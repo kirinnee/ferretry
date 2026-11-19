@@ -28,6 +28,7 @@ const at = '2026-11-19T00:00:00.000Z' as Instant;
 const browser: FolderBrowser = {
   home: async () => '/home/me',
   holdsSignIn: async () => false,
+  leaf: async () => 'present',
   realPaths: async paths => [...paths],
   open: async (path, verdict) => {
     if ((await verdict(path)) !== undefined) return { ok: false, reason: 'refused' };
@@ -36,10 +37,11 @@ const browser: FolderBrowser = {
       folder: {
         real: path,
         entries: async () => ({
-          entries: path === '/work/alpha' ? [{ name: 'app', kind: 'directory' as const, modified: at }] : [],
+          entries: path === '/home/me/work/alpha' ? [{ name: 'app', kind: 'directory' as const, modified: at }] : [],
           more: false,
         }),
         lookup: async () => 'missing',
+        readText: async () => '[remote "origin"]\n\turl = https://tok:en@github.com/o/app.git\n',
         hasGit: async name => name === 'app',
         makeLeaf: async () => ({ kind: 'failed' }),
         close: async () => undefined,
@@ -49,10 +51,10 @@ const browser: FolderBrowser = {
 };
 
 const setup = async () => {
-  const world = registryOver(fakeMachine(['/work/alpha']));
-  const made = await world.registry.register({ kind: 'existing-folder', path: '/work/alpha' });
+  const world = registryOver(fakeMachine(['/home/me/work/alpha']));
+  const made = await world.registry.register({ kind: 'existing-folder', path: '/home/me/work/alpha' });
   if (!made.ok) throw new Error('not registered');
-  const scan = { browser, readConfig: async () => '[remote "origin"]\n\turl = https://tok:en@github.com/o/app.git\n' };
+  const scan = { browser };
   return { ...world, id: made.value.id, scan };
 };
 
@@ -67,6 +69,25 @@ describe('GET /v1/projects/:id/repos', () => {
     });
     expect(JSON.stringify(store.file)).not.toContain('tok');
     expect(store.file.projects[0]?.repos?.[0]?.path).toBe('app');
+  });
+  test('a scan that could not see everything keeps a stored repository and its account link', async () => {
+    const { registry, id, store } = await setup();
+    await registry.recordRepos(id, [{ path: 'gone', remote: 'https://github.com/o/gone', provider: 'github' }], true);
+    await store.update(file => ({
+      ...file,
+      projects: file.projects.map(project => ({
+        ...project,
+        repos: project.repos?.map(repo => ({ ...repo, account: 'work' })),
+      })),
+    }));
+    // the project folder is not there this time (an unmounted disk): the scan answers nothing and says it saw nothing
+    const missing: FolderBrowser = { ...browser, leaf: async () => 'missing' };
+    const got = answer(await reposRoute(registry, { browser: missing })(callWith(undefined, { id })));
+    expect(got.json).toEqual({
+      repos: [{ path: 'gone', remote: 'https://github.com/o/gone', provider: 'github', account: 'work' }],
+      truncated: true,
+    });
+    expect(store.file.projects[0]?.repos?.[0]?.account).toBe('work');
   });
   test('an unknown project is 404 and a bad id is 400', async () => {
     const { registry, scan } = await setup();

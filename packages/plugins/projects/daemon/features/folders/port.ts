@@ -42,6 +42,12 @@ export interface HeldFolder {
    * something else that is there.
    */
   lookup(name: string): Promise<'missing' | 'link' | 'present'>;
+  /**
+   * The text of the file at `rel` inside the held folder (at most `limit` bytes), read through the held object: the leaf
+   * is looked at without following it first, no link at any component is followed, and only a regular file is read.
+   * `undefined` when it is not there, is not a regular file, is a link, is larger than `limit` or cannot be read.
+   */
+  readText(rel: string, limit: number): Promise<string | undefined>;
   /** Whether `<held>/<name>/.git` exists (a folder, or the file a work tree keeps). */
   hasGit(name: string): Promise<boolean>;
   /**
@@ -71,6 +77,8 @@ export interface FolderBrowser {
    * cannot be read answers `true`; a file or a missing name, `false`.
    */
   holdsSignIn(path: string): Promise<boolean>;
+  /** What is AT the absolute `path`, the leaf never followed (a link anywhere above it is the machine's to resolve): nothing, a link, or something else. */
+  leaf(path: string): Promise<'missing' | 'link' | 'present'>;
   /** The real path (links resolved) of each of `paths` that exists and resolves; the others are left out. */
   realPaths(paths: readonly string[]): Promise<readonly string[]>;
 }

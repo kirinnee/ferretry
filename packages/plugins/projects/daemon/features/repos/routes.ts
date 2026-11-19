@@ -10,7 +10,11 @@ const projectId = (raw: string | undefined) => {
   return id.data;
 };
 
-/** `GET /v1/projects/:id/repos`: scans the project folder now and answers (and keeps) what it found. */
+/**
+ * `GET /v1/projects/:id/repos`: scans the project folder now and answers (and keeps) what it found. A scan that did not
+ * see everything (`truncated`: a bound, a refused or missing folder, an unreadable one) only ADDS what it found: a stored
+ * repository it did not see, and the account linked to it, stay.
+ */
 export const reposRoute =
   (registry: ProjectRegistry, scan: ScanDeps): RouteHandler =>
   async call => {
@@ -18,7 +22,7 @@ export const reposRoute =
     const project = await registry.find(id);
     if (project === undefined) throw new ApiError(404, `no project ${id}`, 'not-found');
     const result = await scanRepos(project.path, scan);
-    const kept = await registry.recordRepos(id, result.repos);
+    const kept = await registry.recordRepos(id, result.repos, !result.truncated);
     if (!kept.ok) throw new ApiError(404, kept.error.message, 'not-found');
     return jsonResponse({ repos: kept.value.repos ?? [], truncated: result.truncated });
   };

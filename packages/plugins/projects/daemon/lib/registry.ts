@@ -1,6 +1,7 @@
 import { basename, resolve } from 'node:path';
 import { err, ok, type Result } from '@ferretry/std';
 import {
+  MAX_PROJECT_REPOS,
   ProjectCloneUrlSchema,
   ProjectCloneUrlUnsupportedMessage,
   type ProjectId,
@@ -114,19 +115,26 @@ export class ProjectRegistry {
   }
 
   /**
-   * Keeps what a scan found. A repository found again keeps the account it was given (by path); one no longer found
-   * is dropped with it. Nothing is written when nothing changed.
+   * Keeps what a scan found. A repository found again keeps the account it was given (by path). When the scan saw
+   * everything (`complete`), one no longer found is dropped with it; when it did not (a bound, a refusal, a read that
+   * failed), what it did not see is NOT known to be gone, so every stored repository it did not find stays as it was, with
+   * its account link, and only what was found is added or refreshed. Nothing is written when nothing changed.
    */
   async recordRepos(
     id: ProjectId,
     found: readonly Omit<ProjectRepo, 'account'>[],
+    complete: boolean,
   ): Promise<Result<ProjectInfo, ProjectRefusal>> {
     return await this.change(id, project => {
       const before = project.repos ?? [];
-      const repos = found.map(repo => {
+      const seen = found.map(repo => {
         const account = before.find(known => known.path === repo.path)?.account;
         return account === undefined ? repo : { ...repo, account };
       });
+      const unseen = complete ? [] : before.filter(known => !found.some(repo => repo.path === known.path));
+      const repos = [...seen, ...unseen]
+        .slice(0, MAX_PROJECT_REPOS)
+        .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
       const { repos: _before, ...rest } = project;
       return repos.length === 0 ? rest : { ...rest, repos };
     });

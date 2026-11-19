@@ -14,7 +14,6 @@ import { restrictSpawn } from '../../../../../core/kernel/host/permissions.ts';
 import { PinRegistry } from '../../../../../core/kernel/host/pins.ts';
 import { rootsPortFor } from '../../../../../core/kernel/host/roots.ts';
 import { kernelBrowser } from '../../../daemon/features/folders/adapter.ts';
-import { kernelConfigReader } from '../../../daemon/features/repos/adapter.ts';
 import { scanRepos } from '../../../daemon/features/repos/scan.ts';
 
 const parents: string[] = [];
@@ -75,7 +74,7 @@ async function world() {
     KernelPorts,
     'roots' | 'paths' | 'spawn'
   >;
-  return { user, project, outside, deps: { browser: kernelBrowser(kernel), readConfig: kernelConfigReader(kernel) } };
+  return { user, project, outside, deps: { browser: kernelBrowser(kernel) } };
 }
 
 describe('the repository scan over the real imports root', () => {
@@ -97,19 +96,33 @@ describe('the repository scan over the real imports root', () => {
       expect(paths).not.toContain(never);
     expect(JSON.stringify(paths)).not.toContain('stolen');
   });
-  test('a project reached through a link answers its real folder; one that is a repository answers itself', async () => {
+  test('a project folder that is itself a link is refused; one that is a repository answers itself', async () => {
     const w = await world();
     const viaLink = join(w.user, 'alias');
     await symlink(w.project, viaLink);
-    expect((await scanRepos(viaLink, w.deps)).repos.map(repo => repo.path)).toContain('app');
+    expect(await scanRepos(viaLink, w.deps)).toEqual({ repos: [], truncated: true });
+    const toSsh = join(w.user, 'stowed-project');
+    await symlink(join(w.user, '.ssh'), toSsh);
+    expect(await scanRepos(toSsh, w.deps)).toEqual({ repos: [], truncated: true });
     expect((await scanRepos(join(w.project, 'app'), w.deps)).repos).toEqual([
       { path: '.', remote: 'https://github.com/me/app', provider: 'github' },
     ]);
   });
-  test('the config reader refuses a link where `.git/config` should be', async () => {
+  test('a link where `.git/config` should be is not read: the repository shows no remote', async () => {
     const w = await world();
     await rm(join(w.project, 'app', '.git', 'config'));
     await symlink(join(w.outside, 'stolen', '.git', 'config'), join(w.project, 'app', '.git', 'config'));
-    expect(await w.deps.readConfig(join(w.project, 'app'))).toBeUndefined();
+    const found = await scanRepos(w.project, w.deps);
+    expect(found.repos.find(repo => repo.path === 'app')).toEqual({ path: 'app' });
+    expect(JSON.stringify(found)).not.toContain('evil');
+  });
+  test('a child that is a link to a private folder and a child that holds a sign-in file are not looked into', async () => {
+    const w = await world();
+    await mkdir(join(w.project, 'keys', '.git'), { recursive: true });
+    await writeFile(join(w.project, 'keys', 'id_ed25519'), 'not a key');
+    await writeFile(join(w.project, 'keys', '.git', 'config'), CONFIG('https://github.com/me/keys'));
+    const found = await scanRepos(w.project, w.deps);
+    expect(found.repos.map(repo => repo.path)).not.toContain('keys');
+    expect(found.repos.map(repo => repo.path)).not.toContain('to-ssh');
   });
 });

@@ -16,16 +16,23 @@ import { fakeMachine, registryOver } from './support.ts';
 const AT = '2026-11-19T00:00:00.000Z' as Instant;
 const HOME = '/home/me';
 
-/** Folders as `path -> child folder names`; `git` is the set of folders that hold a `.git`; `links` says what a path REALLY is. */
+/**
+ * Folders as `path -> child folder names`; `git` is the set of folders that hold a `.git`; `links` says what a path REALLY is
+ * (and so is a link); `signIn` is the folders that hold a sign-in file; `configs` is each repository's `.git/config`.
+ * `probed` lists every folder something was looked for in or read from (a `.git`, a config), `opened` every folder held.
+ */
 function browserOf(
   tree: Record<string, readonly string[]>,
   git: readonly string[],
   links: Record<string, string> = {},
-): { browser: FolderBrowser; opened: string[] } {
+  more: { signIn?: readonly string[]; configs?: Record<string, string> } = {},
+): { browser: FolderBrowser; opened: string[]; probed: string[] } {
   const opened: string[] = [];
+  const probed: string[] = [];
   const browser: FolderBrowser = {
     home: async () => HOME,
-    holdsSignIn: async () => false,
+    holdsSignIn: async path => more.signIn?.includes(path) ?? false,
+    leaf: async path => (path in links ? 'link' : path in tree ? 'present' : 'missing'),
     realPaths: async paths => paths.map(path => links[path] ?? path).filter(path => path in tree),
     open: async (path, verdict) => {
       const real = links[path] ?? path;
@@ -42,19 +49,27 @@ function browserOf(
             more: names.length > limit,
           };
         },
-        lookup: async name => (git.includes(`${real}/${name}`) ? 'present' : 'missing'),
-        hasGit: async name => git.includes(`${real}/${name}`),
+        lookup: async name => {
+          probed.push(`${real}/${name}`);
+          return git.includes(`${real}/${name}`) ? 'present' : 'missing';
+        },
+        readText: async rel => {
+          probed.push(`${real}/${rel}`);
+          const repo = rel === '.git/config' ? real : `${real}/${rel.slice(0, -'/.git/config'.length)}`;
+          return more.configs?.[repo];
+        },
+        hasGit: async name => {
+          probed.push(`${real}/${name}`);
+          return git.includes(`${real}/${name}`);
+        },
         makeLeaf: async () => ({ kind: 'failed' }),
         close: async () => undefined,
       };
       return { ok: true, folder };
     },
   };
-  return { browser, opened };
+  return { browser, opened, probed };
 }
-
-const configs: Record<string, string> = {};
-const readConfig = async (repo: string) => configs[repo];
 
 describe('remote parsing', () => {
   test('reads https, ssh and scp spellings; another host keeps no provider; a local path names nothing', () => {
@@ -110,9 +125,10 @@ describe('scanning a project folder for repositories', () => {
         `${P}/node_modules/dep`,
         `${P}/.hid/r`,
       ],
+      {},
+      { configs: { [`${P}/a`]: '[remote "origin"]\n\turl = git@github.com:me/a.git\n' } },
     );
-    configs[`${P}/a`] = '[remote "origin"]\n\turl = git@github.com:me/a.git\n';
-    const found = await scanRepos(P, { browser, readConfig });
+    const found = await scanRepos(P, { browser });
     expect(found.repos).toEqual([
       { path: 'a', remote: 'https://github.com/me/a', provider: 'github' },
       { path: 'group/b' },
@@ -122,7 +138,7 @@ describe('scanning a project folder for repositories', () => {
   });
   test('a project folder that is itself a repository answers just itself and is not entered further', async () => {
     const world = browserOf({ [P]: ['sub'], [`${P}/sub`]: [] }, [`${P}/.git`, `${P}/sub`]);
-    const found = await scanRepos(P, { browser: world.browser, readConfig });
+    const found = await scanRepos(P, { browser: world.browser });
     expect(found.repos).toEqual([{ path: '.' }]);
     expect(world.opened).toEqual([P]);
   });
@@ -132,7 +148,7 @@ describe('scanning a project folder for repositories', () => {
       ['/elsewhere/r', `${HOME}/.ssh/r2`],
       { [`${P}/escape`]: '/elsewhere', [`${P}/dotssh`]: `${HOME}/.ssh` },
     );
-    const found = await scanRepos(P, { browser, readConfig });
+    const found = await scanRepos(P, { browser });
     expect(found.repos).toEqual([]);
     expect(opened).toEqual([P]);
   });
@@ -140,23 +156,75 @@ describe('scanning a project folder for repositories', () => {
     const wide: Record<string, readonly string[]> = { [P]: Array.from({ length: 30 }, (_, i) => `d${i}`) };
     for (let i = 0; i < 30; i++) wide[`${P}/d${i}`] = Array.from({ length: 20 }, (_, j) => `e${j}`);
     for (let i = 0; i < 30; i++) for (let j = 0; j < 20; j++) wide[`${P}/d${i}/e${j}`] = [];
-    const folders = await scanRepos(P, { browser: browserOf(wide, []).browser, readConfig });
+    const folders = await scanRepos(P, { browser: browserOf(wide, []).browser });
     expect(folders.truncated).toBe(true);
     const bound = browserOf(wide, []);
-    await scanRepos(P, { browser: bound.browser, readConfig });
+    await scanRepos(P, { browser: bound.browser });
     expect(bound.opened.length).toBe(MAX_SCAN_FOLDERS);
 
     const many: Record<string, readonly string[]> = {
       [P]: Array.from({ length: MAX_PROJECT_REPOS + 10 }, (_, i) => `r${i}`),
     };
     const repos = many[P]?.map(name => `${P}/${name}`) ?? [];
-    const capped = await scanRepos(P, { browser: browserOf(many, repos).browser, readConfig });
+    const capped = await scanRepos(P, { browser: browserOf(many, repos).browser });
     expect(capped.repos.length).toBe(MAX_PROJECT_REPOS);
     expect(capped.truncated).toBe(true);
   });
-  test('a project folder that is not there answers nothing', async () => {
-    const found = await scanRepos('/nowhere', { browser: browserOf({}, []).browser, readConfig });
-    expect(found).toEqual({ repos: [], truncated: false });
+  test('a project folder that is not there answers nothing, and says the scan did not see everything', async () => {
+    const found = await scanRepos('/nowhere', { browser: browserOf({}, []).browser });
+    expect(found).toEqual({ repos: [], truncated: true });
+  });
+  test('a project folder that is itself a link is refused and nothing in or behind it is touched', async () => {
+    const world = browserOf(
+      { [P]: ['r'], '/elsewhere': ['r'], [`${HOME}/.ssh`]: ['r'] },
+      ['/elsewhere/r', `${HOME}/.ssh/r`],
+      { [P]: '/elsewhere' },
+    );
+    expect(await scanRepos(P, { browser: world.browser })).toEqual({ repos: [], truncated: true });
+    expect(world.opened).toEqual([]);
+    expect(world.probed).toEqual([]);
+    const toSsh = browserOf({ [P]: [], [`${HOME}/.ssh`]: ['r'] }, [`${HOME}/.ssh/r`], { [P]: `${HOME}/.ssh` });
+    expect((await scanRepos(P, { browser: toSsh.browser })).repos).toEqual([]);
+    expect(toSsh.probed).toEqual([]);
+  });
+  test('a private child (a stow-style link to ~/.ssh) is never probed, not even for a .git', async () => {
+    // `stowed` is a folder of the project that is where ~/.ssh REALLY is (the private folder, reached by a link)
+    const world = browserOf(
+      { [P]: ['stowed', 'ok'], [`${P}/ok`]: [], [`${P}/stowed`]: [] },
+      [`${P}/ok`, `${P}/stowed`],
+      {},
+      { configs: { [`${P}/stowed`]: '[remote "origin"]\n\turl = https://github.com/me/stolen\n' } },
+    );
+    const browser: FolderBrowser = {
+      ...world.browser,
+      realPaths: async paths => paths.map(path => (path === `${HOME}/.ssh` ? `${P}/stowed` : path)),
+    };
+    const found = await scanRepos(P, { browser });
+    expect(found.repos.map(repo => repo.path)).toEqual(['ok']);
+    expect(world.probed.filter(path => path.startsWith(`${P}/stowed`))).toEqual([]);
+    expect(world.opened).not.toContain(`${P}/stowed`);
+  });
+  test('a child folder that holds a sign-in file is skipped unprobed, and so is a project folder that holds one', async () => {
+    const world = browserOf(
+      { [P]: ['keys', 'ok'], [`${P}/keys`]: [], [`${P}/ok`]: [] },
+      [`${P}/keys`, `${P}/ok`],
+      {},
+      { signIn: [`${P}/keys`] },
+    );
+    expect((await scanRepos(P, { browser: world.browser })).repos.map(repo => repo.path)).toEqual(['ok']);
+    expect(world.probed).not.toContain(`${P}/keys`);
+    const marked = browserOf({ [P]: ['ok'], [`${P}/ok`]: [] }, [`${P}/ok`], {}, { signIn: [P] });
+    expect(await scanRepos(P, { browser: marked.browser })).toEqual({ repos: [], truncated: false });
+    expect(marked.probed).toEqual([]);
+  });
+  test('a folder that could not be read says the scan did not see everything', async () => {
+    const world = browserOf({ [P]: ['a'], [`${P}/a`]: [] }, []);
+    const flaky: FolderBrowser = {
+      ...world.browser,
+      open: async (path, verdict) =>
+        path === `${P}/a` ? { ok: false, reason: 'refused' } : world.browser.open(path, verdict),
+    };
+    expect((await scanRepos(P, { browser: flaky })).truncated).toBe(true);
   });
 });
 
@@ -191,9 +259,33 @@ describe("a project's accounts and repositories", () => {
     const missing = await registry.setAccounts('00000000-0000-4000-8000-0000000000ff' as ProjectId, ['x']);
     expect(missing.ok).toBe(false);
   });
+  test('a scan that did not see everything keeps a stored repository and its account link; a complete one drops it', async () => {
+    const { registry, id, store } = await over();
+    await registry.recordRepos(id, [{ path: 'a' }, { path: 'b' }], true);
+    await store.update(file => ({
+      ...file,
+      projects: file.projects.map(project => ({
+        ...project,
+        repos: project.repos?.map(repo => (repo.path === 'b' ? { ...repo, account: 'work' } : repo)),
+      })),
+    }));
+    const partial = await registry.recordRepos(
+      id,
+      [{ path: 'a', remote: 'https://github.com/o/a', provider: 'github' }],
+      false,
+    );
+    expect(partial.ok && partial.value.repos).toEqual([
+      { path: 'a', remote: 'https://github.com/o/a', provider: 'github' },
+      { path: 'b', account: 'work' },
+    ]);
+    const nothing = await registry.recordRepos(id, [], false);
+    expect(nothing.ok && nothing.value.repos?.map(repo => repo.path)).toEqual(['a', 'b']);
+    const full = await registry.recordRepos(id, [{ path: 'a' }], true);
+    expect(full.ok && full.value.repos).toEqual([{ path: 'a' }]);
+  });
   test('a repository found again keeps its account; one that is gone is dropped; nothing found removes the field', async () => {
     const { registry, id, store } = await over();
-    await registry.recordRepos(id, [{ path: 'a' }, { path: 'b' }]);
+    await registry.recordRepos(id, [{ path: 'a' }, { path: 'b' }], true);
     // the owner gave `a` an account of its own (the field a later unit sets)
     await store.update(file => ({
       ...file,
@@ -202,18 +294,22 @@ describe("a project's accounts and repositories", () => {
         repos: project.repos?.map(repo => (repo.path === 'a' ? { ...repo, account: 'work' } : repo)),
       })),
     }));
-    const again = await registry.recordRepos(id, [{ path: 'a', remote: 'https://github.com/o/a', provider: 'github' }]);
+    const again = await registry.recordRepos(
+      id,
+      [{ path: 'a', remote: 'https://github.com/o/a', provider: 'github' }],
+      true,
+    );
     expect(again.ok && again.value.repos).toEqual([
       { path: 'a', remote: 'https://github.com/o/a', provider: 'github', account: 'work' },
     ]);
-    const none = await registry.recordRepos(id, []);
+    const none = await registry.recordRepos(id, [], true);
     expect(none.ok && 'repos' in none.value).toBe(false);
   });
   test('an unchanged scan writes nothing', async () => {
     const { registry, id, store } = await over();
-    await registry.recordRepos(id, [{ path: 'a' }]);
+    await registry.recordRepos(id, [{ path: 'a' }], true);
     const written = store.file;
-    await registry.recordRepos(id, [{ path: 'a' }]);
+    await registry.recordRepos(id, [{ path: 'a' }], true);
     expect(store.file).toBe(written);
   });
   test('links survive an account being removed and read as removed', () => {

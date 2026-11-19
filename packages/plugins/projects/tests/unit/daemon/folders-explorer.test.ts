@@ -46,6 +46,7 @@ function machine(tree: Tree, options: Machine = {}) {
       calls.push(`holdsSignIn ${path}`);
       return holdsSignIn(names(path));
     },
+    leaf: async path => (path in links ? 'link' : path in tree ? 'present' : 'missing'),
     realPaths: async paths =>
       paths.flatMap(path => {
         const real = links[path] ?? path;
@@ -78,6 +79,7 @@ function machine(tree: Tree, options: Machine = {}) {
           if (item === undefined) return 'missing';
           return kindOf(name, item) === 'symlink' ? 'link' : 'present';
         },
+        readText: async () => undefined,
         hasGit: async name => git.includes(`${real}/${name}`),
         makeLeaf: async (name, judge): Promise<LeafMade> => {
           const target = `${real}/${name}`;
