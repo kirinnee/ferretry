@@ -165,6 +165,27 @@ describe('the board writes', () => {
 });
 
 describe('readWholeBoard', () => {
+  it('sends only the first page as the person’s press (quiet: false); the pages after it follow unmarked', async () => {
+    const seen: unknown[] = [];
+    let page = 0;
+    const port = fakePort({
+      board: async (_daemon, _query, _cursor, _limit, press) => {
+        seen.push(press);
+        page += 1;
+        return boardAnswer([boardTask(`F${page}`)], { nextCursor: page < 2 ? `c${page}` : null });
+      },
+    });
+    await readWholeBoard(port, laptop, query, { quiet: false });
+    expect(seen).toEqual([{ quiet: false }, undefined]);
+  });
+
+  it('reads the board through the client with the press added to the call', async () => {
+    const client = clientOf({ 'GET /v1/board': boardAnswer([boardTask('F1')]) });
+    await clientBoardPort(client).board(laptop, query, undefined, undefined, { quiet: false });
+    await clientBoardPort(client).board(laptop, query);
+    expect(client.calls.map(call => (call.init as { quiet?: boolean }).quiet)).toEqual([false, undefined]);
+  });
+
   it('follows each cursor and reports a board longer than the pages read as truncated', async () => {
     let page = 0;
     const port = fakePort({

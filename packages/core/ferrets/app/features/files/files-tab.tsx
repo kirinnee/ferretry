@@ -213,7 +213,7 @@ export const FilesTab = ({
   // opposite case and keep the default.
   const listing = useFsResource<FsListing>(
     stateMatchesScope && !active && !unavailable ? `list:${key}:${dir}` : null,
-    useCallback(signal => fsApi.list(scope, dir, signal), [scope, dir]),
+    useCallback((signal, press) => fsApi.list(scope, dir, signal, press), [scope, dir]),
     { refetchOnRearm: true },
   );
 

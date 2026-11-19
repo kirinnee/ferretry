@@ -4,11 +4,12 @@ import {
   type FsResource,
   type FsResourceOptions,
 } from '../../../../app/features/files/files-resource.ts';
+import type { ReadPress } from '@ferretry/app/ui';
 import { interact, mount, must } from '../support/dom.ts';
 
 interface ProbeProps {
   resourceKey: string | null;
-  load: (signal: AbortSignal) => Promise<string>;
+  load: (signal: AbortSignal, press: ReadPress) => Promise<string>;
   onResource: (resource: FsResource<string>) => void;
   options?: FsResourceOptions;
 }
@@ -34,6 +35,28 @@ const text = (container: HTMLElement): string =>
 const latestOf = <T,>(read: () => T | null, what: string): T => must(read(), what);
 
 describe('the Files async resource', () => {
+  it('sends Reload and Try again (reload) as the person’s own press, and the page’s own re-read (refresh) unmarked', async () => {
+    const seen: ReadPress[] = [];
+    let latest: FsResource<string> | null = null;
+    const view = await mount(
+      <Probe
+        resourceKey="file:a"
+        load={async (_signal, press) => {
+          seen.push(press);
+          return `read ${seen.length}`;
+        }}
+        onResource={resource => {
+          latest = resource;
+        }}
+      />,
+    );
+    await interact(() => latestOf(() => latest, 'the resource').reload());
+    await interact(() => latestOf(() => latest, 'the resource').refresh());
+    await interact(() => latestOf(() => latest, 'the resource').reload());
+    expect(seen).toEqual([{}, { quiet: false }, {}, { quiet: false }]);
+    await view.unmount();
+  });
+
   it('stays idle for a null key and never calls the loader', async () => {
     let calls = 0;
     const view = await mount(

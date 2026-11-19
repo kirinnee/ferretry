@@ -5,7 +5,7 @@
  * It is the machine's inventory (`GET /v1/skills`, docs/skills-inventory.md), not one ferret's: a skill another one of the
  * same name hides (`shadowedBy`) is still listed here, because a person may open it on purpose.
  */
-import { Button, ContextFailure, Loading, useContextRead } from '@ferretry/app/ui';
+import { Button, ContextFailure, Loading, type ReadPress, useContextRead } from '@ferretry/app/ui';
 import type { AppComponent, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useState } from 'react';
 import type { SkillEntry } from '../../contract/index.ts';
@@ -57,10 +57,14 @@ function Group({
 /** One daemon's Skills settings tab: built once per client. */
 export function createSkillsSettings(client: Pick<PluginClient, 'call'>): AppComponent<SettingsProps> {
   return function SkillsSettings(): ReactNode {
-    const loader = useCallback((_signal: AbortSignal) => readMachineSkills(client), []);
+    const loader = useCallback((_signal: AbortSignal, press: ReadPress) => readMachineSkills(client, press), []);
     const read = useContextRead(loader, true);
     const [opened, setOpened] = useState<SkillEntry | null>(null);
-    const loadFile = useCallback(async (path: string, _signal: AbortSignal) => await readSkillFile(client, path), []);
+    const loadFile = useCallback(
+      async (path: string, _signal: AbortSignal, press: ReadPress) =>
+        await readSkillFile(client, path, undefined, press),
+      [],
+    );
     if (read.load.kind === 'failed')
       return (
         <ContextFailure

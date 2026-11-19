@@ -16,6 +16,8 @@ export interface ListDaemon {
   readonly client: LiveFerretsClient;
   ferrets: readonly FerretSummary[];
   reads: number;
+  /** What each plain read sent besides its route: `{ quiet: false }` for a press, nothing for the page's own. */
+  readonly inits: unknown[];
   /** A refusal for the next reads, or `undefined` for none. */
   failWith: Error | undefined;
   /** When set, each read waits for this promise before answering. */
@@ -29,6 +31,7 @@ export const listDaemon = (ferrets: readonly FerretSummary[], options: { conditi
   const daemon: ListDaemon = {
     ferrets,
     reads: 0,
+    inits: [],
     failWith: undefined,
     hold: undefined,
     listeners,
@@ -36,9 +39,10 @@ export const listDaemon = (ferrets: readonly FerretSummary[], options: { conditi
       for (const listener of listeners) listener({ ferret, generation: 1, ...(gone === true ? { gone } : {}) });
     },
     client: {
-      call: (async (route: string) => {
+      call: (async (route: string, init?: unknown) => {
         if (route !== 'GET /v1/ferrets') throw new Error(`no route ${route}`);
         daemon.reads += 1;
+        daemon.inits.push(init);
         await daemon.hold;
         if (daemon.failWith !== undefined) throw daemon.failWith;
         return daemon.ferrets;

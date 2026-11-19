@@ -39,6 +39,24 @@ afterEach(() => {
 });
 
 describe('loading a resolved agenda document', () => {
+  test('Try again (retry) reads again as the person’s own press (quiet: false); the opening read is the page’s own', async () => {
+    // Arrange
+    const { client, With } = scripted();
+    await runAsync(async () => {
+      render(
+        <With>
+          <Probe item={header} />
+        </With>,
+      );
+    });
+    // Act
+    await runAsync(async () => {
+      latest.retry();
+    });
+    // Assert
+    expect(client.calls.map(call => (call.init as { quiet?: boolean }).quiet)).toEqual([undefined, false]);
+  });
+
   test('reads through the half’s client by route key, never as a plain network request', async () => {
     // Arrange
     const network = spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Plain HTTP must not be used.'));

@@ -9,6 +9,7 @@
  * place, so what the page shows is always what the daemon answered.
  */
 
+import { type ReadPress, readPress } from '@ferretry/app/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   type ComponentCatalog,
@@ -27,16 +28,16 @@ const PROFILES_ROUTE = 'GET /v1/runtimes/profiles' as const;
 const RUNTIMES_ROUTE = 'GET /v1/runtimes' as const;
 
 /** The six kinds, each component with its badges and "used by". */
-export const readComponents = async (client: RuntimesClient): Promise<ComponentCatalog> =>
-  ComponentCatalogSchema.parse(await client.call(COMPONENTS_ROUTE));
+export const readComponents = async (client: RuntimesClient, press: ReadPress = {}): Promise<ComponentCatalog> =>
+  ComponentCatalogSchema.parse(await client.call(COMPONENTS_ROUTE, press));
 
 /** Every profile with its layers, its stack per harness and its conflicts. */
-export const readProfiles = async (client: RuntimesClient): Promise<LayeredProfileCatalog> =>
-  LayeredProfileCatalogSchema.parse(await client.call(PROFILES_ROUTE));
+export const readProfiles = async (client: RuntimesClient, press: ReadPress = {}): Promise<LayeredProfileCatalog> =>
+  LayeredProfileCatalogSchema.parse(await client.call(PROFILES_ROUTE, press));
 
 /** Each runtime with its resolved stack, model set, fixed layer and whether it can launch. */
-export const readRuntimeCatalog = async (client: RuntimesClient): Promise<RuntimeCatalog> =>
-  RuntimeCatalogSchema.parse(await client.call(RUNTIMES_ROUTE));
+export const readRuntimeCatalog = async (client: RuntimesClient, press: ReadPress = {}): Promise<RuntimeCatalog> =>
+  RuntimeCatalogSchema.parse(await client.call(RUNTIMES_ROUTE, press));
 
 export interface AccountCatalog {
   readonly components: ComponentCatalog;
@@ -59,12 +60,12 @@ const refusal = (error: unknown): (CallFailure & { readonly message: string }) |
 };
 
 /** One read of all three; never throws. */
-async function readAccountCatalog(client: RuntimesClient): Promise<AccountCatalogRead> {
+async function readAccountCatalog(client: RuntimesClient, press: ReadPress = {}): Promise<AccountCatalogRead> {
   try {
     const [components, profiles, runtimes] = await Promise.all([
-      readComponents(client),
-      readProfiles(client),
-      readRuntimeCatalog(client),
+      readComponents(client, press),
+      readProfiles(client, press),
+      readRuntimeCatalog(client, press),
     ]);
     return { kind: 'ready', catalog: { components, profiles, runtimes } };
   } catch (error) {
@@ -87,19 +88,26 @@ export interface UseAccountCatalog {
   readonly read: AccountCatalogRead;
   /** Read again; answers the new read so a caller can pick what it just made. */
   readonly reload: () => Promise<AccountCatalogRead>;
+  /** The Try again button: reads again as the person's own press, so the passkey prompt can open. */
+  readonly press: () => Promise<AccountCatalogRead>;
 }
 
 /** The catalogue for one machine, read on mount and on demand. A newer read always wins. */
 export function useAccountCatalog(client: LiveRuntimesClient): UseAccountCatalog {
   const [read, setRead] = useState<AccountCatalogRead>({ kind: 'loading' });
   const generation = useRef(0);
-  const reload = useCallback(async (): Promise<AccountCatalogRead> => {
-    generation.current += 1;
-    const mine = generation.current;
-    const next = await readAccountCatalog(client);
-    if (mine === generation.current) setRead(next);
-    return next;
-  }, [client]);
+  const load = useCallback(
+    async (press: ReadPress): Promise<AccountCatalogRead> => {
+      generation.current += 1;
+      const mine = generation.current;
+      const next = await readAccountCatalog(client, press);
+      if (mine === generation.current) setRead(next);
+      return next;
+    },
+    [client],
+  );
+  const reload = useCallback((): Promise<AccountCatalogRead> => load({}), [load]);
+  const press = useCallback((): Promise<AccountCatalogRead> => load(readPress(true)), [load]);
   useEffect(() => {
     void reload();
   }, [reload]);
@@ -111,5 +119,5 @@ export function useAccountCatalog(client: LiveRuntimesClient): UseAccountCatalog
       if (mine === generation.current && next.kind === 'ready') setRead(next);
     });
   });
-  return { read, reload };
+  return { read, reload, press };
 }

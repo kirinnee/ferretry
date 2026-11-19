@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { z } from 'zod';
+import type { ReadPress } from '@ferretry/app/ui';
 import { callFailure } from '../../lib/client.ts';
 import { grantRefusalSentence } from './refusal-words.ts';
 import { type FilesScope, scopeKey } from './scope.ts';
@@ -35,11 +36,13 @@ const read = async (
   route: string,
   query: Readonly<Record<string, string>> | undefined,
   signal: AbortSignal | undefined,
+  press: ReadPress = {},
 ): Promise<unknown> => {
   if (signal?.aborted) throw abortReason(signal);
   const answer = await scope.client.call<unknown>(route, {
     params: { ferretId: scope.ferretId },
     ...(query === undefined ? {} : { query }),
+    ...press,
   });
   if (signal?.aborted) throw abortReason(signal);
   return answer;
@@ -58,25 +61,36 @@ const readJson = async <Schema extends z.ZodType>(
   route: string,
   query: Readonly<Record<string, string>> | undefined,
   signal: AbortSignal | undefined,
+  press: ReadPress = {},
 ): Promise<z.output<Schema>> => {
-  const parsed = schema.safeParse(await read(scope, route, query, signal));
+  const parsed = schema.safeParse(await read(scope, route, query, signal, press));
   if (!parsed.success) throw new UnreadableAnswerError();
   return parsed.data;
 };
 
 export const fsApi = {
-  list: (scope: FilesScope, path: string, signal: AbortSignal | undefined): Promise<FsListing> =>
-    readJson(FsListingSchema, scope, LIST, pathQuery(path), signal),
-  file: (scope: FilesScope, path: string, rev: 'head' | undefined, signal: AbortSignal | undefined): Promise<FsFile> =>
-    readJson(FsFileSchema, scope, FILE, pathQuery(path, rev ? { rev } : undefined), signal),
+  list: (scope: FilesScope, path: string, signal: AbortSignal | undefined, press?: ReadPress): Promise<FsListing> =>
+    readJson(FsListingSchema, scope, LIST, pathQuery(path), signal, press),
+  file: (
+    scope: FilesScope,
+    path: string,
+    rev: 'head' | undefined,
+    signal: AbortSignal | undefined,
+    press?: ReadPress,
+  ): Promise<FsFile> => readJson(FsFileSchema, scope, FILE, pathQuery(path, rev ? { rev } : undefined), signal, press),
   /** The bounded byte representation, for a rich preview: the SAME route and the same daemon-side gates as `file`. */
-  preview: (scope: FilesScope, path: string, signal: AbortSignal | undefined): Promise<FsFile> =>
-    readJson(FsFileSchema, scope, FILE, pathQuery(path, { format: 'base64' }), signal),
-  changes: (scope: FilesScope, signal: AbortSignal | undefined): Promise<FsChanges> =>
-    readJson(FsChangesSchema, scope, CHANGES, undefined, signal),
+  preview: (scope: FilesScope, path: string, signal: AbortSignal | undefined, press?: ReadPress): Promise<FsFile> =>
+    readJson(FsFileSchema, scope, FILE, pathQuery(path, { format: 'base64' }), signal, press),
+  changes: (scope: FilesScope, signal: AbortSignal | undefined, press?: ReadPress): Promise<FsChanges> =>
+    readJson(FsChangesSchema, scope, CHANGES, undefined, signal, press),
   /** The one text answer: a unified diff. An empty diff arrives as no body at all. */
-  diff: async (scope: FilesScope, path: string, signal: AbortSignal | undefined): Promise<string> => {
-    const body = await read(scope, DIFF, pathQuery(path), signal);
+  diff: async (
+    scope: FilesScope,
+    path: string,
+    signal: AbortSignal | undefined,
+    press?: ReadPress,
+  ): Promise<string> => {
+    const body = await read(scope, DIFF, pathQuery(path), signal, press);
     if (body === undefined) return '';
     if (typeof body !== 'string') throw new UnreadableAnswerError();
     return body;

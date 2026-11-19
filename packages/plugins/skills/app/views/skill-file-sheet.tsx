@@ -1,13 +1,13 @@
 /** One SKILL.md, read when opened and shown as the document it is: the front matter as its lines, the body as Markdown. */
 import { Markdown } from '@ferretry/app';
-import { ContextFailure, Loading, useContextRead } from '@ferretry/app/ui';
+import { ContextFailure, Loading, type ReadPress, useContextRead } from '@ferretry/app/ui';
 import { useCallback } from 'react';
 import type { SkillEntry, SkillFile } from '../../contract/index.ts';
 import { splitFrontMatter } from '../lib/skills-model.ts';
 import { SkillSheet } from './skill-sheet.tsx';
 
 /** Reads one SKILL.md for Open. */
-export type SkillFileLoader = (path: string, signal: AbortSignal) => Promise<SkillFile>;
+export type SkillFileLoader = (path: string, signal: AbortSignal, press: ReadPress) => Promise<SkillFile>;
 
 /** The front matter as the lines it is, then the body as the document it is. */
 function SkillDocument({ content }: { readonly content: string }) {
@@ -38,7 +38,10 @@ export function SkillFileSheet({
   readonly machineName: string;
   readonly onClose: () => void;
 }) {
-  const reader = useCallback((signal: AbortSignal) => load(skill.path, signal), [load, skill.path]);
+  const reader = useCallback(
+    (signal: AbortSignal, press: ReadPress) => load(skill.path, signal, press),
+    [load, skill.path],
+  );
   const file = useContextRead(reader, true);
   return (
     <SkillSheet name="file" title={skill.name} closeLabel="Close SKILL.md" onClose={onClose}>

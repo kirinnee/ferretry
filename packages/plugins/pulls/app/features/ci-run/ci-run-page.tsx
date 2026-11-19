@@ -141,7 +141,11 @@ function Fact({ term, value }: { readonly term: string; readonly value: string }
 
 export function CiRunPage({ client, scope, runId, attempt, nowMs: fixedNow }: CiRunPageProps) {
   const key = `${scope.project}/${scope.repo.owner}/${scope.repo.name}/${runId}/${attempt ?? ''}`;
-  const { state, reload } = useLiveRead(key, signal => fetchRun(client, scope, runId, attempt, signal), isLive);
+  const { state, reload } = useLiveRead(
+    key,
+    (signal, press) => fetchRun(client, scope, runId, attempt, signal, press),
+    isLive,
+  );
   const now = useSecondClock(state.kind === 'ready' && isLive(state.value), fixedNow);
   if (state.kind === 'loading') return <Loading kind="page" compact label="Reading this run…" />;
   if (state.kind === 'failed') return <CiFailedPanel failure={state.failure} onRetry={reload} />;

@@ -12,6 +12,7 @@
  */
 
 import { type AskListSnapshot, AskListSnapshotSchema } from '@ferretry/core-asks/contract';
+import type { ReadPress } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { type BoardServerQuery, boardQueryParams } from './board-model.ts';
 import type { DaemonConnection } from './machine.ts';
@@ -90,7 +91,13 @@ export interface LaneWriteError {
 /** The daemon reads and writes the board needs, injected rather than imported. */
 export interface BoardPort {
   /** One page of a board; `cursor` continues the one before, `limit` shrinks the page. */
-  board(daemon: DaemonConnection, query: BoardServerQuery, cursor?: string, limit?: number): Promise<BoardResponse>;
+  board(
+    daemon: DaemonConnection,
+    query: BoardServerQuery,
+    cursor?: string,
+    limit?: number,
+    press?: ReadPress,
+  ): Promise<BoardResponse>;
   /** One task in full, or `null` when the daemon has no such task. */
   card(daemon: DaemonConnection, id: TaskId): Promise<TaskResponse | null>;
   /** One ferret's agenda (`GET /v1/ferrets/:ferretId/agenda`), or `null` when the daemon will not say: the task reads its asks from it. */
@@ -176,11 +183,11 @@ const queryRecord = (params: URLSearchParams): Readonly<Record<string, string>> 
 
 /** The port over the generated client. The machine argument is the identity of the slice; the client is the wire. */
 export const clientBoardPort = (client: Pick<PluginClient, 'call'>): BoardPort => ({
-  board: async (_daemon, query, cursor, limit = BOARD_PAGE_SIZE) => {
+  board: async (_daemon, query, cursor, limit = BOARD_PAGE_SIZE, press = {}) => {
     const answer = await read<unknown>(
       client,
       'GET /v1/board',
-      { query: queryRecord(boardQueryParams(query, cursor, limit)) },
+      { query: queryRecord(boardQueryParams(query, cursor, limit)), ...press },
       false,
     );
     return readBoard(answer);
@@ -277,8 +284,10 @@ export const readWholeBoard = async (
   port: Pick<BoardPort, 'board'>,
   daemon: DaemonConnection,
   query: BoardServerQuery,
+  press: ReadPress = {},
 ): Promise<BoardRead> => {
-  const first = await port.board(daemon, query);
+  // Only the first page is a person's press: once it is answered, the rest follow on the same confirmation.
+  const first = await port.board(daemon, query, undefined, undefined, press);
   let tasks = first.cards;
   let cursor = first.nextCursor;
   let pages = 1;

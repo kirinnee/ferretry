@@ -11,6 +11,7 @@ import {
   ContextNote,
   Loading,
   useChangeAuthority,
+  type ReadPress,
   useContextRead,
 } from '@ferretry/app/ui';
 import { useCallback, useState } from 'react';
@@ -30,7 +31,10 @@ export interface McpSettingsProps {
 }
 
 export function McpSettings({ client, now = Date.now, origin }: McpSettingsProps) {
-  const loader = useCallback(async () => await readMachineMcpServers(client), [client]);
+  const loader = useCallback(
+    async (_signal: AbortSignal, press: ReadPress) => await readMachineMcpServers(client, press),
+    [client],
+  );
   const { load, reload } = useContextRead(loader, true);
   const actions = useMcpServerActions(
     { client, machineName: MACHINE_NAME, now, ...(origin === undefined ? {} : { origin }) },

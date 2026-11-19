@@ -31,7 +31,7 @@ export interface ComponentMcpStatusProps {
 }
 
 export function ComponentMcpStatus({ client, name, usedByRuntimes, now = Date.now }: ComponentMcpStatusProps) {
-  const { servers, reload } = useMachineServers(client);
+  const { servers, reload, press } = useMachineServers(client);
   const actions = useMcpServerActions({ client, machineName: MACHINE_NAME, now }, reload);
   if (servers.kind === 'failed')
     return (
@@ -40,7 +40,7 @@ export function ComponentMcpStatus({ client, name, usedByRuntimes, now = Date.no
           failure={plainFailure(servers.reason, MACHINE_NAME, `read where ${name} stands`)}
           spot="status"
         />
-        <button className="self-start text-meta underline" type="button" onClick={reload} data-component-mcp-retry="">
+        <button className="self-start text-meta underline" type="button" onClick={press} data-component-mcp-retry="">
           Try again
         </button>
       </div>

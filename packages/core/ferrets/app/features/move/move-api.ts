@@ -19,6 +19,7 @@ import {
   type MoveConversation,
   MoveSessionRequestSchema,
 } from '../../../contract/index.ts';
+import type { ReadPress } from '@ferretry/app/ui';
 import type { FerretsClient } from '../../lib/client.ts';
 import type { MoveTarget } from './move-model.ts';
 
@@ -40,10 +41,14 @@ const parsed = <T>(route: string, result: { success: true; data: T } | { success
   return result.data;
 };
 
-export const readFerret = async (client: FerretsClient, ferret: string): Promise<FerretSummary> =>
+export const readFerret = async (
+  client: FerretsClient,
+  ferret: string,
+  press: ReadPress = {},
+): Promise<FerretSummary> =>
   parsed(
     FERRET_ROUTE,
-    FerretSummarySchema.safeParse(await client.call(FERRET_ROUTE, { params: { ferretId: ferret } })),
+    FerretSummarySchema.safeParse(await client.call(FERRET_ROUTE, { params: { ferretId: ferret }, ...press })),
   );
 
 const moveBody = (target: MoveTarget, forceInflight: boolean, conversation?: MoveConversation): unknown =>

@@ -16,6 +16,7 @@ import {
   contextEmptyCopy,
   ContextNote,
   Loading,
+  type ReadPress,
   useContextRead,
 } from '@ferretry/app/ui';
 import { Plus } from 'lucide-react';
@@ -63,7 +64,10 @@ export function McpServersPanel({
   now = Date.now,
   searchDebounceMs,
 }: McpServersPanelProps) {
-  const loader = useCallback(async () => await readFerretMcpServers(client, ferretId), [client, ferretId]);
+  const loader = useCallback(
+    async (_signal: AbortSignal, press: ReadPress) => await readFerretMcpServers(client, ferretId, press),
+    [client, ferretId],
+  );
   const read = useContextRead(loader, true);
   const { load, reload } = read;
   const actions = useMcpServerActions({ client, machineName: MACHINE_NAME, ferretId, now }, reload);

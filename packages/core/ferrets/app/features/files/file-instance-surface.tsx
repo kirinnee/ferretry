@@ -91,12 +91,12 @@ export const useFileInstanceSurface = ({
   const diffPath = tab !== null && diffActive ? tab.path : null;
   const diff = useFsResource<string>(
     diffPath ? `diff:${key}:${diffPath}` : null,
-    useCallback(signal => fsApi.diff(scope, diffPath ?? '', signal), [scope, diffPath]),
+    useCallback((signal, press) => fsApi.diff(scope, diffPath ?? '', signal, press), [scope, diffPath]),
   );
   const filePath = tab === null || diffActive ? null : tab.path;
   const file = useFsResource<FsFile>(
     filePath ? `file:${key}:${filePath}` : null,
-    useCallback(signal => fsApi.file(scope, filePath ?? '', undefined, signal), [scope, filePath]),
+    useCallback((signal, press) => fsApi.file(scope, filePath ?? '', undefined, signal, press), [scope, filePath]),
   );
 
   useEffect(() => {

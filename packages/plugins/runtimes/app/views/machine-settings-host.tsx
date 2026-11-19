@@ -6,6 +6,7 @@
  */
 
 import { daemonOfClient, usePairedDaemons } from '@ferretry/app';
+import { type ReadPress, readPress } from '@ferretry/app/ui';
 import type { AppComponent, SettingsProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { MachineView } from '../../contract/index.ts';
@@ -25,22 +26,28 @@ type MachineRead =
 export function useMachineView(client: LiveRuntimesClient) {
   const [read, setRead] = useState<MachineRead>({ kind: 'checking', last: null });
   const generation = useRef(0);
-  const reload = useCallback((): void => {
-    generation.current += 1;
-    const mine = generation.current;
-    setRead(current => ({ kind: 'checking', last: current.kind === 'ready' ? current.machine : null }));
-    readMachine(client).then(
-      machine => {
-        if (mine === generation.current) setRead({ kind: 'ready', machine });
-      },
-      error => {
-        if (mine === generation.current) setRead({ kind: 'failed', sentence: changeRefusalSentence(error) });
-      },
-    );
-  }, [client]);
+  const load = useCallback(
+    (press: ReadPress): void => {
+      generation.current += 1;
+      const mine = generation.current;
+      setRead(current => ({ kind: 'checking', last: current.kind === 'ready' ? current.machine : null }));
+      readMachine(client, press).then(
+        machine => {
+          if (mine === generation.current) setRead({ kind: 'ready', machine });
+        },
+        error => {
+          if (mine === generation.current) setRead({ kind: 'failed', sentence: changeRefusalSentence(error) });
+        },
+      );
+    },
+    [client],
+  );
+  const reload = useCallback((): void => load({}), [load]);
+  // The Try again button: reads again as the person's own press, so the passkey prompt can open.
+  const press = useCallback((): void => load(readPress(true)), [load]);
   useEffect(reload, [reload]);
   useMachineChanges(client, ['runtimes'], reload);
-  return { read, reload };
+  return { read, reload, press };
 }
 
 export type MachineTab = (props: MachineTabProps) => ReactNode;
@@ -63,7 +70,7 @@ export const machineNameShown = (
 /** One Settings tab: the machine read, and the tab inside it. */
 export const machineSettingsView = (client: LiveRuntimesClient, Tab: MachineTab): AppComponent<SettingsProps> =>
   function MachineSettings() {
-    const { read, reload } = useMachineView(client);
+    const { read, reload, press } = useMachineView(client);
     const machine = read.kind === 'ready' ? read.machine : read.kind === 'checking' ? read.last : null;
     // The name follows the machine's LIVE name (the paired record every rename and every plugin-list read updates), not the
     // name this view last read: a machine renamed while its setup is open must not keep reading "No runtimes on <old name>".
@@ -75,7 +82,7 @@ export const machineSettingsView = (client: LiveRuntimesClient, Tab: MachineTab)
             <p role="alert" className="m-0 text-cell leading-base text-warn">
               {read.sentence}
             </p>
-            <Button type="button" size="sm" data-machine-retry="" onClick={reload}>
+            <Button type="button" size="sm" data-machine-retry="" onClick={press}>
               Try again
             </Button>
           </div>

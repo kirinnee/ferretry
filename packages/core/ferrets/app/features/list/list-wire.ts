@@ -4,6 +4,7 @@
  * sends the etag it holds and a `304` keeps the rows it already has.
  */
 
+import type { ReadPress } from '@ferretry/app/ui';
 import { z } from 'zod';
 import { type FerretSummary, FerretSummarySchema } from '../../../contract/index.ts';
 import type { LiveFerretsClient } from '../../lib/client.ts';
@@ -27,12 +28,17 @@ const parse = (body: unknown): readonly FerretSummary[] => {
   return parsed.data;
 };
 
-/** One read of the list. `held` is the read the caller already has: a `304` answers with it unchanged. */
+/**
+ * One read of the list. `held` is the read the caller already has: a `304` answers with it unchanged. `press` marks a
+ * Retry's read as the person's own; it is a plain read (no etag), since a failed list holds nothing to match.
+ */
 export const readFerretList = async (
   client: Pick<LiveFerretsClient, 'call' | 'conditional'>,
   held?: FerretListRead,
+  press: ReadPress = {},
 ): Promise<FerretListRead> => {
-  if (client.conditional === undefined) return { ferrets: parse(await client.call<unknown>(LIST_ROUTE)) };
+  if (client.conditional === undefined || press.quiet === false)
+    return { ferrets: parse(await client.call<unknown>(LIST_ROUTE, press)) };
   const answer = await client.conditional(LIST_ROUTE, {}, held?.etag === undefined ? {} : { ifNoneMatch: held.etag });
   if (answer.status === 304 && held !== undefined) return held;
   if (answer.status === 304) throw new Error(UNREADABLE_LIST);

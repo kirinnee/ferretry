@@ -110,7 +110,11 @@ function RunRow({
 
 export function CiTab({ client, daemon, scope, target, nowMs: fixedNow }: CiTabProps) {
   const key = `${scope.project}/${scope.repo.owner}/${scope.repo.name}/${'pr' in target ? `pr${target.pr}` : target.branch}`;
-  const { state, reload } = useLiveRead(key, signal => fetchRuns(client, scope, target, signal), runsLive);
+  const { state, reload } = useLiveRead(
+    key,
+    (signal, press) => fetchRuns(client, scope, target, signal, press),
+    runsLive,
+  );
   const hrefOf = useScreenHref();
   const { navigate } = useRouter();
   const live = state.kind === 'ready' && runsLive(state.value);

@@ -23,6 +23,7 @@
  * abandons its reads in flight, so nothing read under a replaced credential is shown or kept.
  */
 
+import type { ReadPress } from '@ferretry/app/ui';
 import type { AskListSnapshot } from '@ferretry/core-asks/contract';
 import {
   type BoardCounts,
@@ -291,9 +292,9 @@ export class DaemonBoardStore {
   }
 
   /** Re-reads one machine's whole board in a view now, ahead of the 30-second beat. */
-  refresh(key: string, daemonId: DaemonId): Promise<void> {
+  refresh(key: string, daemonId: DaemonId, press: ReadPress = {}): Promise<void> {
     const view = this.#views.get(key);
-    return view === undefined ? Promise.resolve() : this.#readWhole(view, daemonId);
+    return view === undefined ? Promise.resolve() : this.#readWhole(view, daemonId, press);
   }
 
   #slice(view: View, daemonId: DaemonId): BoardMachineSlice {
@@ -371,7 +372,7 @@ export class DaemonBoardStore {
     this.#publish();
   }
   /** The whole board of one machine, with its lane sets and version. */
-  async #readWhole(view: View, daemonId: DaemonId): Promise<void> {
+  async #readWhole(view: View, daemonId: DaemonId, press: ReadPress = {}): Promise<void> {
     const machine = view.machines.get(daemonId);
     if (machine === undefined) return;
     const stamp = ++this.#clock;
@@ -380,7 +381,7 @@ export class DaemonBoardStore {
     if (before.status !== 'ready') this.#setSlice(view, daemonId, { ...before, status: 'loading', error: null });
     try {
       const [read, listed, version] = await Promise.all([
-        readWholeBoard(this.#port, machine, view.query),
+        readWholeBoard(this.#port, machine, view.query, press),
         this.#port.projects(machine).catch(() => null),
         this.#port.version(machine),
       ]);

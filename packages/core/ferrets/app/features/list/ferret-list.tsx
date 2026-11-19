@@ -88,7 +88,7 @@ export function FerretListBody({
   const router = useOptionalRouter();
   const daemon = router === null ? undefined : daemonOfRoute(router.route);
   const openFerret = router === null ? undefined : ferretOfRoute(router.route);
-  const { read, retry } = useFerretList(client);
+  const { read, retry, press } = useFerretList(client);
   const { device, set } = useDeviceControls();
   const showStopped = device.showStopped;
   // The branches the reader flipped from how they would open by themselves (`openByDefault`). Kept while the list lives.
@@ -112,7 +112,7 @@ export function FerretListBody({
     return (
       <div className="fy-sbar__empty" role="alert">
         <p className="m-0">{read.sentence}</p>
-        <button className="kt-btn mt-2" onClick={retry} type="button">
+        <button className="kt-btn mt-2" onClick={press} type="button">
           Retry
         </button>
       </div>

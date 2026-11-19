@@ -62,7 +62,7 @@ const kindHref = (kind: ComponentKind, machineName: string): string | null | und
 
 export function ProfilesTab(props: MachineTabProps & { readonly onAtList?: (atList: boolean) => void }) {
   const { client, machineName, onAtList } = props;
-  const { read, reload } = useAccountCatalog(client);
+  const { read, reload, press } = useAccountCatalog(client);
   const [page, setPage] = useState<Page>({ kind: 'list' });
   const [saved, setSaved] = useState<string | undefined>(undefined);
   const open = (next: Page) => {
@@ -78,7 +78,7 @@ export function ProfilesTab(props: MachineTabProps & { readonly onAtList?: (atLi
   useEffect(() => onAtList?.(showingList), [onAtList, showingList]);
 
   if (read.kind === 'loading') return <Loading kind="page" label={`Reading ${machineName}’s profiles…`} />;
-  if (read.kind === 'failed') return <ReadFailed reason={read.reason} onRetry={() => void reload()} />;
+  if (read.kind === 'failed') return <ReadFailed reason={read.reason} onRetry={() => void press()} />;
   const catalog = read.catalog;
   const profile =
     page.kind === 'detail' ? catalog.profiles.profiles.find(candidate => candidate.name === page.name) : undefined;

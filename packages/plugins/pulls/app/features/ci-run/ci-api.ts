@@ -2,6 +2,7 @@
  * CI run page, the wire half (r9 E9): the two reads E8's daemon answers, parsed whole by E1's `CiRunSchema` so a shape the
  * daemon did not mean is refused here instead of drawn wrong. Nothing is cached in this folder: a read is one call.
  */
+import type { ReadPress } from '@ferretry/app/ui';
 import { z } from 'zod';
 import { type CiRun, CiRunSchema } from '../../../contract/wire.ts';
 import { repoSegment } from '../../../contract/repo-segment.ts';
@@ -39,14 +40,16 @@ export const fetchRuns = async (
   scope: CiScope,
   target: CiTarget,
   signal?: AbortSignal,
+  press: ReadPress = {},
 ): Promise<readonly CiRun[]> =>
   RunsSchema.parse(
     await client.call(RUNS_ROUTE, {
       params: { project: scope.project, repo: repoSegment(scope.repo) },
       query: 'pr' in target ? { pr: String(target.pr) } : { branch: target.branch },
-      // A poll the page makes on its own never raises a passkey prompt.
+      // A poll the page makes on its own never raises a passkey prompt; a Try again's `press` (`quiet: false`) may.
       quiet: true,
       ...(signal === undefined ? {} : { signal }),
+      ...press,
     }),
   );
 
@@ -56,6 +59,7 @@ export const fetchRun = async (
   runId: number,
   attempt?: number,
   signal?: AbortSignal,
+  press: ReadPress = {},
 ): Promise<CiRun> =>
   CiRunSchema.parse(
     await client.call(RUN_ROUTE, {
@@ -63,6 +67,7 @@ export const fetchRun = async (
       ...(attempt === undefined ? {} : { query: { attempt: String(attempt) } }),
       quiet: true,
       ...(signal === undefined ? {} : { signal }),
+      ...press,
     }),
   );
 

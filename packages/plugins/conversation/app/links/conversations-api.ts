@@ -20,14 +20,18 @@ import {
   LinkPreviewSchema,
   type LinkQuery,
 } from '../../contract/index.ts';
+import type { ReadPress } from '@ferretry/app/ui';
 import { listingQueryParams } from './conversation-picker-model.ts';
 
 /** The conversations this machine's harnesses hold, newest first, narrowed by `query` on the daemon. */
 export const readLinkableConversations = async (
   client: Pick<PluginClient, 'call'>,
   query: LinkQuery = {},
+  press: ReadPress = {},
 ): Promise<LinkListing> =>
-  LinkListingSchema.parse(await client.call('GET /v1/links/conversations', { query: listingQueryParams(query) }));
+  LinkListingSchema.parse(
+    await client.call('GET /v1/links/conversations', { query: listingQueryParams(query), ...press }),
+  );
 
 /** Keep the chosen conversations as ferrets: stopped unless `start`, never more than ten launched. */
 export const keepConversations = async (

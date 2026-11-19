@@ -172,19 +172,19 @@ export interface RichFilePreviewProps {
 export const RichFilePreview = ({ scope, path, revision }: RichFilePreviewProps) => {
   const kind = richFileKind(path);
   const key = kind === null ? null : `preview:${scopeKey(scope)}:${path}`;
-  const preview = useFsResource(key, signal => fsApi.preview(scope, path, signal));
+  const preview = useFsResource(key, (signal, press) => fsApi.preview(scope, path, signal, press));
   const [url, setUrl] = useState<string | null>(null);
   // A raster picture opens in the shared full-screen viewer (the same one the chat draws with).
   const [viewing, setViewing] = useState(false);
   // The revision this preview's bytes were fetched against. Seeded from the
   // mounting revision so the first read is not immediately re-run.
   const fetchedFor = useRef(revision);
-  const reloadPreview = preview.reload;
+  const refreshPreview = preview.refresh;
   useEffect(() => {
     if (fetchedFor.current === revision) return;
     fetchedFor.current = revision;
-    reloadPreview();
-  }, [revision, reloadPreview]);
+    refreshPreview();
+  }, [revision, refreshPreview]);
   const bytes = useMemo(() => {
     if (!preview.data?.base64) return null;
     try {
