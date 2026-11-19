@@ -8,7 +8,13 @@ import { lazyComponent } from './lazy.ts';
  * A view module (React), loaded on first use. The specifier is a Vite dynamic-import variable (`./views/*.tsx`), which
  * keeps this module free of React so the registry generator can load it before the app shell is in place.
  */
-const loadView = (name: 'shells-settings'): Promise<Record<string, unknown>> => import(`./views/${name}.tsx`);
+const loadView = (name: 'shells-settings' | 'shells-step'): Promise<Record<string, unknown>> =>
+  import(`./views/${name}.tsx`);
+
+const stepOf = (client: PluginClient): AppComponent<PanelProps> =>
+  lazyComponent<PanelProps>(async () =>
+    ((await loadView('shells-step')).createShellsStep as (client: PluginClient) => AppComponent<PanelProps>)(client),
+  );
 
 const settingsOf = (client: PluginClient): AppComponent<SettingsProps> =>
   lazyComponent<SettingsProps>(async () =>
@@ -28,8 +34,8 @@ const settingsOf = (client: PluginClient): AppComponent<SettingsProps> =>
 export default implementApp(manifest, {
   build: ({ client }) => ({
     screens: {},
-    // The first-run step's body: the same view as the Settings tab, only for its own step.
-    panels: { 'onboarding-step': forSubject('shells.nix', settingsOf(client) as AppComponent<PanelProps>) },
+    // The first-run step: one page that skips itself when nix is on the machine (`features/onboarding`).
+    panels: { 'onboarding-step': forSubject('shells.nix', stepOf(client)) },
     settings: { shells: settingsOf(client) },
     renderers: {},
   }),
