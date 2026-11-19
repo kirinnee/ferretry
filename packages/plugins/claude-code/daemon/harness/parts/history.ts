@@ -2,6 +2,7 @@ import type {
   ConversationFinder,
   ConversationImport,
   FoundConversation,
+  HarnessHistoryFiles,
   HarnessHistorySource,
   LaunchSpec,
 } from '@ferretry/core-ferrets/contract';
@@ -16,6 +17,18 @@ const configFile = CLAUDE_CODE_CONFIG as unknown as ConfigFileDef<HarnessConfig>
 
 /** Whether the person's own `~/.claude` history may be read (`hostHistory`, default on); read at each call. */
 const hostHistoryOn = (core: ClaudeCore): boolean => core.deps.config.file(configFile)?.hostHistory ?? true;
+
+/**
+ * The owner's host history, behind the switch for EVERY operation. Conversation caches an issued source and reads through
+ * it later (a fresh transcript preview, a re-listing), so the source checks `hostHistory` at each call, not once when it
+ * was handed out: off, it lists nothing, finds nothing and reads nothing (the source seam is total, so a refusal is
+ * "nothing there", never an error).
+ */
+const guardedHostFiles = (core: ClaudeCore, files: HarnessHistoryFiles): HarnessHistoryFiles => ({
+  entries: async directory => (hostHistoryOn(core) ? await files.entries(directory) : []),
+  stat: async path => (hostHistoryOn(core) ? await files.stat(path) : undefined),
+  read: async (path, offset, length) => (hostHistoryOn(core) ? await files.read(path, offset, length) : undefined),
+});
 
 /**
  * The most `projects/*` folders `hasConversation` lists before it says "cannot tell". One ferret's home holds the
@@ -157,7 +170,10 @@ export const historyPart = (
       sources.push({
         kind: 'computer',
         label: 'owner',
-        files: historyFilesOver(core.deps.roots.root('harness-history', { subfolder: historyHome })),
+        files: guardedHostFiles(
+          core,
+          historyFilesOver(core.deps.roots.root('harness-history', { subfolder: historyHome })),
+        ),
       });
     try {
       sources.push({ kind: 'pool', label: 'pool', files: historyFilesOver(core.deps.roots.historyPool()) });

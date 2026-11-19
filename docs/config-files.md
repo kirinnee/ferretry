@@ -923,6 +923,13 @@ channel (the tools server loaded as a development channel). Unset, it follows ea
 login, **off** for every other type or an unreadable one); `true` or `false` wins for every login. Read at each launch;
 not a loosening, so never held ([launch-settings.md](launch-settings.md#the-claude-channel)).
 
+`harness-claude-code.yaml` also takes `hostHistory` (default `true`): whether Ferretry READS the conversations Claude holds in
+the person's own `~/.claude` on this machine (listing them, previewing them, copying one into the shared pool). `false` stops
+all of it, checked at every call (a source already handed to the conversation index refuses too), with no restart; ferrets' own
+homes and the shared pool are not affected, and Ferretry never changes or deletes anything in `~/.claude` either way. Turning it
+**on** (`false` to `true`, or removing the key so it reads as the default `true`) is a loosening, since those are the owner's private
+conversations: an agent's edit is **held** for the owner and the owner's own edit is not. Turning it off is a tightening and is never held.
+
 `harness-claude-code.yaml` also takes `dangerousRmWaiver: true` (default `false`): with it AND
 bypass mode (`permissionMode: skip`) a launch sets `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`, which waives Claude's
 dangerous-`rm` guard. It is a loosening, so an agent's edit turning it on is **held** for the owner like a looser permission

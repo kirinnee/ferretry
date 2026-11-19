@@ -112,6 +112,26 @@ describe('claude-code contract', () => {
     expect(harnessConfigLoosens(undefined, explicitAuto)).toEqual([]);
   });
 
+  test('turning hostHistory back on is held (false to true, or the key removed); turning it off or an owner-free write is not', () => {
+    const held = CLAUDE_CODE_CONFIG.loosens;
+    const off = HarnessConfigSchema.parse({ hostHistory: false });
+    const on = HarnessConfigSchema.parse({ hostHistory: true });
+    const nothing = HarnessConfigSchema.parse({});
+    const sentence = [
+      "agents may now read the owner's own Claude conversations on this computer (hostHistory turned on)",
+    ];
+    expect(held(off, on)).toEqual(sentence);
+    // Removing the key falls back to the default, which is on: held the same.
+    expect(held(off, nothing)).toEqual(sentence);
+    // Off, staying off, going off, a first file, or on staying on: nothing to hold.
+    expect(held(off, off)).toEqual([]);
+    expect(held(on, off)).toEqual([]);
+    expect(held(nothing, off)).toEqual([]);
+    expect(held(on, on)).toEqual([]);
+    expect(held(undefined, on)).toEqual([]);
+    expect(held(undefined, nothing)).toEqual([]);
+  });
+
   test('any change of the binary or the search paths is held (code execution); the file is judged by that rule', () => {
     // What the file is judged by (the plugin's own def), not a helper the contract exports.
     const held = CLAUDE_CODE_CONFIG.loosens;

@@ -585,6 +585,30 @@ describe('ClaudeHarness', () => {
       on = false;
       expect(await harness.conversations.list(undefined)).toEqual([]);
     });
+
+    test('an owner source issued while hostHistory was on refuses list, stat and read once it is turned off', async () => {
+      let on = true;
+      const { harness } = build({
+        config: {
+          file: () => ({ searchPaths: [], permissionMode: 'auto', hostHistory: on }),
+          collection: () => new Map(),
+        },
+      });
+      await seedHost();
+      const owner = (await harness.historySources()).find(source => source.kind === 'computer');
+      expect(owner).toBeDefined();
+      const files = owner!.files;
+      expect((await files.entries('projects/p')).map(entry => entry.name)).toEqual(['c-1.jsonl']);
+      expect((await files.stat('projects/p/c-1.jsonl'))?.size).toBeGreaterThan(0);
+      expect(new TextDecoder().decode(await files.read('projects/p/c-1.jsonl', 0, 64))).toContain('/work');
+      on = false;
+      expect(await files.entries('projects/p')).toEqual([]);
+      expect(await files.entries('projects')).toEqual([]);
+      expect(await files.stat('projects/p/c-1.jsonl')).toBeUndefined();
+      expect(await files.read('projects/p/c-1.jsonl', 0, 64)).toBeUndefined();
+      on = true;
+      expect((await files.entries('projects/p')).length).toBe(1);
+    });
   });
 
   test('S41 conversation discovery refuses a history symlink that leaves its root', async () => {
