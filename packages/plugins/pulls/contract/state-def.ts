@@ -12,6 +12,12 @@ export const MAX_CACHE_BYTES_PER_PROJECT = 32 * 1024 * 1024;
 /** One answer larger than this is served but not kept. */
 export const MAX_CACHE_ENTRY_BYTES = 8 * 1024 * 1024;
 
+/**
+ * What a GitHub REST `200` carries: a JSON list or a JSON object, never `null`, a scalar or nothing. A body that is
+ * neither is not an answer, and is neither served as one nor kept.
+ */
+export const GithubBodySchema = z.union([z.array(z.unknown()), z.record(z.string(), z.unknown())]);
+
 /** One cached answer: what a later `If-None-Match` needs and what a `304` serves. The token is never part of it. */
 export const CacheEntrySchema = z.strictObject({
   format: z.literal(1),

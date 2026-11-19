@@ -31,7 +31,7 @@ describe('the per-project cache', () => {
     expect(await later.usage(P1)).toMatchObject({ files: 2 });
   });
 
-  test('a file that cannot be removed while fitting is warned about, and the write still stands', async () => {
+  test('room is made BEFORE a write: a file that will not go means the new answer is not written, and the bound holds', async () => {
     const w = world();
     const warned: string[] = [];
     const port = w.folder.port([PULLS_CACHE]);
@@ -41,13 +41,94 @@ describe('the per-project cache', () => {
     });
     for (const n of [1, 2, 3, 4, 5]) await stuck.put(P1, A1, `/p${n}`, { etag: 'e', body: big(7) });
     expect(warned).toEqual(['a cache file could not be removed']);
-    expect(await stuck.get(P1, A1, '/p5')).toBeDefined();
+    // Four fit (28 MiB); the fifth needed room that could not be made, so it was never written.
+    expect(await stuck.get(P1, A1, '/p5')).toBeUndefined();
+    expect(await stuck.get(P1, A1, '/p4')).toBeDefined();
+    const usage = await stuck.usage(P1);
+    expect(usage.files).toBe(4);
+    expect(usage.bytes).toBeLessThanOrEqual(MAX_CACHE_BYTES_PER_PROJECT);
+    // The folder itself never went over the bound, not even for a moment.
+    let onDisk = 0;
+    for (const bytes of w.folder.bytes.values()) onDisk += bytes.byteLength;
+    expect(onDisk).toBeLessThanOrEqual(MAX_CACHE_BYTES_PER_PROJECT);
     // A purge that cannot remove a file says so and leaves the retry to the sweep.
     await stuck.purgeProject(P1);
     expect(warned).toEqual([
       'a cache file could not be removed',
       "a removed project's cache could not be deleted; the next sweep retries",
     ]);
+  });
+
+  test('the folder never holds more than the bound while a write is in progress', async () => {
+    const w = world();
+    const port = w.folder.port([PULLS_CACHE]);
+    let high = 0;
+    const watched = new PullsCache(
+      {
+        ...port,
+        write: async (...args: Parameters<typeof port.write>) => {
+          const written = await port.write(...args);
+          let onDisk = 0;
+          for (const bytes of w.folder.bytes.values()) onDisk += bytes.byteLength;
+          high = Math.max(high, onDisk);
+          return written;
+        },
+      } as typeof port,
+      () => 1_000,
+      quiet,
+    );
+    for (const n of [1, 2, 3, 4, 5, 6]) {
+      w.tick();
+      await watched.put(P1, A1, `/p${n}`, { etag: 'e', body: big(7) });
+    }
+    expect(high).toBeLessThanOrEqual(MAX_CACHE_BYTES_PER_PROJECT);
+  });
+
+  test('rewriting one answer replaces it: its old bytes are not counted twice', async () => {
+    const w = world();
+    for (const n of [1, 2, 3]) await w.cache.put(P1, A1, `/p${n}`, { etag: 'e', body: big(7) });
+    await w.cache.put(P1, A1, '/p3', { etag: 'e2', body: big(7) });
+    expect(await w.cache.usage(P1)).toMatchObject({ files: 3 });
+    expect(await w.cache.get(P1, A1, '/p1')).toBeDefined();
+  });
+
+  test('a write whose read began before a purge writes nothing (project, then account)', async () => {
+    const w = world();
+    const early = w.cache.stamp(P1, A1);
+    await w.cache.purgeProject(P1);
+    await w.cache.put(P1, A1, '/a', { etag: 'e', body: { a: 1 } }, early);
+    expect(w.folder.bytes.size).toBe(0);
+    // A read that began AFTER the purge is a fresh one and is kept.
+    await w.cache.put(P1, A1, '/a', { etag: 'e', body: { a: 1 } }, w.cache.stamp(P1, A1));
+    expect(w.folder.bytes.size).toBe(1);
+
+    const before = w.cache.stamp(P1, A1);
+    await w.cache.purgeAccount(A1);
+    await w.cache.put(P1, A1, '/b', { etag: 'e', body: { b: 1 } }, before);
+    expect(w.folder.bytes.size).toBe(0);
+    // The purge moved this account's stamp, not another's.
+    expect(w.cache.stamp(P1, A1)).not.toBe(before);
+    expect(w.cache.stamp(P1, A2)).toBe(before);
+  });
+
+  test('a purge that is still queued already fences a write that follows it', async () => {
+    const w = world();
+    const early = w.cache.stamp(P1, A1);
+    const purge = w.cache.purgeProject(P1); // not awaited: the fence is up before it runs
+    const write = w.cache.put(P1, A1, '/a', { etag: 'e', body: { a: 1 } }, early);
+    await Promise.all([purge, write]);
+    expect(w.folder.bytes.size).toBe(0);
+  });
+
+  test('remove then reconnect of the same account id finds no old file', async () => {
+    const w = world();
+    await w.cache.put(P1, A1, '/a', { etag: 'e', body: { private: 'code' } });
+    await w.cache.put(P2, A1, '/a', { etag: 'e', body: { private: 'code' } });
+    await w.cache.purgeAccount(A1);
+    // Reconnected: the same id, nothing left to read.
+    expect(await w.cache.get(P1, A1, '/a')).toBeUndefined();
+    expect(await w.cache.get(P2, A1, '/a')).toBeUndefined();
+    expect(w.folder.bytes.size).toBe(0);
   });
 
   test('keeps an answer, its validator and its Link, per account', async () => {
@@ -95,6 +176,23 @@ describe('the per-project cache', () => {
     expect(await w.cache.usage(P1)).toEqual({ bytes: 0, files: 0 });
   });
 
+  test('a folder that will not go (still in use) does not fail a purge or a sweep', async () => {
+    const w = world();
+    const port = w.folder.port([PULLS_CACHE]);
+    const cache = new PullsCache(
+      { ...port, removeEmptyDirectory: async () => Promise.reject(new Error('busy')) },
+      () => 1_000,
+      quiet,
+    );
+    await cache.put(P1, A1, '/a', { etag: 'e', body: { a: 1 } });
+    await cache.put(P2, A1, '/a', { etag: 'e', body: { a: 1 } });
+    await cache.purgeAccount(A1);
+    await cache.put(P1, A1, '/a', { etag: 'e', body: { a: 1 } });
+    await cache.reconcile(new Set(), new Set());
+    await cache.purgeProject(P1);
+    expect(w.folder.bytes.size).toBe(0);
+  });
+
   test('purging a project deletes its files and nothing else', async () => {
     const w = world();
     await w.cache.put(P1, A1, '/a', { etag: 'e', body: 1 });
@@ -123,7 +221,18 @@ describe('the per-project cache', () => {
     await w.cache.put(P1, A1, '/a', { etag: 'e', body: 1 });
     await w.cache.put(P1, A2, '/a', { etag: 'e', body: 2 });
     await w.cache.put(P2, A1, '/a', { etag: 'e', body: 3 });
+    // A file that is no account's is dropped as well.
+    const port = w.folder.port([PULLS_CACHE]);
+    await port.write(PULLS_CACHE, '{}' as never, `${P1}/stray.json`);
+    const early = w.cache.stamp(P2, A1);
+    const earlyA2 = w.cache.stamp(P1, A2);
     await w.cache.reconcile(new Set([P1]), new Set([A1]));
+    expect(await port.read(PULLS_CACHE, `${P1}/stray.json`)).toMatchObject({ value: undefined });
+    // What it removed fences a read that was already out.
+    await w.cache.put(P2, A1, '/late', { etag: 'e', body: {} }, early);
+    await w.cache.put(P1, A2, '/late', { etag: 'e', body: {} }, earlyA2);
+    expect(await w.cache.get(P2, A1, '/late')).toBeUndefined();
+    expect(await w.cache.get(P1, A2, '/late')).toBeUndefined();
     expect(await w.cache.get(P1, A1, '/a')).toBeDefined();
     expect(await w.cache.get(P1, A2, '/a')).toBeUndefined();
     expect(await w.cache.get(P2, A1, '/a')).toBeUndefined();

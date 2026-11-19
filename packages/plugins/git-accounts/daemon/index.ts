@@ -1,6 +1,11 @@
 import { milliseconds } from '@ferretry/std';
 import { implementDaemon } from '@ferretry/kernel/manifest';
-import { GIT_ACCOUNT_TOKENS, GitAccountsConfigFile, GitAccountsConfigSchema } from '../contract/index.ts';
+import {
+  GIT_ACCOUNT_TOKENS,
+  GitAccountDisconnected,
+  GitAccountsConfigFile,
+  GitAccountsConfigSchema,
+} from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { FetchGithubHttp } from './adapters/github-http.ts';
 import { gitAccountRoutes } from './routes.ts';
@@ -26,7 +31,9 @@ export default implementDaemon(manifest, {
       nowMs: () => kernel.clock.nowMs(),
       after: (ms, fn) => kernel.clock.after(milliseconds(ms), fn),
     });
-    const service = new GitAccountsService(book, http, kernel.spawn, kernel.scratch);
+    const service = new GitAccountsService(book, http, kernel.spawn, kernel.scratch, id =>
+      kernel.events.publish(GitAccountDisconnected, { id }),
+    );
     return {
       routes: gitAccountRoutes(flows, service, async draft => await needs.gate.audit(draft)),
       provides: {

@@ -1,7 +1,7 @@
 import type { Log } from '@ferretry/kernel/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import type { GitAccountId, GitAccountsApi, GitApiAnswer } from '@ferretry/plugin-git-accounts/contract';
-import { PULLS_CODES, type PullsCode, type RateResource } from '../../../contract/index.ts';
+import { GithubBodySchema, PULLS_CODES, type PullsCode, type RateResource } from '../../../contract/index.ts';
 import type { PullsCache } from '../../lib/cache/store.ts';
 import { RateBudget } from './budget.ts';
 import { nextPagePath } from './link.ts';
@@ -64,6 +64,8 @@ export class GithubClient {
   async get(reading: Reading): Promise<Result<ReadAnswer, ReadFailure>> {
     const paused = this.#paused(reading.account, 'rest');
     if (paused !== undefined) return err(paused);
+    // Taken before GitHub is asked: a purge that lands while the call is out makes this read's write a no-op.
+    const stamp = this.cache.stamp(reading.project, reading.account);
     const cached = await this.cache.get(reading.project, reading.account, reading.path);
     const first = await this.#call(reading.account, 'rest', {
       method: 'GET',
@@ -84,12 +86,15 @@ export class GithubClient {
       });
     }
     if (answer.status !== 200) return err(this.#failure(reading.account, 'rest', answer.status));
+    // The seam turns text it cannot parse into `null`; a 200 with no usable body is not an answer and is never kept.
+    const body = GithubBodySchema.safeParse(answer.body);
+    if (!body.success) return err({ code: PULLS_CODES.github, status: 200, message: 'GitHub answered with an error' });
     const etag = answer.headers.etag;
     const link = answer.headers.link;
-    if (etag !== undefined && answer.body !== undefined)
-      await this.cache.put(reading.project, reading.account, reading.path, { etag, link, body: answer.body });
+    if (etag !== undefined)
+      await this.cache.put(reading.project, reading.account, reading.path, { etag, link, body: body.data }, stamp);
     return ok({
-      body: answer.body,
+      body: body.data,
       fromCache: false,
       ...(etag === undefined ? {} : { etag }),
       ...(link === undefined ? {} : { link }),

@@ -1,5 +1,5 @@
 import { definePlugin } from '@ferretry/kernel/manifest';
-import { GitAccountsPort } from '@ferretry/plugin-git-accounts/contract';
+import { GitAccountDisconnected, GitAccountsPort } from '@ferretry/plugin-git-accounts/contract';
 import { ProjectsPort, ProjectRemoved } from '@ferretry/plugin-projects/contract';
 import { PULLS_CACHE, PULLS_WORDS } from './contract/index.ts';
 
@@ -25,8 +25,8 @@ export default definePlugin({
   data: {
     // Private code (diffs): `0600` files in `0700` folders, bounded, deleted with the project or account.
     state: [PULLS_CACHE],
-    // A removed project takes its cache with it.
-    subscribes: [ProjectRemoved],
+    // A removed project or account takes its cache with it, at once (not on the next sweep).
+    subscribes: [ProjectRemoved, GitAccountDisconnected],
   },
 
   // Private code: no ferret reaches the cache through any root.

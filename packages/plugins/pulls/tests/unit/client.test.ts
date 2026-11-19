@@ -102,6 +102,79 @@ describe('answers that are not a body', () => {
   });
 });
 
+describe('a 200 that is not a body is never kept', () => {
+  test.each([
+    ['null (the seam’s mark for text it could not parse)', null],
+    ['nothing', undefined],
+    ['a string', 'plain text'],
+    ['a number', 7],
+  ])('%s: an error, nothing cached, not served on the next read', async (_name, body) => {
+    const w = world();
+    w.github.on('GET', '/repos/o/r/odd', () => ({ status: 200, body, headers: { etag: 'W/"x"' } }));
+    const first = await w.client.get(w.reading('/repos/o/r/odd'));
+    expect(!first.ok && first.error).toMatchObject({ code: PULLS_CODES.github, status: 200 });
+    expect(await w.cache.usage(PROJECT)).toEqual({ bytes: 0, files: 0 });
+    expect(w.folder.bytes.size).toBe(0);
+    await w.client.get(w.reading('/repos/o/r/odd'));
+    expect(w.github.seen[1]?.ifNoneMatch).toBeUndefined(); // no validator was ever kept
+  });
+
+  test('a list and an object are bodies and are kept', async () => {
+    const w = world();
+    w.github.set('/repos/o/r/list', []);
+    w.github.set('/repos/o/r/obj', {});
+    expect((await w.client.get(w.reading('/repos/o/r/list'))).ok).toBe(true);
+    expect((await w.client.get(w.reading('/repos/o/r/obj'))).ok).toBe(true);
+    expect(await w.cache.usage(PROJECT)).toMatchObject({ files: 2 });
+  });
+});
+
+describe('a purge while a read is out', () => {
+  /** A seam that holds every answer until `release()`, as a slow network would. */
+  function slow(w: ReturnType<typeof world>) {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>(resolve => (release = resolve));
+    const accounts = {
+      ...w.github.accounts,
+      api: async (...args: Parameters<typeof w.github.accounts.api>) => {
+        const answer = await w.github.accounts.api(...args);
+        await held;
+        return answer;
+      },
+    };
+    const client = new GithubClient(accounts, w.cache, () => NOW_SEC * 1000, quiet);
+    return { client, release };
+  }
+
+  test('a project removed meanwhile: the answer is served to the caller and written nowhere', async () => {
+    const w = world();
+    w.github.set('/repos/o/r', { id: 1 });
+    const { client, release } = slow(w);
+    const reading = client.get(w.reading('/repos/o/r'));
+    await w.cache.purgeProject(PROJECT);
+    release();
+    const answer = await reading;
+    expect(answer.ok && answer.value.body).toEqual({ id: 1 });
+    expect(w.folder.bytes.size).toBe(0);
+    expect(await w.cache.usage(PROJECT)).toEqual({ bytes: 0, files: 0 });
+  });
+
+  test('an account removed meanwhile (and reconnected under the same id): nothing is written for it', async () => {
+    const w = world();
+    w.github.set('/repos/o/r', { id: 1 });
+    const { client, release } = slow(w);
+    const reading = client.get(w.reading('/repos/o/r'));
+    await w.cache.purgeAccount(FAKE_ACCOUNT);
+    release();
+    await reading;
+    expect(w.folder.bytes.size).toBe(0);
+    // A read begun after the purge is kept again.
+    const after = await w.client.get(w.reading('/repos/o/r'));
+    expect(after.ok).toBe(true);
+    expect(w.folder.bytes.size).toBe(1);
+  });
+});
+
 describe('paging', () => {
   const items = Array.from({ length: 5 }, (_, i) => ({ n: i + 1 }));
 

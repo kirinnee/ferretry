@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { StandInAdmission, ownerStanding } from '@ferretry/core-gate/contract/testing';
+import { GitAccountDisconnected } from '@ferretry/plugin-git-accounts/contract';
 import { ProjectRemoved } from '@ferretry/plugin-projects/contract';
 import { testHost } from '@ferretry/kernel/testing';
 import daemon from '../../daemon/index.ts';
@@ -39,6 +40,22 @@ describe('pulls daemon', () => {
     host.emit(ProjectRemoved, { id: P1 as never });
     await host.settle();
     expect(folder.rawBytes(PULLS_CACHE, `${P1}/gha_4242-aaaa.json`)).toBeUndefined();
+  });
+
+  test('git-accounts.removed purges that account’s files in every project at once, before any reconnect can read them', async () => {
+    const host = await boot(new FakeGithub(), [{ id: P1 }]);
+    const { PULLS_CACHE } = await import('../../contract/index.ts');
+    const folder = host.state('pulls');
+    const P2 = '22222222-2222-4222-8222-222222222222';
+    const plant = (name: string) => folder.plantBytes(PULLS_CACHE, new TextEncoder().encode('{}'), name);
+    plant(`${P1}/gha_4242-old.json`);
+    plant(`${P2}/gha_4242-old.json`);
+    plant(`${P1}/gha_9-other.json`);
+    host.emit(GitAccountDisconnected, { id: 'gha_4242' as never });
+    await host.settle();
+    expect(folder.rawBytes(PULLS_CACHE, `${P1}/gha_4242-old.json`)).toBeUndefined();
+    expect(folder.rawBytes(PULLS_CACHE, `${P2}/gha_4242-old.json`)).toBeUndefined();
+    expect(folder.rawBytes(PULLS_CACHE, `${P1}/gha_9-other.json`)).toBeDefined();
   });
 
   test('the sweep job drops a project that is gone and an account that is gone, and keeps the rest', async () => {

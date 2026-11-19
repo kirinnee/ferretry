@@ -28,6 +28,8 @@ export class GitAccountsService {
     private readonly http: GithubHttp,
     private readonly spawn: Pick<SpawnPort, 'run'>,
     private readonly scratch: ScratchPort,
+    /** Tells the rest of the daemon an account is gone, once its token and record are. */
+    private readonly removed: (id: GitAccountId) => unknown,
   ) {}
 
   list(): Promise<readonly GitAccount[]> {
@@ -130,6 +132,7 @@ export class GitAccountsService {
       if ((await this.book.token(id)) === undefined)
         throw new ApiError(404, 'no such Git account', GIT_ACCOUNT_CODES.unknownAccount);
       await this.book.forget(id);
+      await this.removed(id);
       return { id, removed: true, keysLeftOnProvider: [], revokeAt: GITHUB_REVOKE_URL };
     }
     const left: string[] = [];
@@ -156,6 +159,7 @@ export class GitAccountsService {
       }
     }
     await this.book.forget(id);
+    await this.removed(id);
     return { id, removed: true, keysLeftOnProvider: left, revokeAt: GITHUB_REVOKE_URL };
   }
 

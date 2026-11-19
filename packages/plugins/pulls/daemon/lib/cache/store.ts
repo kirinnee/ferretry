@@ -36,6 +36,11 @@ export class PullsCache {
   /** project → file name → size and write time. Built from disk the first time a project is touched. */
   readonly #index = new Map<string, Map<string, Kept>>();
   #chain: Promise<unknown> = Promise.resolve();
+  /**
+   * The fence. Each purge moves the epoch of what it removes (a project, an account) BEFORE it queues, so a read that
+   * began earlier carries a stamp that no longer matches and its write is dropped; nothing recreates a purged cache.
+   */
+  readonly #epochs = new Map<string, number>();
 
   constructor(
     private readonly state: StatePort,
@@ -48,6 +53,19 @@ export class PullsCache {
     const next = this.#chain.then(fn, fn);
     this.#chain = next.catch(() => undefined);
     return next;
+  }
+
+  #epoch(scope: string): number {
+    return this.#epochs.get(scope) ?? 0;
+  }
+
+  #bump(scope: string): void {
+    this.#epochs.set(scope, this.#epoch(scope) + 1);
+  }
+
+  /** What a read takes before it asks GitHub and hands back to `put`: valid only while neither side was purged. */
+  stamp(project: string, account: GitAccountId): string {
+    return `${this.#epoch(`p:${project}`)}.${this.#epoch(`a:${account}`)}`;
   }
 
   async get(project: string, account: GitAccountId, path: string): Promise<CacheEntry | undefined> {
@@ -67,7 +85,14 @@ export class PullsCache {
     return undefined;
   }
 
-  async put(project: string, account: GitAccountId, path: string, value: CachePut): Promise<void> {
+  /** Keeps an answer. With a `stamp` (taken before the read), nothing is written if the project or account was purged since. */
+  async put(
+    project: string,
+    account: GitAccountId,
+    path: string,
+    value: CachePut,
+    stamp: string = this.stamp(project, account),
+  ): Promise<void> {
     if (!PROJECT_DIR.test(project)) return;
     const entry: CacheEntry = {
       format: 1,
@@ -81,17 +106,20 @@ export class PullsCache {
     const bytes = Buffer.byteLength(text);
     if (bytes > MAX_CACHE_ENTRY_BYTES) return;
     await this.#serial(async () => {
+      if (stamp !== this.stamp(project, account)) return;
       const files = await this.#load(project);
       const file = nameOf(account, path);
+      // Room first, then the write: the folder is never over its bound, not even for a moment.
+      if (!(await this.#reserve(project, files, file, bytes))) return;
       await this.state.write(PULLS_CACHE, text as never, `${project}/${file}`);
       files.set(file, { bytes, at: this.nowMs() });
-      await this.#fit(project, files, file);
     });
   }
 
   /** Deletes everything kept for a project, and its folder. A file that will not go is logged; the next sweep retries. */
   async purgeProject(project: string): Promise<void> {
     if (!PROJECT_DIR.test(project)) return;
+    this.#bump(`p:${project}`);
     await this.#serial(async () => {
       try {
         for (const file of await this.state.entries(PULLS_CACHE, project))
@@ -108,6 +136,7 @@ export class PullsCache {
 
   /** Deletes every file kept for an account, in every project. */
   async purgeAccount(account: GitAccountId): Promise<void> {
+    this.#bump(`a:${account}`);
     await this.#serial(async () => {
       for (const project of await this.state.list(PULLS_CACHE)) {
         for (const file of await this.state.entries(PULLS_CACHE, project))
@@ -125,6 +154,7 @@ export class PullsCache {
     await this.#serial(async () => {
       for (const project of await this.state.list(PULLS_CACHE)) {
         if (!projects.has(project)) {
+          this.#bump(`p:${project}`);
           for (const file of await this.state.entries(PULLS_CACHE, project))
             if (file.kind === 'file') await this.state.remove(PULLS_CACHE, `${project}/${file.name}`);
           await this.state.removeEmptyDirectory(PULLS_CACHE, project).catch(() => undefined);
@@ -134,6 +164,7 @@ export class PullsCache {
         for (const file of await this.state.entries(PULLS_CACHE, project)) {
           const owner = /^(gha_[0-9]{1,20})-/u.exec(file.name)?.[1];
           if (file.kind !== 'file' || owner === undefined || !accounts.has(owner)) {
+            if (owner !== undefined) this.#bump(`a:${owner}`);
             await this.state.remove(PULLS_CACHE, `${project}/${file.name}`);
             this.#index.get(project)?.delete(file.name);
           }
@@ -175,12 +206,14 @@ export class PullsCache {
     return files;
   }
 
-  /** Oldest out first until the project fits; the file just written stays unless it alone is too big (it is not). */
-  async #fit(project: string, files: Map<string, Kept>, keep: string): Promise<void> {
-    let total = 0;
-    for (const kept of files.values()) total += kept.bytes;
-    if (total <= MAX_CACHE_BYTES_PER_PROJECT) return;
-    const oldest = [...files.entries()].filter(([name]) => name !== keep).toSorted((a, b) => a[1].at - b[1].at);
+  /**
+   * Makes room for one entry before it is written: oldest out first (the entry it replaces does not count) until the
+   * project plus the new bytes fit. `false` when it will not fit, or a file will not go: then nothing is written.
+   */
+  async #reserve(project: string, files: Map<string, Kept>, replacing: string, incoming: number): Promise<boolean> {
+    let total = incoming;
+    for (const [name, kept] of files) if (name !== replacing) total += kept.bytes;
+    const oldest = [...files.entries()].filter(([name]) => name !== replacing).toSorted((a, b) => a[1].at - b[1].at);
     for (const [name, kept] of oldest) {
       if (total <= MAX_CACHE_BYTES_PER_PROJECT) break;
       try {
@@ -191,8 +224,9 @@ export class PullsCache {
           project,
           reason: error instanceof Error ? error.name : 'error',
         });
-        break;
+        return false;
       }
     }
+    return total <= MAX_CACHE_BYTES_PER_PROJECT;
   }
 }
