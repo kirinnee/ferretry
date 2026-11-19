@@ -4,7 +4,14 @@ import { PULLS_CODES, type PullsCode, type RepoRef } from '../../../contract/ind
 
 /** The project's repository and the account that reads it, or why neither could be named. */
 export type Target =
-  | { readonly ok: true; readonly project: string; readonly repo: RepoRef; readonly account: GitAccountId }
+  | {
+      readonly ok: true;
+      readonly project: string;
+      readonly repo: RepoRef;
+      readonly account: GitAccountId;
+      /** The account's GitHub login, read in the same list as the id (so the two can never disagree). */
+      readonly login: string;
+    }
   | { readonly ok: false; readonly status: 404 | 409; readonly code: PullsCode; readonly message: string };
 
 const GITHUB_REMOTE = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/iu;
@@ -53,5 +60,5 @@ export async function resolveTarget(
       code: PULLS_CODES.noAccount,
       message: 'the GitHub account linked to this project was removed',
     };
-  return { ok: true, project: project.id, repo, account: account.id };
+  return { ok: true, project: project.id, repo, account: account.id, login: account.login };
 }

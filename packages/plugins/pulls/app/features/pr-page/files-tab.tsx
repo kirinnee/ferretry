@@ -1,20 +1,22 @@
 import type { PullDetail } from '../../../contract/index.ts';
+import { ReviewableFiles } from '../compose/index.ts';
+import type { PullAddress, PullsClient } from '../../lib/client.ts';
 
-/** What changed, in numbers, and where the file-by-file diff is. Replaced by the diff viewer when it lands. */
-export function FilesTab({ pull }: { readonly pull: PullDetail }) {
+/** The Files tab: the diff with its review threads, and the ways to quote and comment on it (E5, E6, E7). */
+export function FilesTab({
+  client,
+  daemon,
+  address,
+  pull,
+}: {
+  readonly client: PullsClient;
+  readonly daemon: string;
+  readonly address: PullAddress;
+  readonly pull: PullDetail;
+}) {
   return (
-    <section aria-label="Files" className="kt-panel grid gap-xs p-panel" data-pull-files="">
-      <p className="m-0 text-ui text-fg">
-        {pull.changedFiles} {pull.changedFiles === 1 ? 'file' : 'files'} changed:{' '}
-        <span className="text-ok">+{pull.additions}</span> <span className="text-err">−{pull.deletions}</span> across{' '}
-        {pull.commits} {pull.commits === 1 ? 'commit' : 'commits'}.
-      </p>
-      <p className="m-0 text-meta text-muted">
-        The file-by-file diff is on GitHub for now.{' '}
-        <a href={`${pull.url}/files`} rel="noopener noreferrer" target="_blank">
-          Open the files on GitHub
-        </a>
-      </p>
+    <section aria-label="Files" data-pull-files="">
+      <ReviewableFiles address={address} client={client} daemon={daemon} pull={pull} />
     </section>
   );
 }

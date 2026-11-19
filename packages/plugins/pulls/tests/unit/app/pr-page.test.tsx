@@ -105,7 +105,8 @@ describe('PullPageView', () => {
     const calls: unknown[] = [];
     const mounted = await mount(view(clientOf(page(), calls)));
     await shown(mounted);
-    expect(calls).toEqual([
+    // The page also asks which account a comment would post as (E7); the one PR is read once.
+    expect(calls.filter(call => (call as { route: string }).route === 'GET /v1/pulls/:project/:repo/:number')).toEqual([
       {
         route: 'GET /v1/pulls/:project/:repo/:number',
         init: { params: { project: PROJECT, repo: 'octo~demo', number: '7' } },
@@ -182,7 +183,8 @@ describe('PullPageView', () => {
     );
     expect(mounted.container.querySelectorAll('[data-pull-check]').length).toBe(2);
     await interact(() => tab('Files').click());
-    expect(mounted.container.querySelector('[data-pull-files]')?.textContent).toContain('3 files changed');
+    // The Files tab is the diff view now (E5) with its threads and its composer (E6, E7); their own tests read what they draw.
+    expect(mounted.container.querySelector('[data-pull-files]')).not.toBeNull();
     await mounted.unmount();
   });
 

@@ -2,6 +2,7 @@ import { Badge } from '@ferretry/app/ui';
 import type { ReactNode } from 'react';
 import type { PullComment, PullDetail, PullPage, PullReview } from '../../../contract/index.ts';
 import { timeline } from '../../lib/timeline.ts';
+import { OpenComment, QuoteScope } from '../compose/index.ts';
 import { initial, localTime, VERDICT_WORDS } from './format.ts';
 import { SafeProse } from './safe-prose.tsx';
 
@@ -83,30 +84,33 @@ export function Conversation({ page }: { readonly page: PullPage }) {
   const pull: PullDetail = page.pull;
   const entries = timeline(page.comments, page.reviews);
   return (
-    <div className="grid gap-panel" data-pull-conversation="">
-      <Entry login={pull.author.login} url={pull.url} verb="opened this" when={pull.createdAt}>
-        {pull.body.trim() === '' ? (
-          <p className="m-0 text-meta text-faint">No description provided.</p>
-        ) : (
-          <SafeProse sourceUrl={pull.url} text={pull.body} />
+    <QuoteScope>
+      <div className="grid gap-panel" data-pull-conversation="">
+        <Entry login={pull.author.login} url={pull.url} verb="opened this" when={pull.createdAt}>
+          {pull.body.trim() === '' ? (
+            <p className="m-0 text-meta text-faint">No description provided.</p>
+          ) : (
+            <SafeProse sourceUrl={pull.url} text={pull.body} />
+          )}
+        </Entry>
+        {entries.map(entry =>
+          entry.kind === 'comment' ? (
+            <CommentEntry comment={entry.comment} key={`c${entry.comment.id}`} />
+          ) : (
+            <ReviewEntry key={`r${entry.review.id}`} review={entry.review} />
+          ),
         )}
-      </Entry>
-      {entries.map(entry =>
-        entry.kind === 'comment' ? (
-          <CommentEntry comment={entry.comment} key={`c${entry.comment.id}`} />
-        ) : (
-          <ReviewEntry key={`r${entry.review.id}`} review={entry.review} />
-        ),
-      )}
-      {page.truncated && (
-        <p className="m-0 text-meta text-warn" role="status">
-          This page shows the first {page.comments.length} comments and {page.reviews.length} reviews.{' '}
-          <a href={pull.url} rel="noopener noreferrer" target="_blank">
-            Read the rest on GitHub
-          </a>
-          .
-        </p>
-      )}
-    </div>
+        <OpenComment />
+        {page.truncated && (
+          <p className="m-0 text-meta text-warn" role="status">
+            This page shows the first {page.comments.length} comments and {page.reviews.length} reviews.{' '}
+            <a href={pull.url} rel="noopener noreferrer" target="_blank">
+              Read the rest on GitHub
+            </a>
+            .
+          </p>
+        )}
+      </div>
+    </QuoteScope>
   );
 }

@@ -6,6 +6,7 @@ import { threadsRoute } from './features/threads/routes.ts';
 import { detailRoutes } from './features/detail/index.ts';
 import type { watchFeature } from './features/watch/index.ts';
 import { filesRoutes } from './features/files/index.ts';
+import { type PostServices, postRoutes } from './features/post/index.ts';
 import type { PullsCache } from './lib/cache/store.ts';
 
 /** What every later unit's routes and jobs are built from: the one GitHub client (one budget) and the one cache. */
@@ -16,6 +17,8 @@ export interface PullsServices {
   readonly projects: Pick<ProjectsApi, 'find'>;
   readonly accounts: Pick<GitAccountsApi, 'list'>;
   readonly nowMs: () => number;
+  /** E7: what a post needs besides the client (Gate's audit door, the exactly-once ledger). */
+  readonly post: Pick<PostServices, 'record' | 'ledger' | 'log'>;
 }
 
 /** Each unit adds ONE line here, naming its routes. */
@@ -30,4 +33,10 @@ export const pullsRoutes = (services: PullsServices, watch: ReturnType<typeof wa
   ...detailRoutes(services), // E4: the PR page
   ...watch.routes, // E2: the watch status and settings
   ...filesRoutes(services),
+  ...postRoutes({
+    ...services.post,
+    github: services.github,
+    projects: services.projects,
+    accounts: services.accounts,
+  }), // E7
 });
