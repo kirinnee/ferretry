@@ -21,6 +21,7 @@ import { composerSkills } from './lib/composer.ts';
 import { MAX_SKILL_MANIFEST_BYTES, SkillsInventoryService } from './lib/inventory.ts';
 import { inventoryRoutes } from './routes.ts';
 import { skillParts } from './lib/launch-parts.ts';
+import { createSkillsItem, skillsImportPut } from './features/host-import/index.ts';
 import { skillsComponentSource } from './lib/profile-component-source.ts';
 import { SkillStore } from './lib/skill-store.ts';
 import { skillReferenceProvider } from './lib/reference-catalog.ts';
@@ -199,9 +200,15 @@ export default implementDaemon(manifest, {
         'reference.catalog:/': skillReferenceProvider(api.forComposer),
         'reference.catalog:$': skillReferenceProvider(api.forComposer),
         // Runtimes' read of the `skills` components a profile names: this plugin's own items, live, no cache.
-        'runtimes.components.skills:components': skillsComponentSource(items, listener =>
-          kernel.config.watch(SKILLS_CONFIG, listener),
-        ),
+        // `put` is the setup import's write: this plugin creates its own item file (host-import/put.ts).
+        'runtimes.components.skills:components': {
+          ...skillsComponentSource(items, listener => kernel.config.watch(SKILLS_CONFIG, listener)),
+          put: skillsImportPut({
+            has: name => items().has(name),
+            create: createSkillsItem(kernel.config),
+            store,
+          }),
+        },
         // Skills' own installed skills (`installed/<name>/`) go to a launch only for an item the runtime's profile selects.
         'launch.parts': () => [
           {

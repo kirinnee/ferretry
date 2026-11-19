@@ -41,6 +41,14 @@ export class InstalledSkillConflict extends InstalledSkillRefused {
   }
 }
 
+/** A create-only install found `installed/<name>/` already there: nothing of it was touched. */
+export class InstalledSkillExists extends InstalledSkillRefused {
+  constructor(name: string) {
+    super(`${name} is already installed here, so it was left as it is.`);
+    this.name = 'InstalledSkillExists';
+  }
+}
+
 /** The most entries one look at an installed folder lists before it says there are more than a skill holds. */
 const MAX_WALKED_ENTRIES = 1000;
 
@@ -124,7 +132,10 @@ export function installRefusal(name: string, files: readonly InstalledSkillFile[
  */
 export class SkillStore {
   constructor(
-    private readonly state: Pick<StatePort, 'write' | 'remove' | 'stat' | 'read' | 'removeEmptyDirectory' | 'entries'>,
+    private readonly state: Pick<
+      StatePort,
+      'write' | 'remove' | 'stat' | 'read' | 'removeEmptyDirectory' | 'entries' | 'createPrivateDirectory'
+    >,
     private readonly roots: Pick<RootsPort, 'share'>,
   ) {}
 
@@ -136,9 +147,14 @@ export class SkillStore {
    * is not swapped atomically, so a ferret that launches while its skill is being replaced finds the folder partly
    * written.
    */
-  async install(name: string, files: readonly InstalledSkillFile[]): Promise<void> {
+  async install(
+    name: string,
+    files: readonly InstalledSkillFile[],
+    options: { readonly createOnly?: boolean } = {},
+  ): Promise<void> {
     const refusal = installRefusal(name, files);
     if (refusal !== undefined) throw new InstalledSkillRefused(refusal);
+    if (options.createOnly === true) return await this.#create(name, files);
     const owned = await this.#ownedFiles(name, 'replaced');
     const incoming = new Set(files.map(file => file.path));
     const stale = owned.filter(path => !incoming.has(path));
@@ -146,6 +162,35 @@ export class SkillStore {
     // The index names the new paths before they land, so a crash part-way leaves them ours, not someone else's.
     await this.#remember(name, [...new Set([...owned.filter(path => incoming.has(path)), ...incoming])]);
     for (const file of files) await this.state.write(SKILLS_INSTALLED_STATE, file.content, `${name}/${file.path}`);
+  }
+
+  /**
+   * A create-only install: the skill's folder is made with ONE exclusive mkdir, so a folder that exists (a person's, or a
+   * catalog install that landed first) is never replaced, whatever happened between a look at the store and this call. It
+   * throws {@link InstalledSkillExists} and touches nothing then.
+   */
+  async #create(name: string, files: readonly InstalledSkillFile[]): Promise<void> {
+    try {
+      await this.state.createPrivateDirectory(SKILLS_INSTALLED_STATE, name);
+    } catch (error) {
+      if (await this.holds(name).catch(() => false)) throw new InstalledSkillExists(name);
+      if ((await this.state.stat(SKILLS_INSTALLED_STATE, name).catch(() => undefined)) !== undefined)
+        throw new InstalledSkillExists(name);
+      throw error;
+    }
+    try {
+      await this.#remember(
+        name,
+        files.map(file => file.path),
+      );
+      for (const file of files) await this.state.write(SKILLS_INSTALLED_STATE, file.content, `${name}/${file.path}`);
+    } catch (error) {
+      await this.removePaths(
+        name,
+        files.map(file => file.path),
+      ).catch(() => undefined);
+      throw error;
+    }
   }
 
   /**
