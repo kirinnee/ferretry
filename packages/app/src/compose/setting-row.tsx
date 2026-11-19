@@ -63,6 +63,8 @@ export interface SettingRowProps {
   readonly children?: ReactNode;
   /** `data-*` attributes on the row itself, for a row whose state a test or a stylesheet reads. */
   readonly dataAttributes?: Readonly<Record<`data-${string}`, string>>;
+  /** A `SettingPreview`: the last column of the row on a desktop (the same place down a card), its own line under the row on a phone. */
+  readonly preview?: ReactNode;
 }
 
 export function SettingRow({
@@ -74,6 +76,7 @@ export function SettingRow({
   wide = false,
   children,
   dataAttributes,
+  preview,
 }: SettingRowProps) {
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -115,6 +118,15 @@ export function SettingRow({
             </span>
           )}
         </span>
+        {preview === undefined || preview === null ? null : (
+          <span
+            className="order-last flex shrink-0 py-1 max-md:basis-full"
+            aria-hidden="true"
+            data-setting-preview-slot=""
+          >
+            {preview}
+          </span>
+        )}
         <span
           className={cn(
             'flex min-w-0 items-center gap-1',
