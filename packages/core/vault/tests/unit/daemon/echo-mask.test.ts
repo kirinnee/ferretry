@@ -6,7 +6,7 @@ import {
   maskReplyHeaders,
   maskText,
   sanitizeBody,
-} from '../../../daemon/lib/secrets/echo-mask.ts';
+} from '../../../contract/echo-mask.ts';
 
 const FAKE = 'FAKE-MCP-TOKEN-0123456789';
 const around = echoMask([FAKE, `Bearer ${FAKE}`], '[x]');

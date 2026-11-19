@@ -419,6 +419,17 @@
         "react-test-renderer": "^19.0.0",
       },
     },
+    "packages/plugins/git-accounts": {
+      "name": "@ferretry/plugin-git-accounts",
+      "version": "5.0.0",
+      "dependencies": {
+        "@ferretry/core-gate": "workspace:*",
+        "@ferretry/core-vault": "workspace:*",
+        "@ferretry/kernel": "workspace:*",
+        "@ferretry/std": "workspace:*",
+        "zod": "4.4.3",
+      },
+    },
     "packages/plugins/layouts": {
       "name": "@ferretry/plugin-layouts",
       "version": "5.0.0",
@@ -893,6 +904,8 @@
     "@ferretry/plugin-connections": ["@ferretry/plugin-connections@workspace:packages/plugins/connections"],
 
     "@ferretry/plugin-conversation": ["@ferretry/plugin-conversation@workspace:packages/plugins/conversation"],
+
+    "@ferretry/plugin-git-accounts": ["@ferretry/plugin-git-accounts@workspace:packages/plugins/git-accounts"],
 
     "@ferretry/plugin-layouts": ["@ferretry/plugin-layouts@workspace:packages/plugins/layouts"],
 

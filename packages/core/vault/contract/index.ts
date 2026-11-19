@@ -59,6 +59,7 @@ export * from './phone.ts';
 export * from './port.ts';
 export * from './sealed.ts';
 export * from './secret-wire.ts';
+export * from './echo-mask.ts';
 export * from './secrets.ts';
 export * from './saved-logins.ts';
 export * from './secure-copy.ts';
