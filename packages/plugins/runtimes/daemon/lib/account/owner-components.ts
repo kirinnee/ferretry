@@ -38,6 +38,8 @@ export interface OwnerComponentWrite {
   readonly files?: readonly { readonly path: string; readonly content: string }[];
   /** An update the person accepted: the owner replaces its existing item (never set for a first import). */
   readonly replace?: true;
+  /** With `replace`: the owner's own items an earlier import created through this component. */
+  readonly owned?: readonly string[];
   /** Hidden files (a path segment starting with a dot) the import carried but does NOT hand over: the answer names them. */
   readonly skipped?: readonly string[];
 }
@@ -87,10 +89,12 @@ export function ownerWrites(
   assetText: (file: string) => string | undefined,
   assetFiles: (prefix: string) => readonly { readonly path: string; readonly content: string }[] = () => [],
   touched: readonly string[] = [],
+  ownedOf: (reference: string) => readonly string[] = () => [],
 ): readonly OwnerComponentWrite[] {
   const writes: OwnerComponentWrite[] = [];
   for (const { kind, name } of changedRefs(before, next, touched)) {
-    const replaces = (reference: string) => (touched.includes(reference) ? { replace: true as const } : {});
+    const replaces = (reference: string) =>
+      touched.includes(reference) ? { replace: true as const, owned: ownedOf(reference) } : {};
     if (!OWNER_KINDS.has(kind)) continue;
     const ownerKind = kind as OwnerKind;
     const value: unknown = next.components[ownerKind][name];
@@ -226,8 +230,8 @@ export function ownerReferences(
 
 /** What the owner of a kind answered to one write: written, held for confirmation, or refused in a sentence. */
 export type OwnerWriteOutcome =
-  | { readonly outcome: 'written'; readonly warnings?: readonly string[] }
-  | { readonly outcome: 'held'; readonly warnings?: readonly string[] }
+  | { readonly outcome: 'written'; readonly warnings?: readonly string[]; readonly created?: readonly string[] }
+  | { readonly outcome: 'held'; readonly warnings?: readonly string[]; readonly created?: readonly string[] }
   | { readonly outcome: 'refused'; readonly reason: string };
 
 /** The door the setup hands an imported component to its owner through (`daemon/adapters/component-writers.ts`). */

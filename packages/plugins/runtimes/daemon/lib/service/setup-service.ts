@@ -338,7 +338,7 @@ function parseImportRecord(text: string | undefined): ImportRecord | undefined {
     return undefined;
   }
   if (!isRecord(raw) || raw.version !== 1 || !isRecord(raw.components)) return undefined;
-  const components: Record<string, { sources: string[]; digest: string; left?: string[] }> = {};
+  const components: Record<string, { sources: string[]; digest: string; left?: string[]; owned?: string[] }> = {};
   for (const [reference, entry] of Object.entries(raw.components)) {
     if (!isRecord(entry) || typeof entry.digest !== 'string' || !Array.isArray(entry.sources)) continue;
     components[reference] = {
@@ -346,6 +346,9 @@ function parseImportRecord(text: string | undefined): ImportRecord | undefined {
       digest: entry.digest,
       ...(Array.isArray(entry.left) && entry.left.some(item => typeof item === 'string')
         ? { left: entry.left.filter((item): item is string => typeof item === 'string') }
+        : {}),
+      ...(Array.isArray(entry.owned) && entry.owned.some(item => typeof item === 'string')
+        ? { owned: entry.owned.filter((item): item is string => typeof item === 'string') }
         : {}),
     };
   }
@@ -787,6 +790,7 @@ export class FleetSetupService {
       assetText: file => assets.find(asset => asset.path === file)?.content,
       assetFiles: prefix => assets.filter(asset => asset.path.startsWith(prefix)),
       touched,
+      ownedOf: reference => plan.record.components[reference]?.owned ?? [],
       documents: async (next, outcome) =>
         await this.#documents(reading, next, written, [
           { path: this.#recordPath(), content: recordText(plan, updates, outcome) },

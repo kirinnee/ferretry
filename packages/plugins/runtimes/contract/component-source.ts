@@ -40,7 +40,16 @@ export type ProfileComponentDocument = Readonly<Record<string, unknown>>;
  * machine): names and rules, never a value.
  */
 export type ComponentPutResult =
-  | { readonly ok: true; readonly held?: true; readonly warnings?: readonly string[] }
+  | {
+      readonly ok: true;
+      readonly held?: true;
+      readonly warnings?: readonly string[];
+      /**
+       * The owner's own items (a skill folder, a Codex profile item) this write CREATED, by name. Runtimes keeps them in
+       * the import record, so a later accepted update replaces only what an import made, never what a person made.
+       */
+      readonly created?: readonly string[];
+    }
   | { readonly ok: false; readonly reason: string };
 
 /** One file an imported component brings with it, by its path under the component (`<item>/<rel>` for a skill). */
@@ -56,6 +65,12 @@ export interface ComponentPutFile {
  */
 export interface ComponentPutOptions {
   readonly replace?: true;
+  /**
+   * The owner's own items an earlier import created through this component (what `created` answered, kept in the import
+   * record). An item that exists but is not named here, and is not the component's own item, was not made by an import and
+   * is left exactly as it is, in a sentence.
+   */
+  readonly owned?: readonly string[];
 }
 
 /** A view of one kind's component documents, read live from the owner's own configuration. */

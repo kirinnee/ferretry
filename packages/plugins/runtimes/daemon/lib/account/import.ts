@@ -183,6 +183,8 @@ interface ImportRecordEntry {
    * imported, so a skill that was left out is never a change to offer; one that is new to the source still is.
    */
   readonly left?: readonly string[];
+  /** The owner's own items (a skill folder, a Codex profile item) an import created through this component. */
+  readonly owned?: readonly string[];
 }
 
 /**
@@ -1505,6 +1507,9 @@ export function mergeImportRecord(plan: ImportPlan, acceptedUpdates: readonly La
         sources: update.sources,
         digest: update.digest,
         ...(update.left === undefined ? {} : { left: update.left }),
+        ...(plan.record.components[update.reference]?.owned === undefined
+          ? {}
+          : { owned: plan.record.components[update.reference]?.owned }),
       };
     }
   }
