@@ -3484,10 +3484,10 @@ describe('the setup.import executor, components another plugin owns', () => {
       throw new Error('disk full');
     };
     const change = IMPORT();
-    await service.executors.setup.describe(change);
+    await service.executors.setup.describe(change, MACHINE);
 
     // Act
-    const error = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_failed');
+    const error = await catalogRefusal(service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
 
     // Assert
     should(error.message).containEql('disk full');
@@ -3521,7 +3521,7 @@ describe('the setup.import executor, components another plugin owns', () => {
     const { service, state } = world({ overrides: { components: door.components } });
     state.scans = ownedScans();
     const change = IMPORT();
-    await service.executors.setup.describe(change);
+    await service.executors.setup.describe(change, MACHINE);
     state.scans = [
       claudeScan({
         mcp: { kind: 'text', source: '/person/.claude.json', text: MCP_JSON.replace('github', 'other'), bytes: 9 },
@@ -3530,7 +3530,7 @@ describe('the setup.import executor, components another plugin owns', () => {
     ];
 
     // Act
-    const error = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_stale');
+    const error = await catalogRefusal(service.executors.setup.execute(change, MACHINE), 'fleet_change_stale');
 
     // Assert
     should(error.message).containEql('review it again');
@@ -3695,10 +3695,10 @@ describe('the setup.import executor builds the fleet from what the owners report
     };
     state.scans = settingsHost();
     const change = IMPORT();
-    await service.executors.setup.describe(change);
+    await service.executors.setup.describe(change, MACHINE);
 
     // Act
-    const error = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_failed');
+    const error = await catalogRefusal(service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
 
     // Assert
     should(error.message).containEql('could not be read');
@@ -3786,8 +3786,8 @@ describe('the setup.import executor, what an owner refuses', () => {
     // Act — the owner refuses the update
     door.components.put = async () => ({ outcome: 'refused', reason: 'nope' });
     const change = IMPORT({ acceptedUpdates: ['settings/claude-settings'] });
-    await service.executors.setup.describe(change);
-    await service.executors.setup.execute(change);
+    await service.executors.setup.describe(change, MACHINE);
+    await service.executors.setup.execute(change, MACHINE);
     for (const document of applied[1]?.documents ?? []) state.assets[document.path] = document.content;
 
     // Assert — the record is as it was, so the same update is offered again
@@ -3816,8 +3816,8 @@ describe('the setup.import executor, what an owner refuses', () => {
 
     // Act
     const change = IMPORT({ acceptedUpdates: ['settings/claude-settings'] });
-    await service.executors.setup.describe(change);
-    await service.executors.setup.execute(change);
+    await service.executors.setup.describe(change, MACHINE);
+    await service.executors.setup.execute(change, MACHINE);
     for (const document of applied[1]?.documents ?? []) state.assets[document.path] = document.content;
     state.reading = door.readingOf([...first, ...(applied[1]?.documents ?? [])]);
 
@@ -3885,14 +3885,14 @@ describe('the setup.import executor, the files of a skill', () => {
     const { service, state } = world({ overrides: { components: door.components } });
     state.scans = ownedScans();
     const change = IMPORT();
-    await service.executors.setup.describe(change);
+    await service.executors.setup.describe(change, MACHINE);
     state.folders['/person/.claude/skills/review'] = {
       files: [{ path: 'SKILL.md', content: 'changed after the review' }],
       skipped: [],
     };
 
     // Act
-    const error = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_stale');
+    const error = await catalogRefusal(service.executors.setup.execute(change, MACHINE), 'fleet_change_stale');
 
     // Assert
     should(error.message).containEql('review it again');
