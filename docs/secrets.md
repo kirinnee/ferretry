@@ -1990,8 +1990,11 @@ secret ("Per-session scoping" above), and a GitHub token is too strong for that.
 - The token is sealed in the plugin's **own sealed document** (`state/git-accounts/tokens.json`, `0600`, the vault's
   key), a document no route, `use` or `${secret:NAME}` reaches and a ferret's folder never holds (`privacy.private`).
 - Only the plugin's **daemon half** opens it, in `AccountBook.token`, and only to place it on a request to
-  `api.github.com` or in the environment of the one `gh` child described below (`permissions.network` names `github.com` and `api.github.com`, nothing else). A request path outside
-  `/user`, `/user/emails`, `/user/keys[/id]` and `/user/ssh_signing_keys[/id]` is refused before it is sent.
+  `api.github.com` or in the environment of the one `gh` child described below (`permissions.network` names `github.com` and `api.github.com`, nothing else). The
+  port's `api` call forwards **any REST path** for `GET`, `POST` and `PATCH` and the one `/graphql` endpoint for `POST`
+  (`GITHUB_API_RULES`; no `..`, no `//`, a plain query string only); a `DELETE` is refused unless it is
+  `/user/keys/<id>` or `/user/ssh_signing_keys/<id>`, so nothing here deletes a repository or a branch. Whoever holds the seam
+  acts with the token's scopes on the GitHub API, `repo` among them.
 - **No route, CLI verb or port method returns the token**, and no wire shape has a field that could (every shape is strict;
   a contract test reads each against `NO_SECRET_FIELDS`). The GitHub `device_code` is a bearer for the token too, so it
   stays in the daemon: the page gets only OUR flow id and the user code.
@@ -2002,11 +2005,18 @@ secret ("Per-session scoping" above), and a GitHub token is too strong for that.
 - **Use, never read, for a child.** Another plugin that needs `gh` as the account calls `GitAccountsApi.run`: the daemon
   half starts `gh` (the one declared program) with `GH_TOKEN` in that child's own, sealed environment and returns its
   output with the token masked. There is no getter. **The token in the child's environment is the design; what that
-  child can be asked to do is narrowed:**
-  - the argv must name a command on an **allow-list** (`api pr run repo issue workflow release search`); `auth`,
-    `config`, `alias`, `extension`/`ext` and any command not listed are refused before a child starts. `--hostname`,
-    `--input`, `--body-file`, `--notes-file`, `-F` (and `api -F key=@file`), an address outside `github.com` and a repository
-    on another host are refused wherever they appear;
+  child can be asked to do is narrowed to GitHub API work.** Anything that starts `git` or reads or writes a local
+  file is out of the seam: ferrets clone and push with `git` and the account's SSH key, never through `gh`.
+  - the argv must pass a strict **allow-list of subcommand + flags**, not a deny-list: - `api` (REST or GraphQL on `api.github.com` only; one endpoint) takes only `-X/--method`, `-H/--header`,
+    `-f/--raw-field key=value`, `--paginate` and `--jq/-q`. `-F/--field`, `--input`, any argument starting with `@` or
+    containing `=@`, and an endpoint that is not an `api.github.com` path are refused; - `pr` (`list view diff checks comment review create edit close reopen merge`), `issue` (`list view create comment edit
+close reopen`), `run` (`list view watch cancel rerun`), `workflow` (`list view`), `repo view`, `release`
+    (`list view`) and `search` (`repos issues prs code commits`) take no flag that names a file or directory
+    (`--body-file`, `-F`, `--notes-file`, `--template`, `-T`, `--input`) and no `--hostname`; - `--` anywhere, any short-flag cluster (`-dF`, `-iFquery=@f`: a short flag is one letter, on its own), and any argument
+    that looks like a local path (`/…`, `~…`, `./…`, `../…`, `…/..`) are refused. The only values exempt from the path rule
+    are those of `-H`, `-f` and `--jq`/`-q` (text, not files), and the `api` endpoint (an API path, checked as one); - everything else is refused because it is not named: `pr checkout`, `issue develop`, `repo clone|create|fork|sync|edit`,
+    `release upload|create|download`, `workflow run`, `run download`, `gist`, `extension`, `codespace`, `ssh-key`,
+    `gpg-key`, `secret`, `variable`, `auth`, `config`, `alias`, and any command a later `gh` adds;
   - the child runs in an **empty private folder** that is also its `HOME`, `XDG_*` and `GH_CONFIG_DIR` (no host aliases,
     extensions or config), removed after the run, with no prompt, pager, editor, askpass or browser (each is a binary that
     exits 1) and no update check;
@@ -2031,8 +2041,10 @@ secret ("Per-session scoping" above), and a GitHub token is too strong for that.
 for every secret here ([threat model](#threat-model)). The sealed document narrows who is _handed_ it; it is not a
 sandbox against a process running as the owner.
 
-**GAP — `gh` children.** `gh` itself is narrowed as above, but it starts `git` for `repo clone`, `pr checkout` and the like, and
-that `git` child inherits `GH_TOKEN` (the token in the child's environment is the design). A repository's own hooks or
-`.git/config` can run code in that child and read the token. The scrub catches the token only where it is printed back
-exactly or in a GitHub token's usual shape, not an encoded or split copy. Allowed commands act with `repo` scope on
-every repository the account can reach. Use `gh` as an account only in projects whose repositories you trust.
+**GAP — what `gh` can still do with the token.** The `gh` seam is GitHub API work only, and there is **no `git` child on
+it**, so a repository's own hooks or `.git/config` can never run with the token (the old `repo clone` and `pr checkout`
+route is gone). What an allowed command can still do is everything the token's scopes allow on the GitHub API: with `repo`
+that is reading and writing every repository the account can reach (opening, merging or closing pull requests, commenting,
+creating or editing issues, re-running workflows) and, through `api`, any REST or GraphQL call. The scrub catches the token
+only where it is printed back exactly or in a GitHub token's usual shape, not an encoded or split copy. Use an account only
+with agents and projects you would trust with those scopes.

