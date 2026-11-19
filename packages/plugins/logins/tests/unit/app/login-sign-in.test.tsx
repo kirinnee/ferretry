@@ -211,8 +211,13 @@ describe('LoginSignIn', () => {
     );
     expect(view.container.textContent).toContain('sign this login in on the host');
     await click(button(view.container, 'Start a new sign-in'), 'Start a new sign-in');
-    expect(state(view.container)).toBe('start');
-    expect(text(view.container, '[data-change-refusal]')).toBeUndefined();
+    // One press starts the new sign-in over the failed one: no idle card in between.
+    expect(only(calls, LOGIN).map(call => call.body)).toEqual([
+      { loginId: 'claude-work' },
+      { loginId: 'claude-work' },
+      { loginId: 'claude-work', restart: true },
+    ]);
+    expect(state(view.container)).toBe('failed');
     await view.unmount();
   });
 
@@ -496,8 +501,11 @@ describe('LoginSignIn with a Codex link', () => {
     const failed = await open({ [LOGIN]: codexLink('failed') }, { login: CODEX });
     await click(failed.view.container.querySelector('[data-change-submit]'), 'the start button');
     await click(button(failed.view.container, 'Sign in with a link instead'), 'the link restart');
-    expect(state(failed.view.container)).toBe('start');
-    expect(failed.view.container.textContent).toContain('Sign in to Codex with a link');
+    // One press restarts as a link sign-in; there is no idle card to press a second time.
+    expect(only(failed.calls, LOGIN).map(call => call.body)).toEqual([
+      { loginId: 'codex' },
+      { loginId: 'codex', method: 'link', restart: true },
+    ]);
     await failed.view.unmount();
   });
 
@@ -562,7 +570,6 @@ describe('LoginSignIn with a Codex link', () => {
     });
     await click(view.container.querySelector('[data-change-submit]'), 'the start button');
     await click(button(view.container, 'Start a new sign-in'), 'Start a new sign-in');
-    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
     expect(only(calls, LOGIN).map(call => call.body)).toEqual([
       { loginId: 'claude-work' },
       { loginId: 'claude-work', restart: true },
