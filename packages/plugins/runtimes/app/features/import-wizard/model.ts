@@ -21,7 +21,7 @@ import { becomes, GITHUB_TOKEN_NAMES, HARNESS_LABEL } from './mapping-words.ts';
 
 export const HARNESSES: readonly HarnessKey[] = ['claude-code', 'codex'];
 
-/** The part of `GET /v1/<harness>/update` the header reads: the installed version, nothing else. */
+/** The part of each tool's own update read the header reads: the installed version, nothing else. */
 const InstalledVersionReadSchema = z.looseObject({
   installed: z.union([
     z.looseObject({ state: z.literal('ok'), version: z.string().min(1) }),
