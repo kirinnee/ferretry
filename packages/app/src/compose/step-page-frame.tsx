@@ -22,7 +22,8 @@ import './step-page-frame.css';
 export interface StepPageBack {
   /** Defaults to "Back". */
   readonly label?: string;
-  readonly onClick: () => void;
+  /** Optional: a caller that routes elsewhere (a link, a form submit) may omit it. */
+  readonly onClick?: () => void;
 }
 
 export interface StepPageNext {
@@ -30,7 +31,8 @@ export interface StepPageNext {
   readonly disabled?: boolean;
   /** Working: Next is locked and shows the busy mark. */
   readonly busy?: boolean;
-  readonly onClick: () => void;
+  /** Optional: a caller that routes elsewhere (a link, a form submit) may omit it. */
+  readonly onClick?: () => void;
 }
 
 export interface StepPageFrameProps {

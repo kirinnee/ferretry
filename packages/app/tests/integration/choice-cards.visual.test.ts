@@ -312,6 +312,12 @@ describe('StepPageFrame in a real browser', () => {
             viewportWidth: window.innerWidth,
             scrollable: (document.querySelector('[data-scroller]') as HTMLElement).scrollHeight,
             demo: rect('[data-step-demo]'),
+            tracks: [...document.querySelectorAll<HTMLElement>('[data-option-bar-track]')].map(track => ({
+              track: track.getBoundingClientRect().width,
+              fill: (track.querySelector('[data-option-bar-fill]') as HTMLElement).getBoundingClientRect().width,
+              height: track.getBoundingClientRect().height,
+            })),
+            demoInner: (document.querySelector('[data-step-demo]') as HTMLElement).clientWidth,
             body: rect('.fy-spf__body'),
             overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
           };
@@ -326,6 +332,15 @@ describe('StepPageFrame in a real browser', () => {
         expect(info.next.width).toBeLessThan(info.viewportWidth * 0.5);
         expect(info.back.width).toBeLessThan(info.viewportWidth * 0.5);
         expect(info.overflowX).toBe(false);
+        // OptionBars inside the centred demo box keep a usable track, and the fill is its share of it (0.8, 0.5).
+        expect(info.tracks).toHaveLength(2);
+        for (const [index, share] of [0.8, 0.5].entries()) {
+          const bar = info.tracks[index] as { track: number; fill: number; height: number };
+          expect(bar.track).toBeGreaterThanOrEqual(64);
+          expect(bar.height).toBeGreaterThan(0);
+          expect(bar.track).toBeLessThanOrEqual(info.demoInner);
+          expect(Math.abs(bar.fill - bar.track * share)).toBeLessThanOrEqual(1.5);
+        }
         // Next's label reads on its fill (WCAG 4.5:1), light and dark.
         expect(info.nextContrast).toBeGreaterThanOrEqual(4.5);
         if (variant.phone) {

@@ -37,7 +37,7 @@ export function OptionBars({ bars, label, className }: OptionBarsProps) {
       role="img"
       aria-label={optionBarsText(bars, label)}
       data-option-bars=""
-      className={cn('grid min-w-0 gap-1', className)}
+      className={cn('grid w-full min-w-[12rem] gap-1', className)}
     >
       {bars.map(bar => (
         <div
@@ -46,7 +46,7 @@ export function OptionBars({ bars, label, className }: OptionBarsProps) {
           className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2 text-meta text-muted"
         >
           <span className="truncate">{bar.label}</span>
-          <span className="h-1.5 overflow-hidden rounded-badge bg-surface-3" data-option-bar-track="">
+          <span className="h-1.5 min-w-16 overflow-hidden rounded-badge bg-surface-3" data-option-bar-track="">
             <span
               className="block h-full rounded-badge bg-accent"
               style={{ width: `${Math.round(barFill(bar.value) * 100)}%` }}

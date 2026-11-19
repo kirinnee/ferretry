@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { useState } from 'react';
 import { ChoiceCards, choiceAfterKey } from '../../../src/compose/choice-cards.tsx';
 import { barFill, OptionBars, optionBarsText } from '../../../src/compose/option-bars.tsx';
-import { StepPageFrame } from '../../../src/compose/step-page-frame.tsx';
+import { StepPageFrame, type StepPageBack, type StepPageNext } from '../../../src/compose/step-page-frame.tsx';
 import { StepProgress, stepProgressText } from '../../../src/compose/step-progress.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 
@@ -243,5 +243,27 @@ describe('StepPageFrame', () => {
     expect(next.disabled).toBe(true);
     expect(mounted.container.querySelector('[data-spinner]')).not.toBeNull();
     expect(mounted.container.querySelector('section')?.getAttribute('aria-busy')).toBe('true');
+  });
+});
+
+describe('StepPageFrame documented API shape', () => {
+  it('should type-check and render a caller that gives next={{label, disabled, busy}} and back={{label}} with no onClick', async () => {
+    // The P1 API names next as {label, disabled?, busy?}: a caller written to that shape must compile (tsc is the
+    // assertion) and draw.
+    const next = { label: 'Next', disabled: false, busy: false } satisfies StepPageNext;
+    const back = { label: 'Previous' } satisfies StepPageBack;
+    const mounted = await mount(
+      <StepPageFrame title="T" back={back} next={next}>
+        x
+      </StepPageFrame>,
+    );
+    try {
+      expect(mounted.container.querySelector<HTMLButtonElement>('[data-step-next]')?.textContent).toBe('Next');
+      expect(mounted.container.querySelector<HTMLButtonElement>('[data-step-back]')?.textContent).toBe('Previous');
+      // Clicking with no handler is a no-op, not a throw.
+      await interact(() => mounted.container.querySelector<HTMLButtonElement>('[data-step-next]')?.click());
+    } finally {
+      await mounted.unmount();
+    }
   });
 });
