@@ -14,6 +14,7 @@ import { rootRunFolder } from './adapters/run-folder.ts';
 import { accountLaunchParts } from './features/launch/parts.ts';
 import { AgentSupervisor, type RunFolder } from './features/ssh-keys/agents.ts';
 import { GhRunner } from './features/gh-run/gh-runner.ts';
+import { ghLocator } from './lib/gh-locator.ts';
 import { ghShimLaunchParts } from './features/gh-shim/parts.ts';
 import { type GhShimFolders, installGhShim } from './features/gh-shim/shim.ts';
 import { ghRunRoutes } from './features/gh-run/routes.ts';
@@ -82,6 +83,12 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
         async id => {
           await keys.service?.forget(id);
         },
+        // The `gh` that gets a token is the real one: never a file in the state home, even if the daemon's own PATH names the shim folder.
+        ghLocator({
+          daemonPath: () => kernel.hostFacts.launchGuard().searchPath,
+          which: (name, options) => kernel.paths.which(name, options),
+          stateHomeHolding: path => kernel.paths.stateHomeHolding(path),
+        }),
       );
       const keyService = new SshKeyService(
         service,

@@ -20,6 +20,8 @@ export interface CallInit {
   readonly headers?: PluginCallHeaders;
   /** The caller stopped waiting: aborting ends the send in flight (and any wait for a restarting daemon). */
   readonly signal?: AbortSignal;
+  /** How long to wait for this answer instead of the transport's default (see `PluginClient.call`). */
+  readonly timeoutMs?: number;
 }
 
 /**

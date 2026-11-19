@@ -177,7 +177,7 @@ describe('git-accounts manifest', () => {
   test('the CLI verbs are `fy git account add|ls|rm`, and Ferretry’s `fy gh` with its pane check (B10)', () => {
     expect(manifest.actions.cli.map(verb => verb.verb)).toEqual([
       'gh',
-      'gh doctor',
+      'gh-doctor',
       'git account add',
       'git account ls',
       'git account rm',
@@ -186,8 +186,16 @@ describe('git-accounts manifest', () => {
   test('only GitHub is reached, the tokens and keys files are private, and no secret is named', () => {
     expect(manifest.permissions?.network).toEqual(['github.com', 'api.github.com']);
     expect(manifest.privacy?.private).toEqual(['tokens.json', 'keys.json']);
-    expect(Object.keys(manifest.permissions ?? {}).sort()).toEqual(['cliEnvReads', 'network', 'roots', 'spawn']);
-    // `fy gh doctor` reads these NAMES from a pane to warn about them; no value is ever printed, and no `FY_*` is among them.
+    expect(Object.keys(manifest.permissions ?? {}).sort()).toEqual([
+      'checkDirectory',
+      'cliEnvReads',
+      'hostFacts',
+      'network',
+      'roots',
+      'spawn',
+      'which',
+    ]);
+    // `fy gh-doctor` reads these NAMES from a pane to warn about them; no value is ever printed, and no `FY_*` is among them.
     expect(manifest.permissions?.cliEnvReads).toEqual([
       'PATH',
       'GH_CONFIG_DIR',

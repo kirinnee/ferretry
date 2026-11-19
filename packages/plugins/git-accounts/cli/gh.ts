@@ -17,25 +17,70 @@ const USAGE = 2;
 /** `gh` was ended by a signal (its time ran out): the same code a shell reports for a timeout. */
 const TIMED_OUT = 124;
 
-/** The names `fy gh doctor` reads (`permissions.cliEnvReads`): never a value is printed. */
+/** The names `fy gh-doctor` reads (`permissions.cliEnvReads`): never a value is printed. */
 export const GH_DOCTOR_ENV = ['PATH', 'GH_CONFIG_DIR', 'GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN'] as const;
 const TOKEN_NAMES = ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN'] as const;
 
-/** The words after the verb, `--` dropped: everything past it is `gh`'s, even a word that looks like an option. */
-function ghArguments(invocation: VerbInvocation): readonly string[] {
-  const words = invocation.words ?? invocation.args;
-  return words[0] === '--' ? words.slice(1) : words;
+/**
+ * How long `fy gh` waits for the daemon: the daemon's longest run (a followed `gh pr checks --watch`, 5 minutes) plus a
+ * margin, so the transport's own 60 s never ends a run the daemon is still allowed to finish.
+ */
+const GH_REQUEST_MS = 330_000;
+
+interface Typed {
+  /** `gh`'s own words, and nothing of `fy`'s: no `--account`, not the outer `--`. */
+  readonly argv: readonly string[];
+  readonly account: string | undefined;
 }
 
-const accountOf = (invocation: VerbInvocation): string | undefined => {
-  const value = invocation.options['account'];
-  return typeof value === 'string' && value !== '' ? value : undefined;
-};
+const nonEmpty = (value: string | undefined): string | undefined =>
+  value === undefined || value === '' ? undefined : value;
+
+/**
+ * What was typed, split into `fy gh`'s own option (`--account <login>`) and `gh`'s words. With a `--` (the shim always writes
+ * one) everything before the FIRST `--` is `fy`'s and everything after it is `gh`'s, byte for byte, even a word that looks
+ * like `--account`. Without one, only a leading `--account` is `fy`'s. The daemon is sent `gh`'s argv alone.
+ */
+function typedWords(invocation: VerbInvocation): Typed {
+  if (invocation.words === undefined) {
+    const value = invocation.options['account'];
+    return { argv: invocation.args, account: typeof value === 'string' ? nonEmpty(value) : undefined };
+  }
+  const words = invocation.words;
+  const outer = words.indexOf('--');
+  let account: string | undefined;
+  let at = 0;
+  // `fy`'s own words: all of them before a `--`, otherwise only the leading `--account` ones.
+  while (at < (outer < 0 ? words.length : outer)) {
+    const word = words[at] as string;
+    if (word === '--account') {
+      // The word after it is its value, unless that word is the outer `--` (an `--account` with no value).
+      const value = words[at + 1] === '--' ? undefined : words[at + 1];
+      account = nonEmpty(value);
+      at += value === undefined ? 1 : 2;
+    } else if (word.startsWith('--account=')) {
+      account = nonEmpty(word.slice('--account='.length));
+      at += 1;
+    } else if (outer < 0) break;
+    else at += 1;
+  }
+  return { argv: words.slice(outer < 0 ? at : outer + 1), account };
+}
 
 const NAMES_HEAD = (argv: readonly string[]): boolean =>
   argv.some(arg => arg === '-H' || arg === '--head' || arg.startsWith('--head='));
 /** `ref: refs/heads/<branch>`, and a branch name that cannot be taken for a flag or carry a shell or path trick. */
 const BRANCH = /^ref: refs\/heads\/([A-Za-z0-9._][A-Za-z0-9._/-]{0,199})$/u;
+
+const GITDIR_LINE = /^gitdir: (.+)$/mu;
+/** A `.git` file or a `HEAD` is a line or two: read no more than this much of either. */
+const MAX_GIT_TEXT = 4096;
+
+const branchIn = async (
+  head: string,
+  files: Pick<CliContext<typeof manifest>, 'readText'>,
+): Promise<string | undefined> =>
+  BRANCH.exec(((await files.readText?.(head).catch(() => '')) ?? '').slice(0, MAX_GIT_TEXT).trim())?.[1];
 
 /**
  * `gh pr create` runs in an empty folder on the daemon and cannot see the ferret's branch (B9), so THIS side, which runs as
@@ -51,9 +96,17 @@ async function withHead(
   if (files.exists === undefined || files.readText === undefined) return argv;
   let folder = cwd;
   for (let up = 0; up < 8; up += 1) {
-    const head = `${folder === '/' ? '' : folder}/.git/HEAD`;
-    if (await files.exists(head)) {
-      const branch = BRANCH.exec((await files.readText(head).catch(() => '')).trim())?.[1];
+    const dot = `${folder === '/' ? '' : folder}/.git`;
+    if (await files.exists(`${dot}/HEAD`)) {
+      const branch = await branchIn(`${dot}/HEAD`, files);
+      return branch === undefined ? argv : [...argv, '--head', branch];
+    }
+    // A linked WORKTREE has a `.git` FILE: `gitdir: <main>/.git/worktrees/<name>`, and that folder's `HEAD` is THIS worktree's branch
+    // (never the main checkout's, which is what climbing to the parent would name). Read as text, no `git` run.
+    const pointer = GITDIR_LINE.exec((await files.readText(dot).catch(() => '')).slice(0, MAX_GIT_TEXT))?.[1]?.trim();
+    if (pointer !== undefined) {
+      const gitdir = pointer.startsWith('/') ? pointer : `${folder === '/' ? '' : folder}/${pointer}`;
+      const branch = await branchIn(`${gitdir.replace(/\/+$/u, '')}/HEAD`, files);
       return branch === undefined ? argv : [...argv, '--head', branch];
     }
     if (folder === '/' || folder === '') break;
@@ -64,12 +117,12 @@ async function withHead(
 
 export function ghVerbs(context: CliContext<typeof manifest>): {
   readonly gh: VerbHandler;
-  readonly 'gh doctor': VerbHandler;
+  readonly 'gh-doctor': VerbHandler;
 } {
   const { client, io } = context;
   return {
     gh: async invocation => {
-      const typedArgv = ghArguments(invocation);
+      const { argv: typedArgv, account } = typedWords(invocation);
       if (typedArgv.length === 0) {
         io.err('gh needs a command, for example: gh pr list\n');
         return USAGE;
@@ -80,10 +133,10 @@ export function ghVerbs(context: CliContext<typeof manifest>): {
         return FAILED;
       }
       const argv = await withHead(typedArgv, cwd, context);
-      const account = accountOf(invocation);
       const answer: GhRunAnswer = GhRunAnswerSchema.parse(
         await client.call<unknown>('POST /v1/git-accounts/gh/run', {
           body: { argv, cwd, ...(account === undefined ? {} : { account }) },
+          timeoutMs: GH_REQUEST_MS,
         }),
       );
       if ('refused' in answer) {
@@ -96,7 +149,7 @@ export function ghVerbs(context: CliContext<typeof manifest>): {
     },
 
     // The pane-side check: the first `gh` on this pane's PATH is Ferretry's shim, and no GitHub token sits in the pane.
-    'gh doctor': async () => {
+    'gh-doctor': async () => {
       const seen = context.readEnvironment?.(GH_DOCTOR_ENV) ?? {};
       const problems: string[] = [];
       const tokens = TOKEN_NAMES.filter(name => seen[name] !== undefined && seen[name] !== '');

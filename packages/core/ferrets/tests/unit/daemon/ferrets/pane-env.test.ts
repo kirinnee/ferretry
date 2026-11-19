@@ -137,6 +137,24 @@ describe('a pane-env launch part', () => {
     expect(f.asked[0]?.PATH).toBe('/fy/shims:/fy/other:/usr/bin:/bin');
   });
 
+  test('a shell part’s PATH (the devshell’s tools) is kept: the shim goes in front of IT, not of the daemon’s PATH', async () => {
+    const shell: LaunchPart = { kind: 'shell', name: 'nix', env: { PATH: '/nix/store/devshell/bin:/usr/bin' } };
+    // The gh part comes first in the list on purpose: the order of the parts never decides which PATH is the base.
+    const f = fixture([answering([pane({}, 'git-accounts', ['/fy/shims']), shell])], '/daemon/bin');
+
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+
+    expect(started.ok).toBe(true);
+    expect(f.asked[0]?.PATH).toBe('/fy/shims:/nix/store/devshell/bin:/usr/bin');
+  });
+
+  test('a shell part that left PATH empty is no PATH at all: the daemon’s is the base', async () => {
+    const shell: LaunchPart = { kind: 'shell', name: 'nix', env: { PATH: '' } };
+    const f = fixture([answering([shell, pane({}, 'git-accounts', ['/fy/shims'])])], '/daemon/bin');
+    await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+    expect(f.asked[0]?.PATH).toBe('/fy/shims:/daemon/bin');
+  });
+
   test('the daemon’s PATH is asked only when a part prepends (a daemon that cannot answer still starts ferrets)', () => {
     const unaskable = () => {
       throw new Error('not asked');

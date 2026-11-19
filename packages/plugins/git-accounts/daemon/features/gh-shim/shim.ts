@@ -14,8 +14,8 @@ const SHIM_FOLDER = 'shims';
 const SHIM_NAME = 'gh';
 /** The folder `GH_CONFIG_DIR` points at in a pane, so a REAL `gh` reached by accident finds no sign-in (never the host's). */
 const PANE_CONFIG_FOLDER = 'pane-gh-config';
-const PANE_CONFIG_NOTE =
-  'Ferretry keeps no gh sign-in here. In a project linked to GitHub, `gh` runs as the linked account.\n';
+/** The pane's config folder: EMPTY, and read-and-search only (`0500`), so a `gh` reached by accident has nothing to read and nowhere to save a sign-in. */
+const PANE_CONFIG_MODE = 0o500;
 
 /** One word for `sh`: the name stays plain, anything odd is single-quoted. */
 const word = (text: string): string => (/^[A-Za-z0-9_./-]+$/u.test(text) ? text : `'${text.replaceAll("'", "'\\''")}'`);
@@ -37,12 +37,13 @@ export const ghShimFolders = (folder: RunFolder): GhShimFolders => ({
 
 /**
  * Writes the shim (and the pane's empty config folder) and answers the folders; `undefined` when they cannot be made
- * safely (the run folder is not private), so a launch then adds nothing instead of naming a folder that is not there.
- * Written again on every boot, so a changed `fy` name or a hand-edited shim never survives a restart.
+ * safely (the run folder is not private): the launch then closes the pane's `gh` config instead (`parts.ts`).
+ * Written again on every boot, so a changed `fy` name or a hand-edited shim never survives a restart, and the pane's
+ * config folder is emptied again too (anything a ferret left in it is removed).
  */
 export async function installGhShim(folder: RunFolder, client: string): Promise<GhShimFolders | undefined> {
   if (!(await folder.isPrivate())) return undefined;
   await folder.publish(`${SHIM_FOLDER}/${SHIM_NAME}`, shimScript(client), 0o755);
-  await folder.publish(`${PANE_CONFIG_FOLDER}/README`, PANE_CONFIG_NOTE, 0o600);
+  await folder.emptyDirectory(PANE_CONFIG_FOLDER, PANE_CONFIG_MODE);
   return ghShimFolders(folder);
 }

@@ -2251,21 +2251,38 @@ project or not, so the host's `gh` is ignored everywhere) with:
   `POST /v1/git-accounts/gh/run` on the ferret's own credential and prints the masked answer with `gh`'s exit code. It
   has **no policy of its own**: the daemon (B9, then the seam under it) decides, so nothing here can widen what runs.
   Outside a project linked to an account the shim answers with B9's sentence and starts nothing.
-- **An empty `GH_CONFIG_DIR`** (`…/downloads/pane-gh-config`), so a _real_ `gh` reached by accident (a shell rc that
-  rewrites `PATH`) finds no sign-in, instead of reading the host's `~/.config/gh`.
+- **An empty `GH_CONFIG_DIR`** (`…/downloads/pane-gh-config`: no file in it, mode `0500`, emptied again at every boot), so a
+  _real_ `gh` reached by accident (a shell rc that rewrites `PATH`) finds no sign-in and has nowhere to save one, instead
+  of reading the host's `~/.config/gh`.
+- **It fails closed.** If the shim cannot be written (the plugin's folder is not private), the pane gets no `PATH` entry
+  but `GH_CONFIG_DIR` still points at a path nothing can read or write (`/dev/null/…`) and an instruction says `gh` is not
+  available. A pane never silently falls back to the host's `gh` and its config.
 - **One instruction**: `gh` here is Ferretry's; it acts as the linked account; it refuses `auth`, `config`, extensions,
   aliases, codespaces and commands that check out or clone; use `git`.
 
 **The pane never holds a token.** The part sets no `GH_TOKEN`, `GITHUB_TOKEN` or `GH_ENTERPRISE_TOKEN`, and the launch
 refuses any `pane-env` part that names one (or `PATH`, `HOME`, a harness home, any `FY_*`, a `${secret…}` value). The
-only way a part changes `PATH` is `pathPrepend`: absolute folders put first, then the daemon's own `PATH` (the system
-folders when it has none). A relative folder, a `:`, a control character or a `..` step refuses the launch naming the
+only way a part changes `PATH` is `pathPrepend`: absolute folders put first, then the `PATH` the pane already has (its
+login's or a shell part's, so a devshell's tools stay), else the daemon's own `PATH` (the system folders when it has none). A relative folder, a `:`, a control character or a `..` step refuses the launch naming the
 plugin.
 
 `fy gh` also names the ferret's branch for `gh pr create`: it reads `.git/HEAD` as _text_ from the ferret's own folder
-(it runs as the ferret) and adds `--head <branch>`. The daemon never opens a file in an agent's folder.
+(it runs as the ferret) and adds `--head <branch>`. In a linked **worktree** `.git` is a file; its `gitdir:` line is read
+as text and the `HEAD` there is the worktree's own branch (never the main checkout's). The daemon never opens a file in an
+agent's folder.
 
-**`fy gh doctor`** (run in a pane) warns when `command -v gh` is not the shim (the first `gh` on `PATH` is somewhere
+`fy gh` sends the daemon `gh`'s argv alone: its own `--account <login>` and the outer `--` are removed, and everything
+after the first `--` is passed byte for byte. It waits for the daemon's own budget (5 minutes for a followed
+`pr checks --watch`, plus a margin), not the CLI's default 60 s.
+
+**Which `gh` gets a token.** The daemon never starts `gh` by bare name. It resolves `gh` on its own `PATH` with every
+folder inside the state home removed, runs the answer by absolute path, and refuses an answer that is itself inside the
+state home or a fence that cannot be built. The reason: a ferret pane's `PATH` starts with the shim folder, a file the
+ferret can rewrite, and `fy daemon start|restart|update` run from a pane would write that `PATH` into the service unit.
+The CLI therefore also drops every state-home folder from the `PATH` it writes into the unit, plist or direct-start
+environment. Either guard alone keeps the token out of a ferret-writable file.
+
+**`fy gh-doctor`** (run in a pane) warns when `command -v gh` is not the shim (the first `gh` on `PATH` is somewhere
 else: a shell rc moved `PATH`), when the pane was not started with the shim, or when a GitHub token variable is set in
 the pane. It prints the variable's NAME and never a value.
 
@@ -2274,7 +2291,7 @@ the pane. It prints the variable's NAME and never a value.
 - **A ferret can run the real `gh` by absolute path** (or after rewriting `PATH`). It then has no sign-in (empty config)
   and no token, so it can do nothing as the account; it can still use the _host's_ `gh` sign-in if the host's `gh` reads
   a token from somewhere Ferretry does not set (`GH_TOKEN` exported by a login or a shell rc). Ferretry cannot stop a
-  process of the same user from reading the user's own files; `fy gh doctor` says when it happens.
+  process of the same user from reading the user's own files; `fy gh-doctor` says when it happens.
 - **GAP: no stdin and no files.** `fy gh` sends the argument list and the folder only. B9's seam refuses every flag that
   reads a local file, so there is nothing to send them to (`--body-file`, `-F`, `--input`, `-` for stdin): pass the text
   itself.
@@ -2282,4 +2299,4 @@ the pane. It prints the variable's NAME and never a value.
   not by an absolute path (the daemon has no way to name the client's install). A pane without `fy` on `PATH` cannot use it.
 - **GAP: the harness's own shell tool.** Whether Claude Code's and Codex's shell tools keep the shim first after they
   read the person's shell rc is **not measured here** (it needs a real signed-in harness; a test daemon refuses to start
-  one). `fy gh doctor` is the pane-side check, and the first real-machine check is owner step 5/6.
+  one). `fy gh-doctor` is the pane-side check, and the first real-machine check is owner step 5/6.

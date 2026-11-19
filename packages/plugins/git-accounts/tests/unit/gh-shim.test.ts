@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
@@ -8,7 +18,12 @@ import { testHost } from '@ferretry/kernel/testing';
 import { FakeSealedDocuments } from '@ferretry/core-vault/contract/testing';
 import { ghVerbs, GH_DOCTOR_ENV } from '../../cli/gh.ts';
 import { gitAccountsDaemon } from '../../daemon/index.ts';
-import { GH_INSTRUCTION, ghShimLaunchParts } from '../../daemon/features/gh-shim/parts.ts';
+import {
+  CLOSED_CONFIG,
+  GH_INSTRUCTION,
+  GH_UNAVAILABLE,
+  ghShimLaunchParts,
+} from '../../daemon/features/gh-shim/parts.ts';
 import { ghShimFolders, installGhShim, shimScript } from '../../daemon/features/gh-shim/shim.ts';
 import { tmpRunFolder } from './run-folder.ts';
 
@@ -34,15 +49,27 @@ describe('the gh shim file', () => {
     expect(shimScript("f y';x")).toBe(`#!/bin/sh\nexec 'f y'\\'';x' gh -- "$@"\n`);
   });
 
-  test('is written 0755 in a private `shims` folder, beside an empty pane config; no sign-in file exists anywhere', async () => {
+  test('is written 0755 in a private `shims` folder, beside an EMPTY 0500 pane config; no file of any kind is in it', async () => {
     const folder = runFolder();
     const folders = await installGhShim(folder, 'fy');
     expect(folders).toEqual(ghShimFolders(folder));
     expect(folders?.shims).toBe(`${folder.path}/shims`);
     expect(statSync(`${folder.path}/shims/gh`).mode & 0o777).toBe(0o755);
     expect(statSync(`${folder.path}/shims`).mode & 0o077).toBe(0);
-    expect(readdirSync(`${folder.path}/pane-gh-config`)).toEqual(['README']);
-    expect(readFileSync(`${folder.path}/pane-gh-config/README`, 'utf8')).not.toMatch(/oauth_token|hosts/u);
+    expect(readdirSync(`${folder.path}/pane-gh-config`)).toEqual([]);
+    expect(statSync(`${folder.path}/pane-gh-config`).mode & 0o777).toBe(0o500);
+  });
+
+  test('anything found in the pane config at install is removed, and the folder is narrowed again', async () => {
+    const folder = runFolder();
+    await installGhShim(folder, 'fy');
+    chmodSync(`${folder.path}/pane-gh-config`, 0o700);
+    writeFileSync(`${folder.path}/pane-gh-config/hosts.yml`, 'oauth_token: x\n');
+    mkdirSync(`${folder.path}/pane-gh-config/extensions`);
+    writeFileSync(`${folder.path}/pane-gh-config/extensions/README`, 'x');
+    await installGhShim(folder, 'fy');
+    expect(readdirSync(`${folder.path}/pane-gh-config`)).toEqual([]);
+    expect(statSync(`${folder.path}/pane-gh-config`).mode & 0o777).toBe(0o500);
   });
 
   test('is rewritten on the next boot, so an edited or stale shim never survives', async () => {
@@ -112,12 +139,21 @@ describe('every ferret’s launch gets the shim, and never a token', () => {
       expect(GH_INSTRUCTION).toContain(word);
   });
 
-  test('a shim that could not be written adds nothing (a PATH entry that is not there would be worse)', async () => {
-    expect(await ghShimLaunchParts(async () => undefined).parts(spec)).toEqual([]);
+  test('a shim that could not be written FAILS CLOSED: no PATH entry, a config nothing can read or write, and a sentence', async () => {
+    const parts = await ghShimLaunchParts(async () => undefined).parts(spec);
+    expect(parts).toEqual([
+      { kind: 'pane-env', plugin: 'git-accounts', env: { GH_CONFIG_DIR: CLOSED_CONFIG } },
+      { kind: 'instruction', id: 'git-accounts-gh', text: GH_UNAVAILABLE },
+    ] satisfies LaunchPart[]);
+    // Nothing can be read from, or written under, that path: `/dev/null` is not a folder.
+    expect(existsSync(CLOSED_CONFIG)).toBe(false);
+    expect(() => mkdirSync(CLOSED_CONFIG, { recursive: true })).toThrow();
+    expect(GH_UNAVAILABLE).toContain('not available');
+    expect(JSON.stringify(parts)).not.toMatch(/GH_TOKEN|pathPrepend/u);
   });
 });
 
-type Calls = { route: string; body: unknown }[];
+type Calls = { route: string; body: unknown; timeoutMs?: number }[];
 function cli(
   answer: unknown,
   options: {
@@ -133,8 +169,12 @@ function cli(
   let read = false;
   const context = {
     client: {
-      call: async (route: string, request?: { body?: unknown }) => {
-        calls.push({ route, body: request?.body });
+      call: async (route: string, request?: { body?: unknown; timeoutMs?: number }) => {
+        calls.push({
+          route,
+          body: request?.body,
+          ...(request?.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
+        });
         return answer;
       },
     },
@@ -174,6 +214,8 @@ describe('fy gh -- <args>', () => {
       {
         route: 'POST /v1/git-accounts/gh/run',
         body: { argv: ['pr', 'list', '--json', 'number', '--help', '--'], cwd: '/work/app' },
+        // The daemon lets a followed `pr checks --watch` run 5 minutes: the CLI waits for that, plus a margin.
+        timeoutMs: 330_000,
       },
     ]);
     expect(run.out).toEqual(['#12 fix\n']);
@@ -201,10 +243,40 @@ describe('fy gh -- <args>', () => {
     expect(await timeout.verbs.gh(typed(['--', 'run', 'watch', '9']))).toBe(124);
   });
 
-  test('--account is forwarded for the daemon to judge (it refuses a ferret that names one)', async () => {
+  test('--account is forwarded for the daemon to judge (it refuses a ferret that names one), and is never gh’s argv', async () => {
+    const spaced = cli({ exitCode: 0, stdout: '', stderr: '' });
+    await spaced.verbs.gh(typed(['--account', 'other', '--', 'pr', 'list']));
+    expect(spaced.calls[0]?.body).toEqual({ argv: ['pr', 'list'], cwd: '/work/app', account: 'other' });
+    const joined = cli({ exitCode: 0, stdout: '', stderr: '' });
+    await joined.verbs.gh(typed(['--account=other', 'pr', 'list']));
+    expect(joined.calls[0]?.body).toEqual({ argv: ['pr', 'list'], cwd: '/work/app', account: 'other' });
+    const bare = cli({ exitCode: 0, stdout: '', stderr: '' });
+    await bare.verbs.gh(typed(['--account', 'other', 'pr', 'list']));
+    expect(bare.calls[0]?.body).toEqual({ argv: ['pr', 'list'], cwd: '/work/app', account: 'other' });
+  });
+
+  test('past the first `--` every word is gh’s, even one that looks like fy’s own option; words before it that are not --account go nowhere', async () => {
     const run = cli({ exitCode: 0, stdout: '', stderr: '' });
-    await run.verbs.gh(typed(['--', 'pr', 'list'], { account: 'other' }));
-    expect(run.calls[0]?.body).toEqual({ argv: ['pr', 'list'], cwd: '/work/app', account: 'other' });
+    await run.verbs.gh(typed(['stray', '--', 'pr', 'list', '--account', 'x', '--', '--account=y']));
+    expect(run.calls[0]?.body).toEqual({
+      argv: ['pr', 'list', '--account', 'x', '--', '--account=y'],
+      cwd: '/work/app',
+    });
+  });
+
+  test('an empty --account, or one with no value, names no account; a handler given no raw words reads the parsed ones', async () => {
+    const empty = cli({ exitCode: 0, stdout: '', stderr: '' });
+    await empty.verbs.gh(typed(['--account', '', '--', 'pr', 'list']));
+    await empty.verbs.gh(typed(['--account=', '--', 'pr', 'list']));
+    await empty.verbs.gh(typed(['--account', '--', 'pr', 'list']));
+    for (const call of empty.calls) expect(call.body).toEqual({ argv: ['pr', 'list'], cwd: '/work/app' });
+    const parsed = cli({ exitCode: 0, stdout: '', stderr: '' });
+    await parsed.verbs.gh({ args: ['pr', 'list'], options: { account: 'other' } });
+    await parsed.verbs.gh({ args: ['pr', 'list'], options: { account: true } });
+    expect(parsed.calls.map(call => call.body)).toEqual([
+      { argv: ['pr', 'list'], cwd: '/work/app', account: 'other' },
+      { argv: ['pr', 'list'], cwd: '/work/app' },
+    ]);
   });
 
   test('nothing to run, or no folder to judge by, asks nothing of the daemon', async () => {
@@ -269,6 +341,104 @@ describe('gh pr create names the ferret’s branch (the daemon runs in an empty 
     expect(bodyOf(run)).toEqual(['pr', 'create', '--title', 't', '--body', 'b']);
   });
 
+  test('a linked WORKTREE (its .git is a file) names the worktree’s own branch, never the main checkout’s', async () => {
+    const root = scratch();
+    const git = (cwd: string, ...args: string[]) => {
+      const run = Bun.spawnSync(['git', ...args], {
+        cwd,
+        env: {
+          PATH: process.env['PATH'] ?? '',
+          HOME: root,
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_CONFIG_SYSTEM: '/dev/null',
+        },
+      });
+      expect(run.exitCode).toBe(0);
+    };
+    const main = join(root, 'main');
+    mkdirSync(main);
+    git(main, 'init', '-q', '-b', 'main');
+    git(main, '-c', 'user.name=t', '-c', 'user.email=t@e.x', 'commit', '-q', '--allow-empty', '-m', 'one');
+    const tree = join(root, 'tree');
+    git(main, 'worktree', 'add', '-q', '-b', 'feat/mine', tree);
+    mkdirSync(join(tree, 'src', 'deep'), { recursive: true });
+    expect(statSync(join(tree, '.git')).isFile()).toBe(true);
+    const files = {
+      exists: async (path: string) => existsSync(path),
+      texts: (path: string): string => {
+        try {
+          return readFileSync(path, 'utf8');
+        } catch {
+          return '';
+        }
+      },
+    };
+    const make = (cwd: string) => {
+      const run = cli({ exitCode: 0, stdout: '', stderr: '' }, { env: { PWD: cwd } });
+      const context = {
+        client: {
+          call: async (_route: string, request?: { body?: unknown }) => {
+            run.calls.push({ route: _route, body: request?.body });
+            return { exitCode: 0, stdout: '', stderr: '' };
+          },
+        },
+        io: { out: () => undefined, err: () => undefined, isTty: false },
+        env: { PWD: cwd },
+        exists: files.exists,
+        readText: async (path: string) => {
+          if (!existsSync(path)) throw new Error('ENOENT');
+          return files.texts(path);
+        },
+      };
+      return { run, verbs: ghVerbs(context as never) };
+    };
+    for (const [cwd, branch] of [
+      [tree, 'feat/mine'],
+      [join(tree, 'src', 'deep'), 'feat/mine'],
+      [main, 'main'],
+    ] as const) {
+      const made = make(cwd);
+      await made.verbs.gh(typed(create));
+      expect(bodyOf(made.run).slice(-2)).toEqual(['--head', branch]);
+    }
+  });
+
+  test('a worktree .git file that points at nothing readable, or is no pointer at all, adds nothing and does not climb to the parent', async () => {
+    const parentHead = '/work/.git/HEAD';
+    const gone = cli(
+      { exitCode: 0, stdout: '', stderr: '' },
+      {
+        exists: [parentHead],
+        texts: { [parentHead]: 'ref: refs/heads/main', '/work/app/.git': 'gitdir: /main/.git/worktrees/app\n' },
+      },
+    );
+    await gone.verbs.gh(typed(create));
+    expect(bodyOf(gone)).toEqual(['pr', 'create', '--title', 't', '--body', 'b']);
+    // A relative pointer is read from the folder it is in; a detached HEAD there still adds nothing.
+    const relative = cli(
+      { exitCode: 0, stdout: '', stderr: '' },
+      {
+        texts: {
+          '/work/app/.git': 'gitdir: ../main/.git/worktrees/app/\n',
+          '/work/app/../main/.git/worktrees/app/HEAD': '0123456789abcdef0123456789abcdef01234567',
+        },
+      },
+    );
+    await relative.verbs.gh(typed(create));
+    expect(bodyOf(relative)).toEqual(['pr', 'create', '--title', 't', '--body', 'b']);
+    const named = cli(
+      { exitCode: 0, stdout: '', stderr: '' },
+      {
+        texts: {
+          '/work/app/.git': 'gitdir: ../main/.git/worktrees/app\n',
+          '/work/app/../main/.git/worktrees/app/HEAD': 'ref: refs/heads/feat/rel\n',
+        },
+      },
+    );
+    await named.verbs.gh(typed(create));
+    expect(bodyOf(named).slice(-2)).toEqual(['--head', 'feat/rel']);
+  });
+
   test('no repository, or any other command, reads nothing', async () => {
     const none = cli({ exitCode: 0, stdout: '', stderr: '' });
     await none.verbs.gh(typed(create));
@@ -282,7 +452,7 @@ describe('gh pr create names the ferret’s branch (the daemon runs in an empty 
   });
 });
 
-describe('fy gh doctor (inside a pane)', () => {
+describe('fy gh-doctor (inside a pane)', () => {
   const CONFIG = '/fy/state/git-accounts/downloads/pane-gh-config';
   const SHIM = '/fy/state/git-accounts/downloads/shims/gh';
   const healthy = { PATH: '/fy/state/git-accounts/downloads/shims:/usr/bin', GH_CONFIG_DIR: CONFIG };
@@ -293,28 +463,34 @@ describe('fy gh doctor (inside a pane)', () => {
 
   test('the shim is first on PATH and no token is set: OK', async () => {
     const run = cli({}, { read: healthy, exists: [SHIM, '/usr/bin/gh'] });
-    expect(await run.verbs['gh doctor'](typed([]))).toBe(0);
+    expect(await run.verbs['gh-doctor'](typed([]))).toBe(0);
     expect(run.out.join('')).toContain('OK');
     expect(run.err).toEqual([]);
   });
 
   test('a host gh ahead of the shim (a shell rc moved PATH) is a warning that names where it is', async () => {
     const run = cli({}, { read: { ...healthy, PATH: `/opt/bin:${healthy.PATH}` }, exists: ['/opt/bin/gh', SHIM] });
-    expect(await run.verbs['gh doctor'](typed([]))).toBe(1);
+    expect(await run.verbs['gh-doctor'](typed([]))).toBe(1);
     expect(run.err.join('')).toContain('/opt/bin/gh');
     expect(run.err.join('')).toContain(SHIM);
   });
 
   test('a GitHub token in the pane is a warning that names the variable and never prints a value', async () => {
     const run = cli({}, { read: { ...healthy, GITHUB_TOKEN: 'ghp_FAKEFAKEFAKEFAKEFAKE' }, exists: [SHIM] });
-    expect(await run.verbs['gh doctor'](typed([]))).toBe(1);
+    expect(await run.verbs['gh-doctor'](typed([]))).toBe(1);
     expect(run.err.join('')).toContain('GITHUB_TOKEN');
     expect(run.err.join('') + run.out.join('')).not.toContain('ghp_');
   });
 
+  test('no gh at all on PATH, with Ferretry’s config in place, says the shim cannot be used', async () => {
+    const run = cli({}, { read: { PATH: '/nowhere', GH_CONFIG_DIR: CONFIG }, exists: [] });
+    expect(await run.verbs['gh-doctor'](typed([]))).toBe(1);
+    expect(run.err.join('')).toContain('No `gh` is first on PATH');
+  });
+
   test('a pane started without the shim says so', async () => {
     const run = cli({}, { read: { PATH: '/usr/bin' }, exists: ['/usr/bin/gh'] });
-    expect(await run.verbs['gh doctor'](typed([]))).toBe(1);
+    expect(await run.verbs['gh-doctor'](typed([]))).toBe(1);
     expect(run.err.join('')).toContain('not started with Ferretry');
   });
 });
@@ -367,10 +543,13 @@ describe('the daemon half', () => {
     expect(held.items.map(entry => entry.id)).toEqual(['git-accounts', 'git-accounts-gh']);
   });
 
-  test('a run folder that is not private starts the daemon and gives launches nothing', async () => {
+  test('a run folder that is not private starts the daemon and gives launches the closed config, never the host’s', async () => {
     const folder = runFolder();
     chmodSync(folder.path, 0o755);
     const { held } = await boot(folder);
-    expect(await held.items[1]?.item.parts({ folder: '/anywhere' })).toEqual([]);
+    expect(await held.items[1]?.item.parts({ folder: '/anywhere' })).toEqual([
+      { kind: 'pane-env', plugin: 'git-accounts', env: { GH_CONFIG_DIR: CLOSED_CONFIG } },
+      { kind: 'instruction', id: 'git-accounts-gh', text: GH_UNAVAILABLE },
+    ]);
   });
 });

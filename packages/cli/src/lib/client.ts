@@ -37,6 +37,8 @@ export interface SendOptions {
   readonly recheck?: () => Promise<void>;
   /** The caller's own signal: once it aborts the send in flight ends and no resend is waited for. */
   readonly signal?: AbortSignal;
+  /** How long this one request may take, instead of the transport's default (only the HTTP transport reads it). */
+  readonly timeoutMs?: number;
 }
 
 /** Sends one request, with whatever credential the connection chose. Never throws for an HTTP status. */
@@ -194,11 +196,13 @@ export async function sendChecked(
   request: DaemonRequest,
   ids: readonly string[],
   signal?: AbortSignal,
+  timeoutMs?: number,
 ): Promise<unknown> {
   signal?.throwIfAborted();
   const reply = await deps.transport.send(request, {
     repeatable: isRepeatable(request.method),
     ...(signal === undefined ? {} : { signal }),
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
     recheck: async () => {
       deps.inventory.invalidate();
       await ensureAllAllowed(deps, ids);
@@ -407,7 +411,7 @@ export function pluginClient(deps: ClientDeps, caller: Manifest['id']): Followin
       const request = buildRequest(route, init);
       const ids = [caller, facts.owner];
       await ensureAllAllowed(deps, ids);
-      return (await sendChecked(deps, request, ids, init?.signal)) as Answer;
+      return (await sendChecked(deps, request, ids, init?.signal, init?.timeoutMs)) as Answer;
     },
     async tool(name: string, input?: unknown): Promise<unknown> {
       const facts = toolFactsBeforeContact(deps.surfaces, deps.inPane, name);

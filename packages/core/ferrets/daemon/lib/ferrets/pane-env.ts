@@ -7,7 +7,8 @@
  * `${secret…}` reference: a value is plain text, so no plugin can ask the Vault to open a secret into a pane through here.
  * The refusal text carries the plugin's id and the variable's NAME, never a value.
  *
- * `PATH` is composed, never set (r9 B10): a part's `pathPrepend` folders go first, then the daemon's own `PATH`.
+ * `PATH` is composed, never set (r9 B10): a part's `pathPrepend` folders go first, then the `PATH` the pane already has (its
+ * login's or a shell part's, which the caller passes in), else the daemon's own.
  */
 import { err, ok, type Result } from '@ferretry/std';
 import type { LaunchPart } from '../../../contract/index.ts';
@@ -30,7 +31,7 @@ const SYSTEM_PATH = '/usr/local/bin:/usr/bin:/bin';
 /** The merged pairs of every `pane-env` part (and a composed `PATH` when one asks to prepend), or the sentence that refuses the launch. */
 export function paneEnvironment(
   parts: readonly LaunchPart[],
-  daemonPath?: () => string | undefined,
+  basePath?: () => string | undefined,
 ): Result<Readonly<Record<string, string>>, string> {
   const merged: Record<string, string> = {};
   const prepend: string[] = [];
@@ -54,7 +55,7 @@ export function paneEnvironment(
     }
   }
   if (prepend.length > 0) {
-    const known = daemonPath?.();
+    const known = basePath?.();
     const base = known === undefined || known === '' ? SYSTEM_PATH : known;
     merged.PATH = [...prepend, base].join(':');
   }

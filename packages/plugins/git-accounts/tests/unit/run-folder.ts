@@ -1,5 +1,15 @@
 /** A real private folder with a short path, standing in for the plugin's `downloads` root (the kernel's test roots are in memory). */
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { RunFolder } from '../../daemon/features/ssh-keys/agents.ts';
 
@@ -25,6 +35,23 @@ export function tmpRunFolder(): RunFolder & { destroy(): void } {
       chmodSync(temporary, mode);
       renameSync(temporary, `${path}/${name}`);
     },
-    destroy: () => rmSync(path, { recursive: true, force: true }),
+    emptyDirectory: async (name, mode) => {
+      const folder = `${path}/${name}`;
+      mkdirSync(folder, { recursive: true, mode: 0o700 });
+      chmodSync(folder, 0o700);
+      for (const entry of readdirSync(folder)) rmSync(`${folder}/${entry}`, { recursive: true, force: true });
+      chmodSync(folder, mode);
+    },
+    destroy: () => {
+      // A folder left at 0500 must be writable again before it can go.
+      for (const entry of readdirSync(path)) {
+        try {
+          chmodSync(`${path}/${entry}`, 0o700);
+        } catch {
+          // not a folder we narrowed
+        }
+      }
+      rmSync(path, { recursive: true, force: true });
+    },
   };
 }

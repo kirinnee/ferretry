@@ -97,7 +97,7 @@ export type LaunchPart =
       readonly env: Readonly<Record<string, string>>;
       /**
        * Absolute folders put FIRST on this pane's `PATH` (r9 B10: Ferretry's `gh` shim). The launch composes
-       * `PATH = <every prepend, in order>:<the daemon's PATH>`; a relative folder, a `:` or a control character in a
+       * `PATH = <every prepend, in order>:<the PATH the pane already has (its login's or a shell part's), else the daemon's>`; a relative folder, a `:` or a control character in a
        * folder refuses the launch naming `plugin`. `env` may still never name `PATH`.
        */
       readonly pathPrepend?: readonly string[];

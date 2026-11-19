@@ -119,7 +119,7 @@ export default definePlugin({
           { flag: '--account <login>', help: 'the account to use (only the owner may choose; a ferret never does)' },
         ],
       }),
-      verb('gh doctor', {
+      verb('gh-doctor', {
         summary: "check that `gh` in this terminal is Ferretry's shim and that no GitHub token is set",
         args: [],
         options: [],
@@ -162,7 +162,12 @@ export default definePlugin({
     roots: ['downloads'],
     // `gh` runs as an account, with its token in that child's environment alone (`GitAccountsApi.run`).
     spawn: ['gh', 'ssh-agent', 'ssh-add'],
-    // `fy gh doctor`: where this pane's `gh` is and whether a GitHub token sits in it. Names only are read; no value is ever printed.
+    // Which `gh` gets a token (B10 SEC): the daemon's PATH minus any folder in the state home, resolved by the kernel, and an answer
+    // inside the state home is refused. Nothing is executed to find out, and no PATH value is ever returned to a caller.
+    hostFacts: true,
+    which: true,
+    checkDirectory: true,
+    // `fy gh-doctor`: where this pane's `gh` is and whether a GitHub token sits in it. Names only are read; no value is ever printed.
     cliEnvReads: ['PATH', 'GH_CONFIG_DIR', 'GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN'],
     // The device flow and the profile read (github.com), the profile and key calls (api.github.com): nowhere else.
     network: ['github.com', 'api.github.com'],
