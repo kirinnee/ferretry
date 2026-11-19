@@ -6,11 +6,21 @@
  * person's own open/close is kept while the run refreshes underneath.
  */
 import { ExternalLink, Loading } from '@ferretry/app/ui';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { CiRun } from '../../../contract/wire.ts';
 import { CiFailedPanel } from './ci-failed.tsx';
 import { type CiClient, type CiScope, fetchRun } from './ci-api.ts';
-import { barMs, formatDuration, isLive, opensByDefault, shortSha, slowestSentence, triggerWord } from './ci-format.ts';
+import {
+  barMs,
+  DEFAULT_OPEN_JOBS,
+  formatDuration,
+  isLive,
+  needLookCount,
+  opensByDefault,
+  shortSha,
+  slowestSentence,
+  triggerWord,
+} from './ci-format.ts';
 import { CiJobView } from './ci-job.tsx';
 import { StatusMark } from './ci-status.tsx';
 import { useLiveRead, useSecondClock } from './use-ci.ts';
@@ -34,17 +44,25 @@ function RunView({
   readonly nowMs: number;
   readonly refreshFailed: string | undefined;
 }) {
-  // The person's own choices; a job they never touched follows `opensByDefault`.
+  // The person's own choices; a job they never touched follows `opensByDefault` (a bounded few, never every failed job).
   const [chosen, setChosen] = useState<ReadonlyMap<number, boolean>>(new Map());
+  const byDefault = useMemo(() => opensByDefault(run.jobs), [run.jobs]);
+  const shut = needLookCount(run.jobs) - byDefault.size;
   // The slowest step is only named once the run has finished: a step still running has no final length.
   const slowest = isLive(run) ? undefined : slowestStep(run, nowMs);
-  const slowestMs = slowest === undefined ? 0 : (barMs(slowest.step, nowMs) ?? 0);
-  const wall = run.live === true ? Math.max(run.wallMs, nowMs - Date.parse(run.createdAt)) : run.wallMs;
+  // Nothing ticks once the run is final, so the slowest step is read at E8's own bounds.
+  const slowestMs = slowest === undefined ? 0 : (barMs(slowest.step, nowMs, false) ?? 0);
+  const runLive = run.live === true;
+  const wall = runLive ? Math.max(run.wallMs, nowMs - Date.parse(run.createdAt)) : run.wallMs;
   return (
-    <article className="mx-auto grid w-full max-w-3xl gap-sm" data-ci-run-page={run.id} data-ci-run-status={run.status}>
-      <header className="kt-panel grid gap-1 p-panel">
+    <article
+      className="mx-auto grid w-full max-w-3xl grid-cols-[minmax(0,1fr)] gap-sm"
+      data-ci-run-page={run.id}
+      data-ci-run-status={run.status}
+    >
+      <header className="kt-panel grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1 p-panel">
         <div className="flex flex-wrap items-center gap-x-sm gap-y-1">
-          <h2 className="m-0 min-w-0 break-words text-title font-semibold text-fg">{run.name}</h2>
+          <h2 className="m-0 min-w-0 text-title font-semibold text-fg [overflow-wrap:anywhere]">{run.name}</h2>
           <StatusMark status={run.status} />
           {isLive(run) && <span className="text-meta font-medium text-accent">Live</span>}
           {run.attempt > 1 && (
@@ -70,7 +88,7 @@ function RunView({
           {run.jobs.length > 0 && <Fact term="Jobs" value={String(run.jobs.length)} />}
         </dl>
         {slowest !== undefined && (
-          <p className="m-0 text-meta text-fg-soft" data-ci-slowest-line="true">
+          <p className="m-0 text-meta text-fg-soft [overflow-wrap:anywhere]" data-ci-slowest-line="true">
             {slowestSentence(slowest.job.name, slowest.step.name, slowestMs)}
           </p>
         )}
@@ -86,15 +104,22 @@ function RunView({
           {run.url === undefined ? '.' : '. Its details are on GitHub.'}
         </p>
       ) : (
-        <div className="grid gap-sm">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-sm">
+          {shut > 0 && (
+            <p className="m-0 px-1 text-meta text-muted" data-ci-shut-jobs={shut}>
+              {shut} more {shut === 1 ? 'job needs' : 'jobs need'} a look: only the first {DEFAULT_OPEN_JOBS} open by
+              themselves.
+            </p>
+          )}
           {run.jobs.map(job => (
             <CiJobView
               key={job.id}
               job={job}
               nowMs={nowMs}
-              open={chosen.get(job.id) ?? opensByDefault(job)}
+              runLive={runLive}
+              open={chosen.get(job.id) ?? byDefault.has(job.id)}
               onToggle={() =>
-                setChosen(previous => new Map(previous).set(job.id, !(previous.get(job.id) ?? opensByDefault(job))))
+                setChosen(previous => new Map(previous).set(job.id, !(previous.get(job.id) ?? byDefault.has(job.id))))
               }
               slowestStep={slowest?.job.id === job.id ? slowest.step.number : undefined}
             />

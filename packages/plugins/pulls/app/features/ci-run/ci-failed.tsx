@@ -7,7 +7,7 @@ export function CiFailedPanel({ failure, onRetry }: { readonly failure: CiFailur
   const until = failure.pausedUntil;
   return (
     <div className="kt-panel m-0 p-panel" role="status" data-ci-failed="true">
-      <p className="m-0 flex items-center gap-1.5 text-ui text-fg">
+      <p className="m-0 flex items-center gap-1.5 text-ui text-fg [overflow-wrap:anywhere]">
         {until !== undefined && <PauseCircle aria-hidden="true" size={16} className="shrink-0 text-pend" />}
         {until === undefined
           ? failure.message

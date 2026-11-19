@@ -5,6 +5,7 @@
  * The timing itself is E8's (`contract/ci-timing.ts`, imported by path): this file only turns its answers into words and
  * percentages.
  */
+import { durationMs } from '../../../contract/ci-timing.ts';
 import type { CiJob, CiRun, CiStatus, CiStep } from '../../../contract/wire.ts';
 
 /** One status, one word (never colour alone: every state also has its own icon and this word). */
@@ -59,18 +60,24 @@ const at = (text: string | undefined): number | undefined => {
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 
+/** One bar's inputs: what E8 recorded for it (`start`, `end`) and whether E8 saw it still running (`live`). */
+export interface Timed {
+  readonly start?: string;
+  readonly end?: string;
+  readonly live?: boolean;
+}
+
 /**
- * How long a bar is. A live bar ends at the clock's "now" (the daemon's own end is only as fresh as its last read), a
- * finished one at its end; an item with no bar (skipped, not started) is `undefined`, never `0`.
+ * How long a bar is: the ONE duration its label and its geometry both read. It is E8's own `durationMs` (the bounds E8
+ * put on each item: a step clamped inside its job ends where the job ends), except that an item still running ticks to
+ * `nowMs` while every level above it is live too (`ticking`). A "live" step inside a job or run that has stopped keeps
+ * E8's end and never grows with the browser clock. An item with no bar (skipped, not started) is `undefined`, never `0`.
  */
-export function barMs(
-  item: { readonly start?: string; readonly end?: string; readonly live?: boolean },
-  nowMs: number,
-): number | undefined {
+export function barMs(item: Timed, nowMs: number, ticking: boolean): number | undefined {
   const start = at(item.start);
   if (start === undefined) return undefined;
-  const end = item.live === true ? nowMs : at(item.end);
-  return end === undefined ? Math.max(0, nowMs - start) : Math.max(0, end - start);
+  if (ticking && item.live === true) return Math.max(0, nowMs - start);
+  return durationMs(item, nowMs);
 }
 
 /** The span a job's steps are drawn against: the job's own bar, so a step's bar says what share of the job it took. */
@@ -79,21 +86,25 @@ export interface BarFrame {
   readonly length: number;
 }
 
-/** The frame of a job, or `undefined` when the job has no bar (then its steps have no bar either). */
-export function jobFrame(job: CiJob, nowMs: number): BarFrame | undefined {
+/** The frame of a job (`ticking`: its run is live), or `undefined` when the job has no bar (then its steps have none either). */
+export function jobFrame(job: CiJob, nowMs: number, ticking: boolean): BarFrame | undefined {
   const start = at(job.start);
-  const length = barMs(job, nowMs);
+  const length = barMs(job, nowMs, ticking);
   return start === undefined || length === undefined ? undefined : { start, length };
 }
 
-/** Where a step's bar sits inside its job's, in percent of the job's width: left edge and width. `undefined`: no bar. */
+/**
+ * Where a step's bar sits inside its job's, in percent of the job's width: left edge and width. `undefined`: no bar.
+ * `ticking`: the step's job and run are live too.
+ */
 export function stepSpan(
   step: CiStep,
   frame: BarFrame | undefined,
   nowMs: number,
+  ticking: boolean,
 ): { readonly left: number; readonly width: number } | undefined {
   const start = at(step.start);
-  const length = barMs(step, nowMs);
+  const length = barMs(step, nowMs, ticking);
   if (frame === undefined || start === undefined || length === undefined) return undefined;
   // A zero-length job is one whole bar; nothing to divide.
   if (frame.length <= 0) return { left: 0, width: 100 };
@@ -120,6 +131,26 @@ export function orderRuns(runs: readonly CiRun[]): readonly CiRun[] {
   return [...runs].sort((a, b) => rank(a) - rank(b) || (at(b.createdAt) ?? 0) - (at(a.createdAt) ?? 0) || b.id - a.id);
 }
 
+/** A check from a CI that is not GitHub Actions: one bar, no jobs, `check` as its trigger (E8's `buildCheckRun`). */
+export const isCheck = (run: CiRun): boolean => run.trigger === 'check' && run.jobs.length === 0;
+
+/**
+ * Where a check from another CI opens: its own page on GitHub, and only that. A check's `url` is whatever the CI told
+ * GitHub, so anything but an `https://github.com/…` address (a plain http link, another host, `javascript:`) is not
+ * linked at all.
+ */
+export function checkHref(run: CiRun): string | undefined {
+  if (run.url === undefined) return undefined;
+  try {
+    const url = new URL(run.url);
+    return url.protocol === 'https:' && url.hostname === 'github.com' && url.username === '' && url.password === ''
+      ? url.href
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The one line over the run list: how many, and how many need a look. */
 export function runsSummary(runs: readonly CiRun[]): string {
   if (runs.length === 0) return 'No CI runs';
@@ -131,15 +162,36 @@ export function runsSummary(runs: readonly CiRun[]): string {
   return parts.join(' · ');
 }
 
-/** Does a run or anything inside it still move? Then the screen keeps asking and keeps its clock ticking. */
-export const isLive = (run: CiRun): boolean =>
-  run.live === true || run.jobs.some(job => job.live === true || job.steps.some(step => step.live === true));
+/**
+ * Does a run still move? Then the screen keeps asking and keeps its clock ticking. Only the run's own state says so: a job
+ * or step E8 still flags live inside a run that has finished is stale (it never grows), so it keeps nothing ticking.
+ */
+export const isLive = (run: CiRun): boolean => run.live === true;
 
 /** Does any run in the list still move? */
 export const anyLive = (runs: readonly CiRun[]): boolean => runs.some(isLive);
 
-/** A job opens by itself when it needs a look: it failed, or it is still going. */
-export const opensByDefault = (job: CiJob): boolean => job.status === 'failed' || job.status === 'running';
+/** How many jobs open by themselves: a run with 256 failed jobs must not mount 256 step lists on arrival. */
+export const DEFAULT_OPEN_JOBS = 4;
+
+/** How many steps of an open job are drawn before "Show more": a job may carry 500, and each is a row. */
+export const STEPS_FIRST_PAGE = 25;
+
+/** A job needs a look when it failed, or is still going. */
+const needsLook = (job: CiJob): boolean => job.status === 'failed' || job.status === 'running';
+
+/**
+ * The jobs that open by themselves: the first `DEFAULT_OPEN_JOBS` that need a look, failed ones before running ones, each
+ * group in the run's own order. The rest stay shut until asked (their header still says Failed or Running).
+ */
+export function opensByDefault(jobs: readonly CiJob[]): ReadonlySet<number> {
+  const failed = jobs.filter(job => job.status === 'failed');
+  const running = jobs.filter(job => job.status === 'running');
+  return new Set([...failed, ...running].slice(0, DEFAULT_OPEN_JOBS).map(job => job.id));
+}
+
+/** How many jobs need a look in all (to say how many stayed shut). */
+export const needLookCount = (jobs: readonly CiJob[]): number => jobs.filter(needsLook).length;
 
 /** The sentence for a step that took longest, or `undefined` when no step has a bar. */
 export function slowestSentence(job: string, step: string, ms: number): string {

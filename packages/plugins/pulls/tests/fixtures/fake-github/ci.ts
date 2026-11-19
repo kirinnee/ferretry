@@ -84,6 +84,8 @@ export interface CheckSpec {
   readonly conclusion?: string | null;
   readonly start?: Time;
   readonly end?: Time;
+  /** The check's own page; a third-party CI's is whatever it told GitHub. */
+  readonly url?: string;
 }
 export const ghCheck = (spec: CheckSpec) => ({
   id: spec.id,
@@ -92,7 +94,7 @@ export const ghCheck = (spec: CheckSpec) => ({
   conclusion: spec.conclusion === undefined ? 'success' : spec.conclusion,
   started_at: time(spec.start ?? null),
   completed_at: time(spec.end ?? null),
-  html_url: `https://ci.example.test/builds/${spec.id}`,
+  html_url: spec.url ?? `https://ci.example.test/builds/${spec.id}`,
   app: { slug: spec.app ?? 'circleci-checks' },
 });
 

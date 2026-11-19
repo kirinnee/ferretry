@@ -3,13 +3,23 @@
  * E4's PR page mounts `CiTab` by its path (`app/features/ci-run/ci-runs-list.tsx`); nothing here knows the PR page.
  */
 import { useRouter, useScreenHref } from '@ferretry/app';
-import { Loading, RouteLink } from '@ferretry/app/ui';
+import { ExternalLink, Loading, RouteLink } from '@ferretry/app/ui';
 import { ChevronRight } from 'lucide-react';
 import { repoSegment } from '../../../contract/repo-segment.ts';
 import type { CiRun } from '../../../contract/wire.ts';
 import { CiFailedPanel } from './ci-failed.tsx';
 import { type CiClient, type CiScope, type CiTarget, fetchRuns } from './ci-api.ts';
-import { barMs, formatDuration, orderRuns, runsSummary, shortSha, STATUS_WORD, triggerWord } from './ci-format.ts';
+import {
+  barMs,
+  checkHref,
+  formatDuration,
+  isCheck,
+  orderRuns,
+  runsSummary,
+  shortSha,
+  STATUS_WORD,
+  triggerWord,
+} from './ci-format.ts';
 import { StatusIcon, STATUS_TEXT } from './ci-status.tsx';
 import { runsLive, useLiveRead, useSecondClock } from './use-ci.ts';
 
@@ -30,7 +40,9 @@ const startedAt = (run: CiRun): string =>
 const runLength = (run: CiRun, nowMs: number): string => {
   if (run.live === true && run.start === undefined) return `waiting ${formatDuration(run.queuedMs)}`;
   const ms =
-    run.live === true ? Math.max(run.wallMs, barMs({ start: run.createdAt, live: true }, nowMs) ?? 0) : run.wallMs;
+    run.live === true
+      ? Math.max(run.wallMs, barMs({ start: run.createdAt, live: true }, nowMs, true) ?? 0)
+      : run.wallMs;
   return formatDuration(ms);
 };
 
@@ -41,6 +53,7 @@ function RunRow({
   onOpen,
 }: {
   readonly run: CiRun;
+  /** The run screen for an Actions run; `undefined` for a check from another CI (it has no run screen). */
   readonly href: string | undefined;
   readonly nowMs: number;
   readonly onOpen: (to: string) => void;
@@ -50,7 +63,7 @@ function RunRow({
       <StatusIcon status={run.status} size={18} />
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
-          <span className="min-w-0 break-words text-ui font-medium text-fg">{run.name}</span>
+          <span className="min-w-0 text-ui font-medium text-fg [overflow-wrap:anywhere]">{run.name}</span>
           <span className={`text-meta font-medium ${STATUS_TEXT[run.status]}`}>{STATUS_WORD[run.status]}</span>
           {run.attempt > 1 && (
             <span className="rounded-control border border-border-strong px-1 text-2xs text-fg-soft">
@@ -58,19 +71,33 @@ function RunRow({
             </span>
           )}
         </span>
-        <span className="block text-meta text-muted">
+        <span className="block text-meta text-muted [overflow-wrap:anywhere]">
           {triggerWord(run.trigger)} · <span className="mono">{shortSha(run.headSha)}</span> · {startedAt(run)}
           {run.queuedMs > 0 && <> · queued {formatDuration(run.queuedMs)}</>}
         </span>
       </span>
       <span className={`mono shrink-0 text-cell tabular-nums ${STATUS_TEXT[run.status]}`}>{runLength(run, nowMs)}</span>
-      {href !== undefined && <ChevronRight aria-hidden="true" size={16} className="shrink-0 text-muted" />}
+      {!isCheck(run) && href !== undefined && (
+        <ChevronRight aria-hidden="true" size={16} className="shrink-0 text-muted" />
+      )}
     </>
   );
   const row = 'flex min-h-control items-center gap-sm px-control-x py-row-y text-left no-underline';
+  // A check from another CI has no run screen: the daemon only reads `/actions/runs/{id}`, so its id there would be a
+  // different run or none. It links to its own page on GitHub when that is a github.com address, else it is not a link.
+  const outside = isCheck(run) ? checkHref(run) : undefined;
   return (
-    <li data-ci-run={run.id} data-ci-run-status={run.status}>
-      {href === undefined ? (
+    <li data-ci-run={run.id} data-ci-run-status={run.status} data-ci-check={isCheck(run) ? 'true' : undefined}>
+      {isCheck(run) ? (
+        outside === undefined ? (
+          <div className={row}>{body}</div>
+        ) : (
+          <ExternalLink href={outside} className={`${row} hover:bg-hover-fill`}>
+            {body}
+            <span className="sr-only"> (opens on GitHub)</span>
+          </ExternalLink>
+        )
+      ) : href === undefined ? (
         <div className={row}>{body}</div>
       ) : (
         <RouteLink to={href} onNavigate={onOpen} className={`${row} hover:bg-hover-fill`}>
@@ -106,7 +133,7 @@ export function CiTab({ client, daemon, scope, target, nowMs: fixedNow }: CiTabP
         <ul className="kt-panel m-0 list-none divide-y divide-border-soft p-0">
           {runs.map(run => (
             <RunRow
-              key={`${run.id}-${run.attempt}`}
+              key={`${isCheck(run) ? 'check' : 'run'}-${run.id}-${run.attempt}`}
               run={run}
               nowMs={now}
               onOpen={navigate}
