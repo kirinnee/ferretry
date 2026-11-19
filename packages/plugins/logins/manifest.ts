@@ -324,7 +324,7 @@ export default definePlugin({
       panel(ADD_RUNTIME_LOGIN_SLOT, { id: 'add-runtime-login', order: 10 }),
       panel(ADD_RUNTIME_SIGN_IN_SLOT, { id: 'add-runtime-sign-in', order: 10 }),
     ],
-    settings: [settingsTab('logins', { group: 'agents', label: 'Logins', order: 25 })],
+    settings: [settingsTab('logins', { icon: 'log-in', group: 'agents', label: 'Logins', order: 25 })],
   },
 
   /** Never reached by a ferret, through any root: the sign-in material of every login (`PrivacyDecl`). */

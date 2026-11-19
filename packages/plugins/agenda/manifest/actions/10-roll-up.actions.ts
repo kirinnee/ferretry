@@ -66,7 +66,7 @@ export default manifestFragment({
       screen('agenda-ask', { path: 'agenda/:ferret/:ask' }),
     ],
     panels: [panel('ferret.side', { id: 'ferret-agenda', order: 10 })],
-    settings: [settingsTab('agenda', { group: 'agent-settings', label: 'Agenda', order: 20 })],
+    settings: [settingsTab('agenda', { icon: 'inbox', group: 'agent-settings', label: 'Agenda', order: 20 })],
     // The ask page OFFERS the `agenda.conversation` slot (contract/slots.ts, lead decision Q9): Conversation contributes
     // the ferret's conversation and composer under an open ask; Agenda imports nothing of Conversation's.
   },

@@ -44,7 +44,7 @@ export default fragment({
       panel(ACTIONS_ROW_SLOT, { id: 'stuck-messages-row', order: 20 }),
       panel(AGENDA_CONVERSATION_SLOT, { id: 'agenda-conversation', order: 10 }),
     ],
-    settings: [settingsTab('conversation', { group: 'behaviour', label: 'Conversation', order: 20 })],
+    settings: [settingsTab('conversation', { icon: 'messages', group: 'behaviour', label: 'Conversation', order: 20 })],
     renderers: [renderer('ask', { source: 'question' })],
   },
 });

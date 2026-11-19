@@ -416,11 +416,12 @@ export default definePlugin({
     // Today these sit under Settings › <machine>: the Runtimes, Profiles and Components tabs. Components other than
     // model sets live with their own plugins now, so the third tab is the model sets.
     settings: [
-      settingsTab('runtimes', { group: 'agents', label: 'Runtimes', order: 10 }),
-      settingsTab('profiles', { group: 'agents', label: 'Profiles', order: 11 }),
-      settingsTab('model-sets', { group: 'agents', label: 'Model sets', order: 12 }),
+      settingsTab('runtimes', { icon: 'cpu', group: 'agents', label: 'Runtimes', order: 10 }),
+      settingsTab('profiles', { icon: 'id-card', group: 'agents', label: 'Profiles', order: 11 }),
+      settingsTab('model-sets', { icon: 'boxes', group: 'agents', label: 'Model sets', order: 12 }),
       // v4's Agents tab: permissions, what agents may control, auto-resume, agenda mode, conversations.
       settingsTab('agents', {
+        icon: 'bot',
         group: 'agents',
         label: 'Agents',
         order: 13,
@@ -442,7 +443,7 @@ export default definePlugin({
         ],
       }),
       // Export this machine's settings as a zip, or copy another machine's here (v4's Setup › Export / Copy settings).
-      settingsTab('transfer', { group: 'agents', label: 'Export & copy', order: 14 }),
+      settingsTab('transfer', { icon: 'arrow-left-right', group: 'agents', label: 'Export & copy', order: 14 }),
     ],
     // The model and effort switches above the composer, and the account picker (with its health and quota) that
     // Ferrets' new-ferret and move pages OFFER as slots: Runtimes contributes, Ferrets imports nothing of it.

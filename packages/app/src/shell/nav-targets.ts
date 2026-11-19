@@ -2,6 +2,7 @@ import { daemonHomeHref, DEVICE_SETTINGS_HREF, HOME_HREF, needsSubject, type Rou
 import { useRouter } from '../router/router.tsx';
 import type { NavEntry } from '../layout/engine.ts';
 import { useShell } from './context.tsx';
+import { navIconName } from './icons.tsx';
 
 /**
  * WHERE EACH NAV ENTRY GOES, once: the nav bar draws these as tabs and the chat's one menu lists the same places, so a
@@ -16,6 +17,8 @@ export interface NavTarget {
   readonly to: string | undefined;
   /** Whether it is the place on screen. */
   readonly current: boolean;
+  /** Its icon name (`icons.tsx`), when it declares one. */
+  readonly icon: string | undefined;
   readonly entry: NavEntry;
 }
 
@@ -57,5 +60,6 @@ export function useNavTargets(daemon: string | undefined): readonly NavTarget[] 
     to: href(entry),
     current: onScreen(entry),
     entry,
+    icon: navIconName(entry),
   }));
 }

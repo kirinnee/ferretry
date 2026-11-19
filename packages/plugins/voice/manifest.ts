@@ -103,8 +103,8 @@ export default definePlugin({
       panel('onboarding.step', { id: 'onboarding-voice', order: 51 }),
     ],
     settings: [
-      settingsTab('voice', { group: 'behaviour', label: 'Voice', order: 60 }),
-      settingsTab('speedups', { group: 'advanced', label: 'Speed-ups', order: 70 }),
+      settingsTab('voice', { icon: 'mic', group: 'behaviour', label: 'Voice', order: 60 }),
+      settingsTab('speedups', { icon: 'zap', group: 'advanced', label: 'Speed-ups', order: 70 }),
     ],
   },
 

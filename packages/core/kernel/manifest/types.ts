@@ -156,6 +156,11 @@ export interface SettingsTabDecl<Id extends string = string> {
   readonly id: Id;
   readonly label: string;
   readonly order: number;
+  /**
+   * The tab's icon: a name in the app's one icon set (`packages/app/src/shell/icons.tsx` is the vocabulary), drawn beside its
+   * label in the Settings list. Optional in the type so older manifests still load; the app's test fails a tab without one.
+   */
+  readonly icon?: string;
   /** The heading the Settings page lists this tab under (`settings-groups.ts`); a tab that names none is listed last. */
   readonly group?: SettingsGroupId;
   /** Words the command bar finds this tab by, beyond its label (the settings it holds). */

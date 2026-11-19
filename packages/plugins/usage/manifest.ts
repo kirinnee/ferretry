@@ -210,9 +210,9 @@ export default definePlugin({
       panel('composer.tools', { id: 'composer-quota', order: 90 }),
     ],
     settings: [
-      settingsTab('budgets', { group: 'agents', label: 'Budgets', order: 70 }),
-      settingsTab('model-pricing', { group: 'advanced', label: 'Model pricing', order: 71 }),
-      settingsTab('performance', { group: 'health', label: 'Performance', order: 72 }),
+      settingsTab('budgets', { icon: 'wallet', group: 'agents', label: 'Budgets', order: 70 }),
+      settingsTab('model-pricing', { icon: 'coins', group: 'advanced', label: 'Model pricing', order: 71 }),
+      settingsTab('performance', { icon: 'activity', group: 'health', label: 'Performance', order: 72 }),
     ],
   },
 

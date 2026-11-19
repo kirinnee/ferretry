@@ -265,7 +265,7 @@ export default definePlugin({
       // Runtimes' Profiles library offers this under each MCP server's row (its contract/slots.ts): where it stands.
       panel(COMPONENT_MCP_SLOT, { id: 'component-status', order: 10 }),
     ],
-    settings: [settingsTab('mcp', { group: 'tools', label: 'MCP servers', order: 50 })],
+    settings: [settingsTab('mcp', { icon: 'plug-zap', group: 'tools', label: 'MCP servers', order: 50 })],
   },
 
   /** Never reached by a ferret, through any root: the sealed OAuth refresh tokens and client secrets (`PrivacyDecl`). */

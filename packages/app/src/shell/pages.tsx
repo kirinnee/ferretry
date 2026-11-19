@@ -7,6 +7,7 @@ import { SettingGroup } from '../compose/setting-row.tsx';
 import { CachedDataSetting } from './device-cached-data.tsx';
 import { DeviceAppearance } from './device-appearance.tsx';
 import { DevicePanels } from './device-panels.tsx';
+import { Icon } from './icons.tsx';
 import { groupSettingsTabs, resolveSettingsTab } from './settings-tab.ts';
 import { Loading } from '../ui/loading.tsx';
 import { PanelSlot, PluginView, ShellLine } from './views.tsx';
@@ -231,6 +232,7 @@ export function DaemonSettingsPage({
           {/* This device's own settings (theme, text size, motion, notifications…) are saved in this browser, not on a daemon:
           the shell's own entry, one click from here as v4's Settings had it. Its address is the one a reload still serves. */}
           <Link to={DEVICE_SETTINGS_HREF} className="fy-tab fy-settings-device">
+            <Icon name="monitor" />
             This device
           </Link>
           {groupSettingsTabs(tabs).map(group => (
@@ -244,6 +246,7 @@ export function DaemonSettingsPage({
                     className={candidate === active ? 'fy-tab fy-tab--active' : 'fy-tab'}
                     current={candidate === active && named !== undefined}
                   >
+                    <Icon name={candidate.icon} />
                     {candidate.label}
                   </Link>
                 ))}

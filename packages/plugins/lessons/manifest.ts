@@ -350,7 +350,9 @@ export default definePlugin({
       // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
       panel('onboarding.step', { id: 'onboarding-step', order: 70 }),
     ],
-    settings: [settingsTab('lessons', { group: 'agent-settings', label: 'Lessons', order: 70 })],
+    settings: [
+      settingsTab('lessons', { icon: 'graduation-cap', group: 'agent-settings', label: 'Lessons', order: 70 }),
+    ],
   },
 
   data: {
