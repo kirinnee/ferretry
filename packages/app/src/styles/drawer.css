@@ -1,0 +1,201 @@
+/* ============================================================================
+   THE LEFT DRAWER (shell/drawer.tsx): the shell's one side of navigation. Top to bottom: the machine item (2+ machines),
+   Find with the collapse toggle, the destinations, and the list slot. Wide: a column that collapses to a slim icon rail.
+   Phone: an overlay over the page, opened by the menu button. Token-driven; sizes multiply by `--fy-text-scale`.
+   ============================================================================ */
+.fy-drawer {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  width: calc(var(--fy-text-scale, 1) * 280px);
+  min-height: 0;
+  padding: 8px;
+  overflow-y: auto;
+  background: var(--bar-bg);
+  color: var(--chrome-fg);
+  border-right: var(--border-width) solid var(--border);
+}
+.fy-drawer--rail {
+  align-items: center;
+  width: calc(var(--fy-text-scale, 1) * 56px);
+  padding-inline: 6px;
+}
+/* The phone's overlay: above the page and its bottom bar, under the shell's dialogs (the command bar is z-50). */
+.fy-drawer--overlay {
+  position: fixed;
+  z-index: 40;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(calc(var(--fy-text-scale, 1) * 320px), 86vw);
+  /* Opaque: the bar colour is translucent, and the page must not show through the overlay. */
+  background: var(--surface);
+  padding-top: calc(var(--inset-top, 0px) + 8px);
+  padding-bottom: calc(var(--safe-bottom, 0px) + 8px);
+  border-right: var(--border-width) solid var(--border-strong, var(--border));
+}
+.fy-drawer-scrim {
+  position: fixed;
+  z-index: 39;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: var(--scrim, rgb(0 0 0 / 0.4));
+  cursor: default;
+}
+
+/* Find and the collapse toggle share one row; in the rail they stack. */
+.fy-drawer__bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+.fy-drawer--rail .fy-drawer__bar {
+  flex-direction: column;
+  gap: 8px;
+}
+.fy-drawer .fy-search {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+}
+.fy-drawer__find--rail {
+  flex: none;
+  justify-content: center;
+  width: 44px;
+  padding: 0;
+}
+.fy-drawer__toggle {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  min-height: var(--control-h);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-input);
+  background: transparent;
+  color: var(--muted);
+}
+.fy-drawer__toggle:hover {
+  background: var(--nav-hover, var(--surface-2));
+  color: var(--fg);
+}
+@media (max-width: 767.98px) {
+  .fy-drawer__toggle {
+    width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* The machine item: a quiet name with a status dot (the rail keeps the dot alone). */
+.fy-drawer__machine {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  max-width: 100%;
+}
+.fy-drawer__machine .fy-daemon-picker {
+  flex: 1;
+}
+.fy-drawer__machine--rail .fy-daemon-picker {
+  flex: none;
+  justify-content: center;
+  padding: 0;
+  width: 44px;
+}
+.fy-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.fy-dot[data-reach='up'] {
+  background: var(--ok);
+}
+.fy-dot[data-reach='pending'] {
+  background: var(--warn);
+}
+.fy-dot[data-reach='down'] {
+  background: var(--err);
+}
+
+/* The destinations: icon + label rows (the rail: the icon alone). */
+.fy-nav--drawer {
+  flex: none;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  background: transparent;
+}
+.fy-nav--drawer .fy-nav__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 10px;
+}
+@media (max-width: 767.98px) {
+  .fy-nav--drawer .fy-nav__item {
+    min-height: 44px;
+  }
+}
+.fy-nav--rail.fy-nav--drawer {
+  align-items: center;
+}
+.fy-nav--rail .fy-nav__item {
+  justify-content: center;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+.fy-nav__icon {
+  flex: none;
+  color: var(--muted);
+}
+.fy-nav__item[aria-current='page'] .fy-nav__icon {
+  color: inherit;
+}
+.fy-nav__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-nav__item .fy-nav__badge {
+  margin-left: auto;
+}
+.fy-nav--rail .fy-nav__item .fy-nav__badge {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  margin-left: 0;
+}
+.fy-nav__initial {
+  font-weight: 600;
+}
+
+/* THE LIST SLOT: what draws here (the ferret list, with its own header) takes the rest of the column and scrolls inside it. */
+.fy-drawer__list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: 8px;
+  border-top: var(--border-width) solid var(--border);
+  overflow-y: auto;
+}
+
+/* The shortcut hint has a box of its own size, so the mono font arriving a moment later never moves it (no layout shift). */
+.fy-drawer .fy-search kbd {
+  flex: none;
+  display: inline-block;
+  font-family: inherit;
+  width: 3.5rem;
+  text-align: right;
+}

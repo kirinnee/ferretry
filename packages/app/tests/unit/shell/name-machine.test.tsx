@@ -91,6 +91,8 @@ async function boot(options: Options = {}) {
     address: 'http://127.0.0.1:40245',
     ...options.pairing,
   });
+  // A second machine, so the switcher (hidden while one machine is paired) is drawn and carries the offer.
+  list.add({ daemon: 'other', machine: 'other-host', deviceId: 'dev2', address: 'http://127.0.0.1:40246' });
   if (options.learned !== undefined) list.learnMachine('ws', options.learned);
   const runtime = new ShellRuntime({
     appVersion: '5.0.0',

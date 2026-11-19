@@ -42,11 +42,17 @@ describe('the machine switcher', () => {
     expect(document.querySelectorAll('[role="group"], optgroup')).toHaveLength(0);
   });
 
-  test('with one machine the menu has the one machine once', async () => {
-    const app = await bootApp({ surfaces: [], machines: ['d1'], path: '/d/d1' });
-    view = app.view;
-    await interact(() => trigger(app.view.container).click());
-    expect(labels()).toEqual(['All daemons', 'd1-hostthis one']);
+  test('with one machine paired there is no switcher at all; with two it is a small item at the top of the drawer', async () => {
+    const one = await bootApp({ surfaces: [], machines: ['d1'], path: '/d/d1' });
+    view = one.view;
+    expect(one.view.container.querySelector('.fy-daemon-picker')).toBeNull();
+    expect(one.view.container.querySelector('.fy-top')).toBeNull();
+    await one.view.unmount();
+    const two = await bootApp({ surfaces: [], machines: ['d1', 'd2'], path: '/d/d1' });
+    view = two.view;
+    const item = must(two.view.container.querySelector('.fy-drawer > .fy-drawer__machine'), 'the machine item');
+    expect(item.querySelector('.fy-dot')).not.toBeNull();
+    expect(item.textContent).toBe('d1-host');
   });
 
   test('two pairings of one machine name read as DISTINCT rows and button, as the chooser names them', async () => {

@@ -120,7 +120,7 @@ const hitsItself = async (tab: Page, selector: string): Promise<{ readonly hit: 
   }, selector);
 
 describe('the agenda page with a status line drawn in flow', () => {
-  it('at 1280 keeps v4’s page column and puts the line in a strip under the top bar, across the page', async () => {
+  it('at 1280 keeps v4’s page column and puts the line in a strip at the top of the body, across the page', async () => {
     const { tab, close } = await open(VIEWPORTS[0], '/d/ws/agenda', '[data-relay-fallback]');
     try {
       if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, '1280-agenda-page.png') });
@@ -128,7 +128,7 @@ describe('the agenda page with a status line drawn in flow', () => {
       const line = await tab.evaluate(() => {
         const box = (query: string) => document.querySelector(query)?.getBoundingClientRect();
         const note = box('[data-relay-fallback]');
-        const top = box('.fy-top');
+        const top = box('.fy-body');
         const columns = box('.fy-columns');
         const body = box('.fy-body');
         return {
@@ -136,13 +136,13 @@ describe('the agenda page with a status line drawn in flow', () => {
           noteRight: note?.right ?? -1,
           noteTop: note?.top ?? -1,
           noteBottom: note?.bottom ?? -1,
-          topBottom: top?.bottom ?? -1,
+          topBottom: top?.top ?? -1,
           columnsTop: columns?.top ?? -1,
           bodyLeft: body?.left ?? -1,
           bodyRight: body?.right ?? -1,
         };
       });
-      expect(line.noteTop, 'under the top bar').toBeGreaterThanOrEqual(line.topBottom);
+      expect(line.noteTop, 'at the top of the body: no bar above it').toBeGreaterThanOrEqual(line.topBottom);
       expect(line.noteBottom, 'above the columns').toBeLessThanOrEqual(line.columnsTop);
       expect(line.noteLeft, 'the strip starts at the body’s left edge').toBeLessThanOrEqual(line.bodyLeft + 16);
     } finally {
@@ -335,7 +335,7 @@ const scrolledToEnd = async (tab: Page) => {
     ({ before: start }) => {
       const rect = (query: string) => document.querySelector(query)?.getBoundingClientRect();
       const nav = rect('.fy-nav');
-      const top = rect('.fy-top');
+      const top = rect('.fy-body');
       const filler = document.querySelector('[data-tall-filler]')?.getBoundingClientRect();
       return {
         window: { width: window.innerWidth, height: window.innerHeight },
@@ -348,7 +348,7 @@ const scrolledToEnd = async (tab: Page) => {
   );
 };
 
-describe('the nav and the top bar stay put while a tall page scrolls', () => {
+describe('the drawer and the body stay put while a tall page scrolls', () => {
   for (const viewport of VIEWPORTS)
     for (const [name, path, ready] of [
       ['agenda', '/d/ws/agenda', '[data-agenda-stand-in]'],
@@ -369,8 +369,8 @@ describe('the nav and the top bar stay put while a tall page scrolls', () => {
               seen.window.height,
             );
           } else {
-            expect(seen.top.top, 'the top bar is still at the top of the window').toBeGreaterThanOrEqual(0);
-            expect(seen.top.bottom, 'the top bar is still on screen').toBeLessThanOrEqual(seen.window.height);
+            expect(seen.top.top, 'the body is still at the top of the window').toBeGreaterThanOrEqual(0);
+            expect(seen.top.bottom, 'the body is still on screen').toBeLessThanOrEqual(seen.window.height);
             expect(seen.nav.top, 'the nav starts inside the window').toBeGreaterThanOrEqual(0);
             expect(seen.nav.bottom, 'the nav is still inside the window').toBeLessThanOrEqual(seen.window.height);
             expect(seen.nav.right, 'the nav is still in view sideways').toBeGreaterThan(0);
@@ -514,7 +514,7 @@ describe('the ferret page on a phone (390)', () => {
 // U-L: the default layout is v4's shell — the ferret list is a column on the LEFT of every page, the nav a short row of
 // destinations (a phone keeps the bottom bar), and no second "Needs you" list under the nav. The same fake pages are what
 // `v4-vs-v5` side-by-side shots are taken from (`FY_LAYOUT_SHOTS_DIR`, named `v5-<viewport>-<mode>-<page>.png`).
-describe('the default shell is v4’s: ferret list on the left, a compact nav', () => {
+describe('the default shell is v4’s: ferret list on the left, a left drawer', () => {
   const SHELL_VIEWPORTS = [
     { name: 'desktop', width: 1_440, height: 900, phone: false },
     { name: 'phone', width: 390, height: 844, phone: true },
@@ -527,18 +527,21 @@ describe('the default shell is v4’s: ferret list on the left, a compact nav', 
   for (const viewport of SHELL_VIEWPORTS)
     for (const mode of ['light', 'dark'] as const)
       for (const page of PAGES)
-        it(`${viewport.name}, ${mode}, ${page.name}: ${viewport.phone ? 'bottom bar, no side column' : 'list left of the page, one nav row'}, nothing overflows`, async () => {
+        it(`${viewport.name}, ${mode}, ${page.name}: ${viewport.phone ? 'bottom bar, no side column' : 'list in the drawer left of the page, no top row'}, nothing overflows`, async () => {
           const { tab, close } = await open(viewport, page.path, page.ready, '&relay=0', `studio-${mode}`);
           try {
             await shotOf(tab, `v5-${viewport.name}-${mode}-${page.name}`);
             const geometry = await tab.evaluate(() => {
               const box = (query: string) => document.querySelector(query)?.getBoundingClientRect();
               const nav = document.querySelector('nav.fy-nav') as HTMLElement | null;
+              const drawer = document.querySelector('.fy-drawer') as HTMLElement | null;
               return {
                 navClass: nav?.className ?? '',
-                navHeight: nav?.getBoundingClientRect().height ?? -1,
+                topRow: document.querySelector('.fy-top, .fy-nav--top') !== null,
+                drawerFill: drawer === null ? -1 : drawer.getBoundingClientRect().height,
+                windowHeight: window.innerHeight,
                 navOverflows: nav === null ? true : nav.scrollWidth > nav.clientWidth + 1,
-                side: box('.fy-side'),
+                side: box('.fy-drawer__list'),
                 main: box('.fy-main'),
                 navPanels: document.querySelectorAll('[data-device-slot="nav"]').length,
                 pageOverflows: document.documentElement.scrollWidth > window.innerWidth + 1,
@@ -551,8 +554,11 @@ describe('the default shell is v4’s: ferret list on the left, a compact nav', 
               expect(geometry.navClass).toContain('fy-nav--bottom');
               expect(geometry.side, 'a phone draws no side column').toBeUndefined();
             } else {
-              expect(geometry.navClass).toContain('fy-nav--top');
-              expect(geometry.navHeight, 'one short row').toBeLessThanOrEqual(52);
+              expect(geometry.navClass).toContain('fy-nav--drawer');
+              expect(geometry.topRow, 'no row of places across the top').toBe(false);
+              expect(geometry.drawerFill, 'the drawer runs the full height').toBeGreaterThanOrEqual(
+                geometry.windowHeight - 1,
+              );
               expect(geometry.side, 'the ferret list is drawn').not.toBeUndefined();
               expect(geometry.side?.right ?? 9_999, 'the list is left of the page').toBeLessThanOrEqual(
                 geometry.main?.left ?? 0,
@@ -563,4 +569,57 @@ describe('the default shell is v4’s: ferret list on the left, a compact nav', 
             await close();
           }
         });
+});
+
+// r8-SHELL: the left drawer collapses to a slim icon rail (Find's icon and the places), the page takes the room, and the
+// choice is remembered on this device; on a phone the same drawer is an overlay opened by the menu button.
+describe('the left drawer collapses to a rail and opens over a phone', () => {
+  it('desktop: the toggle makes a slim rail, the page widens, and a reload keeps it', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], '/d/ws/board', '.fy-main', '&relay=0', 'studio-light');
+    try {
+      const wide = await tab.evaluate(() => document.querySelector('.fy-drawer')?.getBoundingClientRect().width ?? -1);
+      const mainWide = await width(tab, '.fy-main');
+      expect(await tab.locator('.fy-drawer__list [data-sbar-filter]').count(), 'Mine / All / Agents in the slot').toBe(
+        3,
+      );
+      await shotOf(tab, 'v5-desktop-light-drawer-open');
+      await tab.click('[data-drawer-toggle]');
+      await tab.waitForSelector('.fy-drawer--rail');
+      const rail = await tab.evaluate(() => document.querySelector('.fy-drawer')?.getBoundingClientRect().width ?? -1);
+      expect(rail, 'a slim rail').toBeLessThanOrEqual(72);
+      expect(rail, 'narrower than the open drawer').toBeLessThan(wide);
+      expect(await width(tab, '.fy-main'), 'the page takes the room').toBeGreaterThan(mainWide);
+      expect(await tab.locator('.fy-drawer--rail [data-drawer-find]').count(), 'the find icon is in the rail').toBe(1);
+      expect(await tab.locator('.fy-drawer--rail .fy-drawer__list').count(), 'the list slot is put away').toBe(0);
+      await shotOf(tab, 'v5-desktop-light-drawer-rail');
+      await tab.reload();
+      await tab.waitForSelector('.fy-drawer');
+      expect(await tab.locator('.fy-drawer--rail').count(), 'remembered after a reload').toBe(1);
+    } finally {
+      await close();
+    }
+  });
+
+  for (const mode of ['light', 'dark'] as const)
+    it(`phone, ${mode}: the menu button opens the overlay over the page`, async () => {
+      const { tab, close } = await open(VIEWPORTS[1], '/d/ws/board', '.fy-main', '&relay=0', `studio-${mode}`);
+      try {
+        expect(await tab.locator('.fy-drawer').count(), 'shut until asked').toBe(0);
+        await tab.click('button[aria-label="Menu"]');
+        await tab.waitForSelector('.fy-drawer--overlay');
+        const box = await tab.evaluate(() => document.querySelector('.fy-drawer')?.getBoundingClientRect());
+        expect(box?.left, 'from the left edge').toBe(0);
+        expect(box?.height ?? 0, 'the full height').toBeGreaterThanOrEqual(840);
+        // The same order as the wide drawer: places, then the ferret list (Mine / All / Agents and its ⋯ menu).
+        expect(
+          await tab.locator('.fy-drawer--overlay .fy-drawer__list [data-sbar-filter]').count(),
+          'the list',
+        ).toBeGreaterThan(0);
+        await shotOf(tab, `v5-phone-${mode}-drawer-open`);
+        await tab.click('.fy-drawer-scrim', { position: { x: 380, y: 400 } });
+        expect(await tab.locator('.fy-drawer').count(), 'the scrim puts it away').toBe(0);
+      } finally {
+        await close();
+      }
+    });
 });

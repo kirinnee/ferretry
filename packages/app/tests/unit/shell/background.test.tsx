@@ -90,17 +90,17 @@ describe('the background host', () => {
     expect(app.view.container.textContent).toContain('watching d2');
   });
 
-  test('shell S5: what a background view draws in flow sits in the status strip under the top bar, never as a column of the frame’s own row', async () => {
+  test('shell S5: what a background view draws in flow sits in the status strip at the top of the body, never as a column of the frame’s own row', async () => {
     // The sweep: Connections' "Couldn't reach it through the relay…" line was a child of the frame (a flex ROW), so it took
     // ~400px beside the page and the agenda's item column fell from ~680px to 350px at 1280.
     const app = await bootApp({ surfaces: [bg], machines: ['d1', 'd2'] });
     view = app.view;
     const frame = must(app.view.container.querySelector('.fy-frame'), 'the frame');
     expect([...frame.children].map(child => `${child.tagName.toLowerCase()}.${child.className.split(' ')[0]}`)).toEqual(
-      ['nav.fy-nav', 'div.fy-body'],
+      ['aside.fy-drawer', 'div.fy-body'],
     );
     const strip = must(app.view.container.querySelector('.fy-body > .fy-status'), 'the status strip');
-    expect(strip.previousElementSibling?.classList.contains('fy-top')).toBe(true);
+    expect(strip.previousElementSibling).toBeNull();
     expect(strip.nextElementSibling?.classList.contains('fy-columns')).toBe(true);
     for (const daemon of ['d1', 'd2']) expect(strip.querySelector(`[data-testid="bg-${daemon}"]`)).not.toBeNull();
   });

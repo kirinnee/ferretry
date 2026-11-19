@@ -1,4 +1,3 @@
-import { ChevronDown } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { distinctDaemonName } from '../daemons/machine-names.ts';
 import { daemonHomeHref, HOME_HREF } from '../router/routes.ts';
@@ -9,7 +8,7 @@ import { useRuntimeVersion, useShell } from './context.tsx';
 import { hostFileIsNamed, readHostFile } from './name-machine.tsx';
 
 /**
- * THE MACHINE SWITCHER, like v4's: a button that says which machine is on screen and opens a menu (the shared
+ * THE MACHINE SWITCHER, like v4's: an item that says which machine is on screen and opens a menu (the shared
  * ContextMenu — role=menu, arrows, Home/End, Escape back to the button, 44px rows on a touch screen). Every machine is
  * ONE row, in its own words, the one on screen marked "this one"; "All daemons" leads, marked the same way when the
  * list is what is showing.
@@ -27,7 +26,7 @@ const THIS_ONE = 'this one';
  * name is the owner's), once it can answer and again whenever the name this device shows changes (a rename). `false` while
  * it is not known — a machine that cannot say, or a device that may not read it, is never offered a step it could not finish.
  */
-export function useGoesByHostName(daemon: string | undefined): boolean {
+function useGoesByHostName(daemon: string | undefined): boolean {
   const { runtime } = useShell();
   useRuntimeVersion(runtime);
   const client = daemon === undefined ? undefined : runtime.client(daemon, 'kernel');
@@ -58,7 +57,7 @@ export function useGoesByHostName(daemon: string | undefined): boolean {
 }
 
 /** The machine on screen's name and the menu rows that switch machines: shared by the bar's switcher and the chat's one menu. */
-export function useMachineChoices(daemon: string | undefined): {
+function useMachineChoices(daemon: string | undefined): {
   readonly name: string;
   readonly items: readonly ContextMenuItem[];
 } {
@@ -93,16 +92,34 @@ export function useMachineChoices(daemon: string | undefined): {
   };
 }
 
-export function DaemonPicker({ daemon }: { readonly daemon: string | undefined }) {
+/** How the machine on screen is doing, as the dot beside its name says it: reached, still being reached, or not reached. */
+type Reach = 'up' | 'pending' | 'down';
+
+function useReach(daemon: string | undefined): Reach | undefined {
+  const { runtime } = useShell();
+  useRuntimeVersion(runtime);
+  if (daemon === undefined) return undefined;
+  const kind = runtime.connection(daemon).kind;
+  return kind === 'connected' ? 'up' : kind === 'connecting' ? 'pending' : 'down';
+}
+
+/**
+ * THE MACHINE ITEM at the top of the drawer, like v4's switcher: ONE machine paired means there is nothing to switch and
+ * nothing is drawn; with two or more it is a small item (the machine's name and a status dot) that opens the menu. In the slim
+ * rail it is the dot alone, named for assistive tech. A machine that goes by its host name is offered "Name this machine".
+ */
+export function MachineItem({ daemon, rail }: { readonly daemon: string | undefined; readonly rail: boolean }) {
   const { runtime } = useShell();
   const trigger = useRef<HTMLButtonElement | null>(null);
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
   const { touchAffected } = useInputModality();
   const { name, items } = useMachineChoices(daemon);
   const goesByHostName = useGoesByHostName(daemon);
-  if (items.length === 0) return null;
+  const reach = useReach(daemon);
+  const machines = runtime.daemons.groups().flatMap(group => group.daemons).length;
+  if (machines < 2) return null;
   return (
-    <>
+    <div className={`fy-drawer__machine${rail ? ' fy-drawer__machine--rail' : ''}`}>
       <button
         aria-expanded={anchor !== null}
         aria-haspopup="menu"
@@ -116,10 +133,10 @@ export function DaemonPicker({ daemon }: { readonly daemon: string | undefined }
         ref={trigger}
         type="button"
       >
-        <span className="fy-daemon-picker__name">{name}</span>
-        <ChevronDown aria-hidden="true" size={14} />
+        {reach === undefined ? null : <span aria-hidden="true" className="fy-dot" data-reach={reach} />}
+        {rail ? null : <span className="fy-daemon-picker__name">{name}</span>}
       </button>
-      {goesByHostName && daemon !== undefined ? (
+      {goesByHostName && !rail && daemon !== undefined ? (
         <button
           className="fy-name-machine"
           data-name-machine-offer=""
@@ -138,6 +155,6 @@ export function DaemonPicker({ daemon }: { readonly daemon: string | undefined }
         touch={touchAffected}
         triggerRef={trigger}
       />
-    </>
+    </div>
   );
 }

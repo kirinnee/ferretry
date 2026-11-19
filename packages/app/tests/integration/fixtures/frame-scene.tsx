@@ -94,8 +94,61 @@ const FERRETS = [
 function FerretListScreen(): ReactNode {
   return (
     <div className="fy-sbar__ferrets" data-ferret-list="">
-      <div className="fy-sbar__filters">
-        <strong>Mine 2</strong> · All 4 · Agents 2
+      {/* Ferrets' own header row (`ferret-list.tsx`): the Mine / All / Agents segments with their counts, the ⋯ options button beside them. */}
+      <div className="fy-sbar__filters" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 0 8px' }}>
+        <fieldset
+          aria-label="Show ferrets"
+          style={{
+            display: 'flex',
+            flex: 1,
+            gap: 2,
+            margin: 0,
+            padding: 2,
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+          }}
+        >
+          {(
+            [
+              ['mine', 'Mine', 2],
+              ['all', 'All', 4],
+              ['agents', 'Agents', 2],
+            ] as const
+          ).map(([mode, label, count]) => (
+            <button
+              aria-pressed={mode === 'mine'}
+              data-sbar-filter={mode}
+              key={mode}
+              type="button"
+              style={{
+                flex: 1,
+                border: 0,
+                borderRadius: 6,
+                padding: '4px 6px',
+                font: 'inherit',
+                fontSize: 12,
+                color: 'var(--fg)',
+                background: mode === 'mine' ? 'var(--select-fill)' : 'transparent',
+              }}
+            >
+              {label} <span style={{ opacity: 0.6 }}>{count}</span>
+            </button>
+          ))}
+        </fieldset>
+        <button
+          aria-label="List options"
+          type="button"
+          style={{
+            border: 0,
+            background: 'transparent',
+            color: 'var(--muted)',
+            fontSize: 18,
+            lineHeight: 1,
+            padding: '2px 6px',
+          }}
+        >
+          ⋯
+        </button>
       </div>
       <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
         {FERRETS.map(([title, callsign]) => (
@@ -281,25 +334,29 @@ const panelStand = (id: string) =>
     );
   };
 
-const stub = (id: string, screens: { id: string; path: string; label: string; order: number }[]) =>
+const stub = (id: string, screens: { id: string; path: string; label: string; order: number; icon: string }[]) =>
   manifestOf(id, {
-    ui: { screens: screens.map(s => ({ id: s.id, path: s.path, nav: { label: s.label, order: s.order } })) },
+    ui: {
+      screens: screens.map(s => ({ id: s.id, path: s.path, nav: { label: s.label, icon: s.icon, order: s.order } })),
+    },
   });
 
 const ferretsManifest = manifestOf('ferrets', {
   core: true,
   ui: {
     screens: [
-      { id: 'ferrets', path: 'ferrets', nav: { label: 'Ferrets', order: 5 } },
+      { id: 'ferrets', path: 'ferrets', nav: { label: 'Ferrets', icon: 'list', order: 5 } },
       { id: 'ferret', path: 'ferrets/:ferret' },
     ],
   },
 });
-const agendaManifest = stub('agenda', [{ id: 'agenda', path: 'agenda', label: 'Agenda', order: 1 }]);
-const boardManifest = stub('board', [{ id: 'board', path: 'board/:project?', label: 'Board', order: 2 }]);
+const agendaManifest = stub('agenda', [{ id: 'agenda', path: 'agenda', label: 'Agenda', icon: 'inbox', order: 1 }]);
+const boardManifest = stub('board', [
+  { id: 'board', path: 'board/:project?', label: 'Board', icon: 'columns', order: 2 },
+]);
 const usageManifest = manifestOf('usage', {
   ui: {
-    screens: [{ id: 'insights', path: 'insights', nav: { label: 'Insights', order: 3 } }],
+    screens: [{ id: 'insights', path: 'insights', nav: { label: 'Insights', icon: 'chart', order: 3 } }],
     panels: [],
   },
 });
