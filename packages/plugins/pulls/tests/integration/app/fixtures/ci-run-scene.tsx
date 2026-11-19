@@ -16,6 +16,11 @@ import { BIG_RUN, CANCELLED_RUN, FAILED_RUN, secondsAfterT0 } from '../../../fix
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+// The app's shell pins the page to the window; this scene is one scrolling page, so a full-page shot sees all of it.
+for (const element of [document.documentElement, document.body]) {
+  element.style.height = 'auto';
+  element.style.overflow = 'visible';
+}
 
 const LONG = (letter: string): string => letter.repeat(500);
 

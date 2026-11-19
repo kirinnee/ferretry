@@ -151,6 +151,8 @@ describe('the CI run page', () => {
       const { page, close, problems } = await open(variant, 'stopped');
       try {
         await page.locator('[data-ci-job="8"] button[aria-expanded]').click();
+        // The chevron turns over a moment; shoot it once it has.
+        await page.waitForTimeout(400);
         expect(await page.locator('[data-ci-step="2"] [data-ci-duration]').textContent()).toBe('9s');
         await noSidewaysScroll(page);
         await shot(page, variant, 'stopped');
