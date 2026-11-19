@@ -6,7 +6,7 @@ import { FakeSealedDocuments } from '@ferretry/core-vault/contract/testing';
 import type { SpawnOptions, SpawnResult, StatePort } from '@ferretry/kernel/contract';
 import { testHost } from '@ferretry/kernel/testing';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import type { GitAccountId } from '../../contract/index.ts';
+import type { GitAccountId, GitAccountsApi } from '../../contract/index.ts';
 import { GIT_ACCOUNT_TOKENS, GitAccountsPort, GitDeviceFlowStatusSchema } from '../../contract/index.ts';
 import { AccountBook } from '../../daemon/lib/accounts.ts';
 import { GithubDeviceFlows } from '../../daemon/lib/device-flow.ts';
@@ -438,8 +438,8 @@ describe('gh runs as an account, narrowed (review HIGH 1)', () => {
     await world.request('GET', `/v1/git-accounts/github/device/${flow.flowId}`);
     return { ...world, calls, port: world.host.provided(GitAccountsPort) };
   }
-  const run = (port: { run: Function }, args: string[]) =>
-    port.run('gha_4242' as never, { program: 'gh', args }) as Promise<unknown>;
+  const run = (port: Pick<GitAccountsApi, 'run'>, args: string[]) =>
+    port.run('gha_4242' as never, { program: 'gh', args });
 
   const REFUSED: readonly (readonly string[])[] = [
     ['auth', 'token'],
@@ -745,7 +745,11 @@ describe('device codes are dropped as soon as a flow ends (review MED 3)', () =>
     });
     const advance = (ms: number) => {
       now += ms;
-      for (const timer of timers) if (timer.live && timer.at <= now) (timer.live = false), timer.fn();
+      for (const timer of timers) {
+        if (!timer.live || timer.at > now) continue;
+        timer.live = false;
+        timer.fn();
+      }
     };
     return { flows, http, advance, book };
   }
@@ -856,5 +860,77 @@ describe('git-account.added is recorded once per connect, by account (review MED
     await wait(5);
     expect((await request('GET', `/v1/git-accounts/github/device/${flow.flowId}`)).status).toBe(502);
     expect(gate.audits).toEqual([]);
+  });
+});
+
+describe('the failure branches of the flow and the service', () => {
+  async function connected(github = new FakeGithub()) {
+    github.tokenAnswers = [{ access_token: FAKE_TOKEN, scope: 'read:user' }];
+    const world = await boot(github);
+    const flow = (await world.request('POST', '/v1/git-accounts/github/device')).json<{ flowId: string }>();
+    await world.wait(5);
+    await world.request('GET', `/v1/git-accounts/github/device/${flow.flowId}`);
+    return { ...world, github };
+  }
+
+  test('GitHub refusing to start a device sign-in is a 502 and no flow is kept', async () => {
+    const github = new FakeGithub();
+    github.deviceFails = true;
+    const { request } = await boot(github);
+    expect((await request('POST', '/v1/git-accounts/github/device')).status).toBe(502);
+  });
+
+  test('a poll answer that is not an answer, and an error nobody knows, are a 502 and file nothing', async () => {
+    for (const answer of ['nonsense', { error: 'unsupported_grant_type' }]) {
+      const github = new FakeGithub();
+      github.tokenAnswers = [answer as never];
+      const { request, wait } = await boot(github);
+      const flow = (await request('POST', '/v1/git-accounts/github/device')).json<{ flowId: string }>();
+      await wait(5);
+      expect((await request('GET', `/v1/git-accounts/github/device/${flow.flowId}`)).status).toBe(502);
+      expect((await request('GET', '/v1/git-accounts')).json()).toEqual([]);
+    }
+  });
+
+  test('an api body past the cap is a 413 and is never sent', async () => {
+    const { host, github } = await connected();
+    const sent = github.seen.length;
+    await expect(
+      host
+        .provided(GitAccountsPort)
+        .api('gha_4242' as never, { method: 'POST', path: '/user/keys', body: { key: 'x'.repeat(300 * 1024) } }),
+    ).rejects.toMatchObject({ status: 413 });
+    expect(github.seen).toHaveLength(sent);
+  });
+
+  test('an account whose sealed token is gone: api and run say to connect again, remove names its keys and still disconnects', async () => {
+    const { host, sealed, request } = await connected();
+    const port = host.provided(GitAccountsPort);
+    await port.recordKeys('gha_4242' as never, {
+      ssh: { githubKeyId: '11', title: 'auth key' },
+      signing: { githubKeyId: '22', title: 'signing key' },
+    });
+    await (sealed.handle as SealedDocumentHandle).delete('gha_4242' as never);
+    await expect(port.api('gha_4242' as never, { method: 'GET', path: '/user' })).rejects.toMatchObject({
+      status: 409,
+    });
+    await expect(port.run('gha_4242' as never, { program: 'gh', args: ['pr', 'list'] })).rejects.toMatchObject({
+      status: 409,
+    });
+    const removed = (await request('DELETE', '/v1/git-accounts/gha_4242')).json<{ keysLeftOnProvider: string[] }>();
+    expect(removed.keysLeftOnProvider).toEqual(['auth key', 'signing key']);
+    expect((await request('GET', '/v1/git-accounts')).json()).toEqual([]);
+  });
+
+  test('a key delete that never gets an answer is named for the person, and the account is still disconnected', async () => {
+    const github = new FakeGithub();
+    github.deleteThrows.add('/user/keys/11');
+    const { host, request } = await connected(github);
+    await host.provided(GitAccountsPort).recordKeys('gha_4242' as never, {
+      ssh: { githubKeyId: '11', title: 'unreachable key' },
+    });
+    const removed = (await request('DELETE', '/v1/git-accounts/gha_4242')).json<{ keysLeftOnProvider: string[] }>();
+    expect(removed.keysLeftOnProvider).toEqual(['unreachable key']);
+    expect((await request('GET', '/v1/git-accounts')).json()).toEqual([]);
   });
 });

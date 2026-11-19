@@ -28,6 +28,10 @@ export class FakeGithub {
   verificationUri = 'https://github.com/login/device';
   /** Statuses answered to DELETE of a key, by path. Default 204. */
   deleteStatus = new Map<string, number>();
+  /** When set, the device-code request is refused with a 500 (GitHub down, or an answer that is not a device grant). */
+  deviceFails = false;
+  /** Paths whose DELETE never answers (the network fails). */
+  deleteThrows = new Set<string>();
   #polls = 0;
 
   readonly fetch = async (url: URL, init?: RequestInit): Promise<Response> => {
@@ -59,6 +63,8 @@ export class FakeGithub {
       url.pathname !== '/user'
     )
       return new Response(null, { status: 304, headers: { etag: 'W/"abc123"', 'x-ratelimit-remaining': '4998' } });
+    if (url.host === 'github.com' && url.pathname === '/login/device/code' && this.deviceFails)
+      return json({ message: 'unavailable' }, 500);
     if (url.host === 'github.com' && url.pathname === '/login/device/code')
       return json({
         device_code: FAKE_DEVICE_CODE,
@@ -89,6 +95,8 @@ export class FakeGithub {
       return new Response(`<p>${headers.get('authorization')}</p>`, { headers: { 'content-type': 'text/html' } });
     if (url.host === 'api.github.com' && url.pathname === '/user' && init?.method !== 'DELETE')
       return json(this.user, this.userStatus);
+    if (url.host === 'api.github.com' && init?.method === 'DELETE' && this.deleteThrows.has(url.pathname))
+      throw new Error('network down');
     if (url.host === 'api.github.com' && init?.method === 'DELETE')
       return new Response(null, { status: this.deleteStatus.get(url.pathname) ?? 204 });
     if (url.host === 'api.github.com') return json({ ok: true, path: url.pathname });
