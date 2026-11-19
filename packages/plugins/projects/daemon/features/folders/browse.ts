@@ -8,8 +8,14 @@ import {
   type MakeFolderResult,
 } from '../../../contract/index.ts';
 import type { ProjectFolders } from '../../lib/ports.ts';
-import { belowHome, holdsSignIn, isPrivateFolder, parsePath } from './fence.ts';
+import { belowHome, holdsSignIn, isAtOrUnder, isPrivateFolder, parsePath, privateSpellings } from './fence.ts';
 import type { FolderBrowser, FolderVerdict, HeldFolder, RawFolderEntry } from './port.ts';
+
+/** The policy for ONE request: the verdict on a real path, and whether a real path is a private folder (a link to one included). */
+interface Policy {
+  readonly verdict: FolderVerdict;
+  readonly isPrivateReal: (real: string) => boolean;
+}
 
 const PRIVATE_MESSAGE = 'that folder holds keys or sign-ins and is not listed';
 /** One answer for every way a folder is out of reach (outside the home, a link out, missing and refused alike). */
@@ -28,8 +34,13 @@ const priv = (): ApiError => new ApiError(403, PRIVATE_MESSAGE, 'private_folder'
  * folder. It reads names, kinds and times only: never a file's content, never a link's target. It lists nothing outside
  * the home, nothing private (see `fence.ts`) and nothing through a link that leaves the home.
  *
+ * A private name is judged by its spelling only BEFORE the disk is touched (that answer is `private_folder` and says nothing
+ * about what exists). Everything the disk decided (a sign-in folder, a link into a private folder, a folder under either)
+ * answers the one `folder_refused`, so a guess cannot tell an existing private place from a missing one.
+ *
  * ONE policy judges every folder it touches: the real path (never the spelling alone) is the home or below it, is not
- * a private folder, and neither it nor any ancestor below the home holds a sign-in file. It judges the folder being
+ * a private folder (by name, and by where each private folder REALLY is: `~/.gnupg` linked to `~/dotfiles/gnupg` makes
+ * both private), and neither it nor any ancestor below the home holds a sign-in file. It judges the folder being
  * listed, each folder listed, every ancestor, the parent a folder is made in and the place it is made. A folder is held
  * open once and everything is read or made through that held object (see `adapter.ts`).
  */
@@ -46,16 +57,22 @@ export class FolderExplorer {
   async list(path: string, hidden: boolean): Promise<FolderListing> {
     const { browser } = this.deps;
     const home = await browser.home();
-    const { folder, below } = await this.hold(path, home);
+    const policy = await this.policy(home);
+    const { folder, below } = await this.hold(path, home, policy);
     try {
       const read = await folder.entries(READ_LIMIT);
       if (read === undefined) throw refused();
       // The held folder's own names are checked too: the home itself often holds a few and is the starting point.
-      if (below.length > 0 && holdsSignIn(read.entries.map(entry => entry.name))) throw priv();
+      if (below.length > 0 && holdsSignIn(read.entries.map(entry => entry.name))) throw refused();
 
       const kept = read.entries
         .filter(entry => hidden || !entry.name.startsWith('.'))
         .filter(entry => entry.kind !== 'directory' || !isPrivateFolder([...below, entry.name]))
+        .filter(
+          entry =>
+            entry.kind !== 'directory' ||
+            !policy.isPrivateReal(`${folder.real === '/' ? '' : folder.real}/${entry.name}`),
+        )
         .sort(byKindThenName);
       const shown = await this.firstShown(kept, folder.real);
       const listed: FolderEntry[] = [];
@@ -91,23 +108,30 @@ export class FolderExplorer {
       const named = belowHome(parsed.absolute, home);
       if (named !== undefined && isPrivateFolder([...named, request.name])) throw priv();
     }
-    const { folder, below } = await this.hold(request.parent, home);
+    const policy = await this.policy(home);
+    const { folder, below } = await this.hold(request.parent, home, policy);
     try {
-      // The destination against the private names BEFORE the existence test, so it cannot be probed through it.
-      if (isPrivateFolder([...below, request.name])) throw priv();
+      // The destination against the private names BEFORE the existence test, so it cannot be probed through it. The parent
+      // is a real path by now: this is the disk's answer, so it is the one refusal.
+      if (isPrivateFolder([...below, request.name])) throw refused();
       const target = `${folder.real === '/' ? '' : folder.real}/${request.name}`;
+      if (policy.isPrivateReal(target)) throw refused();
+      // What is already there is looked at WITHOUT following it: a link (to anywhere) is only "already there" and nothing
+      // beyond the link is touched, so the answer says nothing about a folder outside the home.
+      const found = await folder.lookup(request.name);
+      if (found === 'link') throw new ApiError(409, 'something with that name is already there', 'folder_exists');
       if (!(await folders.mayName(target))) throw refused();
-      // A destination that already exists and holds a sign-in marker (any spelling) is refused as the folder it is, BEFORE
+      // A real folder that already exists and holds a sign-in marker (any spelling) is refused as the folder it is, BEFORE
       // "already there" can say so.
-      if (await browser.holdsSignIn(target)) throw refused();
-      const made = await folder.makeLeaf(request.name, this.verdict(home));
+      if (found === 'present' && (await browser.holdsSignIn(target))) throw refused();
+      const made = await folder.makeLeaf(request.name, policy.verdict);
       switch (made.kind) {
         case 'made':
           return { path: made.path };
         case 'exists':
           throw new ApiError(409, 'something with that name is already there', 'folder_exists');
         case 'refused':
-          throw made.reason === 'private' ? priv() : refused();
+          throw refused();
         case 'failed':
           throw new ApiError(422, 'the folder could not be created', 'folder_not_created');
       }
@@ -117,14 +141,21 @@ export class FolderExplorer {
   }
 
   /**
-   * The one policy, on a REAL path: the home or inside it, not a private folder, and no folder from the first below the
-   * home down to this one holds a sign-in file (the home itself often does and is the starting point).
+   * The one policy for a request, on a REAL path: the home or inside it, not a private folder (by name, nor at or under
+   * where any private folder REALLY is), and no folder from the first below the home down to this one holds a sign-in file
+   * (the home itself often does and is the starting point). Where each private folder really is is read once per request.
    */
-  private verdict(home: string): FolderVerdict {
+  private async policy(home: string): Promise<Policy> {
+    const roots = await this.deps.browser.realPaths(privateSpellings(home));
+    const isPrivateReal = (real: string): boolean => roots.some(root => isAtOrUnder(real, root));
+    return { verdict: this.verdict(home, isPrivateReal), isPrivateReal };
+  }
+
+  private verdict(home: string, isPrivateReal: (real: string) => boolean): FolderVerdict {
     return async real => {
       const below = belowHome(real, home);
       if (below === undefined) return 'outside';
-      if (isPrivateFolder(below)) return 'private';
+      if (isPrivateFolder(below) || isPrivateReal(real)) return 'private';
       let path = home.replace(/\/+$/, '');
       for (const segment of below) {
         path = `${path}/${segment}`;
@@ -135,7 +166,11 @@ export class FolderExplorer {
   }
 
   /** `path` named, held open, and proved by where it REALLY is to be the home or inside it and not private. */
-  private async hold(path: string, home: string): Promise<{ folder: HeldFolder; below: readonly string[] }> {
+  private async hold(
+    path: string,
+    home: string,
+    policy: Policy,
+  ): Promise<{ folder: HeldFolder; below: readonly string[] }> {
     const parsed = parsePath(path, home);
     if (!parsed.ok) throw new ApiError(400, parsed.message, 'invalid_path');
     // The home boundary and the private names, by the spelling, BEFORE any probe: a place outside the home, or a private
@@ -143,11 +178,9 @@ export class FolderExplorer {
     const named = belowHome(parsed.absolute, home);
     if (named === undefined) throw refused();
     if (isPrivateFolder(named)) throw priv();
-    const opened = await this.deps.browser.open(parsed.absolute, this.verdict(home));
+    const opened = await this.deps.browser.open(parsed.absolute, policy.verdict);
     if (!opened.ok) {
       switch (opened.reason) {
-        case 'private':
-          throw priv();
         case 'not_folder':
           throw new ApiError(422, 'that is not a folder', 'not_a_folder');
         default:

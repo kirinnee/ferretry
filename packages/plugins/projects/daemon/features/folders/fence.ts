@@ -32,8 +32,18 @@ const PRIVATE_FOLDERS: readonly (readonly string[])[] = [
   ['.local', 'share', 'keyrings'],
 ];
 
+/** Every private folder as an absolute spelling under `home`: the paths whose REAL location is then looked up per request. */
+export const privateSpellings = (home: string): readonly string[] => {
+  const base = home.replace(/\/+$/, '');
+  return PRIVATE_FOLDERS.map(folder => `${base}/${folder.join('/')}`);
+};
+
+/** Whether the real path `real` is `root` or inside it. */
+export const isAtOrUnder = (real: string, root: string): boolean =>
+  real === root || real.startsWith(root.endsWith('/') ? root : `${root}/`);
+
 /** A folder that directly holds one of these is a sign-in or key folder wherever it sits, and is not listed. */
-export const SIGN_IN_FILES: readonly string[] = [
+const SIGN_IN_FILES: readonly string[] = [
   '.credentials.json',
   'auth.json',
   'hosts.yml',

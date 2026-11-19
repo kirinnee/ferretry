@@ -46,6 +46,11 @@ function machine(tree: Tree, options: Machine = {}) {
       calls.push(`holdsSignIn ${path}`);
       return holdsSignIn(names(path));
     },
+    realPaths: async paths =>
+      paths.flatMap(path => {
+        const real = links[path] ?? path;
+        return real in tree ? [real] : [];
+      }),
     open: async (path, verdict) => {
       calls.push(`open ${path}`);
       const named = links[path] ?? path;
@@ -67,6 +72,11 @@ function machine(tree: Tree, options: Machine = {}) {
             return kind === 'symlink' || kind === ('other' as string) ? [] : [{ name, kind, modified: AT }];
           });
           return { entries: items.slice(0, limit), more: items.length > limit };
+        },
+        lookup: async name => {
+          const item = (tree[real] ?? []).find(entry => (typeof entry === 'string' ? entry : entry[0]) === name);
+          if (item === undefined) return 'missing';
+          return kindOf(name, item) === 'symlink' ? 'link' : 'present';
         },
         hasGit: async name => git.includes(`${real}/${name}`),
         makeLeaf: async (name, judge): Promise<LeafMade> => {
@@ -205,8 +215,9 @@ describe('FolderExplorer.list', () => {
     expect((await failure(() => explorer.list('~/.ssh', true))).code).toBe('private_folder');
     expect((await failure(() => explorer.list('~/.SSH', true))).code).toBe('private_folder');
     expect((await failure(() => explorer.list('~/.config/gh', true))).code).toBe('private_folder');
-    expect((await failure(() => explorer.list('~/keys', false))).code).toBe('private_folder');
-    expect((await failure(() => explorer.list('~/innocent', false))).code).toBe('private_folder');
+    // What the disk decides (a sign-in folder, a link into a private folder) is the one refusal, never "private".
+    expect((await failure(() => explorer.list('~/keys', false))).code).toBe('folder_refused');
+    expect((await failure(() => explorer.list('~/innocent', false))).code).toBe('folder_refused');
     expect((await failure(() => explorer.list('~/nope', false))).code).toBe('folder_refused');
     expect((await failure(() => explorer.list('code', false))).status).toBe(400);
     expect((await failure(() => explorer.list('~/../etc', false))).status).toBe(400);
@@ -214,12 +225,12 @@ describe('FolderExplorer.list', () => {
 
   test('one credential policy: a folder UNDER a sign-in folder is refused too, and so is each way to it', async () => {
     const { explorer } = machine(BASE, { links: { [`${HOME}/short`]: `${HOME}/keys/sub/deeper` } });
-    expect((await failure(() => explorer.list('~/keys/sub', false))).code).toBe('private_folder');
-    expect((await failure(() => explorer.list('~/keys/sub/deeper', false))).code).toBe('private_folder');
-    expect((await failure(() => explorer.list('~/short', false))).code).toBe('private_folder');
+    expect((await failure(() => explorer.list('~/keys/sub', false))).code).toBe('folder_refused');
+    expect((await failure(() => explorer.list('~/keys/sub/deeper', false))).code).toBe('folder_refused');
+    expect((await failure(() => explorer.list('~/short', false))).code).toBe('folder_refused');
     // A folder that holds one of its own marks in a different case is the same folder on a disk that folds case.
     const mixed = machine({ ...BASE, [`${HOME}/Docs`]: ['ID_ED25519'] });
-    expect((await failure(() => mixed.explorer.list('~/Docs', false))).code).toBe('private_folder');
+    expect((await failure(() => mixed.explorer.list('~/Docs', false))).code).toBe('folder_refused');
   });
 
   test('one fold for the marker check in every place: the listed folder, a listed child, an ancestor, the write parent, the destination', async () => {
@@ -238,13 +249,13 @@ describe('FolderExplorer.list', () => {
     };
     const { explorer, made } = machine(tree);
     // The listed folder.
-    expect((await failure(() => explorer.list('~/a', false))).code).toBe('private_folder');
+    expect((await failure(() => explorer.list('~/a', false))).code).toBe('folder_refused');
     // A listed child: shown by the parent only when it holds no marker in any spelling.
     expect((await explorer.list('~/b', false)).entries.map(entry => entry.name)).toEqual(['plain']);
     // An ancestor below the home.
-    expect((await failure(() => explorer.list('~/c/inner', false))).code).toBe('private_folder');
+    expect((await failure(() => explorer.list('~/c/inner', false))).code).toBe('folder_refused');
     // The write parent.
-    expect((await failure(() => explorer.make({ parent: '~/d', name: 'x' }))).code).toBe('private_folder');
+    expect((await failure(() => explorer.make({ parent: '~/d', name: 'x' }))).code).toBe('folder_refused');
     // The destination: an existing folder holding a marker is refused as the folder it is, before "already there".
     const destination = await failure(() => explorer.make({ parent: '~/e', name: 'dest' }));
     expect([destination.status, destination.code]).toEqual([403, 'folder_refused']);
@@ -254,7 +265,7 @@ describe('FolderExplorer.list', () => {
 
   test('a folder is listed from the object held, and a hold that is not the folder judged is refused unread', async () => {
     const swapped = machine(BASE, { swapped: { [`${HOME}/code`]: `${HOME}/.ssh` } });
-    expect((await failure(() => swapped.explorer.list('~/code', true))).code).toBe('private_folder');
+    expect((await failure(() => swapped.explorer.list('~/code', true))).code).toBe('folder_refused');
     expect(swapped.calls.some(call => call.startsWith('entries'))).toBe(false);
     const out = machine(BASE, { swapped: { [`${HOME}/code`]: '/etc' } });
     expect((await failure(() => out.explorer.list('~/code', true))).code).toBe('folder_refused');
@@ -324,8 +335,8 @@ describe('FolderExplorer.make', () => {
 
   test('the one policy: not in a sign-in folder or under one, and the destination is judged before it is looked up', async () => {
     const { explorer, made, calls } = machine(BASE);
-    expect((await failure(() => explorer.make({ parent: '~/keys', name: 'x' }))).code).toBe('private_folder');
-    expect((await failure(() => explorer.make({ parent: '~/keys/sub', name: 'x' }))).code).toBe('private_folder');
+    expect((await failure(() => explorer.make({ parent: '~/keys', name: 'x' }))).code).toBe('folder_refused');
+    expect((await failure(() => explorer.make({ parent: '~/keys/sub', name: 'x' }))).code).toBe('folder_refused');
     // `.config/gh` exists, and `.config/gcloud` does not: both are refused as private, never as taken or as free.
     for (const name of ['gh', 'GH', 'Gh', 'gcloud']) {
       calls.length = 0;
@@ -354,14 +365,108 @@ describe('FolderExplorer.make', () => {
       madeReaches: { [`${HOME}/code/swapped`]: '/etc', [`${HOME}/code/inkeys`]: `${HOME}/.ssh` },
     });
     expect((await failure(() => explorer.make({ parent: '~/code', name: 'swapped' }))).code).toBe('folder_refused');
-    expect((await failure(() => explorer.make({ parent: '~/code', name: 'inkeys' }))).code).toBe('private_folder');
+    expect((await failure(() => explorer.make({ parent: '~/code', name: 'inkeys' }))).code).toBe('folder_refused');
     expect(made).toEqual([`${HOME}/code/swapped`, `${HOME}/code/inkeys`]);
     expect(removed).toEqual(made);
   });
 
   test('the parent held is not the one named: judged again by what it is', async () => {
     const { explorer, made } = machine(BASE, { swapped: { [`${HOME}/code`]: `${HOME}/.ssh` } });
-    expect((await failure(() => explorer.make({ parent: '~/code', name: 'x' }))).code).toBe('private_folder');
+    expect((await failure(() => explorer.make({ parent: '~/code', name: 'x' }))).code).toBe('folder_refused');
+    expect(made).toEqual([]);
+  });
+});
+
+describe('private folders reached through a link inside the home (stow / dotfiles)', () => {
+  /** `~/.gnupg`, `~/.aws` and `~/.ssh` are links to folders kept in `~/dotfiles`; the keys there are not marker names. */
+  const stowed = () =>
+    machine(
+      {
+        ...BASE,
+        [HOME]: [...(BASE[HOME] as string[]), 'dotfiles', ['.gnupg', 'symlink'], ['.aws', 'symlink']],
+        [`${HOME}/dotfiles`]: ['gnupg', 'aws', 'ssh', 'plain'],
+        [`${HOME}/dotfiles/gnupg`]: ['private-keys-v1.d', 'sub'],
+        [`${HOME}/dotfiles/gnupg/sub`]: [],
+        [`${HOME}/dotfiles/aws`]: ['credentials'],
+        [`${HOME}/dotfiles/ssh`]: ['id_work_ed25519'],
+        [`${HOME}/dotfiles/plain`]: ['fine'],
+        [`${HOME}/dotfiles/plain/fine`]: [],
+      },
+      {
+        links: {
+          [`${HOME}/.gnupg`]: `${HOME}/dotfiles/gnupg`,
+          [`${HOME}/.aws`]: `${HOME}/dotfiles/aws`,
+          [`${HOME}/.ssh`]: `${HOME}/dotfiles/ssh`,
+        },
+      },
+    );
+
+  test('the folder a private name links to is private itself, and so is everything under it', async () => {
+    const { explorer, made } = stowed();
+    for (const path of ['~/dotfiles/gnupg', '~/dotfiles/gnupg/sub', '~/dotfiles/aws', '~/dotfiles/ssh'])
+      expect((await failure(() => explorer.list(path, true))).code).toBe('folder_refused');
+    for (const parent of ['~/dotfiles/gnupg', '~/dotfiles/gnupg/sub', '~/dotfiles/aws', '~/dotfiles/ssh'])
+      expect((await failure(() => explorer.make({ parent, name: 'x' }))).code).toBe('folder_refused');
+    expect(made).toEqual([]);
+    // The rest of the dotfiles folder is ordinary, and does not name the private ones.
+    const listing = await explorer.list('~/dotfiles', true);
+    expect(listing.entries.map(entry => entry.name)).toEqual(['plain']);
+    expect((await explorer.make({ parent: '~/dotfiles/plain', name: 'ok' })).path).toBe(`${HOME}/dotfiles/plain/ok`);
+  });
+
+  test('a destination that is such a folder is refused, never made or reported taken', async () => {
+    const { explorer, made } = stowed();
+    for (const name of ['gnupg', 'aws', 'ssh'])
+      expect((await failure(() => explorer.make({ parent: '~/dotfiles', name }))).code).toBe('folder_refused');
+    expect(made).toEqual([]);
+  });
+});
+
+describe('what the disk decided answers the same whether or not the place exists', () => {
+  const answer = async (run: () => Promise<unknown>) => {
+    const error = await failure(run);
+    return [error.status, error.code, error.message].join(' ');
+  };
+
+  test('a guessed path under a sign-in folder or a link into a private folder, listed or written', async () => {
+    const { explorer } = machine(BASE, { links: { [`${HOME}/innocent`]: `${HOME}/.ssh` } });
+    const pairs: [string, string][] = [
+      ['~/keys/sub', '~/keys/nothing-here'],
+      ['~/keys', '~/keys-missing'],
+      ['~/innocent', '~/nowhere'],
+      ['~/innocent/id_work_ed25519', '~/innocent/guess'],
+    ];
+    for (const [present, absent] of pairs) {
+      expect(await answer(() => explorer.list(present, false))).toBe(await answer(() => explorer.list(absent, false)));
+      expect(await answer(() => explorer.make({ parent: present, name: 'x' }))).toBe(
+        await answer(() => explorer.make({ parent: absent, name: 'x' })),
+      );
+    }
+    expect(await answer(() => explorer.list('~/keys/sub', false))).toBe(
+      '403 folder_refused that folder is not there, or cannot be listed',
+    );
+  });
+});
+
+describe('an existing destination is looked at without being followed', () => {
+  test('a link there is "already there" (409) whatever it points at, and nothing behind it is opened', async () => {
+    const { explorer, made, calls } = machine(
+      {
+        ...BASE,
+        [HOME]: [...(BASE[HOME] as string[]), ['to-out', 'symlink'], ['to-keys', 'symlink'], ['to-nothing', 'symlink']],
+        '/outside': ['id_rsa'],
+      },
+      { links: { [`${HOME}/to-out`]: '/outside', [`${HOME}/to-keys`]: `${HOME}/keys` } },
+    );
+    for (const name of ['to-out', 'to-keys', 'to-nothing']) {
+      calls.length = 0;
+      const taken = await failure(() => explorer.make({ parent: '~', name }));
+      expect([taken.status, taken.code]).toEqual([409, 'folder_exists']);
+      expect(calls.filter(call => call.startsWith('holdsSignIn /') && !call.startsWith(`holdsSignIn ${HOME}`))).toEqual(
+        [],
+      );
+      expect(calls.some(call => call.includes(name))).toBe(false);
+    }
     expect(made).toEqual([]);
   });
 });

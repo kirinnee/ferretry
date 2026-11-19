@@ -69,17 +69,20 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
     }
   };
 
-  const exists = async (folder: string, name: string): Promise<boolean> => {
+  /** What is at `<folder>/<name>`, the leaf not followed. A name the root refuses is not one to make over: a link. */
+  const leafAt = async (folder: string, name: string): Promise<'missing' | 'link' | 'present'> => {
     const root = handle(folder);
     const fenced = root.resolve(name);
-    if (!fenced.ok) return true;
+    if (!fenced.ok) return 'link';
     try {
-      return (await root.lstat(fenced.value)) !== undefined;
+      const found = await root.lstat(fenced.value);
+      if (found === undefined) return 'missing';
+      return found.kind === 'symlink' ? 'link' : 'present';
     } catch {
-      // A name the root refuses is not one to make over either.
-      return true;
+      return 'link';
     }
   };
+  const exists = async (folder: string, name: string): Promise<boolean> => (await leafAt(folder, name)) !== 'missing';
 
   /** Resolves, judges, holds, and judges what is really held. */
   const hold = async (
@@ -139,6 +142,7 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
           return undefined;
         }
       },
+      lookup: name => leafAt(pinned.rootReal, name),
       hasGit: async name => {
         try {
           const target = await pinned.open(`${name}/.git`);
@@ -188,6 +192,10 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
     home: async () => {
       const home = kernel.paths.home();
       return (await realOf(home)) ?? home;
+    },
+    realPaths: async paths => {
+      const real = await Promise.all(paths.map(realOf));
+      return real.filter((path): path is string => path !== undefined);
     },
     open: async (path, verdict) => {
       const held = await hold(path, verdict);

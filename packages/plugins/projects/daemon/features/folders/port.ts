@@ -37,6 +37,11 @@ export interface HeldFolder {
   readonly real: string;
   /** The names in the held folder, files and folders only (a link is never listed); `more` when it held more than `limit`. */
   entries(limit: number): Promise<{ readonly entries: readonly RawFolderEntry[]; readonly more: boolean } | undefined>;
+  /**
+   * What is AT `<held>/<name>`, the leaf never followed: nothing, a link (or a name the machine refuses to look at), or
+   * something else that is there.
+   */
+  lookup(name: string): Promise<'missing' | 'link' | 'present'>;
   /** Whether `<held>/<name>/.git` exists (a folder, or the file a work tree keeps). */
   hasGit(name: string): Promise<boolean>;
   /**
@@ -66,4 +71,6 @@ export interface FolderBrowser {
    * cannot be read answers `true`; a file or a missing name, `false`.
    */
   holdsSignIn(path: string): Promise<boolean>;
+  /** The real path (links resolved) of each of `paths` that exists and resolves; the others are left out. */
+  realPaths(paths: readonly string[]): Promise<readonly string[]>;
 }
