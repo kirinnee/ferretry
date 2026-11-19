@@ -117,7 +117,7 @@ describe('app parity', () => {
         clickEvent(),
       ),
     );
-    expect(hub.container.querySelector('section[aria-label="Create a project"]')).not.toBeNull();
+    expect(hub.container.querySelector('[role="dialog"][aria-label="Create a project"]')).not.toBeNull();
     await hub.unmount();
   });
 

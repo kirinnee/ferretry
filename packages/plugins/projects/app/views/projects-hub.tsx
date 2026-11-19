@@ -26,21 +26,24 @@
  */
 
 import type { ProjectsConnectAccount, RegisterProjectRequest } from '../../contract/index.ts';
-import { FolderOpen, Plus, TriangleAlert } from 'lucide-react';
+import { ChoiceCards } from '@ferretry/app';
+import { FolderOpen, GitBranch, Plus, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import type { RecentProjectOption } from '../lib/discoveries.ts';
 import type { ProjectsSlice } from '../lib/projects-store.ts';
 import { CreateProjectFlow } from '../features/create-project/create-project-flow.tsx';
+import type { CreateDraft } from '../features/create-project/create-project-model.ts';
 import type { ProjectsClient } from '../lib/client.ts';
 import { AddProjectForm } from './add-project-form.tsx';
 import { ProjectDiscoveries } from './project-discoveries.tsx';
-import { ProjectProvenance } from './project-provenance.tsx';
+
 import { Loading, RouteLink } from '@ferretry/app/ui';
 import {
   confirmDiscoveryRequest,
   emptyProjectRegistrationDraft,
   type ProjectRegistrationDraft,
   type ProjectRegistrationStatus,
+  projectSourceLabel,
 } from '../lib/registration-model.ts';
 
 interface ProjectsHubProps {
@@ -80,6 +83,22 @@ interface ProjectsHubProps {
 }
 
 const FORM_ID = 'add-project-form';
+
+/** The empty state's two ways in: each opens the create stepper on its own first page. */
+const FIRST_PROJECT = [
+  {
+    id: 'folder',
+    title: 'A folder on this machine',
+    line: 'Use a folder that is already here, or make a new one.',
+    icon: <FolderOpen size={18} aria-hidden="true" />,
+  },
+  {
+    id: 'clone',
+    title: 'Clone a repository',
+    line: 'Download a repository into a folder you pick.',
+    icon: <GitBranch size={18} aria-hidden="true" />,
+  },
+] as const;
 
 /** What just happened, said in a way a reader can act on. */
 function RegisteredNotice({
@@ -130,6 +149,7 @@ export function ProjectsHub({
 }: ProjectsHubProps) {
   const [draft, setDraft] = useState<ProjectRegistrationDraft>(emptyProjectRegistrationDraft);
   const [open, setOpen] = useState(initiallyOpen);
+  const [source, setSource] = useState<CreateDraft['source']>('folder');
   const projects = slice.projects;
   const unread = projects === null;
   const loading = slice.status === 'idle' || slice.status === 'loading';
@@ -142,23 +162,25 @@ export function ProjectsHub({
     });
   };
 
+  const heading = open && client !== undefined ? 'h2' : 'h1';
+  const Heading = heading;
+  const startCreate = (next: CreateDraft['source']): void => {
+    setSource(next);
+    setOpen(true);
+  };
+
   return (
     // Its own scroller: the page host gives it a fixed height and clips, so a phone could not reach the
     // discoveries below the fold.
-    <section
-      className="grid h-full min-h-0 content-start gap-panel overflow-y-auto p-panel"
-      aria-labelledby="projects-heading"
-    >
-      <div className="kt-panel grid gap-panel p-panel">
-        <div className="flex flex-wrap items-start justify-between gap-md">
+    <section className="h-full min-h-0 overflow-y-auto p-panel" aria-labelledby="projects-heading">
+      <div className="mx-auto grid w-full max-w-[640px] content-start gap-panel">
+        <header className="flex flex-wrap items-start justify-between gap-md">
           <div className="grid min-w-0 gap-xs">
-            <p className="m-0 text-meta font-semibold uppercase tracking-wide text-muted">Workspace registry</p>
-            <h1 className="m-0 font-display text-display font-bold tracking-display" id="projects-heading">
+            <Heading className="m-0 font-display text-display font-bold tracking-display" id="projects-heading">
               Projects
-            </h1>
+            </Heading>
             <p className="m-0 max-w-prose text-ui leading-base text-muted">
-              Folders this daemon has deliberately registered. A folder a ferret used is a discovery until you confirm
-              it.
+              The folders this machine knows by name. A folder a ferret used stays a discovery until you confirm it.
             </p>
           </div>
           <button
@@ -167,12 +189,12 @@ export function ProjectsHub({
             data-variant={open ? undefined : 'primary'}
             aria-expanded={open}
             aria-controls={FORM_ID}
-            onClick={() => setOpen(current => !current)}
+            onClick={() => (open ? setOpen(false) : startCreate('folder'))}
           >
             <Plus size={14} aria-hidden="true" />
             Add project
           </button>
-        </div>
+        </header>
         {open && (
           <div id={FORM_ID}>
             {client === undefined ? (
@@ -186,6 +208,7 @@ export function ProjectsHub({
             ) : (
               <CreateProjectFlow
                 client={client}
+                initialSource={source}
                 {...(connectAccount === undefined ? {} : { connectAccount })}
                 status={status}
                 onRegister={onRegister}
@@ -196,78 +219,94 @@ export function ProjectsHub({
             )}
           </div>
         )}
-      </div>
 
-      <RegisteredNotice status={status} onDismiss={onDismiss} />
+        <RegisteredNotice status={status} onDismiss={onDismiss} />
 
-      {slice.status === 'error' && (
-        <p className="kt-panel m-0 flex items-start gap-sm p-panel text-ui text-err" role="alert">
-          <TriangleAlert className="mt-0.5 shrink-0" size={16} aria-hidden="true" />
-          Could not read this daemon’s project registry: {slice.error}
-        </p>
-      )}
+        {slice.status === 'error' && (
+          <p className="m-0 flex items-start gap-sm text-ui text-err" role="alert">
+            <TriangleAlert className="mt-0.5 shrink-0" size={16} aria-hidden="true" />
+            Could not read this daemon’s project registry: {slice.error}
+          </p>
+        )}
 
-      {unread && loading ? (
-        <Loading kind="page" label="Loading registered projects…" />
-      ) : (
-        <section className="kt-panel grid gap-sm p-panel" aria-labelledby="registered-projects-heading">
-          <h2
-            className="m-0 flex items-center gap-xs text-title font-semibold text-fg"
-            id="registered-projects-heading"
-          >
-            <FolderOpen className="text-muted" size={16} aria-hidden="true" />
-            Registered
-            {!unread && projects.length > 0 && (
-              <span className="rounded-control bg-surface-2 px-1.5 py-0.5 text-meta font-medium text-muted">
-                {projects.length}
-              </span>
+        {unread && loading ? (
+          <Loading kind="page" label="Loading registered projects…" />
+        ) : (
+          <section className="grid gap-sm" aria-labelledby="registered-projects-heading">
+            <h2
+              className="m-0 flex items-center gap-xs text-title font-semibold text-fg"
+              id="registered-projects-heading"
+            >
+              <FolderOpen className="text-muted" size={16} aria-hidden="true" />
+              Registered
+              {!unread && projects.length > 0 && (
+                <span className="rounded-control bg-surface-2 px-1.5 py-0.5 text-meta font-medium text-muted">
+                  {projects.length}
+                </span>
+              )}
+            </h2>
+            {unread ? (
+              <p className="m-0 text-meta leading-base text-faint" data-registered-state="unread">
+                Ferretry has not read this registry, so it cannot say what is in it.
+              </p>
+            ) : projects.length === 0 ? (
+              <div className="grid gap-sm" data-registered-state="empty">
+                <p className="m-0 text-meta leading-base text-faint">No projects registered yet. Start with one:</p>
+                {client === undefined ? null : (
+                  <ChoiceCards
+                    label="Add your first project"
+                    options={FIRST_PROJECT}
+                    value={null}
+                    onChange={id => startCreate(id === 'clone' ? 'clone' : 'folder')}
+                  />
+                )}
+              </div>
+            ) : (
+              <ul className="m-0 grid list-none divide-y divide-border-soft p-0">
+                {projects.map(project => (
+                  <li
+                    className="grid min-w-0 gap-0 py-2"
+                    data-registered-project={project.path}
+                    key={project.id ?? project.path}
+                  >
+                    {project.id === undefined || projectHref === undefined ? (
+                      <h3 className="m-0 text-ui font-semibold text-fg">{project.name}</h3>
+                    ) : (
+                      <h3 className="m-0 leading-tight">
+                        <RouteLink
+                          to={projectHref(project.id)}
+                          {...(onNavigate === undefined ? {} : { onNavigate })}
+                          className="inline-flex min-h-0 items-center py-0.5 text-left text-ui font-semibold text-fg underline-offset-4 hover:text-accent hover:underline"
+                        >
+                          {project.name}
+                        </RouteLink>
+                      </h3>
+                    )}
+                    <p
+                      className="m-0 min-w-0 text-meta leading-tight text-muted"
+                      data-project-provenance={project.path}
+                    >
+                      <span className="mono break-all">{project.path}</span>
+                      {projectSourceLabel(project.source) !== null && (
+                        <span data-project-source={project.source}> · {projectSourceLabel(project.source)}</span>
+                      )}
+                      {project.git !== undefined && <span> · git</span>}
+                    </p>
+                  </li>
+                ))}
+              </ul>
             )}
-          </h2>
-          {unread ? (
-            <p className="m-0 text-meta leading-base text-faint" data-registered-state="unread">
-              Ferretry has not read this registry, so it cannot say what is in it.
-            </p>
-          ) : projects.length === 0 ? (
-            <p className="m-0 text-meta leading-base text-faint" data-registered-state="empty">
-              No projects registered. Add an existing folder, create one, clone a repository, or confirm a discovery
-              below.
-            </p>
-          ) : (
-            <ul className="m-0 grid list-none gap-xs p-0">
-              {projects.map(project => (
-                <li
-                  className="grid min-w-0 gap-1 rounded-control border border-border-soft bg-surface-2 px-control-x py-2"
-                  data-registered-project={project.path}
-                  key={project.id ?? project.path}
-                >
-                  {project.id === undefined || projectHref === undefined ? (
-                    <h3 className="m-0 text-ui font-semibold text-fg">{project.name}</h3>
-                  ) : (
-                    <h3 className="m-0">
-                      <RouteLink
-                        to={projectHref(project.id)}
-                        {...(onNavigate === undefined ? {} : { onNavigate })}
-                        className="inline-flex min-h-control items-center text-left text-ui font-semibold text-fg underline-offset-4 hover:text-accent hover:underline"
-                      >
-                        {project.name}
-                      </RouteLink>
-                    </h3>
-                  )}
-                  <ProjectProvenance project={project} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
+          </section>
+        )}
 
-      <ProjectDiscoveries
-        discoveries={discoveries}
-        ferretsError={ferretsError}
-        status={status}
-        onConfirm={path => submit(confirmDiscoveryRequest(path))}
-        now={now}
-      />
+        <ProjectDiscoveries
+          discoveries={discoveries}
+          ferretsError={ferretsError}
+          status={status}
+          onConfirm={path => submit(confirmDiscoveryRequest(path))}
+          now={now}
+        />
+      </div>{' '}
     </section>
   );
 }

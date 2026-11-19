@@ -44,7 +44,6 @@ const step = (mounted: Mounted, name: string) =>
 const createAt = async (mounted: Mounted): Promise<void> => {
   await press(must(mounted.container.querySelector('[aria-controls="add-project-form"]'), 'the disclosure'));
   await settled(mounted, c => c.querySelector('[data-explorer-state="ready"]') !== null, 'the explorer');
-  await press(button(mounted, 'Use this folder'));
   await press(button(mounted, 'Next'));
   await step(mounted, 'name');
   await press(button(mounted, 'Create project'));
@@ -93,7 +92,7 @@ describe('Create a project', () => {
     expect(must(mounted.container.querySelector('[data-create-keys-ready]'), 'the note').textContent).toContain(
       '@hubot already has a key',
     );
-    await press(button(mounted, 'Set up push and signing for this account'));
+    await press(button(mounted, 'Set up push and signing'));
     await settled(mounted, c => (c.textContent ?? '').includes('SHA256:abc'), 'the key');
     expect(calls.find(call => call.route === KEYS)).toMatchObject({
       params: { id: 'gha_1' },
@@ -103,12 +102,14 @@ describe('Create a project', () => {
 
     await step(mounted, 'done');
     expect(must(mounted.container.querySelector('[data-create-done]'), 'done').textContent).toContain(
-      'scratch is ready.',
+      '/home/k/scratch',
     );
+    expect(must(mounted.container.querySelector('h1'), 'the page title').textContent).toBe('scratch is ready');
     expect(mounted.container.querySelectorAll('[data-project-account]').length).toBe(2);
-    expect(must(mounted.container.querySelector('[data-create-done] a'), 'the link').getAttribute('href')).toBe(
-      `/d/workstation/projects/${ANSWERED.id}`,
-    );
+    // The page's Next opens the project through the router and closes the stepper.
+    await press(button(mounted, 'Open the project'));
+    expect(window.location.pathname).toBe(`/d/workstation/projects/${ANSWERED.id}`);
+    expect(mounted.container.querySelector('[data-create-sheet]')).toBeNull();
     await mounted.unmount();
   });
 
@@ -147,7 +148,7 @@ describe('Create a project', () => {
     await press(must(second.container.querySelector('[data-create-account="gha_1"] input'), 'octocat'));
     await press(button(second, 'Link this account'));
     await step(second, 'keys');
-    await press(button(second, 'Set up push and signing for this account'));
+    await press(button(second, 'Set up push and signing'));
     await settled(second, c => (c.textContent ?? '').includes(KEY_REFUSED), 'the key refusal');
     await second.unmount();
   });
@@ -268,7 +269,7 @@ describe('Create a project', () => {
     await press(button(mounted, 'Confirm it’s you to see this'));
     await settled(mounted, c => c.querySelector('[data-create-key-account="gha_3"]') !== null, 'the key offer');
     expect(mounted.container.querySelector('[data-create-keys="unchecked"]')).toBeNull();
-    await press(button(mounted, 'Set up push and signing for this account'));
+    await press(button(mounted, 'Set up push and signing'));
     await settled(mounted, c => (c.textContent ?? '').includes('SHA256:new'), 'the key');
     await mounted.unmount();
   });
@@ -323,14 +324,13 @@ describe('Create a project', () => {
     const calls: Call[] = [];
     const mounted = await mount(page(base(calls, { [REGISTER]: ANSWERED })));
     await press(must(mounted.container.querySelector('[aria-controls="add-project-form"]'), 'the disclosure'));
-    await press(must(mounted.container.querySelector('[data-create-source="clone"] input'), 'the clone source'));
+    await press(must(mounted.container.querySelector('[data-choice="clone"] input'), 'the clone source'));
     const url = must(
       mounted.container.querySelector<HTMLInputElement>('[data-create-step="folder"] input.mono'),
       'the address',
     );
     await interact(() => typeInto(url, 'https://github.com/you/project.git'));
     await settled(mounted, c => c.querySelector('[data-explorer-state="ready"]') !== null, 'the explorer');
-    await press(button(mounted, 'Clone into this folder'));
     expect(must(mounted.container.querySelector('[data-create-chosen] .mono'), 'where').textContent).toBe(
       '/home/k/scratch/project',
     );

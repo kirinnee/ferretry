@@ -4,14 +4,15 @@
  * Presentational on purpose: a listing in, callbacks out, so the unit tier and the screenshot harness drive the shipped
  * component. `folder-picker.tsx` is the half bound to a daemon.
  *
- * - Breadcrumbs from the home folder down; each is a link back up.
+ * - Breadcrumbs from the home folder down; each is a link back up, and an Up button goes one level.
+ * - The fence: the explorer never leaves the home folder, and at the home it SAYS so instead of drawing a dead Up.
  * - Card or list, remembered per device (the toggle is a native radio group).
  * - A git badge on repository folders; New folder inline.
  * - Keyboard: arrows move the one highlight, Enter opens it, Backspace goes up, Home/End jump.
  * - NO FLICKER: while the next folder is read the current one stays drawn (`aria-busy`), and a failed read is stated
  *   beside it instead of blanking it.
  */
-import { ChevronRight, FolderPlus, LayoutGrid, List, LoaderCircle, TriangleAlert } from 'lucide-react';
+import { ArrowUp, ChevronRight, FolderPlus, LayoutGrid, List, LoaderCircle, TriangleAlert } from 'lucide-react';
 import { useId, useRef, useState } from 'react';
 import { cn } from '@ferretry/app/ui';
 import type { FolderEntry, FolderListing } from '../../../contract/index.ts';
@@ -38,8 +39,8 @@ export interface FolderExplorerProps {
   readonly onShowHiddenChange: (show: boolean) => void;
   /** Go into a folder, or to a crumb. */
   readonly onOpen: (path: string) => void;
-  /** Choose the folder that is open. */
-  readonly onChoose: (path: string) => void;
+  /** Choose the folder that is open. Omitted when the caller's own button (a stepper's Next) chooses the open folder. */
+  readonly onChoose?: (path: string) => void;
   /** Makes a folder in the open one; `null` = made, else the daemon's sentence. */
   readonly onMakeFolder: (name: string) => Promise<string | null>;
   readonly chooseLabel?: string;
@@ -90,6 +91,7 @@ export function FolderExplorer(props: FolderExplorerProps) {
   const up = parentPath(listing);
   const idFor = (entry: FolderEntry): string => `${listId}-${entry.name}`;
   const truncated = truncationSentence(listing);
+  const home = listing.crumbs[0]?.path ?? listing.path;
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
     if (NAV_KEYS.has(event.key)) {
@@ -113,30 +115,44 @@ export function FolderExplorer(props: FolderExplorerProps) {
   return (
     <div className="grid min-h-0 gap-sm" data-explorer-state="ready" aria-busy={loading}>
       <div className="flex flex-wrap items-center justify-between gap-xs">
-        <nav aria-label="Folder path" className="min-w-0">
-          <ol className="m-0 flex min-w-0 list-none flex-wrap items-center gap-0.5 p-0 text-ui" id={headingId}>
-            {listing.crumbs.map((crumb, index) => {
-              const last = index === listing.crumbs.length - 1;
-              return (
-                <li key={crumb.path} className="flex items-center gap-0.5">
-                  {index > 0 && <ChevronRight className="text-faint" size={12} aria-hidden="true" />}
-                  <button
-                    type="button"
-                    className={cn(
-                      'min-h-control rounded-control px-1.5 hover:bg-surface-2',
-                      last ? 'font-semibold text-fg' : 'text-muted',
-                    )}
-                    aria-current={last ? 'page' : undefined}
-                    data-explorer-crumb={crumb.path}
-                    onClick={() => onOpen(crumb.path)}
-                  >
-                    {crumb.name}
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-        </nav>
+        <div className="flex min-w-0 items-center gap-xs">
+          {up !== null && (
+            <button
+              type="button"
+              className="kt-btn min-h-control shrink-0"
+              aria-label="Up one folder"
+              data-explorer-up={up}
+              onClick={() => onOpen(up)}
+            >
+              <ArrowUp size={14} aria-hidden="true" />
+              Up
+            </button>
+          )}
+          <nav aria-label="Folder path" className="min-w-0">
+            <ol className="m-0 flex min-w-0 list-none flex-wrap items-center gap-0.5 p-0 text-ui" id={headingId}>
+              {listing.crumbs.map((crumb, index) => {
+                const last = index === listing.crumbs.length - 1;
+                return (
+                  <li key={crumb.path} className="flex items-center gap-0.5">
+                    {index > 0 && <ChevronRight className="text-faint" size={12} aria-hidden="true" />}
+                    <button
+                      type="button"
+                      className={cn(
+                        'min-h-control rounded-control px-1.5 hover:bg-surface-2',
+                        last ? 'font-semibold text-fg' : 'text-muted',
+                      )}
+                      aria-current={last ? 'page' : undefined}
+                      data-explorer-crumb={crumb.path}
+                      onClick={() => onOpen(crumb.path)}
+                    >
+                      {crumb.name}
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </nav>
+        </div>
         <div className="flex items-center gap-xs">
           <fieldset className="relative m-0 flex gap-0.5 border-0 p-0">
             <legend className="sr-only">How to show folders</legend>
@@ -184,13 +200,21 @@ export function FolderExplorer(props: FolderExplorerProps) {
         <label className="flex min-h-control items-center gap-xs text-meta text-muted">
           <input
             type="checkbox"
-            className="size-4 accent-accent"
+            role="switch"
+            aria-checked={showHidden}
+            className="relative h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-border-strong transition-colors after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-bg after:transition-transform checked:bg-accent checked:after:translate-x-4 focus-visible:ring-2 focus-visible:ring-focus motion-reduce:transition-none motion-reduce:after:transition-none"
             checked={showHidden}
             onChange={event => onShowHiddenChange(event.target.checked)}
           />
           Show hidden folders
         </label>
       </div>
+
+      {up === null && (
+        <p className="m-0 text-meta text-faint" data-explorer-fence="">
+          Ferretry can only open folders inside <span className="mono break-all text-muted">{home}</span>.
+        </p>
+      )}
 
       {creating && (
         <NewFolderRow
@@ -235,19 +259,21 @@ export function FolderExplorer(props: FolderExplorerProps) {
         </p>
       )}
 
-      <div className="flex flex-wrap items-center gap-sm">
-        <button
-          type="button"
-          className="kt-btn min-h-control"
-          data-variant="primary"
-          onClick={() => onChoose(listing.path)}
-        >
-          {props.chooseLabel ?? 'Use this folder'}
-        </button>
-        <span className="mono min-w-0 break-all text-meta text-muted" data-explorer-path="">
-          {listing.path}
-        </span>
-      </div>
+      {onChoose !== undefined && (
+        <div className="flex flex-wrap items-center gap-sm">
+          <button
+            type="button"
+            className="kt-btn min-h-control"
+            data-variant="primary"
+            onClick={() => onChoose(listing.path)}
+          >
+            {props.chooseLabel ?? 'Use this folder'}
+          </button>
+          <span className="mono min-w-0 break-all text-meta text-muted" data-explorer-path="">
+            {listing.path}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

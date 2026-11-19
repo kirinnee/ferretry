@@ -56,7 +56,6 @@ const buttonNamed = (mounted: Mounted, text: string): Element =>
 const registerByHand = async (mounted: Mounted, _path: string): Promise<void> => {
   await press(must(mounted.container.querySelector('[aria-controls="add-project-form"]'), 'the disclosure'));
   await settled(mounted, c => c.querySelector('[data-explorer-state="ready"]') !== null, 'the explorer');
-  await press(buttonNamed(mounted, 'Use this folder'));
   await press(buttonNamed(mounted, 'Next'));
   await press(buttonNamed(mounted, 'Create project'));
 };
@@ -108,7 +107,8 @@ describe('ProjectsPage', () => {
     await settled(mounted, c => c.querySelector('[data-registered-state="empty"]') !== null, 'the empty registry');
 
     expect(mounted.container.textContent).toContain('No projects registered');
-    expect(mounted.container.textContent).toContain('Add an existing folder, create one, clone a repository');
+    expect(mounted.container.textContent).toContain('A folder on this machine');
+    expect(mounted.container.textContent).toContain('Clone a repository');
     await mounted.unmount();
   });
 

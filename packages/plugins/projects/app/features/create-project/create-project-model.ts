@@ -12,7 +12,7 @@ import { baseName } from '../../lib/folders.ts';
 export const CREATE_STEPS = ['folder', 'name', 'accounts', 'keys', 'done'] as const;
 export type CreateStep = (typeof CREATE_STEPS)[number];
 
-export const STEP_LABELS: Readonly<Record<CreateStep, string>> = {
+const STEP_LABELS: Readonly<Record<CreateStep, string>> = {
   folder: 'Folder',
   name: 'Name',
   accounts: 'GitHub accounts',
@@ -83,3 +83,11 @@ export const createVerdict = (draft: CreateDraft): CreateVerdict => {
     ? { request: parsed.data, problem: null }
     : { request: null, problem: parsed.error.issues[0]?.message ?? 'That cannot be registered.' };
 };
+
+/** The stepper's progress bar: the five steps are the segments, and the page is `n` of 5 (no step is ever skipped). */
+export const createProgress = (step: CreateStep, steps: readonly CreateStep[]) => ({
+  segments: steps.map(each => ({ id: each, label: STEP_LABELS[each] })),
+  current: step,
+  step: steps.indexOf(step) + 1,
+  of: steps.length,
+});

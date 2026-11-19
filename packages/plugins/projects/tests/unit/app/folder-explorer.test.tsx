@@ -263,4 +263,51 @@ describe('FolderExplorer', () => {
     await settled(mounted, c => c.querySelector('[data-explorer-empty]') !== null, 'empty');
     await mounted.unmount();
   });
+
+  it('says it cannot go above the home folder instead of drawing a dead Up, and goes up and down below it', async () => {
+    explorerViewPreference.write('auto');
+    const mounted = await open();
+    expect(mounted.container.querySelector('[data-explorer-up]')).toBeNull();
+    expect(must(mounted.container.querySelector('[data-explorer-fence]'), 'the fence line').textContent).toBe(
+      'Ferretry can only open folders inside /home/k.',
+    );
+
+    await press(must(mounted.container.querySelector('[data-explorer-entry="work"]'), 'work'));
+    await settled(mounted, c => c.querySelector('[data-explorer-entry="scratch"]') !== null, 'work');
+    // Below the home the fence line is gone and Up goes to the parent.
+    expect(mounted.container.querySelector('[data-explorer-fence]')).toBeNull();
+    const up = must(mounted.container.querySelector('[data-explorer-up]'), 'the Up button');
+    expect(up.getAttribute('data-explorer-up')).toBe('/home/k');
+    await press(up);
+    await settled(mounted, c => c.querySelector('[data-explorer-entry="notes.md"]') !== null, 'the home');
+    expect(names(mounted)).toEqual(['work', 'notes.md']);
+    await mounted.unmount();
+  });
+
+  it('shows dotfolders only with the Show hidden folders switch on, and reads again when it flips', async () => {
+    explorerViewPreference.write('auto');
+    const calls: Call[] = [];
+    const mounted = await open(calls);
+    const toggle = must(
+      mounted.container.querySelector<HTMLInputElement>('input[role="switch"]'),
+      'the Show hidden folders switch',
+    );
+    expect(names(mounted)).not.toContain('.config');
+    await press(toggle);
+    await settled(mounted, c => c.querySelector('[data-explorer-entry=".config"]') !== null, 'the dotfolder');
+    expect(calls.some(call => call.query?.hidden === '1')).toBe(true);
+    await mounted.unmount();
+  });
+
+  it('reports the open folder to a caller that owns the choosing button', async () => {
+    const opened: string[] = [];
+    const client = scripted({ [LIST]: listingFor });
+    const mounted = await mount(<FolderPicker client={client} onOpened={path => opened.push(path)} />);
+    await settled(mounted, c => c.querySelector('[data-explorer-state="ready"]') !== null, 'the explorer');
+    expect(opened.at(-1)).toBe('/home/k');
+    expect(mounted.container.querySelector('[data-explorer-path]')).toBeNull();
+    await press(must(mounted.container.querySelector('[data-explorer-entry="work"]'), 'work'));
+    await settled(mounted, () => opened.at(-1) === '/home/k/work', 'the next folder');
+    await mounted.unmount();
+  });
 });

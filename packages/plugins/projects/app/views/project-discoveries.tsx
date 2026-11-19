@@ -49,7 +49,7 @@ export function ProjectDiscoveries({ discoveries, ferretsError, status, onConfir
   const refusal = status?.phase === 'refused' && status.request.kind === 'confirmed-discovery' ? status.message : null;
 
   return (
-    <section className="kt-panel grid gap-sm p-panel" aria-labelledby={HEADING_ID} data-project-discoveries="">
+    <section className="grid gap-sm" aria-labelledby={HEADING_ID} data-project-discoveries="">
       <header className="grid gap-xs">
         <h2 className="m-0 flex items-center gap-xs text-title font-semibold text-fg" id={HEADING_ID}>
           <FolderClock className="text-muted" size={16} aria-hidden="true" />
@@ -81,12 +81,12 @@ export function ProjectDiscoveries({ discoveries, ferretsError, status, onConfir
           Every folder a ferret on this daemon has worked in is already covered by a registered project.
         </p>
       ) : (
-        <ul className="m-0 grid list-none gap-xs p-0">
+        <ul className="m-0 grid list-none divide-y divide-border-soft p-0">
           {discoveries.map(option => {
             const pending = registrationPendingFor(status, option.path);
             return (
               <li
-                className="flex min-w-0 flex-wrap items-center gap-sm rounded-control border border-border-soft bg-surface-2 px-control-x py-2"
+                className="flex min-w-0 flex-wrap items-center gap-sm py-2"
                 data-project-discovery={option.path}
                 key={option.key}
               >
@@ -94,10 +94,9 @@ export function ProjectDiscoveries({ discoveries, ferretsError, status, onConfir
                 <div className="min-w-0 grow basis-64">
                   <p className="m-0 text-ui font-medium text-fg">{option.name}</p>
                   <p className="mono m-0 break-all text-meta leading-tight text-muted">{option.path}</p>
+                  <p className="m-0 text-meta text-faint">last used {relativeTime(option.lastActivity, now)}</p>
                 </div>
-                <span className="shrink-0 text-meta text-faint">
-                  last used {relativeTime(option.lastActivity, now)}
-                </span>
+
                 <button
                   type="button"
                   className="kt-btn min-h-control shrink-0"

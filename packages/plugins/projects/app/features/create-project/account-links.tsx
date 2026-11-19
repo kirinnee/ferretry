@@ -54,14 +54,14 @@ export function AccountLinksView({ project, existing, error, onConfirm }: Accoun
   }
   const logins = new Map(existing.map(account => [account.id, account.login]));
   return (
-    <ul className="m-0 grid list-none gap-xs p-0" data-project-accounts="ready">
+    <ul className="m-0 grid list-none divide-y divide-border-soft p-0" data-project-accounts="ready">
       {accountLinks(
         linked,
         existing.map(account => account.id),
       ).map(link => (
         <li
           key={link.id}
-          className="flex min-h-control items-center gap-xs rounded-control border border-border-soft bg-surface-2 px-control-x py-1 text-ui"
+          className="flex min-h-control items-center gap-xs py-1 text-ui"
           data-project-account={link.id}
           data-project-account-removed={link.removed ? 'true' : 'false'}
         >

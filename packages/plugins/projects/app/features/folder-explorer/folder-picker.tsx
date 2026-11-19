@@ -3,7 +3,7 @@
  * Making a folder opens it, so "New folder" then "Use this folder" is two presses.
  */
 import { useLayoutMode } from '@ferretry/app/ui';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { type ProjectsClient, reasonOf } from '../../lib/client.ts';
 import { FolderExplorer } from './folder-explorer.tsx';
 import { resolveView } from './explorer-model.ts';
@@ -15,16 +15,23 @@ export interface FolderPickerProps {
   readonly client: ProjectsClient;
   /** Where to open; the home folder when omitted. */
   readonly startAt?: string;
-  readonly onChoose: (path: string) => void;
+  /** Draws "Use this folder" under the list. Omitted when the caller's own button takes the open folder (`onOpened`). */
+  readonly onChoose?: (path: string) => void;
+  /** The folder that is open now, whenever it changes: a stepper's Next uses it. */
+  readonly onOpened?: (path: string) => void;
   readonly chooseLabel?: string;
 }
 
-export function FolderPicker({ client, startAt, onChoose, chooseLabel }: FolderPickerProps) {
+export function FolderPicker({ client, startAt, onChoose, onOpened, chooseLabel }: FolderPickerProps) {
   const [path, setPath] = useState<string | undefined>(startAt);
   const [showHidden, setShowHidden] = useState(false);
   const state = useFolderListing(client, path, showHidden);
   const choice = explorerViewPreference.use();
   const phone = useLayoutMode() === 'drawer';
+  const openPath = state.listing?.path;
+  useEffect(() => {
+    if (openPath !== undefined) onOpened?.(openPath);
+  }, [openPath, onOpened]);
 
   return (
     <FolderExplorer
@@ -36,7 +43,7 @@ export function FolderPicker({ client, startAt, onChoose, chooseLabel }: FolderP
       showHidden={showHidden}
       onShowHiddenChange={setShowHidden}
       onOpen={setPath}
-      onChoose={onChoose}
+      {...(onChoose === undefined ? {} : { onChoose })}
       {...(chooseLabel === undefined ? {} : { chooseLabel })}
       onMakeFolder={async name => {
         if (state.listing === null) return 'The folder list has not been read yet.';

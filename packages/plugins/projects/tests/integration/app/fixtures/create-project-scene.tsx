@@ -2,7 +2,7 @@
  * The browser entry for "Create a project" over FAKE data (no daemon, no account, no real folder): the REAL folder
  * explorer, the REAL create flow and the REAL account links, driven by a client that answers from a tiny fake home.
  *
- *   ?theme=<family>-<mode>&stage=<before|explorer|links|flow>[&view=card|list][&at=<folder>]
+ *   ?theme=<family>-<mode>&stage=<before|explorer|links|flow|hub-empty|hub-list>[&view=card|list][&at=<folder>][&source=clone]
  */
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -17,6 +17,7 @@ import {
   type ProjectRegistrationStatus,
 } from '../../../../app/lib/registration-model.ts';
 import { AddProjectForm } from '../../../../app/views/add-project-form.tsx';
+import { ProjectsHub } from '../../../../app/views/projects-hub.tsx';
 import {
   type ProjectsConnectAccountProps,
   ProjectInfoSchema,
@@ -29,6 +30,7 @@ const stage = params.get('stage') ?? 'flow';
 const view = params.get('view');
 if (view === 'card' || view === 'list') explorerViewPreference.write(view);
 const startAt = params.get('at') ?? undefined;
+const source = params.get('source') === 'clone' ? 'clone' : 'folder';
 
 const at = '2026-08-01T10:00:00.000Z';
 const entry = (name: string, kind: 'folder' | 'file' = 'folder', isRepo = false) => ({
@@ -120,6 +122,7 @@ function Flow() {
     <CreateProjectFlow
       client={client}
       connectAccount={connectProvider}
+      initialSource={source}
       status={status}
       onRegister={onRegister}
       onClose={() => {}}
@@ -128,7 +131,38 @@ function Flow() {
   );
 }
 
+const NOW = Date.parse(at) + 3_600_000;
+const DISCOVERY = [
+  { kind: 'recent' as const, key: 'd1', name: 'globex', path: `${HOME}/work/clients/globex`, lastActivity: at },
+];
+function Hub({ projects, open }: { readonly projects: readonly (typeof project)[]; readonly open: boolean }) {
+  const [status, setStatus] = useState<ProjectRegistrationStatus | null>(null);
+  return (
+    <div style={{ height: '100dvh' }} data-scene-ready="">
+      <ProjectsHub
+        slice={{ projects, status: 'ready', error: null }}
+        discoveries={DISCOVERY}
+        ferretsError={null}
+        status={status}
+        onRegister={async request => {
+          setStatus({ phase: 'registered', request, project, alreadyRegistered: false });
+          return true;
+        }}
+        onDismiss={() => setStatus(null)}
+        projectHref={id => `/d/demo/projects/${id}`}
+        now={NOW}
+        client={client}
+        connectAccount={connectProvider}
+        initiallyOpen={open}
+      />
+    </div>
+  );
+}
+
 function Scene() {
+  if (stage === 'hub-empty') return <Hub projects={[]} open={false} />;
+  if (stage === 'hub-list') return <Hub projects={[project]} open={false} />;
+  if (stage === 'hub-open') return <Hub projects={[project]} open />;
   if (stage === 'before')
     return (
       <AddProjectForm
@@ -170,9 +204,13 @@ function Scene() {
 const root = document.getElementById('root');
 if (root !== null)
   createRoot(root).render(
-    <div className="mx-auto max-w-[760px] p-4" data-scene-ready="">
-      <div className="kt-panel grid gap-panel p-panel">
-        <Scene />
+    stage.startsWith('hub-') ? (
+      <Scene />
+    ) : (
+      <div className="mx-auto max-w-[760px] p-4" data-scene-ready="">
+        <div className="kt-panel grid gap-panel p-panel">
+          <Scene />
+        </div>
       </div>
-    </div>,
+    ),
   );
