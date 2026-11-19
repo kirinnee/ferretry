@@ -36,14 +36,37 @@ export interface OwnerComponentWrite {
   readonly problem?: string;
   /** A skills component's files (`<item>/<rel>`), which its owner installs: Runtimes writes none of them itself. */
   readonly files?: readonly { readonly path: string; readonly content: string }[];
+  /** Hidden files (a path segment starting with a dot) the import carried but does NOT hand over: the answer names them. */
+  readonly skipped?: readonly string[];
 }
 
 /** What a write is, as one string, for the fingerprint of an import: the document, or why there is none, and the files. */
 export const handedText = (write: OwnerComponentWrite): string =>
   `${write.file}\n${write.text ?? write.problem ?? ''}\n${JSON.stringify(write.files ?? [])}`;
 
+/**
+ * The components a change adds or changes that an owner writes, plus every one in `touched` (`kind/name`): an accepted
+ * update whose SOURCE changed (a skill's files) while its selection is the same value still has to reach its owner.
+ */
+function changedRefs(
+  before: AccountModel,
+  next: AccountModel,
+  touched: readonly string[],
+): readonly { readonly kind: string; readonly name: string }[] {
+  const changed: { kind: string; name: string }[] = [...foreignComponentRefs(before, next)];
+  for (const reference of touched) {
+    const [kind = '', name = ''] = reference.split('/');
+    if (changed.some(ref => ref.kind === kind && ref.name === name)) continue;
+    if (OWNER_KINDS.has(kind) && next.components[kind as OwnerKind][name] !== undefined) changed.push({ kind, name });
+  }
+  return changed;
+}
+
 const SETTINGS_FORMAT = { claude: 'json', codex: 'toml' } as const satisfies Record<HarnessKind, 'json' | 'toml'>;
 const SETTINGS_DIRECTORY = { claude: 'claude-code', codex: 'codex' } as const satisfies Record<HarnessKind, string>;
+
+/** Whether any segment of a path starts with a dot: a hidden file or folder never crosses to an owner. */
+const isHidden = (path: string): boolean => path.split('/').some(segment => segment.startsWith('.'));
 
 /** Where an item's files sit among the assets an import carries. */
 export const skillAssetPrefix = (item: string): string => `skills/${item}/`;
@@ -61,9 +84,10 @@ export function ownerWrites(
   next: AccountModel,
   assetText: (file: string) => string | undefined,
   assetFiles: (prefix: string) => readonly { readonly path: string; readonly content: string }[] = () => [],
+  touched: readonly string[] = [],
 ): readonly OwnerComponentWrite[] {
   const writes: OwnerComponentWrite[] = [];
-  for (const { kind, name } of foreignComponentRefs(before, next)) {
+  for (const { kind, name } of changedRefs(before, next, touched)) {
     if (!OWNER_KINDS.has(kind)) continue;
     const ownerKind = kind as OwnerKind;
     const value: unknown = next.components[ownerKind][name];
@@ -72,19 +96,21 @@ export function ownerWrites(
     const reference = `${ownerKind}/${name}` as LayerReferenceText;
     if (ownerKind !== 'settings') {
       const items = ownerKind === 'skills' ? (next.components.skills[name]?.items ?? []) : [];
-      const files = items.flatMap(item =>
+      const carried = items.flatMap(item =>
         assetFiles(skillAssetPrefix(item)).map(asset => ({
           path: `${item}/${asset.path.slice(skillAssetPrefix(item).length)}`,
           content: asset.content,
         })),
       );
+      const files = carried.filter(file => !isHidden(file.path));
+      const skipped = carried.filter(file => isHidden(file.path)).map(file => file.path);
       writes.push({
         kind: ownerKind,
         name,
         reference,
         file: `${ownerKind}/${name}.yaml`,
         text: documentText(value),
-        ...(ownerKind === 'skills' ? { files } : {}),
+        ...(ownerKind === 'skills' ? { files, ...(skipped.length === 0 ? {} : { skipped }) } : {}),
       });
       continue;
     }
@@ -186,8 +212,9 @@ export function withoutHookChanges(before: AccountModel, next: AccountModel): Ac
 export function ownerReferences(
   before: AccountModel,
   next: AccountModel,
+  touched: readonly string[] = [],
 ): readonly { readonly kind: OwnerKind; readonly name: string }[] {
-  return foreignComponentRefs(before, next).filter(
+  return changedRefs(before, next, touched).filter(
     (ref): ref is { kind: OwnerKind; name: string } =>
       OWNER_KINDS.has(ref.kind) && next.components[ref.kind as OwnerKind][ref.name] !== undefined,
   );

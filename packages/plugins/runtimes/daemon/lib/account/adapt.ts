@@ -87,6 +87,11 @@ export interface ComponentBodies {
   readonly instructions?: Readonly<Record<string, string>>;
   /** Each hooks component's parsed `file`. */
   readonly hooks?: Readonly<Record<string, SettingsObject>>;
+  /**
+   * The skill items whose folder the asset tree holds. When given, only those are linked: an item an owner serves from its
+   * own store (Skills' launch contribution) has no copy here, and a link to a copy that is not there would be rejected.
+   */
+  readonly skillItems?: ReadonlySet<string>;
 }
 
 export interface AdaptInput {
@@ -596,6 +601,7 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
   const skillsDest = destOf(assets, harness, 'skills').dest;
   const reserved = HARNESS_OWNED_SKILL_ENTRIES[harness];
   for (const { item, layer } of resolved.skills) {
+    if (input.bodies?.skillItems?.has(item) === false) continue;
     if (reserved.includes(item)) {
       problems.push({
         kind: 'reserved-skill-item',

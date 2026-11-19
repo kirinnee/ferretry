@@ -3899,3 +3899,81 @@ describe('the setup.import executor, the files of a skill', () => {
     should(door.calls).have.length(0);
   });
 });
+
+describe('the setup.import executor, a skill an owner serves', () => {
+  /** The links the first apply lays down for skills. */
+  const skillLinks = (applied: World['applied']): string[] =>
+    applied.flatMap(entry =>
+      entry.plan.operations.flatMap(operation =>
+        operation.kind === 'symlink' && operation.source.includes('/assets/skills/') ? [operation.source] : [],
+      ),
+    );
+
+  it('should apply a clean fleet with an owned skill and leave no link to a copy that is not there', async () => {
+    // Arrange — the skills owner takes the skill and holds it in its own store
+    const door = reportingOwners();
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
+    state.scans = ownedScans();
+
+    // Act
+    await importOnce(service);
+
+    // Assert
+    should(applied).have.length(1);
+    should(planText(applied)).containEql('review');
+    should(skillLinks(applied)).eql([]);
+  });
+
+  it('should still link a skill the fleet holds itself when no owner takes components', async () => {
+    // Arrange
+    const { service, applied, state } = world();
+    state.scans = ownedScans();
+
+    // Act
+    await importOnce(service);
+
+    // Assert
+    should(skillLinks(applied)).eql(['/state/fleet/assets/skills/review']);
+  });
+
+  it('should hand an accepted update to the owner when only the skill files changed', async () => {
+    // Arrange — the skill is already in effect; the host's SKILL.md then changes, the selection does not
+    const door = reportingOwners();
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
+    state.scans = ownedScans();
+    await importOnce(service);
+    const first = applied[0]?.documents ?? [];
+    for (const document of first) state.assets[document.path] = document.content;
+    state.reading = door.readingOf(first);
+    const recordBefore = state.assets[RECORD_PATH];
+    state.folders['/person/.claude/skills/review'] = {
+      files: [{ path: 'SKILL.md', content: '---\nname: review\n---\nnew body\n' }],
+      skipped: [],
+    };
+    state.scans = [
+      claudeScan({
+        mcp: { kind: 'text', source: '/person/.claude.json', text: MCP_JSON, bytes: MCP_JSON.length },
+        skills: [{ item: 'review', source: '/person/.claude/skills/review', digest: 'skill-digest-2' }],
+      }),
+      codexScan(),
+    ];
+    should((await service.scan()).updates.map(update => update.reference)).containEql('skills/skills');
+    const before = door.calls.length;
+
+    // Act
+    const change = IMPORT({ acceptedUpdates: ['skills/skills'] });
+    await service.executors.setup.describe(change, MACHINE);
+    await service.executors.setup.execute(change, MACHINE);
+
+    // Assert
+    const handed = door.calls.slice(before).filter(call => call.kind === 'skills');
+    should(handed).have.length(1);
+    should(handed[0]?.files).eql([{ path: 'review/SKILL.md', content: '---\nname: review\n---\nnew body\n' }]);
+    const paths = (applied[1]?.documents ?? []).map(document => document.path);
+    should(paths.some(path => path.startsWith('/state/fleet/assets/skills/'))).be.false();
+    for (const document of applied[1]?.documents ?? []) state.assets[document.path] = document.content;
+    should(state.assets[RECORD_PATH]).not.equal(recordBefore);
+  });
+});

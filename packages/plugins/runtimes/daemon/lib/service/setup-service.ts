@@ -731,6 +731,7 @@ export class FleetSetupService {
       );
     }
     const updates = plan.updates.filter(update => accepted.includes(update.reference));
+    const touched = updates.map(update => update.reference);
     const adds =
       Object.keys(plan.credentials).length +
       plan.components.length +
@@ -745,11 +746,7 @@ export class FleetSetupService {
     }
     let model: AccountModel;
     try {
-      model = mergeImport(
-        existing,
-        plan,
-        updates.map(update => update.reference),
-      );
+      model = mergeImport(existing, plan, touched);
     } catch (error) {
       throw new FleetCatalogRefusal(
         'fleet_change_refused',
@@ -769,7 +766,8 @@ export class FleetSetupService {
       for (const entry of folder.files) assets.push({ path: `${file.path}/${entry.path}`, content: entry.content });
     }
     // The body a handed-over settings component was made from is never written under the fleet's assets.
-    const written = this.deps.components === undefined ? assets : withoutHandedBodies(assets, reading.model, model);
+    const written =
+      this.deps.components === undefined ? assets : withoutHandedBodies(assets, reading.model, model, touched);
     // MCP servers, skills and settings belong to other plugins: Runtimes' own files are composed WITHOUT them (each as it
     // is now), and the owners are handed them at the apply.
     const { documents, owners } = await composeOwned({
@@ -778,6 +776,7 @@ export class FleetSetupService {
       enabled: this.deps.components !== undefined,
       assetText: file => assets.find(asset => asset.path === file)?.content,
       assetFiles: prefix => assets.filter(asset => asset.path.startsWith(prefix)),
+      touched,
       documents: async (next, outcome) =>
         await this.#documents(reading, next, written, [
           { path: this.#recordPath(), content: recordText(plan, updates, outcome) },

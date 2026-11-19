@@ -184,6 +184,49 @@ describe('withEffective', () => {
   });
 });
 
+describe('a change that moved only a source', () => {
+  it('should hand over a touched component whose model value did not move', () => {
+    // Act
+    const untouched = ownerReferences(BEFORE, BEFORE);
+    const touched = ownerReferences(NEXT, NEXT, ['skills/skills', 'instructions/main', 'mcp/none']);
+    const writes = ownerWrites(
+      NEXT,
+      NEXT,
+      () => undefined,
+      () => [],
+      ['skills/skills'],
+    );
+
+    // Assert
+    should(untouched).eql([]);
+    should(touched.map(({ kind, name }) => `${kind}/${name}`)).eql(['skills/skills']);
+    should(writes.map(write => write.reference)).eql(['skills/skills']);
+  });
+});
+
+describe('ownerWrites, hidden files of a skill', () => {
+  it('should not carry a file under a dot segment, and name it instead', () => {
+    // Arrange
+    const assets = [
+      { path: 'skills/review/SKILL.md', content: '# review\n' },
+      { path: 'skills/review/.git/config', content: 'x' },
+      { path: 'skills/review/lib/.env', content: 'y' },
+    ];
+
+    // Act
+    const skills = ownerWrites(
+      BEFORE,
+      NEXT,
+      () => undefined,
+      prefix => assets.filter(asset => asset.path.startsWith(prefix)),
+    ).find(write => write.kind === 'skills');
+
+    // Assert
+    should(skills?.files).eql([{ path: 'review/SKILL.md', content: '# review\n' }]);
+    should(skills?.skipped).eql(['review/.git/config', 'review/lib/.env']);
+  });
+});
+
 describe('ownerWrites, the files of a skill', () => {
   const assets = [
     { path: 'skills/review/SKILL.md', content: '# review\n' },

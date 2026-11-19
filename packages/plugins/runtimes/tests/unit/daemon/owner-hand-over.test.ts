@@ -218,6 +218,34 @@ describe('handOver, what is in effect', () => {
   });
 });
 
+describe('handOver, hidden files', () => {
+  it('should say the hidden files that were not handed over, once the owner took the component', async () => {
+    // Arrange
+    const writer: ComponentWriter = { put: async () => ({ outcome: 'written' }) };
+    const owners: OwnedComponents = {
+      writes: [
+        {
+          kind: 'skills',
+          name: 'b',
+          reference: 'skills/b',
+          file: 'skills/b.yaml',
+          text: '{}',
+          skipped: ['review/.git/config'],
+        },
+      ],
+      rebuild: async () => applied,
+    };
+
+    // Act
+    const { sentences } = await handOver({ writer, owners, applied, secretValues: [], inEffect: async () => MODEL });
+
+    // Assert
+    should(sentences).containEql(
+      'Written with a warning: skills/b.yaml (hidden files not handed over: review/.git/config).',
+    );
+  });
+});
+
 describe('withoutHandedBodies', () => {
   const before = parseAccountModel({ version: 1 });
   const model = parseAccountModel({

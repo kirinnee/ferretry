@@ -390,6 +390,10 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       bodies: {
         ...(input.bodies?.instructions === undefined ? {} : { instructions: input.bodies.instructions }),
         ...(input.bodies?.hooks === undefined ? {} : { hooks: input.bodies.hooks }),
+        // A skill item whose `SKILL.md` the caller could not read has no copy in the asset tree: nothing to link.
+        ...(input.bodies?.skillFrontmatter === undefined
+          ? {}
+          : { skillItems: new Set(Object.keys(input.bodies.skillFrontmatter)) }),
       },
       ...(launch === undefined ? {} : { settings: launch.settings }),
     });

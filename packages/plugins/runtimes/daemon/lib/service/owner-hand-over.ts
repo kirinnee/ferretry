@@ -54,14 +54,16 @@ export async function composeOwned(input: {
   readonly assetText: (file: string) => string | undefined;
   readonly assetFiles?: (prefix: string) => readonly { readonly path: string; readonly content: string }[];
   readonly documents: (model: AccountModel, outcome: NotInEffect) => Promise<readonly FleetDocumentWrite[]>;
+  /** The references (`kind/name`) of accepted updates: handed over even when their model value did not move. */
+  readonly touched?: readonly string[];
 }): Promise<{ readonly documents: readonly FleetDocumentWrite[]; readonly owners?: OwnedComponents }> {
   const { before, model } = input;
-  const owned = input.enabled ? ownerReferences(before, model) : [];
+  const owned = input.enabled ? ownerReferences(before, model, input.touched) : [];
   if (owned.length === 0) return { documents: await input.documents(model, NOTHING_HELD) };
   return {
     documents: await input.documents(withComponentsOf(model, before, owned), NOTHING_HELD),
     owners: {
-      writes: ownerWrites(before, model, input.assetText, input.assetFiles),
+      writes: ownerWrites(before, model, input.assetText, input.assetFiles, input.touched),
       rebuild: async outcome => {
         const left = owned.filter(({ kind, name }) => outcome.refused.has(`${kind}/${name}`));
         const kept = owned.filter(({ kind, name }) => !outcome.refused.has(`${kind}/${name}`));
@@ -118,6 +120,8 @@ export async function handOver(input: {
       (answer.outcome === 'written' ? written : held).push(write.file);
       if (answer.outcome === 'held') heldReferences.add(write.reference);
       for (const warning of answer.warnings ?? []) noted.push(`${write.file} (${say(warning)})`);
+      if (write.skipped !== undefined)
+        noted.push(`${write.file} (hidden files not handed over: ${say(write.skipped.join(', '))})`);
     } else {
       refused.push({ file: write.file, reason: say(answer.reason) });
       left.add(write.reference);
@@ -190,8 +194,9 @@ export function withoutHandedBodies<T extends { readonly path: string }>(
   assets: readonly T[],
   before: AccountModel,
   model: AccountModel,
+  touched: readonly string[] = [],
 ): readonly T[] {
-  const handed = ownerReferences(before, model);
+  const handed = ownerReferences(before, model, touched);
   const bodies = new Set<string>(
     handed.flatMap(({ kind, name }) => {
       const file = kind === 'settings' ? model.components.settings[name]?.file : undefined;
