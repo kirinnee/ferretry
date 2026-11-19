@@ -11,7 +11,8 @@ import { readSpeedups } from '../lib/speedups.ts';
 import { wardenClientOf } from '../lib/warden-client.ts';
 import { useRouter } from '../ui.ts';
 
-const FileSchema = z.looseObject({ exists: z.boolean(), written: z.unknown().optional() });
+/** The route's reply is `{ path, exists, text, state, … }`; the page reads only whether the file is there. */
+const FileSchema = z.looseObject({ exists: z.boolean() });
 
 const depsOf = (client: PluginClient): WardenStepDeps => ({
   client: wardenClientOf(client),

@@ -1,9 +1,13 @@
 /**
  * "Let the Warden watch your ferrets?" — the Warden's one first-run page. Three cards (the shell's ChoiceCards): Rules
  * only (free), + Jev, + LLM investigation. An answer is written at once to `warden.yaml` (only `enabled` and the two
- * layers) and the page tells its host `done()`. The page is skipped (`already-set`) when the person has already
- * written the file. No key is typed here: a Jev key is entered once, in Settings › Speed-ups, and this page only
- * says whether it is there and offers to name it in `warden.yaml`.
+ * layers). The page is skipped (`already-set`) when `warden.yaml` is already on the machine, so it never writes over
+ * what is saved. No key is typed here: a Jev key is entered once, in Settings › Speed-ups, and this page only says
+ * whether it is there and offers to name it in `warden.yaml`.
+ *
+ * The host is told `done()` once the answer is saved, EXCEPT when the answer uses Jev and the key is still to settle
+ * (stored but not named, or not stored yet): then the step stays open under `busy()`, with the key buttons reachable
+ * without picking the card again, until the key is named or the person goes on without it. Only then `done()`.
  */
 import { ChoiceCards } from '@ferretry/app';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -15,13 +19,21 @@ import { Button, RouteLink } from '../../ui.ts';
 import { jevKeyStatus } from '../warden/warden-config-card.tsx';
 import type { JevKeyStatus } from '../warden/warden-settings-model.ts';
 import { WardenDemo } from './warden-demo.tsx';
-import { choiceOf, patchFor, WARDEN_CHOICES, type WardenChoice, wardenFileWritten } from './warden-step-model.ts';
+import {
+  choiceOf,
+  keyStillOpen,
+  patchFor,
+  WARDEN_CHOICES,
+  type WardenChoice,
+  type WardenFileRead,
+  wardenFileExists,
+} from './warden-step-model.ts';
 import './warden-step.css';
 
 /** What the page reads and writes, so a test hands its own: the Warden's routes, `warden.yaml` as written, the Jev key. */
 export interface WardenStepDeps {
   readonly client: WardenClient;
-  readonly readFile: () => Promise<{ readonly exists: boolean; readonly written?: unknown }>;
+  readonly readFile: () => Promise<WardenFileRead>;
   readonly readKey: () => Promise<SpeedupsView | 'off'>;
 }
 
@@ -32,6 +44,9 @@ export interface WardenStepPageProps {
   readonly speedupsHref?: string | undefined;
   readonly onNavigate?: ((to: string) => void) | undefined;
 }
+
+/** What the host shows while the page waits on the Jev key. */
+const HOLD_LABEL = 'Waiting for the Jev key…';
 
 const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
@@ -54,16 +69,20 @@ export function WardenStepPage({ deps, step, speedupsHref, onNavigate }: WardenS
   const [failed, setFailed] = useState<string | null>(null);
   const [naming, setNaming] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [checking, setChecking] = useState(false);
+  /** Whether the step is held open for the Jev key (the host was told `busy` and not yet `done`). */
+  const [holding, setHolding] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
     setFailed(null);
     try {
+      // A file that cannot be read is NOT a file that is not there: the page says so rather than offer to write over it.
       const [file, view, speedups] = await Promise.all([
-        deps.readFile().catch(() => ({ exists: false })),
+        deps.readFile(),
         deps.client.config(),
         deps.readKey().catch(() => null),
       ]);
-      if (wardenFileWritten(file)) {
+      if (wardenFileExists(file)) {
         step?.skip('already-set');
         return;
       }
@@ -82,6 +101,19 @@ export function WardenStepPage({ deps, step, speedupsHref, onNavigate }: WardenS
     void load();
   }, [load]);
 
+  /** The answer is settled: let go of the step and tell the host. */
+  const finish = (): void => {
+    setHolding(false);
+    step?.busy(null);
+    step?.done();
+  };
+
+  /** The answer is saved, but the Jev key is still open: hold the step (no `done`) until it is named or declined. */
+  const hold = (): void => {
+    setHolding(true);
+    step?.busy(HOLD_LABEL);
+  };
+
   const choose = async (next: WardenChoice): Promise<void> => {
     if (loaded === null) return;
     const before = choice;
@@ -93,14 +125,16 @@ export function WardenStepPage({ deps, step, speedupsHref, onNavigate }: WardenS
       const answer = await deps.client.updateConfig(patchFor(next));
       const held = answer.held ?? [];
       if (held.length > 0) setNote(`Saved, but it waits for you to confirm it: ${held.join('; ')}.`);
-      setLoaded({ view: answer, jevKey: jevOf(answer, loaded.jevKey) });
-      step?.done();
+      const jevKey = jevOf(answer, loaded.jevKey);
+      setLoaded({ view: answer, jevKey });
+      if (keyStillOpen(next, jevKey.state)) hold();
+      else finish();
     } catch (cause) {
       setChoice(before);
       setNote(reasonOf(cause));
+      step?.busy(holding ? HOLD_LABEL : null);
     } finally {
       setSaving(false);
-      step?.busy(null);
     }
   };
 
@@ -116,11 +150,35 @@ export function WardenStepPage({ deps, step, speedupsHref, onNavigate }: WardenS
           ? current
           : { view: answer, jevKey: answer.jevKey === 'named' ? { ...current.jevKey, state: 'set' } : current.jevKey },
       );
+      // Asked for: whether it is applied now or waits for the owner, the key is no longer this page's to settle.
+      finish();
     } catch (cause) {
       setNote(reasonOf(cause));
     } finally {
       setNaming(false);
     }
+  };
+
+  /** Reads the key and the settings again, so a key saved in Speed-ups meanwhile shows without picking the card again. */
+  const checkKey = async (): Promise<void> => {
+    setChecking(true);
+    setNote(null);
+    try {
+      const [view, speedups] = await Promise.all([deps.client.config(), deps.readKey().catch(() => null)]);
+      const jevKey = jevKeyStatus(speedups, view.jevKey);
+      setLoaded({ view, jevKey });
+      if (holding && !keyStillOpen(choice ?? 'rules', jevKey.state)) finish();
+    } catch (cause) {
+      setNote(reasonOf(cause));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  /** "Go on without a key": the person has said Jev may stay keyless, so the step is done. */
+  const goOnWithoutKey = (): void => {
+    setNote(null);
+    finish();
   };
 
   if (failed !== null)
@@ -156,9 +214,13 @@ export function WardenStepPage({ deps, step, speedupsHref, onNavigate }: WardenS
           choice={choice}
           jevKey={loaded.jevKey}
           naming={naming}
+          checking={checking}
+          holding={holding}
           speedupsHref={speedupsHref}
           onNavigate={onNavigate}
           onUseStoredKey={() => void nameStoredKey()}
+          onCheck={() => void checkKey()}
+          onGoOn={goOnWithoutKey}
         />
       )}
       {note === null ? null : (
@@ -177,17 +239,31 @@ function JevNote({
   choice,
   jevKey,
   naming,
+  checking,
+  holding,
   speedupsHref,
   onNavigate,
   onUseStoredKey,
+  onCheck,
+  onGoOn,
 }: {
   readonly choice: WardenChoice;
   readonly jevKey: JevKeyStatus;
   readonly naming: boolean;
+  readonly checking: boolean;
+  /** The step is held open for this key: "go on without it" is offered. */
+  readonly holding: boolean;
   readonly speedupsHref: string | undefined;
   readonly onNavigate: ((to: string) => void) | undefined;
   readonly onUseStoredKey: () => void;
+  readonly onCheck: () => void;
+  readonly onGoOn: () => void;
 }) {
+  const goOn = holding ? (
+    <Button onClick={onGoOn} disabled={naming || checking}>
+      Go on without a key
+    </Button>
+  ) : null;
   const fallback = NO_KEY_FALLBACK[choice];
   const add =
     speedupsHref === undefined ? (
@@ -211,6 +287,7 @@ function JevNote({
           <Button onClick={onUseStoredKey} disabled={naming}>
             {naming ? 'Using it…' : 'Use the stored key'}
           </Button>
+          {goOn}
         </div>
       );
     case 'missing':
@@ -220,6 +297,10 @@ function JevNote({
             No Jev key yet. It is optional: until you add one, {fallback}. {add}
             {jevKey.keyUrl === undefined ? '.' : `, then get a key at ${jevKey.keyUrl}.`}
           </p>
+          <Button onClick={onCheck} disabled={checking}>
+            {checking ? 'Looking…' : 'Check again'}
+          </Button>
+          {goOn}
         </div>
       );
     case 'off':
