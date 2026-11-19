@@ -32,7 +32,13 @@ export default implementDaemon(manifest, {
     });
 
     return {
-      routes: pullsRoutes({ github, cache }),
+      routes: pullsRoutes({
+        github,
+        cache,
+        projects: needs.projects,
+        accounts: needs.gitAccounts,
+        nowMs: () => kernel.clock.nowMs(),
+      }),
       subscribers: {
         'projects.removed': async payload => await cache.purgeProject((payload as { id: string }).id),
         // A reconnect of the same GitHub user reuses the id, so the old cache must be gone before it can be read again.
