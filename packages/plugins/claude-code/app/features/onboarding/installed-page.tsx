@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import type { ClaudeCodeClient } from '../../lib/client.ts';
 import { InstalledDemo } from './demos.tsx';
-import type { StepPageProps } from './kit.tsx';
+import type { StepPageProps } from './props.ts';
 import { sentenceOf } from './words.ts';
 
 /** Only the tools list of the scan is read here; the rest is the import wizard's. */
@@ -21,6 +21,10 @@ const ScanToolsSchema = z.looseObject({ tools: z.array(SetupToolSchema) });
 const UPDATE = 'GET /v1/claude-code/update' as const;
 const SCAN = 'GET /v1/runtimes/setup/scan' as const;
 const INSTALL = 'POST /v1/runtimes/machine/tools/install' as const;
+
+/** The daemon's refusal when the command it would run is no longer the one that was shown (Runtimes' `fleet_setup_plan_changed`). */
+const isPlanChanged = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'fleet_setup_plan_changed';
 
 type Read =
   | { readonly kind: 'reading' }
@@ -94,13 +98,16 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
     };
   }, [client, decide, readPlan]);
 
-  const install = async (): Promise<void> => {
+  const install = async (shown: string): Promise<void> => {
     setNote(null);
     setWorking(true);
     step?.busy('Installing Claude Code…');
     try {
+      // The request names the command the person is looking at: the daemon re-plans, and runs only that very command.
       const result = ToolInstallResultSchema.parse(
-        await client.call(INSTALL, { body: { harnesses: ['claude-code'] } }),
+        await client.call(INSTALL, {
+          body: { harnesses: ['claude-code'], shown: [{ harness: 'claude-code', command: shown }] },
+        }),
       );
       const outcome = result.outcomes.find(entry => entry.harness === 'claude-code');
       if (outcome?.outcome === 'installed' || outcome?.outcome === 'already-installed') {
@@ -111,6 +118,8 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
       else setNote('Nothing was installed.');
     } catch (error) {
       setNote(sentenceOf(error));
+      // The plan moved since it was shown: nothing ran. Show the new command, for a new press.
+      if (isPlanChanged(error)) await readPlan(true);
     } finally {
       setWorking(false);
       step?.busy(null);
@@ -118,6 +127,7 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
   };
 
   if (read.kind === 'reading' || read.kind === 'found') return null;
+  const shownCommand = read.kind === 'plan' && read.plan.kind === 'runnable' ? read.plan.command : '';
   return (
     <div className="cc-step" data-onboarding-step="claude-code.installed">
       <p className="cc-step__line">
@@ -140,7 +150,7 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
             {read.plan.command}
           </pre>
           <div className="cc-actions">
-            <Button variant="primary" disabled={working} onClick={() => void install()}>
+            <Button variant="primary" disabled={working} onClick={() => void install(shownCommand)}>
               {working ? 'Installing…' : 'Install Claude Code'}
             </Button>
           </div>

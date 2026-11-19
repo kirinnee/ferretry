@@ -112,14 +112,13 @@ describe('the Claude segment pages', () => {
             // A button is never the whole row on a desktop.
             if (!viewport.phone) expect(box?.width).toBeLessThan(viewport.width / 2);
           }
-          for (const card of await tab.locator('.cc-card').all()) {
+          for (const card of await tab.locator('.fy-cc__card').all()) {
             const box = await card.boundingBox();
             if (!viewport.phone) expect(box?.width).toBeLessThanOrEqual(320);
-            // The text is drawn (the radio must not paint over it).
+            // The text is drawn.
             expect((await card.innerText()).trim().length).toBeGreaterThan(0);
-            expect(await card.locator('input').evaluate(node => getComputedStyle(node).backgroundColor)).toBe(
-              'rgba(0, 0, 0, 0)',
-            );
+            // The radio is visually hidden (the card is the control), so it paints nothing over the text.
+            expect((await card.locator('input').boundingBox())?.width ?? 0).toBeLessThanOrEqual(1);
           }
           if (shotsDir !== '')
             await tab.screenshot({ fullPage: true, path: join(shotsDir, `${page}-${viewport.name}-${mode}.png`) });
@@ -131,7 +130,7 @@ describe('the Claude segment pages', () => {
     const tab = await open(context, 'permission', 'light');
     expect(await tab.locator('input[value="skip"]').isChecked()).toBe(true);
     expect(await tab.locator('.cc-step').innerText()).toContain('--dangerously-skip-permissions');
-    await tab.locator('input[value="auto"]').check();
+    await tab.locator('[data-choice="auto"]').click();
     await tab.waitForTimeout(400);
     expect(await tab.locator('[data-demo="permission-auto"]').count()).toBe(1);
     if (shotsDir !== '')

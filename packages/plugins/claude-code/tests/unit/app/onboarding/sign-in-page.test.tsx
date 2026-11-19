@@ -9,7 +9,7 @@ import {
 } from '@ferretry/app/testing';
 import { afterEach, describe, expect, it } from 'bun:test';
 import { SignInPage } from '../../../../app/features/onboarding/sign-in-page.tsx';
-import { scripted, stepHarness } from '../../../fixtures/onboarding/step-harness.ts';
+import { scripted, stepHarness } from '../../../fixtures/onboarding/harness.ts';
 
 const mounted: Mounted[] = [];
 afterEach(async () => {

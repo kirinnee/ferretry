@@ -2,7 +2,7 @@
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { afterEach, describe, expect, it } from 'bun:test';
 import { InstalledPage } from '../../../../app/features/onboarding/installed-page.tsx';
-import { type Call, scripted, stepHarness } from '../../../fixtures/onboarding/step-harness.ts';
+import { type Call, scripted, stepHarness } from '../../../fixtures/onboarding/harness.ts';
 
 const mounted: Mounted[] = [];
 afterEach(async () => {
@@ -82,11 +82,53 @@ describe('the install page', () => {
     const button = [...view.container.querySelectorAll('button')].find(b => b.textContent === 'Install Claude Code');
     await interact(() => must(button, 'the install button').click());
     await settle();
+    // The request names the very command that was on the screen, so the daemon can refuse if its plan has moved.
     expect(calls.find(call => call.route === 'POST /v1/runtimes/machine/tools/install')?.init?.body).toEqual({
       harnesses: ['claude-code'],
+      shown: [{ harness: 'claude-code', command: 'npm install -g @fake/claude' }],
     });
     expect(run.events).toEqual(['ready', 'busy:Installing Claude Code…', 'done', 'busy:null']);
     expect(view.container.querySelector('[data-installed]')?.textContent).toContain('added 1 package');
+  });
+
+  it('re-shows the new command, runs nothing and does not say done, when the daemon says its plan changed', async () => {
+    let planned = RUNNABLE;
+    const refused = Object.assign(
+      new Error('The install command for Claude Code changed. It is now: brew install fake-claude.'),
+      {
+        code: 'fleet_setup_plan_changed',
+      },
+    );
+    const { view, run, calls } = await open({
+      'GET /v1/claude-code/update': update(absent),
+      'GET /v1/runtimes/setup/scan': () => planned,
+      'POST /v1/runtimes/machine/tools/install': () => {
+        planned = scan({ installed: false, install: { kind: 'runnable', command: 'brew install fake-claude' } });
+        return refused;
+      },
+    });
+    const button = [...view.container.querySelectorAll('button')].find(b => b.textContent === 'Install Claude Code');
+    await interact(() => must(button, 'the install button').click());
+    await settle();
+    expect(must(view.container.querySelector('[data-install-command]'), 'the command').textContent).toBe(
+      'brew install fake-claude',
+    );
+    expect(view.container.querySelector('[role="alert"]')?.textContent).toContain(
+      'It is now: brew install fake-claude',
+    );
+    expect(run.events).not.toContain('done');
+    expect(calls.filter(call => call.route === 'POST /v1/runtimes/machine/tools/install')).toHaveLength(1);
+    // A new press sends the new command.
+    const again = [...view.container.querySelectorAll('button')].find(b => b.textContent === 'Install Claude Code');
+    await interact(() => must(again, 'the install button').click());
+    await settle();
+    const bodies = calls
+      .filter(call => call.route === 'POST /v1/runtimes/machine/tools/install')
+      .map(call => call.init?.body);
+    expect(bodies[1]).toEqual({
+      harnesses: ['claude-code'],
+      shown: [{ harness: 'claude-code', command: 'brew install fake-claude' }],
+    });
   });
 
   it('says the daemon’s reason and the manual command when the install fails, and does not say done', async () => {

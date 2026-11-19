@@ -9,7 +9,7 @@ import { daemonOfClient, PanelSlot, useSlotHasPanels } from '@ferretry/app';
 import { useEffect, useRef } from 'react';
 import { CLAUDE_CODE_SIGN_IN_SLOT } from '../../../contract/index.ts';
 import type { ClaudeCodeClient } from '../../lib/client.ts';
-import type { StepPageProps } from './kit.tsx';
+import type { StepPageProps } from './props.ts';
 
 export function SignInPage({ client, step }: StepPageProps<ClaudeCodeClient>) {
   const placed = useSlotHasPanels(CLAUDE_CODE_SIGN_IN_SLOT);

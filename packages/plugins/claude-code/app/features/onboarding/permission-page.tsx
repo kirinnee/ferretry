@@ -2,16 +2,25 @@
  * "Permissions" — how Claude Code handles a command it is about to run: ask first (auto mode), or never ask (Claude's
  * own `--dangerously-skip-permissions`). The page says plainly what skip allows. It writes exactly one key,
  * `permissionMode`, in `harness-claude-code.yaml` through the kernel's config route (read with its etag, written
- * against it). The dangerous-rm waiver is a separate Settings switch and is NOT offered here. A loosening an AGENT
- * makes stays held for the owner; this is the person's own choice.
+ * against it). The file is read with the shared config reader and the one key is set with the shared one-key editor
+ * (`@ferretry/std/yaml`), so every YAML form reads right and every other key and comment stays as it was. The dangerous-rm
+ * waiver is a separate Settings switch and is NOT offered here. A loosening an AGENT makes stays held for the owner; this
+ * is the person's own choice.
+ *
+ * A pick is NOT a write: moving over the cards (arrow keys included) only selects. The page then says in full what the
+ * selected mode means and offers one explicit "Use …" button; only that press writes.
+ *
+ * When the route does not show the file (its text is WITHHELD because it holds a secret or does not parse, or the YAML
+ * does not read), the page shows the mode as unknown, writes nothing, and says where to change it at the machine.
  */
-import { Button } from '@ferretry/app';
+import { Button, ChoiceCards, type ChoiceOption } from '@ferretry/app';
+import { readConfigText, setConfigKey } from '@ferretry/std/yaml';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { PermissionModeSchema } from '../../../contract/index.ts';
 import type { ClaudeCodeClient } from '../../lib/client.ts';
 import { PermissionDemo } from './demos.tsx';
-import { ChoiceCards, type ChoiceOption, type StepPageProps } from './kit.tsx';
+import type { StepPageProps } from './props.ts';
 import { sentenceOf } from './words.ts';
 
 type Mode = z.infer<typeof PermissionModeSchema>;
@@ -20,10 +29,24 @@ const FILE = 'harness-claude-code.yaml';
 const READ = 'GET /v1/config/file' as const;
 const WRITE = 'PUT /v1/config/file' as const;
 
-const FileSchema = z.looseObject({ text: z.string(), etag: z.string().min(1) });
+const FileSchema = z.looseObject({
+  text: z.string(),
+  etag: z.string().min(1),
+  absolutePath: z.string().min(1).optional(),
+  state: z.string().optional(),
+});
 const WroteSchema = z.looseObject({ etag: z.string().min(1), outcome: z.enum(['applied', 'pending']) });
 
-const OPTIONS: readonly ChoiceOption<Mode>[] = [
+/** What each mode means, said in full before the press that writes it. */
+const CONSEQUENCE: Readonly<Record<Mode, { readonly button: string; readonly text: string }>> = {
+  auto: { button: 'Use Auto mode', text: 'Claude will ask you before anything risky.' },
+  skip: {
+    button: 'Use Skip permissions',
+    text: 'Claude will run every command without asking you, including deleting files. This is Claude’s --dangerously-skip-permissions. Only choose it on a machine you would let it wipe.',
+  },
+};
+
+const OPTIONS: readonly ChoiceOption[] = [
   { id: 'auto', title: 'Auto mode', line: 'Claude asks before anything risky.' },
   {
     id: 'skip',
@@ -32,36 +55,60 @@ const OPTIONS: readonly ChoiceOption<Mode>[] = [
   },
 ];
 
-const MODE_LINE = /^permissionMode:[ \t]*['"]?([a-z]+)['"]?[ \t]*(?:#.*)?$/mu;
+/** The comment the route answers in place of a text it will not show (kernel `withheldComment`). */
+const WITHHELD = /^# ‹hidden›: the text of this file is not shown because/u;
 
-/** What the file says now; `skip` (the default, owner !A525) when it says nothing or something unreadable. */
-export const permissionModeOf = (text: string): Mode => {
-  const parsed = PermissionModeSchema.safeParse(MODE_LINE.exec(text)?.[1]);
-  return parsed.success ? parsed.data : 'skip';
+/** What the file says now: a mode, or why none can be told (the default is `skip`, owner !A525). */
+export type PermissionRead = { readonly kind: 'mode'; readonly mode: Mode } | { readonly kind: 'unknown' };
+
+export const permissionRead = (text: string, state?: string): PermissionRead => {
+  if (WITHHELD.test(text) || state === 'invalid') return { kind: 'unknown' };
+  const read = readConfigText(text);
+  if (!read.ok) return { kind: 'unknown' };
+  const value = read.read.value;
+  if (value === null || value === undefined) return { kind: 'mode', mode: 'skip' };
+  if (typeof value !== 'object' || Array.isArray(value)) return { kind: 'unknown' };
+  const { permissionMode: raw } = value as { readonly permissionMode?: unknown };
+  if (raw === undefined || raw === null) return { kind: 'mode', mode: 'skip' };
+  const parsed = PermissionModeSchema.safeParse(raw);
+  return parsed.success ? { kind: 'mode', mode: parsed.data } : { kind: 'unknown' };
 };
 
-/** The file with `permissionMode` set and every other line left exactly as it was. */
-export const withPermissionMode = (text: string, mode: Mode): string => {
-  if (MODE_LINE.test(text)) return text.replace(MODE_LINE, `permissionMode: ${mode}`);
-  const body = text.length === 0 || text.endsWith('\n') ? text : `${text}\n`;
-  return `${body}permissionMode: ${mode}\n`;
-};
+/** The file with `permissionMode` set and every other key and comment left exactly as it was. */
+export const withPermissionMode = (text: string, mode: Mode): string => setConfigKey(text, 'permissionMode', mode);
+
+interface Loaded {
+  readonly text: string;
+  readonly etag: string;
+}
 
 export function PermissionPage({ client, step }: StepPageProps<ClaudeCodeClient>) {
-  const [mode, setMode] = useState<Mode | null>(null);
+  const [mode, setMode] = useState<Mode | 'unknown' | null>(null);
+  /** The card selected but not yet written. */
+  const [picked, setPicked] = useState<Mode | null>(null);
+  const [where, setWhere] = useState<string>(FILE);
   const [note, setNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const file = useRef<{ text: string; etag: string } | null>(null);
+  const file = useRef<Loaded | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     try {
       const read = FileSchema.parse(await client.call(READ, { query: { path: FILE } }));
-      file.current = { text: read.text, etag: read.etag };
-      setMode(permissionModeOf(read.text));
+      const found = permissionRead(read.text, read.state);
+      setWhere(read.absolutePath ?? FILE);
+      if (found.kind === 'unknown') {
+        file.current = null; // never written: its text is not shown, or does not read
+        setMode('unknown');
+      } else {
+        file.current = { text: read.text, etag: read.etag };
+        setMode(found.mode);
+        setPicked(prior => prior ?? found.mode);
+      }
       setNote(null);
     } catch (error) {
+      file.current = null;
       setNote(sentenceOf(error));
-      setMode(prior => prior ?? 'skip');
+      setMode(prior => prior ?? 'unknown');
     }
     step?.ready();
   }, [client, step]);
@@ -74,21 +121,20 @@ export function PermissionPage({ client, step }: StepPageProps<ClaudeCodeClient>
   }, [load]);
 
   const choose = async (next: Mode): Promise<void> => {
-    setMode(next);
     setNote(null);
     if (file.current === null) {
       await load();
       if (file.current === null) return;
     }
+    const loaded = file.current;
     setSaving(true);
     step?.busy('Saving…');
     try {
-      const wrote = WroteSchema.parse(
-        await client.call(WRITE, {
-          body: { path: FILE, text: withPermissionMode(file.current.text, next), etag: file.current.etag },
-        }),
-      );
-      file.current = { text: withPermissionMode(file.current.text, next), etag: wrote.etag };
+      const text = withPermissionMode(loaded.text, next);
+      const wrote = WroteSchema.parse(await client.call(WRITE, { body: { path: FILE, text, etag: loaded.etag } }));
+      file.current = { text, etag: wrote.etag };
+      setMode(next);
+      setPicked(next);
       if (wrote.outcome === 'pending') setNote('Saved, but the owner has to confirm it before it takes effect.');
       step?.done();
     } catch (error) {
@@ -104,14 +150,31 @@ export function PermissionPage({ client, step }: StepPageProps<ClaudeCodeClient>
   return (
     <div className="cc-step" data-onboarding-step="claude-code.permission">
       <p className="cc-step__line">When Claude Code wants to run a command on this machine, should it ask you first?</p>
-      <ChoiceCards
-        legend="Permissions"
-        name="permission-mode"
-        options={OPTIONS}
-        value={mode}
-        onChange={next => void choose(next)}
-      />
-      <PermissionDemo mode={mode} />
+      {mode === 'unknown' ? (
+        <p className="cc-step__line" data-mode-unknown="">
+          The current mode is unknown: this page cannot read it safely. Change this at the machine: {where}
+        </p>
+      ) : (
+        <>
+          <ChoiceCards
+            label="Permissions"
+            options={OPTIONS}
+            value={picked ?? mode}
+            onChange={next => setPicked(next as Mode)}
+          />
+          <PermissionDemo mode={picked ?? mode} />
+          {picked !== null && picked !== mode ? (
+            <div className="cc-actions" data-permission-confirm="">
+              <p className="cc-step__line" role="note" data-permission-consequence={picked}>
+                {CONSEQUENCE[picked].text} Nothing is saved until you press the button.
+              </p>
+              <Button variant="primary" disabled={saving} onClick={() => void choose(picked)}>
+                {CONSEQUENCE[picked].button}
+              </Button>
+            </div>
+          ) : null}
+        </>
+      )}
       {saving ? (
         <p role="status" className="cc-step__line">
           Saving…
@@ -122,9 +185,14 @@ export function PermissionPage({ client, step }: StepPageProps<ClaudeCodeClient>
           <p role="alert" className="cc-step__line">
             {note}
           </p>
-          {file.current === null ? <Button onClick={() => void load()}>Try again</Button> : null}
+          {file.current === null && mode !== 'unknown' ? <Button onClick={() => void load()}>Try again</Button> : null}
         </div>
       )}
+      {note !== null && mode === 'unknown' ? (
+        <div className="cc-actions">
+          <Button onClick={() => void load()}>Try again</Button>
+        </div>
+      ) : null}
     </div>
   );
 }

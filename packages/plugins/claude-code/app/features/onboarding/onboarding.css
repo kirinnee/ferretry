@@ -1,6 +1,6 @@
-/* Claude Code's first-run pages: the choice cards of the pre-screen and the permission page, and the two small demos.
-   Palette and shape come from the shell's tokens. Cards sit in a row and are never full width (<= 320px each); they
-   stack only on a phone. A demo plays ONCE and stays on its last frame; with motion reduced it is simply the last frame. */
+/* Claude Code's first-run pages: the page body, the command block, the actions row and the two small demos.
+   Palette and shape come from the shell's tokens. The choice cards are the app's own (`ChoiceCards`). A demo plays ONCE
+   and stays on its last frame; with motion reduced it is simply the last frame. */
 .cc-step {
   display: flex;
   flex-direction: column;
@@ -13,83 +13,6 @@
   line-height: var(--leading-base);
   margin: 0;
   max-width: 60ch;
-}
-.cc-cards {
-  border: 0;
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 260px));
-  margin: 0;
-  min-width: 0;
-  padding: 0;
-}
-@media (max-width: 479px) {
-  .cc-cards {
-    grid-template-columns: 1fr;
-  }
-}
-.cc-card {
-  background: var(--card-bg);
-  border: var(--card-stroke) solid var(--card-border);
-  border-radius: var(--card-radius);
-  box-sizing: border-box;
-  color: var(--fg);
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-height: 88px;
-  padding: 16px;
-  position: relative;
-  text-align: left;
-}
-.cc-card input {
-  /* Native radio group (arrow keys, one tab stop); the dot is hidden, the card is the control. */
-  appearance: none;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  inset: 0;
-  margin: 0;
-  position: absolute;
-}
-.cc-card__title,
-.cc-card__line {
-  position: relative;
-  pointer-events: none;
-}
-.cc-card__title {
-  font-weight: 600;
-}
-.cc-card__line {
-  color: var(--muted);
-  font-size: var(--font-size-meta, 0.875em);
-  line-height: var(--leading-base);
-}
-.cc-card:has(input:checked) {
-  animation: cc-pick 160ms ease-out;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
-}
-.cc-card:has(input:checked)::after {
-  color: var(--accent);
-  content: '✓';
-  font-weight: 700;
-  position: absolute;
-  right: 12px;
-  top: 10px;
-}
-.cc-card:has(input:focus-visible) {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-@keyframes cc-pick {
-  from {
-    transform: scale(0.98);
-  }
-  to {
-    transform: scale(1);
-  }
 }
 .cc-command {
   background: var(--surface-2);
@@ -161,7 +84,6 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .cc-card:has(input:checked),
   .cc-type,
   .cc-fade,
   .cc-ask,

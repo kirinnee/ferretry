@@ -6,10 +6,11 @@
  *   ?page=installed|sign-in|import-choice|permission|permission-auto   ?theme=<family>-<mode>
  */
 import { createRoot } from 'react-dom/client';
+import '../../../../app/features/onboarding/onboarding.css';
 import { InstalledPage } from '../../../../app/features/onboarding/installed-page.tsx';
 import { ImportChoicePage } from '../../../../app/features/onboarding/import-choice-page.tsx';
 import { PermissionPage } from '../../../../app/features/onboarding/permission-page.tsx';
-import type { StepHost } from '../../../../app/features/onboarding/kit.tsx';
+import type { StepHost } from '@ferretry/kernel/contract';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';

@@ -117,6 +117,86 @@ describe('the harness sign-in embed', () => {
     }
   });
 
+  it('does not count a switched-off login as signed in: the page is shown, and the Add action stays', async () => {
+    const told: string[] = [];
+    const disabled = login({ disabled: { source: 'login' } });
+    const view = await mount(
+      <HarnessSignInEmbed
+        client={scripted({ [LIST]: loginList(disabled), [GRANTS]: OPEN })}
+        harness="claude-code"
+        onShown={() => told.push('shown')}
+        onAlreadySignedIn={() => told.push('already')}
+      />,
+    );
+    await settle();
+    expect(told).toEqual(['shown']);
+    expect(view.container.querySelector('[data-harness-sign-in="done"]')).toBeNull();
+    expect(view.container.querySelector('[data-harness-sign-in-blocked]')?.textContent).toContain('switched off');
+    expect(view.container.querySelector('[data-change-submit]')?.textContent).toBe('Sign in to Claude Code');
+    await view.unmount();
+  });
+
+  it('shows a row still being checked as checking, not signed in, and a retry reads again', async () => {
+    const told: string[] = [];
+    let ready = false;
+    const calls: Call[] = [];
+    const checkingRow = login({ status: { ...NEEDS, word: 'checking', label: 'Checking' } });
+    const client = scripted({ [LIST]: () => loginList(ready ? login() : checkingRow), [GRANTS]: OPEN }, calls);
+    const view = await mount(
+      <HarnessSignInEmbed
+        client={client}
+        harness="claude-code"
+        onShown={() => told.push('shown')}
+        onAlreadySignedIn={() => told.push('already')}
+        onSignedIn={() => told.push('signed-in')}
+      />,
+    );
+    await settle();
+    expect(told).toEqual(['shown']);
+    expect(view.container.querySelector('[data-harness-sign-in="checking"]')?.textContent).toContain('Checking');
+    expect(view.container.querySelector('[data-harness-sign-in="done"]')).toBeNull();
+    ready = true;
+    const before = calls.filter(call => call.route === LIST).length;
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[data-harness-sign-in="checking"] button'),
+        'retry',
+      ).click(),
+    );
+    await settle();
+    expect(calls.filter(call => call.route === LIST).length).toBe(before + 1);
+    expect(view.container.querySelector('[data-harness-sign-in="done"]')).not.toBeNull();
+    expect(told).toEqual(['shown', 'signed-in']);
+    await view.unmount();
+  });
+
+  it('keeps the Add action when the only login that needs a sign-in cannot be signed in here', async () => {
+    const stuck = login({
+      status: NEEDS,
+      signIn: { available: false, reason: 'The claude command is not installed.' },
+    });
+    const view = await mount(
+      <HarnessSignInEmbed client={scripted({ [LIST]: loginList(stuck), [GRANTS]: OPEN })} harness="claude-code" />,
+    );
+    await settle();
+    expect(view.container.querySelector('[data-harness-sign-in-blocked]')?.textContent).toContain(
+      'The claude command is not installed.',
+    );
+    expect(view.container.querySelector('[data-change-submit]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('works on a switched-on login that needs signing in, even when a switched-off one is listed first', async () => {
+    const off = login({ id: 'old', status: NEEDS, disabled: { source: 'login' } });
+    const on = login({ id: 'claude-you', status: NEEDS });
+    const view = await mount(
+      <HarnessSignInEmbed client={scripted({ [LIST]: loginList(off, on), [GRANTS]: OPEN })} harness="claude-code" />,
+    );
+    await settle();
+    expect(view.container.querySelector('[data-login-sign-in]')?.getAttribute('data-login-sign-in')).toBe('start');
+    await view.unmount();
+  });
+
   it('as a slot panel it checks its untyped props and still draws without a callback', () => {
     const client = scripted({});
     expect(harnessSignIn(client, 'codex', {}).props).toMatchObject({ harness: 'codex' });

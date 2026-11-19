@@ -5,7 +5,7 @@ import { lazyComponent } from './lazy.ts';
 import { forSubject } from '@ferretry/app';
 import { createElement } from 'react';
 import type { ClaudeCodeClient } from './lib/client.ts';
-import type { StepHost } from './features/onboarding/kit.tsx';
+import type { StepHost } from '@ferretry/kernel/contract';
 
 type ViewName = 'claude-code-settings' | 'permission-panel' | 'dialog-panel' | 'onboarding-pages';
 

@@ -12,7 +12,7 @@ import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { useLoginChanges } from '../lib/login-changes.ts';
 import { readLogins } from '../lib/logins-api.ts';
 import { HARNESS_NAMES, type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
-import { ChangeApplyPanel } from '../ui.ts';
+import { Button, ChangeApplyPanel } from '../ui.ts';
 import { LoginSignIn } from './login-sign-in.tsx';
 
 export interface HarnessSignInEmbedProps {
@@ -29,9 +29,27 @@ export interface HarnessSignInEmbedProps {
 /** `refresh_due` is still a login that works: the harness refreshes it on its own. */
 const USABLE: ReadonlySet<string> = new Set(['ready', 'refresh_due']);
 
-/** The login this panel works on: one of this harness that still needs a sign-in. */
+type Row = LoginList['logins'][number];
+
+/** A login that is switched on. A switched-off login refuses every start, so it never counts as "signed in". */
+const enabled = (login: Row): boolean => login.disabled === undefined;
+
+const rowsOf = (list: LoginList, harness: HarnessKind): readonly Row[] =>
+  list.logins.filter(login => login.harness === harness);
+
+/** A login of this harness that works NOW: switched on, and ready (or about to refresh itself). */
+const usable = (list: LoginList, harness: HarnessKind): boolean =>
+  rowsOf(list, harness).some(login => enabled(login) && USABLE.has(login.status.word));
+
+/** The login this panel works on: one of this harness, switched on, that needs a sign-in and can be signed in here. */
 const pending = (list: LoginList, harness: HarnessKind) =>
-  list.logins.find(login => login.harness === harness && login.status.word === 'needs_sign_in');
+  rowsOf(list, harness).find(
+    login => enabled(login) && login.status.word === 'needs_sign_in' && login.signIn.available,
+  );
+
+/** Switched on, and the machine has not yet said whether it works: not signed in, not yet known to be signed out. */
+const checking = (list: LoginList, harness: HarnessKind): boolean =>
+  rowsOf(list, harness).some(login => enabled(login) && login.status.word === 'checking');
 
 export function HarnessSignInEmbed({
   client,
@@ -60,13 +78,27 @@ export function HarnessSignInEmbed({
 
   // Said once, after the first read: a usable login lets the page skip itself, anything else shows the panel.
   const told = useRef(false);
+  const alreadyAtFirst = useRef(false);
   useEffect(() => {
     if (told.current || (list === null && failure === null)) return;
     told.current = true;
-    if (list?.logins.some(login => login.harness === harness && USABLE.has(login.status.word)) === true)
-      onAlreadySignedIn?.();
+    alreadyAtFirst.current = list !== null && usable(list, harness);
+    if (list !== null && usable(list, harness)) onAlreadySignedIn?.();
     else onShown?.();
   }, [list, failure, harness, onShown, onAlreadySignedIn]);
+
+  // A login that was still being checked (or was signed in by another door) turns out to work: that is "signed in", once.
+  const signedTold = useRef(false);
+  const signedIn = useCallback((): void => {
+    if (signedTold.current) return;
+    signedTold.current = true;
+    onSignedIn?.();
+  }, [onSignedIn]);
+  useEffect(() => {
+    // Not on the first read: a login that already worked then is "already signed in" (above), and the page moved on.
+    if (!told.current || alreadyAtFirst.current || list === null || !usable(list, harness)) return;
+    signedIn();
+  }, [list, harness, signedIn]);
 
   const name = HARNESS_NAMES[harness];
   if (failure !== null)
@@ -87,17 +119,40 @@ export function HarnessSignInEmbed({
         autoStart={login.id === made}
         onSignedIn={() => {
           void reload();
-          onSignedIn?.();
+          signedIn();
         }}
       />
     );
 
-  if (list.logins.some(item => item.harness === harness))
+  if (usable(list, harness))
     return (
       <p className="m-0 text-cell leading-base text-muted" data-harness-sign-in="done">
         {name} is signed in on {list.machine}.
       </p>
     );
+
+  // The machine has not finished checking: that is not "signed in", and not "signed out" either. Say so, and offer to look again.
+  if (checking(list, harness))
+    return (
+      <section className="flex flex-col gap-3" data-harness-sign-in="checking">
+        <p role="status" className="m-0 text-cell leading-base text-muted">
+          Checking the {name} sign-in on {list.machine}…
+        </p>
+        <div>
+          <Button onClick={() => void reload()}>Check again</Button>
+        </div>
+      </section>
+    );
+
+  // Rows that exist but cannot be signed in from here (switched off, or sign-in not available): said, never a dead end —
+  // the Add action below stays.
+  const blocked = rowsOf(list, harness).flatMap(item =>
+    !enabled(item)
+      ? [`A ${name} sign-in on ${list.machine} is switched off.`]
+      : item.status.word === 'needs_sign_in' && !item.signIn.available
+        ? [item.signIn.reason]
+        : [],
+  );
 
   const make = async (): Promise<void> => {
     const id = suggestLoginId(harness, undefined, new Set(list.logins.map(item => item.id)));
@@ -109,8 +164,16 @@ export function HarnessSignInEmbed({
 
   return (
     <section className="flex flex-col gap-3" data-harness-sign-in={harness}>
+      {blocked.map(sentence => (
+        <p key={sentence} className="m-0 text-cell leading-base text-muted" data-harness-sign-in-blocked="">
+          {sentence}
+        </p>
+      ))}
       <p className="m-0 text-cell leading-base text-muted">
-        There is no {name} sign-in on {list.machine} yet. This makes one and starts signing it in.
+        {blocked.length === 0
+          ? `There is no ${name} sign-in on ${list.machine} yet.`
+          : `None of them can be signed in here.`}{' '}
+        This makes one and starts signing it in.
       </p>
       <ChangeApplyPanel
         machineName={list.machine}

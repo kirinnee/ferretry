@@ -1,4 +1,5 @@
 /** The Claude segment's first-run pages, as one view module the half loads on first use (like the other views). */
+import '../features/onboarding/onboarding.css';
 export { ImportChoicePage } from '../features/onboarding/import-choice-page.tsx';
 export { InstalledPage } from '../features/onboarding/installed-page.tsx';
 export { PermissionPage } from '../features/onboarding/permission-page.tsx';
