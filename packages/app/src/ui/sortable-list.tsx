@@ -14,7 +14,7 @@
  * {@link useMotionAllowed} says the screen must be still, and the order still changes.
  */
 import { ChevronDown, ChevronUp, GripVertical } from 'lucide-react';
-import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode } from 'react';
+import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   cancelledMessage,
@@ -58,6 +58,13 @@ interface Drag {
   readonly startCentre: number;
 }
 
+/** What the drag reads on every move or release: the latest closure, so a listener added once never goes stale. */
+interface PointerHandlers {
+  readonly move: (event: PointerEvent) => void;
+  readonly end: (event: PointerEvent) => void;
+  readonly lost: (event: PointerEvent) => void;
+}
+
 const FLIP_MS = 150;
 const centreOf = (row: HTMLElement): number => row.offsetTop + row.offsetHeight / 2;
 
@@ -76,9 +83,14 @@ export function SortableList<T>({
   const [heldKey, setHeldKey] = useState<string | null>(null);
   const [mode, setMode] = useState<'pointer' | 'keyboard' | null>(null);
   const [offset, setOffset] = useState(0);
+  /** Where the pointer says the held row's middle is, from the list's top. The offset is measured from it. */
+  const [dragCentre, setDragCentre] = useState<number | null>(null);
   const [announcement, setAnnouncement] = useState('');
   const rows = useRef(new Map<string, HTMLLIElement>());
   const drag = useRef<Drag | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const handlers = useRef<PointerHandlers | null>(null);
+  const untrack = useRef<(() => void) | null>(null);
   const tops = useRef(new Map<string, number>());
   const shown = draft ?? items;
   const keys = shown.map(itemKey);
@@ -104,13 +116,65 @@ export function SortableList<T>({
     }
   }, [keys.join('\u0000'), motion, heldKey]);
 
+  // THE HELD OFFSET, measured AFTER the order is drawn. The row's layout place changes when the order does, so an offset
+  // worked out from the place it had before the move would shift it by the distance it just travelled.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the order is a trigger
+  useLayoutEffect(() => {
+    if (mode !== 'pointer' || heldKey === null || dragCentre === null) return;
+    const row = rows.current.get(heldKey);
+    if (row !== undefined) setOffset(dragCentre - centreOf(row));
+  }, [dragCentre, heldKey, mode, keys.join('\u0000')]);
+
   const finish = useCallback((): void => {
+    untrack.current?.();
+    untrack.current = null;
     drag.current = null;
     setDraft(null);
     setHeldKey(null);
     setMode(null);
     setOffset(0);
+    setDragCentre(null);
   }, []);
+
+  // A drag is followed on the DOCUMENT and the list, never on the grip: React moves a row in the DOM when the order
+  // changes, and a node that moves loses the pointer, so the release would never reach it. Neither the document nor
+  // the list moves. The list also holds the capture, so a release outside the window is still delivered.
+  const track = (pointerId: number): void => {
+    untrack.current?.();
+    const list = listRef.current;
+    try {
+      list?.setPointerCapture?.(pointerId);
+    } catch {
+      // The pointer is not active (a synthetic press): the document listeners below still follow it.
+    }
+    const onMove = (event: PointerEvent): void => handlers.current?.move(event);
+    const onEnd = (event: PointerEvent): void => handlers.current?.end(event);
+    const onLost = (event: PointerEvent): void => handlers.current?.lost(event);
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onEnd);
+    document.addEventListener('pointercancel', onEnd);
+    list?.addEventListener('lostpointercapture', onLost);
+    untrack.current = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onEnd);
+      document.removeEventListener('pointercancel', onEnd);
+      list?.removeEventListener('lostpointercapture', onLost);
+      try {
+        if (list?.hasPointerCapture?.(pointerId)) list.releasePointerCapture(pointerId);
+      } catch {
+        // Already released with the pointer.
+      }
+    };
+  };
+
+  // Releasing the component mid-drag leaves nothing listening.
+  useEffect(
+    () => () => {
+      untrack.current?.();
+      untrack.current = null;
+    },
+    [],
+  );
 
   const commit = (): void => {
     const next = draft ?? items;
@@ -155,26 +219,25 @@ export function SortableList<T>({
     setAnnouncement(movedMessage(labelOf(key), target, count));
   };
 
-  const onGripPointerDown = (key: string, event: PointerEvent<HTMLButtonElement>): void => {
+  const onGripPointerDown = (key: string, event: ReactPointerEvent<HTMLButtonElement>): void => {
     if (disabled || heldKey !== null) return;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     const row = rows.current.get(key);
     if (row === undefined) return;
     event.preventDefault();
     event.currentTarget.focus?.();
-    event.currentTarget.setPointerCapture?.(event.pointerId);
     drag.current = { key, pointerId: event.pointerId, startY: event.clientY, startCentre: centreOf(row) };
+    track(event.pointerId);
     setDraft(items);
+    setDragCentre(centreOf(row));
     setHeldKey(key);
     setMode('pointer');
     setAnnouncement(liftedMessage(labelOf(key), keys.indexOf(key), count));
   };
 
-  const onGripPointerMove = (event: PointerEvent<HTMLButtonElement>): void => {
+  const onPointerMove = (event: PointerEvent): void => {
     const current = drag.current;
     if (current === null || event.pointerId !== current.pointerId) return;
-    const row = rows.current.get(current.key);
-    if (row === undefined) return;
     const dragged = current.startCentre + (event.clientY - current.startY);
     const others = keys.filter(key => key !== current.key);
     const target = dropIndex(
@@ -186,16 +249,23 @@ export function SortableList<T>({
       setDraft(next);
       setAnnouncement(movedMessage(labelOf(current.key), target, count));
     }
-    setOffset(dragged - centreOf(row));
+    setDragCentre(dragged);
   };
 
-  const onGripPointerEnd = (event: PointerEvent<HTMLButtonElement>): void => {
+  const onPointerEnd = (event: PointerEvent): void => {
     const current = drag.current;
     if (current === null || event.pointerId !== current.pointerId) return;
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
     if (event.type === 'pointercancel') cancel(current.key);
     else commit();
   };
+
+  // The capture went without a release (the browser took it): the drag is over, and nothing was dropped.
+  const onPointerLost = (event: PointerEvent): void => {
+    const current = drag.current;
+    if (current === null || event.pointerId !== current.pointerId) return;
+    cancel(current.key);
+  };
+  handlers.current = { move: onPointerMove, end: onPointerEnd, lost: onPointerLost };
 
   const onGripKeyDown = (key: string, event: KeyboardEvent<HTMLButtonElement>): void => {
     if (disabled || mode === 'pointer') return;
@@ -224,7 +294,7 @@ export function SortableList<T>({
 
   return (
     <div className={className}>
-      <ul aria-label={label} className="relative m-0 flex list-none flex-col gap-1.5 p-0">
+      <ul aria-label={label} className="relative m-0 flex list-none flex-col gap-1.5 p-0" ref={listRef}>
         {shown.map((item, index) => {
           const key = itemKey(item);
           const held = key === heldKey;
@@ -260,10 +330,7 @@ export function SortableList<T>({
                   if (held && mode === 'keyboard') cancel(key);
                 }}
                 onKeyDown={event => onGripKeyDown(key, event)}
-                onPointerCancel={onGripPointerEnd}
                 onPointerDown={event => onGripPointerDown(key, event)}
-                onPointerMove={onGripPointerMove}
-                onPointerUp={onGripPointerEnd}
                 type="button"
               >
                 <GripVertical aria-hidden="true" size={16} />
