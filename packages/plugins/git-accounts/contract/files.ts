@@ -28,3 +28,11 @@ export const GitAccountsConfigFile = defineConfig({
   personOnly: true,
 });
 export const GitAccountsConfigDef = GitAccountsConfigFile as ConfigDef;
+
+/**
+ * `state/git-accounts/keys.json`: the PRIVATE halves of the SSH keys Ferretry made, SEALED (0600, the vault's key), one
+ * entry per account id. The only readers are the ssh-agent feeder (it writes the key to `ssh-add -` on stdin) and
+ * nothing else: no route, command, port method, `use` or `${secret:}` returns or reaches it, and it is never put in
+ * an environment variable or written to another file.
+ */
+export const GIT_ACCOUNT_KEYS = defineSealedDocument({ name: 'keys', path: 'keys.json' });

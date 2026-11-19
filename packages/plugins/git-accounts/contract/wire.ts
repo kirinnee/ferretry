@@ -17,11 +17,33 @@ export type GitProvider = z.infer<typeof GitProviderSchema>;
 export const GitAccountIdSchema = z.string().regex(/^gha_[0-9]{1,20}$/u, 'a git account id is gha_ and digits');
 export type GitAccountId = z.infer<typeof GitAccountIdSchema>;
 
-/** A key this machine registered on the account at GitHub. Public facts only (B3 fills these). */
+/** The public half of an SSH key, as one OpenSSH line: `ssh-ed25519 AAAA…` (a comment may follow). */
+export const SshPublicKeySchema = z
+  .string()
+  .max(2048)
+  .regex(
+    /^(?:ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+={0,2}(?: [^\r\n]{0,200})?$/u,
+    'one OpenSSH public key line',
+  );
+/** `SHA256:` and 43 base64 characters, as `ssh-keygen -l` prints it. */
+export const SshFingerprintSchema = z.string().regex(/^SHA256:[A-Za-z0-9+/]{43}$/u);
+
+/**
+ * A key on the account at GitHub. Public facts only: the private half of a key Ferretry made lives in the sealed
+ * `keys.json` and never leaves the daemon.
+ */
 export const GitAccountKeySchema = z.strictObject({
-  /** GitHub's id of the registered key (to delete it again). */
-  githubKeyId: z.string().regex(/^[0-9]{1,20}$/u),
+  /** GitHub's id of the registered key (to delete it again). Absent for a key the person already had (never deleted by us). */
+  githubKeyId: z
+    .string()
+    .regex(/^[0-9]{1,20}$/u)
+    .optional(),
   title: z.string().min(1).max(200),
+  /** The public key line, for `user.signingkey` and for the screen. */
+  publicKey: SshPublicKeySchema.optional(),
+  fingerprint: SshFingerprintSchema.optional(),
+  /** `generated`: made here, private half sealed here. `own`: the person's own key, used through the host's ssh-agent. */
+  source: z.enum(['generated', 'own']).optional(),
 });
 export type GitAccountKey = z.infer<typeof GitAccountKeySchema>;
 
@@ -97,6 +119,9 @@ export const GIT_ACCOUNT_CODES = {
   providerUnreachable: 'provider_unreachable',
   providerRefused: 'provider_refused',
   invalidRequest: 'invalid_request',
+  keyRefused: 'key_refused',
+  keyNotOnAccount: 'key_not_on_account',
+  agentUnavailable: 'agent_unavailable',
 } as const;
 
 /** Where a person ends an OAuth app's access to their account. Shown, never opened for them. */
@@ -104,3 +129,41 @@ export const GITHUB_REVOKE_URL = 'https://github.com/settings/applications';
 
 /** The words no field of any wire shape here may be named by. A test reads every schema against it. */
 export const NO_SECRET_FIELDS = /token|secret|password|private|deviceCode|device_code|accessToken|bearer|digest/iu;
+
+// ─── SSH keys per account (B3) ────────────────────────────────────────────────────────────────────────────────────────
+
+/** What a key is for: `auth` (push and pull over SSH), `signing` (sign commits), or `both` (one key, two registrations). */
+export const GIT_KEY_PURPOSES = ['auth', 'signing', 'both'] as const;
+export const GitKeyPurposeSchema = z.enum(GIT_KEY_PURPOSES);
+export type GitKeyPurpose = z.infer<typeof GitKeyPurposeSchema>;
+/** The two registrations a key can hold at GitHub; `both` is a request for the two. */
+export const GitKeyKindSchema = z.enum(['auth', 'signing']);
+export type GitKeyKind = z.infer<typeof GitKeyKindSchema>;
+
+/**
+ * `POST /v1/git-accounts/:id/keys`. With no `publicKey` Ferretry makes an ed25519 key and registers its public half.
+ * With one, the person says "I already have this key on GitHub": it is only recorded (after GitHub confirms the
+ * account holds it), the private half is never asked for, and the host's own ssh-agent is used.
+ */
+export const GitKeyRequestSchema = z.strictObject({
+  purpose: GitKeyPurposeSchema,
+  publicKey: SshPublicKeySchema.optional(),
+});
+export type GitKeyRequest = z.infer<typeof GitKeyRequestSchema>;
+
+/** The public half and what is registered. Never the private half. */
+export const GitKeyResultSchema = z.strictObject({
+  publicKey: SshPublicKeySchema,
+  fingerprint: SshFingerprintSchema,
+  /** The registrations this account holds for the key now. */
+  registered: z.array(GitKeyKindSchema).max(2),
+  source: z.enum(['generated', 'own']),
+});
+export type GitKeyResult = z.infer<typeof GitKeyResultSchema>;
+
+export const GitKeyRemovedSchema = z.strictObject({
+  id: GitAccountIdSchema,
+  purpose: GitKeyKindSchema,
+  removed: z.literal(true),
+});
+export type GitKeyRemoved = z.infer<typeof GitKeyRemovedSchema>;

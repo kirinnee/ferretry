@@ -14,6 +14,8 @@ export const GIT_ACCOUNT_CAPS = {
 export const GIT_ACCOUNT_AUDIT = {
   added: 'git-account.added',
   removed: 'git-account.removed',
+  keyAdded: 'git-account.key-added',
+  keyRemoved: 'git-account.key-removed',
 } as const;
 
 export const GIT_ACCOUNT_AUDIT_SKIP = {
@@ -23,6 +25,11 @@ export const GIT_ACCOUNT_AUDIT_SKIP = {
   },
   list: { skip: 'a read of logins and key titles; no token' },
 } as const satisfies Readonly<Record<string, AuditDeclaration>>;
+
+/** A key route answers a public key and its fingerprint; the private half is never in a body, a header or a log. */
+export const GIT_ACCOUNT_KEY_GUARD = {
+  none: 'a public key line, its fingerprint and which registrations exist; never the private half of a key',
+} as const satisfies GuardDeclaration;
 
 export const GIT_ACCOUNT_GUARD = {
   none: 'a user code, a verification address, a login and key titles; never a token, a device code or key material',

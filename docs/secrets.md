@@ -2073,3 +2073,48 @@ that is reading and writing every repository the account can reach (opening, mer
 creating or editing issues, re-running workflows) and, through `api`, any REST or GraphQL call. The scrub catches the token
 only where it is printed back exactly or in a GitHub token's usual shape, not an encoded or split copy. Use an account only
 with agents and projects you would trust with those scopes.
+
+## A Git account's SSH key (B3: `git-accounts`)
+
+Each connected account can have **one SSH key that Ferretry makes**, registered on GitHub as an _authentication_ key
+(push and pull over SSH), a _signing_ key (signed commits), or both: one key, two registrations. A ferret may **use** it
+and can never **read** it.
+
+- **Made in the daemon.** `node:crypto` makes an ed25519 key pair; the private half is written as an unencrypted
+  `openssh-key-v1` file and **sealed** in the plugin's own document `state/git-accounts/keys.json` (`0600`, the vault's
+  key; one entry per account id). It is listed under the plugin's `privacy.private`, so no root reaches it, and it is no
+  more a `fy secret` than the token is: `use` and `${secret:}` never touch it.
+- **Only the public half leaves.** The key is registered by `POST /user/keys` and `POST /user/ssh_signing_keys`
+  (titled `Ferretry <machine name>`) through the account's API seam. Every answer, the account list and the audit line
+  (`git-account.key-added` / `git-account.key-removed`: the account id) hold the public key, its fingerprint and which
+  registrations exist. A request body is never quoted back, because a person may have pasted a private key into it.
+- **Used through an ssh-agent, one per account.** The daemon starts `ssh-agent -D -a <socket>` on the first ask for an
+  account's socket (`GitAccountsApi.agentSocket`; the launch of a ferret that needs it asks), then feeds the key with
+  `ssh-add -` **on stdin**. The key is never an argument, an environment variable or a file; the children run
+  `sealed` (only the nine inherited names plus `SSH_AUTH_SOCK`). The sockets live in one private (`0700`) scratch
+  folder with a short path (a unix socket path holds about 104 bytes, which a folder under the state directory can
+  exceed); the agent creates each socket `0600`. An agent stops when the account is removed, when its last registration
+  is removed, and when the daemon stops.
+- **A key the person already has** (`POST …/keys` with a `publicKey`): GitHub must list that exact key on the account;
+  Ferretry records the public key, asks for no private half, and never deletes it from GitHub. `agentSocket` answers
+  `undefined`, so the host's own `SSH_AUTH_SOCK` is used. A private key is never imported from `~/.ssh`.
+- **Pinned host keys.** `known_hosts` for `github.com` is compiled from GitHub's published keys
+  (`contract/known-hosts.ts`, with the update path in its header and a test that compares them with GitHub's published
+  SHA256 fingerprints); `GitAccountsApi.knownHostsFile` writes it beside the sockets. Use it with
+  `StrictHostKeyChecking=yes`.
+- **Removing** a registration deletes it at GitHub first (a refusal keeps it recorded, so it can be retried); removing
+  the last one, or the account, stops the agent and deletes the sealed private key.
+- Add and remove are `secrets.configure` from a person (passkey step-up from a paired device).
+
+**GAP — use is real.** Any process that can open an account's agent socket (every process of a ferret that was given it,
+and any other process of the same OS user) can push and sign as that account while the agent runs, and a GitHub SSH key
+opens every repository the account can reach, not one. That is the point of "use". It cannot extract the key through the
+socket, but a process running as the owner that can read the daemon's memory or its state folder can reach the sealed
+key, as for every secret here ([threat model](#threat-model)).
+
+**GAP — an unclean daemon death.** The agent is a child of the daemon. After a `SIGKILL` or a power loss nothing stops
+it: it keeps the key in its memory, behind a `0600` socket in a `0700` folder of this user, until it is killed or the
+machine restarts. A clean stop ends every agent and removes the folder.
+
+**GAP — SAML single sign-on.** An organisation that enforces SSO needs the key authorised once on GitHub before a push
+to its repositories works; Ferretry cannot do that for the person.
