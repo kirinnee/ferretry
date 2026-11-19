@@ -67,7 +67,14 @@ describe('a fresh machine', () => {
     const view = await open(
       routes(scanOf({ claude: 'absent', codex: 'absent' }), {
         'POST /v1/runtimes/machine/tools/install': {
-          outcomes: [{ harness: 'claude-code', outcome: 'installed', command: 'brew install --cask claude-code' }],
+          outcomes: [
+            {
+              harness: 'claude-code',
+              outcome: 'installed',
+              command: 'brew install --cask claude-code',
+              output: ['==> Installed claude-code'],
+            },
+          ],
         },
       }),
       calls,
@@ -82,6 +89,7 @@ describe('a fresh machine', () => {
       harnesses: ['claude-code'],
     });
     expect(text(root, '[data-install-note]')).toContain('brew install --cask claude-code');
+    expect(text(root, '[data-install-note]')).toContain('==> Installed claude-code');
   });
 });
 

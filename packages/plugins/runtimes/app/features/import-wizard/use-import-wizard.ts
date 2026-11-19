@@ -48,10 +48,12 @@ export type ToolEnd =
   | { readonly kind: 'imported'; readonly sentences: readonly string[]; readonly unmarked: boolean }
   | { readonly kind: 'skipped' };
 
+/** What the install answered: one sentence, then the manager's last lines (the daemon scrubbed them). */
 const installSentence = (outcome: ToolInstallOutcome): string => {
   if (outcome.outcome === 'already-installed') return 'It is already installed.';
-  if (outcome.outcome === 'installed') return `Installed with: ${outcome.command}`;
-  return `${outcome.reason} To do it yourself, run: ${outcome.manualCommand}`;
+  const lines = outcome.output.length === 0 ? '' : `\n${outcome.output.join('\n')}`;
+  if (outcome.outcome === 'installed') return `Installed with: ${outcome.command}${lines}`;
+  return `${outcome.reason} To do it yourself, run: ${outcome.manualCommand}${lines}`;
 };
 
 export function useImportWizard(client: RuntimesClient) {

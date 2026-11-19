@@ -73,7 +73,11 @@ function InstallBlock({ model, wizard }: { readonly model: ToolModel; readonly w
         </>
       ) : null}
       {note === undefined ? null : (
-        <p role="status" className="m-0 text-cell leading-base text-fg" data-install-note="">
+        <p
+          role="status"
+          className="m-0 whitespace-pre-wrap text-cell leading-base text-fg [overflow-wrap:anywhere]"
+          data-install-note=""
+        >
           {note}
         </p>
       )}
