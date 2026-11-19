@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { interact, mount, must, settleUntil } from '@ferretry/app/testing';
 import { AccountLinksView, ProjectAccountLinks } from '../../../app/features/create-project/account-links.tsx';
-import { refusal, scripted } from './support/client.ts';
+import type { ProjectsClient } from '../../../app/lib/client.ts';
+import { clickEvent, refusal, scripted } from './support/client.ts';
 
 const ACCOUNTS = 'GET /v1/git-accounts';
 const account = (id: string, login: string) => ({ id, login, keys: {} });
@@ -34,6 +35,38 @@ describe('account links', () => {
     expect(unread.container.querySelector('[data-project-account-removed]')).toBeNull();
     expect(unread.container.textContent).toContain('cannot be checked: daemon is offline');
     await unread.unmount();
+  });
+
+  it('offers the passkey press on a protected read, and that press reads them and reaches "account removed"', async () => {
+    const quietReads: (boolean | undefined)[] = [];
+    const client = {
+      call: <Answer,>(_route: string, init?: { readonly quiet?: boolean }) => {
+        quietReads.push(init?.quiet);
+        return init?.quiet === false
+          ? Promise.resolve([account('gha_1', 'octocat')] as Answer)
+          : Promise.reject(refusal(403, 'passkey first', 'grant_step_up_required'));
+      },
+    } as ProjectsClient;
+    const mounted = await mount(<ProjectAccountLinks client={client} project={{ accounts: ['gha_9', 'gha_1'] }} />);
+    await settleUntil(
+      () => mounted.container.querySelector('[data-confirm-to-see]') !== null,
+      'the confirm action',
+      interact,
+    );
+    expect(mounted.container.querySelector('[data-project-account-removed]')).toBeNull();
+    await interact(() =>
+      must(mounted.container.querySelector('[data-confirm-to-see] button'), 'the press').dispatchEvent(clickEvent()),
+    );
+    await settleUntil(
+      () => mounted.container.querySelector('[data-project-accounts="ready"]') !== null,
+      'the links',
+      interact,
+    );
+    expect(
+      must(mounted.container.querySelector('[data-project-account="gha_9"]'), 'the deleted link').textContent,
+    ).toContain('account removed');
+    expect(quietReads).toContain(false);
+    await mounted.unmount();
   });
 
   it('reads the accounts from the daemon and marks a deleted one', async () => {

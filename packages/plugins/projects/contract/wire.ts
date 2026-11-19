@@ -43,7 +43,7 @@ export const ProjectPathMustBeAbsoluteMessage =
   "a project path must be absolute; a relative path would resolve against the daemon's own directory";
 export const ProjectPathSchema = z
   .string()
-  .trim()
+  // Never trimmed: a picked folder may end in a space, and trimming would name a different sibling path.
   .min(1)
   .refine(path => path.startsWith('/'), { message: ProjectPathMustBeAbsoluteMessage });
 

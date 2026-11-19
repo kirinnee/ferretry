@@ -95,8 +95,6 @@ export function CreateProjectFlow({
     });
   };
 
-  const linkedRows = (accounts.accounts ?? []).filter(account => linked.includes(account.id));
-
   return (
     <section
       className="grid min-w-0 gap-md border-t border-border-soft pt-panel"
@@ -132,7 +130,9 @@ export function CreateProjectFlow({
           onSkip={() => setStep('done')}
         />
       )}
-      {step === 'keys' && <KeysStep client={client} accounts={linkedRows} onNext={() => setStep('done')} />}
+      {step === 'keys' && (
+        <KeysStep client={client} accounts={accounts} linked={linked} onNext={() => setStep('done')} />
+      )}
       {step === 'done' && project !== null && (
         <DoneStep
           project={{ ...project, accounts: linked.length > 0 ? [...linked] : project.accounts }}

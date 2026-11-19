@@ -32,6 +32,17 @@ describe('create-project model', () => {
     expect(defaultProjectName(draft)).toBe('ferretry');
   });
 
+  it('sends a picked path exactly: a folder ending in a space is not its trimmed sibling', () => {
+    const draft = { ...emptyCreateDraft, folder: '/home/k/work/notes ' };
+    expect(createVerdict(draft).request).toEqual({ kind: 'existing-folder', path: '/home/k/work/notes ' });
+    const clone = { ...draft, source: 'clone' as const, url: 'https://github.com/you/project.git' };
+    expect(createVerdict({ ...clone, folder: '/home/k/work/ ' }).request).toEqual({
+      kind: 'clone',
+      url: 'https://github.com/you/project.git',
+      path: '/home/k/work/ /project',
+    });
+  });
+
   it('clones into a new folder named after the repository, and judges the address by the contract', () => {
     const draft = {
       ...emptyCreateDraft,

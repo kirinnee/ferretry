@@ -2,11 +2,13 @@
  * STEP 4: PUSH AND SIGNING, for each linked account that has no key yet. One press makes the key on the daemon and
  * registers its public half at GitHub; the private half never reaches this screen. A refusal is shown as worded.
  */
+import { ConfirmToSee } from '@ferretry/app/ui';
 import { Check, KeyRound, LoaderCircle, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import type { ProjectsClient } from '../../lib/client.ts';
 import { reasonOf } from '../../lib/client.ts';
-import { accountHasKeys, type GitAccountRow, setUpKeys } from './accounts-api.ts';
+import { accountHasKeys, setUpKeys } from './accounts-api.ts';
+import type { GitAccountsState } from './use-git-accounts.ts';
 
 type KeyState =
   | { readonly phase: 'working' }
@@ -15,13 +17,18 @@ type KeyState =
 
 export interface KeysStepProps {
   readonly client: ProjectsClient;
-  /** The linked accounts that exist now. */
-  readonly accounts: readonly GitAccountRow[];
+  /** The connected accounts as the machine last showed them: `accounts.accounts` is `null` until that read succeeds. */
+  readonly accounts: GitAccountsState;
+  /** The ids of the accounts this project was just linked to. */
+  readonly linked: readonly string[];
   readonly onNext: () => void;
 }
 
-export function KeysStep({ client, accounts, onNext }: KeysStepProps) {
+export function KeysStep({ client, accounts: read, linked, onNext }: KeysStepProps) {
   const [states, setStates] = useState<Readonly<Record<string, KeyState>>>({});
+  // An unread list proves nothing: "no key found" and "not checked yet" are different answers, and only a list says which.
+  const checked = read.accounts !== null;
+  const accounts = (read.accounts ?? []).filter(account => linked.includes(account.id));
   const needing = accounts.filter(account => !accountHasKeys(account));
   const keyed = accounts.filter(accountHasKeys);
   const put = (id: string, state: KeyState): void => setStates(current => ({ ...current, [id]: state }));
@@ -36,7 +43,14 @@ export function KeysStep({ client, accounts, onNext }: KeysStepProps) {
 
   return (
     <div className="grid min-w-0 gap-md" data-create-step="keys">
-      {needing.length === 0 ? (
+      {!checked ? (
+        <div data-create-keys="unchecked">
+          <ConfirmToSee
+            line="Not checked yet: this machine has not shown its GitHub accounts, so whether they have a key is unknown. Confirm to check."
+            onConfirm={read.confirm}
+          />
+        </div>
+      ) : needing.length === 0 ? (
         <p className="m-0 text-meta text-muted" data-create-keys="none">
           Every linked account already has a key on this machine, so ferrets here can push and sign as them.
         </p>

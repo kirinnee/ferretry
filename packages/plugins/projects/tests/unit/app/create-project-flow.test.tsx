@@ -230,6 +230,95 @@ describe('Create a project', () => {
     await mounted.unmount();
   });
 
+  it('never calls an unread account list "already keyed": a just-connected account is "not checked yet" until the passkey press reads it', async () => {
+    const calls: Call[] = [];
+    const inner = base(calls, {
+      [SET_ACCOUNTS]: { ...ANSWERED, accounts: ['gha_3'] },
+      [ACCOUNTS]: [account('gha_3', 'newcomer')],
+      [KEYS]: { fingerprint: 'SHA256:new', registered: ['auth', 'signing'] },
+    });
+    // The list is its own passkey confirmation: only the person's press (`quiet: false`) is answered.
+    const asking: ProjectsClient = {
+      call: <Answer,>(route: string, init?: { readonly quiet?: boolean }) =>
+        route === ACCOUNTS && init?.quiet !== false
+          ? Promise.reject(refusal(403, 'passkey first', 'grant_step_up_required'))
+          : inner.call<Answer>(route, init as never),
+    } as ProjectsClient;
+    const panel = ({ onConnected }: { connected: number; onConnected: (id: string) => void }) => (
+      <button type="button" data-fake-connect="" onClick={() => onConnected('gha_3')}>
+        Connect
+      </button>
+    );
+    const mounted = await mount(
+      <WithAppHooks provided={{ [PROJECTS_CONNECT_ACCOUNT_HOOK]: { panel } }}>{page(asking)}</WithAppHooks>,
+    );
+    await createAt(mounted);
+    await settled(mounted, c => c.querySelector('[data-create-accounts-step-up]') !== null, 'the press');
+    await press(must(mounted.container.querySelector('[data-fake-connect]'), 'the connect card'));
+    await press(button(mounted, 'Link this account'));
+    await step(mounted, 'keys');
+
+    // Unknown is not "has a key": no claim, no key offer, only the way to check.
+    expect(mounted.container.querySelector('[data-create-keys="none"]')).toBeNull();
+    expect(mounted.container.querySelector('[data-create-keys-ready]')).toBeNull();
+    expect(mounted.container.textContent).not.toContain('already has a key');
+    expect(must(mounted.container.querySelector('[data-create-keys="unchecked"]'), 'the note').textContent).toContain(
+      'Not checked yet',
+    );
+    await press(button(mounted, 'Confirm it’s you to see this'));
+    await settled(mounted, c => c.querySelector('[data-create-key-account="gha_3"]') !== null, 'the key offer');
+    expect(mounted.container.querySelector('[data-create-keys="unchecked"]')).toBeNull();
+    await press(button(mounted, 'Set up push and signing for this account'));
+    await settled(mounted, c => (c.textContent ?? '').includes('SHA256:new'), 'the key');
+    await mounted.unmount();
+  });
+
+  it('says every linked account already has a key only once the list was read and shows it', async () => {
+    const mounted = await mount(page(base([], { [SET_ACCOUNTS]: { ...ANSWERED, accounts: ['gha_2'] } })));
+    await createAt(mounted);
+    await settled(mounted, c => c.querySelector('[data-create-account="gha_2"]') !== null, 'the accounts');
+    await press(must(mounted.container.querySelector('[data-create-account="gha_2"] input'), 'hubot'));
+    await press(button(mounted, 'Link this account'));
+    await step(mounted, 'keys');
+    expect(must(mounted.container.querySelector('[data-create-keys="none"]'), 'the note').textContent).toContain(
+      'already has a key',
+    );
+    expect(mounted.container.querySelector('[data-create-keys="unchecked"]')).toBeNull();
+    await mounted.unmount();
+  });
+
+  it('keeps the confirm action on the done step when the account list is still unread, then names the links', async () => {
+    const inner = base([], {
+      [SET_ACCOUNTS]: { ...ANSWERED, accounts: ['gha_3'] },
+      [ACCOUNTS]: [account('gha_3', 'newcomer')],
+    });
+    const asking: ProjectsClient = {
+      call: <Answer,>(route: string, init?: { readonly quiet?: boolean }) =>
+        route === ACCOUNTS && init?.quiet !== false
+          ? Promise.reject(refusal(403, 'passkey first', 'grant_step_up_required'))
+          : inner.call<Answer>(route, init as never),
+    } as ProjectsClient;
+    const panel = ({ onConnected }: { connected: number; onConnected: (id: string) => void }) => (
+      <button type="button" data-fake-connect="" onClick={() => onConnected('gha_3')}>
+        Connect
+      </button>
+    );
+    const mounted = await mount(
+      <WithAppHooks provided={{ [PROJECTS_CONNECT_ACCOUNT_HOOK]: { panel } }}>{page(asking)}</WithAppHooks>,
+    );
+    await createAt(mounted);
+    await settled(mounted, c => c.querySelector('[data-create-accounts-step-up]') !== null, 'the press');
+    await press(must(mounted.container.querySelector('[data-fake-connect]'), 'the connect card'));
+    await press(button(mounted, 'Link this account'));
+    await step(mounted, 'keys');
+    await press(button(mounted, 'Next'));
+    await step(mounted, 'done');
+    await press(button(mounted, 'Confirm it’s you to see this'));
+    await settled(mounted, c => c.querySelector('[data-project-accounts="ready"]') !== null, 'the links');
+    expect(mounted.container.querySelector('[data-project-account="gha_3"]')?.textContent).toBe('@newcomer');
+    await mounted.unmount();
+  });
+
   it('clones into the picked folder, in a new folder named after the repository', async () => {
     const calls: Call[] = [];
     const mounted = await mount(page(base(calls, { [REGISTER]: ANSWERED })));

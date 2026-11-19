@@ -21,7 +21,12 @@ export function DoneStep({ project, accounts, projectHref, onNavigate, onClose }
       </div>
       <div className="grid gap-xs">
         <p className="m-0 text-meta font-semibold uppercase tracking-wide text-muted">GitHub accounts</p>
-        <AccountLinksView project={project} existing={accounts.accounts} error={accounts.error} />
+        <AccountLinksView
+          project={project}
+          existing={accounts.accounts}
+          error={accounts.error}
+          onConfirm={accounts.stepUp ? accounts.confirm : undefined}
+        />
       </div>
       <div className="flex flex-wrap items-center gap-sm">
         {projectHref !== undefined && (

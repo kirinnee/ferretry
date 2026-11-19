@@ -5,6 +5,7 @@
  * has been removed the link reads "account removed" (its id, nothing else, because the login went with the account), and
  * a read of the account list that failed says so rather than calling every link removed.
  */
+import { ConfirmToSee } from '@ferretry/app/ui';
 import { TriangleAlert, UserRound } from 'lucide-react';
 import { accountLinks, type ProjectInfo } from '../../../contract/index.ts';
 import type { ProjectsClient } from '../../lib/client.ts';
@@ -15,15 +16,27 @@ export interface AccountLinksViewProps {
   /** The accounts that exist now, or `null` when that could not be read. */
   readonly existing: readonly { readonly id: string; readonly login: string }[] | null;
   readonly error: string | null;
+  /** The person's press, present when the read was refused only for want of the passkey step-up. */
+  readonly onConfirm?: (() => void) | undefined;
 }
 
-export function AccountLinksView({ project, existing, error }: AccountLinksViewProps) {
+export function AccountLinksView({ project, existing, error, onConfirm }: AccountLinksViewProps) {
   const linked = project.accounts ?? [];
   if (linked.length === 0) {
     return (
       <p className="m-0 text-meta text-faint" data-project-accounts="none">
         No GitHub account is linked to this project.
       </p>
+    );
+  }
+  if (existing === null && onConfirm !== undefined) {
+    return (
+      <div data-project-accounts="unread">
+        <ConfirmToSee
+          line="This machine wants your passkey before it shows its GitHub accounts, so these links cannot be checked yet."
+          onConfirm={onConfirm}
+        />
+      </div>
     );
   }
   if (existing === null) {
@@ -79,6 +92,8 @@ export function ProjectAccountLinks({
   readonly client: ProjectsClient;
   readonly project: Pick<ProjectInfo, 'accounts'>;
 }) {
-  const { accounts, error } = useGitAccounts(client);
-  return <AccountLinksView project={project} existing={accounts} error={error} />;
+  const { accounts, error, stepUp, confirm } = useGitAccounts(client);
+  return (
+    <AccountLinksView project={project} existing={accounts} error={error} onConfirm={stepUp ? confirm : undefined} />
+  );
 }
