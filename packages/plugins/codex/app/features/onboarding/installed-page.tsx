@@ -101,13 +101,22 @@ export function InstalledPage({ client, step }: { readonly client: OnboardingCli
             type="button"
             variant="primary"
             disabled={installing}
+            className="min-h-11 py-3"
+            style={{ paddingInline: '1.25rem' }}
             data-install-run=""
             onClick={() => void install()}
           >
             Install Codex
           </Button>
         ) : null}
-        <Button type="button" disabled={installing} data-install-recheck="" onClick={() => void look(false)}>
+        <Button
+          type="button"
+          className="min-h-11 py-3"
+          style={{ paddingInline: '1.25rem' }}
+          disabled={installing}
+          data-install-recheck=""
+          onClick={() => void look(false)}
+        >
           Check again
         </Button>
       </div>

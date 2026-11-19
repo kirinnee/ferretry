@@ -33,9 +33,10 @@ const CODEX_CONFIG_FILE = 'harness-codex.yaml';
 /** The command a person can run by hand when this machine cannot run an install for them. */
 const MANUAL_INSTALL = 'npm install -g @openai/codex';
 
-/** What `permissionMode: skip` allows, in the words the page says before the person chooses it. */
-export const SKIP_WORDS =
-  "Codex runs every command without asking you, including deleting files. This is Codex's --dangerously-bypass-approvals-and-sandbox: no approvals, no sandbox. Fastest, and only safe on a machine you would let it wipe.";
+/** What `permissionMode: skip` allows, in the words the page says before the person chooses it (the flag is drawn as code). */
+export const SKIP_LEAD = "Codex runs every command without asking you, including deleting files. This is Codex's";
+export const SKIP_FLAG = '--dangerously-bypass-approvals-and-sandbox';
+export const SKIP_TAIL = ': no approvals, no sandbox. Fastest, and only safe on a machine you would let it wipe.';
 export const AUTO_WORDS = 'Codex asks before anything risky.';
 
 /** The sentence for a failed call: the daemon's own words, or that it did not answer. */

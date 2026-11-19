@@ -12,7 +12,9 @@ import {
   type ConfigFile,
   type OnboardingClient,
   type PermissionMode,
-  SKIP_WORDS,
+  SKIP_FLAG,
+  SKIP_LEAD,
+  SKIP_TAIL,
   modeOf,
   readConfig,
   refusalWords,
@@ -80,9 +82,16 @@ export function PermissionPage({ client, step }: { readonly client: OnboardingCl
         disabled={file === null || saving}
         onChange={next => void choose(next)}
       />
-      {file === null ? null : (
-        <p className="m-0 max-w-xl text-cell text-muted" data-permission-words={mode}>
-          {mode === 'skip' ? SKIP_WORDS : AUTO_WORDS}
+      {file === null || mode !== 'skip' ? null : (
+        <p
+          className="m-0 max-w-xl border-l-2 border-warn pl-3 text-ui leading-base text-fg"
+          data-permission-words="skip"
+        >
+          {SKIP_LEAD}{' '}
+          <code className="rounded bg-surface-2 px-1 text-cell [overflow-wrap:anywhere] md:whitespace-nowrap">
+            {SKIP_FLAG}
+          </code>
+          {SKIP_TAIL}
         </p>
       )}
       {note === null ? null : (
