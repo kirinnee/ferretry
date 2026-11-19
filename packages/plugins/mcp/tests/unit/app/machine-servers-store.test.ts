@@ -16,6 +16,27 @@ const tick = async (): Promise<void> => {
 };
 
 describe('the machine servers store', () => {
+  it('sends a Try again (press) as the person’s own read, and the page’s own reads unmarked', async () => {
+    const inits: unknown[] = [];
+    let fail = true;
+    const store = createMachineServersStore({
+      call: async (_route: string, init?: unknown) => {
+        inits.push(init);
+        if (fail) throw new Error('the machine is offline');
+        return MCP;
+      },
+    } as never);
+    const stop = store.subscribe(() => undefined);
+    await tick();
+    fail = false;
+    store.press();
+    await tick();
+    store.reload();
+    await tick();
+    expect(inits).toEqual([{}, { quiet: false }, {}]);
+    stop();
+  });
+
   it('reads ONE inventory for every row that subscribes, and tells each of them', async () => {
     const calls: Call[] = [];
     const store = createMachineServersStore(scriptedClient({ [ROUTE]: MCP }, calls));

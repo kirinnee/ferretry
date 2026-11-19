@@ -4,7 +4,8 @@ import {
   type AgendaReadItem,
   isAgendaHeader,
 } from '@ferretry/core-asks/contract';
-import { useEffect, useState } from 'react';
+import { readPress } from '@ferretry/app/ui';
+import { useEffect, useRef, useState } from 'react';
 import { fetchAgendaItem } from '../../lib/agenda-item-client.ts';
 import type { DaemonConnection } from '../../shell.ts';
 import type { DaemonSessionScope } from '../../shell.ts';
@@ -19,6 +20,8 @@ export const useAgendaItem = (
   const agendaClient = useAgendaCall();
   const header = candidate !== undefined && isAgendaHeader(candidate) ? candidate : undefined;
   const [attempt, setAttempt] = useState(0);
+  // Set by Try again, spent by the very next read: only that one is the person's press.
+  const pressed = useRef(false);
   const key = JSON.stringify([connection.daemonId, scope.sessionId, header?.id, header?.resolvedAt, attempt]);
   const [read, setRead] = useState<{ key: string; item?: AgendaReadItem; error?: string } | null>(null);
   const id = header?.id;
@@ -26,7 +29,9 @@ export const useAgendaItem = (
     if (id === undefined) return;
     let live = true;
     setRead(null);
-    void fetchAgendaItem(connection, scope, id, agendaClient).then(
+    const press = readPress(pressed.current);
+    pressed.current = false;
+    void fetchAgendaItem(connection, scope, id, agendaClient, press).then(
       item => {
         if (live) setRead({ key, item });
       },
@@ -43,6 +48,9 @@ export const useAgendaItem = (
     item: candidate === undefined || isAgendaHeader(candidate) ? current?.item : candidate,
     loading: header !== undefined && current === null,
     error: header === undefined ? undefined : current?.error,
-    retry: () => setAttempt(value => value + 1),
+    retry: () => {
+      pressed.current = true;
+      setAttempt(value => value + 1);
+    },
   };
 };

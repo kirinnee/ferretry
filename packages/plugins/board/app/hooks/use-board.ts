@@ -15,7 +15,7 @@
  */
 
 import type { TaskId } from '../../contract/index.ts';
-import { useNow } from '@ferretry/app/ui';
+import { readPress, useNow } from '@ferretry/app/ui';
 import { useCallback, useEffect, useMemo, useReducer, useSyncExternalStore } from 'react';
 import { type BoardActions, createBoardActions } from '../lib/board-actions.ts';
 import {
@@ -124,7 +124,8 @@ export const useBoard = (
       status: summarise(statuses, model.cards.length > 0),
       machines: statuses,
       refresh: () => {
-        for (const { connection } of machines) void store.refresh(key, connection.daemonId);
+        // Every caller is a person's press (Try again): the read asks for the passkey itself, even after a Cancel.
+        for (const { connection } of machines) void store.refresh(key, connection.daemonId, readPress(true));
       },
     };
   }, [view, filters, names, key, store]);

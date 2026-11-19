@@ -42,6 +42,23 @@ const probe = async (daemon: ListDaemon, on?: (retry: () => void) => void): Prom
 };
 
 describe('the live ferret list', () => {
+  it('reads again as the person’s own press for the Retry button (press), and unmarked for any other re-read (retry)', async () => {
+    const daemon = listDaemon([ferretSummary('a')]);
+    let hook: { retry: () => void; press: () => void } | undefined;
+    function Hook() {
+      const { retry, press } = useFerretList(daemon.client);
+      hook = { retry, press };
+      return null;
+    }
+    mounted = await mount(<Hook />);
+    await settle();
+    await interact(async () => hook?.press());
+    await settle();
+    await interact(async () => hook?.retry());
+    await settle();
+    expect(daemon.inits).toEqual([{}, { quiet: false }, {}]);
+  });
+
   it('reads on mount and says it is loading until the answer arrives', async () => {
     const daemon = listDaemon([ferretSummary('a'), ferretSummary('b')]);
     let release = (): void => undefined;

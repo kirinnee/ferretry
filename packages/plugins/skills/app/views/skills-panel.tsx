@@ -23,6 +23,7 @@ import {
   ContextNote,
   Loading,
   contextEmptyCopy,
+  type ReadPress,
   useContextRead,
 } from '@ferretry/app/ui';
 import type { AppComponent, PanelProps, PluginClient } from '@ferretry/kernel/manifest';
@@ -214,10 +215,13 @@ function FerretSkills({
   const [chip, setChip] = useState<SkillChip>('all');
   const [opened, setOpened] = useState<SkillEntry | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const loader = useCallback((_signal: AbortSignal) => readFerretSkillsInventory(client, ferretId), [client, ferretId]);
+  const loader = useCallback(
+    (_signal: AbortSignal, press: ReadPress) => readFerretSkillsInventory(client, ferretId, press),
+    [client, ferretId],
+  );
   const read = useContextRead(loader, true);
   const loadFile = useCallback(
-    async (path: string, _signal: AbortSignal) => await readSkillFile(client, path, ferretId),
+    async (path: string, _signal: AbortSignal, press: ReadPress) => await readSkillFile(client, path, ferretId, press),
     [client, ferretId],
   );
   const scope = useMemo(() => {

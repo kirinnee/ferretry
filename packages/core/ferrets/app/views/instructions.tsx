@@ -12,6 +12,7 @@ import {
   contextEmptyCopy,
   Loading,
   type ContextRead,
+  type ReadPress,
   useContextRead,
 } from '@ferretry/app/ui';
 import { type ReactNode, useCallback, useMemo, useState } from 'react';
@@ -121,8 +122,8 @@ function FerretInstructions({ client, ferretId }: { readonly client: LiveFerrets
   const [chip, setChip] = useState<DocChip>('all');
   const scope: FilesScope = useMemo(() => ({ client, ferretId }), [client, ferretId]);
   const loader = useCallback(
-    async (signal: AbortSignal): Promise<readonly ContextDoc[]> =>
-      instructionDocs((await fsApi.list(scope, '', signal)).entries),
+    async (signal: AbortSignal, press: ReadPress): Promise<readonly ContextDoc[]> =>
+      instructionDocs((await fsApi.list(scope, '', signal, press)).entries),
     [scope],
   );
   const read = useContextRead(loader, true);

@@ -84,7 +84,7 @@ export function ComponentKindPages({
   /** Leaves the list for the page it was opened from (the Profiles tab's list); a tab of its own has none. */
   readonly onExit?: () => void;
 }) {
-  const { read, reload } = useAccountCatalog(client);
+  const { read, reload, press } = useAccountCatalog(client);
   const [page, setPage] = useState<Page>({ kind: 'list' });
   const [saved, setSaved] = useState<string | undefined>(undefined);
   const open = (next: Page) => {
@@ -93,7 +93,7 @@ export function ComponentKindPages({
   };
 
   if (read.kind === 'loading') return <Loading kind="page" label={`Reading ${machineName}’s ${KIND_PLURAL[kind]}…`} />;
-  if (read.kind === 'failed') return <ReadFailed reason={read.reason} onRetry={() => void reload()} />;
+  if (read.kind === 'failed') return <ReadFailed reason={read.reason} onRetry={() => void press()} />;
   const catalog = read.catalog;
   const done = (message: string, next: Page) => {
     void reload().then(() => {

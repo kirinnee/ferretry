@@ -193,7 +193,11 @@ export function TwoFactorSeedHost({ client: given, item, addKey: askKey, onDone 
     <TwoFactorSeedCard
       check={check}
       facts={withKeySays(seedCardFacts(item.context ?? undefined, flagged), says)}
-      onRetry={() => setReads(count => count + 1)}
+      onRetry={() => {
+        // Try again is the owner's press: its read may ask for the passkey, even after a Cancel.
+        pressed.current = true;
+        setReads(count => count + 1);
+      }}
       onAllow={() => void allow()}
       onDeny={() => void deny()}
       phase={phase}

@@ -53,6 +53,7 @@ export function McpSignInSection({
   const name = component;
   const read = signIns.read;
   const reload = signIns.reload;
+  const press = signIns.press;
   const [flow, setFlow] = useState<McpOAuthFlow | null>(null);
   const [starting, setStarting] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -107,7 +108,7 @@ export function McpSignInSection({
           role="status"
           title={`Couldn’t read whether ${name} is signed in`}
           actions={
-            <Button type="button" size="sm" onClick={() => void reload()} data-mcp-sign-in-retry="">
+            <Button type="button" size="sm" onClick={() => void press()} data-mcp-sign-in-retry="">
               Try again
             </Button>
           }

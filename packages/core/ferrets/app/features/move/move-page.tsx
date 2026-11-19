@@ -10,10 +10,10 @@
  */
 
 import { ArrowLeftRight, ServerCog } from 'lucide-react';
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { FerretSummary } from '../../../contract/index.ts';
 import type { FerretsClient } from '../../lib/client.ts';
-import { Button, Loading } from '../../ui.ts';
+import { Button, Loading, readPress } from '../../ui.ts';
 import type { RenderAccountSlot } from './account-slot.tsx';
 import { ChangeAccount } from './change-account.tsx';
 import { moveCallFailure } from './call-failure.ts';
@@ -45,12 +45,16 @@ export function MovePage({ client, ferret, slot, onClose, initialMode = 'account
   const [load, setLoad] = useState<Load>({ status: 'loading' });
   const [mode, setMode] = useState<Mode>(initialMode);
   const [attempt, setAttempt] = useState(0);
+  // Set by Try again, spent by the very next read: only that one is the person's press.
+  const pressed = useRef(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` is the deliberate re-read trigger
   useEffect(() => {
     let current = true;
     setLoad({ status: 'loading' });
-    readFerret(client, ferret)
+    const press = readPress(pressed.current);
+    pressed.current = false;
+    readFerret(client, ferret, press)
       .then(summary => {
         if (current) setLoad({ status: 'ready', summary });
       })
@@ -116,7 +120,13 @@ export function MovePage({ client, ferret, slot, onClose, initialMode = 'account
         <section className="m-4 rounded-control border border-err bg-surface-2 p-4" data-move-failed="" role="alert">
           <p className="m-0 break-words text-ui leading-base text-err">{load.message}</p>
           <div className="mt-3 flex gap-sm">
-            <Button onClick={() => setAttempt(count => count + 1)} type="button">
+            <Button
+              onClick={() => {
+                pressed.current = true;
+                setAttempt(count => count + 1);
+              }}
+              type="button"
+            >
               Try again
             </Button>
             <Button onClick={onClose} type="button">

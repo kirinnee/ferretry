@@ -45,6 +45,7 @@
  * side, and this hook only decides WHEN to ask again.
  */
 
+import { type ReadPress, readPress } from '@ferretry/app/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { describeFsError, isAbort } from './files-api.ts';
 
@@ -59,7 +60,10 @@ export interface FsResource<T> {
   readonly stale: boolean;
   /** Identifies the successfully displayed snapshot; a failed reread never bumps it. */
   readonly revision: number;
+  /** A person's press (Reload, Try again): the read it starts is sent as their own, so the passkey prompt can open. */
   readonly reload: () => void;
+  /** The page's own re-read (a revision moved): never a press, so it never opens the prompt by itself. */
+  readonly refresh: () => void;
 }
 
 interface ResourceState<T> {
@@ -84,7 +88,7 @@ export interface FsResourceOptions {
 
 export const useFsResource = <T>(
   key: string | null,
-  load: (signal: AbortSignal) => Promise<T>,
+  load: (signal: AbortSignal, press: ReadPress) => Promise<T>,
   options?: FsResourceOptions,
 ): FsResource<T> => {
   const [state, setState] = useState<ResourceState<T>>({
@@ -108,10 +112,15 @@ export const useFsResource = <T>(
   // lets every consumer read "a read is in flight" straight off `refreshing` and
   // `loading`, instead of each deciding for itself whether a settled failure
   // still applies while its replacement is being fetched.
+  const pressRef = useRef(false);
   const askAgain = useCallback(() => {
     setState(previous => (previous.error === null ? previous : { ...previous, error: null }));
     setNonce(current => current + 1);
   }, []);
+  const pressAgain = useCallback(() => {
+    pressRef.current = true;
+    askAgain();
+  }, [askAgain]);
 
   // `nonce` carries no value into the read: bumping it IS the reload, and it is
   // the only way to re-run a read for a key that has not changed. It is stamped
@@ -136,8 +145,10 @@ export const useFsResource = <T>(
     }
     const controller = new AbortController();
     let live = true;
+    const press = readPress(pressRef.current);
+    pressRef.current = false;
     loadRef
-      .current(controller.signal)
+      .current(controller.signal, press)
       .then(data => {
         if (!live) return;
         setState(previous => ({
@@ -176,6 +187,7 @@ export const useFsResource = <T>(
     refreshing: pending && data !== null,
     stale: data !== null && (pending || error !== null),
     revision: mine ? state.revision : 0,
-    reload: askAgain,
+    reload: pressAgain,
+    refresh: askAgain,
   };
 };

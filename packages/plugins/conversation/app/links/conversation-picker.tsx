@@ -8,7 +8,7 @@
 
 import { PanelSlot, statusLabel, useSlotHasPanels } from '@ferretry/app';
 import { MOVE_ACCOUNT_SLOT, type MoveAccountSlotProps } from '@ferretry/core-ferrets/contract';
-import { Button, cn, SetupNote } from '@ferretry/app/ui';
+import { Button, cn, type ReadPress, readPress, SetupNote } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { CONVERSATION_LAUNCH_MAX, type KeepResult, type LinkableConversation } from '../../contract/index.ts';
 
@@ -159,14 +159,19 @@ export function ConversationPicker({
   const runtimeInputId = useId();
   const name = HARNESS_NAMES[harness];
 
-  const load = useCallback(async (): Promise<void> => {
-    const answer = await guarded(() => readLinkableConversations(client, { harness, limit: PICKER_READ_LIMIT }));
-    setListing(
-      answer.kind === 'done'
-        ? { kind: 'read', rows: answer.value.conversations }
-        : { kind: 'refused', sentence: answer.sentence },
-    );
-  }, [client, harness]);
+  const load = useCallback(
+    async (press: ReadPress = {}): Promise<void> => {
+      const answer = await guarded(() =>
+        readLinkableConversations(client, { harness, limit: PICKER_READ_LIMIT }, press),
+      );
+      setListing(
+        answer.kind === 'done'
+          ? { kind: 'read', rows: answer.value.conversations }
+          : { kind: 'refused', sentence: answer.sentence },
+      );
+    },
+    [client, harness],
+  );
 
   useEffect(() => {
     void load();
@@ -183,7 +188,7 @@ export function ConversationPicker({
       <SetupNote live tone="warn" name="conversations-refused" title="Couldn’t read your conversations">
         <span>{listing.sentence}</span>
         <div className="mt-2">
-          <Button type="button" size="sm" data-conversations-retry="" onClick={() => void load()}>
+          <Button type="button" size="sm" data-conversations-retry="" onClick={() => void load(readPress(true))}>
             Try again
           </Button>
         </div>

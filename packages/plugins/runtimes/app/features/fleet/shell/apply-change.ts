@@ -14,6 +14,7 @@
  * - **The change is the daemon's to derive.** A caller names one intent; it never sends a document.
  */
 
+import type { ReadPress } from '@ferretry/app/ui';
 import { z } from 'zod';
 import {
   type AccountChange,
@@ -38,8 +39,8 @@ const PROPOSE_ROUTE = 'POST /v1/runtimes/proposals' as const;
 const APPLY_ROUTE = 'POST /v1/runtimes/proposals/:proposalId/apply' as const;
 
 /** Agent permissions, the tools installed, whether it is set up, and what this caller may change. */
-export const readMachine = async (client: RuntimesClient): Promise<MachineView> =>
-  MachineViewSchema.parse(await client.call(MACHINE_ROUTE));
+export const readMachine = async (client: RuntimesClient, press: ReadPress = {}): Promise<MachineView> =>
+  MachineViewSchema.parse(await client.call(MACHINE_ROUTE, press));
 
 /** Stage one change. Nothing is written: the answer is the preview a person approves. */
 const stageChange = async (client: RuntimesClient, change: AccountChange): Promise<AccountChangeView> =>

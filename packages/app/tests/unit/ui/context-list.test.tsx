@@ -8,6 +8,7 @@ import {
   plainFailure,
   useContextRead,
 } from '../../../src/ui/context-list.tsx';
+import { type ReadPress, readPress } from '../../../src/ui/read-press.ts';
 import { settleUntil } from '../../../src/testing/settle.ts';
 import { interact, type Mounted, mount } from '../../support/dom.ts';
 
@@ -95,14 +96,15 @@ describe('a lazy read', () => {
     loader,
     wanted,
   }: {
-    readonly loader: (signal: AbortSignal) => Promise<string>;
+    readonly loader: (signal: AbortSignal, press: ReadPress) => Promise<string>;
     readonly wanted: boolean;
   }) {
-    const { load, reload } = useContextRead(loader, wanted);
+    const { load, reload, refresh } = useContextRead(loader, wanted);
     return (
       <div>
         <span data-state>{load.kind === 'ready' ? `ready:${load.value}` : load.kind}</span>
         <button type="button" data-reload onClick={reload} />
+        <button type="button" data-refresh onClick={refresh} />
       </div>
     );
   }
@@ -148,5 +150,50 @@ describe('a lazy read', () => {
     fail = false;
     await interact(() => open?.container.querySelector<HTMLButtonElement>('[data-reload]')?.click());
     await wait('ready:fine');
+  });
+
+  it('marks only a Try again read as the person’s own press (quiet: false), once, never the opening or a new list', async () => {
+    const seen: ReadPress[] = [];
+    const loader = async (_signal: AbortSignal, press: ReadPress) => {
+      seen.push(press);
+      return `v${seen.length}`;
+    };
+    open = await mount(<Probe loader={loader} wanted />);
+    await wait('ready:v1');
+    await interact(() => open?.container.querySelector<HTMLButtonElement>('[data-reload]')?.click());
+    await wait('ready:v2');
+    // Another list is not a press, and the press is spent: nothing carries over to it.
+    const other = async (_signal: AbortSignal, press: ReadPress) => {
+      seen.push(press);
+      return 'other';
+    };
+    await open.render(<Probe loader={other} wanted />);
+    await wait('ready:other');
+    expect(seen).toEqual([{}, { quiet: false }, {}]);
+  });
+
+  it('re-reads quietly for the page’s own refresh (after a write, a sign-in, a dialog closing), never as a press', async () => {
+    const seen: ReadPress[] = [];
+    const loader = async (_signal: AbortSignal, press: ReadPress) => {
+      seen.push(press);
+      return `v${seen.length}`;
+    };
+    open = await mount(<Probe loader={loader} wanted />);
+    await wait('ready:v1');
+    await interact(() => open?.container.querySelector<HTMLButtonElement>('[data-refresh]')?.click());
+    await wait('ready:v2');
+    // A refresh leaves no press behind, and Try again after it is still the person's own.
+    await interact(() => open?.container.querySelector<HTMLButtonElement>('[data-reload]')?.click());
+    await wait('ready:v3');
+    await interact(() => open?.container.querySelector<HTMLButtonElement>('[data-refresh]')?.click());
+    await wait('ready:v4');
+    expect(seen).toEqual([{}, {}, { quiet: false }, {}]);
+  });
+});
+
+describe('readPress', () => {
+  it('is quiet: false for a press and nothing for the page’s own read', () => {
+    expect(readPress(true)).toEqual({ quiet: false });
+    expect(readPress(false)).toEqual({});
   });
 });

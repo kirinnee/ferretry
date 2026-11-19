@@ -23,7 +23,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { cn, EYEBROW, Loading, PanelPath } from '@ferretry/app/ui';
+import { cn, EYEBROW, Loading, PanelPath, readPress } from '@ferretry/app/ui';
 import { type DaemonConnection, DaemonCallError } from '../../shell.ts';
 import {
   type AnalyticsPricingClient,
@@ -1165,13 +1165,14 @@ export function PricingSettings({
   }, []);
 
   const refresh = useCallback(
-    async (preserveCurrent: boolean): Promise<void> => {
+    // `pressed`: a person asked for this read (Refresh, Retry), so it may open the passkey prompt; the page's own never does.
+    async (preserveCurrent: boolean, pressed = preserveCurrent): Promise<void> => {
       const generation = ++readGeneration.current;
       setNotice(null);
       if (preserveCurrent) setRefreshing(true);
       else setState({ status: 'loading' });
       try {
-        const view = await readAnalyticsPricing(client);
+        const view = await readAnalyticsPricing(client, readPress(pressed));
         if (generation !== readGeneration.current) return;
         publishView(view, preserveCurrent ? 'Catalog refreshed.' : undefined);
       } catch (error) {
@@ -1425,7 +1426,7 @@ export function PricingSettings({
         <section className="kt-panel border-err-border bg-err-bg p-panel" role="alert" data-pricing-error="">
           <h4 className="m-0 text-ui font-semibold text-err">Model pricing unavailable</h4>
           <p className="mb-0 mt-1 text-meta leading-base text-err">{state.message}</p>
-          <button type="button" className="kt-btn mt-3 min-h-[44px]" onClick={() => void refresh(false)}>
+          <button type="button" className="kt-btn mt-3 min-h-[44px]" onClick={() => void refresh(false, true)}>
             Retry
           </button>
         </section>

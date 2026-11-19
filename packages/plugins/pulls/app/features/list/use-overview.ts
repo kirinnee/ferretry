@@ -7,7 +7,8 @@
  * is dropped), so a slow older answer can never replace a newer one, and exactly one timer is ever pending.
  */
 import { useDocumentVisible } from '@ferretry/app';
-import { useCallback, useEffect, useState } from 'react';
+import { readPress } from '@ferretry/app/ui';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PullsChanged, type WatchOverview } from '../../../contract/index.ts';
 import { type ListClient, type ProjectFacts, readOverview, readProjects } from './api.ts';
 
@@ -28,9 +29,11 @@ export type Reading =
 
 const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
-export function useOverview(client: ListClient): { reading: Reading; reload: () => void } {
+export function useOverview(client: ListClient): { reading: Reading; reload: () => void; refresh: () => void } {
   const [reading, setReading] = useState<Reading>({ status: 'loading' });
   const [round, setRound] = useState(0);
+  // Set by Try again, spent by the very next read: only that one is the person's press.
+  const pressed = useRef(false);
   const visible = useDocumentVisible();
 
   useEffect(() => {
@@ -39,12 +42,16 @@ export function useOverview(client: ListClient): { reading: Reading; reload: () 
     if (!visible) return undefined;
     let current: AbortController | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let press = readPress(pressed.current);
+    pressed.current = false;
     const read = (): void => {
+      const spent = press;
+      press = {};
       if (timer !== undefined) clearTimeout(timer);
       current?.abort();
       const mine = new AbortController();
       current = mine;
-      void Promise.all([readOverview(client, mine.signal), readProjects(client, mine.signal)]).then(
+      void Promise.all([readOverview(client, mine.signal, spent), readProjects(client, mine.signal)]).then(
         ([overview, projects]) => {
           if (mine.signal.aborted) return;
           setReading({ status: 'ready', overview, projects });
@@ -71,6 +78,11 @@ export function useOverview(client: ListClient): { reading: Reading; reload: () 
     };
   }, [client, visible, round]);
 
-  const reload = useCallback(() => setRound(value => value + 1), []);
-  return { reading, reload };
+  const reload = useCallback(() => {
+    pressed.current = true;
+    setRound(value => value + 1);
+  }, []);
+  // The page's own re-read (a watch just saved): never a press, so it never opens the prompt by itself.
+  const refresh = useCallback(() => setRound(value => value + 1), []);
+  return { reading, reload, refresh };
 }

@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ContextChip } from './filter-chips.tsx';
 import { ContextFilterChips } from './filter-chips.tsx';
 import { Button } from './primitives.tsx';
+import { type ReadPress, readPress } from './read-press.ts';
 import { SidePaneSearch } from './side-pane-search.tsx';
 
 // ── Search and chips ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -50,11 +51,17 @@ export type ContextLoad<T> =
 
 export interface ContextRead<T> {
   readonly load: ContextLoad<T>;
+  /** Try again: a read the person pressed for (`quiet: false`), so the passkey prompt can open. Only a button calls it. */
   readonly reload: () => void;
+  /** The page's own re-read (after a write, a sign-in, a dialog closing): never a press, so it never opens the prompt. */
+  readonly refresh: () => void;
 }
 
-/** A one-shot read the list can cancel and repeat. */
-export type ContextLoader<T> = (signal: AbortSignal) => Promise<T>;
+/**
+ * A one-shot read the list can cancel and repeat. `press` is what a Try again adds to the read (`quiet: false`, a person's
+ * own press, so the passkey prompt can open); the list's own first read gets none. Spread it into the call.
+ */
+export type ContextLoader<T> = (signal: AbortSignal, press: ReadPress) => Promise<T>;
 
 /** What a failed read says. The daemon's own sentence when it gave one. */
 export const loadFailureReason = (error: unknown): string =>
@@ -70,6 +77,8 @@ export function useContextRead<T>(loader: ContextLoader<T>, wanted: boolean): Co
   const [attempt, setAttempt] = useState(0);
   const [load, setLoad] = useState<ContextLoad<T>>({ kind: 'idle' });
   const shown = useRef(loader);
+  // Set by `reload` (a Try again), spent by the very next read: only that one is the person's press.
+  const pressed = useRef(false);
   if (wanted && !started) setStarted(true);
 
   // `attempt` is in the list although the body never reads it: bumping it IS the retry.
@@ -80,7 +89,9 @@ export function useContextRead<T>(loader: ContextLoader<T>, wanted: boolean): Co
     const same = shown.current === loader;
     shown.current = loader;
     setLoad(previous => (same && previous.kind === 'ready' ? previous : { kind: 'loading' }));
-    loader(controller.signal).then(
+    const press = readPress(pressed.current);
+    pressed.current = false;
+    loader(controller.signal, press).then(
       value => {
         if (!controller.signal.aborted) setLoad({ kind: 'ready', value });
       },
@@ -91,8 +102,12 @@ export function useContextRead<T>(loader: ContextLoader<T>, wanted: boolean): Co
     return () => controller.abort();
   }, [loader, started, attempt]);
 
-  const reload = useCallback(() => setAttempt(value => value + 1), []);
-  return { load, reload };
+  const reload = useCallback(() => {
+    pressed.current = true;
+    setAttempt(value => value + 1);
+  }, []);
+  const refresh = useCallback(() => setAttempt(value => value + 1), []);
+  return { load, reload, refresh };
 }
 
 // ── The header every list has ──────────────────────────────────────────────────────────────────────────────────────

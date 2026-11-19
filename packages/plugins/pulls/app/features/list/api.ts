@@ -2,6 +2,7 @@
  * The PRs screen, the wire half (r9 E3): the reads and the one write this folder makes, each parsed whole by E1/E2's
  * schemas so a shape the daemon did not mean is refused here instead of drawn wrong.
  */
+import type { ReadPress } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import { WatchOverviewSchema, type WatchOverview, type WatchPatch } from '../../../contract/index.ts';
@@ -14,8 +15,13 @@ const PATCH_ROUTE = 'PATCH /v1/pulls/watch/:project';
 /** Projects' own list, read by route key like every half that needs a project's name (it is not a dependency). */
 const PROJECTS_ROUTE = 'GET /v1/projects';
 
-export const readOverview = async (client: ListClient, signal?: AbortSignal): Promise<WatchOverview> =>
-  WatchOverviewSchema.parse(await client.call(WATCH_ROUTE, { quiet: true, ...(signal ? { signal } : {}) }));
+/** The page's own read is quiet; a Try again's `press` (`quiet: false`) is the person's, and may open the passkey prompt. */
+export const readOverview = async (
+  client: ListClient,
+  signal?: AbortSignal,
+  press: ReadPress = {},
+): Promise<WatchOverview> =>
+  WatchOverviewSchema.parse(await client.call(WATCH_ROUTE, { quiet: true, ...(signal ? { signal } : {}), ...press }));
 
 /** What the screen reads of a project: its id, its name and, when the record has one, the repositories last found in it. */
 const ProjectFactsSchema = z.looseObject({

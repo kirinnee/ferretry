@@ -5,7 +5,7 @@
  * read when its last row goes, so the next library to open reads the machine as it is then. Nothing here holds a token:
  * the inventory has none (docs/mcp-oauth.md).
  */
-import { loadFailureReason } from '@ferretry/app/ui';
+import { loadFailureReason, type ReadPress, readPress } from '@ferretry/app/ui';
 import { useCallback, useSyncExternalStore } from 'react';
 import type { McpInventory } from '../../contract/index.ts';
 import { type McpClient, readMachineMcpServers } from './client.ts';
@@ -22,6 +22,8 @@ export interface MachineServersStore {
   readonly snapshot: () => MachineServers;
   /** Read again; the rows on screen keep what they show until the new answer lands. */
   readonly reload: () => void;
+  /** The Try again button: reads again as the person's own press, so the passkey prompt can open. */
+  readonly press: () => void;
 }
 
 /** A store over one client. Exported for a test; the panel gets its client's through {@link machineServersStore}. */
@@ -36,10 +38,10 @@ export function createMachineServersStore(client: McpClient): MachineServersStor
     for (const listener of [...listeners]) listener();
   };
 
-  const read = (): void => {
+  const read = (press: ReadPress = {}): void => {
     generation += 1;
     const mine = generation;
-    readMachineMcpServers(client).then(
+    readMachineMcpServers(client, press).then(
       inventory => {
         if (mine === generation) set({ kind: 'ready', inventory });
       },
@@ -47,6 +49,13 @@ export function createMachineServersStore(client: McpClient): MachineServersStor
         if (mine === generation) set({ kind: 'failed', reason: loadFailureReason(error) });
       },
     );
+  };
+
+  const again = (press: ReadPress): void => {
+    if (listeners.size === 0) return;
+    // A failed read goes back to "reading"; a good one stays on screen until the new answer lands.
+    if (state.kind === 'failed') set(LOADING);
+    read(press);
   };
 
   return {
@@ -62,12 +71,8 @@ export function createMachineServersStore(client: McpClient): MachineServersStor
       };
     },
     snapshot: () => state,
-    reload: () => {
-      if (listeners.size === 0) return;
-      // A failed read goes back to "reading"; a good one stays on screen until the new answer lands.
-      if (state.kind === 'failed') set(LOADING);
-      read();
-    },
+    reload: () => again({}),
+    press: () => again(readPress(true)),
   };
 }
 
@@ -86,9 +91,11 @@ export function machineServersStore(client: McpClient): MachineServersStore {
 export function useMachineServers(client: McpClient): {
   readonly servers: MachineServers;
   readonly reload: () => void;
+  readonly press: () => void;
 } {
   const store = machineServersStore(client);
   const servers = useSyncExternalStore(store.subscribe, store.snapshot);
   const reload = useCallback(() => store.reload(), [store]);
-  return { servers, reload };
+  const press = useCallback(() => store.press(), [store]);
+  return { servers, reload, press };
 }

@@ -10,14 +10,18 @@ import {
   type AnalyticsPricingView,
   AnalyticsPricingViewSchema,
 } from '../../../contract/index.ts';
+import type { ReadPress } from '@ferretry/app/ui';
 import type { UsageClient } from '../../shell.ts';
 
 /** The only client capability the pricing transport uses. */
 export type AnalyticsPricingClient = UsageClient;
 
 /** Read the complete catalog, configured sources, sync metadata, and optimistic identities. */
-export async function readAnalyticsPricing(client: AnalyticsPricingClient): Promise<AnalyticsPricingView> {
-  return AnalyticsPricingViewSchema.parse(await client.call('GET /v1/usage/pricing'));
+export async function readAnalyticsPricing(
+  client: AnalyticsPricingClient,
+  press: ReadPress = {},
+): Promise<AnalyticsPricingView> {
+  return AnalyticsPricingViewSchema.parse(await client.call('GET /v1/usage/pricing', press));
 }
 
 /** Apply one structured manual edit against the catalog identity it was composed from. */

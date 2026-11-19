@@ -1,5 +1,6 @@
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { useCallback, useEffect, useState } from 'react';
+import { readPress } from '@ferretry/app/ui';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { budgetSentence, PullFilesAnswerSchema, type PullFilesAnswer, type RepoRef } from '../../../contract/index.ts';
 import { repoSegment } from '../../../contract/repo-segment.ts';
 
@@ -39,13 +40,17 @@ export function usePullFiles(
 ) {
   const [held, setHeld] = useState<Held>({ key: '', state: { status: 'loading' } });
   const [round, setRound] = useState(0);
+  // Set by Try again, spent by the very next read: only that one is the person's press.
+  const pressed = useRef(false);
   const segment = repoSegment({ owner, name });
   const key = `${project}/${segment}/${number}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `round` is the reload trigger; the effect does not read it
   useEffect(() => {
     let live = true;
+    const press = readPress(pressed.current);
+    pressed.current = false;
     client
-      .call(FILES_ROUTE, { params: { project, repo: segment, number: String(number) } })
+      .call(FILES_ROUTE, { params: { project, repo: segment, number: String(number) }, ...press })
       .then(raw => {
         if (live) setHeld({ key, state: { status: 'ready', answer: PullFilesAnswerSchema.parse(raw) } });
       })
@@ -56,7 +61,10 @@ export function usePullFiles(
       live = false;
     };
   }, [client, key, project, segment, number, round]);
-  const reload = useCallback(() => setRound(value => value + 1), []);
+  const reload = useCallback(() => {
+    pressed.current = true;
+    setRound(value => value + 1);
+  }, []);
   const state: FilesState = held.key === key ? held.state : { status: 'loading' };
   return { state, reload } as const;
 }

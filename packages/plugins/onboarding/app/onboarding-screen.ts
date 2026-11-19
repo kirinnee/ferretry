@@ -5,6 +5,7 @@
  * A step's LIVE CHECK is a route its owning plugin declares, which the screen's page calls; this controller only
  * records what the page concluded.
  */
+import type { ReadPress } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
   ONBOARDING_CODES,
@@ -17,7 +18,8 @@ import {
 } from '../contract/index.ts';
 
 export interface OnboardingScreen {
-  load(): Promise<OnboardingView>;
+  /** `press`: a Try again's read, sent as the person's own so the passkey prompt can open. */
+  load(press?: ReadPress): Promise<OnboardingView>;
   /** `undefined` when the daemon does not know the step (its plugin was turned off meanwhile). */
   answer(plugin: string, step: string, answer: StepAnswerRequest): Promise<StepView | undefined>;
   reset(): Promise<void>;
@@ -30,8 +32,8 @@ const isUnknownStep = (error: unknown): boolean =>
 
 export function onboardingScreen(client: PluginClient): OnboardingScreen {
   return {
-    async load() {
-      return OnboardingViewSchema.parse(await client.call('GET /v1/onboarding'));
+    async load(press = {}) {
+      return OnboardingViewSchema.parse(await client.call('GET /v1/onboarding', press));
     },
     async answer(plugin, step, answer) {
       try {

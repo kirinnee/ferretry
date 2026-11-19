@@ -8,6 +8,7 @@
  * once, without waiting for the read. A failed re-read keeps the rows on screen and says they may be stale.
  */
 
+import { type ReadPress, readPress } from '@ferretry/app/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FerretsChanged, type FerretSummary } from '../../../contract/index.ts';
 import type { LiveFerretsClient } from '../../lib/client.ts';
@@ -25,28 +26,35 @@ export interface UseFerretList {
   readonly read: FerretListState;
   /** Reads again now (the Retry button). */
   readonly retry: () => void;
+  /** The Retry button: reads again as the person's own press, so the passkey prompt can open. */
+  readonly press: () => void;
 }
 
 const sentenceOf = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
 
 export function useFerretList(client: LiveFerretsClient): UseFerretList {
   const [read, setRead] = useState<FerretListState>({ kind: 'loading' });
-  const refresh = useRef<(() => void) | undefined>(undefined);
+  const refresh = useRef<((press: ReadPress) => void) | undefined>(undefined);
   useEffect(() => {
     let alive = true;
     let inFlight = false;
     let queued = false;
     let held: FerretListRead | undefined;
-    const run = async (): Promise<void> => {
+    let nextPress: ReadPress = {};
+    const run = async (press: ReadPress = {}): Promise<void> => {
       if (inFlight) {
         queued = true;
+        if (press.quiet === false) nextPress = press;
         return;
       }
+      nextPress = press;
       inFlight = true;
       while (alive) {
         queued = false;
         try {
-          const next = await readFerretList(client, held);
+          const spent = nextPress;
+          nextPress = {};
+          const next = await readFerretList(client, held, spent);
           if (!alive) break;
           held = next;
           setRead({ kind: 'ready', ferrets: next.ferrets, stale: false });
@@ -60,7 +68,7 @@ export function useFerretList(client: LiveFerretsClient): UseFerretList {
       }
       inFlight = false;
     };
-    refresh.current = () => void run();
+    refresh.current = press => void run(press);
     void run();
     const stop = client.subscribe?.(FerretsChanged, change => {
       if (change.gone === true) {
@@ -81,7 +89,11 @@ export function useFerretList(client: LiveFerretsClient): UseFerretList {
   }, [client]);
   const retry = useCallback(() => {
     setRead(previous => (previous.kind === 'failed' ? { kind: 'loading' } : previous));
-    refresh.current?.();
+    refresh.current?.({});
   }, []);
-  return { read, retry };
+  const press = useCallback(() => {
+    setRead(previous => (previous.kind === 'failed' ? { kind: 'loading' } : previous));
+    refresh.current?.(readPress(true));
+  }, []);
+  return { read, retry, press };
 }

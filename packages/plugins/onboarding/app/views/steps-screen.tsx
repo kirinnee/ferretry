@@ -5,7 +5,7 @@
  */
 
 import { daemonHomeHref, daemonOfClient, daemonSettingsHref, PanelSlot, useOptionalRouter } from '@ferretry/app';
-import { Button, Loading } from '@ferretry/app/ui';
+import { Button, Loading, type ReadPress, readPress } from '@ferretry/app/ui';
 import type { PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { type MouseEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ONBOARDING_STEP_SLOT, type OnboardingView, stepSubject, type StepState } from '../../contract/index.ts';
@@ -39,8 +39,8 @@ function useOnboardingView(client: PluginClient): { readonly reading: Reading; r
   const again = useRef<(() => void) | null>(null);
   useEffect(() => {
     let live = true;
-    const load = (): void => {
-      screen.load().then(
+    const load = (press: ReadPress = {}): void => {
+      screen.load(press).then(
         view => {
           if (live) setReading({ kind: 'ready', view });
         },
@@ -52,10 +52,10 @@ function useOnboardingView(client: PluginClient): { readonly reading: Reading; r
     };
     again.current = () => {
       setReading(current => (current.kind === 'failed' ? { kind: 'loading' } : current));
-      load();
+      load(readPress(true));
     };
     load();
-    const stop = screen.subscribe(load);
+    const stop = screen.subscribe(() => load());
     return () => {
       live = false;
       stop();

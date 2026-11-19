@@ -4,6 +4,7 @@
  * tab is hidden or when everything has finished.
  */
 import { useDocumentVisible } from '@ferretry/app';
+import { type ReadPress, readPress } from '@ferretry/app/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CiRun } from '../../../contract/wire.ts';
 import { type CiFailure, failureOf } from './ci-api.ts';
@@ -20,11 +21,13 @@ export type CiLoad<Value> =
 /** `read` once, and again every `LIVE_REFRESH_MS` while `live(value)` says something still moves. */
 export function useLiveRead<Value>(
   key: string,
-  read: (signal: AbortSignal) => Promise<Value>,
+  read: (signal: AbortSignal, press: ReadPress) => Promise<Value>,
   live: (value: Value) => boolean,
 ): { readonly state: CiLoad<Value>; readonly reload: () => void } {
   // The load is kept WITH the subject it answers, so a different subject reads as loading at once (never the last subject's rows).
   const [round, setRound] = useState(0);
+  // Set by Try again, spent by the very next read: only that one is the person's press.
+  const pressed = useRef(false);
   // "Try again" is a new subject: it reads as loading, then answers.
   const subject = round === 0 ? key : `${key}#${round}`;
   const [held, setHeld] = useState<{ readonly key: string; readonly load: CiLoad<Value> }>({
@@ -42,8 +45,12 @@ export function useLiveRead<Value>(
     if (!visible) return undefined;
     const abort = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let press = readPress(pressed.current);
+    pressed.current = false;
     const tick = (): void => {
-      reader.current(abort.signal).then(
+      const spent = press;
+      press = {};
+      reader.current(abort.signal, spent).then(
         value => {
           if (abort.signal.aborted) return;
           setHeld({ key: subject, load: { kind: 'ready', value } });
@@ -74,7 +81,10 @@ export function useLiveRead<Value>(
     };
   }, [subject, visible]);
 
-  const reload = useCallback(() => setRound(value => value + 1), []);
+  const reload = useCallback(() => {
+    pressed.current = true;
+    setRound(value => value + 1);
+  }, []);
   return { state, reload };
 }
 

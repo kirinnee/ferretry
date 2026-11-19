@@ -16,6 +16,7 @@ import {
   RestartRequestSchema,
   RestartResultSchema,
 } from '@ferretry/core-ferrets/contract';
+import type { ReadPress } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import {
@@ -63,12 +64,16 @@ const FINISH_ROUTE = 'POST /v1/mcp/auth/flows/:flowId' as const;
 const CANCEL_ROUTE = 'DELETE /v1/mcp/auth/flows/:flowId' as const;
 
 /** Every MCP server one ferret sees, from every scope. */
-export const readFerretMcpServers = async (client: McpClient, ferretId: string): Promise<McpInventory> =>
-  McpInventorySchema.parse(await client.call(FERRET_SERVERS_ROUTE, { params: { ferretId } }));
+export const readFerretMcpServers = async (
+  client: McpClient,
+  ferretId: string,
+  press: ReadPress = {},
+): Promise<McpInventory> =>
+  McpInventorySchema.parse(await client.call(FERRET_SERVERS_ROUTE, { params: { ferretId }, ...press }));
 
 /** Every MCP server on the machine, once each, with every runtime that sees it. */
-export const readMachineMcpServers = async (client: McpClient): Promise<McpInventory> =>
-  McpInventorySchema.parse(await client.call(MACHINE_SERVERS_ROUTE));
+export const readMachineMcpServers = async (client: McpClient, press: ReadPress = {}): Promise<McpInventory> =>
+  McpInventorySchema.parse(await client.call(MACHINE_SERVERS_ROUTE, press));
 
 /**
  * Connects to one server from a listing and lists its tools. With `ferretId`, as that ferret reaches it. A server that
@@ -83,8 +88,8 @@ export const checkMcpServer = async (client: McpClient, id: string, ferretId?: s
   );
 
 /** Where every `auth: oauth` server on this machine stands. */
-export const readMcpSignIns = async (client: McpClient): Promise<McpOAuthConnectionList> =>
-  McpOAuthConnectionListSchema.parse(await client.call(SIGN_INS_ROUTE));
+export const readMcpSignIns = async (client: McpClient, press: ReadPress = {}): Promise<McpOAuthConnectionList> =>
+  McpOAuthConnectionListSchema.parse(await client.call(SIGN_INS_ROUTE, press));
 
 /**
  * Starts signing one MCP server in. `redirectUri` is this app's own callback page; leaving it out asks the daemon for the
