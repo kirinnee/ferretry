@@ -648,3 +648,52 @@ describe('the identity of a write, and one entry opened alone', () => {
     should(refused).be.instanceOf(SecretStoreError);
   });
 });
+
+describe('the create-only write (putNewIdentified)', () => {
+  it('should store a name the store does not hold and answer the identity of that write', async () => {
+    const documents = new MemorySecretDocuments();
+    const store = directory(documents);
+    const answer = await store.putNewIdentified('ANTHROPIC_API_KEY', TOKEN);
+    should(answer.kind).equal('stored');
+    should(await store.writeIdentity('ANTHROPIC_API_KEY')).equal(answer.kind === 'stored' ? answer.write : undefined);
+    should((await store.list()).map(secret => secret.name)).deepEqual(['ANTHROPIC_API_KEY']);
+  });
+
+  it('should refuse a held name and leave its value, createdAt, updatedAt and write identity exactly as they were', async () => {
+    const documents = new MemorySecretDocuments();
+    const first = directory(documents, CLOCK);
+    const held = await first.putIdentified('ANTHROPIC_API_KEY', TOKEN);
+    const before = await first.list();
+    const answer = await directory(documents, LATER).putNewIdentified('ANTHROPIC_API_KEY', 'another-value-0123');
+    should(answer).deepEqual({ kind: 'exists' });
+    should(await first.list()).deepEqual(before);
+    should(await first.writeIdentity('ANTHROPIC_API_KEY')).equal(held);
+    // The ciphertext in the document is the first value's, not the second's.
+    const vault = new SecretVault(documents, new FakeSecretCipher());
+    should((await vault.values()).get('ANTHROPIC_API_KEY')).equal(TOKEN);
+  });
+
+  it('should let exactly one of two racing creators win, and keep the winner', async () => {
+    const store = directory();
+    const answers = await Promise.all([
+      store.putNewIdentified('RACED', 'first-value-0123'),
+      store.putNewIdentified('RACED', 'second-value-0123'),
+    ]);
+    should(answers.map(answer => answer.kind).sort()).deepEqual(['exists', 'stored']);
+    const vault = new SecretVault((store as unknown as { store: SecretDocumentStore }).store, new FakeSecretCipher());
+    should((await vault.values()).get('RACED')).equal('first-value-0123');
+  });
+
+  it('should refuse past the limit with the store full, writing nothing', async () => {
+    const store = directory();
+    for (let index = 0; index < MAX_SECRETS_PER_DAEMON; index += 1) await store.put(`KEY_${String(index)}`, TOKEN);
+    let raised: unknown;
+    try {
+      await store.putNewIdentified('ONE_TOO_MANY', TOKEN);
+    } catch (error) {
+      raised = error;
+    }
+    should(raised).be.instanceOf(SecretStoreError);
+    should(await store.list()).have.length(MAX_SECRETS_PER_DAEMON);
+  });
+});

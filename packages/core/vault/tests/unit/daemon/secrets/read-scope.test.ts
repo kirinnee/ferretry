@@ -200,6 +200,7 @@ describe('what the types refuse', () => {
         'putIdentified',
         'putIf',
         'putMissing',
+        'putNewIdentified',
         'remove',
         'write',
         'writeIdentity',

@@ -514,6 +514,8 @@ export default definePlugin({
     // The setup lists the NAMES of this machine’s API keys (never a value): a copy says which a setup needs. The Vault lists every NAME to a
     // plugin that declares this, and no value; it writes it nothing. The setup route is the person’s (operator) gate.
     secretNamePicker: true,
+    // The import files a machine's own API keys into the Vault (`VaultApi.putNew`): CREATE-ONLY, never a replace, a remove or a read.
+    createSecrets: true,
     // Whether an MCP server's command and a harness are installed (`kernel.paths.which`: bounded, never executing).
     which: true,
     // Claude keeps its user-scope MCP servers in `~/.claude.json`, BESIDE `~/.claude`: one read-only file, no listing.

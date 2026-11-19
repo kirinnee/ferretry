@@ -23,7 +23,7 @@ import {
 } from '@ferretry/kernel/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import type { InputRaise, InputRequestId, InputRequestState } from '../inputs.ts';
-import type { ActedPage, ChildEnvironment, PageActNote, VaultApi } from '../port.ts';
+import type { ActedPage, ChildEnvironment, PageActNote, PutNewOutcome, VaultApi } from '../port.ts';
 import {
   PHONE_APPROVAL_UNAVAILABLE,
   type PhoneApprovalAgentView,
@@ -508,6 +508,12 @@ export class FakeVault implements VaultApi {
     const at = '2026-11-07T12:00:00.000Z';
     this.#values.set(name, { value, createdAt: this.#values.get(name)?.createdAt ?? at, updatedAt: at });
     this.#minted.add(name);
+  }
+  /** The real Vault's create-only write in a fake: a held name answers `exists` and is left exactly as it was. */
+  async putNew(name: SecretName, value: string): Promise<PutNewOutcome> {
+    if (this.#values.has(name)) return 'exists';
+    await this.put(name, value);
+    return 'stored';
   }
   /** A value somebody OTHER than the plugin put (the owner's): held, usable by name, but never the plugin's mint. */
   plant(name: SecretName, value: string): void {

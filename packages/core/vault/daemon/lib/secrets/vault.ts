@@ -100,6 +100,24 @@ export class SecretDirectory {
     return await this.inTurn(async () => (await this.write(await this.document(), name, value)).write);
   }
 
+  /**
+   * CREATE-ONLY: stores a value under a name the store does NOT hold, checked and written in ONE turn, and answers the
+   * identity of that write (as {@link putIdentified}) or `exists` and writes nothing. A held name keeps its value,
+   * `createdAt` and `updatedAt` exactly as they were. What a plugin that imports a machine's own keys may do
+   * (`permissions.createSecrets`): add a key, never replace one.
+   */
+  async putNewIdentified(
+    name: SecretName,
+    value: string,
+  ): Promise<{ readonly kind: 'stored'; readonly write: string } | { readonly kind: 'exists' }> {
+    return await this.inTurn(async () => {
+      const document = await this.document();
+      if (document.entries[name] !== undefined) return { kind: 'exists' as const };
+      const written = await this.write(document, name, value);
+      return { kind: 'stored' as const, write: written.write };
+    });
+  }
+
   /** The identity of the write that produced a name's current value, or nothing when it holds none. */
   async writeIdentity(name: SecretName): Promise<string | undefined> {
     return (await this.document()).entries[name]?.iv;

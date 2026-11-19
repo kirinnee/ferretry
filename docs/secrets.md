@@ -1941,3 +1941,24 @@ build fails if the worker's bundle carries the vault, its store or the redactor 
 become a seventh holder. `housekeeping.enabled: false` in `daemon.json` runs the same job code on the main
 thread, as before the worker existed. The token reaches its provider or — for the idle bench and the CI budget,
 through `FY_USAGE_PROBE_ORIGIN` — a server on this machine; any other origin is refused.
+
+## A key an import files, create-only (`VaultApi.putNew`)
+
+The setup's import (Runtimes) finds API keys in a machine's own Claude Code and Codex settings and files them in the Vault
+as `${secret:NAME}` references. Until r9 the write was refused (`refusing.secrets.put`), so an import that found a key
+could not apply. The write it gets is **create-only**, and nothing wider:
+
+- **`vault.putNew(name, value)` answers `stored` or `exists`, never a value.** It checks and writes in ONE turn
+  (`SecretDirectory.putNewIdentified`), so a name that arrives between the plan and the write is kept, not overwritten. A
+  held name keeps its value, `createdAt`, `updatedAt` and mint record exactly as they were. A store that cannot be read, or
+  is full, raises and writes nothing.
+- **Handed only to a core caller and to a non-core plugin whose manifest declares `permissions.createSecrets`** (Runtimes).
+  Every other needer has no `putNew`. The permission does not widen `put` or `remove`, which stay the names a plugin MINTS
+  (`mintedSecrets`); Runtimes declares none, so it can add a key and never replace, remove or read one.
+- **The write is recorded as the caller's** in the mint ledger (as any plugin's `put`), with ids and a write nonce, never a
+  value. Runtimes declares no `network`, so a name it created is not placeable on any request; an owner's later replacement
+  is another write and is not its mint either.
+- **Values never come from the app.** The daemon re-reads the host file at APPLY time (the plan is composed again, as for
+  every import) and hands the value to `putNew`; the proposal, the route and the screen carry names only. A name already
+  held is not overwritten: the planner picks the next free name (`ANTHROPIC_API_KEY_2`) from the Vault's NAME listing, and
+  a race that still lands on a held name is refused in a sentence naming the secret, with nothing changed.

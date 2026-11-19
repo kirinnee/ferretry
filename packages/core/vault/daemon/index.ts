@@ -230,6 +230,12 @@ export default implementDaemon(manifest, {
         await directory.put(name, value);
         changed();
       },
+      // A core caller's create-only write is not recorded: the ledger is for what a non-core plugin placed itself.
+      putNew: async (name, value) => {
+        const written = await directory.putNewIdentified(name, value);
+        if (written.kind === 'stored') changed();
+        return written.kind;
+      },
       remove: async name => {
         const removed = await directory.remove(name);
         if (removed) changed();
@@ -419,6 +425,7 @@ export default implementDaemon(manifest, {
         maskCopy,
         pageTakenOver,
         inputOpen,
+        putNew,
         ...rest
       } = full;
       return {
@@ -447,6 +454,20 @@ export default implementDaemon(manifest, {
           );
           changed();
         },
+        // CREATE-ONLY, for the plugin whose manifest declares `permissions.createSecrets` (Runtimes' import): any name the Vault
+        // does not hold yet, recorded as this plugin's write; a held name answers `exists` and nothing is touched.
+        ...(needer.permissions.createSecrets === true && putNew !== undefined
+          ? {
+              putNew: async (name: SecretName, value: string) => {
+                const secret = String(name);
+                const written = await directory.putNewIdentified(secret as SecretName, value);
+                if (written.kind === 'exists') return 'exists' as const;
+                await mints.record(needer.id, secret as SecretName, written.write);
+                changed();
+                return 'stored' as const;
+              },
+            }
+          : {}),
         remove: async name => {
           const secret = String(name);
           if (!isMintedSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'remove');

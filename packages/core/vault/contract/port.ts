@@ -57,6 +57,9 @@ export interface SecureCopyCommandOutcome {
   readonly truncated: boolean;
 }
 
+/** What {@link VaultApi.putNew} found: the value was filed, or the name was already held and nothing changed. */
+export type PutNewOutcome = 'stored' | 'exists';
+
 /**
  * The Vault port (§2.2, §3.7): secrets by NAME only. There is no getter, and none may be added (it would delete the
  * feature): `run` executes a command with the values in that child's environment and returns masked output;
@@ -69,6 +72,15 @@ export interface VaultApi {
   /** A value in; person-only at the route. */
   put(name: SecretName, value: string): Promise<void>;
   remove(name: SecretName): Promise<boolean>;
+  /**
+   * CREATE-ONLY: files a value under a name the Vault does not hold yet, and answers `stored`, or `exists` having written
+   * NOTHING (the held value, its times and its mint record are untouched). The check and the write are one turn, so a name
+   * that appears meanwhile is kept. The write is recorded in the mint ledger as the caller's. Additive, and handed only to a
+   * core caller and to a non-core plugin whose manifest declares `permissions.createSecrets` (Runtimes' import of a
+   * machine's own keys): such a plugin may add a name, never replace, remove or read one. A store that cannot be read or is
+   * full raises. The caller names the secret by NAME and the answer carries no value.
+   */
+  putNew?(name: SecretName, value: string): Promise<PutNewOutcome>;
   run(command: SecretUseCommand, ferret?: FerretId): Promise<Result<SecretUseResult, SecretUseRefusal>>;
   authorizeFetch(
     name: SecretName,
