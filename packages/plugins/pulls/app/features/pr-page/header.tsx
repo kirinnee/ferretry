@@ -28,10 +28,12 @@ export function PullHeader({ pull }: { readonly pull: PullDetail }) {
         {pull.title} <span className="font-normal text-muted">#{pull.number}</span>
       </h1>
       <div className="flex flex-wrap items-center gap-xs">
-        <Badge data-pull-state={pull.state} tone={STATE_TONE[pull.state]}>
-          {STATE_WORDS[pull.state]}
+        <Badge
+          data-pull-state={pull.state}
+          tone={pull.draft && pull.state === 'open' ? 'pend' : STATE_TONE[pull.state]}
+        >
+          {pull.draft && pull.state === 'open' ? 'Draft' : STATE_WORDS[pull.state]}
         </Badge>
-        {pull.draft && <Badge tone="pend">Draft</Badge>}
         <Badge
           data-pull-review={pull.review}
           tone={pull.review === 'changes_requested' ? 'err' : pull.review === 'approved' ? 'ok' : 'pend'}
