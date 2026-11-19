@@ -101,7 +101,7 @@ describe('WardenSettingsForm', () => {
     // Assert
     const json = text(renderer);
     expect(json).toContain('What leaves this machine: nothing. The rules send nothing anywhere.');
-    expect(json).toContain('always on · free');
+    expect(json).toContain('Always on · free');
     expect(json).not.toContain('Investigation (the assigned warden)');
     expect(json).not.toContain('Jev cap ($/day)');
     expect(json).not.toContain('LLM cap ($/day)');
