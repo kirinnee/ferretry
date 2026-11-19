@@ -6,6 +6,7 @@
  *   /d/ws/settings[/<plugin>/<tab>]   Settings, grouped, with the Setup, Warden … tabs one click away
  *   /settings                         Settings › This device, with its way back to the daemon's settings
  *   ?theme=<family>-<mode>
+ *   ?real=agenda                      the Agenda surface is the plugin's REAL app half (its real Settings tab body), in the real shell
  */
 
 import { implementApp, type Manifest } from '@ferretry/kernel/manifest';
@@ -34,6 +35,7 @@ const surfaces: SurfaceEntry[] = [
   ...generated.surfaces
     .filter(entry => (entry.manifest.ui?.settings ?? []).length > 0 && !CORE.some(core => core.id === entry.id))
     .map(entry => {
+      if (entry.id === 'agenda' && params.get('real') === 'agenda') return entry;
       const settings = entry.manifest.ui?.settings ?? [];
       const manifest = {
         id: entry.id,

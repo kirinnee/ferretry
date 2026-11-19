@@ -10,4 +10,5 @@
 @import './features/agenda/agenda-config-change.css';
 @import './features/agenda/agenda-panel.css';
 @import './features/agenda/agenda-inbox.css';
+@import './features/settings/notification-tiles.css';
 @import './components/agenda-message.css';

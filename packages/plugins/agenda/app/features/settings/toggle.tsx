@@ -64,8 +64,8 @@ export function Toggle({
         </span>
       )}
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-ui font-semibold text-fg">{label}</span>
-        <span className="block truncate text-meta leading-base text-muted">{description}</span>
+        <span className="block break-words text-ui font-semibold text-fg">{label}</span>
+        <span className="block break-words text-meta leading-base text-muted">{description}</span>
       </span>
       <SwitchGlyph checked={checked} />
     </button>

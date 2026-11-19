@@ -7,8 +7,9 @@
  * row of that machine's notification switch (Access's). All of it is local to this browser; nothing here is sent to any
  * daemon.
  *
- * LAYOUT (r10 S8): the five kinds are compact tiles in a 1 / 2 / 3 column grid (icon, name, one line, switch); quiet
- * hours is ONE row (its switch, and From / To inline while it is on). One surface per tile, no box in a box.
+ * LAYOUT (r10 S8): the five kinds are compact tiles (icon, name, one line, switch) in a 1 / 2 / 3 column grid that follows
+ * the width of the PANEL they sit in, never the window's (`notification-tiles.css`); a long name or line wraps, it never
+ * clips. Quiet hours is ONE row (its switch, and From / To inline while it is on). One surface per tile, no box in a box.
  */
 import { BellRing, CircleAlert, CircleCheck, GitPullRequest, Moon, Smartphone } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -57,20 +58,22 @@ export function NotificationFilterSettingsView({
   return (
     <section className="flex flex-col gap-4" aria-label="Notification filter">
       <p className="m-0 text-meta leading-base text-faint">{NOTIFICATION_FILTER_INTRO}</p>
-      <fieldset className="m-0 grid min-w-0 grid-cols-1 gap-3 border-0 p-0 sm:grid-cols-2 xl:grid-cols-3">
-        <legend className="sr-only">Show me</legend>
-        {NOTIFICATION_CATEGORIES.map(category => (
-          <Toggle
-            key={category}
-            checked={categories[category]}
-            onChange={next => onCategoryChange(category, next)}
-            label={NOTIFICATION_CATEGORY_COPY[category].label}
-            description={TILE[category].line}
-            icon={TILE[category].icon}
-            title={NOTIFICATION_CATEGORY_COPY[category].description}
-          />
-        ))}
-      </fieldset>
+      <div className="fy-notify-tiles">
+        <fieldset className="fy-notify-grid">
+          <legend className="sr-only">Show me</legend>
+          {NOTIFICATION_CATEGORIES.map(category => (
+            <Toggle
+              key={category}
+              checked={categories[category]}
+              onChange={next => onCategoryChange(category, next)}
+              label={NOTIFICATION_CATEGORY_COPY[category].label}
+              description={TILE[category].line}
+              icon={TILE[category].icon}
+              title={NOTIFICATION_CATEGORY_COPY[category].description}
+            />
+          ))}
+        </fieldset>
+      </div>
       <div className="flex min-h-[56px] flex-wrap items-center gap-x-4 gap-y-2" data-quiet-hours-row="">
         <button
           type="button"

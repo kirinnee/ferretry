@@ -1,5 +1,6 @@
 /**
- * THE AGENDA SETTINGS TAB in a real browser over fake data, at 1280 and 390 wide, light and dark (r10 S8):
+ * THE AGENDA SETTINGS TAB's own layout in a real browser over fake data (the in-shell cases, which prove the columns follow
+ * the panel, are in `packages/app/tests/integration/settings-shell.visual.test.ts`), at 1280 and 390 wide, light and dark (r10 S8):
  *
  *  - the five kinds are a grid of compact tiles (three across wide, one on a phone), one line each;
  *  - quiet hours is one row, and turning it on puts From / To on that row without moving anything above it;
@@ -99,6 +100,9 @@ describe('The Agenda settings tab', () => {
           await page.click('[data-quiet-hours-row] [role="switch"]');
           await page.waitForSelector('[data-quiet-hours-row] input[type="time"]');
           expect(await page.$$('[data-quiet-hours-row] input[type="time"]')).toHaveLength(2);
+          await page.evaluate(async () => {
+            await Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => undefined)));
+          });
           expect(await rowTop(), 'nothing above moves').toBe(before.top);
           if (!variant.phone) expect(await rowHeight(), 'one row, the same height on wide').toBe(before.height);
           if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, `${variant.name}-${scheme}-on.png`) });

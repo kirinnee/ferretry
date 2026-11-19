@@ -1,6 +1,6 @@
 /**
  * The browser entry for the Agenda settings tab (r10 S8), over fake data: the REAL `NotificationFilterSettingsView` under a
- * stand-in page head (title + the scope chip), driven by local state.
+ * stand-in page head (the title; the scope chip is the shell's, and it hides it on a phone), driven by local state.
  *
  *   ?theme=<family>-<mode>   ?quiet=on   quiet hours switched on, 22:00 to 07:00
  */
@@ -25,9 +25,6 @@ function Scene() {
   return (
     <main style={{ maxWidth: 1_100, padding: 16 }}>
       <h1 className="text-ui font-semibold">Agenda</h1>
-      <p data-scope-chip="" className="text-meta text-muted">
-        Only this browser
-      </p>
       <NotificationFilterSettingsView
         preferences={preferences}
         onCategoryChange={(category, next) =>

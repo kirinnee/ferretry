@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'bun:test';
 
 import {
@@ -98,9 +100,16 @@ describe('NotificationFilterSettingsView layout (r10 S8)', () => {
   it('lays the five kinds out as a 1 / 2 / 3 column grid of tiles with one line each', () => {
     const { renderer } = view();
     const [grid] = renderer.root.findAllByType('fieldset');
-    expect(grid?.props.className).toContain('grid');
-    expect(grid?.props.className).toContain('sm:grid-cols-2');
-    expect(grid?.props.className).toContain('xl:grid-cols-3');
+    // The columns follow the PANEL (a container query in notification-tiles.css), never the window: no viewport breakpoint.
+    expect(grid?.props.className).toBe('fy-notify-grid');
+    expect(grid?.props.className).not.toMatch(/\b(sm|md|lg|xl|2xl):/);
+    const css = readFileSync(
+      join(import.meta.dir, '../../../../../app/features/settings/notification-tiles.css'),
+      'utf8',
+    );
+    expect(css).toMatch(/\.fy-notify-tiles\s*\{[^}]*container-type:\s*inline-size/u);
+    expect(css).toMatch(/@container \(min-width: 520px\)[^}]*\{[^}]*repeat\(2,/u);
+    expect(css).toMatch(/@container \(min-width: 780px\)[^}]*\{[^}]*repeat\(3,/u);
     const tiles = grid?.findAllByProps({ role: 'switch' }) ?? [];
     expect(tiles).toHaveLength(5);
     for (const tile of tiles) {

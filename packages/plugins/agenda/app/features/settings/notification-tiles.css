@@ -1,0 +1,27 @@
+/* The five notification kinds as tiles (r10 S8). The columns follow the WIDTH OF THE PANEL the tiles sit in, never the
+   window's: Settings' page is 212px wide at a 768px window and 724px at 1280px, so a viewport breakpoint
+   (`sm:` / `xl:`) clips every label. A tile is never narrower than ~240px; below that it is one column, and a name or
+   hint that does not fit WRAPS. */
+.fy-notify-tiles {
+  container-type: inline-size;
+  min-width: 0;
+}
+.fy-notify-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+@container (min-width: 520px) {
+  .fy-notify-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (min-width: 780px) {
+  .fy-notify-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

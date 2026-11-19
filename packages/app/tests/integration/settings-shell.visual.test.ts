@@ -110,7 +110,7 @@ const shotOf = async (tab: Page, variant: Variant, name: string): Promise<void> 
 };
 
 /** The page scrolls inside the app shell, so a "full page" shot of a phone is a tall window. */
-const tall = async (tab: Page, variant: (typeof VARIANTS)[number], height: number): Promise<void> => {
+const tall = async (tab: Page, variant: Variant, height: number): Promise<void> => {
   if (variant.phone) await tab.setViewportSize({ width: variant.width, height });
 };
 
@@ -119,10 +119,22 @@ describe('Settings shell', () => {
     it(`${variant.name}: Settings lists its tabs under titled groups, with This device one click away`, async () => {
       const { tab, close } = await open(variant, '/d/ws/settings', 'nav[aria-label="Plugin settings"] .fy-tab-group');
       try {
-        const headings = await tab.locator('nav[aria-label="Plugin settings"] summary').allInnerTexts();
-        expect(headings.slice(0, 3)).toEqual(['Behaviour', 'Agents and logins', 'Supervision']);
-        expect(headings).toContain('Devices & access');
-        expect(headings).not.toContain('More');
+        // The list has two blocks: the device block first, then the machine's. The machine block keeps the group order;
+        // Agenda (this browser's notification filter) sits in the device block, so it is asserted there on its own.
+        const machineHeadings = await tab
+          .locator('nav[aria-label="Plugin settings"] section[aria-labelledby="fy-settings-block-machine"] summary')
+          .allInnerTexts();
+        expect(machineHeadings.slice(0, 3)).toEqual(['Behaviour', 'Agents and logins', 'Supervision']);
+        expect(machineHeadings).toContain('Devices & access');
+        expect(machineHeadings).not.toContain('More');
+        const deviceBlock = tab.locator(
+          'nav[aria-label="Plugin settings"] section[aria-labelledby="fy-settings-block-device"]',
+        );
+        expect(await deviceBlock.locator('a', { hasText: /^Agenda$/ }).count(), 'Agenda is a device-block tab').toBe(1);
+        expect(
+          await tab.locator('section[aria-labelledby="fy-settings-block-machine"] a', { hasText: /^Agenda$/ }).count(),
+          'and not in the machine block',
+        ).toBe(0);
         expect(await tab.getByRole('link', { name: 'This device', exact: true }).getAttribute('href')).toBe(
           '/settings',
         );
@@ -267,6 +279,95 @@ describe('Settings shell: the frame rules (S1)', () => {
         if (!variant.phone) expect(facts.pageMax).toBe('1100px');
         await tall(tab, variant, 2_300);
         await shotOf(tab, variant, 'frame-s1');
+      } finally {
+        await close();
+      }
+    });
+  }
+});
+
+/**
+ * R10 S8: THE AGENDA TAB INSIDE THE REAL SHELL (`?real=agenda`: the real notification settings over local state). The
+ * Settings panel is much narrower than the window (212px wide at 768, 264 at 820, 724 at 1280), so the five tiles pick
+ * their columns from the PANEL; every name and hint wraps inside its tile, none is clipped, and nothing scrolls sideways.
+ */
+const AGENDA_VARIANTS: readonly Variant[] = [
+  { name: '390-light', width: 390, height: 844, phone: true, scheme: 'light' },
+  { name: '390-dark', width: 390, height: 844, phone: true, scheme: 'dark' },
+  { name: '768-light', width: 768, height: 900, phone: false, scheme: 'light' },
+  { name: '768-dark', width: 768, height: 900, phone: false, scheme: 'dark' },
+  { name: '820-light', width: 820, height: 900, phone: false, scheme: 'light' },
+  { name: '1280-light', width: 1_280, height: 800, phone: false, scheme: 'light' },
+  { name: '1280-dark', width: 1_280, height: 800, phone: false, scheme: 'dark' },
+];
+
+describe('Settings shell: the Agenda tab (S8)', () => {
+  for (const variant of AGENDA_VARIANTS) {
+    it(`${variant.name}: the tiles follow the panel's width and no label or hint is clipped`, async () => {
+      const { tab, close } = await open(variant, '/d/ws/settings/agenda?real=agenda', '.fy-notify-grid');
+      try {
+        await tab.waitForSelector('.fy-notify-grid [role="switch"]');
+        const facts = await tab.evaluate(() => {
+          const grid = document.querySelector('.fy-notify-grid') as HTMLElement;
+          const panel = (document.querySelector('.fy-notify-tiles') as HTMLElement).getBoundingClientRect().width;
+          const tiles = [...grid.querySelectorAll('[role="switch"]')].map(tile => {
+            const box = tile.getBoundingClientRect();
+            const texts = [...tile.querySelectorAll('span.block')].map(span => {
+              const range = document.createRange();
+              range.selectNodeContents(span);
+              const text = range.getBoundingClientRect();
+              const own = span.getBoundingClientRect();
+              return {
+                words: span.textContent ?? '',
+                clippedX: span.scrollWidth > span.clientWidth + 1,
+                clippedY: span.scrollHeight > span.clientHeight + 1,
+                outside: text.right > box.right + 0.5 || text.left < box.left - 0.5 || text.right > own.right + 0.5,
+                overflow: getComputedStyle(span).overflow,
+              };
+            });
+            const glyph = tile.lastElementChild?.getBoundingClientRect();
+            return {
+              top: Math.round(box.top),
+              left: Math.round(box.left),
+              width: box.width,
+              glyphInside: glyph !== undefined && glyph.right <= box.right + 0.5 && glyph.left >= box.left,
+              texts,
+            };
+          });
+          return {
+            panel,
+            tiles,
+            columns: new Set(tiles.map(tile => tile.left)).size,
+            sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          };
+        });
+        expect(facts.tiles).toHaveLength(5);
+        const wanted = facts.panel >= 780 ? 3 : facts.panel >= 520 ? 2 : 1;
+        expect(facts.columns, `panel ${facts.panel}px`).toBe(wanted);
+        for (const tile of facts.tiles) {
+          expect(tile.glyphInside, 'the switch stays inside its tile').toBe(true);
+          expect(tile.texts).toHaveLength(2);
+          for (const text of tile.texts) {
+            expect(text.clippedX, `${text.words} is not clipped sideways`).toBe(false);
+            expect(text.clippedY, `${text.words} is not clipped vertically`).toBe(false);
+            expect(text.outside, `${text.words} stays inside its tile`).toBe(false);
+            expect(text.overflow, `${text.words} does not hide overflow`).toBe('visible');
+          }
+        }
+        expect(facts.sideways).toBeLessThanOrEqual(0);
+        await tall(tab, variant, 1_400);
+        await shotOf(tab, variant, 'agenda-tiles');
+        // Quiet hours: switch it on, then shoot once the switch has finished moving.
+        await tab.click('[data-quiet-hours-row] [role="switch"]');
+        await tab.waitForSelector('[data-quiet-hours-row] input[type="time"]');
+        await tab.evaluate(async () => {
+          await Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => undefined)));
+        });
+        const after = await tab.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(after).toBeLessThanOrEqual(0);
+        await shotOf(tab, variant, 'agenda-quiet-hours');
       } finally {
         await close();
       }
