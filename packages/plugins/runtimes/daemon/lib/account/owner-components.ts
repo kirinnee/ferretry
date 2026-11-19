@@ -36,6 +36,8 @@ export interface OwnerComponentWrite {
   readonly problem?: string;
   /** A skills component's files (`<item>/<rel>`), which its owner installs: Runtimes writes none of them itself. */
   readonly files?: readonly { readonly path: string; readonly content: string }[];
+  /** An update the person accepted: the owner replaces its existing item (never set for a first import). */
+  readonly replace?: true;
   /** Hidden files (a path segment starting with a dot) the import carried but does NOT hand over: the answer names them. */
   readonly skipped?: readonly string[];
 }
@@ -88,6 +90,7 @@ export function ownerWrites(
 ): readonly OwnerComponentWrite[] {
   const writes: OwnerComponentWrite[] = [];
   for (const { kind, name } of changedRefs(before, next, touched)) {
+    const replaces = (reference: string) => (touched.includes(reference) ? { replace: true as const } : {});
     if (!OWNER_KINDS.has(kind)) continue;
     const ownerKind = kind as OwnerKind;
     const value: unknown = next.components[ownerKind][name];
@@ -109,6 +112,7 @@ export function ownerWrites(
         name,
         reference,
         file: `${ownerKind}/${name}.yaml`,
+        ...replaces(reference),
         text: documentText(value),
         ...(ownerKind === 'skills' ? { files, ...(skipped.length === 0 ? {} : { skipped }) } : {}),
       });
@@ -116,7 +120,7 @@ export function ownerWrites(
     }
     const settings = value as { readonly harness: HarnessKind; readonly file?: string } & Record<string, unknown>;
     const file = `${SETTINGS_DIRECTORY[settings.harness]}/settings/${name}.yaml`;
-    const base = { kind: ownerKind, name, reference, harness: settings.harness, file } as const;
+    const base = { kind: ownerKind, name, reference, harness: settings.harness, file, ...replaces(reference) } as const;
     if (settings.file === undefined) {
       writes.push({ ...base, text: documentText(value) });
       continue;

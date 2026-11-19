@@ -19,11 +19,14 @@ function tree(
   const options: unknown[] = [];
   const config: HostImportConfig = {
     collection: () => written as never,
+    etag: async (_def, name) => (name !== undefined && written.has(name) ? `etag-${name}` : 'absent'),
     writeAsCaller: async (_def: unknown, name: string | undefined, edit: ConfigEdit, option) => {
       options.push(option);
       if (answer !== undefined) return answer;
       if (name === undefined || typeof edit !== 'string') throw new Error('a whole item text is written');
-      if (written.has(name)) return { kind: 'conflict' };
+      if (option?.ifMatch === 'absent' && written.has(name)) return { kind: 'conflict' };
+      if (option?.ifMatch !== undefined && option.ifMatch !== 'absent' && option.ifMatch !== `etag-${name}`)
+        return { kind: 'conflict' };
       written.set(name, Bun.YAML.parse(edit) as SettingsItem);
       return { kind: 'written', etag: 'e1', loosened: [] };
     },
@@ -56,6 +59,21 @@ describe('a Codex settings component the import hands over', () => {
 
     expect(result).toEqual({ ok: false, reason: 'a Codex settings item named "mine" already exists' });
     expect(written.get('mine')).toEqual({ settings: { model: 'keep' } });
+  });
+
+  it('replaces its own item for an update the person accepted, pinned to the current etag', async () => {
+    const { config, written, options } = tree({ mine: { settings: { model: 'old' } } });
+
+    const result = await codexSettingsPut(config)(
+      'mine',
+      asText({ harness: 'codex', document: { model: 'new' } }),
+      undefined,
+      { replace: true },
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(written.get('mine')).toEqual({ settings: { model: 'new' } });
+    expect(options).toEqual([{ ifMatch: 'etag-mine' }]);
   });
 
   it('reports a name taken between the look and the write as taken', async () => {

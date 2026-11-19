@@ -3976,6 +3976,35 @@ describe('the setup.import executor, a skill an owner serves', () => {
     should(skillLinks(applied)).eql(['/state/fleet/assets/skills/review']);
   });
 
+  it('should replace the skills item with a newly added skill when the person accepts it, leaving the unticked one out', async () => {
+    // Arrange — "review" imported with "skip" unticked; the host then gains "claude-new".
+    const door = reportingOwners();
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
+    const skills = (...items: string[]) =>
+      items.map(item => ({ item, source: `/person/.claude/skills/${item}`, digest: `${item}-digest` }));
+    const scans = (...items: string[]) => [claudeScan({ skills: skills(...items) }), codexScan()];
+    state.scans = scans('review', 'skip');
+    await importOnce(service, IMPORT({ skip: ['claude-code:skill:skip'] }));
+    const first = applied[0]?.documents ?? [];
+    for (const document of first) state.assets[document.path] = document.content;
+    state.reading = door.readingOf(first);
+    state.scans = scans('review', 'skip', 'claude-new');
+    should((await service.scan()).updates.map(update => update.reference)).eql(['skills/claude-skills']);
+    const before = door.calls.length;
+
+    // Act
+    const change = IMPORT({ skip: ['claude-code:skill:skip'], acceptedUpdates: ['skills/claude-skills'] });
+    await importOnce(service, change);
+
+    // Assert — one replacing write of the new selection, Codex's items untouched.
+    const handed = door.calls.slice(before);
+    should(handed.map(call => call.reference)).eql(['skills/claude-skills']);
+    should(handed[0]?.replace).be.true();
+    should(JSON.parse(handed[0]?.text ?? '{}')).eql({ items: ['review', 'claude-new'], harness: 'claude' });
+    should(handed[0]?.files?.map(file => file.path)).not.containEql('skip/SKILL.md');
+  });
+
   it('should hand an accepted update to the owner when only the skill files changed', async () => {
     // Arrange — the skill is already in effect; the host's SKILL.md then changes, the selection does not
     const door = reportingOwners();
@@ -4009,6 +4038,8 @@ describe('the setup.import executor, a skill an owner serves', () => {
     // Assert
     const handed = door.calls.slice(before).filter(call => call.kind === 'skills');
     should(handed).have.length(1);
+    should(handed[0]?.replace).be.true();
+    should(door.calls.slice(0, before).some(call => call.replace !== undefined)).be.false();
     should(handed[0]?.files).eql([{ path: 'review/SKILL.md', content: '---\nname: review\n---\nnew body\n' }]);
     const paths = (applied[1]?.documents ?? []).map(document => document.path);
     should(paths.some(path => path.startsWith('/state/fleet/assets/skills/'))).be.false();

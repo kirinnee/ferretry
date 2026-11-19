@@ -100,6 +100,16 @@ describe('MCP owner writes an imported server', () => {
     expect(await owner().read('once')).toEqual({ command: 'first' });
   });
 
+  test('an update the person accepted replaces the server it made, pinned to the current file', async () => {
+    const { owner } = await world();
+    await owner().put?.('once', doc({ command: 'first' }));
+
+    const replaced = await owner().put?.('once', doc({ command: 'second' }), undefined, { replace: true });
+
+    expect(replaced?.ok).toBe(true);
+    expect(await owner().read('once')).toEqual({ command: 'second' });
+  });
+
   test('a raw secret in the environment is refused by the config service, without echoing it', async () => {
     const { owner } = await world();
     const leaked = 'ghp_0123456789abcdef0123456789abcdef0123';
