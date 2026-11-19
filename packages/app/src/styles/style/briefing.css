@@ -127,6 +127,14 @@
   box-shadow: var(--shadow-md);
 }
 
+/* A text field's keyboard focus is the same hot outline a button draws, not only a border-colour change. */
+:root[data-style='briefing'] .kt-input:focus-visible,
+[data-swatch][data-style='briefing'] .kt-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+  box-shadow: var(--focus-shadow);
+}
+
 /* The halo rides every keyboard focus the shell's ring draws. */
 :root[data-style='briefing'] .kt-btn:focus-visible,
 [data-swatch][data-style='briefing'] .kt-btn:focus-visible {
