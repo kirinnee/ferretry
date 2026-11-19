@@ -1,7 +1,7 @@
 import { implementApp } from '@ferretry/kernel/manifest';
-import { forSubject } from '@ferretry/app';
 import { createElement } from 'react';
 import manifest from '../manifest.ts';
+import { harnessSignIn } from './features/harness-sign-in-embed.tsx';
 import { addRuntimeLoginPanel, addRuntimeSignInPanel } from './features/add-runtime-slots.tsx';
 import { AddLoginPanel, LocalModelsSurface, LoginSignInPanel, QuotaReadout, SignInsTab } from './views.tsx';
 
@@ -30,8 +30,9 @@ export default implementApp(manifest, {
       'add-runtime-sign-in': props => addRuntimeSignInPanel(client, { ...props }),
       'local-models': () => createElement(LocalModelsSurface, { client }),
       'quota-readout': () => createElement(QuotaReadout, { client }),
-      // The first-run step's body: the sign-ins view, only for its own step.
-      'onboarding-step': forSubject('logins.login', () => createElement(SignInsTab, { client })),
+      // A harness's first-run "Sign in" page offers a slot each; the sign-in drawn there is this one.
+      'claude-code-sign-in': props => harnessSignIn(client, 'claude-code', { ...props }),
+      'codex-sign-in': props => harnessSignIn(client, 'codex', { ...props }),
     },
   }),
 });

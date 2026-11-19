@@ -28,6 +28,7 @@ import {
 import { launchFlagsLoosen } from './launch-flags.ts';
 
 export * from './wire.ts';
+export * from './slots.ts';
 export { launchFlagsKept } from './launch-flags.ts';
 
 /** The harness key and plugin id. */

@@ -45,6 +45,8 @@ export interface LoginSignInProps {
   readonly onSignedIn: () => void;
   /** Supplied in tests. */
   readonly pollMs?: number;
+  /** Start the sign-in on mount: the login was made a moment ago by the person's own press, so a second press would add nothing. */
+  readonly autoStart?: boolean;
 }
 
 const WAITING: ReadonlySet<HarnessLoginFlow['state']> = new Set([
@@ -61,7 +63,14 @@ const waiting = (flow: HarnessLoginFlow | null): boolean => flow !== null && WAI
 const onLink = (flow: HarnessLoginFlow | null): boolean =>
   flow?.harness === 'codex' && (flow.state === 'awaiting-callback' || flow.state === 'finishing');
 
-export function LoginSignIn({ login, machineName, client, onSignedIn, pollMs = SIGN_IN_POLL_MS }: LoginSignInProps) {
+export function LoginSignIn({
+  login,
+  machineName,
+  client,
+  onSignedIn,
+  pollMs = SIGN_IN_POLL_MS,
+  autoStart = false,
+}: LoginSignInProps) {
   const [flow, setFlow] = useState<LoginSignInFlow | null>(null);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -119,6 +128,13 @@ export function LoginSignIn({ login, machineName, client, onSignedIn, pollMs = S
    * ended panel it was pressed on.
    */
   const again = (chosen?: HarnessLoginCodexMethod): void => void start(true, undefined, chosen);
+
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoStart || autoStarted.current) return;
+    autoStarted.current = true;
+    void start(false);
+  }); // runs once: the ref guards it; `start` closes over the latest state
 
   const answer = async (
     send: (flowId: string) => Promise<Awaited<ReturnType<typeof submitLoginSignInCode>>>,

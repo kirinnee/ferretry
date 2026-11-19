@@ -228,8 +228,11 @@ export default definePlugin({
     panels: [
       panel('conversation.above-composer', { id: 'permission-request', order: 20 }),
       panel('conversation.above-composer', { id: 'harness-dialog', order: 30 }),
-      // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
-      panel('onboarding.step', { id: 'onboarding-step', order: 20 }),
+      // The Claude segment's first-run pages (r10 O7); each draws only for its own step. The import pages (O7b) add theirs.
+      panel('onboarding.step', { id: 'onboarding-installed', order: 20 }),
+      panel('onboarding.step', { id: 'onboarding-sign-in', order: 21 }),
+      panel('onboarding.step', { id: 'onboarding-import-choice', order: 22 }),
+      panel('onboarding.step', { id: 'onboarding-permission', order: 30 }),
     ],
     settings: [settingsTab('claude-code', { icon: 'sparkles', group: 'tools', label: 'Claude Code', order: 20 })],
   },
@@ -256,7 +259,21 @@ export default definePlugin({
   // The one sentence that keeps Claude's dangerous-rm guard from stopping a Claude ferret (c58 O11b). Claude only: Codex has no such guard.
   instructions: [{ id: 'rm-targets', text: 'instructions/rm.md', when: { role: 'any', harness: CLAUDE_CODE } }],
 
-  onboarding: [{ id: 'harness', title: 'Claude Code', order: 20 }],
+  // The Claude segment (side: daemon, group: Claude Code: both are the defaults). The import steps 23-29 have their pages
+  // in O7b; the retired `harness` step is replaced by `installed`.
+  onboarding: [
+    { id: 'installed', title: 'Install Claude Code', order: 20 },
+    { id: 'sign-in', title: 'Sign in to Claude', order: 21 },
+    { id: 'import-choice', title: 'What to bring over', order: 22 },
+    { id: 'import-settings', title: 'Settings', order: 23 },
+    { id: 'import-model-set', title: 'Models', order: 24 },
+    { id: 'import-instructions', title: 'CLAUDE.md', order: 25 },
+    { id: 'import-skills', title: 'Skills', order: 26 },
+    { id: 'import-mcp', title: 'MCP servers', order: 27 },
+    { id: 'conversations', title: 'Conversations', order: 28 },
+    { id: 'import-run', title: 'Bring it over', order: 29 },
+    { id: 'permission', title: 'Permissions', order: 30 },
+  ],
   doctor: ['claude-code-paths'],
 
   permissions: {

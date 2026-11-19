@@ -21,14 +21,14 @@ describe('app parity', () => {
   });
 
   test('G31 G32 the two answer cards draw above the composer, in this order', () => {
-    const above = (ids: readonly string[] | undefined) => ids?.filter(id => id !== 'onboarding-step');
+    const above = (ids: readonly string[] | undefined) => ids?.filter(id => !id.startsWith('onboarding-'));
     expect(above(manifest.ui?.panels?.map(panel => panel.id))).toEqual(['permission-request', 'harness-dialog']);
     expect(above(Object.keys(half?.panels ?? {}))).toEqual(['permission-request', 'harness-dialog']);
   });
 
   test('G31 G32 both cards are contributed to the slot Conversation offers above its composer', () => {
     const slots = (manifest.ui?.panels ?? [])
-      .filter(panel => panel.id !== 'onboarding-step')
+      .filter(panel => !panel.id.startsWith('onboarding-'))
       .map(panel => [panel.id, panel.slot]);
     expect(slots).toEqual([
       ['permission-request', CONVERSATION_ABOVE_COMPOSER_SLOT],
@@ -36,8 +36,9 @@ describe('app parity', () => {
     ]);
   });
 
-  test('S14 the first-run step panel is contributed to the onboarding.step slot, beside the two cards', () => {
-    expect(manifest.ui?.panels?.find(panel => panel.id === 'onboarding-step')?.slot).toBe('onboarding.step');
-    expect(Object.keys(half?.panels ?? {})).toContain('onboarding-step');
+  test('S14 the Claude segment pages are contributed to the onboarding.step slot, beside the two cards', () => {
+    const steps = ['onboarding-installed', 'onboarding-sign-in', 'onboarding-import-choice', 'onboarding-permission'];
+    for (const id of steps) expect(manifest.ui?.panels?.find(panel => panel.id === id)?.slot).toBe('onboarding.step');
+    expect(Object.keys(half?.panels ?? {})).toEqual(expect.arrayContaining(steps));
   });
 });
