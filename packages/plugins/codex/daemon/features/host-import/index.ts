@@ -10,15 +10,16 @@
  * was written; an item that could not be written (a name taken) comes back as a warning beside the ones that were.
  *
  * Create only: every file is written with `ifMatch: 'absent'`, so an import never replaces an item it did not make (a
- * name taken, even a moment ago, is refused in a sentence). The sentences name rules and keys, never a value.
+ * name taken, even a moment ago, is refused in a sentence). The ONE exception is an update the person accepted
+ * (`options.replace`): each item is then replaced, pinned to its current etag. The sentences name rules and keys, never a value.
  */
 import type { ConfigCollectionDef, ConfigPort, ConfigWriteOutcome } from '@ferretry/kernel/contract';
-import type { ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
+import type { ComponentPutOptions, ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
 import { CODEX_SETTINGS, type SettingsItem } from '../../../contract/index.ts';
 import { settingsItemsFromImport } from './settings-item.ts';
 
 /** The one write of the person's apply (`writeAsCaller`) and the only read of what exists, both over Codex's own def. */
-export type HostImportConfig = Pick<ConfigPort, 'writeAsCaller' | 'collection'>;
+export type HostImportConfig = Pick<ConfigPort, 'writeAsCaller' | 'collection' | 'etag'>;
 
 type ItemAnswer = { readonly wrote: true; readonly held: boolean } | { readonly wrote: false; readonly reason: string };
 
@@ -47,8 +48,8 @@ const answerOf = (outcome: ConfigWriteOutcome, name: string): ItemAnswer => {
 
 export function codexSettingsPut(
   config: HostImportConfig,
-): (name: string, documentText: string) => Promise<ComponentPutResult> {
-  return async (name, documentText) => {
+): (name: string, documentText: string, files?: unknown, options?: ComponentPutOptions) => Promise<ComponentPutResult> {
+  return async (name, documentText, _files, options) => {
     const made = settingsItemsFromImport(name, documentText);
     if (!made.ok) return made;
     const existing = config.collection(CODEX_SETTINGS as ConfigCollectionDef<SettingsItem>);
@@ -57,12 +58,16 @@ export function codexSettingsPut(
     let wrote = 0;
     let held = false;
     for (const { name: itemName, item } of made.items) {
-      const answer = existing.has(itemName)
-        ? taken(itemName)
-        : answerOf(
-            await config.writeAsCaller(CODEX_SETTINGS, itemName, JSON.stringify(item, null, 2), { ifMatch: 'absent' }),
-            itemName,
-          );
+      const replacing = options?.replace === true && existing.has(itemName);
+      const answer =
+        existing.has(itemName) && !replacing
+          ? taken(itemName)
+          : answerOf(
+              await config.writeAsCaller(CODEX_SETTINGS, itemName, JSON.stringify(item, null, 2), {
+                ifMatch: replacing ? await config.etag(CODEX_SETTINGS, itemName) : 'absent',
+              }),
+              itemName,
+            );
       if (!answer.wrote) failures.push(answer.reason);
       else {
         wrote += 1;

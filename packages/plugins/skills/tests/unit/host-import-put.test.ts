@@ -8,6 +8,7 @@ import type { ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import { SKILLS_CONFIG, type SkillsItem, SkillsItemSchema } from '../../contract/index.ts';
 import {
   createSkillsItem,
+  replaceSkillsItem,
   type ImportedSkillFile,
   MAX_DOCUMENT_BYTES,
   MAX_IMPORTED_SKILLS,
@@ -29,11 +30,14 @@ function owner(answer?: (name: string, edit: unknown) => ConfigWriteOutcome, fai
   const held = new Map<string, SkillsItem>();
   const calls: { name: string | undefined; ifMatch: string | undefined }[] = [];
   const config = {
+    etag: async (_def: unknown, name?: string) => (name !== undefined && held.has(name) ? `etag-${name}` : 'absent'),
     write: async (def: unknown, name: string | undefined, edit: unknown, options?: { ifMatch?: string }) => {
       calls.push({ name, ifMatch: options?.ifMatch });
       expect(def).toBe(SKILLS_CONFIG);
       if (answer !== undefined && name !== undefined) return answer(name, edit);
       if (name === undefined || (options?.ifMatch === 'absent' && held.has(name))) return { kind: 'conflict' as const };
+      if (options?.ifMatch !== undefined && options.ifMatch !== 'absent' && options.ifMatch !== `etag-${name}`)
+        return { kind: 'conflict' as const };
       const parsed = SkillsItemSchema.safeParse(JSON.parse(edit as string));
       if (!parsed.success)
         return {
@@ -59,7 +63,12 @@ function owner(answer?: (name: string, edit: unknown) => ConfigWriteOutcome, fai
       installed.delete(skill);
     },
   };
-  const put = skillsImportPut({ has: name => held.has(name), create: createSkillsItem(config), store });
+  const put = skillsImportPut({
+    has: name => held.has(name),
+    create: createSkillsItem(config),
+    replace: replaceSkillsItem(config),
+    store,
+  });
   return { held, calls, put, installed, removed, source: skillsComponentSource(() => held) };
 }
 
@@ -73,6 +82,34 @@ describe('skills host import: put', () => {
     expect(calls).toEqual([{ name: 'imported', ifMatch: 'absent' }]);
     expect(await source.list()).toEqual(['imported']);
     expect(await source.read('imported')).toEqual(document);
+  });
+
+  test('an update the person accepted replaces the item, pinned to its etag, and installs only the new skill', async () => {
+    const { put, held, calls, installed } = owner();
+    await put('mine', text({ items: ['one'], harness: 'claude-code' }), folders('one'));
+    calls.length = 0;
+
+    const answered = await put('mine', text({ items: ['one', 'two'], harness: 'claude-code' }), folders('one', 'two'), {
+      replace: true,
+    });
+
+    expect(answered).toEqual({ ok: true });
+    expect(calls).toEqual([{ name: 'mine', ifMatch: 'etag-mine' }]);
+    expect(held.get('mine')?.items).toEqual(['one', 'two']);
+    expect([...installed.keys()].toSorted()).toEqual(['one', 'two']);
+  });
+
+  test('an update still refuses a skill the owner has not been given files for, and a first import never replaces', async () => {
+    const { put, held } = owner();
+    await put('mine', text({ items: ['one'] }), folders('one'));
+
+    expect(await put('mine', text({ items: ['one', 'two'] }), folders('one'), { replace: true })).toEqual({
+      ok: false,
+      reason: 'the files of the skill "two" were not handed over, so it was not imported',
+    });
+    expect(held.get('mine')?.items).toEqual(['one']);
+    expect((await put('mine', text({ items: ['one', 'two'] }), folders('one', 'two'))).ok).toBe(false);
+    expect(held.get('mine')?.items).toEqual(['one']);
   });
 
   test('a name that is taken is refused and the item is not replaced', async () => {

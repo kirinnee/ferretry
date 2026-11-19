@@ -45,6 +45,7 @@ async function world() {
       items.add(name);
       return { kind: 'written' };
     },
+    replace: async () => ({ kind: 'written' }),
     store,
   });
   return { put, store, items, disk: `${home}/state/skills/installed` };
@@ -106,6 +107,7 @@ describe("imported skills land in Skills' own installed store", () => {
     const put = skillsImportPut({
       has: () => false,
       create: async () => ({ kind: 'written' }),
+      replace: async () => ({ kind: 'written' }),
       store: {
         holds: async skill => {
           const held = await store.holds(skill);

@@ -21,7 +21,7 @@ import { composerSkills } from './lib/composer.ts';
 import { MAX_SKILL_MANIFEST_BYTES, SkillsInventoryService } from './lib/inventory.ts';
 import { inventoryRoutes } from './routes.ts';
 import { skillParts } from './lib/launch-parts.ts';
-import { createSkillsItem, skillsImportPut } from './features/host-import/index.ts';
+import { createSkillsItem, replaceSkillsItem, skillsImportPut } from './features/host-import/index.ts';
 import { skillsComponentSource } from './lib/profile-component-source.ts';
 import { SkillStore } from './lib/skill-store.ts';
 import { skillReferenceProvider } from './lib/reference-catalog.ts';
@@ -206,6 +206,7 @@ export default implementDaemon(manifest, {
           put: skillsImportPut({
             has: name => items().has(name),
             create: createSkillsItem(kernel.config),
+            replace: replaceSkillsItem(kernel.config),
             store,
           }),
         },

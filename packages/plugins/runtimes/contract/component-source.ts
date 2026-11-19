@@ -49,6 +49,15 @@ export interface ComponentPutFile {
   readonly content: string;
 }
 
+/**
+ * How one `put` differs from a first import. `replace` is the PERSON's accepted update of an item an earlier import made
+ * (never a first import, never anything not accepted): the owner replaces its own existing item through its own write,
+ * pinned to the file's current etag, so a file that moved meanwhile is a refusal and never a silent overwrite.
+ */
+export interface ComponentPutOptions {
+  readonly replace?: true;
+}
+
 /** A view of one kind's component documents, read live from the owner's own configuration. */
 export interface ProfileComponentSource {
   /** Every component's name, in name order. */
@@ -68,11 +77,17 @@ export interface ProfileComponentSource {
    * YAML 1.2 document (JSON-formatted): the same projection `read` answers, so a `read` after a `put` gives it back. A
    * value never travels: an `env` entry is a plain value or a `${secret:NAME}` reference, and a raw secret is the
    * owner's to refuse. Optional: an owner that offers none is refused in a sentence, and the rest of the import still lands.
-   * A name that is taken is the owner's to judge (an import never replaces a component it did not make).
+   * A name that is taken is the owner's to judge (an import never replaces a component it did not make), unless
+   * `options.replace`: the person accepted an update of the item, which the owner then replaces.
    * `files` are the files the component brings (a skill's folders, as `<item>/<rel>`): only a skills component has
    * any, and the owner installs them into its own store with its own bounds. Runtimes does not copy them anywhere.
    */
-  put?(name: string, documentText: string, files?: readonly ComponentPutFile[]): Promise<ComponentPutResult>;
+  put?(
+    name: string,
+    documentText: string,
+    files?: readonly ComponentPutFile[],
+    options?: ComponentPutOptions,
+  ): Promise<ComponentPutResult>;
 }
 
 /** The kinds whose components another plugin owns (`modelSets` are Runtimes' own). */
