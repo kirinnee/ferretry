@@ -2,18 +2,24 @@
  * One `ssh-agent` per account, so a ferret that may push as an account can USE its key through a socket and can never
  * read it. The supervisor owns three facts:
  *
- * - The sockets live in ONE private (0700) scratch folder with a short path (a unix socket path is limited to ~104
- *   bytes, which a folder under the state directory can exceed); the agent makes each socket 0600.
+ * - The sockets, the pinned `known_hosts` and the public key files live in ONE private folder at a STABLE path: this
+ *   plugin's own kernel-made `downloads` folder, the same on every run. A ferret that was started before a daemon
+ *   restart or update still has `SSH_AUTH_SOCK` and `UserKnownHostsFile` in its environment, and those paths must
+ *   still mean the same thing afterwards (a fresh temp folder per run left them pointing at nothing, and a push failed
+ *   with "Host key verification failed"). The path is bounded to fit a unix socket; the agent makes each socket 0600.
  * - The private key reaches the agent on `ssh-add -`'s STDIN and nowhere else: not an argument, not an environment
  *   variable, not a file.
- * - Agents start lazily, on the first ask for an account's socket, and stop when the account is removed or the daemon
- *   stops.
+ * - Agents start lazily, on the first ask for an account's socket (and at boot for the accounts that have a key, so a
+ *   ferret that outlived a restart finds its socket again), and stop when the account is removed or the daemon stops.
+ * - A socket name is the account's, never reused for another account. A stale file left by an agent that died unclean is
+ *   removed before the new one binds; an agent that is still stopping is waited for first, because it removes its own
+ *   socket path when it exits and would otherwise remove the new agent's.
  *
  * DECLARED GAP: an agent is a child of the daemon. After an UNCLEAN daemon death (SIGKILL, power loss) it is not stopped
  * by anyone; it keeps the key in its memory, behind a 0600 socket in a 0700 folder of this user, until it is killed or
  * the machine restarts. A clean stop kills every agent.
  */
-import type { ChildHandle, Clock, Log, ScratchDirectory, ScratchPort, SpawnPort } from '@ferretry/kernel/contract';
+import type { ChildHandle, Clock, Log, SpawnPort } from '@ferretry/kernel/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { GIT_ACCOUNT_CODES, type GitAccountId, githubKnownHosts } from '../../../contract/index.ts';
@@ -23,6 +29,22 @@ const READY_DEADLINE_MS = 5_000;
 const READY_WAIT_MS = 50;
 const READY_PROBE_MS = 1_000;
 const KNOWN_HOSTS_NAME = 'known_hosts';
+/** A unix socket path is limited (104 bytes on macOS, 108 on Linux): a longer one is refused up front, in words. */
+const MAX_SOCKET_PATH = 100;
+/** The longest an agent that is stopping is waited for before its replacement starts. */
+const STOP_WAIT_MS = 3_000;
+
+/** The private folder the agents live in: stable across runs, made by the kernel, never listed to a ferret. */
+export interface RunFolder {
+  /** The absolute path; the same on every run. */
+  readonly path: string;
+  /** Whether every folder down to it is a plain folder only this user can change. */
+  isPrivate(): Promise<boolean>;
+  /** Removes one name (a stale socket); nothing when it is not there. */
+  remove(name: string): Promise<void>;
+  /** Writes one file with exactly `mode`, replacing what was there atomically. */
+  publish(name: string, text: string, mode: number): Promise<void>;
+}
 
 interface Running {
   readonly socket: string;
@@ -30,17 +52,16 @@ interface Running {
 }
 
 export class AgentSupervisor {
-  #folder: Promise<ScratchDirectory> | undefined;
   readonly #running = new Map<GitAccountId, Running>();
+  /** An agent that was told to stop: its exit, so a replacement waits for it to have removed its socket. */
+  readonly #stopping = new Map<GitAccountId, Promise<unknown>>();
   readonly #starting = new Map<GitAccountId, Promise<string | undefined>>();
   #knownHosts: Promise<string> | undefined;
   #stopped = false;
-  /** A socket name is never reused: an agent that died unclean leaves its socket file, and `-a` refuses an existing one. */
-  #generation = 0;
 
   constructor(
     private readonly spawn: Pick<SpawnPort, 'run' | 'start'>,
-    private readonly scratch: ScratchPort,
+    private readonly folder: RunFolder,
     private readonly clock: Pick<Clock, 'sleep' | 'after'>,
     private readonly log: Pick<Log, 'warn'>,
   ) {}
@@ -64,25 +85,47 @@ export class AgentSupervisor {
   stop(id: GitAccountId): void {
     const live = this.#running.get(id);
     this.#running.delete(id);
-    live?.child.kill('SIGTERM');
+    if (live === undefined) return;
+    const gone = live.child.exited.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#stopping.set(id, gone);
+    void gone.then(() => {
+      if (this.#stopping.get(id) === gone) this.#stopping.delete(id);
+    });
+    live.child.kill('SIGTERM');
   }
 
-  /** The daemon is stopping: every agent ends, and the folder of sockets goes. */
+  /** The daemon is stopping: every agent ends. The folder stays: a running ferret's paths must mean the same next run. */
   async stopAll(): Promise<void> {
     this.#stopped = true;
     for (const id of [...this.#running.keys()]) this.stop(id);
-    const folder = this.#folder;
-    this.#folder = undefined;
     this.#knownHosts = undefined;
-    await (await folder)?.close().catch(() => undefined);
+    await Promise.race([
+      Promise.allSettled([...this.#stopping.values()]),
+      this.clock.sleep(milliseconds(STOP_WAIT_MS)).catch(() => undefined),
+    ]);
+  }
+
+  /** The path an account's agent listens on: the same on every run. */
+  socketPath(id: GitAccountId): string {
+    return `${this.folder.path}/${id}.sock`;
+  }
+
+  /** A file holding the account's PUBLIC key (ssh's `IdentityFile` and git's `user.signingkey`); a public key is not a secret. */
+  async publicKeyFile(id: GitAccountId, publicKey: string): Promise<string> {
+    await this.#ready();
+    await this.folder.publish(`${id}.pub`, `${publicKey.trim()}\n`, 0o644);
+    return `${this.folder.path}/${id}.pub`;
   }
 
   /** A `known_hosts` file pinning GitHub's published keys, kept beside the sockets (read-only to everyone but this user). */
   knownHostsFile(): Promise<string> {
     this.#knownHosts ??= (async () => {
-      const folder = await this.#folderOf();
-      await folder.writeFile(KNOWN_HOSTS_NAME, githubKnownHosts(), 0o600);
-      return `${folder.path}/${KNOWN_HOSTS_NAME}`;
+      await this.#ready();
+      await this.folder.publish(KNOWN_HOSTS_NAME, githubKnownHosts(), 0o600);
+      return `${this.folder.path}/${KNOWN_HOSTS_NAME}`;
     })();
     const known = this.#knownHosts;
     // A failure must not stick: the next ask tries again.
@@ -93,10 +136,15 @@ export class AgentSupervisor {
   }
 
   async #start(id: GitAccountId, privateKey: string): Promise<string> {
+    await this.#ready();
+    // The last agent of this account is gone before the next binds: it removes its socket path as it exits.
+    const leaving = this.#stopping.get(id);
+    if (leaving !== undefined)
+      await Promise.race([leaving, this.clock.sleep(milliseconds(STOP_WAIT_MS)).catch(() => undefined)]);
+    const socket = this.socketPath(id);
+    // A file left by an agent that died unclean: `-a` refuses an existing path.
+    await this.folder.remove(`${id}.sock`);
     if (this.#stopped) throw unavailable();
-    const folder = await this.#folderOf();
-    this.#generation += 1;
-    const socket = `${folder.path}/${id}-${String(this.#generation)}.sock`;
     // `-D`: stay in the foreground, so the daemon owns the process; `-a`: this socket and no other.
     const child = this.spawn.start('ssh-agent', ['-D', '-a', socket], { sealed: true, ownGroup: true });
     // Nothing the agent says is worth keeping, but it must be READ: a closed read end kills the agent with SIGPIPE when it
@@ -156,10 +204,13 @@ export class AgentSupervisor {
     }
   }
 
-  #folderOf(): Promise<ScratchDirectory> {
-    if (this.#stopped) return Promise.reject(unavailable());
-    this.#folder ??= this.scratch.open();
-    return this.#folder;
+  /** The folder is private and the longest socket path fits; otherwise nothing starts. */
+  async #ready(): Promise<void> {
+    if (this.#stopped) throw unavailable();
+    if (this.socketPath('gha_99999999999999999999').length > MAX_SOCKET_PATH || !(await this.folder.isPrivate())) {
+      this.log.warn('git-accounts: the agent folder is not private or its path is too long for a socket');
+      throw unavailable();
+    }
   }
 }
 

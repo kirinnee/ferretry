@@ -18,6 +18,7 @@ import {
   type GitKeyRequest,
   type GitKeyResult,
 } from '../../../contract/index.ts';
+import type { AccountKit } from '../launch/environment.ts';
 import type { AgentSupervisor } from './agents.ts';
 import { generateEd25519, parsePublicKey } from './openssh.ts';
 
@@ -100,6 +101,42 @@ export class SshKeyService {
       if (!made) return undefined;
       return await this.agents.socketFor(id, async () => (await this.#sealedKey(id))?.privateKey);
     });
+  }
+
+  /**
+   * What a ferret's launch is handed for this account: its agent's socket and the files beside it (paths only; a public
+   * key file, the pinned `known_hosts`). `undefined` without a key Ferretry made (the person's own key is the host's
+   * agent's to hold, and a ferret is not given the host's socket).
+   */
+  launchKit(id: GitAccountId): Promise<AccountKit | undefined> {
+    return this.#serial(id, async () => {
+      const account = await this.accounts.find(id);
+      const auth = account?.keys.ssh?.source === 'generated';
+      const signing = account?.keys.signing?.source === 'generated';
+      const publicKey = (auth ? account?.keys.ssh : account?.keys.signing)?.publicKey;
+      if ((!auth && !signing) || publicKey === undefined) return undefined;
+      const socket = await this.agents.socketFor(id, async () => (await this.#sealedKey(id))?.privateKey);
+      if (socket === undefined) return undefined;
+      return {
+        socket,
+        publicKeyFile: await this.agents.publicKeyFile(id, publicKey),
+        knownHosts: await this.agents.knownHostsFile(),
+        auth,
+        signing,
+      };
+    });
+  }
+
+  /**
+   * At boot: every account with a key Ferretry made gets its agent back at its own path, so a ferret that outlived a
+   * daemon restart or update finds its `SSH_AUTH_SOCK` where it left it. One that cannot start is skipped, said in the log.
+   */
+  async warm(ids: readonly GitAccountId[], log: (id: GitAccountId) => void): Promise<void> {
+    for (const id of ids)
+      await this.launchKit(id).catch(() => {
+        log(id);
+        return undefined;
+      });
   }
 
   /** The account is going: stop its agent and forget the private key. */
