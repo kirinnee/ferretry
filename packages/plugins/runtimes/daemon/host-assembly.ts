@@ -19,7 +19,7 @@
  */
 import type { FerretsApi, FerretState } from '@ferretry/core-ferrets/contract';
 import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/kernel/contract';
-import { SecretNameSchema, type VaultApi } from '@ferretry/core-vault/contract';
+import { type SecretName, SecretNameSchema, type VaultApi } from '@ferretry/core-vault/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { UsageApi } from '@ferretry/plugin-usage/contract';
 import { InstantSchema, milliseconds } from '@ferretry/std';
@@ -373,7 +373,7 @@ export function fileAssembly(
        * takes a value in and never hands one back, so no value can flow out through it. Absent: the setup's secret read stays
        * unavailable and says so (a store that cannot be read refuses).
        */
-      readonly vault?: Pick<VaultApi, 'names' | 'putNew'>;
+      readonly vault?: Pick<VaultApi, 'names' | 'putNew' | 'filedSame'>;
       readonly ferrets: Pick<FerretsApi, 'lastAutoResume' | 'runtimeRecords' | 'repointRuntime'> & {
         list(): Promise<readonly { readonly state: FerretState }[]>;
       };
@@ -467,6 +467,8 @@ export function fileAssembly(
     install: async (request, governance) =>
       await installer.install({ harnesses: request.harnesses.map(harnessKindOfKey) }, governance),
   };
+  // The Vault's own "this very value, filed by this plugin's earlier create" check (absent on a Vault that offers none).
+  const filed = ctx.needs.vault?.filedSame?.bind(ctx.needs.vault);
   const services = assembleServices(catalog, base =>
     fileFleetSetupDeps({
       host,
@@ -484,6 +486,7 @@ export function fileAssembly(
       secrets: {
         list: ctx.needs.vault === undefined ? refusing.secrets.held : secretNamesOver(ctx.needs.vault),
         put: ctx.needs.vault === undefined ? refusing.secrets.put : putNewOver(ctx.needs.vault),
+        ...(filed === undefined ? {} : { filedSame: filedSameOver(filed) }),
       },
     }),
   );
@@ -511,6 +514,19 @@ export function putNewOver(vault: Pick<VaultApi, 'putNew'>): (name: string, valu
     if (!parsed.success) throw new Error(`${name} is not a name the secret store accepts`);
     if ((await vault.putNew(parsed.data, value)) === 'exists')
       throw new Error(`the secret store already holds ${name} and an import never replaces one`);
+  };
+}
+
+/**
+ * Whether the Vault holds exactly this value under this name from this plugin's own earlier create (`VaultApi.filedSame`): one
+ * boolean, decided inside the Vault. A name the store does not accept is a plain no.
+ */
+export function filedSameOver(
+  filedSame: (name: SecretName, value: string) => Promise<boolean>,
+): (name: string, value: string) => Promise<boolean> {
+  return async (name, value) => {
+    const parsed = SecretNameSchema.safeParse(name);
+    return parsed.success && (await filedSame(parsed.data, value));
   };
 }
 

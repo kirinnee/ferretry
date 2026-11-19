@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
-import { putNewOver } from '../../../daemon/host-assembly.ts';
+import { filedSameOver, putNewOver } from '../../../daemon/host-assembly.ts';
 import type { Permissions } from '@ferretry/kernel/manifest';
 import manifest from '../../../manifest.ts';
 
@@ -61,5 +61,26 @@ describe('what the Runtimes manifest lets the import reach', () => {
     expect(permissions.secrets).toEqual([]);
     // r9 gives nobody a new root: `harness-home` stays the one READ-ONLY root it was.
     expect(permissions.roots).toEqual(['fleet', 'harness-home']);
+  });
+});
+
+describe('filedSameOver: a retried import asks the Vault whether it already filed this value', () => {
+  it('answers yes only for a key this plugin filed with the very value, and never carries a value back', async () => {
+    const vault = new FakeVault();
+    await putNewOver(vault)('ANTHROPIC_API_KEY', SENTINEL);
+    const asked = filedSameOver(vault.filedSame.bind(vault));
+    expect(await asked('ANTHROPIC_API_KEY', SENTINEL)).toBe(true);
+    expect(await asked('ANTHROPIC_API_KEY', 'another-0f9c')).toBe(false);
+    expect(await asked('NEVER_HELD', SENTINEL)).toBe(false);
+  });
+
+  it('is a plain no for a name the store does not accept, without asking the Vault', async () => {
+    let asked = 0;
+    const check = filedSameOver(async () => {
+      asked += 1;
+      return true;
+    });
+    expect(await check('not a valid name', SENTINEL)).toBe(false);
+    expect(asked).toBe(0);
   });
 });

@@ -765,6 +765,35 @@ describe('a plugin that declares createSecrets may create a secret and never rep
     expect(reached).toEqual(['api.groq.test']);
   });
 
+  test('filedSame answers yes only for the plugin’s own create holding the same value', async () => {
+    const { core, of } = await world({ runtimes: IMPORTING });
+    const api = of('runtimes');
+    const mine = 'RETRIED_KEY' as SecretName;
+    await api.putNew?.(mine, 'sk-ant-retried-0123456789');
+    expect(await api.filedSame?.(mine, 'sk-ant-retried-0123456789')).toBe(true);
+    // A different value, a name not held and a value the owner put under the same name are all a plain no.
+    expect(await api.filedSame?.(mine, 'sk-ant-other-0123456789')).toBe(false);
+    expect(await api.filedSame?.('NEVER_HELD_KEY' as SecretName, 'sk-ant-retried-0123456789')).toBe(false);
+    const owners = 'OWNERS_KEY' as SecretName;
+    await core.put(owners, 'owner-value-0123456789');
+    expect(await api.filedSame?.(owners, 'owner-value-0123456789')).toBe(false);
+    // The owner replacing the plugin's entry, even with the very same value, makes it the owner's write, not the plugin's.
+    await core.put(mine, 'sk-ant-retried-0123456789');
+    expect(await api.filedSame?.(mine, 'sk-ant-retried-0123456789')).toBe(false);
+  });
+
+  test('filedSame is a plugin’s own: a second createSecrets plugin cannot confirm what the first filed', async () => {
+    const { of } = await world({ runtimes: IMPORTING, other: IMPORTING });
+    const name = 'FIRST_PLUGINS_KEY' as SecretName;
+    await of('runtimes').putNew?.(name, 'first-plugin-0123456789');
+    expect(await of('other').filedSame?.(name, 'first-plugin-0123456789')).toBe(false);
+  });
+
+  test('filedSame is not handed to a plugin that does not declare createSecrets', async () => {
+    const { of } = await world({ plain: {}, mcp: MINTING });
+    for (const id of ['plain', 'mcp']) expect(of(id).filedSame).toBeUndefined();
+  });
+
   test('a plugin that does not declare it is handed no putNew, whatever else it may do', async () => {
     const { of } = await world({
       catalogs: { network: [], spawn: [], secrets: [], secretNamePicker: true },

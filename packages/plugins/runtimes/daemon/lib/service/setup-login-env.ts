@@ -20,12 +20,14 @@ interface PlannedLogin {
   readonly store: string;
 }
 
-/** What the apply holds that these steps read: the plan's logins, its envs, the secrets it filed and the ticked names. */
+/** What the apply holds that these steps read: the plan's logins, its envs, the secrets it filed, the ones it reused and the ticked names. */
 export interface LoginEnvPlan {
   readonly newLogins?: readonly PlannedLogin[];
   readonly loginEnvs?: readonly ImportedLoginEnv[];
   readonly tickedEnv?: readonly string[];
   readonly secrets: readonly { readonly name: string; readonly value: string }[];
+  /** Names of keys an earlier import filed with this value: not filed again, but bound like a filed one (names only). */
+  readonly reused?: readonly string[];
 }
 
 /** What an import of a harness's variables into its login did, in names and words (never a value). */
@@ -78,8 +80,8 @@ export async function createLogins(
 
 /**
  * Adds each imported harness's own `env` to the login this apply selected or created, once the login is in effect (r9 A8).
- * The secrets are already filed (every create-only put above succeeded), so `minted` is exactly the keys this apply made:
- * a variable whose secret was not filed is left out. Never throws: what could not be added is said in a sentence, and the
+ * The secrets are already filed (every create-only put above succeeded) or were reused from an earlier import, so `minted` is
+ * exactly the keys this apply holds: a variable whose secret was neither is left out. Never throws: what could not be added is said in a sentence, and the
  * import that landed stays landed.
  */
 export async function importLoginEnvs(
@@ -91,7 +93,7 @@ export async function importLoginEnvs(
   if (envs.length === 0) return [];
   // A machine wired without the door adds nothing to a login, as before r9 A8: there is no one to ask.
   if (port === undefined) return [];
-  const filed = new Set(plan.secrets.map(secret => secret.name));
+  const filed = new Set([...plan.secrets.map(secret => secret.name), ...(plan.reused ?? [])]);
   const sentences: string[] = [];
   for (const env of envs) {
     const label = HARNESS_DISPLAY_NAMES[env.harness];

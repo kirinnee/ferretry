@@ -214,6 +214,25 @@ describe('the setup’s collaborators over the fleet folder', () => {
     expect(held).toEqual([{ name: 'NEW_SECRET', value: 'placeholder-value' }]);
   });
 
+  it('passes the Vault’s same-value check through when it has one, and offers none when it does not', async () => {
+    const world = await fleetWorld();
+    expect((await setupOver(world)).setup.secrets.filedSame).toBeUndefined();
+
+    const asked: [string, string][] = [];
+    const { setup } = await setupOver(world, {
+      secrets: {
+        list: async () => [],
+        put: async () => undefined,
+        filedSame: async (name, value) => {
+          asked.push([name, value]);
+          return true;
+        },
+      },
+    });
+    expect(await setup.secrets.filedSame?.('GITHUB_TOKEN', 'placeholder-value')).toBe(true);
+    expect(asked).toEqual([['GITHUB_TOKEN', 'placeholder-value']]);
+  });
+
   it('reads a folder as text and names a file that is not text', async () => {
     const world = await fleetWorld();
     const { setup, directory } = await setupOver(world);

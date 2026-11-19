@@ -537,7 +537,8 @@ A ferret started on a login launches with that login's environment, and an agent
     the caller, and it asks that caller's live `fleet.configure` at the write, plus `secrets.configure` when a Vault reference is
     bound; activating a new reference keeps Gate's `fleet.use` and owner/step-up policy (held for anyone but the owner).
   - **Two lists, so a reference has a source.** `plain` is host text; any `${secret…}` in it (the optional form too) is refused with a
-    sentence. `minted` is `{ name, secretName }` built only from the apply's own successful create-only puts, and Logins writes
+    sentence. `minted` is `{ name, secretName }` built only from this import's own successful create-only puts: the apply's, or
+    a key an earlier run of the same import filed that the Vault confirmed (`filedSame`) still holds this value. Logins writes
     the reference text itself.
   - **It only adds, and never replaces.** The file's etag is read before the version in effect and the write is pinned to it
     (`ifMatch`); a login with an edit held for the owner, or one that moved meanwhile, is refused rather than rewritten, so a
@@ -1980,8 +1981,20 @@ could not apply. The write it gets is **create-only**, and nothing wider:
   is another write and is not its mint either.
 - **Values never come from the app.** The daemon re-reads the host file at APPLY time (the plan is composed again, as for
   every import) and hands the value to `putNew`; the proposal, the route and the screen carry names only. A name already
-  held is not overwritten: the planner picks the next free name (`ANTHROPIC_API_KEY_2`) from the Vault's NAME listing, and
+  held is not overwritten: the planner picks the next free name (`ANTHROPIC_API_KEY_2`) from the Vault's NAME listing (unless the held one is this import's own earlier filing with the same value, below), and
   a race that still lands on a held name is refused in a sentence naming the secret, with nothing changed.
+- **A retry reuses what it already filed (`VaultApi.filedSame`).** When an import fails AFTER it filed keys, the keys stay, and the
+  retry would otherwise file `NAME_2`, `NAME_3`. The planner instead asks the Vault, per held name in the key's own family
+  (`NAME`, `NAME_2`, …), whether it holds exactly the value the host file still has. The comparison is made INSIDE the Vault
+  (both sides reduced to a SHA-256 digest and compared in constant time; the digests live for the call, are never returned or
+  logged) and the answer is one boolean. It is true only when the entry's current write is this caller's own create-only write
+  in the mint ledger, so it is not a way to test a guess at the owner's secret or another plugin's: a name the owner wrote, a
+  value the owner replaced since (even with the same text) and a name another plugin filed all answer `false`. A different
+  value still gets the next free name. Handed only with `putNew`, to a plugin that declares `permissions.createSecrets`; a store
+  that cannot be read raises and the import then files under the next free name. The answer names the keys it reused and the
+  keys it filed ("Reused from an earlier import: …", "Filed in the secret store: …"); a reused key is not written again (so a
+  retry that needs to file nothing needs no `secrets.configure` either) but is bound to the login's environment like a filed one; the
+  keys of accepted updates and a long name (shortened before `_2`) are asked about the same way, by the planner's own naming rule.
 - **Who may import keys.** The apply asks the CALLER for `secrets.configure` BEFORE the first write (the route's `fleet.configure`
   does not stand in for it, and a caller with no standing fails closed): a paired device the owner denied the Vault cannot create
   entries by importing. A passkey still to prove is asked at the apply, not at the preview. The refusal names no secret and
