@@ -142,6 +142,33 @@ rm -f "${coverage_file}"
 
 coverage_dir="${coverage_file%/*}"
 mkdir -p "${coverage_dir}"
+# A TEST PROCESS THAT DIED: it ended non-zero and wrote no JUnit report, so it never reached its summary (a signal,
+# the kernel's OOM killer, a crash, a stray process.exit). Before this the only line was quarantine.ts's
+# "no JUnit report", and the status became its 2: on 2026-11-19 the kernel group died that way three times in
+# private-files-pinned.test.ts and the log said neither the signal nor the memory. Say how it ended, the last file
+# and test it printed, and what the memory cgroup counted, so the next one is diagnosable from the log alone.
+say_how_it_died() {
+  local status=$1 log=$2 how
+  how="exit ${status}"
+  if ((status > 128 && status < 160)); then
+    how="exit ${status} = signal SIG$(kill -l $((status - 128)) 2>/dev/null || echo "$((status - 128))")"
+  fi
+  [[ ${status} -eq 124 ]] && how="exit 124 = stalled: stall-watch.ts killed it (see STALLED above)"
+  {
+    echo "❌ ${mode} test process died before writing its JUnit report: ${how}"
+    echo "   last file it started: $(grep -a -E '\.test\.tsx?:$' "${log}" | tail -1)"
+    echo "   last test it printed: $(grep -a -E '\((pass|fail|skip|todo)\)' "${log}" | tail -1 | cut -c1-300)"
+    [[ ${status} -eq 137 ]] &&
+      echo "   SIGKILL with no crash report and no STALLED line is almost always the kernel's OOM killer: the runner ran out of memory."
+    # cgroup v2: this job's memory events (oom_kill counts every OOM kill in it, the host's own included) and what is left.
+    local cgroup
+    cgroup="$(sed -n 's|^0::||p' /proc/self/cgroup 2>/dev/null || true)"
+    [[ -n ${cgroup} && -r /sys/fs/cgroup${cgroup}/memory.events ]] &&
+      echo "   memory.events of ${cgroup}: $(tr '\n' ' ' <"/sys/fs/cgroup${cgroup}/memory.events")"
+    [[ -r /proc/meminfo ]] && echo "   now: $(grep -E '^(MemTotal|MemAvailable):' /proc/meminfo | tr -s ' ' | tr '\n' ' ')"
+  } >&2
+}
+
 # ONE PROCESS: the files run in one bun process, its ledger at ${coverage_file}.
 run_one() {
   local run_config=$1 run_dir=$2
@@ -149,6 +176,12 @@ run_one() {
   set +e
   ./scripts/test/swept.sh bun scripts/test/stall-watch.ts "${FY_TEST_STALL_SECONDS:-300}" -- bun test --config="${run_config}" "${timeout_flag[@]}" --coverage --reporter=junit --reporter-outfile="${run_dir}/junit.xml" "$@" 2>&1 | tee "${run_dir}/console.log"
   local status=${PIPESTATUS[0]}
+  if [[ ${status} -ne 0 && ! -s "${run_dir}/junit.xml" ]]; then
+    # Nothing to rescue without a report: keep the process's own status, never quarantine's generic 2.
+    say_how_it_died "${status}" "${run_dir}/console.log"
+    set -e
+    return "${status}"
+  fi
   ./scripts/test/swept.sh bun scripts/ci/quarantine.ts "${mode}" "${status}" "${run_config}" "${run_dir}" "${run_dir}/console.log" "${timeout_flag[@]}"
   status=$?
   set -e

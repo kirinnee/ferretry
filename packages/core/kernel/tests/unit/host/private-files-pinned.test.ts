@@ -31,6 +31,12 @@ import { composePrivateFiles } from '../../../manifest/privacy.ts';
 
 const parents: string[] = [];
 afterEach(async () => {
+  // Every case builds a fence over 65,536 fake sessions, and the engine left each one's garbage on the heap: this file
+  // alone peaked at 2.0 GB RSS (0.5 GB collected after each case) and lifted the kernel unit group to 6.6 GB, beside
+  // five other groups on one 16 GB runner; three Quick runs on 2026-11-19 saw the group killed silently in this file
+  // (no crash report, no JUnit report), as the OOM killer does. Collecting here keeps every case and its 65,536
+  // sessions, and drops only the previous case's garbage.
+  Bun.gc(true);
   for (const parent of parents.splice(0)) await rm(parent, { recursive: true, force: true });
 });
 
