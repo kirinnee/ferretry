@@ -155,6 +155,8 @@ interface World {
   readonly service: FleetSetupService;
   readonly applied: { plan: FleetModelApplyPlan; documents: readonly FleetDocumentWrite[] }[];
   readonly secrets: Map<string, string>;
+  /** The names this import itself filed (the Vault's mint ledger says so), and whether it may be asked about one. */
+  readonly filed: Set<string>;
   readonly state: {
     reading: AccountDocumentReading;
     scans: readonly HostHarnessScan[];
@@ -167,6 +169,8 @@ interface World {
     /** When each secret was made, by name; its `updatedAt` for a name not listed (never edited). */
     secretCreatedAt: Record<string, string>;
     putSecret: (name: string, value: string) => Promise<void>;
+    /** The Vault's "this value, filed by this import" answer: true for a name this import filed, still holding the value. */
+    filedSame: (name: string, value: string) => Promise<boolean>;
     apply: () => Promise<unknown>;
     emails: () => Promise<LoginView[]>;
     plans: readonly ToolInstallPreview[];
@@ -191,6 +195,7 @@ function world(
 ): World {
   const applied: World['applied'] = [];
   const secrets = new Map<string, string>();
+  const filed = new Set<string>();
   let minted = 0;
   const state: World['state'] = {
     reading: EMPTY_READING(),
@@ -208,7 +213,9 @@ function world(
     secretCreatedAt: {},
     putSecret: async (name, value) => {
       secrets.set(name, value);
+      filed.add(name);
     },
+    filedSame: async (name, value) => filed.has(name) && secrets.get(name) === value,
     apply: async () => RUN_RESULT,
     emails: async () => [credentialRow('claude-you', 'you@example.com')],
     plans: [
@@ -288,6 +295,7 @@ function world(
           return { name, createdAt: state.secretCreatedAt[name] ?? updatedAt, updatedAt };
         }),
       put: async (name, value) => await state.putSecret(name, value),
+      filedSame: async (name, value) => await state.filedSame(name, value),
     },
     readFolder: async path => state.folders[path] ?? { files: [], skipped: [] },
     skillItems: async () => await state.skillItems(),
@@ -337,6 +345,7 @@ function world(
     service: createFleetSetupSubsystem(deps),
     applied,
     secrets,
+    filed,
     state,
   };
 }
@@ -909,7 +918,10 @@ describe('the setup.import executor', () => {
     should(description).containEql('Login claude-you: shared with claude in your terminal');
     should(description).containEql('Runtimes: claude-default.');
     should(description).not.containEql(SECRET_VALUE);
-    should(summary).equal('studio is ready · 1 runtime created: claude-default.');
+    // The answer names the key it filed (the name, never the value).
+    should(summary).equal(
+      'studio is ready · 1 runtime created: claude-default. Filed in the secret store: ANTHROPIC_API_KEY.',
+    );
     const paths = (applied[0]?.documents ?? []).map(document => document.path);
     should(paths).containEql('/state/config/model.yaml');
     should(paths).containEql('/state/fleet/assets/skills/review/SKILL.md');
@@ -1193,7 +1205,7 @@ describe('the setup.import executor', () => {
 
   it('should file a key a new part and an accepted update share once, so the second create is not refused', async () => {
     // Arrange: one import is on disk (its MCP server holds the token).
-    const { service, state, applied, secrets } = world();
+    const { service, state, applied, secrets, filed } = world();
     const mcp = (servers: Record<string, unknown>) => ({
       kind: 'text' as const,
       source: '/person/.claude.json',
@@ -1208,6 +1220,10 @@ describe('the setup.import executor', () => {
     const written = applied[0]?.documents ?? [];
     for (const document of written) state.assets[document.path] = document.content;
     state.reading = configReading(modelOfWrites(written), 'rev-2');
+
+    // The first import's key is gone (the owner removed it), so this import has to file it again.
+    secrets.clear();
+    filed.clear();
 
     // Act: the first server changed (an update) and a second, new one holds the SAME token.
     state.scans = [
@@ -1264,6 +1280,124 @@ describe('the setup.import executor', () => {
     should(failure.message).not.containEql('so nothing was changed');
     should(failure.message).not.containEql(SECRET_VALUE);
     should(applied).have.length(0);
+  });
+
+  describe('a retried import and the keys it already filed', () => {
+    const OPENAI_VALUE = 'sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa';
+    const twoKeys = (state: World['state']): void => {
+      state.scans = [
+        claudeScan({
+          settings: {
+            kind: 'text',
+            source: '/person/.claude/settings.json',
+            text: JSON.stringify({ env: { ANTHROPIC_API_KEY: SECRET_VALUE, OPENAI_API_KEY: OPENAI_VALUE } }),
+            bytes: 120,
+          },
+        }),
+        codexScan(),
+      ];
+    };
+    /** The first attempt: the first key is filed, then the store fails on the second. */
+    const failAfterFirst = async (w: World): Promise<void> => {
+      twoKeys(w.state);
+      const put = w.state.putSecret;
+      w.state.putSecret = async (name, value) => {
+        if (w.secrets.size === 1) throw new Error('the secret store is full');
+        await put(name, value);
+      };
+      const change = IMPORT();
+      await w.service.executors.setup.describe(change, MACHINE);
+      await catalogRefusal(w.service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
+      w.state.putSecret = put;
+    };
+
+    it('should reuse the key it filed before the failure and file only the rest, never a NAME_2', async () => {
+      const w = world();
+      await failAfterFirst(w);
+      should([...w.secrets.keys()]).eql(['ANTHROPIC_API_KEY']);
+
+      const { description, summary } = await importOnce(w.service);
+
+      should([...w.secrets.keys()].toSorted()).eql(['ANTHROPIC_API_KEY', 'OPENAI_API_KEY']);
+      should(w.secrets.get('OPENAI_API_KEY')).equal(OPENAI_VALUE);
+      for (const sentence of [description, summary]) {
+        should(sentence).containEql('Filed in the secret store: OPENAI_API_KEY.');
+        should(sentence).containEql('Reused from an earlier import: ANTHROPIC_API_KEY.');
+        should(sentence).not.containEql(SECRET_VALUE);
+        should(sentence).not.containEql(OPENAI_VALUE);
+      }
+      // The imported settings point at the reused name.
+      should(configTextOf(w.applied[0]?.documents ?? [])).containEql('${secret:ANTHROPIC_API_KEY}');
+    });
+
+    it('should file nothing, and need no right to file, when every key is already filed with the same value', async () => {
+      const w = world();
+      twoKeys(w.state);
+      await importOnce(w.service);
+      const filedBefore = [...w.secrets.entries()];
+      let puts = 0;
+      const put = w.state.putSecret;
+      w.state.putSecret = async (name, value) => {
+        puts += 1;
+        await put(name, value);
+      };
+
+      const { summary } = await importOnce(w.service, IMPORT({ addDuplicates: true }));
+
+      should(puts).equal(0);
+      should([...w.secrets.entries()]).eql(filedBefore);
+      should(summary).containEql('Reused from an earlier import: ANTHROPIC_API_KEY, OPENAI_API_KEY.');
+      should(summary).not.containEql('Filed in the secret store');
+    });
+
+    it('should file under the next free name when the held name holds a DIFFERENT value', async () => {
+      const w = world();
+      twoKeys(w.state);
+      await failAfterFirst(w);
+      // Somebody replaced the filed key since: it no longer holds what the host file says.
+      w.secrets.set('ANTHROPIC_API_KEY', 'a-value-the-owner-chose-0123');
+
+      const { summary } = await importOnce(w.service);
+
+      should(w.secrets.get('ANTHROPIC_API_KEY')).equal('a-value-the-owner-chose-0123');
+      should(w.secrets.get('ANTHROPIC_API_KEY_2')).equal(SECRET_VALUE);
+      should(summary).containEql('ANTHROPIC_API_KEY_2');
+      should(summary).not.containEql('Reused from an earlier import: ANTHROPIC_API_KEY.');
+    });
+
+    it('should not reuse a held name the import did not file, even when the value matches', async () => {
+      const w = world();
+      twoKeys(w.state);
+      w.secrets.set('ANTHROPIC_API_KEY', SECRET_VALUE);
+
+      const { summary } = await importOnce(w.service);
+
+      should(w.secrets.get('ANTHROPIC_API_KEY_2')).equal(SECRET_VALUE);
+      should(summary).not.containEql('Reused');
+    });
+
+    it('should fall back to the next free name when the Vault cannot say, or offers no such check', async () => {
+      const broken = world();
+      await failAfterFirst(broken);
+      broken.state.filedSame = async () => {
+        throw new Error('the secret store could not be read');
+      };
+      await importOnce(broken.service);
+      should(broken.secrets.has('ANTHROPIC_API_KEY_2')).be.true();
+
+      const without = world({
+        overrides: {
+          secrets: {
+            names: async () => ['ANTHROPIC_API_KEY'],
+            held: async () => [],
+            put: async () => undefined,
+          },
+        },
+      });
+      twoKeys(without.state);
+      const { summary } = await importOnce(without.service);
+      should(summary).containEql('ANTHROPIC_API_KEY_2');
+    });
   });
 
   it('should report an apply that failed for any other reason in its own words', async () => {
@@ -4185,7 +4319,9 @@ describe('the setup.import executor adds the harness env to the login the apply 
     );
     const none = world();
     none.state.scans = envScan();
-    should((await importOnce(none.service)).summary).equal('studio is ready · 1 runtime created: claude-default.');
+    should((await importOnce(none.service)).summary).equal(
+      'studio is ready · 1 runtime created: claude-default. Filed in the secret store: ANTHROPIC_API_KEY.',
+    );
   });
 
   const GITHUB_SETTINGS = JSON.stringify({

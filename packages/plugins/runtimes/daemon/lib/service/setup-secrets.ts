@@ -67,3 +67,33 @@ export async function fileSecrets(
     }
   }
 }
+
+/**
+ * Which held names an earlier import already filed with exactly the value this scan found again, as name -> that value. The
+ * COMPARISON is the Vault's (`filedSame`: one boolean, true only for an entry this plugin's own create filed and nobody replaced
+ * since); no value comes back and nothing here is a digest. `found` is a scan planned against an EMPTY store, so each name is the
+ * one the import wants; the held names to ask about are that name's own family (`NAME`, `NAME_2`, ...). Without `filedSame`, or
+ * when it fails, nothing is reused and the import files under the next free name, as before.
+ */
+export async function reusableSecrets(
+  found: readonly FiledSecret[],
+  held: readonly string[],
+  filedSame: ((name: string, value: string) => Promise<boolean>) | undefined,
+): Promise<Map<string, string>> {
+  const reusable = new Map<string, string>();
+  if (filedSame === undefined) return reusable;
+  for (const secret of found) {
+    const stem = secret.name.replace(/_\d+$/u, '');
+    for (const name of held) {
+      if (name !== stem && !name.startsWith(`${stem}_`)) continue;
+      if (await filedSame(name, secret.value).catch(() => false)) reusable.set(name, secret.value);
+    }
+  }
+  return reusable;
+}
+
+/** What the answer says about the keys: the names it filed and the names it reused. Names only, never a value. */
+export const secretSentences = (filed: readonly string[], reused: readonly string[]): string[] => [
+  ...(filed.length === 0 ? [] : [`Filed in the secret store: ${filed.join(', ')}.`]),
+  ...(reused.length === 0 ? [] : [`Reused from an earlier import: ${reused.join(', ')}.`]),
+];

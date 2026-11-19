@@ -1980,8 +1980,19 @@ could not apply. The write it gets is **create-only**, and nothing wider:
   is another write and is not its mint either.
 - **Values never come from the app.** The daemon re-reads the host file at APPLY time (the plan is composed again, as for
   every import) and hands the value to `putNew`; the proposal, the route and the screen carry names only. A name already
-  held is not overwritten: the planner picks the next free name (`ANTHROPIC_API_KEY_2`) from the Vault's NAME listing, and
+  held is not overwritten: the planner picks the next free name (`ANTHROPIC_API_KEY_2`) from the Vault's NAME listing (unless the held one is this import's own earlier filing with the same value, below), and
   a race that still lands on a held name is refused in a sentence naming the secret, with nothing changed.
+- **A retry reuses what it already filed (`VaultApi.filedSame`).** When an import fails AFTER it filed keys, the keys stay, and the
+  retry would otherwise file `NAME_2`, `NAME_3`. The planner instead asks the Vault, per held name in the key's own family
+  (`NAME`, `NAME_2`, …), whether it holds exactly the value the host file still has. The comparison is made INSIDE the Vault
+  (both sides reduced to a SHA-256 digest and compared in constant time; the digests live for the call, are never returned or
+  logged) and the answer is one boolean. It is true only when the entry's current write is this caller's own create-only write
+  in the mint ledger, so it is not a way to test a guess at the owner's secret or another plugin's: a name the owner wrote, a
+  value the owner replaced since (even with the same text) and a name another plugin filed all answer `false`. A different
+  value still gets the next free name. Handed only with `putNew`, to a plugin that declares `permissions.createSecrets`; a store
+  that cannot be read raises and the import then files under the next free name. The answer names the keys it reused and the
+  keys it filed ("Reused from an earlier import: …", "Filed in the secret store: …"); a reused key is not written again, so a
+  retry that needs to file nothing needs no `secrets.configure` either.
 - **Who may import keys.** The apply asks the CALLER for `secrets.configure` BEFORE the first write (the route's `fleet.configure`
   does not stand in for it, and a caller with no standing fails closed): a paired device the owner denied the Vault cannot create
   entries by importing. A passkey still to prove is asked at the apply, not at the preview. The refusal names no secret and

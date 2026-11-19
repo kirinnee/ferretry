@@ -167,6 +167,8 @@ interface ImportedSecret {
   readonly value: string;
   /** Where it was found, as `<reference> · <key>` — names only. */
   readonly from: string;
+  /** The Vault already holds exactly this value under this name from an earlier import: it is referenced, never filed again. */
+  readonly reused?: true;
 }
 
 /** A sentence about one harness's import, for the result screen (E4–E9). */
@@ -309,6 +311,11 @@ export interface ImportOptions {
   /** Secret names already in the store, so an import never overwrites one. */
   readonly existingSecrets?: readonly string[];
   /**
+   * Held names the Vault confirmed an earlier import filed with exactly the value this scan found again, by name and that
+   * value (the host's own, which this plan already holds): such a name is reused, not skipped for `NAME_2`.
+   */
+  readonly reusableSecrets?: ReadonlyMap<string, string>;
+  /**
    * GitHub token variables of a harness's own `env` the person ticked (names only). A token that is not named here is NOT
    * imported: no secret is filed for it and nothing reaches a component or the login (r9 A8). Absent: none is imported.
    */
@@ -374,7 +381,10 @@ class SecretNames {
   readonly #taken: Set<string>;
   readonly #byName = new Map<string, string>();
 
-  constructor(existing: readonly string[]) {
+  constructor(
+    existing: readonly string[],
+    readonly reusable: ReadonlyMap<string, string> = new Map(),
+  ) {
     this.#taken = new Set(existing);
   }
 
@@ -386,9 +396,17 @@ class SecretNames {
     }
     const free = (candidate: string): boolean => !this.#taken.has(candidate) && !this.#byName.has(candidate);
     let name = base;
-    for (let index = 2; !free(name); index += 1) name = `${base.slice(0, 60)}_${String(index)}`;
+    let reused = false;
+    for (let index = 2; !free(name); index += 1) {
+      // A held name an earlier import filed with this very value is the one to use again; any other value moves on to the next name.
+      if (this.#taken.has(name) && this.reusable.get(name) === value) {
+        reused = true;
+        break;
+      }
+      name = `${base.slice(0, 60)}_${String(index)}`;
+    }
     this.#byName.set(name, value);
-    secrets.push({ name, value, from });
+    secrets.push({ name, value, from, ...(reused ? { reused: true as const } : {}) });
     return name;
   }
 }
@@ -1179,7 +1197,7 @@ function previewOf(scan: HostHarnessScan, entry: HarnessHarvest | undefined): Ha
 export function planImport(scans: readonly HostHarnessScan[], options: ImportOptions): ImportPlan {
   const existing = options.existing;
   const record = options.record ?? EMPTY_IMPORT_RECORD;
-  const names = new SecretNames(options.existingSecrets ?? []);
+  const names = new SecretNames(options.existingSecrets ?? [], options.reusableSecrets);
   const secrets: ImportedSecret[] = [];
   const imported = importedHarnesses(scans, options.include);
   const skip = new Set(options.skip ?? []);

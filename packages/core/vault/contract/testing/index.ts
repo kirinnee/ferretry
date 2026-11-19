@@ -515,6 +515,10 @@ export class FakeVault implements VaultApi {
     await this.put(name, value);
     return 'stored';
   }
+  /** The real Vault's "same value, filed by this caller" check in a fake: true only for the plugin's own mint with an equal value. */
+  async filedSame(name: SecretName, value: string): Promise<boolean> {
+    return this.#minted.has(name) && this.#values.get(name)?.value === value;
+  }
   /** A value somebody OTHER than the plugin put (the owner's): held, usable by name, but never the plugin's mint. */
   plant(name: SecretName, value: string): void {
     const at = '2026-11-07T12:00:00.000Z';

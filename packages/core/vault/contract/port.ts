@@ -81,6 +81,15 @@ export interface VaultApi {
    * full raises. The caller names the secret by NAME and the answer carries no value.
    */
   putNew?(name: SecretName, value: string): Promise<PutNewOutcome>;
+  /**
+   * Whether `name` still holds EXACTLY `value` AND that entry is one this caller's own create-only write filed (the mint
+   * ledger says the entry's current write is this caller's): what a retried import asks to reuse a key it already filed
+   * instead of filing `NAME_2`. The comparison happens inside the Vault; the answer is one boolean, never a value or a
+   * digest. A name the owner or another plugin wrote, a value the owner replaced since, and a name not held all answer `false`, so
+   * it cannot be used to test a guess at somebody else's secret. A store that cannot be read raises. Handed only with
+   * {@link putNew}, to a non-core plugin that declares `permissions.createSecrets`.
+   */
+  filedSame?(name: SecretName, value: string): Promise<boolean>;
   run(command: SecretUseCommand, ferret?: FerretId): Promise<Result<SecretUseResult, SecretUseRefusal>>;
   authorizeFetch(
     name: SecretName,

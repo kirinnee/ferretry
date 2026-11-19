@@ -47,6 +47,7 @@ import { secretRouteHandlers } from './lib/runtime/mounts/secrets.ts';
 import { OutboundProviderAuthorizer } from './lib/secrets/authorizer.ts';
 import { echoMask, maskReplyHeaders, maskText, sanitizeBody } from '../contract/echo-mask.ts';
 import { MintLedger } from './lib/secrets/mint-ledger.ts';
+import { sameText } from './lib/secrets/same-text.ts';
 import {
   isCoreNeeder,
   isMintedSecret,
@@ -486,6 +487,15 @@ export default implementDaemon(manifest, {
                 changed();
                 await auditCreate(needer.id, secret, 'succeeded');
                 return 'stored' as const;
+              },
+              // One boolean, decided in here: the entry must be THIS plugin's own create (the ledger's word) and equal.
+              filedSame: async (name: SecretName, value: string) => {
+                const opened = await vault.openEntry(name);
+                return (
+                  opened !== undefined &&
+                  (await mints.mintedBy(needer.id, name, opened.write)) &&
+                  sameText(opened.value, value)
+                );
               },
             }
           : {}),

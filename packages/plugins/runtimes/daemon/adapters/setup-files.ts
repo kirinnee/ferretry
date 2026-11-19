@@ -145,6 +145,8 @@ export interface FileFleetSetupOptions {
   readonly secrets: {
     list(): Promise<readonly { readonly name: string; readonly createdAt: string; readonly updatedAt: string }[]>;
     put(name: string, value: string): Promise<unknown>;
+    /** Whether the Vault holds exactly this value under this name from an earlier import's own filing: one boolean. */
+    filedSame?(name: string, value: string): Promise<boolean>;
   };
 }
 
@@ -214,6 +216,9 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
       put: async (name, value) => {
         await options.secrets.put(name, value);
       },
+      ...(options.secrets.filedSame === undefined
+        ? {}
+        : { filedSame: options.secrets.filedSame.bind(options.secrets) }),
     },
     readFolder: async path => await readTextFolder(host.files, path),
     skillItems: async () => await skillItemsIn(host.files, join(layout.assetsDirectory, 'skills')),

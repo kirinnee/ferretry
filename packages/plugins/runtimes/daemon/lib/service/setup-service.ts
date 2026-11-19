@@ -87,6 +87,7 @@ import { configurationLanded, failedApplySentence } from './failed-apply.ts';
 import {
   freeName,
   type HostHarnessScan,
+  type ImportOptions,
   type ImportPlan,
   type ImportRecord,
   mergeImport,
@@ -137,7 +138,7 @@ import {
   type FleetCatalogServiceDeps,
   harnessCommandsOf,
 } from './catalog-service.ts';
-import { assertMayFileSecrets, fileSecrets, uniqueByName } from './setup-secrets.ts';
+import { assertMayFileSecrets, fileSecrets, reusableSecrets, secretSentences, uniqueByName } from './setup-secrets.ts';
 import { type ToolInstallOutcome, type ToolInstallPreview, ToolInstallRefusal } from './tool-install.ts';
 import { toolOutcomeOnWire } from './tool-install-wire.ts';
 import { createLogins, importLoginEnvs, type LoginEnvPlan, loginEnvPlanOf, tickedEnvOf } from './setup-login-env.ts';
@@ -252,6 +253,8 @@ export interface FleetSetupServiceDeps {
     /** Each secret's name and when it was made and last changed: what a repeat copy compares. Never a value. */
     held(): Promise<readonly { readonly name: string; readonly createdAt: string; readonly updatedAt: string }[]>;
     put(name: string, value: string): Promise<void>;
+    /** Whether the Vault holds exactly this value under this name from an earlier import's own filing: one boolean, no value. */
+    filedSame?(name: string, value: string): Promise<boolean>;
   };
   /** One folder, read as text: a host skill folder, or a folder of the asset tree. */
   readFolder(path: string): Promise<FolderReading>;
@@ -341,6 +344,8 @@ interface Composed extends LoginEnvPlan {
   readonly documents: readonly FleetDocumentWrite[];
   /** Values to store before the apply. Never in a description, a digest or a log. */
   readonly secrets: readonly { readonly name: string; readonly value: string }[];
+  /** The keys an earlier import already filed with the same value: referenced again, not filed (names only). */
+  readonly reused?: readonly string[];
   readonly lines: readonly string[];
   readonly summary: string;
   /** What the person reviewed, so the apply runs that and nothing else. Holds no value. */
@@ -628,7 +633,15 @@ export class FleetSetupService {
     }
     await this.#applyModel(model, documents, landed);
     const envSentences = await importLoginEnvs(this.deps.loginEnvImport, composed, caller);
-    const sentences = [composed.summary, ...handed.sentences, ...envSentences];
+    const sentences = [
+      composed.summary,
+      ...secretSentences(
+        composed.secrets.map(secret => secret.name),
+        composed.reused ?? [],
+      ),
+      ...handed.sentences,
+      ...envSentences,
+    ];
     if (held > 0)
       sentences.push(`${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`);
     return sentences.join(' ');
@@ -672,7 +685,7 @@ export class FleetSetupService {
         `this machine's secret store could not be read, so nothing can be imported yet: ${errorMessage(error)}`,
       );
     }
-    const raw = planImport(scans, {
+    const planning = {
       ...(change.include === undefined ? {} : { include: change.include.map(harnessKind) }),
       ...(change.skip === undefined ? {} : { skip: change.skip }),
       ...(existing === undefined ? {} : { existing }),
@@ -681,7 +694,15 @@ export class FleetSetupService {
       addDuplicates: change.addDuplicates === true ? installed : [],
       tickedEnv: tickedEnvOf(change),
       digest: text => this.deps.digest(text),
-    });
+    } satisfies ImportOptions;
+    // A retry after a failed apply: a key an earlier import filed with this very value is used again, not filed as `NAME_2`.
+    const probed = planImport(scans, { ...planning, existingSecrets: [] }).secrets;
+    const reusableSecretsHeld = await reusableSecrets(
+      probed,
+      existingSecrets,
+      this.deps.secrets.filedSame?.bind(this.deps.secrets),
+    );
+    const raw = planImport(scans, { ...planning, reusableSecrets: reusableSecretsHeld });
     // The wire keys the names by the Ferrets harness key; the library keys them by its own word.
     const given = change.names;
     const plan = this.#named(
@@ -755,10 +776,9 @@ export class FleetSetupService {
         ]),
     });
     const handed = owners?.writes ?? [];
-    const secrets = uniqueByName([...plan.secrets, ...updates.flatMap(update => update.secrets)]).map(secret => ({
-      name: secret.name,
-      value: secret.value,
-    }));
+    const planned = uniqueByName([...plan.secrets, ...updates.flatMap(update => update.secrets)]);
+    const secrets = planned.filter(secret => secret.reused !== true).map(({ name, value }) => ({ name, value }));
+    const reused = planned.filter(secret => secret.reused === true).map(secret => secret.name);
     const runtimes = Object.keys(plan.runtimes).toSorted();
     const loginEnv = loginEnvPlanOf(change, plan, text => this.deps.digest(text));
     const lines = [
@@ -777,11 +797,16 @@ export class FleetSetupService {
       ...Object.keys(plan.profiles).map(name => `Profile ${name}.`),
       ...(runtimes.length > 0 ? [`Runtimes: ${runtimes.join(', ')}.`] : []),
       ...plan.notes.map(note => note.text),
+      ...secretSentences(
+        secrets.map(secret => secret.name),
+        reused,
+      ),
     ];
     return {
       model,
       documents,
       secrets,
+      reused,
       lines,
       summary:
         runtimes.length > 0
@@ -789,7 +814,7 @@ export class FleetSetupService {
           : `Imported into ${catalog.machineName()}.`,
       fingerprint: this.#fingerprint(
         documents,
-        secrets.map(secret => this.deps.digest(`${secret.name}\n${secret.value}`)),
+        planned.map(secret => this.deps.digest(`${secret.name}\n${secret.value}`)),
         [],
         [],
         [...handed.map(write => this.deps.digest(handedText(write))), ...loginEnv.digests],
