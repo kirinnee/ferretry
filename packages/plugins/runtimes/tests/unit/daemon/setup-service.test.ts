@@ -3423,7 +3423,7 @@ describe('the setup.import executor, components another plugin owns', () => {
 
   it('should report each file written, held and refused, apply the rest, and leave a refused one out of every profile', async () => {
     // Arrange
-    const door = owners(write =>
+    const door = reportingOwners(write =>
       write.kind === 'mcp'
         ? { outcome: 'refused', reason: 'the server is not valid' }
         : write.kind === 'settings'
@@ -3431,6 +3431,7 @@ describe('the setup.import executor, components another plugin owns', () => {
           : { outcome: 'written' },
     );
     const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
     state.scans = ownedScans();
 
     // Act

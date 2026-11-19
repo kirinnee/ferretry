@@ -143,6 +143,23 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
         }
       },
       lookup: name => leafAt(pinned.rootReal, name),
+      readText: async (rel, limit) => {
+        // Looked at without following the leaf first (as `lookup`), then read through the held descriptor, whose walk
+        // refuses a link at ANY component and which answers only a regular file.
+        if ((await leafAt(pinned.rootReal, rel)) !== 'present') return undefined;
+        try {
+          const target = await pinned.open(rel);
+          try {
+            if (target.metadata.type !== 'file') return undefined;
+            const bytes = await target.read(limit);
+            return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+          } finally {
+            await target.close();
+          }
+        } catch {
+          return undefined;
+        }
+      },
       hasGit: async name => {
         try {
           const target = await pinned.open(`${name}/.git`);
@@ -192,6 +209,12 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
     home: async () => {
       const home = kernel.paths.home();
       return (await realOf(home)) ?? home;
+    },
+    leaf: async path => {
+      const trimmed = path.replace(/\/+$/, '');
+      const at = trimmed.lastIndexOf('/');
+      if (trimmed === '' || at < 0) return 'present';
+      return leafAt(at === 0 ? '/' : trimmed.slice(0, at), trimmed.slice(at + 1));
     },
     realPaths: async paths => {
       const real = await Promise.all(paths.map(realOf));

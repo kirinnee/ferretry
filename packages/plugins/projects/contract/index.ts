@@ -2,5 +2,6 @@
 export * from './folders.ts';
 export * from './policy.ts';
 export * from './port.ts';
+export * from './repos.ts';
 export * from './state-def.ts';
 export * from './wire.ts';

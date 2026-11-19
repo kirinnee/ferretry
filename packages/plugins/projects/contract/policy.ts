@@ -13,3 +13,6 @@ export const filesystemUse: CapabilityDemand = { capability: FILESYSTEM, axis: '
 
 /** Audit kind for a folder made from the picker. */
 export const PROJECT_FOLDER_CREATED_AUDIT = policyRef('audit', 'project.folder-created');
+
+/** Audit kind for a change to which accounts a project uses (ids only, never a token or a key). */
+export const PROJECT_ACCOUNTS_AUDIT = policyRef('audit', 'project.accounts-changed');

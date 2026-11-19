@@ -23,6 +23,8 @@ import {
   refusalSentence,
 } from '../../lib/layout-model.ts';
 import type { LayoutsClient } from '../../lib/layouts-client.ts';
+import { LayoutPreview } from './previews/layout-preview.tsx';
+import { NavListPreview } from './previews/nav-list-preview.tsx';
 
 /** Saves one key; answers the reason it was refused, or `undefined` once it is saved. */
 type Apply = (path: string, value: string) => Promise<string | undefined>;
@@ -49,7 +51,15 @@ function ListRow({
     setRefusal(await apply(setting.path, draft));
   };
   return (
-    <SettingRow name={setting.name} hint={setting.hint}>
+    <SettingRow
+      name={setting.name}
+      hint={setting.hint}
+      preview={
+        setting.path === 'nav.items' || setting.path === 'phone.nav.items' ? (
+          <NavListPreview items={listOf(layout, setting.path)} label={`${setting.name}: reorder and hide`} />
+        ) : undefined
+      }
+    >
       {/* The list is long ("ferrets, agenda, board, projects, insights, …"), so it gets the row's whole width under its
           name rather than a narrow box beside it that cuts it off. */}
       <span className="flex min-w-0 items-center gap-2 px-panel pb-3">
@@ -93,6 +103,7 @@ function ChoiceRow({
       name={setting.name}
       hint={setting.hint}
       wide
+      preview={<LayoutPreview setting={setting} value={choiceOf(layout, setting.path)} />}
       control={() => (
         <Segmented
           label={setting.name}

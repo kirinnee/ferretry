@@ -8,14 +8,9 @@ import {
   type MakeFolderResult,
 } from '../../../contract/index.ts';
 import type { ProjectFolders } from '../../lib/ports.ts';
-import { belowHome, holdsSignIn, isAtOrUnder, isPrivateFolder, parsePath, privateSpellings } from './fence.ts';
-import type { FolderBrowser, FolderVerdict, HeldFolder, RawFolderEntry } from './port.ts';
-
-/** The policy for ONE request: the verdict on a real path, and whether a real path is a private folder (a link to one included). */
-interface Policy {
-  readonly verdict: FolderVerdict;
-  readonly isPrivateReal: (real: string) => boolean;
-}
+import { belowHome, holdsSignIn, isPrivateFolder, parsePath } from './fence.ts';
+import { type FolderPolicy, folderPolicy } from './policy.ts';
+import type { FolderBrowser, HeldFolder, RawFolderEntry } from './port.ts';
 
 const PRIVATE_MESSAGE = 'that folder holds keys or sign-ins and is not listed';
 /** One answer for every way a folder is out of reach (outside the home, a link out, missing and refused alike). */
@@ -57,7 +52,7 @@ export class FolderExplorer {
   async list(path: string, hidden: boolean): Promise<FolderListing> {
     const { browser } = this.deps;
     const home = await browser.home();
-    const policy = await this.policy(home);
+    const policy = await folderPolicy(this.deps.browser, home);
     const { folder, below } = await this.hold(path, home, policy);
     try {
       const read = await folder.entries(READ_LIMIT);
@@ -108,7 +103,7 @@ export class FolderExplorer {
       const named = belowHome(parsed.absolute, home);
       if (named !== undefined && isPrivateFolder([...named, request.name])) throw priv();
     }
-    const policy = await this.policy(home);
+    const policy = await folderPolicy(this.deps.browser, home);
     const { folder, below } = await this.hold(request.parent, home, policy);
     try {
       // The destination against the private names BEFORE the existence test, so it cannot be probed through it. The parent
@@ -140,36 +135,11 @@ export class FolderExplorer {
     }
   }
 
-  /**
-   * The one policy for a request, on a REAL path: the home or inside it, not a private folder (by name, nor at or under
-   * where any private folder REALLY is), and no folder from the first below the home down to this one holds a sign-in file
-   * (the home itself often does and is the starting point). Where each private folder really is is read once per request.
-   */
-  private async policy(home: string): Promise<Policy> {
-    const roots = await this.deps.browser.realPaths(privateSpellings(home));
-    const isPrivateReal = (real: string): boolean => roots.some(root => isAtOrUnder(real, root));
-    return { verdict: this.verdict(home, isPrivateReal), isPrivateReal };
-  }
-
-  private verdict(home: string, isPrivateReal: (real: string) => boolean): FolderVerdict {
-    return async real => {
-      const below = belowHome(real, home);
-      if (below === undefined) return 'outside';
-      if (isPrivateFolder(below) || isPrivateReal(real)) return 'private';
-      let path = home.replace(/\/+$/, '');
-      for (const segment of below) {
-        path = `${path}/${segment}`;
-        if (await this.deps.browser.holdsSignIn(path)) return 'private';
-      }
-      return undefined;
-    };
-  }
-
   /** `path` named, held open, and proved by where it REALLY is to be the home or inside it and not private. */
   private async hold(
     path: string,
     home: string,
-    policy: Policy,
+    policy: FolderPolicy,
   ): Promise<{ folder: HeldFolder; below: readonly string[] }> {
     const parsed = parsePath(path, home);
     if (!parsed.ok) throw new ApiError(400, parsed.message, 'invalid_path');

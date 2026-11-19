@@ -456,3 +456,5 @@ route	POST /v1/pack/routing/clean-up	changed	tightened (c58-sec3 r1): today flee
 route	GET /v1/ferrets/:ferretId/last-screen	added	5.0 serves a ferret that ended on its own's stored last screen (FerretsApi.lastSnapshot) from Ferrets itself, so fy status and Info read the closing words without the cause or journal carrying pane text; it asks terminal use of a remote device like the pane snapshot route, refuses a caller that may not touch the ferret before the file is opened, and masks again on every read
 route	GET /v1/projects/folders	added	new in r9 (B6): the folder explorer behind the project picker; names under the home only, never a private folder
 route	POST /v1/projects/folders	added	new in r9 (B6): makes one owner-only folder for the project picker; filesystem configure
+route	GET /v1/projects/:id/repos	added	new in r9 (B5): the git repositories found inside a registered project folder; filesystem use
+route	PUT /v1/projects/:id/accounts	added	new in r9 (B5): which git accounts a project uses (ids only); filesystem configure
