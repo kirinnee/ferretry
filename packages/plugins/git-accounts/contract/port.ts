@@ -1,5 +1,12 @@
-import { definePort } from '@ferretry/kernel/contract';
-import type { GitAccount, GitAccountId, GitAccountKeys } from './wire.ts';
+import { definePort, defineEvent } from '@ferretry/kernel/contract';
+import { GitAccountIdSchema, type GitAccount, type GitAccountId, type GitAccountKeys } from './wire.ts';
+import { z } from 'zod';
+
+/**
+ * An account was removed (its token and record are gone). The id only, nothing else: a plugin that keeps anything for an
+ * account (the PR cache) deletes it on this, because a reconnect of the same GitHub user reuses the same id.
+ */
+export const GitAccountDisconnected = defineEvent('git-accounts.removed', z.strictObject({ id: GitAccountIdSchema }));
 
 /**
  * A call to the provider's API made WITH an account's token, by the daemon half, for another plugin's daemon half (the

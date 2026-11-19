@@ -9,6 +9,7 @@ import {
   GIT_ACCOUNT_TOKENS,
   GIT_ACCOUNTS_WORDS,
   GitAccountsConfigDef,
+  GitAccountDisconnected,
   GitAccountsPort,
   GitAccountsState,
 } from './contract/index.ts';
@@ -97,6 +98,7 @@ export default definePlugin({
     state: [GitAccountsState, GIT_ACCOUNT_TOKENS.state],
     config: [GitAccountsConfigDef],
     readModels: ['list'],
+    publishes: [GitAccountDisconnected],
   },
 
   permissions: {

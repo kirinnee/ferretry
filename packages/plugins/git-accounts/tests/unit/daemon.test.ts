@@ -266,6 +266,8 @@ describe('listing, removing and the port', () => {
     expect(await handle.names()).toEqual([]);
     expect((await request('GET', '/v1/git-accounts')).json()).toEqual([]);
     expect(host.state('git-accounts')).toBeDefined();
+    // One event, the id and nothing else.
+    expect(host.published).toEqual([{ event: 'git-accounts.removed', payload: { id: 'gha_4242' } }]);
     expectNoSecretAnywhere(responses, host.logs);
   });
 
@@ -876,7 +878,7 @@ describe('a token with no record (review MED 4)', () => {
 
   test('disconnect removes a sealed entry that has no record, and still 404s when there is neither', async () => {
     const github = new FakeGithub();
-    const { sealed, request } = await boot(github);
+    const { host, sealed, request } = await boot(github);
     expect((await request('DELETE', '/v1/git-accounts/gha_77')).status).toBe(404);
     // Open the plugin's handle by asking for anything, then strand an entry the way a failed record write would have.
     await request('GET', '/v1/git-accounts');
@@ -885,7 +887,9 @@ describe('a token with no record (review MED 4)', () => {
     expect(removed.status).toBe(200);
     expect(removed.json()).toMatchObject({ id: 'gha_77', removed: true, keysLeftOnProvider: [] });
     expect(await (sealed.handle as SealedDocumentHandle).names()).toEqual([]);
+    expect(host.published).toEqual([{ event: 'git-accounts.removed', payload: { id: 'gha_77' } }]);
     expect((await request('DELETE', '/v1/git-accounts/gha_77')).status).toBe(404);
+    expect(host.published).toHaveLength(1); // a refused removal says nothing
   });
 });
 
