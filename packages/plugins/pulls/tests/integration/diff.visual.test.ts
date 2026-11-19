@@ -59,7 +59,7 @@ const VARIANTS = [
   { name: '390-light', width: 390, height: 1_100, phone: true, scheme: 'light' },
   { name: '390-dark', width: 390, height: 1_100, phone: true, scheme: 'dark' },
 ] as const;
-const CASES = ['split', 'large', 'threads', 'viewed'] as const;
+const CASES = ['split', 'large', 'threads', 'viewed', 'bounded'] as const;
 
 const open = async (variant: (typeof VARIANTS)[number], scene: string, height: number = variant.height) => {
   const context = await browser.newContext({
@@ -103,6 +103,20 @@ describe('the Files tab', () => {
         if (scene === 'large') expect(await tab.getByText('Too large or binary to show here.').count()).toBe(1);
         if (scene === 'threads') expect(await tab.locator('[data-thread]').count()).toBe(2);
         if (scene === 'viewed') expect(await tab.locator('[data-viewed="true"]').count()).toBe(2);
+        if (scene === 'bounded') {
+          // 25 of 83 cards, the long line cut to a short row with its note, the hidden characters named.
+          expect(await tab.locator('[data-diff-file]').count()).toBe(25);
+          expect(await tab.locator('[data-files-more]').count()).toBe(1);
+          expect(await tab.locator('[data-diff-cut]').count()).toBe(1);
+          expect(await tab.locator('[data-diff-control]').count()).toBeGreaterThan(3);
+          expect(await tab.locator('[data-diff-more]').count()).toBe(1);
+          const tallest = await tab.evaluate(() =>
+            Math.max(
+              ...[...document.querySelectorAll('[data-diff-line]')].map(line => line.getBoundingClientRect().height),
+            ),
+          );
+          expect(tallest).toBeLessThan(500);
+        }
         if (scene === 'large') {
           // A short path stays on one line: it is not split inside its name by the numbers beside it.
           const lines = await tab.evaluate(() => {

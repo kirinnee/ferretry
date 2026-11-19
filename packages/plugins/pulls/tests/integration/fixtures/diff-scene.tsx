@@ -4,6 +4,7 @@
  *   large             a file GitHub sent no patch for ("too large or binary")
  *   threads           two review threads drawn under their lines through `lineExtras`
  *   viewed            the same PR with two files ticked as viewed
+ *   bounded           a big PR: a 64 KiB line, hidden bidi characters, a long diff and 80 more files, all folded
  * `?theme=<family>-<mode>` sets the theme.
  */
 import { createRoot } from 'react-dom/client';
@@ -63,6 +64,42 @@ const LARGE: readonly PullFile[] = [
   FILES[0] as PullFile,
 ];
 
+const BOUNDED: readonly PullFile[] = [
+  {
+    path: 'src/\u202Egnp.ts',
+    status: 'modified',
+    additions: 2,
+    deletions: 0,
+    patch: '@@ -1 +1,3 @@ fn\u2067tion\n a\n+const admin = "no\u200B\u202Eone";\n+const x = 1;',
+  },
+  {
+    path: 'dist/app.min.js',
+    status: 'modified',
+    additions: 1,
+    deletions: 0,
+    patch: `@@ -0,0 +1 @@\n+${'minified(); '.repeat(5500)}`,
+    url: 'https://github.com/octo/widgets/blob/abc/dist/app.min.js',
+  },
+  {
+    path: 'data/long.txt',
+    status: 'added',
+    additions: 450,
+    deletions: 0,
+    patch: `@@ -0,0 +1,450 @@\n${Array.from({ length: 450 }, (_, i) => `+row ${i}`).join('\n')}`,
+    url: 'https://github.com/octo/widgets/blob/abc/data/long.txt',
+  },
+  ...Array.from(
+    { length: 80 },
+    (_, i): PullFile => ({
+      path: `gen/part${i}.ts`,
+      status: 'modified',
+      additions: 1,
+      deletions: 1,
+      patch: CSS_PATCH,
+    }),
+  ),
+];
+
 const answer = (files: readonly PullFile[]): PullFilesAnswer => ({
   files: [...files],
   truncated: false,
@@ -70,7 +107,7 @@ const answer = (files: readonly PullFile[]): PullFilesAnswer => ({
   fromCache: false,
 });
 const client: PullsClient = {
-  call: (async () => answer(scene === 'large' ? LARGE : FILES)) as PullsClient['call'],
+  call: (async () => answer(scene === 'large' ? LARGE : scene === 'bounded' ? BOUNDED : FILES)) as PullsClient['call'],
 };
 
 if (scene === 'viewed')

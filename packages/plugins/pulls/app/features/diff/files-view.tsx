@@ -1,12 +1,18 @@
 import { Button, Loading } from '@ferretry/app/ui';
-import { useCallback, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import type { PullFile, RepoRef } from '../../../contract/index.ts';
-import { DiffFile, fileAnchor } from './diff-file.tsx';
+import { DiffFile } from './diff-file.tsx';
 import type { LineExtras } from './diff-rows.tsx';
 import { FileTree } from './file-tree.tsx';
 import { type PullsClient, usePullFiles } from './use-pull-files.ts';
 import { useViewedTicks } from './use-viewed.ts';
 import { useWide } from './use-wide.ts';
+
+/** How many file cards a PR draws at first, and at each "Show more files": 3,000 files never mean 3,000 cards at once. */
+export const FILES_PER_PAGE = 25;
+
+/** A card's element id: its place in the list, so two paths that look alike (`a b`, `a_b`) never share one. */
+const anchorOf = (index: number): string => `pulls-file-${index}`;
 
 export interface PullFilesViewProps {
   readonly client: PullsClient;
@@ -37,11 +43,25 @@ export function PullFilesView({
   const [unified, setUnified] = useState(false);
   const files = state.status === 'ready' ? state.answer.files : [];
   const ticks = useViewedTicks(`${daemon}.${project}.${repo.owner}.${repo.name}.${number}`);
-  const pick = useCallback((path: string) => {
-    const target = document.getElementById(fileAnchor(path));
-    target?.scrollIntoView({ block: 'start' });
-    target?.querySelector<HTMLElement>('button')?.focus({ preventScroll: true });
-  }, []);
+  const [limit, setLimit] = useState(FILES_PER_PAGE);
+  // A file picked in the tree that is still folded is drawn where it belongs in the list, with the files between left
+  // folded; it is scrolled to once it is on the page. Picking the last of 3,000 files draws one card, not 3,000.
+  const [picked, setPicked] = useState<ReadonlySet<number>>(new Set());
+  const [target, setTarget] = useState<number | undefined>(undefined);
+  const drawn = (index: number): boolean => index < limit || picked.has(index);
+  useEffect(() => {
+    if (target === undefined || !(target < limit || picked.has(target))) return;
+    const card = document.getElementById(anchorOf(target));
+    card?.scrollIntoView({ block: 'start' });
+    card?.querySelector<HTMLElement>('button')?.focus({ preventScroll: true });
+    setTarget(undefined);
+  }, [target, limit, picked]);
+  const pick = (path: string): void => {
+    const index = files.findIndex(file => file.path === path);
+    if (index === -1) return;
+    setPicked(value => (value.has(index) ? value : new Set(value).add(index)));
+    setTarget(index);
+  };
   const total = useMemo(
     () =>
       files.reduce((sum, file) => ({ add: sum.add + file.additions, del: sum.del + file.deletions }), {
@@ -71,6 +91,46 @@ export function PullFilesView({
 
   const split = wide && !unified;
   const viewed = (file: PullFile): boolean => ticks.isViewed(file);
+  // The cards in list order; each run of folded files between them is one line, and the first run has the button.
+  const cards: ReactNode[] = [];
+  let folded = 0;
+  const closeRun = (at: number): void => {
+    if (folded === 0) return;
+    cards.push(
+      <p
+        className="m-0 flex flex-wrap items-center gap-sm text-meta text-muted"
+        data-files-more={folded}
+        key={`more-${at}`}
+      >
+        {folded} more files, listed in the tree.
+        {at - folded === limit ? (
+          <Button onClick={() => setLimit(value => value + FILES_PER_PAGE)} size="sm">
+            Show {Math.min(FILES_PER_PAGE, files.length - limit)} more files
+          </Button>
+        ) : null}
+      </p>,
+    );
+    folded = 0;
+  };
+  files.forEach((file, index) => {
+    if (!drawn(index)) {
+      folded += 1;
+      return;
+    }
+    closeRun(index);
+    cards.push(
+      <DiffFile
+        anchor={anchorOf(index)}
+        extras={lineExtras}
+        file={file}
+        key={file.path}
+        onViewed={value => ticks.setViewed(file, value)}
+        split={split}
+        viewed={viewed(file)}
+      />,
+    );
+  });
+  closeRun(files.length);
   return (
     <div className="grid min-w-0 gap-sm" data-pulls-files="ready">
       <div className="flex flex-wrap items-center gap-sm text-meta text-muted">
@@ -119,18 +179,7 @@ export function PullFilesView({
             />
           </div>
         ) : null}
-        <div className="grid min-w-0 gap-sm">
-          {files.map(file => (
-            <DiffFile
-              extras={lineExtras}
-              file={file}
-              key={file.path}
-              onViewed={value => ticks.setViewed(file, value)}
-              split={split}
-              viewed={viewed(file)}
-            />
-          ))}
-        </div>
+        <div className="grid min-w-0 gap-sm">{cards}</div>
       </div>
     </div>
   );

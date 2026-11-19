@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { findLine, lineText, parsePatch, splitRows } from '../../contract/diff-hunks.ts';
+import {
+  findLine,
+  lineText,
+  MAX_HUNKS,
+  MAX_LINE_CHARS,
+  MAX_PATCH_LINES,
+  parsePatch,
+  splitRows,
+  takeLines,
+} from '../../contract/diff-hunks.ts';
 
 const PATCH = [
   '@@ -1,4 +1,5 @@ function greet()',
@@ -56,7 +65,7 @@ describe('parsePatch', () => {
   });
 
   test('a rename with no content change has no hunks; the patch is empty', () => {
-    expect(parsePatch('')).toEqual({ hunks: [], stray: 0 });
+    expect(parsePatch('')).toEqual({ hunks: [], stray: 0, omitted: 0 });
   });
 
   test('an empty row inside a hunk is an empty context line (a trimmed space); a trailing newline is not one', () => {
@@ -122,5 +131,56 @@ describe('splitRows', () => {
 describe('lineText', () => {
   test('joins the text of the lines, one per row', () => {
     expect(lineText(parsePatch(PATCH).hunks[0]!.lines.slice(0, 2))).toBe('keep\nold one');
+  });
+});
+
+describe('bounds', () => {
+  test('a 64 KiB single line keeps its start and says how much it left out', () => {
+    const long = 'x'.repeat(64 * 1024);
+    const line = parsePatch(`@@ -1 +1 @@\n+${long}`).hunks[0]!.lines[0]!;
+    expect(line.text).toHaveLength(MAX_LINE_CHARS);
+    expect(line.cut).toBe(64 * 1024 - MAX_LINE_CHARS);
+    expect(parsePatch('@@ -1 +1 @@\n+short').hunks[0]!.lines[0]).not.toHaveProperty('cut');
+  });
+
+  test('a cut never splits a surrogate pair', () => {
+    const text = `${'x'.repeat(MAX_LINE_CHARS - 1)}😀tail`;
+    const line = parsePatch(`@@ -1 +1 @@\n+${text}`).hunks[0]!.lines[0]!;
+    expect(line.text).toHaveLength(MAX_LINE_CHARS - 1);
+    expect(line.cut).toBe(text.length - (MAX_LINE_CHARS - 1));
+  });
+
+  test('a hunk header is bounded too, and a header with a line separator in its section still reads', () => {
+    const hunk = parsePatch(`@@ -1 +1 @@ ${'s'.repeat(5000)}\n+a`).hunks[0]!;
+    expect(hunk.header).toHaveLength(MAX_LINE_CHARS);
+    expect(parsePatch('@@ -1 +1 @@ a b\n+a').hunks[0]?.section).toBe('a b');
+  });
+
+  test('past the line bound the rest is counted, not parsed', () => {
+    const body = Array.from({ length: MAX_PATCH_LINES + 7 }, () => '+x').join('\n');
+    const parsed = parsePatch(`@@ -0,0 +1 @@\n${body}\n`);
+    expect(parsed.hunks[0]?.lines).toHaveLength(MAX_PATCH_LINES);
+    expect(parsed.omitted).toBe(7);
+  });
+
+  test('past the hunk bound the later hunks are counted, not parsed', () => {
+    const hunks = Array.from({ length: MAX_HUNKS + 3 }, (_, i) => `@@ -${i + 1} +${i + 1} @@\n+a`).join('\n');
+    const parsed = parsePatch(hunks);
+    expect(parsed.hunks).toHaveLength(MAX_HUNKS);
+    expect(parsed.omitted).toBe(6);
+    expect(parsed.hunks.at(-1)?.lines).toHaveLength(1);
+  });
+});
+
+describe('takeLines', () => {
+  const hunks = parsePatch('@@ -1,2 +1,2 @@\n a\n+b\n@@ -9 +9 @@\n+c\n+d\n+e').hunks;
+  test('takes whole hunks while the budget lasts, cuts the one it ends in, and counts the rest', () => {
+    expect(takeLines(hunks, 10)).toEqual({ hunks, hidden: 0 });
+    const cut = takeLines(hunks, 3);
+    expect(cut.hunks.map(h => h.lines.length)).toEqual([2, 1]);
+    expect(cut.hidden).toBe(2);
+    const none = takeLines(hunks, 2);
+    expect(none.hunks).toHaveLength(1);
+    expect(none.hidden).toBe(3);
   });
 });

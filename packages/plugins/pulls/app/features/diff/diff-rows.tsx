@@ -2,6 +2,7 @@ import { highlightToHtml } from '@ferretry/app';
 import { trustedHighlight } from '@ferretry/app/ui';
 import { memo, type ReactNode, useMemo } from 'react';
 import { type DiffHunk, type DiffLine, type DiffSide, splitRows } from '../../../contract/diff-hunks.ts';
+import { VisibleText } from './visible-text.tsx';
 
 /** Where a line sits, for a thread drawn under it (E6): its file, the side it is on and its number on that side. */
 export interface LineAt {
@@ -25,22 +26,46 @@ const NUMBER_TONE = { add: 'text-ok', del: 'text-err', context: 'text-faint' } a
  * escaped text. The highlighter's own contract is what makes the markup safe (it escapes what it tokenizes), the same one
  * the transcript's code blocks rely on; a stranger's text is never forwarded as markup on either path.
  */
-const Code = memo(function Code({ text, lang }: { readonly text: string; readonly lang: string | undefined }) {
+const Run = memo(function Run({ text, lang }: { readonly text: string; readonly lang: string | undefined }) {
   const html = useMemo(() => highlightToHtml(text, lang), [text, lang]);
   if (html === null) return <>{text === '' ? '​' : text}</>;
   // biome-ignore lint/security/noDangerouslySetInnerHtml: the highlighter's own escaped markup (see above)
   return <span dangerouslySetInnerHTML={{ __html: trustedHighlight(html) }} />;
 });
 
-const lineAt = (path: string, line: DiffLine): LineAt | undefined =>
-  line.newLine !== undefined
-    ? { path, side: 'right', line: line.newLine }
-    : line.oldLine === undefined
-      ? undefined
-      : { path, side: 'left', line: line.oldLine };
+/**
+ * One line's text with its bidi and zero-width controls drawn as visible chips first (the highlighter only ever sees the
+ * runs between them), and a note when the parser kept only the start of a very long line.
+ */
+const Code = memo(function Code({
+  text,
+  lang,
+  cut,
+}: {
+  readonly text: string;
+  readonly lang: string | undefined;
+  readonly cut: number | undefined;
+}) {
+  return (
+    <>
+      <VisibleText render={run => <Run lang={lang} text={run} />} text={text} />
+      {cut === undefined ? null : (
+        <span className="pl-1 text-meta text-faint" data-diff-cut={cut}>
+          … {cut.toLocaleString('en-US')} more characters not shown
+        </span>
+      )}
+    </>
+  );
+});
 
-function Extras({ at, extras }: { readonly at: LineAt | undefined; readonly extras: LineExtras | undefined }) {
-  const node = at === undefined || extras === undefined ? null : extras(at);
+/** Every place a line sits at: a context line is on both sides (a thread can be on either), a change on the one it is on. */
+const placesOf = (path: string, line: DiffLine): readonly LineAt[] => [
+  ...(line.newLine === undefined ? [] : [{ path, side: 'right', line: line.newLine } as const]),
+  ...(line.oldLine === undefined ? [] : [{ path, side: 'left', line: line.oldLine } as const]),
+];
+
+function Extras({ at, extras }: { readonly at: LineAt; readonly extras: LineExtras | undefined }) {
+  const node = extras === undefined ? null : extras(at);
   return node === null || node === undefined || node === false ? null : <div className="col-span-full">{node}</div>;
 }
 
@@ -57,7 +82,7 @@ const Gutter = ({ n, tone }: { readonly n: number | undefined; readonly tone: ke
 function HunkHeader({ hunk }: { readonly hunk: DiffHunk }) {
   return (
     <div className="col-span-full truncate bg-code-bg px-2 py-0.5 text-meta text-faint" data-diff-hunk={hunk.header}>
-      {hunk.header}
+      <VisibleText text={hunk.header} />
     </div>
   );
 }
@@ -78,7 +103,8 @@ export function UnifiedHunk({
     <div className="grid grid-cols-[3rem_3rem_minmax(0,1fr)] font-mono text-code leading-base" data-diff-view="unified">
       <HunkHeader hunk={hunk} />
       {hunk.lines.map(line => {
-        const at = lineAt(path, line);
+        const places = placesOf(path, line);
+        const at = places[0];
         return (
           <div
             className={`col-span-full grid grid-cols-subgrid ${TONE[line.kind]}`}
@@ -94,12 +120,14 @@ export function UnifiedHunk({
               <span aria-hidden="true" className={`select-none pr-1 ${NUMBER_TONE[line.kind]}`}>
                 {MARK[line.kind]}
               </span>
-              <Code lang={lang} text={line.text} />
+              <Code cut={line.cut} lang={lang} text={line.text} />
               {line.noNewline === true ? (
                 <span className="pl-2 text-meta text-faint">no newline at end of file</span>
               ) : null}
             </span>
-            <Extras at={at} extras={extras} />
+            {places.map(place => (
+              <Extras at={place} extras={extras} key={place.side} />
+            ))}
           </div>
         );
       })}
@@ -140,7 +168,7 @@ function Half({
         data-diff-path={path}
         data-diff-side={side}
       >
-        <Code lang={lang} text={line.text} />
+        <Code cut={line.cut} lang={lang} text={line.text} />
         {line.noNewline === true ? <span className="pl-2 text-meta text-faint">no newline at end of file</span> : null}
       </span>
     </>
@@ -174,9 +202,9 @@ export function SplitHunk({
           <div className="col-span-full grid grid-cols-subgrid" key={index}>
             <Half line={left} lang={lang} path={path} side="left" />
             <Half line={right} lang={lang} path={path} side="right" />
-            {left?.kind === 'del' && left.oldLine !== undefined ? (
+            {left?.oldLine === undefined ? null : (
               <Extras at={{ path, side: 'left', line: left.oldLine }} extras={extras} />
-            ) : null}
+            )}
             {right?.newLine === undefined ? null : (
               <Extras at={{ path, side: 'right', line: right.newLine }} extras={extras} />
             )}
