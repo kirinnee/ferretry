@@ -1,0 +1,156 @@
+/* The flamegraph of a CI run (r9 E11). Colours are the theme's status tokens only; nothing here moves. */
+.fy-flame {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg);
+}
+.fy-flame-trail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  font-size: 13px;
+  color: var(--muted);
+}
+.fy-flame-here {
+  color: var(--fg);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.fy-flame-sep {
+  padding: 0 7px;
+}
+.fy-flame .fy-flame-back {
+  margin: 0;
+  padding-inline: 0;
+  /* The app's touch-target floor would indent it and spread it from the chevron; its row already gives it height. */
+  min-width: 0;
+  min-height: 0;
+  justify-content: flex-start;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.fy-flame-chart {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+}
+.fy-flame-bar {
+  cursor: pointer;
+  outline: none;
+}
+.fy-flame-fill {
+  stroke: var(--surface);
+  stroke-width: 2;
+  fill: color-mix(in srgb, var(--tone, var(--pend)) 48%, var(--surface));
+}
+/* A strip of the status colour on top of each bar: the status shows without leaning on the fill alone. */
+.fy-flame-edge {
+  fill: var(--tone, var(--pend));
+  pointer-events: none;
+}
+/* ONE highlight: the bar the line under the chart describes (the one pointed at, focused or clicked, else the zoomed one). */
+.fy-flame-ring {
+  fill: none;
+  stroke: var(--fg);
+  stroke-width: 2;
+  opacity: 0;
+  pointer-events: none;
+}
+.fy-flame-bar[data-shown] .fy-flame-ring {
+  opacity: 1;
+}
+.fy-flame-label {
+  fill: var(--fg);
+  font-size: 12.5px;
+  pointer-events: none;
+  user-select: none;
+}
+.fy-flame [data-status='passed'] {
+  --tone: var(--ok);
+}
+.fy-flame [data-status='failed'] {
+  --tone: var(--err);
+}
+.fy-flame [data-status='running'] {
+  --tone: var(--accent);
+}
+.fy-flame [data-status='cancelled'] {
+  --tone: var(--warn);
+}
+.fy-flame [data-status='queued'],
+.fy-flame [data-status='skipped'] {
+  --tone: var(--pend);
+}
+.fy-flame-readout {
+  margin: 0;
+  min-height: 2.6em;
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+.fy-flame-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.fy-flame-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fy-flame-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--tone, var(--pend)) 48%, var(--surface));
+  border: 1px solid var(--tone, var(--pend));
+}
+.fy-flame-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+/* The folded bar ("N shorter steps") is a hatched, quieter version of any bar; its list is plain text. */
+.fy-flame-bar[data-kind='more'] .fy-flame-fill {
+  fill: color-mix(in srgb, var(--tone, var(--pend)) 22%, var(--surface));
+  stroke-dasharray: 4 3;
+}
+.fy-flame-more {
+  font-size: 13px;
+}
+.fy-flame-more > summary {
+  cursor: pointer;
+  padding: 4px 0;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.fy-flame-more-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 8px;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+.fy-flame-more-list li {
+  padding: 2px 0;
+}
+.fy-flame .fy-flame-more-list .fy-flame-back {
+  text-align: left;
+}
