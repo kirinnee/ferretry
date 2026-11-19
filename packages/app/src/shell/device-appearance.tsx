@@ -11,6 +11,7 @@ import type { TextScale } from '../theme/preferences.ts';
 import { cn } from '../ui/lib/class-names.ts';
 import { MODE_OPTIONS, scrollThemeFamilyIntoView, Swatch } from '../ui/theme-toggle.tsx';
 import { type DeviceTheme, useDeviceTheme } from './device-context.tsx';
+import { ColourModePreview, MotionPreview, TextSizePreview } from './device-appearance-previews.tsx';
 
 const TEXT_SCALE_OPTIONS: readonly { readonly id: TextScale; readonly label: string; readonly title: string }[] = [
   { id: 'default', label: 'Default', title: 'Use the interface’s designed size.' },
@@ -125,6 +126,7 @@ export function DeviceAppearance() {
     <SettingGroup label="Look">
       <SettingRow
         settingId="theme"
+        preview={<ColourModePreview family={preference.family} mode={preference.mode} />}
         name="Colour mode"
         explanation="Auto follows this device's light or dark setting; Light and Dark stay as you choose. Saved on this device."
         hint={preference.mode === 'system' ? `Auto follows the system (now ${resolved})` : `Always ${preference.mode}`}
@@ -150,6 +152,7 @@ export function DeviceAppearance() {
       </SettingRow>
       <SettingRow
         settingId="text-size"
+        preview={<TextSizePreview scale={preference.textScale} />}
         name="Text size"
         hint="Touch targets never shrink"
         explanation="Scales the text across the app on this device. Buttons and touch targets keep their size, so nothing gets harder to tap."
@@ -168,6 +171,7 @@ export function DeviceAppearance() {
       />
       <SettingRow
         settingId="motion"
+        preview={<MotionPreview motion={device.motion} />}
         name="Motion"
         hint={MOTION_HINT[device.motion]}
         explanation="Reduced stills spinners and transitions on this device. Follow system plays animations unless this device asks for less motion."

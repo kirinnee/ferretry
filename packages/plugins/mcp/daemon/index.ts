@@ -39,6 +39,7 @@ import { parseHarnessDocument } from './lib/inventory/parse-document.ts';
 import { accountsOf, componentsOf, layeredMcp } from './lib/inventory/runtime-wiring.ts';
 import { mcpCatalogRuntime } from './lib/catalog-runtime.ts';
 import { McpLaunchParts } from './lib/launch-parts.ts';
+import { hostImportPut, kernelConfigWrite } from './features/host-import/index.ts';
 import { mcpComponentSource } from './lib/profile-component-source.ts';
 import { McpOAuthService } from './lib/oauth/service.ts';
 import { runtimesLoginTarget } from './lib/session/login-target.ts';
@@ -468,9 +469,11 @@ export default implementDaemon(manifest, {
         'catalog.items:mcp': catalogItems,
         'launch.parts': () => [{ id: 'mcp', item: launch }],
         // Runtimes' read of the `mcp` components a profile names: this plugin's own items, live, no cache.
-        'runtimes.components.mcp:components': mcpComponentSource(items, listener =>
-          kernel.config.watch(MCP_CONFIG, listener),
-        ),
+        // Its `put` is the setup import's write of a server found on the host: this plugin's own file, create-only.
+        'runtimes.components.mcp:components': {
+          ...mcpComponentSource(items, listener => kernel.config.watch(MCP_CONFIG, listener)),
+          put: hostImportPut(kernelConfigWrite(kernel.config, MCP_CONFIG as ConfigCollectionDef<McpItem>)),
+        },
       },
     };
   },
