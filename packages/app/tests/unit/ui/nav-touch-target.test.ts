@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
 /**
- * A TOP ROW OF TABS ON A PHONE IS A TOUCH TARGET: a finger needs 44px, and the row's items are 32px for a mouse. A layout
- * that puts the nav on top at phone width (an owner's choice) gets the same height as the bottom bar's entries.
+ * THE DRAWER'S ROWS ON A PHONE ARE TOUCH TARGETS: a finger needs 44px, and the rows are 36px for a mouse. The overlay drawer
+ * at phone width gets the same height as the bottom bar's entries.
  */
-const css = await Bun.file(new URL('../../../src/styles/shell.css', import.meta.url)).text();
+const css = await Bun.file(new URL('../../../src/styles/drawer.css', import.meta.url)).text();
 
 /** The body of the first `@media (max-width: 767.98px)` block that contains `selector`. */
 const phoneBlockWith = (selector: string): string | undefined => {
@@ -22,10 +22,10 @@ const phoneBlockWith = (selector: string): string | undefined => {
   return undefined;
 };
 
-describe('the top nav at phone width', () => {
-  test('its items are at least 44px tall, though a pointer row keeps its 32px', () => {
-    const phone = phoneBlockWith('.fy-nav--top .fy-nav__item');
-    expect(phone).toMatch(/\.fy-nav--top \.fy-nav__item \{[^}]*min-height: 44px;/u);
-    expect(css).toMatch(/\.fy-nav--top \.fy-nav__item \{[^}]*min-height: 32px;/u);
+describe('the drawer at phone width', () => {
+  test('its rows are at least 44px tall, though a pointer row keeps its 36px', () => {
+    const phone = phoneBlockWith('.fy-nav--drawer .fy-nav__item');
+    expect(phone).toMatch(/\.fy-nav--drawer \.fy-nav__item \{[^}]*min-height: 44px;/u);
+    expect(css).toMatch(/\.fy-nav--drawer \.fy-nav__item \{[^}]*min-height: 36px;/u);
   });
 });

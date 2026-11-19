@@ -1,14 +1,14 @@
-import { Users } from 'lucide-react';
+import { Menu } from 'lucide-react';
 import { useLayoutEffect, useState } from 'react';
 import { PageThemeSwitch } from '../ui/theme-toggle.tsx';
 import { type Route } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { NavCount } from './device-panels.tsx';
+import { drawerState } from './drawer-state.ts';
 import { useShell } from './context.tsx';
-import { Link } from './pages.tsx';
 
 /**
- * THE PHONE'S TITLE BAR (E2 gap 31): v4 puts the page's name at the top of every phone page, the ferret list's button on its left
+ * THE PHONE'S TITLE BAR (E2 gap 31): v4 puts the page's name at the top of every phone page, the menu button (the drawer) on its left
  * and the theme's on its right, so the person can tell which screen they are on (the bottom bar names a place, but Settings and
  * the pages with no bottom entry show none). The wide frame has no such bar: its nav already says where you are.
  *
@@ -67,24 +67,24 @@ function Title({
   return <Tag className={className}>{children}</Tag>;
 }
 
-export function PhoneTitleBar({ daemon }: { readonly daemon: string | undefined }) {
-  const { views, routes, viewport } = useShell();
+export function PhoneTitleBar() {
+  const { viewport } = useShell();
   const { route } = useRouter();
   const pageHasH1 = usePageDrawsOwnH1();
   if (viewport !== 'phone') return null;
   const named = phoneTitleOf(route);
   if (named === undefined) return null;
-  const ferrets = views.screens.get('ferrets.ferrets');
-  const list = daemon === undefined || ferrets === undefined ? undefined : routes.href(ferrets, {}, daemon);
   return (
     <div className="fy-phone-title" data-slot="phone-title">
-      {list === undefined ? (
-        <span className="fy-phone-title__side" />
-      ) : (
-        <Link to={list} className="fy-phone-title__side fy-phone-title__button" aria-label="Ferret list">
-          <Users aria-hidden="true" size={20} />
-        </Link>
-      )}
+      <button
+        type="button"
+        className="fy-phone-title__side fy-phone-title__button"
+        aria-label="Menu"
+        aria-haspopup="dialog"
+        onClick={() => drawerState.setOpen(true)}
+      >
+        <Menu aria-hidden="true" size={20} />
+      </button>
       {/* The bar's name is the page's h1 only where the page draws none of its own. */}
       <Title as={pageHasH1 ? 'p' : 'h1'} className="fy-phone-title__text">
         {named.title}

@@ -1,19 +1,19 @@
 import { BackgroundViews } from './background.tsx';
-import { DevicePanels, NavCount, type NavForm } from './device-panels.tsx';
 import { DeviceViews } from './device-views.tsx';
 import { PhoneTitleBar } from './phone-title-bar.tsx';
-import { Search } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { DEFAULT_LAYOUT } from '../layout/layout.ts';
 import { CommandBar } from '../ui/command-bar.tsx';
 import { useAppViewport } from '../ui/hooks/use-app-viewport.ts';
-import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../ui/palette-shortcut.ts';
 import { buildPluginCommandSources, deviceLayoutSource, placeSource, settingsSource } from './command-sources.ts';
 import { useScreenHref } from '../router/screen-href.ts';
 import { ChatMenu } from './chat-menu.tsx';
-import { DaemonPicker } from './machine-switcher.tsx';
-import { isChatRoute, routeDaemon, useNavTargets } from './nav-targets.ts';
-import { DEVICE_SETTINGS_HREF, needsSubject, pairAgainHref, type Route } from '../router/routes.ts';
+import { BottomNav } from './drawer-nav.tsx';
+import { Drawer, useDrawerShortcut } from './drawer.tsx';
+import { useFindShortcut } from './drawer-find.tsx';
+import { RightSide } from './side-column.tsx';
+import { isChatRoute, routeDaemon } from './nav-targets.ts';
+import { DEVICE_SETTINGS_HREF, pairAgainHref, type Route } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import {
@@ -28,81 +28,12 @@ import { PageScrollRegion } from '../scroll/page-scroll-region.tsx';
 import { FrameRootContext } from './frame-root.tsx';
 import { NameThisMachine } from './name-machine.tsx';
 import { PasskeyMount } from './passkey-mount.tsx';
-import { PanelSlot, ScreenView, ShellLine } from './views.tsx';
+import { ScreenView, ShellLine } from './views.tsx';
 
 /**
- * THE FRAME (§5.2): the shell's slots, placed by the layout. `nav` (or `bottom` when the layout puts nav there on a
- * phone), `top`, `main` (one screen at a time, by the router), `side` (wide screens, when the layout asks). Nothing
+ * THE FRAME (§5.2): the shell's slots, placed by the layout: the left drawer (find, destinations, the list slot; an overlay on a phone) and, on a phone, the `bottom` bar; `main` (one screen at a time, by the router), `side` (wide screens, when the layout asks). Nothing
  * in the frame is a feature: every entry is a plugin's screen, or one of the shell's own items.
  */
-
-function Nav({ daemon }: { readonly daemon: string | undefined }) {
-  const { plan } = useShell();
-  const targets = useNavTargets(daemon);
-  const side = plan.nav.side;
-  // A nav panel is drawn in a left or right nav of EVERY style (the default built-in is a list, compact is a rail), told which form it is
-  // in; never on the top or bottom bar.
-  const panelForm: NavForm | undefined =
-    side === 'left' || side === 'right' ? (plan.nav.style === 'rail' ? 'rail' : 'column') : undefined;
-  return (
-    <nav
-      className={`fy-nav fy-nav--${side} fy-nav--${plan.nav.style}`}
-      data-slot={side === 'bottom' ? 'bottom' : 'nav'}
-      // THE PHONE'S BOTTOM BAR STEPS ASIDE FOR THE KEYBOARD (design-system.css `[data-kb-hide]`): it is stateless links, so it
-      // can go and come back intact, and it no longer covers the composer while someone types. Only a bar at the bottom: a
-      // rail or top row does not sit over the keyboard, and desktop never sets `data-keyboard`.
-      data-kb-hide={side === 'bottom' ? '' : undefined}
-    >
-      {targets.map(({ entry, to, label, key, current }) => {
-        // A plugin's count for its own entry, summed over every machine (S4), on every nav form.
-        const badge =
-          entry.kind === 'screen' ? (
-            <NavCount key="count" plugin={entry.screen.plugin} screen={entry.screen.id} label={label} />
-          ) : null;
-        return to === undefined ? (
-          <span key={key} className="fy-nav__item fy-nav__item--off">
-            {label}
-            {badge}
-          </span>
-        ) : (
-          <Link key={key} to={to} className="fy-nav__item" current={current}>
-            {label}
-            {badge}
-          </Link>
-        );
-      })}
-      {/* Device-level nav panels (S4, MJ3): drawn once, with no daemon, in the column and in the rail (each told its
-      form), never on the phone bar. */}
-      {panelForm === undefined ? null : <DevicePanels slot="nav" form={panelForm} />}
-    </nav>
-  );
-}
-
-function TopBar({ daemon, onSearch }: { readonly daemon: string | undefined; readonly onSearch: () => void }) {
-  const { plan } = useShell();
-  return (
-    <header className="fy-top" data-slot="top">
-      {plan.top.map(item => {
-        if (item === 'daemon-picker') return <DaemonPicker key={item} daemon={daemon} />;
-        if (item === 'search')
-          return (
-            <button
-              key={item}
-              type="button"
-              className="fy-search"
-              aria-keyshortcuts={PALETTE_KEYSHORTCUTS}
-              onClick={onSearch}
-            >
-              <Search aria-hidden="true" size={16} className="fy-search__icon" />
-              <span className="fy-search__label">Find</span>
-              <kbd className="mono">{paletteShortcutLabel()}</kbd>
-            </button>
-          );
-        return null;
-      })}
-    </header>
-  );
-}
 
 function Main({ route }: { readonly route: Route }) {
   switch (route.kind) {
@@ -125,42 +56,6 @@ function Main({ route }: { readonly route: Route }) {
     case 'not-found':
       return <NotFoundPage />;
   }
-}
-
-function Side({ daemon, route }: { readonly daemon: string | undefined; readonly route: Route }) {
-  const { plan, viewport } = useShell();
-  const { show, holds } = plan.side;
-  if (show === 'never' || (show === 'wide-only' && viewport === 'phone') || holds.kind === 'none') return null;
-  if (daemon === undefined) return null;
-  if (holds.kind === 'screen' && needsSubject(holds.screen.path)) return null; // needs a subject the route lacks
-  // The page IS the screen the column holds (the ferret list on /ferrets): draw it once, in the page, not again beside it.
-  if (
-    holds.kind === 'screen' &&
-    route.kind === 'screen' &&
-    route.screen.plugin === holds.screen.plugin &&
-    route.screen.id === holds.screen.id
-  )
-    return null;
-  return (
-    <aside className={`fy-side fy-side--${plan.side.at}`} data-slot="side">
-      {holds.kind === 'screen' ? <ScreenView daemon={daemon} screen={holds.screen} params={{}} /> : null}
-      {/* The side column that holds panels (S4): the `side` slot's panels, for the route's daemon. */}
-      {holds.kind === 'panels' ? <PanelSlot daemon={daemon} slot="side" /> : null}
-    </aside>
-  );
-}
-
-/** Cmd/Ctrl+K from anywhere opens the bar (or re-focuses its query when it is open). */
-function useCommandBarShortcut(open: () => void): void {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.key.toLowerCase() !== 'k') return;
-      event.preventDefault();
-      open();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open]);
 }
 
 /** The command bar with the shell's own sources (places, this device's layout commands) and the plugins' entries. */
@@ -275,7 +170,9 @@ export function Frame() {
   const [bar, setBar] = useState({ open: false, signal: 0 });
   const openBar = useCallback(() => setBar(current => ({ open: true, signal: current.signal + 1 })), []);
   const closeBar = useCallback(() => setBar(current => ({ ...current, open: false })), []);
-  useCommandBarShortcut(openBar);
+  const findRef = useRef<HTMLButtonElement | null>(null);
+  useFindShortcut(findRef, openBar);
+  useDrawerShortcut();
   // The visible height (`--app-h`) and the keyboard-open attribute every screen lays itself out by, as today.
   useAppViewport();
   // The frame root, handed to the shell's own overlays (the machine picker, S10) so they draw above every plugin sheet.
@@ -284,16 +181,22 @@ export function Frame() {
     <FrameRootContext.Provider value={frameRoot}>
       <div
         ref={setFrameRoot}
-        className={`fy-frame fy-frame--nav-${plan.nav.side}`}
+        className={`fy-frame${plan.nav.side === 'bottom' ? ' fy-frame--nav-bottom' : ''}`}
         data-chat-chrome={chat ? '' : undefined}
         data-layout={plan.layoutId}
       >
-        <Nav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
+        <Drawer
+          daemon={daemon}
+          navDaemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined}
+          route={route}
+          findRef={findRef}
+          onFind={openBar}
+          listed={whole === undefined}
+        />
         <div className="fy-body">
-          <PhoneTitleBar daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
-          <TopBar daemon={daemon} onSearch={openBar} />
+          <PhoneTitleBar />
           {/* THE STATUS STRIP: where the views mounted at the frame root draw what they draw IN FLOW — a line a watcher
-      says ("Couldn't reach it through the relay…"), a banner. They sit here, a row under the top bar and above the
+      says ("Couldn't reach it through the relay…"), a banner. They sit here, a row above the
       columns, never as a child of the frame's own row: a line placed beside the body is a COLUMN of the frame and takes its
       width from the page (the agenda's item column fell from v4's ~680px to 350px at 1280). An overlay a view draws is
       fixed or portalled and does not care where it is mounted; an empty strip takes no room. */}
@@ -308,16 +211,17 @@ export function Frame() {
             ) : null}
           </div>
           <div className="fy-columns">
-            {/* The side column is drawn first when the layout puts it on the left, so the reading and the tab order match the eye. */}
-            {whole === undefined && plan.side.at === 'left' ? <Side daemon={daemon} route={route} /> : null}
             <main className="fy-main" data-slot="main">
-              {chat ? <ChatMenu daemon={daemon} onSearch={openBar} /> : null}
+              {chat ? <ChatMenu /> : null}
               <PageScrollRegion entryKey={entryKey} memory={scroll}>
                 {whole === undefined ? <Main route={route} /> : <WholeLine daemon={daemon} line={whole} />}
               </PageScrollRegion>
             </main>
-            {whole === undefined && plan.side.at === 'right' ? <Side daemon={daemon} route={route} /> : null}
+            {whole === undefined ? <RightSide daemon={daemon} route={route} /> : null}
           </div>
+          {plan.nav.side === 'bottom' ? (
+            <BottomNav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
+          ) : null}
         </div>
         <ShellCommandBar
           daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined}

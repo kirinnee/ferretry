@@ -422,7 +422,7 @@ describe('the nav on the "All daemons" route', () => {
     expect(app.view.container.querySelector('.fy-daemon-picker')?.getAttribute('aria-label')).toBe(
       'Machine: All daemons. Switch machine',
     );
-    const door = app.view.container.querySelector('.fy-nav--top .fy-nav__item');
+    const door = app.view.container.querySelector('.fy-nav--drawer .fy-nav__item');
     expect(door?.tagName).toBe('A');
     expect(door?.getAttribute('href')).toBe('/d/d2/inbox');
     expect(door?.querySelector('.fy-nav__badge')?.getAttribute('data-count')).toBe('5');
@@ -483,7 +483,7 @@ describe('the Needs-you nav panel (device-level)', () => {
       expect(panels('inbox.needs-you')).toBe(drawn ? 1 : 0);
       if (drawn)
         expect(app.view.container.querySelector('[data-testid="needs-you"]')?.getAttribute('data-form')).toBe('rail');
-      else expect(app.view.container.querySelector('.fy-nav--top')).not.toBeNull();
+      else expect(app.view.container.querySelector('.fy-nav--drawer')).not.toBeNull();
     });
   }
 
@@ -627,7 +627,8 @@ describe('the side column', () => {
     const app = await bootApp({ surfaces: [inbox], machines: ['d1', 'd2'], path: '/d/d2/inbox', storage });
     view = app.view;
     expect(panels('inbox.side-note')).toBe(1);
-    expect(app.view.container.querySelector('.fy-side')).not.toBeNull();
+    // On the left the column is the drawer's list slot.
+    expect(app.view.container.querySelector('.fy-drawer__list')).not.toBeNull();
     await view.unmount();
     const home = await bootApp({ surfaces: [inbox], machines: ['d1', 'd2'], path: '/app/', arrived: true, storage });
     view = home.view;
@@ -647,9 +648,10 @@ describe('the side column', () => {
       storage: deviceLayout({ items: ['inbox'] }),
     });
     view = app.view;
-    expect(orderOf(app.view.container)).toEqual(['side', 'main']);
-    expect(app.view.container.querySelector('.fy-side--left')).not.toBeNull();
-    expect(app.view.container.querySelector('.fy-nav--top')).not.toBeNull();
+    // The left column is the drawer's list slot, not a column of the frame: the page is alone in the columns.
+    expect(orderOf(app.view.container)).toEqual(['main']);
+    expect(app.view.container.querySelector('.fy-drawer__list')).not.toBeNull();
+    expect(app.view.container.querySelector('.fy-nav--drawer')).not.toBeNull();
   });
 
   test('U-L: the nav entry whose page is on screen is marked as the current page', async () => {
@@ -718,7 +720,7 @@ describe('a screen the side column holds', () => {
     const app = await bootApp({ surfaces: [inbox], machines: ['d1'], path: '/d/d1/lanes', storage: holdingInbox() });
     view = app.view;
     expect(drawn('inbox page')).toBe(1);
-    expect(app.view.container.querySelector('.fy-side')).not.toBeNull();
+    expect(app.view.container.querySelector('.fy-drawer__list')).not.toBeNull();
   });
 
   test('ferrets list: a nav entry whose screen has only an optional parameter is a real link; one that needs a subject is not', async () => {

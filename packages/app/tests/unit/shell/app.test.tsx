@@ -490,7 +490,7 @@ describe('the app shell', () => {
     );
     await settle();
     const nav = view.container.querySelector('nav[data-slot="nav"]');
-    expect(nav?.className).toContain('fy-nav--top');
+    expect(nav?.className).toContain('fy-nav--drawer');
     expect([...(nav?.querySelectorAll('a') ?? [])].map(a => a.getAttribute('href'))).toContain('/d/d1/board');
     expect(document.documentElement.dataset.theme).toBe('mission-light');
     await view.unmount();

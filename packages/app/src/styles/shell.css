@@ -1,5 +1,5 @@
 /* ============================================================================
-   The frame (§5.2): nav, top, main, side, bottom — placed by the layout (`data-layout`, `fy-frame--nav-<side>`).
+   The frame (§5.2): drawer (drawer.css), main, side, bottom — placed by the layout (`data-layout`).
    Token-driven only; sizes multiply by `--fy-text-scale` so the text-size setting reaches the shell.
    ============================================================================ */
 
@@ -27,15 +27,6 @@
 .fy-frame--nav-bottom {
   padding-bottom: 0;
 }
-.fy-frame--nav-right {
-  flex-direction: row-reverse;
-}
-.fy-frame--nav-top {
-  flex-direction: column;
-}
-.fy-frame--nav-bottom {
-  flex-direction: column-reverse;
-}
 
 .fy-body {
   display: flex;
@@ -55,41 +46,6 @@
   border-color: var(--border);
   border-style: solid;
   border-width: 0;
-}
-.fy-nav--left,
-.fy-nav--right {
-  flex-direction: column;
-  width: calc(var(--fy-text-scale, 1) * 168px);
-  overflow-y: auto;
-}
-.fy-nav--left {
-  border-right-width: var(--border-width);
-}
-.fy-nav--right {
-  border-left-width: var(--border-width);
-}
-.fy-nav--top {
-  border-bottom-width: var(--border-width);
-}
-/* A top nav is v4's destination row: one short line of tabs, never a column, and it scrolls sideways before it wraps. */
-.fy-nav--top {
-  flex-direction: row;
-  align-items: center;
-  gap: 2px;
-  padding: 4px 8px;
-  overflow-x: auto;
-}
-.fy-nav--top .fy-nav__item {
-  flex: none;
-  min-height: 32px;
-  padding: 4px 10px;
-  white-space: nowrap;
-}
-/* A phone's finger is 44px: a top row of tabs on a phone is as tall as a bottom bar's entry. */
-@media (max-width: 767.98px) {
-  .fy-nav--top .fy-nav__item {
-    min-height: 44px;
-  }
 }
 .fy-nav--bottom {
   justify-content: space-around;
@@ -123,10 +79,6 @@
   font-size: calc(var(--fy-text-scale, 1) * 0.6875rem);
   line-height: 1.4;
 }
-.fy-nav--rail.fy-nav--left,
-.fy-nav--rail.fy-nav--right {
-  width: calc(var(--fy-text-scale, 1) * 96px);
-}
 
 .fy-nav__item {
   display: block;
@@ -144,13 +96,6 @@
   color: var(--faint);
 }
 
-.fy-top {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 8px 12px;
-  border-bottom: var(--border-width) solid var(--border);
-}
 .fy-search {
   flex: 1;
   max-width: 420px;
@@ -271,14 +216,6 @@
   width: 360px;
   border-left: var(--border-width) solid var(--border);
   padding: 16px;
-}
-/* On the left (v4's fleet column): the ferret list is the first thing in the row, narrower than the right-hand column. */
-.fy-side--left {
-  flex: none;
-  width: calc(var(--fy-text-scale, 1) * 280px);
-  border-left-width: 0;
-  border-right: var(--border-width) solid var(--border);
-  padding: 8px;
 }
 
 .fy-page h1 {
@@ -701,9 +638,9 @@
    possible so we can read and see as much of the chat as possible").
 
    On a ferret's own page (`data-chat-chrome`, set by the frame from the route, so it is true on the first paint and nothing moves
-   when the page loads) the bar of places (`.fy-nav--top`) and the top bar (machine switcher + Find) are put away, and ONE
-   button (`.fy-chat-menu`, chat-menu.tsx) at the start of the ferret's own header row (name, status, Modes) opens a menu that
-   holds all of them. The header row is the first thing in the window: it is reserved one row high, so it does not change
+   when the page loads) the phone's title bar is put away (the wide frame has no top row at all), and ONE
+   button (`.fy-chat-menu`, chat-menu.tsx) at the start of the ferret's own header row (name, status, Modes) opens the
+   drawer that holds all of them. The header row is the first thing in the window: it is reserved one row high, so it does not change
    height as its name arrives. The side list, the bottom bar of a phone and the nav of a rail layout are untouched.
    ============================================================================ */
 .fy-main {
@@ -711,17 +648,13 @@
 }
 .fy-frame[data-chat-chrome] {
   --chat-head-h: 36px;
-  --chat-menu-w: 36px;
+  --chat-menu-w: 0px; /* the wide frame draws no menu button: the drawer is beside the chat */
 }
 @media (max-width: 767.98px) {
   .fy-frame[data-chat-chrome] {
     --chat-head-h: 44px;
     --chat-menu-w: 44px;
   }
-}
-.fy-frame[data-chat-chrome] .fy-nav--top,
-.fy-frame[data-chat-chrome] .fy-top {
-  display: none;
 }
 /* The chat page runs to the window's edges under the row: its own padding is the page's, not the frame's. */
 .fy-frame[data-chat-chrome] .fy-main {

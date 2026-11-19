@@ -162,98 +162,47 @@ describe('the chat page keeps its top chrome to one slim row', () => {
     );
   }
 
-  for (const viewport of VIEWPORTS) {
-    it(
-      'at ' + viewport.name + ' the one menu holds Find, the places, the machines and "Name this machine"',
-      async () => {
-        const { tab, close } = await open(viewport, CHAT + '&host=unnamed', '[data-chat-menu]');
-        try {
-          await tab.locator('[data-chat-menu]').click();
-          await tab.waitForSelector('[role="menu"] [role="menuitem"]');
-          // The machine's host name is offered a name only once the machine has said it has none.
-          await tab.waitForFunction(() =>
-            [...document.querySelectorAll('[role="menuitem"]')].some(item =>
-              item.textContent?.includes('Name this machine'),
-            ),
-          );
-          const words = await tab.evaluate(() =>
-            [...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent ?? ''),
-          );
-          await shot(tab, viewport.name + '-chat-menu');
-          expect(
-            words.some(word => word.startsWith('Find')),
-            'Find',
-          ).toBe(true);
-          for (const place of ['Ferrets', 'Agenda', 'Board'])
-            expect(
-              words.some(word => word.startsWith(place)),
-              place,
-            ).toBe(true);
-          expect(
-            words.some(word => word.startsWith('workshop-host') && word.includes('this one')),
-            'the machine on screen',
-          ).toBe(true);
-          expect(
-            words.some(word => word.startsWith('Name this machine')),
-            'Name this machine',
-          ).toBe(true);
-          // Choosing a place goes there, and the bar of places is back on a page that is not the chat.
-          await tab.locator('[role="menuitem"]', { hasText: 'Agenda' }).click();
-          await tab.waitForSelector('[data-agenda-stand-in]');
-          expect(await tab.locator('.fy-frame[data-chat-chrome]').count(), 'the agenda is not a chat').toBe(0);
-        } finally {
-          await close();
-        }
-      },
-    );
-  }
-
-  it('a machine that has been named is not offered a name', async () => {
-    const { tab, close } = await open(VIEWPORTS[0], CHAT + '&host=named', '[data-chat-menu]');
+  // The wide frame has no menu button on the chat: the left drawer (Find, the places) is already beside it.
+  it('on a desktop the drawer sits beside the chat and there is no menu button', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], CHAT, '[data-transcript]');
     try {
-      await tab.waitForTimeout(500);
+      expect(await tab.locator('[data-chat-menu]').count()).toBe(0);
+      expect(await tab.locator('.fy-drawer [data-drawer-find]').count()).toBe(1);
+      for (const place of ['Ferrets', 'Agenda', 'Board'])
+        expect(await tab.locator('.fy-drawer nav a', { hasText: place }).count(), place).toBeGreaterThan(0);
+      await shot(tab, VIEWPORTS[0].name + '-chat-drawer');
+    } finally {
+      await close();
+    }
+  });
+
+  it('on a phone the one button opens the drawer: Find, then the places; choosing one goes there', async () => {
+    const { tab, close } = await open(VIEWPORTS[1], CHAT, '[data-chat-menu]');
+    try {
       await tab.locator('[data-chat-menu]').click();
-      await tab.waitForSelector('[role="menu"] [role="menuitem"]');
-      const words = await tab.evaluate(() =>
-        [...document.querySelectorAll('[role="menuitem"]')].map(item => item.textContent ?? ''),
-      );
-      expect(words.some(word => word.includes('Name this machine'))).toBe(false);
+      await tab.waitForSelector('.fy-drawer--overlay [data-drawer-find]');
+      await shot(tab, VIEWPORTS[1].name + '-chat-drawer');
+      for (const place of ['Ferrets', 'Agenda', 'Board'])
+        expect(await tab.locator('.fy-drawer--overlay nav a', { hasText: place }).count(), place).toBeGreaterThan(0);
+      await tab.locator('.fy-drawer--overlay nav a', { hasText: 'Agenda' }).click();
+      await tab.waitForSelector('[data-agenda-stand-in]');
+      expect(await tab.locator('.fy-frame[data-chat-chrome]').count(), 'the agenda is not a chat').toBe(0);
+      expect(await tab.locator('.fy-drawer--overlay').count(), 'the overlay is put away').toBe(0);
     } finally {
       await close();
     }
   });
 });
 
-describe('the machine switcher on the pages that keep the top bar', () => {
-  it('quietly offers "Name this machine" beside a machine that goes by its host name, and the step opens', async () => {
-    const { tab, close } = await open(VIEWPORTS[0], '/d/ws/agenda?relay=0&host=unnamed', '[data-name-machine-offer]');
+describe('the machine switcher', () => {
+  it('is not drawn while one machine is paired, so there is nothing to name from it either', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], '/d/ws/agenda?relay=0&host=unnamed', '[data-agenda-stand-in]');
     try {
-      await shot(tab, 'desktop-1440x900-switcher-offer');
-      expect(await tab.locator('[data-daemon-picker]').count()).toBe(1);
-      await tab.locator('[data-name-machine-offer]').click();
-      await tab.waitForSelector('[data-name-machine]');
-      expect(
-        await tab.locator('[data-name-machine-offer]').count(),
-        'the offer steps aside while the step is open',
-      ).toBe(0);
+      await tab.waitForTimeout(500);
+      expect(await tab.locator('[data-daemon-picker]').count()).toBe(0);
+      expect(await tab.locator('[data-name-machine-offer]').count()).toBe(0);
     } finally {
       await close();
-    }
-  });
-
-  it('offers nothing to a machine the owner named, or one that cannot say', async () => {
-    for (const host of ['named', '']) {
-      const { tab, close } = await open(
-        VIEWPORTS[0],
-        '/d/ws/agenda?relay=0' + (host === '' ? '' : '&host=' + host),
-        '[data-daemon-picker]',
-      );
-      try {
-        await tab.waitForTimeout(500);
-        expect(await tab.locator('[data-name-machine-offer]').count(), 'host=' + host).toBe(0);
-      } finally {
-        await close();
-      }
     }
   });
 });

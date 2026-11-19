@@ -92,7 +92,8 @@ list.add({
   ...(view === 'pair-name' ? { askName: true as const } : {}),
 });
 if (view === 'connecting') list.learnMachine('ws', OWNER_NAME);
-if (view === 'daemons')
+// A second machine, so the switcher (not drawn while one machine is paired) shows the name.
+if (view === 'daemons' || view === 'connecting')
   list.add({ daemon: 'lap', machine: 'kirin-laptop', deviceId: 'dev2', address: 'http://127.0.0.1:40246' });
 const runtime = new ShellRuntime({
   appVersion: '5.0.0',

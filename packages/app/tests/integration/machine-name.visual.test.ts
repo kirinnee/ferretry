@@ -89,9 +89,9 @@ const open = async (viewport: (typeof VIEWPORTS)[number], scheme: 'light' | 'dar
   );
   const tab: Page = await context.newPage();
   await tab.goto(`${origin}${path}?theme=studio-${scheme}&view=${view}`);
-  // The machine switcher is a closed menu button, so a page can be drawn with little text: it counts as drawn too.
+  // The machine switcher is a closed menu button in the drawer, so a page can be drawn with little text: the frame counts as drawn too.
   await tab.waitForFunction(
-    () => document.body.innerText.trim().length > 40 || document.querySelector('.fy-daemon-picker') !== null,
+    () => document.body.innerText.trim().length > 40 || document.querySelector('.fy-frame') !== null,
     undefined,
     { timeout: 15_000 },
   );
@@ -107,6 +107,9 @@ describe('the machine name on every screen that shows it', () => {
           const words = [...always, ...(viewport.phone || !('wide' in rest) ? [] : rest.wide)];
           const { tab, close } = await open(viewport, scheme, view, path);
           try {
+            // On a phone the drawer (and the machine item in it) is shut until the menu button opens it.
+            if (viewport.phone && ('viaPicker' in rest || view === 'connecting'))
+              await tab.locator('button[aria-label="Menu"]').click();
             if ('viaPicker' in rest) {
               await tab.waitForSelector('button.fy-daemon-picker');
               await tab.click('button.fy-daemon-picker');

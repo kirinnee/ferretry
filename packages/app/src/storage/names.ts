@@ -60,4 +60,6 @@ export const APP_STORAGE = {
   daemons: localKey(APP_OWNER, 'daemons'),
   /** localStorage: the density chosen on this device. */
   density: localKey(APP_OWNER, 'density'),
+  /** localStorage: whether the left drawer is collapsed to its rail on this device. */
+  drawer: localKey(APP_OWNER, 'drawer'),
 } as const;
