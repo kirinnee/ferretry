@@ -885,6 +885,19 @@ const sameText = (left: string, right: string): boolean =>
 
 const sameJson = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
 
+/** JSON with every object's keys sorted, so two readings of one server compare equal whatever order they came in. */
+const stableJson = (value: unknown): string =>
+  JSON.stringify(value, (_key, each: unknown) =>
+    typeof each === 'object' && each !== null && !Array.isArray(each)
+      ? Object.fromEntries(Object.entries(each).toSorted(([left], [right]) => left.localeCompare(right)))
+      : each,
+  );
+
+const withoutScope = (server: McpComponent): Omit<McpComponent, 'harness'> => {
+  const { harness: _harness, ...rest } = server;
+  return rest;
+};
+
 /** The layer order a Default profile reads in, as §5.2 shows it. */
 const LAYER_ORDER: readonly ComponentKind[] = ['instructions', 'mcp', 'skills', 'settings', 'modelSets'];
 
@@ -948,7 +961,8 @@ function mcpCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candi
       component: { kind: 'mcp', name, value },
       files: [],
       sources,
-      digestText: JSON.stringify(value),
+      // Over the server alone, never its scope: widening a server to both tools must not read as a change.
+      digestText: JSON.stringify(server.value),
       warnings: server.warnings,
     });
   };
@@ -1214,7 +1228,32 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     const referenced = new Set(secretReferencesIn(JSON.stringify(candidate.component.value)));
     return secrets.filter(secret => referenced.has(secret.name));
   };
-  for (const candidate of candidates) {
+  for (const original of candidates) {
+    let candidate = original;
+    // A server one tool's import already made, which the OTHER tool now holds under the same name: the same server is
+    // reused (widened to both tools, no update), a different one is kept under its own tool's name.
+    if (original.component.kind === 'mcp') {
+      const mine = original.component.value;
+      const held = existing?.components.mcp[original.component.name];
+      const heldBy = held?.harness;
+      const recorded = record.components[referenceOf('mcp', original.component.name)];
+      if (mine.harness !== undefined && heldBy !== undefined && heldBy !== mine.harness && recorded !== undefined) {
+        if (stableJson(withoutScope(held as McpComponent)) === stableJson(withoutScope(mine))) {
+          const reference = referenceOf('mcp', original.component.name);
+          components.push({ kind: 'mcp', name: original.component.name, value: withoutScope(held as McpComponent) });
+          added.push(reference);
+          recordEntries[reference] = {
+            sources: [...new Set([...recorded.sources, ...original.sources])],
+            digest: recorded.digest,
+          };
+          continue;
+        }
+        candidate = {
+          ...original,
+          component: { kind: 'mcp', name: harnessNamed(mine.harness, original.component.name), value: mine },
+        };
+      }
+    }
     const { kind, name } = candidate.component;
     const digest = options.digest(candidate.digestText);
     const reference = referenceOf(kind, name);
@@ -1224,7 +1263,19 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
         updates.push({
           reference,
           sources: candidate.sources,
-          component: candidate.component,
+          // An update never changes which tools a server serves: the item keeps the scope it has.
+          component:
+            candidate.component.kind === 'mcp'
+              ? {
+                  ...candidate.component,
+                  value: {
+                    ...withoutScope(candidate.component.value),
+                    ...(existing?.components.mcp[name]?.harness === undefined
+                      ? {}
+                      : { harness: existing.components.mcp[name].harness }),
+                  },
+                }
+              : candidate.component,
           files: candidate.files,
           secrets: secretsOf(candidate),
           digest,
