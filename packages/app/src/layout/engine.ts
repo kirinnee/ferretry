@@ -16,6 +16,8 @@ export interface ScreenRef {
   readonly label: string;
   readonly icon?: string;
   readonly navOrder?: number;
+  /** `none`: drawn without the shell's chrome (`ScreenDecl.chrome`). */
+  readonly chrome?: 'none';
 }
 
 export interface PanelRef {
@@ -46,6 +48,7 @@ export function viewsOf(surfaces: readonly SurfaceEntry[]): Views {
         label: screen.nav?.label ?? entry.title,
         ...(screen.nav?.icon === undefined ? {} : { icon: screen.nav.icon }),
         ...(screen.nav === undefined ? {} : { navOrder: screen.nav.order }),
+        ...(screen.chrome === undefined ? {} : { chrome: screen.chrome }),
       };
       screens.set(`${entry.id}.${screen.id}`, ref);
       bare.set(screen.id, [...(bare.get(screen.id) ?? []), ref]);

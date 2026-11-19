@@ -166,9 +166,15 @@ export function Frame() {
   const daemon = routeDaemon(route);
   // A ferret's own page: the chat, whose top chrome is one slim row (shell.css `[data-chat-chrome]`, chat-menu.tsx).
   const chat = isChatRoute(route);
+  // A screen that declares `chrome: 'none'` (first-run setup) is drawn alone: no drawer, bars, side column or command bar.
+  const bare = route.kind === 'screen' && route.screen.chrome === 'none';
   const whole = daemon === undefined ? undefined : runtime.wholeDaemonLine(daemon);
   const [bar, setBar] = useState({ open: false, signal: 0 });
-  const openBar = useCallback(() => setBar(current => ({ open: true, signal: current.signal + 1 })), []);
+  // Ctrl-K opens nothing on a chrome-less screen (no bar is drawn, so it must not wait open for the next screen).
+  const openBar = useCallback(
+    () => (bare ? undefined : setBar(current => ({ open: true, signal: current.signal + 1 }))),
+    [bare],
+  );
   const closeBar = useCallback(() => setBar(current => ({ ...current, open: false })), []);
   const findRef = useRef<HTMLButtonElement | null>(null);
   useFindShortcut(findRef, openBar);
@@ -181,20 +187,23 @@ export function Frame() {
     <FrameRootContext.Provider value={frameRoot}>
       <div
         ref={setFrameRoot}
-        className={`fy-frame${plan.nav.side === 'bottom' ? ' fy-frame--nav-bottom' : ''}`}
+        className={`fy-frame${plan.nav.side === 'bottom' && !bare ? ' fy-frame--nav-bottom' : ''}`}
+        data-chrome={bare ? 'none' : undefined}
         data-chat-chrome={chat ? '' : undefined}
         data-layout={plan.layoutId}
       >
-        <Drawer
-          daemon={daemon}
-          navDaemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined}
-          route={route}
-          findRef={findRef}
-          onFind={openBar}
-          listed={whole === undefined}
-        />
+        {bare ? null : (
+          <Drawer
+            daemon={daemon}
+            navDaemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined}
+            route={route}
+            findRef={findRef}
+            onFind={openBar}
+            listed={whole === undefined}
+          />
+        )}
         <div className="fy-body">
-          <PhoneTitleBar />
+          {bare ? null : <PhoneTitleBar />}
           {/* THE STATUS STRIP: where the views mounted at the frame root draw what they draw IN FLOW — a line a watcher
       says ("Couldn't reach it through the relay…"), a banner. They sit here, a row above the
       columns, never as a child of the frame's own row: a line placed beside the body is a COLUMN of the frame and takes its
@@ -217,18 +226,20 @@ export function Frame() {
                 {whole === undefined ? <Main route={route} /> : <WholeLine daemon={daemon} line={whole} />}
               </PageScrollRegion>
             </main>
-            {whole === undefined ? <RightSide daemon={daemon} route={route} /> : null}
+            {whole === undefined && !bare ? <RightSide daemon={daemon} route={route} /> : null}
           </div>
-          {plan.nav.side === 'bottom' ? (
+          {plan.nav.side === 'bottom' && !bare ? (
             <BottomNav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
           ) : null}
         </div>
-        <ShellCommandBar
-          daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined}
-          open={bar.open}
-          focusSignal={bar.signal}
-          onClose={closeBar}
-        />
+        {bare ? null : (
+          <ShellCommandBar
+            daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined}
+            open={bar.open}
+            focusSignal={bar.signal}
+            onClose={closeBar}
+          />
+        )}
         {/* One passkey prompt for the whole app (Access's): any daemon call refused for want of an unlock or a step-up
       raises it, and only the machine on screen may raise a background one (G95, G105). */}
         <PasskeyMount onScreen={runtime.passkeyOnScreen.chosen() ?? daemon ?? runtime.daemons.snapshot().selected} />

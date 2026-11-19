@@ -144,6 +144,8 @@ export interface ScreenDecl<Id extends string = string> {
   /** On purpose, the screen belongs to no daemon (a share link's landing page, first-run setup). Absolute paths only. */
   readonly daemonless?: true;
   readonly nav?: { readonly label: string; readonly icon?: string; readonly order: number };
+  /** `none`: the screen is drawn WITHOUT the shell's chrome (no drawer, bottom nav, side column, title bar or command bar); first-run setup. */
+  readonly chrome?: 'none';
 }
 
 export interface PanelDecl<Id extends string = string> {
