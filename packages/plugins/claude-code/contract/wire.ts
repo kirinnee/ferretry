@@ -333,6 +333,13 @@ export const HarnessConfigSchema = z.strictObject({
    * known is not assumed to allow them). `true` or `false` wins for every login. Read at each launch; not a loosening.
    */
   channels: z.boolean().optional(),
+  /**
+   * Whether Ferretry READS the conversations Claude holds in the person's own `~/.claude` on this machine (the host
+   * history). Default ON. OFF, the history part lists nothing from the host home and copies nothing from it. One way
+   * either way: Ferretry never changes or deletes anything in `~/.claude`; ferrets' own homes and the shared pool are
+   * Ferretry's own and are not affected. Read per request, so a change takes effect without a restart. Not a loosening.
+   */
+  hostHistory: z.boolean().default(true),
 });
 export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
 

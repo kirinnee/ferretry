@@ -527,6 +527,66 @@ describe('ClaudeHarness', () => {
     expect(Object.keys(owner?.files ?? {}).sort()).toEqual(['entries', 'read', 'stat']);
   });
 
+  describe('hostHistory', () => {
+    const configWith = (extra: Record<string, unknown>) => ({
+      file: () => ({ searchPaths: [], permissionMode: 'auto', ...extra }),
+      collection: () => new Map(),
+    });
+    const seedHost = async () => {
+      await mkdir(join(HISTORY, 'projects/p'), { recursive: true });
+      await Bun.write(join(HISTORY, 'projects/p/c-1.jsonl'), `${JSON.stringify({ cwd: '/work' })}\n`);
+      await mkdir(join(AGENT_HOMES(), 'scout', 'projects/q'), { recursive: true });
+      await Bun.write(join(AGENT_HOMES(), 'scout', 'projects/q/c-2.jsonl'), 'abcdef');
+    };
+
+    test('hostHistory: false lists no host conversation and offers no owner source; ferret homes stay', async () => {
+      const { harness } = build({ config: configWith({ hostHistory: false }) });
+      await seedHost();
+      expect(await harness.conversations.list(undefined)).toEqual([]);
+      expect(await harness.conversations.list(spec().folder)).toEqual([]);
+      const sources = await harness.historySources();
+      expect(sources.some(source => source.kind === 'computer')).toBe(false);
+      expect(sources.map(source => [source.kind, source.label])).toEqual(
+        expect.arrayContaining([['ferret-home', 'scout']]),
+      );
+    });
+
+    test('hostHistory: false refuses to copy a host conversation into the pool, and leaves the host file as it was', async () => {
+      const { harness } = build({ config: configWith({ hostHistory: false }) });
+      await seedHost();
+      const result = await harness.importConversation({ id: 'c-1', source: 'projects/p/c-1.jsonl' } as never);
+      expect(result.ok).toBe(false);
+      expect(JSON.stringify(result)).toContain('turned off');
+      expect(await Bun.file(join(HISTORY, 'projects/p/c-1.jsonl')).text()).toBe(
+        `${JSON.stringify({ cwd: '/work' })}\n`,
+      );
+    });
+
+    test('hostHistory default (absent or true) is unchanged: host conversations and the owner source are listed', async () => {
+      for (const extra of [{}, { hostHistory: true }]) {
+        const { harness } = build({ config: configWith(extra) });
+        await seedHost();
+        expect((await harness.conversations.list(spec().folder)).map(item => item.id)).toEqual(['c-1']);
+        const sources = await harness.historySources();
+        expect(sources.map(source => source.kind)).toContain('computer');
+      }
+    });
+
+    test('hostHistory is read at each call: turning it off after a listing empties the next one', async () => {
+      let on = true;
+      const { harness } = build({
+        config: {
+          file: () => ({ searchPaths: [], permissionMode: 'auto', hostHistory: on }),
+          collection: () => new Map(),
+        },
+      });
+      await seedHost();
+      expect((await harness.conversations.list(undefined)).length).toBe(1);
+      on = false;
+      expect(await harness.conversations.list(undefined)).toEqual([]);
+    });
+  });
+
   test('S41 conversation discovery refuses a history symlink that leaves its root', async () => {
     const { harness } = build();
     await mkdir(join(fixture, 'outside'), { recursive: true });

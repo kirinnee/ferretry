@@ -7,8 +7,15 @@ import type {
 } from '@ferretry/core-ferrets/contract';
 import { historyFilesOver } from '@ferretry/core-ferrets/contract';
 import { err, ok, type Result } from '@ferretry/std';
+import type { ConfigFileDef } from '@ferretry/kernel/contract';
+import { CLAUDE_CODE_CONFIG, type HarnessConfig } from '../../../contract/index.ts';
 import { claudeTranscriptPath, isConversationId } from '../../lib/harness/claude-path.ts';
 import { type ClaudeCore, claudeHome, FIRST_RECORDS_BYTES, type Serves } from './core.ts';
+
+const configFile = CLAUDE_CODE_CONFIG as unknown as ConfigFileDef<HarnessConfig>;
+
+/** Whether the person's own `~/.claude` history may be read (`hostHistory`, default on); read at each call. */
+const hostHistoryOn = (core: ClaudeCore): boolean => core.deps.config.file(configFile)?.hostHistory ?? true;
 
 /**
  * The most `projects/*` folders `hasConversation` lists before it says "cannot tell". One ferret's home holds the
@@ -83,6 +90,7 @@ export const historyPart = (
    */
   async importConversation(input: ConversationImport): Promise<Result<void, { readonly reason: string }>> {
     const refuse = (reason: string): Result<void, { readonly reason: string }> => err({ reason });
+    if (!hostHistoryOn(core)) return refuse("Showing Claude's conversations from this computer is turned off.");
     if (!isConversationId(input.id) || !new RegExp(`^projects/[^/]+/${input.id}\\.jsonl$`, 'u').test(input.source))
       return refuse('That is not a Claude Code conversation file of this id.');
     try {
@@ -111,6 +119,7 @@ export const historyPart = (
   /** Claude's own conversations on this machine, read from its documented history folder only. */
   conversations: {
     list: async folder => {
+      if (!hostHistoryOn(core)) return [];
       const historyHome = await core.deps.historyHome();
       if (!historyHome.startsWith('/')) return [];
       const history = core.deps.roots.root('harness-history', { subfolder: historyHome });
@@ -143,7 +152,7 @@ export const historyPart = (
    */
   async historySources(): Promise<readonly HarnessHistorySource[]> {
     const sources: HarnessHistorySource[] = [];
-    const historyHome = await core.deps.historyHome().catch(() => '');
+    const historyHome = hostHistoryOn(core) ? await core.deps.historyHome().catch(() => '') : '';
     if (historyHome.startsWith('/'))
       sources.push({
         kind: 'computer',

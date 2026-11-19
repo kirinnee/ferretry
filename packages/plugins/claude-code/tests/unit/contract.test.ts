@@ -70,8 +70,8 @@ describe('claude-code contract', () => {
   });
 
   test('skipping every permission prompt is a loosening; asking again is not', () => {
-    const auto = { searchPaths: [], permissionMode: 'auto' as const, dangerousRmWaiver: false };
-    const skip = { searchPaths: [], permissionMode: 'skip' as const, dangerousRmWaiver: false };
+    const auto = { searchPaths: [], permissionMode: 'auto' as const, dangerousRmWaiver: false, hostHistory: true };
+    const skip = { searchPaths: [], permissionMode: 'skip' as const, dangerousRmWaiver: false, hostHistory: true };
     expect(harnessConfigLoosens(auto, skip)).toEqual(['agents now skip every permission prompt']);
     expect(harnessConfigLoosens(skip, auto)).toEqual([]);
     expect(CLAUDE_CODE_CONFIG.axis).toBe('configure');
@@ -81,6 +81,12 @@ describe('claude-code contract', () => {
     expect(HarnessConfigSchema.safeParse({ questionTool: true }).success).toBe(false);
     expect(HarnessConfigSchema.safeParse({ questionTool: false }).success).toBe(false);
     expect(Object.keys(HarnessConfigSchema.shape)).not.toContain('questionTool');
+  });
+
+  test('a harness file with no hostHistory reads the host history; false switches it off', () => {
+    expect(HarnessConfigSchema.parse({}).hostHistory).toBe(true);
+    expect(HarnessConfigSchema.parse({ hostHistory: false }).hostHistory).toBe(false);
+    expect(() => HarnessConfigSchema.parse({ hostHistory: 'no' })).toThrow();
   });
 
   test('^A525 a harness file with no permissionMode means skip; an explicit auto stays auto', () => {
