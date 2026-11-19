@@ -18,7 +18,7 @@
   border: 0;
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 320px));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 260px));
   margin: 0;
   min-width: 0;
   padding: 0;
@@ -46,9 +46,17 @@
 .cc-card input {
   /* Native radio group (arrow keys, one tab stop); the dot is hidden, the card is the control. */
   appearance: none;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
   inset: 0;
   margin: 0;
   position: absolute;
+}
+.cc-card__title,
+.cc-card__line {
+  position: relative;
+  pointer-events: none;
 }
 .cc-card__title {
   font-weight: 600;
