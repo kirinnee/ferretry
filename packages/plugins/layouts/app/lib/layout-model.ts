@@ -15,7 +15,8 @@ interface ChoiceOption {
 
 /**
  * ONLY WHAT THE SHELL DRAWS. The menu is always the left side bar (`drawer.tsx`); a side of `right` or `top` and a style of
- * `bar` draw exactly what `left` and `list` draw, so they are not offered. A layout that still names one (the built-in
+ * `bar` draw exactly what `left` and `list` draw, so they are not offered. A phone has no navigation style row: its side bar
+ * is always the shut overlay drawer, so a style would change nothing there. A layout that still names one (the built-in
  * default says `top` and `bar`; `fy layout set` accepts them) reads as the choice it draws, `unlisted`, with no migration.
  */
 const NAV_SIDE_OPTIONS: readonly ChoiceOption[] = [
@@ -50,7 +51,6 @@ export interface ChoiceSetting {
     | 'side.show'
     | 'density'
     | 'phone.nav.side'
-    | 'phone.nav.style'
     | 'phone.side.show'
     | 'phone.density';
   readonly name: string;
@@ -132,14 +132,6 @@ export const LAYOUT_SETTINGS: readonly LayoutSetting[] = [
   },
   {
     kind: 'choice',
-    path: 'phone.nav.style',
-    name: 'Phone navigation style',
-    hint: 'How the navigation is drawn on a narrow screen',
-    options: NAV_STYLE_OPTIONS,
-    unlisted: 'list',
-  },
-  {
-    kind: 'choice',
     path: 'phone.side.show',
     name: 'Phone second column',
     hint: 'The column beside the page on a narrow screen',
@@ -192,8 +184,6 @@ function wordOf(layout: Layout, path: ChoiceSetting['path']): string {
       return layout.density;
     case 'phone.nav.side':
       return layout.phone?.nav?.side ?? layout.nav.side;
-    case 'phone.nav.style':
-      return layout.phone?.nav?.style ?? layout.nav.style;
     case 'phone.side.show':
       return layout.phone?.side?.show ?? layout.side.show;
     case 'phone.density':

@@ -7,7 +7,7 @@ import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { LayoutPreview } from '../../../app/features/layout/previews/layout-preview.tsx';
 import { NavListPreview } from '../../../app/features/layout/previews/nav-list-preview.tsx';
-import { captionFor, stateFor, wordBefore } from '../../../app/features/layout/previews/scene.ts';
+import { stateFor, wordBefore } from '../../../app/features/layout/previews/scene.ts';
 import { type ChoiceSetting, LAYOUT_SETTINGS } from '../../../app/lib/layout-model.ts';
 
 const choices = LAYOUT_SETTINGS.filter((setting): setting is ChoiceSetting => setting.kind === 'choice');
@@ -32,21 +32,9 @@ describe('the scene for a layout key', () => {
     expect(stateFor('nav.style', 'list')).toEqual(stateFor('nav.style', 'bar'));
   });
 
-  test('a phone has no drawer on screen: its style draws one frame, and only bottom adds the bar', () => {
-    for (const word of ['rail', 'bar', 'list'])
-      expect(stateFor('phone.nav.style', word)).toEqual(stateFor('phone.nav.style', 'rail'));
-    expect(stateFor('phone.nav.style', 'list')).toMatchObject({ device: 'phone', drawer: 'none', bottom: false });
+  test('a phone has no drawer on screen: only bottom adds the bar', () => {
     expect(stateFor('phone.nav.side', 'right')).toEqual(stateFor('phone.nav.side', 'left'));
     expect(stateFor('phone.nav.side', 'bottom')).toMatchObject({ drawer: 'none', bottom: true, device: 'phone' });
-  });
-
-  test('a caption says so where a word draws nothing new, and only there', () => {
-    expect(captionFor('nav.side', 'left')).toBeUndefined();
-    expect(captionFor('nav.side', 'bottom')).toBeUndefined();
-    expect(captionFor('nav.style', 'list')).toBeUndefined();
-    expect(captionFor('nav.style', 'rail')).toBeUndefined();
-    expect(captionFor('phone.nav.style', 'rail')).toContain('phone');
-    expect(captionFor('density', 'compact')).toBeUndefined();
   });
 
   test('the second column is drawn for wide-only and always on a wide screen, and for always alone on a phone', () => {
@@ -90,8 +78,6 @@ describe('the previews', () => {
       scene =>
         `${scene.querySelector('.fy-ls-drawer')?.getAttribute('data-form') ?? 'none'}${scene.querySelector('.fy-ls-bottom') === null ? '' : '+bottom'}`,
     );
-  const caption = (container: HTMLElement): string | undefined =>
-    container.querySelector('[data-ls-caption]')?.textContent ?? undefined;
 
   test('every choice key draws, decorative, with its word in the label and one lit part per frame', async () => {
     for (const setting of choices)
@@ -138,13 +124,9 @@ describe('the previews', () => {
     expect(menus(mounted.container)).toEqual(['rail', 'rail+bottom']);
   });
 
-  test('a word that draws nothing new on a phone says so under its frame, and no other does', async () => {
-    mounted = await mount(<LayoutPreview setting={choice('phone.nav.style')} value="list" />);
-    expect(caption(mounted.container)).toContain('No visible change on a phone');
+  test('a preview frame is decorative', async () => {
+    mounted = await mount(<LayoutPreview setting={choice('phone.nav.side')} value="left" />);
     expect(frame(mounted.container).getAttribute('aria-hidden')).toBe('true');
-    await mounted.unmount();
-    mounted = await mount(<LayoutPreview setting={choice('nav.side')} value="left" />);
-    expect(caption(mounted.container)).toBeUndefined();
   });
 
   test('a phone frame draws a menu button where a wide one draws its drawer', async () => {

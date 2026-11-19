@@ -77,7 +77,6 @@ describe('the Layout tab', () => {
       'Top bar',
       'Ferret side panels',
       'Phone navigation side',
-      'Phone navigation style',
       'Phone second column',
       'Phone density',
       'Phone navigation items',

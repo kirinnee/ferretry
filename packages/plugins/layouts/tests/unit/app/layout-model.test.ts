@@ -31,7 +31,8 @@ describe('the layout settings', () => {
         setting.kind === 'choice' && setting.path === path ? setting.options.map(o => o.id) : [],
       );
     for (const path of ['nav.side', 'phone.nav.side']) expect(offered(path)).toEqual(['left', 'bottom']);
-    for (const path of ['nav.style', 'phone.nav.style']) expect(offered(path)).toEqual(['rail', 'list']);
+    expect(offered('nav.style')).toEqual(['rail', 'list']);
+    expect(offered('phone.nav.style')).toEqual([]); // a phone's side bar is always the shut drawer: no style to choose
   });
 
   test('a saved word that is no longer offered reads as the choice the shell draws it as', () => {
@@ -64,14 +65,7 @@ describe('the layout settings', () => {
 
   test('every phone key has a row, named `phone.*` as `fy layout set` takes it', () => {
     const phone = LAYOUT_SETTINGS.filter(setting => setting.path.startsWith('phone.')).map(setting => setting.path);
-    expect(phone).toEqual([
-      'phone.nav.side',
-      'phone.nav.style',
-      'phone.side.show',
-      'phone.density',
-      'phone.nav.items',
-      'phone.top',
-    ]);
+    expect(phone).toEqual(['phone.nav.side', 'phone.side.show', 'phone.density', 'phone.nav.items', 'phone.top']);
   });
 
   test('a phone key is what the layout sets for a phone, else what the wide layout holds', () => {
@@ -87,7 +81,6 @@ describe('the layout settings', () => {
     ]);
     const bare = LayoutSchema.parse({ id: 'bare', nav: { side: 'right', style: 'bar', items: ['agenda'] } });
     expect(choiceOf(bare, 'phone.nav.side')).toBe('left');
-    expect(choiceOf(bare, 'phone.nav.style')).toBe('list');
     expect(choiceOf(bare, 'phone.side.show')).toBe('never');
     expect(choiceOf(bare, 'phone.density')).toBe('comfortable');
     expect(listOf(bare, 'phone.nav.items')).toEqual(['agenda']);
@@ -98,7 +91,6 @@ describe('the layout settings', () => {
       phone: { nav: { side: 'bottom', style: 'list' }, side: { show: 'always' }, density: 'compact', top: ['search'] },
     });
     expect(choiceOf(phone, 'phone.nav.side')).toBe('bottom');
-    expect(choiceOf(phone, 'phone.nav.style')).toBe('list');
     expect(choiceOf(phone, 'phone.side.show')).toBe('always');
     expect(choiceOf(phone, 'phone.density')).toBe('compact');
     expect(listOf(phone, 'phone.top')).toEqual(['search']);
