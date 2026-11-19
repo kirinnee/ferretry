@@ -204,6 +204,16 @@ describe('planImport — hints that are listed, not imported', () => {
     should(JSON.stringify(plan.preview.harnesses[0]?.codexProfiles)).not.containEql('approval_policy');
   });
 
+  it('should list a profile that sets only a model, and skip a profiles entry that is not a table', () => {
+    const settings = text(
+      '/h/.codex/config.toml',
+      ['[profiles]', 'odd = 1', '[profiles.plain]', 'model = "m"'].join('\n'),
+    );
+    const plan = planImport([codex({ settings })], { digest });
+
+    should(plan.preview.harnesses[0]?.codexProfiles).deepEqual([{ name: 'plain', model: 'm' }]);
+  });
+
   it('should list no Codex profiles for Claude', () => {
     should(planImport([claude()], { digest }).preview.harnesses[0]?.codexProfiles).deepEqual([]);
   });
