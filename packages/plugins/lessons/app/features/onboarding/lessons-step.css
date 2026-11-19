@@ -1,0 +1,104 @@
+/* The first-run Lessons page: a title, one line, the two cards. The shell owns the page frame (width, footer). */
+.fy-lessons-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md, 12px);
+  min-width: 0;
+}
+.fy-lessons-step-title {
+  color: var(--fg);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-strong, 600);
+  margin: 0;
+}
+.fy-lessons-step-line {
+  color: var(--muted);
+  font-size: var(--text-md);
+  margin: 0;
+  max-width: min(100%, 652px); /* the width of the two cards and the gap between them */
+}
+/* The cards sit a clear step below the line above them: 12px of gap plus 8px. */
+.fy-lessons-step [data-choice-cards] {
+  margin-block-start: 8px;
+}
+.fy-lessons-step-note {
+  color: var(--muted);
+  font-size: var(--text-md);
+  margin: 0;
+}
+.fy-lessons-step-problem {
+  color: var(--err);
+  font-size: var(--text-md);
+  margin: 0;
+}
+.fy-lessons-step-retry {
+  background: var(--surface-2);
+  border: var(--stroke-panel) solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--fg);
+  cursor: pointer;
+  min-height: 44px;
+  padding: 0 16px;
+}
+
+/* A correction becomes a rule: two chips and an arrow, 48px tall so both cards stay the same height. */
+.fy-lsd {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  height: 48px;
+  min-width: 0;
+}
+.fy-lsd__said,
+.fy-lsd__rule {
+  border-radius: var(--radius-control);
+  font-size: calc(var(--font-size-base) - 2px);
+  line-height: 1.2;
+  overflow: hidden;
+  padding: 6px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-lsd__said {
+  background: var(--surface-3);
+  color: var(--fg);
+}
+.fy-lsd__arrow {
+  color: var(--muted);
+}
+.fy-lsd__rule {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+/* Off: nothing becomes a rule, so the second chip is dashed and quiet. */
+.fy-lsd[data-kept='false'] .fy-lsd__rule {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--muted);
+  font-weight: 400;
+}
+
+@keyframes fy-lsd-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+/* Plays once, when the card BECOMES selected; at rest (or never selected) it shows the finished scene. */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion='reduced']) .fy-cc__card[data-selected='true'] .fy-lsd__said {
+    animation: fy-lsd-in 280ms ease-out backwards;
+  }
+  :root:not([data-motion='reduced']) .fy-cc__card[data-selected='true'] .fy-lsd__arrow {
+    animation: fy-lsd-in 280ms 200ms ease-out backwards;
+  }
+  :root:not([data-motion='reduced']) .fy-cc__card[data-selected='true'] .fy-lsd__rule {
+    animation: fy-lsd-in 280ms 400ms ease-out backwards;
+  }
+}
