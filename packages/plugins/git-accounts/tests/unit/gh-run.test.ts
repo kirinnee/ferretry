@@ -17,6 +17,7 @@ import { GhRunAnswerSchema, GhRunRequestSchema, NO_SECRET_FIELDS } from '../../c
 import daemon from '../../daemon/index.ts';
 import { GhRunner } from '../../daemon/features/gh-run/gh-runner.ts';
 import { FAKE_TOKEN, FakeGithub } from './fake-github.ts';
+import { GH_REAL, ghHost } from './gh-host.ts';
 
 const CLIENT = 'Ov23FAKECLIENTID';
 const ACCOUNT = 'gha_4242';
@@ -49,6 +50,8 @@ async function boot(
     ferretFolders?: Record<string, string>;
     standing?: () => CallStanding;
     spawn?: (call: Call) => SpawnResult | Promise<SpawnResult>;
+    /** The daemon's PATH, the executables the kernel finds, and what it says is in the state home (default: a plain /usr/bin/gh). */
+    where?: { path?: string; executables?: readonly string[]; held?: (path: string) => Promise<string | undefined> };
   } = {},
 ) {
   const github = new FakeGithub();
@@ -59,6 +62,8 @@ async function boot(
   const calls: Call[] = [];
   const host = await testHost({
     plugins: [daemon],
+    ...ghHost(options.where?.path, options.where?.executables),
+    ...(options.where?.held === undefined ? {} : { stateHomeHolding: options.where.held }),
     gate: new StandInAdmission(() => (connecting ? ownerStanding() : (options.standing ?? (() => ownerStanding()))())),
     fakes: { sealed, gate },
     uses: {
@@ -109,6 +114,70 @@ const everything = (world: Awaited<ReturnType<typeof boot>>) =>
     JSON.stringify(world.gate.audits),
   ].join('\n');
 
+describe('the gh that gets a token is the real one, never a file in the state home', () => {
+  const HOME = '/home/o/.ferretry';
+  const SHIMS = `${HOME}/state/git-accounts/downloads/shims`;
+  const held = async (path: string) => (path === HOME || path.startsWith(`${HOME}/`) ? HOME : undefined);
+
+  test('a daemon PATH that starts with the shim folder (written there by a pane) still runs the real gh, by absolute path', async () => {
+    const { root } = projectFolder();
+    const world = await boot({
+      projects: [linked(root)],
+      where: { path: `${SHIMS}:/usr/bin`, executables: [`${SHIMS}/gh`, '/usr/bin/gh'], held },
+    });
+    const answer = await world.gh(['pr', 'list'], root);
+    expect(answer.status).toBe(200);
+    expect(world.calls.map(call => call.program)).toEqual(['/usr/bin/gh']);
+  });
+
+  test('a daemon PATH with nothing but the shim refuses in a sentence: nothing runs and the token is never read', async () => {
+    const { root } = projectFolder();
+    const world = await boot({
+      projects: [linked(root)],
+      where: { path: SHIMS, executables: [`${SHIMS}/gh`], held },
+    });
+    const answer = await world.gh(['pr', 'list'], root);
+    // The kernel falls back to the whole PATH when the safe folders hold no gh: what it finds there is the shim, and is refused.
+    expect(answer.json()).toEqual({ refused: expect.stringContaining("inside Ferretry's own folders") });
+    expect(world.calls).toEqual([]);
+    expect(everything(world)).not.toContain(FAKE_TOKEN);
+  });
+
+  test('a machine with no gh at all says so, and nothing runs', async () => {
+    const { root } = projectFolder();
+    const world = await boot({ projects: [linked(root)], where: { executables: [], held } });
+    const answer = await world.gh(['pr', 'list'], root);
+    expect(answer.json()).toEqual({ refused: expect.stringContaining('no gh program was found outside') });
+    expect(world.calls).toEqual([]);
+  });
+
+  test('a gh found in an ordinary folder that is itself inside the state home (a link) is refused too', async () => {
+    const { root } = projectFolder();
+    const world = await boot({
+      projects: [linked(root)],
+      where: { executables: ['/usr/bin/gh'], held: async path => (path === '/usr/bin/gh' ? HOME : undefined) },
+    });
+    const answer = await world.gh(['pr', 'list'], root);
+    expect(answer.json()).toEqual({ refused: expect.stringContaining("inside Ferretry's own folders") });
+    expect(world.calls).toEqual([]);
+  });
+
+  test('a fence that cannot be built refuses (it never guesses), and nothing runs', async () => {
+    const { root } = projectFolder();
+    const world = await boot({
+      projects: [linked(root)],
+      where: {
+        held: async () => {
+          throw new Error('fence');
+        },
+      },
+    });
+    const answer = await world.gh(['pr', 'list'], root);
+    expect(answer.json()).toEqual({ refused: expect.stringContaining('could not check where the gh program is') });
+    expect(world.calls).toEqual([]);
+  });
+});
+
 describe("Ferretry's gh runs as the account the folder is linked to", () => {
   test('a person in a linked folder: the repository comes from the project record, the token is only in the child', async () => {
     const { root, recorder } = projectFolder();
@@ -121,7 +190,7 @@ describe("Ferretry's gh runs as the account the folder is linked to", () => {
     expect(answer.json()).toEqual({ exitCode: 0, stdout: 'list [redacted]', stderr: '' });
     expect(world.calls).toHaveLength(1);
     const call = world.calls[0] as Call;
-    expect(call.program).toBe('gh');
+    expect(call.program).toBe(GH_REAL);
     // The repository is the record's (github.com/acme/app), NOT the evil remote in the folder's own .git/config.
     expect(call.args).toEqual(['pr', 'list', '-R', 'acme/app', '--state', 'open']);
     const env = call.options?.env as Record<string, string>;

@@ -91,7 +91,17 @@ export type LaunchPart =
    * is linked to). Unlike `env` they are judged at launch: a name the launch or login owns (`PATH`, `HOME`, `FY_*`, the
    * token variables) or a `${secret…}` value refuses the launch, naming `plugin`. Values are paths and words, never secrets.
    */
-  | { readonly kind: 'pane-env'; readonly plugin: string; readonly env: Readonly<Record<string, string>> }
+  | {
+      readonly kind: 'pane-env';
+      readonly plugin: string;
+      readonly env: Readonly<Record<string, string>>;
+      /**
+       * Absolute folders put FIRST on this pane's `PATH` (r9 B10: Ferretry's `gh` shim). The launch composes
+       * `PATH = <every prepend, in order>:<the PATH the pane already has (its login's or a shell part's), else the daemon's>`; a relative folder, a `:` or a control character in a
+       * folder refuses the launch naming `plugin`. `env` may still never name `PATH`.
+       */
+      readonly pathPrepend?: readonly string[];
+    }
   /**
    * Where the harness squeezes its own conversation, in tokens (a login's `compactAt`, once it is a number: `auto` adds
    * nothing). The Claude harness writes it into its private settings file as `autoCompactWindow`.

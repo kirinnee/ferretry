@@ -23,6 +23,47 @@ const input = {
   searchPath: '/usr/bin',
 };
 
+describe('the PATH the daemon is given never names a folder in the state home (a ferret pane starts the unit)', () => {
+  const shims = '/home/ada/.ferretry/state/git-accounts/downloads/shims';
+
+  it('drops the gh shim folder and any other state-home folder, keeps the rest in order', () => {
+    const layout = resolveDaemonLayout({
+      ...input,
+      searchPath: `${shims}:/nix/store/dev/bin:/home/ada/.ferretry/bin/:/home/ada/.ferretry:/home/ada/.ferretry-other/bin:/usr/bin::rel/bin`,
+    });
+    should(layout.searchPath).equal('/nix/store/dev/bin:/home/ada/.ferretry-other/bin:/usr/bin::rel/bin');
+  });
+
+  it('judges the folder as written once normalised, so a dot segment cannot hide it', () => {
+    const layout = resolveDaemonLayout({
+      ...input,
+      searchPath: `/usr/bin:/home/ada/./.ferretry/state/../state/x:/bin`,
+    });
+    should(layout.searchPath).equal('/usr/bin:/bin');
+  });
+
+  it('a pinned FY_HOME is the home that is judged, and the unit written from a pane PATH has no shims entry', () => {
+    const layout = resolveDaemonLayout({
+      ...input,
+      stateHome: '/data/fy/',
+      searchPath: '/data/fy/state/git-accounts/downloads/shims:/usr/bin',
+    });
+    should(layout.searchPath).equal('/usr/bin');
+    const unit = renderSystemdUnit({
+      daemonBinary: '/usr/bin/fyd',
+      stateHome: layout.stateHome,
+      userHome: layout.homeDirectory,
+      logFile: layout.logFile,
+      searchPath: layout.searchPath,
+      locale: layout.locale,
+      runtime: {},
+      description: 'x',
+    });
+    should(unit).containEql('PATH=/usr/bin');
+    should(unit).not.containEql('shims');
+  });
+});
+
 describe('where the daemon lives on this host', () => {
   it('defaults the state home to a dot-folder named for the product, and the manager to the platform’s own', () => {
     const linux = resolveDaemonLayout(input);

@@ -11,6 +11,9 @@ import {
 
 /** How long one request may take: longer than the longest thing the daemon holds open inside one. */
 const DEFAULT_TIMEOUT_MS = 60_000;
+/** The range one call may ask to wait (`PluginClient.call`'s `timeoutMs`); anything else is ignored. */
+const MIN_CALL_TIMEOUT_MS = 1_000;
+const MAX_CALL_TIMEOUT_MS = 600_000;
 
 export type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -67,7 +70,12 @@ export interface HttpTransportOptions {
 export class HttpTransport implements DaemonTransport {
   constructor(private readonly options: HttpTransportOptions) {}
 
-  async send(request: DaemonRequest, { repeatable, recheck, signal }: SendOptions): Promise<DaemonReply> {
+  async send(request: DaemonRequest, { repeatable, recheck, signal, timeoutMs }: SendOptions): Promise<DaemonReply> {
+    const asked =
+      timeoutMs !== undefined && timeoutMs >= MIN_CALL_TIMEOUT_MS && timeoutMs <= MAX_CALL_TIMEOUT_MS
+        ? timeoutMs
+        : undefined;
+    const budget = asked ?? this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const fetcher = this.options.fetcher ?? ((url, init) => fetch(url, init));
     let headers: Headers | undefined;
     // The credential is read once per request, and only after an address has passed the check: a refused check
@@ -103,9 +111,7 @@ export class HttpTransport implements DaemonTransport {
           headers: sending,
           ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
           signal:
-            signal === undefined
-              ? AbortSignal.timeout(this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
-              : AbortSignal.any([AbortSignal.timeout(this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS), signal]),
+            signal === undefined ? AbortSignal.timeout(budget) : AbortSignal.any([AbortSignal.timeout(budget), signal]),
         });
         // A daemon that has bound its address but not mounted its routes ran nothing: still away.
         const starting = await daemonStartingOf(response);

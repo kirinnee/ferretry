@@ -32,7 +32,9 @@ export class GitAccountsService {
     /** Tells the rest of the daemon an account is gone, once its token and record are. */
     private readonly removed: (id: GitAccountId) => unknown,
     /** Runs once an account is on its way out, after its keys are off GitHub and before its token goes (B3: stops its agent, drops its private key). */
-    private readonly beforeForget: (id: GitAccountId) => Promise<void> = async () => undefined,
+    private readonly beforeForget: (id: GitAccountId) => Promise<void>,
+    /** The `gh` program to run with a token: an absolute path that is not in the state home (`gh-locator.ts`), or a refusal. */
+    private readonly ghProgram: () => Promise<string>,
   ) {}
 
   list(): Promise<readonly GitAccount[]> {
@@ -81,6 +83,8 @@ export class GitAccountsService {
     if (spec.program !== 'gh')
       throw new ApiError(403, 'only gh runs with an account', GIT_ACCOUNT_CODES.invalidRequest);
     checkGhArgs(spec.args);
+    // Which program runs is settled BEFORE the token is read: a `gh` that cannot be trusted never sees one.
+    const program = await this.ghProgram();
     const token = await this.#tokenOf(id);
     const timeout = milliseconds(Math.min(Math.max(spec.timeoutMs ?? 60_000, 1_000), 300_000));
     const folder = await this.scratch.open();
@@ -118,7 +122,7 @@ export class GitAccountsService {
         GIT_CONFIG_NOSYSTEM: '1',
         NO_COLOR: '1',
       };
-      const result = await this.spawn.runBytes('gh', [...spec.args], {
+      const result = await this.spawn.runBytes(program, [...spec.args], {
         env,
         sealed: true,
         timeout,

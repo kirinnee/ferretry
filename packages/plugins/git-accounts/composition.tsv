@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+oversize	manifest.ts	220	2026-12-16	the r9 units B1 to B10 each add routes, verbs or permissions here; split by feature when the track settles

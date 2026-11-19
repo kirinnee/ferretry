@@ -219,6 +219,24 @@ function managerForPlatform(platform: string): DaemonManagerKind {
 }
 
 /**
+ * `path` without any folder inside the state home. `fy daemon start|restart|update` run from a ferret's pane would otherwise
+ * write that pane's `PATH` into the service unit, and the pane's first folder is Ferretry's `gh` shim, a file the ferret can
+ * rewrite: the DAEMON would then find it by name. Nothing inside the state home belongs on the daemon's `PATH`. Only
+ * absolute entries are judged (a relative or empty one is kept as it was written, and the daemon's own lookup drops it).
+ */
+function pathWithoutStateHome(path: string, stateHome: string): string {
+  const home = stateHome.replace(/\/+$/u, '');
+  return path
+    .split(':')
+    .filter(entry => {
+      if (!isAbsolute(entry)) return true;
+      const folder = normalize(entry).replace(/\/+$/u, '');
+      return folder !== home && !folder.startsWith(`${home}/`);
+    })
+    .join(':');
+}
+
+/**
  * Derives every daemon-control path from captured inputs.
  *
  * The state home is resolved the same way the daemon resolves its own, because `FY_HOME` is the
@@ -265,7 +283,7 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     stateArtifactRoot,
     logDirectory,
     logFile: join(logDirectory, `${daemonName}.log`),
-    searchPath: input.searchPath,
+    searchPath: pathWithoutStateHome(input.searchPath, stateHome),
     locale: daemonLocale(input.platform, input.locale ?? {}),
     systemdUnitName,
     systemdUnitFile,

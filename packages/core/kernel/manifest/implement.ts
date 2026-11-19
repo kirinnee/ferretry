@@ -372,6 +372,12 @@ export interface PluginClient {
        */
       readonly signal?: AbortSignal;
       /**
+       * How long the CLI waits for THIS answer, in milliseconds, instead of its default (60 s): for the one call the daemon
+       * itself lets run longer (Ferretry's `gh pr checks --watch`, 5 minutes). Only the CLI transport reads it; a value
+       * outside 1 s .. 10 min is ignored, and the default applies.
+       */
+      readonly timeoutMs?: number;
+      /**
        * A READ THE PAGE MAKES ON ITS OWN (a panel mounting, a poll), not one a person asked for. If the daemon answers
        * that it wants a passkey STEP-UP for it, the refusal comes back as the answer and no prompt is raised: the
        * person is asked when they act on the panel (a press is never quiet), not merely for opening the page. An

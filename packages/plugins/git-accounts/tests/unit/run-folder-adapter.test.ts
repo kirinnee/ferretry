@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { rootRunFolder } from '../../daemon/adapters/run-folder.ts';
 
 type Calls = string[];
-function root(options: { exists?: boolean; problem?: boolean; throws?: boolean; refusePath?: boolean } = {}) {
+function root(
+  options: { exists?: boolean; problem?: boolean; throws?: boolean; refusePath?: boolean; entries?: string[] } = {},
+) {
   const calls: Calls = [];
   const port = {
     resolve: () =>
@@ -19,6 +21,13 @@ function root(options: { exists?: boolean; problem?: boolean; throws?: boolean; 
       return options.exists === true ? { kind: 'other' } : undefined;
     },
     remove: async (path: string) => void calls.push(`remove ${path}`),
+    makeDirectory: async (path: string, made?: { mode?: number }) =>
+      void calls.push(`mkdir ${path} ${made?.mode?.toString(8) ?? ''}`),
+    setMode: async (path: string, mode: number) => void calls.push(`chmod ${path} ${mode.toString(8)}`),
+    list: async (path: string) => {
+      calls.push(`list ${path}`);
+      return options.entries ?? [];
+    },
     publish: async (path: string, bytes: Uint8Array, publish?: { mode?: number }) => {
       calls.push(`publish ${path} ${new TextDecoder().decode(bytes)} ${publish?.mode?.toString(8) ?? ''}`);
       return { outcome: 'published' as const, identity: { device: 1n, inode: 1n } };
@@ -50,6 +59,29 @@ describe('the agent folder over the plugin’s own downloads root', () => {
     expect(there.calls.at(-1)).toBe(
       'publish /home/o/.ferretry/state/git-accounts/downloads/known_hosts github.com x\n 600',
     );
+  });
+
+  test('an emptied folder is made when it is not there, opened, cleared, then narrowed to exactly its mode', async () => {
+    const base = '/home/o/.ferretry/state/git-accounts/downloads';
+    const fresh = root();
+    await fresh.folder.emptyDirectory('pane-gh-config', 0o500);
+    expect(fresh.calls).toEqual([
+      `lstat ${base}/pane-gh-config`,
+      `mkdir ${base}/pane-gh-config 700`,
+      `chmod ${base}/pane-gh-config 700`,
+      `list ${base}/pane-gh-config`,
+      `chmod ${base}/pane-gh-config 500`,
+    ]);
+    const stale = root({ exists: true, entries: ['README', 'hosts.yml'] });
+    await stale.folder.emptyDirectory('pane-gh-config', 0o500);
+    expect(stale.calls).toEqual([
+      `lstat ${base}/pane-gh-config`,
+      `chmod ${base}/pane-gh-config 700`,
+      `list ${base}/pane-gh-config`,
+      `remove ${base}/pane-gh-config/README`,
+      `remove ${base}/pane-gh-config/hosts.yml`,
+      `chmod ${base}/pane-gh-config 500`,
+    ]);
   });
 
   test('a root that cannot be located is a boot error, in words', () => {

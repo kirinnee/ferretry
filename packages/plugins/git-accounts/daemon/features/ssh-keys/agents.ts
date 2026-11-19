@@ -44,6 +44,8 @@ export interface RunFolder {
   remove(name: string): Promise<void>;
   /** Writes one file with exactly `mode`, replacing what was there atomically. */
   publish(name: string, text: string, mode: number): Promise<void>;
+  /** Makes the folder `name` (when it is not there), removes everything in it, and leaves it with exactly `mode`. */
+  emptyDirectory(name: string, mode: number): Promise<void>;
 }
 
 interface Running {

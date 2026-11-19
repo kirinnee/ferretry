@@ -13,6 +13,7 @@ import { GithubDeviceFlows } from '../../daemon/lib/device-flow.ts';
 import type { GithubHttp, GithubRequest, GithubResponse } from '../../daemon/lib/github-http.ts';
 import daemon from '../../daemon/index.ts';
 import { FAKE_DEVICE_CODE, FAKE_TOKEN, FAKE_USER_CODE, FakeGithub } from './fake-github.ts';
+import { GH_REAL, ghHost } from './gh-host.ts';
 
 const CLIENT = 'Ov23FAKECLIENTID';
 
@@ -38,6 +39,7 @@ async function boot(
   const gate = new FakeGate();
   const host = await testHost({
     plugins: [daemon],
+    ...ghHost(),
     gate: new StandInAdmission(() => (options.standing ?? (() => ownerStanding()))()),
     fakes: { sealed, gate },
     fetch: github.fetch,
@@ -398,7 +400,7 @@ describe('listing, removing and the port', () => {
     expect(result).toEqual({ exitCode: 0, stdout: 'as [redacted]', stderr: 'bad [redacted] and [redacted]' });
     expect(JSON.stringify(result)).not.toContain(FAKE_TOKEN);
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.program).toBe('gh');
+    expect(calls[0]?.program).toBe(GH_REAL);
     expect(calls[0]?.args).toEqual(['pr', 'list']);
     expect(calls[0]?.args.join(' ')).not.toContain(FAKE_TOKEN);
     expect((calls[0]?.options?.env as Record<string, string> | undefined)?.GH_TOKEN).toBe(FAKE_TOKEN);

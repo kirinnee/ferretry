@@ -62,6 +62,55 @@ const rigAt = (base: string, table: string): Rig => ({
   clockMs: 0,
 });
 
+describe('how long one call may wait', () => {
+  /** A fetch that records the signal it was given and answers at once. */
+  const seen = async (options: { timeoutMs?: number }, asked?: number): Promise<AbortSignal | undefined> => {
+    let signal: AbortSignal | undefined;
+    const transport = new HttpTransport({
+      baseUrl: async () => 'http://127.0.0.1:7431',
+      authorization: async () => undefined,
+      ...options,
+      fetcher: async (_url, init) => {
+        signal = init.signal as AbortSignal | undefined;
+        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    });
+    await transport.send(
+      { method: 'POST', path: '/v1/x' },
+      { repeatable: false, ...(asked === undefined ? {} : { timeoutMs: asked }) },
+    );
+    return signal;
+  };
+  const originalTimeout = AbortSignal.timeout;
+  const timeouts: number[] = [];
+  const spy = async (options: { timeoutMs?: number }, asked?: number): Promise<number | undefined> => {
+    timeouts.length = 0;
+    AbortSignal.timeout = (ms: number) => {
+      timeouts.push(ms);
+      return originalTimeout.call(AbortSignal, ms);
+    };
+    try {
+      await seen(options, asked);
+    } finally {
+      AbortSignal.timeout = originalTimeout;
+    }
+    return timeouts[0];
+  };
+
+  it('is 60 s unless the call asks for more, and a call may ask for up to 10 minutes', async () => {
+    expect(await spy({})).toBe(60_000);
+    expect(await spy({ timeoutMs: 5_000 })).toBe(5_000);
+    expect(await spy({ timeoutMs: 5_000 }, 330_000)).toBe(330_000);
+    expect(await spy({}, 600_000)).toBe(600_000);
+  });
+
+  it('an ask outside 1 s .. 10 min is ignored', async () => {
+    expect(await spy({}, 999)).toBe(60_000);
+    expect(await spy({}, 600_001)).toBe(60_000);
+    expect(await spy({ timeoutMs: 7_000 }, Number.NaN)).toBe(7_000);
+  });
+});
+
 describe('the transport checks every attempt (S57)', () => {
   it('S57 a resend after a refused connection finds a foreign listener on the freed port: no second send, the token is not sent again', async () => {
     const rig = rigAt('http://127.0.0.1:7457', [HEADER, listening(7457, OWN_UID)].join('\n'));
