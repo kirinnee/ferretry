@@ -175,15 +175,6 @@ const KNOWN: readonly Known[] = [
   {
     viewports: BOTH_WIDTHS,
     styles: EVERY_STYLE,
-    palettes: ['ledger', 'ma'],
-    modes: ['light'],
-    check: 'text',
-    what: 'The menu beside your work',
-    why: 'The muted line of the SELECTED choice card (--muted on --accent-soft) is 4.37-4.49:1 in Ledger and Ma light',
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: EVERY_STYLE,
     palettes: ['ledger'],
     modes: ['dark'],
     check: 'text',
@@ -216,15 +207,6 @@ const KNOWN: readonly Known[] = [
     check: 'text',
     what: 'Stop ferret',
     why: 'Ledger dark status inks on their tint are 4.15-4.31:1',
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: EVERY_STYLE,
-    palettes: ['wayfinding'],
-    modes: ['dark'],
-    check: 'text',
-    what: 'accent',
-    why: 'Wayfinding dark accent badge text is 4.47:1',
   },
 ];
 const pins = pinnedMisses(KNOWN);
