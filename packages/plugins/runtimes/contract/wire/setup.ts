@@ -38,6 +38,16 @@ export type SetupTool = z.infer<typeof SetupToolSchema>;
 
 export const ToolInstallRequestSchema = z.strictObject({
   harnesses: z.array(HarnessKeySchema).min(1).max(2),
+  /**
+   * The command the person was SHOWN for a harness before pressing Install. When it is there and the daemon's fresh plan
+   * for that harness is a different command, the daemon refuses before starting anything (the machine changed between the
+   * look and the press), so what runs is only ever what was on the screen. Absent: the daemon runs its own plan.
+   */
+  shown: z
+    .array(z.strictObject({ harness: HarnessKeySchema, command: NonEmptyStringSchema }))
+    .max(2)
+    .readonly()
+    .optional(),
 });
 export type ToolInstallRequest = z.infer<typeof ToolInstallRequestSchema>;
 

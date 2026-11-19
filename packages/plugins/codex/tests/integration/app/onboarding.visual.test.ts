@@ -21,7 +21,16 @@ const VIEWPORTS = [
   { name: 'phone-390', width: 390, height: 844, phone: true },
   { name: 'desktop-1280', width: 1_280, height: 800, phone: false },
 ] as const;
-const PAGES = ['installed', 'sign-in', 'import-choice', 'permission'] as const;
+const PAGES = [
+  'installed',
+  'sign-in',
+  'sign-in-checking',
+  'import-choice',
+  'import-returned',
+  'permission',
+  'permission-confirm',
+  'permission-unknown',
+] as const;
 
 let browser: Browser;
 let directory = '';
@@ -83,6 +92,8 @@ const open = async (context: BrowserContext, page: string, mode: 'light' | 'dark
   const tab = await context.newPage();
   await tab.goto(`${server?.url.origin ?? ''}/?page=${page}&theme=studio-${mode}`);
   await tab.waitForSelector('[data-codex-step]');
+  // The confirm shot is the Auto file after the person pressed the Skip card: the warning and its confirm, nothing written.
+  if (page === 'permission-confirm') await tab.locator('input[value="skip"]').check({ force: true });
   // Let the card animation finish: a shot shows the last frame.
   await tab.waitForTimeout(800);
   return tab;
@@ -117,7 +128,7 @@ describe('the Codex segment pages', () => {
     const tab = await open(context, 'permission', 'light');
     expect(await tab.locator('input[value="skip"]').isChecked()).toBe(true);
     expect(await tab.locator('[data-codex-step]').innerText()).toContain('--dangerously-bypass-approvals-and-sandbox');
-    await tab.locator('input[value="auto"]').check({ force: true });
+    await tab.locator('input[value="auto"]').click({ force: true });
     await tab.waitForTimeout(400);
     if (shotsDir !== '')
       await tab.screenshot({ fullPage: true, path: join(shotsDir, 'permission-auto-desktop-1280-light.png') });

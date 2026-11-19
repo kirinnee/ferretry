@@ -1,9 +1,10 @@
 /**
  * Step `sign-in`: does Codex have a login that works here? Yes: skipped. A login that needs signing in: Logins' own Codex
- * sign-in (the device code), mounted for that login. No login at all: Logins' add-login panel. The page reads the logins
+ * sign-in (the device code), mounted for that login. A login still being checked: said so, with a retry. No login that can be
+ * signed in (none at all, only switched-off ones, or ones that cannot be signed in from here): Logins' add-login panel. The page reads the logins
  * again when one changes, and ends the moment one is ready. It draws no credential: the logins list has status words only.
  */
-import { PanelSlot, daemonOfClient } from '@ferretry/app';
+import { Button, PanelSlot, daemonOfClient } from '@ferretry/app';
 import type { StepHost } from './onboarding-api.ts';
 import { LoginChanged } from '@ferretry/plugin-logins/contract';
 import { useCallback, useEffect, useState } from 'react';
@@ -64,6 +65,19 @@ export function SignInPage({ client, step }: { readonly client: OnboardingClient
         Signed in as {facts.who}.
       </p>
     );
+  if (facts.state === 'checking')
+    return (
+      <section aria-label="Sign in to Codex" className="flex max-w-xl flex-col gap-3" data-codex-step="sign-in">
+        <p className="m-0 text-cell text-muted" data-codex-checking="">
+          Checking whether your Codex login is signed in…
+        </p>
+        <div>
+          <Button type="button" className="min-h-11 py-3" data-codex-retry="" onClick={() => void read(false)}>
+            Check again
+          </Button>
+        </div>
+      </section>
+    );
   const daemon = daemonOfClient(client);
   const panel = facts.state === 'needs-sign-in' ? 'codex-login' : 'add-login';
   return (
@@ -71,7 +85,7 @@ export function SignInPage({ client, step }: { readonly client: OnboardingClient
       <p className="m-0 text-cell text-muted">
         {facts.state === 'needs-sign-in'
           ? 'Codex needs you to sign in on this machine. You can do it later in Settings › Logins.'
-          : 'There is no Codex login on this machine yet. You can add one later in Settings › Logins.'}
+          : 'There is no Codex login on this machine that can be signed in yet. Add one here, or later in Settings › Logins.'}
       </p>
       {daemon === undefined ? null : (
         <PanelSlot

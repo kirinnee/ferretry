@@ -11,6 +11,7 @@ import {
   type OnboardingClient,
   factsOf,
   installCodex,
+  planChanged,
   readInstallPlan,
   readUpdate,
   refusalWords,
@@ -54,14 +55,27 @@ export function InstalledPage({ client, step }: { readonly client: OnboardingCli
   }, [look]);
 
   const install = async (): Promise<void> => {
+    // Only the command on the screen can run: it travels with the request, and the daemon compares it with its own plan.
+    if (view.kind !== 'missing' || view.facts.plan.kind !== 'runnable') return;
+    const shown = view.facts.plan.command;
     setInstalling(true);
     step.busy('Installing Codex…');
     try {
-      const result = await installCodex(client);
+      const result = await installCodex(client, shown);
       if (result.done) await look(false);
       else setView(current => (current.kind === 'missing' ? { ...current, note: result.words } : current));
     } catch (cause) {
-      setView(current => (current.kind === 'missing' ? { ...current, note: refusalWords(cause) } : current));
+      // The machine changed between the look and the press: show the command that would run now, for a fresh press.
+      const plan = planChanged(cause) ? await readInstallPlan(client) : undefined;
+      setView(current =>
+        current.kind === 'missing'
+          ? {
+              ...current,
+              ...(plan === undefined ? {} : { facts: { state: 'missing', plan } }),
+              note: refusalWords(cause),
+            }
+          : current,
+      );
     } finally {
       step.busy(null);
       setInstalling(false);

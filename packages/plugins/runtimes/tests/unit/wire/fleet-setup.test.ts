@@ -73,6 +73,11 @@ const cases: SchemaCase[] = [
     value: { harnesses: ['claude-code', 'codex'] },
   },
   {
+    name: 'ToolInstallRequestSchema (with the shown commands)',
+    schema: setup.ToolInstallRequestSchema,
+    value: { harnesses: ['codex'], shown: [{ harness: 'codex', command: 'npm install -g @openai/codex' }] },
+  },
+  {
     name: 'ToolInstallOutcomeSchema',
     schema: setup.ToolInstallOutcomeSchema,
     value: {
@@ -196,6 +201,14 @@ describe('the machine setup wire contract', () => {
       rejects('an install request naming no harness', setup.ToolInstallRequestSchema, { harnesses: [] }),
       rejects('an install request naming three harnesses', setup.ToolInstallRequestSchema, {
         harnesses: ['claude-code', 'codex', 'claude-code'],
+      }),
+      rejects('an install request whose shown command is empty', setup.ToolInstallRequestSchema, {
+        harnesses: ['codex'],
+        shown: [{ harness: 'codex', command: '' }],
+      }),
+      rejects('an install request whose shown entry carries anything else', setup.ToolInstallRequestSchema, {
+        harnesses: ['codex'],
+        shown: [{ harness: 'codex', command: 'npm i -g x', argv: ['x'] }],
       }),
       rejects('an install request still carrying a confirmation', setup.ToolInstallRequestSchema, {
         harnesses: ['claude-code'],

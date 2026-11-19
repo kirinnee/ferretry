@@ -5,8 +5,8 @@
  * step never hangs the flow under its loading cover. No host (the panel drawn outside the setup flow) draws nothing.
  */
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
-import { createElement, type ReactElement, useEffect } from 'react';
-import { ImportChoicePage } from './import-choice-page.tsx';
+import { createElement, type ReactElement, useEffect, useState } from 'react';
+import { ImportChoicePage, rememberedImportMode } from './import-choice-page.tsx';
 import { InstalledPage } from './installed-page.tsx';
 import type { OnboardingClient, StepHost } from './onboarding-api.ts';
 import { PermissionPage } from './permission-page.tsx';
@@ -29,6 +29,20 @@ function NoPageYet({ step }: { readonly step: StepHost }) {
   return null;
 }
 
+/** The steps that act on the person's answer at `import-choice`: every `import-*` step but the choice itself. */
+const readsImportChoice = (id: string): boolean => id.startsWith('import-') && id !== 'import-choice';
+
+/**
+ * An import step with no remembered `importMode` (a reload since the choice was answered) brings the choice back before
+ * anything else: it neither runs, skips, nor is answered by default until the person has chosen. Once they have, the step's own
+ * body takes over.
+ */
+function AfterChoice({ step, body }: { readonly step: StepHost; readonly body: () => ReactElement }) {
+  const [chosen, setChosen] = useState(() => rememberedImportMode(step) !== undefined);
+  if (chosen) return body();
+  return createElement(ImportChoicePage, { step, returned: { onChosen: () => setChosen(true) } });
+}
+
 function WithHost({
   step,
   draw,
@@ -45,5 +59,8 @@ export const stepBody =
   ({ step }) =>
     createElement(WithHost, {
       step,
-      draw: host => PAGES[id]?.(client, host) ?? createElement(NoPageYet, { step: host }),
+      draw: host => {
+        const body = (): ReactElement => PAGES[id]?.(client, host) ?? createElement(NoPageYet, { step: host });
+        return readsImportChoice(id) ? createElement(AfterChoice, { step: host, body }) : body();
+      },
     });
