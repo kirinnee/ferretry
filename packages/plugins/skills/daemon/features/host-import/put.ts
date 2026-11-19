@@ -23,7 +23,12 @@
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import type { ComponentPutFile, ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
 import { ITEM_NAME_PATTERN } from '@ferretry/std';
-import { type InstalledSkillFile, installRefusal, usableSkillName } from '../../lib/skill-store.ts';
+import {
+  type InstalledSkillFile,
+  InstalledSkillExists,
+  installRefusal,
+  usableSkillName,
+} from '../../lib/skill-store.ts';
 
 /** The most skill folders one imported item may name (the installed store's own file count bound). */
 export const MAX_IMPORTED_SKILLS = 200;
@@ -53,8 +58,11 @@ export type SkillsItemWrite =
 interface SkillsInstalledStore {
   /** Whether `installed/<skill>/` is a plain folder here. */
   holds(skill: string): Promise<boolean>;
-  /** Installs `files` (paths inside the skill) at `installed/<skill>/`; throws a refusal that names the rule. */
-  install(skill: string, files: readonly InstalledSkillFile[]): Promise<void>;
+  /**
+   * Installs `files` (paths inside the skill) at `installed/<skill>/`, CREATE-ONLY (an existing skill is never replaced; it
+   * throws `InstalledSkillExists`); throws a refusal that names the rule.
+   */
+  install(skill: string, files: readonly InstalledSkillFile[], options: { readonly createOnly: true }): Promise<void>;
   /** Removes what an install of ours wrote. */
   uninstall(skill: string): Promise<void>;
 }
@@ -148,9 +156,14 @@ export function skillsImportPut(
     };
     for (const { skill, files: own } of toInstall) {
       try {
-        await deps.store.install(skill, own);
+        await deps.store.install(skill, own, { createOnly: true });
         landed.push(skill);
       } catch (error) {
+        // A skill that landed between the look above and this write is the owner's: left as it is, and said so.
+        if (error instanceof InstalledSkillExists) {
+          kept.push(`"${skill}" is already installed here, so it was left as it is`);
+          continue;
+        }
         await undo();
         return refuse(
           `the skill "${skill}" was not imported: ${error instanceof Error ? error.message : 'it could not be installed'}`,

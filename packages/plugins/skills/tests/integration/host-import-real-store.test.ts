@@ -92,4 +92,42 @@ describe("imported skills land in Skills' own installed store", () => {
     expect(await readFile(`${disk}/pdf/SKILL.md`, 'utf8')).toBe('mine');
     expect(await store.holds('review')).toBe(true);
   });
+
+  test('a skill installed between the preflight and the write is kept, and the warning names it', async () => {
+    const { store, disk } = await world();
+    let preflightObserved!: () => void;
+    let resumeImport!: () => void;
+    const observed = new Promise<void>(resolve => {
+      preflightObserved = resolve;
+    });
+    const resume = new Promise<void>(resolve => {
+      resumeImport = resolve;
+    });
+    const put = skillsImportPut({
+      has: () => false,
+      create: async () => ({ kind: 'written' }),
+      store: {
+        holds: async skill => {
+          const held = await store.holds(skill);
+          preflightObserved();
+          await resume;
+          return held;
+        },
+        install: store.install.bind(store),
+        uninstall: store.uninstall.bind(store),
+      },
+    });
+    const imported = put('selection', `${JSON.stringify({ items: ['shared'], harness: 'claude' })}`, [
+      { path: 'shared/SKILL.md', content: 'import content' },
+    ]);
+    await observed;
+    try {
+      await store.install('shared', [{ path: 'SKILL.md', content: 'owner content' }]);
+    } finally {
+      resumeImport();
+    }
+
+    expect(await imported).toEqual({ ok: true, warnings: [expect.stringContaining('"shared" is already installed')] });
+    expect(await readFile(`${disk}/shared/SKILL.md`, 'utf8')).toBe('owner content');
+  });
 });
