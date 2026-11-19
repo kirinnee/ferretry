@@ -158,7 +158,7 @@ describe('runtimes contract', () => {
       'GET /v1/ferrets/:id/runtime-models',
       'POST /v1/ferrets/:id/runtime',
     ]);
-    expect(Object.keys(manifest.needs)).toEqual(['ferrets', 'logins', 'loginChanges', 'vault']);
+    expect(Object.keys(manifest.needs)).toEqual(['ferrets', 'logins', 'loginChanges', 'loginEnvImport', 'vault']);
     // The Vault is read for the setup's secret NAMES alone (a name listing, never a value).
     expect(manifest.permissions?.secretNamePicker).toBe(true);
   });

@@ -3980,3 +3980,118 @@ describe('the setup.import executor, a skill an owner serves', () => {
     should(state.assets[RECORD_PATH]).not.equal(recordBefore);
   });
 });
+
+// ── The harness env goes to the login, through Logins' own door (r9 A8) ────────────────────────
+
+describe('the setup.import executor adds the harness env to the login the apply selected', () => {
+  const ENV_SETTINGS = JSON.stringify({
+    theme: 'dark',
+    env: { ANTHROPIC_BASE_URL: 'https://gateway.example.test', ANTHROPIC_API_KEY: SECRET_VALUE },
+  });
+  const envScan = (): HostHarnessScan[] => [
+    claudeScan({ settings: { kind: 'text', source: '/person/.claude/settings.json', text: ENV_SETTINGS, bytes: 80 } }),
+    codexScan(),
+  ];
+  type Asked = Parameters<NonNullable<FleetSetupServiceDeps['loginEnvImport']>['import']>[0];
+  const fakePort = (
+    answer: Awaited<ReturnType<NonNullable<FleetSetupServiceDeps['loginEnvImport']>['import']>> = {
+      outcome: 'written',
+      added: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY'],
+      kept: [],
+      skipped: [],
+      sentences: [],
+    },
+  ) => {
+    const asked: { request: Asked; appliedBefore: number }[] = [];
+    let applied: World['applied'] = [];
+    return {
+      asked,
+      watch: (seen: World['applied']) => {
+        applied = seen;
+      },
+      port: {
+        import: async (request: Asked) => {
+          asked.push({ request, appliedBefore: applied.length });
+          return answer;
+        },
+      },
+    };
+  };
+
+  it('should hand the port the caller, the login, host text and the keys this apply filed, after the fleet is applied', async () => {
+    const fake = fakePort();
+    const w = world({ overrides: { loginEnvImport: fake.port } });
+    fake.watch(w.applied);
+    w.state.scans = envScan();
+
+    const { summary } = await importOnce(w.service, IMPORT({ tickedEnv: ['GITHUB_TOKEN'] } as never));
+
+    should(fake.asked).have.length(1);
+    const { request, appliedBefore } = fake.asked[0] as (typeof fake.asked)[number];
+    should(appliedBefore).equal(1);
+    should(request.login).equal('claude-you');
+    should(request.harness).equal('claude-code');
+    should(request.caller.governance).equal(MACHINE.governance);
+    should(request.plain).eql([{ name: 'ANTHROPIC_BASE_URL', value: 'https://gateway.example.test' }]);
+    should(request.minted).eql([{ name: 'ANTHROPIC_API_KEY', secretName: 'ANTHROPIC_API_KEY' }]);
+    should(request.ticked).eql(['GITHUB_TOKEN']);
+    should(w.secrets.get('ANTHROPIC_API_KEY')).equal(SECRET_VALUE);
+    should(JSON.stringify(request)).not.containEql(SECRET_VALUE);
+    should(summary).containEql('Added to login claude-you: ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY.');
+  });
+
+  it('should say what the port left out and what it held, and keep the import landed', async () => {
+    const fake = fakePort({
+      outcome: 'held',
+      added: ['ANTHROPIC_API_KEY'],
+      kept: [],
+      skipped: [{ name: 'GITHUB_TOKEN', because: 'not ticked' }],
+      sentences: ['confirm the new secret reference'],
+    });
+    const w = world({ overrides: { loginEnvImport: fake.port } });
+    fake.watch(w.applied);
+    w.state.scans = envScan();
+    const { summary } = await importOnce(w.service);
+    should(summary).containEql('That change waits for you to confirm it: confirm the new secret reference');
+    should(summary).containEql('Left out of login claude-you: GITHUB_TOKEN (not ticked).');
+    should(w.applied).have.length(1);
+  });
+
+  it('should say a refusal in a sentence and never undo the import', async () => {
+    const fake = fakePort({ outcome: 'refused', reason: 'this device may not change a login' });
+    const w = world({ overrides: { loginEnvImport: fake.port } });
+    fake.watch(w.applied);
+    w.state.scans = envScan();
+    const { summary } = await importOnce(w.service);
+    should(summary).containEql('were not added to login claude-you: this device may not change a login.');
+    should(w.applied).have.length(1);
+  });
+
+  it('should say so when the port throws, and say nothing more when this machine has no port', async () => {
+    const throwing = world({
+      overrides: {
+        loginEnvImport: {
+          import: async () => {
+            throw new Error('Logins is off');
+          },
+        },
+      },
+    });
+    throwing.state.scans = envScan();
+    should((await importOnce(throwing.service)).summary).containEql(
+      'were not added to login claude-you: Logins is off.',
+    );
+    const none = world();
+    none.state.scans = envScan();
+    should((await importOnce(none.service)).summary).equal('studio is ready · 1 runtime created: claude-default.');
+  });
+
+  it('should ask the port nothing when the person left the env out', async () => {
+    const fake = fakePort();
+    const w = world({ overrides: { loginEnvImport: fake.port } });
+    fake.watch(w.applied);
+    w.state.scans = envScan();
+    await importOnce(w.service, IMPORT({ skip: ['claude-code:env'] }));
+    should(fake.asked).eql([]);
+  });
+});

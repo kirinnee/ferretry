@@ -135,6 +135,8 @@ export interface FileFleetSetupOptions {
   readonly tools: FleetSetupServiceDeps['tools'];
   /** Where an imported component another plugin owns is written: that plugin's own door. Absent: none is written. */
   readonly components?: FleetSetupServiceDeps['components'];
+  /** Logins' door for an imported harness `env`; absent, the `env` is left out of every login and the result says so. */
+  readonly loginEnvImport?: FleetSetupServiceDeps['loginEnvImport'];
   /** The configuration files a copy merges settings into; absent, a copy carrying one is refused. */
   readonly configFiles?: CloneConfigFiles;
   /** This daemon's id as it reports itself; absent until pairing identity is open. */
@@ -204,6 +206,7 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
     scan: async () => await scanner.scan(),
     tools: options.tools,
     ...(options.components === undefined ? {} : { components: options.components }),
+    ...(options.loginEnvImport === undefined ? {} : { loginEnvImport: options.loginEnvImport }),
     secrets: {
       names: async () => (await options.secrets.list()).map(secret => secret.name),
       held: async () =>

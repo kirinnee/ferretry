@@ -15,7 +15,12 @@ import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/te
 import { type DaemonImplementation } from '@ferretry/kernel/manifest';
 import { fixedClock, type TestHost, testHost } from '@ferretry/kernel/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
-import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import {
+  fakeLoginChanges,
+  fakeLoginEnvImport,
+  fakeLogins,
+  sampleLogin,
+} from '@ferretry/plugin-logins/contract/testing';
 import { RuntimeHomeUnreadable } from '../../../contract/index.ts';
 import { fleetHomes } from '../../../daemon/adapters/fleet-home-reader.ts';
 import {
@@ -663,6 +668,7 @@ async function compose(
       ferrets: new FakeFerrets(),
       logins: fakeLogins(logins),
       loginChanges: fakeLoginChanges(),
+      loginEnvImport: fakeLoginEnvImport(),
       vault: new FakeVault(),
     },
     gate: new StandInAdmission(() => ownerStanding()),
@@ -945,6 +951,7 @@ async function scheduledCompose(failures = 0, unpublishable = false) {
       ferrets: new FakeFerrets(),
       logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
       loginChanges: fakeLoginChanges(),
+      loginEnvImport: fakeLoginEnvImport(),
       vault: new FakeVault(),
     },
     gate: new StandInAdmission(() => ownerStanding()),

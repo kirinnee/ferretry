@@ -10,7 +10,7 @@ import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/te
 import type { DaemonImplementation } from '@ferretry/kernel/manifest';
 import { testHost } from '@ferretry/kernel/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
-import { fakeLoginChanges, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
+import { fakeLoginChanges, fakeLoginEnvImport, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import should from 'should';
 import { RuntimesLaunchFailed } from '../../../contract/index.ts';
 import { type RuntimesAssembly, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
@@ -192,7 +192,13 @@ describe('the Runtimes daemon, booted with Ferrets and no other plugin', () => {
     });
     return await testHost({
       plugins: [runtimesDaemon(assembly) as DaemonImplementation<any>],
-      fakes: { ferrets, logins: fakeLogins([]), loginChanges: fakeLoginChanges(), vault: new FakeVault() },
+      fakes: {
+        ferrets,
+        logins: fakeLogins([]),
+        loginChanges: fakeLoginChanges(),
+        loginEnvImport: fakeLoginEnvImport(),
+        vault: new FakeVault(),
+      },
       gate: new StandInAdmission(() => ownerStanding()),
       config: { runtimes: {}, profiles: {} },
     });
@@ -237,7 +243,13 @@ describe('the Runtimes daemon, booted with Ferrets and no other plugin', () => {
     add(ferrets, { id: 'c1', harness: 'codex', runtime: 'codex-work', state: 'stopped' });
     const host = await testHost({
       plugins: [runtimesDaemon(unavailableAssembly) as DaemonImplementation<any>],
-      fakes: { ferrets, logins: fakeLogins([]), loginChanges: fakeLoginChanges(), vault: new FakeVault() },
+      fakes: {
+        ferrets,
+        logins: fakeLogins([]),
+        loginChanges: fakeLoginChanges(),
+        loginEnvImport: fakeLoginEnvImport(),
+        vault: new FakeVault(),
+      },
       gate: new StandInAdmission(() => ownerStanding()),
       config: { runtimes: {}, profiles: {} },
     });

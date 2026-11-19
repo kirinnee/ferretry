@@ -18,7 +18,12 @@ import type { HookTake } from '@ferretry/kernel/manifest';
 import { definePlugin, implementDaemon, type DaemonImplementation } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
-import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import {
+  fakeLoginChanges,
+  fakeLoginEnvImport,
+  fakeLogins,
+  sampleLogin,
+} from '@ferretry/plugin-logins/contract/testing';
 import type { EnvironmentLoginTemplate } from '@ferretry/plugin-logins/contract';
 import {
   PROFILE_COMPONENTS_KEY,
@@ -163,7 +168,13 @@ async function compose(
       ) as DaemonImplementation<any>,
       ...ownerPlugins(owners, options.absent),
     ],
-    fakes: { ferrets: new FakeFerrets(), logins, loginChanges: fakeLoginChanges(), vault: new FakeVault() },
+    fakes: {
+      ferrets: new FakeFerrets(),
+      logins,
+      loginChanges: fakeLoginChanges(),
+      loginEnvImport: fakeLoginEnvImport(),
+      vault: new FakeVault(),
+    },
     gate:
       options.ownerConfirms === true
         ? Object.assign(new StandInAdmission(() => standing.current), { judgeConfigWrite: () => 'apply' as const })
@@ -431,6 +442,7 @@ describe('only the plugin that owns a kind can provide it', () => {
           ferrets: new FakeFerrets(),
           logins: fakeLogins([]),
           loginChanges: fakeLoginChanges(),
+          loginEnvImport: fakeLoginEnvImport(),
           vault: new FakeVault(),
         },
         gate: new StandInAdmission(() => ownerStanding()),

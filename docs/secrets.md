@@ -543,6 +543,9 @@ A ferret started on a login launches with that login's environment, and an agent
     (`ifMatch`); a login with an edit held for the owner, or one that moved meanwhile, is refused rather than rewritten, so a
     held-only key is never dropped. A variable the login already has is kept.
   - **Names that look like a key are not repeated** in a skipped or refused sentence.
+  - **It runs once per harness.** Runtimes' setup apply calls it after the secrets are filed and the login is in effect, with the
+    names of the keys that apply filed; "Import again" of a harness an earlier import already brought in adds no variables and
+    files no key for them. The person's ticked GitHub-token names (`tickedEnv`) travel as `ticked`.
     A reserved variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, …) is skipped, and `GH_TOKEN`, `GITHUB_TOKEN` and
     `GH_ENTERPRISE_TOKEN` come in only when the person ticks them: a token in a login's environment can be read by every ferret on
     that login.
