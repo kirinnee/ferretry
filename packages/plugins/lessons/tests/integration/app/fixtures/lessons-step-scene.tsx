@@ -7,6 +7,7 @@
  */
 
 import { createRoot } from 'react-dom/client';
+import { StepPageFrame } from '@ferretry/app';
 import { LessonsStep } from '../../../../app/features/onboarding/lessons-step.tsx';
 import { LessonsSettingsSurface } from '../../../../app/src/lessons-settings.tsx';
 import type { LessonsConnection } from '../../../../app/src/api.ts';
@@ -50,9 +51,10 @@ root.render(
       <LessonsSettingsSurface connection={connection} />
     </div>
   ) : (
-    <div style={{ maxWidth: 880, margin: '0 auto', padding: 16 }}>
+    // The shell draws the frame around a step's body; this fixture stands in for it.
+    <StepPageFrame title="Lessons" next={{ label: 'Next' }}>
       <LessonsStep connection={connection} />
-    </div>
+    </StepPageFrame>
   ),
 );
 requestAnimationFrame(() => {

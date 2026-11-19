@@ -1,6 +1,9 @@
 /**
  * FIRST RUN › THIS MACHINE › "Learn rules from your ferrets?" — one daemon step, two cards.
  *
+ * This is the step's BODY only: the shell wraps it in the step frame (title from the manifest, progress, Back / Next,
+ * Later, the loading cover), so the page draws no title or footer of its own and talks to the footer through the host.
+ *
  * It answers one setting: `lessons.yaml`'s `passiveDefault`, whether NEW ferrets are told to file a lesson when you
  * correct them (Settings › Lessons has the same switch; nothing else changes here, and a running ferret keeps its own
  * switch). Every lesson still waits for the person's own verdict before anything is written.
@@ -23,7 +26,6 @@ import { fetchLessonsConfig, type LessonsConnection, lessonsErrorMessage, patchL
 import { LessonDemo } from './lessons-step-demo.tsx';
 import './lessons-step.css';
 
-export const LESSONS_STEP_TITLE = 'Learn rules from your ferrets?';
 const LESSONS_STEP_LINE =
   'When you correct a ferret, Ferretry can keep the correction as a rule for every ferret after. You read each rule and decide before it is used.';
 
@@ -104,10 +106,7 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
 
   const unread = config === null;
   return (
-    <section className="fy-lessons-step" aria-labelledby="fy-lessons-step-title" data-lessons-step="">
-      <h2 id="fy-lessons-step-title" className="fy-lessons-step-title">
-        {LESSONS_STEP_TITLE}
-      </h2>
+    <div className="fy-lessons-step" data-lessons-step="">
       <p className="fy-lessons-step-line">{LESSONS_STEP_LINE}</p>
       {unread ? null : (
         <ChoiceCards
@@ -153,6 +152,6 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
           </button>
         </div>
       ) : null}
-    </section>
+    </div>
   );
 }

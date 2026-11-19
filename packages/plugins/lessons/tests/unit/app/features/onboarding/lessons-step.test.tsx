@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { recordingHost as stepHarness } from '../../../../support/app/step-host.ts';
-import { LessonsStep, LESSONS_STEP_TITLE } from '../../../../../app/features/onboarding/lessons-step.tsx';
+import { LessonsStep } from '../../../../../app/features/onboarding/lessons-step.tsx';
 import { lessonsStepPanel } from '../../../../../app/features/onboarding/step-panel.tsx';
 import { click, textOf, waitFor, waitForText } from '../../../../support/app/dom-helpers.ts';
 import { mount, must } from '../../../../support/app/dom.ts';
@@ -22,7 +22,9 @@ describe('first-run › Lessons step', () => {
     const harness = stepHarness();
     const view = await mount(<LessonsStep connection={daemon.connection} step={harness.host} />);
     await waitFor(() => harness.decision === 'shown', 'the page lifts its cover');
-    expect(textOf(view.container)).toContain(LESSONS_STEP_TITLE);
+    // The shell's frame owns the title and the footer; the page draws neither.
+    expect(view.container.querySelector('h1, h2, h3, header, footer, [data-step-page], [data-step-footer]')).toBeNull();
+    expect(view.container.querySelector('button')).toBeNull();
     expect(view.container.querySelectorAll('[data-choice]').length).toBe(2);
     expect(view.container.querySelectorAll('[data-selected="true"]').length).toBe(0);
     expect(view.container.querySelector('[data-lessons-now]')?.textContent).toBe('Right now: on for new ferrets.');

@@ -1,15 +1,9 @@
-/* The first-run Lessons page: a title, one line, the two cards. The shell owns the page frame (width, footer). */
+/* The first-run Lessons page body: one line, the two cards. The shell owns the page frame (width, footer). */
 .fy-lessons-step {
   display: flex;
   flex-direction: column;
   gap: var(--gap-md, 12px);
   min-width: 0;
-}
-.fy-lessons-step-title {
-  color: var(--fg);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-strong, 600);
-  margin: 0;
 }
 .fy-lessons-step-line {
   color: var(--muted);
