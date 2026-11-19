@@ -34,6 +34,8 @@ export interface CodexHarnessOptions {
    */
   readonly selected: (runtime: string | undefined) => Promise<SelectedComponents>;
   readonly historyDirectory?: () => Promise<string | undefined>;
+  /** Whether the owner's own `~/.codex` history is offered to the conversation index (config `hostHistory`, default true). */
+  readonly hostHistory?: () => boolean;
   /** The owner's own Codex home (`~/.codex`), which holds `sessions` and `session_index.jsonl`; the conversation index reads it in place. */
   readonly historyHome?: () => Promise<string | undefined>;
   readonly locate: () => Promise<HarnessLocation>;

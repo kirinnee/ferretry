@@ -186,6 +186,7 @@ export default implementDaemon(manifest, {
         const home = await homeDirectory();
         return home === '' ? undefined : `${home}/.codex`;
       },
+      hostHistory: () => paths().hostHistory,
       update: { view, start, settled: () => service.settled() },
     });
 
