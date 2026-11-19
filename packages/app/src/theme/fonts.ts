@@ -48,6 +48,7 @@ export const STYLE_FONT_FILES: Readonly<Partial<Record<StyleId, ThemeFontFiles>>
   mission: { text: [publicSans, cascadiaMono], code: [] },
   neo: { text: [archivoBlack], code: ibmPlexMono },
   geist: { text: [geist], code: [geistMono] },
+  glass: { text: [inter], code: jetBrainsMono },
 });
 
 /** The scope of the document a preload is added to — injected so a test can stand in for the page. */

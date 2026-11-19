@@ -1,0 +1,134 @@
+/* ============================================================================
+   GLASSMORPHISM. Panels are frosted glass laid over a soft colour field: translucent surfaces that blur what is behind
+   them, large generous radii, a thin light edge, long soft shadows and light type weights. What carries the style in
+   greyscale is the STRUCTURE: big radii, hairline edges, airy padding, blur. The colour field behind (`--body-wash`) is
+   built from the palette's own accent and tool hues, so any palette takes it.
+
+   READABILITY STAYS ON. Surfaces never drop below ~76% opaque (88% for menus, which float over content), so text keeps its
+   contrast even over a bright field; the blur is an addition, not what makes the text legible. No second font: it draws in
+   Inter, which the app already ships. The focus ring stays a hard 2px ring (an input draws it too).
+   Not `loud`: it passes the contrast matrix like the house styles do.
+   ============================================================================ */
+:root[data-style='glass'],
+[data-swatch][data-style='glass'] {
+  /* ═══ structural token layer ═══ */
+  --font-ui: var(--font-body);
+  --text-display: 1.25rem;
+  --weight-normal: 400;
+  --weight-medium: 450;
+  --weight-strong: 560;
+  --weight-display: 560;
+  --label-transform: none;
+  --label-size: 11px;
+  --label-weight: 500;
+  --tracking-label: 0.02em;
+  --tracking-display: -0.015em;
+  --leading-base: 1.6;
+  --radius-xs: 8px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+  --radius-control: 12px;
+  --radius-panel: 22px;
+  --radius-badge: 999px;
+  --radius-tab: 12px;
+  --radius-input: 12px;
+  --bubble-radius: 20px 20px 8px 20px;
+  --card-tail-radius: 8px;
+  --border-width: 1px;
+  --border-width-heavy: 1px;
+  --stroke-control: 1px;
+  --stroke-panel: 1px;
+  --divider-width: 1px;
+  --divider-color: var(--border-soft);
+  /* The surface roles are translucent: the glass. `.kt-panel` and the floating roles blur what is behind them. */
+  --panel-bg: color-mix(in srgb, var(--surface) 78%, transparent);
+  --card-bg: color-mix(in srgb, var(--surface) 78%, transparent);
+  --menu-bg: color-mix(in srgb, var(--surface) 90%, transparent);
+  --menu-radius: 16px;
+  --menu-item-h: 36px;
+  --bubble-border: var(--border-soft);
+  --bubble-stroke: 1px;
+  --bubble-shadow: var(--shadow-sm);
+  /* Long, soft, low shadows: glass floats, it does not sit. */
+  --shadow-sm: 0 2px 10px -2px var(--shadow-sm-1);
+  --shadow-md: 0 8px 30px -8px var(--shadow-md-2);
+  --shadow-lg: 0 20px 60px -16px var(--shadow-lg-2);
+  --shadow-control: 0 1px 3px var(--shadow-sm-1);
+  --shadow-active: none;
+  --press-translate: 1px;
+  /* The light rim: a bright inner edge along the top and sides, the way glass catches light. */
+  --rule-inset: inset 0 1px 0 var(--surface), inset 0 0 0 1px color-mix(in srgb, var(--surface) 55%, transparent);
+  /* The field the glass sits over: three soft colour glows from the palette's own hues. */
+  --body-wash:
+    radial-gradient(60rem 40rem at 8% -8%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 70%),
+    radial-gradient(48rem 36rem at 96% 6%, color-mix(in srgb, var(--tool-search) 20%, transparent), transparent 70%),
+    radial-gradient(54rem 40rem at 60% 112%, color-mix(in srgb, var(--syn-keyword) 18%, transparent), transparent 70%);
+  /* Roomier than the house style: glass needs air around its panels. */
+  --control-h-desktop: 32px;
+  --control-h-sm-desktop: 28px;
+  --row-min-h-desktop: 38px;
+  --pad-control-x: 14px;
+  --pad-panel: 14px;
+  --pad-row-y: 8px;
+  --pad-cell-x: 10px;
+  --gap-xs: 6px;
+  --gap-sm: 8px;
+  --gap-md: 12px;
+  --focus-width: 2px;
+  --focus-offset: 2px;
+  /* Calm: a slow, soft ease and a gentle pop on select. */
+  --motion-fast: 140ms;
+  --motion-base: 240ms;
+  --motion-slow: 420ms;
+  --ease-standard: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --select-pop: 1.03;
+}
+
+:root[data-style='glass'][data-mode='dark'],
+[data-swatch][data-style='glass'][data-mode='dark'] {
+  --panel-bg: color-mix(in srgb, var(--surface) 72%, transparent);
+  --card-bg: color-mix(in srgb, var(--surface) 72%, transparent);
+  --menu-bg: color-mix(in srgb, var(--surface-2) 90%, transparent);
+  --rule-inset:
+    inset 0 1px 0 color-mix(in srgb, var(--fg) 16%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--fg) 5%, transparent);
+  --shadow-md: 0 10px 34px -8px var(--shadow-md-2);
+  --shadow-lg: 0 24px 64px -14px var(--shadow-lg-2);
+}
+
+/* ---- component touches: the glass itself. Only blur, translucency and the light edge; no colour literal. ---- */
+:root[data-style='glass'] .kt-panel,
+:root[data-style='glass'] .kt-details,
+:root[data-style='glass'] .kt-sheet {
+  border-color: color-mix(in srgb, var(--fg) 16%, transparent);
+  background-color: var(--panel-bg);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  backdrop-filter: blur(18px) saturate(1.5);
+}
+:root[data-style='glass'] .kt-popover {
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
+}
+/* A text field draws a real 2px ring on keyboard focus, like a button (its border alone is 1px here). */
+:root[data-style='glass'] .kt-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 1px;
+}
+/* The primary button takes a soft accent halo, the one glow in the style. */
+:root[data-style='glass'] .kt-btn[data-variant='primary'] {
+  box-shadow: 0 6px 18px -6px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+@media (max-width: 640px) {
+  :root[data-style='glass'] {
+    --text-2xs: 12.5px;
+    --text-xs: 14px;
+    --text-sm: 15px;
+    --text-base: 16px;
+    --text-md: 17px;
+    --text-lg: 19px;
+    --text-display: 1.5rem;
+    --label-size: 12.5px;
+  }
+}
