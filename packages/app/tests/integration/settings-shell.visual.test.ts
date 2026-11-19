@@ -262,7 +262,7 @@ describe('Settings shell: the frame rules (S1)', () => {
         expect(facts.linkColours).toEqual([facts.fgProbe]);
         // A phone's bare Settings is the list alone: no item is current and no page is mounted.
         if (!variant.phone) expect(facts.activeShadow).not.toBe('none');
-        expect(facts.blocks[0]).toBe('Only this browser');
+        expect(facts.blocks[0]).toBe('Just this device');
         expect(facts.blocks[1]).toMatch(/ · every device$/);
         if (!variant.phone) expect(facts.pageMax).toBe('1100px');
         await tall(tab, variant, 2_300);

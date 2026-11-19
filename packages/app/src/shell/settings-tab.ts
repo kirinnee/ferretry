@@ -77,6 +77,9 @@ export const SCOPE_WORDS = {
   machine: 'This machine · every device',
 } as const satisfies Record<SettingsScope, string>;
 
+/** The device block's HEADING in the nav, in the owner's words; the per-tab chip keeps `SCOPE_WORDS.device`. */
+export const DEVICE_BLOCK_HEADING = 'Just this device';
+
 export const scopeOf = (tab: { readonly scope?: SettingsScope }): SettingsScope => tab.scope ?? 'machine';
 
 /** The tabs split by scope, each side keeping the order it came in. */

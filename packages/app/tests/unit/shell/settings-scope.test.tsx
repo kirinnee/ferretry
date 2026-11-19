@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { SCOPE_WORDS, scopeOf, splitTabsByScope } from '../../../src/shell/settings-tab.ts';
+import { DEVICE_BLOCK_HEADING, SCOPE_WORDS, scopeOf, splitTabsByScope } from '../../../src/shell/settings-tab.ts';
 import type { Mounted } from '../../support/dom.ts';
 import { bootApp, entryOf, manifestOf, settle } from './frame-fixtures.tsx';
 
@@ -56,7 +56,7 @@ describe('the Settings list is split by where a setting is kept', () => {
       links: [...block.querySelectorAll('a')].map(link => link.textContent),
     }));
     expect(blocks).toHaveLength(2);
-    expect(blocks[0]?.heading).toBe(SCOPE_WORDS.device);
+    expect(blocks[0]?.heading).toBe(DEVICE_BLOCK_HEADING);
     expect(blocks[0]?.links).toEqual(['This device', 'Mine only']);
     expect(blocks[1]?.heading).toMatch(/ · every device$/);
     expect(blocks[1]?.links).toEqual(['Tab one', 'Tab two']);

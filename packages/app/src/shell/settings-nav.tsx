@@ -2,8 +2,8 @@ import { daemonSettingsHref, DEVICE_SETTINGS_HREF } from '../router/routes.ts';
 import { Icon } from './icons.tsx';
 import { Link } from './link.tsx';
 import {
+  DEVICE_BLOCK_HEADING,
   groupSettingsTabs,
-  SCOPE_WORDS,
   splitTabsByScope,
   type GroupableTab,
   type SettingsScope,
@@ -61,7 +61,7 @@ export function SettingsNav({
     <nav className="fy-tabs fy-tabs--grouped fy-settings-nav" aria-label="Plugin settings">
       <section aria-labelledby="fy-settings-block-device" className="fy-settings-block">
         <p className="fy-settings-block__title" id="fy-settings-block-device">
-          {SCOPE_WORDS.device}
+          {DEVICE_BLOCK_HEADING}
         </p>
         {/* This device's own settings (theme, text size, motion, notifications…) are saved in this browser, not on a daemon:
         the shell's own entry. Its address is the one a reload still serves. */}
