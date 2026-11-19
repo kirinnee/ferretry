@@ -25,16 +25,16 @@ const view = (overrides: Partial<NotificationFilterSettingsViewProps> = {}) => {
 };
 
 describe('NotificationFilterSettingsView', () => {
-  it('renders the four category switches on and the quiet-hours switch off by default', () => {
+  it('renders the five category switches on and the quiet-hours switch off by default', () => {
     const { renderer } = view();
     const switches = renderer.root.findAllByProps({ role: 'switch' });
-    expect(switches).toHaveLength(5);
+    expect(switches).toHaveLength(6);
     for (const toggle of switches) expect(toggle.props.className).toContain('min-h-[44px]');
     const quietToggle = switches.find(node =>
       node.findAllByType('span').some(span => span.children.includes('Quiet hours')),
     );
     expect(quietToggle?.props['aria-checked']).toBe(false);
-    expect(switches.filter(toggle => toggle.props['aria-checked'] === true)).toHaveLength(4);
+    expect(switches.filter(toggle => toggle.props['aria-checked'] === true)).toHaveLength(5);
   });
 
   it('flips exactly the category switch that was pressed', () => {

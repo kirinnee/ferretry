@@ -34,12 +34,14 @@ const at = (hour: number, minute: number): Date => {
 };
 
 describe('notificationCategoryFor', () => {
-  it('collapses the five wire kinds onto exactly four categories', () => {
+  it('collapses the wire kinds onto the five categories', () => {
     expect(notificationCategoryFor('attention')).toBe('needs-you');
     expect(notificationCategoryFor('question')).toBe('needs-you');
     expect(notificationCategoryFor('completed')).toBe('finished');
     expect(notificationCategoryFor('failed')).toBe('failed');
     expect(notificationCategoryFor('device-paired')).toBe('new-device');
+    expect(notificationCategoryFor('pr')).toBe('prs-ci');
+    expect(notificationCategoryFor('ci')).toBe('prs-ci');
   });
 
   it('names every protocol kind, so a schema addition cannot fall through silently', () => {
@@ -116,7 +118,7 @@ describe('quiet hours, as the kernel decides them over the document', () => {
 describe('shouldShowNotification', () => {
   it('shows an unclassified payload whatever the category switches say', () => {
     const silenced = prefs({
-      categories: { 'needs-you': false, finished: false, failed: false, 'new-device': false },
+      categories: { 'needs-you': false, finished: false, failed: false, 'new-device': false, 'prs-ci': false },
     });
     expect(shouldShowNotification({ kind: null, daemonId: null }, silenced, at(12, 0))).toBe(true);
   });
@@ -169,7 +171,7 @@ describe('parseNotificationFilterPreferences', () => {
 
   it('round-trips a complete, well-shaped record', () => {
     const value: DeviceNotificationFilterPreferences = {
-      categories: { 'needs-you': true, finished: false, failed: true, 'new-device': false },
+      categories: { 'needs-you': true, finished: false, failed: true, 'new-device': false, 'prs-ci': false },
       quietHours: { enabled: true, startMinute: 60, endMinute: 120 },
       machines: { 'daemon-a': false },
     };
@@ -185,7 +187,13 @@ describe('parseNotificationFilterPreferences', () => {
         machines: { 'daemon-a': true, '': true, 'daemon-b': 'not a boolean', empty: null },
       }),
     );
-    expect(parsed.categories).toEqual({ 'needs-you': true, finished: false, failed: true, 'new-device': true });
+    expect(parsed.categories).toEqual({
+      'needs-you': true,
+      finished: false,
+      failed: true,
+      'new-device': true,
+      'prs-ci': true,
+    });
     expect(parsed.quietHours).toEqual({ enabled: true, startMinute: 0, endMinute: 0 });
     expect(parsed.machines).toEqual({ 'daemon-a': true });
   });
@@ -214,6 +222,7 @@ describe('filterDocumentOf', () => {
     expect(off('finished')).toEqual(['completed']);
     expect(off('failed')).toEqual(['failed']);
     expect(off('new-device')).toEqual(['device-paired']);
+    expect([...off('prs-ci')].sort()).toEqual(['ci', 'pr']);
     expect(filterDocumentOf(prefs()).hiddenKinds).toEqual([]);
   });
 
@@ -227,7 +236,7 @@ describe('filterDocumentOf', () => {
   it('carries the quiet hours and always reads back through the kernel parser (never resets to default)', () => {
     const doc = filterDocumentOf(
       prefs({
-        categories: { 'needs-you': false, finished: false, failed: false, 'new-device': false },
+        categories: { 'needs-you': false, finished: false, failed: false, 'new-device': false, 'prs-ci': false },
         quietHours: { enabled: true, startMinute: 60, endMinute: 120 },
         machines: { a: false },
       }),

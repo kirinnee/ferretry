@@ -39,7 +39,15 @@
  */
 
 /** The push kinds a notification names (today's protocol `PushNotificationKind`). */
-export type PushNotificationKind = 'attention' | 'agenda' | 'question' | 'failed' | 'completed' | 'device-paired';
+export type PushNotificationKind =
+  | 'attention'
+  | 'agenda'
+  | 'question'
+  | 'failed'
+  | 'completed'
+  | 'device-paired'
+  | 'pr'
+  | 'ci';
 
 import { type NotificationFilterDocument, shouldShowPush } from '@ferretry/kernel/contract/notification-filter';
 import type { NotificationFilterMirrorWriter } from './notification-filter-mirror.ts';
@@ -58,6 +66,8 @@ const NOTIFICATION_KIND_FIELDS = {
   completed: true,
   failed: true,
   'device-paired': true,
+  pr: true,
+  ci: true,
 } as const satisfies { readonly [K in PushNotificationKind]: true };
 
 /** Every protocol notification kind. */
@@ -66,7 +76,7 @@ export const ALL_NOTIFICATION_KINDS: readonly PushNotificationKind[] = Object.ke
 ) as PushNotificationKind[];
 
 /** The four switches the Settings screen exposes, in the owner-approved spec's own order. */
-export const NOTIFICATION_CATEGORIES = ['needs-you', 'finished', 'failed', 'new-device'] as const;
+export const NOTIFICATION_CATEGORIES = ['needs-you', 'finished', 'failed', 'new-device', 'prs-ci'] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 
 export const NOTIFICATION_CATEGORY_COPY: Record<
@@ -77,6 +87,7 @@ export const NOTIFICATION_CATEGORY_COPY: Record<
   finished: { label: 'Finished', description: 'A session completed its task.' },
   failed: { label: 'Failed', description: 'A session failed, stalled, or could not be stopped.' },
   'new-device': { label: 'New device', description: 'Another browser was paired with this machine.' },
+  'prs-ci': { label: 'PRs & CI', description: 'CI failed, a review was asked of you, or a PR of yours changed.' },
 };
 
 /**
@@ -97,6 +108,9 @@ export function notificationCategoryFor(kind: PushNotificationKind): Notificatio
       return 'failed';
     case 'device-paired':
       return 'new-device';
+    case 'pr':
+    case 'ci':
+      return 'prs-ci';
   }
 }
 
@@ -125,6 +139,7 @@ const DEFAULT_CATEGORIES: NotificationCategoryPrefs = Object.freeze({
   finished: true,
   failed: true,
   'new-device': true,
+  'prs-ci': true,
 });
 
 const DEFAULT_MACHINES: Readonly<Record<string, boolean>> = Object.freeze({});

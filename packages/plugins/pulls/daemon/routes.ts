@@ -4,6 +4,7 @@ import type { GithubClient } from './adapters/github/client.ts';
 import { ciRoutes } from './features/ci/index.ts';
 import { threadsRoute } from './features/threads/routes.ts';
 import { detailRoutes } from './features/detail/index.ts';
+import type { watchFeature } from './features/watch/index.ts';
 import type { PullsCache } from './lib/cache/store.ts';
 
 /** What every later unit's routes and jobs are built from: the one GitHub client (one budget) and the one cache. */
@@ -16,8 +17,8 @@ export interface PullsServices {
   readonly nowMs: () => number;
 }
 
-/** Each unit adds ONE line here, naming its routes and handing them `services`. */
-export const pullsRoutes = (services: PullsServices) => ({
+/** Each unit adds ONE line here, naming its routes. */
+export const pullsRoutes = (services: PullsServices, watch: ReturnType<typeof watchFeature>) => ({
   ...ciRoutes(services), // E8: CI runs, jobs, steps and timing
   // E6 · review threads
   'GET /v1/pulls/:project/:repo/:number/threads': threadsRoute({
@@ -26,4 +27,5 @@ export const pullsRoutes = (services: PullsServices) => ({
     nowIso: () => new Date(services.nowMs()).toISOString(),
   }),
   ...detailRoutes(services), // E4: the PR page
+  ...watch.routes, // E2: the watch status and settings
 });

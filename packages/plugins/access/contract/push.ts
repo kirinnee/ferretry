@@ -20,6 +20,12 @@ export const PushNotificationKindSchema = z.enum(['agenda', 'question', 'failed'
 export type PushNotificationKind = z.infer<typeof PushNotificationKindSchema>;
 
 /**
+ * The kinds a push about NO session may carry: a new device, and (r9 E2) a pull request or its CI. They filter on the
+ * phone like any kind (Agenda's "PRs & CI" switch), but narrate no ferret, so none carries a session id.
+ */
+export const NoSessionPushKindSchema = z.enum(['device-paired', 'pr', 'ci']);
+
+/**
  * The push services a subscription may point at, and whether each lets a push show nothing (owner decision !A324):
  * declared once in the kernel contract, because the signed service worker applies the clear rule and runs no plugin
  * code. Re-exported here, never copied, so the allowlist the daemon enrols against and the rule the worker clears by
@@ -167,7 +173,7 @@ export const PushNotificationPayloadSchema = z.union([
   }),
   z.strictObject({
     ...PushPayloadBaseShape,
-    kind: z.literal('device-paired').optional(),
+    kind: NoSessionPushKindSchema.optional(),
   }),
 ]);
 export type PushNotificationPayload = z.infer<typeof PushNotificationPayloadSchema>;

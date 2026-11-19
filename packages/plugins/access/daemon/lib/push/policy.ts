@@ -85,6 +85,7 @@ export function buzzPayload(message: Buzz): PushNotificationPayload {
   return PushNotificationPayloadSchema.parse({
     version: 1,
     ...(message.eventKey === undefined ? {} : { eventKey: message.eventKey }),
+    ...(message.kind === undefined ? {} : { kind: message.kind }),
     title: message.title,
     body: message.body,
     ...(tag === undefined ? {} : { tag }),

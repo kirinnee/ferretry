@@ -33,5 +33,7 @@ export const BuzzSchema = z.strictObject({
    * ferret, twelve across the daemon. A high buzz that names none counts against the daemon's twelve only.
    */
   ferret: z.string().min(1).max(200).optional(),
+  /** What the push is about, for the device's own filter (a no-session kind: `pr`, `ci`). Absent: never hidden by kind. */
+  kind: z.enum(['pr', 'ci']).optional(),
 });
 export type Buzz = z.infer<typeof BuzzSchema>;

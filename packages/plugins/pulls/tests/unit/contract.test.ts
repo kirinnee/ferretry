@@ -137,6 +137,6 @@ describe('pulls contract', () => {
   test('the manifest reaches nothing itself: no network, no spawn, no root; no new capability', () => {
     expect(manifest.permissions).toEqual({ roots: [], spawn: [], network: [] });
     expect(PULLS_CAPS.read).toEqual(cap('filesystem', 'use'));
-    expect(manifest.data?.state?.map(file => file.path)).toEqual(['cache/*']);
+    expect(manifest.data?.state?.map(file => file.path)).toEqual(['cache/*', 'watch/*.json']);
   });
 });
