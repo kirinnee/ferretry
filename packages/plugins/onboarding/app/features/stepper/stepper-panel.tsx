@@ -6,6 +6,8 @@
 import { daemonOfClient, daemonSettingsHref, useEveryDaemon, useOptionalRouter, useScreenHref } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { type ReactNode, useMemo } from 'react';
+import { stepsHref } from '../../views/steps-screen.tsx';
+import { PROJECTLESS_WORDS } from './projectless-words.ts';
 import { StepperView, type StepperAction } from './stepper-view.tsx';
 import { useStepper } from './use-stepper.ts';
 
@@ -32,17 +34,27 @@ export function createStepperPanel(client: PluginClient) {
           const run = go(daemonSettingsHref(daemon, 'kernel', 'name'));
           return run === undefined ? undefined : { label: 'Name this machine', run };
         }
-        case 'login': {
-          const run = go(daemonSettingsHref(daemon, 'logins', 'logins'));
-          return run === undefined ? undefined : { label: 'Add a login', run };
+        // Both tool steps go to the setup steps page, where the import wizard (`runtimes.import`) finds what the tool
+        // has, installs or signs in what is missing, and imports what the person picks. Until that step is on the page
+        // the same page still holds each tool's own step.
+        case 'claude':
+        case 'codex': {
+          const run = go(stepsHref(daemon));
+          return run === undefined
+            ? undefined
+            : { label: current.id === 'claude' ? 'Set up Claude Code' : 'Set up Codex', run };
         }
-        case 'runtime': {
-          const run = go(daemonSettingsHref(daemon, 'runtimes', 'runtimes'));
-          return run === undefined ? undefined : { label: 'Add a runtime', run };
-        }
-        case 'ferret': {
-          const run = go(screenHref(daemon, 'ferrets', 'new-ferret'));
-          return run === undefined ? undefined : { label: 'New ferret', run };
+        // The last step: a project (the add-project form until the create-a-project flow lands), or no project at all.
+        case 'project': {
+          const create = go(screenHref(daemon, 'projects', 'projects'));
+          const resume = go(screenHref(daemon, 'conversation', 'links'));
+          if (create === undefined) return undefined;
+          return {
+            label: 'Create a project',
+            run: create,
+            alternative: resume === undefined ? undefined : { label: 'Continue a conversation', run: resume },
+            note: PROJECTLESS_WORDS,
+          };
         }
         default:
           return undefined;

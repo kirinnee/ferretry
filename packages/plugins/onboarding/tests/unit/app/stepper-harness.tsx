@@ -7,9 +7,13 @@ import { useStepper } from '../../../app/features/stepper/use-stepper.ts';
 type Held = {
   passkey?: boolean;
   name?: boolean;
-  login?: boolean;
-  runtime?: boolean;
-  ferret?: boolean;
+  /** Claude Code's and Codex's own onboarding steps have been looked at. */
+  claude?: boolean;
+  codex?: boolean;
+  /** A project is registered. */
+  project?: boolean;
+  /** A conversation was ever made (a project is not needed: the person works projectless). Off unless stated. */
+  conversation?: boolean;
   /** Every ferret ever made is archived: the live list is empty, the archive is not. */
   archivedFerret?: boolean;
 };
@@ -19,10 +23,18 @@ const answersFor = (held: Held): Record<string, unknown> => {
   return {
     'GET /v1/passkeys': { passkeys: has('passkey') ? [{ id: 'k' }] : [] },
     'GET /v1/config/file': { exists: has('name'), text: has('name') ? 'name: "Studio"\n' : '' },
-    'GET /v1/logins': { logins: has('login') ? [{ id: 'l' }] : [] },
-    'GET /v1/onboarding': { setUp: has('runtime') },
-    'GET /v1/ferrets': has('ferret') && held.archivedFerret !== true ? [{ id: 'f' }] : [],
-    'GET /v1/archived-sessions': { count: has('ferret') && held.archivedFerret === true ? 2 : 0, sessions: [] },
+    'GET /v1/onboarding': {
+      steps: [
+        { plugin: 'claude-code', id: 'harness', state: has('claude') ? 'done' : 'pending' },
+        { plugin: 'codex', id: 'harness', state: has('codex') ? 'found' : 'pending' },
+      ],
+    },
+    'GET /v1/projects': has('project') ? [{ id: 'p' }] : [],
+    'GET /v1/ferrets': held.conversation === true && held.archivedFerret !== true ? [{ id: 'f' }] : [],
+    'GET /v1/archived-sessions': {
+      count: held.conversation === true && held.archivedFerret === true ? 2 : 0,
+      sessions: [],
+    },
   };
 };
 

@@ -1,5 +1,5 @@
 /**
- * READING THE SIX FACTS, cheaply: one batch of reads, each through this machine's own client, each QUIET (a read
+ * READING THE FIVE FACTS, cheaply: one batch of reads, each through this machine's own client, each QUIET (a read
  * nobody asked for must never raise a passkey prompt). No timer: a batch runs when the page opens and again only when
  * the machine says a step changed (`OnboardingChanged`), the person comes back to it, or the machine locks or unlocks.
  *
@@ -18,9 +18,9 @@ import type { StepperFact, StepperFacts } from './stepper-model.ts';
 
 const PasskeysSchema = z.object({ passkeys: z.array(z.unknown()) });
 const FileSchema = z.object({ exists: z.boolean(), text: z.string() });
-const LoginsSchema = z.object({ logins: z.array(z.unknown()) });
-const SetUpSchema = z.object({ setUp: z.boolean() });
 const FerretsSchema = z.array(z.unknown());
+const ProjectsSchema = z.array(z.unknown());
+const StepsSchema = z.object({ steps: z.array(z.object({ plugin: z.string(), id: z.string(), state: z.string() })) });
 const ArchivedSchema = z.object({ count: z.number() });
 
 const NAME_LINE = /^name:/mu;
@@ -55,6 +55,24 @@ export const readStepperFacts = async (
     settled(read).then(fact => {
       if (!signal.aborted) onFact(key, fact);
     });
+  /** Any ferret ever made counts: the live list leaves out an archived one, so an empty live list asks the archive. One read per batch. */
+  let used: Promise<boolean> | undefined;
+  const inUse = (): Promise<boolean> =>
+    (used ??= (async () => {
+      if (FerretsSchema.parse(await client.call('GET /v1/ferrets', base)).length > 0) return true;
+      const archived = await client.call('GET /v1/archived-sessions', { query: { limit: '1' }, ...base });
+      return ArchivedSchema.parse(archived).count > 0;
+    })());
+  /** The onboarding steps, read once per batch: a tool is looked at once its own step is no longer `pending`. */
+  let steps: Promise<ReadonlyMap<string, string>> | undefined;
+  const toolLooked = async (plugin: string): Promise<boolean> => {
+    steps ??= client
+      .call('GET /v1/onboarding', base)
+      .then(
+        raw => new Map(StepsSchema.parse(raw).steps.map(step => [`${step.plugin}.${step.id}`, step.state] as const)),
+      );
+    return (await steps).get(`${plugin}.harness`) !== 'pending';
+  };
   const protectedReads: readonly [FactKey, () => Promise<StepperFact>][] = [
     [
       'name',
@@ -65,16 +83,15 @@ export const readStepperFacts = async (
         return host.exists && NAME_LINE.test(host.text);
       },
     ],
-    ['login', async () => LoginsSchema.parse(await client.call('GET /v1/logins', base)).logins.length > 0],
-    ['runtime', async () => SetUpSchema.parse(await client.call('GET /v1/onboarding', base)).setUp],
+    // Claude Code and Codex: each tool's own onboarding step has been looked at (found, done, later or skipped), or this
+    // machine already has a conversation (an established machine is not on its first run). A tool whose plugin is off
+    // declares no step: nothing to ask here, so it holds.
+    ['claude', async () => (await toolLooked('claude-code')) || (await inUse())],
+    ['codex', async () => (await toolLooked('codex')) || (await inUse())],
+    // A project is registered, or the person already works projectless (any conversation ever made).
     [
-      'ferret',
-      // Any ferret ever made counts: the live list leaves out an archived one, so an empty live list asks the archive.
-      async () => {
-        if (FerretsSchema.parse(await client.call('GET /v1/ferrets', base)).length > 0) return true;
-        const archived = await client.call('GET /v1/archived-sessions', { query: { limit: '1' }, ...base });
-        return ArchivedSchema.parse(archived).count > 0;
-      },
+      'project',
+      async () => ProjectsSchema.parse(await client.call('GET /v1/projects', base)).length > 0 || (await inUse()),
     ],
   ];
   await Promise.all([

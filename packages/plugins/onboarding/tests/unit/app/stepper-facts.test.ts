@@ -41,21 +41,35 @@ const batch = async (
 const SET_UP = {
   'GET /v1/passkeys': { passkeys: [{ id: 'k' }], registration: 'closed' },
   'GET /v1/config/file': { exists: true, text: 'name: "Studio"\n', etag: 'e' },
-  'GET /v1/logins': { format: 1, machine: 'm', logins: [{ id: 'main' }] },
-  'GET /v1/onboarding': { steps: [], complete: false, setUp: true },
+  'GET /v1/onboarding': {
+    steps: [
+      { plugin: 'claude-code', id: 'harness', state: 'done' },
+      { plugin: 'codex', id: 'harness', state: 'found' },
+    ],
+    complete: false,
+    setUp: true,
+  },
+  'GET /v1/projects': [{ id: 'p1' }],
   'GET /v1/ferrets': [{ id: 'f1' }],
   'GET /v1/archived-sessions': { count: 0, sessions: [] },
 };
 const FRESH = {
   'GET /v1/passkeys': { passkeys: [], registration: 'open' },
   'GET /v1/config/file': { exists: false, text: '', etag: 'e' },
-  'GET /v1/logins': { format: 1, machine: 'm', logins: [] },
-  'GET /v1/onboarding': { steps: [], complete: false, setUp: false },
+  'GET /v1/onboarding': {
+    steps: [
+      { plugin: 'claude-code', id: 'harness', state: 'pending' },
+      { plugin: 'codex', id: 'harness', state: 'pending' },
+    ],
+    complete: false,
+    setUp: true,
+  },
+  'GET /v1/projects': [],
   'GET /v1/ferrets': [],
   'GET /v1/archived-sessions': { count: 0, sessions: [] },
 };
-const ALL_TRUE: StepperFacts = { passkey: true, name: true, login: true, runtime: true, ferret: true };
-const ALL_FALSE: StepperFacts = { passkey: false, name: false, login: false, runtime: false, ferret: false };
+const ALL_TRUE: StepperFacts = { passkey: true, name: true, claude: true, codex: true, project: true };
+const ALL_FALSE: StepperFacts = { passkey: false, name: false, claude: false, codex: false, project: false };
 
 describe('reading the stepper facts', () => {
   it('a fully set-up machine holds every fact', async () => {
@@ -75,40 +89,66 @@ describe('reading the stepper facts', () => {
     expect((await batch(clientOf(answers).client)).name).toBe(false);
   });
 
-  it('a machine whose live list is empty but whose archive holds a ferret HAS made a ferret', async () => {
-    const answers = { ...SET_UP, 'GET /v1/ferrets': [], 'GET /v1/archived-sessions': { count: 3, sessions: [{}] } };
-    expect((await batch(clientOf(answers).client)).ferret).toBe(true);
+  it('a machine whose live list is empty but whose archive holds a ferret HAS made a conversation', async () => {
+    const answers = { ...FRESH, 'GET /v1/archived-sessions': { count: 3, sessions: [{}] } };
+    expect(await batch(clientOf(answers).client)).toMatchObject({ claude: true, codex: true, project: true });
   });
 
-  it('a machine with neither a live nor an archived ferret has made none', async () => {
-    expect((await batch(clientOf({ ...SET_UP, 'GET /v1/ferrets': [] }).client)).ferret).toBe(false);
+  it('a machine with no project and no conversation, ever, has the Project step open', async () => {
+    expect((await batch(clientOf(FRESH).client)).project).toBe(false);
   });
 
-  it('a live ferret settles the fact without asking the archive', async () => {
-    const { client, calls } = clientOf(SET_UP);
-    await batch(client);
+  it('a project settles the Project step without asking for any ferret', async () => {
+    const { client, calls } = clientOf({ ...FRESH, 'GET /v1/projects': [{ id: 'p' }] });
+    expect((await batch(client)).project).toBe(true);
+    expect(calls.filter(call => call.route === 'GET /v1/projects')).toHaveLength(1);
+  });
+
+  it('a live ferret settles the facts without asking the archive, and the conversation is read once', async () => {
+    const { client, calls } = clientOf({ ...FRESH, 'GET /v1/ferrets': [{ id: 'f' }] });
+    expect(await batch(client)).toMatchObject({ claude: true, codex: true, project: true });
     expect(calls.map(call => call.route)).not.toContain('GET /v1/archived-sessions');
+    expect(calls.filter(call => call.route === 'GET /v1/ferrets')).toHaveLength(1);
+  });
+
+  it('each tool holds when its own step was looked at (found, done, later, skipped) and is open while it is pending', async () => {
+    const tools = (claude: string, codex: string) => ({
+      ...FRESH,
+      'GET /v1/onboarding': {
+        steps: [
+          { plugin: 'claude-code', id: 'harness', state: claude },
+          { plugin: 'codex', id: 'harness', state: codex },
+        ],
+      },
+    });
+    expect(await batch(clientOf(tools('done', 'pending')).client)).toMatchObject({ claude: true, codex: false });
+    expect(await batch(clientOf(tools('pending', 'skipped')).client)).toMatchObject({ claude: false, codex: true });
+    expect(await batch(clientOf(tools('later', 'found')).client)).toMatchObject({ claude: true, codex: true });
+  });
+
+  it('a tool whose plugin declares no step has nothing to ask here, so it holds', async () => {
+    const answers = { ...FRESH, 'GET /v1/onboarding': { steps: [] } };
+    expect(await batch(clientOf(answers).client)).toMatchObject({ claude: true, codex: true, project: false });
   });
 
   it('an unlock refusal makes THAT fact locked; any other failure is unknown; the rest still answer', async () => {
     const answers = {
       ...SET_UP,
-      'GET /v1/logins': refusal(401, 'unlock_required'),
-      'GET /v1/ferrets': { not: 'a list' },
+      'GET /v1/projects': refusal(401, 'unlock_required'),
       'GET /v1/onboarding': refusal(403, 'grant_step_up_required'),
     };
     expect(await batch(clientOf(answers).client)).toEqual({
       passkey: true,
       name: true,
-      login: 'locked',
-      runtime: undefined,
-      ferret: undefined,
+      claude: undefined,
+      codex: undefined,
+      project: 'locked',
     });
   });
 
   it('a live list refused for the unlock is locked, and the archive is not asked behind it', async () => {
-    const { client, calls } = clientOf({ ...SET_UP, 'GET /v1/ferrets': refusal(401, 'unlock_required') });
-    expect((await batch(client)).ferret).toBe('locked');
+    const { client, calls } = clientOf({ ...FRESH, 'GET /v1/ferrets': refusal(401, 'unlock_required') });
+    expect(await batch(client)).toMatchObject({ claude: 'locked', codex: 'locked', project: 'locked' });
     expect(calls.map(call => call.route)).not.toContain('GET /v1/archived-sessions');
   });
 
@@ -128,9 +168,9 @@ describe('reading the stepper facts', () => {
     expect(await batch(client, true)).toEqual({
       passkey: 'locked',
       name: 'locked',
-      login: 'locked',
-      runtime: 'locked',
-      ferret: 'locked',
+      claude: 'locked',
+      codex: 'locked',
+      project: 'locked',
     });
     expect(calls.map(call => call.route)).toEqual(['GET /v1/passkeys']);
   });

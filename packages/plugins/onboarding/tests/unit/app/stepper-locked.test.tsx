@@ -16,7 +16,7 @@ import type { StepperStorage } from '../../../app/features/stepper/stepper-memor
 const ROUTES: Record<string, readonly string[]> = {
   kernel: ['GET /v1/config/file'],
   access: ['GET /v1/passkeys'],
-  logins: ['GET /v1/logins'],
+  projects: ['GET /v1/projects'],
   ferrets: ['GET /v1/ferrets', 'GET /v1/archived-sessions'],
   onboarding: ['GET /v1/onboarding'],
 };
@@ -41,10 +41,15 @@ const UNLOCK = { status: 401, headers: {}, body: { error: 'Unlock this machine f
 
 const SET_UP: Record<string, unknown> = {
   '/v1/config/file': { exists: true, text: 'name: "Studio"\n', etag: 'e' },
-  '/v1/logins': { logins: [{ id: 'main' }] },
+  '/v1/projects': [{ id: 'p' }],
   '/v1/ferrets': [{ id: 'f' }],
   '/v1/archived-sessions': { count: 0, sessions: [] },
-  '/v1/onboarding': { setUp: true },
+  '/v1/onboarding': {
+    steps: [
+      { plugin: 'claude-code', id: 'harness', state: 'done' },
+      { plugin: 'codex', id: 'harness', state: 'done' },
+    ],
+  },
 };
 
 /** A machine that answers the passkey list whatever its lock, and every other read only once `state.locked` is false. */
@@ -134,7 +139,7 @@ describe('the stepper facts on a locked machine (the real client)', () => {
     await readStepperFacts(world.stepperClient, true, new AbortController().signal, (key, fact) => {
       heard[key] = fact;
     });
-    expect(heard).toEqual({ passkey: 'locked', name: 'locked', login: 'locked', runtime: 'locked', ferret: 'locked' });
+    expect(heard).toEqual({ passkey: 'locked', name: 'locked', claude: 'locked', codex: 'locked', project: 'locked' });
   });
 
   it('the stepper draws once the shell knows it is locked, the first still-unknown step the one to do, though four reads never answered', async () => {
@@ -160,7 +165,7 @@ describe('the stepper facts on a locked machine (the real client)', () => {
     const states = [...view.container.querySelectorAll('[data-step]')].map(
       item => `${item.getAttribute('data-step')}:${item.getAttribute('data-state')}`,
     );
-    expect(states).toEqual(['pair:done', 'passkey:done', 'name:current', 'login:next', 'runtime:next', 'ferret:next']);
+    expect(states).toEqual(['pair:done', 'passkey:done', 'name:current', 'claude:next', 'codex:next', 'project:next']);
     expect(view.container.querySelector('[data-first-run-stepper-action="name"]')?.textContent).toBe('Unlock');
     await view.unmount();
   });
