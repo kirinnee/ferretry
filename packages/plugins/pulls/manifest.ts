@@ -1,4 +1,4 @@
-import { definePlugin, route } from '@ferretry/kernel/manifest';
+import { definePlugin, route, screen } from '@ferretry/kernel/manifest';
 import { GitAccountDisconnected, GitAccountsPort } from '@ferretry/plugin-git-accounts/contract';
 import { ProjectsPort, ProjectRemoved } from '@ferretry/plugin-projects/contract';
 import { PULLS_CACHE, PULLS_CAPS, PULLS_WORDS } from './contract/index.ts';
@@ -6,7 +6,7 @@ import { PULLS_CACHE, PULLS_CAPS, PULLS_WORDS } from './contract/index.ts';
 /**
  * PRs & CI (r9 track E): a project's pull requests and CI, inside Ferretry. E1 is the base the other units stand on: the
  * contract, a GitHub client over `git-accounts`' api seam (ETag reads, `Link` paging, a rate budget) and the per-project
- * cache. E1 filed no route; each later unit adds its own route declaration here and one registration line to `daemon/routes.ts`. E8 files the CI reads.
+ * cache. E1 filed no route; each later unit adds its own route declaration here and one registration line to `daemon/routes.ts`. E8 files the CI reads; E4 files the PR page (route and screen).
  *
  * NO TOKEN. This plugin names an account by id and `git-accounts` places the token on the request; nothing here can
  * read one. It needs no network permission of its own for the same reason: it never makes the request.
@@ -17,7 +17,7 @@ export default definePlugin({
   version: '5.0.0',
   api: 5,
   core: false,
-  kinds: ['command'],
+  kinds: ['command', 'view'],
   words: PULLS_WORDS,
 
   needs: { gitAccounts: GitAccountsPort, projects: ProjectsPort },
@@ -50,8 +50,22 @@ export default definePlugin({
         audit: { skip: 'a read of a PR the project already lists; nothing is changed and no secret is touched' },
         guard: { none: 'review threads of one PR: logins, comment text and links from GitHub; never a token' },
       }),
+      // E4: one pull request with its conversation and its checks. Reading it reads private code, so `filesystem.use`.
+      route('GET /v1/pulls/:project/:repo/:number', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: PULLS_CAPS.read,
+        noStore: true,
+        audit: { skip: 'a read of one pull request; nothing is changed and no text is recorded' },
+        guard: {
+          none: 'GitHub text (a title, a description, comments) and counts; no pane, page or vault text, and no token',
+        },
+      }),
     ],
   },
+
+  // E4: the PR page. E3 adds the list screen beside it.
+  ui: { screens: [screen('pull', { path: 'pulls/:project/:repo/:number' })] },
 
   data: {
     // Private code (diffs): `0600` files in `0700` folders, bounded, deleted with the project or account.

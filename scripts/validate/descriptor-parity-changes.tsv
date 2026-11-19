@@ -467,3 +467,4 @@ route	DELETE /v1/git-accounts/:id/keys/:purpose	added	new in 5.0 (r9 B3 git-acco
 route	GET /v1/pulls/:project/:repo/runs	added	new in r9 (E8 pulls): the CI runs of a pull request's or branch's head commit (jobs, steps, timing); filesystem use from a person, names, statuses and times only
 route	GET /v1/pulls/:project/:repo/runs/:runId	added	new in r9 (E8 pulls): one Actions run with its jobs, steps and timing (a chosen attempt on request); filesystem use from a person, names, statuses and times only
 route	GET /v1/pulls/:project/:repo/:number/threads	added	new in 5.0 (r9 E6 pulls): the review threads of one pull request (GitHub GraphQL, never cached), filesystem.use; repo is owner~name; no token
+route	GET /v1/pulls/:project/:repo/:number	added	new in r9 (E4 pulls): one pull request with its conversation and head-commit checks, read through the connected GitHub account; filesystem.use, no token or body_html is returned

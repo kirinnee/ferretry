@@ -601,16 +601,17 @@
       "name": "@ferretry/plugin-pulls",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/app": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-git-accounts": "workspace:*",
         "@ferretry/plugin-projects": "workspace:*",
         "@ferretry/std": "workspace:*",
+        "lucide-react": "^0.468.0",
         "react": "^19.0.0",
         "zod": "4.4.3",
       },
       "devDependencies": {
-        "@ferretry/app": "workspace:*",
         "@happy-dom/global-registrator": "^20.11.1",
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
