@@ -18,7 +18,7 @@ const entry = (name: string, kind: 'folder' | 'file' = 'folder', isRepo = false)
 
 /** A fake home: ~ holds work (with a repo) and notes.md; ~/work holds ferretry (a repo) and scratch. */
 const TREE: Record<string, readonly ReturnType<typeof entry>[]> = {
-  '/home/k': [entry('work'), entry('notes.md', 'file'), entry('.config')],
+  '/home/k': [entry('work'), entry('notes.md', 'file'), entry('.env', 'file'), entry('.config')],
   '/home/k/work': [entry('ferretry', 'folder', true), entry('scratch')],
   '/home/k/work/scratch': [],
 };
@@ -82,14 +82,12 @@ const open = async (
 };
 
 describe('FolderExplorer', () => {
-  it('opens at the home folder with folders first, files muted, and a git badge on a repository', async () => {
+  it('opens at the home folder with folders only (no files), and a git badge on a repository', async () => {
     explorerViewPreference.write('auto');
     const mounted = await open();
-    expect(names(mounted)).toEqual(['work', 'notes.md']);
+    expect(names(mounted)).toEqual(['work']);
     expect(crumbs(mounted)).toEqual(['/home/k']);
-    expect(
-      must(mounted.container.querySelector('[data-explorer-kind="file"]'), 'a file').getAttribute('aria-disabled'),
-    ).toBe('true');
+    expect(mounted.container.querySelector('[data-explorer-kind="file"]')).toBeNull();
     await press(must(mounted.container.querySelector('[data-explorer-entry="work"]'), 'work'));
     await settled(mounted, c => c.querySelector('[data-explorer-entry="ferretry"]') !== null, 'work opened');
     expect(crumbs(mounted)).toEqual(['/home/k', '/home/k/work']);
@@ -101,15 +99,12 @@ describe('FolderExplorer', () => {
     await mounted.unmount();
   });
 
-  it('a press on a file does nothing, and a crumb goes back up', async () => {
+  it('a crumb goes back up', async () => {
     const mounted = await open();
-    await press(must(mounted.container.querySelector('[data-explorer-entry="notes.md"]'), 'the file'));
-    await settle();
-    expect(crumbs(mounted)).toEqual(['/home/k']);
     await press(must(mounted.container.querySelector('[data-explorer-entry="work"]'), 'work'));
     await settled(mounted, c => c.querySelector('[data-explorer-entry="scratch"]') !== null, 'work');
     await press(must(mounted.container.querySelector('[data-explorer-crumb="/home/k"]'), 'the home crumb'));
-    await settled(mounted, c => c.querySelector('[data-explorer-entry="notes.md"]') !== null, 'home again');
+    await settled(mounted, c => c.querySelector('[data-explorer-fence]') !== null, 'home again');
     await mounted.unmount();
   });
 
@@ -146,7 +141,7 @@ describe('FolderExplorer', () => {
     // The highlight belongs to the folder it was made in.
     expect(mounted.container.querySelectorAll('[data-explorer-highlighted="true"]').length).toBe(0);
     await key(listbox(mounted), 'Backspace');
-    await settled(mounted, c => c.querySelector('[data-explorer-entry="notes.md"]') !== null, 'back at home');
+    await settled(mounted, c => c.querySelector('[data-explorer-fence]') !== null, 'back at home');
     // Backspace at the top stays at the top.
     await key(listbox(mounted), 'Backspace');
     await settle();
@@ -236,7 +231,7 @@ describe('FolderExplorer', () => {
       c => (c.querySelector('[role="alert"]')?.textContent ?? '').includes('that folder is private'),
       'the failure',
     );
-    expect(names(mounted)).toEqual(['work', 'notes.md']);
+    expect(names(mounted)).toEqual(['work']);
     await mounted.unmount();
   });
 
@@ -279,8 +274,8 @@ describe('FolderExplorer', () => {
     const up = must(mounted.container.querySelector('[data-explorer-up]'), 'the Up button');
     expect(up.getAttribute('data-explorer-up')).toBe('/home/k');
     await press(up);
-    await settled(mounted, c => c.querySelector('[data-explorer-entry="notes.md"]') !== null, 'the home');
-    expect(names(mounted)).toEqual(['work', 'notes.md']);
+    await settled(mounted, c => c.querySelector('[data-explorer-fence]') !== null, 'the home');
+    expect(names(mounted)).toEqual(['work']);
     await mounted.unmount();
   });
 
@@ -295,6 +290,8 @@ describe('FolderExplorer', () => {
     expect(names(mounted)).not.toContain('.config');
     await press(toggle);
     await settled(mounted, c => c.querySelector('[data-explorer-entry=".config"]') !== null, 'the dotfolder');
+    // The daemon lists hidden FILES too with the switch on; the picker is folders only.
+    expect(names(mounted)).toEqual(['work', '.config']);
     expect(calls.some(call => call.query?.hidden === '1')).toBe(true);
     await mounted.unmount();
   });

@@ -234,17 +234,17 @@ export function FolderExplorer(props: FolderExplorerProps) {
         </p>
       )}
 
-      {listing.entries.length === 0 ? (
+      {folders.length === 0 ? (
         <p
           className="m-0 rounded-control border border-border-soft bg-surface-2 p-panel text-meta text-faint"
           data-explorer-empty=""
         >
-          This folder is empty.
+          {listing.entries.length === 0 ? 'This folder is empty.' : 'No folders in here.'}
         </p>
       ) : (
         <ExplorerEntries
           ref={listRef}
-          entries={listing.entries}
+          entries={folders}
           view={view}
           highlightedName={highlightedName}
           idFor={idFor}

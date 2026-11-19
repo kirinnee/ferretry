@@ -344,4 +344,58 @@ describe('Create a project', () => {
     });
     await mounted.unmount();
   });
+
+  it('keeps Next locked while the next folder is still being read, then advances with the NEW path', async () => {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const folder = (name: string) => ({
+      name,
+      kind: 'folder',
+      isRepo: false,
+      hidden: false,
+      modifiedAt: '2026-08-01T10:00:00.000Z',
+    });
+    const mounted = await mount(
+      page(
+        base(calls, {
+          [FOLDERS]: async (call: Call) => {
+            if (call.query?.path === '/home/k/child') {
+              await gate;
+              return {
+                ...listing('/home/k/child'),
+                crumbs: [
+                  { name: '~', path: '/home/k' },
+                  { name: 'child', path: '/home/k/child' },
+                ],
+              };
+            }
+            return { ...listing('/home/k'), entries: [folder('child')] };
+          },
+        }),
+      ),
+    );
+    await press(must(mounted.container.querySelector('[aria-controls="add-project-form"]'), 'the disclosure'));
+    await settled(mounted, c => c.querySelector('[data-explorer-entry="child"]') !== null, 'the home folder');
+    await press(must(mounted.container.querySelector('[data-explorer-entry="child"]'), 'child'));
+    await settled(mounted, c => c.querySelector('[data-explorer-state="ready"][aria-busy="true"]') !== null, 'busy');
+    // The picker still draws the previous folder, but Next must not commit it.
+    expect((button(mounted, 'Next') as HTMLButtonElement).disabled).toBe(true);
+    await press(button(mounted, 'Next'));
+    expect(mounted.container.querySelector('[data-create-step="folder"]')).not.toBeNull();
+    await interact(async () => release());
+    await settled(mounted, c => c.querySelector('[data-explorer-crumb="/home/k/child"]') !== null, 'child opened');
+    await settled(mounted, () => !(button(mounted, 'Next') as HTMLButtonElement).disabled, 'Next unlocked');
+    await press(button(mounted, 'Next'));
+    await step(mounted, 'name');
+    await press(button(mounted, 'Create project'));
+    await step(mounted, 'accounts');
+    expect(calls.find(call => call.route === REGISTER)?.body).toEqual({
+      kind: 'existing-folder',
+      path: '/home/k/child',
+    });
+    await mounted.unmount();
+  });
 });

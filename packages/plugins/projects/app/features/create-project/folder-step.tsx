@@ -40,6 +40,8 @@ export function FolderStep({ client, draft, progress, onDraftChange, onNext }: F
   // The folder open in the explorer right now. Coming back from the next page reopens where the person was.
   const [opened, setOpened] = useState<string | null>(draft.folder);
   const onOpened = useCallback((path: string) => setOpened(path), []);
+  // While the next folder is read the picker still shows the previous one: Next must not commit that old path.
+  const [busy, setBusy] = useState(true);
   const target = opened === null ? null : projectFolder({ ...draft, folder: opened });
 
   return (
@@ -53,9 +55,9 @@ export function FolderStep({ client, draft, progress, onDraftChange, onNext }: F
       progress={progress}
       next={{
         label: 'Next',
-        disabled: target === null,
+        disabled: target === null || busy,
         onClick: () => {
-          if (opened === null) return;
+          if (opened === null || busy) return;
           onDraftChange({ ...draft, folder: opened });
           onNext();
         },
@@ -84,7 +86,7 @@ export function FolderStep({ client, draft, progress, onDraftChange, onNext }: F
           </label>
         )}
 
-        <FolderPicker client={client} startAt={draft.folder ?? undefined} onOpened={onOpened} />
+        <FolderPicker client={client} startAt={draft.folder ?? undefined} onOpened={onOpened} onBusyChange={setBusy} />
 
         {target !== null && (
           <p className="m-0 text-meta text-muted" data-create-chosen="">

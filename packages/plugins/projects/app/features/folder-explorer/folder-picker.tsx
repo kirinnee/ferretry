@@ -19,10 +19,12 @@ export interface FolderPickerProps {
   readonly onChoose?: (path: string) => void;
   /** The folder that is open now, whenever it changes: a stepper's Next uses it. */
   readonly onOpened?: (path: string) => void;
+  /** Whether a folder read is pending (the listing on screen is then the PREVIOUS folder): a stepper locks Next on it. */
+  readonly onBusyChange?: (busy: boolean) => void;
   readonly chooseLabel?: string;
 }
 
-export function FolderPicker({ client, startAt, onChoose, onOpened, chooseLabel }: FolderPickerProps) {
+export function FolderPicker({ client, startAt, onChoose, onOpened, onBusyChange, chooseLabel }: FolderPickerProps) {
   const [path, setPath] = useState<string | undefined>(startAt);
   const [showHidden, setShowHidden] = useState(false);
   const state = useFolderListing(client, path, showHidden);
@@ -32,6 +34,11 @@ export function FolderPicker({ client, startAt, onChoose, onOpened, chooseLabel 
   useEffect(() => {
     if (openPath !== undefined) onOpened?.(openPath);
   }, [openPath, onOpened]);
+
+  const busy = state.loading;
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
 
   return (
     <FolderExplorer

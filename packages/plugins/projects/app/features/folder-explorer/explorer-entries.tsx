@@ -3,7 +3,7 @@
  * order are drawn either way and only the arrangement differs.
  *
  * ONE HIGHLIGHT. The highlighted folder is the keyboard's (`aria-activedescendant` on the listbox); a pointer never
- * draws a second one. A file is shown muted and cannot be opened: the explorer picks folders.
+ * draws a second one. The explorer picks folders, so it is only ever handed folders (the daemon also lists files).
  */
 import { File, Folder, FolderGit2 } from 'lucide-react';
 import { forwardRef } from 'react';
