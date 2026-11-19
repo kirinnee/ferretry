@@ -179,3 +179,40 @@ export interface ComponentWriter {
   /** Never throws: an owner that is off, slow, offers no write or refuses is a `refused` outcome. */
   put(write: OwnerComponentWrite & { readonly text: string }): Promise<OwnerWriteOutcome>;
 }
+
+/**
+ * A copy of `model` whose named components are what the owners REPORT as in effect (`effective`, read after they wrote),
+ * not what the import asked for: an owner may have narrowed a document, held it, or taken it as it already stood. A
+ * component the owners do not have in effect is left out, and so is every profile layer that names it, in this model only
+ * (the profile FILES keep a held one's layer, so confirming it completes them).
+ */
+export function withEffective(
+  model: AccountModel,
+  effective: AccountModel,
+  references: readonly { readonly kind: OwnerKind; readonly name: string }[],
+): AccountModel {
+  const components: Record<string, Record<string, unknown>> = Object.fromEntries(
+    Object.entries(model.components).map(([kind, entries]) => [kind, { ...(entries as Record<string, unknown>) }]),
+  );
+  const absent = new Set<string>();
+  for (const { kind, name } of references) {
+    const reported: unknown = effective.components[kind][name];
+    const entries = components[kind] ?? {};
+    components[kind] = entries;
+    if (reported === undefined) {
+      delete entries[name];
+      absent.add(`${kind}/${name}`);
+    } else entries[name] = reported;
+  }
+  const next = { ...model, components: components as unknown as AccountModel['components'] };
+  if (absent.size === 0) return next;
+  return {
+    ...next,
+    profiles: Object.fromEntries(
+      Object.entries(next.profiles).map(([name, profile]) => [
+        name,
+        { ...profile, layers: profile.layers.filter(layer => !absent.has(layer)) },
+      ]),
+    ),
+  };
+}

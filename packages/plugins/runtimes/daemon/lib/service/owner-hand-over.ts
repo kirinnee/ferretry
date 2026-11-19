@@ -6,7 +6,8 @@
  * never stops Runtimes' own files, which still land together. A refused component is reverted out of the model Runtimes
  * then applies, and out of every profile that named it.
  */
-import type { AccountModel } from '../account/schema.ts';
+import { type ImportPlan, mergeImportRecord } from '../account/import.ts';
+import type { AccountModel, LayerReferenceText } from '../account/schema.ts';
 import {
   type ComponentWriter,
   type OwnerComponentWrite,
@@ -14,15 +15,30 @@ import {
   ownerWrites,
   revertComponents,
   withComponentsOf,
+  withEffective,
 } from '../account/owner-components.ts';
 import type { FleetDocumentWrite } from '../provisioning.ts';
+import { FleetCatalogRefusal } from './catalog-service.ts';
+import { configurationLanded } from './failed-apply.ts';
+
+/** The references (`kind/name`) the owners did not take into effect: refused outright, or written but held for the owner. */
+export interface NotInEffect {
+  readonly refused: ReadonlySet<string>;
+  readonly held: ReadonlySet<string>;
+}
+
+const NOTHING_HELD: NotInEffect = { refused: new Set(), held: new Set() };
 
 /** What an import composed for the components another plugin owns. */
 export interface OwnedComponents {
   readonly writes: readonly OwnerComponentWrite[];
-  /** The model and documents to apply when the owners refused these references: those are left out. */
+  /**
+   * The model and documents to apply once the owners answered: a refused reference is left out of both and out of every
+   * profile that named it; a held one stays in the documents (confirming it completes them) and is left to the caller's
+   * reading of what is in effect. `documents` is told what is not in effect so the import record claims no more.
+   */
   rebuild(
-    refused: ReadonlySet<string>,
+    outcome: NotInEffect,
   ): Promise<{ readonly model: AccountModel; readonly documents: readonly FleetDocumentWrite[] }>;
 }
 
@@ -35,20 +51,23 @@ export async function composeOwned(input: {
   readonly model: AccountModel;
   readonly enabled: boolean;
   readonly assetText: (file: string) => string | undefined;
-  readonly documents: (model: AccountModel) => Promise<readonly FleetDocumentWrite[]>;
+  readonly documents: (model: AccountModel, outcome: NotInEffect) => Promise<readonly FleetDocumentWrite[]>;
 }): Promise<{ readonly documents: readonly FleetDocumentWrite[]; readonly owners?: OwnedComponents }> {
   const { before, model } = input;
   const owned = input.enabled ? ownerReferences(before, model) : [];
-  if (owned.length === 0) return { documents: await input.documents(model) };
+  if (owned.length === 0) return { documents: await input.documents(model, NOTHING_HELD) };
   return {
-    documents: await input.documents(withComponentsOf(model, before, owned)),
+    documents: await input.documents(withComponentsOf(model, before, owned), NOTHING_HELD),
     owners: {
       writes: ownerWrites(before, model, input.assetText),
-      rebuild: async refused => {
-        const left = owned.filter(({ kind, name }) => refused.has(`${kind}/${name}`));
-        const kept = owned.filter(({ kind, name }) => !refused.has(`${kind}/${name}`));
+      rebuild: async outcome => {
+        const left = owned.filter(({ kind, name }) => outcome.refused.has(`${kind}/${name}`));
+        const kept = owned.filter(({ kind, name }) => !outcome.refused.has(`${kind}/${name}`));
         const reverted = revertComponents(model, before, left);
-        return { model: reverted, documents: await input.documents(withComponentsOf(reverted, before, kept)) };
+        return {
+          model: reverted,
+          documents: await input.documents(withComponentsOf(reverted, before, kept), outcome),
+        };
       },
     },
   };
@@ -70,6 +89,8 @@ export async function handOver(input: {
   readonly owners: OwnedComponents | undefined;
   readonly applied: HandOver['applied'];
   readonly secretValues: readonly string[];
+  /** The model the owners report in effect NOW (read again after they wrote). Only asked when an owner took something. */
+  readonly inEffect: () => Promise<AccountModel>;
 }): Promise<HandOver> {
   const { writer, owners, applied } = input;
   if (owners === undefined || writer === undefined || owners.writes.length === 0) {
@@ -85,6 +106,7 @@ export async function handOver(input: {
   const refused: { readonly file: string; readonly reason: string }[] = [];
   const noted: string[] = [];
   const left = new Set<string>();
+  const heldReferences = new Set<string>();
   for (const write of owners.writes) {
     const answer =
       write.text === undefined
@@ -92,14 +114,35 @@ export async function handOver(input: {
         : await writer.put({ ...write, text: write.text });
     if (answer.outcome !== 'refused') {
       (answer.outcome === 'written' ? written : held).push(write.file);
+      if (answer.outcome === 'held') heldReferences.add(write.reference);
       for (const warning of answer.warnings ?? []) noted.push(`${write.file} (${say(warning)})`);
     } else {
       refused.push({ file: write.file, reason: say(answer.reason) });
       left.add(write.reference);
     }
   }
+  const rebuilt =
+    left.size === 0 && heldReferences.size === 0
+      ? applied
+      : await owners.rebuild({ refused: left, held: heldReferences });
+  // The fleet is built from what the owners report in effect, never from what the import asked for: a held component
+  // is not in effect yet, an owner may have written less than it was given, and a prior version stays active.
+  const taken = owners.writes.filter(write => !left.has(write.reference));
+  const effective =
+    taken.length === 0
+      ? rebuilt.model
+      : withEffective(
+          rebuilt.model,
+          await input.inEffect().catch((error: unknown) => {
+            throw new FleetCatalogRefusal(
+              'fleet_change_failed',
+              `what is now in effect could not be read (${error instanceof Error ? error.message : String(error)}), so no runtime was generated${written.length === 0 ? '' : `; ${configurationLanded(written)}`}`,
+            );
+          }),
+          taken.map(({ kind, name }) => ({ kind, name })),
+        );
   return {
-    applied: left.size === 0 ? applied : await owners.rebuild(left),
+    applied: { model: effective, documents: rebuilt.documents },
     landed: written,
     sentences: [
       ...(written.length === 0 ? [] : [`Written by the parts that own them: ${written.join(', ')}.`]),
@@ -110,4 +153,46 @@ export async function handOver(input: {
         : [`Not written: ${refused.map(entry => `${entry.file} (${entry.reason})`).join('; ')}.`]),
     ],
   };
+}
+
+/**
+ * The text of the import record after an apply, claiming only what took effect: an accepted update an owner refused or held stays
+ * as it was (so the next scan offers it again), and a component an owner refused is not recorded as imported.
+ */
+export function recordText(
+  plan: ImportPlan,
+  updates: readonly { readonly reference: LayerReferenceText }[],
+  outcome: NotInEffect,
+): string {
+  const offered = new Set<string>(updates.map(update => update.reference));
+  const merged = mergeImportRecord(
+    plan,
+    updates
+      .map(update => update.reference)
+      .filter(reference => !outcome.refused.has(reference) && !outcome.held.has(reference)),
+  );
+  const components = Object.fromEntries(
+    Object.entries(merged.components).filter(
+      ([reference]) => offered.has(reference) || !outcome.refused.has(reference),
+    ),
+  );
+  return `${JSON.stringify({ ...merged, components }, null, 2)}\n`;
+}
+
+/**
+ * `assets` without the body a handed-over settings component was made from. That body only composes the owner's
+ * document; written under the fleet it would outlive an owner's refusal, raw secrets included.
+ */
+export function withoutHandedBodies<T extends { readonly path: string }>(
+  assets: readonly T[],
+  before: AccountModel,
+  model: AccountModel,
+): readonly T[] {
+  const bodies = new Set<string>(
+    ownerReferences(before, model).flatMap(({ kind, name }) => {
+      const file = kind === 'settings' ? model.components.settings[name]?.file : undefined;
+      return file === undefined ? [] : [file];
+    }),
+  );
+  return assets.filter(asset => !bodies.has(asset.path));
 }

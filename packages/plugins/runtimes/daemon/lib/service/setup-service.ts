@@ -90,12 +90,11 @@ import {
   type ImportPlan,
   type ImportRecord,
   mergeImport,
-  mergeImportRecord,
   planImport,
 } from '../account/import.ts';
 import { HARNESS_DISPLAY_NAMES } from '../account/layering.ts';
 import { type ComponentWriter, withoutHookChanges } from '../account/owner-components.ts';
-import { composeOwned, handOver, type OwnedComponents } from './owner-hand-over.ts';
+import { composeOwned, handOver, type OwnedComponents, recordText, withoutHandedBodies } from './owner-hand-over.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
 import { parseSettings, type SettingsObject } from '../settings.ts';
@@ -641,6 +640,8 @@ export class FleetSetupService {
       owners: composed.owners,
       applied: { model: composed.model, documents: composed.documents },
       secretValues: composed.secrets.map(secret => secret.value),
+      // The fleet is built from what the owners report in effect after they wrote, not from the import's own model.
+      inEffect: async () => (await this.#read()).model,
     });
     landed.push(...handed.landed);
     const { model, documents } = handed.applied;
@@ -767,11 +768,8 @@ export class FleetSetupService {
       const folder = await this.deps.readFolder(file.from);
       for (const entry of folder.files) assets.push({ path: `${file.path}/${entry.path}`, content: entry.content });
     }
-    const record = mergeImportRecord(
-      plan,
-      updates.map(update => update.reference),
-    );
-    const recordFile = { path: this.#recordPath(), content: `${JSON.stringify(record, null, 2)}\n` };
+    // The body a handed-over settings component was made from is never written under the fleet's assets.
+    const written = this.deps.components === undefined ? assets : withoutHandedBodies(assets, reading.model, model);
     // MCP servers, skills and settings belong to other plugins: Runtimes' own files are composed WITHOUT them (each as it
     // is now), and the owners are handed them at the apply.
     const { documents, owners } = await composeOwned({
@@ -779,7 +777,10 @@ export class FleetSetupService {
       model,
       enabled: this.deps.components !== undefined,
       assetText: file => assets.find(asset => asset.path === file)?.content,
-      documents: async next => await this.#documents(reading, next, assets, [recordFile]),
+      documents: async (next, outcome) =>
+        await this.#documents(reading, next, written, [
+          { path: this.#recordPath(), content: recordText(plan, updates, outcome) },
+        ]),
     });
     const handed = owners?.writes ?? [];
     const secrets = uniqueByName([...plan.secrets, ...updates.flatMap(update => update.secrets)]).map(secret => ({

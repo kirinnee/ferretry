@@ -6,7 +6,10 @@
  * the host scan, the files, the provisioner and the secret store are stand-ins, so what
  * an apply is handed is what a real apply would be.
  */
-import { describe, it } from 'bun:test';
+import { afterEach, describe, it } from 'bun:test';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import should from 'should';
 import type { CallerGovernance, GrantRefusal } from '@ferretry/core-gate/contract';
 import type { Instant } from '@ferretry/std';
@@ -3532,5 +3535,315 @@ describe('the setup.import executor, components another plugin owns', () => {
     // Assert
     should(error.message).containEql('review it again');
     should(door.calls).have.length(0);
+  });
+});
+
+// ── What the owners report in effect builds the fleet (r9 A3, review round 1) ────────────────────
+
+type OwnerAnswer = Awaited<ReturnType<NonNullable<FleetSetupServiceDeps['components']>['put']>>;
+
+/**
+ * An owner door that behaves like owners do: a component it WRITES is in effect from then on (the next read of the
+ * model has it, as the owner projects it), a held or refused one is not.
+ */
+function reportingOwners(
+  answer: (write: OwnerCall) => OwnerAnswer = () => ({ outcome: 'written' }),
+  report: (write: OwnerCall) => unknown = write => JSON.parse(write.text),
+) {
+  const inEffect: Record<string, Record<string, unknown>> = {};
+  let sync: () => void = () => undefined;
+  const door = owners(write => {
+    const answered = answer(write);
+    if (answered.outcome === 'written') {
+      inEffect[write.kind] = { ...inEffect[write.kind], [write.name]: report(write) };
+      sync();
+    }
+    return answered;
+  });
+  /** The model as the machine reads it: Runtimes' own files (`documents`) plus what the owners have in effect. */
+  const readingOf = (documents: readonly FleetDocumentWrite[], revision = 'rev-2'): AccountDocumentReading => {
+    // Read raw: Runtimes' files name an owner's component by reference, and a held one is not in effect.
+    const held = (file: string): Record<string, unknown> => {
+      const document = documents.find(candidate => candidate.path === `/state/config/${file}`);
+      return document === undefined ? {} : (JSON.parse(document.content) as Record<string, unknown>);
+    };
+    const base = { version: 1, ...held('model.yaml'), ...held('machine.yaml') } as {
+      components?: Record<string, Record<string, unknown>>;
+    };
+    const components = Object.fromEntries(
+      Object.entries(inEffect).map(([kind, entries]) => [kind, { ...base.components?.[kind], ...entries }]),
+    );
+    return configReading(parseAccountModel({ ...base, components: { ...base.components, ...components } }), revision);
+  };
+  return {
+    ...door,
+    readingOf,
+    /** From now on every write an owner takes shows in `state.reading` at once. */
+    bind: (state: World['state']) => {
+      sync = () => {
+        state.reading = readingOf([], 'rev-1');
+      };
+    },
+  };
+}
+
+/** The text of everything the fake apply was asked to materialise: the runtime wrappers, settings and MCP files. */
+const planText = (applied: World['applied']): string => JSON.stringify(applied.map(entry => entry.plan));
+
+/** A host whose settings carry a command the owner is not meant to keep (A6 drops it) and one distinct body marker. */
+const HOST_SETTINGS = JSON.stringify({ theme: 'dark', apiKeyHelper: 'run-evil-helper', zzBody: 'BODY-MARKER-9' });
+const settingsHost = (): readonly HostHarnessScan[] => [
+  claudeScan({
+    settings: {
+      kind: 'text',
+      source: '/person/.claude/settings.json',
+      text: HOST_SETTINGS,
+      bytes: HOST_SETTINGS.length,
+    },
+    mcp: { kind: 'text', source: '/person/.claude.json', text: MCP_JSON, bytes: MCP_JSON.length },
+  }),
+  codexScan(),
+];
+
+/** The owner of Claude settings narrows what it was given: no command we would run, and its own marker. */
+const narrowed = (write: OwnerCall): unknown => {
+  const given = JSON.parse(write.text) as { document?: Record<string, unknown> };
+  if (write.kind !== 'settings') return given;
+  const { apiKeyHelper: _command, zzBody: _body, ...kept } = given.document ?? {};
+  return { ...given, document: { ...kept, ownerKept: 'OWNER-VALUE-1' } };
+};
+
+describe('the setup.import executor builds the fleet from what the owners report in effect', () => {
+  it('should generate the runtime from the owner version of a written component, never the import’s own copy', async () => {
+    // Arrange — the owner of settings drops a command the host file carried
+    const door = reportingOwners(() => ({ outcome: 'written' }), narrowed);
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
+    state.scans = settingsHost();
+
+    // Act
+    await importOnce(service);
+
+    // Assert
+    should(applied).have.length(1);
+    const text = planText(applied);
+    should(text).containEql('OWNER-VALUE-1');
+    should(text).containEql('server-github');
+    should(text).not.containEql('run-evil-helper');
+  });
+
+  it('should never put a held component into the generated runtime, and keep it in the profile files', async () => {
+    // Arrange — the MCP server is held until the owner confirms it
+    const door = reportingOwners(write => (write.kind === 'mcp' ? { outcome: 'held' } : { outcome: 'written' }));
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
+    state.scans = settingsHost();
+
+    // Act
+    const { summary } = await importOnce(service);
+
+    // Assert
+    should(summary).containEql('Held until you confirm: mcp/github.yaml.');
+    should(planText(applied)).not.containEql('server-github');
+    const profiles = Object.values(rawModelOf(applied[0]?.documents ?? []).profiles);
+    should(profiles.some(profile => profile.layers.includes('mcp/github'))).be.true();
+  });
+
+  it('should keep the prior version of a held update in effect in the generated runtime', async () => {
+    // Arrange — the owner already has the first github server in effect; the import's update is held
+    let hold = false;
+    const door = reportingOwners(write =>
+      hold && write.kind === 'mcp' ? { outcome: 'held' } : { outcome: 'written' },
+    );
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
+    state.scans = settingsHost();
+    await importOnce(service);
+    const first = applied[0]?.documents ?? [];
+    for (const document of first) state.assets[document.path] = document.content;
+    state.reading = door.readingOf(first);
+    hold = true;
+    const newer = MCP_JSON.replace('server-github', 'server-github-newer');
+    state.scans = [
+      claudeScan({
+        settings: { kind: 'text', source: '/person/.claude/settings.json', text: HOST_SETTINGS, bytes: 9 },
+        mcp: { kind: 'text', source: '/person/.claude.json', text: newer, bytes: newer.length },
+      }),
+      codexScan(),
+    ];
+
+    // Act
+    const { summary } = await importOnce(service, IMPORT({ acceptedUpdates: ['mcp/github'], addDuplicates: true }));
+
+    // Assert
+    should(summary).containEql('Held until you confirm: mcp/github.yaml.');
+    const text = JSON.stringify(applied.slice(1).map(entry => entry.plan));
+    should(text).containEql('server-github');
+    should(text).not.containEql('server-github-newer');
+  });
+
+  it('should fail with the landed owner files named when what is in effect cannot be read after the owners wrote', async () => {
+    // Arrange
+    let broken: () => void = () => undefined;
+    const door = reportingOwners(() => {
+      broken();
+      return { outcome: 'written' };
+    });
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    broken = () => {
+      state.documentError = new Error('files unreadable');
+    };
+    state.scans = settingsHost();
+    const change = IMPORT();
+    await service.executors.setup.describe(change);
+
+    // Act
+    const error = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_failed');
+
+    // Assert
+    should(error.message).containEql('could not be read');
+    should(error.message).containEql('NOT rolled back');
+    should(error.message).containEql('mcp/github.yaml');
+    should(applied).have.length(0);
+  });
+});
+
+describe('the setup.import executor, what an owner refuses', () => {
+  const homes: string[] = [];
+  afterEach(async () => {
+    await Promise.all(homes.splice(0).map(home => rm(home, { recursive: true, force: true })));
+  });
+
+  /** Every file under `directory`, as its path relative to it and its text. */
+  async function tree(directory: string): Promise<readonly { readonly file: string; readonly text: string }[]> {
+    const entries = await readdir(directory, { withFileTypes: true, recursive: true });
+    return await Promise.all(
+      entries
+        .filter(entry => entry.isFile())
+        .map(async entry => {
+          const full = path.join(entry.parentPath, entry.name);
+          return { file: path.relative(directory, full), text: await readFile(full, 'utf8') };
+        }),
+    );
+  }
+
+  it('should never land a refused settings body anywhere under the machine home', async () => {
+    // Arrange — the owner refuses the settings; the fake apply writes every document to a temp FY_HOME like a real one
+    const home = await mkdtemp(path.join(tmpdir(), 'fy-home-'));
+    homes.push(home);
+    const door = reportingOwners(write =>
+      write.kind === 'settings' ? { outcome: 'refused', reason: 'a raw secret' } : { outcome: 'written' },
+    );
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
+    state.scans = settingsHost();
+    state.commit = documents => {
+      for (const document of documents) {
+        if (document.remove === true) continue;
+        const target = path.join(home, document.path);
+        void mkdir(path.dirname(target), { recursive: true }).then(() => writeFile(target, document.content));
+      }
+    };
+
+    // Act
+    const { summary } = await importOnce(service);
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Assert
+    should(summary).containEql('Not written: claude-code/settings/claude-settings.yaml');
+    should(applied).have.length(1);
+    const files = await tree(home);
+    should(files.length).be.above(0);
+    for (const { file, text } of files) {
+      should(text).not.containEql('BODY-MARKER-9');
+      should(text).not.containEql('run-evil-helper');
+      should(file).not.containEql('components/settings');
+    }
+    should(planText(applied)).not.containEql('BODY-MARKER-9');
+  });
+
+  it('should show a refused update again on the next scan, and advance the record for a taken one', async () => {
+    // Arrange — one import is on disk and in effect; the host's CLAUDE.md then changes
+    const door = reportingOwners();
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
+    state.scans = settingsHost();
+    await importOnce(service);
+    const first = applied[0]?.documents ?? [];
+    for (const document of first) state.assets[document.path] = document.content;
+    state.reading = door.readingOf(first);
+    const recordBefore = state.assets[RECORD_PATH];
+    const changed = JSON.stringify({ theme: 'light', apiKeyHelper: 'run-evil-helper' });
+    state.scans = [
+      claudeScan({
+        settings: { kind: 'text', source: '/person/.claude/settings.json', text: changed, bytes: changed.length },
+        mcp: { kind: 'text', source: '/person/.claude.json', text: MCP_JSON, bytes: MCP_JSON.length },
+      }),
+      codexScan(),
+    ];
+    should((await service.scan()).updates.map(update => update.reference)).deepEqual(['settings/claude-settings']);
+
+    // Act — the owner refuses the update
+    door.components.put = async () => ({ outcome: 'refused', reason: 'nope' });
+    const change = IMPORT({ acceptedUpdates: ['settings/claude-settings'] });
+    await service.executors.setup.describe(change);
+    await service.executors.setup.execute(change);
+    for (const document of applied[1]?.documents ?? []) state.assets[document.path] = document.content;
+
+    // Assert — the record is as it was, so the same update is offered again
+    should(state.assets[RECORD_PATH]).equal(recordBefore);
+    should((await service.scan()).updates.map(update => update.reference)).deepEqual(['settings/claude-settings']);
+  });
+
+  it('should advance the record for an update the owner took', async () => {
+    // Arrange
+    const door = reportingOwners();
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
+    state.scans = settingsHost();
+    await importOnce(service);
+    const first = applied[0]?.documents ?? [];
+    for (const document of first) state.assets[document.path] = document.content;
+    state.reading = door.readingOf(first);
+    const changed = JSON.stringify({ theme: 'light' });
+    state.scans = [
+      claudeScan({
+        settings: { kind: 'text', source: '/person/.claude/settings.json', text: changed, bytes: changed.length },
+        mcp: { kind: 'text', source: '/person/.claude.json', text: MCP_JSON, bytes: MCP_JSON.length },
+      }),
+      codexScan(),
+    ];
+
+    // Act
+    const change = IMPORT({ acceptedUpdates: ['settings/claude-settings'] });
+    await service.executors.setup.describe(change);
+    await service.executors.setup.execute(change);
+    for (const document of applied[1]?.documents ?? []) state.assets[document.path] = document.content;
+    state.reading = door.readingOf([...first, ...(applied[1]?.documents ?? [])]);
+
+    // Assert
+    should((await service.scan()).updates).deepEqual([]);
+  });
+
+  it('should not record a refused new component as imported', async () => {
+    // Arrange
+    const door = reportingOwners(write =>
+      write.kind === 'mcp' ? { outcome: 'refused', reason: 'nope' } : { outcome: 'written' },
+    );
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
+    state.scans = settingsHost();
+
+    // Act
+    await importOnce(service);
+
+    // Assert
+    const record = JSON.parse(
+      applied[0]?.documents.find(document => document.path === RECORD_PATH)?.content ?? '{}',
+    ) as {
+      components: Record<string, unknown>;
+    };
+    should(Object.keys(record.components)).not.containEql('mcp/github');
+    should(Object.keys(record.components)).containEql('settings/claude-settings');
   });
 });

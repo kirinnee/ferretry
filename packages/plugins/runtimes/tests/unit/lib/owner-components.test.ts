@@ -9,6 +9,7 @@ import {
   ownerWrites,
   revertComponents,
   withComponentsOf,
+  withEffective,
   withoutHookChanges,
 } from '../../../daemon/lib/account/owner-components.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
@@ -149,5 +150,35 @@ describe('a component an owner already holds, and a settings component given as 
     // Assert
     should(write?.file).equal('codex/settings/given.yaml');
     should(JSON.parse(write?.text ?? '{}')).eql({ harness: 'codex', document: { model: 'x' } });
+  });
+});
+
+describe('withEffective', () => {
+  const effective = parseAccountModel({
+    version: 1,
+    components: { mcp: { old: { command: 'old' }, github: { command: 'narrowed' } } },
+    profiles: { default: { layers: ['mcp/old', 'mcp/github'] } },
+  });
+
+  it('should take what the owners report, and leave out of this model a component they do not have in effect', () => {
+    // Act
+    const model = withEffective(NEXT, effective, [
+      { kind: 'mcp', name: 'github' },
+      { kind: 'skills', name: 'skills' },
+    ]);
+
+    // Assert
+    should(model.components.mcp.github).eql({ command: 'narrowed' });
+    should(model.components.skills).eql({});
+    should(model.profiles.default?.layers).not.containEql('skills/skills');
+    should(model.profiles.default?.layers).containEql('mcp/github');
+  });
+
+  it('should return a model with every layer when the owners hold every component', () => {
+    // Act
+    const model = withEffective(NEXT, effective, [{ kind: 'mcp', name: 'github' }]);
+
+    // Assert
+    should(model.profiles.default?.layers).eql(NEXT.profiles.default?.layers);
   });
 });
