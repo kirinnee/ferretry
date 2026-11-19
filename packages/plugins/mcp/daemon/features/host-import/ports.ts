@@ -6,4 +6,6 @@ export interface McpConfigWrite {
   taken(name: string): boolean;
   /** Writes the whole document as a NEW file only: never over one that is there (the caller's own act, judged as such). */
   create(name: string, documentText: string): Promise<ConfigWriteOutcome>;
+  /** Replaces the whole document for an update the person accepted, pinned to the file's etag read just before. */
+  replace(name: string, documentText: string): Promise<ConfigWriteOutcome>;
 }

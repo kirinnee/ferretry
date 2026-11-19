@@ -8,6 +8,7 @@ import type { ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import { SKILLS_CONFIG, type SkillsItem, SkillsItemSchema } from '../../contract/index.ts';
 import {
   createSkillsItem,
+  replaceSkillsItem,
   type ImportedSkillFile,
   MAX_DOCUMENT_BYTES,
   MAX_IMPORTED_SKILLS,
@@ -29,11 +30,14 @@ function owner(answer?: (name: string, edit: unknown) => ConfigWriteOutcome, fai
   const held = new Map<string, SkillsItem>();
   const calls: { name: string | undefined; ifMatch: string | undefined }[] = [];
   const config = {
+    etag: async (_def: unknown, name?: string) => (name !== undefined && held.has(name) ? `etag-${name}` : 'absent'),
     write: async (def: unknown, name: string | undefined, edit: unknown, options?: { ifMatch?: string }) => {
       calls.push({ name, ifMatch: options?.ifMatch });
       expect(def).toBe(SKILLS_CONFIG);
       if (answer !== undefined && name !== undefined) return answer(name, edit);
       if (name === undefined || (options?.ifMatch === 'absent' && held.has(name))) return { kind: 'conflict' as const };
+      if (options?.ifMatch !== undefined && options.ifMatch !== 'absent' && options.ifMatch !== `etag-${name}`)
+        return { kind: 'conflict' as const };
       const parsed = SkillsItemSchema.safeParse(JSON.parse(edit as string));
       if (!parsed.success)
         return {
@@ -59,7 +63,12 @@ function owner(answer?: (name: string, edit: unknown) => ConfigWriteOutcome, fai
       installed.delete(skill);
     },
   };
-  const put = skillsImportPut({ has: name => held.has(name), create: createSkillsItem(config), store });
+  const put = skillsImportPut({
+    has: name => held.has(name),
+    create: createSkillsItem(config),
+    replace: replaceSkillsItem(config),
+    store,
+  });
   return { held, calls, put, installed, removed, source: skillsComponentSource(() => held) };
 }
 
@@ -68,11 +77,63 @@ describe('skills host import: put', () => {
     const { put, calls, source } = owner();
     const document = { items: ['pdf', 'review.v2'], harness: 'claude-code' };
 
-    expect(await put('imported', text(document), folders('pdf', 'review.v2'))).toEqual({ ok: true });
+    expect(await put('imported', text(document), folders('pdf', 'review.v2'))).toEqual({
+      ok: true,
+      created: ['pdf', 'review.v2'],
+    });
 
     expect(calls).toEqual([{ name: 'imported', ifMatch: 'absent' }]);
     expect(await source.list()).toEqual(['imported']);
     expect(await source.read('imported')).toEqual(document);
+  });
+
+  test('an update the person accepted replaces the item, pinned to its etag, and installs only the new skill', async () => {
+    const { put, held, calls, installed } = owner();
+    await put('mine', text({ items: ['one'], harness: 'claude-code' }), folders('one'));
+    calls.length = 0;
+
+    const answered = await put('mine', text({ items: ['one', 'two'], harness: 'claude-code' }), folders('one', 'two'), {
+      replace: true,
+      owned: ['one'],
+    });
+
+    expect(answered).toEqual({ ok: true, created: ['two'] });
+    expect(calls).toEqual([{ name: 'mine', ifMatch: 'etag-mine' }]);
+    expect(held.get('mine')?.items).toEqual(['one', 'two']);
+    expect([...installed.keys()].toSorted()).toEqual(['one', 'two']);
+  });
+
+  test('an update rewrites the files of a skill an import installed, and leaves one it did not install alone', async () => {
+    const { put, installed } = owner();
+    const first = await put('mine', text({ items: ['one'] }), folders('one'));
+    expect(first).toEqual({ ok: true, created: ['one'] });
+    installed.set('theirs', [{ path: 'SKILL.md', content: 'the person made this' }]);
+    const changed = [{ path: 'one/SKILL.md', content: '---\nname: one\n---\nNEW TEXT\n' }, ...folders('theirs')];
+
+    const answered = await put('mine', text({ items: ['one', 'theirs'] }), changed, {
+      replace: true,
+      owned: ['one'],
+    });
+
+    expect(answered).toEqual({
+      ok: true,
+      warnings: ['"theirs" is already installed here and was not brought in by an import, so it was left as it is'],
+    });
+    expect(installed.get('one')).toEqual([{ path: 'SKILL.md', content: '---\nname: one\n---\nNEW TEXT\n' }]);
+    expect(installed.get('theirs')).toEqual([{ path: 'SKILL.md', content: 'the person made this' }]);
+  });
+
+  test('an update still refuses a skill the owner has not been given files for, and a first import never replaces', async () => {
+    const { put, held } = owner();
+    await put('mine', text({ items: ['one'] }), folders('one'));
+
+    expect(await put('mine', text({ items: ['one', 'two'] }), folders('one'), { replace: true })).toEqual({
+      ok: false,
+      reason: 'the files of the skill "two" were not handed over, so it was not imported',
+    });
+    expect(held.get('mine')?.items).toEqual(['one']);
+    expect((await put('mine', text({ items: ['one', 'two'] }), folders('one', 'two'))).ok).toBe(false);
+    expect(held.get('mine')?.items).toEqual(['one']);
   });
 
   test('a name that is taken is refused and the item is not replaced', async () => {
@@ -97,7 +158,11 @@ describe('skills host import: put', () => {
 
   test('a held write is answered as held', async () => {
     const { put } = owner(() => ({ kind: 'held', etag: 'e', id: 'h1', sentences: ['x'] }));
-    expect(await put('held', text({ items: ['one'] }), folders('one'))).toEqual({ ok: true, held: true });
+    expect(await put('held', text({ items: ['one'] }), folders('one'))).toEqual({
+      ok: true,
+      held: true,
+      created: ['one'],
+    });
   });
 
   test('an item name that is not a plain safe name is refused before anything is written', async () => {
@@ -127,7 +192,7 @@ describe('skills host import: put', () => {
     expect((await put('none', text({ items: [] }))).ok).toBe(false);
     expect((await put('big', ` ${'x'.repeat(MAX_DOCUMENT_BYTES)}`)).ok).toBe(false);
     expect(calls).toEqual([]);
-    expect(await put('full', text({ items: full }), folders(...full))).toEqual({ ok: true });
+    expect(await put('full', text({ items: full }), folders(...full))).toMatchObject({ ok: true });
   });
 
   test('a document that is not a mapping, or not readable, is refused', async () => {
@@ -148,7 +213,9 @@ describe('skills host import: put', () => {
   test("the skill folders land in Skills' installed store, each under its own name with the skill folder taken off the path", async () => {
     const { put, installed } = owner();
 
-    expect(await put('imported', text({ items: ['pdf', 'review'] }), folders('pdf', 'review'))).toEqual({ ok: true });
+    expect(await put('imported', text({ items: ['pdf', 'review'] }), folders('pdf', 'review'))).toMatchObject({
+      ok: true,
+    });
 
     expect([...installed.keys()]).toEqual(['pdf', 'review']);
     expect(installed.get('pdf')?.map(file => file.path)).toEqual(['SKILL.md', 'notes/more.md']);
@@ -160,7 +227,7 @@ describe('skills host import: put', () => {
 
     const answered = await put('imported', text({ items: ['pdf', 'review'] }), folders('review'));
 
-    expect(answered).toEqual({ ok: true, warnings: [expect.stringContaining('"pdf" is already installed')] });
+    expect(answered).toMatchObject({ ok: true, warnings: [expect.stringContaining('"pdf" is already installed')] });
     expect(installed.get('pdf')).toEqual([{ path: 'SKILL.md', content: 'mine' }]);
     expect(installed.has('review')).toBe(true);
   });

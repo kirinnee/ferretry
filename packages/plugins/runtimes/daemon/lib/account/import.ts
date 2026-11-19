@@ -36,6 +36,7 @@ import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contra
 import { looksSecret } from '@ferretry/std/credential-words';
 import { GITHUB_TOKEN_NAMES, maskedVariableName, nameLooksLikeKey } from '@ferretry/plugin-logins/contract';
 import { importItemId, importNamedItemId } from '../../../contract/index.ts';
+import { harnessNamed, keepScope, ownMcpItem } from './import-scope.ts';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
 import { FLEET_STARTER_MODELS } from '../defaults.ts';
@@ -178,6 +179,13 @@ interface ImportNote {
 interface ImportRecordEntry {
   readonly sources: readonly string[];
   readonly digest: string;
+  /**
+   * Source skills the person left out when this component was made (names only). A later scan compares only what was
+   * imported, so a skill that was left out is never a change to offer; one that is new to the source still is.
+   */
+  readonly left?: readonly string[];
+  /** The owner's own items (a skill folder, a Codex profile item) an import created through this component. */
+  readonly owned?: readonly string[];
 }
 
 /**
@@ -207,6 +215,8 @@ interface ImportUpdate {
   readonly files: readonly ImportFile[];
   readonly secrets: readonly ImportedSecret[];
   readonly digest: string;
+  /** The skills still left out, once this update is taken. */
+  readonly left?: readonly string[];
 }
 
 /** A runtime the import did not create because one already uses that login and profile (E15). */
@@ -218,7 +228,7 @@ interface ImportDuplicate {
 }
 
 /** One component of any kind, as the plan carries it. */
-type ImportedComponent =
+export type ImportedComponent =
   | { readonly kind: 'instructions'; readonly name: string; readonly value: InstructionsComponent }
   | { readonly kind: 'mcp'; readonly name: string; readonly value: McpComponent }
   | { readonly kind: 'skills'; readonly name: string; readonly value: SkillsComponent }
@@ -322,8 +332,6 @@ const IMPORT_NAMES = {
   /** The generic skills component, for items both harnesses hold identically. */
   sharedSkills: 'skills',
 } as const;
-
-const harnessNamed = (harness: HarnessKind, what: string): string => `${harness}-${what}`;
 
 /**
  * The runtime an import makes for one harness on one profile — `claude-default` on a machine whose
@@ -652,6 +660,8 @@ interface HarnessHarvest {
     readonly warnings: readonly string[];
   }[];
   readonly skills: readonly HostSkill[];
+  /** Skills the person left out (their names), which the import never reads again as a change. */
+  readonly skillsLeft: readonly string[];
   readonly modelSet: ModelSetComponent;
   readonly secretKeys: readonly string[];
   /** GitHub token variables left out until ticked (names only): listed by the scan, never filed. */
@@ -840,8 +850,12 @@ function harvest(
     return [{ name: server.name, value, source: mcpSource, warnings }];
   });
 
+  const skillsLeft: string[] = [];
   const skills = scan.skills.filter(skill => {
-    if (skip.has(importNamedItemId(key, 'skill', skill.item))) return false;
+    if (skip.has(importNamedItemId(key, 'skill', skill.item))) {
+      skillsLeft.push(skill.item);
+      return false;
+    }
     if (isUsableSkillItemName(skill.item)) return true;
     problems.push(`Skill "${skill.item}" has a folder name Ferretry cannot use, so it was not imported.`);
     return false;
@@ -855,6 +869,7 @@ function harvest(
     codexProfiles: harness === 'codex' ? codexProfilesOf(parsed) : [],
     mcp,
     skills,
+    skillsLeft,
     modelSet: modelSetOf(harness, modelSource),
     secretKeys,
     gatedKeys: envImport?.gated ?? [],
@@ -869,13 +884,17 @@ function harvest(
 // ── The plan ─────────────────────────────────────────────────────────────────────────────────────
 
 /** One component the import wants, before Import again decides whether it is new. */
-interface Candidate {
+export interface Candidate {
   readonly component: ImportedComponent;
   readonly files: readonly ImportFile[];
   readonly sources: readonly string[];
   /** Over the component and its file content, so a changed source is a changed digest. */
   readonly digestText: string;
   readonly warnings: readonly string[];
+  /** Skills of its harness the person left out, recorded so the next scan does not read them as a change. */
+  readonly left?: readonly string[];
+  /** The same candidate without those skills, for comparing with what an earlier import recorded. */
+  readonly without?: (omit: ReadonlySet<string>) => Candidate;
 }
 
 const referenceOf = (kind: ComponentKind, name: string): LayerReferenceText => `${kind}/${name}`;
@@ -913,10 +932,12 @@ function instructionsCandidates(harvests: readonly HarnessHarvest[]): {
   };
   if (first === undefined) return { candidates: [] };
   if (second === undefined) {
-    // Only one harness has instructions: they stay that harness's, so the other is not handed them.
-    const narrowed = harvests.length > 1 ? first.harness : undefined;
-    const name = narrowed === undefined ? IMPORT_NAMES.sharedInstructions : harnessNamed(first.harness, 'instructions');
-    return { candidates: [make(name, first.text, [first.source], narrowed)] };
+    // Only one harness has instructions: they are that harness's own — named and scoped to it, even when it is the only
+    // harness this pass imports — so a later import of the other tool adds ITS items instead of reading as an update of
+    // these, and its profile is never handed them.
+    return {
+      candidates: [make(harnessNamed(first.harness, 'instructions'), first.text, [first.source], first.harness)],
+    };
   }
   if (sameText(first.text, second.text)) {
     return {
@@ -939,7 +960,6 @@ function mcpCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candi
     for (const server of entry.mcp)
       byName.set(server.name, [...(byName.get(server.name) ?? []), { harness: entry.harness, server }]);
   }
-  const both = harvests.length > 1;
   const candidates: Candidate[] = [];
   const make = (name: string, server: HarnessHarvest['mcp'][number], sources: string[], harness?: HarnessKind) => {
     const value: McpComponent = { ...server.value, ...(harness === undefined ? {} : { harness }) };
@@ -947,7 +967,8 @@ function mcpCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candi
       component: { kind: 'mcp', name, value },
       files: [],
       sources,
-      digestText: JSON.stringify(value),
+      // Over the server alone, never its scope: widening a server to both tools must not read as a change.
+      digestText: JSON.stringify(server.value),
       warnings: server.warnings,
     });
   };
@@ -955,7 +976,7 @@ function mcpCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candi
     const [first, second] = holders;
     if (first === undefined) continue;
     if (second === undefined) {
-      make(name, first.server, [first.server.source], both ? first.harness : undefined);
+      make(name, first.server, [first.server.source], first.harness);
     } else if (sameJson(first.server.value, second.server.value)) {
       make(name, first.server, [first.server.source, second.server.source]);
     } else {
@@ -973,7 +994,6 @@ function mcpCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candi
 
 function skillsCandidates(harvests: readonly HarnessHarvest[]): { candidates: Candidate[]; notes: ImportNote[] } {
   const notes: ImportNote[] = [];
-  const both = harvests.length > 1;
   const store = new Map<string, HostSkill>();
   const shared: string[] = [];
   const own = new Map<HarnessKind, string[]>();
@@ -998,7 +1018,8 @@ function skillsCandidates(harvests: readonly HarnessHarvest[]): { candidates: Ca
     if (first === undefined) continue;
     if (second === undefined) {
       place(item, first.skill);
-      (both ? ownOf(first.harness) : shared).push(item);
+      // One tool's skill is that tool's own, even when it is the only one this pass imports (see the instructions above).
+      ownOf(first.harness).push(item);
       sources.set(item, [first.skill.source]);
     } else if (first.skill.digest === second.skill.digest) {
       place(item, first.skill);
@@ -1020,7 +1041,15 @@ function skillsCandidates(harvests: readonly HarnessHarvest[]): { candidates: Ca
   }
   const make = (name: string, items: readonly string[], harness?: HarnessKind): Candidate => {
     const value: SkillsComponent = { items: [...items], ...(harness === undefined ? {} : { harness }) };
+    const left = harvests.find(entry => entry.harness === harness)?.skillsLeft ?? [];
     return {
+      ...(left.length === 0 ? {} : { left }),
+      without: omit =>
+        make(
+          name,
+          items.filter(item => !omit.has(item)),
+          harness,
+        ),
       component: { kind: 'skills', name, value },
       files: files.filter(file => items.some(item => file.path === skillStorePath(item))),
       sources: items.flatMap(item => sources.get(item) ?? []),
@@ -1213,19 +1242,27 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     const referenced = new Set(secretReferencesIn(JSON.stringify(candidate.component.value)));
     return secrets.filter(secret => referenced.has(secret.name));
   };
-  for (const candidate of candidates) {
+  for (const original of candidates) {
+    const candidate = ownMcpItem(original, existing);
     const { kind, name } = candidate.component;
-    const digest = options.digest(candidate.digestText);
     const reference = referenceOf(kind, name);
     const previous = record.components[reference];
+    // What an earlier import left out is not compared: only what it imported can have changed.
+    const comparable =
+      previous?.left !== undefined && previous.left.length > 0 && candidate.without !== undefined
+        ? candidate.without(new Set(previous.left))
+        : candidate;
+    const digest = options.digest(comparable.digestText);
     if (existing?.components[kind][name] !== undefined && previous !== undefined) {
       if (previous.digest !== digest) {
+        const left = [...new Set([...(previous.left ?? []), ...(candidate.left ?? [])])];
         updates.push({
           reference,
-          sources: candidate.sources,
-          component: candidate.component,
-          files: candidate.files,
-          secrets: secretsOf(candidate),
+          ...(left.length === 0 ? {} : { left }),
+          sources: comparable.sources,
+          component: keepScope(comparable.component, existing),
+          files: comparable.files,
+          secrets: secretsOf(comparable),
           digest,
         });
       }
@@ -1254,7 +1291,11 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     for (const secret of secretsOf(candidate)) keptSecrets.add(secret.name);
     const freeReference = referenceOf(kind, free);
     added.push(freeReference);
-    recordEntries[freeReference] = { sources: candidate.sources, digest };
+    recordEntries[freeReference] = {
+      sources: candidate.sources,
+      digest,
+      ...(candidate.left === undefined ? {} : { left: [...candidate.left] }),
+    };
     if (candidate.warnings.length > 0) warnings[freeReference] = candidate.warnings;
   }
 
@@ -1431,7 +1472,14 @@ export function mergeImportRecord(plan: ImportPlan, acceptedUpdates: readonly La
   const components: Record<string, ImportRecordEntry> = { ...plan.record.components };
   for (const update of plan.updates) {
     if (acceptedUpdates.includes(update.reference)) {
-      components[update.reference] = { sources: update.sources, digest: update.digest };
+      components[update.reference] = {
+        sources: update.sources,
+        digest: update.digest,
+        ...(update.left === undefined ? {} : { left: update.left }),
+        ...(plan.record.components[update.reference]?.owned === undefined
+          ? {}
+          : { owned: plan.record.components[update.reference]?.owned }),
+      };
     }
   }
   return { ...plan.record, components };

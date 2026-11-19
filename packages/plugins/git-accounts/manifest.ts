@@ -1,6 +1,8 @@
+import { LaunchParts } from '@ferretry/core-ferrets/contract';
 import { audit, GatePort } from '@ferretry/core-gate/contract';
 import { SealedDocumentsPort } from '@ferretry/core-vault/contract';
 import { definePlugin, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import {
   GIT_ACCOUNT_AUDIT,
   GIT_ACCOUNT_AUDIT_SKIP,
@@ -41,6 +43,8 @@ export default definePlugin({
   words: GIT_ACCOUNTS_WORDS,
 
   needs: { sealed: SealedDocumentsPort, gate: GatePort },
+  // Optional: which folder is a project, and which accounts it links (B5). Off = no ferret is given an account.
+  uses: { projects: ProjectsPort },
   provides: { gitAccounts: GitAccountsPort },
 
   actions: {
@@ -117,6 +121,8 @@ export default definePlugin({
   ui: {
     settings: [settingsTab('accounts', { icon: 'key-round', group: 'sites', label: 'GitHub accounts', order: 43 })],
   },
+  // A launch inside a project linked to an account gets that account's agent and git settings (B4).
+  hooks: { takes: [{ hook: LaunchParts }] },
 
   /** Never reached by a ferret, through any root: the sealed OAuth tokens. */
   privacy: { private: ['tokens.json', 'keys.json'] },
@@ -128,7 +134,8 @@ export default definePlugin({
   },
 
   permissions: {
-    roots: [],
+    // `downloads`: this plugin's own kernel-made folder, the stable, private home of the agents' sockets and the pinned `known_hosts`.
+    roots: ['downloads'],
     // `gh` runs as an account, with its token in that child's environment alone (`GitAccountsApi.run`).
     spawn: ['gh', 'ssh-agent', 'ssh-add'],
     // The device flow and the profile read (github.com), the profile and key calls (api.github.com): nowhere else.

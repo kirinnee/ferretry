@@ -7,7 +7,8 @@
  * this module adds no second reading of the document and never holds a value. It only decides three things the config
  * service does not:
  *
- * - **Create-only.** An import never replaces a server it did not make: a name that is taken (in effect, held or broken)
+ * - **Create-only**, except for an update the person accepted (`options.replace`), which replaces the server, pinned to
+ *   the file's current etag. An import never replaces a server it did not make: a name that is taken (in effect, held or broken)
  *   is refused in a sentence, and the write itself is pinned to "no file there" (`ifMatch: 'absent'`), so a file that
  *   appears between the check and the write is a refusal too, never an overwrite.
  * - **A missing program is a warning, not a refusal.** The server's `command` is not looked up on this machine: a server
@@ -23,7 +24,7 @@
  * person ticked it.
  */
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
-import type { ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
+import type { ComponentPutOptions, ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
 import { ITEM_NAME_PATTERN } from '@ferretry/std';
 import type { McpConfigWrite } from './ports.ts';
 
@@ -42,8 +43,9 @@ const sentencesOf = (issues: readonly { readonly path: string; readonly message:
 
 export function hostImportPut(
   config: McpConfigWrite,
-): (name: string, documentText: string) => Promise<ComponentPutResult> {
-  return async (name, documentText) => {
+): (name: string, documentText: string, files?: unknown, options?: ComponentPutOptions) => Promise<ComponentPutResult> {
+  return async (name, documentText, _files, options) => {
+    const replacing = options?.replace === true && config.taken(name);
     const file = `mcp/${name}.yaml`;
     if (!ITEM_NAME_PATTERN.test(name)) return refused(`${name} is not a name an MCP server can have.`);
     let document: unknown;
@@ -54,7 +56,7 @@ export function hostImportPut(
     }
     if (typeof document !== 'object' || document === null || Array.isArray(document))
       return refused(`The server for ${file} is not a server description.`);
-    if (config.taken(name))
+    if (config.taken(name) && !replacing)
       return refused(`${file} already exists, so it was left as it is: an import never replaces a server.`);
 
     const harness = (document as { harness?: unknown }).harness;
@@ -65,7 +67,7 @@ export function hostImportPut(
       text = `${JSON.stringify({ ...document, harness: key }, null, 2)}\n`;
     }
 
-    const outcome = await config.create(name, text);
+    const outcome = replacing ? await config.replace(name, text) : await config.create(name, text);
     switch (outcome.kind) {
       case 'written':
         return { ok: true };
