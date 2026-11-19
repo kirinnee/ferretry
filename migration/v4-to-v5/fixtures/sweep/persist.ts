@@ -364,6 +364,7 @@ export const KIT_FILES = [
   'deploy-gate.ts',
   'fake-codex-auth.ts',
   'persist.ts',
+  'preview-ref.ts',
   'real-claude.ts',
   'reset.ts',
   'service-guard.ts',
