@@ -4,7 +4,8 @@
  * width strip writes its lines.
  *
  * Set `FY_CONVERSATION_PREVIEWS_SHOTS_DIR` to keep `<viewport>-<scheme>-<scene>-<frame>.png` (1280 and 390, light and dark):
- * every frame at four moments of its loop, plus the whole tab.
+ * every frame at seven moments of its loop (typing, the key press, the fade out, the fade in, the result arriving, the
+ * settled result, and the Skills menu), plus the whole tab.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -93,12 +94,19 @@ const seek = async (tab: Page, ms: number): Promise<void> => {
   }, ms);
 };
 
-/** typing, the key press, the fade to the result, the settled result. */
+/**
+ * The loop's moments, against the take-turns crossfade (before visible 0-36%, gone by 42%; after fades in 48-54%, in
+ * 54-88%): typing, the key press, the typing layer fading out, the result layer fading in, the result arriving, the
+ * settled result, and the late part of the result (the Skills menu).
+ */
 const MOMENTS = [
   { name: 'typing', at: 0.12 },
-  { name: 'key', at: 0.31 },
+  { name: 'key', at: 0.3 },
   { name: 'fade', at: 0.42 },
+  { name: 'fadein', at: 0.51 },
+  { name: 'arrive', at: 0.57 },
   { name: 'result', at: 0.7 },
+  { name: 'late', at: 0.84 },
 ] as const;
 
 const SCENES = ['editor', 'send-key', 'suggestions', 'chat-width'] as const;
@@ -106,7 +114,7 @@ const SCENES = ['editor', 'send-key', 'suggestions', 'chat-width'] as const;
 describe('Conversation tab previews', () => {
   for (const viewport of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const) {
-      it(`${viewport.name} ${scheme}: every frame is 160 x 100, plays typed then result, and is shot at four moments`, async () => {
+      it(`${viewport.name} ${scheme}: every frame is 160 x 100, plays typed then result, and is shot at seven moments`, async () => {
         const { tab, problems, close } = await open(viewport, scheme);
         try {
           const frames = tab.locator('[data-setting-preview]');
@@ -164,6 +172,70 @@ describe('Conversation tab previews', () => {
         }
       });
 
+      it(`${viewport.name} ${scheme}: the motion that shows each setting happens while its layer is visible`, async () => {
+        const { tab, close } = await open(viewport, scheme);
+        try {
+          const opacityOf = async (selector: string): Promise<number> =>
+            Number(
+              await tab
+                .locator(selector)
+                .first()
+                .evaluate(node => getComputedStyle(node).opacity),
+            );
+          const travelOf = async (selector: string): Promise<number> =>
+            await tab
+              .locator(selector)
+              .first()
+              .evaluate(node => new DOMMatrixReadOnly(getComputedStyle(node).transform).m42);
+          const clipOf = async (selector: string): Promise<string> =>
+            await tab
+              .locator(selector)
+              .first()
+              .evaluate(node => getComputedStyle(node).clipPath);
+          const send = '[data-scene="send-key"] [data-setting-preview]';
+          const suggestions = '[data-scene="suggestions"] [data-setting-preview]';
+          // Send key (Enter sends): the key goes down while the typing layer is fully visible...
+          await seek(tab, LOOP_MS * 0.27);
+          expect(await opacityOf(`${send} .fy-sp__layer--before`)).toBe(1);
+          expect(
+            await tab
+              .locator(`${send} .fy-cvp-key--press`)
+              .first()
+              .evaluate(node => new DOMMatrixReadOnly(getComputedStyle(node).transform).a),
+          ).toBeLessThan(1);
+          // ...and the bubble is still travelling up (several px) once the result layer is fully in.
+          await seek(tab, LOOP_MS * 0.56);
+          expect(await opacityOf(`${send} .fy-sp__layer--after`)).toBe(1);
+          expect(await travelOf(`${send} .fy-cvp-bubble`)).toBeGreaterThan(5);
+          await seek(tab, LOOP_MS * 0.8);
+          expect(await travelOf(`${send} .fy-cvp-bubble`)).toBe(0);
+          // Suggestions: the Agents menu is mid pop-in with its layer fully visible...
+          await seek(tab, LOOP_MS * 0.545);
+          expect(await opacityOf(`${suggestions} .fy-sp__layer--after`)).toBe(1);
+          const popping = await opacityOf(`${suggestions} .fy-cvp-pop--agents`);
+          expect(popping).toBeGreaterThan(0.05);
+          expect(popping).toBeLessThan(0.95);
+          // ...then settled, while the Skills menu is its own menu that has not opened yet...
+          await seek(tab, LOOP_MS * 0.63);
+          expect(await opacityOf(`${suggestions} .fy-cvp-pop--agents`)).toBe(1);
+          expect(await opacityOf(`${suggestions} .fy-cvp-pop--skills`)).toBe(0);
+          // ...and the Agents menu closes as the `$` is typed and the Skills menu opens in its place.
+          await seek(tab, LOOP_MS * 0.84);
+          expect(await opacityOf(`${suggestions} .fy-cvp-pop--agents`)).toBe(0);
+          expect(await opacityOf(`${suggestions} .fy-cvp-pop--skills`)).toBe(1);
+          expect(await clipOf(`${suggestions} .fy-cvp-typed--skill`)).not.toContain('100%');
+          // Enter starts a new line: the second line types while the result layer is visible.
+          await tab.locator('[data-scene="send-key"]').getByText('⌘/Ctrl+↵ sends').click();
+          await seek(tab, LOOP_MS * 0.66);
+          expect(await opacityOf(`${send} .fy-sp__layer--after`)).toBe(1);
+          const typing = await clipOf(`${send} .fy-cvp-typed--late`);
+          expect(typing).not.toBe('none');
+          expect(typing).not.toBe('inset(0px 100% 0px 0px)');
+        } finally {
+          await close();
+        }
+      });
+
       it(`${viewport.name} ${scheme}: choosing another value replays that frame from its start`, async () => {
         const { tab, close } = await open(viewport, scheme);
         try {
@@ -177,6 +249,10 @@ describe('Conversation tab previews', () => {
                 ?.getAttribute('data-sp-value') === 'symbols-skills',
           );
           expect(await suggestions.locator('.fy-cvp-typed').first().textContent()).toBe(':');
+          expect(await tab.locator('[data-scene="suggestions"] .fy-cvp-pop-title').allTextContents()).toEqual([
+            'Agents',
+            'Skills',
+          ]);
           await tab.locator('[data-scene="send-key"]').getByText('⌘/Ctrl+↵ sends').click();
           expect(
             await tab.locator('[data-scene="send-key"] [data-setting-preview]').first().getAttribute('data-sp-label'),
@@ -215,6 +291,11 @@ describe('Conversation tab previews', () => {
         .first()
         .evaluate(node => getComputedStyle(node).animationName);
       expect(writing).toBe('fy-cvp-write');
+      // It is the last section: bring it into view, so only the hidden tab (not the scroll) can pause it.
+      await tab.locator('[data-cvp-motion]').scrollIntoViewIfNeeded();
+      await tab.waitForFunction(
+        () => document.querySelector('[data-cvp-motion]')?.getAttribute('data-cvp-motion') === 'on',
+      );
       await tab.evaluate(() => {
         Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
         document.dispatchEvent(new Event('visibilitychange'));
@@ -227,6 +308,53 @@ describe('Conversation tab previews', () => {
         .evaluateAll(nodes => nodes.flatMap(node => node.getAnimations().map(animation => animation.playState)));
       expect(states.length).toBeGreaterThan(0);
       expect(states.every(state => state === 'paused')).toBe(true);
+      // The chat width strip goes through the same pause path: its lines stop writing too.
+      await tab.waitForFunction(
+        () => document.querySelector('[data-cvp-motion]')?.getAttribute('data-cvp-motion') === 'paused',
+      );
+      const held = await tab
+        .locator('.fy-cvp-write')
+        .evaluateAll(nodes => nodes.flatMap(node => node.getAnimations().map(animation => animation.playState)));
+      expect(held.length).toBe(3);
+      expect(held.every(state => state === 'paused')).toBe(true);
+      await tab.evaluate(() => {
+        Reflect.deleteProperty(document, 'visibilityState');
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await tab.waitForFunction(
+        () => document.querySelector('[data-cvp-motion]')?.getAttribute('data-cvp-motion') === 'on',
+      );
+      expect(
+        await tab
+          .locator('.fy-cvp-write')
+          .evaluateAll(nodes => nodes.flatMap(node => node.getAnimations().map(animation => animation.playState))),
+      ).toEqual(['running', 'running', 'running']);
+    } finally {
+      await close();
+    }
+  });
+
+  it('the chat width strip stops writing while it is scrolled off-screen and resumes when it is back in view', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], 'light');
+    try {
+      const motion = () =>
+        tab.evaluate(() => document.querySelector('[data-cvp-motion]')?.getAttribute('data-cvp-motion'));
+      await tab.setViewportSize({ width: 1_280, height: 300 });
+      await tab.evaluate(() => window.scrollTo(0, 0));
+      await tab.waitForFunction(
+        () => document.querySelector('[data-cvp-motion]')?.getAttribute('data-cvp-motion') === 'paused',
+      );
+      expect(await motion()).toBe('paused');
+      expect(
+        await tab
+          .locator('.fy-cvp-write')
+          .evaluateAll(nodes => nodes.flatMap(node => node.getAnimations().map(animation => animation.playState))),
+      ).toEqual(['paused', 'paused', 'paused']);
+      await tab.locator('[data-cvp-motion]').scrollIntoViewIfNeeded();
+      await tab.waitForFunction(
+        () => document.querySelector('[data-cvp-motion]')?.getAttribute('data-cvp-motion') === 'on',
+      );
+      expect(await motion()).toBe('on');
     } finally {
       await close();
     }

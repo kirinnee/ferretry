@@ -65,14 +65,20 @@ describe('Conversation previews', () => {
     expect(mounted.container.querySelector('.fy-cvp-h')).toBeNull();
   });
 
-  it('suggestions: the ladder types @@, the symbols type :, and skills add a $ row', async () => {
+  it('suggestions: the ladder types @@, the symbols type :, and skills open their OWN menu rather than a row in the agents one', async () => {
     mounted = await mount(<SuggestionsPreview keys="ladder" skills={false} />);
     expect(mounted.container.querySelector('.fy-cvp-typed')?.textContent).toBe('@@');
+    expect(mounted.container.querySelectorAll('.fy-cvp-pop').length).toBe(1);
     expect(mounted.container.querySelectorAll('.fy-cvp-pop .fy-cvp-row').length).toBe(2);
+    expect(textOf(mounted.container)).not.toContain('$');
     await mounted.render(<SuggestionsPreview keys="symbols" skills />);
     expect(mounted.container.querySelector('.fy-cvp-typed')?.textContent).toBe(':');
-    expect(mounted.container.querySelectorAll('.fy-cvp-pop .fy-cvp-row').length).toBe(3);
-    expect(textOf(mounted.container)).toContain('$');
+    const menus = [...mounted.container.querySelectorAll('.fy-cvp-pop')];
+    expect(menus.map(menu => menu.querySelector('.fy-cvp-pop-title')?.textContent)).toEqual(['Agents', 'Skills']);
+    expect(menus.map(menu => menu.querySelectorAll('.fy-cvp-row').length)).toEqual([2, 2]);
+    expect(menus[0]?.textContent).not.toContain('$');
+    expect(menus[1]?.textContent).toContain('$');
+    expect(mounted.container.querySelector('.fy-cvp-typed--skill')?.textContent).toBe('$');
   });
 
   it('chat width: the column keeps its marker and width class, writes while motion is on, and rests when it is off', async () => {
@@ -89,6 +95,27 @@ describe('Conversation previews', () => {
     expect(mounted.container.querySelector('[data-cvp-motion]')?.getAttribute('data-cvp-motion')).toBe('still');
     expect(column.className).not.toContain('transition-[width]');
     expect(mounted.container.querySelectorAll('.fy-cvp-write').length).toBe(3);
+  });
+
+  it('chat width: holds still while the tab is hidden, and plays again when it returns', async () => {
+    const setVisibility = async (state: 'visible' | 'hidden'): Promise<void> => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+      await interact(() => document.dispatchEvent(new Event('visibilitychange')));
+    };
+    try {
+      mounted = await mount(<ChatWidthPreview value="balanced" />);
+      const strip = () => must(mounted?.container.querySelector('[data-cvp-motion]'), 'the strip');
+      expect(strip().getAttribute('data-cvp-motion')).toBe('on');
+      await setVisibility('hidden');
+      expect(strip().getAttribute('data-cvp-motion')).toBe('paused');
+      await setVisibility('visible');
+      expect(strip().getAttribute('data-cvp-motion')).toBe('on');
+      document.documentElement.dataset.motion = 'reduced';
+      await setVisibility('hidden');
+      expect(strip().getAttribute('data-cvp-motion')).toBe('still');
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState');
+    }
   });
 
   it('the hosts draw one preview per group and keep their radios', async () => {

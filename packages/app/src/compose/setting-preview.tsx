@@ -23,7 +23,6 @@
 
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useDocumentVisible } from '../ui/hooks/use-document-visible.ts';
-import { useMotionAllowed } from '../ui/use-motion-allowed.ts';
 import { cn } from '../ui/lib/class-names.ts';
 import { useMotionAllowed } from '../ui/use-motion-allowed.ts';
 import './setting-preview.css';
@@ -50,6 +49,17 @@ function useOnScreen(element: { current: Element | null }): boolean {
   return onScreen;
 }
 
+/**
+ * Is a frame worth animating right now: the document is visible AND the frame is in view. Every moving preview gates
+ * its loop on this one answer (the setting-preview frame, and the chat-width strip that draws its own), so none keeps
+ * running in a hidden tab or off-screen.
+ */
+export function usePreviewPlaying(element: { current: Element | null }): boolean {
+  const visible = useDocumentVisible();
+  const onScreen = useOnScreen(element);
+  return visible && onScreen;
+}
+
 export interface SettingPreviewProps {
   /**
    * What the frame shows once it has settled: the value's effect in a few words. The frame is decorative
@@ -68,10 +78,8 @@ export interface SettingPreviewProps {
 export function SettingPreview({ label, value, before, after, className }: SettingPreviewProps) {
   const frame = useRef<HTMLDivElement | null>(null);
   const motionAllowed = useMotionAllowed();
-  const visible = useDocumentVisible();
-  const onScreen = useOnScreen(frame);
-  const state: SettingPreviewState =
-    !motionAllowed || before === undefined ? 'still' : visible && onScreen ? 'playing' : 'paused';
+  const playing = usePreviewPlaying(frame);
+  const state: SettingPreviewState = !motionAllowed || before === undefined ? 'still' : playing ? 'playing' : 'paused';
   return (
     <div
       ref={frame}
