@@ -11,7 +11,9 @@
    constrained (>=3:1, >=7:1 in High Contrast), unlike decorative --border. */
   --border-strong: #868689;
   /* ---- elevation roles ---- */
-  --shadow-ink: transparent; /* only Neo uses a hard offset ink */
+  /* The ink of Neo's hard offset shadow: the text colour unless a palette says otherwise (the Neo palette does). No other
+   style draws it. */
+  --shadow-ink: var(--fg);
   /* ---- neutrals — cool zinc, low chroma so the accent + syntax carry ---- */
   --bg: #fbfbfc;
   --surface: #ffffff;

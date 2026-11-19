@@ -25,7 +25,7 @@
   --accent: #58a6ff;
   --accent-rgb: 88 166 255;
   --accent-fg: #071b32;
-  --accent-soft: #153b69;
+  --accent-soft: #123259; /* accent text on it: 5.11:1 (was 4.47:1) */
   --accent-border: #397fc6;
   --bar-bg: rgba(17, 27, 39, 0.86);
   --nav-hover: var(--surface-2);

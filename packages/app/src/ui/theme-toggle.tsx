@@ -147,6 +147,7 @@ function ThemeSettings({
       positioned group its containing block is the fixed shell, which focusing it would scroll out of view. */}
       <div
         role="radiogroup"
+        data-neo-segmented=""
         aria-label="Colour mode"
         className="relative mb-2 flex gap-1 rounded-control border border-border bg-surface-2 p-1"
       >

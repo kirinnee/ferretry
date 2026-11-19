@@ -112,3 +112,161 @@
     --label-size: 13px;
   }
 }
+
+/* ============================================================================
+   NEO COMPONENT TOUCHES (r10 T13). The tokens above carry the style into everything that reads them; these are the
+   pieces the newer components draw with hard-coded round, thin or soft utilities, so Neo is still a hard block there.
+   One idea throughout: ink rules (--stroke-control), square corners, a flat offset shadow that the block presses into,
+   the yellow block for "selected", and a hard accent ring for the keyboard. Colour comes only from roles.
+   ========================================================================== */
+
+/* The keyboard on a text field: the field's own `outline: none` (design-system.css) wins over the shell's ring, so a
+   field showed only a border-colour change. Neo draws the hard ring, and the family offset block beside it. */
+:root[data-style='neo'] .kt-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 0;
+  box-shadow: var(--shadow-md);
+}
+
+/* Switch: ONLY the shared switch's own track and thumb (`data-neo-switch-track` / `-thumb`): a square track in ink with a square
+   thumb; pressing it moves it into its shadow. A bare `[role=switch] > span` also caught every label wrapper in a row-shaped
+   switch (Grants), so the accent title sat on an accent fill and the text spans were forced 14px wide. */
+:root[data-style='neo'] [data-neo-switch-track] {
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  box-shadow: var(--shadow-sm);
+  transition: translate var(--motion-fast) var(--ease-standard);
+}
+:root[data-style='neo'] [role='switch'][aria-checked='true'] [data-neo-switch-track] {
+  background: var(--accent);
+}
+:root[data-style='neo'] [data-neo-switch-thumb] {
+  background: var(--surface);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  height: 14px;
+  width: 14px;
+  transition: transform var(--motion-fast) var(--ease-standard);
+}
+:root[data-style='neo'] [role='switch']:active [data-neo-switch-track] {
+  box-shadow: none;
+  translate: var(--press-translate) var(--press-translate);
+}
+
+/* Segmented control (`data-neo-segmented` only, never any radio group): a ruled tray; the chosen segment is the yellow block
+   with its shadow. Voice's What to read is a radio group of cards and keeps its own look. */
+:root[data-style='neo'] [data-neo-segmented] {
+  border-width: var(--stroke-control);
+  border-color: var(--border-strong);
+}
+:root[data-style='neo'] [data-neo-segmented] > label {
+  border: var(--stroke-control) solid transparent;
+  transition: none;
+}
+:root[data-style='neo'] [data-neo-segmented] > label:has(:checked) {
+  background: var(--nav-sel-bg);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+  color: var(--nav-sel-fg);
+}
+:root[data-style='neo'] [data-neo-segmented] > label:has(:focus-visible) {
+  box-shadow: none;
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 2px;
+}
+
+/* Choice cards: a block with a flat shadow that lifts on hover, presses on click and pops once when chosen. */
+:root[data-style='neo'] .fy-cc__card {
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
+  transition:
+    translate var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+:root[data-style='neo'] .fy-cc__card:not([aria-disabled='true']):hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-popover);
+  translate: -2px -2px;
+}
+:root[data-style='neo'] .fy-cc__card:not([aria-disabled='true']):active {
+  box-shadow: none;
+  translate: var(--press-translate) var(--press-translate);
+}
+:root[data-style='neo'] .fy-cc__card[data-selected='true'] {
+  background: var(--nav-sel-bg);
+  border-color: var(--border-strong);
+  color: var(--nav-sel-fg);
+}
+:root[data-style='neo'] .fy-cc__card[data-selected='true'] .fy-cc__line {
+  color: var(--nav-sel-sub);
+}
+:root[data-style='neo'] .fy-cc__card:has(:focus-visible) {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 3px;
+}
+:root[data-style='neo'] .fy-cc__card[aria-disabled='true'] {
+  box-shadow: none;
+}
+:root[data-style='neo'] .fy-cc__check {
+  background: var(--accent);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+}
+@keyframes fy-neo-pop {
+  from {
+    transform: scale(var(--select-pop));
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-style='neo']:not([data-motion='reduced']) .fy-cc__card[data-pulse='true'] {
+    animation: fy-neo-pop var(--motion-base) var(--ease-standard);
+  }
+}
+
+/* Progress: empty = a white block, done = solid ink, current = the accent, each a ruled block, none faded. */
+:root[data-style='neo'] .fy-sp-progress__bar {
+  gap: 6px;
+}
+:root[data-style='neo'] .fy-sp-progress__segment {
+  background: var(--surface);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  height: 12px;
+  opacity: 1;
+}
+:root[data-style='neo'] .fy-sp-progress__segment[data-state='done'] {
+  background: var(--fg);
+}
+:root[data-style='neo'] .fy-sp-progress__segment[data-state='current'] {
+  background: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Bars (voice engine speed / accuracy / size): a ruled track with a solid fill. */
+:root[data-style='neo'] [data-option-bar-track] {
+  background: var(--surface);
+  border: var(--stroke-control) solid var(--border-strong);
+  height: 12px;
+}
+
+/* A pressed chip or tab is the yellow block, like the selected row (design-system.css gives it a flat neutral fill). */
+:root[data-style='neo'] .kt-tab[aria-pressed='true'],
+:root[data-style='neo'] .kt-tab[aria-selected='true'] {
+  background: var(--nav-sel-bg);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+  color: var(--nav-sel-fg);
+}
+:root[data-style='neo'] .kt-tab[aria-pressed='true'] .mono,
+:root[data-style='neo'] .kt-tab[aria-selected='true'] .mono {
+  color: var(--nav-sel-sub);
+}
+
+/* Every badge tone is ruled in ink, whatever its tint (a palette's tone edges are pale hairlines). */
+:root[data-style='neo'] .kt-badge,
+:root[data-style='neo'] .kt-badge[data-tone] {
+  border-color: var(--border-strong);
+}

@@ -6,7 +6,6 @@
    removed (see header) so --glow-alpha stays 0 and the reduced-motion path is
    a no-op. No offset ink (Neo), no rings-instead-of-shadow (Contrast) — the
    third distinct read is planar: crisp thin edges, no float. */
-  --shadow-ink: transparent;
   --nav-hover: var(--surface-2);
   --nav-sel-bg: var(--accent-soft);
   --nav-sel-edge: var(--accent-border);

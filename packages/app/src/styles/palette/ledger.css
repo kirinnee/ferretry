@@ -5,6 +5,7 @@
   --accent-fg: #fff;
   --accent-soft: #d6eadc;
   --accent-border: #75ab86;
+  --muted: #5f5f6c; /* 4.99:1 on the chosen row's accent-soft (the Studio grey was 4.49:1) */
   --nav-sel-bg: var(--accent-soft);
   --nav-sel-fg: var(--accent);
   --nav-sel-sub: #345a40;
