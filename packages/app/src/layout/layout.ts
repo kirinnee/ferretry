@@ -77,15 +77,18 @@ export function checkLayout(layout: Layout, installed: InstalledViews): readonly
   const issues: LayoutIssue[] = [];
   const navItems: readonly string[] = SHELL_ITEMS.nav;
   const topItems: readonly string[] = SHELL_ITEMS.top;
-  const checkNav = (at: string, items: readonly string[] | undefined): void => {
+  // A layout that names `hidden` (at a viewport) takes its `items` as an order and skips a name that resolves to
+  // nothing installed, so a removed plugin must not refuse the whole layout; one that does not still lists exactly them.
+  const checkNav = (at: string, items: readonly string[] | undefined, tolerant: boolean): void => {
+    if (tolerant) return;
     for (const item of items ?? []) {
       if (!navItems.includes(item) && !installed.screens.has(item)) {
         issues.push({ at, message: `"${item}" is not an installed screen` });
       }
     }
   };
-  checkNav('nav.items', layout.nav.items);
-  checkNav('phone.nav.items', layout.phone?.nav?.items);
+  checkNav('nav.items', layout.nav.items, layout.nav.hidden !== undefined);
+  checkNav('phone.nav.items', layout.phone?.nav?.items, (layout.phone?.nav?.hidden ?? layout.nav.hidden) !== undefined);
   for (const [at, items] of [
     ['top', layout.top],
     ['phone.top', layout.phone?.top],
@@ -184,7 +187,15 @@ const SCALAR_PATHS: ReadonlySet<string> = new Set([
 ]);
 
 /** Paths that take a list (`agenda,board`), besides `panels.<slot>`. */
-const LIST_PATHS: ReadonlySet<string> = new Set(['nav.items', 'top', 'composer.tools', 'phone.nav.items', 'phone.top']);
+const LIST_PATHS: ReadonlySet<string> = new Set([
+  'nav.items',
+  'nav.hidden',
+  'top',
+  'composer.tools',
+  'phone.nav.items',
+  'phone.nav.hidden',
+  'phone.top',
+]);
 
 function keysOf(path: string): { readonly keys: readonly string[]; readonly list: boolean } | undefined {
   if (path.startsWith('panels.') && path.length > 'panels.'.length)

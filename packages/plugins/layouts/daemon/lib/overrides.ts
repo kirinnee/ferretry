@@ -33,7 +33,15 @@ const SCALAR_PATHS: ReadonlySet<string> = new Set([
 ]);
 
 /** Paths that take a list (`agenda,board`), besides `panels.<slot>`. */
-const LIST_PATHS: ReadonlySet<string> = new Set(['nav.items', 'top', 'composer.tools', 'phone.nav.items', 'phone.top']);
+const LIST_PATHS: ReadonlySet<string> = new Set([
+  'nav.items',
+  'nav.hidden',
+  'top',
+  'composer.tools',
+  'phone.nav.items',
+  'phone.nav.hidden',
+  'phone.top',
+]);
 
 /** Where a dotted path lands in the overrides object: `panels.ferret.side` is key `panels` › slot `ferret.side`. */
 function keysOf(path: string): { readonly keys: readonly string[]; readonly list: boolean } | undefined {
