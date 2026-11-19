@@ -638,7 +638,10 @@ describe('the side column', () => {
   // U-L: v4 keeps its fleet column on the LEFT of every page. The built-in default says so (`side.at: left`); a layout that
   // names no edge (every layout saved before the field) keeps the column on the right (`layout.test.ts` holds that).
   const orderOf = (container: HTMLElement): string[] =>
-    [...(container.querySelector('.fy-columns')?.children ?? [])].map(node => node.getAttribute('data-slot') ?? '');
+    // The zero-width grab handle (ui/resize-handle, r10 S3) is a sibling of the side column but is not a column.
+    [...(container.querySelector('.fy-columns')?.children ?? [])]
+      .filter(node => !node.classList.contains('fy-resize'))
+      .map(node => node.getAttribute('data-slot') ?? '');
 
   test('U-L: the default layout draws the side column first, before the page, on the left', async () => {
     const app = await bootApp({
