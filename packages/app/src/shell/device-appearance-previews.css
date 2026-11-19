@@ -1,7 +1,7 @@
 /* ============================================================================
    The Look previews (shell/device-appearance-previews.tsx): colour mode, text size, motion. Each scene fills the
    160 x 100 `.fy-sp` frame. Theme tokens only; the only literals are sizes. A scene's own movement hangs off
-   `.fy-sp[data-sp-state='playing']` and only ever animates `transform`/`opacity`.
+   `.fy-sp:not([data-sp-state='still'])` (kept in the paused state too, so a pause holds its phase) and only ever animates `transform`/`opacity`.
    ========================================================================== */
 
 .fy-dap-frame {
@@ -166,16 +166,16 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .fy-sp[data-sp-state='playing'] .fy-dap-frame--motion[data-dap-motion='moving'] .fy-dap-dot {
+  .fy-sp:not([data-sp-state='still']) .fy-dap-frame--motion[data-dap-motion='moving'] .fy-dap-dot {
     animation: fy-dap-bounce 1.1s ease-in-out infinite;
   }
-  .fy-sp[data-sp-state='playing'] .fy-dap-frame--motion[data-dap-motion='moving'] .fy-dap-dot:nth-child(2) {
+  .fy-sp:not([data-sp-state='still']) .fy-dap-frame--motion[data-dap-motion='moving'] .fy-dap-dot:nth-child(2) {
     animation-delay: 0.15s;
   }
-  .fy-sp[data-sp-state='playing'] .fy-dap-frame--motion[data-dap-motion='moving'] .fy-dap-dot:nth-child(3) {
+  .fy-sp:not([data-sp-state='still']) .fy-dap-frame--motion[data-dap-motion='moving'] .fy-dap-dot:nth-child(3) {
     animation-delay: 0.3s;
   }
-  .fy-sp[data-sp-state='playing'] .fy-dap-frame--motion[data-dap-motion='moving'] .fy-dap-ring {
+  .fy-sp:not([data-sp-state='still']) .fy-dap-frame--motion[data-dap-motion='moving'] .fy-dap-ring {
     animation: fy-dap-turn 1.2s linear infinite;
   }
 }

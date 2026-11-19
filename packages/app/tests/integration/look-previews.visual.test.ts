@@ -104,6 +104,23 @@ const seek = async (tab: Page, ms: number): Promise<void> => {
   }, ms);
 };
 
+/** The two layers take turns: at no point of the loop are both visible, so a label never lands on another. */
+const expectNeverOverlapping = async (tab: Page): Promise<void> => {
+  for (let step = 0; step <= 100; step += 1) {
+    await seek(tab, (4_200 * step) / 100);
+    const worst = await tab.evaluate(() =>
+      Math.max(
+        ...[...document.querySelectorAll('[data-setting-preview]')].map(frame => {
+          const layer = (kind: string) =>
+            Number(getComputedStyle(frame.querySelector(`.fy-sp__layer--${kind}`) as Element).opacity);
+          return Math.min(layer('before'), layer('after'));
+        }),
+      ),
+    );
+    expect(worst).toBe(0);
+  }
+};
+
 const ROWS = ['Colour mode', 'Text size', 'Motion'] as const;
 const frameOf = (tab: Page, row: string) => tab.locator(`[data-setting-row="${row}"] [data-setting-preview]`);
 
@@ -122,11 +139,57 @@ describe('the Look previews', () => {
         await frameOf(tab, 'Motion').scrollIntoViewIfNeeded();
         await seek(tab, 0);
         await shotOf(tab, variant, 'look-t0-before');
-        await seek(tab, 4_200 * 0.42);
+        await seek(tab, 4_200 * 0.39);
         await shotOf(tab, variant, 'look-mid-fade');
+        await seek(tab, 4_200 * 0.45);
+        await shotOf(tab, variant, 'look-mid-fade-gap');
+        await seek(tab, 4_200 * 0.51);
+        await shotOf(tab, variant, 'look-mid-fade-in');
+        await expectNeverOverlapping(tab);
         await seek(tab, 4_200 * 0.7);
         await shotOf(tab, variant, 'look-final');
         expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+
+    it(`${variant.name}: pausing holds the Motion scene's own animations where they are, not back at 0`, async () => {
+      const { tab, close } = await open(variant);
+      try {
+        await frameOf(tab, 'Motion').scrollIntoViewIfNeeded();
+        await tab.waitForTimeout(400);
+        await tab.evaluate(() => {
+          Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+          document.dispatchEvent(new Event('visibilitychange'));
+        });
+        await tab.waitForFunction(
+          () =>
+            document
+              .querySelector('[data-setting-row="Motion"] [data-setting-preview]')
+              ?.getAttribute('data-sp-state') === 'paused',
+        );
+        const mine = () =>
+          tab.evaluate(() =>
+            document
+              .getAnimations()
+              .filter(a => (a.effect as KeyframeEffect | null)?.target?.closest('[data-setting-row="Motion"]'))
+              .map(a => ({
+                name: (a as CSSAnimation).animationName,
+                state: a.playState,
+                at: Number(a.currentTime ?? 0),
+              })),
+          );
+        await tab.waitForTimeout(150); // the pause lands on the next frame
+        const held = await mine();
+        // The dots and the ring keep their animation while paused (3 dots + ring + 2 fade layers), all paused.
+        expect(held.filter(a => a.name === 'fy-dap-bounce' || a.name === 'fy-dap-turn').length).toBe(4);
+        expect(held.every(a => a.state === 'paused')).toBe(true);
+        expect(held.filter(a => a.name === 'fy-dap-bounce' || a.name === 'fy-dap-turn').every(a => a.at > 0)).toBe(
+          true,
+        );
+        await tab.waitForTimeout(300);
+        expect((await mine()).map(a => a.at)).toEqual(held.map(a => a.at));
       } finally {
         await close();
       }

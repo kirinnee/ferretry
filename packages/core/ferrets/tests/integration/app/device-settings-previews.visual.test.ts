@@ -95,6 +95,23 @@ const seek = async (tab: Page, ms: number): Promise<void> => {
   }, ms);
 };
 
+/** The two layers take turns: at no point of the loop are both visible, so a label never lands on another. */
+const expectNeverOverlapping = async (tab: Page): Promise<void> => {
+  for (let step = 0; step <= 100; step += 1) {
+    await seek(tab, (4_200 * step) / 100);
+    const worst = await tab.evaluate(() =>
+      Math.max(
+        ...[...document.querySelectorAll('[data-setting-preview]')].map(frame => {
+          const layer = (kind: string) =>
+            Number(getComputedStyle(frame.querySelector(`.fy-sp__layer--${kind}`) as Element).opacity);
+          return Math.min(layer('before'), layer('after'));
+        }),
+      ),
+    );
+    expect(worst).toBe(0);
+  }
+};
+
 const ROWS = ['Group Needs you at the top', 'Density'] as const;
 const frameOf = (tab: Page, row: string) => tab.locator(`[data-setting-row="${row}"] [data-setting-preview]`);
 
@@ -112,8 +129,13 @@ describe('the Ferret list previews', () => {
         expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         await seek(tab, 0);
         await shotOf(tab, variant, 'ferret-list-t0-before');
-        await seek(tab, 4_200 * 0.42);
+        await seek(tab, 4_200 * 0.39);
         await shotOf(tab, variant, 'ferret-list-mid-fade');
+        await seek(tab, 4_200 * 0.45);
+        await shotOf(tab, variant, 'ferret-list-mid-fade-gap');
+        await seek(tab, 4_200 * 0.51);
+        await shotOf(tab, variant, 'ferret-list-mid-fade-in');
+        await expectNeverOverlapping(tab);
         await seek(tab, 4_200 * 0.7);
         await shotOf(tab, variant, 'ferret-list-final');
         expect(problems).toEqual([]);

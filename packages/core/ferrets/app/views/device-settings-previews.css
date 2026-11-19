@@ -1,6 +1,6 @@
 /* ============================================================================
    The ferret list previews (views/device-settings-previews.tsx): a mini ferret list in a 160 x 100 `.fy-sp` frame.
-   Theme tokens only; the lifted row's slide hangs off `.fy-sp[data-sp-state='playing']` and animates `transform` only.
+   Theme tokens only; the lifted row's slide hangs off `.fy-sp:not([data-sp-state='still'])` (kept while paused, so a pause holds its phase) and animates `transform` only.
    ========================================================================== */
 
 .fy-dsp-frame {
@@ -102,16 +102,16 @@
 
 @keyframes fy-dsp-lift {
   0%,
-  40% {
+  54% {
     transform: translateY(14px);
   }
-  60%,
+  72%,
   100% {
     transform: translateY(0);
   }
 }
 @media (prefers-reduced-motion: no-preference) {
-  .fy-sp[data-sp-state='playing'] .fy-dsp-row[data-lifted] {
+  .fy-sp:not([data-sp-state='still']) .fy-dsp-row[data-lifted] {
     animation: fy-dsp-lift var(--sp-loop) ease-in-out infinite;
   }
 }

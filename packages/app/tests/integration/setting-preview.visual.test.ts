@@ -104,6 +104,23 @@ const seek = async (tab: Page, ms: number): Promise<void> => {
   }, ms);
 };
 
+/** The two layers take turns: at no point of the loop are both visible, so a label never lands on another. */
+const expectNeverOverlapping = async (tab: Page): Promise<void> => {
+  for (let step = 0; step <= 100; step += 1) {
+    await seek(tab, (4_200 * step) / 100);
+    const worst = await tab.evaluate(() =>
+      Math.max(
+        ...[...document.querySelectorAll('[data-setting-preview]')].map(frame => {
+          const layer = (kind: string) =>
+            Number(getComputedStyle(frame.querySelector(`.fy-sp__layer--${kind}`) as Element).opacity);
+          return Math.min(layer('before'), layer('after'));
+        }),
+      ),
+    );
+    expect(worst).toBe(0);
+  }
+};
+
 const opacityOf = async (tab: Page, layer: 'before' | 'after'): Promise<number> =>
   await tab
     .locator(`[data-setting-preview] >> nth=0`)
@@ -123,8 +140,13 @@ describe('SettingPreview', () => {
         expect(await opacityOf(tab, 'before')).toBe(1);
         expect(await opacityOf(tab, 'after')).toBe(0);
         await shotOf(tab, variant, 't0-before');
-        await seek(tab, 4_200 * 0.42);
+        await seek(tab, 4_200 * 0.39);
         await shotOf(tab, variant, 'mid-fade');
+        await seek(tab, 4_200 * 0.45);
+        await shotOf(tab, variant, 'mid-fade-gap');
+        await seek(tab, 4_200 * 0.51);
+        await shotOf(tab, variant, 'mid-fade-in');
+        await expectNeverOverlapping(tab);
         await seek(tab, 4_200 * 0.7);
         expect(await opacityOf(tab, 'before')).toBe(0);
         expect(await opacityOf(tab, 'after')).toBe(1);

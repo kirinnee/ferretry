@@ -7,8 +7,9 @@
  * The caller owns the scene (`before` and `after` are the mini-frame drawn for the old and the new value); this file
  * owns when it moves:
  *
- *   - It loops `before` → `after` → `before` as one slow cross-fade (`setting-preview.css`), and replays from the start
- *     whenever `value` changes, so choosing a value answers with the movement.
+ *   - It loops `before` → `after` → `before` as two layers taking turns (`setting-preview.css`): one fades out, then
+ *     the other in, never both at once, so no label lands on another. It replays from the start whenever `value`
+ *     changes, so choosing a value answers with the movement.
  *   - It pauses while the tab is hidden (`useDocumentVisible`) or the frame is scrolled off-screen
  *     (`IntersectionObserver`): a thing nobody sees costs nothing.
  *   - With motion off (the OS's reduced-motion query OR Settings › Appearance › Motion = reduced) it shows the FINAL
@@ -17,7 +18,7 @@
  *
  * No library, no timer and no per-frame script: the loop is CSS on `opacity`, one composited layer per state.
  * A scene that wants to move a piece of itself (a menu sliding, a line being typed) hangs its own animation off
- * `.fy-sp[data-sp-state='playing']` and reads the loop length from `var(--sp-loop)`.
+ * `.fy-sp:not([data-sp-state='still'])` (so a pause holds its phase) and reads the loop length from `var(--sp-loop)`.
  */
 
 import { type ReactNode, useEffect, useRef, useState } from 'react';
