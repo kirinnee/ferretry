@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { clampWidth, panelWidths, PANEL_RANGES, useApplyPanelWidths } from '../../../src/shell/panel-widths.ts';
+import {
+  clampWidth,
+  fitWidthsToViewport,
+  panelWidths,
+  PANEL_RANGES,
+  useApplyPanelWidths,
+} from '../../../src/shell/panel-widths.ts';
 import { APP_STORAGE } from '../../../src/storage/names.ts';
 import { ResizeHandle } from '../../../src/ui/resize-handle.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '../../support/dom.ts';
@@ -31,6 +37,16 @@ const handle = (scope: ParentNode, panel: string): HTMLElement =>
 const pointer = (target: HTMLElement, type: string, clientX: number): void => {
   target.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, pointerId: 1, clientX }));
 };
+/** Runs `body` in a window of this inner width (the fit to the window reads it), then puts the real width back. */
+async function inWindow(width: number, body: () => Promise<void>): Promise<void> {
+  const before = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+  try {
+    await body();
+  } finally {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: before });
+  }
+}
 const stored = (): unknown => JSON.parse(window.localStorage.getItem(APP_STORAGE.panelWidths) ?? 'null');
 
 /** Mounts a handle with the applier the frame mounts once, so the root variable follows. */
@@ -110,13 +126,15 @@ describe('in the app', () => {
       APP_STORAGE.panelWidths,
       JSON.stringify({ format: 1, value: { drawer: 333, 'settings-nav': 9999 } }),
     );
-    const app = await bootApp({ surfaces: [], machines: ['d1'], path: '/d/d1/settings' });
-    view = app.view;
-    expect(handle(app.view.container, 'drawer').getAttribute('aria-valuenow')).toBe('333');
-    expect(handle(app.view.container, 'settings-nav').getAttribute('aria-valuenow')).toBe('320');
-    expect(root.style.getPropertyValue('--fy-w-drawer')).toBe('333px');
-    expect(root.style.getPropertyValue('--fy-w-settings-nav')).toBe('320px');
-    expect(root.style.getPropertyValue('--fy-w-side')).toBe('');
+    await inWindow(1280, async () => {
+      const app = await bootApp({ surfaces: [], machines: ['d1'], path: '/d/d1/settings' });
+      view = app.view;
+      expect(handle(app.view.container, 'drawer').getAttribute('aria-valuenow')).toBe('333');
+      expect(handle(app.view.container, 'settings-nav').getAttribute('aria-valuenow')).toBe('320');
+      expect(root.style.getPropertyValue('--fy-w-drawer')).toBe('333px');
+      expect(root.style.getPropertyValue('--fy-w-settings-nav')).toBe('320px');
+      expect(root.style.getPropertyValue('--fy-w-side')).toBe('');
+    });
   });
 
   test('a value another page wrote that is not a width is ignored', async () => {
@@ -146,5 +164,43 @@ describe('in the app', () => {
       ).click(),
     );
     expect(app.view.container.querySelector('[data-resize-handle]')).toBeNull();
+  });
+});
+
+describe('fitWidthsToViewport (the settings pane keeps room on a narrow window)', () => {
+  test('a roomy window leaves every width alone', () => {
+    const saved = { drawer: 400, 'settings-nav': 320 } as const;
+    expect(fitWidthsToViewport(saved, 1280)).toBe(saved);
+    expect(fitWidthsToViewport({}, 768)).toEqual({});
+  });
+
+  test('768px: both saved widths shrink toward their minimums so the pane keeps its room', () => {
+    const fitted = fitWidthsToViewport({ drawer: 400, 'settings-nav': 320 }, 768);
+    expect(fitted).toEqual({ drawer: PANEL_RANGES.drawer.min, 'settings-nav': PANEL_RANGES['settings-nav'].min });
+  });
+
+  test('a partial squeeze shrinks each saved panel in proportion to how far it is above its minimum', () => {
+    // 900px: budget 900 - 56 - 320 = 524; 400 + 320 = 720 → 196 over; room 180 + 140 = 320 → share 0.6125.
+    const fitted = fitWidthsToViewport({ drawer: 400, 'settings-nav': 320 }, 900);
+    expect(fitted.drawer).toBe(290);
+    expect(fitted['settings-nav']).toBe(234);
+    expect(400 - (fitted.drawer ?? 0) + (320 - (fitted['settings-nav'] ?? 0))).toBe(196);
+  });
+
+  test('an unsaved panel counts at its stylesheet width and is never given a value', () => {
+    const fitted = fitWidthsToViewport({ drawer: 400 }, 768);
+    expect(fitted).toEqual({ drawer: PANEL_RANGES.drawer.min });
+    expect('settings-nav' in fitted).toBe(false);
+  });
+
+  test('the fitted value is what the page gets, and the stored one is untouched', async () => {
+    await inWindow(768, async () => {
+      panelWidths.set('drawer', 400);
+      panelWidths.set('settings-nav', 320);
+      view = await mount(<Harness edge="end" />);
+      expect(root.style.getPropertyValue('--fy-w-drawer')).toBe('220px');
+      expect(root.style.getPropertyValue('--fy-w-settings-nav')).toBe('180px');
+      expect(stored()).toEqual({ format: 1, value: { drawer: 400, 'settings-nav': 320 } });
+    });
   });
 });

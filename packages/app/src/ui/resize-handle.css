@@ -1,4 +1,4 @@
-/* THE GRAB STRIP ON A PANEL'S EDGE (ui/resize-handle.tsx): an 18px hit area around a 2px line, centred on the panel's edge.
+/* THE GRAB STRIP ON A PANEL'S EDGE (ui/resize-handle.tsx): an 18px hit area around a 6px line, centred on the panel's edge.
    The handle is a ZERO-WIDTH item that sits right where the panel's edge is (a flex sibling of the drawer and the side column, an
    absolutely placed one beside the settings list), because the panels scroll and a child of one would be clipped and would
    scroll away with its content. Its two pseudo-elements are the hit area and the visible line. */
@@ -26,9 +26,9 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -1px;
-  width: 2px;
-  border-radius: 1px;
+  left: -3px;
+  width: 6px;
+  border-radius: 3px;
   background: transparent;
   pointer-events: none;
   transition: background-color 120ms ease;

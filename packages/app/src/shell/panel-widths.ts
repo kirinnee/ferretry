@@ -1,4 +1,4 @@
-import { useLayoutEffect, useSyncExternalStore } from 'react';
+import { useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import { APP_STORAGE } from '../storage/names.ts';
 import { type KeyValueStore, readRecord, removeRecord, writeRecord } from '../storage/records.ts';
@@ -165,6 +165,39 @@ export function measurePanel(panel: PanelId): number | undefined {
   return width === undefined || width <= 0 ? undefined : width;
 }
 
+/** The page beside the drawer and the settings list keeps at least this much room (a settings pane is unusable below it). */
+const MIN_PANE = 320;
+/** What the settings page spends besides the two panels and its pane: the page's side padding and the gap before the pane. */
+const PANE_OVERHEAD = 56;
+/** What the stylesheet gives a panel nobody resized (screen pixels at text scale 1). */
+const DEFAULT_WIDTH: Readonly<Record<'drawer' | 'settings-nav', number>> = { drawer: 280, 'settings-nav': 220 };
+
+/**
+ * THE SAVED WIDTHS, FITTED TO THIS SCREEN. A width saved on a wide screen (or one dragged to its maximum on a small one) must
+ * not push the settings pane off a narrow window (768px: drawer 400 + list 320 left it 0 wide). When the drawer and the list
+ * together leave the pane less than `MIN_PANE`, the SAVED ones shrink in proportion to how far each is above its own minimum,
+ * never below it; an unsaved panel keeps the stylesheet's width and counts toward the sum. Below a window where even both
+ * minimums leave the pane under `MIN_PANE` the minimums are what remain. The stored value is untouched: widening the window
+ * brings the chosen width back. Pure; `viewport` is the window's inner width.
+ */
+export function fitWidthsToViewport(widths: Widths, viewport: number): Widths {
+  const panels = ['drawer', 'settings-nav'] as const;
+  const budget = viewport - PANE_OVERHEAD - MIN_PANE;
+  const used = (panel: (typeof panels)[number]): number => widths[panel] ?? DEFAULT_WIDTH[panel];
+  const excess = panels.reduce((sum, panel) => sum + used(panel), 0) - budget;
+  if (excess <= 0) return widths;
+  const room = (panel: (typeof panels)[number]): number =>
+    widths[panel] === undefined ? 0 : Math.max(0, used(panel) - PANEL_RANGES[panel].min);
+  const total = panels.reduce((sum, panel) => sum + room(panel), 0);
+  if (total === 0) return widths;
+  const share = Math.min(1, excess / total);
+  const fitted: Widths = { ...widths };
+  for (const panel of panels) {
+    if (widths[panel] !== undefined) fitted[panel] = Math.round(used(panel) - room(panel) * share);
+  }
+  return fitted;
+}
+
 /** Writes every stored width onto the document root as its CSS variable, and unsets a panel that has none. */
 function applyPanelWidths(widths: Widths, root: HTMLElement): void {
   for (const panel of PANELS) {
@@ -180,7 +213,15 @@ function applyPanelWidths(widths: Widths, root: HTMLElement): void {
  */
 export function useApplyPanelWidths(): void {
   const widths = useSyncExternalStore(panelWidths.subscribe, panelWidths.all, () => ({}) as Widths);
+  // The window's width is part of the fit: a resize (or a rotation) re-fits the saved widths.
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   useLayoutEffect(() => {
-    applyPanelWidths(widths, document.documentElement);
-  }, [widths]);
+    const onResize = (): void => setViewportWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const fitted = useMemo(() => fitWidthsToViewport(widths, viewportWidth), [widths, viewportWidth]);
+  useLayoutEffect(() => {
+    applyPanelWidths(fitted, document.documentElement);
+  }, [fitted]);
 }

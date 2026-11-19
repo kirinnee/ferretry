@@ -185,6 +185,30 @@ describe('Resizable panels', () => {
     });
   }
 
+  it('768 wide: saved widths at their maximums never erase the settings pane, and a reload keeps it', async () => {
+    const variant: Variant = { name: '768-light', width: 768, height: 800, phone: false, scheme: 'light' };
+    const { tab, close } = await open(variant, '/d/ws/settings', '.fy-settings-page');
+    try {
+      await drag(tab, 'drawer', 900);
+      await drag(tab, 'settings-nav', 900);
+      await tab.reload();
+      await tab.waitForSelector('.fy-settings-page');
+      const pane = await widthOf(tab, '.fy-settings-page');
+      expect(pane).toBeGreaterThanOrEqual(300);
+      expect(await widthOf(tab, '.fy-drawer')).toBeGreaterThanOrEqual(220);
+      expect(await widthOf(tab, '.fy-settings-nav')).toBeGreaterThanOrEqual(180);
+      await shotOf(tab, variant, 'saved-widths-fitted');
+      // The strip is a 6px line (the plan's), not a hairline.
+      await hover(tab, 'drawer');
+      const line = await tab
+        .locator('[data-resize-handle="drawer"]')
+        .evaluate(node => getComputedStyle(node, '::after').width);
+      expect(line).toBe('6px');
+    } finally {
+      await close();
+    }
+  });
+
   for (const variant of PHONE) {
     it(`${variant.name}: a phone has no handles`, async () => {
       const { tab, close } = await open(variant, '/d/ws/settings', 'nav[aria-label="Plugin settings"]');
