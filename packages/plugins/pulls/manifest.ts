@@ -1,7 +1,19 @@
 import { definePlugin, route, screen } from '@ferretry/kernel/manifest';
 import { GitAccountDisconnected, GitAccountsPort } from '@ferretry/plugin-git-accounts/contract';
 import { ProjectsPort, ProjectRemoved } from '@ferretry/plugin-projects/contract';
-import { PULLS_CACHE, PULLS_CAPS, PULLS_WORDS } from './contract/index.ts';
+import { AccessPort } from './contract/others.ts';
+import { audit } from '@ferretry/core-gate/contract';
+import {
+  PULLS_AUDIT,
+  PULLS_AUDIT_SKIP,
+  PULLS_CACHE,
+  PULLS_CAPS,
+  PULLS_GUARD,
+  PULLS_WORDS,
+  PullsChanged,
+  PullsConfigDef,
+  WATCH_STATE,
+} from './contract/index.ts';
 
 /**
  * PRs & CI (r9 track E): a project's pull requests and CI, inside Ferretry. E1 is the base the other units stand on: the
@@ -21,9 +33,27 @@ export default definePlugin({
   words: PULLS_WORDS,
 
   needs: { gitAccounts: GitAccountsPort, projects: ProjectsPort },
+  // E2 buzzes the phone through Access when it is there; without it the watch still keeps and shows PRs.
+  uses: { access: AccessPort },
 
   actions: {
     routes: [
+      route('GET /v1/pulls/watch', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: PULLS_CAPS.read,
+        noStore: true,
+        audit: PULLS_AUDIT_SKIP.read,
+        guard: PULLS_GUARD,
+      }),
+      route('PATCH /v1/pulls/watch/:project', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: PULLS_CAPS.configure,
+        noStore: true,
+        audit: audit(PULLS_AUDIT.watchChanged),
+        guard: PULLS_GUARD,
+      }),
       // E8 (CI data): a person's read of a project repository's CI. Names, statuses and times; logs are never read.
       route('GET /v1/pulls/:project/:repo/runs', {
         minimum: 'operator',
@@ -75,13 +105,16 @@ export default definePlugin({
 
   data: {
     // Private code (diffs): `0600` files in `0700` folders, bounded, deleted with the project or account.
-    state: [PULLS_CACHE],
+    state: [PULLS_CACHE, WATCH_STATE],
+    // E2: which projects are watched and which events notify.
+    config: [PullsConfigDef],
+    publishes: [PullsChanged],
     // A removed project or account takes its cache with it, at once (not on the next sweep).
     subscribes: [ProjectRemoved, GitAccountDisconnected],
   },
 
   // Private code: no ferret reaches the cache through any root.
-  privacy: { private: ['cache'] },
+  privacy: { private: ['cache', 'watch'] },
 
   permissions: { roots: [], spawn: [], network: [] },
 });

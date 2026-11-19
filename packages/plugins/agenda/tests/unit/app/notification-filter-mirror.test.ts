@@ -89,7 +89,7 @@ const fakeIndexedDb = (options: { open?: OpenOutcome; failure?: Failure; stores?
 };
 
 const CUSTOM: NotificationFilterDocument = filterDocumentOf({
-  categories: { 'needs-you': true, finished: false, failed: true, 'new-device': false },
+  categories: { 'needs-you': true, finished: false, failed: true, 'new-device': false, 'prs-ci': true },
   quietHours: { enabled: true, startMinute: 60, endMinute: 120 },
   machines: { 'daemon-a': false },
 });

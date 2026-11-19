@@ -66,7 +66,7 @@ const ferretPagePath = (daemonId: DaemonId, sessionId: string): string =>
  * blocking prompt raises an Agenda item, and THAT pushes, so a page notification would say it twice.
  * Both are excluded here rather than given dead switch cases below.
  */
-export type SessionNotifyKind = Exclude<NotifyKind, 'device-paired' | 'question'>;
+export type SessionNotifyKind = Exclude<NotifyKind, 'device-paired' | 'question' | 'pr' | 'ci'>;
 
 const FAILED_STATUSES: ReadonlySet<NotifiedStatus> = new Set(['failed', 'stalled', 'kill_failed']);
 

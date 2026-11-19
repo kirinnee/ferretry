@@ -43,6 +43,12 @@ export interface Reading {
 const DEFAULT_MAX_PAGES = 10;
 const MAX_PAGES = 40;
 
+/** Whether GitHub's own message says a rate or abuse limit was hit (the text is read here and never passed on). */
+function saysLimited(body: unknown): boolean {
+  const message = typeof body === 'object' && body !== null ? (body as { message?: unknown }).message : undefined;
+  return typeof message === 'string' && /rate limit|abuse/iu.test(message);
+}
+
 /**
  * GitHub REST and GraphQL over `git-accounts`' api seam. This class never holds a token: it names an account and the
  * seam places the token on the request. A REST `GET` is conditional (`If-None-Match`) and answered from the cache on a
@@ -165,7 +171,7 @@ export class GithubClient {
       this.log.warn('a GitHub call failed', { reason: error instanceof Error ? error.name : 'error' });
       return err({ code: PULLS_CODES.refused, message: 'that GitHub call could not be made' });
     }
-    this.budget.observe(account, resource, answer.headers, answer.status);
+    this.budget.observe(account, resource, answer.headers, answer.status, saysLimited(answer.body));
     return ok(answer);
   }
 

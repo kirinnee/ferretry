@@ -28,6 +28,8 @@ export interface GitApiHeaders {
   readonly link?: string;
   readonly rateLimitRemaining?: string;
   readonly rateLimitReset?: string;
+  /** `Retry-After`: seconds, or an HTTP date, GitHub asks a caller to wait (a secondary limit, a 429, a 503). */
+  readonly retryAfter?: string;
   /** The scopes the token really carries (`X-OAuth-Scopes`). */
   readonly oauthScopes?: string;
 }

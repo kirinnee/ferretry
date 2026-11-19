@@ -71,6 +71,12 @@ describe('buzzPayload (K-push: a tag is never a reason to lose a buzz)', () => {
     });
   });
 
+  it('should carry the kind a buzz names, so the phone can filter it, and none when it names none', () => {
+    should(buzzPayload({ ...words, tag: 'pr-o:r-1', kind: 'ci' }).kind).equal('ci');
+    should(buzzPayload({ ...words, tag: 'pr-o:r-1', kind: 'pr' }).kind).equal('pr');
+    should(buzzPayload({ ...words, tag: 'agenda-f1' })).not.have.property('kind');
+  });
+
   it('should never copy the tag into the event key: a buzz that names no event sends none', () => {
     const payload = buzzPayload({ ...words, tag: 'agenda-f1' });
 

@@ -316,3 +316,83 @@ describe('GraphQL', () => {
     expect(await w.cache.usage(PROJECT)).toEqual({ bytes: 0, files: 0 });
   });
 });
+
+describe('the budget and the secondary limit', () => {
+  const NOW = 5_000_000;
+  const healthy = { rateLimitRemaining: '4000', rateLimitReset: String(Math.floor(NOW / 1000) + 600) };
+
+  test('Retry-After on a 403, 429 or 503 pauses for exactly that long, whatever the allowance says', () => {
+    for (const status of [403, 429, 503]) {
+      const budget = new RateBudget(() => NOW);
+      budget.observe(FAKE_ACCOUNT, 'rest', { ...healthy, retryAfter: '120' }, status);
+      expect(budget.pausedUntil(FAKE_ACCOUNT, 'rest')).toBe(NOW + 120_000);
+    }
+  });
+
+  test('Retry-After may be an HTTP date; a past date, nonsense or more than an hour is clamped or ignored', () => {
+    const budget = new RateBudget(() => NOW);
+    budget.observe(FAKE_ACCOUNT, 'rest', { ...healthy, retryAfter: new Date(NOW + 30_000).toUTCString() }, 429);
+    // An HTTP date has whole-second precision.
+    expect(budget.pausedUntil(FAKE_ACCOUNT, 'rest')).toBe(Math.floor((NOW + 30_000) / 1000) * 1000);
+
+    const long = new RateBudget(() => NOW);
+    long.observe(FAKE_ACCOUNT, 'rest', { ...healthy, retryAfter: '999999' }, 429);
+    expect(long.pausedUntil(FAKE_ACCOUNT, 'rest')).toBe(NOW + 3_600_000);
+
+    // A 503 whose Retry-After is junk or already past is just a 5xx: no pause here (the watch backs off on its own).
+    for (const retryAfter of ['soon', 'Thu, 01 Jan 1970 00:00:00 GMT', '0']) {
+      const odd = new RateBudget(() => NOW);
+      odd.observe(FAKE_ACCOUNT, 'rest', { ...healthy, retryAfter }, 503);
+      expect(odd.pausedUntil(FAKE_ACCOUNT, 'rest')).toBeUndefined();
+    }
+  });
+
+  test('a 403 that says it is a limit, with a healthy allowance and no Retry-After, pauses a minute; a plain refusal or a 500 does not', () => {
+    const budget = new RateBudget(() => NOW);
+    budget.observe(FAKE_ACCOUNT, 'rest', healthy, 500);
+    budget.observe(FAKE_ACCOUNT, 'rest', healthy, 403);
+    expect(budget.pausedUntil(FAKE_ACCOUNT, 'rest')).toBeUndefined();
+    budget.observe(FAKE_ACCOUNT, 'rest', healthy, 403, true);
+    expect(budget.pausedUntil(FAKE_ACCOUNT, 'rest')).toBe(NOW + 60_000);
+  });
+
+  test('a longer pause already in force is never shortened by a later, shorter ask; a 429 never lands with no pause', () => {
+    const budget = new RateBudget(() => NOW);
+    budget.observe(FAKE_ACCOUNT, 'rest', { ...healthy, retryAfter: '300' }, 429);
+    budget.observe(FAKE_ACCOUNT, 'rest', { retryAfter: '10' }, 429);
+    expect(budget.pausedUntil(FAKE_ACCOUNT, 'rest')).toBe(NOW + 300_000);
+
+    // A 429 whose reset is already past used to pause nothing at all.
+    const past = new RateBudget(() => NOW);
+    past.observe(FAKE_ACCOUNT, 'rest', { rateLimitRemaining: '10', rateLimitReset: '1' }, 429);
+    expect(past.pausedUntil(FAKE_ACCOUNT, 'rest')).toBe(NOW + 60_000);
+  });
+
+  test('through the client: a 403 whose message is GitHub’s secondary limit pauses a minute; its text is not passed on', async () => {
+    const w = world();
+    w.github.on('GET', '/repos/o/r', () => ({
+      status: 403,
+      body: { message: 'You have exceeded a secondary rate limit.' },
+    }));
+    const first = await w.client.get(w.reading('/repos/o/r'));
+    expect(!first.ok && first.error.code).toBe(PULLS_CODES.paused);
+    expect(JSON.stringify(first)).not.toContain('secondary');
+    expect(w.client.budget.pausedUntil(FAKE_ACCOUNT, 'rest')).toBe(NOW_SEC * 1000 + 60_000);
+    // A reply that has no message at all is no limit.
+    const other = world();
+    other.github.on('GET', '/repos/o/r', () => ({ status: 403 }));
+    await other.client.get(other.reading('/repos/o/r'));
+    expect(other.client.budget.pausedUntil(FAKE_ACCOUNT, 'rest')).toBeUndefined();
+  });
+
+  test('through the client: a 403 with Retry-After reads as paused, and the next read makes no request', async () => {
+    const w = world();
+    w.github.fail('/repos/o/r', 403, { retryAfter: '120' });
+    const first = await w.client.get(w.reading('/repos/o/r'));
+    expect(!first.ok && first.error.code).toBe(PULLS_CODES.paused);
+    const asked = w.github.seen.length;
+    const second = await w.client.get(w.reading('/repos/o/r'));
+    expect(!second.ok && second.error.code).toBe(PULLS_CODES.paused);
+    expect(w.github.seen.length).toBe(asked);
+  });
+});

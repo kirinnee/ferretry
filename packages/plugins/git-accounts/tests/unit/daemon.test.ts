@@ -377,6 +377,16 @@ describe('listing, removing and the port', () => {
       await expect(port.api('gha_4242' as never, call)).rejects.toMatchObject({ status: 403 });
   });
 
+  test('the api seam hands on Retry-After, so a caller can wait as long as GitHub asked', async () => {
+    const github = new FakeGithub();
+    github.retryAfter = '120';
+    const { host } = await connected(github);
+    const answer = await host
+      .provided(GitAccountsPort)
+      .api('gha_4242' as never, { method: 'GET', path: '/repos/o/r/pulls' });
+    expect(answer.headers.retryAfter).toBe('120');
+  });
+
   test('run: gh gets the token in its own sealed environment, and what comes back has it masked', async () => {
     const calls: SpawnCall[] = [];
     const { host } = await connected(new FakeGithub(), call => {

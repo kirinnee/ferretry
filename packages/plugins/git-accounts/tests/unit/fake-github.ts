@@ -32,6 +32,8 @@ export class FakeGithub {
   deviceFails = false;
   /** Paths whose DELETE never answers (the network fails). */
   deleteThrows = new Set<string>();
+  /** When set, every answer carries a `Retry-After` of this text (a secondary limit asking a caller to wait). */
+  retryAfter: string | undefined = undefined;
   #polls = 0;
 
   readonly fetch = async (url: URL, init?: RequestInit): Promise<Response> => {
@@ -54,6 +56,7 @@ export class FakeGithub {
           'x-ratelimit-remaining': '4999',
           'x-ratelimit-reset': '1790000000',
           'set-cookie': 'session=SHOULD-NEVER-PASS',
+          ...(this.retryAfter === undefined ? {} : { 'retry-after': this.retryAfter }),
         },
       });
     if (

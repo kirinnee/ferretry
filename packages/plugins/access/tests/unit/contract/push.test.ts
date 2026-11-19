@@ -55,6 +55,7 @@ const clearPayload = {
 
 const pushCases: SchemaCase[] = [
   { name: 'notification kind', schema: push.PushNotificationKindSchema, value: 'agenda' },
+  { name: 'no-session notification kind', schema: push.NoSessionPushKindSchema, value: 'pr' },
   { name: 'browser subscription', schema: push.BrowserPushSubscriptionSchema, value: subscription },
   { name: 'register request', schema: push.RegisterPushDeviceRequestSchema, value: registration },
   { name: 'device view', schema: push.PushDeviceViewSchema, value: deviceView },
@@ -97,6 +98,15 @@ describe('push schemas', () => {
       should(push.PushNotificationPayloadSchema.safeParse({ ...sessionPayload, kind }).success).be.true();
     }
     for (const value of payloads) should(push.PushNotificationPayloadSchema.parse(value)).deepEqual(value);
+  });
+
+  it('should let a push about no session carry the PR and CI kinds, and never a session kind', () => {
+    for (const kind of ['pr', 'ci'] as const) {
+      should(push.PushNotificationPayloadSchema.safeParse({ ...payloadBase, kind }).success).be.true();
+      // The same kinds on a session payload are refused: they narrate no ferret.
+      should(push.PushNotificationPayloadSchema.safeParse({ ...sessionPayload, kind }).success).be.false();
+    }
+    should(push.PushNotificationPayloadSchema.safeParse({ ...payloadBase, kind: 'failed' }).success).be.false();
   });
 
   it('should normalise device names', () => {

@@ -1,9 +1,13 @@
 import { milliseconds } from '@ferretry/std';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import type { GitAccountId } from '@ferretry/plugin-git-accounts/contract';
+import { PullsChanged, PullsConfigDef } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { GithubClient } from './adapters/github/client.ts';
+import { configDoorOf } from './features/watch/config-door.ts';
+import { watchFeature } from './features/watch/index.ts';
 import { PullsCache } from './lib/cache/store.ts';
+import { WatchStore } from './features/watch/store.ts';
 import { pullsRoutes } from './routes.ts';
 
 const RECONCILE_EVERY = milliseconds(10 * 60_000);
@@ -13,7 +17,7 @@ const RECONCILE_EVERY = milliseconds(10 * 60_000);
  * ONE registration line here (its routes, its watch job), importing the client built below.
  */
 export default implementDaemon(manifest, {
-  build: ({ needs, kernel }) => {
+  build: ({ needs, uses, kernel }) => {
     const cache = new PullsCache(kernel.state, () => kernel.clock.nowMs(), kernel.log);
     // Later units read GitHub through this one client (one budget, one cache).
     const github = new GithubClient(needs.gitAccounts, cache, () => kernel.clock.nowMs(), kernel.log);
@@ -31,18 +35,48 @@ export default implementDaemon(manifest, {
       run: reconcile,
     });
 
+    // E2: the watch of each project's PRs and CI. Its pushes go through Access when Access is there.
+    const watch = watchFeature({
+      github,
+      store: new WatchStore(kernel.state, kernel.log),
+      projects: async () => await needs.projects.list(),
+      accounts: async () => await needs.gitAccounts.list(),
+      config: () => kernel.config.file(PullsConfigDef),
+      buzz: () => {
+        const access = uses.access.current();
+        return access === undefined ? undefined : async buzz => await access.buzz(buzz);
+      },
+      changed: project => kernel.events.publish(PullsChanged, { project }),
+      nowMs: () => kernel.clock.nowMs(),
+      random: () => Math.random(),
+      log: kernel.log,
+      jobs: kernel.jobs,
+      door: configDoorOf(kernel.config),
+    });
+
     return {
-      routes: pullsRoutes({
-        github,
-        cache,
-        projects: needs.projects,
-        accounts: needs.gitAccounts,
-        nowMs: () => kernel.clock.nowMs(),
-      }),
+      routes: pullsRoutes(
+        {
+          github,
+          cache,
+          projects: needs.projects,
+          accounts: needs.gitAccounts,
+          nowMs: () => kernel.clock.nowMs(),
+        },
+        watch,
+      ),
       subscribers: {
-        'projects.removed': async payload => await cache.purgeProject((payload as { id: string }).id),
+        'projects.removed': async payload => {
+          const id = (payload as { id: string }).id;
+          await cache.purgeProject(id);
+          await watch.service.forgetProject(id);
+        },
         // A reconnect of the same GitHub user reuses the id, so the old cache must be gone before it can be read again.
-        'git-accounts.removed': async payload => await cache.purgeAccount((payload as { id: GitAccountId }).id),
+        'git-accounts.removed': async payload => {
+          const id = (payload as { id: GitAccountId }).id;
+          await cache.purgeAccount(id);
+          await watch.service.forgetAccount(id);
+        },
       },
     };
   },

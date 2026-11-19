@@ -66,12 +66,14 @@ function headersOf(response: Response, around: EchoMask | undefined): GitApiHead
   const link = pick('link');
   const remaining = pick('x-ratelimit-remaining');
   const reset = pick('x-ratelimit-reset');
+  const retryAfter = pick('retry-after');
   const scopes = pick('x-oauth-scopes');
   return {
     ...(etag === undefined ? {} : { etag }),
     ...(link === undefined ? {} : { link }),
     ...(remaining === undefined ? {} : { rateLimitRemaining: remaining }),
     ...(reset === undefined ? {} : { rateLimitReset: reset }),
+    ...(retryAfter === undefined ? {} : { retryAfter }),
     ...(scopes === undefined ? {} : { oauthScopes: scopes }),
   };
 }
