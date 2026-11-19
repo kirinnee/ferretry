@@ -1,4 +1,4 @@
-import { SETTINGS_GROUPS } from '@ferretry/kernel/manifest';
+import { SETTINGS_GROUPS, type SettingsTabDecl } from '@ferretry/kernel/manifest';
 
 /**
  * WHICH SETTINGS TAB AN ADDRESS NAMES. `/d/<daemon>/settings/<plugin>` is that plugin's first tab,
@@ -66,4 +66,25 @@ export function groupSettingsTabs<T extends GroupableTab>(tabs: readonly T[]): r
       .sort(byOrder),
   }));
   return grouped.filter(group => group.tabs.length > 0);
+}
+
+/** WHERE A TAB'S SETTINGS ARE KEPT: in this browser only (`device`), or on the machine for every device paired to it (`machine`, the default). */
+export type SettingsScope = NonNullable<SettingsTabDecl['scope']>;
+
+/** The words the nav's block headings and the page's scope chip share, so the two always agree. */
+export const SCOPE_WORDS = {
+  device: 'Only this browser',
+  machine: 'This machine · every device',
+} as const satisfies Record<SettingsScope, string>;
+
+export const scopeOf = (tab: { readonly scope?: SettingsScope }): SettingsScope => tab.scope ?? 'machine';
+
+/** The tabs split by scope, each side keeping the order it came in. */
+export function splitTabsByScope<T extends { readonly scope?: SettingsScope }>(
+  tabs: readonly T[],
+): { readonly device: readonly T[]; readonly machine: readonly T[] } {
+  return {
+    device: tabs.filter(tab => scopeOf(tab) === 'device'),
+    machine: tabs.filter(tab => scopeOf(tab) === 'machine'),
+  };
 }

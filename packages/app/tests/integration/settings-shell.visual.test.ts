@@ -211,3 +211,65 @@ describe('Settings shell: a picked tab is on screen', () => {
     }
   });
 });
+
+/**
+ * R10 S1: THE FRAME'S OWN RULES, as the browser computes them. A flex label inside a page stays flex (the page's old
+ * `label {display:block}` beat Tailwind's `.flex`); a form's bare label is still a block; the nav's links read in the body
+ * colour and only the current item carries the accent bar; the content is at most 1,100px wide; the list has its two blocks.
+ */
+describe('Settings shell: the frame rules (S1)', () => {
+  for (const variant of VARIANTS) {
+    it(`${variant.name}: labels, nav colour, content width and the two list blocks`, async () => {
+      const { tab, close } = await open(variant, '/d/ws/settings', 'nav[aria-label="Plugin settings"] .fy-tab-group');
+      try {
+        const facts = await tab.evaluate(() => {
+          const page = document.querySelector('.fy-page') as HTMLElement;
+          const probe = document.createElement('div');
+          probe.innerHTML =
+            '<label class="flex" id="s1-flex"><input type="radio"> flex</label><form><label id="s1-form"><input type="text"></label></form>';
+          page.append(probe);
+          const display = (id: string) => getComputedStyle(document.getElementById(id) as HTMLElement).display;
+          const colour = (el: Element) => getComputedStyle(el).color;
+          const links = [...document.querySelectorAll('.fy-settings-nav .fy-tab:not(.fy-tab--active)')];
+          const active = document.querySelector('.fy-settings-nav .fy-tab--active') as HTMLElement | null;
+          const body = getComputedStyle(document.body).color;
+          const fg = getComputedStyle(document.documentElement).getPropertyValue('--fg').trim();
+          const out = {
+            flex: display('s1-flex'),
+            form: display('s1-form'),
+            linkColours: [...new Set(links.map(colour))],
+            fgProbe: (() => {
+              const p = document.createElement('i');
+              p.style.color = 'var(--fg)';
+              document.body.append(p);
+              const c = getComputedStyle(p).color;
+              p.remove();
+              return c;
+            })(),
+            bodyColour: body,
+            fg,
+            activeShadow: active === null ? '' : getComputedStyle(active).boxShadow,
+            blocks: [...document.querySelectorAll('.fy-settings-block__title')].map(el => el.textContent),
+            pageMax: ((el: Element | null) => (el === null ? '' : getComputedStyle(el).maxWidth))(
+              document.querySelector('.fy-settings-page'),
+            ),
+          };
+          probe.remove();
+          return out;
+        });
+        expect(facts.flex).toBe('flex');
+        expect(facts.form).toBe('block');
+        expect(facts.linkColours).toEqual([facts.fgProbe]);
+        // A phone's bare Settings is the list alone: no item is current and no page is mounted.
+        if (!variant.phone) expect(facts.activeShadow).not.toBe('none');
+        expect(facts.blocks[0]).toBe('Only this browser');
+        expect(facts.blocks[1]).toMatch(/ · every device$/);
+        if (!variant.phone) expect(facts.pageMax).toBe('1100px');
+        await tall(tab, variant, 2_300);
+        await shotOf(tab, variant, 'frame-s1');
+      } finally {
+        await close();
+      }
+    });
+  }
+});

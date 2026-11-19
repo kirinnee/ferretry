@@ -7,45 +7,14 @@ import { SettingGroup } from '../compose/setting-row.tsx';
 import { CachedDataSetting } from './device-cached-data.tsx';
 import { DeviceAppearance } from './device-appearance.tsx';
 import { DevicePanels } from './device-panels.tsx';
-import { Icon } from './icons.tsx';
-import { groupSettingsTabs, resolveSettingsTab } from './settings-tab.ts';
+import { Link } from './link.tsx';
+import { SettingsNav } from './settings-nav.tsx';
+import { resolveSettingsTab, SCOPE_WORDS, scopeOf } from './settings-tab.ts';
 import { Loading } from '../ui/loading.tsx';
 import { PanelSlot, PluginView, ShellLine } from './views.tsx';
 import { useEffect, useRef, type MouseEvent } from 'react';
 
-/** An in-app link: a plain click navigates in place; a modifier or middle click is the browser's (a new tab). */
-export function Link({
-  to,
-  children,
-  className,
-  current,
-}: {
-  readonly to: string;
-  readonly children: React.ReactNode;
-  readonly className?: string;
-  /** The page this link names is the one on screen (`aria-current="page"`). */
-  readonly current?: boolean;
-}) {
-  const router = useRouter();
-  const onClick = (event: MouseEvent<HTMLAnchorElement>): void => {
-    if (
-      event.defaultPrevented ||
-      event.button !== 0 ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey
-    )
-      return;
-    event.preventDefault();
-    router.navigate(to);
-  };
-  return (
-    <a href={to} onClick={onClick} className={className} aria-current={current === true ? 'page' : undefined}>
-      {children}
-    </a>
-  );
-}
+export { Link };
 
 /**
  * Home: every paired daemon, grouped by machine (§5.1). With a selected, still-paired daemon the app OPENS that machine
@@ -221,39 +190,23 @@ export function DaemonSettingsPage({
             <span className="fy-settings-machine__state" data-online={online ? 'true' : 'false'}>
               {online ? 'Online' : 'Offline'}
             </span>
-            <span className="fy-settings-machine__scope">This machine · shared by every device paired to it</span>
+            {active === undefined ? null : (
+              <span className="fy-settings-machine__scope" data-scope={scopeOf(active)}>
+                {SCOPE_WORDS[scopeOf(active)]}
+              </span>
+            )}
           </p>
         )}
         {active === undefined ? null : <p className="fy-settings-title">{active.label}</p>}
       </header>
       <div className="fy-settings-body">
-        {/* v4's titled groups (`machine-panels.ts`); each plugin names its tab's group in its manifest. */}
-        <nav className="fy-tabs fy-tabs--grouped fy-settings-nav" aria-label="Plugin settings">
-          {/* This device's own settings (theme, text size, motion, notifications…) are saved in this browser, not on a daemon:
-          the shell's own entry, one click from here as v4's Settings had it. Its address is the one a reload still serves. */}
-          <Link to={DEVICE_SETTINGS_HREF} className="fy-tab fy-settings-device">
-            <Icon name="monitor" />
-            This device
-          </Link>
-          {groupSettingsTabs(tabs).map(group => (
-            <details key={group.id} className="fy-tab-group" open={group.tabs.some(candidate => candidate === active)}>
-              <summary className="fy-tab-group__title">{group.label}</summary>
-              <div className="fy-tab-group__tabs">
-                {group.tabs.map(candidate => (
-                  <Link
-                    key={`${candidate.plugin}.${candidate.id}`}
-                    to={daemonSettingsHref(daemon, candidate.plugin, candidate.id)}
-                    className={candidate === active ? 'fy-tab fy-tab--active' : 'fy-tab'}
-                    current={candidate === active && named !== undefined}
-                  >
-                    <Icon name={candidate.icon} />
-                    {candidate.label}
-                  </Link>
-                ))}
-              </div>
-            </details>
-          ))}
-        </nav>
+        <SettingsNav
+          daemon={daemon}
+          machine={paired === undefined ? 'This machine' : daemonTitle(paired)}
+          tabs={tabs}
+          active={active}
+          named={named !== undefined}
+        />
         {choice.kind === 'none' ? (
           <ShellLine>No plugin on this daemon has settings.</ShellLine>
         ) : choice.kind === 'missing' ? (

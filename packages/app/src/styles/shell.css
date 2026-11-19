@@ -222,16 +222,12 @@
   margin: 0 0 12px;
   font-size: calc(var(--fy-text-scale, 1) * 1.4rem);
 }
-.fy-page label {
+/* A plain form's fields (a bare <label> straight under a <form>) stack as blocks. Every other label brings its own layout: a rule on
+   `.fy-page label` (0,1,1) beat Tailwind's `.flex` (0,1,0) and turned each switch, radio and checkbox row into a block, with the box
+   above its words (the owner's "radio buttons are pretty bad"). */
+.fy-page form > label:not([class]) {
   display: block;
   margin: 8px 0;
-}
-/* A segmented control's options are labels too, and they are laid out by their own classes (a centred flex box in the group's own
-   padding): the page's block-and-margin rule above is for a form's fields, and on them it left each label 8px of margin above and
-   below and its words at the top of a taller box. */
-.fy-page [role='radiogroup'] > label {
-  display: flex;
-  margin: 0;
 }
 .fy-machine ul {
   list-style: none;
@@ -530,28 +526,52 @@
   gap: 1px;
   padding: 0 0 6px 8px;
 }
+/* Every item reads in the body colour (the page paints a link in the accent, and a whole column of accent is noise); the accent is
+   spent once, on the item that is the page on screen: a 3px bar and a soft fill. */
 .fy-settings-nav .fy-tab {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 8px;
+  padding: 6px 10px;
   border-radius: 6px;
+  color: var(--fg);
   text-decoration: none;
 }
-.fy-settings-nav .fy-tab--active {
+.fy-settings-nav .fy-tab:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+.fy-settings-nav .fy-tab--active,
+.fy-settings-nav .fy-tab[aria-current='page'] {
   background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+  color: var(--fg);
   text-decoration: none;
 }
 .fy-settings-nav .fy-settings-device {
-  padding: 6px 8px;
-  color: var(--fg);
   font-weight: 600;
+}
+/* The two blocks (this browser / the machine) are headed and stand a step apart. */
+.fy-settings-block + .fy-settings-block {
+  margin-top: 20px;
+}
+.fy-settings-block__title {
+  margin: 0 0 4px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 .fy-settings-machine__scope {
   padding: 1px 8px;
   border: var(--border-width, 1px) solid var(--border);
   border-radius: 999px;
   font-size: 0.75rem;
+}
+.fy-settings-machine__scope[data-scope='device'] {
+  border-color: var(--accent);
+  color: var(--fg);
 }
 @media (max-width: 767.98px) {
   .fy-settings-body {
@@ -610,7 +630,11 @@
 }
 /* Setting groups on a page (a title over a grouped card) stand a whole step apart, so a title belongs to the card under it. */
 .fy-page [data-setting-group] {
-  margin-bottom: var(--flow-4, 16px);
+  margin-bottom: 32px;
+}
+/* The settings content stays a readable width on a wide screen (it was 1,900px of stretched rows). */
+.fy-settings-page {
+  max-width: 1100px;
 }
 .fy-settings-daemons {
   list-style: none;
@@ -722,6 +746,10 @@
   flex: none;
   color: var(--fg-soft);
 }
-.fy-settings-nav .fy-tab--active .fy-icon {
-  color: inherit;
+.fy-settings-nav .fy-icon {
+  color: var(--muted);
+}
+.fy-settings-nav .fy-tab--active .fy-icon,
+.fy-settings-nav .fy-tab[aria-current='page'] .fy-icon {
+  color: var(--fg);
 }
