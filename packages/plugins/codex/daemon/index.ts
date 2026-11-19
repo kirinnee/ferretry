@@ -38,6 +38,7 @@ import { codexDoctor } from './lib/doctor.ts';
 import { CATALOG_LOADING, CODEX_NOT_FOUND, fastStartDecision } from './lib/fast-mode.ts';
 import { codexHooksSource, codexSettingsSource } from './lib/profile-components.ts';
 import { codexProjectApprovals } from './lib/project-approvals.ts';
+import { codexSettingsPut } from './features/host-import/index.ts';
 
 /** The one job that reads the held catalog: once at boot, then each time a fast start finds it missing or stale. */
 const CATALOG_JOB = 'codex-fast-catalog';
@@ -199,10 +200,14 @@ export default implementDaemon(manifest, {
         // The Warden's read of the screens this plugin draws (it has no nudge to add: a declined Codex screen says nothing).
         'warden.dialog-rules.codex:dialog-rules': { rules: CODEX_DIALOG_RULES },
         // Runtimes' read of the `settings` components a profile names for Codex: this plugin's own items, live, no cache.
-        'runtimes.components.settings.codex:components': codexSettingsSource(
-          () => kernel.config.collection(CODEX_SETTINGS as ConfigCollectionDef<SettingsItem>),
-          listener => kernel.config.watch(CODEX_SETTINGS, listener),
-        ),
+        'runtimes.components.settings.codex:components': {
+          ...codexSettingsSource(
+            () => kernel.config.collection(CODEX_SETTINGS as ConfigCollectionDef<SettingsItem>),
+            listener => kernel.config.watch(CODEX_SETTINGS, listener),
+          ),
+          // The setup import's write of a Codex settings component: this plugin's own file, create only.
+          put: codexSettingsPut(kernel.config),
+        },
         'runtimes.components.hooks.codex:components': codexHooksSource(
           () => kernel.config.collection(CODEX_HOOKS as ConfigCollectionDef<HooksItem>),
           listener => kernel.config.watch(CODEX_HOOKS, listener),
