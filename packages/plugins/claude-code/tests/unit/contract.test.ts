@@ -70,8 +70,8 @@ describe('claude-code contract', () => {
   });
 
   test('skipping every permission prompt is a loosening; asking again is not', () => {
-    const auto = { searchPaths: [], permissionMode: 'auto' as const, dangerousRmWaiver: false };
-    const skip = { searchPaths: [], permissionMode: 'skip' as const, dangerousRmWaiver: false };
+    const auto = { searchPaths: [], permissionMode: 'auto' as const, dangerousRmWaiver: false, hostHistory: true };
+    const skip = { searchPaths: [], permissionMode: 'skip' as const, dangerousRmWaiver: false, hostHistory: true };
     expect(harnessConfigLoosens(auto, skip)).toEqual(['agents now skip every permission prompt']);
     expect(harnessConfigLoosens(skip, auto)).toEqual([]);
     expect(CLAUDE_CODE_CONFIG.axis).toBe('configure');
@@ -81,6 +81,12 @@ describe('claude-code contract', () => {
     expect(HarnessConfigSchema.safeParse({ questionTool: true }).success).toBe(false);
     expect(HarnessConfigSchema.safeParse({ questionTool: false }).success).toBe(false);
     expect(Object.keys(HarnessConfigSchema.shape)).not.toContain('questionTool');
+  });
+
+  test('a harness file with no hostHistory reads the host history; false switches it off', () => {
+    expect(HarnessConfigSchema.parse({}).hostHistory).toBe(true);
+    expect(HarnessConfigSchema.parse({ hostHistory: false }).hostHistory).toBe(false);
+    expect(() => HarnessConfigSchema.parse({ hostHistory: 'no' })).toThrow();
   });
 
   test('^A525 a harness file with no permissionMode means skip; an explicit auto stays auto', () => {
@@ -104,6 +110,26 @@ describe('claude-code contract', () => {
     expect(harnessConfigLoosens(undefined, explicitSkip)).toEqual([]);
     expect(harnessConfigLoosens(undefined, nothing)).toEqual([]);
     expect(harnessConfigLoosens(undefined, explicitAuto)).toEqual([]);
+  });
+
+  test('turning hostHistory back on is held (false to true, or the key removed); turning it off or an owner-free write is not', () => {
+    const held = CLAUDE_CODE_CONFIG.loosens;
+    const off = HarnessConfigSchema.parse({ hostHistory: false });
+    const on = HarnessConfigSchema.parse({ hostHistory: true });
+    const nothing = HarnessConfigSchema.parse({});
+    const sentence = [
+      "agents may now read the owner's own Claude conversations on this computer (hostHistory turned on)",
+    ];
+    expect(held(off, on)).toEqual(sentence);
+    // Removing the key falls back to the default, which is on: held the same.
+    expect(held(off, nothing)).toEqual(sentence);
+    // Off, staying off, going off, a first file, or on staying on: nothing to hold.
+    expect(held(off, off)).toEqual([]);
+    expect(held(on, off)).toEqual([]);
+    expect(held(nothing, off)).toEqual([]);
+    expect(held(on, on)).toEqual([]);
+    expect(held(undefined, on)).toEqual([]);
+    expect(held(undefined, nothing)).toEqual([]);
   });
 
   test('any change of the binary or the search paths is held (code execution); the file is judged by that rule', () => {

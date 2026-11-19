@@ -195,10 +195,22 @@ const rmWaiverLoosens: Loosens<HarnessConfig> = (before, after) =>
     ? ['agents now run Claude Code with its dangerous-rm guard waived (bypass mode only)']
     : [];
 
-/** What an agent's edit of this file is HELD for: a looser permission mode or rm guard, or any change of where the program is. */
+/**
+ * Turning the host history back ON (`hostHistory` false to true, or the key removed so it reads as the default true): the
+ * harness file is agent-writable, and the host history is the owner's private conversations, so an agent's edit that
+ * re-enables reading them waits for the owner. Switching it OFF is a tightening and is never held; a file that did not
+ * exist reads as on, so creating it loosens nothing.
+ */
+const hostHistoryLoosens: Loosens<HarnessConfig> = (before, after) =>
+  before?.hostHistory === false && after.hostHistory
+    ? ["agents may now read the owner's own Claude conversations on this computer (hostHistory turned on)"]
+    : [];
+
+/** What an agent's edit of this file is HELD for: a looser permission mode or rm guard, host history turned on, or any change of where the program is. */
 const harnessConfigHeld: Loosens<HarnessConfig> = (before, after) => [
   ...harnessConfigLoosens(before, after),
   ...rmWaiverLoosens(before, after),
+  ...hostHistoryLoosens(before, after),
   ...harnessPathsChange(before, after),
 ];
 

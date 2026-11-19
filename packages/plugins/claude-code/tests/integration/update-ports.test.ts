@@ -46,6 +46,7 @@ const config = (document: Partial<HarnessConfig>): HarnessConfig => ({
   searchPaths: [],
   permissionMode: 'auto',
   dangerousRmWaiver: false,
+  hostHistory: true,
   ...document,
 });
 

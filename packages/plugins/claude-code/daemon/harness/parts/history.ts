@@ -2,13 +2,45 @@ import type {
   ConversationFinder,
   ConversationImport,
   FoundConversation,
+  HarnessHistoryFiles,
   HarnessHistorySource,
   LaunchSpec,
 } from '@ferretry/core-ferrets/contract';
 import { historyFilesOver } from '@ferretry/core-ferrets/contract';
 import { err, ok, type Result } from '@ferretry/std';
+import type { ConfigFileDef } from '@ferretry/kernel/contract';
+import { CLAUDE_CODE_CONFIG, type HarnessConfig } from '../../../contract/index.ts';
 import { claudeTranscriptPath, isConversationId } from '../../lib/harness/claude-path.ts';
 import { type ClaudeCore, claudeHome, FIRST_RECORDS_BYTES, type Serves } from './core.ts';
+
+const configFile = CLAUDE_CODE_CONFIG as unknown as ConfigFileDef<HarnessConfig>;
+
+/**
+ * Whether the person's own `~/.claude` history may be read (`hostHistory`, default on); read at each call, and FAIL
+ * CLOSED. The config port answers a file it cannot read with the last accepted value (or nothing, which reads as the
+ * default on), so the value alone would let a broken file keep reading; the file's STATE is asked as well, and an
+ * invalid or unreadable file, or a state that cannot be asked, is OFF.
+ */
+const hostHistoryOn = (core: ClaudeCore): boolean => {
+  try {
+    if (core.deps.config.fileState(configFile).state === 'invalid') return false;
+    return core.deps.config.file(configFile)?.hostHistory ?? true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The owner's host history, behind the switch for EVERY operation. Conversation caches an issued source and reads through
+ * it later (a fresh transcript preview, a re-listing), so the source checks `hostHistory` at each call, not once when it
+ * was handed out: off, it lists nothing, finds nothing and reads nothing (the source seam is total, so a refusal is
+ * "nothing there", never an error).
+ */
+const guardedHostFiles = (core: ClaudeCore, files: HarnessHistoryFiles): HarnessHistoryFiles => ({
+  entries: async directory => (hostHistoryOn(core) ? await files.entries(directory) : []),
+  stat: async path => (hostHistoryOn(core) ? await files.stat(path) : undefined),
+  read: async (path, offset, length) => (hostHistoryOn(core) ? await files.read(path, offset, length) : undefined),
+});
 
 /**
  * The most `projects/*` folders `hasConversation` lists before it says "cannot tell". One ferret's home holds the
@@ -83,6 +115,7 @@ export const historyPart = (
    */
   async importConversation(input: ConversationImport): Promise<Result<void, { readonly reason: string }>> {
     const refuse = (reason: string): Result<void, { readonly reason: string }> => err({ reason });
+    if (!hostHistoryOn(core)) return refuse("Showing Claude's conversations from this computer is turned off.");
     if (!isConversationId(input.id) || !new RegExp(`^projects/[^/]+/${input.id}\\.jsonl$`, 'u').test(input.source))
       return refuse('That is not a Claude Code conversation file of this id.');
     try {
@@ -111,6 +144,7 @@ export const historyPart = (
   /** Claude's own conversations on this machine, read from its documented history folder only. */
   conversations: {
     list: async folder => {
+      if (!hostHistoryOn(core)) return [];
       const historyHome = await core.deps.historyHome();
       if (!historyHome.startsWith('/')) return [];
       const history = core.deps.roots.root('harness-history', { subfolder: historyHome });
@@ -143,12 +177,15 @@ export const historyPart = (
    */
   async historySources(): Promise<readonly HarnessHistorySource[]> {
     const sources: HarnessHistorySource[] = [];
-    const historyHome = await core.deps.historyHome().catch(() => '');
+    const historyHome = hostHistoryOn(core) ? await core.deps.historyHome().catch(() => '') : '';
     if (historyHome.startsWith('/'))
       sources.push({
         kind: 'computer',
         label: 'owner',
-        files: historyFilesOver(core.deps.roots.root('harness-history', { subfolder: historyHome })),
+        files: guardedHostFiles(
+          core,
+          historyFilesOver(core.deps.roots.root('harness-history', { subfolder: historyHome })),
+        ),
       });
     try {
       sources.push({ kind: 'pool', label: 'pool', files: historyFilesOver(core.deps.roots.historyPool()) });

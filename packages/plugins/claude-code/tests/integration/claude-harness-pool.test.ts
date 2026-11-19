@@ -109,7 +109,11 @@ function build(
   const harness = new ClaudeHarness({
     selected: async () => ({ settings: { has: () => true }, hooks: { has: () => true } }) as never,
     roots,
-    config: { file: () => ({ searchPaths: [], permissionMode: 'auto' }), collection: () => new Map() } as never,
+    config: {
+      fileState: () => ({ state: 'valid', inEffect: true, sentences: [] }),
+      file: () => ({ searchPaths: [], permissionMode: 'auto' }),
+      collection: () => new Map(),
+    } as never,
     state: new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]),
     spawn: { run: async () => ({ exitCode: 0, signal: null, stdout: '', stderr: '' }) } as never,
     clock: { sleep: async () => {}, after: () => () => {}, nowMs: () => Date.now() } as never,
