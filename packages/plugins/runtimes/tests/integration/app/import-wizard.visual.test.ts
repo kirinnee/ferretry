@@ -165,7 +165,7 @@ const CASES: readonly Case[] = [
   {
     name: 'secret-env',
     view: 'secrets',
-    expectText: ['ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'kept in the Vault', 'receives it in its environment'],
+    expectText: ['ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'kept in the Vault', 'in its own environment'],
   },
   {
     name: 'hooks-present',

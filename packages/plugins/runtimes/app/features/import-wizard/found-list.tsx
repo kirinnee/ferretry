@@ -92,9 +92,9 @@ function TokenRow({
             <Lock size={12} aria-hidden="true" className="shrink-0 text-accent" />
             <code className="[overflow-wrap:anywhere]">{name}</code>
           </span>
-          <span className="text-cell text-fg">{`Becomes: ${becomes('claude-code', 'env')} (${SECRET_KEPT})`}</span>
+          <span className="text-cell text-fg">{`Becomes: ${becomes('claude-code', 'env')} (kept in the Vault)`}</span>
           <span className="text-cell text-fg" data-found-token-note="">
-            {GITHUB_TOKEN_SENTENCE} {VAULT_VS_ENVIRONMENT}
+            {GITHUB_TOKEN_SENTENCE}
           </span>
         </span>
       </label>
