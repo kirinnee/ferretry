@@ -1,6 +1,6 @@
 /**
  * The Conversation tab previews: each scene names the effect of the value it shows, plays typed-then-result while
- * motion is on, settles on the result alone when motion is off (the OS query or Settings › Motion), and the settings
+ * motion is on (once, when the value changes), settles on the result alone when motion is off (the OS query or Settings › Motion), and the settings
  * that host them still hand the radios the same values.
  */
 
@@ -27,7 +27,9 @@ describe('Conversation previews', () => {
   });
 
   it('send key: types "hi there", then shows the message sent when the key sends', async () => {
-    mounted = await mount(<SendKeyPreview device="keyboard" outcome="send" />);
+    mounted = await mount(<SendKeyPreview device="keyboard" outcome="newline" />);
+    expect(frameOf(mounted.container).getAttribute('data-sp-state')).toBe('still');
+    await mounted.render(<SendKeyPreview device="keyboard" outcome="send" />);
     const frame = frameOf(mounted.container);
     expect(frame.getAttribute('data-sp-label')).toBe('The key sends the message');
     expect(frame.getAttribute('data-sp-state')).toBe('playing');
@@ -37,7 +39,8 @@ describe('Conversation previews', () => {
   });
 
   it('send key: the new-line result grows a second line instead, and a phone calls the key "return"', async () => {
-    mounted = await mount(<SendKeyPreview device="phone" outcome="newline" />);
+    mounted = await mount(<SendKeyPreview device="phone" outcome="send" />);
+    await mounted.render(<SendKeyPreview device="phone" outcome="newline" />);
     expect(frameOf(mounted.container).getAttribute('data-sp-label')).toBe('The key starts a new line');
     expect(mounted.container.querySelector('.fy-cvp-bubble')).toBeNull();
     expect(mounted.container.querySelector('.fy-cvp-typed--late')?.textContent).toBe('and then');

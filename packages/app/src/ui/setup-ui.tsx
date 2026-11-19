@@ -6,7 +6,8 @@
 
 import { cn } from './lib/class-names.ts';
 import { Check } from 'lucide-react';
-import { type ReactNode, useId } from 'react';
+import { type ReactNode, useId, useRef } from 'react';
+import './setup-ui.css';
 
 export function SetupSection({
   title,
@@ -77,7 +78,11 @@ interface ChoiceListProps<T extends string> {
 }
 
 /**
- * Radio or checkbox cards in a real `fieldset`. Each input is visually hidden inside its `<label>`,
+ * Radio or checkbox cards in a real `fieldset`, laid in a wrapping ROW (each card 180–320 px, never a full-width stack;
+ * they stack only when the row is narrower than one card). The card just picked settles once (`setup-ui.css`).
+ * This is the shape `ChoiceCards` (r10 P1, `compose/choice-cards`) gives the onboarding pages; until P1 lands this
+ * keeps the same one, and `RadioChoices` moves onto it then.
+ * Each input is visually hidden inside its `<label>`,
  * and the fieldset is `relative` so the hidden input stays inside it rather than escaping to the
  * fixed app shell and scrolling it away when focused.
  */
@@ -93,9 +98,11 @@ function ChoiceList<T extends string>({
   readonly isChecked: (option: SetupChoice<T>) => boolean;
 }) {
   const uid = useId();
+  // Only a card the person picked settles: resting on the saved value plays nothing.
+  const picked = useRef<string | null>(null);
   return (
-    <fieldset className="relative m-0 flex min-w-0 flex-col gap-2 border-0 p-0" data-setup-choices={name}>
-      <legend className={legendHidden ? 'sr-only' : 'mb-1 block text-cell font-medium text-fg'}>{legend}</legend>
+    <fieldset className="relative m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" data-setup-choices={name}>
+      <legend className={legendHidden ? 'sr-only' : 'mb-1 block w-full text-cell font-medium text-fg'}>{legend}</legend>
       {options.map(option => {
         const id = `${uid}-${option.id}`;
         return (
@@ -103,8 +110,13 @@ function ChoiceList<T extends string>({
             key={option.id}
             htmlFor={id}
             data-setup-choice={option.id}
+            data-checked={isChecked(option)}
+            data-picked={picked.current === option.id}
+            onChange={() => {
+              picked.current = option.id;
+            }}
             className={cn(
-              'kt-panel relative flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel has-[:checked]:border-accent has-[:checked]:bg-accent-soft has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus',
+              'fy-choice-card kt-panel relative flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel has-[:checked]:border-accent has-[:checked]:bg-accent-soft has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus',
               option.disabled === true ? 'cursor-not-allowed opacity-60' : 'hover:border-accent',
             )}
           >

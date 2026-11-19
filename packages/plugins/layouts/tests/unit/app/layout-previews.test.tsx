@@ -104,7 +104,9 @@ describe('the previews', () => {
 
   test('it plays the word before then the word now, and shows only the word now when motion is reduced', async () => {
     const setting = choice('nav.side');
-    mounted = await mount(<LayoutPreview setting={setting} value="bottom" />);
+    mounted = await mount(<LayoutPreview setting={setting} value="left" />);
+    expect(frame(mounted.container).getAttribute('data-sp-state')).toBe('still');
+    await mounted.render(<LayoutPreview setting={setting} value="bottom" />);
     expect(frame(mounted.container).getAttribute('data-sp-state')).toBe('playing');
     // The word before (top, the same as left) then the word now (the bar of places is added).
     expect(menus(mounted.container)).toEqual(['rail', 'rail+bottom']);
@@ -117,7 +119,8 @@ describe('the previews', () => {
 
   test('choosing another word replays from the word that was showing', async () => {
     const setting = choice('nav.side');
-    mounted = await mount(<LayoutPreview setting={setting} value="left" />);
+    mounted = await mount(<LayoutPreview setting={setting} value="bottom" />);
+    await mounted.render(<LayoutPreview setting={setting} value="left" />);
     expect(menus(mounted.container)).toEqual(['rail+bottom', 'rail']);
     await mounted.render(<LayoutPreview setting={setting} value="bottom" />);
     await interact(() => undefined);

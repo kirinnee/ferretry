@@ -79,6 +79,7 @@ const open = async (variant: (typeof VARIANTS)[number], extra = '') => {
   tab.on('pageerror', error => problems.push(error.message));
   await tab.goto(`${server?.url.origin ?? ''}/?theme=studio-${variant.scheme}&view=row${extra}`);
   await tab.waitForSelector('[data-setting-row="Density"] [data-setting-preview]');
+  await nudge(tab);
   return { tab, problems, close: async () => await context.close() };
 };
 
@@ -95,10 +96,56 @@ const seek = async (tab: Page, ms: number): Promise<void> => {
   }, ms);
 };
 
-/** The two layers take turns: at no point of the loop are both visible, so a label never lands on another. */
+/**
+ * The frames REST on the chosen value and play once when it changes (compose/setting-preview), so each choice is given
+ * one change and the way back, and every movement is then held at its start so a frame is the same on every run.
+ */
+const nudge = async (tab: Page): Promise<void> => {
+  // A change and then the way back: every choice ends on the value it started on, having played one movement.
+  const names = await tab.evaluate(() => [
+    ...new Set([...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')].map(input => input.name)),
+  ]);
+  for (const name of names) {
+    const radios = tab.locator(`input[type="radio"][name="${name}"]`);
+    const homeValue = await radios.evaluateAll(
+      nodes => (nodes as HTMLInputElement[]).find(n => n.checked)?.value ?? null,
+    );
+    const awayValue = await radios.evaluateAll(
+      nodes => (nodes as HTMLInputElement[]).find(n => !n.checked && !n.disabled)?.value ?? null,
+    );
+    if (homeValue === null || awayValue === null) continue;
+    await tab
+      .locator(`input[type="radio"][name="${name}"][value="${awayValue}"]`)
+      .first()
+      .locator('xpath=ancestor::label')
+      .click({ timeout: 2_000 })
+      .catch(() => undefined);
+    await tab
+      .locator(`input[type="radio"][name="${name}"][value="${homeValue}"]`)
+      .first()
+      .locator('xpath=ancestor::label')
+      .click({ timeout: 2_000 })
+      .catch(() => undefined);
+    await seek(tab, 0);
+  }
+  const switches = tab.locator('[role="switch"], button[aria-pressed]');
+  for (let index = 0; index < (await switches.count()); index += 1) {
+    await switches
+      .nth(index)
+      .click({ timeout: 2_000 })
+      .catch(() => undefined);
+    await switches
+      .nth(index)
+      .click({ timeout: 2_000 })
+      .catch(() => undefined);
+    await seek(tab, 0);
+  }
+};
+
+/** The two layers take turns: at no point of the movement are both visible, so a label never lands on another. */
 const expectNeverOverlapping = async (tab: Page): Promise<void> => {
   for (let step = 0; step <= 100; step += 1) {
-    await seek(tab, (4_200 * step) / 100);
+    await seek(tab, (1_400 * step) / 100);
     const worst = await tab.evaluate(() =>
       Math.max(
         ...[...document.querySelectorAll('[data-setting-preview]')].map(frame => {
@@ -129,14 +176,14 @@ describe('the Ferret list previews', () => {
         expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         await seek(tab, 0);
         await shotOf(tab, variant, 'ferret-list-t0-before');
-        await seek(tab, 4_200 * 0.39);
+        await seek(tab, 1_400 * 0.39);
         await shotOf(tab, variant, 'ferret-list-mid-fade');
-        await seek(tab, 4_200 * 0.45);
+        await seek(tab, 1_400 * 0.45);
         await shotOf(tab, variant, 'ferret-list-mid-fade-gap');
-        await seek(tab, 4_200 * 0.51);
+        await seek(tab, 1_400 * 0.51);
         await shotOf(tab, variant, 'ferret-list-mid-fade-in');
         await expectNeverOverlapping(tab);
-        await seek(tab, 4_200 * 0.7);
+        await seek(tab, 1_400 * 0.7);
         await shotOf(tab, variant, 'ferret-list-final');
         expect(problems).toEqual([]);
       } finally {
@@ -151,7 +198,7 @@ describe('the Ferret list previews', () => {
         expect(await frameOf(tab, 'Density').getAttribute('data-sp-value')).toBe('minimal');
         await tab.locator('[data-setting-row="Group Needs you at the top"] [role="switch"]').click();
         expect(await frameOf(tab, 'Group Needs you at the top').getAttribute('data-sp-value')).toBe('off');
-        await seek(tab, 4_200 * 0.7);
+        await seek(tab, 1_400 * 0.7);
         await shotOf(tab, variant, 'ferret-list-minimal-off');
       } finally {
         await close();

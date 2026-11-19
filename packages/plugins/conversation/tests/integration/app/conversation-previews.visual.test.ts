@@ -18,7 +18,7 @@ setDefaultTimeout(60_000);
 
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_CONVERSATION_PREVIEWS_SHOTS_DIR ?? '';
-const LOOP_MS = 4_200;
+const LOOP_MS = 1_400;
 
 let browser: Browser;
 let directory = '';
@@ -81,6 +81,8 @@ const open = async (viewport: (typeof VIEWPORTS)[number], scheme: 'light' | 'dar
   tab.on('pageerror', error => problems.push(error.message));
   await tab.goto(`${origin}/?theme=studio-${scheme}${query}`);
   await tab.waitForSelector('[data-setting-preview]');
+  // `&rest=1` opens the page as it is drawn, with nothing changed, for the strip that runs on its own.
+  if (!query.includes('rest=1')) await nudge(tab);
   return { tab, problems, close: async () => await context.close() };
 };
 
@@ -92,6 +94,52 @@ const seek = async (tab: Page, ms: number): Promise<void> => {
       animation.currentTime = at;
     }
   }, ms);
+};
+
+/**
+ * The frames REST on the chosen value and play once when it changes (compose/setting-preview), so each choice is given
+ * one change and the way back, and every movement is then held at its start so a frame is the same on every run.
+ */
+const nudge = async (tab: Page): Promise<void> => {
+  // A change and then the way back: every choice ends on the value it started on, having played one movement.
+  const names = await tab.evaluate(() => [
+    ...new Set([...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')].map(input => input.name)),
+  ]);
+  for (const name of names) {
+    const radios = tab.locator(`input[type="radio"][name="${name}"]`);
+    const homeValue = await radios.evaluateAll(
+      nodes => (nodes as HTMLInputElement[]).find(n => n.checked)?.value ?? null,
+    );
+    const awayValue = await radios.evaluateAll(
+      nodes => (nodes as HTMLInputElement[]).find(n => !n.checked && !n.disabled)?.value ?? null,
+    );
+    if (homeValue === null || awayValue === null) continue;
+    await tab
+      .locator(`input[type="radio"][name="${name}"][value="${awayValue}"]`)
+      .first()
+      .locator('xpath=ancestor::label')
+      .click({ timeout: 2_000 })
+      .catch(() => undefined);
+    await tab
+      .locator(`input[type="radio"][name="${name}"][value="${homeValue}"]`)
+      .first()
+      .locator('xpath=ancestor::label')
+      .click({ timeout: 2_000 })
+      .catch(() => undefined);
+    await seek(tab, 0);
+  }
+  const switches = tab.locator('[role="switch"], button[aria-pressed]');
+  for (let index = 0; index < (await switches.count()); index += 1) {
+    await switches
+      .nth(index)
+      .click({ timeout: 2_000 })
+      .catch(() => undefined);
+    await switches
+      .nth(index)
+      .click({ timeout: 2_000 })
+      .catch(() => undefined);
+    await seek(tab, 0);
+  }
 };
 
 /**
@@ -150,9 +198,10 @@ describe('Conversation tab previews', () => {
                   return layers;
                 }),
               );
-              for (const [before, after] of states) {
-                expect(before).toBe(0);
-                expect(after).toBe(1);
+              for (const layers of states) {
+                // A frame that has not changed rests: its one layer is the result. One that has played shows before gone.
+                expect(layers.at(-1)).toBe(1);
+                if (layers.length === 2) expect(layers[0]).toBe(0);
               }
             }
             if (shotsDir !== '') {
@@ -285,7 +334,7 @@ describe('Conversation tab previews', () => {
     }
 
   it('the chat width strip writes its lines while motion is on and stops while the tab is hidden', async () => {
-    const { tab, close } = await open(VIEWPORTS[0], 'light');
+    const { tab, close } = await open(VIEWPORTS[0], 'light', '&rest=1');
     try {
       const writing = await tab
         .locator('.fy-cvp-write')
@@ -301,14 +350,8 @@ describe('Conversation tab previews', () => {
         Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
         document.dispatchEvent(new Event('visibilitychange'));
       });
-      await tab.waitForFunction(
-        () => document.querySelector('[data-setting-preview]')?.getAttribute('data-sp-state') === 'paused',
-      );
-      const states = await tab
-        .locator('[data-setting-preview] *')
-        .evaluateAll(nodes => nodes.flatMap(node => node.getAnimations().map(animation => animation.playState)));
-      expect(states.length).toBeGreaterThan(0);
-      expect(states.every(state => state === 'paused')).toBe(true);
+      // (The preview frames rest until a value changes, so only the strip runs here; the frames' own pause is in
+      // the app's setting-preview browser test.)
       // The chat width strip goes through the same pause path: its lines stop writing too.
       await tab.waitForFunction(
         () => document.querySelector('[data-cvp-motion]')?.getAttribute('data-cvp-motion') === 'paused',

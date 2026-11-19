@@ -1,6 +1,6 @@
 /**
  * THE LAYOUT PREVIEWS in a real browser over fake data (`fixtures/layout-previews-scene.tsx`): each choice and the
- * navigation list draw a 160 x 100 frame, the loop shows before then after, motion off shows the final frame only and
+ * navigation list draw a 160 x 100 frame, the movement shows before then after, motion off shows the final frame only and
  * runs nothing, a hidden tab stops them, and nothing makes the page scroll sideways.
  *
  * Set `FY_LAYOUT_PREVIEWS_SHOTS_DIR` to keep `<viewport>-<theme>-<case>.png`.
@@ -88,6 +88,7 @@ const open = async (variant: Variant, query = '') => {
   tab.on('pageerror', error => problems.push(error.message));
   await tab.goto(`${origin}/?theme=studio-${variant.scheme}${query}`);
   await tab.waitForSelector('[data-setting-preview]');
+  await nudge(tab);
   return { tab, problems, close: async () => await context.close() };
 };
 
@@ -101,6 +102,52 @@ const seek = async (tab: Page, ms: number): Promise<void> => {
   }, ms);
 };
 
+/**
+ * The frames REST on the chosen value and play once when it changes (compose/setting-preview), so each choice is given
+ * one change and the way back, and every movement is then held at its start so a frame is the same on every run.
+ */
+const nudge = async (tab: Page): Promise<void> => {
+  // A change and then the way back: every choice ends on the value it started on, having played one movement.
+  const names = await tab.evaluate(() => [
+    ...new Set([...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')].map(input => input.name)),
+  ]);
+  for (const name of names) {
+    const radios = tab.locator(`input[type="radio"][name="${name}"]`);
+    const homeValue = await radios.evaluateAll(
+      nodes => (nodes as HTMLInputElement[]).find(n => n.checked)?.value ?? null,
+    );
+    const awayValue = await radios.evaluateAll(
+      nodes => (nodes as HTMLInputElement[]).find(n => !n.checked && !n.disabled)?.value ?? null,
+    );
+    if (homeValue === null || awayValue === null) continue;
+    await tab
+      .locator(`input[type="radio"][name="${name}"][value="${awayValue}"]`)
+      .first()
+      .locator('xpath=ancestor::label')
+      .click({ timeout: 2_000 })
+      .catch(() => undefined);
+    await tab
+      .locator(`input[type="radio"][name="${name}"][value="${homeValue}"]`)
+      .first()
+      .locator('xpath=ancestor::label')
+      .click({ timeout: 2_000 })
+      .catch(() => undefined);
+    await seek(tab, 0);
+  }
+  const switches = tab.locator('[role="switch"], button[aria-pressed]');
+  for (let index = 0; index < (await switches.count()); index += 1) {
+    await switches
+      .nth(index)
+      .click({ timeout: 2_000 })
+      .catch(() => undefined);
+    await switches
+      .nth(index)
+      .click({ timeout: 2_000 })
+      .catch(() => undefined);
+    await seek(tab, 0);
+  }
+};
+
 const previewOf = (tab: Page, row: string): Locator =>
   tab.locator(`[data-setting-row="${row}"] [data-setting-preview]`);
 
@@ -109,11 +156,11 @@ const shot = async (locator: Locator, variant: Variant, name: string): Promise<v
 };
 
 const ROWS = ['Navigation side', 'Navigation style', 'Second column', 'Density', 'Navigation items'] as const;
-const LOOP = 4_200;
+const LOOP = 1_400;
 
 describe('the layout previews', () => {
   for (const variant of VARIANTS) {
-    it(`${variant.name}: every row has a 160 x 100 preview, the loop plays, and the page does not scroll sideways`, async () => {
+    it(`${variant.name}: every row has a 160 x 100 preview, the movement plays, and the page does not scroll sideways`, async () => {
       const { tab, problems, close } = await open(variant);
       try {
         for (const row of ROWS) {
@@ -188,7 +235,7 @@ describe('the layout previews', () => {
         document.dispatchEvent(new Event('visibilitychange'));
       });
       await tab.waitForFunction(
-        () => document.querySelector('[data-setting-preview]')?.getAttribute('data-sp-state') === 'paused',
+        () => document.querySelector('[data-setting-preview][data-sp-state="paused"]') !== null,
       );
       const states = await tab.evaluate(() => document.getAnimations().map(animation => animation.playState));
       expect(states.length).toBeGreaterThan(0);

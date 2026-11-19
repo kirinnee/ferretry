@@ -1,7 +1,7 @@
 /**
  * THE SETTING PREVIEW in a real browser over fake data (`fixtures/setting-preview-scene.tsx`): a ~160 x 100 frame beside a
- * row that loops before → after, holds still on the final frame under reduced motion, stops while the tab is hidden and
- * adds no height beyond its own box.
+ * row that RESTS on the chosen value, plays before → after ONCE when the value changes, holds still on the final frame
+ * under reduced motion, stops while the tab is hidden and adds no height beyond its own box.
  *
  * Set `FY_SETTING_PREVIEW_SHOTS_DIR` to keep `<viewport>-<theme>-<case>.png` (desktop 1280 and phone 390, light and dark).
  */
@@ -94,7 +94,30 @@ const shotOf = async (tab: Page, variant: (typeof VARIANTS)[number], name: strin
   if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${variant.name}-${name}.png`) });
 };
 
-/** Jump every running animation to `ms` into its loop and hold it there, so a frame is the same on every run. */
+/** The length of the one movement (`--sp-loop`). */
+const PLAY_MS = 1_400;
+
+/** Choose the other value of the first row: the frame plays its one movement. */
+const flip = async (tab: Page): Promise<void> => {
+  // Click and hold in the same page turn, so a slow machine cannot let the movement end before it is looked at.
+  await tab.evaluate(
+    () =>
+      new Promise<void>(resolve => {
+        document.querySelector<HTMLElement>('[data-flip]')?.click();
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            for (const animation of document.getAnimations()) animation.pause();
+            resolve();
+          }),
+        );
+      }),
+  );
+  await tab.waitForFunction(
+    () => document.querySelector('[data-setting-preview]')?.getAttribute('data-sp-state') !== 'still',
+  );
+};
+
+/** Jump every running animation to `ms` into its movement and hold it there, so a frame is the same on every run. */
 const seek = async (tab: Page, ms: number): Promise<void> => {
   await tab.evaluate(at => {
     for (const animation of document.getAnimations()) {
@@ -104,17 +127,19 @@ const seek = async (tab: Page, ms: number): Promise<void> => {
   }, ms);
 };
 
-/** The two layers take turns: at no point of the loop are both visible, so a label never lands on another. */
+/** The two layers take turns: at no point of the movement are both visible, so a label never lands on another. */
 const expectNeverOverlapping = async (tab: Page): Promise<void> => {
   for (let step = 0; step <= 100; step += 1) {
-    await seek(tab, (4_200 * step) / 100);
+    await seek(tab, (PLAY_MS * step) / 100);
     const worst = await tab.evaluate(() =>
       Math.max(
-        ...[...document.querySelectorAll('[data-setting-preview]')].map(frame => {
-          const layer = (kind: string) =>
-            Number(getComputedStyle(frame.querySelector(`.fy-sp__layer--${kind}`) as Element).opacity);
-          return Math.min(layer('before'), layer('after'));
-        }),
+        ...[...document.querySelectorAll('[data-setting-preview]')]
+          .filter(frame => frame.querySelector('.fy-sp__layer--before') !== null)
+          .map(frame => {
+            const layer = (kind: string) =>
+              Number(getComputedStyle(frame.querySelector(`.fy-sp__layer--${kind}`) as Element).opacity);
+            return Math.min(layer('before'), layer('after'));
+          }),
       ),
     );
     expect(worst).toBe(0);
@@ -129,9 +154,16 @@ const opacityOf = async (tab: Page, layer: 'before' | 'after'): Promise<number> 
 
 describe('SettingPreview', () => {
   for (const variant of VARIANTS) {
-    it(`${variant.name}: it is 160 x 100, plays before then after, and the frames are shot`, async () => {
+    it(`${variant.name}: it is 160 x 100, rests, plays before then after once on a change, and the frames are shot`, async () => {
       const { tab, problems, close } = await open(variant);
       try {
+        // Resting: the selected value only, never blank, and nothing running.
+        expect(await tab.locator('[data-setting-preview]').first().getAttribute('data-sp-state')).toBe('still');
+        expect(await tab.locator('.fy-sp__layer--before').count()).toBe(0);
+        expect(await tab.evaluate(() => document.getAnimations().length)).toBe(0);
+        expect(await opacityOf(tab, 'after')).toBe(1);
+        await shotOf(tab, variant, 'rest');
+        await flip(tab);
         const box = await tab.locator('[data-setting-preview]').first().boundingBox();
         expect(Math.round(box?.width ?? 0)).toBe(160);
         expect(Math.round(box?.height ?? 0)).toBe(100);
@@ -140,14 +172,14 @@ describe('SettingPreview', () => {
         expect(await opacityOf(tab, 'before')).toBe(1);
         expect(await opacityOf(tab, 'after')).toBe(0);
         await shotOf(tab, variant, 't0-before');
-        await seek(tab, 4_200 * 0.39);
+        await seek(tab, PLAY_MS * 0.39);
         await shotOf(tab, variant, 'mid-fade');
-        await seek(tab, 4_200 * 0.45);
+        await seek(tab, PLAY_MS * 0.45);
         await shotOf(tab, variant, 'mid-fade-gap');
-        await seek(tab, 4_200 * 0.51);
+        await seek(tab, PLAY_MS * 0.51);
         await shotOf(tab, variant, 'mid-fade-in');
         await expectNeverOverlapping(tab);
-        await seek(tab, 4_200 * 0.7);
+        await seek(tab, PLAY_MS * 0.7);
         expect(await opacityOf(tab, 'before')).toBe(0);
         expect(await opacityOf(tab, 'after')).toBe(1);
         await shotOf(tab, variant, 'final-after');
@@ -160,6 +192,7 @@ describe('SettingPreview', () => {
     it(`${variant.name}: with motion reduced it shows the final frame only and runs nothing`, async () => {
       const { tab, close } = await open(variant, '&motion=reduced');
       try {
+        await tab.locator('[data-flip]').first().click();
         expect(await tab.locator('[data-setting-preview]').first().getAttribute('data-sp-state')).toBe('still');
         expect(await tab.locator('.fy-sp__layer--before').count()).toBe(0);
         expect(await tab.evaluate(() => document.getAnimations().length)).toBe(0);
@@ -180,6 +213,7 @@ describe('SettingPreview', () => {
     const variant = VARIANTS[0];
     const { tab, close } = await open(variant);
     try {
+      await flip(tab);
       const rowBox = await tab.locator('[data-setting-row="Menu side"]').boundingBox();
       // A 100px frame plus the row's own padding: the row grows to hold it and no further.
       expect(rowBox?.height ?? 0).toBeLessThan(120);

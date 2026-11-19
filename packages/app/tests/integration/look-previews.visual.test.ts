@@ -104,10 +104,10 @@ const seek = async (tab: Page, ms: number): Promise<void> => {
   }, ms);
 };
 
-/** The two layers take turns: at no point of the loop are both visible, so a label never lands on another. */
+/** The two layers take turns: at no point of the movement are both visible, so a label never lands on another. */
 const expectNeverOverlapping = async (tab: Page): Promise<void> => {
   for (let step = 0; step <= 100; step += 1) {
-    await seek(tab, (4_200 * step) / 100);
+    await seek(tab, (PLAY_MS * step) / 100);
     const worst = await tab.evaluate(() =>
       Math.max(
         ...[...document.querySelectorAll('[data-setting-preview]')].map(frame => {
@@ -121,14 +121,36 @@ const expectNeverOverlapping = async (tab: Page): Promise<void> => {
   }
 };
 
+/** The length of the one movement (`--sp-loop`). */
+const PLAY_MS = 1_400;
+
 const ROWS = ['Colour mode', 'Text size', 'Motion'] as const;
 const frameOf = (tab: Page, row: string) => tab.locator(`[data-setting-row="${row}"] [data-setting-preview]`);
+
+/**
+ * The frames REST on the chosen value and play once when it changes, so every row is given one change: Dark, Larger,
+ * and Motion Reduced then back to Follow system (so its scene moves again).
+ */
+const playAll = async (tab: Page, hold = true): Promise<void> => {
+  // Each click is followed by a hold at 0, so a movement cannot finish while the next click is being made.
+  for (const [group, text] of [
+    ['Colour mode', 'Dark'],
+    ['Text size', 'Larger'],
+    ['Motion', 'Reduced'],
+    ['Motion', 'Follow system'],
+  ] as const) {
+    await tab.locator(`[role="radiogroup"][aria-label="${group}"] label`, { hasText: text }).click();
+    if (hold) await seek(tab, 0);
+  }
+};
 
 describe('the Look previews', () => {
   for (const variant of VARIANTS) {
     it(`${variant.name}: each of the three rows carries a 160 x 100 frame that plays, and the page does not widen`, async () => {
       const { tab, problems, close } = await open(variant);
       try {
+        for (const row of ROWS) expect(await frameOf(tab, row).getAttribute('data-sp-state')).toBe('still');
+        await playAll(tab);
         for (const row of ROWS) {
           const box = await frameOf(tab, row).boundingBox();
           expect(Math.round(box?.width ?? 0)).toBe(160);
@@ -139,14 +161,14 @@ describe('the Look previews', () => {
         await frameOf(tab, 'Motion').scrollIntoViewIfNeeded();
         await seek(tab, 0);
         await shotOf(tab, variant, 'look-t0-before');
-        await seek(tab, 4_200 * 0.39);
+        await seek(tab, PLAY_MS * 0.39);
         await shotOf(tab, variant, 'look-mid-fade');
-        await seek(tab, 4_200 * 0.45);
+        await seek(tab, PLAY_MS * 0.45);
         await shotOf(tab, variant, 'look-mid-fade-gap');
-        await seek(tab, 4_200 * 0.51);
+        await seek(tab, PLAY_MS * 0.51);
         await shotOf(tab, variant, 'look-mid-fade-in');
         await expectNeverOverlapping(tab);
-        await seek(tab, 4_200 * 0.7);
+        await seek(tab, PLAY_MS * 0.7);
         await shotOf(tab, variant, 'look-final');
         expect(problems).toEqual([]);
       } finally {
@@ -157,8 +179,9 @@ describe('the Look previews', () => {
     it(`${variant.name}: pausing holds the Motion scene's own animations where they are, not back at 0`, async () => {
       const { tab, close } = await open(variant);
       try {
+        await playAll(tab, false);
         await frameOf(tab, 'Motion').scrollIntoViewIfNeeded();
-        await tab.waitForTimeout(400);
+        await tab.waitForTimeout(300);
         await tab.evaluate(() => {
           Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
           document.dispatchEvent(new Event('visibilitychange'));
@@ -209,7 +232,7 @@ describe('the Look previews', () => {
           ),
         );
         expect(clipped).toBe(false);
-        await seek(tab, 4_200 * 0.7);
+        await seek(tab, PLAY_MS * 0.7);
         await shotOf(tab, variant, 'look-dark-larger');
         await tab.locator('[role="radiogroup"][aria-label="Motion"] label', { hasText: 'Reduced' }).click();
         await tab.waitForFunction(

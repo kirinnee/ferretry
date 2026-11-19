@@ -1647,6 +1647,16 @@ body {
   text-align: left;
   text-transform: var(--control-transform, none);
 }
+/* The settings group (compose/setting-row.tsx `SettingGroup`): rows divided by hairlines under their title, with no box
+   around them, so a bordered thing inside a row is never a box in a box. */
+.kt-groupcard--flat {
+  background: none;
+  border-width: 0;
+  border-radius: 0;
+  border-block: var(--divider-width) solid var(--border);
+  box-shadow: none;
+  overflow: visible;
+}
 /* A real border on the row's list item, not a pseudo-element: it is the separation a divided list
    promises, and the Machines geometry gate reads it as one. */
 .kt-groupcard > li + li {

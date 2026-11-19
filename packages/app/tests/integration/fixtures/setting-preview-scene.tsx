@@ -6,9 +6,10 @@
  *   ?theme=<family>-<mode>   ?motion=reduced  sets Settings › Motion to Reduced
  */
 
+import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SettingPreview } from '../../../src/compose/setting-preview.tsx';
-import { SettingGroup, SettingRow } from '../../../src/compose/setting-row.tsx';
+import { SettingGroup, SettingRow, SettingRowGrid } from '../../../src/compose/setting-row.tsx';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
@@ -62,45 +63,82 @@ const Switch = ({ on }: { readonly on: boolean }) => (
   </div>
 );
 
+/**
+ * A setting that RESTS on its value and plays once when it changes: the button flips the value, and the preview's
+ * `before` is the value it just left.
+ */
+function Flip<T extends string>({
+  name,
+  hint,
+  values,
+  label,
+  scene,
+}: {
+  readonly name: string;
+  readonly hint: string;
+  readonly values: readonly [T, T];
+  readonly label: (value: T) => string;
+  readonly scene: (value: T) => React.ReactNode;
+}) {
+  const [{ previous, value }, set] = useState<{ previous: T; value: T }>({ previous: values[0], value: values[1] });
+  return (
+    <SettingRow
+      name={name}
+      hint={hint}
+      preview={<SettingPreview label={label(value)} value={value} before={scene(previous)} after={scene(value)} />}
+      control={() => (
+        <button
+          type="button"
+          data-flip=""
+          className="min-h-[44px] rounded-control border border-border px-3 text-ui text-fg"
+          onClick={() =>
+            set(state => ({ previous: state.value, value: state.value === values[0] ? values[1] : values[0] }))
+          }
+        >
+          {value}
+        </button>
+      )}
+    />
+  );
+}
+
 const root = document.getElementById('root');
 if (root !== null)
   createRoot(root).render(
-    <div className="mx-auto max-w-3xl p-4">
+    <div className="mx-auto max-w-5xl p-4">
       <SettingGroup label="Look">
-        <SettingRow
+        <Flip
           name="Menu side"
           hint="Which edge the menu sits on."
-          preview={
-            <SettingPreview
-              label="The menu on the right"
-              value="right"
-              before={<Menu side="left" />}
-              after={<Menu side="right" />}
-            />
-          }
-          control={() => <span className="text-ui text-fg">Right</span>}
+          values={['left', 'right']}
+          label={value => `The menu on the ${value}`}
+          scene={value => <Menu side={value} />}
         />
-        <SettingRow
+        <Flip
           name="Density"
           hint="How tightly the rows sit."
-          preview={
-            <SettingPreview label="Compact rows" value="compact" before={<Rows gap={14} />} after={<Rows gap={4} />} />
-          }
-          control={() => <span className="text-ui text-fg">Compact</span>}
-        />
-        <SettingRow
-          name="Group needs-you"
-          hint="Put what is waiting on you first."
-          preview={
-            <SettingPreview label="Switched on" value="on" before={<Switch on={false} />} after={<Switch on />} />
-          }
-          control={() => <span className="text-ui text-fg">On</span>}
+          values={['comfortable', 'compact']}
+          label={value => `${value} rows`}
+          scene={value => <Rows gap={value === 'compact' ? 4 : 14} />}
         />
         <SettingRow
           name="No preview here"
           hint="A row without one is unchanged."
           control={() => <span className="text-ui text-fg">—</span>}
         />
+      </SettingGroup>
+      <SettingGroup label="Quiet">
+        <Flip
+          name="Group needs-you"
+          hint="Put what is waiting on you first."
+          values={['off', 'on']}
+          label={value => `Switched ${value}`}
+          scene={value => <Switch on={value === 'on'} />}
+        />
+        <SettingRowGrid>
+          <SettingRow name="Short one" control={() => <span className="text-ui text-fg">A</span>} />
+          <SettingRow name="Short two" control={() => <span className="text-ui text-fg">B</span>} />
+        </SettingRowGrid>
       </SettingGroup>
     </div>,
   );
