@@ -19,6 +19,7 @@
 import { cn } from '@ferretry/app';
 import { type ComposerDockLayout, useComposerDockLayout, writeComposerDockLayout } from './composer-dock-layout.ts';
 import { type MdComposePref, useMdComposePref, writeMdComposePref } from '@ferretry/app';
+import { EditorStylePreview } from './previews/index.ts';
 
 export const MARKDOWN_COMPOSER_EXPLANATION =
   'Whichever style, what you send is markdown, and the @ / : suggestions and Vim keys work in all three. In Markdown style the text formats as you type — # headings at their real size, - and 1. lists that continue on Enter, [ ] checklists, > quotes, ``` code and --- dividers, with **bold** bold and *italic* slanted — and the markers kept faintly visible. Rich text formats the same way, hides the markers except on the line you are editing, and adds a formatting toolbar. ⌘B, ⌘I and ⌘E wrap the selection; ⌘⇧8 and ⌘⇧7 make lists.';
@@ -109,32 +110,37 @@ export function MarkdownComposerSettings({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
-        <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-          <legend className="mb-1 text-ui font-semibold text-fg">Editor style</legend>
-          {EDITOR_STYLES.map(style => (
-            <label
-              className={cn(
-                'flex min-h-[44px] cursor-pointer items-start gap-3 rounded-control border px-control-x py-2',
-                pref === style.pref ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2 hover:border-accent',
-              )}
-              data-editor-style={style.pref}
-              key={style.pref}
-            >
-              <input
-                checked={pref === style.pref}
-                className="mt-1"
-                name="composer-editor-style"
-                onChange={() => writeMdComposePref(style.pref)}
-                type="radio"
-                value={style.pref}
-              />
-              <span className="min-w-0">
-                <span className="block text-ui font-semibold text-fg">{style.label}</span>
-                <span className="mt-0.5 block text-meta leading-base text-muted">{style.detail}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
+        <div className="flex flex-wrap items-start gap-3">
+          <fieldset className="m-0 flex min-w-0 flex-1 basis-64 flex-col gap-2 border-0 p-0">
+            <legend className="mb-1 text-ui font-semibold text-fg">Editor style</legend>
+            {EDITOR_STYLES.map(style => (
+              <label
+                className={cn(
+                  'flex min-h-[44px] cursor-pointer items-start gap-3 rounded-control border px-control-x py-2',
+                  pref === style.pref
+                    ? 'border-accent bg-accent-soft'
+                    : 'border-border bg-surface-2 hover:border-accent',
+                )}
+                data-editor-style={style.pref}
+                key={style.pref}
+              >
+                <input
+                  checked={pref === style.pref}
+                  className="mt-1"
+                  name="composer-editor-style"
+                  onChange={() => writeMdComposePref(style.pref)}
+                  type="radio"
+                  value={style.pref}
+                />
+                <span className="min-w-0">
+                  <span className="block text-ui font-semibold text-fg">{style.label}</span>
+                  <span className="mt-0.5 block text-meta leading-base text-muted">{style.detail}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <EditorStylePreview pref={pref} />
+        </div>
         <p className="m-0 text-cell leading-base text-muted">{MARKDOWN_COMPOSER_EXPLANATION}</p>
       </div>
       <div className="flex flex-col gap-2">

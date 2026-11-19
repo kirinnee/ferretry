@@ -15,6 +15,7 @@
 
 import { cn } from '@ferretry/app';
 import { type DeviceControls, SUGGESTION_KEYS, type SuggestionKeys } from '@ferretry/app';
+import { SuggestionsPreview } from './previews/index.ts';
 
 type ComposerSuggestionPreferences = Pick<DeviceControls, 'suggestionKeys' | 'skillSuggestions'>;
 
@@ -88,17 +89,20 @@ export function ComposerSuggestionsSettings({
   const skills = preferences.skillSuggestions;
   return (
     <div className="flex flex-col gap-2">
-      <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-        <legend className="mb-1 text-ui font-semibold text-fg">Open suggestions with</legend>
-        {SUGGESTION_KEYS.map(value => (
-          <KeysOption
-            checked={preferences.suggestionKeys === value}
-            key={value}
-            onSelect={next => onChange({ suggestionKeys: next })}
-            value={value}
-          />
-        ))}
-      </fieldset>
+      <div className="flex flex-wrap items-start gap-3">
+        <fieldset className="m-0 flex min-w-0 flex-1 basis-64 flex-col gap-2 border-0 p-0">
+          <legend className="mb-1 text-ui font-semibold text-fg">Open suggestions with</legend>
+          {SUGGESTION_KEYS.map(value => (
+            <KeysOption
+              checked={preferences.suggestionKeys === value}
+              key={value}
+              onSelect={next => onChange({ suggestionKeys: next })}
+              value={value}
+            />
+          ))}
+        </fieldset>
+        <SuggestionsPreview keys={preferences.suggestionKeys} skills={skills} />
+      </div>
       <button
         type="button"
         role="switch"
