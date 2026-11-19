@@ -15,6 +15,11 @@
  * left is the still picture (the stylesheet's resting state is that picture, so a stylesheet that never matches
  * still draws it).
  *
+ * STARS (r10 O3, `stars`, on by default with `fill="viewport"`): a still sky of 17 faint stars (one element, many `box-shadow`s,
+ * never animated) and three shooting streaks on staggered CSS delays, one every 6 to 11 s, each moving only `transform` and
+ * `opacity`. The look is the Pair page's sky ported as CSS (`access/app/features/pairing/pairing-sky.tsx`), not imported.
+ * Under reduced motion the stars stay and the streaks are never drawn; a hidden tab pauses them with everything else.
+ *
  * LOW CONTRAST ON PURPOSE. Dots and glow use the theme's accent at low opacity and the grid fades out toward the middle,
  * so text keeps its contrast over the busiest frame. It is scenery: `aria-hidden`, never focusable, ignores the pointer.
  */
@@ -29,9 +34,13 @@ export interface LivingBackgroundProps {
    * (a card). Either way the host should be `isolate` so the background sits behind its content and nowhere else.
    */
   readonly fill?: 'viewport' | 'parent';
+  /**
+   * Draw the stars and shooting streaks. Defaults to on for `viewport` (a first-run page) and off for `parent` (a card).
+   */
+  readonly stars?: boolean;
 }
 
-export function LivingBackground({ fill = 'viewport' }: LivingBackgroundProps) {
+export function LivingBackground({ fill = 'viewport', stars = fill === 'viewport' }: LivingBackgroundProps) {
   const visible = useDocumentVisible();
   const moving = useMotionAllowed();
   const pattern = `fy-lb-dots-${useId().replaceAll(':', '')}`;
@@ -43,8 +52,17 @@ export function LivingBackground({ fill = 'viewport' }: LivingBackgroundProps) {
       data-living-background=""
       data-live={moving ? '' : undefined}
       data-paused={visible ? undefined : ''}
+      data-stars={stars ? '' : undefined}
     >
       <div className="fy-lb-glow" />
+      {stars ? (
+        <div className="fy-lb-sky" data-lb-stars="">
+          <i className="fy-lb-stars" />
+          <i className="fy-lb-streak fy-lb-streak-a" />
+          <i className="fy-lb-streak fy-lb-streak-b" />
+          <i className="fy-lb-streak fy-lb-streak-c" />
+        </div>
+      ) : null}
       <svg aria-hidden="true" className="fy-lb-grid" focusable="false" height="100%" width="100%">
         <defs>
           <pattern height="28" id={pattern} patternUnits="userSpaceOnUse" width="28">

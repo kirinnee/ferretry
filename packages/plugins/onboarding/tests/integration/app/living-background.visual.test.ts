@@ -6,11 +6,13 @@
  *  - only `transform` and `opacity` ever animate (nothing re-lays-out or repaints a phone);
  *  - under reduced motion, from the OS OR from the app's Motion = Reduced, nothing runs and the picture is whole;
  *  - a hidden tab pauses both animations, a visible one resumes them;
+ *  - the stars layer (viewport fill only): 17 still stars, three shooting streaks one every 6-11 s on staggered delays,
+ *    still under reduced motion (stars drawn, streaks never), paused with a hidden tab;
  *  - the content does not move: its bounding boxes are the same with and without the background;
  *  - text keeps >= 4.5:1 over the brightest frame of the background.
  *
  * Set `FY_LIVING_BG_SHOTS_DIR` to keep `<viewport>-<scheme>-<scene>-t0|t3|before.png` (phone 390 and desktop 1280, light and
- * dark; `t0` is the first frame, `t3` the frame three seconds in) and `<...>-reduced.png`.
+ * dark; `t0` is the first frame, `t3` the frame three seconds in, `streak` 4.5 s in, a shooting star mid-flight) and `<...>-reduced.png`.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -205,6 +207,10 @@ describe('The living background', () => {
           const names = await runningAnimations(tab);
           expect(names).toContain('fy-lb-breathe');
           expect(names).toContain('fy-lb-drift');
+          expect(names.filter(name => name === 'fy-lb-shoot').length, 'three streaks on the stars layer').toBe(
+            scene.fill === 'viewport' ? 3 : 0,
+          );
+          expect(await tab.locator(`${scene.host} [data-lb-stars]`).count()).toBe(scene.fill === 'viewport' ? 1 : 0);
           const properties = await tab.evaluate(() => {
             const found = new Set<string>();
             for (const animation of document.getAnimations()) {
@@ -219,6 +225,8 @@ describe('The living background', () => {
           await shot(tab, variant, scene, 't0');
           await seek(tab, 3_000);
           await shot(tab, variant, scene, 't3');
+          await seek(tab, 4_500);
+          await shot(tab, variant, scene, 'streak');
           // The same page without the background, for the before/after pair.
           await tab.evaluate(() => document.querySelector('[data-living-background]')?.remove());
           await shot(tab, variant, scene, 'before');
@@ -276,6 +284,92 @@ describe('The living background', () => {
     }
   });
 
+  it('the streaks start on staggered delays, one every 6 to 11 s, and the stars never animate', async () => {
+    const { tab, close } = await open(SCENES[0] as Scene, VARIANTS[0]);
+    try {
+      const read = await tab.evaluate(() => {
+        const streaks = [...document.querySelectorAll('.fy-lb-streak')].map(node => {
+          const animation = node.getAnimations()[0] as CSSAnimation;
+          const timing = animation.effect?.getComputedTiming();
+          return { delay: Number(timing?.delay) / 1000, duration: Number(timing?.duration) / 1000 };
+        });
+        const starAnimations = [...document.querySelectorAll('.fy-lb-stars')].flatMap(node => [
+          ...node.getAnimations({ subtree: true }),
+        ]).length;
+        return { streaks, starAnimations, still: document.querySelectorAll('.fy-lb-stars').length };
+      });
+      expect(read.starAnimations, 'the still stars run nothing').toBe(0);
+      expect(read.still).toBe(1);
+      const starts = read.streaks.map(streak => streak.delay).sort((a, b) => a - b);
+      expect(starts.length).toBe(3);
+      const period = (read.streaks[0] as { duration: number }).duration;
+      const gaps = starts.map(
+        (start, index) => (starts[(index + 1) % 3] as number) + (index === 2 ? period : 0) - start,
+      );
+      for (const gap of gaps) {
+        expect(gap).toBeGreaterThanOrEqual(6);
+        expect(gap).toBeLessThanOrEqual(11);
+      }
+      const stars = await tab.evaluate(() => {
+        const node = document.querySelector('.fy-lb-stars') as Element;
+        const shadows = getComputedStyle(node).boxShadow.split(/,(?![^(]*\))/u).length;
+        const more = getComputedStyle(node, '::after').boxShadow.split(/,(?![^(]*\))/u).length;
+        return shadows + more;
+      });
+      expect(stars, '12 + 5 still stars').toBe(17);
+    } finally {
+      await close();
+    }
+  });
+
+  it('reduced motion keeps the stars drawn and never draws a streak', async () => {
+    for (const how of ['os', 'app'] as const) {
+      const { tab, close } = await open(
+        SCENES[0] as Scene,
+        VARIANTS[2],
+        how === 'os' ? 'reduce' : 'no-preference',
+        how === 'app' ? 'reduced' : '',
+      );
+      try {
+        expect(await tab.locator('.fy-lb-stars').count(), `${how}: the stars are in the page`).toBe(1);
+        expect(
+          await tab.evaluate(() => getComputedStyle(document.querySelector('.fy-lb-sky') as Element).display),
+        ).not.toBe('none');
+        const opacities = await tab.evaluate(() =>
+          [...document.querySelectorAll('.fy-lb-streak')].map(node => getComputedStyle(node).opacity),
+        );
+        expect(opacities, `${how}: streaks are invisible and still`).toEqual(['0', '0', '0']);
+        expect(await runningAnimations(tab), `${how}: nothing runs`).toEqual([]);
+      } finally {
+        await close();
+      }
+    }
+  });
+
+  it('the stars layer is only transform and opacity, and adds no scroll or layout shift', async () => {
+    const { tab, close } = await open(SCENES[0] as Scene, VARIANTS[2]);
+    try {
+      const props = await tab.evaluate(() => {
+        const found = new Set<string>();
+        for (const node of document.querySelectorAll('.fy-lb-streak'))
+          for (const animation of node.getAnimations())
+            for (const frame of (animation.effect as KeyframeEffect).getKeyframes())
+              for (const key of Object.keys(frame)) found.add(key);
+        return [...found].filter(key => !['offset', 'easing', 'composite', 'computedOffset'].includes(key));
+      });
+      expect(props.sort()).toEqual(['opacity', 'transform']);
+      const positions = await tab.evaluate(() =>
+        [...document.querySelectorAll('.fy-lb-sky, .fy-lb-stars, .fy-lb-streak')].map(
+          node => getComputedStyle(node).position,
+        ),
+      );
+      expect(positions.every(position => position === 'absolute')).toBe(true);
+      expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
   for (const scene of SCENES)
     it(`${scene.name}: a hidden tab pauses the animations, and a visible one resumes them`, async () => {
       const { tab, close } = await open(scene, VARIANTS[2]);
@@ -296,7 +390,7 @@ describe('The living background', () => {
             .filter(animation => animation instanceof CSSAnimation)
             .map(animation => animation.playState),
         );
-        expect(states.length).toBe(2);
+        expect(states.length).toBe(scene.fill === 'viewport' ? 5 : 2);
         expect([...new Set(states)]).toEqual(['paused']);
         await setHidden(false);
         await tab.waitForSelector('[data-living-background]:not([data-paused])');
@@ -333,6 +427,14 @@ describe('The living background', () => {
             dot: getComputedStyle(grid).color,
             glow: probe('var(--accent)'),
             peak: Math.max(...peak),
+            star: getComputedStyle(document.querySelector('.fy-lb-sky') as Element).color,
+            starPeak: Math.max(
+              ...[...document.getAnimations()]
+                .filter(animation => animation instanceof CSSAnimation && animation.animationName === 'fy-lb-shoot')
+                .flatMap(animation => (animation.effect as KeyframeEffect).getKeyframes())
+                .map(frame => Number(frame.opacity))
+                .filter(value => !Number.isNaN(value)),
+            ),
           };
         });
         const bg = channels(read.bg);
@@ -342,6 +444,11 @@ describe('The living background', () => {
         expect(contrast(channels(read.muted), glow), 'muted text on the glow').toBeGreaterThanOrEqual(4.5);
         // A dot is 1.4 px on a 28 px grid and the grid fades out toward the middle, so no glyph sits on one for more than a
         // pixel or two. Worst case anyway (a full dot at the breathing peak, on top of the glow, no mask): text still reads.
+        // The stars and the streak at its peak (0.2) are masked out of the middle, and a star is 1.5-2.5 px; their worst frame:
+        expect(read.starPeak, 'the streak peak is read from the real animation').toBeGreaterThan(0);
+        const star = over(channels(read.star), read.starPeak, glow);
+        expect(contrast(channels(read.fg), star), 'text on a streak, worst frame').toBeGreaterThanOrEqual(4.5);
+        expect(contrast(channels(read.muted), star), 'muted text on a streak, worst frame').toBeGreaterThanOrEqual(3);
         const worst = over(channels(read.dot), read.peak, glow);
         expect(read.peak, 'the breathing peak is read from the real animation').toBeGreaterThan(0);
         expect(contrast(channels(read.fg), worst), 'text on a dot, worst frame').toBeGreaterThanOrEqual(4.5);
