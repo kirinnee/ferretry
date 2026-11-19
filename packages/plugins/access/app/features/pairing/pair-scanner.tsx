@@ -16,7 +16,9 @@
  * string straight to its caller and holds nothing.
  */
 import { Camera, ImageUp, Link2, QrCode, X } from 'lucide-react';
-import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import { ChoiceCards, type ChoiceOption } from '@ferretry/app';
 
 import { useDeviceFacts } from '../../hooks/use-device-permissions.ts';
 import { useQrScan } from '../../hooks/use-qr-scan.ts';
@@ -31,6 +33,11 @@ export interface PairScannerProps {
   readonly pasteOpen: boolean;
   /** Open the pasted-link field (the third way; the form itself is the caller's). */
   readonly onPaste: () => void;
+  /**
+   * Bumps on every change to the pasted-link field. Typing there is choosing the pasted way, so a picture still being
+   * read is let go the moment it changes. A count only: the typed text never reaches this component.
+   */
+  readonly typedRevision?: number;
   /** Reads one picture to its QR text; the page's own decoder unless a suite hands another. Never rendered or kept. */
   readonly readImage?: (file: Blob) => Promise<string>;
   /** The raw decoded text of the first QR code seen. */
@@ -43,6 +50,7 @@ export function PairScanner({
   host,
   pasteOpen,
   onPaste,
+  typedRevision = 0,
   readImage = readQrImageInBrowser,
   onText,
   onFailed,
@@ -78,8 +86,28 @@ export function PairScanner({
   );
 
   const scan = useQrScan(host, preview, onText);
+  const upload = useQrUpload(readImage, onText, typedRevision);
   const facts = useDeviceFacts();
   const scanning = scan.phase === 'scanning';
+  // A click anywhere on the pasted way's card is choosing it, even when it is already the chosen one. The card is a
+  // native radio, and choosing a chosen radio again raises no change, so a re-choice is read from the click itself.
+  // A ref callback, because the group is mounted and unmounted as scanning starts and stops.
+  const cancelUpload = upload.cancel;
+  const group = useCallback(
+    (element: HTMLDivElement | null) => {
+      if (element === null) return undefined;
+      const onClick = (event: Event): void => {
+        if (event.target instanceof Element && event.target.closest('[data-choice="paste"]') !== null) cancelUpload();
+      };
+      element.addEventListener('click', onClick);
+      return () => element.removeEventListener('click', onClick);
+    },
+    [cancelUpload],
+  );
+  // Starting the camera is choosing another way: a picture still being read is let go.
+  useEffect(() => {
+    if (scanning) cancelUpload();
+  }, [scanning, cancelUpload]);
 
   // The caller is told in an effect, not during render: revealing the paste
   // fallback is a state change in an ancestor, and React refuses one made while
@@ -121,16 +149,38 @@ export function PairScanner({
           Stop scanning
         </button>
       ) : (
-        // Three equal ways in, none of them the "real" one: a card each, never a full-width bar.
-        <section className="grid grid-cols-3 gap-3" aria-label="Ways to read the pairing code" data-pair-ways="">
-          <WayCard icon={<QrCode size={22} aria-hidden="true" />} onClick={scan.start} disabled={host === null}>
-            Scan QR code
-          </WayCard>
-          <UploadWay readImage={readImage} onText={onText} pasteOpen={pasteOpen} />
-          <WayCard icon={<Link2 size={22} aria-hidden="true" />} onClick={onPaste} pressed={pasteOpen}>
-            Paste a link
-          </WayCard>
-        </section>
+        // Three equal ways in, none of them the "real" one: the app's choice cards, never a full-width bar.
+        <div ref={group} data-pair-ways="">
+          <ChoiceCards
+            label="Ways to read the pairing code"
+            value={pasteOpen ? 'paste' : null}
+            options={ways(host !== null, upload.busy)}
+            onChange={id => {
+              if (id === 'scan') scan.start();
+              else if (id === 'upload') upload.pick();
+              else {
+                // Every explicit choice of the pasted way lets a read in flight go; typing does the same.
+                upload.cancel();
+                onPaste();
+              }
+            }}
+          />
+        </div>
+      )}
+      <input
+        ref={upload.input}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        tabIndex={-1}
+        aria-label="QR code image"
+        data-pair-upload=""
+        onChange={event => void upload.read(event)}
+      />
+      {upload.problem === null ? null : (
+        <p className="m-0 text-ui leading-base text-err" role="alert" data-pair-upload-problem="">
+          {upload.problem}
+        </p>
       )}
 
       {scan.phase === 'failed' && scan.message !== null && (
@@ -166,39 +216,11 @@ export function PairScanner({
   );
 }
 
-interface WayCardProps {
-  readonly icon: ReactNode;
-  readonly children: ReactNode;
-  readonly onClick: () => void;
-  readonly disabled?: boolean;
-  readonly busy?: boolean;
-  /** Set only for a way that stays open (the pasted-link field). */
-  readonly pressed?: boolean;
-}
-
-/** One of the equal ways in: an icon over a short label, at least 44 px tall, selection shown by the border. */
-function WayCard({ icon, children, onClick, disabled = false, busy = false, pressed }: WayCardProps) {
-  return (
-    <button
-      type="button"
-      className={`flex min-h-[88px] min-w-0 flex-col items-center justify-start gap-2 rounded-control border px-2 py-4 text-center text-ui font-medium leading-base text-fg transition-colors hover:border-accent focus-visible:outline-focus focus-visible:outline-offset-focus disabled:cursor-not-allowed disabled:opacity-60 ${pressed === true ? 'border-accent bg-surface-3' : 'border-border-strong bg-surface-2'}`}
-      onClick={onClick}
-      disabled={disabled || busy}
-      aria-pressed={pressed}
-      aria-busy={busy ? 'true' : undefined}
-    >
-      <span className={busy ? 'animate-pulse' : undefined}>{icon}</span>
-      {children}
-    </button>
-  );
-}
-
-interface UploadWayProps {
-  readonly readImage: (file: Blob) => Promise<string>;
-  readonly onText: (text: string) => void;
-  /** Opening the paste field is choosing another way: a read still in flight is let go. */
-  readonly pasteOpen: boolean;
-}
+const ways = (canScan: boolean, reading: boolean): readonly ChoiceOption[] => [
+  { id: 'scan', title: 'Scan QR code', icon: <QrCode size={22} />, disabled: !canScan },
+  { id: 'upload', title: reading ? 'Reading…' : 'Upload a QR image', icon: <ImageUp size={22} />, disabled: reading },
+  { id: 'paste', title: 'Paste a link', icon: <Link2 size={22} /> },
+];
 
 /**
  * The upload way: pick a picture, read its QR in this tab, hand the text up.
@@ -207,14 +229,18 @@ interface UploadWayProps {
  * picture can be chosen again, and nothing keeps the file), and what is shown is a sentence about the picture, never
  * its content.
  */
-function UploadWay({ readImage, onText, pasteOpen }: UploadWayProps) {
+function useQrUpload(
+  readImage: (file: Blob) => Promise<string>,
+  onText: (text: string) => void,
+  typedRevision: number,
+) {
   const input = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   // Which read is the live one. A read that finishes after the person has moved on — this way unmounted (the screen went
-  // on to confirm a pasted link, or the camera started), the paste field opened, or a newer picture chosen — is stale
-  // and must neither speak nor hand its text up. A counter, not a mounted flag: a flag set false in cleanup stays false
-  // when StrictMode replays the effect, and would leave the button on "Reading…" with no error.
+  // on to confirm a pasted link, or the camera started), the pasted way chosen or typed into, or a newer picture chosen
+  // — is stale and must neither speak nor hand its text up. A counter, not a mounted flag: a flag set false in cleanup
+  // stays false when StrictMode replays the effect, and would leave the button on "Reading…" with no error.
   const run = useRef(0);
   useEffect(
     () => () => {
@@ -222,13 +248,16 @@ function UploadWay({ readImage, onText, pasteOpen }: UploadWayProps) {
     },
     [],
   );
-  const firstPaste = useRef(pasteOpen);
-  useEffect(() => {
-    if (firstPaste.current === pasteOpen) return;
-    firstPaste.current = pasteOpen;
+  const cancel = useCallback((): void => {
     run.current += 1;
     setBusy(false);
-  }, [pasteOpen]);
+  }, []);
+  const lastRevision = useRef(typedRevision);
+  useEffect(() => {
+    if (lastRevision.current === typedRevision) return;
+    lastRevision.current = typedRevision;
+    cancel();
+  }, [typedRevision, cancel]);
 
   const read = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const element = event.currentTarget;
@@ -251,26 +280,5 @@ function UploadWay({ readImage, onText, pasteOpen }: UploadWayProps) {
     if (text !== undefined && run.current === mine) onText(text);
   };
 
-  return (
-    <>
-      <WayCard icon={<ImageUp size={22} aria-hidden="true" />} onClick={() => input.current?.click()} busy={busy}>
-        {busy ? 'Reading…' : 'Upload a QR image'}
-      </WayCard>
-      <input
-        ref={input}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        tabIndex={-1}
-        aria-label="QR code image"
-        data-pair-upload=""
-        onChange={event => void read(event)}
-      />
-      {problem === null ? null : (
-        <p className="col-span-3 m-0 text-ui leading-base text-err" role="alert" data-pair-upload-problem="">
-          {problem}
-        </p>
-      )}
-    </>
-  );
+  return { input, busy, problem, read, cancel, pick: () => input.current?.click() };
 }

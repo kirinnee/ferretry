@@ -294,14 +294,16 @@ describe('The pair page: mascot and night sky', () => {
     it(`${variant.name}: a cold open offers scan, upload and paste as three equal cards, none a full-width bar`, async () => {
       const { tab, problems, close } = await open(variant, '&arrival=cold&scan=camera');
       try {
-        const ways = tab.locator('[data-pair-ways] button');
+        const ways = tab.locator('[data-pair-ways] label');
         expect(await ways.allInnerTexts()).toEqual(['Scan QR code', 'Upload a QR image', 'Paste a link']);
         const boxes = await Promise.all(
           [0, 1, 2].map(async index => must(await ways.nth(index).boundingBox(), 'a way')),
         );
         for (const box of boxes) expect(box.height, 'at least 44 px tall').toBeGreaterThanOrEqual(44);
         expect(new Set(boxes.map(box => Math.round(box.width))).size, 'equal widths').toBe(1);
-        expect(new Set(boxes.map(box => Math.round(box.y))).size, 'one row').toBe(1);
+        // The app's choice cards: a row where there is room, a stack where there is not (a phone).
+        const rows = new Set(boxes.map(box => Math.round(box.y))).size;
+        expect(rows, variant.phone ? 'stacked' : 'one row').toBe(variant.phone ? 3 : 1);
         expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         await shot(tab, variant, 'ways');
         await ways.nth(2).click();

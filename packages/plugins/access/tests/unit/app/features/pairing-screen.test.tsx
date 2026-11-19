@@ -43,6 +43,17 @@ const buttonNamed = (container: HTMLElement, text: string): HTMLButtonElement =>
     `a button labelled ${text}`,
   );
 
+/** One of the three ways, by its title: the card (a label over a native radio) the person presses. */
+const wayNamed = (container: HTMLElement, text: string): HTMLLabelElement =>
+  must(
+    [...container.querySelectorAll<HTMLLabelElement>('[data-pair-ways] label')].find(candidate =>
+      candidate.textContent?.includes(text),
+    ) ?? null,
+    `a way titled ${text}`,
+  );
+
+const wayOff = (way: HTMLElement): boolean => must(way.querySelector('input'), 'the way radio').disabled;
+
 const typeLink = async (container: HTMLElement, value: string): Promise<void> => {
   const input = must(
     container.querySelector('input[aria-label="Pairing link"]'),
@@ -76,7 +87,7 @@ describe('PairingScreen cold open', () => {
     const screen = await screenWith();
 
     expect(screen.container.textContent).toContain('Connect a daemon');
-    expect(buttonNamed(screen.container, 'Scan QR code')).toBeDefined();
+    expect(wayNamed(screen.container, 'Scan QR code')).toBeDefined();
     // The card that used to say "0" and then explain that it was 0.
     expect(screen.container.textContent).not.toContain('Paired daemons');
     expect(screen.container.textContent).not.toContain('No daemons are paired yet');
@@ -99,13 +110,13 @@ describe('PairingScreen cold open', () => {
 
   it('reveals the paste field on request, and permanently when there is no camera', async () => {
     const screen = await screenWith();
-    await interact(() => buttonNamed(screen.container, 'Paste a link').click());
+    await interact(() => wayNamed(screen.container, 'Paste a link').click());
     expect(screen.container.querySelector('input[aria-label="Pairing link"]')).not.toBeNull();
     await screen.unmount();
 
     const noCamera = await screenWith({ scanHost: null });
     expect(noCamera.container.querySelector('input[aria-label="Pairing link"]')).not.toBeNull();
-    expect(buttonNamed(noCamera.container, 'Scan QR code').disabled).toBe(true);
+    expect(wayOff(wayNamed(noCamera.container, 'Scan QR code'))).toBe(true);
     await noCamera.unmount();
   });
 });
@@ -131,7 +142,7 @@ describe('PairingScreen with daemons already paired', () => {
     expect(screen.container.textContent?.split('https://gamma.example.test')).toHaveLength(2);
     expect(screen.container.textContent).not.toContain('alpha-secret');
     expect(screen.container.textContent).not.toContain('beta-secret');
-    expect(buttonNamed(screen.container, 'Scan QR code')).toBeDefined();
+    expect(wayNamed(screen.container, 'Scan QR code')).toBeDefined();
 
     const chosen = must(screen.container.querySelector('button[aria-current="true"]'), 'the selected daemon');
     const forget = must(screen.container.querySelector('button[aria-label="Forget beta-host"]'), 'the forget control');
@@ -355,7 +366,7 @@ describe('PairingScreen scanned and pasted links', () => {
   it('confirms a scanned pairing link before exchanging it', async () => {
     const screen = await screenWith({ scanHost: scanningHost(LINK) });
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect(screen.container.textContent).toContain('Pair this device?');
     expect(screen.container.textContent).toContain('daemon.example.test');
@@ -365,7 +376,7 @@ describe('PairingScreen scanned and pasted links', () => {
   it('refuses a QR code that is not a pairing link', async () => {
     const screen = await screenWith({ scanHost: scanningHost('https://example.com/some-other-qr') });
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect(screen.container.textContent).toContain('That is not a Ferretry pairing link.');
     await screen.unmount();
@@ -379,7 +390,7 @@ describe('PairingScreen scanned and pasted links', () => {
       },
     });
 
-    await interact(() => buttonNamed(screen.container, 'Paste a link').click());
+    await interact(() => wayNamed(screen.container, 'Paste a link').click());
     await typeLink(screen.container, 'not a link');
     await submitForm(screen.container);
 
@@ -635,7 +646,7 @@ describe('PairingScreen uploaded QR image', () => {
     });
 
     await chooseImage(screen.container);
-    await interact(() => buttonNamed(screen.container, 'Paste a link').click());
+    await interact(() => wayNamed(screen.container, 'Paste a link').click());
     await typeLink(screen.container, FAKE_PASTED_LINK);
     await submitForm(screen.container);
     expect(screen.container.textContent).toContain('pasted.example.test');
@@ -645,6 +656,47 @@ describe('PairingScreen uploaded QR image', () => {
     expect(screen.container.textContent).toContain('Pair this device?');
     expect(screen.container.textContent).toContain('pasted.example.test');
     expect(screen.container.textContent).not.toContain('uploaded.example.test');
+    await screen.unmount();
+  });
+
+  it('keeps a half-typed link when a slow upload finishes after Paste was chosen again, field already open', async () => {
+    for (const scanHost of [idleHost, null]) {
+      let finish: (text: string) => void = () => {};
+      const screen = await screenWith({
+        scanHost,
+        readImage: async () => await new Promise<string>(resolve => (finish = resolve)),
+      });
+      // With a camera the field is opened first; without one it is open from the start.
+      if (scanHost !== null) await interact(() => wayNamed(screen.container, 'Paste a link').click());
+      expect(screen.container.querySelector('input[aria-label="Pairing link"]')).not.toBeNull();
+
+      await chooseImage(screen.container);
+      await interact(() => wayNamed(screen.container, 'Paste a link').click());
+      await typeLink(screen.container, FAKE_PASTED_LINK);
+      await interact(() => finish(FAKE_UPLOAD_LINK));
+
+      expect(screen.container.textContent).not.toContain('Pair this device?');
+      const field = must(screen.container.querySelector('input[aria-label="Pairing link"]'), 'the paste field');
+      expect((field as HTMLInputElement).value).toBe(FAKE_PASTED_LINK);
+      await screen.unmount();
+    }
+  });
+
+  it('keeps a link being typed when a slow upload finishes, even with no second choice of Paste', async () => {
+    let finish: (text: string) => void = () => {};
+    const screen = await screenWith({
+      scanHost: null,
+      readImage: async () => await new Promise<string>(resolve => (finish = resolve)),
+    });
+
+    await chooseImage(screen.container);
+    await typeLink(screen.container, FAKE_PASTED_LINK);
+    await interact(() => finish(FAKE_UPLOAD_LINK));
+
+    expect(screen.container.textContent).not.toContain('Pair this device?');
+    expect(
+      (must(screen.container.querySelector('input[aria-label="Pairing link"]'), 'the field') as HTMLInputElement).value,
+    ).toBe(FAKE_PASTED_LINK);
     await screen.unmount();
   });
 
@@ -680,7 +732,7 @@ describe('PairingScreen uploaded QR image', () => {
     expect(must(screen.container.querySelector('[data-pair-upload-problem]'), 'the problem').textContent).toBe(
       'That image could not be read.',
     );
-    expect(buttonNamed(screen.container, 'Upload a QR image').getAttribute('aria-busy')).toBeNull();
+    expect(wayOff(wayNamed(screen.container, 'Upload a QR image'))).toBe(false);
     await screen.unmount();
   });
 
@@ -694,7 +746,7 @@ describe('PairingScreen uploaded QR image', () => {
       await uploaded.unmount();
 
       const scanned = await screenWith({ scanHost: scanningHost(FAKE_UPLOAD_LINK) });
-      await interact(() => buttonNamed(scanned.container, 'Scan QR code').click());
+      await interact(() => wayNamed(scanned.container, 'Scan QR code').click());
       await scanned.unmount();
 
       const pasted = await screenWith({ scanHost: null });

@@ -399,6 +399,7 @@ export function PairingScreen({
         host={scanHost}
         pasteOpen={pasting || scanHost === null}
         onPaste={revealPaste}
+        typedRevision={link.revision}
         {...(readImage === undefined ? {} : { readImage })}
         onText={readText}
         onFailed={revealPaste}
@@ -568,7 +569,7 @@ function PairingFrame({ embedded, stage, announce = '', children }: PairingFrame
 const EMBEDDED_SHELL = 'flex min-w-0 flex-col gap-4';
 
 const SHELL =
-  'mx-auto flex min-h-full flex-1 w-full max-w-[520px] flex-col gap-4 py-6 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-10';
+  'mx-auto flex min-h-full flex-1 w-full max-w-[600px] flex-col gap-4 py-6 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-10';
 
 /**
  * The security explanation, below the fold and behind one tap.

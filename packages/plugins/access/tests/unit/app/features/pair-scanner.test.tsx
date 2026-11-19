@@ -15,6 +15,17 @@ const buttonNamed = (container: HTMLElement, text: string): HTMLButtonElement =>
     `a button labelled ${text}`,
   );
 
+/** One of the three ways, by its title: the card (a label over a native radio) the person presses. */
+const wayNamed = (container: HTMLElement, text: string): HTMLLabelElement =>
+  must(
+    [...container.querySelectorAll<HTMLLabelElement>('[data-pair-ways] label')].find(candidate =>
+      candidate.textContent?.includes(text),
+    ) ?? null,
+    `a way titled ${text}`,
+  );
+
+const wayOff = (way: HTMLElement): boolean => must(way.querySelector('input'), 'the way radio').disabled;
+
 const viewfinder = (container: HTMLElement): HTMLElement =>
   must(container.querySelector('section[aria-label="Camera viewfinder"]'), 'the viewfinder');
 
@@ -24,8 +35,8 @@ describe('PairScanner', () => {
       <PairScanner host={never} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
     );
 
-    const scan = buttonNamed(screen.container, 'Scan QR code');
-    expect(scan.disabled).toBe(false);
+    const scan = wayNamed(screen.container, 'Scan QR code');
+    expect(wayOff(scan)).toBe(false);
     expect(viewfinder(screen.container).className).toBe('hidden');
     // The video is mounted from the first paint: the decoder reads this exact
     // element, and mounting it with the scan would be a race against the camera.
@@ -38,7 +49,7 @@ describe('PairScanner', () => {
       <PairScanner host={null} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
     );
 
-    expect(buttonNamed(screen.container, 'Scan QR code').disabled).toBe(true);
+    expect(wayOff(wayNamed(screen.container, 'Scan QR code'))).toBe(true);
     await screen.unmount();
   });
 
@@ -47,7 +58,7 @@ describe('PairScanner', () => {
       <PairScanner host={never} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
     );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect(viewfinder(screen.container).className).not.toBe('hidden');
     expect(screen.container.textContent).toContain('Starting the camera…');
@@ -86,7 +97,7 @@ describe('PairScanner', () => {
       />,
     );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect((seen[0] as HTMLElement).tagName).toBe('VIDEO');
     expect(released).toBeNull();
@@ -114,7 +125,7 @@ describe('PairScanner', () => {
       <PairScanner host={host} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
     );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect(video?.muted).toBe(true);
     expect(video?.hasAttribute('muted')).toBe(true);
@@ -137,7 +148,7 @@ describe('PairScanner', () => {
       <PairScanner host={host} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
     );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect(screen.container.textContent).toContain('Stop scanning');
     await screen.unmount();
@@ -148,11 +159,11 @@ describe('PairScanner', () => {
       <PairScanner host={never} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
     );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
     await interact(() => buttonNamed(screen.container, 'Stop scanning').click());
 
     expect(viewfinder(screen.container).className).toBe('hidden');
-    expect(buttonNamed(screen.container, 'Scan QR code').disabled).toBe(false);
+    expect(wayOff(wayNamed(screen.container, 'Scan QR code'))).toBe(false);
     await screen.unmount();
   });
 
@@ -174,7 +185,7 @@ describe('PairScanner', () => {
       />,
     );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect(must(screen.container.querySelector('[role="alert"]'), 'the refusal').textContent).toContain(
       'Camera access is turned off for Ferretry on this device.',
@@ -201,7 +212,7 @@ describe('PairScanner', () => {
       </DevicePermissionsContext.Provider>,
     );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     const howTo = must(screen.container.querySelector('[data-camera-howto]'), 'the how-to');
     expect(howTo.textContent).toContain('find Ferretry in the list of apps');
@@ -220,7 +231,7 @@ describe('PairScanner', () => {
       <PairScanner host={host} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
     );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect(screen.container.querySelector('[data-camera-howto]')).toBeNull();
     await screen.unmount();
@@ -283,7 +294,8 @@ describe('PairScanner: the three equal ways', () => {
     );
 
     const ways = must(screen.container.querySelector('[data-pair-ways]'), 'the ways');
-    const labels = [...ways.querySelectorAll('button')].map(button => button.textContent);
+    const labels = [...ways.querySelectorAll('label')].map(way => way.textContent);
+    expect(ways.querySelector('[role="radiogroup"]')).not.toBeNull();
     expect(labels).toEqual(['Scan QR code', 'Upload a QR image', 'Paste a link']);
     const input = must(
       screen.container.querySelector('input[data-pair-upload]'),
@@ -299,9 +311,9 @@ describe('PairScanner: the three equal ways', () => {
       <PairScanner host={null} pasteOpen onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
     );
 
-    expect(buttonNamed(screen.container, 'Scan QR code').disabled).toBe(true);
-    expect(buttonNamed(screen.container, 'Upload a QR image').disabled).toBe(false);
-    expect(buttonNamed(screen.container, 'Paste a link').getAttribute('aria-pressed')).toBe('true');
+    expect(wayOff(wayNamed(screen.container, 'Scan QR code'))).toBe(true);
+    expect(wayOff(wayNamed(screen.container, 'Upload a QR image'))).toBe(false);
+    expect(wayNamed(screen.container, 'Paste a link').getAttribute('data-selected')).toBe('true');
     await screen.unmount();
   });
 
@@ -374,7 +386,7 @@ describe('PairScanner: the three equal ways', () => {
       />,
     );
     await choose(screen.container);
-    expect(buttonNamed(screen.container, 'Reading…').getAttribute('aria-busy')).toBe('true');
+    expect(wayOff(wayNamed(screen.container, 'Reading…'))).toBe(true);
 
     await screen.unmount();
     await interact(() => finish(FAKE_LINK));
@@ -382,28 +394,102 @@ describe('PairScanner: the three equal ways', () => {
     expect(decoded).toEqual([]);
   });
 
-  it('lets go of a read still in flight when the paste field is opened', async () => {
+  it('lets go of a read still in flight when the paste way is chosen', async () => {
     const decoded: string[] = [];
+    let pasted = 0;
     let finish: (text: string) => void = () => {};
-    const element = (pasteOpen: boolean) => (
+    const screen = await mount(
       <PairScanner
         host={never}
-        pasteOpen={pasteOpen}
+        pasteOpen={false}
+        onPaste={() => (pasted += 1)}
+        readImage={async () => await new Promise<string>(resolve => (finish = resolve))}
+        onText={text => decoded.push(text)}
+        onFailed={() => {}}
+      />,
+    );
+    await choose(screen.container);
+
+    await interact(() => wayNamed(screen.container, 'Paste a link').click());
+    expect(pasted).toBe(1);
+    expect(wayOff(wayNamed(screen.container, 'Upload a QR image'))).toBe(false);
+    await interact(() => finish(FAKE_LINK));
+
+    expect(decoded).toEqual([]);
+    expect(screen.container.querySelector('[data-pair-upload-problem]')).toBeNull();
+    await screen.unmount();
+  });
+
+  it('lets go of a read when the paste way is chosen AGAIN, with its field already open', async () => {
+    const decoded: string[] = [];
+    let pasted = 0;
+    let finish: (text: string) => void = () => {};
+    const screen = await mount(
+      <PairScanner
+        host={null}
+        pasteOpen
+        onPaste={() => (pasted += 1)}
+        readImage={async () => await new Promise<string>(resolve => (finish = resolve))}
+        onText={text => decoded.push(text)}
+        onFailed={() => {}}
+      />,
+    );
+    await choose(screen.container);
+
+    // The way is already the chosen one, so the radio raises no change: the click itself is the choice.
+    await interact(() => wayNamed(screen.container, 'Paste a link').click());
+    expect(wayOff(wayNamed(screen.container, 'Upload a QR image'))).toBe(false);
+    await interact(() => finish(FAKE_LINK));
+
+    expect(decoded).toEqual([]);
+    expect(pasted).toBe(0);
+    await screen.unmount();
+  });
+
+  it('lets go of a read still in flight when anything is typed in the paste field', async () => {
+    const decoded: string[] = [];
+    let finish: (text: string) => void = () => {};
+    const element = (typedRevision: number) => (
+      <PairScanner
+        host={null}
+        pasteOpen
+        typedRevision={typedRevision}
         onPaste={() => {}}
         readImage={async () => await new Promise<string>(resolve => (finish = resolve))}
         onText={text => decoded.push(text)}
         onFailed={() => {}}
       />
     );
-    const screen = await mount(element(false));
+    const screen = await mount(element(3));
     await choose(screen.container);
 
-    await screen.render(element(true));
-    expect(buttonNamed(screen.container, 'Upload a QR image').getAttribute('aria-busy')).toBeNull();
+    await screen.render(element(4));
+    expect(wayOff(wayNamed(screen.container, 'Upload a QR image'))).toBe(false);
     await interact(() => finish(FAKE_LINK));
 
     expect(decoded).toEqual([]);
-    expect(screen.container.querySelector('[data-pair-upload-problem]')).toBeNull();
+    await screen.unmount();
+  });
+
+  it('lets go of a read still in flight when the camera starts', async () => {
+    const decoded: string[] = [];
+    let finish: (text: string) => void = () => {};
+    const screen = await mount(
+      <PairScanner
+        host={never}
+        pasteOpen={false}
+        onPaste={() => {}}
+        readImage={async () => await new Promise<string>(resolve => (finish = resolve))}
+        onText={text => decoded.push(text)}
+        onFailed={() => {}}
+      />,
+    );
+    await choose(screen.container);
+
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
+    await interact(() => finish(FAKE_LINK));
+
+    expect(decoded).toEqual([]);
     await screen.unmount();
   });
 
@@ -432,7 +518,7 @@ describe('PairScanner: the three equal ways', () => {
     expect(must(screen.container.querySelector('[data-pair-upload-problem]'), 'the problem').textContent).toBe(
       'No QR code found in that image.',
     );
-    expect(buttonNamed(screen.container, 'Upload a QR image').getAttribute('aria-busy')).toBeNull();
+    expect(wayOff(wayNamed(screen.container, 'Upload a QR image'))).toBe(false);
     expect(decoded).toEqual([]);
 
     await choose(screen.container);
@@ -454,7 +540,7 @@ describe('PairScanner: the three equal ways', () => {
       />,
     );
 
-    await interact(() => buttonNamed(screen.container, 'Paste a link').click());
+    await interact(() => wayNamed(screen.container, 'Paste a link').click());
 
     expect(pasted).toBe(1);
     await screen.unmount();
