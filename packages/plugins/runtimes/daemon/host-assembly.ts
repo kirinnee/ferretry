@@ -465,7 +465,22 @@ export function fileAssembly(
   const tools: FleetSetupServiceDeps['tools'] = {
     plans: harnesses => installer.plans(harnesses),
     install: async (request, governance) =>
-      await installer.install({ harnesses: request.harnesses.map(harnessKindOfKey) }, governance),
+      // The command the person was shown travels with the request (each entry's harness in the installer's own spelling), so
+      // the installer can refuse a plan that changed since; dropping it here would leave that check never made.
+      await installer.install(
+        {
+          harnesses: request.harnesses.map(harnessKindOfKey),
+          ...(request.shown === undefined
+            ? {}
+            : {
+                shown: request.shown.map(entry => ({
+                  harness: harnessKindOfKey(entry.harness),
+                  command: entry.command,
+                })),
+              }),
+        },
+        governance,
+      ),
   };
   // The Vault's own "this very value, filed by this plugin's earlier create" check (absent on a Vault that offers none).
   const filed = ctx.needs.vault?.filedSame?.bind(ctx.needs.vault);

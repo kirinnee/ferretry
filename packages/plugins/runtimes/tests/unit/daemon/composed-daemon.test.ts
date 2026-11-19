@@ -25,7 +25,7 @@ import {
 import { type ModelCatalogSourcesView, ModelCatalogSourcesSchema } from '@ferretry/plugin-logins/contract';
 import { LoginPaused, LoginResumed } from '@ferretry/plugin-usage/contract';
 import type { Instant } from '@ferretry/std';
-import type { KernelPorts } from '@ferretry/kernel/contract';
+import type { ChildHandle, KernelPorts } from '@ferretry/kernel/contract';
 import {
   type MachineBrowserPorts,
   PROFILE_ITEMS,
@@ -67,6 +67,10 @@ async function compose(
     readonly ferrets?: FakeFerrets;
     readonly vault?: FakeVault;
     readonly sources?: ModelCatalogSourcesView;
+    /** Answers `kernel.spawn.run` (the default starts nothing and answers empty). */
+    readonly run?: (program: string, args: readonly string[]) => { exitCode: number; stdout: string; stderr: string };
+    /** Answers `kernel.spawn.start`: what a package manager run would be. Absent: a start fails, as it always did. */
+    readonly start?: (program: string, args: readonly string[]) => ChildHandle;
   } = {},
 ): Promise<Composed> {
   const world = await fleetWorld();
@@ -101,8 +105,16 @@ async function compose(
     // A stub for every spawn: nothing is ever started, and a test sees what was asked.
     spawn: (program, args) => {
       stubbed.push([program, ...args].join(' '));
-      return { code: 0, stdout: '', stderr: '' } as never;
+      return (options.run?.(program, args) ?? { code: 0, stdout: '', stderr: '' }) as never;
     },
+    ...(options.start === undefined
+      ? {}
+      : {
+          start: (program: string, args: readonly string[]) => {
+            stubbed.push(`start ${[program, ...args].join(' ')}`);
+            return options.start!(program, args);
+          },
+        }),
   });
   return { host, world, stubbed };
 }
@@ -315,6 +327,70 @@ describe('a real apply through the composed daemon', () => {
       ['claude-code', false],
       ['codex', false],
     ]);
+  });
+
+  describe('an install through the registered wiring (route -> host assembly -> installer)', () => {
+    const closed = (text = '') =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (text !== '') controller.enqueue(new TextEncoder().encode(text));
+          controller.close();
+        },
+      });
+    const manager = (): ChildHandle => ({
+      pid: 1,
+      stdout: closed('==> Installed claude-code\n'),
+      stderr: closed(),
+      write: () => undefined,
+      kill: () => undefined,
+      exited: Promise.resolve(0),
+      pipes: [],
+      closePipes: () => undefined,
+    });
+    /** A macOS with Homebrew and no tool: the plan for Claude is the `brew` cask command. */
+    const mac = () =>
+      compose({
+        executables: ['/fixture/bin/brew'],
+        run: program => ({ exitCode: 0, stdout: program === 'uname' ? 'Darwin\n' : '', stderr: '' }),
+        start: manager,
+      });
+    const shownCommand = async (host: TestHost): Promise<string> => {
+      const scan = await host.request('GET', '/v1/runtimes/setup/scan');
+      const claude = scan
+        .json<{ tools: { harness: string; install?: { kind: string; command?: string } }[] }>()
+        .tools.find(tool => tool.harness === 'claude-code');
+      expect(claude?.install?.kind).toBe('runnable');
+      return claude?.install?.command ?? '';
+    };
+
+    it('refuses a plan that changed since it was shown, and starts nothing', async () => {
+      const { host, stubbed } = await mac();
+      const command = await shownCommand(host);
+      stubbed.length = 0;
+
+      const refused = await host.request('POST', '/v1/runtimes/machine/tools/install', {
+        body: { harnesses: ['claude-code'], shown: [{ harness: 'claude-code', command: `${command} --stale` }] },
+      });
+
+      expect(refused.status).toBe(409);
+      expect(refused.json<{ error: string }>().error).toContain('is not the one that was shown');
+      expect(stubbed.filter(call => call.startsWith('start '))).toEqual([]);
+    });
+
+    it('runs the checked plan when the shown command matches the fresh one', async () => {
+      const { host, stubbed } = await mac();
+      const command = await shownCommand(host);
+      stubbed.length = 0;
+
+      const ran = await host.request('POST', '/v1/runtimes/machine/tools/install', {
+        body: { harnesses: ['claude-code'], shown: [{ harness: 'claude-code', command }] },
+      });
+
+      expect(ran.status).toBe(200);
+      expect(stubbed.filter(call => call.startsWith('start '))).toEqual([
+        'start /fixture/bin/brew install --cask claude-code',
+      ]);
+    });
   });
 
   it('C2 refuses a change in a sentence while a part of the model stands in, BEFORE any file is written: the runtime file is absent and the next apply does not publish it', async () => {
