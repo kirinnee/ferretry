@@ -3332,3 +3332,205 @@ describe('API keys newer on the source', () => {
     });
   });
 });
+
+// ── Components another plugin owns (r9 A3) ───────────────────────────────────────────────────────
+
+const MCP_JSON = JSON.stringify({
+  mcpServers: { github: { command: 'npx', args: ['-y', 'server-github'], env: { GITHUB_TOKEN: SECRET_VALUE } } },
+});
+
+/** A host with one MCP server (its token a secret), a skill and settings. */
+const ownedScans = (): readonly HostHarnessScan[] => [
+  claudeScan({ mcp: { kind: 'text', source: '/person/.claude.json', text: MCP_JSON, bytes: MCP_JSON.length } }),
+  codexScan(),
+];
+
+/**
+ * The model Runtimes' own files hold, as JSON. Not re-parsed: those files name a component by reference and the owner
+ * of its kind holds it, so on their own they would not pass the whole-model check the stand-in's reader applies.
+ */
+const rawModelOf = (documents: readonly FleetDocumentWrite[]) =>
+  JSON.parse(documents.find(document => document.path === '/state/config/model.yaml')?.content ?? '{}') as {
+    components: Record<string, Record<string, unknown>>;
+    profiles: Record<string, { layers: string[] }>;
+  };
+
+type OwnerCall = Parameters<NonNullable<FleetSetupServiceDeps['components']>['put']>[0];
+
+/** An owner door that answers per file, and records what it was handed. */
+function owners(
+  answer: (write: OwnerCall) => Awaited<ReturnType<NonNullable<FleetSetupServiceDeps['components']>['put']>> = () => ({
+    outcome: 'written',
+  }),
+) {
+  const calls: OwnerCall[] = [];
+  const components: NonNullable<FleetSetupServiceDeps['components']> = {
+    put: async write => {
+      calls.push(write);
+      return answer(write);
+    },
+  };
+  return { calls, components };
+}
+
+describe('the setup.import executor, components another plugin owns', () => {
+  it('should hand each imported MCP server, skill and settings to its owner and leave them out of Runtimes files', async () => {
+    // Arrange
+    const door = owners();
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    state.scans = ownedScans();
+
+    // Act
+    const { description, summary } = await importOnce(service);
+
+    // Assert
+    should(door.calls.map(call => call.file).toSorted()).eql([
+      'claude-code/settings/claude-settings.yaml',
+      'mcp/github.yaml',
+      'skills/skills.yaml',
+    ]);
+    should(description).containEql('Hands 3 parts to the parts of Ferretry that own them');
+    should(summary).containEql('Written by the parts that own them:');
+    should(summary).containEql('mcp/github.yaml');
+    const written = rawModelOf(applied[0]?.documents ?? []);
+    should(Object.keys(written.components.mcp ?? {})).eql([]);
+    should(Object.keys(written.components.skills ?? {})).eql([]);
+    should(Object.keys(written.components.settings ?? {})).eql([]);
+  });
+
+  it('should hand the owner a document with the secret as a reference, never the value', async () => {
+    // Arrange
+    const door = owners();
+    const { service, state } = world({ overrides: { components: door.components } });
+    state.scans = ownedScans();
+
+    // Act
+    await importOnce(service);
+
+    // Assert
+    const mcp = door.calls.find(call => call.kind === 'mcp');
+    should(mcp?.text).containEql('${secret:GITHUB_TOKEN}');
+    for (const call of door.calls) should(call.text).not.containEql(SECRET_VALUE);
+    const settings = door.calls.find(call => call.kind === 'settings');
+    should(JSON.parse(settings?.text ?? '{}')).have.property('document');
+    should(JSON.parse(settings?.text ?? '{}')).not.have.property('file');
+  });
+
+  it('should report each file written, held and refused, apply the rest, and leave a refused one out of every profile', async () => {
+    // Arrange
+    const door = owners(write =>
+      write.kind === 'mcp'
+        ? { outcome: 'refused', reason: 'the server is not valid' }
+        : write.kind === 'settings'
+          ? { outcome: 'held' }
+          : { outcome: 'written' },
+    );
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    state.scans = ownedScans();
+
+    // Act
+    const { summary } = await importOnce(service);
+
+    // Assert
+    should(summary).containEql('Written by the parts that own them: skills/skills.yaml.');
+    should(summary).containEql('Held until you confirm: claude-code/settings/claude-settings.yaml.');
+    should(summary).containEql('Not written: mcp/github.yaml (the server is not valid).');
+    should(summary).not.containEql('settings file held');
+    should(applied).have.length(1);
+    const model = rawModelOf(applied[0]?.documents ?? []);
+    for (const profile of Object.values(model.profiles)) should(profile.layers).not.containEql('mcp/github');
+    should(Object.values(model.profiles).some(profile => profile.layers.includes('skills/skills'))).be.true();
+  });
+
+  it('should refuse a document the owner refuses for a raw secret, and never echo the value in the answer', async () => {
+    // Arrange
+    const door = owners(() => ({ outcome: 'refused', reason: `env GITHUB_TOKEN holds ${SECRET_VALUE}, a raw secret` }));
+    const { service, state } = world({ overrides: { components: door.components } });
+    state.scans = ownedScans();
+
+    // Act
+    const { summary } = await importOnce(service);
+
+    // Assert
+    should(summary).containEql('Not written:');
+    should(summary).containEql('***');
+    should(summary).not.containEql(SECRET_VALUE);
+  });
+
+  it('should still apply the import when every owner refuses', async () => {
+    // Arrange
+    const door = owners(() => ({ outcome: 'refused', reason: 'cannot take an import yet' }));
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    state.scans = ownedScans();
+
+    // Act
+    const { summary } = await importOnce(service);
+
+    // Assert
+    should(summary).containEql('studio is ready');
+    should(summary).containEql('Not written:');
+    should(applied).have.length(1);
+  });
+
+  it('should name the owner files already written when the apply then fails', async () => {
+    // Arrange
+    const door = owners();
+    const { service, state } = world({ overrides: { components: door.components } });
+    state.scans = ownedScans();
+    state.apply = async () => {
+      throw new Error('disk full');
+    };
+    const change = IMPORT();
+    await service.executors.setup.describe(change);
+
+    // Act
+    const error = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_failed');
+
+    // Assert
+    should(error.message).containEql('disk full');
+    should(error.message).containEql('mcp/github.yaml');
+  });
+
+  it('should never import a hooks component', async () => {
+    // Arrange
+    const door = owners();
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    state.scans = [
+      claudeScan(),
+      codexScan({
+        hooks: { kind: 'text', source: '/person/.codex/hooks.json', text: '{"hooks":{}}', bytes: 12 },
+      }),
+    ];
+
+    // Act
+    await importOnce(service);
+
+    // Assert
+    should(door.calls.filter(call => (call.kind as string) === 'hooks')).eql([]);
+    should(Object.keys(rawModelOf(applied[0]?.documents ?? []).components.hooks ?? {})).eql([]);
+    const paths = (applied[0]?.documents ?? []).map(document => document.path);
+    should(paths.some(path => path.includes('/components/hooks/'))).be.false();
+  });
+
+  it('should describe the same import after the owners answered, and refuse one that changed', async () => {
+    // Arrange
+    const door = owners();
+    const { service, state } = world({ overrides: { components: door.components } });
+    state.scans = ownedScans();
+    const change = IMPORT();
+    await service.executors.setup.describe(change);
+    state.scans = [
+      claudeScan({
+        mcp: { kind: 'text', source: '/person/.claude.json', text: MCP_JSON.replace('github', 'other'), bytes: 9 },
+      }),
+      codexScan(),
+    ];
+
+    // Act
+    const error = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_stale');
+
+    // Assert
+    should(error.message).containEql('review it again');
+    should(door.calls).have.length(0);
+  });
+});

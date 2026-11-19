@@ -64,6 +64,13 @@ export const PROFILE_COMPONENT_SOURCE_HOOKS: readonly SourceHook[] = [
   ),
 ];
 
+/** The hook of the owner that holds one kind's components (for a harness's own kind, that harness's). `undefined`: none. */
+export function sourceHookFor(kind: ProfileComponentKind, harness?: 'claude' | 'codex'): SourceHook | undefined {
+  const sources = SOURCES[kind];
+  const source = sources.length === 1 ? sources[0] : sources.find(candidate => candidate.harness === harness);
+  return source?.hook;
+}
+
 const unread = (reason: string): KindReading => ({ state: 'unread', reason });
 
 /** A component's `harness` in the model's own spelling. */
@@ -75,7 +82,7 @@ const harnessOf = (document: ProfileComponentDocument, source: SourceDefinition)
 };
 
 /** What {@link Within} answers when the work did not finish in time. */
-const TIMED_OUT = 'timed-out' as const;
+export const TIMED_OUT = 'timed-out' as const;
 
 /** Bounds a piece of work: its answer, or {@link TIMED_OUT}. The clock that measures the time is the caller's. */
 export type Within = <Answer>(work: Promise<Answer>) => Promise<Answer | typeof TIMED_OUT>;

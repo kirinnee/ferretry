@@ -115,15 +115,25 @@ const FOREIGN_COMPONENT_KINDS = ['mcp', 'skills', 'settings', 'hooks'] as const;
  * next republish, which reads the files.
  */
 export function foreignComponentChanges(before: AccountModel, next: AccountModel): readonly string[] {
-  const changed: string[] = [];
+  return foreignComponentRefs(before, next)
+    .map(({ kind, name }) => `${kind} "${name}"`)
+    .toSorted((left, right) => left.localeCompare(right));
+}
+
+/** The same components as {@link foreignComponentChanges}, as kind and name (the setup import hands them to their owners). */
+export function foreignComponentRefs(
+  before: AccountModel,
+  next: AccountModel,
+): readonly { readonly kind: (typeof FOREIGN_COMPONENT_KINDS)[number]; readonly name: string }[] {
+  const changed: { kind: (typeof FOREIGN_COMPONENT_KINDS)[number]; name: string }[] = [];
   for (const kind of FOREIGN_COMPONENT_KINDS) {
     const was: Readonly<Record<string, unknown>> = before.components[kind];
     const now: Readonly<Record<string, unknown>> = next.components[kind];
     for (const name of new Set([...Object.keys(was), ...Object.keys(now)])) {
-      if (!same(was[name], now[name])) changed.push(`${kind} "${name}"`);
+      if (!same(was[name], now[name])) changed.push({ kind, name });
     }
   }
-  return changed.toSorted((left, right) => left.localeCompare(right));
+  return changed;
 }
 
 /** A value's identity for comparison: the same keys in any order are the same value. */

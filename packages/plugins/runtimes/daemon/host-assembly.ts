@@ -26,6 +26,7 @@ import { InstantSchema, milliseconds } from '@ferretry/std';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import { PROFILE_COMPONENTS_KEY, PROFILE_ITEMS, type RuntimeCheckEnvironment } from '../contract/index.ts';
 import { applyClaimFor } from './adapters/apply-claim.ts';
+import { componentWriters } from './adapters/component-writers.ts';
 import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
 import { CommandCache } from './adapters/command-cache.ts';
 import { HostPlatform } from './adapters/host-platform.ts';
@@ -470,6 +471,11 @@ export function fileAssembly(
       catalog: base,
       logins: ctx.needs.logins,
       tools,
+      // Imported MCP servers, skills and settings go to the plugin that owns each (its own `put`), never written here.
+      components: componentWriters(
+        hook => ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY),
+        withinMs((delay, fn) => ctx.kernel.clock.after(milliseconds(delay), fn), PROVIDER_ANSWER_MS),
+      ),
       daemonId: () => ctx.kernel.identity.daemonId,
       // The NAME listing is the Vault's own (names and times, never a value); writing a key in stays unavailable here.
       secrets: {

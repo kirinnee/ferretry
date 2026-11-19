@@ -18,6 +18,11 @@
  * the build refuses any other plugin, so a plugin that does not own a kind cannot provide it. A kind with no provider is
  * UNRESOLVED and Runtimes refuses an apply in a sentence rather than write a home without it.
  *
+ * One write door, owned by the owner too (`put`, optional): the setup import hands each imported `mcp`, `skills` or
+ * `settings` component to the plugin that OWNS that kind, and the owner writes its own file through the kernel's
+ * config service, so its schema check, the refusal of a raw secret and the hold on a loosening still apply. Runtimes never
+ * writes another plugin's file. Hooks are never handed over: nothing imports them.
+ *
  * Environment logins are not here: Logins is a plugin Runtimes already needs, so a provide hook taken by Logins would put
  * Runtimes before Logins and after it at once. Logins gives the same kind of answer through its own port
  * (`LoginsApi.environmentTemplates`).
@@ -28,7 +33,15 @@ import { z } from 'zod';
 /** One component, as its owner projects it for the account model (plain parsed data in the model's shape). */
 export type ProfileComponentDocument = Readonly<Record<string, unknown>>;
 
-/** A read-only view of one kind's component documents, read live from the owner's own configuration. */
+/**
+ * What an owner answers to one `put`: it wrote the file, or it refused in a sentence (names and rules, never a value).
+ * `held` is a write the owner saved but holds until the owner of the machine confirms it (it loosens something).
+ */
+export type ComponentPutResult =
+  | { readonly ok: true; readonly held?: true }
+  | { readonly ok: false; readonly reason: string };
+
+/** A view of one kind's component documents, read live from the owner's own configuration. */
 export interface ProfileComponentSource {
   /** Every component's name, in name order. */
   list(): Promise<readonly string[]>;
@@ -42,6 +55,14 @@ export interface ProfileComponentSource {
    * owner that offers none is read at the next change Runtimes does hear.
    */
   watch?(listener: () => void): () => void;
+  /**
+   * Writes one component as the owner's own file. `documentText` is the component in the account model's shape, as a
+   * YAML 1.2 document (JSON-formatted): the same projection `read` answers, so a `read` after a `put` gives it back. A
+   * value never travels: an `env` entry is a plain value or a `${secret:NAME}` reference, and a raw secret is the
+   * owner's to refuse. Optional: an owner that offers none is refused in a sentence, and the rest of the import still lands.
+   * A name that is taken is the owner's to judge (an import never replaces a component it did not make).
+   */
+  put?(name: string, documentText: string): Promise<ComponentPutResult>;
 }
 
 /** The kinds whose components another plugin owns (`modelSets` are Runtimes' own). */

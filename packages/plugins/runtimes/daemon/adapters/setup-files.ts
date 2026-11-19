@@ -133,6 +133,8 @@ export interface FileFleetSetupOptions {
   /** Safe Logins contract facts; host sign-in files stay opaque. */
   readonly logins: Pick<import('@ferretry/plugin-logins/contract').LoginsApi, 'list'>;
   readonly tools: FleetSetupServiceDeps['tools'];
+  /** Where an imported component another plugin owns is written: that plugin's own door. Absent: none is written. */
+  readonly components?: FleetSetupServiceDeps['components'];
   /** The configuration files a copy merges settings into; absent, a copy carrying one is refused. */
   readonly configFiles?: CloneConfigFiles;
   /** This daemon's id as it reports itself; absent until pairing identity is open. */
@@ -201,6 +203,7 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
     ...(options.configFiles === undefined ? {} : { configFiles: options.configFiles }),
     scan: async () => await scanner.scan(),
     tools: options.tools,
+    ...(options.components === undefined ? {} : { components: options.components }),
     secrets: {
       names: async () => (await options.secrets.list()).map(secret => secret.name),
       held: async () =>
