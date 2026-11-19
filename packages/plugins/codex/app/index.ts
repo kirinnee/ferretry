@@ -1,9 +1,9 @@
 import { createElement } from 'react';
 import { forSubject } from '@ferretry/app';
-import type { PanelProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { codexSettings } from './codex-settings.ts';
+import { stepBody } from './features/onboarding/pages.tsx';
 import { CodexSettingsView } from './settings-view.tsx';
 
 export default implementApp(manifest, {
@@ -12,10 +12,14 @@ export default implementApp(manifest, {
     const view = () => createElement(CodexSettingsView, { settings });
     return {
       settings: { codex: view },
-      // The first-run step's body: the same view, only for its own step.
-      panels: {
-        'onboarding-step': forSubject('codex.harness', view as (props: PanelProps) => ReturnType<typeof view>),
-      },
+      // The body of each Codex setup step, one panel per declared step (`step-<id>`, as the manifest names them), drawn
+      // for its own `codex.<id>` subject only.
+      panels: Object.fromEntries(
+        (manifest.onboarding ?? []).map(step => [
+          `step-${step.id}`,
+          forSubject(`codex.${step.id}`, stepBody(step.id, client)),
+        ]),
+      ),
     };
   },
 });
