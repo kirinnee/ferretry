@@ -29,6 +29,10 @@ const NAME_LINE = /^name:/mu;
 const isLockedRefusal = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 401;
 
+/** `404` is a plugin that is off: its routes are not served, so the question it answers has no answer to give. */
+const isAbsentPlugin = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 404;
+
 /** What one read says as a fact: its answer, `'locked'` for an unlock refusal, `undefined` for any other failure. */
 const settled = async (read: () => Promise<StepperFact>): Promise<StepperFact> => {
   try {
@@ -88,10 +92,21 @@ export const readStepperFacts = async (
     // declares no step: nothing to ask here, so it holds.
     ['claude', async () => (await toolLooked('claude-code')) || (await inUse())],
     ['codex', async () => (await toolLooked('codex')) || (await inUse())],
-    // A project is registered, or the person already works projectless (any conversation ever made).
+    // A project is registered, or the person already works projectless (any conversation ever made). A Projects plugin
+    // that is off has registered nothing and holds no answer to wait for: the step then rests on the conversations alone,
+    // so it stays readable (and finishable) with Projects paused.
     [
       'project',
-      async () => ProjectsSchema.parse(await client.call('GET /v1/projects', base)).length > 0 || (await inUse()),
+      async () => {
+        const registered = await client.call('GET /v1/projects', base).then(
+          raw => ProjectsSchema.parse(raw).length > 0,
+          (error: unknown) => {
+            if (isAbsentPlugin(error)) return false;
+            throw error;
+          },
+        );
+        return registered || (await inUse());
+      },
     ],
   ];
   await Promise.all([

@@ -7,7 +7,7 @@ import { daemonOfClient, daemonSettingsHref, useEveryDaemon, useOptionalRouter, 
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { type ReactNode, useMemo } from 'react';
 import { stepsHref } from '../../views/steps-screen.tsx';
-import { PROJECTLESS_WORDS } from './projectless-words.ts';
+import { addProjectHref, projectAction } from './project-action.ts';
 import { StepperView, type StepperAction } from './stepper-view.tsx';
 import { useStepper } from './use-stepper.ts';
 
@@ -44,17 +44,15 @@ export function createStepperPanel(client: PluginClient) {
             ? undefined
             : { label: current.id === 'claude' ? 'Set up Claude Code' : 'Set up Codex', run };
         }
-        // The last step: a project (the add-project form until the create-a-project flow lands), or no project at all.
+        // The last step: a project (the registry with its add form already open, until the create-a-project flow lands),
+        // or no project at all. Each button depends on its own plugin alone: Projects off leaves Continue a conversation
+        // as the one way through, Conversations off leaves Create a project.
         case 'project': {
-          const create = go(screenHref(daemon, 'projects', 'projects'));
-          const resume = go(screenHref(daemon, 'conversation', 'links'));
-          if (create === undefined) return undefined;
-          return {
-            label: 'Create a project',
-            run: create,
-            alternative: resume === undefined ? undefined : { label: 'Continue a conversation', run: resume },
-            note: PROJECTLESS_WORDS,
-          };
+          const projects = screenHref(daemon, 'projects', 'projects');
+          return projectAction(
+            go(projects === undefined ? undefined : addProjectHref(projects)),
+            go(screenHref(daemon, 'conversation', 'links')),
+          );
         }
         default:
           return undefined;

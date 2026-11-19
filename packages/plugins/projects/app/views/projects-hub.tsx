@@ -66,6 +66,8 @@ interface ProjectsHubProps {
    */
   readonly onNavigate?: (to: string) => void;
   readonly now: number;
+  /** Whether the add form starts open (a caller that came to add a project: the first-run stepper's "Create a project"). */
+  readonly initiallyOpen?: boolean;
 }
 
 const FORM_ID = 'add-project-form';
@@ -113,9 +115,10 @@ export function ProjectsHub({
   projectHref,
   onNavigate,
   now,
+  initiallyOpen = false,
 }: ProjectsHubProps) {
   const [draft, setDraft] = useState<ProjectRegistrationDraft>(emptyProjectRegistrationDraft);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initiallyOpen);
   const projects = slice.projects;
   const unread = projects === null;
   const loading = slice.status === 'idle' || slice.status === 'loading';

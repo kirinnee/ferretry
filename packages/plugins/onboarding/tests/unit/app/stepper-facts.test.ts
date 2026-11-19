@@ -131,6 +131,20 @@ describe('reading the stepper facts', () => {
     expect(await batch(clientOf(answers).client)).toMatchObject({ claude: true, codex: true, project: false });
   });
 
+  it('a Projects plugin that is off (404) does not make the Project step unknown: it rests on the conversations alone', async () => {
+    const off = { ...FRESH, 'GET /v1/projects': refusal(404, 'not_found') };
+    expect((await batch(clientOf(off).client)).project).toBe(false);
+    const used = { ...off, 'GET /v1/ferrets': [{ id: 'f' }] };
+    expect((await batch(clientOf(used).client)).project).toBe(true);
+    // Any other failure is still unknown, and an unlock refusal is still locked.
+    expect(
+      (await batch(clientOf({ ...FRESH, 'GET /v1/projects': refusal(500, 'boom') }).client)).project,
+    ).toBeUndefined();
+    expect(
+      (await batch(clientOf({ ...FRESH, 'GET /v1/projects': refusal(401, 'unlock_required') }).client)).project,
+    ).toBe('locked');
+  });
+
   it('an unlock refusal makes THAT fact locked; any other failure is unknown; the rest still answer', async () => {
     const answers = {
       ...SET_UP,

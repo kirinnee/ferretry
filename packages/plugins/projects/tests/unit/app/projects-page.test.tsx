@@ -55,6 +55,19 @@ const registry = (rows: readonly ProjectInfo[], ferrets: readonly FerretRow[] = 
   scripted({ [LIST]: rows, [FERRETS]: ferrets });
 
 describe('ProjectsPage', () => {
+  it('opens the add form at once when the address asks for it (?add=1), and keeps it closed otherwise', async () => {
+    // The DOM is installed by the first mount; the address is set before the page under test draws.
+    await (await mount(<p>dom</p>)).unmount();
+    window.history.replaceState({}, '', '/d/workstation/projects?add=1');
+    const asked = await mount(page(registry([])));
+    expect(asked.container.querySelector('#add-project-form')).not.toBeNull();
+    await asked.unmount();
+    window.history.replaceState({}, '', '/d/workstation/projects');
+    const plain = await mount(page(registry([])));
+    expect(plain.container.querySelector('#add-project-form')).toBeNull();
+    await plain.unmount();
+  });
+
   it('keeps an unread registry visibly loading instead of calling it empty', async () => {
     let release: (rows: readonly ProjectInfo[]) => void = () => undefined;
     const pending = new Promise<readonly ProjectInfo[]>(resolve => {
