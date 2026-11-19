@@ -64,8 +64,14 @@ export default definePlugin({
     ],
   },
 
-  // E4: the PR page. E3 adds the list screen beside it.
-  ui: { screens: [screen('pull', { path: 'pulls/:project/:repo/:number' })] },
+  ui: {
+    screens: [
+      // E4: the PR page. E3 adds the list screen beside it.
+      screen('pull', { path: 'pulls/:project/:repo/:number' }),
+      // E9 (CI run page): one workflow run's jobs, steps and timing. No nav entry: a run is reached from a PR's CI tab.
+      screen('ci-run', { path: 'pulls/:project/:repo/runs/:runId' }),
+    ],
+  },
 
   data: {
     // Private code (diffs): `0600` files in `0700` folders, bounded, deleted with the project or account.
