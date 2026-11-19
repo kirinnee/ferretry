@@ -286,6 +286,32 @@ describe('Conversation tab previews', () => {
         }
       });
 
+      it(`${viewport.name} ${scheme}: the suggestion cards sit in a row (not full width) with the (i) at the end of the line`, async () => {
+        const { tab, close } = await open(viewport, scheme);
+        try {
+          const boxes = await tab
+            .locator('[data-scene="suggestions"] .fy-cc-card')
+            .evaluateAll(cards => cards.map(card => card.getBoundingClientRect().toJSON() as DOMRect));
+          expect(boxes.length).toBe(3);
+          const section = (await tab.locator('[data-scene="suggestions"]').boundingBox())?.width ?? 0;
+          if (!viewport.phone) for (const box of boxes) expect(box.width).toBeLessThanOrEqual(320);
+          if (viewport.phone) {
+            // Below 480 px the cards stack, and stay short.
+            for (const box of boxes) expect(box.height).toBeLessThan(64);
+          } else {
+            expect(new Set(boxes.map(box => Math.round(box.top))).size).toBe(1);
+            expect(boxes[2]!.right - boxes[0]!.left).toBeLessThan(section);
+          }
+          const text = await tab.locator('[data-suggestions-detail]').boundingBox();
+          const info = await tab.locator('[data-suggestions-detail] button').boundingBox();
+          // The (i) sits on the last line of the sentence, not under it.
+          expect((info?.y ?? 0) + (info?.height ?? 0)).toBeLessThanOrEqual((text?.y ?? 0) + (text?.height ?? 0) + 1);
+          expect(info?.y).toBeGreaterThanOrEqual((text?.y ?? 0) - 1);
+        } finally {
+          await close();
+        }
+      });
+
       it(`${viewport.name} ${scheme}: choosing another value replays that frame from its start`, async () => {
         const { tab, close } = await open(viewport, scheme);
         try {

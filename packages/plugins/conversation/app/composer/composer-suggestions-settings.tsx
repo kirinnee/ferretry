@@ -4,17 +4,22 @@
  * Suggestions and grammar are deliberately different facts. Every choice here governs an offer —
  * whether typing a key opens the autocomplete popover — and none of them governs what the app
  * understands: a reference typed, pasted, or inserted by the transcript's Add to chat is parsed,
- * proved and linked exactly the same either way. The copy says that out loud, because a reader who
- * reads "off" as "references stop working" would keep a menu they do not want rather than lose a
- * feature they do.
+ * proved and linked exactly the same either way. The copy says that out loud (behind the (i), one tap
+ * away), because a reader who reads "off" as "references stop working" would keep a menu they do not
+ * want rather than lose a feature they do.
  *
- * The values live in `lib/controls.ts`, which is the sole owner of the browser key: these are
- * properties of the reader's screen, so they are shared by every paired daemon and switching daemon
- * must not change them. This surface holds no storage and no state of its own.
+ * Three cards sit in a row, the keys each opens as a mono line; the selected mode's meaning is the one
+ * line below them (only what is selected), and the preview beside them shows that mode alone. The
+ * values live in `lib/controls.ts`, which is the sole owner of the browser key: these are properties
+ * of the reader's screen, so they are shared by every paired daemon and switching daemon must not
+ * change them. This surface holds no storage; the open/closed (i) is its only state.
  */
 
 import { cn } from '@ferretry/app';
 import { type DeviceControls, SUGGESTION_KEYS, type SuggestionKeys } from '@ferretry/app';
+import { Info } from 'lucide-react';
+import { useState } from 'react';
+import { ChoiceCards } from './choice-cards-stand-in.tsx';
 import { SuggestionsPreview } from './previews/index.ts';
 
 type ComposerSuggestionPreferences = Pick<DeviceControls, 'suggestionKeys' | 'skillSuggestions'>;
@@ -25,8 +30,14 @@ export const COMPOSER_SUGGESTIONS_EXPLANATION =
 export const COMPOSER_SUGGESTIONS_UNGOVERNED_NOTE =
   'The / commands and skills menu and the % terminals and browser menu open in every mode.';
 
+/** The one-line intro; the longer words are behind the (i). */
+export const COMPOSER_SUGGESTIONS_INTRO = 'Which keys open the reference menu.';
+
 interface KeysCopy {
   readonly label: string;
+  /** The keys, short enough to sit on the card as one mono line. */
+  readonly keys: string;
+  /** What they open: shown once, for the selected card only. */
   readonly detail: string;
 }
 
@@ -34,46 +45,43 @@ interface KeysCopy {
 const KEYS_COPY = {
   ladder: {
     label: '@ ladder',
+    keys: '@  @@  @@@  @@@@',
     detail: '@ files · @@ agents · @@@ asks · @@@@ tasks. Typing : ! or & in normal text never pops a menu.',
   },
   symbols: {
     label: 'Symbols',
+    keys: '@  :  !  &  %',
     detail: '@ files · : agents · ! asks · & tasks · % terminals. Faster once you know them.',
   },
-  both: { label: 'Both', detail: 'Either way works.' },
+  both: { label: 'Both', keys: '@  @@  :  !  &', detail: 'Either way works.' },
 } as const satisfies Record<SuggestionKeys, KeysCopy>;
 
-function KeysOption({
-  value,
-  checked,
-  onSelect,
+const OPTIONS = SUGGESTION_KEYS.map(id => ({
+  id,
+  title: KEYS_COPY[id].label,
+  line: KEYS_COPY[id].keys,
+}));
+
+/** The (i): a small button that sits at the end of the line it explains. */
+function InfoButton({
+  label,
+  open,
+  onToggle,
 }: {
-  readonly value: SuggestionKeys;
-  readonly checked: boolean;
-  readonly onSelect: (value: SuggestionKeys) => void;
+  readonly label: string;
+  readonly open: boolean;
+  readonly onToggle: () => void;
 }) {
-  const copy = KEYS_COPY[value];
   return (
-    <label
-      className={cn(
-        'flex min-h-[44px] cursor-pointer items-start gap-3 rounded-control border px-control-x py-2',
-        checked ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2 hover:border-accent',
-      )}
-      data-suggestion-keys={value}
+    <button
+      aria-expanded={open}
+      aria-label={label}
+      className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded-full align-middle text-muted hover:text-fg"
+      onClick={onToggle}
+      type="button"
     >
-      <input
-        checked={checked}
-        className="mt-1 accent-[var(--accent)]"
-        name="composer-suggestion-keys"
-        onChange={() => onSelect(value)}
-        type="radio"
-        value={value}
-      />
-      <span className="min-w-0">
-        <span className={cn('block text-ui font-semibold', checked ? 'text-accent' : 'text-fg')}>{copy.label}</span>
-        <span className="mt-0.5 block text-meta leading-base text-muted">{copy.detail}</span>
-      </span>
-    </label>
+      <Info aria-hidden="true" size={16} />
+    </button>
   );
 }
 
@@ -86,38 +94,51 @@ export function ComposerSuggestionsSettings({
   /** One field at a time; the host decides where a patch is persisted. */
   readonly onChange: (patch: Partial<ComposerSuggestionPreferences>) => void;
 }) {
+  const [more, setMore] = useState(false);
+  // The (i) travels with the last word, so it is never left alone on a line of its own.
+  const detail = KEYS_COPY[preferences.suggestionKeys].detail;
+  const cut = detail.lastIndexOf(' ') + 1;
+  const lead = detail.slice(0, cut);
+  const last = detail.slice(cut);
   const skills = preferences.skillSuggestions;
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-start gap-3">
-        <fieldset className="m-0 flex min-w-0 flex-1 basis-64 flex-col gap-2 border-0 p-0">
-          <legend className="mb-1 text-ui font-semibold text-fg">Open suggestions with</legend>
-          {SUGGESTION_KEYS.map(value => (
-            <KeysOption
-              checked={preferences.suggestionKeys === value}
-              key={value}
-              onSelect={next => onChange({ suggestionKeys: next })}
-              value={value}
-            />
-          ))}
-        </fieldset>
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-wrap items-start gap-x-6 gap-y-4">
+        <div className="flex min-w-0 flex-1 basis-[34rem] flex-col gap-3">
+          <ChoiceCards
+            legend="Open suggestions with"
+            mono
+            name="composer-suggestion-keys"
+            onChange={next => onChange({ suggestionKeys: next })}
+            options={OPTIONS}
+            value={preferences.suggestionKeys}
+          />
+          <p className="m-0 text-meta leading-base text-muted" data-suggestions-detail="">
+            {lead}
+            <span className="whitespace-nowrap">
+              {last}
+              <InfoButton label="More about suggestions" onToggle={() => setMore(!more)} open={more} />
+            </span>
+          </p>
+          {more ? (
+            <div className="text-cell leading-base text-muted" data-suggestions-more="">
+              <p className="m-0">{COMPOSER_SUGGESTIONS_EXPLANATION}</p>
+              <p className="m-0 mt-1 text-faint">{COMPOSER_SUGGESTIONS_UNGOVERNED_NOTE}</p>
+            </div>
+          ) : null}
+        </div>
         <SuggestionsPreview keys={preferences.suggestionKeys} skills={skills} />
       </div>
       <button
-        type="button"
-        role="switch"
         aria-checked={skills}
+        className="flex min-h-[44px] w-fit max-w-full cursor-pointer items-center gap-6 border-0 bg-transparent p-0 text-left focus-visible:outline-focus"
         onClick={() => onChange({ skillSuggestions: !skills })}
-        className={cn(
-          'flex min-h-[44px] w-full items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left',
-          skills ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2 hover:border-accent',
-        )}
+        role="switch"
+        type="button"
       >
         <span className="min-w-0">
-          <span className={cn('block text-ui font-semibold', skills ? 'text-accent' : 'text-fg')}>
-            Suggest $ skills
-          </span>
-          <span className="mt-0.5 block text-meta leading-base text-muted">The $name skill form only.</span>
+          <span className="block text-ui font-semibold text-fg">Suggest $ skills</span>
+          <span className="block text-meta leading-base text-muted">The $name skill form only.</span>
         </span>
         <span
           aria-hidden="true"
@@ -134,8 +155,6 @@ export function ComposerSuggestionsSettings({
           />
         </span>
       </button>
-      <p className="m-0 text-cell leading-base text-muted">{COMPOSER_SUGGESTIONS_EXPLANATION}</p>
-      <p className="m-0 text-meta leading-base text-faint">{COMPOSER_SUGGESTIONS_UNGOVERNED_NOTE}</p>
     </div>
   );
 }

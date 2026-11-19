@@ -1,0 +1,118 @@
+/* Stand-in for P1's choice cards; deleted when P1 lands (see choice-cards-stand-in.tsx). */
+.fy-cc {
+  border: 0;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(136px, 220px));
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+.fy-cc-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control, 8px);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 56px;
+  min-width: 0;
+  padding: 10px 12px;
+  position: relative;
+  transition:
+    border-color 160ms,
+    background-color 160ms;
+}
+.fy-cc-card:hover {
+  border-color: var(--accent);
+}
+.fy-cc-card[data-selected='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.fy-cc-card:has(.fy-cc-input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.fy-cc-input {
+  border: 0;
+  clip: rect(0 0 0 0);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  width: 1px;
+}
+.fy-cc-title {
+  align-items: center;
+  color: var(--fg);
+  display: flex;
+  font-weight: 600;
+  gap: 8px;
+}
+.fy-cc-card[data-selected='true'] .fy-cc-title {
+  color: var(--accent);
+}
+.fy-cc-line {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.fy-cc-line--mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.02em;
+}
+.fy-cc-check {
+  align-items: center;
+  background: var(--accent);
+  border-radius: 999px;
+  color: var(--bg, #fff);
+  display: none;
+  height: 18px;
+  justify-content: center;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 18px;
+}
+.fy-cc-card[data-selected='true'] .fy-cc-check {
+  display: inline-flex;
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion='reduced']) .fy-cc-card[data-pop='true'] {
+    animation: fy-cc-pop 160ms ease-out;
+  }
+}
+@keyframes fy-cc-pop {
+  from {
+    transform: scale(0.98);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@media (max-width: 480px) {
+  /* A phone stacks the cards, each as ONE short row: the name, then its keys at the far end. */
+  .fy-cc {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .fy-cc-card {
+    align-items: center;
+    flex-direction: row;
+    gap: 12px;
+    justify-content: space-between;
+    min-height: 44px;
+    padding-right: 36px;
+  }
+  .fy-cc-line {
+    white-space: nowrap;
+  }
+  .fy-cc-check {
+    margin-top: -9px;
+    top: 50%;
+  }
+}

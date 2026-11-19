@@ -44,7 +44,10 @@
 }
 .fy-cvp-line {
   color: var(--fg);
+  /* Clip the line INSIDE the box: text that is too long is cut at the edge together with the caret that follows it,
+     so the caret is never drawn to the right of clipped text, outside the box. */
   min-height: 11px;
+  overflow: hidden;
   white-space: nowrap;
 }
 .fy-cvp-hint {
