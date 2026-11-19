@@ -76,7 +76,8 @@ is deliberately **not** used for it — see
 
 **The 5.0 preview has its own output, `packages.preview`** (with `fy-preview` and `fyd-preview`):
 `nix profile install github:kirinnee/ferretry/rebuild/preview#preview` builds the same binaries linked to the
-preview's hosted app instead of production's. A nix build is pure (no environment from the caller), so the
+preview's hosted app instead of production's. Before the preview branch moves,
+`github:kirinnee/ferretry/rebuild/5.0-after#preview` builds the same thing. A nix build is pure (no environment from the caller), so the
 preview cannot be a switch on `default`, and `default` must stay what it was because this code lands on main.
 The preview's origin is the one the preview workflow (`.github/workflows/pwa-pages-v5.yaml`) already sets as
 `FY_HOSTED_APP_ORIGIN`; `nix/ferretry.nix` reads that line, never spells an origin, and the output exists only
