@@ -438,3 +438,47 @@ describe('a changed source is listed once', () => {
     expect(text(root, '[data-import-count]')).toBe('Bringing 5 items, refreshing 2 changed sources.');
   });
 });
+
+describe('the only change is an update the person left unticked', () => {
+  it('does not show the daemon\'s "Nothing new" as a failure: the tool finishes as set up and says it kept the source as it was', async () => {
+    const calls: Call[] = [];
+    const scan = {
+      ...scanOf({ claude: CLAUDE_FULL }),
+      updates: [{ reference: 'instructions/claude', sources: ['~/.claude/CLAUDE.md'] }],
+    };
+    const view = await open(
+      routes(scan, {
+        'POST /v1/runtimes/proposals': Object.assign(new Error('Nothing new to import.'), {
+          status: 409,
+          code: 'fleet_change_refused',
+        }),
+      }),
+      calls,
+    );
+    const root = view.container;
+    await click(root, '[data-found-group="updates"] input');
+    await click(root, '[data-change-submit]');
+    await settle();
+    expect(root.querySelector('[data-change-refusal]')).toBeNull();
+    const answer = text(root, '[data-import-answer]');
+    expect(answer).toContain('Claude Code is set up');
+    expect(answer).toContain('instructions/claude kept as it was.');
+    expect(answer).toContain('Nothing new to bring in from Claude Code');
+    expect(calls.some(call => call.route === 'POST /v1/onboarding/steps/:plugin/:stepId')).toBe(true);
+  });
+
+  it('any other refusal is still shown as one', async () => {
+    const view = await open(
+      routes(scanOf({ claude: CLAUDE_FULL }), {
+        'POST /v1/runtimes/proposals': Object.assign(new Error('This machine is busy.'), {
+          status: 409,
+          code: 'fleet_change_refused',
+        }),
+      }),
+    );
+    await click(view.container, '[data-change-submit]');
+    await settle();
+    expect(view.container.querySelector('[data-change-refusal]')).not.toBeNull();
+    expect(view.container.querySelector('[data-import-answer]')).toBeNull();
+  });
+});

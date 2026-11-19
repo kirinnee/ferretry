@@ -28,6 +28,9 @@ import {
   versionOf,
 } from './model.ts';
 
+/** The daemon's own words for an import that has nothing it does not already hold. */
+const NOTHING_NEW = /nothing new to import/iu;
+
 const SCAN_ROUTE = 'GET /v1/runtimes/setup/scan' as const;
 const INSTALL_ROUTE = 'POST /v1/runtimes/machine/tools/install' as const;
 const STEP_ROUTE = 'POST /v1/onboarding/steps/:plugin/:stepId' as const;
@@ -230,8 +233,17 @@ export function useImportWizard(client: RuntimesClient) {
       const result = await changes.apply(
         importChange(model, left[harness], nameOf(harness), tickedEnv[harness], declined[harness]),
       );
-      if (result.kind !== 'applied') return;
-      const summary = result.outcome.outcome === 'executed' ? result.outcome.summary : 'Imported.';
+      // The daemon says "Nothing new to import." when everything is already in (the only change was an update the person left
+      // unticked). That is not a failure to show: the tool is set up as it was, and each unticked update says so.
+      const alreadyIn = result.kind === 'refused' && NOTHING_NEW.test(result.sentence);
+      if (result.kind !== 'applied' && !alreadyIn) return;
+      if (alreadyIn) changes.clear();
+      const summary =
+        result.kind === 'applied' && result.outcome.outcome === 'executed'
+          ? result.outcome.summary
+          : alreadyIn
+            ? `Nothing new to bring in from ${model.label}: it is already set up.`
+            : 'Imported.';
       const unmarked = await settleSteps(harness);
       const told = resultSentences(summary);
       // What happened to each changed source, in words: the daemon names an accepted one; an unticked one is said here.
