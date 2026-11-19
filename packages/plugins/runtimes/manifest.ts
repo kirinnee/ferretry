@@ -1,5 +1,11 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
-import { LoginChanged, LoginChangesPort, LoginsPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
+import {
+  LoginChanged,
+  LoginChangesPort,
+  LoginEnvImportPort,
+  LoginsPort,
+  LoginsUsedBy,
+} from '@ferretry/plugin-logins/contract';
 import { LoginPaused, LoginResumed, UsagePort } from '@ferretry/plugin-usage/contract';
 import {
   AutoResumeDecide,
@@ -53,7 +59,14 @@ export default definePlugin({
 
   // Logins is one plugin: reading it (`logins`) and changing it (`loginChanges`) are two ports, and only Runtimes holds the second.
   // The Vault is needed for its NAME listing alone (the setup's import and copy ask which API keys exist); see `permissions.secretNamePicker`.
-  needs: { ferrets: FerretsPort, logins: LoginsPort, loginChanges: LoginChangesPort, vault: VaultPort },
+  // `loginEnvImport` adds an imported harness `env` to the login the setup apply selected (r9 A8); Logins hands it to Runtimes alone.
+  needs: {
+    ferrets: FerretsPort,
+    logins: LoginsPort,
+    loginChanges: LoginChangesPort,
+    loginEnvImport: LoginEnvImportPort,
+    vault: VaultPort,
+  },
   // Optional (§2.4): the account picker shows each runtime's quota from Usage's feed. Usage off = the picker without quota.
   uses: { usage: UsagePort },
   provides: { runtimes: RuntimesPort },

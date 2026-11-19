@@ -14,6 +14,7 @@ import should from 'should';
 import type { CallerGovernance, GrantRefusal } from '@ferretry/core-gate/contract';
 import type { Instant } from '@ferretry/std';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
+import { fakeLoginChanges } from '@ferretry/plugin-logins/contract/testing';
 import {
   type AccountChange,
   CLONE_BUNDLE_KEYS_LIMIT,
@@ -91,7 +92,7 @@ const claudeScan = (overrides: Partial<HostHarnessScan> = {}): HostHarnessScan =
   settings: {
     kind: 'text',
     source: '/person/.claude/settings.json',
-    text: JSON.stringify({ theme: 'dark', env: { GITHUB_TOKEN: SECRET_VALUE } }),
+    text: JSON.stringify({ theme: 'dark', env: { ANTHROPIC_API_KEY: SECRET_VALUE } }),
     bytes: 80,
   },
   mcp: { kind: 'absent', source: '/person/.claude.json' },
@@ -252,6 +253,7 @@ function world(
       credentials: {
         list: async () => ({ logins: await state.emails() }) as never,
       },
+      loginChanges: fakeLoginChanges(),
       provisioner: {
         preview: async () => {
           throw new Error('not used');
@@ -424,7 +426,7 @@ describe('scan', () => {
     should(claude?.instructions?.name).equal('CLAUDE.md');
     should(claude?.settings?.source).equal('/person/.claude/settings.json');
     should(claude?.skills).deepEqual(['review']);
-    should(claude?.secretKeys).deepEqual(['env.GITHUB_TOKEN']);
+    should(claude?.secretKeys).deepEqual(['env.ANTHROPIC_API_KEY']);
     should(JSON.stringify(scan)).not.containEql(SECRET_VALUE);
     should(scan.runtimes).deepEqual([{ harness: 'claude-code', name: 'claude-default', profile: 'claude-default' }]);
     should(scan.updates).deepEqual([]);
@@ -915,7 +917,7 @@ describe('the setup.import executor', () => {
     // Instructions are Runtimes' own kind: the text rides in the model, never as a document beside it.
     should(paths.some(path => path.startsWith('/state/fleet/assets/components/instructions/'))).be.false();
     should(configTextOf(applied[0]?.documents ?? [])).containEql('Be kind.');
-    should(secrets.get('GITHUB_TOKEN')).equal(SECRET_VALUE);
+    should(secrets.get('ANTHROPIC_API_KEY')).equal(SECRET_VALUE);
     for (const document of applied[0]?.documents ?? []) should(document.content).not.containEql(SECRET_VALUE);
     should(configTextOf(applied[0]?.documents ?? [])).containEql('"agent": true');
   });
@@ -1137,7 +1139,7 @@ describe('the setup.import executor', () => {
     const change = IMPORT();
     await full.service.executors.setup.describe(change, MACHINE);
     const failure = await catalogRefusal(full.service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
-    should(failure.message).equal('the secret store could not take GITHUB_TOKEN, so nothing was changed: full');
+    should(failure.message).equal('the secret store could not take ANTHROPIC_API_KEY, so nothing was changed: full');
     should(full.applied).have.length(0);
   });
 
@@ -1183,10 +1185,10 @@ describe('the setup.import executor', () => {
     const change = IMPORT();
     await service.executors.setup.describe(change, remoteWith('granted'));
     await service.executors.setup.execute(change, remoteWith('granted'));
-    should(secrets.get('GITHUB_TOKEN')).equal(SECRET_VALUE);
+    should(secrets.get('ANTHROPIC_API_KEY')).equal(SECRET_VALUE);
     const other = world();
     await importOnce(other.service);
-    should(other.secrets.get('GITHUB_TOKEN')).equal(SECRET_VALUE);
+    should(other.secrets.get('ANTHROPIC_API_KEY')).equal(SECRET_VALUE);
   });
 
   it('should file a key a new part and an accepted update share once, so the second create is not refused', async () => {
@@ -1242,7 +1244,7 @@ describe('the setup.import executor', () => {
           kind: 'text',
           source: '/person/.claude/settings.json',
           text: JSON.stringify({
-            env: { GITHUB_TOKEN: SECRET_VALUE, OPENAI_API_KEY: 'sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa' },
+            env: { ANTHROPIC_API_KEY: SECRET_VALUE, OPENAI_API_KEY: 'sk-proj-aaaaaaaaaaaaaaaaaaaaaaaa' },
           }),
           bytes: 120,
         },
@@ -3978,5 +3980,189 @@ describe('the setup.import executor, a skill an owner serves', () => {
     should(paths.some(path => path.startsWith('/state/fleet/assets/skills/'))).be.false();
     for (const document of applied[1]?.documents ?? []) state.assets[document.path] = document.content;
     should(state.assets[RECORD_PATH]).not.equal(recordBefore);
+  });
+});
+
+// ── The harness env goes to the login, through Logins' own door (r9 A8) ────────────────────────
+
+describe('the setup.import executor adds the harness env to the login the apply selected', () => {
+  const ENV_SETTINGS = JSON.stringify({
+    theme: 'dark',
+    env: { ANTHROPIC_BASE_URL: 'https://gateway.example.test', ANTHROPIC_API_KEY: SECRET_VALUE },
+  });
+  const envScan = (): HostHarnessScan[] => [
+    claudeScan({ settings: { kind: 'text', source: '/person/.claude/settings.json', text: ENV_SETTINGS, bytes: 80 } }),
+    codexScan(),
+  ];
+  type Asked = Parameters<NonNullable<FleetSetupServiceDeps['loginEnvImport']>['import']>[0];
+  const fakePort = (
+    answer: Awaited<ReturnType<NonNullable<FleetSetupServiceDeps['loginEnvImport']>['import']>> = {
+      outcome: 'written',
+      added: ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY'],
+      kept: [],
+      skipped: [],
+      sentences: [],
+    },
+  ) => {
+    const asked: { request: Asked; appliedBefore: number }[] = [];
+    let applied: World['applied'] = [];
+    return {
+      asked,
+      watch: (seen: World['applied']) => {
+        applied = seen;
+      },
+      port: {
+        import: async (request: Asked) => {
+          asked.push({ request, appliedBefore: applied.length });
+          return answer;
+        },
+      },
+    };
+  };
+
+  it('should hand the port the caller, the login, host text and the keys this apply filed, after the fleet is applied', async () => {
+    const fake = fakePort();
+    const w = world({ overrides: { loginEnvImport: fake.port } });
+    fake.watch(w.applied);
+    w.state.scans = envScan();
+
+    const { summary } = await importOnce(w.service, IMPORT({ tickedEnv: ['GITHUB_TOKEN'] } as never));
+
+    should(fake.asked).have.length(1);
+    const { request, appliedBefore } = fake.asked[0] as (typeof fake.asked)[number];
+    should(appliedBefore).equal(1);
+    should(request.login).equal('claude-you');
+    should(request.harness).equal('claude-code');
+    should(request.caller.governance).equal(MACHINE.governance);
+    should(request.plain).eql([{ name: 'ANTHROPIC_BASE_URL', value: 'https://gateway.example.test' }]);
+    should(request.minted).eql([{ name: 'ANTHROPIC_API_KEY', secretName: 'ANTHROPIC_API_KEY' }]);
+    should(request.ticked).eql(['GITHUB_TOKEN']);
+    should(w.secrets.get('ANTHROPIC_API_KEY')).equal(SECRET_VALUE);
+    should(JSON.stringify(request)).not.containEql(SECRET_VALUE);
+    should(summary).containEql('Added to login claude-you: ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY.');
+  });
+
+  it('should say what the port left out and what it held, and keep the import landed', async () => {
+    const fake = fakePort({
+      outcome: 'held',
+      added: ['ANTHROPIC_API_KEY'],
+      kept: [],
+      skipped: [{ name: 'GITHUB_TOKEN', because: 'not ticked' }],
+      sentences: ['confirm the new secret reference'],
+    });
+    const w = world({ overrides: { loginEnvImport: fake.port } });
+    fake.watch(w.applied);
+    w.state.scans = envScan();
+    const { summary } = await importOnce(w.service);
+    should(summary).containEql('That change waits for you to confirm it: confirm the new secret reference');
+    should(summary).containEql('Left out of login claude-you: GITHUB_TOKEN (not ticked).');
+    should(w.applied).have.length(1);
+  });
+
+  it('should say a refusal in a sentence and never undo the import', async () => {
+    const fake = fakePort({ outcome: 'refused', reason: 'this device may not change a login' });
+    const w = world({ overrides: { loginEnvImport: fake.port } });
+    fake.watch(w.applied);
+    w.state.scans = envScan();
+    const { summary } = await importOnce(w.service);
+    should(summary).containEql('were not added to login claude-you: this device may not change a login.');
+    should(w.applied).have.length(1);
+  });
+
+  it('should say so when the port throws, and say nothing more when this machine has no port', async () => {
+    const throwing = world({
+      overrides: {
+        loginEnvImport: {
+          import: async () => {
+            throw new Error('Logins is off');
+          },
+        },
+      },
+    });
+    throwing.state.scans = envScan();
+    should((await importOnce(throwing.service)).summary).containEql(
+      'were not added to login claude-you: Logins is off.',
+    );
+    const none = world();
+    none.state.scans = envScan();
+    should((await importOnce(none.service)).summary).equal('studio is ready · 1 runtime created: claude-default.');
+  });
+
+  const GITHUB_SETTINGS = JSON.stringify({
+    env: { GITHUB_TOKEN: SECRET_VALUE, GH_TOKEN: SECRET_VALUE, ANTHROPIC_BASE_URL: 'https://gateway.example.test' },
+  });
+  const githubScan = (): HostHarnessScan[] => [
+    claudeScan({
+      settings: { kind: 'text', source: '/person/.claude/settings.json', text: GITHUB_SETTINGS, bytes: 80 },
+    }),
+    codexScan(),
+  ];
+
+  it('should file no secret and bind nothing for a GitHub token that is not ticked, whether tickedEnv is absent or empty', async () => {
+    for (const change of [IMPORT(), IMPORT({ tickedEnv: [] } as never)]) {
+      const fake = fakePort();
+      const w = world({ overrides: { loginEnvImport: fake.port } });
+      fake.watch(w.applied);
+      w.state.scans = githubScan();
+      await importOnce(w.service, change);
+      should([...w.secrets.keys()]).eql([]);
+      should(fake.asked[0]?.request.minted).eql([]);
+      should(fake.asked[0]?.request.plain.map(variable => variable.name)).eql(['ANTHROPIC_BASE_URL']);
+      should(JSON.stringify(w.applied)).not.containEql('GITHUB_TOKEN');
+      should(JSON.stringify(w.applied)).not.containEql(SECRET_VALUE);
+    }
+  });
+
+  it('should file and bind the one GitHub token the person ticked, and no other', async () => {
+    const fake = fakePort();
+    const w = world({ overrides: { loginEnvImport: fake.port } });
+    fake.watch(w.applied);
+    w.state.scans = githubScan();
+    await importOnce(w.service, IMPORT({ tickedEnv: ['GITHUB_TOKEN'] } as never));
+    should([...w.secrets.keys()]).eql(['GITHUB_TOKEN']);
+    should(w.secrets.get('GITHUB_TOKEN')).equal(SECRET_VALUE);
+    should(fake.asked[0]?.request.minted).eql([{ name: 'GITHUB_TOKEN', secretName: 'GITHUB_TOKEN' }]);
+    should(fake.asked[0]?.request.ticked).eql(['GITHUB_TOKEN']);
+  });
+
+  it('should create the login the plan names through Logins, before the runtime is written and before the env is added', async () => {
+    const changes = fakeLoginChanges();
+    const fake = fakePort();
+    const w = world({ overrides: { loginEnvImport: fake.port }, catalog: { loginChanges: changes } });
+    fake.watch(w.applied);
+    w.state.emails = async () => [];
+    w.state.scans = envScan();
+    await importOnce(w.service);
+    should(changes.staged).eql([{ kind: 'login.add', id: 'claude-you', harness: 'claude-code', store: 'host' }]);
+    should(changes.applied).have.length(1);
+    should(fake.asked[0]?.request.login).equal('claude-you');
+  });
+
+  it('should leave a login that already exists alone, and say so in a sentence when Logins refuses to create one', async () => {
+    const existing = fakeLoginChanges();
+    const kept = world({ catalog: { loginChanges: existing } });
+    kept.state.scans = envScan();
+    await importOnce(kept.service);
+    should(existing.staged).eql([]);
+
+    const refusing = fakeLoginChanges();
+    refusing.refuseStage(new Error('no way') as never);
+    const w = world({ catalog: { loginChanges: refusing } });
+    w.state.emails = async () => [];
+    w.state.scans = envScan();
+    const change = IMPORT();
+    await w.service.executors.setup.describe(change, MACHINE);
+    const failure = await catalogRefusal(w.service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
+    should(failure.message).containEql('Logins could not create the login claude-you: no way');
+    should(w.applied).have.length(0);
+  });
+
+  it('should ask the port nothing when the person left the env out', async () => {
+    const fake = fakePort();
+    const w = world({ overrides: { loginEnvImport: fake.port } });
+    fake.watch(w.applied);
+    w.state.scans = envScan();
+    await importOnce(w.service, IMPORT({ skip: ['claude-code:env'] }));
+    should(fake.asked).eql([]);
   });
 });

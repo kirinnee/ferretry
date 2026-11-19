@@ -10,7 +10,12 @@ import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/te
 import { type DaemonImplementation, definePlugin, type HookInvoker, implementDaemon } from '@ferretry/kernel/manifest';
 import { testHost } from '@ferretry/kernel/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
-import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import {
+  fakeLoginChanges,
+  fakeLoginEnvImport,
+  fakeLogins,
+  sampleLogin,
+} from '@ferretry/plugin-logins/contract/testing';
 import type { RuntimeView } from '../../../contract/wire/index.ts';
 import { hostAssembly, runtimesDaemon } from '../../../daemon/index.ts';
 import { runtimeModelCatalog } from '../../../daemon/lib/runtime-model-catalog.ts';
@@ -55,6 +60,7 @@ async function world() {
       ferrets: new FakeFerrets(),
       logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
       loginChanges: fakeLoginChanges(),
+      loginEnvImport: fakeLoginEnvImport(),
       vault: new FakeVault(),
     },
     gate: new StandInAdmission(() => ownerStanding()),

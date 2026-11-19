@@ -9,7 +9,12 @@ import { FakeLoginKind, FakeRunner } from '../../../../ferrets/contract/testing/
 import { FakeGate, ownerStanding, StandInAdmission } from '../../../../gate/contract/testing/index.ts';
 import { type SecretName } from '../../../../vault/contract/index.ts';
 import { FakeVault } from '../../../../vault/contract/testing/index.ts';
-import { fakeLoginChanges, fakeLogins, sampleLogin } from '../../../../../plugins/logins/contract/testing/index.ts';
+import {
+  fakeLoginChanges,
+  fakeLoginEnvImport,
+  fakeLogins,
+  sampleLogin,
+} from '../../../../../plugins/logins/contract/testing/index.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { daemonImplementations } from '../../../src/generated/plugins.ts';
 import { diskFolders, type TestHost, testHost } from '../../../testing/index.ts';
@@ -211,6 +216,7 @@ async function boot(runner: RecordingRunner, fixed: string | null = STALE_FIXED)
       // The runtime `work` below runs on this signed-in login: a start by runtime resolves it (v5), and the launch spends it.
       logins: fakeLogins([sampleLogin(RUNTIME)]),
       loginChanges: fakeLoginChanges(),
+      loginEnvImport: fakeLoginEnvImport(),
     },
     // `claude` exists and answers its version, so the harness is discovered.
     executables: ['/opt/bin/claude'],

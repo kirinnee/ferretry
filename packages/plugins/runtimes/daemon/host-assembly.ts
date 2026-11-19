@@ -366,6 +366,8 @@ export function fileAssembly(
         Parameters<typeof fileFleetSetupDeps>[0]['logins'] &
         Pick<LoginsApi, 'environmentTemplates' | 'modelSources' | 'launchStores'>;
       readonly loginChanges: FleetCatalogServiceDeps['loginChanges'];
+      /** Logins' door for an imported harness `env` (r9 A8): only Runtimes is handed one that writes. */
+      readonly loginEnvImport?: FleetSetupServiceDeps['loginEnvImport'];
       /**
        * The Vault, through its NAME listing and its CREATE-ONLY write ONLY: `names` answers a name and two times, and `putNew`
        * takes a value in and never hands one back, so no value can flow out through it. Absent: the setup's secret read stays
@@ -471,6 +473,7 @@ export function fileAssembly(
       catalog: base,
       logins: ctx.needs.logins,
       tools,
+      ...(ctx.needs.loginEnvImport === undefined ? {} : { loginEnvImport: ctx.needs.loginEnvImport }),
       // Imported MCP servers, skills and settings go to the plugin that owns each (its own `put`), never written here.
       components: componentWriters(
         hook => ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY),

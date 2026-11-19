@@ -10,7 +10,7 @@ import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/te
 import type { ConfigCollectionDef, KernelPorts } from '@ferretry/kernel/contract';
 import { testHost } from '@ferretry/kernel/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
-import { fakeLoginChanges, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
+import { fakeLoginChanges, fakeLoginEnvImport, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import should from 'should';
 import { PROFILE_ITEMS, RUNTIME_ITEMS } from '../../../contract/index.ts';
 import { writeAllConfigWriter } from '../../../daemon/adapters/config-write-all.ts';
@@ -40,6 +40,7 @@ async function world(files: Record<string, unknown> = {}) {
       ferrets: new FakeFerrets(),
       logins: fakeLogins([]),
       loginChanges: fakeLoginChanges(),
+      loginEnvImport: fakeLoginEnvImport(),
       vault: new FakeVault(),
     },
     gate: new StandInAdmission(() => ownerStanding()),

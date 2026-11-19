@@ -11,6 +11,9 @@ import {
   LoginChangeError,
   type LoginChangeOutcome,
   type LoginChangeView,
+  type LoginEnvImportApi,
+  type LoginEnvImportOutcome,
+  type LoginEnvImportRequest,
   type LoginId,
   type LoginLaunchStore,
   type LoginList,
@@ -201,4 +204,26 @@ export async function loginsConformance(make: () => LoginsApi): Promise<Result<t
   if (!ModelCatalogSourcesSchema.safeParse(await api.modelSources()).success)
     failures.push('modelSources() returns the catalog sources');
   return failures.length === 0 ? ok(true) : err(failures);
+}
+
+/** The setup import's door into a login's environment as a fake: it records what it is asked and answers `unchanged`. */
+export interface FakeLoginEnvImport extends LoginEnvImportApi {
+  readonly asked: LoginEnvImportRequest[];
+  /** What the next imports answer (default: unchanged). */
+  setOutcome(outcome: LoginEnvImportOutcome): void;
+}
+
+export function fakeLoginEnvImport(): FakeLoginEnvImport {
+  const asked: LoginEnvImportRequest[] = [];
+  let outcome: LoginEnvImportOutcome = { outcome: 'unchanged', kept: [], skipped: [] };
+  return {
+    asked,
+    setOutcome: next => {
+      outcome = next;
+    },
+    import: async request => {
+      asked.push(request);
+      return outcome;
+    },
+  };
 }

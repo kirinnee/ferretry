@@ -20,6 +20,7 @@ import {
   LoginChanged,
   LoginSignedIn,
   LoginChangesPort,
+  LoginEnvImportPort,
   LoginsPort,
   LoginsBudget,
   LoginsQuota,
@@ -49,7 +50,7 @@ export default definePlugin({
 
   needs: { vault: VaultPort },
   uses: { browsers: BrowsersPort, ferrets: FerretsPort },
-  provides: { logins: LoginsPort, loginChanges: LoginChangesPort },
+  provides: { logins: LoginsPort, loginChanges: LoginChangesPort, loginEnvImport: LoginEnvImportPort },
 
   actions: {
     routes: [

@@ -34,6 +34,7 @@
  */
 import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { looksSecret } from '@ferretry/std/credential-words';
+import { GITHUB_TOKEN_NAMES, maskedVariableName, nameLooksLikeKey } from '@ferretry/plugin-logins/contract';
 import { importItemId, importNamedItemId } from '../../../contract/index.ts';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
@@ -273,6 +274,8 @@ export interface ImportPlan {
   readonly runtimes: Readonly<Record<string, Runtime>>;
   readonly files: readonly ImportFile[];
   readonly secrets: readonly ImportedSecret[];
+  /** Each imported harness's own `env`, for the login its runtime launches on (r9 A8). */
+  readonly loginEnvs: readonly ImportedLoginEnv[];
   /** Per-component warnings that do not block saving (K6), keyed by layer reference. */
   readonly warnings: Readonly<Record<string, readonly string[]>>;
   readonly notes: readonly ImportNote[];
@@ -295,6 +298,11 @@ export interface ImportOptions {
   readonly record?: ImportRecord;
   /** Secret names already in the store, so an import never overwrites one. */
   readonly existingSecrets?: readonly string[];
+  /**
+   * GitHub token variables of a harness's own `env` the person ticked (names only). A token that is not named here is NOT
+   * imported: no secret is filed for it and nothing reaches a component or the login (r9 A8). Absent: none is imported.
+   */
+  readonly tickedEnv?: readonly string[];
   /** Harnesses whose duplicate runtime should be created anyway ("Add another anyway"). */
   readonly addDuplicates?: readonly HarnessKind[];
   /** A content digest. Equal inputs give equal outputs; that is all that is asked of it. */
@@ -377,10 +385,43 @@ class SecretNames {
   }
 }
 
+/** The three variables that carry a GitHub account's token: the login's environment leaves them out unless ticked. */
+const isGithubTokenName = (name: string): boolean => GITHUB_TOKEN_NAMES.includes(name.toUpperCase());
+
 interface EnvImport {
   readonly env: Record<string, string>;
   readonly secretKeys: string[];
   readonly dropped: string[];
+  /** GitHub token variables left out until ticked, by NAME: the scan still lists them so the person can tick one. */
+  readonly gated: string[];
+  /** The variables as host text (no secret-looking value): what a login's environment takes as plain text (r9 A8). */
+  readonly plain: LoginEnvPlain[];
+  /** The variables whose value went to the Vault, by the secret's NAME: what a login's environment binds a reference to. */
+  readonly minted: LoginEnvMinted[];
+}
+
+/** A host variable as written, for the imported login's environment (r9 A8). */
+interface LoginEnvPlain {
+  readonly name: string;
+  readonly value: string;
+}
+
+/** A host variable whose value this plan files in the Vault, by NAME (r9 A8). */
+interface LoginEnvMinted {
+  readonly name: string;
+  readonly secretName: string;
+}
+
+/**
+ * The host's harness `env` for the login its runtime launches on (r9 A8): host text and the names of the secrets this plan
+ * files, in two lists so a Vault reference only ever comes from a key the apply filed itself.
+ */
+export interface ImportedLoginEnv {
+  readonly harness: HarnessKind;
+  /** The login the apply selected or created for this harness. */
+  readonly login: string;
+  readonly plain: readonly LoginEnvPlain[];
+  readonly minted: readonly LoginEnvMinted[];
 }
 
 /** An environment block with every secret-looking value replaced by a reference. */
@@ -390,35 +431,50 @@ function importEnv(
   from: string,
   names: SecretNames,
   secrets: ImportedSecret[],
+  /** Given for a harness's own `env`: a GitHub token variable not named here is left out before any secret is filed. */
+  ticked?: ReadonlySet<string>,
 ): EnvImport {
-  const result: EnvImport = { env: {}, secretKeys: [], dropped: [] };
+  const result: EnvImport = { env: {}, secretKeys: [], dropped: [], gated: [], plain: [], minted: [] };
   if (!isRecord(env)) return result;
   for (const [variable, raw] of Object.entries(env)) {
+    // A name that is itself shaped like a key is not repeated in a scan, a warning or a source label.
+    const shown = `${keyPrefix}${maskedVariableName(variable)}`;
+    // A key typed into the name box: skipped BEFORE anything is derived from it, so no Vault name is built from it.
+    if (nameLooksLikeKey(variable)) {
+      result.dropped.push(`${shown} (a name that looks like a key, so it was left out)`);
+      continue;
+    }
     if (typeof raw !== 'string' && typeof raw !== 'number' && typeof raw !== 'boolean') {
-      result.dropped.push(`${keyPrefix}${variable} (not a text value)`);
+      result.dropped.push(`${shown} (not a text value)`);
       continue;
     }
     const value = String(raw);
+    if (ticked !== undefined && isGithubTokenName(variable) && !ticked.has(variable)) {
+      result.dropped.push(`${shown} (a GitHub token: not imported unless you tick it)`);
+      result.gated.push(shown);
+      continue;
+    }
     if ((RESERVED_ENV_NAMES as readonly string[]).includes(variable)) {
-      result.dropped.push(`${keyPrefix}${variable} (Ferretry sets it for each runtime)`);
+      result.dropped.push(`${shown} (Ferretry sets it for each runtime)`);
       continue;
     }
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(variable)) {
-      result.dropped.push(`${keyPrefix}${variable} (not an environment variable name)`);
+      result.dropped.push(`${shown} (not an environment variable name)`);
       continue;
     }
     if (looksSecret(variable, value)) {
-      result.secretKeys.push(`${keyPrefix}${variable}`);
-      result.env[variable] = secretReference(
-        names.claim(variable, value, `${from} · ${keyPrefix}${variable}`, secrets),
-      );
+      result.secretKeys.push(shown);
+      const secretName = names.claim(variable, value, `${from} · ${shown}`, secrets);
+      result.env[variable] = secretReference(secretName);
+      result.minted.push({ name: variable, secretName });
       continue;
     }
     if (/\$\{secret:/u.test(value) && secretReferencesIn(value).length === 0) {
-      result.dropped.push(`${keyPrefix}${variable} (a malformed secret reference)`);
+      result.dropped.push(`${shown} (a malformed secret reference)`);
       continue;
     }
     result.env[variable] = value;
+    result.plain.push({ name: variable, value });
   }
   return result;
 }
@@ -598,6 +654,10 @@ interface HarnessHarvest {
   readonly skills: readonly HostSkill[];
   readonly modelSet: ModelSetComponent;
   readonly secretKeys: readonly string[];
+  /** GitHub token variables left out until ticked (names only): listed by the scan, never filed. */
+  readonly gatedKeys: readonly string[];
+  /** The harness's own `env` for its login (r9 A8), when it has any and the person did not leave it out. */
+  readonly loginEnv?: { readonly plain: readonly LoginEnvPlain[]; readonly minted: readonly LoginEnvMinted[] };
   readonly problems: readonly string[];
   /** Whether anything at all was found, which decides Default or Starter (E5). */
   readonly found: boolean;
@@ -643,6 +703,7 @@ function harvest(
   names: SecretNames,
   secrets: ImportedSecret[],
   skip: ReadonlySet<string>,
+  ticked: ReadonlySet<string>,
 ): HarnessHarvest {
   const { harness } = scan;
   const key = itemHarness(harness);
@@ -672,7 +733,7 @@ function harvest(
       hooks = { source: scan.settings.source, count: countHooks(rest.hooks) };
     }
     delete rest.hooks;
-    envImport = skipped('env') ? undefined : importEnv(rest.env, 'env.', settingsFile, names, secrets);
+    envImport = skipped('env') ? undefined : importEnv(rest.env, 'env.', settingsFile, names, secrets, ticked);
     delete rest.env;
   } else {
     delete rest.mcp_servers;
@@ -681,7 +742,7 @@ function harvest(
     if (isRecord(policy) && isRecord(policy.set)) {
       envImport = skipped('env')
         ? undefined
-        : importEnv(policy.set, 'shell_environment_policy.set.', settingsFile, names, secrets);
+        : importEnv(policy.set, 'shell_environment_policy.set.', settingsFile, names, secrets, ticked);
       const kept = Object.fromEntries(Object.entries(policy).filter(([key]) => key !== 'set'));
       if (Object.keys(kept).length === 0) delete rest.shell_environment_policy;
       else rest.shell_environment_policy = kept;
@@ -796,6 +857,10 @@ function harvest(
     skills,
     modelSet: modelSetOf(harness, modelSource),
     secretKeys,
+    gatedKeys: envImport?.gated ?? [],
+    ...(envImport === undefined || (envImport.plain.length === 0 && envImport.minted.length === 0)
+      ? {}
+      : { loginEnv: { plain: envImport.plain, minted: envImport.minted } }),
     problems,
     found: instructions !== undefined || settings !== undefined || mcp.length > 0 || skills.length > 0,
   };
@@ -1071,7 +1136,7 @@ function previewOf(scan: HostHarnessScan, entry: HarnessHarvest | undefined): Ha
     skills: entry.skills.map(skill => skill.item),
     codexProfiles: [...entry.codexProfiles],
     projectInstructions: [...(scan.projectInstructions ?? [])],
-    secretKeys: [...entry.secretKeys],
+    secretKeys: [...entry.secretKeys, ...entry.gatedKeys],
     problems: [...entry.problems],
   };
 }
@@ -1089,8 +1154,9 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
   const secrets: ImportedSecret[] = [];
   const imported = importedHarnesses(scans, options.include);
   const skip = new Set(options.skip ?? []);
+  const ticked = new Set(options.tickedEnv ?? []);
   const harvests = imported.map(harness =>
-    harvest(scans.find(scan => scan.harness === harness) as HostHarnessScan, names, secrets, skip),
+    harvest(scans.find(scan => scan.harness === harness) as HostHarnessScan, names, secrets, skip, ticked),
   );
   const harvestOf = (harness: HarnessKind) => harvests.find(entry => entry.harness === harness);
 
@@ -1216,9 +1282,14 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
       harness,
     );
   const profileOf: Partial<Record<HarnessKind, string>> = {};
+  // A harness an earlier import already brought in: its login has had its `env` already, so a repeat adds none (r9 A8).
+  const importedBefore = new Set<HarnessKind>();
   for (const harness of imported) {
     const known = record.profiles?.[harness] ?? record.profile;
-    if (known !== undefined && existing?.profiles[known] !== undefined) profileOf[harness] = known;
+    if (known !== undefined && existing?.profiles[known] !== undefined) {
+      profileOf[harness] = known;
+      importedBefore.add(harness);
+    }
   }
   for (const known of new Set(Object.values(profileOf))) {
     const on = imported.filter(harness => profileOf[harness] === known);
@@ -1259,6 +1330,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
   const credentials: Record<string, Credential> = {};
   const runtimes: Record<string, Runtime> = {};
   const duplicates: ImportDuplicate[] = [];
+  const loginEnvs: ImportedLoginEnv[] = [];
   for (const harness of imported) {
     const scan = scans.find(each => each.harness === harness) as HostHarnessScan;
     const wanted = credentialOf(harness, scan.login);
@@ -1271,6 +1343,12 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     const credentialId =
       reuse ?? freeName(harnessNamed(harness, 'you'), candidate => existing?.credentials[candidate] !== undefined);
     if (reuse === undefined) credentials[credentialId] = wanted;
+    const env = importedBefore.has(harness) ? undefined : harvestOf(harness)?.loginEnv;
+    if (env !== undefined) {
+      // An unticked GitHub token never got here: it was left out of the harvest, before any secret was claimed.
+      for (const entry of env.minted) keptSecrets.add(entry.secretName);
+      loginEnvs.push({ harness, login: credentialId, plain: env.plain, minted: env.minted });
+    }
     const profileName = profileOf[harness];
     if (profileName === undefined) continue;
     const suggested = freeName(
@@ -1304,6 +1382,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     runtimes,
     files,
     secrets: secrets.filter(secret => keptSecrets.has(secret.name)),
+    loginEnvs,
     warnings,
     notes,
     updates,

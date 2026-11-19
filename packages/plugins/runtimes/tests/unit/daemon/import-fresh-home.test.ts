@@ -11,7 +11,7 @@ import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { type DaemonImplementation } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
-import { fakeLoginChanges, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
+import { fakeLoginChanges, fakeLoginEnvImport, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon } from '../../../daemon/index.ts';
 import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
 
@@ -38,6 +38,7 @@ async function fresh(): Promise<{ host: TestHost; world: FleetWorld }> {
       ferrets: new FakeFerrets(),
       logins: fakeLogins([]),
       loginChanges: fakeLoginChanges(),
+      loginEnvImport: fakeLoginEnvImport(),
       vault: new FakeVault(),
     },
     // The owner at the machine confirms what an import loosens, as Gate's judge does for the host's admin token.

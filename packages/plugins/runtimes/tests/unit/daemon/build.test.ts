@@ -30,7 +30,13 @@ import {
 import { UNAVAILABLE } from '../../../daemon/lib/service/assembly.ts';
 import { LoginChanged, type LoginView } from '@ferretry/plugin-logins/contract';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
-import { type FakeLogins, fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import {
+  type FakeLogins,
+  fakeLoginChanges,
+  fakeLoginEnvImport,
+  fakeLogins,
+  sampleLogin,
+} from '@ferretry/plugin-logins/contract/testing';
 import manifest from '../../../manifest.ts';
 
 const login = sampleLogin;
@@ -118,7 +124,13 @@ async function build(
   ) as DaemonImplementation<any>;
   const host = await testHost({
     plugins: [daemon],
-    fakes: { ferrets, logins, loginChanges: fakeLoginChanges(), vault: new FakeVault() },
+    fakes: {
+      ferrets,
+      logins,
+      loginChanges: fakeLoginChanges(),
+      loginEnvImport: fakeLoginEnvImport(),
+      vault: new FakeVault(),
+    },
     gate: new StandInAdmission(() => ownerStanding()),
     config: options.config ?? FILES,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
