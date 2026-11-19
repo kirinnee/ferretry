@@ -1,0 +1,76 @@
+import type { Instant } from '@ferretry/std';
+
+/** One name in a folder as the machine reports it: the leaf as it is, a link never followed. */
+export interface RawFolderEntry {
+  readonly name: string;
+  readonly kind: 'file' | 'directory';
+  readonly modified: Instant;
+}
+
+/**
+ * Why a folder was not opened: the machine refused it (or the fence did, or nothing verified is there), it is a file, or the
+ * explorer's own judgment of where it REALLY is said no (`outside` the home, `private`).
+ */
+export type FolderOpenFailure = 'refused' | 'not_folder' | 'outside' | 'private';
+
+/** The explorer's verdict on a real folder path: `undefined` to accept it, or why not. Asked on the real path, never the spelling. */
+export type FolderVerdict = (real: string) => Promise<'outside' | 'private' | undefined>;
+
+export type FolderOpen =
+  | { readonly ok: true; readonly folder: HeldFolder }
+  | { readonly ok: false; readonly reason: FolderOpenFailure };
+
+/** What making one new folder did. */
+export type LeafMade =
+  | { readonly kind: 'made'; readonly path: string }
+  | { readonly kind: 'exists' }
+  | { readonly kind: 'failed' }
+  /** The new folder was not where it should be (a link, or a place the verdict refuses): it was taken back. */
+  | { readonly kind: 'refused'; readonly reason: 'outside' | 'private' };
+
+/**
+ * A folder HELD OPEN: everything the explorer reads or makes in it goes through the one object that was judged, never
+ * through its name again. The real one keeps a descriptor; a test double keeps a map entry.
+ */
+export interface HeldFolder {
+  /** The real path of the object held (links resolved), as the machine says it NOW. */
+  readonly real: string;
+  /** The names in the held folder, files and folders only (a link is never listed); `more` when it held more than `limit`. */
+  entries(limit: number): Promise<{ readonly entries: readonly RawFolderEntry[]; readonly more: boolean } | undefined>;
+  /**
+   * What is AT `<held>/<name>`, the leaf never followed: nothing, a link (or a name the machine refuses to look at), or
+   * something else that is there.
+   */
+  lookup(name: string): Promise<'missing' | 'link' | 'present'>;
+  /** Whether `<held>/<name>/.git` exists (a folder, or the file a work tree keeps). */
+  hasGit(name: string): Promise<boolean>;
+  /**
+   * Makes ONE new folder `name` (owner-only, not recursive, never over anything) inside the held folder, then proves it
+   * is a real folder at `<real>/<name>` that `verdict` accepts; when it is not, only that just-made empty folder is
+   * removed and the refusal answers.
+   */
+  makeLeaf(name: string, verdict: FolderVerdict): Promise<LeafMade>;
+  close(): Promise<void>;
+}
+
+/**
+ * What the folder explorer asks of the machine, as one port. The real one (`adapter.ts`) goes through the kernel's
+ * `imports` root and holds folders open; tests give a map of folders. Every path handed to it is absolute.
+ */
+export interface FolderBrowser {
+  /** The owner's home folder, resolved (no link on the way). */
+  home(): Promise<string>;
+  /**
+   * Holds the folder open. The real path is resolved, judged by `verdict`, held, and judged AGAIN as what the held
+   * object really is; a folder that fails either is never returned. The caller closes it.
+   */
+  open(path: string, verdict: FolderVerdict): Promise<FolderOpen>;
+  /**
+   * Whether the real folder `path` directly holds a sign-in or key file: every name it holds (a link counts, not
+   * followed) is judged by the one fold in `fence.ts`, so a differently spelled marker is a marker. A folder whose names
+   * cannot be read answers `true`; a file or a missing name, `false`.
+   */
+  holdsSignIn(path: string): Promise<boolean>;
+  /** The real path (links resolved) of each of `paths` that exists and resolves; the others are left out. */
+  realPaths(paths: readonly string[]): Promise<readonly string[]>;
+}

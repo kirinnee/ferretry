@@ -2,6 +2,8 @@ import { LaunchRoots } from '@ferretry/core-ferrets/contract';
 import { appAction, definePlugin, route, screen, verb } from '@ferretry/kernel/manifest';
 import {
   filesystemConfigure,
+  filesystemUse,
+  PROJECT_FOLDER_CREATED_AUDIT,
   PROJECT_REGISTERED_AUDIT,
   PROJECT_REMOVED_AUDIT,
   ProjectRegistered,
@@ -66,6 +68,24 @@ export default definePlugin({
         audit: { record: PROJECT_REMOVED_AUDIT },
         guard: { none: 'answers the removed record; no pane, page or vault text' },
       }),
+      // NEW in r9 (B6): the folder explorer behind the project picker. Names under the owner's home only, never a private
+      // folder (`daemon/features/folders/fence.ts`); a person's act, never a ferret's.
+      route('GET /v1/projects/folders', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: filesystemUse,
+        noStore: true,
+        audit: { skip: 'a read of folder names under the home folder' },
+        guard: { none: 'folder names, kinds and times only; no file content, no pane, page or vault text' },
+      }),
+      route('POST /v1/projects/folders', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: filesystemConfigure,
+        noStore: true,
+        audit: { record: PROJECT_FOLDER_CREATED_AUDIT },
+        guard: { none: 'answers the new folder path; no pane, page or vault text' },
+      }),
     ],
     cli: [
       verb('project add', {
@@ -104,5 +124,5 @@ export default definePlugin({
   },
 
   // Registering touches only the folder the owner named, once (`imports` root, §7.7); `git` clones and initialises.
-  permissions: { roots: ['imports'], spawn: ['git', 'mkdir'] },
+  permissions: { roots: ['imports'], spawn: ['git', 'mkdir', 'rmdir'] },
 });

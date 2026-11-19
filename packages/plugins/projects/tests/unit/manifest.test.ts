@@ -8,6 +8,8 @@ describe('projects manifest', () => {
       'GET /v1/projects',
       'POST /v1/projects',
       'DELETE /v1/projects/:id',
+      'GET /v1/projects/folders',
+      'POST /v1/projects/folders',
     ]);
     for (const route of routes) expect(route.minimum).toBe('operator');
     expect(routes[2]?.caller).toBe('person');
