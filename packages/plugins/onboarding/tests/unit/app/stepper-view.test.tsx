@@ -4,37 +4,84 @@ import { deriveSteps, type StepperFacts } from '../../../app/features/stepper/st
 import { StepperHarness } from './stepper-harness.tsx';
 import { mount, must } from '../support/dom.ts';
 
-const ALL: StepperFacts = { passkey: true, name: true, login: true, runtime: true, ferret: true };
+const ALL: StepperFacts = { passkey: true, name: true, claude: true, codex: true, project: true };
 
 describe('the stepper view', () => {
   it('draws done / current / next with exactly one highlight and one button', async () => {
     const ran: string[] = [];
     const view = await mount(
       <StepperView
-        action={{ label: 'Add a login', run: () => ran.push('go') }}
+        action={{ label: 'Set up Claude Code', run: () => ran.push('go') }}
         onDismiss={() => undefined}
-        steps={deriveSteps({ ...ALL, login: false, runtime: false, ferret: false })}
+        steps={deriveSteps({ ...ALL, claude: false, codex: false, project: false })}
       />,
     );
     const items = [...view.container.querySelectorAll('[data-step]')].map(
       item => `${item.getAttribute('data-step')}:${item.getAttribute('data-state')}`,
     );
-    expect(items).toEqual(['pair:done', 'passkey:done', 'name:done', 'login:current', 'runtime:next', 'ferret:next']);
+    expect(items).toEqual(['pair:done', 'passkey:done', 'name:done', 'claude:current', 'codex:next', 'project:next']);
     expect(view.container.querySelectorAll('[aria-current="step"]')).toHaveLength(1);
     const buttons = view.container.querySelectorAll('button');
     expect(buttons).toHaveLength(1);
-    expect(buttons[0]?.textContent).toBe('Add a login');
+    expect(buttons[0]?.textContent).toBe('Set up Claude Code');
     must(buttons[0], 'the action').click();
     expect(ran).toEqual(['go']);
     // State is said in words too, not only in marks.
-    expect(view.container.textContent).toContain('Login — up next');
-    expect(view.container.textContent).toContain('Runtime — later');
+    expect(view.container.textContent).toContain('Claude Code — up next');
+    expect(view.container.textContent).toContain('Codex — later');
+    await view.unmount();
+  });
+
+  it('the Project step offers Create a project (the one highlight), Continue a conversation beside it, and the projectless words', async () => {
+    const ran: string[] = [];
+    const view = await mount(
+      <StepperView
+        action={{
+          label: 'Create a project',
+          run: () => ran.push('create'),
+          alternative: { label: 'Continue a conversation', run: () => ran.push('resume') },
+          note: 'Without a project, a ferret works in a folder you name.',
+        }}
+        onDismiss={() => undefined}
+        steps={deriveSteps({ ...ALL, project: false })}
+      />,
+    );
+    expect(view.container.querySelector('[data-state="current"]')?.getAttribute('data-step')).toBe('project');
+    const primary = must(
+      view.container.querySelector<HTMLElement>('[data-first-run-stepper-action="project"]'),
+      'primary',
+    );
+    const other = must(
+      view.container.querySelector<HTMLElement>('[data-first-run-stepper-alternative="project"]'),
+      'alternative',
+    );
+    expect(primary.textContent).toBe('Create a project');
+    expect(other.textContent).toBe('Continue a conversation');
+    expect(view.container.querySelectorAll('button[data-variant="primary"]')).toHaveLength(1);
+    expect(view.container.querySelector('[data-first-run-stepper-note]')?.textContent).toContain(
+      'works in a folder you name',
+    );
+    primary.click();
+    other.click();
+    expect(ran).toEqual(['create', 'resume']);
+    await view.unmount();
+  });
+
+  it('says no projectless words once the step is done (a finished stepper explains nothing)', async () => {
+    const view = await mount(
+      <StepperView
+        action={{ label: 'x', run: () => undefined, note: 'gone' }}
+        onDismiss={() => undefined}
+        steps={deriveSteps(ALL)}
+      />,
+    );
+    expect(view.container.querySelector('[data-first-run-stepper-note]')).toBeNull();
     await view.unmount();
   });
 
   it('offers Dismiss only once every step is done', async () => {
     const open = await mount(
-      <StepperView onDismiss={() => undefined} steps={deriveSteps({ ...ALL, ferret: false })} />,
+      <StepperView onDismiss={() => undefined} steps={deriveSteps({ ...ALL, project: false })} />,
     );
     expect(open.container.querySelector('[data-first-run-stepper-dismiss]')).toBeNull();
     await open.unmount();
@@ -52,7 +99,7 @@ describe('the stepper on a machine', () => {
     const waiting = await mount(<blank.Component />);
     expect(waiting.container.querySelector('[data-first-run-stepper]')).toBeNull();
     await waiting.unmount();
-    const harness = StepperHarness.answering({ ferret: false });
+    const harness = StepperHarness.answering({ project: false });
     const view = await mount(<harness.Component />);
     await harness.settle();
     expect(view.container.querySelectorAll('[data-first-run-stepper="open"]')).toHaveLength(1);
@@ -60,16 +107,16 @@ describe('the stepper on a machine', () => {
   });
 
   it('resumes after a reload: the remembered steps draw at once, before any read comes back', async () => {
-    const first = StepperHarness.answering({ login: false });
+    const first = StepperHarness.answering({ claude: false });
     const before = await mount(<first.Component />);
     await first.settle();
-    expect(before.container.querySelector('[data-state="current"]')?.getAttribute('data-step')).toBe('login');
+    expect(before.container.querySelector('[data-state="current"]')?.getAttribute('data-step')).toBe('claude');
     await before.unmount();
 
     // A reload: new page, same storage, a machine that has not answered yet.
     const reloaded = StepperHarness.silent(first.storage);
     const after = await mount(<reloaded.Component />);
-    expect(after.container.querySelector('[data-state="current"]')?.getAttribute('data-step')).toBe('login');
+    expect(after.container.querySelector('[data-state="current"]')?.getAttribute('data-step')).toBe('claude');
     await after.unmount();
   });
 
@@ -81,8 +128,8 @@ describe('the stepper on a machine', () => {
     await view.unmount();
   });
 
-  it('a machine whose every ferret is archived is not waiting for a first ferret', async () => {
-    const harness = StepperHarness.answering({ archivedFerret: true });
+  it('a machine whose every ferret is archived is not waiting for a project (it works projectless)', async () => {
+    const harness = StepperHarness.answering({ conversation: true, archivedFerret: true });
     const view = await mount(<harness.Component />);
     await harness.settle();
     expect(view.container.querySelector('[data-first-run-stepper]')).toBeNull();
@@ -90,8 +137,8 @@ describe('the stepper on a machine', () => {
   });
 
   it('a dismissed stepper stays away after a reload, until a step opens again', async () => {
-    // The stepper was open on this device (a ferret to make), then the last step was done: the card says so.
-    const done = StepperHarness.answering({ ferret: false });
+    // The stepper was open on this device (a project to make), then the last step was done: the card says so.
+    const done = StepperHarness.answering({ project: false });
     const view = await mount(<done.Component />);
     await done.settle();
     expect(view.container.querySelector('[data-first-run-stepper="open"]')).not.toBeNull();
@@ -108,16 +155,16 @@ describe('the stepper on a machine', () => {
     expect(again.container.querySelector('[data-first-run-stepper]')).toBeNull();
     await again.unmount();
 
-    // A ferret is gone: a step is open again, so the stepper has something to say.
-    const reopened = StepperHarness.answering({ ferret: false }, done.storage);
+    // A project is gone: a step is open again, so the stepper has something to say.
+    const reopened = StepperHarness.answering({ project: false }, done.storage);
     const last = await mount(<reopened.Component />);
     await reopened.settle();
     expect(last.container.querySelector('[data-first-run-stepper="open"]')).not.toBeNull();
     await last.unmount();
   });
 
-  it('asks the machine six quiet reads on open (the archive too, as no live ferret answers) and none by itself afterwards (no polling)', async () => {
-    const harness = StepperHarness.answering({ ferret: false });
+  it('asks the machine six quiet reads on open (the archive too, as no project and no live ferret answers) and none by itself afterwards (no polling)', async () => {
+    const harness = StepperHarness.answering({ project: false });
     const view = await mount(<harness.Component />);
     await harness.settle();
     expect(harness.calls()).toBe(6);
@@ -127,10 +174,10 @@ describe('the stepper on a machine', () => {
   });
 
   it('re-reads when the machine says a step changed', async () => {
-    const harness = StepperHarness.answering({ ferret: false });
+    const harness = StepperHarness.answering({ project: false });
     const view = await mount(<harness.Component />);
     await harness.settle();
-    harness.change({ ferret: true });
+    harness.change({ project: true });
     await harness.settle();
     expect(view.container.querySelector('[data-first-run-stepper="done"]')).not.toBeNull();
     await view.unmount();
@@ -155,8 +202,8 @@ describe('the stepper through a lock and a slow read', () => {
     await reloaded.unmount();
   });
 
-  it('with no passkey and no login, a slow passkey read draws nothing, then Passkey as the current step (never Login first)', async () => {
-    const harness = StepperHarness.answering({ passkey: false, login: false }).holdPasskey();
+  it('with no passkey and no Claude Code step done, a slow passkey read draws nothing, then Passkey as the current step (never Claude Code first)', async () => {
+    const harness = StepperHarness.answering({ passkey: false, claude: false }).holdPasskey();
     const view = await mount(<harness.Component />);
     await harness.settle(); // every other read has answered; the passkey one has not
     expect(view.container.querySelector('[data-first-run-stepper]')).toBeNull();
@@ -170,11 +217,11 @@ describe('the stepper through a lock and a slow read', () => {
   });
 
   it('a slow passkey read behind remembered steps keeps the remembered current step, not a different one', async () => {
-    const first = StepperHarness.answering({ passkey: false, login: false });
+    const first = StepperHarness.answering({ passkey: false, claude: false });
     const before = await mount(<first.Component />);
     await first.settle();
     await before.unmount();
-    const reloaded = StepperHarness.answering({ passkey: false, login: false }, first.storage).holdPasskey();
+    const reloaded = StepperHarness.answering({ passkey: false, claude: false }, first.storage).holdPasskey();
     const after = await mount(<reloaded.Component />);
     await reloaded.settle();
     expect(after.container.querySelector('[data-state="current"]')?.getAttribute('data-step')).toBe('passkey');
