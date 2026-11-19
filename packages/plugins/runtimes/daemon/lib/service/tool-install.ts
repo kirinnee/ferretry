@@ -25,6 +25,7 @@
  */
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import type { HarnessKind } from '../manifest.ts';
+import { scrubInstallOutput } from './install-output.ts';
 import {
   type ExecutableResolverPort,
   HARNESS_PACKAGES,
@@ -203,7 +204,7 @@ type PackageInstallResult =
   | { readonly kind: 'not-started'; readonly reason: string };
 
 /** Running one package manager with no stdin, so nothing it asks can wait for an answer. */
-type PackageInstallPort = (run: PackageInstallRun) => Promise<PackageInstallResult>;
+export type PackageInstallPort = (run: PackageInstallRun) => Promise<PackageInstallResult>;
 
 // ─── outcomes ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -219,7 +220,14 @@ type ToolInstallFailureCause =
 /** How installing one harness ended. */
 export type ToolInstallOutcome =
   | { readonly harness: HarnessKind; readonly outcome: 'already-installed'; readonly path: string }
-  | { readonly harness: HarnessKind; readonly outcome: 'installed'; readonly command: string; readonly path: string }
+  | {
+      readonly harness: HarnessKind;
+      readonly outcome: 'installed';
+      readonly command: string;
+      readonly path: string;
+      /** The manager's last lines, scrubbed ({@link scrubInstallOutput}). */
+      readonly output: readonly string[];
+    }
   | {
       readonly harness: HarnessKind;
       readonly outcome: 'failed';
@@ -227,6 +235,8 @@ export type ToolInstallOutcome =
       readonly reason: string;
       /** The exact command for a person to run themselves (E2). */
       readonly manualCommand: string;
+      /** The manager's last lines, scrubbed; empty when nothing ran. */
+      readonly output: readonly string[];
     };
 
 /** One step of a running install, for a surface that shows progress. */
@@ -268,6 +278,7 @@ function classifyInstallResult(
       cause,
       reason,
       manualCommand: manualCommand(plan.manager, plan.args, needsAdmin),
+      output: result.kind === 'not-started' ? [] : scrubInstallOutput(result.tail),
     }) as const;
   const manager = MANAGER_NAME[plan.manager];
   if (result.kind === 'not-started')
@@ -326,8 +337,8 @@ export class ToolInstallRefusal extends Error {
 }
 
 interface ToolInstallServiceOptions {
-  /** `darwin`, `linux`, … — which managers this system offers. */
-  readonly platform: string;
+  /** `darwin`, `linux`, … — which managers this system offers; a function when it is learned after boot. */
+  readonly platform: string | (() => string);
   /** The daemon's one executable resolver, so manager detection and harness detection agree. */
   readonly executables: ExecutableResolverPort;
   /** The daemon's one harness resolution rule (`locateHarnessCommand`, bound to its policy). */
@@ -362,7 +373,7 @@ export class ToolInstallService {
       return {
         harness,
         installed: false,
-        plan: planToolInstall(harness, this.options.platform, this.options.executables),
+        plan: planToolInstall(harness, this.#platform(), this.options.executables),
       };
     });
   }
@@ -406,7 +417,7 @@ export class ToolInstallService {
   ): Promise<ToolInstallOutcome> {
     const before = this.options.locate(harness);
     if (before.outcome === 'located') return { harness, outcome: 'already-installed', path: before.path };
-    const plan = planToolInstall(harness, this.options.platform, this.options.executables);
+    const plan = planToolInstall(harness, this.#platform(), this.options.executables);
     if (plan.kind === 'no-package-manager')
       return {
         harness,
@@ -414,6 +425,7 @@ export class ToolInstallService {
         cause: 'no-package-manager',
         reason: plan.reason,
         manualCommand: plan.manualCommand,
+        output: [],
       };
     onProgress({ harness, stage: 'running', command: plan.command });
     const timeoutMinutes = this.options.timeoutMinutes ?? TOOL_INSTALL_TIMEOUT_MINUTES;
@@ -426,14 +438,27 @@ export class ToolInstallService {
     const failure = classifyInstallResult(plan, result, timeoutMinutes);
     if (failure !== undefined) return failure;
     const after = this.options.locate(harness);
-    if (after.outcome === 'located') return { harness, outcome: 'installed', command: plan.command, path: after.path };
+    if (after.outcome === 'located')
+      return {
+        harness,
+        outcome: 'installed',
+        command: plan.command,
+        path: after.path,
+        output: result.kind === 'exited' ? scrubInstallOutput(result.tail) : [],
+      };
     return {
       harness,
       outcome: 'failed',
       cause: 'not-found-after-install',
       reason: `${MANAGER_NAME[plan.manager]} finished, but this daemon still cannot find \`${harness}\`. It was probably installed somewhere outside this daemon's PATH: tell the daemon where it is with FY_${harness.toUpperCase()}_BIN or the harness block in config/daemon.json, then restart it.`,
       manualCommand: plan.command,
+      output: result.kind === 'exited' ? scrubInstallOutput(result.tail) : [],
     };
+  }
+
+  #platform(): string {
+    const { platform } = this.options;
+    return typeof platform === 'function' ? platform() : platform;
   }
 
   #assertIdle(): void {

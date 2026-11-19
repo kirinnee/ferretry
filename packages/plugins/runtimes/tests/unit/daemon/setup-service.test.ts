@@ -531,13 +531,20 @@ describe('installTools', () => {
     const { service, state } = world();
     state.install = async () => [
       { harness: 'claude', outcome: 'already-installed', path: '/usr/bin/claude' },
-      { harness: 'codex', outcome: 'installed', command: 'npm install -g @openai/codex', path: '/usr/bin/codex' },
+      {
+        harness: 'codex',
+        outcome: 'installed',
+        command: 'npm install -g @openai/codex',
+        path: '/usr/bin/codex',
+        output: ['added 1 package'],
+      },
       {
         harness: 'codex',
         outcome: 'failed',
         cause: 'needs-admin',
         reason: 'npm needs admin rights',
         manualCommand: 'sudo npm install -g @openai/codex',
+        output: ['npm ERR! code EACCES'],
       },
     ];
     const result = ToolInstallResultSchema.parse(
@@ -545,13 +552,14 @@ describe('installTools', () => {
     );
     should(result.outcomes).deepEqual([
       { harness: 'claude-code', outcome: 'already-installed' },
-      { harness: 'codex', outcome: 'installed', command: 'npm install -g @openai/codex' },
+      { harness: 'codex', outcome: 'installed', command: 'npm install -g @openai/codex', output: ['added 1 package'] },
       {
         harness: 'codex',
         outcome: 'failed',
         cause: 'needs-admin',
         reason: 'npm needs admin rights',
         manualCommand: 'sudo npm install -g @openai/codex',
+        output: ['npm ERR! code EACCES'],
       },
     ]);
   });

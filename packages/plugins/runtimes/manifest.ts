@@ -509,7 +509,8 @@ export default definePlugin({
     // `harness-home`: the machine's own Claude Code and Codex homes, READ-ONLY, for the first-run scan and, scoped to one folder, a runtime's home.
     roots: ['fleet', 'harness-home'],
     network: [],
-    spawn: ['brew', 'apt-get', 'npm'],
+    // The tool install runs brew and npm and nothing else, never sudo (apt has no package for either harness); `uname -s` names the system.
+    spawn: ['brew', 'npm', 'uname'],
     secrets: [],
     // The setup lists the NAMES of this machine’s API keys (never a value): a copy says which a setup needs. The Vault lists every NAME to a
     // plugin that declares this, and no value; it writes it nothing. The setup route is the person’s (operator) gate.

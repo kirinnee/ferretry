@@ -82,7 +82,7 @@ import {
 } from '../account/clone.ts';
 import { CloneRefusal } from '../account/clone-parts.ts';
 import { EMPTY_RUNTIME_IDS } from '../account/ids.ts';
-import { type FleetDocumentWrite, type FleetModelApplyPlan } from '../provisioning.ts';
+import type { FleetDocumentWrite, FleetModelApplyPlan } from '../provisioning.ts';
 import { configurationLanded, failedApplySentence } from './failed-apply.ts';
 import {
   freeName,
@@ -464,7 +464,12 @@ export class FleetSetupService {
         outcome.outcome === 'already-installed'
           ? { harness: harnessKey(outcome.harness), outcome: 'already-installed' }
           : outcome.outcome === 'installed'
-            ? { harness: harnessKey(outcome.harness), outcome: 'installed', command: outcome.command }
+            ? {
+                harness: harnessKey(outcome.harness),
+                outcome: 'installed',
+                command: outcome.command,
+                output: outcome.output,
+              }
             : { ...outcome, harness: harnessKey(outcome.harness) },
       ),
     };

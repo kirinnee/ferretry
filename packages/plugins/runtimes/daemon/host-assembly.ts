@@ -28,6 +28,8 @@ import { PROFILE_COMPONENTS_KEY, PROFILE_ITEMS, type RuntimeCheckEnvironment } f
 import { applyClaimFor } from './adapters/apply-claim.ts';
 import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
 import { CommandCache } from './adapters/command-cache.ts';
+import { HostPlatform } from './adapters/host-platform.ts';
+import { packageRunner } from './adapters/package-run.ts';
 import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
@@ -278,10 +280,6 @@ function fleetTexts(disk: FleetDisk): AdapterHost['texts'] {
 /** The harness commands every read asks about, looked up ahead (`./adapters/command-cache.ts`). */
 const HARNESS_COMMANDS = ['claude', 'codex', 'npm', 'brew', 'apt-get'] as const;
 
-/** What an install says when it is asked to run a package manager: it is not composed over the kernel yet. */
-const PACKAGE_MANAGER_NOT_COMPOSED =
-  'running a package manager is not available from the Runtimes plugin yet, so run the command yourself';
-
 /** A Claude account file is a few KiB; a larger one is not read. */
 const MAX_ACCOUNT_FILE_BYTES = 1024 * 1024;
 
@@ -360,9 +358,10 @@ export function fleetHost(
  */
 export function fileAssembly(
   ctx: {
-    readonly kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log' | 'identity'> & {
-      readonly config: Pick<ConfigPort, 'writeAll' | 'collection' | 'file' | 'etag'>;
-    };
+    readonly kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log' | 'identity'> &
+      Partial<Pick<KernelPorts, 'spawn'>> & {
+        readonly config: Pick<ConfigPort, 'writeAll' | 'collection' | 'file' | 'etag'>;
+      };
     readonly needs: {
       readonly logins: FleetCatalogServiceDeps['credentials'] &
         Parameters<typeof fileFleetSetupDeps>[0]['logins'] &
@@ -391,6 +390,7 @@ export function fileAssembly(
   const commands = new CommandCache({ which: async name => await ctx.kernel.paths.which(name) }, () =>
     ctx.kernel.clock.nowMs(),
   );
+  const platform = new HostPlatform(() => ctx.kernel.spawn);
   const { host, directory } = fleetHost(ctx.kernel, commands);
   const home = directory.slice(0, directory.lastIndexOf('/'));
   const configDirectory = configDirectoryOf(home);
@@ -403,7 +403,7 @@ export function fileAssembly(
       const wanted = new Set<string>(HARNESS_COMMANDS);
       for (const component of Object.values(model?.components.mcp ?? {}))
         if (component.command !== undefined) wanted.add(component.command);
-      await commands.prime(wanted);
+      await Promise.all([commands.prime(wanted), platform.prime()]);
     },
   });
   const unguarded = fileFleetCatalogDeps({
@@ -453,18 +453,22 @@ export function fileAssembly(
     preflight: refuseBeforeWriting(config),
   };
   const refusing = unavailableSetupDeps(catalog);
-  // The tool installer's PLANS are real (what is installed, and the command a person would run); running a package
-  // manager is not composed, so an install ends in `could-not-start` with the manual command named.
+  // The tool installer: the plans say what is installed and the command a person would run; an explicit install runs that
+  // command through the kernel's spawn (declared `brew` and `npm` only, an argv, never a shell or sudo).
   const installer = new ToolInstallService({
-    // GAP(kernel): Runtimes declares no `hostFacts`, so the platform is not known and the plan names npm only.
-    platform: 'unknown',
+    // Runtimes declares no `hostFacts`: the system is asked once with `uname -s`, primed with the command lookups.
+    platform: () => platform.name(),
     executables: { resolve: name => commands.which(name), runnable: () => false },
     locate: (kind): HarnessLocation => {
       const path = commands.which(kind);
       return path === undefined ? { kind, outcome: 'absent', searched: [] } : { kind, outcome: 'located', path };
     },
-    run: async () => ({ kind: 'not-started', reason: PACKAGE_MANAGER_NOT_COMPOSED }),
-    environment: {},
+    run: packageRunner(() => {
+      if (ctx.kernel.spawn === undefined) throw new Error('this daemon gives no way to start a program');
+      return ctx.kernel.spawn;
+    }, ctx.kernel.clock),
+    // The manager's own directory goes first (tool-install.ts); this is the system part a daemon with a minimal PATH lacks.
+    environment: { PATH: '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' },
   });
   const tools: FleetSetupServiceDeps['tools'] = {
     plans: harnesses => installer.plans(harnesses),
