@@ -109,14 +109,14 @@ function BudgetPeriodRow({
       name={legend}
       hint={hint}
       wide
-      dataAttributes={{ 'data-budget-period': period }}
+      dataAttributes={{ 'data-budget-period': period, 'data-usage-stack': '' }}
       control={() => (
-        <span className="grid min-w-0 grid-cols-2 gap-x-3">
+        <span className="fy-usage-budget-fields">
           {fields.map(([key, label]) => (
             <label key={key} className="flex min-w-0 flex-col gap-1">
               <span className="text-meta text-muted">{label}</span>
               <input
-                className="kt-input w-28 min-w-0"
+                className="kt-input w-full min-w-0"
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"

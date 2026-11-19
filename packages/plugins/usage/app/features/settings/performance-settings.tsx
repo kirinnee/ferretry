@@ -226,7 +226,11 @@ export function PerformanceSettings({
   }, [recording, write]);
 
   return (
-    <section className="flex min-w-0 flex-col gap-8" aria-labelledby="performance-settings-heading" data-performance="">
+    <section
+      className="fy-usage-settings flex min-w-0 flex-col gap-8"
+      aria-labelledby="performance-settings-heading"
+      data-performance=""
+    >
       <div className="flex min-w-0 flex-col gap-1">
         <h3 id="performance-settings-heading" className="m-0 text-row font-semibold text-fg">
           Performance
@@ -242,6 +246,7 @@ export function PerformanceSettings({
           hint="Use the app as you normally would while it runs."
           explanation={`Records what this machine and this app spend their time on for ${String(seconds)} seconds, then shows a report you can copy or download. It names routes, programs and file patterns — never your sessions, files or secrets — so it is safe to share.`}
           wide
+          dataAttributes={{ 'data-usage-stack': '' }}
           control={() => (
             <Button
               type="button"
@@ -267,9 +272,10 @@ export function PerformanceSettings({
             name="Share this report"
             hint="Copy it as text, or save both halves as one JSON file."
             wide
+            dataAttributes={{ 'data-usage-stack': '' }}
             control={() => (
-              <span className="flex flex-wrap items-center gap-2">
-                <Button type="button" className="min-h-[44px]" onClick={copyReport} data-performance-copy="">
+              <span className="flex min-w-0 flex-wrap items-center gap-2">
+                <Button type="button" className="min-h-[44px] max-w-full" onClick={copyReport} data-performance-copy="">
                   <Copy size={16} aria-hidden="true" />
                   Copy report
                 </Button>

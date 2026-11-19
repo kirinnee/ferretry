@@ -13,34 +13,43 @@ export function ApplicabilityDisclosure({ view }: { readonly view: AnalyticsPric
   const imageStored = view.rateApplicability.image === 'stored_not_applied';
   const toolStored = view.rateApplicability.tool === 'stored_not_applied';
   const reasoningApplied = view.rateApplicability.reasoning === 'applied_when_evidenced';
-  const imageToolApplied = !(imageStored && toolStored);
+  // A one-line hint ends in an ellipsis on a wide screen, so the whole sentence is also behind the row's (i).
+  const imageToolWords =
+    imageStored && toolStored
+      ? 'Recorded, not applied: there is no reliable billable evidence.'
+      : 'Follows the daemon record shown for this catalog.';
+  const reasoningWords = reasoningApplied
+    ? 'Applied when transcript evidence exists.'
+    : 'Recorded; this daemon does not currently apply them.';
   return (
     <div className="min-w-0" data-pricing-applicability="">
       <SettingGroup label="What insights applies">
         <SettingRow
           wide
           name="Image and tool rates"
-          hint={
-            imageStored && toolStored
-              ? 'Recorded, not applied: there is no reliable billable evidence.'
-              : 'Follows the daemon record shown for this catalog.'
-          }
+          hint={imageToolWords}
+          explanation={imageToolWords}
           dataAttributes={{
             'data-rate-applicability': `image:${view.rateApplicability.image},tool:${view.rateApplicability.tool}`,
+            'data-usage-stack': '',
           }}
           control={() => (
-            <Badge tone={imageToolApplied ? 'ok' : 'pend'}>{imageToolApplied ? 'Applied' : 'Stored only'}</Badge>
+            <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              <Badge className="max-w-full whitespace-normal" tone={imageStored ? 'pend' : 'ok'}>
+                {imageStored ? 'Image: stored only' : 'Image: applied'}
+              </Badge>
+              <Badge className="max-w-full whitespace-normal" tone={toolStored ? 'pend' : 'ok'}>
+                {toolStored ? 'Tool: stored only' : 'Tool: applied'}
+              </Badge>
+            </span>
           )}
         />
         <SettingRow
           wide
           name="Reasoning rates"
-          hint={
-            reasoningApplied
-              ? 'Applied when transcript evidence exists.'
-              : 'Recorded; this daemon does not currently apply them.'
-          }
-          dataAttributes={{ 'data-reasoning-applicability': view.rateApplicability.reasoning }}
+          hint={reasoningWords}
+          explanation={reasoningWords}
+          dataAttributes={{ 'data-reasoning-applicability': view.rateApplicability.reasoning, 'data-usage-stack': '' }}
           control={() => (
             <Badge tone={reasoningApplied ? 'ok' : 'pend'}>{reasoningApplied ? 'Applied' : 'Stored only'}</Badge>
           )}

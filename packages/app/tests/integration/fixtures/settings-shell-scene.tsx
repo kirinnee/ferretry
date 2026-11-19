@@ -10,6 +10,7 @@
  */
 
 import { implementApp, type Manifest } from '@ferretry/kernel/manifest';
+import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { TransportAnswer, TransportRequest } from '../../../src/client/transport.ts';
 import { type DaemonlessPorts, registeredDaemonless } from '../../../src/connect/provides.ts';
@@ -24,6 +25,16 @@ import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
 import { CORE, FakeTransport, inventoryOf, json } from '../../unit/client/fixtures.ts';
+
+/**
+ * REAL BODIES FOR THIS SCENE: a plugin's integration test that must measure its real page INSIDE the real shell (the drawer, the
+ * nav, the panel it actually gets) registers it on `globalThis.__FY_SCENE_SETTINGS_BODIES__`, keyed `<plugin>/<tab>`, from a
+ * module the test's generated entry imports BEFORE this one. A global, not an import: a plugin reaches the app only through its
+ * public API. Any tab not registered keeps its fake body below.
+ */
+const sceneBodies: ReadonlyMap<string, () => ReactNode> =
+  (globalThis as { __FY_SCENE_SETTINGS_BODIES__?: Map<string, () => ReactNode> }).__FY_SCENE_SETTINGS_BODIES__ ??
+  new Map();
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
@@ -49,15 +60,16 @@ const surfaces: SurfaceEntry[] = [
       const bodies = Object.fromEntries(
         settings.map(setting => [
           setting.id,
-          // A real tab is a screenful or more (a list of logins, a form): the fake one is tall enough to scroll to.
-          () => (
-            <div>
-              <p>{`${setting.label} settings (fake data)`}</p>
-              {Array.from({ length: 24 }, (_, row) => row + 1).map(number => (
-                <p key={number}>{`${setting.label}: fake row ${number}`}</p>
-              ))}
-            </div>
-          ),
+          sceneBodies.get(`${entry.id}/${setting.id}`) ??
+            // A real tab is a screenful or more (a list of logins, a form): the fake one is tall enough to scroll to.
+            (() => (
+              <div>
+                <p>{`${setting.label} settings (fake data)`}</p>
+                {Array.from({ length: 24 }, (_, row) => row + 1).map(number => (
+                  <p key={number}>{`${setting.label}: fake row ${number}`}</p>
+                ))}
+              </div>
+            )),
         ]),
       );
       return {

@@ -1,5 +1,6 @@
 /**
- * The browser entry for the three Usage settings tabs over FAKE data (no daemon): the REAL pages read from scripted clients.
+ * The three Usage settings tabs over FAKE data (no daemon): the REAL pages read from scripted clients. This is the BODY the
+ * Settings shell scene mounts (`usage-settings-shell-scene.tsx`), so the pages are measured inside the real panel.
  *
  *   ?tab=budgets|pricing|performance   ?theme=<family>-<mode>   ?motion=reduced
  *   ?act=add        pricing: opens the manual-rate form      ?act=feed   pricing: picks the feed and reads its changes
@@ -8,7 +9,6 @@
 import { ANALYTICS_PRICING_RATE_APPLICABILITY } from '../../../../contract/index.ts';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { LoginBudgetSchema } from '@ferretry/plugin-logins/contract';
-import { createRoot } from 'react-dom/client';
 import { BudgetsSettings } from '../../../../app/features/settings/budgets-settings.tsx';
 import { PerformanceSettings } from '../../../../app/features/settings/performance-settings.tsx';
 import { PricingSettings } from '../../../../app/features/settings/pricing-settings.tsx';
@@ -173,7 +173,7 @@ if (tab === 'pricing' && act === 'feed') {
 }
 if (tab === 'performance' && act === 'record') click(button => button.textContent?.startsWith('Record') === true);
 
-const page =
+export const page =
   tab === 'pricing' ? (
     <PricingSettings connection={connection} client={pricing} />
   ) : tab === 'performance' ? (
@@ -185,12 +185,4 @@ const page =
     />
   ) : (
     <BudgetsSettings connection={connection} client={budgets} deviceTimeZone="America/New_York" />
-  );
-
-const root = document.getElementById('root');
-if (root !== null)
-  createRoot(root).render(
-    <div className="mx-auto max-w-[1100px] p-4" data-scene-ready="">
-      {page}
-    </div>,
   );

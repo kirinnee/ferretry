@@ -10,7 +10,7 @@ import type { AnalyticsPricingRate } from '../../../contract/index.ts';
 import { EffectiveDates, Identity, Provenance, RateActions, RateAmounts } from './pricing-rate-parts.tsx';
 import { PROVIDER_LABELS } from './pricing-model.ts';
 
-const ROW = 'grid min-w-0 gap-3 px-panel py-3 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] md:items-start';
+const ROW = 'fy-usage-ledger-row gap-3 px-panel py-3';
 
 /**
  * The prices the model catalogs give the models no operator rate claims (docs/model-catalog.md
@@ -104,9 +104,11 @@ export function CatalogLedger({
             <Identity rate={rate} />
             <div className="flex min-w-0 flex-col gap-3">
               <RateAmounts rates={rate.rates} />
-              <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-                <Provenance rate={rate} />
-                <EffectiveDates rate={rate} />
+              <div className="fy-usage-fit">
+                <div className="fy-usage-pair gap-3">
+                  <Provenance rate={rate} />
+                  <EffectiveDates rate={rate} />
+                </div>
               </div>
             </div>
             <RateActions

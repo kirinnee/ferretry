@@ -26,28 +26,35 @@ export function DateValue({
   );
 }
 
-/** Every slot's amount, two to a line from a phone up, so nine slots are five lines and not nine. */
+/** Every slot's amount, two to a line when the block itself is 560px wide, so nine slots are five lines and not nine. */
 export function RateAmounts({ rates }: { readonly rates: AnalyticsPricingRates }) {
   return (
-    <dl className="m-0 grid min-w-0 grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
-      {ANALYTICS_PRICING_RATE_SLOTS.map(slot => {
-        const amount = rates[slot];
-        return (
-          <div
-            key={slot}
-            className="flex min-w-0 justify-between gap-2 text-meta leading-base"
-            data-pricing-rate={slot}
-          >
-            <dt className="text-muted">{RATE_LABELS[slot]}</dt>
-            <dd className={cn('m-0 text-right font-mono', amount === null ? 'text-faint' : 'text-fg')}>
-              {amount === null
-                ? 'Not set'
-                : `${formatUsdMicros(amount)} USD / ${UNIT_LABELS[analyticsPricingRateUnit(slot)]}`}
-            </dd>
-          </div>
-        );
-      })}
-    </dl>
+    <div className="fy-usage-fit">
+      <dl className="fy-usage-amounts m-0 gap-x-6 gap-y-1">
+        {ANALYTICS_PRICING_RATE_SLOTS.map(slot => {
+          const amount = rates[slot];
+          return (
+            <div
+              key={slot}
+              className="flex min-w-0 flex-wrap justify-between gap-x-2 text-meta leading-base"
+              data-pricing-rate={slot}
+            >
+              <dt className="text-muted">{RATE_LABELS[slot]}</dt>
+              <dd
+                className={cn(
+                  'm-0 min-w-0 break-words text-right font-mono',
+                  amount === null ? 'text-faint' : 'text-fg',
+                )}
+              >
+                {amount === null
+                  ? 'Not set'
+                  : `${formatUsdMicros(amount)} USD / ${UNIT_LABELS[analyticsPricingRateUnit(slot)]}`}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+    </div>
   );
 }
 

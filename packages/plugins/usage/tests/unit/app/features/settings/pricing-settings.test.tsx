@@ -916,6 +916,9 @@ describe('PricingSettings — what the daemon says and what goes wrong', () => {
 
     const rendered = text(renderer);
     expect(rendered).toContain('Follows the daemon record shown for this catalog.');
+    // The joint row shows each kind's own status, never one "Applied" for a pair of which only one applies.
+    expect(rendered).toContain('Image: applied');
+    expect(rendered).toContain('Tool: stored only');
     expect(rendered).not.toContain('Recorded, not applied: there is no reliable billable evidence.');
     expect(rendered).toContain('Recorded; this daemon does not currently apply them.');
     expect(rendered).not.toContain('Applied when transcript evidence exists.');

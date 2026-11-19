@@ -259,7 +259,7 @@ export function PricingSettings({
 
   return (
     <section
-      className="flex min-w-0 flex-col gap-8"
+      className="fy-usage-settings flex min-w-0 flex-col gap-8"
       aria-labelledby="model-pricing-heading"
       data-pricing-daemon={String(connection.daemonId)}
     >

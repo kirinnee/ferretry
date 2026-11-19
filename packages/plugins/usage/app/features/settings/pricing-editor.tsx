@@ -1,6 +1,6 @@
 /**
  * THE MANUAL-RATE EDITOR: add a rate, or edit one into a manual override. One group of the page (its own heading, one
- * hairline-bordered body), the fields two to a line on a tablet and up, the nine rate amounts three to a line, and the
+ * hairline-bordered body), the fields two to a line once the PANEL is 640px wide, the nine rate fields three to a line from 960px, and the
  * Save / Cancel buttons auto-width on one line. The wording about what a save records is kept whole.
  */
 import { SettingGroup } from '@ferretry/app';
@@ -112,12 +112,7 @@ export function PricingEditor({
           ) : null}
         </li>
         <li className="min-w-0 px-panel py-3">
-          <form
-            className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2"
-            onSubmit={submit}
-            noValidate
-            data-pricing-form=""
-          >
+          <form className="fy-usage-form gap-x-4 gap-y-3" onSubmit={submit} noValidate data-pricing-form="">
             <Field
               id={`${formId}-pricing-key`}
               label="Pricing key"
@@ -239,9 +234,9 @@ export function PricingEditor({
                 onChange={event => onChange({ ...draft, verifiedAt: event.currentTarget.value })}
               />
             </Field>
-            <fieldset className="m-0 grid min-w-0 grid-cols-1 gap-x-4 gap-y-3 border-0 border-t border-border-soft p-0 pt-3 sm:col-span-2 sm:grid-cols-3">
+            <fieldset className="fy-usage-form-rates col-span-full m-0 gap-x-4 gap-y-3 border-0 border-t border-border-soft p-0 pt-3">
               <legend className="px-0 pr-2 text-ui font-semibold text-fg">Rates</legend>
-              <p className="m-0 text-meta leading-base text-muted sm:col-span-3">
+              <p className="m-0 text-meta leading-base text-muted col-span-full">
                 Currency is fixed to USD. Amounts use the protocol-owned unit shown beside each field.
               </p>
               {ANALYTICS_PRICING_RATE_SLOTS.map(slot => {
@@ -273,11 +268,11 @@ export function PricingEditor({
               })}
             </fieldset>
             {failure ? (
-              <p className="m-0 text-meta leading-base text-err sm:col-span-2" role="alert">
+              <p className="m-0 text-meta leading-base text-err col-span-full" role="alert">
                 {failure}
               </p>
             ) : null}
-            <div className="flex flex-wrap gap-2 sm:col-span-2">
+            <div className="flex flex-wrap gap-2 col-span-full">
               <Button type="submit" variant="primary" className="min-h-[44px]" disabled={busy} data-pricing-save="">
                 {busy ? 'Saving…' : editing === null ? 'Add rate' : 'Save manual override'}
               </Button>

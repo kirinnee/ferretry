@@ -63,7 +63,7 @@ export function BudgetsSettings({ connection, client, deviceTimeZone }: BudgetsS
 
   return (
     <section
-      className="flex min-w-0 flex-col gap-8"
+      className="fy-usage-settings flex min-w-0 flex-col gap-8"
       aria-labelledby="budgets-settings-heading"
       data-budgets-daemon={connection.daemonId}
     >
