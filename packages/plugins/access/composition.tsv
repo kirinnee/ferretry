@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+oversize	app/features/pairing/pairing-screen.tsx	860	2026-12-19	hot (6 of the last 80 merges); the machine-name field lives in its own file, split the rest by stage when next touched

@@ -44,6 +44,7 @@ import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
 import { browserDeviceName } from '@ferretry/app';
 import { normalizedDeviceName } from '../../lib/device-name.ts';
 import { FerretMascot, type FerretPose } from './ferret-mascot.tsx';
+import { MachineNameField } from './machine-name-field.tsx';
 import { PairScanner } from './pair-scanner.tsx';
 import {
   FirstPasskeyOffer,
@@ -811,22 +812,7 @@ function PairingFocus({
         </p>
       )}
 
-      {/* WHAT THIS MACHINE WILL BE CALLED, saved with the pair so no later step has to ask. Optional: empty keeps the host name. */}
-      <label className="flex min-w-0 flex-col gap-1 text-ui text-muted">
-        Name this machine
-        <input
-          type="text"
-          className="kt-input min-h-[44px] min-w-0"
-          data-pair-machine-name=""
-          value={machineName}
-          placeholder="Optional, e.g. Studio box"
-          maxLength={100}
-          autoComplete="off"
-          spellCheck={false}
-          disabled={busy}
-          onChange={event => onMachineName(event.target.value)}
-        />
-      </label>
+      <MachineNameField value={machineName} disabled={busy} onChange={onMachineName} />
 
       {/*
         `data-pair-confirm` names the one control that starts a redemption, so a harness presses it
