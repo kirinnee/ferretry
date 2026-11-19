@@ -223,6 +223,8 @@ export interface FerretsPorts {
    */
   after?(delayMs: number, fire: () => void): () => void;
   launchParts(): readonly LaunchPartSource[];
+  /** The daemon's own `PATH`, the base a `pane-env` `pathPrepend` is put in front of (r9 B10). Unbound: the system folders. */
+  daemonPath?(): string | undefined;
   /** The ONE provider that plans the files a start was given (`start -f`); unbound or none: a start that carries attachments is refused. */
   openingAttachments?(): OpeningAttachmentsSource | undefined;
   sitrepSources(): readonly SitrepLineSource[];
@@ -2724,7 +2726,7 @@ export class FerretsService implements FerretsApi {
     const env: Record<string, string> = { ...login, ...modeSwitchDefaults(mode) };
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
     // What a plugin gives THIS pane (the Git account's ssh-agent and git settings): judged by name, refused naming the plugin.
-    const contributed = paneEnvironment(parts);
+    const contributed = paneEnvironment(parts, this.ports.daemonPath?.());
     if (!contributed.ok) return err(contributed.error);
     Object.assign(env, contributed.value);
     // The ferret's mode (v4 parity: the pane is handed FY_SESSION_MODE, which the wrappers and `instructions` read) goes

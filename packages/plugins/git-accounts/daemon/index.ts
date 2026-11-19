@@ -14,6 +14,8 @@ import { rootRunFolder } from './adapters/run-folder.ts';
 import { accountLaunchParts } from './features/launch/parts.ts';
 import { AgentSupervisor, type RunFolder } from './features/ssh-keys/agents.ts';
 import { GhRunner } from './features/gh-run/gh-runner.ts';
+import { ghShimLaunchParts } from './features/gh-shim/parts.ts';
+import { type GhShimFolders, installGhShim } from './features/gh-shim/shim.ts';
 import { ghRunRoutes } from './features/gh-run/routes.ts';
 import { sshKeyRoutes } from './features/ssh-keys/routes.ts';
 import { SshKeyService } from './features/ssh-keys/service.ts';
@@ -48,13 +50,26 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
         after: (ms, fn) => kernel.clock.after(milliseconds(ms), fn),
       });
       // The agents live in this plugin's own `downloads` folder: the same path on every run (a ferret outlives a restart).
-      const agents = new AgentSupervisor(
-        kernel.spawn,
-        overrides.runFolder ?? rootRunFolder(kernel.roots.root('downloads')),
-        kernel.clock,
-        kernel.log,
-      );
+      const runFolder = overrides.runFolder ?? rootRunFolder(kernel.roots.root('downloads'));
+      const agents = new AgentSupervisor(kernel.spawn, runFolder, kernel.clock, kernel.log);
       kernel.lifecycle.onStop(() => agents.stopAll());
+      // Ferretry's `gh` (B10): the shim is written at boot and again whenever a launch finds it was not (a failure is not kept).
+      let shim: Promise<GhShimFolders | undefined> | undefined;
+      const shimFolders = (): Promise<GhShimFolders | undefined> => {
+        shim ??= installGhShim(runFolder, kernel.identity.binaries.client).then(
+          folders => {
+            if (folders === undefined) shim = undefined;
+            return folders;
+          },
+          () => {
+            shim = undefined;
+            kernel.log.warn("git-accounts: Ferretry's gh shim could not be written, so ferrets keep no gh shim");
+            return undefined;
+          },
+        );
+        return shim;
+      };
+      void shimFolders();
       // Late-bound: the key service asks the account service (for the API on an account's behalf), which in turn tells
       // the key service when an account goes. Neither holds a token.
       const keys: { service?: SshKeyService } = {};
@@ -101,7 +116,7 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
           ...ghRunRoutes(gh),
         },
         hooks: {
-          // A ferret in a project linked to an account pushes and signs as it (r9 B4).
+          // A ferret in a project linked to an account pushes and signs as it (r9 B4); every ferret gets Ferretry's `gh` (B10).
           'launch.parts': () => [
             {
               id: 'git-accounts',
@@ -111,6 +126,7 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
                 kit: account => keyService.launchKit(account),
               }),
             },
+            { id: 'git-accounts-gh', item: ghShimLaunchParts(shimFolders) },
           ],
         },
         provides: {

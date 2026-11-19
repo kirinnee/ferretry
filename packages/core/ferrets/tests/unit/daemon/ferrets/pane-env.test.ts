@@ -20,10 +20,15 @@ import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
  * or the login owns, or a `${secret…}` value, refuses the launch naming the plugin; the Ferretry identity wins over a part.
  */
 
-const pane = (env: Record<string, string>, plugin = 'git-accounts'): LaunchPart => ({ kind: 'pane-env', plugin, env });
+const pane = (env: Record<string, string>, plugin = 'git-accounts', pathPrepend?: string[]): LaunchPart => ({
+  kind: 'pane-env',
+  plugin,
+  env,
+  ...(pathPrepend === undefined ? {} : { pathPrepend }),
+});
 const answering = (parts: readonly LaunchPart[]): LaunchPartSource => ({ parts: async () => parts });
 
-function fixture(sources: readonly LaunchPartSource[]) {
+function fixture(sources: readonly LaunchPartSource[], searchPath?: string) {
   const registry = new FerretRegistry([]);
   const tokens = new FerretTokenDirectory();
   const runner = new FakeRunner();
@@ -46,6 +51,7 @@ function fixture(sources: readonly LaunchPartSource[]) {
     runner: () => runner,
     decide: async () => ({ allow: true }),
     launchParts: () => sources,
+    daemonPath: () => searchPath,
     sitrepSources: () => [],
     instructions: () => [],
     folder: path => ok(fenced(path)),
@@ -107,6 +113,7 @@ describe('a pane-env launch part', () => {
   });
 
   test('a value that names a secret, or a name that is not a variable, is refused, and the text carries no value', () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is literal text, never a template.
     const named = paneEnvironment([pane({ FOO: '${secret:TOKEN}' }, 'p')]);
     expect(named).toEqual({ ok: false, error: expect.stringContaining('the p plugin may not set FOO') });
     const odd = paneEnvironment([pane({ 'A=B': 'v' }, 'p')]);
@@ -118,4 +125,46 @@ describe('a pane-env launch part', () => {
     expect(paneEnvironment([{ kind: 'env', env: { PATH: '/x' } }])).toEqual({ ok: true, value: {} });
     expect(paneEnvironment([])).toEqual({ ok: true, value: {} });
   });
+  test('pathPrepend goes first on the daemon’s PATH, in order, once each, and the part never names PATH itself', async () => {
+    const f = fixture(
+      [answering([pane({}, 'a', ['/fy/shims', '/fy/other']), pane({}, 'b', ['/fy/shims'])])],
+      '/usr/bin:/bin',
+    );
+
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+
+    expect(started.ok).toBe(true);
+    expect(f.asked[0]?.PATH).toBe('/fy/shims:/fy/other:/usr/bin:/bin');
+  });
+
+  test('no pathPrepend leaves PATH alone (the kernel adds the daemon’s at spawn)', async () => {
+    const f = fixture([answering([pane({ A: '1' })])], '/usr/bin');
+    await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+    expect(f.asked[0]).not.toHaveProperty('PATH');
+  });
+
+  test('a daemon that knows no PATH gives the system folders, never a PATH of the prepend alone', () => {
+    expect(paneEnvironment([pane({}, 'p', ['/fy/shims'])])).toEqual({
+      ok: true,
+      value: { PATH: '/fy/shims:/usr/local/bin:/usr/bin:/bin' },
+    });
+    expect(paneEnvironment([pane({}, 'p', ['/fy/shims'])], '')).toEqual({
+      ok: true,
+      value: { PATH: '/fy/shims:/usr/local/bin:/usr/bin:/bin' },
+    });
+  });
+
+  test.each(['relative/bin', '', '/a:/b', '/a/../b', '/a\nb', '/x\u0000y'])(
+    'a prepend folder %j is refused naming the plugin, and nothing starts',
+    async folder => {
+      const f = fixture([answering([pane({}, 'sneaky', [folder])])], '/usr/bin');
+      const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+      expect(started.ok).toBe(false);
+      if (started.ok) return;
+      expect(started.error.reason).toBe(
+        "the sneaky plugin may only put an absolute folder first on a ferret's PATH, so the ferret was not started",
+      );
+      expect(f.runner.starts).toBe(0);
+    },
+  );
 });

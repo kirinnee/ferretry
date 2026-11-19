@@ -111,6 +111,19 @@ export default definePlugin({
       }),
     ],
     cli: [
+      verb('gh', {
+        summary:
+          "Ferretry's gh: runs gh as the GitHub account this folder's project is linked to (the `gh` on a ferret's PATH calls it)",
+        args: [{ name: 'args', help: "gh's own arguments, after `--`", variadic: true }],
+        options: [
+          { flag: '--account <login>', help: 'the account to use (only the owner may choose; a ferret never does)' },
+        ],
+      }),
+      verb('gh doctor', {
+        summary: "check that `gh` in this terminal is Ferretry's shim and that no GitHub token is set",
+        args: [],
+        options: [],
+      }),
       verb('git account add', {
         summary: 'connect a GitHub account: shows a code to type on GitHub, then waits',
         args: [],
@@ -149,6 +162,8 @@ export default definePlugin({
     roots: ['downloads'],
     // `gh` runs as an account, with its token in that child's environment alone (`GitAccountsApi.run`).
     spawn: ['gh', 'ssh-agent', 'ssh-add'],
+    // `fy gh doctor`: where this pane's `gh` is and whether a GitHub token sits in it. Names only are read; no value is ever printed.
+    cliEnvReads: ['PATH', 'GH_CONFIG_DIR', 'GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN'],
     // The device flow and the profile read (github.com), the profile and key calls (api.github.com): nowhere else.
     network: ['github.com', 'api.github.com'],
   },

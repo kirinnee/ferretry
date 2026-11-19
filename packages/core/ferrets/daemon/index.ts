@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { type BearerDigest } from '@ferretry/core-gate/contract';
+import type { BearerDigest } from '@ferretry/core-gate/contract';
 import {
   ApiError,
   type CallContext,
@@ -76,7 +76,7 @@ import { KernelGitRunner } from './adapters/git/runner.ts';
 import { KernelDiffScratch, KernelSessionRootPinner, RunnerSessionGit } from './adapters/session/filesystem/index.ts';
 import { StateAgentPinRepository } from './adapters/agent-pins/index.ts';
 import { KeyedSerialExecutor } from './adapters/storage/keyed-serial-executor.ts';
-import { type StateHomeLaunchReach } from './lib/route-security/state-home.ts';
+import type { StateHomeLaunchReach } from './lib/route-security/state-home.ts';
 import { AgentPinService } from './lib/agent-pins/index.ts';
 import { DaemonStorage } from './adapters/storage/session-storage.ts';
 import { SessionFiles, type SessionFilesDeps } from './modules/session-files.ts';
@@ -490,6 +490,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         : await found.login(login);
     },
     launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
+    daemonPath: () => kernel.hostFacts.launchGuard().searchPath,
     // The kind that HOLDS the login answers (`LoginKind.holds`): no kind trial, no caught throw. Each failure is a
     // fixed sentence; a Logins error is never quoted, because it can sit beside a credential.
     loginEnv: async (login, harness) => {
