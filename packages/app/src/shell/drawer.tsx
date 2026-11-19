@@ -3,11 +3,13 @@ import { type RefObject, useEffect, useRef } from 'react';
 import type { Route } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { useDialogFocus } from '../ui/hooks/use-dialog-focus.ts';
+import { ResizeHandle } from '../ui/resize-handle.tsx';
 import { useShell } from './context.tsx';
 import { drawerState, useDrawerCollapsed, useDrawerOpen } from './drawer-state.ts';
 import { DrawerFind } from './drawer-find.tsx';
 import { DrawerNav } from './drawer-nav.tsx';
 import { MachineItem } from './machine-switcher.tsx';
+import { useApplyPanelWidths } from './panel-widths.ts';
 import { SideBody, useSideHolds } from './side-column.tsx';
 
 /**
@@ -57,6 +59,7 @@ export function Drawer({
   /** Whether the list slot may draw (not while a whole-machine line replaces the pages). */
   readonly listed: boolean;
 }) {
+  useApplyPanelWidths();
   const { viewport, plan } = useShell();
   const phone = viewport === 'phone';
   const { entryKey } = useRouter();
@@ -115,6 +118,8 @@ export function Drawer({
           </div>
         )}
       </aside>
+      {/* The grab strip on the drawer's edge: wide only, and not on the rail (a rail is one width). */}
+      {phone || rail ? null : <ResizeHandle panel="drawer" edge="end" label="side bar" />}
     </>
   );
 }

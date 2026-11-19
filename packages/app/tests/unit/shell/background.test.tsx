@@ -96,9 +96,12 @@ describe('the background host', () => {
     const app = await bootApp({ surfaces: [bg], machines: ['d1', 'd2'] });
     view = app.view;
     const frame = must(app.view.container.querySelector('.fy-frame'), 'the frame');
-    expect([...frame.children].map(child => `${child.tagName.toLowerCase()}.${child.className.split(' ')[0]}`)).toEqual(
-      ['aside.fy-drawer', 'div.fy-body'],
-    );
+    // The zero-width grab handle (ui/resize-handle, r10 S3) sits beside the drawer; it is not a column.
+    expect(
+      [...frame.children]
+        .filter(child => !child.classList.contains('fy-resize'))
+        .map(child => `${child.tagName.toLowerCase()}.${child.className.split(' ')[0]}`),
+    ).toEqual(['aside.fy-drawer', 'div.fy-body']);
     const strip = must(app.view.container.querySelector('.fy-body > .fy-status'), 'the status strip');
     expect(strip.previousElementSibling).toBeNull();
     expect(strip.nextElementSibling?.classList.contains('fy-columns')).toBe(true);

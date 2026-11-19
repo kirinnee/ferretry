@@ -11,6 +11,7 @@ import { Link } from './link.tsx';
 import { SettingsNav } from './settings-nav.tsx';
 import { resolveSettingsTab, SCOPE_WORDS, scopeOf } from './settings-tab.ts';
 import { Loading } from '../ui/loading.tsx';
+import { ResizeHandle } from '../ui/resize-handle.tsx';
 import { PanelSlot, PluginView, ShellLine } from './views.tsx';
 import { useEffect, useRef, type MouseEvent } from 'react';
 
@@ -207,6 +208,7 @@ export function DaemonSettingsPage({
           active={active}
           named={named !== undefined}
         />
+        {viewport === 'phone' ? null : <ResizeHandle panel="settings-nav" edge="end" label="settings list" />}
         {choice.kind === 'none' ? (
           <ShellLine>No plugin on this daemon has settings.</ShellLine>
         ) : choice.kind === 'missing' ? (

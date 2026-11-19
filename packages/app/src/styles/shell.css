@@ -213,7 +213,7 @@
 .fy-side {
   min-height: 0;
   overflow-y: auto;
-  width: 360px;
+  width: var(--fy-w-side, 360px);
   border-left: var(--border-width) solid var(--border);
   padding: 16px;
 }
@@ -479,7 +479,8 @@
 }
 .fy-settings-body {
   display: grid;
-  grid-template-columns: calc(var(--fy-text-scale, 1) * 220px) minmax(0, 1fr);
+  position: relative;
+  grid-template-columns: var(--fy-w-settings-nav, calc(var(--fy-text-scale, 1) * 220px)) minmax(0, 1fr);
   gap: 24px;
   align-items: start;
 }
