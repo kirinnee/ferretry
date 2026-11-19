@@ -1,7 +1,13 @@
 {
-  "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "app/features/threads/index.ts"],
+  "entry": [
+    "tests/**/*.test.{ts,tsx}",
+    "tests/**/fixtures/**/*.{ts,tsx}",
+    "app/features/threads/index.ts",
+    "app/features/ci-flame/index.ts"
+  ],
   "project": ["**/*.{ts,tsx}"],
   "allowed": {
-    "entry:app/features/threads/index.ts": "E6 review threads: E4's PR page and E5's diff viewer import this barrel; neither has merged yet"
+    "entry:app/features/threads/index.ts": "E6 review threads: E4's PR page and E5's diff viewer import this barrel; neither has merged yet",
+    "entry:app/features/ci-flame/index.ts": "E11 flamegraph: E9's run page mounts this barrel; it has not merged yet"
   }
 }
