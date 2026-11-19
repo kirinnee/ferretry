@@ -165,6 +165,9 @@ export class GithubDeviceFlows {
 
   async #ask(flow: Flow): Promise<GitDeviceFlowStatus> {
     if (flow.deviceCode === undefined) return this.#settle(flow, { status: 'expired' });
+    // Whatever GitHub answers (an unreadable body, an error nobody knows, no answer at all), the next ask waits one
+    // interval: a page that polls fast can never make the daemon re-hit GitHub per request. Real answers set it again.
+    flow.nextPollMs = this.deps.nowMs() + flow.interval * 1000;
     const response = await this.deps.http.request({
       method: 'POST',
       url: ACCESS_TOKEN_URL,

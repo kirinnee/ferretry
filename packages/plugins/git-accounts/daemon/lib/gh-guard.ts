@@ -8,12 +8,16 @@
  *
  * So the argv is checked against a strict ALLOW-list of SUBCOMMAND + FLAGS, never a deny-list: a command, subcommand or
  * flag nobody listed (`auth`, `extension`, `repo clone`, `pr checkout`, anything a later `gh` adds) is refused because it
- * is not named, not because someone remembered it. On top of that, `--`, any short-flag cluster (`-dF`), any flag that
+ * is not named, not because someone remembered it. `--jq`, `-q`, `-t` and `--template` are refused on every command:
+ * gh's jq (gojq) and Go templates can read the child's environment (`env.GH_TOKEN`, `$ENV`), past any scrub of the
+ * output. A repository is named `OWNER/REPO` or `github.com/OWNER/REPO` and nothing else (no SSH form, no other
+ * host), and `github.localhost` / `*.ghe.com` appear nowhere, since gh would send the token there. On top of that, `--`, any short-flag cluster (`-dF`), any flag that
  * takes a file or directory (`--body-file`, `-F`, `--notes-file`, `--template`, `-T`, `--input`) and any argument that
  * looks like a local path are refused wherever they appear.
  *
  * Residual, said plainly (docs/secrets.md "A Git account's token"): an allowed command still acts with the token's
- * scopes (`repo` among them) on the GitHub API. There is no `git` child on this seam.
+ * scopes (`repo` among them) on the GitHub API. No `git` child runs with a repository's hooks or config on this seam
+ * (`pr merge --delete-branch` may run `git` in an empty scratch folder with an empty HOME).
  */
 import { ApiError } from '@ferretry/kernel/contract';
 import { GIT_ACCOUNT_CODES } from '../../contract/index.ts';
@@ -44,6 +48,11 @@ const REFUSED_FLAGS: ReadonlySet<string> = new Set([
   '--notes-file',
   '--template',
   '-T',
+  // gh's jq (gojq) and Go templates can read the child's ENVIRONMENT (`env.GH_TOKEN`, `$ENV`, `env`), past any
+  // scrub of the output, so they are refused on every command; callers post-process the scrubbed `--json` themselves.
+  '--jq',
+  '-q',
+  '-t',
 ]);
 /** `gh api`: the ONLY flags, each with whether it takes a value. Everything else is refused. */
 const API_FLAGS: Readonly<Record<string, boolean>> = {
@@ -54,17 +63,23 @@ const API_FLAGS: Readonly<Record<string, boolean>> = {
   '-f': true,
   '--raw-field': true,
   '--paginate': false,
-  '--jq': true,
-  '-q': true,
 };
-/** The flags whose VALUE may look like a path (a header, a field, a jq program are text, not a file). */
-const TEXT_VALUED: ReadonlySet<string> = new Set(['-H', '--header', '-f', '--raw-field', '--jq', '-q']);
+/** The flags whose VALUE may look like a path (a header or a field is text, not a file). */
+const TEXT_VALUED: ReadonlySet<string> = new Set(['-H', '--header', '-f', '--raw-field']);
 const METHODS: ReadonlySet<string> = new Set(['GET', 'POST', 'PATCH', 'PUT', 'DELETE']);
 /** An API endpoint: `graphql`, a REST path (`/repos/o/r`, `repos/o/r`), or an `api.github.com` address. */
 const API_ENDPOINT =
   /^(?:https:\/\/api\.github\.com\/|\/)?[A-Za-z0-9._~!$&'()*+,;%/{}-]+(?:\?[A-Za-z0-9._~!$&'()*+,;=:@%/?{}-]{0,1024})?$/u;
 const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//u;
 const GITHUB_URL = /^https:\/\/(?:github\.com|api\.github\.com)\//u;
+/** `OWNER/REPO` or `github.com/OWNER/REPO`: the only way a repository is named (no SSH form, no other host). */
+const STRICT_REPO = /^(?:github\.com\/)?([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)$/u;
+/** An SSH-style address (`git@host:o/r`) anywhere in an argument. */
+const SSH_ADDRESS = /[^\s@]+@[^\s@/:]+:/u;
+/** The hosts gh sends a `GH_TOKEN` to over plain http or to a tenant: never named, in any argument. */
+const REFUSED_HOSTS = /github\.localhost|ghe\.com/iu;
+/** The flags that name a repository. */
+const REPO_FLAGS: ReadonlySet<string> = new Set(['-R', '--repo']);
 /** `HOST/OWNER/REPO`: a repository named with a host. */
 const HOSTED_REPO = /^([^/\s]+)\/[^/\s]+\/[^/\s]+$/u;
 /** A flag standing alone: `-x` or `--long` / `--long=value`. */
@@ -99,7 +114,15 @@ function checkShape(arg: string): void {
   }
 }
 
+/** A repository, parsed strictly: `OWNER/REPO` or `github.com/OWNER/REPO` and nothing else. */
+function checkRepo(value: string): void {
+  const match = STRICT_REPO.exec(value);
+  if (match === null || match[1] === '.' || match[1] === '..' || match[2] === '.' || match[2] === '..')
+    refuse('a repository must be OWNER/REPO or github.com/OWNER/REPO');
+}
+
 function checkAddress(arg: string): void {
+  if (SSH_ADDRESS.test(arg)) refuse('an SSH-style address');
   if (SCHEME.test(arg) && !GITHUB_URL.test(arg)) refuse('an address outside github.com');
   const hosted = HOSTED_REPO.exec(arg);
   if (hosted !== null && (hosted[1] as string).toLowerCase() !== 'github.com' && /[.:]/u.test(hosted[1] as string))
@@ -145,15 +168,21 @@ function checkCommand(command: string, args: readonly string[]): void {
   const allowed = command === 'search' ? SEARCH_KINDS : GH_SUBCOMMANDS.get(command);
   if (sub === undefined || allowed === undefined || !allowed.has(sub))
     refuse(`"${command} ${(sub ?? '').slice(0, 40)}" is not run as an account`);
+  let repoNext = false;
   for (let at = 2; at < args.length; at += 1) {
     const arg = args[at] as string;
     checkShape(arg);
+    const flag = arg.startsWith('--') ? (arg.split('=', 1)[0] as string) : arg;
     // A short flag has no value of its own; `--flag=value` carries one; anything else is a value or a positional.
     const value = arg.startsWith('--') ? arg.slice(arg.indexOf('=') + 1) : arg;
+    if (repoNext || (REPO_FLAGS.has(flag) && arg.includes('='))) checkRepo(repoNext ? arg : value);
+    else if (!arg.startsWith('-') && command === 'repo' && /[/:@]/u.test(arg)) checkRepo(arg);
+    repoNext = REPO_FLAGS.has(flag) && !arg.includes('=');
     if (SHORT_FLAG.test(arg) || (arg.startsWith('--') && !arg.includes('='))) continue;
     if (looksLocal(value)) refuse('a local path');
     checkAddress(value);
   }
+  if (repoNext) refuse('a repository flag needs a value');
 }
 
 /** Throws a 403 unless every part of `args` is something a run as an account may do. */
@@ -161,6 +190,7 @@ export function checkGhArgs(args: readonly string[]): void {
   if (args.length === 0 || args.length > MAX_ARGS) refuse('wrong number of arguments');
   for (const arg of args)
     if (arg.length > MAX_ARG_BYTES || arg.includes('\0')) refuse('an argument is too long or has a NUL');
+  for (const arg of args) if (REFUSED_HOSTS.test(arg)) refuse('a host the token is not sent to');
   const command = args[0] as string;
   if (command === 'api') {
     checkApi(args);

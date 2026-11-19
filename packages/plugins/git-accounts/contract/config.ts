@@ -29,7 +29,7 @@ export const GITHUB_CONSENT = [
   'Ferretry will be able to read and write EVERY repository this GitHub account can reach, private ones included (the "repo" permission).',
   'It will also read your profile, your email addresses and your organizations, and add and remove the SSH keys Ferretry registers for you.',
   'It will not be able to change GitHub Actions workflow files, and it never sees your password.',
-  'The access token is kept sealed on this machine. No page, command or ferret can read it; it is only used by the daemon.',
+  'The access token is kept sealed on this machine. No page, command or ferret can read it: the daemon uses it for GitHub on your behalf, and a ferret can only ask the daemon to run narrowed GitHub commands as this account.',
   'To end the access completely, disconnect the account here and then revoke Ferretry at github.com/settings/applications.',
 ] as const;
 

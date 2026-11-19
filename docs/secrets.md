@@ -2008,13 +2008,19 @@ secret ("Per-session scoping" above), and a GitHub token is too strong for that.
   child can be asked to do is narrowed to GitHub API work.** Anything that starts `git` or reads or writes a local
   file is out of the seam: ferrets clone and push with `git` and the account's SSH key, never through `gh`.
   - the argv must pass a strict **allow-list of subcommand + flags**, not a deny-list: - `api` (REST or GraphQL on `api.github.com` only; one endpoint) takes only `-X/--method`, `-H/--header`,
-    `-f/--raw-field key=value`, `--paginate` and `--jq/-q`. `-F/--field`, `--input`, any argument starting with `@` or
+    `-f/--raw-field key=value` and `--paginate`. `-F/--field`, `--input`, any argument starting with `@` or
     containing `=@`, and an endpoint that is not an `api.github.com` path are refused; - `pr` (`list view diff checks comment review create edit close reopen merge`), `issue` (`list view create comment edit
 close reopen`), `run` (`list view watch cancel rerun`), `workflow` (`list view`), `repo view`, `release`
     (`list view`) and `search` (`repos issues prs code commits`) take no flag that names a file or directory
-    (`--body-file`, `-F`, `--notes-file`, `--template`, `-T`, `--input`) and no `--hostname`; - `--` anywhere, any short-flag cluster (`-dF`, `-iFquery=@f`: a short flag is one letter, on its own), and any argument
+    (`--body-file`, `-F`, `--notes-file`, `--input`) and no `--hostname`;
+  - **`--jq`, `-q`, `-t` and `--template` (`-T`) are refused on every command, in every spelling** (`--jq=x`, `-qx`):
+    gh's jq is gojq with the environment loader and Go templates are run by gh itself, so either can print the child's
+    environment (`env.GH_TOKEN`, `$ENV`) past the scrub. A caller post-processes the scrubbed `--json` output itself;
+  - **a repository is named `OWNER/REPO` or `github.com/OWNER/REPO` and nothing else** (`-R`/`--repo` and any repository
+    argument of `repo`; characters `A-Za-z0-9._-`): no `@`, no `:`, no SSH form, no other host. `github.localhost` and
+    `*.ghe.com` are refused anywhere in the argv, because gh sends `GH_TOKEN` to them (over plain http for the first); - `--` anywhere, any short-flag cluster (`-dF`, `-iFquery=@f`: a short flag is one letter, on its own), and any argument
     that looks like a local path (`/…`, `~…`, `./…`, `../…`, `…/..`) are refused. The only values exempt from the path rule
-    are those of `-H`, `-f` and `--jq`/`-q` (text, not files), and the `api` endpoint (an API path, checked as one); - everything else is refused because it is not named: `pr checkout`, `issue develop`, `repo clone|create|fork|sync|edit`,
+    are those of `-H` and `-f` (text, not files), and the `api` endpoint (an API path, checked as one); - everything else is refused because it is not named: `pr checkout`, `issue develop`, `repo clone|create|fork|sync|edit`,
     `release upload|create|download`, `workflow run`, `run download`, `gist`, `extension`, `codespace`, `ssh-key`,
     `gpg-key`, `secret`, `variable`, `auth`, `config`, `alias`, and any command a later `gh` adds;
   - the child runs in an **empty private folder** that is also its `HOME`, `XDG_*` and `GH_CONFIG_DIR` (no host aliases,
@@ -2041,8 +2047,7 @@ close reopen`), `run` (`list view watch cancel rerun`), `workflow` (`list view`)
 for every secret here ([threat model](#threat-model)). The sealed document narrows who is _handed_ it; it is not a
 sandbox against a process running as the owner.
 
-**GAP — what `gh` can still do with the token.** The `gh` seam is GitHub API work only, and there is **no `git` child on
-it**, so a repository's own hooks or `.git/config` can never run with the token (the old `repo clone` and `pr checkout`
+**GAP — what `gh` can still do with the token.** The `gh` seam is GitHub API work only, and there is **no `git` child that can run a repository's hooks or config** (`pr merge --delete-branch` may run `git` in an empty scratch folder with an empty `HOME`: no hooks, no config, no repository), so a repository's own hooks or `.git/config` can never run with the token (the old `repo clone` and `pr checkout`
 route is gone). What an allowed command can still do is everything the token's scopes allow on the GitHub API: with `repo`
 that is reading and writing every repository the account can reach (opening, merging or closing pull requests, commenting,
 creating or editing issues, re-running workflows) and, through `api`, any REST or GraphQL call. The scrub catches the token

@@ -481,6 +481,56 @@ describe('gh runs as an account, narrowed (review HIGH 1)', () => {
     ['api', '/x', '--include'],
     ['api', '/x', '--cache', '1h'],
     ['api', '/x', '-t', '{{.}}'],
+    // HIGH 1 (security re-check): gh's jq reads the environment, so jq and templates are refused on EVERY command.
+    ['api', '/user', '--jq', 'env.GH_TOKEN|@base64'],
+    ['api', '/user', '-q', '$ENV.GH_TOKEN|explode'],
+    ['api', '/user', '--jq=env|tostring|@base64'],
+    ['api', '/user', '-qenv'],
+    ['api', 'repos/o/r/pulls', '--paginate', '--jq', '.[].number'],
+    ['pr', 'list', '-R', 'o/r', '--json', 'number', '--jq', 'env.GH_TOKEN|@base64'],
+    ['pr', 'list', '--jq=env|tostring|@base64'],
+    ['pr', 'list', '--json', 'number', '--jq', '$ENV.GH_TOKEN'],
+    ['issue', 'list', '-R', 'o/r', '--json', 'number', '-q', 'env.GH_TOKEN'],
+    ['issue', 'list', '-qenv.GH_TOKEN'],
+    ['search', 'repos', 'x', '--json', 'name', '--jq', 'env.GH_TOKEN|@base64'],
+    ['run', 'list', '--json', 'name', '--jq=env'],
+    ['pr', 'list', '-t', '{{.}}'],
+    ['pr', 'list', '--template={{env}}'],
+    ['pr', 'list', '-t{{.}}'],
+    // HIGH 2: a repository is OWNER/REPO or github.com/OWNER/REPO, nothing else; no other host is ever named.
+    ['pr', 'list', '-R', 'git@github.localhost:o/r'],
+    ['pr', 'list', '-R', 'git@evil.example:o/r'],
+    ['pr', 'list', '-R', 'git@acme.ghe.com:o/r'],
+    ['pr', 'list', '--repo', 'git@evil.example:o/r'],
+    ['pr', 'list', '--repo=git@evil.example:o/r'],
+    ['pr', 'list', '-R', 'github.localhost/o/r'],
+    ['pr', 'list', '-R', 'acme.ghe.com/o/r'],
+    ['pr', 'list', '-R', 'evil/o/r'],
+    ['pr', 'list', '-R', 'https://github.com/o/r'],
+    ['pr', 'list', '-R', 'o/r/extra'],
+    ['pr', 'list', '-R', 'o'],
+    ['pr', 'list', '-R', 'o/..'],
+    ['pr', 'list', '-R', '../r'],
+    ['pr', 'list', '-R', 'o/r:x'],
+    ['pr', 'list', '-R', '-x'],
+    ['pr', 'list', '--repo=o/r@x'],
+    ['pr', 'list', '-R'],
+    ['pr', 'view', '1', '-R'],
+    ['repo', 'view', 'git@github.localhost:o/r'],
+    ['repo', 'view', 'git@evil.example:o/r'],
+    ['repo', 'view', 'git@acme.ghe.com:o/r'],
+    ['repo', 'view', 'ssh://git@github.com/o/r'],
+    ['repo', 'view', 'evil/o/r'],
+    ['repo', 'view', 'o/r/extra'],
+    ['pr', 'view', 'git@evil.example:o/r'],
+    ['pr', 'view', 'evil.example/o/r'],
+    ['pr', 'view', '1', '--head', 'git@evil.example:o/r'],
+    ['pr', 'view', 'github.localhost/o/r'],
+    ['pr', 'view', 'https://github.localhost/o/r/pull/1'],
+    ['api', 'https://api.github.localhost/user'],
+    ['api', '/user', '-H', 'X-Host: api.github.localhost'],
+    ['search', 'repos', 'acme.ghe.com'],
+    ['pr', 'list', '-R', 'o/r', '--search', 'acme.ghe.com'],
     ['api', '/x', '--template', '{{.}}'],
     ['api', '/x', '-H'],
     ['api', '/x', '-X', 'TRACE'],
@@ -563,16 +613,23 @@ describe('gh runs as an account, narrowed (review HIGH 1)', () => {
     const { port, calls } = await ready();
     const ok: string[][] = [
       ['api', '/repos/o/r/pulls'],
-      ['api', 'repos/o/r/pulls', '--paginate', '--jq', '.[].number'],
+      ['api', 'repos/o/r/pulls', '--paginate'],
       ['api', 'https://api.github.com/user'],
       ['api', '-X', 'POST', '/repos/o/r/issues', '-f', 'title=hi', '-f', 'body=a/b ./c'],
       ['api', '--method=PATCH', '/repos/o/r/issues/1', '--raw-field=state=closed'],
       ['api', 'graphql', '-f', 'query={ viewer { login } }', '-H', 'Accept: application/vnd.github+json'],
-      ['api', '/search/issues?q=repo:o/r+is:open', '-q', '.items | length'],
+      ['api', '/search/issues?q=repo:o/r+is:open'],
+      ['pr', 'list', '-R', 'o/r', '--json', 'number,title'],
+      ['pr', 'list', '--repo', 'github.com/o/r', '--state', 'open'],
+      ['pr', 'list', '--repo=o/r.js_x-y'],
+      ['pr', 'list', '--repo=github.com/o/r'],
+      ['issue', 'list', '-R', 'github.com/o/r'],
+      ['repo', 'view', 'github.com/o/r', '--json', 'name'],
       ['pr', 'list'],
       ['pr', 'view', 'https://github.com/o/r/pull/1'],
       ['pr', 'view', '1', '-R', 'o/r', '--json', 'title,state'],
       ['pr', 'diff', '1'],
+      ['pr', 'view', 'feat/x/y'],
       ['pr', 'checks', '1'],
       ['pr', 'create', '-d', '--title', 't', '--body', 'b', '--head', 'x', '--base', 'main'],
       ['pr', 'comment', '1', '--body', 'thanks'],
@@ -889,6 +946,26 @@ describe('the failure branches of the flow and the service', () => {
       await wait(5);
       expect((await request('GET', `/v1/git-accounts/github/device/${flow.flowId}`)).status).toBe(502);
       expect((await request('GET', '/v1/git-accounts')).json()).toEqual([]);
+    }
+  });
+
+  test('a 502 from a sign-in poll pushes the next ask one interval out: a fast poller never re-hits GitHub', async () => {
+    for (const answer of ['nonsense', { error: 'unsupported_grant_type' }]) {
+      const github = new FakeGithub();
+      github.tokenAnswers = [answer as never];
+      const { request, wait } = await boot(github);
+      const flow = (await request('POST', '/v1/git-accounts/github/device')).json<{ flowId: string }>();
+      await wait(5);
+      expect((await request('GET', `/v1/git-accounts/github/device/${flow.flowId}`)).status).toBe(502);
+      expect(github.tokenPolls).toBe(1);
+      for (let n = 0; n < 3; n += 1) {
+        const again = await request('GET', `/v1/git-accounts/github/device/${flow.flowId}`);
+        expect([again.status, again.json<{ status: string }>().status]).toEqual([200, 'pending']);
+      }
+      expect(github.tokenPolls).toBe(1);
+      await wait(5);
+      expect((await request('GET', `/v1/git-accounts/github/device/${flow.flowId}`)).status).toBe(502);
+      expect(github.tokenPolls).toBe(2);
     }
   });
 
