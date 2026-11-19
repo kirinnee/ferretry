@@ -167,6 +167,11 @@ export interface SettingsTabDecl<Id extends string = string> {
   readonly group?: SettingsGroupId;
   /** Words the command bar finds this tab by, beyond its label (the settings it holds). */
   readonly keywords?: readonly string[];
+  /**
+   * WHERE this tab's settings are kept: `machine` (the default) on the daemon, for every device paired to it; `device` in this
+   * browser only. The Settings page lists each in its own block and says so on the tab.
+   */
+  readonly scope?: 'device' | 'machine';
 }
 
 /** Renderers are provide hooks of the app (§5.2): one per ask source, one per reference prefix. */
