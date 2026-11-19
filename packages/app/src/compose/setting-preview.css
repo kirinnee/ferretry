@@ -1,12 +1,15 @@
 /* ============================================================================
    The setting preview — a ~160 x 100 mini-frame beside a setting row (compose/setting-preview.tsx).
-   The loop is two stacked layers taking turns on `opacity` (out, then in): no layout, no per-frame script. The RESTING style
-   is the final state (`before` hidden, `after` shown), so with the animation removed — reduced motion, a
-   stylesheet that never matches — the frame still shows the answer. Theme tokens only.
+   It RESTS on the final state (`before` is not even mounted) and plays ONE movement when the value changes: two stacked
+   layers on `opacity` (`before` stays opaque underneath, `after` fades in over it), no layout, no per-frame script, no
+   loop. The end of the movement is a timer in setting-preview.tsx, not an event of these animations. The resting style is the
+   final state (`after` shown), so with the animation removed — reduced motion, a stylesheet that never matches — the
+   frame still shows the answer. A lazy scene draws `.fy-sp__skeleton` of the same size, never an empty box.
+   Theme tokens only.
    ========================================================================== */
 
 .fy-sp {
-  --sp-loop: 4200ms;
+  --sp-loop: 1400ms;
   background: var(--surface-2);
   border: var(--stroke-panel) solid var(--border);
   border-radius: var(--radius-control);
@@ -24,52 +27,78 @@
   inset: 0;
   position: absolute;
 }
+/* `fit="contain"`: the stage is the scene's own size, centred, and scaled by the inline transform to the frame. */
+.fy-sp__stage--fit {
+  inset: auto;
+  left: 50%;
+  top: 50%;
+  transform-origin: center;
+}
 .fy-sp__layer {
+  /* An opaque layer covers whatever is under it, so `after` at full opacity hides `before` completely. */
+  background: var(--surface-2);
   will-change: opacity;
 }
-.fy-sp__layer--before {
-  opacity: 0;
+
+/* The same-size placeholder: flat blocks in the frame's own surface tones. No animation, so it costs nothing and
+   never reads as a second thing moving. */
+.fy-sp__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  inset: 0;
+  padding: 12px;
+  position: absolute;
+}
+.fy-sp__skeleton-bar {
+  background: var(--border);
+  border-radius: var(--radius-control);
+  height: 8px;
+  width: 70%;
+}
+.fy-sp__skeleton-bar--short {
+  width: 40%;
+}
+.fy-sp__skeleton-block {
+  background: var(--border);
+  border-radius: var(--radius-control);
+  flex: 1;
+  opacity: 0.6;
 }
 
-/* The two layers take turns: `before` fades out, a beat of bare frame, then `after` fades in. They are never both
-   visible, so a label in one never lands on a label in the other. The scenes time their own movement from these marks
-   (the second layer is fully in at 54%, and fully out again at 94%). */
+/* `before` stays FULLY opaque underneath while `after` fades in over it, and `before` hides only once `after` is fully
+   opaque (54%, then holds). At every instant one of the two layers is opaque, so the frame is never empty; the
+   cross-fade shows both for a moment, never neither. The scenes time their own movement from these marks. */
 @keyframes fy-sp-before {
   0%,
-  36% {
+  54% {
     opacity: 1;
   }
-  42%,
-  94% {
-    opacity: 0;
-  }
+  54.1%,
   100% {
-    opacity: 1;
+    opacity: 0;
   }
 }
 @keyframes fy-sp-after {
   0%,
-  48% {
+  18% {
     opacity: 0;
   }
   54%,
-  88% {
-    opacity: 1;
-  }
-  94%,
   100% {
-    opacity: 0;
+    opacity: 1;
   }
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .fy-sp[data-sp-state='playing'] .fy-sp__layer--before,
   .fy-sp[data-sp-state='paused'] .fy-sp__layer--before {
-    animation: fy-sp-before var(--sp-loop) ease-in-out infinite;
+    animation: fy-sp-before var(--sp-loop) ease-in-out 1;
+    opacity: 0;
   }
   .fy-sp[data-sp-state='playing'] .fy-sp__layer--after,
   .fy-sp[data-sp-state='paused'] .fy-sp__layer--after {
-    animation: fy-sp-after var(--sp-loop) ease-in-out infinite;
+    animation: fy-sp-after var(--sp-loop) ease-in-out 1;
   }
   /* Hidden tab or scrolled off-screen: held where it is, and costing nothing. */
   .fy-sp[data-sp-state='paused'] .fy-sp__layer,

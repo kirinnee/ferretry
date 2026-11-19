@@ -7,7 +7,7 @@
    Two ways to move, both on opacity/transform only:
      .fy-ls       choice scenes. The `before` layer stays put and the `after` layer (opaque) fades in over it, so what the
                   two share does not dip while the part that differs cross-fades.
-     .fy-ls--own  list scenes. One layer, whose rows slide on the loop SettingPreview owns (`--sp-loop`).
+     .fy-ls--own  list scenes. One layer, whose rows slide on the one movement SettingPreview owns (`--sp-loop`).
    ========================================================================== */
 
 .fy-ls {
@@ -268,7 +268,7 @@
   opacity: 0.38;
 }
 
-/* ---- the loops ------------------------------------------------------------ */
+/* ---- the movement (one play, then it rests) ------------------------------ */
 /* A choice scene keeps the `before` layer underneath, and the opaque `after` layer fades in over it. */
 .fy-sp.fy-ls[data-sp-state] .fy-sp__layer--before {
   animation: none;
@@ -283,18 +283,15 @@
   opacity: 1;
 }
 
+/* Each movement ENDS on the resting style (100% = rest), because it plays once and then the frame rests. */
 @keyframes fy-ls-lift {
   0%,
   18% {
     transform: translateY(calc(-2 * (100% + var(--ls-gap))));
   }
-  42%,
-  74% {
-    transform: translateY(0);
-  }
-  96%,
+  64%,
   100% {
-    transform: translateY(calc(-2 * (100% + var(--ls-gap))));
+    transform: translateY(0);
   }
 }
 @keyframes fy-ls-shift {
@@ -302,13 +299,9 @@
   18% {
     transform: translateY(calc(100% + var(--ls-gap)));
   }
-  42%,
-  74% {
-    transform: translateY(0);
-  }
-  96%,
+  64%,
   100% {
-    transform: translateY(calc(100% + var(--ls-gap)));
+    transform: translateY(0);
   }
 }
 @keyframes fy-ls-hide {
@@ -316,13 +309,9 @@
   18% {
     opacity: 1;
   }
-  42%,
-  74% {
-    opacity: 0.38;
-  }
-  96%,
+  64%,
   100% {
-    opacity: 1;
+    opacity: 0.38;
   }
 }
 @keyframes fy-ls-glow {
@@ -330,13 +319,9 @@
   18% {
     opacity: 0;
   }
-  34%,
-  80% {
-    opacity: 1;
-  }
-  96%,
+  54%,
   100% {
-    opacity: 0;
+    opacity: 1;
   }
 }
 
@@ -344,7 +329,7 @@
 @media (prefers-reduced-motion: no-preference) {
   .fy-sp:not([data-sp-state='still']) .fy-ls-nrow {
     animation-duration: var(--sp-loop);
-    animation-iteration-count: infinite;
+    animation-iteration-count: 1;
     animation-timing-function: ease-in-out;
   }
   .fy-sp:not([data-sp-state='still']) .fy-ls-nrow[data-role='lift'] {
@@ -361,7 +346,7 @@
   }
   .fy-sp:not([data-sp-state='still']) .fy-ls-nrow[data-role='lift']::after {
     animation-duration: var(--sp-loop);
-    animation-iteration-count: infinite;
+    animation-iteration-count: 1;
     animation-name: fy-ls-glow;
     animation-timing-function: ease-in-out;
   }

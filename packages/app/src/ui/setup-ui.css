@@ -1,0 +1,24 @@
+/* The choice cards of `RadioChoices` (ui/setup-ui.tsx): a row that wraps, never one full-width stack, and the card that
+   was just picked answers once with a small settle. Theme tokens only. */
+.fy-choice-card {
+  flex: 1 1 180px;
+  max-width: 320px;
+}
+@keyframes fy-choice-settle {
+  from {
+    transform: scale(0.98);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion='reduced']) .fy-choice-card[data-checked='true'][data-picked='true'] {
+    animation: fy-choice-settle 160ms ease-out 1;
+  }
+  :root:not([data-motion='reduced']) .fy-choice-card {
+    transition:
+      border-color 160ms ease-out,
+      background-color 160ms ease-out;
+  }
+}

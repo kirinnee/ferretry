@@ -1,9 +1,12 @@
 /**
- * The compact Settings row kit: one row per setting, grouped in titled cards.
+ * The compact Settings row kit: one row per setting, grouped under a title.
  *
- *   SettingGroup   a small uppercase label over one `kt-groupcard` list (the Machine tab's look)
- *   SettingRow     name + one-line hint on the left, the control on the right, an optional (i) that opens
- *                  the long explanation, and an optional panel under the row (a legend, a list, a sub-view)
+ *   SettingGroup   a small uppercase label over rows divided by hairlines: ONE level of surface, never a box
+ *                  in a box (`kt-groupcard--flat`), 32 px before the next group
+ *   SettingRow     name + one-line hint in a 40 % label column (min 220 px), the control right beside it (not
+ *                  at the far edge), an optional (i) that opens the long explanation, an optional preview
+ *                  beside the control from 900 px, and an optional panel under the row
+ *   SettingRowGrid short rows two to a line from 1,200 px (one `<li>` that holds a grid of rows)
  *   SettingSwitch  the on/off control for a row
  *   Segmented      a `role="radiogroup"` pill control, built from the theme's Auto / Light / Dark one
  *
@@ -33,7 +36,7 @@ export function SettingGroup({ label, settingId, children }: SettingGroupProps) 
   return (
     <section
       aria-labelledby={headingId}
-      className="min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      className="mb-8 min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-accent"
       data-setting-group={label}
       {...(settingId === undefined
         ? {}
@@ -42,8 +45,28 @@ export function SettingGroup({ label, settingId, children }: SettingGroupProps) 
       <h3 id={headingId} className="m-0 mb-1 px-1 text-meta font-semibold uppercase tracking-wide text-muted">
         {label}
       </h3>
-      <ul className="kt-groupcard m-0 list-none p-0">{children}</ul>
+      <ul className="kt-groupcard kt-groupcard--flat m-0 list-none p-0">{children}</ul>
     </section>
+  );
+}
+
+/**
+ * Short rows two to a line from 1,200 px wide, one column below. It is itself ONE list item of the group (so the
+ * group's hairline rule still applies to it) and holds the rows in an inner list that draws its own hairlines.
+ */
+export function SettingRowGrid({ children }: { readonly children: ReactNode }) {
+  return (
+    <li className="min-w-0" data-setting-row-grid="">
+      <ul
+        className={cn(
+          'm-0 grid min-w-0 list-none grid-cols-1 p-0 min-[1200px]:grid-cols-2 min-[1200px]:gap-x-8',
+          '[&>li+li]:border-t [&>li+li]:border-border',
+          'min-[1200px]:[&>li:nth-child(2)]:border-t-0',
+        )}
+      >
+        {children}
+      </ul>
+    </li>
   );
 }
 
@@ -82,6 +105,7 @@ export function SettingRow({
   const id = useId();
   const labelId = `${id}-label`;
   const hasExplanation = explanation !== undefined && explanation !== null;
+  const hasPreview = preview !== undefined && preview !== null;
   const info = hasExplanation ? (
     <button
       type="button"
@@ -108,19 +132,31 @@ export function SettingRow({
       className="min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
       <div className="flex min-h-[52px] min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-1 pl-panel pr-1">
-        <span className={cn('flex min-w-0 flex-1 flex-col', wide ? 'basis-40 max-md:basis-full' : 'basis-40')}>
+        {/* The label column: 40 % of the row (never under 220 px), so the control sits beside it, not at the far edge. */}
+        <span
+          className={cn(
+            'flex min-w-[min(220px,100%)] flex-col min-[900px]:basis-[40%] min-[900px]:flex-none',
+            'max-[899px]:min-w-0 max-[899px]:flex-1 max-[899px]:basis-40',
+            wide && 'max-md:basis-full',
+          )}
+        >
           <span id={labelId} className="text-ui font-semibold text-fg">
             {name}
           </span>
           {hint === undefined ? null : (
-            <span className="text-meta leading-tight text-muted" data-setting-hint="">
+            // One line on a desktop (the rest is behind the (i)); a phone wraps it, so no text is out of reach.
+            <span
+              className="text-meta leading-tight text-muted min-[900px]:truncate"
+              data-setting-hint=""
+              {...(typeof hint === 'string' ? { title: hint } : {})}
+            >
               {hint}
             </span>
           )}
         </span>
-        {preview === undefined || preview === null ? null : (
+        {!hasPreview ? null : (
           <span
-            className="order-last flex shrink-0 py-1 max-md:basis-full"
+            className="order-last flex shrink-0 py-1 max-[899px]:basis-full min-[900px]:ml-2"
             aria-hidden="true"
             data-setting-preview-slot=""
           >
@@ -129,8 +165,10 @@ export function SettingRow({
         )}
         <span
           className={cn(
+            // With a preview the control and the preview stay together beside the label; without one the (i) sits at the end.
             'flex min-w-0 items-center gap-1',
-            !wide && 'shrink-0',
+            hasPreview ? 'min-[900px]:flex-none' : 'flex-1',
+            !wide && 'max-md:shrink-0 max-md:flex-none',
             // `wide` fills the phone's width under the name; the (i) stays beside it.
             wide && 'max-md:basis-full',
           )}

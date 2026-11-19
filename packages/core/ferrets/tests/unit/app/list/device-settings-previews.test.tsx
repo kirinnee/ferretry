@@ -38,7 +38,10 @@ describe('the rows carry their previews', () => {
 
 describe('NeedsYouPreview', () => {
   it('shows the grouped list against the ungrouped one, and only the chosen one under reduced motion', async () => {
-    mounted = await mount(<NeedsYouPreview grouped />);
+    mounted = await mount(<NeedsYouPreview grouped={false} />);
+    expect(attrs('data-dsp-grouped')).toEqual(['off']);
+    // It plays once from the other form when the choice changes.
+    await mounted.render(<NeedsYouPreview grouped />);
     expect(attrs('data-dsp-grouped')).toEqual(['off', 'on']);
     expect(mounted.container.textContent).toContain('Needs you');
     await mounted.unmount();
@@ -57,7 +60,9 @@ describe('NeedsYouPreview', () => {
 
 describe('DensityPreview', () => {
   it('loops from the density it is most unlike, with a row shape per density', async () => {
-    mounted = await mount(<DensityPreview density="compact" />);
+    mounted = await mount(<DensityPreview density="full" />);
+    expect(attrs('data-dsp-density')).toEqual(['full']);
+    await mounted.render(<DensityPreview density="compact" />);
     expect(attrs('data-dsp-density')).toEqual(['full', 'compact']);
     await mounted.unmount();
     document.documentElement.dataset.motion = 'reduced';

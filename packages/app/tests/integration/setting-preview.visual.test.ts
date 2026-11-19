@@ -1,7 +1,7 @@
 /**
  * THE SETTING PREVIEW in a real browser over fake data (`fixtures/setting-preview-scene.tsx`): a ~160 x 100 frame beside a
- * row that loops before → after, holds still on the final frame under reduced motion, stops while the tab is hidden and
- * adds no height beyond its own box.
+ * row that RESTS on the chosen value, plays before → after ONCE when the value changes (never an empty frame, in any
+ * sample of the real play), holds still on the final frame under reduced motion, stops while the tab is hidden and adds no height beyond its own box.
  *
  * Set `FY_SETTING_PREVIEW_SHOTS_DIR` to keep `<viewport>-<theme>-<case>.png` (desktop 1280 and phone 390, light and dark).
  */
@@ -94,7 +94,30 @@ const shotOf = async (tab: Page, variant: (typeof VARIANTS)[number], name: strin
   if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${variant.name}-${name}.png`) });
 };
 
-/** Jump every running animation to `ms` into its loop and hold it there, so a frame is the same on every run. */
+/** The length of the one movement (`--sp-loop`). */
+const PLAY_MS = 1_400;
+
+/** Choose the other value of the first row: the frame plays its one movement. */
+const flip = async (tab: Page): Promise<void> => {
+  // Click and hold in the same page turn, so a slow machine cannot let the movement end before it is looked at.
+  await tab.evaluate(
+    () =>
+      new Promise<void>(resolve => {
+        document.querySelector<HTMLElement>('[data-flip]')?.click();
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            for (const animation of document.getAnimations()) animation.pause();
+            resolve();
+          }),
+        );
+      }),
+  );
+  await tab.waitForFunction(
+    () => document.querySelector('[data-setting-preview]')?.getAttribute('data-sp-state') !== 'still',
+  );
+};
+
+/** Jump every running animation to `ms` into its movement and hold it there, so a frame is the same on every run. */
 const seek = async (tab: Page, ms: number): Promise<void> => {
   await tab.evaluate(at => {
     for (const animation of document.getAnimations()) {
@@ -104,21 +127,53 @@ const seek = async (tab: Page, ms: number): Promise<void> => {
   }, ms);
 };
 
-/** The two layers take turns: at no point of the loop are both visible, so a label never lands on another. */
-const expectNeverOverlapping = async (tab: Page): Promise<void> => {
-  for (let step = 0; step <= 100; step += 1) {
-    await seek(tab, (4_200 * step) / 100);
-    const worst = await tab.evaluate(() =>
-      Math.max(
-        ...[...document.querySelectorAll('[data-setting-preview]')].map(frame => {
-          const layer = (kind: string) =>
-            Number(getComputedStyle(frame.querySelector(`.fy-sp__layer--${kind}`) as Element).opacity);
-          return Math.min(layer('before'), layer('after'));
-        }),
-      ),
-    );
-    expect(worst).toBe(0);
+/**
+ * How much of the frame is covered by SOMETHING at this instant: the layers are stacked and each is opaque in itself, so
+ * the covered share is 1 - (1 - before) * (1 - after). Below 1 the frame shows its bare background: an empty frame.
+ * A frame with no `before` layer (resting) is covered by `after` alone.
+ */
+const coverageNow = (): number => {
+  const frame = document.querySelector('[data-setting-preview]');
+  if (frame === null) return -1;
+  const opacity = (kind: string): number => {
+    const layer = frame.querySelector(`.fy-sp__layer--${kind}`);
+    return layer === null ? 0 : Number(getComputedStyle(layer).opacity);
+  };
+  return 1 - (1 - opacity('before')) * (1 - opacity('after'));
+};
+
+/** Sample the computed coverage on the animation timeline every 16 ms of the play: it must be full at every sample. */
+const expectNeverEmpty = async (tab: Page): Promise<void> => {
+  const lowest = { at: -1, coverage: 1 };
+  for (let at = 0; at <= PLAY_MS; at += 16) {
+    await seek(tab, at);
+    const coverage = await tab.evaluate(coverageNow);
+    if (coverage < lowest.coverage) {
+      lowest.at = at;
+      lowest.coverage = coverage;
+    }
   }
+  expect(lowest, 'the frame is covered at every sample of the play').toEqual({ at: -1, coverage: 1 });
+};
+
+/**
+ * The REAL play, nothing held or seeked: pick the other value, then read the coverage back to back (one browser round
+ * trip each) for two play lengths and return the samples. Run twice (a change and the way back) so both plays are sampled.
+ */
+const sampleRealPlay = async (tab: Page): Promise<{ coverages: number[]; states: string[] }> => {
+  const coverages: number[] = [];
+  const states: string[] = [];
+  await tab.evaluate(() => document.querySelector<HTMLElement>('[data-flip]')?.click());
+  const started = Date.now();
+  while (Date.now() - started < PLAY_MS * 2) {
+    const coverage = await tab.evaluate(coverageNow);
+    const state = await tab.evaluate(
+      () => document.querySelector('[data-setting-preview]')?.getAttribute('data-sp-state') ?? '',
+    );
+    coverages.push(coverage);
+    states.push(state);
+  }
+  return { coverages, states };
 };
 
 const opacityOf = async (tab: Page, layer: 'before' | 'after'): Promise<number> =>
@@ -129,9 +184,16 @@ const opacityOf = async (tab: Page, layer: 'before' | 'after'): Promise<number> 
 
 describe('SettingPreview', () => {
   for (const variant of VARIANTS) {
-    it(`${variant.name}: it is 160 x 100, plays before then after, and the frames are shot`, async () => {
+    it(`${variant.name}: it is 160 x 100, rests, plays before then after once on a change, and the frames are shot`, async () => {
       const { tab, problems, close } = await open(variant);
       try {
+        // Resting: the selected value only, never blank, and nothing running.
+        expect(await tab.locator('[data-setting-preview]').first().getAttribute('data-sp-state')).toBe('still');
+        expect(await tab.locator('.fy-sp__layer--before').count()).toBe(0);
+        expect(await tab.evaluate(() => document.getAnimations().length)).toBe(0);
+        expect(await opacityOf(tab, 'after')).toBe(1);
+        await shotOf(tab, variant, 'rest');
+        await flip(tab);
         const box = await tab.locator('[data-setting-preview]').first().boundingBox();
         expect(Math.round(box?.width ?? 0)).toBe(160);
         expect(Math.round(box?.height ?? 0)).toBe(100);
@@ -140,14 +202,16 @@ describe('SettingPreview', () => {
         expect(await opacityOf(tab, 'before')).toBe(1);
         expect(await opacityOf(tab, 'after')).toBe(0);
         await shotOf(tab, variant, 't0-before');
-        await seek(tab, 4_200 * 0.39);
+        await seek(tab, PLAY_MS * 0.3);
         await shotOf(tab, variant, 'mid-fade');
-        await seek(tab, 4_200 * 0.45);
-        await shotOf(tab, variant, 'mid-fade-gap');
-        await seek(tab, 4_200 * 0.51);
+        // 630 ms: the instant the old frame went empty (both layers transparent) before this was fixed.
+        await seek(tab, 630);
+        expect(await tab.evaluate(coverageNow)).toBe(1);
+        await shotOf(tab, variant, 'mid-630ms');
+        await seek(tab, PLAY_MS * 0.45);
         await shotOf(tab, variant, 'mid-fade-in');
-        await expectNeverOverlapping(tab);
-        await seek(tab, 4_200 * 0.7);
+        await expectNeverEmpty(tab);
+        await seek(tab, PLAY_MS * 0.7);
         expect(await opacityOf(tab, 'before')).toBe(0);
         expect(await opacityOf(tab, 'after')).toBe(1);
         await shotOf(tab, variant, 'final-after');
@@ -157,9 +221,31 @@ describe('SettingPreview', () => {
       }
     });
 
+    it(`${variant.name}: the real play (every frame, two plays) is never empty and then rests on the answer`, async () => {
+      const { tab, close } = await open(variant);
+      try {
+        for (let play = 0; play < 2; play += 1) {
+          const { coverages, states } = await sampleRealPlay(tab);
+          // About 60 frames a second for two durations; a slow machine drops frames, so only a floor is asserted.
+          expect(coverages.length).toBeGreaterThan(20);
+          expect(Math.min(...coverages), 'no sample of the real play shows an empty frame').toBe(1);
+          // It really moved (was playing in some samples) and ended at rest.
+          expect(states).toContain('playing');
+          expect(states.at(-1)).toBe('still');
+          expect(await tab.evaluate(() => document.getAnimations().length)).toBe(0);
+          expect(await tab.locator('.fy-sp__layer--before').count()).toBe(0);
+          expect(await opacityOf(tab, 'after')).toBe(1);
+          if (play === 0) await shotOf(tab, variant, 'rested-after-play');
+        }
+      } finally {
+        await close();
+      }
+    });
+
     it(`${variant.name}: with motion reduced it shows the final frame only and runs nothing`, async () => {
       const { tab, close } = await open(variant, '&motion=reduced');
       try {
+        await tab.locator('[data-flip]').first().click();
         expect(await tab.locator('[data-setting-preview]').first().getAttribute('data-sp-state')).toBe('still');
         expect(await tab.locator('.fy-sp__layer--before').count()).toBe(0);
         expect(await tab.evaluate(() => document.getAnimations().length)).toBe(0);
@@ -180,6 +266,7 @@ describe('SettingPreview', () => {
     const variant = VARIANTS[0];
     const { tab, close } = await open(variant);
     try {
+      await flip(tab);
       const rowBox = await tab.locator('[data-setting-row="Menu side"]').boundingBox();
       // A 100px frame plus the row's own padding: the row grows to hold it and no further.
       expect(rowBox?.height ?? 0).toBeLessThan(120);

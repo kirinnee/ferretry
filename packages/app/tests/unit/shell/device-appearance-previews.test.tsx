@@ -1,6 +1,6 @@
 /**
- * The Look previews: one per choice, each the final frame under reduced motion, each looping from the value it is most
- * unlike, and the Motion one moving only where motion is allowed.
+ * The Look previews: one per choice, each resting on the chosen value, each playing ONCE from the value it is most
+ * unlike when the choice changes, and the Motion one moving only where motion is allowed.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
@@ -18,8 +18,10 @@ const attrs = (name: string): string[] =>
   [...(mounted?.container.querySelectorAll(`[${name}]`) ?? [])].map(node => node.getAttribute(name) ?? '');
 
 describe('ColourModePreview', () => {
-  it('should loop from the opposite tone to the chosen one, in the current theme family', async () => {
-    mounted = await mount(<ColourModePreview family="mission" mode="dark" />);
+  it('should rest on the chosen tone, then play once from the opposite one when it changes, in the theme family', async () => {
+    mounted = await mount(<ColourModePreview family="mission" mode="light" />);
+    expect(attrs('data-dap-mode')).toEqual(['light']);
+    await mounted.render(<ColourModePreview family="mission" mode="dark" />);
     expect(frame().getAttribute('data-sp-label')).toBe('Always dark');
     expect(attrs('data-dap-mode')).toEqual(['light', 'dark']);
     expect(attrs('data-swatch')).toEqual(['mission-light', 'mission-dark']);
@@ -41,8 +43,10 @@ describe('ColourModePreview', () => {
 });
 
 describe('TextSizePreview', () => {
-  it('should loop from the opposite size, and the button is the same in both frames', async () => {
-    mounted = await mount(<TextSizePreview scale="larger" />);
+  it('should play once from the opposite size, and the button is the same in both frames', async () => {
+    mounted = await mount(<TextSizePreview scale="default" />);
+    expect(attrs('data-dap-scale')).toEqual(['default']);
+    await mounted.render(<TextSizePreview scale="larger" />);
     expect(attrs('data-dap-scale')).toEqual(['default', 'larger']);
     expect(mounted.container.querySelectorAll('.fy-dap-button')).toHaveLength(2);
   });
@@ -56,10 +60,11 @@ describe('TextSizePreview', () => {
 
 describe('MotionPreview', () => {
   it('should play moving then still, or still then moving, for the chosen value', async () => {
-    mounted = await mount(<MotionPreview motion="system" />);
-    expect(attrs('data-dap-motion')).toEqual(['still', 'moving']);
-    await mounted.unmount();
     mounted = await mount(<MotionPreview motion="reduced" />);
+    expect(attrs('data-dap-motion')).toEqual(['still']);
+    await mounted.render(<MotionPreview motion="system" />);
+    expect(attrs('data-dap-motion')).toEqual(['still', 'moving']);
+    await mounted.render(<MotionPreview motion="reduced" />);
     expect(attrs('data-dap-motion')).toEqual(['moving', 'still']);
   });
 
@@ -71,7 +76,8 @@ describe('MotionPreview', () => {
   });
 
   it('should stop moving the moment Settings turns motion down', async () => {
-    mounted = await mount(<MotionPreview motion="system" />);
+    mounted = await mount(<MotionPreview motion="reduced" />);
+    await mounted.render(<MotionPreview motion="system" />);
     expect(attrs('data-dap-motion')).toContain('moving');
     await interact(() => {
       document.documentElement.dataset.motion = 'reduced';
