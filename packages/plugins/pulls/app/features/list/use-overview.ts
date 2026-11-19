@@ -2,11 +2,14 @@
  * The PRs screen, the live half (r9 E3): one read, then a re-read every minute while the tab is visible, and at once when
  * the daemon says a project's PRs changed. The reads are the daemon's own snapshot, never GitHub, and reading it is what
  * tells the watch a screen is open (E2's 60-second cadence), so a hidden tab reads nothing and the watch relaxes.
+ *
+ * Only the newest read counts: a read that starts supersedes the one in flight (it is aborted, and whatever it answers
+ * is dropped), so a slow older answer can never replace a newer one, and exactly one timer is ever pending.
  */
 import { useDocumentVisible } from '@ferretry/app';
 import { useCallback, useEffect, useState } from 'react';
 import { PullsChanged, type WatchOverview } from '../../../contract/index.ts';
-import { type ListClient, readNames, readOverview } from './api.ts';
+import { type ListClient, type ProjectFacts, readOverview, readProjects } from './api.ts';
 
 /** Under E2's `viewedWithinMs` (150 s), so one screen keeps the watch at its 60-second pace. */
 const REFRESH_MS = 60_000;
@@ -17,14 +20,15 @@ export type Reading =
   | {
       readonly status: 'ready';
       readonly overview: WatchOverview;
-      readonly names: ReadonlyMap<string, string>;
+      /** What the project records say, by project id (a name; whether the folder holds no repository). */
+      readonly projects: ReadonlyMap<string, ProjectFacts>;
       /** A refresh that failed after one that worked: what is drawn is the last good read. */
       readonly stale?: string;
     };
 
 const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
-export function useOverview(client: ListClient, withNames: boolean): { reading: Reading; reload: () => void } {
+export function useOverview(client: ListClient): { reading: Reading; reload: () => void } {
   const [reading, setReading] = useState<Reading>({ status: 'loading' });
   const [round, setRound] = useState(0);
   const visible = useDocumentVisible();
@@ -33,21 +37,21 @@ export function useOverview(client: ListClient, withNames: boolean): { reading: 
     // `round` is a new read on demand (a change just landed): it is only a reason to run again.
     void round;
     if (!visible) return undefined;
-    const abort = new AbortController();
+    let current: AbortController | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const read = (): void => {
       if (timer !== undefined) clearTimeout(timer);
-      void Promise.all([
-        readOverview(client, abort.signal),
-        withNames ? readNames(client, abort.signal) : Promise.resolve(new Map<string, string>()),
-      ]).then(
-        ([overview, names]) => {
-          if (abort.signal.aborted) return;
-          setReading({ status: 'ready', overview, names });
+      current?.abort();
+      const mine = new AbortController();
+      current = mine;
+      void Promise.all([readOverview(client, mine.signal), readProjects(client, mine.signal)]).then(
+        ([overview, projects]) => {
+          if (mine.signal.aborted) return;
+          setReading({ status: 'ready', overview, projects });
           timer = setTimeout(read, REFRESH_MS);
         },
         (cause: unknown) => {
-          if (abort.signal.aborted) return;
+          if (mine.signal.aborted) return;
           setReading(previous =>
             previous.status === 'ready'
               ? { ...previous, stale: reasonOf(cause) }
@@ -61,11 +65,11 @@ export function useOverview(client: ListClient, withNames: boolean): { reading: 
     // A change the daemon saw reads again at once, so the list moves without a reload.
     const cancel = client.subscribe?.(PullsChanged, () => read());
     return () => {
-      abort.abort();
+      current?.abort();
       if (timer !== undefined) clearTimeout(timer);
       cancel?.();
     };
-  }, [client, withNames, visible, round]);
+  }, [client, visible, round]);
 
   const reload = useCallback(() => setRound(value => value + 1), []);
   return { reading, reload };

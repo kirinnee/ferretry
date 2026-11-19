@@ -30,6 +30,26 @@ describe('the PRs screen model', () => {
     expect(groupsOf(v, 'all')[0]?.open).toBe(4);
   });
 
+  it('counts nothing for a project whose watch is off, since no row of it is drawn', () => {
+    const off = overview(
+      view({
+        watch: false,
+        repos: [
+          {
+            repo: view().repos[0]!.repo,
+            account: 'gha_1',
+            login: 'me',
+            checkedAt: '2026-02-03T11:59:00Z',
+            pulls: [pull(7, { mine: true })],
+          },
+        ],
+      }),
+      view({ project: OTHER }),
+    ).projects;
+    expect(countsOf(off)).toEqual({ mine: 0, review: 0, all: 0 });
+    expect(countsOf([...off, ...mixed().projects])).toEqual({ mine: 1, review: 1, all: 4 });
+  });
+
   it('puts watched projects first, then by name', () => {
     const views = overview(view({ project: OTHER, watch: false, repos: [] }), view()).projects;
     const names = new Map([
@@ -41,16 +61,18 @@ describe('the PRs screen model', () => {
 
   it('gives an empty list a reason', () => {
     const watchOff = overview(view({ watch: false })).projects[0]!;
-    expect(emptyReason(watchOff, groupsOf(watchOff, 'all'), 'all')).toBe('watch-off');
+    expect(emptyReason(watchOff, groupsOf(watchOff, 'all'), 'all', false)).toBe('watch-off');
     const noAccount = overview(view({ repos: [], needsAccount: [{ provider: 'github', owner: 'octo', name: 'x' }] }))
       .projects[0]!;
-    expect(emptyReason(noAccount, groupsOf(noAccount, 'all'), 'all')).toBe('no-account');
-    const noRepos = overview(view({ repos: [] })).projects[0]!;
-    expect(emptyReason(noRepos, groupsOf(noRepos, 'all'), 'all')).toBe('no-repos');
+    expect(emptyReason(noAccount, groupsOf(noAccount, 'all'), 'all', false)).toBe('no-account');
+    // Nothing read yet is not "no repo": only the project's own record says the folder holds none.
+    const unread = overview(view({ repos: [] })).projects[0]!;
+    expect(emptyReason(unread, groupsOf(unread, 'all'), 'all', false)).toBe('no-results');
+    expect(emptyReason(unread, groupsOf(unread, 'all'), 'all', true)).toBe('no-repos');
     const none = overview(view()).projects[0]!;
-    expect(emptyReason(none, groupsOf(none, 'all'), 'all')).toBe('none-open');
+    expect(emptyReason(none, groupsOf(none, 'all'), 'all', false)).toBe('none-open');
     const v = first();
-    expect(emptyReason(v, groupsOf(v, 'all'), 'all')).toBeUndefined();
+    expect(emptyReason(v, groupsOf(v, 'all'), 'all', false)).toBeUndefined();
     const filtered = overview(
       view({
         repos: [
@@ -64,7 +86,7 @@ describe('the PRs screen model', () => {
         ],
       }),
     ).projects[0]!;
-    expect(emptyReason(filtered, groupsOf(filtered, 'mine'), 'mine')).toBe('filtered');
+    expect(emptyReason(filtered, groupsOf(filtered, 'mine'), 'mine', false)).toBe('filtered');
   });
 
   it('folds a long list and says how many wait, never dropping any', () => {

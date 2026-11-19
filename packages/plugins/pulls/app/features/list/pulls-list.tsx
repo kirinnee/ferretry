@@ -23,7 +23,7 @@ export interface PullsListProps {
 const shortId = (id: string): string => id.slice(0, 8);
 
 export function PullsList({ client, daemon, onNavigate, nowMs }: PullsListProps) {
-  const { reading, reload } = useOverview(client, true);
+  const { reading, reload } = useOverview(client);
   const now = useNow(nowMs);
   const [filter, setFilter] = useState<Filter>('mine');
   const [limit, setLimit] = useState(PROJECT_PAGE);
@@ -78,8 +78,8 @@ function Body({ client, daemon, reading, filter, limit, nowMs, onFilter, onOpen,
         </button>
       </div>
     );
-  const { overview, names } = reading;
-  const nameOf = (project: string): string => names.get(project) ?? shortId(project);
+  const { overview, projects } = reading;
+  const nameOf = (project: string): string => projects.get(project)?.name ?? shortId(project);
   if (overview.projects.length === 0)
     return (
       <p className="kt-panel m-0 p-panel text-ui text-muted" data-pulls-empty="no-projects">
@@ -124,6 +124,7 @@ function Body({ client, daemon, reading, filter, limit, nowMs, onFilter, onOpen,
             client={client}
             daemon={daemon}
             filter={filter}
+            noRepo={projects.get(view.project)?.noRepo === true}
             nowMs={nowMs}
             onChanged={reload}
             onOpen={onOpen}

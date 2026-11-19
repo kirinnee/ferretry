@@ -18,7 +18,7 @@ export interface ProjectPullsProps {
 }
 
 export function ProjectPulls({ client, daemon, project, onNavigate, nowMs }: ProjectPullsProps) {
-  const { reading, reload } = useOverview(client, false);
+  const { reading, reload } = useOverview(client);
   const now = useNow(nowMs);
   const [filter, setFilter] = useState<Filter>('all');
   if (reading.status === 'loading') return <Loading kind="bar" label="Reading this project’s pull requests…" />;
@@ -60,6 +60,7 @@ export function ProjectPulls({ client, daemon, project, onNavigate, nowMs }: Pro
         client={client}
         daemon={daemon}
         filter={filter}
+        noRepo={reading.projects.get(project)?.noRepo === true}
         nowMs={now}
         onChanged={reload}
         onOpen={onNavigate}

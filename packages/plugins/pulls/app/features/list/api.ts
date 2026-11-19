@@ -17,16 +17,29 @@ const PROJECTS_ROUTE = 'GET /v1/projects';
 export const readOverview = async (client: ListClient, signal?: AbortSignal): Promise<WatchOverview> =>
   WatchOverviewSchema.parse(await client.call(WATCH_ROUTE, { quiet: true, ...(signal ? { signal } : {}) }));
 
-/** Only what the screen reads of a project: its id and its name. Looser than Projects' own record on purpose. */
-const ProjectNameSchema = z.looseObject({ id: z.string().min(1), name: z.string().min(1) });
+/** What the screen reads of a project: its id, its name and, when the record has one, the repositories last found in it. */
+const ProjectFactsSchema = z.looseObject({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  repos: z.array(z.unknown()).optional(),
+});
 
-/** Project names by id. A failure is an empty map: a project then shows by its short id, and the PRs still draw. */
-export async function readNames(client: ListClient, signal?: AbortSignal): Promise<ReadonlyMap<string, string>> {
+export interface ProjectFacts {
+  readonly name: string;
+  /** The project record says its folder holds no repository (a scan found none). Absent or unscanned is not "none". */
+  readonly noRepo: boolean;
+}
+
+/** Project facts by id. A failure is an empty map: a project then shows by its short id, and the PRs still draw. */
+export async function readProjects(
+  client: ListClient,
+  signal?: AbortSignal,
+): Promise<ReadonlyMap<string, ProjectFacts>> {
   try {
     const list = z
-      .array(ProjectNameSchema)
+      .array(ProjectFactsSchema)
       .parse(await client.call(PROJECTS_ROUTE, { quiet: true, ...(signal ? { signal } : {}) }));
-    return new Map(list.map(project => [project.id, project.name]));
+    return new Map(list.map(project => [project.id, { name: project.name, noRepo: project.repos?.length === 0 }]));
   } catch {
     return new Map();
   }

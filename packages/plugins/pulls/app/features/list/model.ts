@@ -23,6 +23,8 @@ export const FILTER_WORDS: Readonly<Record<Filter, string>> = {
 
 /** How many rows a list draws before it asks to show more. Every row stays reachable through the button. */
 export const PAGE = 20;
+/** How many of a project's repositories start open; the rest start folded to their header, and open on a tap. */
+export const REPOS_OPEN = 2;
 /** How many project sections the screen draws before it asks to show more. */
 export const PROJECT_PAGE = 12;
 /** How many repositories without an account are named before "and N more". */
@@ -75,13 +77,16 @@ export const groupsOf = (view: WatchProjectView, filter: Filter): readonly RepoG
 /** How many PRs each filter would show for the views given: the chips' counts, so a chip never lies about its list. */
 export function countsOf(views: readonly WatchProjectView[]): Readonly<Record<Filter, number>> {
   const counts = { mine: 0, review: 0, all: 0 };
-  for (const view of views)
+  for (const view of views) {
+    // A project whose watch is off shows no row, so it counts for nothing: a chip never counts what is not drawn.
+    if (!view.watch) continue;
     for (const repo of view.repos)
       for (const pull of repo.pulls) {
         counts.all += 1;
         if (pull.mine) counts.mine += 1;
         if (pull.requestedMe) counts.review += 1;
       }
+  }
   return counts;
 }
 
@@ -99,16 +104,20 @@ export function orderProjects(
 }
 
 /** What the screen says when a watched project shows nothing, so an empty list always has a reason. */
-export type EmptyReason = 'watch-off' | 'no-repos' | 'no-account' | 'none-open' | 'filtered';
+export type EmptyReason = 'watch-off' | 'no-results' | 'no-repos' | 'no-account' | 'none-open' | 'filtered';
 
 export function emptyReason(
   view: WatchProjectView,
   groups: readonly RepoGroup[],
   filter: Filter,
+  /** The project's own record says its folder holds no repository. */
+  noRepo: boolean,
 ): EmptyReason | undefined {
   if (!view.watch) return 'watch-off';
   if (groups.some(group => group.pulls.length > 0)) return undefined;
-  if (view.repos.length === 0) return view.needsAccount.length > 0 ? 'no-account' : 'no-repos';
+  // The watch sends no repository both for "a repository is linked but not read yet" and for "there is none": only the
+  // project's own record can tell them apart, so without it the honest words are "no results yet".
+  if (view.repos.length === 0) return view.needsAccount.length > 0 ? 'no-account' : noRepo ? 'no-repos' : 'no-results';
   if (groups.some(group => group.open > 0) && filter !== 'all') return 'filtered';
   return 'none-open';
 }
@@ -116,6 +125,7 @@ export function emptyReason(
 export const EMPTY_WORDS: Readonly<Record<EmptyReason, string>> = {
   'watch-off':
     'Watching is off for this project, so Ferretry is not asking GitHub about it. Turn it on to see its pull requests.',
+  'no-results': 'No results yet. Ferretry has not read this project’s pull requests so far.',
   'no-repos': 'No GitHub repository was found inside this project’s folder.',
   'no-account':
     'None of this project’s repositories has a connected GitHub account to read it with. Connect an account to this project.',
