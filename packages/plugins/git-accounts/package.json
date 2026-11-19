@@ -21,7 +21,14 @@
     "@ferretry/core-vault": "workspace:*",
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "@ferretry/app": "workspace:*",
+    "react": "^19.0.0"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
 }

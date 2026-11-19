@@ -1,6 +1,6 @@
 import { audit, GatePort } from '@ferretry/core-gate/contract';
 import { SealedDocumentsPort } from '@ferretry/core-vault/contract';
-import { definePlugin, route, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import {
   GIT_ACCOUNT_AUDIT,
   GIT_ACCOUNT_AUDIT_SKIP,
@@ -112,6 +112,10 @@ export default definePlugin({
         options: [{ flag: '--json', help: 'print the answer as JSON' }],
       }),
     ],
+  },
+
+  ui: {
+    settings: [settingsTab('accounts', { icon: 'key-round', group: 'sites', label: 'GitHub accounts', order: 43 })],
   },
 
   /** Never reached by a ferret, through any root: the sealed OAuth tokens. */
