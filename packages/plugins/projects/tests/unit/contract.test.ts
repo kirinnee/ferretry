@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { fakeProjects, projectsConformance } from '../../contract/testing/index.ts';
 import {
   isProjectsConnectAccount,
+  isProjectsInsights,
   PROJECTS_APP_HOOKS,
   PROJECTS_CONNECT_ACCOUNT_HOOK,
+  PROJECTS_INSIGHTS_HOOK,
   ProjectCloneUrlSchema,
   ProjectPathMustBeAbsoluteMessage,
   ProjectsFileSchema,
@@ -40,5 +42,11 @@ describe('projects wire schemas', () => {
     expect(PROJECTS_APP_HOOKS[PROJECTS_CONNECT_ACCOUNT_HOOK]).toBe(isProjectsConnectAccount);
     expect(isProjectsConnectAccount({ panel: () => null })).toBe(true);
     for (const bad of [undefined, null, 'panel', {}, { panel: 1 }]) expect(isProjectsConnectAccount(bad)).toBe(false);
+  });
+  test('the insights hook is read only from a value with a title and a panel to render', () => {
+    expect(PROJECTS_APP_HOOKS[PROJECTS_INSIGHTS_HOOK]).toBe(isProjectsInsights);
+    expect(isProjectsInsights({ title: 'PRs & CI', panel: () => null })).toBe(true);
+    for (const bad of [undefined, null, {}, { panel: () => null }, { title: 1, panel: () => null }, { title: 'x' }])
+      expect(isProjectsInsights(bad)).toBe(false);
   });
 });

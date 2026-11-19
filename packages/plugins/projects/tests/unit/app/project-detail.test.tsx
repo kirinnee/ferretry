@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { interact, type Mounted, mount, must, RouterProvider, settleUntil } from '@ferretry/app/testing';
+import { interact, type Mounted, mount, must, RouterProvider, settleUntil, WithAppHooks } from '@ferretry/app/testing';
+import { PROJECTS_INSIGHTS_HOOK } from '../../../contract/index.ts';
 import type { ProjectsClient } from '../../../app/lib/client.ts';
 import type { FerretRow } from '../../../app/lib/ferrets.ts';
 import { ProjectDetailPage } from '../../../app/views/project-detail.tsx';
@@ -40,6 +41,30 @@ const buttonSaying = (mounted: Mounted, text: string): HTMLButtonElement =>
   );
 
 describe('ProjectDetailPage', () => {
+  it('draws another plugin’s insights section, with this project’s id, only when one is provided', async () => {
+    const seen: unknown[] = [];
+    const panel = (props: unknown) => {
+      seen.push(props);
+      return <p data-insights="">insight body</p>;
+    };
+    let mounted = await mount(
+      <WithAppHooks provided={{ [PROJECTS_INSIGHTS_HOOK]: { title: 'PRs & CI', panel } }}>
+        {detail(client())}
+      </WithAppHooks>,
+    );
+    await shown(mounted);
+    expect(mounted.container.querySelector('[aria-label="PRs & CI"] [data-insights]')?.textContent).toBe(
+      'insight body',
+    );
+    expect(seen[0]).toEqual({ project: PROJECT.id, daemon: 'workstation' });
+    await mounted.unmount();
+    // No provider: no section, and nothing else changes.
+    mounted = await mount(detail(client()));
+    await shown(mounted);
+    expect(mounted.container.querySelector('[aria-label="PRs & CI"]')).toBeNull();
+    await mounted.unmount();
+  });
+
   it('keeps an unread registry visibly loading instead of calling the project missing', async () => {
     let release: () => void = () => undefined;
     const pending = new Promise<readonly unknown[]>(resolve => {
