@@ -117,7 +117,9 @@
 
 /* Eyebrows, table heads and badges read in mono, like the report's kickers. */
 :root[data-style='briefing'] .kt-label,
-[data-swatch][data-style='briefing'] .kt-label {
+[data-swatch][data-style='briefing'] .kt-label,
+:root[data-style='briefing'] .kt-badge,
+[data-swatch][data-style='briefing'] .kt-badge {
   font-family: var(--font-mono);
 }
 
