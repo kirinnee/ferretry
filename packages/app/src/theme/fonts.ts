@@ -22,6 +22,7 @@ import geistMono from '../assets/fonts/geist-mono-latin-wght-normal.woff2';
 import ibmPlexMono400 from '../assets/fonts/ibm-plex-mono-latin-400-normal.woff2';
 import ibmPlexMono700 from '../assets/fonts/ibm-plex-mono-latin-700-normal.woff2';
 import inter from '../assets/fonts/inter-latin-wght-normal.woff2';
+import orbitron from '../assets/fonts/orbitron-latin-wght-normal.woff2';
 import jetBrainsMono400 from '../assets/fonts/jetbrains-mono-latin-400-normal.woff2';
 import jetBrainsMono700 from '../assets/fonts/jetbrains-mono-latin-700-normal.woff2';
 import nunito from '../assets/fonts/nunito-latin-wght-normal.woff2';
@@ -52,6 +53,7 @@ export const STYLE_FONT_FILES: Readonly<Partial<Record<StyleId, ThemeFontFiles>>
   glass: { text: [inter], code: jetBrainsMono },
   neumorphism: { text: [nunito], code: jetBrainsMono },
   retro: { text: [publicSans], code: jetBrainsMono },
+  hud: { text: [orbitron, publicSans], code: [cascadiaMono] },
 });
 
 /** The scope of the document a preload is added to — injected so a test can stand in for the page. */
