@@ -40,10 +40,10 @@ function Prompt({ onCancel }: { readonly onCancel: () => void }) {
       >
         <h2 style={{ margin: 0 }}>Unlock</h2>
         <p>Unlock Fake machine with your passkey.</p>
-        <button type="button" data-step-up-confirm="">
+        <button type="button" className="kt-btn" data-variant="primary" data-step-up-confirm="">
           Unlock
         </button>
-        <button type="button" data-step-up-cancel="" onClick={onCancel}>
+        <button type="button" className="kt-btn" style={{ marginLeft: 8 }} data-step-up-cancel="" onClick={onCancel}>
           Cancel
         </button>
       </div>
