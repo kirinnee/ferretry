@@ -4,8 +4,8 @@
  * width strip writes its lines.
  *
  * Set `FY_CONVERSATION_PREVIEWS_SHOTS_DIR` to keep `<viewport>-<scheme>-<scene>-<frame>.png` (1280 and 390, light and dark):
- * every frame at seven moments of its loop (typing, the key press, the fade out, the fade in, the result arriving, the
- * settled result, and the Skills menu), plus the whole tab.
+ * every frame at eight moments of its loop (typing, the key press, the fade out, the fade in, the result arriving, the
+ * settled result, the Agents → Skills hand-over, and the Skills menu), plus the whole tab.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -97,15 +97,16 @@ const seek = async (tab: Page, ms: number): Promise<void> => {
 /**
  * The loop's moments, against the take-turns crossfade (before visible 0-36%, gone by 42%; after fades in 48-54%, in
  * 54-88%): typing, the key press, the typing layer fading out, the result layer fading in, the result arriving, the
- * settled result, and the late part of the result (the Skills menu).
+ * settled result (the Agents menu fully open), the Agents menu handing over to the Skills menu, and the Skills menu.
  */
 const MOMENTS = [
   { name: 'typing', at: 0.12 },
   { name: 'key', at: 0.3 },
   { name: 'fade', at: 0.42 },
   { name: 'fadein', at: 0.51 },
-  { name: 'arrive', at: 0.57 },
-  { name: 'result', at: 0.7 },
+  { name: 'arrive', at: 0.56 },
+  { name: 'result', at: 0.63 },
+  { name: 'swap', at: 0.73 },
   { name: 'late', at: 0.84 },
 ] as const;
 
@@ -114,7 +115,7 @@ const SCENES = ['editor', 'send-key', 'suggestions', 'chat-width'] as const;
 describe('Conversation tab previews', () => {
   for (const viewport of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const) {
-      it(`${viewport.name} ${scheme}: every frame is 160 x 100, plays typed then result, and is shot at seven moments`, async () => {
+      it(`${viewport.name} ${scheme}: every frame is 160 x 100, plays typed then result, and is shot at eight moments`, async () => {
         const { tab, problems, close } = await open(viewport, scheme);
         try {
           const frames = tab.locator('[data-setting-preview]');
