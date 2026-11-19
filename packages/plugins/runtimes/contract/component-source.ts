@@ -36,9 +36,11 @@ export type ProfileComponentDocument = Readonly<Record<string, unknown>>;
 /**
  * What an owner answers to one `put`: it wrote the file, or it refused in a sentence (names and rules, never a value).
  * `held` is a write the owner saved but holds until the owner of the machine confirms it (it loosens something).
+ * `warnings` are things the owner wrote anyway but a person should hear (an MCP server whose command is not on this
+ * machine): names and rules, never a value.
  */
 export type ComponentPutResult =
-  | { readonly ok: true; readonly held?: true }
+  | { readonly ok: true; readonly held?: true; readonly warnings?: readonly string[] }
   | { readonly ok: false; readonly reason: string };
 
 /** A view of one kind's component documents, read live from the owner's own configuration. */

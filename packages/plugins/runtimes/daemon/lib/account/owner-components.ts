@@ -99,8 +99,10 @@ export function withComponentsOf(
   );
   for (const { kind, name } of references) {
     const was: unknown = before.components[kind][name];
-    if (was === undefined) delete components[kind]?.[name];
-    else if (components[kind] !== undefined) components[kind][name] = was;
+    const entries = components[kind] ?? {};
+    components[kind] = entries;
+    if (was === undefined) delete entries[name];
+    else entries[name] = was;
   }
   return { ...model, components: components as unknown as AccountModel['components'] };
 }
@@ -168,8 +170,8 @@ export function ownerReferences(
 
 /** What the owner of a kind answered to one write: written, held for confirmation, or refused in a sentence. */
 export type OwnerWriteOutcome =
-  | { readonly outcome: 'written' }
-  | { readonly outcome: 'held' }
+  | { readonly outcome: 'written'; readonly warnings?: readonly string[] }
+  | { readonly outcome: 'held'; readonly warnings?: readonly string[] }
   | { readonly outcome: 'refused'; readonly reason: string };
 
 /** The door the setup hands an imported component to its owner through (`daemon/adapters/component-writers.ts`). */

@@ -83,15 +83,17 @@ export async function handOver(input: {
   const written: string[] = [];
   const held: string[] = [];
   const refused: { readonly file: string; readonly reason: string }[] = [];
+  const noted: string[] = [];
   const left = new Set<string>();
   for (const write of owners.writes) {
     const answer =
       write.text === undefined
         ? ({ outcome: 'refused', reason: write.problem ?? 'it could not be made' } as const)
         : await writer.put({ ...write, text: write.text });
-    if (answer.outcome === 'written') written.push(write.file);
-    else if (answer.outcome === 'held') held.push(write.file);
-    else {
+    if (answer.outcome !== 'refused') {
+      (answer.outcome === 'written' ? written : held).push(write.file);
+      for (const warning of answer.warnings ?? []) noted.push(`${write.file} (${say(warning)})`);
+    } else {
       refused.push({ file: write.file, reason: say(answer.reason) });
       left.add(write.reference);
     }
@@ -102,6 +104,7 @@ export async function handOver(input: {
     sentences: [
       ...(written.length === 0 ? [] : [`Written by the parts that own them: ${written.join(', ')}.`]),
       ...(held.length === 0 ? [] : [`Held until you confirm: ${held.join(', ')}.`]),
+      ...(noted.length === 0 ? [] : [`Written with a warning: ${noted.join('; ')}.`]),
       ...(refused.length === 0
         ? []
         : [`Not written: ${refused.map(entry => `${entry.file} (${entry.reason})`).join('; ')}.`]),

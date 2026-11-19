@@ -13,6 +13,9 @@ import {
 } from '../../../daemon/lib/account/owner-components.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 
+/** A secret reference, built so the lint that guards template strings does not read it as one. */
+const SECRET_REF = ['$', '{secret:T}'].join('');
+
 const BEFORE = parseAccountModel({
   version: 1,
   components: { mcp: { old: { command: 'old' } }, hooks: { 'claude-hooks': { harness: 'claude', file: 'h.json' } } },
@@ -22,7 +25,7 @@ const BEFORE = parseAccountModel({
 const NEXT = parseAccountModel({
   version: 1,
   components: {
-    mcp: { old: { command: 'old' }, github: { command: 'npx', args: ['-y', 'x'], env: { T: '${secret:T}' } } },
+    mcp: { old: { command: 'old' }, github: { command: 'npx', args: ['-y', 'x'], env: { T: SECRET_REF } } },
     skills: { skills: { items: ['review'] } },
     settings: { 'claude-settings': { harness: 'claude', file: 'components/settings/claude-settings.json' } },
     hooks: {
@@ -117,5 +120,34 @@ describe('withoutHookChanges', () => {
   it('should return the very same model when no hook moved', () => {
     // Act / Assert
     should(withoutHookChanges(BEFORE, BEFORE)).equal(BEFORE);
+  });
+});
+
+describe('a component an owner already holds, and a settings component given as data', () => {
+  const CHANGED = parseAccountModel({
+    version: 1,
+    components: {
+      mcp: { old: { command: 'newer' } },
+      settings: { given: { harness: 'codex', document: { model: 'x' } } },
+    },
+    profiles: { default: { layers: ['mcp/old', 'settings/given'] } },
+  });
+
+  it('should revert a changed component to what the machine had, and keep its layer', () => {
+    // Act
+    const model = revertComponents(CHANGED, BEFORE, [{ kind: 'mcp', name: 'old' }]);
+
+    // Assert
+    should(model.components.mcp.old).eql({ command: 'old' });
+    should(model.profiles.default?.layers).containEql('mcp/old');
+  });
+
+  it('should hand settings that are already data over as they are, under the harness directory', () => {
+    // Act
+    const write = ownerWrites(BEFORE, CHANGED, () => undefined).find(candidate => candidate.kind === 'settings');
+
+    // Assert
+    should(write?.file).equal('codex/settings/given.yaml');
+    should(JSON.parse(write?.text ?? '{}')).eql({ harness: 'codex', document: { model: 'x' } });
   });
 });

@@ -74,3 +74,13 @@ describe('componentWriters', () => {
     should(await broken.put(WRITE)).eql({ outcome: 'refused', reason: 'disk full' });
   });
 });
+
+describe('componentWriters warnings', () => {
+  it("should carry the owner's warnings on a written file", async () => {
+    const writers = componentWriters(
+      () => owner(async () => ({ ok: true, warnings: ['command "x" is not on this machine'] })),
+      direct,
+    );
+    should(await writers.put(WRITE)).eql({ outcome: 'written', warnings: ['command "x" is not on this machine'] });
+  });
+});

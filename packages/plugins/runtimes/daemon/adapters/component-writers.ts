@@ -22,7 +22,9 @@ export function componentWriters(lookup: ComponentSourceLookup, within: Within):
         const answered = await within(owner.put(write.name, write.text));
         if (answered === TIMED_OUT) return refused('the part of Ferretry that owns them did not answer in time');
         if (!answered.ok) return refused(answered.reason);
-        return { outcome: answered.held === true ? 'held' : 'written' };
+        const warnings =
+          answered.warnings === undefined || answered.warnings.length === 0 ? {} : { warnings: answered.warnings };
+        return { outcome: answered.held === true ? 'held' : 'written', ...warnings };
       } catch (error) {
         return refused(error instanceof Error && error.message.length > 0 ? error.message : 'it could not be written');
       }
