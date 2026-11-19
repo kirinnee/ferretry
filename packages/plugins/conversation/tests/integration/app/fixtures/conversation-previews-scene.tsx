@@ -2,6 +2,9 @@
  * The browser entry for the Conversation tab previews: the REAL send-key, editor-style, suggestions and chat-width
  * settings, each holding its choice in local state (fake data, no daemon, no network).
  *
+ * The sections are drawn INSIDE the Settings shell's own frame (`.fy-page .fy-settings`, its two-column body with the nav
+ * column held empty, and `.fy-settings-page`), so the shell's `.fy-page label` rules and the real content width apply.
+ *
  *   ?theme=<family>-<mode>   ?motion=reduced  sets Settings › Motion to Reduced
  */
 import { type ChatWidthPreference, type ComposerEnterKeyPreference, type SuggestionKeys } from '@ferretry/app';
@@ -24,7 +27,7 @@ function Scene() {
   const [vim, setVim] = useState(false);
   const [width, setWidth] = useState<ChatWidthPreference>('balanced');
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4">
+    <div className="flex flex-col gap-4">
       <section className="kt-panel p-panel" data-scene="editor">
         <h3 className="m-0 text-row font-semibold text-fg">Editor style</h3>
         <div className="mt-3">
@@ -67,4 +70,14 @@ function Scene() {
 }
 
 const root = document.getElementById('root');
-if (root !== null) createRoot(root).render(<Scene />);
+if (root !== null)
+  createRoot(root).render(
+    <section className="fy-page fy-settings" data-settings-open="panel">
+      <div className="fy-settings-body">
+        <div aria-hidden="true" className="fy-settings-nav" />
+        <section className="fy-settings-page" aria-label="Conversation">
+          <Scene />
+        </section>
+      </div>
+    </section>,
+  );

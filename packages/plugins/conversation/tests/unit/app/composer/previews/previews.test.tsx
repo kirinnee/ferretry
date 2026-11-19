@@ -100,6 +100,21 @@ describe('Conversation previews', () => {
     expect(mounted.container.querySelectorAll('.fy-cvp-write').length).toBe(3);
   });
 
+  it('chat width: rests written on mount and writes its lines once for each width chosen', async () => {
+    mounted = await mount(<ChatWidthPreview value="balanced" />);
+    const strip = () => must(mounted?.container.querySelector('[data-cvp-motion]'), 'the strip');
+    expect(strip().getAttribute('data-cvp-write')).toBe('rest');
+    const first = mounted.container.querySelector('.fy-cvp-write');
+    await mounted.render(<ChatWidthPreview value="readable" />);
+    expect(strip().getAttribute('data-cvp-write')).toBe('play');
+    // A new choice restarts the write: the lines are new elements, so the one animation begins again.
+    expect(mounted.container.querySelector('.fy-cvp-write')).not.toBe(first);
+    // Choosing the same value again changes nothing.
+    const second = mounted.container.querySelector('.fy-cvp-write');
+    await mounted.render(<ChatWidthPreview value="readable" />);
+    expect(mounted.container.querySelector('.fy-cvp-write')).toBe(second);
+  });
+
   it('chat width: holds still while the tab is hidden, and plays again when it returns', async () => {
     const setVisibility = async (state: 'visible' | 'hidden'): Promise<void> => {
       Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });

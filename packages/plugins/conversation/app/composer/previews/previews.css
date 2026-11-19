@@ -3,12 +3,11 @@
    Every scene is drawn in a 160 x 100 `SettingPreview` frame (the chat-width one in its own wide strip) from divs, theme
    tokens only. The RESTING style of every piece is its FINAL state, so with the animation removed (reduced motion,
    a stylesheet that never matches) a scene still shows the answer.
-   The moving parts hang off `.fy-sp[data-sp-state]` (the frame's loop, `--sp-loop`) and are timed against the frame's
-   take-turns crossfade (setting-preview.css): the BEFORE layer is visible 0-36% (gone by 42%), the AFTER layer fades in
-   48-54%, is fully in 54-88% and gone by 94%. So what happens in the before layer (typing, the key press) is done by
-   ~36%, and what happens in the after layer (the bubble flying, the second line typing, a menu popping open) starts at
-   ~52% and plays out inside 54-88%: motion that finishes while its layer is hidden is never seen. Every piece is back at
-   its start by 100% so the loop never jumps.
+   The moving parts hang off `.fy-sp[data-sp-state]` (the frame's ONE play per chosen value, `--sp-loop`) and are timed
+   against the frame's cross-fade (setting-preview.css): the BEFORE layer is fully opaque until 54%, the AFTER layer fades
+   in over it from 18% and is fully in from 54%. What happens in the before layer (typing, the key press) is done by ~42%;
+   what happens in the after layer (the bubble flying, the second line typing, a menu popping open) starts at ~40% and
+   settles by 100%. Every keyframe set ENDS on the piece's resting style: nothing repeats, and the frame rests.
    ========================================================================== */
 
 .fy-cvp {
@@ -44,7 +43,10 @@
 }
 .fy-cvp-line {
   color: var(--fg);
+  /* Clip the line INSIDE the box: text that is too long is cut at the edge together with the caret that follows it,
+     so the caret is never drawn to the right of clipped text, outside the box. */
   min-height: 11px;
+  overflow: hidden;
   white-space: nowrap;
 }
 .fy-cvp-hint {
@@ -201,58 +203,50 @@
   width: 82%;
 }
 
-/* --- Movement: only where motion is allowed (the OS query AND Settings › Motion), parked while the frame is paused. */
+/* --- Movement: ONE play per chosen value, only where motion is allowed (the OS query AND Settings › Motion), parked while
+   the frame is paused. Every keyframe set ENDS on the piece's resting style (100% = rest), because the play is a single
+   pass of `--sp-loop` and the frame then rests: nothing here repeats. The BEFORE layer stays opaque until 54%, so what it
+   shows (typing, the key press) happens in 0-50%; the AFTER layer fades in over it (18-54%) and stays, so what it shows
+   (a bubble flying, a second line, a menu opening) starts at ~40% and settles by 100%. */
 @keyframes fy-cvp-type {
   0% {
     clip-path: inset(0 100% 0 0);
   }
-  20%,
-  88% {
+  36%,
+  100% {
     clip-path: inset(0 0 0 0);
   }
-  100% {
-    clip-path: inset(0 100% 0 0);
-  }
 }
-/* The second line types inside the after layer's visible window (54-88%). */
 @keyframes fy-cvp-type-late {
   0%,
   54% {
     clip-path: inset(0 100% 0 0);
   }
-  78%,
-  88% {
-    clip-path: inset(0 0 0 0);
-  }
+  88%,
   100% {
-    clip-path: inset(0 100% 0 0);
+    clip-path: inset(0 0 0 0);
   }
 }
 @keyframes fy-cvp-type-first {
   0% {
     clip-path: inset(0 100% 0 0);
   }
-  12%,
-  88% {
-    clip-path: inset(0 0 0 0);
-  }
+  24%,
   100% {
-    clip-path: inset(0 100% 0 0);
+    clip-path: inset(0 0 0 0);
   }
 }
 @keyframes fy-cvp-type-mid {
   0%,
-  12% {
+  16% {
     clip-path: inset(0 100% 0 0);
   }
-  32%,
-  88% {
+  44%,
+  100% {
     clip-path: inset(0 0 0 0);
   }
-  100% {
-    clip-path: inset(0 100% 0 0);
-  }
 }
+/* The caret blinks while the play runs, and is gone (its resting style) when it ends. */
 @keyframes fy-cvp-blink {
   0%,
   49% {
@@ -263,23 +257,23 @@
     opacity: 0;
   }
 }
-/* Pressed while the typing layer is fully visible (0-36%): down at 22%, held to 31%, up by 35%. */
+/* Pressed while the typing layer is fully visible (0-50%): down at 24%, held to 36%, up by 42%. */
 @keyframes fy-cvp-press {
   0%,
-  21% {
+  22% {
     background: var(--surface-3);
     border-color: var(--border-strong);
     color: var(--fg);
     transform: scale(1);
   }
-  24%,
-  31% {
+  26%,
+  36% {
     background: var(--accent);
     border-color: var(--accent);
     color: var(--surface);
     transform: scale(0.88);
   }
-  35%,
+  42%,
   100% {
     background: var(--surface-3);
     border-color: var(--border-strong);
@@ -287,58 +281,50 @@
     transform: scale(1);
   }
 }
-/* The bubble travels up while the result layer is in (54-72%), not while it is still hidden. */
+/* The bubble travels up while the result layer arrives (40-72%) and rests where the result puts it. */
 @keyframes fy-cvp-fly {
   0%,
-  52% {
+  40% {
     opacity: 0;
     transform: translateY(18px);
   }
-  55% {
+  46% {
     opacity: 1;
     transform: translateY(16px);
   }
   72%,
-  88% {
+  100% {
     opacity: 1;
     transform: translateY(0);
   }
-  100% {
-    opacity: 0;
-    transform: translateY(0);
-  }
 }
-/* The menu pops open as the result layer arrives (52-66%), so the pop-in is on screen. */
+/* The menu pops open as the result layer arrives (40-64%) and stays open. */
 @keyframes fy-cvp-pop {
   0%,
-  52% {
+  40% {
     opacity: 0;
     transform: translateY(6px) scale(0.86);
   }
-  66%,
-  88% {
+  64%,
+  100% {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
-  100% {
-    opacity: 0;
-    transform: translateY(0) scale(1);
-  }
 }
-/* With skills on there are two menus, one after the other: Agents pops open (52-62%), closes (66-69%), and `$` opens
-   the separate Skills menu (70-78%) which holds to the layer's fade-out at 88%. */
+/* With skills on there are two menus, one after the other: Agents pops open (40-58%), closes (66-72%), and `$` opens
+   the separate Skills menu (72-86%), which is where the frame rests. */
 @keyframes fy-cvp-pop-agents {
   0%,
-  52% {
+  40% {
     opacity: 0;
     transform: translateY(6px) scale(0.86);
   }
-  62%,
+  58%,
   66% {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
-  69%,
+  72%,
   100% {
     opacity: 0;
     transform: translateY(0) scale(1);
@@ -346,17 +332,13 @@
 }
 @keyframes fy-cvp-pop-skills {
   0%,
-  70% {
+  72% {
     opacity: 0;
     transform: translateY(6px) scale(0.86);
   }
-  78%,
-  88% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  86%,
   100% {
-    opacity: 0;
+    opacity: 1;
     transform: translateY(0) scale(1);
   }
 }
@@ -366,32 +348,27 @@
   66% {
     clip-path: inset(0 100% 0 0);
   }
-  70%,
-  88% {
+  74%,
+  100% {
     clip-path: inset(0 0 0 0);
   }
-  100% {
-    clip-path: inset(0 100% 0 0);
-  }
 }
+/* The chat-width strip: each line writes across once when a width is chosen, and rests written. */
 @keyframes fy-cvp-write {
   0%,
   8% {
     transform: scaleX(0);
   }
-  38%,
-  86% {
-    transform: scaleX(1);
-  }
+  60%,
   100% {
-    transform: scaleX(0);
+    transform: scaleX(1);
   }
 }
 
 @media (prefers-reduced-motion: no-preference) {
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-typed,
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-typed {
-    animation: fy-cvp-type var(--sp-loop) steps(10, end) infinite;
+    animation: fy-cvp-type var(--sp-loop) steps(10, end) 1;
   }
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-typed--late,
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-typed--late {
@@ -407,19 +384,19 @@
   }
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-caret,
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-caret {
-    animation: fy-cvp-blink 1000ms steps(1, end) infinite;
+    animation: fy-cvp-blink 500ms steps(1, end) 2;
   }
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-key--press,
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-key--press {
-    animation: fy-cvp-press var(--sp-loop) ease-in-out infinite;
+    animation: fy-cvp-press var(--sp-loop) ease-in-out 1;
   }
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-bubble,
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-bubble {
-    animation: fy-cvp-fly var(--sp-loop) ease-out infinite;
+    animation: fy-cvp-fly var(--sp-loop) ease-out 1;
   }
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-pop,
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-pop {
-    animation: fy-cvp-pop var(--sp-loop) cubic-bezier(0.25, 0.8, 0.35, 1.15) infinite;
+    animation: fy-cvp-pop var(--sp-loop) cubic-bezier(0.25, 0.8, 0.35, 1.15) 1;
   }
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-pop--agents,
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-pop--agents {
@@ -431,21 +408,19 @@
   }
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-typed--skill,
   :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-typed--skill {
-    animation: fy-cvp-type-skill var(--sp-loop) steps(3, end) infinite;
+    animation: fy-cvp-type-skill var(--sp-loop) steps(3, end) 1;
   }
-  :root:not([data-motion='reduced']) [data-cvp-motion='on'] .fy-cvp-write,
-  :root:not([data-motion='reduced']) [data-cvp-motion='paused'] .fy-cvp-write {
-    animation: fy-cvp-write 3600ms ease-in-out infinite;
+  /* The strip: one write per chosen width (`data-cvp-write="play"`), 1.4 s, then the lines rest written. */
+  :root:not([data-motion='reduced']) [data-cvp-write='play'] .fy-cvp-write {
+    animation: fy-cvp-write 1400ms ease-in-out 1;
   }
-  :root:not([data-motion='reduced']) [data-cvp-motion='on'] .fy-cvp-write:nth-child(2),
-  :root:not([data-motion='reduced']) [data-cvp-motion='paused'] .fy-cvp-write:nth-child(2) {
+  :root:not([data-motion='reduced']) [data-cvp-write='play'] .fy-cvp-write:nth-child(2) {
     animation-delay: 160ms;
   }
-  :root:not([data-motion='reduced']) [data-cvp-motion='on'] .fy-cvp-write:nth-child(3),
-  :root:not([data-motion='reduced']) [data-cvp-motion='paused'] .fy-cvp-write:nth-child(3) {
+  :root:not([data-motion='reduced']) [data-cvp-write='play'] .fy-cvp-write:nth-child(3) {
     animation-delay: 320ms;
   }
-  /* Hidden tab or off-screen: the strip holds where it is, like the frames do. */
+  /* Hidden tab or off-screen: a play holds where it is, like the frames do. */
   :root:not([data-motion='reduced']) [data-cvp-motion='paused'] .fy-cvp-write {
     animation-play-state: paused !important;
   }

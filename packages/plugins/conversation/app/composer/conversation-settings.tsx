@@ -8,7 +8,7 @@
 import { useDeviceControls } from '@ferretry/app';
 import type { ReactNode } from 'react';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
-import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
+import { COMPOSER_SUGGESTIONS_INTRO, ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
 import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
 
 interface SectionDefinition {
@@ -34,8 +34,7 @@ const SECTIONS = {
   suggestions: {
     id: 'composer-suggestions',
     label: 'Open suggestions with',
-    description:
-      'Choose which keys open the composer’s reference menu: the @ ladder (@ files, @@ agents, @@@ asks, @@@@ tasks), the direct symbols (@ files, :agent, !ask, &task), or both; and whether $ opens skills. Suggestions only — a reference you write or paste yourself still resolves and links, and the / and % menus always open.',
+    description: COMPOSER_SUGGESTIONS_INTRO,
   },
 } as const satisfies Record<string, SectionDefinition>;
 
