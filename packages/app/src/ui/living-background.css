@@ -1,0 +1,77 @@
+/* ============================================================================
+   The living background (ui/living-background.tsx) — a dot grid that breathes and a glow that drifts.
+   Only `transform` and `opacity` ever animate. The RESTING style is the still picture: motion is added only under
+   `[data-live]` (the component sets it when neither reduced-motion switch is on), and a hidden tab pauses it.
+   Theme tokens only, low contrast on purpose.
+   ========================================================================== */
+
+.fy-lb {
+  --fy-lb-dot: color-mix(in srgb, var(--accent) 70%, var(--fg));
+  contain: paint;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+.fy-lb[data-fill='viewport'] {
+  position: fixed;
+}
+.fy-lb[data-fill='parent'] {
+  position: absolute;
+}
+:root[data-theme$='-dark'] .fy-lb,
+:root[data-theme='dark'] .fy-lb {
+  --fy-lb-dot: color-mix(in srgb, var(--accent) 65%, var(--fg));
+}
+
+.fy-lb-grid {
+  color: var(--fy-lb-dot);
+  inset: 0;
+  opacity: 0.2;
+  position: absolute;
+  /* The grid fades out behind the content, so it is texture at the edges and never behind a line of text. */
+  -webkit-mask-image: radial-gradient(ellipse 65% 55% at 50% 40%, transparent 0 25%, #000 95%);
+  mask-image: radial-gradient(ellipse 65% 55% at 50% 40%, transparent 0 25%, #000 95%);
+  transform-origin: 50% 40%;
+}
+.fy-lb-glow {
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 12%, transparent), transparent);
+  height: 70%;
+  left: 15%;
+  position: absolute;
+  top: -10%;
+  width: 70%;
+}
+
+.fy-lb[data-live] .fy-lb-grid {
+  animation: fy-lb-breathe 7s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+.fy-lb[data-live] .fy-lb-glow {
+  animation: fy-lb-drift 40s ease-in-out infinite alternate;
+  will-change: transform;
+}
+/* A hidden tab keeps nothing running. */
+.fy-lb[data-live][data-paused] .fy-lb-grid,
+.fy-lb[data-live][data-paused] .fy-lb-glow {
+  animation-play-state: paused;
+}
+
+@keyframes fy-lb-breathe {
+  0%,
+  100% {
+    opacity: 0.1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.22;
+    transform: scale(1.04);
+  }
+}
+@keyframes fy-lb-drift {
+  from {
+    transform: translate3d(-14%, 0, 0);
+  }
+  to {
+    transform: translate3d(14%, 18%, 0);
+  }
+}

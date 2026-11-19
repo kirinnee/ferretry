@@ -3,7 +3,7 @@
  * ones done, the one to do now carrying the only highlight and the only button, the rest quiet. Each step is a list item
  * that says its state in words as well as in marks, for a reader who cannot see colour.
  */
-import { Button } from '@ferretry/app/ui';
+import { Button, LivingBackground } from '@ferretry/app/ui';
 import { Check } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { allDone, type StepperState, type StepperStep } from './stepper-model.ts';
@@ -53,6 +53,7 @@ export function StepperView({ steps, action, onDismiss }: StepperViewProps): Rea
       className="mx-auto mt-2 w-full max-w-[1320px] min-w-0 rounded-control border border-border-strong bg-surface-2 px-3 py-2"
       data-first-run-stepper={finished ? 'done' : 'open'}
     >
+      <LivingBackground fill="parent" />
       <div className="flex min-h-9 min-w-0 items-center justify-between gap-2">
         <h2 id="first-run-stepper-heading" className="m-0 text-row font-semibold text-fg">
           {finished ? 'This machine is set up' : 'Get this machine ready'}
