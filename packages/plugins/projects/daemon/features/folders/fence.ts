@@ -1,9 +1,22 @@
 import { MAX_FOLDER_PATH_LENGTH } from '../../../contract/index.ts';
 
 /**
+ * One name as a filesystem would compare it: Unicode-compatibility-normalized (macOS stores names decomposed, and `ﬁ`
+ * or a full-width letter can read as the plain one), marks and invisible code points dropped (an HFS+ volume ignores
+ * them), then lower-cased. It over-matches on purpose: on a case-sensitive Linux disk `.SSH` is a different folder, but
+ * refusing it costs nothing and a private folder that slips through on a case-insensitive disk costs everything.
+ */
+export const foldName = (name: string): string =>
+  name
+    .normalize('NFKD')
+    .replace(/[\p{M}\p{Default_Ignorable_Code_Point}]/gu, '')
+    .toLowerCase();
+
+/**
  * Folders under the home that hold keys or sign-ins. They are never listed, never entered and never named in a
  * listing of their parent (a name such as `id_work_ed25519` would leak what is there). Relative to the home, by
- * path segment: `.config/gh` also refuses `.config/gh/anything`.
+ * path segment, compared as {@link foldName} folds them: `.config/gh` also refuses `.config/gh/anything` and
+ * `.Config/GH`.
  */
 const PRIVATE_FOLDERS: readonly (readonly string[])[] = [
   ['.ssh'],
@@ -20,7 +33,7 @@ const PRIVATE_FOLDERS: readonly (readonly string[])[] = [
 ];
 
 /** A folder that directly holds one of these is a sign-in or key folder wherever it sits, and is not listed. */
-const SIGN_IN_FILES: ReadonlySet<string> = new Set([
+export const SIGN_IN_FILES: readonly string[] = [
   '.credentials.json',
   'auth.json',
   'hosts.yml',
@@ -30,17 +43,20 @@ const SIGN_IN_FILES: ReadonlySet<string> = new Set([
   'id_ed25519',
   'id_ecdsa_sk',
   'id_ed25519_sk',
-]);
+];
+const FOLDED_SIGN_IN: ReadonlySet<string> = new Set(SIGN_IN_FILES.map(foldName));
+const FOLDED_PRIVATE: readonly (readonly string[])[] = PRIVATE_FOLDERS.map(folder => folder.map(foldName));
 
 const startsWith = (segments: readonly string[], prefix: readonly string[]): boolean =>
-  prefix.every((part, index) => segments[index] === part);
+  prefix.every((part, index) => segments[index] !== undefined && foldName(segments[index] as string) === part);
 
 /** Whether a path relative to the home (segments) is, or is inside, a private folder. */
 export const isPrivateFolder = (relative: readonly string[]): boolean =>
-  PRIVATE_FOLDERS.some(folder => startsWith(relative, folder));
+  FOLDED_PRIVATE.some(folder => startsWith(relative, folder));
 
 /** Whether a folder's own names show it holds a sign-in or a key. */
-export const holdsSignIn = (names: readonly string[]): boolean => names.some(name => SIGN_IN_FILES.has(name));
+export const holdsSignIn = (names: readonly string[]): boolean =>
+  names.some(name => FOLDED_SIGN_IN.has(foldName(name)));
 
 export type PathParse =
   | { readonly ok: true; readonly absolute: string }

@@ -12,8 +12,8 @@ export type { FolderBrowser } from './port.ts';
  * reads through the kernel's `imports` root.
  */
 export function foldersRoutes(
-  kernel: Pick<KernelPorts, 'roots' | 'paths'>,
-  folders: Pick<ProjectFolders, 'mayName' | 'makeDirectory'>,
+  kernel: Pick<KernelPorts, 'roots' | 'paths' | 'spawn'>,
+  folders: Pick<ProjectFolders, 'mayName'>,
   browser: FolderBrowser = kernelBrowser(kernel),
 ): Readonly<Record<'GET /v1/projects/folders' | 'POST /v1/projects/folders', RouteHandler>> {
   const explorer = new FolderExplorer({ browser, folders });
