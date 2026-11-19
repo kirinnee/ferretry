@@ -3,7 +3,7 @@
  * composer's tools slot and Read aloud in an assistant message's footer. Each is wrapped in a boundary that gives it the plugin client and this device's voice stores.
  */
 
-import type { PluginClient } from '@ferretry/kernel/manifest';
+import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { type ReactNode, useEffect, useState } from 'react';
 import type { ConversationAboveComposerProps, ConversationRowProps } from '@ferretry/plugin-conversation/contract';
 import { AutoReadChip } from './components/auto-read-chip.tsx';
@@ -13,6 +13,7 @@ import { DictationDebugSettings } from './features/settings/dictation-debug-sett
 import { DictationSettings } from './features/settings/dictation-settings.tsx';
 import { SpeedupKeysSettings } from './features/settings/speedup-keys-settings.tsx';
 import { TranscriptionLogSettings } from './features/settings/transcription-log-settings.tsx';
+import { SpeedupsStepContainer, VoiceStepContainer } from './features/onboarding/step-panels.tsx';
 import { SpeedupsSurface } from './features/speedups/speedups-surface.tsx';
 import { useAutoRead } from './hooks/use-auto-read.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
@@ -151,6 +152,18 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
     );
   }
 
+  // First run's two client steps (Onboarding's steps screen hands each its host as `props.step`).
+  const VoiceStepPanel = (props: PanelProps) => (
+    <Boundary>
+      <VoiceStepContainer step={props.step} />
+    </Boundary>
+  );
+  const SpeedupsStepPanel = (props: PanelProps) => (
+    <Boundary>
+      <SpeedupsStepContainer step={props.step} />
+    </Boundary>
+  );
+
   const DictationPanel = (props: { readonly subject?: string }) => (
     <Boundary>
       <DictationPanelBody {...props} />
@@ -209,5 +222,5 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
       </Boundary>
     );
 
-  return { VoiceTab, SpeedupsTab, DictationPanel, ReadAloudPanel, AutoReadPanel };
+  return { VoiceTab, SpeedupsTab, DictationPanel, ReadAloudPanel, AutoReadPanel, VoiceStepPanel, SpeedupsStepPanel };
 }

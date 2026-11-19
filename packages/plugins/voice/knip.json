@@ -1,4 +1,4 @@
 {
-  "entry": ["tests/**/*.test.{ts,tsx}", "tests/realworld/dev/**/*.ts"],
+  "entry": ["tests/**/*.test.{ts,tsx}", "tests/realworld/dev/**/*.ts", "tests/integration/**/fixtures/**/*.{ts,tsx}"],
   "project": ["**/*.{ts,tsx}"]
 }

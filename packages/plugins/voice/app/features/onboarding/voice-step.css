@@ -1,0 +1,18 @@
+/* The first-run Voice pages: a title, one line, then the body. The shell owns the page frame (width, footer). */
+.fy-voice-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md, 12px);
+  min-width: 0;
+}
+.fy-voice-step-title {
+  color: var(--fg);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-strong, 600);
+  margin: 0;
+}
+.fy-voice-step-line {
+  color: var(--muted);
+  font-size: var(--text-md);
+  margin: 0;
+}

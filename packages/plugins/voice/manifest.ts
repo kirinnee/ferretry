@@ -98,9 +98,9 @@ export default definePlugin({
       panel(CONVERSATION_ROW_ACTIONS_SLOT, { id: 'read-aloud', order: 10 }),
       // "Read replies aloud": reads a finished reply (or a question) while the device setting is on (Conversation's `conversation.above-composer` slot).
       panel(CONVERSATION_ABOVE_COMPOSER_SLOT, { id: 'auto-read', order: 40 }),
-      // First-run steps (Onboarding's steps screen offers this slot): the same views as the two Settings tabs.
-      panel('onboarding.step', { id: 'onboarding-speedups', order: 50 }),
-      panel('onboarding.step', { id: 'onboarding-voice', order: 51 }),
+      // First-run steps (Onboarding's steps screen offers this slot): this device's two client steps, Voice then Speed-ups.
+      panel('onboarding.step', { id: 'onboarding-voice', order: 3 }),
+      panel('onboarding.step', { id: 'onboarding-speedups', order: 4 }),
     ],
     settings: [
       settingsTab('voice', { icon: 'mic', group: 'behaviour', label: 'Voice', order: 60 }),
@@ -114,10 +114,11 @@ export default definePlugin({
     readModels: [...VOICE_READ_MODELS],
   },
 
-  // v4's New machine setup: Speed-ups (the provider keys), then Voice (this device's dictation).
+  // First run, this DEVICE's half (r10 O15): Voice (the engine cards), then Speed-ups (the keys this browser holds), which
+  // draws only after a local engine was picked. Both configure the browser, so each is asked once per device.
   onboarding: [
-    { id: 'speedups', title: 'Speed-ups', order: 50 },
-    { id: 'voice', title: 'Voice', order: 51 },
+    { id: 'voice', title: 'Voice', order: 3, side: 'client' },
+    { id: 'speedups', title: 'Speed-ups', order: 4, side: 'client' },
   ],
 
   permissions: {
