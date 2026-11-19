@@ -17,7 +17,7 @@ export function createAgendaSettings(runtime: AgendaRuntime) {
     const preferences = useSyncExternalStore(store.subscribe, store.get, store.get);
     return (
       <AgendaClientContext.Provider value={runtime.client}>
-        <div className="flex flex-col gap-4">
+        <div className="flex max-w-[1100px] flex-col gap-4">
           <NotificationFilterSettingsView
             preferences={preferences}
             onCategoryChange={(category, next) => store.set({ categories: { [category]: next } })}
