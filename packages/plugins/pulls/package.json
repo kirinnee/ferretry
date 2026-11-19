@@ -1,0 +1,27 @@
+{
+  "name": "@ferretry/plugin-pulls",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Pull requests and CI (plugins piece of Ferretry 5): GitHub client with ETag cache",
+  "type": "module",
+  "ferretry": {
+    "id": "pulls",
+    "manifest": "./manifest.ts"
+  },
+  "exports": {
+    "./contract": "./contract/index.ts",
+    "./manifest": "./manifest.ts",
+    "./daemon": "./daemon/index.ts",
+    "./app": "./app/index.ts",
+    "./cli": "./cli/index.ts"
+  },
+  "dependencies": {
+    "@ferretry/core-gate": "workspace:*",
+    "@ferretry/kernel": "workspace:*",
+    "@ferretry/plugin-git-accounts": "workspace:*",
+    "@ferretry/plugin-projects": "workspace:*",
+    "@ferretry/std": "workspace:*",
+    "zod": "4.4.3"
+  },
+  "sideEffects": false
+}
