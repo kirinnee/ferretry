@@ -153,7 +153,7 @@ describe('PairingScreen arrival', () => {
     expect(screen.container.textContent).toContain('daemon-a');
     // The one-time code is never rendered, and the address bar is emptied of it.
     expect(screen.container.textContent).not.toContain('single-use');
-    expect(screen.container.querySelector('input')).toBeNull();
+    expect(screen.container.querySelector('input:not([data-pair-machine-name])')).toBeNull();
     expect(taken).toBe(1);
     await screen.unmount();
   });
@@ -473,7 +473,7 @@ describe('PairingScreen naming this device', () => {
     });
     // Said, not asked: the screen is still one decision until the person chooses to rename.
     expect(screen.container.querySelector('[data-pair-device-label]')?.textContent).toContain('Chrome on macOS · K7Q2');
-    expect(screen.container.querySelector('input')).toBeNull();
+    expect(screen.container.querySelector('input:not([data-pair-machine-name])')).toBeNull();
 
     // Act
     await setField(screen.container, '  Kitchen iPad  ');
@@ -482,6 +482,35 @@ describe('PairingScreen naming this device', () => {
     // Assert — trimmed, and the code goes with it.
     expect(sent).toEqual([[SEED, 'Kitchen iPad']]);
     await screen.unmount();
+  });
+
+  it('sends the machine name typed on the confirm screen with the pair, and none when it is left empty', async () => {
+    const sent: (string | undefined)[] = [];
+    const screen = await screenWith({
+      arrival: PREFILLED,
+      onPair: async (_seed, _name, machine) => {
+        sent.push(machine);
+      },
+    });
+    const field = must(
+      screen.container.querySelector('input[data-pair-machine-name]'),
+      'the machine field',
+    ) as HTMLInputElement;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, '  Studio box ');
+    await interact(() => field.dispatchEvent(new Event('input', { bubbles: true })));
+    await interact(() => buttonNamed(screen.container, 'Pair this device').click());
+    expect(sent).toEqual(['Studio box']);
+    await screen.unmount();
+
+    const quiet = await screenWith({
+      arrival: PREFILLED,
+      onPair: async (_seed, _name, machine) => {
+        sent.push(machine);
+      },
+    });
+    await interact(() => buttonNamed(quiet.container, 'Pair this device').click());
+    expect(sent).toEqual(['Studio box', undefined]);
+    await quiet.unmount();
   });
 
   it('will not pair a device with no name', async () => {

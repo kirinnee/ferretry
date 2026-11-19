@@ -92,6 +92,16 @@ describe('the pairing exchange', () => {
     should(result.daemon).equal(daemonId);
   });
 
+  it('hands the shell the machine name the person typed, to save with the new grant', async () => {
+    const { store, claims, added, base } = harness();
+    const ports: PairingPorts = {
+      ...base,
+      pairDirect: async input => ({ kind: 'paired', response: await sealedPaired(input, response()) }) as never,
+    };
+    await exchangePairing({ ports, claims, store }, seed, 'My phone', 'Studio box');
+    should(added[0]).have.property('chosenName', 'Studio box');
+  });
+
   it('falls back to a direct pairing over the pairing’s own address when the shell offers no walk', async () => {
     const { store, claims, added, inputs, base } = harness();
     const ports: PairingPorts = {

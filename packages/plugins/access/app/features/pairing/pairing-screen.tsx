@@ -64,8 +64,11 @@ interface PairedAs {
   readonly connection?: DaemonConnection;
 }
 
-/** Exchanges the code; `deviceName` is what the person called this device on the confirm screen. */
-type PairingExchange = (seed: PairingSeed, deviceName: string) => Promise<PairedAs | void>;
+/**
+ * Exchanges the code; `deviceName` is what the person called this device on the confirm screen, and `machineName`
+ * (absent when the field was left empty) what they called the machine, for the host to save once paired.
+ */
+type PairingExchange = (seed: PairingSeed, deviceName: string, machineName?: string) => Promise<PairedAs | void>;
 
 /** Whether this page runs on a loopback address, i.e. on the daemon's own machine. */
 const pageIsLocal = (): boolean => {
@@ -224,6 +227,7 @@ export function PairingScreen({
   }, [onStatedFailure, statedFailure]);
   // Chosen once per screen, so a person editing it is never overwritten and two attempts send one name.
   const [deviceName, setDeviceName] = useState(defaultName);
+  const [machineName, setMachineName] = useState('');
   const [pasting, setPasting] = useState(false);
   /** The pasted link holds a live code: it lives only in the input's own value, read on submit, never in state or markup. */
   const link = useSecretField(typed => typed.trim().length);
@@ -264,10 +268,10 @@ export function PairingScreen({
     setStage({ kind: 'confirm', seed });
   };
 
-  const pair = async (seed: PairingSeed, name: string): Promise<void> => {
+  const pair = async (seed: PairingSeed, name: string, machine?: string): Promise<void> => {
     setStage({ kind: 'pairing', seed });
     try {
-      const as = await onPair(seed, name);
+      const as = await onPair(seed, name, machine);
       setStage({
         kind: 'paired',
         path: describeDaemonPath({ address: seed.daemonUrl, name: as?.machine, via: as?.via, sameMachine }),
@@ -295,9 +299,11 @@ export function PairingScreen({
     return (
       <PairingFocus
         stage={stage}
-        onPair={(seed, name) => void pair(seed, name)}
+        onPair={(seed, name, machine) => void pair(seed, name, machine)}
         deviceName={deviceName}
         onDeviceName={setDeviceName}
+        machineName={machineName}
+        onMachineName={setMachineName}
         onCancel={startOver}
         paired={connections.length > 0}
         embedded={embedded}
@@ -592,7 +598,10 @@ function HowThisWorks() {
 
 interface PairingFocusProps {
   readonly stage: Exclude<Stage, { kind: 'browse' }>;
-  readonly onPair: (seed: PairingSeed, deviceName: string) => void;
+  readonly onPair: (seed: PairingSeed, deviceName: string, machineName?: string) => void;
+  /** What the person is calling the machine; empty keeps its host name until the later step offers one. */
+  readonly machineName: string;
+  readonly onMachineName: (name: string) => void;
   readonly onCancel: () => void;
   /** What this device will be called at the machine, as the person has it in the field. */
   readonly deviceName: string;
@@ -622,6 +631,8 @@ function PairingFocus({
   embedded,
   deviceName,
   onDeviceName,
+  machineName,
+  onMachineName,
   sameMachine,
   passkeyClient,
   passkeyOffer,
@@ -800,6 +811,23 @@ function PairingFocus({
         </p>
       )}
 
+      {/* WHAT THIS MACHINE WILL BE CALLED, saved with the pair so no later step has to ask. Optional: empty keeps the host name. */}
+      <label className="flex min-w-0 flex-col gap-1 text-ui text-muted">
+        Name this machine
+        <input
+          type="text"
+          className="kt-input min-h-[44px] min-w-0"
+          data-pair-machine-name=""
+          value={machineName}
+          placeholder="Optional, e.g. Studio box"
+          maxLength={100}
+          autoComplete="off"
+          spellCheck={false}
+          disabled={busy}
+          onChange={event => onMachineName(event.target.value)}
+        />
+      </label>
+
       {/*
         `data-pair-confirm` names the one control that starts a redemption, so a harness presses it
         by identity rather than by position or by a design-system attribute. Both fallbacks are
@@ -813,7 +841,10 @@ function PairingFocus({
         data-variant="primary"
         data-pair-confirm=""
         onClick={() => {
-          if (sendableName !== undefined) onPair(seed, sendableName);
+          if (sendableName === undefined) return;
+          const machine = machineName.trim();
+          if (machine === '') onPair(seed, sendableName);
+          else onPair(seed, sendableName, machine);
         }}
         disabled={busy || sendableName === undefined}
       >

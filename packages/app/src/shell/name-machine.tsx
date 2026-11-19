@@ -13,6 +13,9 @@ import { useRuntimeVersion, useShell } from './context.tsx';
  * governs it exactly as it governs that tab: a device without the configure grant is refused, the step says so in the
  * daemon's own words, and moves on. Nothing here decides who may rename a machine.
  *
+ * A name the person already typed ON THE PAIR SCREEN is saved first, through the same call, and then this step never
+ * shows. Only when that save fails does the step come back, prefilled with the typed name, and says what went wrong.
+ *
  * It is only offered by a pairing (`PairingInput.askName`), once per pairing and never again after a reload, and it
  * stays out of the way when it cannot tell whether the machine is named (the read was refused or failed).
  */
@@ -142,12 +145,39 @@ export function NameThisMachine({ daemon }: { readonly daemon: string }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const [refusal, setRefusal] = useState<string | undefined>(undefined);
+  // The name typed at pairing, once it failed to save: the field starts with it.
+  const [typedAtPairing, setTypedAtPairing] = useState<string | undefined>(undefined);
   const settle = (): void => runtime.daemons.nameSettled(daemon);
   const asked = useRef(false);
   useEffect(() => {
     // One look per mount, once the machine can be asked. A machine that cannot say is left alone.
     if (client === undefined || asked.current) return;
     asked.current = true;
+    const chosen = runtime.daemons.takeChosenName(daemon);
+    const parsedChoice = chosen === undefined ? undefined : MachineNameSchema.safeParse(chosen);
+    if (chosen !== undefined && parsedChoice?.success === true) {
+      const name = parsedChoice.data;
+      // Saved with the grant the pairing just made, through the same call as the step below; nothing is drawn meanwhile.
+      const fail = (cause: unknown, read: HostFile | undefined): void => {
+        setTypedAtPairing(name);
+        setProblem(`The name you chose while pairing was not saved: ${sentenceOf(cause)}`);
+        setFile(read ?? { exists: false, text: '', etag: '' });
+      };
+      void readHostFile(client).then(
+        read =>
+          client
+            .call('PUT /v1/config/file', { body: { path: HOST_FILE, text: hostFileText(name), etag: read.etag } })
+            .then(
+              () => {
+                runtime.daemons.learnMachine(daemon, name);
+                runtime.daemons.nameSettled(daemon);
+              },
+              (cause: unknown) => fail(cause, read),
+            ),
+        (cause: unknown) => fail(cause, undefined),
+      );
+      return;
+    }
     void readHostFile(client).then(
       read => (hostFileIsNamed(read) ? runtime.daemons.nameSettled(daemon) : setFile(read)),
       () => runtime.daemons.nameSettled(daemon),
@@ -175,7 +205,7 @@ export function NameThisMachine({ daemon }: { readonly daemon: string }) {
   };
   return (
     <NameThisMachineView
-      initial={daemonTitle(paired)}
+      initial={typedAtPairing ?? daemonTitle(paired)}
       busy={busy}
       {...(refusal === undefined ? {} : { refusal })}
       {...(problem === undefined ? {} : { problem })}

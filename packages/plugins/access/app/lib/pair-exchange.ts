@@ -51,7 +51,7 @@ const crossing = (via: PairedOver['via']): RelayCarrier | undefined => {
 };
 
 /**
- * Redeems the seed's code as `deviceName`, keeps the key and the pairing, and answers the daemon now paired.
+ * Redeems the seed's code as `deviceName` (and hands the shell the `machineName` the person typed, if any, to save), keeps the key and the pairing, and answers the daemon now paired.
  * Rejects with the shell's own errors untouched (a refusal is `RelayPairingRefusedError`, so the screen can tell it
  * from a transport failure); nothing is kept on any rejection.
  */
@@ -59,6 +59,7 @@ export async function exchangePairing(
   dependencies: PairingExchangeDependencies,
   seed: PairingSeed,
   deviceName: string,
+  machineName?: string,
 ): Promise<PairedDaemon> {
   const { ports, claims, store } = dependencies;
   // Read before the attempt: `save` replaces it, and a failure after `save` must not cost the person a working key.
@@ -86,6 +87,7 @@ export async function exchangePairing(
       carriers: response.carriers,
       // The shell then offers a machine with no name of the owner's a name, once (skippable, governed by the daemon).
       askName: true,
+      ...(machineName === undefined ? {} : { chosenName: machineName }),
     });
   } catch (reason) {
     // Only a key `save` wrote can differ from `previous`; before `save` there is nothing to undo.

@@ -163,6 +163,8 @@ export interface PairingInput {
   readonly carriers?: readonly unknown[];
   /** Ask, once this app shows the machine, whether to name it (set by a pairing; never stored, never set by a re-read). */
   readonly askName?: true;
+  /** The name the person typed on the pair screen: the "Name this machine" step saves it with the new grant instead of asking. */
+  readonly chosenName?: string;
 }
 
 /** The list, shaped for `useSyncExternalStore`: `snapshot()` is identity-stable between changes. */
@@ -175,6 +177,8 @@ export class DaemonList {
   readonly #caches = new Set<DaemonScopedCache>();
   /** Machines just paired that may still be asked for a name. In memory only: a reload does not ask again. */
   readonly #naming = new Set<string>();
+  /** Names typed at pairing, waiting for the first connection to save them. In memory only; consumed once. */
+  readonly #chosen = new Map<string, string>();
   #snapshot: DaemonListSnapshot;
 
   constructor(options: DaemonListOptions) {
@@ -242,6 +246,9 @@ export class DaemonList {
     const retained = [record, ...others].slice(0, MAX_DAEMONS);
     for (const evicted of [record, ...others].slice(MAX_DAEMONS)) this.#gone(evicted.daemon);
     if (input.askName === true) this.#naming.add(record.daemon);
+    const chosen = input.chosenName?.trim();
+    if (chosen !== undefined && chosen.length > 0) this.#chosen.set(record.daemon, chosen);
+    else this.#chosen.delete(record.daemon);
     this.#commit({ daemons: retained, selected: record.daemon });
     return record;
   }
@@ -279,6 +286,13 @@ export class DaemonList {
     return this.#naming.has(daemon);
   }
 
+  /** The name typed at pairing for this machine, if one is waiting to be saved; taking it clears it. */
+  takeChosenName(daemon: string): string | undefined {
+    const chosen = this.#chosen.get(daemon);
+    this.#chosen.delete(daemon);
+    return chosen;
+  }
+
   /** The person asked to name this machine (the machine switcher's "Name this machine"): the step is offered again. */
   askToName(daemon: string): void {
     if (this.get(daemon) === undefined || this.#naming.has(daemon)) return;
@@ -306,6 +320,7 @@ export class DaemonList {
 
   #gone(daemon: string): void {
     this.#naming.delete(daemon);
+    this.#chosen.delete(daemon);
     for (const cache of this.#caches) cache.clearDaemon(daemon);
     let forgotten: void | Promise<void>;
     try {

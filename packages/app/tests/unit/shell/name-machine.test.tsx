@@ -187,6 +187,30 @@ describe('Name this machine', () => {
     expect(open.step()).toBeNull();
   });
 
+  test('a name typed at pairing is saved with the pair and the later step never shows', async () => {
+    open = await boot({ pairing: { askName: true, chosenName: '  Studio box ' } });
+    expect(open.writes().map(write => write.body)).toEqual([
+      { path: 'host.yaml', text: 'name: "Studio box"\n', etag: 'e1' },
+    ]);
+    expect(open.list.get('ws')?.machine).toBe('Studio box');
+    expect(open.step()).toBeNull();
+    expect(open.list.namePending('ws')).toBe(false);
+    expect(open.list.takeChosenName('ws')).toBeUndefined();
+  });
+
+  test('a save that fails at pairing brings the later step back, with the typed name and the reason', async () => {
+    open = await boot({
+      pairing: { askName: true, chosenName: 'Studio box' },
+      writeAnswer: json({ error: 'this device may not configure this machine', code: 'forbidden' }, 403),
+    });
+    expect(open.step()?.textContent).toContain('The name you chose while pairing was not saved');
+    expect(open.step()?.textContent).toContain('this device may not configure this machine');
+    expect(must(open.view.container.querySelector<HTMLInputElement>('#name-machine-field'), 'field').value).toBe(
+      'Studio box',
+    );
+    expect(open.list.get('ws')?.machine).toBe(HOST);
+  });
+
   test('a machine that already has a name of the owner’s is not asked', async () => {
     open = await boot({ pairing: { askName: true }, hostFile: 'name: "pebox"\n' });
     expect(open.step()).toBeNull();

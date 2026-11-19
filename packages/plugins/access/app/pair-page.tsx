@@ -173,8 +173,8 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
           onContinue={() => {
             if (landing.current !== undefined) navigate(landing.current);
           }}
-          onPair={async (seed, deviceName) => {
-            const paired = await exchangePairing({ ports, claims, store }, seed, deviceName);
+          onPair={async (seed, deviceName, machineName) => {
+            const paired = await exchangePairing({ ports, claims, store }, seed, deviceName, machineName);
             // The screen says "Connected" and navigates here once the first-passkey offer has been settled (or at once
             // when there is none to make): never away from a button the person could still press.
             landing.current = returnPathOf(location()) ?? daemonHomeHref(paired.daemon);
