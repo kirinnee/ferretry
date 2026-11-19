@@ -45,6 +45,7 @@ async function world() {
       items.add(name);
       return { kind: 'written' };
     },
+    replace: async () => ({ kind: 'written' }),
     store,
   });
   return { put, store, items, disk: `${home}/state/skills/installed` };
@@ -61,7 +62,7 @@ describe("imported skills land in Skills' own installed store", () => {
   test('each skill folder is written under installed/<skill>/ with its own paths, and the store holds it', async () => {
     const { put, store, items, disk } = await world();
 
-    expect(await put('imported', document, handed)).toEqual({ ok: true });
+    expect(await put('imported', document, handed)).toEqual({ ok: true, created: ['pdf', 'review'] });
 
     expect(items.has('imported')).toBe(true);
     expect(await store.holds('pdf')).toBe(true);
@@ -88,7 +89,7 @@ describe("imported skills land in Skills' own installed store", () => {
 
     const answered = await put('imported', document, handed);
 
-    expect(answered).toEqual({ ok: true, warnings: [expect.stringContaining('"pdf" is already installed')] });
+    expect(answered).toMatchObject({ ok: true, warnings: [expect.stringContaining('"pdf" is already installed')] });
     expect(await readFile(`${disk}/pdf/SKILL.md`, 'utf8')).toBe('mine');
     expect(await store.holds('review')).toBe(true);
   });
@@ -106,6 +107,7 @@ describe("imported skills land in Skills' own installed store", () => {
     const put = skillsImportPut({
       has: () => false,
       create: async () => ({ kind: 'written' }),
+      replace: async () => ({ kind: 'written' }),
       store: {
         holds: async skill => {
           const held = await store.holds(skill);
@@ -127,7 +129,10 @@ describe("imported skills land in Skills' own installed store", () => {
       resumeImport();
     }
 
-    expect(await imported).toEqual({ ok: true, warnings: [expect.stringContaining('"shared" is already installed')] });
+    expect(await imported).toMatchObject({
+      ok: true,
+      warnings: [expect.stringContaining('"shared" is already installed')],
+    });
     expect(await readFile(`${disk}/shared/SKILL.md`, 'utf8')).toBe('owner content');
   });
 });

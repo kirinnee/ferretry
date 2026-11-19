@@ -514,7 +514,7 @@ describe('scan', () => {
     const scan = await service.scan();
 
     // Assert
-    should(scan.updates.map(update => update.reference)).deepEqual(['instructions/main']);
+    should(scan.updates.map(update => update.reference)).deepEqual(['instructions/claude-instructions']);
     should(scan.runtimes).deepEqual([]);
   });
 
@@ -1079,9 +1079,9 @@ describe('the setup.import executor', () => {
     ];
     const { description } = await importOnce(
       service,
-      IMPORT({ acceptedUpdates: ['instructions/main'], addDuplicates: true }),
+      IMPORT({ acceptedUpdates: ['instructions/claude-instructions'], addDuplicates: true }),
     );
-    should(description).containEql('Updates instructions/main from its changed source.');
+    should(description).containEql('Updates instructions/claude-instructions from its changed source.');
     const second = applied[1]?.documents ?? [];
     should(configTextOf(second)).containEql('Be kinder.');
     should(configTextOf(second)).containEql('claude-default-2');
@@ -1116,7 +1116,7 @@ describe('the setup.import executor', () => {
     ];
 
     // Act — the twin runtime is not added again, so only the update lands.
-    const { summary } = await importOnce(service, IMPORT({ acceptedUpdates: ['instructions/main'] }));
+    const { summary } = await importOnce(service, IMPORT({ acceptedUpdates: ['instructions/claude-instructions'] }));
 
     // Assert
     should(summary).equal('Imported into studio.');
@@ -2188,7 +2188,39 @@ describe('the import record, as a scan reads it', () => {
   };
 
   it('should offer the change when the record is intact', async () => {
-    should(await offeredWith(record => record)).deepEqual(['instructions/main']);
+    should(await offeredWith(record => record)).deepEqual(['instructions/claude-instructions']);
+  });
+
+  it('should not offer a skill the person left out, and apply the one update it does offer', async () => {
+    // Arrange — one import with the skill "deploy" unticked, then only CLAUDE.md changes.
+    const { service, state, applied } = world();
+    const two = (text: string) => [
+      claudeScan({
+        instructions: { kind: 'text', source: '/person/.claude/CLAUDE.md', text, bytes: text.length },
+        skills: [
+          { item: 'review', source: '/person/.claude/skills/review', digest: 'skill-digest' },
+          { item: 'deploy', source: '/person/.claude/skills/deploy', digest: 'deploy-digest' },
+        ],
+      }),
+      codexScan(),
+    ];
+    state.scans = two('Be kind.\n');
+    await importOnce(service, IMPORT({ skip: ['claude-code:skill:deploy'] }));
+    const written = applied[0]?.documents ?? [];
+    for (const document of written) state.assets[document.path] = document.content;
+    state.reading = configReading(modelOfWrites(written), 'rev-2');
+    state.scans = two('Be kinder.\n');
+
+    // Act
+    const scan = await service.scan();
+    await importOnce(
+      service,
+      IMPORT({ skip: ['claude-code:skill:deploy'], acceptedUpdates: ['instructions/claude-instructions'] }),
+    );
+
+    // Assert — the scan offered what the apply accepts, and the apply took it.
+    should(scan.updates.map(update => update.reference)).deepEqual(['instructions/claude-instructions']);
+    should(configTextOf(applied[1]?.documents ?? [])).containEql('Be kinder.');
   });
 
   it('should treat a record it cannot read as no record, so nothing is offered as an update', async () => {
@@ -2209,7 +2241,7 @@ describe('the import record, as a scan reads it', () => {
         'mcp/nodigest': { sources: [], digest: 4 },
       },
     }));
-    should(offered).deepEqual(['instructions/main']);
+    should(offered).deepEqual(['instructions/claude-instructions']);
   });
 
   it('should read the profile each harness got, keeping only a name per known harness (P7)', async () => {
@@ -2219,11 +2251,13 @@ describe('the import record, as a scan reads it', () => {
         profile: 'default',
         profiles: { claude: 'claude-default', codex: 3, other: 'x' },
       })),
-    ).deepEqual(['instructions/main']);
+    ).deepEqual(['instructions/claude-instructions']);
     should(await offeredWith(record => ({ ...record, profile: 7, profiles: { codex: 1 } }))).deepEqual([
-      'instructions/main',
+      'instructions/claude-instructions',
     ]);
-    should(await offeredWith(record => ({ ...record, profiles: 'nope' }))).deepEqual(['instructions/main']);
+    should(await offeredWith(record => ({ ...record, profiles: 'nope' }))).deepEqual([
+      'instructions/claude-instructions',
+    ]);
   });
 });
 
@@ -3394,7 +3428,7 @@ describe('the setup.import executor, components another plugin owns', () => {
     should(door.calls.map(call => call.file).toSorted()).eql([
       'claude-code/settings/claude-settings.yaml',
       'mcp/github.yaml',
-      'skills/skills.yaml',
+      'skills/claude-skills.yaml',
     ]);
     should(description).containEql('Hands 3 parts to the parts of Ferretry that own them');
     should(summary).containEql('Written by the parts that own them:');
@@ -3440,14 +3474,14 @@ describe('the setup.import executor, components another plugin owns', () => {
     const { summary } = await importOnce(service);
 
     // Assert
-    should(summary).containEql('Written by the parts that own them: skills/skills.yaml.');
+    should(summary).containEql('Written by the parts that own them: skills/claude-skills.yaml.');
     should(summary).containEql('Held until you confirm: claude-code/settings/claude-settings.yaml.');
     should(summary).containEql('Not written: mcp/github.yaml (the server is not valid).');
     should(summary).not.containEql('settings file held');
     should(applied).have.length(1);
     const model = rawModelOf(applied[0]?.documents ?? []);
     for (const profile of Object.values(model.profiles)) should(profile.layers).not.containEql('mcp/github');
-    should(Object.values(model.profiles).some(profile => profile.layers.includes('skills/skills'))).be.true();
+    should(Object.values(model.profiles).some(profile => profile.layers.includes('skills/claude-skills'))).be.true();
   });
 
   it('should refuse a document the owner refuses for a raw secret, and never echo the value in the answer', async () => {
@@ -3942,6 +3976,70 @@ describe('the setup.import executor, a skill an owner serves', () => {
     should(skillLinks(applied)).eql(['/state/fleet/assets/skills/review']);
   });
 
+  it('should keep what an owner created in the import record and hand it back with an accepted update', async () => {
+    // Arrange — the Skills owner answers that it installed "review" for the first import.
+    const door = reportingOwners(write =>
+      write.kind === 'skills' ? { outcome: 'written', created: ['review'] } : { outcome: 'written' },
+    );
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
+    state.scans = ownedScans();
+    await importOnce(service);
+    const first = applied[0]?.documents ?? [];
+    for (const document of first) state.assets[document.path] = document.content;
+    state.reading = door.readingOf(first);
+    const recorded = JSON.parse(state.assets[RECORD_PATH] ?? '{}') as {
+      components: Record<string, { owned?: string[] }>;
+    };
+
+    // Act — the host's skill changes and the person accepts the update.
+    state.scans = [
+      claudeScan({
+        mcp: { kind: 'text', source: '/person/.claude.json', text: MCP_JSON, bytes: MCP_JSON.length },
+        skills: [{ item: 'review', source: '/person/.claude/skills/review', digest: 'skill-digest-3' }],
+      }),
+      codexScan(),
+    ];
+    const before = door.calls.length;
+    await importOnce(service, IMPORT({ acceptedUpdates: ['skills/claude-skills'] }));
+
+    // Assert
+    should(recorded.components['skills/claude-skills']?.owned).eql(['review']);
+    const handed = door.calls.slice(before).filter(call => call.kind === 'skills');
+    should(handed[0]?.replace).be.true();
+    should(handed[0]?.owned).eql(['review']);
+    should(door.calls.slice(0, before).every(call => call.owned === undefined)).be.true();
+  });
+
+  it('should replace the skills item with a newly added skill when the person accepts it, leaving the unticked one out', async () => {
+    // Arrange — "review" imported with "skip" unticked; the host then gains "claude-new".
+    const door = reportingOwners();
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
+    const skills = (...items: string[]) =>
+      items.map(item => ({ item, source: `/person/.claude/skills/${item}`, digest: `${item}-digest` }));
+    const scans = (...items: string[]) => [claudeScan({ skills: skills(...items) }), codexScan()];
+    state.scans = scans('review', 'skip');
+    await importOnce(service, IMPORT({ skip: ['claude-code:skill:skip'] }));
+    const first = applied[0]?.documents ?? [];
+    for (const document of first) state.assets[document.path] = document.content;
+    state.reading = door.readingOf(first);
+    state.scans = scans('review', 'skip', 'claude-new');
+    should((await service.scan()).updates.map(update => update.reference)).eql(['skills/claude-skills']);
+    const before = door.calls.length;
+
+    // Act
+    const change = IMPORT({ skip: ['claude-code:skill:skip'], acceptedUpdates: ['skills/claude-skills'] });
+    await importOnce(service, change);
+
+    // Assert — one replacing write of the new selection, Codex's items untouched.
+    const handed = door.calls.slice(before);
+    should(handed.map(call => call.reference)).eql(['skills/claude-skills']);
+    should(handed[0]?.replace).be.true();
+    should(JSON.parse(handed[0]?.text ?? '{}')).eql({ items: ['review', 'claude-new'], harness: 'claude' });
+    should(handed[0]?.files?.map(file => file.path)).not.containEql('skip/SKILL.md');
+  });
+
   it('should hand an accepted update to the owner when only the skill files changed', async () => {
     // Arrange — the skill is already in effect; the host's SKILL.md then changes, the selection does not
     const door = reportingOwners();
@@ -3964,17 +4062,19 @@ describe('the setup.import executor, a skill an owner serves', () => {
       }),
       codexScan(),
     ];
-    should((await service.scan()).updates.map(update => update.reference)).containEql('skills/skills');
+    should((await service.scan()).updates.map(update => update.reference)).containEql('skills/claude-skills');
     const before = door.calls.length;
 
     // Act
-    const change = IMPORT({ acceptedUpdates: ['skills/skills'] });
+    const change = IMPORT({ acceptedUpdates: ['skills/claude-skills'] });
     await service.executors.setup.describe(change, MACHINE);
     await service.executors.setup.execute(change, MACHINE);
 
     // Assert
     const handed = door.calls.slice(before).filter(call => call.kind === 'skills');
     should(handed).have.length(1);
+    should(handed[0]?.replace).be.true();
+    should(door.calls.slice(0, before).some(call => call.replace !== undefined)).be.false();
     should(handed[0]?.files).eql([{ path: 'review/SKILL.md', content: '---\nname: review\n---\nnew body\n' }]);
     const paths = (applied[1]?.documents ?? []).map(document => document.path);
     should(paths.some(path => path.startsWith('/state/fleet/assets/skills/'))).be.false();
