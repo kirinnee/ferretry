@@ -130,7 +130,7 @@ export function navCatalogEntries(views: Views): readonly NavEntry[] {
  * The nav's entries. A layout that never names `hidden` lists exactly its `items` (as layouts did before the field). One
  * that names it (even empty) gives `items` as an ORDER: those places first, then every other installed nav place by its
  * declared order, minus whatever is hidden, so a plugin installed later shows up without anyone editing the layout.
- * A name that resolves to nothing installed is skipped.
+ * A name that resolves to nothing installed is skipped. Settings is never hidden: naming it in `hidden` is ignored.
  */
 function navEntries(nav: ResolvedLayout['nav'], views: Views): readonly NavEntry[] {
   const shellNav: readonly string[] = SHELL_ITEMS.nav;
@@ -145,6 +145,8 @@ function navEntries(nav: ResolvedLayout['nav'], views: Views): readonly NavEntry
   if (nav.hidden === undefined) return listed;
   const hidden = new Set<string>();
   for (const name of nav.hidden) {
+    // Settings is the way back to every other setting, so no layout can hide it.
+    if (name === 'settings') continue;
     if (shellNav.includes(name)) hidden.add(name);
     else {
       const screen = views.screens.get(name);

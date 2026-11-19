@@ -2,7 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import type { Manifest } from '@ferretry/kernel/manifest';
 import { LayoutSchema } from '@ferretry/plugin-layouts/contract';
 import { navCatalogEntries, planFrame, viewsOf } from '../../../src/layout/engine.ts';
-import { resolveLayout, setDeviceOverride } from '../../../src/layout/layout.ts';
+import {
+  checkLayout,
+  chooseLayout,
+  layoutCandidates,
+  resolveLayout,
+  setDeviceOverride,
+} from '../../../src/layout/layout.ts';
 import { navCatalogItems } from '../../../src/layout/nav-catalog.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 
@@ -58,15 +64,35 @@ describe('a layout that names hidden', () => {
   });
 
   test('hidden places are dropped, whether named bare or qualified, listed or not', () => {
-    expect(
-      keys(layoutWith({ items: ['board', 'ferrets'], hidden: ['agenda', 'ferrets.ferrets', 'settings'] })),
-    ).toEqual(['board.board', 'lessons.lessons']);
+    expect(keys(layoutWith({ items: ['board', 'ferrets'], hidden: ['agenda', 'ferrets.ferrets'] }))).toEqual([
+      'board.board',
+      'lessons.lessons',
+      'settings',
+    ]);
+  });
+
+  test('Settings is never hidden, on the wide nav or the phone, however it is named', () => {
+    const hiding = layoutWith({ items: ['board'], hidden: ['settings', 'agenda'] });
+    expect(keys(hiding)).toContain('settings');
+    expect(keys(hiding)).not.toContain('agenda.agenda');
+    expect(keys(hiding, 'phone')).toContain('settings');
+    const phoneHiding = LayoutSchema.parse({ ...hiding, phone: { nav: { hidden: ['settings'] } } });
+    expect(keys(phoneHiding, 'phone')).toContain('settings');
+    expect(keys(layoutWith({ items: ['settings', 'board'], hidden: ['settings'] }))).toEqual([
+      'settings',
+      'board.board',
+      'ferrets.ferrets',
+      'agenda.agenda',
+      'lessons.lessons',
+    ]);
   });
 
   test('a place named twice appears once and a name that resolves to nothing is skipped', () => {
-    expect(
-      keys(layoutWith({ items: ['board', 'board.board', 'gone'], hidden: ['agenda', 'lessons', 'settings'] })),
-    ).toEqual(['board.board', 'ferrets.ferrets']);
+    expect(keys(layoutWith({ items: ['board', 'board.board', 'gone'], hidden: ['agenda', 'lessons'] }))).toEqual([
+      'board.board',
+      'ferrets.ferrets',
+      'settings',
+    ]);
   });
 
   test('a screen with no nav entry is never appended', () => {
@@ -122,5 +148,51 @@ describe('saving hidden', () => {
     expect(set).toEqual({ ok: true, overrides: { nav: { hidden: ['agenda', 'lessons'] } } });
     const phone = setDeviceOverride(base, {}, 'phone.nav.hidden', '');
     expect(phone).toEqual({ ok: true, overrides: { phone: { nav: { hidden: [] } } } });
+  });
+});
+
+describe('a layout naming a plugin that is no longer installed', () => {
+  const installed = views.installed;
+  const mine = (navPart: Record<string, unknown>, phone?: Record<string, unknown>) =>
+    LayoutSchema.parse({
+      id: 'mine',
+      nav: { side: 'left', style: 'rail', items: [], ...navPart },
+      ...(phone === undefined ? {} : { phone }),
+    });
+
+  test('is kept when it names hidden: stale items and hidden names are skipped, not refused', () => {
+    const layout = mine({ items: ['lessons.lessons', 'gone', 'board'], hidden: ['removed'] });
+    expect(checkLayout(layout, installed)).toEqual([]);
+    const choice = chooseLayout(layoutCandidates(layout, {}), installed);
+    expect(choice).toEqual({ kind: 'applied', layout });
+    const withoutLessons = viewsOf(surfaces.filter(entry => entry.id !== 'lessons'));
+    const stale = mine({ items: ['lessons.lessons', 'board'], hidden: ['agenda'] });
+    const applied = chooseLayout(layoutCandidates(stale, {}), withoutLessons.installed);
+    expect(applied).toEqual({ kind: 'applied', layout: stale });
+    expect(
+      planFrame(resolveLayout(stale, 'wide'), withoutLessons).nav.entries.map(entry =>
+        entry.kind === 'shell' ? entry.item : entry.screen.id,
+      ),
+    ).toEqual(['board', 'ferrets', 'settings']);
+  });
+
+  test('is kept on the phone when the phone names hidden, inherited or its own', () => {
+    const phoneOnly = mine({ items: ['board'], hidden: [] }, { nav: { items: ['gone'] } });
+    expect(checkLayout(phoneOnly, installed)).toEqual([]);
+    const ownHidden = mine({ items: ['board'], hidden: [] }, { nav: { items: ['gone'], hidden: ['agenda'] } });
+    expect(checkLayout(ownHidden, installed)).toEqual([]);
+  });
+
+  test('is still refused whole by a layout that never names hidden', () => {
+    const gone = mine({ items: ['gone'] });
+    expect(checkLayout(gone, installed).map(issue => issue.at)).toEqual(['nav.items']);
+    expect(chooseLayout([gone], installed)).toMatchObject({ kind: 'refused', refused: 'mine' });
+  });
+
+  test('a phone list is strict when only the wide nav is legacy', () => {
+    const strictWide = mine({ items: ['gone'] }, { nav: { hidden: [] } });
+    expect(checkLayout(strictWide, installed).map(issue => issue.at)).toEqual(['nav.items']);
+    const strictPhone = mine({ items: ['board'] }, { nav: { items: ['gone'] } });
+    expect(checkLayout(strictPhone, installed).map(issue => issue.at)).toEqual(['phone.nav.items']);
   });
 });
