@@ -13,7 +13,13 @@ import type { HostEntry, HostFiles } from './ports.ts';
 
 /** What serves one absolute path: a root and the path inside it, or the one file a `harnessFile` handle names. */
 type Mounted =
-  | { readonly kind: 'root'; readonly root: RootHandle; readonly inside: string }
+  | {
+      readonly kind: 'root';
+      readonly root: RootHandle;
+      readonly inside: string;
+      /** A folder the root cannot reach because a folder above it is not there is ABSENT (the fleet folder starts empty). */
+      readonly absentWhenFolderMissing?: true;
+    }
   | { readonly kind: 'file'; readonly file: RootFileHandle };
 
 /** Finds what serves `absolutePath`, or `undefined` when nothing the plugin holds reaches it. */
@@ -33,6 +39,20 @@ function below(base: string, path: string): string | undefined {
 const kindOf = (stat: RootStat | RootLstat): HostEntry['kind'] => (stat.kind === 'symlink' ? 'link' : stat.kind);
 const entryOf = (stat: RootStat | RootLstat): HostEntry => ({ kind: kindOf(stat), size: stat.size });
 
+/** The kernel's answer for a name whose parent folder is not there. */
+const FOLDER_MISSING = 'root refused: outside';
+
+/** `look`'s answer, or `undefined` when it is refused only because a folder above the name is not there. */
+async function orAbsent<T>(target: Mounted, look: () => Promise<T | undefined>): Promise<T | undefined> {
+  if (target.kind !== 'root' || target.absentWhenFolderMissing !== true) return await look();
+  try {
+    return await look();
+  } catch (error) {
+    if (error instanceof Error && error.message === FOLDER_MISSING) return undefined;
+    throw error;
+  }
+}
+
 export function rootHostFiles(mounts: HostMounts): HostFiles {
   const resolveIn = (root: RootHandle, inside: string, shown: string) => {
     const spelled = inside === '' ? '.' : inside;
@@ -51,21 +71,25 @@ export function rootHostFiles(mounts: HostMounts): HostFiles {
       if (target.kind === 'file')
         return await target.file.stat().then(s => (s === undefined ? undefined : target.file.readText()));
       const at = resolveIn(target.root, target.inside, path);
-      return (await target.root.lstat(at)) === undefined ? undefined : await target.root.readText(at);
+      return await orAbsent(target, async () =>
+        (await target.root.lstat(at)) === undefined ? undefined : await target.root.readText(at),
+      );
     },
     readBytes: async path => {
       const target = mount(path);
       if (target.kind === 'file')
         return await target.file.stat().then(s => (s === undefined ? undefined : target.file.readBytes()));
       const at = resolveIn(target.root, target.inside, path);
-      return (await target.root.lstat(at)) === undefined ? undefined : await target.root.readBytes(at);
+      return await orAbsent(target, async () =>
+        (await target.root.lstat(at)) === undefined ? undefined : await target.root.readBytes(at),
+      );
     },
     stat: async path => {
       const target = mount(path);
       const found =
         target.kind === 'file'
           ? await target.file.stat()
-          : await target.root.stat(resolveIn(target.root, target.inside, path));
+          : await orAbsent(target, async () => await target.root.stat(resolveIn(target.root, target.inside, path)));
       return found === undefined ? undefined : entryOf(found);
     },
     lstat: async path => {
@@ -75,16 +99,20 @@ export function rootHostFiles(mounts: HostMounts): HostFiles {
           ? await target.file.lstat()
           : // The root's own base has no leaf of its own to look at: the kernel checked every hop to it (a link anywhere on
             // the way is refused), so what is there is what `stat` says.
-            target.inside === ''
-            ? await target.root.stat(resolveIn(target.root, target.inside, path))
-            : await target.root.lstat(resolveIn(target.root, target.inside, path));
+            await orAbsent(target, async () =>
+              target.inside === ''
+                ? await target.root.stat(resolveIn(target.root, target.inside, path))
+                : await target.root.lstat(resolveIn(target.root, target.inside, path)),
+            );
       return found === undefined ? undefined : entryOf(found);
     },
     list: async path => {
       const target = mount(path);
       if (target.kind === 'file') throw new Error(`${path} is one file; its folder is not listable`);
       const at = resolveIn(target.root, target.inside, path);
-      return (await target.root.lstat(at)) === undefined ? undefined : await target.root.list(at);
+      return await orAbsent(target, async () =>
+        (await target.root.lstat(at)) === undefined ? undefined : await target.root.list(at),
+      );
     },
   };
 }
@@ -126,8 +154,8 @@ export function fleetMounts(roots: Pick<RootsPort, 'root'>, root: RootHandle, fl
   const assets = roots.root('fleet', { subfolder: 'assets' });
   return absolutePath => {
     const inAssets = below(assetsBase, absolutePath);
-    if (inAssets !== undefined) return { kind: 'root', root: assets, inside: inAssets };
+    if (inAssets !== undefined) return { kind: 'root', root: assets, inside: inAssets, absentWhenFolderMissing: true };
     const inside = below(fleetDirectory, absolutePath);
-    return inside === undefined ? undefined : { kind: 'root', root, inside };
+    return inside === undefined ? undefined : { kind: 'root', root, inside, absentWhenFolderMissing: true };
   };
 }

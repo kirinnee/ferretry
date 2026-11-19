@@ -132,7 +132,7 @@ describe('planImport — a machine with both harnesses set up', () => {
   });
 
   it('should make one generic Instructions component when CLAUDE.md and AGENTS.md match (E9)', () => {
-    should(component(plan, 'instructions', 'main')).deepEqual({ file: 'components/instructions/main.md' });
+    should(component(plan, 'instructions', 'main')).deepEqual({ text: '# Be kind\n' });
     should(plan.preview.instructionsIdentical).be.true();
     should(plan.notes.map(note => note.text)).containEql('Instructions: same as your CLAUDE.md · one shared copy.');
   });
@@ -302,11 +302,11 @@ describe('planImport — instructions and harness choices', () => {
 
     // Assert
     should(component(plan, 'instructions', 'claude-instructions')).deepEqual({
-      file: 'components/instructions/claude-instructions.md',
+      text: 'claude words',
       harness: 'claude',
     });
     should(component(plan, 'instructions', 'codex-instructions')).deepEqual({
-      file: 'components/instructions/codex-instructions.md',
+      text: 'codex words',
       harness: 'codex',
     });
     should(plan.preview.instructionsIdentical).be.false();
@@ -318,7 +318,7 @@ describe('planImport — instructions and harness choices', () => {
   it('should narrow the one instructions document found when both harnesses are imported', () => {
     const plan = planImport([claude({ instructions: text('/c', 'claude words') }), codex()], { digest });
     should(component(plan, 'instructions', 'claude-instructions')).deepEqual({
-      file: 'components/instructions/claude-instructions.md',
+      text: 'claude words',
       harness: 'claude',
     });
     should(plan.preview.instructionsIdentical).be.undefined();
@@ -339,7 +339,7 @@ describe('planImport — instructions and harness choices', () => {
 
     // Assert — a lone harness's things stay generic.
     should(plan.imported).deepEqual(['claude']);
-    should(component(plan, 'instructions', 'main')).deepEqual({ file: 'components/instructions/main.md' });
+    should(component(plan, 'instructions', 'main')).deepEqual({ text: 'claude words' });
     should(component(plan, 'skills', 'skills')).deepEqual({ items: ['a'] });
     should(Object.keys(plan.runtimes)).deepEqual(['claude-default']);
     should(plan.notes).containEql({ harness: 'codex', text: "Codex isn't installed · Install later in Settings." });
@@ -708,8 +708,8 @@ describe('planImport — Import again (O6)', () => {
     const plan = planImport(scans, { digest, existing: personal });
 
     // Assert
-    should(component(plan, 'instructions', 'main-2')).deepEqual({ file: 'components/instructions/main-2.md' });
-    should(plan.files.map(file => file.path)).containEql('components/instructions/main-2.md');
+    should(component(plan, 'instructions', 'main-2')).deepEqual({ text: 'theirs' });
+    should(plan.files.map(file => file.path)).not.containEql('components/instructions/main-2.md');
     should(component(plan, 'settings', 'claude-settings-2')).deepEqual({
       harness: 'claude',
       file: 'components/settings/claude-settings-2.json',

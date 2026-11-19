@@ -832,13 +832,17 @@ function instructionsCandidates(harvests: readonly HarnessHarvest[]): {
   );
   const [first, second] = found;
   const make = (name: string, text: string, sources: string[], harness?: HarnessKind): Candidate => {
-    const file = componentFilePath('instructions', name, 'md');
-    const value: InstructionsComponent = { file, ...(harness === undefined ? {} : { harness }) };
+    // Instructions are Runtimes' own kind: the text is kept in the item itself (`config/instructions/<name>.yaml`), so the
+    // model the apply leaves behind holds the component the profile names. A document under the asset tree is never read
+    // back by the model's own source, which left the profile naming a component no read could find.
+    const value: InstructionsComponent = { text, ...(harness === undefined ? {} : { harness }) };
     return {
       component: { kind: 'instructions', name, value },
-      files: [{ kind: 'write', path: file, content: text }],
+      files: [],
       sources,
-      digestText: `${JSON.stringify(value)}\n${text}`,
+      // The digest an earlier import recorded (a `file` pointer plus the text), so a record made before this change
+      // does not read as "changed" for a source that did not move.
+      digestText: `${JSON.stringify({ file: componentFilePath('instructions', name, 'md'), ...(harness === undefined ? {} : { harness }) })}\n${text}`,
       warnings: [],
     };
   };
