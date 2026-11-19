@@ -211,8 +211,13 @@ describe('LoginSignIn', () => {
     );
     expect(view.container.textContent).toContain('sign this login in on the host');
     await click(button(view.container, 'Start a new sign-in'), 'Start a new sign-in');
-    expect(state(view.container)).toBe('start');
-    expect(text(view.container, '[data-change-refusal]')).toBeUndefined();
+    // One press starts the new sign-in over the failed one: no idle card in between.
+    expect(only(calls, LOGIN).map(call => call.body)).toEqual([
+      { loginId: 'claude-work' },
+      { loginId: 'claude-work' },
+      { loginId: 'claude-work', restart: true },
+    ]);
+    expect(state(view.container)).toBe('failed');
     await view.unmount();
   });
 
@@ -496,8 +501,11 @@ describe('LoginSignIn with a Codex link', () => {
     const failed = await open({ [LOGIN]: codexLink('failed') }, { login: CODEX });
     await click(failed.view.container.querySelector('[data-change-submit]'), 'the start button');
     await click(button(failed.view.container, 'Sign in with a link instead'), 'the link restart');
-    expect(state(failed.view.container)).toBe('start');
-    expect(failed.view.container.textContent).toContain('Sign in to Codex with a link');
+    // One press restarts as a link sign-in; there is no idle card to press a second time.
+    expect(only(failed.calls, LOGIN).map(call => call.body)).toEqual([
+      { loginId: 'codex' },
+      { loginId: 'codex', method: 'link', restart: true },
+    ]);
     await failed.view.unmount();
   });
 
@@ -562,13 +570,42 @@ describe('LoginSignIn with a Codex link', () => {
     });
     await click(view.container.querySelector('[data-change-submit]'), 'the start button');
     await click(button(view.container, 'Start a new sign-in'), 'Start a new sign-in');
-    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
     expect(only(calls, LOGIN).map(call => call.body)).toEqual([
       { loginId: 'claude-work' },
       { loginId: 'claude-work', restart: true },
     ]);
     expect(only(calls, FLOW_DELETE)).toHaveLength(0);
     expect(state(view.container)).toBe('awaiting-code');
+    await view.unmount();
+  });
+
+  it('starts a new sign-in with an empty code field after a pasted, unsent code was left on the failed one', async () => {
+    let started = 0;
+    let reads = 0;
+    const { view } = await open(
+      {
+        [LOGIN]: () => {
+          started += 1;
+          return started === 1 ? claudeFlow('awaiting-code') : { ...claudeFlow('awaiting-code'), flowId: 'flow-2' };
+        },
+        [FLOW_GET]: () => {
+          reads += 1;
+          return claudeFlow('failed');
+        },
+      },
+      { pollMs: 5 },
+    );
+    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+    await type(
+      must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'the code field'),
+      'fake-unsent-code',
+    );
+    await wait(30);
+    expect(reads).toBeGreaterThan(0);
+    expect(state(view.container)).toBe('failed');
+    await click(button(view.container, 'Start a new sign-in'), 'Start a new sign-in');
+    expect(state(view.container)).toBe('awaiting-code');
+    expect(must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'the code field').value).toBe('');
     await view.unmount();
   });
 

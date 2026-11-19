@@ -67,8 +67,6 @@ export function LoginSignIn({ login, machineName, client, onSignedIn, pollMs = S
   const [refusal, setRefusal] = useState<string | null>(null);
   /** Codex's sign-in method for the next start. Follows a flow that moved to a link by itself. */
   const [method, setMethod] = useState<HarnessLoginCodexMethod>('device-code');
-  /** The next start follows a sign-in that ended badly, so it starts over rather than picking one up. */
-  const [restartNext, setRestartNext] = useState(false);
   const reported = useRef<string | null>(null);
   /** What this caller may change here: a remote caller that needs a passkey is told so, one that is refused is not offered the button. */
   const authority = useChangeAuthority(client);
@@ -99,16 +97,15 @@ export function LoginSignIn({ login, machineName, client, onSignedIn, pollMs = S
    * Start this login's sign-in. `over` ends whatever sign-in is running for it first (`running` names it, when this
    * screen knows it); otherwise one already running is picked up.
    */
-  const start = async (over: boolean, running?: string): Promise<void> => {
+  const start = async (over: boolean, running?: string, chosen: HarnessLoginCodexMethod = method): Promise<void> => {
     setRefusal(null);
     setBusy(true);
     try {
       const request = {
         loginId: login.id,
-        ...(login.harness === 'codex' && method === 'link' ? { method } : {}),
+        ...(login.harness === 'codex' && chosen === 'link' ? { method: chosen } : {}),
       } as Parameters<typeof startLoginSignIn>[1];
       finished(over ? await restartLoginSignIn(client, request, running) : await startLoginSignIn(client, request));
-      setRestartNext(false);
     } catch (error) {
       setRefusal(refusalSentence(error));
     } finally {
@@ -116,11 +113,12 @@ export function LoginSignIn({ login, machineName, client, onSignedIn, pollMs = S
     }
   };
 
-  /** Back to the start panel after an ending, so the next start starts over. */
-  const again = (): void => {
-    setRestartNext(true);
-    setFlow(null);
-  };
+  /**
+   * "Start a new sign-in" after an ending: ONE press starts the new sign-in (over the ended one, so a leftover Codex sign-in
+   * holding the callback port is cleared on the way) rather than only returning to the idle card. A refusal shows on the
+   * ended panel it was pressed on.
+   */
+  const again = (chosen?: HarnessLoginCodexMethod): void => void start(true, undefined, chosen);
 
   const answer = async (
     send: (flowId: string) => Promise<Awaited<ReturnType<typeof submitLoginSignInCode>>>,
@@ -207,7 +205,7 @@ export function LoginSignIn({ login, machineName, client, onSignedIn, pollMs = S
           busyLabel="Starting sign-in…"
           refusal={refusal}
           submitLabel={linkStart ? `Sign in to ${name} with a link` : `Sign in to ${name}`}
-          onSubmit={() => void start(restartNext)}
+          onSubmit={() => void start(false)}
         />
         {login.harness === 'codex' ? (
           <div data-login-sign-in-method={method}>
@@ -238,7 +236,7 @@ export function LoginSignIn({ login, machineName, client, onSignedIn, pollMs = S
     busy,
     refusal,
     wording,
-    onStart: again,
+    onStart: () => again(),
     onCancel: () => void cancel(),
     ...(waiting(flow) ? { onStartOver: () => void start(true, flow.flowId) } : {}),
     ...(flow.state === 'failed' && flow.recheck === true ? { onRecheck: () => void recheck() } : {}),
@@ -246,16 +244,17 @@ export function LoginSignIn({ login, machineName, client, onSignedIn, pollMs = S
   return (
     <div data-login-sign-in={flow.state}>
       {flow.harness === 'claude-code' ? (
-        <ClaudeLoginPanel {...common} flow={flow} onSubmitCode={code => void submit(code)} />
+        <ClaudeLoginPanel key={flow.flowId} {...common} flow={flow} onSubmitCode={code => void submit(code)} />
       ) : (
         <CodexLoginPanel
+          key={flow.flowId}
           {...common}
           flow={flow}
           linked={linkStart}
           onUseLink={() => void switchToLink()}
           onStartLink={() => {
             setMethod('link');
-            again();
+            again('link');
           }}
           onSubmitAddress={address => void submit(address)}
         />
