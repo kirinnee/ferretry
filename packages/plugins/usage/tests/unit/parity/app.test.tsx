@@ -133,7 +133,7 @@ describe('usage parity · the app half', () => {
     const view = await mount(asElement(half.settings.budgets({})));
     await settle();
     const editor = must(view.container.querySelector('[data-budget-editor="claude-personal"]'), 'the editor');
-    expect(editor.querySelector('h4')?.textContent).toBe('Spend budget');
+    expect(editor.querySelector('[data-setting-group]')?.getAttribute('data-setting-group')).toBe('personal');
     expect(editor.querySelectorAll('[data-budget-input]')).toHaveLength(4);
     await view.unmount();
   });

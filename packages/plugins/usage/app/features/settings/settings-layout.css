@@ -1,0 +1,118 @@
+/* THE USAGE SETTINGS TABS LAY OUT BY THE WIDTH OF THEIR OWN PANEL, never by the viewport. At a 768px window the shell's
+   drawer and Settings nav leave the panel about 212px, so a viewport breakpoint (`sm:` / `md:`) puts three columns in a
+   room for one. Each tab's root is the `fy-usage-settings` container; a block that needs room for its own columns is a
+   `fy-usage-fit` container and asks about itself. Everything stacks below its threshold and wraps rather than clips. */
+.fy-usage-settings {
+  container: fy-usage-settings / inline-size;
+}
+.fy-usage-fit {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+/* One rate in the ledger: identity, amounts, actions — in three columns only when the panel has the room. */
+.fy-usage-ledger-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+@container fy-usage-settings (min-width: 720px) {
+  .fy-usage-ledger-row {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto;
+    align-items: start;
+  }
+}
+
+/* The nine amounts: two to a line only when the block itself is wide enough for two label + amount pairs. */
+.fy-usage-amounts {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+@container (min-width: 560px) {
+  .fy-usage-amounts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Provenance beside the effective dates, when the block is wide enough for both. */
+.fy-usage-pair {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+@container (min-width: 440px) {
+  .fy-usage-pair {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* The manual-rate editor: fields two to a line, the nine rate fields three to a line, each only with the panel room. */
+.fy-usage-form,
+.fy-usage-form-rates {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+@container fy-usage-settings (min-width: 640px) {
+  .fy-usage-form,
+  .fy-usage-form-rates {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container fy-usage-settings (min-width: 960px) {
+  .fy-usage-form-rates {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* A budget's two dollar fields: share the full row under the name on a narrow panel, then sit at a fixed width beside it. */
+.fy-usage-budget-fields {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+@container fy-usage-settings (min-width: 520px) {
+  .fy-usage-budget-fields {
+    width: auto;
+    grid-template-columns: repeat(2, 7rem);
+    column-gap: 12px;
+  }
+}
+
+/* A row whose control is wide (two dollar fields; Record; Copy report and Download JSON) is stacked: the control takes its own
+   full line under the name and its empty (i) slot is dropped, whenever the PANEL is narrow. The shell's own row does this by
+   viewport, and a 768px window leaves a 212px panel. */
+@container fy-usage-settings (max-width: 599.98px) {
+  [data-usage-stack] [data-setting-controls] {
+    flex: 1 1 100%;
+  }
+  [data-usage-stack] [data-setting-controls] > [aria-hidden='true'] {
+    display: none;
+  }
+}
+[data-usage-stack] [data-setting-controls] > :first-child {
+  min-width: 0;
+}
+
+/* A budget meter (here and on Logins): label, bar and a fixed-width words column on ONE line only when the meter itself is 360px
+   wide; narrower, the bar takes its own line under the label and the words. */
+.fy-meter {
+  container-type: inline-size;
+  min-width: 0;
+}
+@container (min-width: 360px) {
+  .fy-meter .fy-meter-row {
+    flex-wrap: nowrap;
+  }
+  .fy-meter .fy-meter-bar {
+    order: 0;
+    flex-basis: 0;
+  }
+  .fy-meter .fy-meter-words {
+    flex: none;
+    width: 12rem;
+  }
+}

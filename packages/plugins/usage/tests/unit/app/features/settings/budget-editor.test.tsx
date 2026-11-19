@@ -167,7 +167,9 @@ describe('BudgetsSettings · the list', () => {
   it('names each login by its label, and says so when there are none', async () => {
     const { view } = await open();
     expect(
-      Array.from(view.container.querySelectorAll('[data-budgets-login] > h4')).map(heading => heading.textContent),
+      Array.from(view.container.querySelectorAll('[data-budgets-login] [data-setting-group]')).map(group =>
+        group.getAttribute('data-setting-group'),
+      ),
     ).toEqual(['personal', 'codex', 'work']);
     await view.unmount();
 
@@ -197,7 +199,7 @@ describe('BudgetEditor · the fields', () => {
     const { view } = await open();
     const c = view.container;
     const editor = editorOf(c);
-    expect(editor.querySelector('h4')?.textContent).toBe('Spend budget');
+    expect(editor.querySelector('[data-setting-group]')?.getAttribute('data-setting-group')).toBe('personal');
     expect(['dailyTrigger', 'dailyHard', 'weeklyTrigger', 'weeklyHard'].map(key => input(c, key).value)).toEqual([
       '40',
       '60',
