@@ -1,6 +1,6 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { type ChildProcess, execFileSync, spawn as nodeSpawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { Readable } from 'node:stream';
 import { FakeGate, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
@@ -17,9 +17,16 @@ import {
   NO_SECRET_FIELDS,
   GitKeyRequestSchema,
 } from '../../contract/index.ts';
-import daemon from '../../daemon/index.ts';
+import { gitAccountsDaemon } from '../../daemon/index.ts';
+import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import { fingerprintOfBlob, generateEd25519, parsePublicKey } from '../../daemon/features/ssh-keys/openssh.ts';
 import { FAKE_TOKEN, FakeGithub } from './fake-github.ts';
+import { tmpRunFolder } from './run-folder.ts';
+
+const folders: Array<ReturnType<typeof tmpRunFolder>> = [];
+afterAll(() => {
+  for (const folder of folders) folder.destroy();
+});
 
 const CLIENT = 'Ov23FAKECLIENTID';
 const ACCOUNT = 'gha_4242';
@@ -47,9 +54,56 @@ class KeyGithub extends FakeGithub {
   /** A status to answer instead of 201 on a registration, by path. */
   refuse = new Map<string, number>();
   #next = 100;
+  /** Raw commit objects by sha, and the verified addresses of the account (GitHub counts the noreply form as verified). */
+  readonly commits = new Map<string, string>();
+  verifiedEmails: string[] = [];
+
+  /**
+   * `commit.verification` as GitHub documents it for an SSH signature: the commit carries a signature, it verifies
+   * against a SIGNING key registered on the account (an auth-only key does not count), and the committer address is one
+   * of the account's verified addresses.
+   */
+  verification(raw: string): { verified: boolean; reason: string } {
+    const lines = raw.split('\n');
+    const start = lines.findIndex(line => line.startsWith('gpgsig '));
+    if (start < 0) return { verified: false, reason: 'unsigned' };
+    let end = start + 1;
+    while ((lines[end] ?? '').startsWith(' ')) end += 1;
+    const signature = [lines[start]?.slice(7) ?? '', ...lines.slice(start + 1, end).map(line => line.slice(1))].join(
+      '\n',
+    );
+    const payload = [...lines.slice(0, start), ...lines.slice(end)].join('\n');
+    const committer = /^committer .*<([^>]*)>/mu.exec(raw)?.[1] ?? '';
+    const dir = mkdtempSync(`${tmpdir()}/b4-verify-`);
+    try {
+      writeFileSync(`${dir}/allowed`, this.registered.signing.map(key => `* namespaces="git" ${key.key}\n`).join(''));
+      writeFileSync(`${dir}/sig`, `${signature}\n`);
+      const checked = spawnSync(
+        'ssh-keygen',
+        ['-Y', 'verify', '-f', `${dir}/allowed`, '-I', 'any', '-n', 'git', '-s', `${dir}/sig`],
+        {
+          input: payload,
+          encoding: 'utf8',
+        },
+      );
+      if (checked.status !== 0) return { verified: false, reason: 'unknown_key' };
+      if (!this.verifiedEmails.includes(committer)) return { verified: false, reason: 'bad_email' };
+      return { verified: true, reason: 'valid' };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
   readonly keyFetch = async (url: URL, init?: RequestInit): Promise<Response> => {
     const method = init?.method ?? 'GET';
     const path = url.pathname;
+    const commit = /^\/repos\/[^/]+\/[^/]+\/commits\/([0-9a-f]{40})$/u.exec(path);
+    if (url.host === 'api.github.com' && method === 'GET' && commit !== null) {
+      const raw = this.commits.get(commit[1] as string);
+      return raw === undefined
+        ? Response.json({ message: 'Not Found' }, { status: 404 })
+        : Response.json({ sha: commit[1], commit: { verification: this.verification(raw) } });
+    }
     const list =
       path === '/user/keys'
         ? this.registered.keys
@@ -119,19 +173,41 @@ function recorder() {
   return { runs, starts, killed, fakeStart, fakeRun };
 }
 
+type Source = { parts(spec: object): Promise<readonly LaunchPart[]> };
+/** The daemon half's `launch.parts` contribution, kept as the host builds it (the test host offers no reader of it). */
+function watched(impl: ReturnType<typeof gitAccountsDaemon>) {
+  const held: { source?: Source } = {};
+  const wrapped = {
+    ...impl,
+    build: (ctx: never) => {
+      const half = (impl.build as (ctx: never) => unknown)(ctx) as {
+        hooks: { 'launch.parts': () => readonly { item: Source }[] };
+      };
+      held.source = half.hooks['launch.parts']()[0]?.item;
+      return half;
+    },
+  } as unknown as ReturnType<typeof gitAccountsDaemon>;
+  return { wrapped, held };
+}
+
 async function boot(
   github: KeyGithub,
   tools: {
     spawn: (p: string, a: readonly string[], o?: SpawnOptions) => SpawnResult | Promise<SpawnResult>;
     start: (p: string, a: readonly string[], o?: SpawnOptions) => ChildHandle;
   },
+  projects: readonly object[] = [],
 ) {
   const sealed = new SpySealed();
   const gate = new FakeGate();
+  const runFolder = tmpRunFolder();
+  folders.push(runFolder);
+  const { wrapped, held } = watched(gitAccountsDaemon({ runFolder }));
   const host = await testHost({
-    plugins: [daemon],
+    plugins: [wrapped],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { sealed, gate },
+    uses: { projects: { list: async () => projects } },
     fetch: github.keyFetch,
     spawn: tools.spawn,
     start: tools.start,
@@ -150,7 +226,7 @@ async function boot(
   await host.clock.advance(5000);
   await request('GET', `/v1/git-accounts/github/device/${flow.flowId}`);
   responses.length = 0;
-  return { host, sealed, gate, request, responses };
+  return { host, sealed, gate, request, responses, runFolder, held };
 }
 
 const fake = () => {
@@ -426,7 +502,7 @@ describe('the agent seam (fake processes)', () => {
     await world.request('POST', `/v1/git-accounts/${ACCOUNT}/keys`, { purpose: 'both' });
     const port = world.host.provided(GitAccountsPort);
     const socket = await port.agentSocket(ACCOUNT as never);
-    expect(socket).toMatch(/\/gha_4242-1\.sock$/u);
+    expect(socket).toBe(`${world.runFolder.path}/gha_4242.sock`);
 
     expect(rec.starts).toHaveLength(1);
     expect(rec.starts[0]?.program).toBe('ssh-agent');
@@ -478,7 +554,7 @@ describe('the agent seam (fake processes)', () => {
     expect(rec.killed).toHaveLength(1);
   });
 
-  test('stopping the daemon ends every agent; known_hosts pins GitHub and is written once', async () => {
+  test('stopping the daemon ends every agent; known_hosts pins GitHub, is written once, and stays for a ferret that outlives the restart', async () => {
     const github = new KeyGithub();
     const { rec, tools } = fake();
     const world = await boot(github, tools);
@@ -493,7 +569,9 @@ describe('the agent seam (fake processes)', () => {
     expect(text).toEqual(GITHUB_HOST_KEYS.map(key => `github.com ${key}`));
     await world.host.stop();
     expect(rec.killed).toHaveLength(1);
-    expect(existsSync(known)).toBe(false);
+    // A ferret started before the restart still names this file in `UserKnownHostsFile`: it must still be there.
+    expect(existsSync(known)).toBe(true);
+    expect(known).toBe(`${world.runFolder.path}/known_hosts`);
   });
 });
 
@@ -597,3 +675,135 @@ describe.skipIf(!HAVE_TOOLS)('a real ssh-agent (needs ssh-agent, ssh-add and ssh
     }
   }, 30_000);
 });
+
+/** The ferret's launch: what the account's `launch.parts` source says for a folder, as a pane would receive it. */
+async function paneEnvFor(world: Awaited<ReturnType<typeof boot>>, folder: string): Promise<Record<string, string>> {
+  const parts = (await world.held.source?.parts({ folder })) ?? [];
+  return Object.assign({}, ...parts.flatMap(part => (part.kind === 'pane-env' ? [part.env] : [])));
+}
+
+describe.skipIf(!HAVE_TOOLS || spawnSync('git', ['--version']).status !== 0)(
+  'a real commit through the account’s agent, with exactly the launch environment (owner step 5 proves the real GitHub)',
+  () => {
+    const EMAIL = '4242+octo-fake@users.noreply.github.com';
+    const root = mkdtempSync(`${tmpdir()}/b4-e2e-`);
+    afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+    /** A temp repo in a linked project, a world with real processes, and `git` run with the pane's environment alone. */
+    async function setup(purpose: 'auth' | 'signing' | 'both', name: string) {
+      const github = new KeyGithub();
+      github.verifiedEmails = [EMAIL];
+      const project = {
+        id: '00000000-0000-4000-8000-000000000001',
+        name,
+        path: `${root}/${name}`,
+        accounts: [ACCOUNT],
+      };
+      mkdirSync(project.path, { recursive: true });
+      const real = realTools();
+      const world = await boot(github, real, [project]);
+      await world.request('POST', `/v1/git-accounts/${ACCOUNT}/keys`, { purpose });
+      const env = await paneEnvFor(world, project.path);
+      const home = `${root}/${name}-home`;
+      mkdirSync(home, { recursive: true });
+      const git = (args: string[], extra: Record<string, string> = {}) =>
+        spawnSync('git', args, {
+          cwd: project.path,
+          encoding: 'utf8',
+          env: {
+            PATH: process.env.PATH ?? '',
+            HOME: home,
+            GIT_CONFIG_NOSYSTEM: '1',
+            GIT_CONFIG_GLOBAL: '/dev/null',
+            ...env,
+            ...extra,
+          },
+        });
+      expect(git(['init', '-q', '-b', 'main']).status).toBe(0);
+      return { github, world, real, env, git, project };
+    }
+    const verdict = async (ctx: Awaited<ReturnType<typeof setup>>) => {
+      const sha = ctx.git(['rev-parse', 'HEAD']).stdout.trim();
+      ctx.github.commits.set(sha, ctx.git(['cat-file', 'commit', 'HEAD']).stdout);
+      const answer = await ctx.world.host
+        .provided(GitAccountsPort)
+        .api(ACCOUNT as never, { method: 'GET', path: `/repos/o/r/commits/${sha}` });
+      return (answer.body as { commit: { verification: { verified: boolean; reason: string } } }).commit.verification;
+    };
+    const finish = (ctx: Awaited<ReturnType<typeof setup>>) => {
+      for (const child of ctx.real.children) child.kill('SIGKILL');
+    };
+
+    test('a signed commit shows Verified: valid signature, a registered signing key, the noreply address', async () => {
+      const ctx = await setup('both', 'verified');
+      try {
+        const committed = ctx.git(['commit', '--allow-empty', '-q', '-m', 'signed']);
+        expect(committed.stderr).toBe('');
+        expect(committed.status).toBe(0);
+        expect(await verdict(ctx)).toEqual({ verified: true, reason: 'valid' });
+        expect(ctx.git(['log', '-1', '--format=%ae']).stdout.trim()).toBe(EMAIL);
+        // Nothing the pane was given is key material.
+        expect(JSON.stringify(ctx.env)).not.toContain('PRIVATE');
+      } finally {
+        finish(ctx);
+      }
+    }, 60_000);
+
+    test('negatives: a key registered for pushing only is unknown_key, another address is bad_email, no signature is unsigned', async () => {
+      const ctx = await setup('both', 'negatives');
+      try {
+        ctx.git(['-c', 'user.email=someone@example.com', 'commit', '--allow-empty', '-q', '-m', 'other address']);
+        expect(await verdict(ctx)).toEqual({ verified: false, reason: 'bad_email' });
+        ctx.git(['-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-q', '-m', 'unsigned']);
+        expect(await verdict(ctx)).toEqual({ verified: false, reason: 'unsigned' });
+        ctx.git(['commit', '--allow-empty', '-q', '-m', 'signed']);
+        ctx.github.registered.signing.length = 0;
+        expect(await verdict(ctx)).toEqual({ verified: false, reason: 'unknown_key' });
+      } finally {
+        finish(ctx);
+      }
+    }, 60_000);
+
+    test('core.sshCommand ignores the person’s ssh config and offers exactly this account’s key, checked against the pinned host keys', async () => {
+      const ctx = await setup('auth', 'sshconfig');
+      try {
+        const command = (ctx.git(['config', 'core.sshCommand']).stdout || '').trim();
+        expect(command).toMatch(
+          /^ssh -F none -o IdentitiesOnly=yes -o IdentityFile=\S+\.pub -o IdentityAgent=\S+\.sock -o StrictHostKeyChecking=yes -o UserKnownHostsFile=\S+\/known_hosts$/u,
+        );
+        // A hostile or merely busy ~/.ssh/config: a proxy, a key, agent forwarding and an alias for github.com.
+        const home = `${root}/sshconfig-home`;
+        mkdirSync(`${home}/.ssh`, { recursive: true });
+        writeFileSync(
+          `${home}/.ssh/config`,
+          'Host github.com\n  ProxyCommand /bin/false\n  IdentityFile ~/.ssh/id_host\n  ForwardAgent yes\n  HostName evil.example\n  StrictHostKeyChecking no\n',
+        );
+        const shown = spawnSync('sh', ['-c', `${command} -G git@github.com`], {
+          encoding: 'utf8',
+          env: { PATH: process.env.PATH ?? '', HOME: home },
+        });
+        expect(shown.status).toBe(0);
+        const effective = new Map(
+          shown.stdout.split('\n').map(line => [line.split(' ')[0], line.slice(line.indexOf(' ') + 1)] as const),
+        );
+        expect(effective.get('hostname')).toBe('github.com');
+        expect(effective.get('proxycommand')).toBeUndefined();
+        expect(effective.get('forwardagent')).toBe('no');
+        expect(effective.get('identitiesonly')).toBe('yes');
+        expect(effective.get('stricthostkeychecking')).toBe('true');
+        expect(
+          shown.stdout
+            .split('\n')
+            .filter(line => line.startsWith('identityfile '))
+            .map(line => line.slice(13)),
+        ).toEqual([String(ctx.env.SSH_AUTH_SOCK).replace(/\.sock$/u, '.pub')]);
+        expect(effective.get('identityagent')).toBe(ctx.env.SSH_AUTH_SOCK);
+        expect(effective.get('userknownhostsfile')).toBe(
+          `${String(ctx.env.SSH_AUTH_SOCK).replace(/[^/]+$/u, '')}known_hosts`,
+        );
+      } finally {
+        finish(ctx);
+      }
+    }, 60_000);
+  },
+);

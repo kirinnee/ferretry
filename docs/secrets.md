@@ -2091,17 +2091,23 @@ and can never **read** it.
 - **Used through an ssh-agent, one per account.** The daemon starts `ssh-agent -D -a <socket>` on the first ask for an
   account's socket (`GitAccountsApi.agentSocket`; the launch of a ferret that needs it asks), then feeds the key with
   `ssh-add -` **on stdin**. The key is never an argument, an environment variable or a file; the children run
-  `sealed` (only the nine inherited names plus `SSH_AUTH_SOCK`). The sockets live in one private (`0700`) scratch
-  folder with a short path (a unix socket path holds about 104 bytes, which a folder under the state directory can
-  exceed); the agent creates each socket `0600`, under a fresh name per start (`<id>-<n>.sock`, so one that died unclean never blocks the next), and the wait for it to listen is bounded to about five seconds. An agent stops when the account is removed, when its last registration
-  is removed, and when the daemon stops.
+  `sealed` (only the nine inherited names plus `SSH_AUTH_SOCK`). The sockets, the pinned `known_hosts` and the public key
+  files live in one private folder at a **stable path**: the plugin's own kernel-made `downloads` folder
+  (`<home>/state/git-accounts/downloads`, checked private before each use and refused if its path is too long for a
+  unix socket, about 104 bytes). The same path on every run is the point: a ferret started before a daemon restart or
+  update keeps `SSH_AUTH_SOCK` and `UserKnownHostsFile` in its environment, and they must still mean the same thing.
+  The socket is `<account id>.sock`, `0600`; a stale file left by an agent that died unclean is removed before the
+  next binds, and an agent that is still stopping is waited for first (it removes its own socket path as it exits). At
+  boot the daemon brings back the agent of every account that has a key Ferretry made, so a surviving ferret finds its
+  socket where it left it. The wait for an agent to listen is bounded to about five seconds. An agent stops when the
+  account is removed, when its last registration is removed, and when the daemon stops.
 - **A key the person already has** (`POST …/keys` with a `publicKey`): GitHub must list that exact key on the account;
   Ferretry records the public key, asks for no private half, and never deletes it from GitHub. `agentSocket` answers
   `undefined`, so the host's own `SSH_AUTH_SOCK` is used. A private key is never imported from `~/.ssh`.
 - **Pinned host keys.** `known_hosts` for `github.com` is compiled from GitHub's published keys
   (`contract/known-hosts.ts`, with the update path in its header and a test that compares them with GitHub's published
-  SHA256 fingerprints); `GitAccountsApi.knownHostsFile` writes it beside the sockets. Use it with
-  `StrictHostKeyChecking=yes`.
+  SHA256 fingerprints); `GitAccountsApi.knownHostsFile` writes it beside the sockets (and it stays there across a restart).
+  Use it with `StrictHostKeyChecking=yes`.
 - **Removing** a registration deletes it at GitHub first (a refusal keeps it recorded, so it can be retried); removing
   the last one, or the account, stops the agent and deletes the sealed private key.
 - Add and remove are `secrets.configure` from a person (passkey step-up from a paired device).
@@ -2114,7 +2120,43 @@ key, as for every secret here ([threat model](#threat-model)).
 
 **GAP — an unclean daemon death.** The agent is a child of the daemon. After a `SIGKILL` or a power loss nothing stops
 it: it keeps the key in its memory, behind a `0600` socket in a `0700` folder of this user, until it is killed or the
-machine restarts. A clean stop ends every agent and removes the folder.
+machine restarts. A clean stop ends every agent; the folder stays (a surviving ferret's paths must keep their meaning), holding no key.
+
+**GAP — a predictable socket name.** The socket is `<state>/git-accounts/downloads/gha_<id>.sock`: any process of the
+same OS user can connect to it (the folder is `0700` and the socket `0600`, so no other user can). That is "use", above.
 
 **GAP — SAML single sign-on.** An organisation that enforces SSO needs the key authorised once on GitHub before a push
 to its repositories works; Ferretry cannot do that for the person.
+
+## A ferret pushes and signs as the Git account its project is linked to (B4: `git-accounts`)
+
+A ferret whose work folder is inside a project linked to a Git account (Projects keeps the link) is started with that
+account's **agent socket and git settings**, and only then. One resolver decides which account
+(`git-accounts/daemon/lib/account-for-folder.ts`): the folder's project, then the repository the folder is in and that
+repository's own account, else the project's first account. A link to an account that no longer exists gives **nothing**
+(never another account). A folder outside every project, or an account with no key Ferretry made, changes nothing.
+
+- **What the pane gets** (a `pane-env` launch part, `core/ferrets`' seam; plain names and paths, never a value read
+  from anywhere): `SSH_AUTH_SOCK`, and `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` for `user.name`,
+  `user.email` (`<id>+<login>@users.noreply.github.com`, an address GitHub counts as verified), and, for what is
+  registered: `gpg.format=ssh`, `user.signingkey=<public key file>`, `commit.gpgsign`, `tag.gpgsign`, and
+  `core.sshCommand=ssh -F none -o IdentitiesOnly=yes -o IdentityFile=<public key file> -o IdentityAgent=<socket> -o StrictHostKeyChecking=yes -o UserKnownHostsFile=<pinned>`
+  with `url.git@github.com:.insteadOf=https://github.com/`. `-F none` means the person's `~/.ssh/config` (a
+  `ProxyCommand`, an `IdentityFile`, `ForwardAgent`, a host alias) is never read, and `IdentitiesOnly` with that one
+  public `IdentityFile` offers exactly this account's key from the agent and no key from the host.
+- **No secret is in the environment.** The socket path and the public key file are not secrets; the agent signs and
+  authenticates and cannot hand the key over. A `pane-env` part may not name `PATH`, `HOME`, a harness home, any
+  `FY_*`, `GH_TOKEN`, `GITHUB_TOKEN` or `GH_ENTERPRISE_TOKEN`, nor carry a `${secret…}` value; the launch is refused
+  naming the plugin and the variable.
+- **Signing shows "Verified"** because the key is registered as a GitHub _signing_ key and the committer address is the
+  account's noreply address; a test proves the rule against a fake GitHub with real `git` and `ssh-keygen`
+  (`unsigned`, `unknown_key`, `bad_email` are the failures). The real GitHub is owner step 5.
+
+**GAP — a process of that ferret can push and sign as the account while it runs.** That is "use". Every ferret that
+shares the project is given the same account's socket, and the key opens every repository the account can reach.
+
+**GAP — the folder is judged by its spelling.** The resolver compares paths as written; a folder reached through a link
+is not matched to a project registered under the link's target.
+
+**GAP — the host's own key.** An account whose key the person already had is not given to a ferret at all (the host's
+agent is not inherited by a pane); such a ferret pushes with no key.
