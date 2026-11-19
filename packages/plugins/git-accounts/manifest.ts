@@ -1,4 +1,4 @@
-import { LaunchParts } from '@ferretry/core-ferrets/contract';
+import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { audit, GatePort } from '@ferretry/core-gate/contract';
 import { SealedDocumentsPort } from '@ferretry/core-vault/contract';
 import { definePlugin, route, settingsTab, verb } from '@ferretry/kernel/manifest';
@@ -7,6 +7,7 @@ import {
   GIT_ACCOUNT_AUDIT,
   GIT_ACCOUNT_AUDIT_SKIP,
   GIT_ACCOUNT_CAPS,
+  GIT_ACCOUNT_GH_GUARD,
   GIT_ACCOUNT_GUARD,
   GIT_ACCOUNT_KEY_GUARD,
   GIT_ACCOUNT_KEYS,
@@ -44,7 +45,7 @@ export default definePlugin({
 
   needs: { sealed: SealedDocumentsPort, gate: GatePort },
   // Optional: which folder is a project, and which accounts it links (B5). Off = no ferret is given an account.
-  uses: { projects: ProjectsPort },
+  uses: { projects: ProjectsPort, ferrets: FerretsPort },
   provides: { gitAccounts: GitAccountsPort },
 
   actions: {
@@ -97,6 +98,16 @@ export default definePlugin({
         noStore: true,
         audit: audit(GIT_ACCOUNT_AUDIT.keyRemoved),
         guard: GIT_ACCOUNT_KEY_GUARD,
+      }),
+      route('POST /v1/git-accounts/gh/run', {
+        minimum: 'operator',
+        // A ferret calls it on its own credential (that is the point); a paired device needs secrets.use. The route
+        // refuses a ferret that names an account, and a folder that is not the ferret's own.
+        caller: 'any',
+        capability: GIT_ACCOUNT_CAPS.list,
+        noStore: true,
+        audit: GIT_ACCOUNT_AUDIT_SKIP.ghRun,
+        guard: GIT_ACCOUNT_GH_GUARD,
       }),
     ],
     cli: [

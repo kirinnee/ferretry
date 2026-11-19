@@ -2160,3 +2160,83 @@ is not matched to a project registered under the link's target.
 
 **GAP — the host's own key.** An account whose key the person already had is not given to a ferret at all (the host's
 agent is not inherited by a pane); such a ferret pushes with no key.
+
+## Ferretry's `gh`: the connected account, used never read (B9: `git-accounts`)
+
+A ferret's `gh` is meant to be a shim (B10) that asks the daemon to run the real `gh`. B9 is the daemon half:
+`POST /v1/git-accounts/gh/run` `{argv, cwd, account?}` answers `{exitCode, stdout, stderr}` (both streams masked) or
+`{refused: "<one sentence>"}`. The daemon starts `gh` with the account's token in **that child's** environment only, in
+an empty private folder, with an empty `gh` config, through `GitAccountsApi.run` (the seam described under "A Git
+account's token"). The token is never in the ferret's environment, never in a response, a log or the audit.
+
+**Which account, which repository.**
+
+- The account is B4's one resolver (`accountForFolder`) on the `cwd`: folder → project → the repository's own account →
+  the project's first account. Outside a project linked to an account the call is refused with "This folder is in no
+  project linked to a GitHub account… Link one on the project page." **The host's own `gh` is never a fallback.**
+- **A ferret may only name its own folder (or one below it)**, checked against the folder Ferrets recorded for that
+  ferret (its real path), so it cannot pick a neighbouring project's account by naming that path (but see the GAP below on a broad folder). A ferret may not
+  pass `account`; the owner's own shell may (by login or id).
+- **The repository is the project's record** (`repos[].remote`, written by Projects' scan, `github.com` only), passed as
+  `-R OWNER/NAME` unless the argv already names one, and filled into a `gh api` endpoint's `{owner}`/`{repo}`. **No file
+  in an agent's folder is opened**: not `.git/config`, not `.git/HEAD`. So a repository's own git config (`core.fsmonitor`,
+  `core.sshCommand`, filters) and hooks can never run with the token, and a remote an agent edited changes nothing. A
+  consequence: `gh pr create` needs `--head <branch>` (the client fills it), and a folder the project has not scanned
+  needs `-R`.
+
+**The policy** (`gh-policy.ts`, pure) is an allow-list of commands and subcommands in front of the seam, and it says what
+to do instead:
+
+| Form                                                                                                                                                                      | Answer points to                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `auth` (anything but `auth status`), `auth status -t/--show-token`                                                                                                        | "Ferretry's gh never shows its token"                                |
+| `auth status`                                                                                                                                                             | answered by the daemon from the account record; no run               |
+| `config` (any)                                                                                                                                                            | nothing to configure                                                 |
+| `extension`/`ext`, `alias`, `codespace`/`cs`, an unknown top-level name                                                                                                   | not available                                                        |
+| `pr checkout`/`co`, `repo clone`/`sync`, `repo fork --clone`, `repo create --source/--push`, `gist clone`, `issue develop --checkout`, `run download`, `release download` | "use git: `git fetch origin pull/12/head:pr-12 && git switch pr-12`" |
+| `--hostname` (any)                                                                                                                                                        | github.com only                                                      |
+| `--body-file`, `-F`, `--notes-file`, `--input`                                                                                                                            | pass the text itself                                                 |
+| `--jq`/`-q`, `--template`/`-T` (they can read the environment)                                                                                                            | filter `--json` yourself                                             |
+| `pr create` without `--head`, or with `--fill`                                                                                                                            | give `--head`, `--title`, `--body`                                   |
+
+**The seam stays the authority.** `GitAccountsApi.run` (B1) has its own, narrower allow-list, reviewed on its own, and
+every call that passes here must pass there too, so **the effective surface is the intersection**. Its sentence is passed
+on when it refuses. B9 widens nothing under it; widening it needs a lead decision and a security review of its own.
+
+Bounds: 120 s per run (a followed run, `run watch` or `pr checks --watch`, the seam's 300 s ceiling); at most 4 runs at
+once per ferret; **4 MiB per stream, enforced where the output is read**: the seam runs `gh` through the kernel's
+capped reader (`spawn.runBytes`, 4 MiB each for stdout and stderr), so a huge `run view --log`, `pr diff` or
+`api --paginate` never sits whole in the daemon's memory. A stream that was cut ends with `[output cut]`, and the scrub
+runs on the kept text AND drops any tail that could be the start of a token (the account's own, or a `gh?_…` /
+`github_pat_…` shape the cut left too short to match), so a token split at the cut never reaches the caller. Governance: a ferret on its own session credential, or a paired device with
+`secrets.use`. **Audit** `git-account.gh.run` (also for a refusal): the account id, the command as two plain words, the
+repository, the exit code and the ferret id; no other argument, no body.
+
+**What it protects against:** a ferret printing, copying or keeping the token (`gh auth token`, `gh auth status -t`,
+`gh config get oauth_token`, `hosts.yml`: the child's config folder is empty and removed); a token in a transcript; the
+host's own `gh` sign-in being used by ferrets; a repository's own git config or hooks running with the token.
+
+**What it does NOT protect against:**
+
+- **Use.** Any ferret in a linked project can do whatever the `repo` scope allows through the commands that pass both
+  lists, as the person: read every private repository, comment, merge, close, re-run. That is the feature. A
+  prompt-injected ferret can use it the same way.
+- **A child can still see its own environment.** The `gh` child holds the token, and so does anything `gh` starts. The
+  known ways are closed (no extensions, aliases, editor, browser or pager; no `git` in the agent's folder; the daemon's
+  `PATH`), but `gh` is a large program and a new flag on an allowed command is not checked here.
+- **An agent reading the state home.** Like every holder here: a ferret's own shell runs as the same user.
+- **GAP: the scope is the whole account.** OAuth apps cannot narrow `repo` to some repositories. So `-R OWNER/NAME`, and
+  a `gh api repos/x/y/…` endpoint, reach **any repository the account can see**, not only the project's: the project's
+  repository is only the default, never a fence.
+- **GAP: a folder decides the account, and a ferret's folder can be broad.** A ferret may name only its own work folder
+  or one below it, but a ferret whose work folder is a **parent of several projects**, or a child ferret started in
+  **another project's folder**, gets that project's account (the first account the resolver finds for the folder), the
+  same as B4's SSH. Ferretry does not claim a ferret cannot use another project's account: it claims a ferret cannot
+  pick one by naming a path outside its own folder.
+
+**GAP — what the plan wanted and the seam still refuses.** No stdin and no file slots (`--body-file`, `-F`, `--input`,
+`release upload`, `gist create` from files); no `repo create|edit|fork`, `secret`, `variable`, `label`, `cache`, `ruleset`,
+`gist`, `project`, `org`, `browse`, `status`, `pr ready|status`, `workflow run|enable|disable`, `release create|edit|delete`,
+`issue delete|lock|pin|transfer|develop`, `--jq`: they pass the policy above and are then refused by the seam with its
+sentence. Followed runs are capped at the seam's 5 minutes, not 15. The repository comes from the last scan, so a folder
+whose remote changed since reads the old one until Projects rescans.

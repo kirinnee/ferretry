@@ -6,6 +6,7 @@ import {
   GITHUB_API_QUERY,
   GITHUB_API_RULES,
   GITHUB_REVOKE_URL,
+  MAX_GH_OUTPUT_BYTES,
   type GitAccount,
   type GitAccountId,
   type GitAccountKeys,
@@ -16,7 +17,7 @@ import {
   type GitRunSpec,
 } from '../../contract/index.ts';
 import type { ScratchPort, SpawnPort } from '@ferretry/kernel/contract';
-import { checkGhArgs, scrubToken } from './gh-guard.ts';
+import { checkGhArgs, scrubCut, scrubToken } from './gh-guard.ts';
 import type { GithubHttp } from './github-http.ts';
 import type { AccountBook } from './accounts.ts';
 
@@ -26,7 +27,7 @@ export class GitAccountsService {
   constructor(
     private readonly book: AccountBook,
     private readonly http: GithubHttp,
-    private readonly spawn: Pick<SpawnPort, 'run'>,
+    private readonly spawn: Pick<SpawnPort, 'runBytes'>,
     private readonly scratch: ScratchPort,
     /** Tells the rest of the daemon an account is gone, once its token and record are. */
     private readonly removed: (id: GitAccountId) => unknown,
@@ -72,7 +73,9 @@ export class GitAccountsService {
    * host's own variables ride along). What that child can be asked to do is narrowed three ways: the argv must pass the
    * allow-list (`checkGhArgs`); it runs in an empty private folder that is also its HOME and `GH_CONFIG_DIR` (no
    * host aliases, extensions or config); and nothing interactive can start (no prompt, pager, editor or browser). Both
-   * streams come back with the token, and anything shaped like a GitHub token, masked.
+   * streams come back with the token, and anything shaped like a GitHub token, masked, and each is read only up to
+   * `MAX_GH_OUTPUT_BYTES` (a reader that stops there, so a huge log never sits in this daemon's memory): a stream that
+   * was cut ends with `[output cut]` and loses any tail that could be the start of a token.
    */
   async run(id: GitAccountId, spec: GitRunSpec): Promise<GitRunResult> {
     if (spec.program !== 'gh')
@@ -115,11 +118,20 @@ export class GitAccountsService {
         GIT_CONFIG_NOSYSTEM: '1',
         NO_COLOR: '1',
       };
-      const result = await this.spawn.run('gh', [...spec.args], { env, sealed: true, timeout, cwd: folder.path });
+      const result = await this.spawn.runBytes('gh', [...spec.args], {
+        env,
+        sealed: true,
+        timeout,
+        cwd: folder.path,
+        maxStdoutBytes: MAX_GH_OUTPUT_BYTES,
+        maxStderrBytes: MAX_GH_OUTPUT_BYTES,
+      });
+      const scrub = (text: string, cut: boolean) => (cut ? scrubCut(text, token) : scrubToken(text, token));
       return {
-        exitCode: result.exitCode,
-        stdout: scrubToken(result.stdout, token),
-        stderr: scrubToken(result.stderr, token),
+        // `runBytes` answers -1 for a child it had to kill (or one a signal ended): no exit code of its own.
+        exitCode: result.exitCode < 0 ? null : result.exitCode,
+        stdout: scrub(new TextDecoder().decode(result.stdout), result.stdoutTruncated),
+        stderr: scrub(result.stderr, result.stderrTruncated),
       };
     } finally {
       await folder.close().catch(() => undefined);

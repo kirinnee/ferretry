@@ -27,7 +27,7 @@ function flowIdOf(call: CallContext): string {
 }
 
 /** Who the log says connected the account: from the credential admission derived, never from the request. */
-function actorOf(call: CallContext): AuditActor {
+export function actorOf(call: CallContext): AuditActor {
   const credential = (call as { credential?: { tokenClass: string; principal?: { holder: string } } }).credential;
   if (credential === undefined) return { kind: 'anonymous' };
   if (credential.tokenClass === 'device' && credential.principal !== undefined)

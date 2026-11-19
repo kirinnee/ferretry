@@ -209,3 +209,28 @@ const REDACTED = '[redacted]';
 export function scrubToken(text: string, token: string): string {
   return text.split(token).join(REDACTED).replace(TOKEN_SHAPE, REDACTED);
 }
+
+/**
+ * What a token (the account's own, or any GitHub shape) looks like when a cut ends it before `TOKEN_SHAPE` can match it:
+ * `g`, `gh`, `ghp`, `ghp_` and up to 15 characters after it (`gh?_` needs 16), or the same for `github_pat_` (20).
+ */
+const TOKEN_START =
+  /^(?:g(?:h(?:[opsur](?:_[A-Za-z0-9_]{0,15})?)?|i(?:t(?:h(?:u(?:b(?:_(?:p(?:a(?:t(?:_[A-Za-z0-9_]{0,19})?)?)?)?)?)?)?)?)?)?)$/u;
+/** The longest shape above: `github_pat_` plus 19 characters. */
+const LONGEST_TOKEN_START = 30;
+const CUT_NOTE = '\n[output cut]';
+
+/**
+ * Bounded output with the same scrub, for a stream the reader CUT: a token the cut split in two never reaches the
+ * caller, because scrubbing the kept text alone cannot see it. Scrub first, then drop whatever tail could be the start
+ * of a token (the account's own, or any GitHub shape), then say so.
+ */
+export function scrubCut(text: string, token: string): string {
+  const scrubbed = scrubToken(text, token);
+  const first = Math.max(0, scrubbed.length - Math.max(token.length, LONGEST_TOKEN_START));
+  for (let at = first; at < scrubbed.length; at++) {
+    const tail = scrubbed.slice(at);
+    if (token.startsWith(tail) || TOKEN_START.test(tail)) return `${scrubbed.slice(0, at)}${CUT_NOTE}`;
+  }
+  return `${scrubbed}${CUT_NOTE}`;
+}
