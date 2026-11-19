@@ -26,10 +26,10 @@ export const becomes = (harness: HarnessKey, kind: ImportSingleItem | ImportName
 };
 
 /** Said under a secret-looking key: it is moved, never shown. */
-export const SECRET_KEPT = 'kept in the Vault: agents use it, nobody can read it back out of the Vault';
+export const SECRET_KEPT = 'kept in the Vault: agents use them, and nothing can fetch a value back out of the Vault';
 
 /** Said once under the secret keys: where the value lives and how a ferret gets it, so "use it" is not read as "can read it". */
-export const VAULT_VS_ENVIRONMENT = 'A ferret on this login gets the value in its own environment when it starts.';
+export const VAULT_VS_ENVIRONMENT = 'A ferret on this login gets each value in its own environment when it starts.';
 
 /** The variables that carry a GitHub account's token (the same three Logins' A8 import leaves out unless ticked). */
 export const GITHUB_TOKEN_NAMES: readonly string[] = ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN'];

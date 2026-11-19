@@ -146,7 +146,7 @@ const CASES: readonly Case[] = [
       'MCP server',
       'Claude settings',
       'This login’s environment',
-      'kept in the Vault: agents use it, nobody can read it back',
+      'kept in the Vault: agents use them, and nothing can fetch a value back out of the Vault',
       'Not imported: Ferretry doesn’t use hooks',
       'Stay in each project; agents read them there',
       'already read automatically, one way. Nothing to import.',

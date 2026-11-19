@@ -100,7 +100,7 @@ describe('everything found', () => {
     expect(text(root, '[data-tool-headline]')).toBe('Installed · version 2.1.0 · signed in as sam@example.test');
     expect(root.querySelectorAll('input[type="checkbox"]')).toHaveLength(7);
     expect(text(root, '[data-found-group="env"]')).toContain(
-      'kept in the Vault: agents use it, nobody can read it back',
+      'kept in the Vault: agents use them, and nothing can fetch a value back out of the Vault',
     );
     expect(text(root, '[data-found-group="env"]')).toContain('ANTHROPIC_API_KEY');
     expect(text(root, '[data-found-fixed="hooks"]')).toContain('Not imported: Ferretry doesn’t use hooks');
