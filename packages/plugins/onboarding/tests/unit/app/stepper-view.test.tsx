@@ -73,9 +73,29 @@ describe('the stepper on a machine', () => {
     await after.unmount();
   });
 
+  it('an already set-up machine shows NOTHING: no stepper, no completion card, even on fresh storage', async () => {
+    const harness = StepperHarness.answering({});
+    const view = await mount(<harness.Component />);
+    await harness.settle();
+    expect(view.container.querySelector('[data-first-run-stepper]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('a machine whose every ferret is archived is not waiting for a first ferret', async () => {
+    const harness = StepperHarness.answering({ archivedFerret: true });
+    const view = await mount(<harness.Component />);
+    await harness.settle();
+    expect(view.container.querySelector('[data-first-run-stepper]')).toBeNull();
+    await view.unmount();
+  });
+
   it('a dismissed stepper stays away after a reload, until a step opens again', async () => {
-    const done = StepperHarness.answering({});
+    // The stepper was open on this device (a ferret to make), then the last step was done: the card says so.
+    const done = StepperHarness.answering({ ferret: false });
     const view = await mount(<done.Component />);
+    await done.settle();
+    expect(view.container.querySelector('[data-first-run-stepper="open"]')).not.toBeNull();
+    done.change({});
     await done.settle();
     expect(view.container.querySelector('[data-first-run-stepper="done"]')).not.toBeNull();
     await done.dismiss(view.container);
@@ -96,13 +116,13 @@ describe('the stepper on a machine', () => {
     await last.unmount();
   });
 
-  it('asks the machine five quiet reads on open and none by itself afterwards (no polling)', async () => {
+  it('asks the machine six quiet reads on open (the archive too, as no live ferret answers) and none by itself afterwards (no polling)', async () => {
     const harness = StepperHarness.answering({ ferret: false });
     const view = await mount(<harness.Component />);
     await harness.settle();
-    expect(harness.calls()).toBe(5);
+    expect(harness.calls()).toBe(6);
     await new Promise(resolve => setTimeout(resolve, 60));
-    expect(harness.calls()).toBe(5);
+    expect(harness.calls()).toBe(6);
     await view.unmount();
   });
 

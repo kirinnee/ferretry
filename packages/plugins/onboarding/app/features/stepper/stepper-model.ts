@@ -4,8 +4,9 @@
  * because the machine says so (a passkey exists, the machine has a name, a login, a runtime, a ferret), so the stepper
  * cannot disagree with the machine and resuming after a reload needs no bookkeeping.
  *
- * A fact is `true` (it holds), `false` (it does not) or `undefined` (the machine could not say: locked, offline, refused).
- * An unreadable fact is never guessed: that step is `unknown`, draws no button, and never makes the stepper appear.
+ * A fact is `true` (it holds), `false` (it does not), `'locked'` (the machine refused the read for want of its unlock: the
+ * step is still to do, and its button is Unlock) or `undefined` (the machine could not say: offline, unreadable). An
+ * unreadable fact is never guessed: that step is `unknown`, draws no button, and never makes the stepper appear.
  */
 
 export const STEP_IDS = ['pair', 'passkey', 'name', 'login', 'runtime', 'ferret'] as const;
@@ -21,7 +22,8 @@ const STEP_TITLES: Readonly<Record<StepperStepId, string>> = {
 };
 
 /** What each fact says; `pair` is not here: a machine this page is drawn for is paired by definition. */
-export type StepperFacts = { readonly [Id in Exclude<StepperStepId, 'pair'>]: boolean | undefined };
+export type StepperFact = boolean | 'locked' | undefined;
+export type StepperFacts = { readonly [Id in Exclude<StepperStepId, 'pair'>]: StepperFact };
 
 /** `done` holds · `current` is the one to do now · `next` is open, after the current one · `unknown` could not be read. */
 export type StepperState = 'done' | 'current' | 'next' | 'unknown';
@@ -30,6 +32,8 @@ export interface StepperStep {
   readonly id: StepperStepId;
   readonly title: string;
   readonly state: StepperState;
+  /** The machine wants its unlock before it can say whether this step holds; the step's button is Unlock. */
+  readonly locked?: true;
 }
 
 export const UNKNOWN_FACTS: StepperFacts = Object.freeze({
@@ -48,9 +52,10 @@ export const deriveSteps = (facts: StepperFacts): readonly StepperStep[] => {
     const title = STEP_TITLES[id];
     if (held === true) return { id, title, state: 'done' };
     if (held === undefined) return { id, title, state: 'unknown' };
-    if (currentTaken) return { id, title, state: 'next' };
+    const lock = held === 'locked' ? ({ locked: true } as const) : {};
+    if (currentTaken) return { id, title, state: 'next', ...lock };
     currentTaken = true;
-    return { id, title, state: 'current' };
+    return { id, title, state: 'current', ...lock };
   });
 };
 
@@ -60,3 +65,14 @@ export const hasOpenStep = (steps: readonly StepperStep[]): boolean =>
 
 /** Every step is known and done: the moment the stepper may be dismissed (or goes away by itself). */
 export const allDone = (steps: readonly StepperStep[]): boolean => steps.every(step => step.state === 'done');
+
+/**
+ * One fact's new answer folded into what is known. A `'locked'` answer never erases something already known (what this
+ * device remembered, or read before the machine locked): a machine seen set up stays set up while it waits for its unlock,
+ * so a configured machine that locks shows nothing here (the shell's own bar offers the unlock).
+ */
+export const withFact = (known: StepperFacts, key: keyof StepperFacts, fact: StepperFact): StepperFacts => {
+  const before = known[key];
+  if (fact === 'locked' && typeof before === 'boolean') return known;
+  return before === fact ? known : { ...known, [key]: fact };
+};

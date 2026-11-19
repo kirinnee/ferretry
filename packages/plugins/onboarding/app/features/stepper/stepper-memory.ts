@@ -17,6 +17,8 @@ export interface StepperStorage {
 export interface StepperRemembered {
   readonly facts: StepperFacts;
   readonly dismissed: boolean;
+  /** The stepper was ever open on this device for this machine: only then is "This machine is set up" worth saying. */
+  readonly seenOpen: boolean;
 }
 
 const FORMAT = 1;
@@ -45,7 +47,12 @@ export const readStepperMemory = (
   try {
     const raw = storage.getItem(stepperKey(daemon));
     if (raw === null) return undefined;
-    const parsed = JSON.parse(raw) as { format?: unknown; facts?: Record<string, unknown>; dismissed?: unknown };
+    const parsed = JSON.parse(raw) as {
+      format?: unknown;
+      facts?: Record<string, unknown>;
+      dismissed?: unknown;
+      seenOpen?: unknown;
+    };
     if (parsed.format !== FORMAT || typeof parsed.facts !== 'object' || parsed.facts === null) return undefined;
     const facts = { ...UNKNOWN_FACTS } as { -readonly [K in keyof StepperFacts]: boolean | undefined };
     for (const key of FACT_KEYS) {
@@ -53,7 +60,7 @@ export const readStepperMemory = (
       if (!isFact(value)) return undefined;
       facts[key] = value;
     }
-    return { facts, dismissed: parsed.dismissed === true };
+    return { facts, dismissed: parsed.dismissed === true, seenOpen: parsed.seenOpen === true };
   } catch {
     return undefined;
   }
@@ -68,7 +75,15 @@ export const writeStepperMemory = (
   try {
     storage.setItem(
       stepperKey(daemon),
-      JSON.stringify({ format: FORMAT, facts: remembered.facts, dismissed: remembered.dismissed }),
+      JSON.stringify({
+        format: FORMAT,
+        // A `locked` fact is a wait, not an answer: it is never remembered as one.
+        facts: Object.fromEntries(
+          FACT_KEYS.map(key => [key, typeof remembered.facts[key] === 'boolean' ? remembered.facts[key] : null]),
+        ),
+        dismissed: remembered.dismissed,
+        seenOpen: remembered.seenOpen,
+      }),
     );
   } catch {
     /* a full or refused store is an ordinary browser condition: the stepper simply starts blank next time */

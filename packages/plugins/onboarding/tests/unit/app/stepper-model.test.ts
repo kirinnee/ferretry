@@ -6,6 +6,7 @@ import {
   STEP_IDS,
   type StepperFacts,
   UNKNOWN_FACTS,
+  withFact,
 } from '../../../app/features/stepper/stepper-model.ts';
 
 const facts = (over: Partial<StepperFacts>): StepperFacts => ({
@@ -87,5 +88,25 @@ describe('the first-run stepper derivation', () => {
     expect(allDone(deriveSteps(facts({})))).toBe(true);
     expect(allDone(deriveSteps(facts({ ferret: undefined })))).toBe(false);
     expect(allDone(deriveSteps(facts({ ferret: false })))).toBe(false);
+  });
+
+  it('a locked fact is still to do: it takes the current step and says it is locked', () => {
+    const steps = deriveSteps(facts({ passkey: 'locked', login: 'locked' }));
+    expect(steps.map(step => `${step.id}:${step.state}${step.locked === true ? ':locked' : ''}`)).toEqual([
+      'pair:done',
+      'passkey:current:locked',
+      'name:done',
+      'login:next:locked',
+      'runtime:done',
+      'ferret:done',
+    ]);
+    expect(hasOpenStep(steps)).toBe(true);
+  });
+
+  it('a locked answer never erases what is already known, but fills what is not', () => {
+    expect(withFact(facts({ login: true }), 'login', 'locked').login).toBe(true);
+    expect(withFact(facts({ login: false }), 'login', 'locked').login).toBe(false);
+    expect(withFact(UNKNOWN_FACTS, 'login', 'locked').login).toBe('locked');
+    expect(withFact(facts({ login: 'locked' }), 'login', true).login).toBe(true);
   });
 });

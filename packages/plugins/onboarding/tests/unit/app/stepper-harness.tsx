@@ -4,7 +4,15 @@ import { StepperView } from '../../../app/features/stepper/stepper-view.tsx';
 import type { StepperStorage } from '../../../app/features/stepper/stepper-memory.ts';
 import { useStepper } from '../../../app/features/stepper/use-stepper.ts';
 
-type Held = { passkey?: boolean; name?: boolean; login?: boolean; runtime?: boolean; ferret?: boolean };
+type Held = {
+  passkey?: boolean;
+  name?: boolean;
+  login?: boolean;
+  runtime?: boolean;
+  ferret?: boolean;
+  /** Every ferret ever made is archived: the live list is empty, the archive is not. */
+  archivedFerret?: boolean;
+};
 
 const answersFor = (held: Held): Record<string, unknown> => {
   const has = (key: keyof Held): boolean => held[key] !== false;
@@ -13,7 +21,8 @@ const answersFor = (held: Held): Record<string, unknown> => {
     'GET /v1/config/file': { exists: has('name'), text: has('name') ? 'name: "Studio"\n' : '' },
     'GET /v1/logins': { logins: has('login') ? [{ id: 'l' }] : [] },
     'GET /v1/onboarding': { setUp: has('runtime') },
-    'GET /v1/ferrets': has('ferret') ? [{ id: 'f' }] : [],
+    'GET /v1/ferrets': has('ferret') && held.archivedFerret !== true ? [{ id: 'f' }] : [],
+    'GET /v1/archived-sessions': { count: has('ferret') && held.archivedFerret === true ? 2 : 0, sessions: [] },
   };
 };
 
@@ -74,8 +83,8 @@ export class StepperHarness {
     }) as never,
   };
 
-  readonly Component = (): React.ReactNode => {
-    const reading = useStepper(this.#client, 'd1', false, () => this.storage);
+  readonly Component = ({ locked = false }: { readonly locked?: boolean }): React.ReactNode => {
+    const reading = useStepper(this.#client, 'd1', locked, () => this.storage);
     return reading.visible && reading.steps !== undefined ? (
       <StepperView onDismiss={reading.dismiss} steps={reading.steps} />
     ) : null;

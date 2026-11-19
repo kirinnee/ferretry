@@ -19,10 +19,12 @@ export function createStepperPanel(client: PluginClient) {
     const current = reading.steps?.find(step => step.state === 'current');
     const action = useMemo((): StepperAction | undefined => {
       if (daemon === undefined || current === undefined) return undefined;
+      // The machine wants its unlock before it can say whether this step holds: that is the one thing to press.
+      if (current.locked === true)
+        return row === undefined ? undefined : { label: 'Unlock', run: () => void row.unlock() };
       const go = (href: string | undefined) => (href === undefined ? undefined : () => router?.navigate(href));
       switch (current.id) {
         case 'passkey': {
-          if (row?.locked === true) return { label: 'Unlock', run: () => void row.unlock() };
           const run = go(daemonSettingsHref(daemon, 'access', 'security'));
           return run === undefined ? undefined : { label: 'Add a passkey', run };
         }

@@ -1,49 +1,94 @@
 /**
- * READING THE SIX FACTS, cheaply: one pass of five reads, each through this machine's own client, each QUIET (a read
- * nobody asked for must never raise a passkey prompt; a refusal is simply "unknown"). No timer: the pass runs when the
- * page opens and again only when the machine says a step changed (`OnboardingChanged`) or the person comes back to it.
+ * READING THE SIX FACTS, cheaply: one batch of reads, each through this machine's own client, each QUIET (a read
+ * nobody asked for must never raise a passkey prompt). No timer: a batch runs when the page opens and again only when
+ * the machine says a step changed (`OnboardingChanged`), the person comes back to it, or the machine locks or unlocks.
+ *
+ * EACH FACT SETTLES ON ITS OWN. A locked machine parks four of the five reads behind its unlock (they wait, quietly,
+ * for as long as it stays locked), so the batch cannot wait for all of them: every fact reports the moment IT answers,
+ * and a fact the machine refused for want of an unlock is `'locked'` (the step shows Unlock), never a guess. While the
+ * machine is known to be locked the four parked reads are not even sent: they would only wait; the passkey read is the
+ * one the daemon answers while locked, so it alone is.
  *
  * Each parser is strict about the one field it needs and blind to the rest, so a daemon that adds a field changes nothing
  * here, and one that answers something else gives `undefined` rather than a wrong `false`.
  */
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
-import type { StepperFacts } from './stepper-model.ts';
+import type { StepperFact, StepperFacts } from './stepper-model.ts';
 
 const PasskeysSchema = z.object({ passkeys: z.array(z.unknown()) });
 const FileSchema = z.object({ exists: z.boolean(), text: z.string() });
 const LoginsSchema = z.object({ logins: z.array(z.unknown()) });
 const SetUpSchema = z.object({ setUp: z.boolean() });
 const FerretsSchema = z.array(z.unknown());
+const ArchivedSchema = z.object({ count: z.number() });
 
 const NAME_LINE = /^name:/mu;
 
-/** Runs a read and gives `undefined` for any failure: a refused, locked or unreachable read is not a `false`. */
-const quietly = async <T>(read: () => Promise<T>): Promise<T | undefined> => {
+/** `401` is the machine wanting its unlock (`unlock_required`): the read is refused, not failed. */
+const isLockedRefusal = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 401;
+
+/** What one read says as a fact: its answer, `'locked'` for an unlock refusal, `undefined` for any other failure. */
+const settled = async (read: () => Promise<StepperFact>): Promise<StepperFact> => {
   try {
     return await read();
-  } catch {
-    return undefined;
+  } catch (error) {
+    return isLockedRefusal(error) ? 'locked' : undefined;
   }
 };
 
-/** `locked` joins the passkey fact: a passkey that exists but is not unlocked is a step still to do ("Unlock"). */
-export const readStepperFacts = async (client: Pick<PluginClient, 'call'>, locked: boolean): Promise<StepperFacts> => {
-  const quiet = { quiet: true } as const;
-  const [passkeys, host, logins, onboarding, ferrets] = await Promise.all([
-    quietly(async () => PasskeysSchema.parse(await client.call('GET /v1/passkeys', quiet))),
-    quietly(async () =>
-      FileSchema.parse(await client.call('GET /v1/config/file', { query: { path: 'host.yaml' }, ...quiet })),
+export type FactKey = keyof StepperFacts;
+
+/**
+ * Starts the batch and returns once every fact has settled. `onFact` hears each fact as it settles, in whatever order
+ * they answer, and is never called after `signal` aborts (an abandoned batch says nothing).
+ */
+export const readStepperFacts = async (
+  client: Pick<PluginClient, 'call'>,
+  locked: boolean,
+  signal: AbortSignal,
+  onFact: (key: FactKey, fact: StepperFact) => void,
+): Promise<void> => {
+  const base = { quiet: true, signal } as const;
+  const report = (key: FactKey, read: () => Promise<StepperFact>): Promise<void> =>
+    settled(read).then(fact => {
+      if (!signal.aborted) onFact(key, fact);
+    });
+  const protectedReads: readonly [FactKey, () => Promise<StepperFact>][] = [
+    [
+      'name',
+      async () => {
+        const host = FileSchema.parse(
+          await client.call('GET /v1/config/file', { query: { path: 'host.yaml' }, ...base }),
+        );
+        return host.exists && NAME_LINE.test(host.text);
+      },
+    ],
+    ['login', async () => LoginsSchema.parse(await client.call('GET /v1/logins', base)).logins.length > 0],
+    ['runtime', async () => SetUpSchema.parse(await client.call('GET /v1/onboarding', base)).setUp],
+    [
+      'ferret',
+      // Any ferret ever made counts: the live list leaves out an archived one, so an empty live list asks the archive.
+      async () => {
+        if (FerretsSchema.parse(await client.call('GET /v1/ferrets', base)).length > 0) return true;
+        const archived = await client.call('GET /v1/archived-sessions', { query: { limit: '1' }, ...base });
+        return ArchivedSchema.parse(archived).count > 0;
+      },
+    ],
+  ];
+  await Promise.all([
+    report('passkey', async () => {
+      const { passkeys } = PasskeysSchema.parse(await client.call('GET /v1/passkeys', base));
+      // A passkey that exists on a locked machine is a step still to do ("Unlock"), not a step done.
+      return passkeys.length === 0 ? false : locked ? 'locked' : true;
+    }),
+    ...protectedReads.map(([key, read]) =>
+      locked ? Promise.resolve(onLocked(signal, onFact, key)) : report(key, read),
     ),
-    quietly(async () => LoginsSchema.parse(await client.call('GET /v1/logins', quiet))),
-    quietly(async () => SetUpSchema.parse(await client.call('GET /v1/onboarding', quiet))),
-    quietly(async () => FerretsSchema.parse(await client.call('GET /v1/ferrets', quiet))),
   ]);
-  return {
-    passkey: passkeys === undefined ? undefined : passkeys.passkeys.length > 0 && !locked,
-    name: host === undefined ? undefined : host.exists && NAME_LINE.test(host.text),
-    login: logins === undefined ? undefined : logins.logins.length > 0,
-    runtime: onboarding === undefined ? undefined : onboarding.setUp,
-    ferret: ferrets === undefined ? undefined : ferrets.length > 0,
-  };
+};
+
+const onLocked = (signal: AbortSignal, onFact: (key: FactKey, fact: StepperFact) => void, key: FactKey): void => {
+  if (!signal.aborted) onFact(key, 'locked');
 };

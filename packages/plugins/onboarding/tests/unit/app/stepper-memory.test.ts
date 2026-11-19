@@ -20,9 +20,17 @@ describe('what the device remembers of the stepper', () => {
 
   it('gives back the facts and the dismissal it was given, an unknown fact staying unknown', () => {
     const store = memoryStore();
-    writeStepperMemory(store, 'd1', { facts: FACTS, dismissed: true });
-    expect(readStepperMemory(store, 'd1')).toEqual({ facts: FACTS, dismissed: true });
+    writeStepperMemory(store, 'd1', { facts: FACTS, dismissed: true, seenOpen: true });
+    expect(readStepperMemory(store, 'd1')).toEqual({ facts: FACTS, dismissed: true, seenOpen: true });
     expect(readStepperMemory(store, 'd2')).toBeUndefined();
+  });
+
+  it('never remembers a locked wait as an answer, and reads an old record with no seenOpen as never seen open', () => {
+    const store = memoryStore();
+    writeStepperMemory(store, 'd1', { facts: { ...FACTS, name: 'locked' }, dismissed: false, seenOpen: false });
+    expect(readStepperMemory(store, 'd1')?.facts.name).toBeUndefined();
+    store.map.set(stepperKey('d2'), '{"format":1,"facts":{"passkey":true},"dismissed":false}');
+    expect(readStepperMemory(store, 'd2')?.seenOpen).toBe(false);
   });
 
   it('reads damaged, foreign or wrong-format storage as nothing remembered', () => {
@@ -42,7 +50,7 @@ describe('what the device remembers of the stepper', () => {
         throw new Error('denied');
       },
     };
-    expect(() => writeStepperMemory(refusing, 'd1', { facts: FACTS, dismissed: false })).not.toThrow();
+    expect(() => writeStepperMemory(refusing, 'd1', { facts: FACTS, dismissed: false, seenOpen: false })).not.toThrow();
     expect(readStepperMemory(refusing, 'd1')).toBeUndefined();
     expect(readStepperMemory(undefined, 'd1')).toBeUndefined();
   });
