@@ -28,6 +28,14 @@ const stepView = (name: StepView, factory: string, client: LiveRuntimesClient): 
     ((await loadView(name))[factory] as (client: LiveRuntimesClient) => AppComponent<SettingsProps>)(client),
   );
 
+/** The first-run Start page: a panel, so it is handed the setup flow's `step` host. */
+const startPanel = (client: LiveRuntimesClient): AppComponent<PanelProps> =>
+  lazyComponent<PanelProps>(async () =>
+    ((await loadView('setup-transfer')).createStartStep as (client: LiveRuntimesClient) => AppComponent<PanelProps>)(
+      client,
+    ),
+  );
+
 const pickerView = (client: RuntimesClient): AppComponent<PanelProps> =>
   lazyComponent<PanelProps>(async () =>
     ((await loadView('runtime-picker')).createRuntimePicker as (client: RuntimesClient) => AppComponent<PanelProps>)(
@@ -77,10 +85,7 @@ export default provideToShell(
         'new-ferret-account': accountPanel(client, 'createNewFerretAccountPanel'),
         'move-account': accountPanel(client, 'createMoveAccountPanel'),
         // The first-run "Start fresh / Copy from another machine" page, only for its own step.
-        'onboarding-start': forSubject(
-          'runtimes.start',
-          stepView('setup-transfer', 'createStartStep', client) as AppComponent<PanelProps>,
-        ),
+        'onboarding-start': forSubject('runtimes.start', startPanel(client)),
       },
     }),
   }),

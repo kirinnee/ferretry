@@ -15,7 +15,8 @@ export interface ImportChangeExtras {
 /**
  * `include` is the harnesses being imported; `skip` is every item id the person left out, as pages accumulate them. An id of
  * a harness that is not in `include`, one the grammar refuses, and a repeat are dropped here, so a page can hand over its raw
- * list and the daemon never sees an id that could mean something else. `name` is the runtime name for `harness`.
+ * list and the daemon never sees an id that could mean something else. `name` is the runtime name for `harness`; an empty one
+ * sends no name (a retry on a runtime that already exists).
  */
 export function buildImportChange(
   harness: HarnessKey,
@@ -33,7 +34,7 @@ export function buildImportChange(
   return {
     kind: 'setup.import',
     include: [...harnesses],
-    names: { [harness]: name.trim() },
+    ...(name.trim() === '' ? {} : { names: { [harness]: name.trim() } }),
     ...(kept.length === 0 ? {} : { skip: kept }),
     ...(tickedEnv.length === 0 ? {} : { tickedEnv: [...tickedEnv] }),
     ...(acceptedUpdates.length === 0 ? {} : { acceptedUpdates: [...acceptedUpdates] }),

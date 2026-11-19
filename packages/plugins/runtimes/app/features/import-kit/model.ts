@@ -268,7 +268,11 @@ export function importChange(
   const env = model.groups.find(group => group.key === 'env');
   // Only a token variable this scan lists, and only while the environment itself is being brought.
   const tickedEnv = (env?.githubTokens ?? []).filter(token => ticked.has(token) && !left.has(`${model.harness}:env`));
-  return buildImportChange(model.harness, [model.harness], skip, name, { tickedEnv, acceptedUpdates });
+  // A runtime this setup already made is imported onto as it is: no name goes out.
+  return buildImportChange(model.harness, [model.harness], skip, model.duplicateOf === null ? name : '', {
+    tickedEnv,
+    acceptedUpdates,
+  });
 }
 
 /** How many things will be imported / left out, for the button's own sentence. */

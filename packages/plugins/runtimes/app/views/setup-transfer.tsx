@@ -5,8 +5,8 @@
  */
 
 import { ChoiceCards } from '@ferretry/app';
-import type { AppComponent, SettingsProps } from '@ferretry/kernel/manifest';
-import { useState } from 'react';
+import type { AppComponent, PanelProps, SettingsProps } from '@ferretry/kernel/manifest';
+import { useEffect, useState } from 'react';
 import { CopySettings } from '../features/fleet/setup/copy-settings.tsx';
 import { ExportSettings } from '../features/fleet/setup/export-settings.tsx';
 import { useAccountChanges } from '../features/fleet/shell/apply-change-panel.tsx';
@@ -33,14 +33,23 @@ function TransferTab({ client, machineName, machine }: MachineTabProps) {
 }
 
 /** The first run's "Start fresh / Copy from another machine" page. */
-function StartStep({ client, machineName, machine }: MachineTabProps) {
+function StartStep({ client, machineName, machine, step }: MachineTabProps) {
   const changes = useAccountChanges({ client });
   const [start, setStart] = useState<'fresh' | 'clone'>('fresh');
   const [unmarked, setUnmarked] = useState(false);
+  // Under the setup flow the page decides at once: it always shows (the person may copy or start fresh).
+  useEffect(() => {
+    step?.ready();
+  }, [step]);
   // A copy that landed completes this step through onboarding, the way the steps screen's Done does; if that answer is
   // not saved the person is told, and can press Done on the step themselves.
   const markDone = (): void => {
     setUnmarked(false);
+    // Drawn as a step, the host records the answer (and moves on); drawn alone, the page answers onboarding itself.
+    if (step !== undefined) {
+      step.done();
+      return;
+    }
     void client
       .call('POST /v1/onboarding/steps/:plugin/:stepId', {
         params: { plugin: 'runtimes', stepId: 'start' },
@@ -86,5 +95,5 @@ function StartStep({ client, machineName, machine }: MachineTabProps) {
 export const createTransferSettings = (client: LiveRuntimesClient): AppComponent<SettingsProps> =>
   machineSettingsView(client, props => <TransferTab {...props} />);
 
-export const createStartStep = (client: LiveRuntimesClient): AppComponent<SettingsProps> =>
+export const createStartStep = (client: LiveRuntimesClient): AppComponent<PanelProps> =>
   machineSettingsView(client, props => <StartStep {...props} />);

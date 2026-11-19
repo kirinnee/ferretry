@@ -150,6 +150,8 @@ export function useImportWizard(client: RuntimesClient) {
         model.label,
       );
       if (applied === null) return;
+      // The machine now holds this runtime: read the scan again so a Go back sees it (and asks for no new name). It is the person's own press.
+      void rescan(false);
       const unmarked = await settleSteps(harness);
       const told = applied.sentences;
       // What happened to each changed source, in words: the daemon names an accepted one; an unticked one is said here.
@@ -166,19 +168,24 @@ export function useImportWizard(client: RuntimesClient) {
         [harness]: { kind: 'imported', sentences: [...told, ...updated, ...kept], unmarked },
       }));
     },
-    [apply, left, models, nameOf, settleSteps, tickedEnv, declined],
+    [apply, left, models, nameOf, rescan, settleSteps, tickedEnv, declined],
   );
 
   const skip = useCallback(
     (harness: HarnessKey): void => setEnds(current => ({ ...current, [harness]: { kind: 'skipped' } })),
     [],
   );
-  const reopen = useCallback((harness: HarnessKey): void => {
-    setEnds(current => {
-      const { [harness]: _gone, ...rest } = current;
-      return rest;
-    });
-  }, []);
+  const reopen = useCallback(
+    (harness: HarnessKey): void => {
+      setEnds(current => {
+        const { [harness]: _gone, ...rest } = current;
+        return rest;
+      });
+      // Reopened, the page shows the machine as it is now, not the scan from before the import.
+      void rescan(false);
+    },
+    [rescan],
+  );
 
   return {
     read,
