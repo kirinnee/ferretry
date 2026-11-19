@@ -121,7 +121,7 @@ export function FlowPage(props: FlowPageProps): ReactNode {
         {ready ? <OnlyOnChip names={step.onlyOn} /> : null}
         {ready ? null : (
           <div className="fy-sf-cover" data-flow-cover="">
-            <Loading kind="page" label={`Getting “${step.title}” ready…`} />
+            <Loading kind="page" label="Checking what this step needs…" />
             {silent ? (
               <div className="fy-sf-silent" data-flow-silent="">
                 <p className="fy-sf-note">Still checking…</p>

@@ -79,8 +79,11 @@ describe('the setup flow', () => {
           for (const scene of CASES) {
             await tab.goto(`${origin}/?theme=studio-${scheme}&case=${scene}`);
             await tab.waitForSelector('[data-scene-ready]');
-            if (scene === 'silent') await tab.waitForSelector('[data-flow-silent]');
-            else await tab.waitForTimeout(scene === 'transition' ? 50 : 300);
+            if (scene === 'silent') {
+              await tab.waitForSelector('[data-flow-silent]');
+              // The loader fades in after a beat (no flash for a fast answer): shoot it settled.
+              await tab.waitForTimeout(900);
+            } else await tab.waitForTimeout(scene === 'transition' ? 50 : 300);
             const overflow = await tab.evaluate(
               () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
             );
@@ -113,7 +116,19 @@ describe('the setup flow', () => {
               );
               expect(size.h, `${scene}: a footer button is at least 44px tall`).toBeGreaterThanOrEqual(43.5);
             }
-            if (scene === 'silent') expect(await tab.$$('[data-flow-skip]')).toHaveLength(1);
+            if (scene === 'silent') {
+              expect(await tab.$$('[data-flow-skip]')).toHaveLength(1);
+              const skip = await (await tab.$('[data-flow-skip]'))?.boundingBox();
+              expect(skip?.height ?? 0, 'Skip this step is a 44px target').toBeGreaterThanOrEqual(43.5);
+              expect(
+                await tab.$$('[data-flow-cover] [data-loading]'),
+                'the spinner is drawn with the note',
+              ).toHaveLength(1);
+            }
+            if (scene === 'choice') {
+              const later = await (await tab.$('[data-flow-later]'))?.boundingBox();
+              expect(later?.height ?? 0, 'Later is a 44px target').toBeGreaterThanOrEqual(43.5);
+            }
             if (scene === 'chip') expect(await tab.textContent('[data-only-on]')).toBe('Only on studio-box');
             if (scene === 'busy')
               expect(await tab.$eval('[data-step-next]', next => (next as HTMLButtonElement).disabled)).toBe(true);
