@@ -702,7 +702,7 @@ function harvest(
   }
   const env = envImport?.env ?? {};
   // What the person chose to leave out is filtered out HERE, before the model set is derived and the file is written:
-  // a skipped profile (`<harness>:profile:<name>`) is gone from both, and skipped settings leave nothing for a default model.
+  // a skipped profile (`<harness>:profile:<name>`) is gone from both, and skipped settings leave no default model (only the profiles still selected remain).
   const profileTable = rest.profiles;
   if (isRecord(profileTable)) {
     const kept = Object.fromEntries(
@@ -711,7 +711,8 @@ function harvest(
     if (Object.keys(kept).length === 0) delete rest.profiles;
     else rest.profiles = kept;
   }
-  if (skipped('settings')) for (const name of Object.keys(rest)) delete rest[name];
+  // Skipped settings drop everything but the profiles the person kept: each is its own item and stays importable.
+  if (skipped('settings')) for (const name of Object.keys(rest)) if (name !== 'profiles') delete rest[name];
   const modelSource: SettingsObject = {
     ...(rest.model === undefined ? {} : { model: rest.model }),
     ...(rest.profiles === undefined ? {} : { profiles: rest.profiles }),

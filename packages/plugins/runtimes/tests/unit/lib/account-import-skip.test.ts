@@ -315,9 +315,38 @@ describe('planImport — a skip is applied before models and settings are derive
 
     const set = modelsOf(plan, 'codex');
     should(set.models).not.containEql('gpt-host-1');
-    should(set.models).not.containEql('gpt-5.6-mini');
     should(set.default).not.equal('gpt-host-1');
     should(settingsFileOf(plan)).not.containEql('gpt-host-1');
+  });
+
+  it('should keep the profiles still selected when Codex settings are skipped, and drop the skipped ones', () => {
+    const plan = planImport([hostCodex()], {
+      digest,
+      skip: [importItemId('codex', 'settings'), importNamedItemId('codex', 'profile', 'deep')],
+    });
+
+    const written = settingsFileOf(plan);
+    should(written).containEql('profiles.fast');
+    should(written).containEql('gpt-5.6-mini');
+    should(written).not.containEql('profiles.deep');
+    should(written).not.containEql('gpt-host-1');
+    should(modelsOf(plan, 'codex').models).containEql('gpt-5.6-mini');
+    should(modelsOf(plan, 'codex').models).not.containEql('gpt-host-1');
+    should(modelsOf(plan, 'codex').default).not.equal('gpt-host-1');
+  });
+
+  it('should write no settings file when Codex settings and every profile are skipped', () => {
+    const plan = planImport([hostCodex()], {
+      digest,
+      skip: [
+        importItemId('codex', 'settings'),
+        importNamedItemId('codex', 'profile', 'fast'),
+        importNamedItemId('codex', 'profile', 'deep'),
+      ],
+    });
+
+    should(settingsFileOf(plan)).not.containEql('profiles');
+    should(plan.components.some(item => item.kind === 'settings')).be.false();
   });
 
   it('should leave an accepted Codex profile out of the model set and the written settings', () => {
