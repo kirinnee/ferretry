@@ -18,8 +18,10 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { GIT_ACCOUNT_CODES, type GitAccountId, githubKnownHosts } from '../../../contract/index.ts';
 
-const READY_TRIES = 60;
+/** The whole wait for an agent to listen: it holds the account's queue, so it is bounded in wall-clock time. */
+const READY_DEADLINE_MS = 5_000;
 const READY_WAIT_MS = 50;
+const READY_PROBE_MS = 1_000;
 const KNOWN_HOSTS_NAME = 'known_hosts';
 
 interface Running {
@@ -33,11 +35,13 @@ export class AgentSupervisor {
   readonly #starting = new Map<GitAccountId, Promise<string | undefined>>();
   #knownHosts: Promise<string> | undefined;
   #stopped = false;
+  /** A socket name is never reused: an agent that died unclean leaves its socket file, and `-a` refuses an existing one. */
+  #generation = 0;
 
   constructor(
     private readonly spawn: Pick<SpawnPort, 'run' | 'start'>,
     private readonly scratch: ScratchPort,
-    private readonly clock: Pick<Clock, 'sleep'>,
+    private readonly clock: Pick<Clock, 'sleep' | 'after'>,
     private readonly log: Pick<Log, 'warn'>,
   ) {}
 
@@ -91,17 +95,21 @@ export class AgentSupervisor {
   async #start(id: GitAccountId, privateKey: string): Promise<string> {
     if (this.#stopped) throw unavailable();
     const folder = await this.#folderOf();
-    const socket = `${folder.path}/${id}.sock`;
+    this.#generation += 1;
+    const socket = `${folder.path}/${id}-${String(this.#generation)}.sock`;
     // `-D`: stay in the foreground, so the daemon owns the process; `-a`: this socket and no other.
     const child = this.spawn.start('ssh-agent', ['-D', '-a', socket], { sealed: true, ownGroup: true });
-    // Nothing the agent says is worth keeping, and a stream nobody reads can stall it.
-    void child.stdout.cancel().catch(() => undefined);
-    void child.stderr.cancel().catch(() => undefined);
+    // Nothing the agent says is worth keeping, but it must be READ: a closed read end kills the agent with SIGPIPE when it
+    // prints `SSH_AUTH_SOCK`, and a stream nobody reads can stall it.
+    void child.stdout.pipeTo(new WritableStream()).catch(() => undefined);
+    void child.stderr.pipeTo(new WritableStream()).catch(() => undefined);
     void child.exited.then(() => {
       if (this.#running.get(id)?.child === child) this.#running.delete(id);
     });
     try {
       await this.#untilReady(socket);
+      // A daemon that stopped while this agent was coming up must not hand it the key.
+      if (this.#stopped) throw unavailable();
       // The key goes in on stdin. `SSH_AUTH_SOCK` is a path, not a secret; nothing else rides along (`sealed`).
       const added = await this.spawn.run('ssh-add', ['-'], {
         sealed: true,
@@ -109,7 +117,7 @@ export class AgentSupervisor {
         stdin: privateKey,
         timeout: milliseconds(10_000),
       });
-      if (added.exitCode !== 0) throw unavailable();
+      if (added.exitCode !== 0 || this.#stopped) throw unavailable();
     } catch (error) {
       child.kill('SIGTERM');
       this.log.warn('git-accounts: an account agent could not be started', { account: id });
@@ -119,16 +127,33 @@ export class AgentSupervisor {
     return socket;
   }
 
-  /** `ssh-add -l` answers 0 (keys) or 1 (none) once the agent listens, and 2 while it cannot be reached. */
+  /**
+   * `ssh-add -l` answers 0 (keys) or 1 (none) once the agent listens, and 2 while it cannot be reached. The WHOLE wait,
+   * probes included, ends at {@link READY_DEADLINE_MS}: this runs inside the account's start, which others queue behind.
+   */
   async #untilReady(socket: string): Promise<void> {
-    for (let attempt = 0; attempt < READY_TRIES; attempt += 1) {
-      const probe = await this.spawn
-        .run('ssh-add', ['-l'], { sealed: true, env: { SSH_AUTH_SOCK: socket }, timeout: milliseconds(5_000) })
-        .catch(() => undefined);
-      if (probe !== undefined && (probe.exitCode === 0 || probe.exitCode === 1)) return;
-      await this.clock.sleep(milliseconds(READY_WAIT_MS));
+    const over = new AbortController();
+    const cancel = this.clock.after(milliseconds(READY_DEADLINE_MS), () => over.abort());
+    const late = new Promise<undefined>(resolve => over.signal.addEventListener('abort', () => resolve(undefined)));
+    try {
+      while (!over.signal.aborted) {
+        const probe = await Promise.race([
+          this.spawn
+            .run('ssh-add', ['-l'], {
+              sealed: true,
+              env: { SSH_AUTH_SOCK: socket },
+              timeout: milliseconds(READY_PROBE_MS),
+            })
+            .catch(() => undefined),
+          late,
+        ]);
+        if (probe !== undefined && (probe.exitCode === 0 || probe.exitCode === 1)) return;
+        await this.clock.sleep(milliseconds(READY_WAIT_MS), over.signal).catch(() => undefined);
+      }
+      throw unavailable();
+    } finally {
+      cancel();
     }
-    throw unavailable();
   }
 
   #folderOf(): Promise<ScratchDirectory> {

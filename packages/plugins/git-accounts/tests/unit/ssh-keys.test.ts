@@ -426,7 +426,7 @@ describe('the agent seam (fake processes)', () => {
     await world.request('POST', `/v1/git-accounts/${ACCOUNT}/keys`, { purpose: 'both' });
     const port = world.host.provided(GitAccountsPort);
     const socket = await port.agentSocket(ACCOUNT as never);
-    expect(socket).toMatch(/\/gha_4242\.sock$/u);
+    expect(socket).toMatch(/\/gha_4242-1\.sock$/u);
 
     expect(rec.starts).toHaveLength(1);
     expect(rec.starts[0]?.program).toBe('ssh-agent');

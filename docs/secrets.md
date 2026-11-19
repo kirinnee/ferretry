@@ -2093,7 +2093,7 @@ and can never **read** it.
   `ssh-add -` **on stdin**. The key is never an argument, an environment variable or a file; the children run
   `sealed` (only the nine inherited names plus `SSH_AUTH_SOCK`). The sockets live in one private (`0700`) scratch
   folder with a short path (a unix socket path holds about 104 bytes, which a folder under the state directory can
-  exceed); the agent creates each socket `0600`. An agent stops when the account is removed, when its last registration
+  exceed); the agent creates each socket `0600`, under a fresh name per start (`<id>-<n>.sock`, so one that died unclean never blocks the next), and the wait for it to listen is bounded to about five seconds. An agent stops when the account is removed, when its last registration
   is removed, and when the daemon stops.
 - **A key the person already has** (`POST …/keys` with a `publicKey`): GitHub must list that exact key on the account;
   Ferretry records the public key, asks for no private half, and never deletes it from GitHub. `agentSocket` answers
