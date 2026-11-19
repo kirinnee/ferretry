@@ -91,9 +91,9 @@ const clientOf = (answer: unknown, calls: unknown[] = []): PullsClient => ({
   }) as PullsClient['call'],
 });
 
-const view = (client: PullsClient) => (
+const view = (client: PullsClient, onNavigate: (to: string) => void = () => undefined) => (
   <RouterProvider>
-    <PullPageView address={ADDRESS} client={client} daemon="workstation" onNavigate={() => undefined} />
+    <PullPageView address={ADDRESS} client={client} daemon="workstation" onNavigate={onNavigate} />
   </RouterProvider>
 );
 
@@ -183,6 +183,21 @@ describe('PullPageView', () => {
     expect(mounted.container.querySelectorAll('[data-pull-check]').length).toBe(2);
     await interact(() => tab('Files').click());
     expect(mounted.container.querySelector('[data-pull-files]')?.textContent).toContain('3 files changed');
+    await mounted.unmount();
+  });
+
+  it('goes back to the project page', async () => {
+    const went: string[] = [];
+    const mounted = await mount(view(clientOf(page()), to => went.push(to)));
+    await shown(mounted);
+    const back = must(
+      [...mounted.container.querySelectorAll<HTMLButtonElement>('button')].find(b =>
+        (b.textContent ?? '').includes('Back to project'),
+      ),
+      'the back button',
+    );
+    await interact(() => back.click());
+    expect(went).toEqual([`/d/workstation/projects/${PROJECT}`]);
     await mounted.unmount();
   });
 
