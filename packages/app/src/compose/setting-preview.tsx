@@ -73,7 +73,10 @@ function useOnScreen(element: { current: Element | null }): boolean {
 }
 
 export interface SettingPreviewProps {
-  /** What the frame shows once it has settled: the value's effect in a few words (its accessible name). */
+  /**
+   * What the frame shows once it has settled: the value's effect in a few words. The frame is decorative
+   * (`aria-hidden`, no role, no name: the row's own control already says it), so this is a `data-sp-label` for tests.
+   */
   readonly label: string;
   /** The value being previewed. A change replays the loop from the start. */
   readonly value: string;
@@ -94,9 +97,9 @@ export function SettingPreview({ label, value, before, after, className }: Setti
   return (
     <div
       ref={frame}
-      role="img"
-      aria-label={label}
+      aria-hidden="true"
       data-setting-preview=""
+      data-sp-label={label}
       data-sp-state={state}
       data-sp-value={value}
       className={cn('fy-sp', className)}

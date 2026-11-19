@@ -119,7 +119,11 @@ export function SettingRow({
           )}
         </span>
         {preview === undefined || preview === null ? null : (
-          <span className="order-last flex shrink-0 py-1 max-md:basis-full" data-setting-preview-slot="">
+          <span
+            className="order-last flex shrink-0 py-1 max-md:basis-full"
+            aria-hidden="true"
+            data-setting-preview-slot=""
+          >
             {preview}
           </span>
         )}
