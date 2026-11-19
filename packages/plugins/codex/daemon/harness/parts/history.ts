@@ -3,14 +3,7 @@ import { historyFilesOver } from '@ferretry/core-ferrets/contract';
 import type { HarnessPart } from './context.ts';
 
 /** The past conversations Codex holds, offered to Conversation's index. */
-export const historyPart: HarnessPart<'historySources'> = ({ options, kernel }) => {
-  const hostHistoryOn = (): boolean => {
-    try {
-      return options.hostHistory?.() ?? true;
-    } catch {
-      return false;
-    }
-  };
+export const historyPart: HarnessPart<'historySources'> = ({ options, kernel, hostHistoryNow: hostHistoryOn }) => {
   /**
    * The owner's history files, gated at CALL time: the conversation index keeps an issued source and reads it later, so a
    * switch turned off after the source was handed out must stop its reads too, not only the next listing.

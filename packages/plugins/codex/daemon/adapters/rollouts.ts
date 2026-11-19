@@ -21,6 +21,9 @@ import { markCutWindow, tailRecordOf } from '../lib/transcript/tail-record.ts';
 
 /** The largest rollout copy-on-link copies: a copy is held whole in memory (the owner's rollouts are tens of MB at most). */
 const MAX_IMPORT_BYTES = 256 * 1024 * 1024;
+
+/** Said when a copy is asked for while the owner's own Codex history is switched off (or its setting cannot be trusted). */
+const HOST_HISTORY_OFF = "Showing Codex's conversations from this computer is turned off.";
 const MAX_ROLLOUTS = 4_000;
 const MAX_DIRECTORIES = 8_000;
 /**
@@ -187,8 +190,20 @@ export class CodexRollouts {
   readonly #parser = new CodexTranscriptParser();
   constructor(
     private readonly kernel: Ports,
-    private readonly historyDirectory: () => Promise<string | undefined>,
+    /** The owner's Codex home (`~/.codex`): the folder that holds `sessions/…`, never the `sessions` folder itself. */
+    private readonly historyHome: () => Promise<string | undefined>,
+    /** Whether the owner's own history may be read at all, asked live at each call (config `hostHistory`). */
+    private readonly hostHistory: () => boolean = () => true,
   ) {}
+
+  /** Asked at every call, so a switch turned off stops the next read; a setting that cannot be read counts as off. */
+  private hostHistoryOn(): boolean {
+    try {
+      return this.hostHistory();
+    } catch {
+      return false;
+    }
+  }
 
   private owner(ferret: FerretId): RootHandle {
     return this.kernel.roots.root('agent-homes', { subfolder: ferret });
@@ -611,10 +626,11 @@ export class CodexRollouts {
   async import(input: ConversationImport): Promise<Result<void, { readonly reason: string }>> {
     const refuse = (reason: string): Result<void, { readonly reason: string }> => err({ reason });
     const named = new RegExp(`^sessions/\\d{4}/\\d{2}/\\d{2}/rollout-[^/]*-${input.id}\\.jsonl$`, 'u');
+    if (!this.hostHistoryOn()) return refuse(HOST_HISTORY_OFF);
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(input.id) || !named.test(input.source))
       return refuse('That is not a Codex rollout file of this id.');
     try {
-      const directory = await this.historyDirectory();
+      const directory = await this.historyHome();
       if (directory === undefined || !directory.startsWith('/'))
         return refuse("Codex's history folder is not known on this machine.");
       const history = this.kernel.roots.root('harness-history', { subfolder: directory });
@@ -641,10 +657,11 @@ export class CodexRollouts {
 
   readonly conversations: Harness['conversations'] = {
     list: async folder => {
-      const history = await this.historyDirectory();
+      if (!this.hostHistoryOn()) return [];
+      const history = await this.historyHome();
       if (history === undefined) return [];
-      // The root is scoped to sessions and the walk never follows a link, so no listing can reach a Codex auth document.
-      const files = await rollouts(this.kernel.roots.root('harness-history', { subfolder: history }), '');
+      // The walk starts at `sessions` and never follows a link, so no listing can reach a Codex auth document.
+      const files = await rollouts(this.kernel.roots.root('harness-history', { subfolder: history }), 'sessions');
       const found: FoundConversation[] = files
         .filter(file => folder === undefined || file.folder === folder)
         .map(file => ({ id: file.id, folder: file.folder, updatedAt: file.modified }));

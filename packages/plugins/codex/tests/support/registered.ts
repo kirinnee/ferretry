@@ -139,7 +139,11 @@ export function registeredCodex() {
         state.set(stateKey(def, name), structuredClone(value));
       },
     },
-    config: { file: () => ({ permissionMode, searchPaths: [] }), collection: () => new Map() },
+    config: {
+      file: () => ({ permissionMode, searchPaths: [] }),
+      fileState: () => ({ state: 'valid', inEffect: true, sentences: [] }),
+      collection: () => new Map(),
+    },
     spawn: {
       start: childSpawn.start,
       run: async (program: string, args: string[], options?: { timeout?: unknown; env?: unknown }) => {

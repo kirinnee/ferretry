@@ -33,7 +33,6 @@ export interface CodexHarnessOptions {
    * home, as v4's profile resolution gave `adaptProfile` only the resolved profile's. No runtime selects none.
    */
   readonly selected: (runtime: string | undefined) => Promise<SelectedComponents>;
-  readonly historyDirectory?: () => Promise<string | undefined>;
   /** Whether the owner's own `~/.codex` history is offered to the conversation index (config `hostHistory`, default true). */
   readonly hostHistory?: () => boolean;
   /** The owner's own Codex home (`~/.codex`), which holds `sessions` and `session_index.jsonl`; the conversation index reads it in place. */
@@ -62,6 +61,8 @@ export interface HarnessContext {
   readonly permissionModeNow: () => HarnessConfig['permissionMode'];
   /** The settings items (`config/codex/settings/`) the runtime's profile selects, now: what a home written now would merge. */
   readonly settingsNow: (runtime: string | undefined) => Promise<ReadonlyMap<string, SettingsItem>>;
+  /** Whether the owner's own `~/.codex` history may be read now: asked live, an unreadable setting counts as off. */
+  readonly hostHistoryNow: () => boolean;
   /**
    * The hooks items (`config/codex/hooks/`) the runtime's profile selects, now, in the profile's layer order (the order
    * Runtimes merges their handlers into its `hooks.json`, so a reorder is a change): what it would render.
@@ -99,7 +100,14 @@ export function harnessContext(options: CodexHarnessOptions): HarnessContext {
       return item === undefined ? [] : [[name, item] as const];
     });
   };
-  const rollouts = new CodexRollouts(kernel, options.historyDirectory ?? (async () => undefined));
+  const hostHistoryNow = (): boolean => {
+    try {
+      return options.hostHistory?.() ?? true;
+    } catch {
+      return false;
+    }
+  };
+  const rollouts = new CodexRollouts(kernel, options.historyHome ?? (async () => undefined), hostHistoryNow);
 
   /**
    * The shared history pool for this ferret's home (docs/design/shared-history.md): each history entry becomes a link to
@@ -172,6 +180,7 @@ export function harnessContext(options: CodexHarnessOptions): HarnessContext {
     permissionModeNow,
     settingsNow,
     hooksNow,
+    hostHistoryNow,
     rollouts,
     say,
     homeRoot,
