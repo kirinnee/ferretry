@@ -24,11 +24,11 @@ const halfOf = (calls: string[]): AppHalf<typeof manifest> =>
   app.build?.({ manifest, client: clientOf(calls) }) as AppHalf<typeof manifest>;
 
 describe('Layouts’ app half', () => {
-  test('it draws exactly the settings tab the manifest declares, and no screen or panel', () => {
+  test('it draws exactly the settings tab the manifest declares, the first-run step panel, and no screen', () => {
     const half = halfOf([]);
     expect(Object.keys(half.settings ?? {})).toEqual(manifest.ui.settings.map(tab => tab.id));
     expect(half.screens ?? {}).toEqual({});
-    expect(half.panels ?? {}).toEqual({});
+    expect(Object.keys(half.panels ?? {})).toEqual(['onboarding-step']);
   });
 
   test('the tab loads on first use and reads the layout through the half’s own client', async () => {

@@ -1,4 +1,4 @@
-import { definePlugin, route, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { cap } from '@ferretry/core-gate/contract';
 import {
   LAYOUTS_ITEMS,
@@ -183,6 +183,8 @@ export default definePlugin({
   },
 
   ui: {
+    // The first-run step `layouts.layout` (a client step: this device's navigation side and density).
+    panels: [panel('onboarding.step', { id: 'onboarding-step', order: 2 })],
     settings: [
       settingsTab('layout', {
         icon: 'layout-dashboard',
@@ -199,6 +201,9 @@ export default definePlugin({
     ],
     themes: [{ id: 'default', file: 'themes/default.yaml' }],
   },
+
+  // Asked on this device only, and skipped once this device has answered it, whichever daemon it was setting up.
+  onboarding: [{ id: 'layout', title: 'Layout', order: 2, side: 'client' }],
 
   data: {
     config: [LAYOUTS_SELECTION, LAYOUTS_ITEMS, LAYOUTS_THEMES],

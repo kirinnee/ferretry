@@ -1,0 +1,157 @@
+/* ============================================================================
+   The layout step (features/onboarding/layout-step.tsx): two rows of ChoiceCards, each card with a mini-window demo.
+   A card's demo moves ONCE, when the card becomes the chosen one (ChoiceCards sets `data-pulse` only on a new
+   selection and never with motion off), and rests on its final picture otherwise. Theme tokens only.
+   ========================================================================== */
+
+.fy-lstep {
+  display: flex;
+  flex-direction: column;
+  gap: 32px; /* between questions; the cards inside a row keep their own 12px */
+  min-width: 0;
+}
+.fy-lstep__row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.fy-lstep__name {
+  color: var(--fg);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  margin: 0;
+}
+.fy-lstep__problem {
+  color: var(--err);
+  font-size: calc(var(--font-size-base) - 1.5px);
+  margin: 0;
+}
+.fy-lstep__note {
+  color: var(--muted);
+  font-size: calc(var(--font-size-base) - 1.5px);
+  margin: 0;
+}
+
+/* The demo is a fixed height so the two cards of a row stay level. The check badge is
+   moved from the card's top corner, where it would sit on the demo, down to the title row. */
+.fy-lstep .fy-cc__card {
+  --lstep-demo-h: 84px;
+}
+.fy-lstep .fy-cc__check {
+  inset-block-start: calc(14px + var(--lstep-demo-h) + 8px - 1px);
+}
+
+/* The mini window: 100% of the card's width. */
+.fy-lstep-demo {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  display: flex;
+  height: var(--lstep-demo-h);
+  overflow: hidden;
+}
+.fy-lstep-demo__drawer {
+  background: var(--surface-2);
+  border-inline-end: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 6px;
+  width: 30px;
+}
+.fy-lstep-demo[data-demo='density'] .fy-lstep-demo__drawer {
+  display: none;
+}
+.fy-lstep-demo__item {
+  background: var(--muted);
+  background: color-mix(in srgb, var(--muted) 50%, var(--bg));
+  border-radius: 3px;
+  height: 8px;
+}
+.fy-lstep-demo__item[data-on] {
+  background: var(--accent);
+}
+.fy-lstep-demo__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.fy-lstep-demo__page {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: flex-start;
+  padding: 8px;
+}
+.fy-lstep-demo[data-density='compact'] .fy-lstep-demo__page {
+  gap: 3px;
+}
+.fy-lstep-demo__row {
+  background: var(--muted);
+  background: color-mix(in srgb, var(--muted) 50%, var(--bg));
+  border-radius: 3px;
+  flex: 0 0 auto;
+  height: 7px;
+}
+.fy-lstep-demo[data-density='compact'] .fy-lstep-demo__row {
+  height: 6px;
+}
+.fy-lstep-demo__bottom {
+  background: var(--surface-2);
+  border-block-start: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  padding: 6px;
+}
+.fy-lstep-demo__bottom span {
+  background: var(--muted);
+  background: color-mix(in srgb, var(--muted) 50%, var(--bg));
+  border-radius: 3px;
+  height: 7px;
+  width: 22px;
+}
+.fy-lstep-demo__bottom span[data-on] {
+  background: var(--accent);
+}
+
+@keyframes fy-lstep-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-cc__card[data-pulse='true'] .fy-lstep-demo__bottom[data-moves] {
+    animation: fy-lstep-rise 280ms ease-out;
+  }
+  .fy-cc__card[data-pulse='true'] .fy-lstep-demo__page[data-moves] .fy-lstep-demo__row {
+    animation: fy-lstep-rise 240ms ease-out backwards;
+  }
+  .fy-cc__card[data-pulse='true'] .fy-lstep-demo__page[data-moves] .fy-lstep-demo__row:nth-child(2) {
+    animation-delay: 40ms;
+  }
+  .fy-cc__card[data-pulse='true'] .fy-lstep-demo__page[data-moves] .fy-lstep-demo__row:nth-child(3) {
+    animation-delay: 80ms;
+  }
+  .fy-cc__card[data-pulse='true'] .fy-lstep-demo__page[data-moves] .fy-lstep-demo__row:nth-child(4) {
+    animation-delay: 120ms;
+  }
+  .fy-cc__card[data-pulse='true'] .fy-lstep-demo__page[data-moves] .fy-lstep-demo__row:nth-child(5) {
+    animation-delay: 160ms;
+  }
+  .fy-cc__card[data-pulse='true'] .fy-lstep-demo__page[data-moves] .fy-lstep-demo__row:nth-child(6) {
+    animation-delay: 200ms;
+  }
+}
+:root[data-motion='reduced'] .fy-lstep-demo__bottom,
+:root[data-motion='reduced'] .fy-lstep-demo__row {
+  animation: none;
+}
