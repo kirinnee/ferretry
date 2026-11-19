@@ -57,7 +57,7 @@ export function ReviewableFiles({
       if (here.length === 0) return null;
       return (
         <div
-          className="grid gap-sm px-sm py-xs"
+          className="grid gap-sm px-sm py-xs font-ui"
           data-compose-extras=""
           data-line-threads={`${at.path}:${at.side}:${String(at.line)}`}
         >

@@ -7,7 +7,7 @@ export function OpenComment() {
   if (compose === undefined) return null;
   return (
     <div>
-      <Button data-compose-open="" onClick={compose.openComment} size="sm" type="button" variant="primary">
+      <Button data-compose-open="" onClick={compose.openComment} size="sm" type="button">
         Write a comment
       </Button>
     </div>

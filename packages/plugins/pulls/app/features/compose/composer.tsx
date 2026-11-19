@@ -1,4 +1,5 @@
 import { Button } from '@ferretry/app/ui';
+import { TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { MAX_POST_BODY, SECRET_SHAPED_SENTENCE } from '../../../contract/index.ts';
 import { SafeProse } from '../pr-page/safe-prose.tsx';
@@ -37,11 +38,13 @@ export function Composer({
   readonly closeLabel?: string;
 }) {
   const { client, address, login, pullUrl, changed } = useCompose();
+  const [preview, setPreview] = useState(false);
   const { phase, post, postAgain, clear } = usePost(client, address, payload, changed, () => {
     onChange('');
+    // The next thing to see is the empty box to write in, not an empty preview.
+    setPreview(false);
     onPosted?.();
   });
-  const [preview, setPreview] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
   // Opened by a person's press, so the box takes the cursor: they came here to type.
   useEffect(() => {
@@ -65,21 +68,22 @@ export function Composer({
   return (
     <section
       aria-label={title}
-      className="kt-panel grid gap-xs p-panel"
+      className="kt-panel grid gap-xs p-panel font-ui"
       data-compose=""
       data-compose-kind={payload.kind}
     >
-      <header className="flex items-center justify-between gap-sm">
+      <header className="flex flex-wrap items-center justify-between gap-sm">
         <h3 className="m-0 min-w-0 break-words text-ui font-semibold text-fg">
           <bdi>{title}</bdi>
         </h3>
         <span className="flex items-center gap-xs">
-          <Button aria-pressed={!preview} onClick={() => setPreview(false)} size="sm" type="button">
+          {/* The kit's own tab look (`kt-tab`): the one showing has the neutral fill, nothing else changes. */}
+          <button aria-pressed={!preview} className="kt-tab" onClick={() => setPreview(false)} type="button">
             Write
-          </Button>
-          <Button aria-pressed={preview} onClick={() => setPreview(true)} size="sm" type="button">
+          </button>
+          <button aria-pressed={preview} className="kt-tab" onClick={() => setPreview(true)} type="button">
             Preview
-          </Button>
+          </button>
           {onClose !== undefined && (
             <Button onClick={onClose} size="sm" type="button" variant="ghost">
               {closeLabel}
@@ -88,7 +92,7 @@ export function Composer({
         </span>
       </header>
       {preview ? (
-        <div className="min-h-24 rounded-control border border-border-soft p-sm" data-compose-preview="">
+        <div className="min-h-[7.5rem] rounded-control border border-border-soft p-sm" data-compose-preview="">
           {blank ? (
             <p className="m-0 text-meta text-faint">Nothing to preview yet.</p>
           ) : (
@@ -98,7 +102,7 @@ export function Composer({
       ) : (
         <textarea
           aria-label={title}
-          className="kt-input min-h-24 resize-y"
+          className="kt-input min-h-[7.5rem] resize-y"
           data-compose-box=""
           dir="auto"
           onChange={event => change(event.target.value)}
@@ -118,11 +122,14 @@ export function Composer({
       </p>
       {phase.status === 'secret' && (
         <div
-          className="grid gap-xs rounded-control border border-warn p-sm text-meta text-warn"
+          className="grid gap-xs rounded-control border-2 border-warn bg-warn/10 p-sm text-ui text-fg"
           data-compose-secret=""
           role="alert"
         >
-          <p className="m-0">{phase.message === '' ? SECRET_SHAPED_SENTENCE : phase.message}</p>
+          <p className="m-0 flex items-start gap-xs font-semibold">
+            <TriangleAlert aria-hidden="true" className="mt-0.5 shrink-0 text-warn" size={16} />
+            <span>{phase.message === '' ? SECRET_SHAPED_SENTENCE : phase.message}</span>
+          </p>
           <span className="flex flex-wrap gap-xs">
             <Button onClick={() => box.current?.focus()} size="sm" type="button">
               Edit the text
@@ -133,41 +140,56 @@ export function Composer({
           </span>
         </div>
       )}
-      {phase.status === 'failed' && (
-        <p className="m-0 text-meta text-err" data-compose-failed="" role="alert">
-          {phase.message}
-        </p>
-      )}
       {phase.status === 'unknown' && (
-        <p className="m-0 grid gap-xs text-meta text-warn" data-compose-unknown="" role="status">
-          <span>
-            Not sure this was posted: GitHub did not answer. The thread is being read again; if your comment is not
-            there, post it again.
-          </span>
+        <div
+          className="grid gap-xs rounded-control border-2 border-warn bg-warn/10 p-sm text-ui text-fg"
+          data-compose-unknown=""
+          role="status"
+        >
+          <p className="m-0 flex items-start gap-xs font-semibold">
+            <TriangleAlert aria-hidden="true" className="mt-0.5 shrink-0 text-warn" size={16} />
+            <span>
+              Not sure this was posted: GitHub did not answer. The thread is being read again; if your comment is not
+              there, post it again.
+            </span>
+          </p>
           <span>
             <Button onClick={postAgain} size="sm" type="button">
               It is not there: post again
             </Button>
           </span>
-        </p>
+        </div>
       )}
-      {phase.status === 'posted' && (
-        <p className="m-0 text-meta text-ok" data-compose-posted={phase.answer.id} role="status">
-          Posted{phase.answer.replayed ? ' (this was already posted)' : ''}.{' '}
-          {posted !== undefined && (
-            <a href={posted} rel="noopener noreferrer" target="_blank">
-              Open on GitHub
-            </a>
-          )}
-        </p>
-      )}
+      {/* One line is always kept for the result, so a post's answer does not push the button away. */}
+      <div aria-live="polite" className="min-h-5 text-meta">
+        {phase.status === 'failed' && (
+          <p className="m-0 text-err" data-compose-failed="" role="alert">
+            {phase.message}
+          </p>
+        )}
+        {phase.status === 'posted' && (
+          <p className="m-0 font-semibold text-ok" data-compose-posted={phase.answer.id}>
+            Posted{phase.answer.replayed ? ' (this was already posted)' : ''}.{' '}
+            {posted !== undefined && (
+              <a href={posted} rel="noopener noreferrer" target="_blank">
+                Open on GitHub
+              </a>
+            )}
+          </p>
+        )}
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-sm">
         <span className="min-w-0 text-meta text-muted" data-compose-as="">
-          {login === null
-            ? 'No GitHub account is linked to this project.'
-            : login === undefined
-              ? 'Checking which account this posts as…'
-              : null}
+          {login === null ? (
+            'No GitHub account is linked to this project.'
+          ) : login === undefined ? (
+            'Checking which account this posts as…'
+          ) : (
+            // Readable whatever the button looks like: a button with nothing to post yet is drawn flat.
+            <>
+              Posts as @<bdi>{login}</bdi>
+            </>
+          )}
         </span>
         <Button disabled={!ready} onClick={() => void post(value)} size="sm" type="button" variant="primary">
           {login === undefined || login === null ? (

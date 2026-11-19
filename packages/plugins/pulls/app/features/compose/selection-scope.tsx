@@ -41,8 +41,10 @@ export function SelectionScope<Found>({
     }
     const rect = selection.getRangeAt(0).getBoundingClientRect();
     const box = element.getBoundingClientRect();
-    const x = Math.max(0, Math.min(rect.right - box.left, Math.max(0, box.width - 120)));
-    const y = rect.bottom - box.top + 6;
+    // In line with the START of the selection, never past a third of the region: the bar wraps inside what is left.
+    const x = Math.max(0, Math.min(rect.left - box.left, box.width * 0.35));
+    // ABOVE the selection: the region can end right under it, and a bar there would be cut off.
+    const y = rect.top - box.top - 6;
     setFloating({ found, x, y });
   }, [read]);
 
@@ -61,13 +63,18 @@ export function SelectionScope<Found>({
       {children}
       {floating !== undefined && (
         <div
-          className="absolute z-10 flex gap-xs rounded-control border border-border-strong bg-surface p-xs shadow-sm"
+          className="absolute z-10 flex flex-wrap gap-xs rounded-control border border-border-strong bg-surface p-xs shadow-sm"
           aria-label="Selection actions"
           data-selection-actions={name}
           // The press must not move the selection away from the text it is about.
           onMouseDown={event => event.preventDefault()}
           role="toolbar"
-          style={{ left: floating.x, top: floating.y }}
+          style={{
+            left: floating.x,
+            top: floating.y,
+            transform: 'translateY(-100%)',
+            maxWidth: `calc(100% - ${String(floating.x)}px)`,
+          }}
         >
           {actions(floating.found, done)}
         </div>

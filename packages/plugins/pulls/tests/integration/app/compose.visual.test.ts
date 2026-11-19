@@ -67,7 +67,8 @@ async function open(
   post: string,
 ): Promise<{ context: BrowserContext; tab: Page; problems: string[] }> {
   const context = await browser.newContext({
-    viewport: { width: variant.width, height: 900 },
+    // Tall, so the page's own scroll box shows the whole of it in a shot.
+    viewport: { width: variant.width, height: 1_800 },
     deviceScaleFactor: variant.phone ? 2 : 1,
     hasTouch: variant.phone,
     isMobile: variant.phone,
@@ -102,6 +103,9 @@ async function selectIn(tab: Page, selector: string, from: number, to: number): 
 }
 
 const shot = async (tab: Page, variant: (typeof VARIANTS)[number], step: string) => {
+  // A shot is of a state at rest: the pointer is off the controls and the 120 ms fills have finished.
+  await tab.mouse.move(0, 0);
+  await tab.waitForTimeout(300);
   if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${variant.name}-${step}.png`), fullPage: true });
 };
 const noSideways = async (tab: Page) =>
@@ -133,6 +137,16 @@ describe('quote and comment', () => {
         await shot(tab, variant, '2-composer-with-quote');
         await tab.getByRole('button', { name: 'Preview' }).click();
         await tab.waitForSelector('[data-compose-preview] blockquote');
+        // The tab that is showing looks different from the one that is not (read from the page, not from a picture).
+        const tabs = await tab.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>('[data-compose] header button[aria-pressed]')].map(button => ({
+            word: button.textContent,
+            pressed: button.getAttribute('aria-pressed'),
+            fill: getComputedStyle(button).backgroundColor,
+          })),
+        );
+        expect(tabs.map(each => each.pressed)).toEqual(['false', 'true']);
+        expect(tabs[0]?.fill, 'the showing tab has its own fill').not.toBe(tabs[1]?.fill);
         await shot(tab, variant, '3-preview');
         await tab.locator('[data-compose] button[data-variant="primary"]').click();
         await tab.waitForSelector('[data-compose-posted]');
@@ -169,6 +183,23 @@ describe('quote and comment', () => {
           selection.addRange(range);
         });
         await tab.waitForSelector('[data-selection-actions="diff"]');
+        // The bar is whole (inside the window, not covered by or cut off by anything).
+        const bar = await tab.evaluate(() => {
+          const element = document.querySelector('[data-selection-actions="diff"]') as HTMLElement;
+          const rect = element.getBoundingClientRect();
+          const probe = (x: number, y: number) => element.contains(document.elementFromPoint(x, y));
+          return {
+            left: rect.left,
+            right: rect.right,
+            top: rect.top,
+            width: window.innerWidth,
+            corners: [probe(rect.left + 2, rect.top + 2), probe(rect.right - 2, rect.bottom - 2)],
+          };
+        });
+        expect(bar.left).toBeGreaterThanOrEqual(0);
+        expect(bar.right).toBeLessThanOrEqual(bar.width);
+        expect(bar.top).toBeGreaterThanOrEqual(0);
+        expect(bar.corners).toEqual([true, true]);
         await shot(tab, variant, '5-diff-selection');
         await tab.getByRole('button', { name: 'Comment on these lines' }).click();
         expect(await tab.locator('[data-compose-dock="line"] h3').innerText()).toMatch(
@@ -194,6 +225,22 @@ describe('quote and comment', () => {
         // A reply under the thread has its own box.
         await tab.locator('[data-reply-open="PRRT_demo1"]').click();
         await tab.waitForSelector('[data-reply-box="PRRT_demo1"] textarea');
+        // Nothing a reply box draws may widen the diff or leave the screen.
+        const fits = await tab.evaluate(() => {
+          const box = document.querySelector('[data-reply-box] [data-compose]')?.getBoundingClientRect();
+          const body = document.querySelector<HTMLElement>('[data-diff-body]');
+          return {
+            right: box?.right ?? 0,
+            left: box?.left ?? 0,
+            width: window.innerWidth,
+            diffOverflow: body === null ? 0 : body.scrollWidth - body.clientWidth,
+            scrolled: body?.scrollLeft ?? 0,
+          };
+        });
+        expect(fits.left).toBeGreaterThanOrEqual(0);
+        expect(fits.right).toBeLessThanOrEqual(fits.width);
+        expect(fits.diffOverflow).toBeLessThanOrEqual(0);
+        expect(fits.scrolled).toBe(0);
         await shot(tab, variant, '7-reply');
         await noSideways(tab);
         expect(problems).toEqual([]);
