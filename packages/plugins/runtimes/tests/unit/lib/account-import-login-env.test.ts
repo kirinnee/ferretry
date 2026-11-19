@@ -89,7 +89,17 @@ describe('planImport — the harness env for the login (r9 A8)', () => {
     const plan = planImport([claude({ env: { [keyed]: FAKE_KEY, CLAUDE_CONFIG_DIR: '/else' } })], { digest });
     const spoken = JSON.stringify([plan.preview, plan.notes, plan.secrets.map(secret => secret.from)]);
     should(spoken.includes(keyed)).be.false();
-    should(plan.preview.harnesses[0]?.secretKeys).eql(['env.(a variable whose name looks like a key)']);
+    should(plan.preview.harnesses[0]?.secretKeys).eql([]);
+    should(plan.preview.harnesses[0]?.problems.join(' ')).containEql('env.(a variable whose name looks like a key)');
+  });
+
+  it('should derive no Vault name from a variable name shaped like a key', () => {
+    const keyed = 'ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
+    const plan = planImport([claude({ env: { [keyed]: FAKE_KEY, ANTHROPIC_API_KEY: FAKE_KEY } })], { digest });
+    should(plan.secrets.map(secret => secret.name)).eql(['ANTHROPIC_API_KEY']);
+    should(plan.loginEnvs[0]?.minted.map(entry => entry.name)).eql(['ANTHROPIC_API_KEY']);
+    should(JSON.stringify(plan).includes(keyed)).be.false();
+    should(JSON.stringify(plan).includes(keyed.toUpperCase())).be.false();
   });
 
   it('should bring in no env when the person left the env item out', () => {

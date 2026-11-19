@@ -34,7 +34,7 @@
  */
 import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { looksSecret } from '@ferretry/std/credential-words';
-import { GITHUB_TOKEN_NAMES, maskedVariableName } from '@ferretry/plugin-logins/contract';
+import { GITHUB_TOKEN_NAMES, maskedVariableName, nameLooksLikeKey } from '@ferretry/plugin-logins/contract';
 import { importItemId, importNamedItemId } from '../../../contract/index.ts';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
@@ -439,6 +439,11 @@ function importEnv(
   for (const [variable, raw] of Object.entries(env)) {
     // A name that is itself shaped like a key is not repeated in a scan, a warning or a source label.
     const shown = `${keyPrefix}${maskedVariableName(variable)}`;
+    // A key typed into the name box: skipped BEFORE anything is derived from it, so no Vault name is built from it.
+    if (nameLooksLikeKey(variable)) {
+      result.dropped.push(`${shown} (a name that looks like a key, so it was left out)`);
+      continue;
+    }
     if (typeof raw !== 'string' && typeof raw !== 'number' && typeof raw !== 'boolean') {
       result.dropped.push(`${shown} (not a text value)`);
       continue;
