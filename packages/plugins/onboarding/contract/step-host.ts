@@ -15,6 +15,11 @@
  *      recorded twice). A page therefore never has to call `done()` just to let Next work, and Next is never held back for
  *      want of a `done()`: only `ready()` (and a `busy()` act in flight) lock it. A page that must not be answered by
  *      default calls `skip()` instead, or holds the person with `busy()`. `Later` records `later` instead of `done`.
+ *   6. THE SHELL OWNS THE FRAME (O4's one seam rule): the shell wraps every page in `StepPageFrame` (the title from the manifest,
+ *      the segment progress, the Back / Next footer, the Later button, the loading cover and the "Only on <machine>" chip). A
+ *      page returns ONLY its body (cards, a short list, a form, its own demo) and NEVER renders `StepPageFrame`, a title, a
+ *      progress bar or Back/Next/Later buttons itself: a page that does would draw two frames and two footers. A page that
+ *      needs the footer's state uses `busy()` / `next()` / `back()` / `skip()` on the host.
  */
 export type { StepHost, StepSegmentMemory } from '@ferretry/kernel/contract';
 

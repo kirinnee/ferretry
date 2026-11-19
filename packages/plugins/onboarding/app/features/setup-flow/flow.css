@@ -71,13 +71,24 @@
   align-self: flex-start;
 }
 /* A quiet text button at the content edge, readable in both modes. */
-.fy-sf-later {
+.fy-sf-page .fy-sf-later {
   align-self: flex-start;
   color: var(--fg);
+  font-size: var(--font-size-base);
+  height: auto;
   margin-inline-start: -8px;
   min-height: 44px;
+  padding-inline: 8px;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+.fy-sf-page .fy-sf-silent button {
+  height: auto;
+  min-height: 44px;
+}
+/* The cover is a short block, so "Still checking…" sits right under the spinner it belongs to. */
+.fy-sf-cover .fy-loading {
+  min-height: 160px;
 }
 .fy-sf-unsaved {
   align-items: center;
