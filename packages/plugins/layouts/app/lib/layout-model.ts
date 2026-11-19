@@ -134,7 +134,7 @@ export const LAYOUT_SETTINGS: readonly LayoutSetting[] = [
     kind: 'choice',
     path: 'phone.side.show',
     name: 'Phone second column',
-    hint: 'The column beside the page on a narrow screen',
+    hint: 'Never: no ferret list. Wide screens: the list is in the menu. Always: also beside the page when the layout puts it on the right',
     options: PHONE_SIDE_SHOW_OPTIONS,
   },
   {
@@ -228,3 +228,22 @@ export function refusalSentence(error: unknown): string {
       : undefined;
   return detail === undefined ? error.message : `${error.message}: ${detail}`;
 }
+
+/** The headed groups of the page, and the keys each holds, in the order they are drawn. */
+export const LAYOUT_SECTIONS: readonly {
+  readonly id: 'navigation' | 'page' | 'phone';
+  readonly name: string;
+  readonly paths: readonly LayoutSetting['path'][];
+}[] = [
+  { id: 'navigation', name: 'Navigation', paths: ['nav.side', 'nav.style', 'nav.items'] },
+  { id: 'page', name: 'The page', paths: ['side.show', 'density', 'top', 'panels.ferret.side'] },
+  {
+    id: 'phone',
+    name: 'On a phone',
+    paths: ['phone.nav.side', 'phone.side.show', 'phone.density', 'phone.nav.items', 'phone.top'],
+  },
+];
+
+/** The words the page uses for the two places a change can be saved. Owner words, verbatim. */
+export const SCOPE_WORDS = { all: 'Same on all my devices', device: 'Just this device' } as const;
+export type Scope = keyof typeof SCOPE_WORDS;

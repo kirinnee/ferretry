@@ -18,6 +18,8 @@ export interface PlaceSource {
   /** The name saved in the layout. */
   readonly id: string;
   readonly label: string;
+  /** Its icon name, when it declares one (the nav places do). */
+  readonly icon?: string;
   /** Other names a layout may spell it by (a screen's bare id, when no other plugin shares it). */
   readonly aliases?: readonly string[];
 }
@@ -26,6 +28,7 @@ export interface PlaceSource {
 export interface Place {
   readonly id: string;
   readonly label: string;
+  readonly icon?: string;
   readonly hidden: boolean;
   /** Settings is the way back to every setting: it is always shown, so its switch is fixed. */
   readonly locked: boolean;
@@ -58,6 +61,7 @@ const shellSource = (name: string): PlaceSource | undefined =>
 const place = (source: PlaceSource, hidden: boolean): Place => ({
   id: source.id,
   label: source.label,
+  ...(source.icon === undefined ? {} : { icon: source.icon }),
   hidden: hidden && source.id !== LOCKED,
   locked: source.id === LOCKED,
 });
@@ -164,6 +168,11 @@ export function navSources(items: readonly NavCatalogItem[]): readonly PlaceSour
     const alias = bare(item);
     const unique =
       alias !== undefined && alias !== item.id && items.filter(other => bare(other) === alias).length === 1;
-    return { id: item.id, label: item.label, ...(unique ? { aliases: [alias] } : {}) };
+    return {
+      id: item.id,
+      label: item.label,
+      ...(item.icon === undefined ? {} : { icon: item.icon }),
+      ...(unique ? { aliases: [alias] } : {}),
+    };
   });
 }

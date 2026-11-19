@@ -206,7 +206,7 @@ describe('the layout previews', () => {
         expect((end?.y ?? 0) - (start?.y ?? 0), 'the row moves down two places').toBeGreaterThan(20);
         // The group, not the page: the app's own scroller clips a full-page capture.
         await tab.setViewportSize({ width: variant.width, height: 4_000 });
-        await shot(tab.locator('[data-setting-group="Layout — every device"]'), variant, 'group');
+        await shot(tab.locator('[data-setting-group="Navigation"]'), variant, 'group');
       } finally {
         await close();
       }

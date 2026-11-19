@@ -96,7 +96,7 @@ describe('the layout lists', () => {
         await list.waitFor();
         expect(await tab.locator('input[type="text"]').count(), 'only the layout name is typed').toBe(1);
         const before = await keysOf(list);
-        const grip = list.locator('[aria-label="Reorder Ferrets"]');
+        const grip = list.locator('[data-chip-main][aria-label="Reorder Ferrets"]');
         await grip.scrollIntoViewIfNeeded();
         const box = await grip.boundingBox();
         const x = (box?.x ?? 0) + (box?.width ?? 0) / 2;
@@ -107,7 +107,19 @@ describe('the layout lists', () => {
         expect(await list.locator('li[data-state="held"]').count(), 'one row is held').toBe(1);
         // The rows that made way slide for 150 ms: the frame is taken once they have arrived.
         await tab.waitForTimeout(350);
-        if (shotsDir !== '') await list.screenshot({ path: join(shotsDir, `${variant.name}-mid-drag.png`) });
+        if (shotsDir !== '') {
+          // The held chip follows the pointer below the list, so the frame is the list and the room under it.
+          const frame = await list.boundingBox();
+          await tab.screenshot({
+            path: join(shotsDir, `${variant.name}-mid-drag.png`),
+            clip: {
+              x: frame?.x ?? 0,
+              y: frame?.y ?? 0,
+              width: frame?.width ?? 300,
+              height: (frame?.height ?? 300) + 120,
+            },
+          });
+        }
         await tab.mouse.up();
         const after = await keysOf(list);
         expect(after).not.toEqual(before);
@@ -115,8 +127,17 @@ describe('the layout lists', () => {
         expect(await list.locator('li[data-state="held"]').count()).toBe(0);
         await tab.waitForTimeout(350);
         if (shotsDir !== '') await list.screenshot({ path: join(shotsDir, `${variant.name}-dropped.png`) });
-        await tab.setViewportSize({ width: variant.width, height: 4_000 });
+        await tab.setViewportSize({ width: variant.width, height: 6_000 });
+        await tab.evaluate(() => window.scrollTo(0, 0));
         if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${variant.name}-page.png`), fullPage: true });
+        // The one switch: "Just this device" draws the same rows, now saved on this device alone.
+        await tab.locator('label', { hasText: 'Just this device' }).click();
+        await tab.locator('[data-layout-scope="device"]').waitFor();
+        expect(await tab.locator('[role="radiogroup"][aria-label="Navigation side"]').count(), 'one set of rows').toBe(
+          1,
+        );
+        if (shotsDir !== '')
+          await tab.screenshot({ path: join(shotsDir, `${variant.name}-device.png`), fullPage: true });
         const overflow = await tab.evaluate(
           () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
         );

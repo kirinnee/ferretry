@@ -42,6 +42,15 @@ const pick = async (root: HTMLElement, label: string, word: string, scope = 0): 
   await interact(() => radio.click());
 };
 
+/** The one switch of the page: where a change is saved. */
+const pickScope = async (root: HTMLElement, scope: 'all' | 'device'): Promise<void> => {
+  const radio = must(
+    group(root, 'Where a change is saved').querySelector<HTMLInputElement>(`input[value="${scope}"]`),
+    scope,
+  );
+  await interact(() => radio.click());
+};
+
 const fakeDevice = (over: Partial<DeviceLayout> = {}): DeviceLayout & { readonly calls: string[] } => {
   const calls: string[] = [];
   return {
@@ -138,10 +147,13 @@ describe('the Layout tab', () => {
       'bottom',
     );
     await pick(view.container, 'Phone navigation side', 'left');
-    await pick(view.container, 'Phone density', 'compact', 1);
     await settle();
     expect(script.calls).toEqual(['set phone.nav.side left']);
+    await pickScope(view.container, 'device');
+    await pick(view.container, 'Phone density', 'compact');
+    await settle();
     expect(device.calls).toEqual(['set phone.density compact']);
+    expect(script.calls).toEqual(['set phone.nav.side left']);
     await view.unmount();
   });
 
@@ -152,7 +164,7 @@ describe('the Layout tab', () => {
       row => row.dataset.sortableKey ?? '',
     );
 
-  test('no list is a text box: places are rows with a grip, arrows and an eye', async () => {
+  test('no list is a text box: places are chips with a handle, Earlier and Later buttons and an eye', async () => {
     const script = scriptedLayouts();
     const view = await mount(<LayoutSettings client={script.client} />);
     await settle();
@@ -177,7 +189,7 @@ describe('the Layout tab', () => {
     const script = scriptedLayouts();
     const view = await mount(<LayoutSettings client={script.client} />);
     await settle();
-    await interact(() => press(list(view.container, 'nav.items'), 'Move Ferrets down').click());
+    await interact(() => press(list(view.container, 'nav.items'), 'Move Ferrets later').click());
     await settle();
     expect(script.calls).toEqual([
       'set nav.items agenda,ferrets,board,projects,insights,settings + set nav.hidden  + set phone.nav.hidden ',
@@ -282,8 +294,8 @@ describe('the Layout tab', () => {
     expect(script.calls).toEqual([
       'set phone.nav.items ferrets,agenda,board,projects,insights,settings + set phone.nav.hidden projects',
     ]);
-    const mine = view.container.querySelectorAll<HTMLElement>('[data-layout-list="phone.top"]')[1];
-    await interact(() => press(must(mine, 'this device phone top'), 'Move Daemon picker down').click());
+    await pickScope(view.container, 'device');
+    await interact(() => press(list(view.container, 'phone.top'), 'Move Daemon picker later').click());
     expect(device.calls).toEqual(['set phone.top search,daemon-picker']);
     await view.unmount();
   });
@@ -373,17 +385,44 @@ describe('the Layout tab', () => {
     expect(script.listeners()).toBe(0);
   });
 
-  test('this device’s own choice is a second group, saved in the app and sent nowhere', async () => {
+  test('one page, one switch: "Same on all my devices" or "Just this device", and one set of rows', async () => {
+    const script = scriptedLayouts();
+    const device = fakeDevice();
+    const view = await mount(<LayoutSettings client={script.client} device={device} />);
+    await settle();
+    const scope = group(view.container, 'Where a change is saved');
+    expect([...scope.querySelectorAll('label')].map(label => label.textContent)).toEqual([
+      'Same on all my devices',
+      'Just this device',
+    ]);
+    expect(scope.querySelector<HTMLInputElement>('input:checked')?.value).toBe('all');
+    // One set of rows in either scope: a key is never drawn twice.
+    expect(view.container.querySelectorAll('[role="radiogroup"][aria-label="Navigation side"]')).toHaveLength(1);
+    await pickScope(view.container, 'device');
+    expect(view.container.querySelectorAll('[role="radiogroup"][aria-label="Navigation side"]')).toHaveLength(1);
+    expect(view.container.textContent).not.toContain('Layout — this device only');
+    expect(view.container.querySelectorAll('h1,h2')).toHaveLength(0);
+    await view.unmount();
+  });
+
+  test('Just this device is saved in the app and sent nowhere; it hides what only the shared layout has', async () => {
     const script = scriptedLayouts();
     const device = fakeDevice({ inForce: COMPACT_LAYOUT, overrides: { density: 'compact' } });
     const view = await mount(<LayoutSettings client={script.client} device={device} />);
     await settle();
-    expect(view.container.textContent).toContain('Layout — this device only');
-    expect(group(view.container, 'Density', 1).querySelector<HTMLInputElement>('input:checked')?.value).toBe('compact');
-    await pick(view.container, 'Navigation side', 'bottom', 1);
+    // A device that already differs opens on its own changes.
+    expect(
+      group(view.container, 'Where a change is saved').querySelector<HTMLInputElement>('input:checked')?.value,
+    ).toBe('device');
+    expect(group(view.container, 'Density').querySelector<HTMLInputElement>('input:checked')?.value).toBe('compact');
+    expect(view.container.textContent).toContain('This device has 1 change of its own');
+    expect(view.container.textContent).not.toContain('Save as a new layout');
+    await pick(view.container, 'Navigation side', 'bottom');
     await interact(() => press(view.container, 'Follow again').click());
     expect(device.calls).toEqual(['set nav.side bottom', 'reset']);
     expect(script.calls).toEqual([]);
+    await pickScope(view.container, 'all');
+    expect(view.container.textContent).toContain('Save as a new layout');
     await view.unmount();
   });
 
@@ -391,8 +430,96 @@ describe('the Layout tab', () => {
     const script = scriptedLayouts();
     const view = await mount(<LayoutSettings client={script.client} device={fakeDevice()} />);
     await settle();
+    await pickScope(view.container, 'device');
     expect(press(view.container, 'Follow again').disabled).toBe(true);
     expect(view.container.textContent).toContain('This device has no changes of its own');
+    await view.unmount();
+  });
+
+  test('outside a shell there is no device, so there is no switch', async () => {
+    const script = scriptedLayouts();
+    const view = await mount(<LayoutSettings client={script.client} />);
+    await settle();
+    expect(view.container.querySelector('[data-layout-scope]')).toBeNull();
+    await view.unmount();
+  });
+
+  test('the keys are grouped, and every choice says in plain text what the chosen word does', async () => {
+    const script = scriptedLayouts();
+    const view = await mount(<LayoutSettings client={script.client} />);
+    await settle();
+    const heads = [...view.container.querySelectorAll('[data-setting-group] > h3')].map(head => head.textContent);
+    expect(heads).toEqual(['In use', 'Navigation', 'The page', 'On a phone', 'Saved layouts']);
+    const row = must(view.container.querySelector<HTMLElement>('[data-setting-row="Density"]'), 'the Density row');
+    expect(row.querySelector('[data-layout-caption]')?.textContent).toBe('Room between rows.');
+    // The caption is outside the decorative preview, so a screen reader reads it.
+    expect(row.querySelector('[data-layout-caption]')?.closest('[aria-hidden="true"]')).toBeNull();
+    await view.unmount();
+  });
+
+  test('each navigation chip carries a name, Earlier, Later and an eye; the chip itself is the drag handle', async () => {
+    const script = scriptedLayouts();
+    const view = await mount(<LayoutSettings client={script.client} />);
+    await settle();
+    const chip = must(
+      list(view.container, 'nav.items').querySelector<HTMLElement>('[data-chip-key="board"]'),
+      'the Board chip',
+    );
+    expect(chip.querySelector('[data-chip-main]')?.textContent).toContain('Board');
+    for (const name of ['Move Board earlier', 'Move Board later', 'Hide Board'])
+      expect(press(chip, name)).toBeDefined();
+    const first = must(
+      list(view.container, 'nav.items').querySelector<HTMLElement>('[data-chip-key="ferrets"]'),
+      'first',
+    );
+    expect(press(first, 'Move Ferrets earlier').getAttribute('aria-disabled')).toBe('true');
+    await view.unmount();
+  });
+
+  test('a pointer drag of the whole chip drops it in the new place, and saves once', async () => {
+    const script = scriptedLayouts();
+    const view = await mount(<LayoutSettings client={script.client} />);
+    await settle();
+    const nav = list(view.container, 'nav.items');
+    const chip = must(nav.querySelector<HTMLElement>('[data-chip-key="ferrets"]'), 'the Ferrets chip');
+    // happy-dom has no layout: every chip is 100 x 40, one per row, so a chip's middle is its place down the list.
+    const all = [...nav.querySelectorAll<HTMLElement>('[data-chip-key]')];
+    all.forEach((element, index) => {
+      Object.defineProperties(element, {
+        offsetLeft: { value: 0, configurable: true },
+        offsetTop: { value: index * 40, configurable: true },
+        offsetWidth: { value: 100, configurable: true },
+        offsetHeight: { value: 40, configurable: true },
+      });
+    });
+    const point = (type: string, y: number) =>
+      new PointerEvent(type, {
+        pointerId: 1,
+        pointerType: 'mouse',
+        button: 0,
+        clientX: 10,
+        clientY: y,
+        bubbles: true,
+        cancelable: true,
+      });
+    await interact(() => chip.dispatchEvent(point('pointerdown', 20)));
+    await interact(() => document.dispatchEvent(point('pointermove', 130)));
+    expect(script.calls).toEqual([]);
+    await interact(() => document.dispatchEvent(point('pointerup', 130)));
+    await settle();
+    expect(script.calls).toHaveLength(1);
+    expect(script.calls[0]).toContain('set nav.items agenda,board,ferrets,projects');
+    await view.unmount();
+  });
+
+  test('moving chips writes no browser storage', async () => {
+    const script = scriptedLayouts();
+    const view = await mount(<LayoutSettings client={script.client} device={fakeDevice()} />);
+    await settle();
+    const before = [localStorage.length, sessionStorage.length];
+    await interact(() => press(list(view.container, 'nav.items'), 'Hide Board').click());
+    await settle();
+    expect([localStorage.length, sessionStorage.length]).toEqual(before);
     await view.unmount();
   });
 

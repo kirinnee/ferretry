@@ -1,0 +1,109 @@
+/* The navigation chips (nav-chips.tsx): a compact grid, one column on a phone, two from 640 px, three from 1100 px. */
+.fy-chips {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+@media (min-width: 640px) {
+  .fy-chips {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1100px) {
+  .fy-chips {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.fy-chip {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control, 8px);
+  cursor: grab;
+  display: flex;
+  min-width: 0;
+  padding-inline: 2px 0;
+}
+/* One ring around the whole chip when its main part has the focus: sized to the chip, not to a grip. */
+.fy-chip:has([data-chip-main]:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.fy-chip[data-state='held'] {
+  border-color: var(--accent);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--fg) 18%, transparent);
+  cursor: grabbing;
+  touch-action: none;
+}
+.fy-chip[data-hidden] .fy-chip-name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.fy-chip[data-hidden] .fy-chip-icon {
+  opacity: 0.55;
+}
+
+.fy-chip-main {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--fg);
+  cursor: inherit;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 8px;
+  min-height: 44px;
+  min-width: 0;
+  outline: none;
+  padding: 0 6px;
+  text-align: left;
+}
+.fy-chip-icon {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  flex: none;
+  height: 44px;
+  justify-content: center;
+  /* A finger drags from here; the rest of the chip scrolls the page. */
+  touch-action: none;
+  width: 28px;
+}
+.fy-chip-name {
+  font-size: var(--text-ui, 0.875rem);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Earlier, Later and the eye: foreground ink, not the faint muted one, so they read in the dark themes too. */
+.fy-chip-act {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control, 8px);
+  color: color-mix(in srgb, var(--fg) 72%, var(--surface));
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  height: 44px;
+  justify-content: center;
+  width: 32px;
+}
+.fy-chip-act:hover {
+  color: var(--fg);
+}
+.fy-chip-act:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+.fy-chip-act[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
