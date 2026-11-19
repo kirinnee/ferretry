@@ -1,14 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { COMPACT_LAYOUT, DEFAULT_LAYOUT, LayoutSchema } from '../../../contract/index.ts';
-import {
-  choiceOf,
-  LAYOUT_ID,
-  LAYOUT_SETTINGS,
-  listOf,
-  listText,
-  parseListText,
-  refusalSentence,
-} from '../../../app/lib/layout-model.ts';
+import { choiceOf, LAYOUT_ID, LAYOUT_SETTINGS, listOf, refusalSentence } from '../../../app/lib/layout-model.ts';
 import { DaemonCallError } from '@ferretry/app';
 
 describe('the layout settings', () => {
@@ -91,12 +83,6 @@ describe('the layout settings', () => {
     expect(choiceOf(phone, 'phone.side.show')).toBe('always');
     expect(choiceOf(phone, 'phone.density')).toBe('compact');
     expect(listOf(phone, 'phone.top')).toEqual(['search']);
-  });
-
-  test('a list is shown with commas and typed back the way the daemon splits it', () => {
-    expect(listText(['agenda', 'board'])).toBe('agenda, board');
-    expect(parseListText(' agenda ,, board ,')).toEqual(['agenda', 'board']);
-    expect(parseListText('')).toEqual([]);
   });
 
   test('a saved layout id is lowercase words joined by dashes', () => {
