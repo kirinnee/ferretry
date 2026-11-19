@@ -133,6 +133,8 @@ describe('the layout lists', () => {
         // The one switch: "Just this device" draws the same rows, now saved on this device alone.
         await tab.locator('label', { hasText: 'Just this device' }).click();
         await tab.locator('[data-layout-scope="device"]').waitFor();
+        // The pill's selected state eases in; the frame is taken once it has settled.
+        await tab.waitForTimeout(350);
         expect(await tab.locator('[role="radiogroup"][aria-label="Navigation side"]').count(), 'one set of rows').toBe(
           1,
         );

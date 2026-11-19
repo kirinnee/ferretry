@@ -190,7 +190,7 @@ export function DaemonSettingsPage({
             <span className="fy-settings-machine__state" data-online={online ? 'true' : 'false'}>
               {online ? 'Online' : 'Offline'}
             </span>
-            {active === undefined ? null : (
+            {active === undefined || active.scopeChip === false ? null : (
               <span className="fy-settings-machine__scope" data-scope={scopeOf(active)}>
                 {SCOPE_WORDS[scopeOf(active)]}
               </span>

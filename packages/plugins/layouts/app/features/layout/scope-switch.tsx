@@ -21,21 +21,25 @@ export function ScopeSwitch({
         label="Where a change is saved"
         value={scope}
         options={[
-          { id: 'all', label: SCOPE_WORDS.all, title: 'Every device that follows the shared layout changes too.' },
+          {
+            id: 'all',
+            label: SCOPE_WORDS.all,
+            title: 'Saved on this computer; every phone or browser that opens it follows this layout.',
+          },
           {
             id: 'device',
             label: SCOPE_WORDS.device,
-            title: 'Only this browser changes; other devices keep the shared layout.',
+            title: 'Only this browser changes; other devices keep this computer’s layout.',
           },
         ]}
         onChange={onChange}
       />
       <p className="fy-lr-caption" data-layout-caption="">
         {scope === 'all'
-          ? 'Every device that follows the shared layout changes with it.'
+          ? 'Saved on this computer — every phone or browser that opens it gets this layout.'
           : changes === 0
-            ? 'This device follows the shared layout. Change a row to make it different here.'
-            : `This device has ${changes} ${changes === 1 ? 'change' : 'changes'} of its own. The other devices keep the shared layout.`}
+            ? 'This device follows this computer’s layout. Change a row to make it different here.'
+            : `This device has ${changes} ${changes === 1 ? 'change' : 'changes'} of its own. The other devices keep this computer’s layout.`}
       </p>
     </div>
   );

@@ -396,6 +396,9 @@ describe('the Layout tab', () => {
       'Just this device',
     ]);
     expect(scope.querySelector<HTMLInputElement>('input:checked')?.value).toBe('all');
+    // The label is the owner's; the caption under it says honestly where "all" reaches: this computer's daemon.
+    const caption = view.container.querySelector('[data-layout-scope] [data-layout-caption]')?.textContent;
+    expect(caption).toBe('Saved on this computer — every phone or browser that opens it gets this layout.');
     // One set of rows in either scope: a key is never drawn twice.
     expect(view.container.querySelectorAll('[role="radiogroup"][aria-label="Navigation side"]')).toHaveLength(1);
     await pickScope(view.container, 'device');

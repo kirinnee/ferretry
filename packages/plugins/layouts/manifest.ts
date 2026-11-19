@@ -190,6 +190,7 @@ export default definePlugin({
         label: 'Layout',
         order: 15,
         scope: 'device',
+        scopeChip: false,
       }),
     ],
     layouts: [
