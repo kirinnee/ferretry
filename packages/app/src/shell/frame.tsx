@@ -26,7 +26,6 @@ import {
 } from './pages.tsx';
 import { PageScrollRegion } from '../scroll/page-scroll-region.tsx';
 import { FrameRootContext } from './frame-root.tsx';
-import { ChosenNameSaver } from './chosen-name-saver.tsx';
 import { NameThisMachine } from './name-machine.tsx';
 import { PasskeyMount } from './passkey-mount.tsx';
 import { PanelSlot, ScreenView, ShellLine } from './views.tsx';
@@ -303,8 +302,6 @@ export function Frame() {
             <DeviceViews />
             {/* Every plugin's background views, once per paired daemon where it may run (S5): watchers and overlays. */}
             <BackgroundViews />
-            {/* The name typed on the pair screen is saved on whatever route comes next (the first run names no machine). */}
-            <ChosenNameSaver />
             {/* A machine a pairing just made, and that has no name of the owner's, offers to be named (skippable). */}
             {daemon !== undefined && runtime.daemons.namePending(daemon) ? (
               <NameThisMachine key={daemon} daemon={daemon} />
