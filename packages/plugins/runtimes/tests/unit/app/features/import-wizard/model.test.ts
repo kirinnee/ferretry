@@ -197,3 +197,12 @@ describe('GitHub-token variables', () => {
     );
   });
 });
+
+describe('an environment that is only GitHub tokens', () => {
+  it('has no whole-environment box; each token is still its own choice', () => {
+    const model = toolModel('claude-code', scanOf({ claude: { secretKeys: ['env.GH_TOKEN'] } }), null);
+    expect(itemIds(model)).toEqual([]);
+    expect(model.groups[0]?.githubTokens).toEqual(['GH_TOKEN']);
+    expect(importChange(model, new Set(), 'x', new Set(['GH_TOKEN']))).toMatchObject({ tickedEnv: ['GH_TOKEN'] });
+  });
+});

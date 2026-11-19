@@ -139,19 +139,25 @@ const groupsOf = (harness: HarnessKey, scan: HarnessScan): readonly FoundGroup[]
         },
       ],
     });
-  if (scan.secretKeys.length > 0)
+  const secrets = scan.secretKeys.map(secretName);
+  const others = secrets.filter(name => !GITHUB_TOKEN_NAMES.includes(name));
+  if (secrets.length > 0)
     groups.push({
       key: 'env',
       title: 'Environment',
-      items: [
-        {
-          id: importItemId(harness, 'env'),
-          label: `Environment keys (${String(scan.secretKeys.length)})`,
-          becomes: becomes(harness, 'env'),
-        },
-      ],
-      locked: scan.secretKeys.map(secretName).filter(name => !GITHUB_TOKEN_NAMES.includes(name)),
-      githubTokens: scan.secretKeys.map(secretName).filter(name => GITHUB_TOKEN_NAMES.includes(name)),
+      // Only GitHub tokens: each is its own choice below, so there is no whole-environment box to draw.
+      items:
+        others.length === 0
+          ? []
+          : [
+              {
+                id: importItemId(harness, 'env'),
+                label: `Environment keys (${String(others.length)})`,
+                becomes: becomes(harness, 'env'),
+              },
+            ],
+      locked: others,
+      githubTokens: secrets.filter(name => GITHUB_TOKEN_NAMES.includes(name)),
     });
   const profiles = scan.codexProfiles ?? [];
   if (profiles.length > 0)

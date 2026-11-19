@@ -76,7 +76,7 @@ function TokenRow({
     <li className="min-w-0" data-found-token={name}>
       <label
         htmlFor={id}
-        className="kt-panel flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel hover:border-accent has-[input:not(:checked)]:opacity-70 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus"
+        className="kt-panel flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel hover:border-accent has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus"
       >
         <input
           id={id}
@@ -92,7 +92,7 @@ function TokenRow({
             <code className="[overflow-wrap:anywhere]">{name}</code>
           </span>
           <span className="text-cell text-fg">{`Becomes: ${becomes('claude-code', 'env')} (${SECRET_KEPT})`}</span>
-          <span className="text-cell text-muted" data-found-token-note="">
+          <span className="text-cell text-fg" data-found-token-note="">
             {GITHUB_TOKEN_SENTENCE}
           </span>
         </span>
