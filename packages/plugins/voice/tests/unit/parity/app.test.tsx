@@ -103,13 +103,15 @@ const trace: CleanupTrace = {
 const noop = (): void => undefined;
 
 describe('the Voice app half', () => {
-  test('S-0473 S-0330 S-0429 settings Voice and Speed-ups are the half’s two settings tabs, and its two panels plus the two first-run steps', () => {
+  test('S-0473 S-0330 S-0429 settings Voice, Voice clean-up and Speed-ups are the half’s three settings tabs, split by where each is kept, and its two panels plus the two first-run steps', () => {
     expect(manifest.ui.settings).toEqual([
-      expect.objectContaining({ id: 'voice', label: 'Voice' }),
+      // r10 S5: what THIS BROWSER does is the device tab; the machine's voice.yaml prompts are their own machine tab.
+      expect.objectContaining({ id: 'voice', label: 'Voice', scope: 'device' }),
+      expect.objectContaining({ id: 'voice-cleanup', label: 'Voice clean-up', scope: 'machine' }),
       expect.objectContaining({ id: 'speedups', label: 'Speed-ups' }),
     ]);
     const half = halfOver();
-    expect(Object.keys(half.settings)).toEqual(['voice', 'speedups']);
+    expect(Object.keys(half.settings)).toEqual(['voice', 'voice-cleanup', 'speedups']);
     expect(Object.keys(half.panels)).toEqual([
       'dictation',
       'read-aloud',
@@ -128,7 +130,7 @@ describe('the Voice app half', () => {
       expect(container.querySelector(`[data-setting-id="${id}"]`)).not.toBeNull();
     for (const name of ['Speed-up key', 'Transcription log', 'Dictation debug'])
       expect(text(container)).toContain(name);
-    expect(container.querySelector('section[aria-label="Voice engine"]')).not.toBeNull();
+    expect(container.querySelector('[data-engine-section]')).not.toBeNull();
   });
 
   test('S-0559 S-0258 the Speed-ups tab is the SpeedupsSurface, reading this machine’s keys', async () => {

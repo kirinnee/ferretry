@@ -82,6 +82,7 @@ describe('<VoiceCleanupSettings>', () => {
     expect(must(c.querySelector<HTMLTextAreaElement>('#stt-cleanup-prompt-fix'), 'prompt').value).toBe(
       DEFAULT_VOICE_CLEANUP_PROMPTS.fix,
     );
+    for (const info of c.querySelectorAll<HTMLButtonElement>('[data-setting-info]')) await interact(() => info.click());
     expect(c.textContent).toContain(CLEANUP_GUARD_EXPLANATION);
     expect(c.textContent).toContain(CONVERSATION_CONTEXT_EXPLANATION);
     expect(c.textContent).not.toContain('Edited');

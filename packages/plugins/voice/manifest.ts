@@ -103,7 +103,16 @@ export default definePlugin({
       panel('onboarding.step', { id: 'onboarding-speedups', order: 4 }),
     ],
     settings: [
-      settingsTab('voice', { icon: 'mic', group: 'behaviour', label: 'Voice', order: 60 }),
+      // Split by where it is kept (r10 S5): Voice holds what THIS BROWSER does (dictation, engine, shortcut, auto-read, device keys);
+      // Voice clean-up is the machine's own `voice.yaml` prompts, shared by every device paired to it.
+      settingsTab('voice', { icon: 'mic', group: 'behaviour', label: 'Voice', order: 60, scope: 'device' }),
+      settingsTab('voice-cleanup', {
+        icon: 'mic',
+        group: 'behaviour',
+        label: 'Voice clean-up',
+        order: 61,
+        scope: 'machine',
+      }),
       settingsTab('speedups', { icon: 'zap', group: 'advanced', label: 'Speed-ups', order: 70 }),
     ],
   },

@@ -3,8 +3,7 @@
  * 132 px tall whatever it says, two or three sit in a row on a desktop and one per row on a phone, nothing is wider than
  * the screen, the radio group has one tab stop, and the small buttons are a full 44 px to press.
  *
- * Set `FY_ENGINE_CARD_SHOTS_DIR` to keep a screenshot of each case (light and dark, 1280 and 390, plus today's list as the
- * "before").
+ * Set `FY_ENGINE_CARD_SHOTS_DIR` to keep a screenshot of each case (light and dark, 1280 and 390).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -168,14 +167,6 @@ describe('the engine cards', () => {
           if (shotsDir !== '') await shoot(tab, join(shotsDir, `after-${view}-${viewport.name}-${mode}.png`));
           await context.close();
         }
-      }, 60_000);
-
-      it(`draws today's list for the before shot (${viewport.name}, ${mode})`, async () => {
-        if (shotsDir === '') return;
-        const { context, tab } = await open('before', viewport, mode, viewport.phone ? 2_400 : viewport.height);
-        await tab.waitForSelector('li[data-engine]');
-        await shoot(tab, join(shotsDir, `before-${viewport.name}-${mode}.png`));
-        await context.close();
       }, 60_000);
     }
 

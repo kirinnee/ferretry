@@ -5,14 +5,11 @@
  *   ?view=short       the first-run Voice step: the short list, Zipformer chosen and installed
  *   ?view=all         the same step with every engine open
  *   ?view=downloading the short list with one engine mid-download
- *   ?view=before      today's Settings › Voice engine list (the "before" shot)
  *   ?theme=<family>-<mode>
  */
 
 import { createRoot } from 'react-dom/client';
-import { EngineCatalogList } from '../../../../app/features/settings/engine-catalog-list.tsx';
 import { VoiceStep } from '../../../../app/features/onboarding/voice-step.tsx';
-import { browserRecognitionProvider } from '../../../../app/lib/stt/browser-recognition.ts';
 import { modelDownloadBytes, ON_DEVICE_MODELS } from '../../../../app/lib/stt/model-catalog.ts';
 import type { DeviceClass } from '../../../../app/lib/stt/engine-defaults.ts';
 import type { ModelInstaller, ModelInstallOptions, ModelStoreStatus } from '../../../../app/lib/stt/model-store.ts';
@@ -72,7 +69,6 @@ if (view === 'downloading') {
 
 // A phone-width window is a phone: the default engine and the short list follow it, as they do on a real phone.
 const deviceClass: DeviceClass = window.matchMedia('(max-width: 640px)').matches ? 'phone' : 'computer';
-const provider = browserRecognitionProvider();
 const settings = { ...DEFAULT_STT_SETTINGS, engine: 'sherpa-zipformer-en' as const };
 
 const root = document.getElementById('root') as HTMLElement;
@@ -80,22 +76,11 @@ const root = document.getElementById('root') as HTMLElement;
 root.className = 'mx-auto max-w-[720px] p-4';
 root.dataset['scene'] = 'ready';
 createRoot(root).render(
-  view === 'before' ? (
-    <EngineCatalogList
-      value="sherpa-zipformer-en"
-      onChange={() => undefined}
-      voices={voices}
-      browserSupport={{ available: true, availability: 'available', implementation: 'standard' }}
-      browserProvider={provider}
-      deviceClass={deviceClass}
-    />
-  ) : (
-    <VoiceStep
-      settings={settings}
-      update={() => undefined}
-      voices={voices}
-      browserSupport={{ available: true, availability: 'available', implementation: 'standard' }}
-      deviceClass={deviceClass}
-    />
-  ),
+  <VoiceStep
+    settings={settings}
+    update={() => undefined}
+    voices={voices}
+    browserSupport={{ available: true, availability: 'available', implementation: 'standard' }}
+    deviceClass={deviceClass}
+  />,
 );

@@ -24,7 +24,7 @@ import {
   type TranscriptionLogSnapshot,
 } from '../../lib/stt/transcription-log.ts';
 import { callDuration, callTime, useDebugSnapshot } from './dictation-debug-settings.tsx';
-import { SettingRow, SettingSwitch } from './setting-row.tsx';
+import { SettingRow, SettingSwitch } from '../../shell-voice.ts';
 
 /** How many matches show before "Show more". */
 export const TRANSCRIPTION_LOG_PAGE = 50;

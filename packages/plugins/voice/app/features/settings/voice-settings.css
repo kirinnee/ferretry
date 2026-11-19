@@ -1,0 +1,215 @@
+/* Voice settings (r10 S5). Everything here is laid out by the width of the SETTINGS PANEL (a container query on `.fy-vs`),
+   never the viewport: at a 768px window the real panel is about 212px wide, and at 390px it is the whole screen.
+   Theme tokens only. */
+.fy-vs {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+/* The engine cards: O15's grid asks for 240px a card, which a 212px panel cannot hold. Here a card may shrink to the
+   panel, and two to four share a row as the panel allows. */
+.fy-vs .fy-engine-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+
+/* A control row inside a setting: an input that stops growing at 36rem, then its buttons, all one height and aligned to
+   the same line. It wraps under the input when the panel is narrower than the whole row. */
+.fy-vs-field {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.fy-vs-field > .fy-vs-input {
+  min-height: 44px;
+  flex: 1 1 14rem;
+  max-width: 36rem;
+  min-width: 0;
+}
+.fy-vs-field > .kt-btn,
+.fy-vs-field > button {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+  justify-content: center;
+  min-height: 44px;
+}
+/* The body of a setting that is not a one-line control: the same left edge as the row's name. */
+.fy-vs-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 4px 12px var(--pad-panel, 16px);
+}
+.fy-vs-body > p {
+  margin: 0;
+}
+.fy-vs-note {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  margin: 0;
+}
+.fy-vs-note[data-tone='warn'] {
+  color: var(--warn);
+}
+.fy-vs-note[data-tone='ok'] {
+  color: var(--ok);
+}
+
+/* A control that sits in a SettingRow's control column and wants room: a select, a number, a slider. */
+.fy-vs-wide {
+  min-width: 0;
+  width: min(100%, 22rem);
+}
+@container (max-width: 479.98px) {
+  .fy-vs-field > .fy-vs-input {
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .fy-vs-wide {
+    width: 100%;
+  }
+}
+
+/* "Downloaded engines": a quiet empty line while no model has been downloaded (the list renders nothing then). */
+.fy-vs-downloads:empty::before {
+  color: var(--muted);
+  content: 'Nothing downloaded yet.';
+  font-size: var(--text-sm);
+}
+
+/* THE SETTINGS ROW, by the panel's width. `SettingRow` (S2) sizes its label and control column with the WINDOW's breakpoints,
+   so at a 768px window (a real panel of about 212px) the control column kept `flex: 1 1 0` beside a 160px label and ran 44px
+   past the panel's edge, and a row with only an (i) pushed it onto a line of its own. Below 520px of PANEL, the row is the
+   name and its (i) / switch on the first line, and any wider control (a select, a field, a row of buttons) on the second,
+   full width: at any window size. */
+.fy-vs [data-setting-controls] {
+  max-width: 100%;
+}
+@container (max-width: 519.98px) {
+  .fy-vs [data-setting-controls]:has(> [data-setting-info]:only-child) {
+    flex: 0 0 auto;
+  }
+  .fy-vs [data-setting-row] > div:first-child {
+    min-width: 0;
+  }
+  .fy-vs [data-setting-row] > div:first-child > span:first-child {
+    flex: 1 1 0;
+    min-width: 0;
+    order: 1;
+  }
+  .fy-vs [data-setting-controls] {
+    display: contents;
+  }
+  .fy-vs [data-setting-controls] > [role='switch'] {
+    order: 2;
+  }
+  .fy-vs [data-setting-controls] > [data-setting-info] {
+    order: 3;
+  }
+  .fy-vs [data-setting-controls] > span[aria-hidden='true'] {
+    display: none;
+  }
+  .fy-vs [data-setting-controls] > :not([role='switch']):not([data-setting-info]):not([aria-hidden='true']) {
+    flex: 1 1 100%;
+    min-width: 0;
+    order: 4;
+  }
+}
+
+/* The engine cards by the CARD's own width (they are 190px in a 212px panel, 290px in a 600px one): the bars and the
+   foot row give up room before anything is clipped, and a chip that does not fit wraps out of sight rather than showing
+   half of itself. A chosen card wears the accent tint, the same as the choice cards beside it. */
+.fy-vs .fy-engine-card {
+  container-type: inline-size;
+}
+.fy-vs .fy-engine-card[data-selected='true'] {
+  background: var(--accent-soft);
+}
+.fy-vs .fy-engine-chips {
+  align-content: flex-start;
+  flex-wrap: wrap;
+  max-height: 22px;
+}
+@container (max-width: 219.98px) {
+  .fy-vs .fy-engine-bars [data-option-bar] {
+    column-gap: 4px;
+    grid-template-columns: 52px minmax(0, 1fr) 56px;
+  }
+  /* Two chips do not fit: keep the last, which is the privacy fact ("On device" / "Not on device"). */
+  .fy-vs .fy-engine-chip:not(:last-child) {
+    display: none;
+  }
+}
+@container (max-width: 199.98px) {
+  /* A card with an Install button has no room for a chip beside it; the same facts are behind its (i). */
+  .fy-vs .fy-engine-foot:has(.fy-engine-mini, .fy-engine-state) .fy-engine-chips {
+    display: none;
+  }
+}
+
+/* Things a row holds that are not text: a number, the voice picker, a select. */
+.fy-vs .fy-vs-num {
+  flex: none;
+  max-width: 6rem;
+  min-height: 44px;
+  width: 6rem;
+}
+.fy-vs-wide {
+  box-sizing: border-box;
+}
+.fy-vs .fy-ar-picker-trigger {
+  max-width: 30rem;
+  padding: 8px 12px;
+}
+.fy-vs .fy-ar-voice-name {
+  font-size: var(--text-md);
+}
+.fy-vs .fy-ar-voice-where {
+  font-size: var(--text-sm);
+}
+/* The bars ask for 12rem at the least; a card in a 212px panel is narrower than that, and the bars shrink with it. */
+.fy-vs .fy-engine-bars[data-option-bars],
+.fy-vs .fy-engine-bars {
+  min-width: 0;
+}
+
+/* Every button a row holds is a full 44px, the same as its neighbours (the switch and (i) already are). */
+.fy-vs [data-setting-controls] button:not([role='switch']):not([data-setting-info]),
+.fy-vs .fy-vs-field > button {
+  min-height: 44px;
+}
+/* A key row's Save, Test and Remove stay together on one line under the key when the panel is narrow: the icons go, and the
+   buttons share the line. */
+@container (max-width: 519.98px) {
+  .fy-vs .fy-vs-field > .kt-btn {
+    flex: 1 1 auto;
+    padding-inline: 8px;
+  }
+  .fy-vs .fy-vs-field > .kt-btn svg {
+    display: none;
+  }
+}
+
+/* Under about 300px of panel a switch does not share a line with its name: the name and its (i) take the first line, the
+   switch the second (a name beside a 95px column wrapped to seven lines). */
+@container (max-width: 299.98px) {
+  .fy-vs [data-setting-controls] > [role='switch'] {
+    flex: 0 0 100%;
+    justify-content: flex-start;
+    order: 4;
+  }
+}
+@container (max-width: 299.98px) {
+  /* A number beside a name has no room either: it takes the second line, as wide as the line. */
+  .fy-vs [data-setting-controls] > .fy-vs-num {
+    flex: 1 1 100%;
+    max-width: none;
+    order: 4;
+    width: auto;
+  }
+}

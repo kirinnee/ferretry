@@ -15,11 +15,10 @@ import { Bug, Trash2 } from 'lucide-react';
 import { useState, useSyncExternalStore } from 'react';
 import { DictationDebugSheet } from '../../components/dictation-debug-sheet.tsx';
 import { timingDuration } from '../../components/dictation-timeline-bar.tsx';
-import { cn } from '../../shell-voice.ts';
 import { clockOfInstant } from '../../lib/message-clock.ts';
 import { useDictationDebug } from '../../lib/voice-store.tsx';
 import type { DictationDebugLog, DictationDebugRecord, DictationDebugSnapshot } from '../../lib/stt/dictation-debug.ts';
-import { SettingRow, SettingSwitch } from './setting-row.tsx';
+import { cn, SettingRow, SettingSwitch } from '../../shell-voice.ts';
 
 const DICTATION_DEBUG_INTRO =
   'Show what a dictation clean-up call sent and what came back: the prompt, the provider’s raw reply and the checks that ran. Off by default.';

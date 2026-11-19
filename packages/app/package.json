@@ -14,7 +14,8 @@
     "./testing": "./src/testing/index.ts",
     "./testing/router": "./src/testing/router.tsx",
     "./worker-facts": "./src/worker/facts.ts",
-    "./testing/browser": "./tests/support/browser/index.ts"
+    "./testing/browser": "./tests/support/browser/index.ts",
+    "./testing/settings-shell": "./tests/support/browser/settings-shell.tsx"
   },
   "scripts": {
     "dev": "bun run build:fy-render-shell && vite",

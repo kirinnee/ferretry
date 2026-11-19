@@ -36,7 +36,7 @@ export const BROWSER_ENGINE_DISCLOSURE = 'sent to your browser vendor’s server
 
 const PARAKEET_ENGINE_SUMMARY =
   'Private and works offline: the Parakeet speech model runs inside this browser. Download it once to this device.';
-export const BROWSER_ENGINE_SUMMARY =
+const BROWSER_ENGINE_SUMMARY =
   'Nothing to download: your phone’s or browser’s own speech recognition. Chrome, Android and Safari send the audio to Google or Apple to turn it into text, so it needs a connection and their privacy policy applies.';
 
 /** The active-engine sentences. The first is the only place the promise is made. */

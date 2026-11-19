@@ -64,7 +64,7 @@ export type OnDeviceModelId = (typeof ON_DEVICE_MODEL_IDS)[number];
 /** The programs a model can run on. */
 export type SpeechRuntimeId = 'onnxruntime-web' | 'sherpa-onnx' | 'vosk-wasm' | 'transformers-js';
 
-export type SpeechModelFamily = 'parakeet' | 'zipformer' | 'moonshine' | 'whisper' | 'vosk';
+type SpeechModelFamily = 'parakeet' | 'zipformer' | 'moonshine' | 'whisper' | 'vosk';
 
 /** A runtime's one binary: pinned like a model file, its URL known only once the build has run. */
 export interface SpeechRuntime {
