@@ -100,11 +100,15 @@ describe('what a Codex settings item never takes from an import', () => {
     expect(item?.settings.model).toBe('m');
   });
 
-  it('never writes hooks, and drops the component’s env', () => {
+  it('never writes hooks or notify (a command run on events), and drops the component’s env', () => {
     const made = settingsItemFromImport(
       asText({
         harness: 'codex',
-        document: { model: 'm', hooks: { Stop: [{ hooks: [{ type: 'command', command: 'x' }] }] } },
+        document: {
+          model: 'm',
+          hooks: { Stop: [{ hooks: [{ type: 'command', command: 'x' }] }] },
+          notify: ['notify-send', 'done'],
+        },
         env: { OPENAI_BASE_URL: 'https://example.invalid' },
       }),
     );

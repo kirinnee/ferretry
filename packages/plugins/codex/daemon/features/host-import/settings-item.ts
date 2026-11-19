@@ -7,7 +7,8 @@
  * - a root `profile` key. It selects a `[profiles.*]` table in the host's `config.toml`, and a home that names a profile
  *   that is not there fails every launch. Each Codex profile the person chose is its own item (`model` and
  *   `model_reasoning_effort` only), never a selection.
- * - a `hooks` key. Nothing imports hooks (the owner said so); `hooks.json` is never read or written here.
+ * - a `hooks` key, or `notify` (a command Codex runs on agent events, a hook by another name). Nothing imports hooks (the
+ *   owner said so); `hooks.json` is never read or written here.
  * - the component's `env`. A Codex settings item has no environment; the import moves it to the login's.
  * - a `${secret:NAME}` reference. A reference in a settings item reaches `config.toml` literally (pending (f)), so it
  *   would launch Codex with the text of a reference instead of a value. A raw secret is the kernel's to refuse.
@@ -19,7 +20,7 @@ export type SettingsItemResult =
   | { readonly ok: false; readonly reason: string };
 
 /** The document keys an import never writes into a Codex settings item. */
-const DROPPED_SETTINGS_KEYS: readonly string[] = ['profile', 'hooks'];
+const DROPPED_SETTINGS_KEYS: readonly string[] = ['profile', 'hooks', 'notify'];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
