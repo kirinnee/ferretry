@@ -124,6 +124,24 @@ describe('GET …/runs', () => {
     expect(await bad({ pr: '7', other: '1' })).toBe(400);
   });
 
+  test('a blank branch is refused here, never sent to GitHub; a repeated parameter is refused, not read as its first', async () => {
+    const github = new FakeGithub();
+    passing(github);
+    const host = await boot(github);
+    const get = async (path: string, query: Record<string, string | string[]>) =>
+      await host.request('GET', path, { query, as: owner() });
+    const blank = await get(runsPath, { branch: '' });
+    expect(blank.status).toBe(400);
+    expect(github.seen).toHaveLength(0);
+    expect((await get(runsPath, { branch: '   ' })).status).toBe(400);
+    const twice = await get(runsPath, { pr: ['7', '8'] });
+    expect(twice.status).toBe(400);
+    expect(twice.json<{ error: string }>().error).toContain('only once');
+    expect((await get(runsPath, { branch: ['main', 'other'] })).status).toBe(400);
+    expect((await get(`${runsPath}/100`, { attempt: ['1', '2'] })).status).toBe(400);
+    expect(github.seen).toHaveLength(0);
+  });
+
   test('a repository the project does not list, a bad repo word and an unknown project are refused before GitHub is asked', async () => {
     const github = new FakeGithub();
     passing(github);

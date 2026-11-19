@@ -7,6 +7,8 @@ import type { ActionsJobInput, ActionsRunInput, ActionsStepInput, CheckRunInput 
  * fields are not read at all. An item that does not parse is dropped, never guessed at.
  */
 const text = (max: number) => z.string().max(max);
+/** What `CiJobSchema` allows a job: the steps emitted are bounded to it, however many are accepted. */
+const MAX_STEPS = 1000;
 const instant = z.string().max(40).nullable().optional();
 const url = z.string().max(500).nullable().optional();
 
@@ -106,7 +108,8 @@ export function readJob(raw: unknown): ActionsJobInput | undefined {
     startedAt: orNull(job.started_at),
     completedAt: orNull(job.completed_at),
     htmlUrl: orNull(job.html_url),
-    steps: (job.steps ?? []).flatMap(step => {
+    // The contract holds at most MAX_STEPS steps a job; GitHub's own cap is lower, so this only guards a hostile answer.
+    steps: (job.steps ?? []).slice(0, MAX_STEPS).flatMap(step => {
       const read = readStep(step);
       return read === undefined ? [] : [read];
     }),

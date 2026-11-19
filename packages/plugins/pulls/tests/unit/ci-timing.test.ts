@@ -299,3 +299,58 @@ describe('other CI', () => {
     expect(buildCheckRun(check, 'a1b2c3d', sec(40))).toMatchObject({ status: 'running', live: true, wallMs: 30_000 });
   });
 });
+
+describe('bounds the contract and the clock cannot break', () => {
+  test('a job with more steps than the contract holds is cut to the contract and still validates', () => {
+    const steps = Array.from({ length: 1001 }, (_, index) =>
+      ghStep(index + 1, { name: `s${index}`, start: 10, end: 11 }),
+    );
+    const read = readJob(ghJob({ id: 7, name: 'big', start: 10, end: 20, steps }));
+    expect(read?.steps).toHaveLength(1000);
+    const built = buildRun(
+      run({ id: 7, updated: 100 }),
+      jobs({ id: 7, name: 'big', start: 10, end: 20, steps }),
+      sec(300),
+    );
+    expect(built.jobs[0]?.steps).toHaveLength(1000);
+    expect(CiRunSchema.safeParse(built).success).toBe(true);
+  });
+
+  test('a live job whose start is ahead of the clock ends at its start, never before it', () => {
+    const built = buildRun(
+      run({ id: 8, status: 'in_progress', conclusion: null }),
+      jobs({ id: 8, name: 'ahead', status: 'in_progress', conclusion: null, start: 100 }),
+      sec(40),
+    );
+    const job = built.jobs[0];
+    expect(job).toMatchObject({
+      live: true,
+      start: new Date(sec(100)).toISOString(),
+      end: new Date(sec(100)).toISOString(),
+    });
+    expect(job?.queuedMs).toBeGreaterThanOrEqual(0);
+    expect(CiRunSchema.safeParse(built).success).toBe(true);
+  });
+
+  test('a cancelled job that never started stops waiting when its run finished, however late it is read', () => {
+    const finished = run({ id: 9, status: 'completed', conclusion: 'cancelled', started: 5, updated: 60 });
+    const cancelled = jobs({ id: 9, name: 'never ran', status: 'completed', conclusion: 'cancelled' });
+    const soon = buildRun(finished, cancelled, sec(100));
+    const later = buildRun(finished, cancelled, sec(100_000));
+    expect(soon.jobs[0]?.queuedMs).toBe(60_000);
+    expect(later.jobs[0]?.queuedMs).toBe(60_000);
+    expect(later.jobs[0]?.start).toBeUndefined();
+  });
+
+  test('a queued job of a finished run, and a final job of a live run, wait only until the run last changed', () => {
+    const queued = jobs({ id: 10, name: 'waiting', status: 'queued', conclusion: null });
+    const done = run({ id: 10, status: 'completed', conclusion: 'success', updated: 90 });
+    expect(buildRun(done, queued, sec(100_000)).jobs[0]?.queuedMs).toBe(90_000);
+    const liveRun = run({ id: 11, status: 'in_progress', conclusion: null, updated: 90 });
+    const cancelled = jobs({ id: 11, name: 'cut', status: 'completed', conclusion: 'cancelled' });
+    expect(buildRun(liveRun, cancelled, sec(100_000)).jobs[0]?.queuedMs).toBe(90_000);
+    // A queued job of a live run is genuinely still waiting: it grows with the clock.
+    const waiting = jobs({ id: 12, name: 'q', status: 'queued', conclusion: null });
+    expect(buildRun(liveRun, waiting, sec(500)).jobs[0]?.queuedMs).toBe(500_000);
+  });
+});

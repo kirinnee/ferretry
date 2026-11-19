@@ -131,20 +131,26 @@ function buildStep(step: ActionsStepInput, job: Bounds | undefined, nowMs: numbe
   };
 }
 
-function buildJob(job: ActionsJobInput, base: number, nowMs: number): CiJob {
+/**
+ * `settledMs` is when the run last changed (its `updated_at`, never before `base`): the stable instant an item that never
+ * started waited until, once the item or its run is final. Only a queued item of a live run waits until `nowMs`, so a
+ * cancelled job with no timestamps never accrues queue time after its run finished.
+ */
+function buildJob(job: ActionsJobInput, base: number, nowMs: number, settledMs: number, runFinal: boolean): CiJob {
   const status = foldStatus(job.status, job.conclusion);
   const started = at(job.startedAt);
   const done = at(job.completedAt);
   const hasBar = status !== 'skipped' && status !== 'queued' && started !== undefined;
   const live = hasBar && status === 'running' && done === undefined;
-  const end = hasBar ? (live ? nowMs : Math.max(done ?? started, started)) : undefined;
+  // A live bar ends now, but never before it began (a clock behind GitHub's would put the end before the start).
+  const end = hasBar ? (live ? Math.max(nowMs, started) : Math.max(done ?? started, started)) : undefined;
   const bounds = hasBar && end !== undefined ? { start: started, end } : undefined;
   // From the run's creation to this job's start. A job that never started waited until it stopped (or until now).
   const queuedMs = hasBar
     ? Math.max(0, started - base)
     : status === 'skipped'
       ? 0
-      : Math.max(0, (done ?? nowMs) - base);
+      : Math.max(0, (done ?? (isFinal(status) || runFinal ? settledMs : nowMs)) - base);
   return {
     id: job.id,
     name: clip(job.name),
@@ -168,10 +174,11 @@ export function buildRun(run: ActionsRunInput, jobs: readonly ActionsJobInput[],
   // A re-run keeps the first attempt's `created_at`; its own start is the origin of its timeline.
   const base = run.runAttempt > 1 ? (attemptStart ?? created) : created;
   const status = foldStatus(run.status, run.conclusion);
-  const built = jobs.map(job => buildJob(job, base, nowMs)).sort(byStart);
+  const live = !isFinal(status);
+  const settledMs = Math.max(base, at(run.updatedAt) ?? base);
+  const built = jobs.map(job => buildJob(job, base, nowMs, settledMs, !live)).sort(byStart);
   const starts = built.flatMap(job => (job.start === undefined ? [] : [Date.parse(job.start)]));
   const ends = built.flatMap(job => (job.end === undefined ? [] : [Date.parse(job.end)]));
-  const live = !isFinal(status);
   const firstStart = starts.length === 0 ? undefined : Math.min(...starts);
   const start = attemptStart ?? firstStart;
   const end = live ? undefined : Math.max(base, ends.length === 0 ? (at(run.updatedAt) ?? base) : Math.max(...ends));

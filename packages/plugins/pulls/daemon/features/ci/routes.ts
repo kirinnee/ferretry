@@ -63,9 +63,15 @@ async function scopeOf(deps: CiRouteDeps, params: { get(name: string): string | 
   return { project: id.data, account: found.value.account, repo: found.value.repo };
 }
 
-const onlyParameters = (request: { query: ReadonlyMap<string, unknown> }, allowed: readonly string[]): void => {
-  for (const name of request.query.keys())
+/** Only the named parameters, each at most once: the shared query helper reads the first of a repeated key, so a second would be ignored without a word. */
+const onlyParameters = (
+  request: { query: ReadonlyMap<string, readonly unknown[]> },
+  allowed: readonly string[],
+): void => {
+  for (const [name, values] of request.query) {
     if (!allowed.includes(name)) throw new ApiError(400, `unknown parameter ${name}`, 'unknown_parameter');
+    if (values.length > 1) throw new ApiError(400, `${name} may be given only once`, 'invalid_request');
+  }
 };
 
 /**
@@ -80,7 +86,7 @@ export const runsRoute =
     const branch = queryValue(call.request, 'branch');
     if ((pr === undefined) === (branch === undefined))
       throw new ApiError(400, 'name exactly one of pr and branch', 'invalid_request');
-    if (branch !== undefined && (branch.length > MAX_BRANCH || /[\p{Cc}\s]/u.test(branch)))
+    if (branch !== undefined && (branch.length === 0 || branch.length > MAX_BRANCH || /[\p{Cc}\s]/u.test(branch)))
       throw new ApiError(400, 'branch is not a usable branch name', 'invalid_request');
     const scope = await scopeOf(deps, call.params);
     const head = await deps.reader.headSha(
