@@ -6,12 +6,14 @@
 
 import { useSyncExternalStore } from 'react';
 
+// A renderer with no document (a server, a test renderer) has nothing to watch and nothing hidden.
 const subscribe = (notify: () => void): (() => void) => {
+  if (typeof document === 'undefined') return () => undefined;
   document.addEventListener('visibilitychange', notify);
   return () => document.removeEventListener('visibilitychange', notify);
 };
 
-const visibleNow = (): boolean => document.visibilityState !== 'hidden';
+const visibleNow = (): boolean => typeof document === 'undefined' || document.visibilityState !== 'hidden';
 
 export function useDocumentVisible(): boolean {
   return useSyncExternalStore(subscribe, visibleNow);

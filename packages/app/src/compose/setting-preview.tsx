@@ -23,6 +23,7 @@
 
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useDocumentVisible } from '../ui/hooks/use-document-visible.ts';
+import { useMotionAllowed } from '../ui/use-motion-allowed.ts';
 import { cn } from '../ui/lib/class-names.ts';
 import { useMotionAllowed } from '../ui/use-motion-allowed.ts';
 import './setting-preview.css';

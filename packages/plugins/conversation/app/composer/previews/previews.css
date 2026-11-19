@@ -1,0 +1,371 @@
+/* ============================================================================
+   Conversation tab previews (send key, editor style, suggestions, chat width).
+   Every scene is drawn in a 160 x 100 `SettingPreview` frame (the chat-width one in its own wide strip) from divs, theme
+   tokens only. The RESTING style of every piece is its FINAL state, so with the animation removed (reduced motion,
+   a stylesheet that never matches) a scene still shows the answer.
+   The moving parts hang off `.fy-sp[data-sp-state]` (the frame's loop, `--sp-loop`): they type from 0% to ~26%, the
+   frame cross-fades to the result at 36-48%, and every piece is back at its start by 100% so the loop never jumps.
+   ========================================================================== */
+
+.fy-cvp {
+  font-family: var(--font-body);
+  font-size: 9px;
+  inset: 0;
+  line-height: 1.25;
+  position: absolute;
+}
+.fy-cvp-mono {
+  font-family: var(--font-mono);
+}
+.fy-cvp-faint {
+  color: var(--faint);
+}
+.fy-cvp-bar {
+  background: var(--border-strong);
+  border-radius: 3px;
+  height: 5px;
+}
+.fy-cvp-box {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  bottom: 8px;
+  left: 8px;
+  padding: 5px 24px 5px 6px;
+  position: absolute;
+  right: 8px;
+}
+.fy-cvp-box--active {
+  border-color: var(--accent);
+}
+.fy-cvp-line {
+  color: var(--fg);
+  min-height: 11px;
+  white-space: nowrap;
+}
+.fy-cvp-hint {
+  color: var(--faint);
+}
+.fy-cvp-typed {
+  display: inline-block;
+  vertical-align: bottom;
+}
+.fy-cvp-caret {
+  background: var(--accent);
+  display: inline-block;
+  height: 9px;
+  margin-left: 1px;
+  opacity: 0; /* resting: no caret; it only appears (blinking) while the loop plays */
+  vertical-align: bottom;
+  width: 1px;
+}
+.fy-cvp-key {
+  align-items: center;
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  bottom: 12px;
+  color: var(--fg);
+  display: inline-flex;
+  font-size: 8px;
+  height: 14px;
+  justify-content: center;
+  min-width: 16px;
+  padding: 0 3px;
+  position: absolute;
+  right: 12px;
+}
+.fy-cvp-key--pressed {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--surface);
+}
+.fy-cvp-bubble {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--accent);
+  padding: 2px 6px;
+  position: absolute;
+  right: 8px;
+  top: 10px;
+}
+.fy-cvp-pop {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  bottom: 38px;
+  left: 8px;
+  padding: 3px;
+  position: absolute;
+  right: 40px;
+  transform-origin: 12px 100%;
+}
+.fy-cvp-pop-title {
+  color: var(--faint);
+  font-size: 7px;
+  letter-spacing: 0.04em;
+  padding: 0 3px 2px;
+  text-transform: uppercase;
+}
+.fy-cvp-row {
+  align-items: center;
+  border-radius: 4px;
+  display: flex;
+  gap: 4px;
+  height: 11px;
+  padding: 0 3px;
+}
+.fy-cvp-row--hot {
+  background: var(--accent-soft);
+}
+.fy-cvp-dot {
+  background: var(--accent);
+  border-radius: 50%;
+  flex: none;
+  height: 6px;
+  width: 6px;
+}
+.fy-cvp-row .fy-cvp-bar {
+  flex: 1;
+}
+.fy-cvp-h {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.fy-cvp-b {
+  font-weight: 700;
+}
+.fy-cvp-tools {
+  display: flex;
+  gap: 3px;
+  left: 8px;
+  position: absolute;
+  top: 7px;
+}
+.fy-cvp-tool {
+  background: var(--surface-3);
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 8px;
+  height: 11px;
+  line-height: 11px;
+  text-align: center;
+  width: 14px;
+}
+.fy-cvp-page {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  bottom: 8px;
+  left: 8px;
+  padding: 5px 6px;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+}
+.fy-cvp-page--tools {
+  top: 22px;
+}
+
+/* --- The chat-width strip: a pane, and the text column inside it writing lines. ------------------------------- */
+.fy-cvp-write {
+  background: var(--accent);
+  border-radius: 1px;
+  display: block;
+  height: 2px;
+  opacity: 0.5;
+  transform-origin: 0 50%;
+}
+.fy-cvp-write:nth-child(1) {
+  width: 90%;
+}
+.fy-cvp-write:nth-child(2) {
+  width: 70%;
+}
+.fy-cvp-write:nth-child(3) {
+  width: 82%;
+}
+
+/* --- Movement: only where motion is allowed (the OS query AND Settings › Motion), parked while the frame is paused. */
+@keyframes fy-cvp-type {
+  0% {
+    clip-path: inset(0 100% 0 0);
+  }
+  24%,
+  88% {
+    clip-path: inset(0 0 0 0);
+  }
+  100% {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+@keyframes fy-cvp-type-late {
+  0%,
+  30% {
+    clip-path: inset(0 100% 0 0);
+  }
+  54%,
+  88% {
+    clip-path: inset(0 0 0 0);
+  }
+  100% {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+@keyframes fy-cvp-type-first {
+  0% {
+    clip-path: inset(0 100% 0 0);
+  }
+  12%,
+  88% {
+    clip-path: inset(0 0 0 0);
+  }
+  100% {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+@keyframes fy-cvp-type-mid {
+  0%,
+  12% {
+    clip-path: inset(0 100% 0 0);
+  }
+  32%,
+  88% {
+    clip-path: inset(0 0 0 0);
+  }
+  100% {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+@keyframes fy-cvp-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes fy-cvp-press {
+  0%,
+  26% {
+    background: var(--surface-3);
+    border-color: var(--border-strong);
+    color: var(--fg);
+    transform: scale(1);
+  }
+  29%,
+  38% {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--surface);
+    transform: scale(0.88);
+  }
+  44%,
+  100% {
+    background: var(--surface-3);
+    border-color: var(--border-strong);
+    color: var(--fg);
+    transform: scale(1);
+  }
+}
+@keyframes fy-cvp-fly {
+  0%,
+  34% {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  50%,
+  88% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+@keyframes fy-cvp-pop {
+  0%,
+  34% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.86);
+  }
+  46%,
+  88% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes fy-cvp-write {
+  0%,
+  8% {
+    transform: scaleX(0);
+  }
+  38%,
+  86% {
+    transform: scaleX(1);
+  }
+  100% {
+    transform: scaleX(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-typed,
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-typed {
+    animation: fy-cvp-type var(--sp-loop) steps(10, end) infinite;
+  }
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-typed--late,
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-typed--late {
+    animation-name: fy-cvp-type-late;
+  }
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-typed--first,
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-typed--first {
+    animation-name: fy-cvp-type-first;
+  }
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-typed--mid,
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-typed--mid {
+    animation-name: fy-cvp-type-mid;
+  }
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-caret,
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-caret {
+    animation: fy-cvp-blink 1000ms steps(1, end) infinite;
+  }
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-key--press,
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-key--press {
+    animation: fy-cvp-press var(--sp-loop) ease-in-out infinite;
+  }
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-bubble,
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-bubble {
+    animation: fy-cvp-fly var(--sp-loop) ease-out infinite;
+  }
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='playing'] .fy-cvp-pop,
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-pop {
+    animation: fy-cvp-pop var(--sp-loop) cubic-bezier(0.2, 0.9, 0.3, 1.2) infinite;
+  }
+  :root:not([data-motion='reduced']) [data-cvp-motion='on'] .fy-cvp-write {
+    animation: fy-cvp-write 3600ms ease-in-out infinite;
+  }
+  :root:not([data-motion='reduced']) [data-cvp-motion='on'] .fy-cvp-write:nth-child(2) {
+    animation-delay: 160ms;
+  }
+  :root:not([data-motion='reduced']) [data-cvp-motion='on'] .fy-cvp-write:nth-child(3) {
+    animation-delay: 320ms;
+  }
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-typed,
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-caret,
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-key,
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-bubble,
+  :root:not([data-motion='reduced']) .fy-sp[data-sp-state='paused'] .fy-cvp-pop {
+    animation-play-state: paused;
+  }
+}
