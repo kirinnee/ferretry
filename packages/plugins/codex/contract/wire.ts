@@ -176,6 +176,12 @@ export const HarnessConfigSchema = z.strictObject({
   /** Directories to look in, in order, on top of what the daemon inherited. */
   searchPaths: z.array(HarnessPathSchema).default([]),
   permissionMode: PermissionModeSchema.default('skip'),
+  /**
+   * Whether the conversation index reads the owner's own `~/.codex` history (their terminal's Codex conversations). One way:
+   * Ferretry reads it and never changes it; `false` stops the READING and deletes nothing. Ferret homes and the pool are
+   * Ferretry's own and are not affected.
+   */
+  hostHistory: z.boolean().default(true),
 });
 export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
 

@@ -209,9 +209,20 @@ const harnessPathsChange: Loosens<HarnessConfig> = (before, after) => [
     : ['agents now look for the Codex program in different directories (searchPaths changed)']),
 ];
 
-/** What an agent's edit of this file is HELD for: a looser permission mode, or any change of where the program is. */
+/**
+ * Turning the owner's own `~/.codex` history back ON is a loosening: Ferretry would read conversations it had been told
+ * not to. `after` is the parsed file, so a removed `hostHistory` line (or a removed file's default) reads as `true` and is
+ * held like an explicit `true`. Turning it off is a narrowing and is never held.
+ */
+export const harnessHostHistoryLoosens: Loosens<HarnessConfig> = (before, after) =>
+  before?.hostHistory === false && after.hostHistory
+    ? ['agents now let Ferretry read your own Codex conversations on this computer (hostHistory turned on)']
+    : [];
+
+/** What an agent's edit of this file is HELD for: a looser permission mode, history turned back on, or any change of where the program is. */
 const harnessConfigHeld: Loosens<HarnessConfig> = (before, after) => [
   ...harnessConfigLoosens(before, after),
+  ...harnessHostHistoryLoosens(before, after),
   ...harnessPathsChange(before, after),
 ];
 

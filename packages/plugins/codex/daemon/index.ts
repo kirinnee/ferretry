@@ -51,6 +51,26 @@ export default implementDaemon(manifest, {
     // `config/harness-codex.yaml`, read each time so an edit is seen on the next look.
     const paths = () =>
       HarnessConfigSchema.parse(kernel.config.file(CODEX_CONFIG as ConfigFileDef<HarnessConfig>) ?? {});
+    /**
+     * Whether Ferretry may read the owner's own `~/.codex` history: `hostHistory` in that file, asked LIVE at every call and
+     * failing CLOSED. A file that is invalid or cannot be read is OFF, even when an earlier good version (or the default)
+     * said on: `ConfigPort.file` keeps answering that last good value, so the file's own state is asked first.
+     * An edit that would turn it back ON waits for the owner (the tighter value stays in effect), so `held` reads that value.
+     */
+    let saidHidden = false;
+    const hostHistoryOn = (): boolean => {
+      if (kernel.config.fileState(CODEX_CONFIG as ConfigFileDef<HarnessConfig>).state === 'invalid') {
+        if (!saidHidden) {
+          saidHidden = true;
+          kernel.log.warn(
+            "harness-codex.yaml cannot be read, so Codex's conversations from this computer stay hidden until it is fixed.",
+          );
+        }
+        return false;
+      }
+      saidHidden = false;
+      return paths().hostHistory;
+    };
     let home: Promise<string> | undefined;
     const homeDirectory = async (): Promise<string> => {
       home ??= host.environment('HOME').then(value => value ?? '');
@@ -178,14 +198,11 @@ export default implementDaemon(manifest, {
       locate,
       probe,
       permissionMode: () => paths().permissionMode,
-      historyDirectory: async () => {
-        const home = await homeDirectory();
-        return home === '' ? undefined : `${home}/.codex/sessions`;
-      },
       historyHome: async () => {
         const home = await homeDirectory();
         return home === '' ? undefined : `${home}/.codex`;
       },
+      hostHistory: hostHistoryOn,
       update: { view, start, settled: () => service.settled() },
     });
 

@@ -900,7 +900,7 @@ export class FerretsService implements FerretsApi {
     }
   }
 
-  /** What each harness that offers any holds of past conversations; one that fails offers none. */
+  /** What each harness that answered holds of past conversations (maybe none: its switch is off); one that fails is left out. */
   async historySources(): Promise<
     readonly { readonly harness: HarnessKey; readonly sources: readonly HarnessHistorySource[] }[]
   > {
@@ -908,8 +908,9 @@ export class FerretsService implements FerretsApi {
     for (const key of this.ports.harnessKeys()) {
       const harness = this.ports.harness(key);
       if (harness?.historySources === undefined) continue;
-      const sources = await harness.historySources().catch((): readonly HarnessHistorySource[] => []);
-      if (sources.length > 0) found.push({ harness: key, sources });
+      // A harness that answered with nothing is listed (the index then forgets what it read from it); one that threw is not.
+      const sources = await harness.historySources().catch(() => undefined);
+      if (sources !== undefined) found.push({ harness: key, sources });
     }
     return found;
   }

@@ -158,7 +158,7 @@ describe('Codex rollout walk never follows a link to a sign-in document', () => 
       .file(imported, rollout('import-native', '/another-home', 'imported'))
       .link(`${OWNER}/sessions/rollout-alias.jsonl`, '../auth.json')
       .link(`${OWNER}/sessions/back`, '..');
-    const history = async () => `${OWNER}/sessions`;
+    const history = async () => OWNER;
     expect(await new CodexRollouts(ports(kernelRoots(real)), history).conversations.list(undefined)).toEqual([
       { id: 'import-native', folder: '/work/project', updatedAt: at },
     ]);

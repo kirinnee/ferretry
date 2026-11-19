@@ -44,8 +44,8 @@ describe('codex contract', () => {
   });
 
   test('skipping every permission prompt is a loosening; asking again is not', () => {
-    const auto = { searchPaths: [], permissionMode: 'auto' as const };
-    const skip = { searchPaths: [], permissionMode: 'skip' as const };
+    const auto = { searchPaths: [], permissionMode: 'auto' as const, hostHistory: true };
+    const skip = { searchPaths: [], permissionMode: 'skip' as const, hostHistory: true };
     expect(harnessConfigLoosens(auto, skip)).toEqual(['agents now skip every permission prompt']);
     expect(harnessConfigLoosens(skip, auto)).toEqual([]);
     expect(CODEX_CONFIG.axis).toBe('configure');

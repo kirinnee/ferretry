@@ -8,6 +8,7 @@ import { buildAttachments } from './attachments/index.ts';
 import { AttachmentError } from './attachments/lib/index.ts';
 import { buildLinks, keepInSyncFrom } from './links/index.ts';
 import type { FerretConversationNames, IndexSource } from './links/index.ts';
+import { indexSourcesOf } from './links/lib/history-groups.ts';
 import type { LinkKeeper } from './links/lib/service.ts';
 import type { TranscriptOpener } from './reader/adapters/file-reads.ts';
 import type { HarnessTranscripts } from './reader/adapters/entries-source.ts';
@@ -187,20 +188,9 @@ export function buildReading(deps: {
   });
 
   // The transcripts the index reads: every tree each harness plugin hands over through Ferrets (the owner's own home, each
-  // ferret's home, later the pool), read-only. A harness that is off or fails offers none, and its rows stay as they were.
+  // ferret's home, later the pool), read-only. A harness that FAILS offers none and its rows stay as they were; one that answers with none (its owner-history switch is off) has them removed.
   const sources = async (): Promise<readonly IndexSource[]> =>
-    ((await ferrets.historySources?.()) ?? []).flatMap(group => {
-      const parser = harnessFamily(group.harness);
-      return parser === undefined
-        ? []
-        : group.sources.map(source => ({
-            harness: group.harness,
-            parser,
-            kind: source.kind,
-            label: source.label,
-            files: source.files,
-          }));
-    });
+    indexSourcesOf((await ferrets.historySources?.()) ?? [], harnessFamily);
   // Which ferret runs each harness conversation, and its name now (Ferrets' registry, not its files): a rename shows on the
   // next listing.
   const ferretNames = async (): Promise<FerretConversationNames> =>

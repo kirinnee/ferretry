@@ -95,7 +95,8 @@ export interface ReadsApi {
   ): Promise<Result<void, { readonly reason: string }>>;
   /**
    * The past conversations each provided harness holds, as read-only trees (additive, the conversation index): one entry per
-   * harness that offers any, in no particular order. A harness that fails offers nothing. Reads nothing itself.
+   * harness that answered (its `sources` empty when it holds none now), in no particular order. A harness that fails is left
+   * out. Reads nothing itself.
    */
   historySources?(): Promise<
     readonly { readonly harness: HarnessKey; readonly sources: readonly HarnessHistorySource[] }[]
