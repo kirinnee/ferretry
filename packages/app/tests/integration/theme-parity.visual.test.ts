@@ -143,8 +143,14 @@ describe('every old family-mode resolves to the same tokens on the three axes', 
     it(`${theme} at ${width}px${real ? '' : ' (colours)'}`, async () => {
       const names = Object.keys(was);
       const now = await resolved(page, family, mode, Number(width), names);
+      // `--shadow-ink` is Neo's hard-shadow ink: the text colour unless a palette sets its own (r10 T13), where it used to be
+      // transparent. No other style draws it, so it is not held to the capture.
       const compared = names.filter(
-        name => !(ASSEMBLED as readonly string[]).includes(name) && name !== TEXTURE && name !== FIELD,
+        name =>
+          !(ASSEMBLED as readonly string[]).includes(name) &&
+          name !== TEXTURE &&
+          name !== FIELD &&
+          name !== '--shadow-ink',
       );
       const different = compared
         .filter(name => now[name] !== was[name])

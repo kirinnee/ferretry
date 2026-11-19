@@ -72,7 +72,9 @@ describe('style files are non-colour only', () => {
       const selectors = [...withoutComments(css).matchAll(/(?:^|[{}])([^{}]+)\{/gu)].map(match =>
         (match[1] as string).trim(),
       );
-      for (const selector of selectors.filter(selector => !selector.startsWith('@media'))) {
+      // At-rules (`@media`, `@keyframes`) and a keyframe's own stops (`from`, `to`, `40%`) are not selectors to key.
+      const keyed = selectors.filter(selector => !selector.startsWith('@') && !/^(?:from|to|\d+%)$/u.test(selector));
+      for (const selector of keyed) {
         expect(selector).toContain(`[data-style='${style}']`);
         expect(selector).not.toContain('data-palette');
       }
