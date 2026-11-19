@@ -1,8 +1,9 @@
 {
-  "entry": ["app/features/threads/index.ts", "app/features/ci-flame/index.ts"],
+  "entry": ["app/features/threads/index.ts", "app/features/*/screen.tsx", "app/features/ci-flame/index.ts"],
   "project": ["**/*.{ts,tsx}", "!tests/**"],
   "allowed": {
     "entry:app/features/threads/index.ts": "E6 review threads: E4's PR page and E5's diff viewer import this barrel; neither has merged yet",
+    "entry:app/features/*/screen.tsx": "a screen is loaded through a dynamic import whose specifier is a template (Vite's dynamic-import variable, as every app half does), which knip cannot follow, so each screen file is an entry by its name; not a pending-port gap",
     "entry:app/features/ci-flame/index.ts": "E11 flamegraph: E9's run page mounts this barrel; it has not merged yet"
   }
 }
