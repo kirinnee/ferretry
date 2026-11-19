@@ -1,16 +1,19 @@
 /**
- * SETTINGS › THIS DEVICE › LOOK: colour mode, theme, text size and motion, as v4's Appearance had them — human labels
- * (never a raw id), the theme as a grid of tiles each previewing its family in its own light and dark theme, and the
- * Motion switch that stills every animation. All four are saved in this browser, never on a daemon.
+ * SETTINGS › THIS DEVICE › LOOK: three choices and one specimen. STYLE (how things are drawn: type, radius, strokes, shadows,
+ * spacing, motion) is a row of cards each drawn in its own style; PALETTE (which colours) is a row of two-colour chips;
+ * COLOUR MODE is Auto / Light / Dark. Any style takes any palette in either mode. Below them ONE specimen shows every
+ * detail of the look in force and replays once on each pick. Text size and Motion follow, as v4 had them. All of it is
+ * saved in this browser, never on a daemon. The onboarding appearance page reuses this component, so it moves with it.
  */
-import { type KeyboardEvent, type ReactNode, useCallback, useId, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { Segmented, SettingGroup, SettingRow } from '../compose/setting-row.tsx';
 import type { MotionPreference } from '../compose/controls.ts';
 import { useDeviceControls } from '../compose/device-controls.ts';
 import type { TextScale } from '../theme/preferences.ts';
-import { cn } from '../ui/lib/class-names.ts';
-import { MODE_OPTIONS, scrollThemeFamilyIntoView, Swatch } from '../ui/theme-toggle.tsx';
-import { type DeviceTheme, useDeviceTheme } from './device-context.tsx';
+import { MODE_OPTIONS } from '../ui/theme-toggle.tsx';
+import { useDeviceTheme } from './device-context.tsx';
+import { PalettePicker, StylePicker } from './appearance-pickers.tsx';
+import { AppearanceSpecimen } from './appearance-specimen.tsx';
 import { ColourModePreview, MotionPreview, TextSizePreview } from './device-appearance-previews.tsx';
 
 const TEXT_SCALE_OPTIONS: readonly { readonly id: TextScale; readonly label: string; readonly title: string }[] = [
@@ -34,99 +37,54 @@ function EqualWidth({ children }: { readonly children: ReactNode }) {
   return <div className="w-full md:w-72">{children}</div>;
 }
 
-/** The theme families as a tile grid: two across on a phone, four on a desktop. Roving radios, like `Segmented`. */
-function ThemeTiles({ theme }: { readonly theme: DeviceTheme }) {
-  const group = useId();
-  const ref = useRef<HTMLDivElement>(null);
-  const { families, resolved, setFamily } = theme;
-  const family = theme.preference.family;
-
-  const reveal = useCallback((control: HTMLElement) => {
-    const card = control.closest<HTMLElement>('[data-family-card]') ?? control;
-    const scroller = card.closest<HTMLElement>('[data-settings-scroller]');
-    if (scroller) scrollThemeFamilyIntoView(scroller, card);
-  }, []);
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const keys = ['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'];
-    if (!keys.includes(event.key)) return;
-    event.preventDefault();
-    const index = families.findIndex(option => option.id === family);
-    const last = families.length - 1;
-    const next =
-      event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? last
-          : event.key === 'ArrowDown' || event.key === 'ArrowRight'
-            ? Math.min(last, index + 1)
-            : Math.max(0, index - 1);
-    const target = families[next];
-    const control =
-      target === undefined ? null : ref.current?.querySelector<HTMLInputElement>(`[data-family="${target.id}"]`);
-    if (target === undefined || !control) return;
-    setFamily(target.id);
-    control.focus({ preventScroll: true });
-    reveal(control);
-  };
-
-  return (
-    // `relative` is load-bearing: the radios are `sr-only` (absolute) and must stay inside the page's scroller.
-    <div
-      ref={ref}
-      role="radiogroup"
-      aria-label="Theme family"
-      onKeyDown={onKeyDown}
-      className="relative grid grid-cols-2 gap-1.5 px-panel pb-3 md:grid-cols-4"
-      data-theme-tiles=""
-    >
-      {families.map(option => {
-        const checked = option.id === family;
-        return (
-          <label
-            key={option.id}
-            data-family-card={option.id}
-            className={cn(
-              'flex min-h-[44px] min-w-0 cursor-pointer flex-col gap-1 rounded-control border p-2 text-left transition-colors',
-              'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
-              checked ? 'border-accent bg-accent-soft' : 'border-border bg-surface hover:border-accent',
-            )}
-          >
-            <input
-              type="radio"
-              name={`${group}-family`}
-              data-family={option.id}
-              value={option.id}
-              checked={checked}
-              aria-label={`${option.label} — ${option.blurb}`}
-              tabIndex={checked ? 0 : -1}
-              onChange={() => setFamily(option.id)}
-              className="sr-only"
-            />
-            <span className="truncate text-meta font-semibold text-fg">{option.label}</span>
-            <span className="flex items-stretch gap-1">
-              <Swatch theme={`${option.id}-light`} current={checked && resolved === 'light'} />
-              <Swatch theme={`${option.id}-dark`} current={checked && resolved === 'dark'} />
-            </span>
-          </label>
-        );
-      })}
-    </div>
-  );
-}
-
 /** The Look group. Draws nothing outside an app shell (no device theme to change). */
 export function DeviceAppearance() {
   const theme = useDeviceTheme();
   const { device, set } = useDeviceControls();
   if (theme === null) return null;
   const { preference, resolved } = theme;
-  const family = theme.families.find(option => option.id === preference.family);
+  const style = theme.styles.find(option => option.id === preference.style);
+  const palette = theme.palettes.find(option => option.id === preference.palette);
+  const look = {
+    style: preference.style,
+    palette: preference.palette,
+    mode: resolved,
+    textScale: preference.textScale,
+  };
   return (
     <SettingGroup label="Look">
       <SettingRow
         settingId="theme"
-        preview={<ColourModePreview family={preference.family} mode={preference.mode} />}
+        name="Style"
+        hint={style?.label}
+        explanation="How the app is drawn: type, corners, borders, shadows, spacing and motion. Every style works with every palette. Saved on this device."
+      >
+        <div className="px-panel pb-3">
+          <StylePicker
+            styles={theme.styles}
+            value={preference.style}
+            palette={preference.palette}
+            mode={resolved}
+            onChange={theme.setStyle}
+          />
+        </div>
+      </SettingRow>
+      <SettingRow
+        name="Palette"
+        hint={palette?.label}
+        explanation="Which colours the app uses. Each chip shows the palette's light half and its dark half, in the style you picked. Saved on this device."
+      >
+        <div className="px-panel pb-3">
+          <PalettePicker
+            palettes={theme.palettes}
+            value={preference.palette}
+            style={preference.style}
+            onChange={theme.setPalette}
+          />
+        </div>
+      </SettingRow>
+      <SettingRow
+        preview={<ColourModePreview look={preference} mode={preference.mode} />}
         name="Colour mode"
         explanation="Auto follows this device's light or dark setting; Light and Dark stay as you choose. Saved on this device."
         hint={preference.mode === 'system' ? `Auto follows the system (now ${resolved})` : `Always ${preference.mode}`}
@@ -144,11 +102,13 @@ export function DeviceAppearance() {
         )}
       />
       <SettingRow
-        name="Theme"
-        hint={family === undefined ? undefined : `${family.label} — ${family.blurb}`}
-        explanation="The look of the whole app. Each tile previews its light and dark versions; Colour mode picks which one is shown. Saved on this device."
+        name="Specimen"
+        hint="Every detail of your look, in one place"
+        explanation="Type and weights, buttons at rest, hover and press, an input with its keyboard focus ring, a panel and its shadow, corners and borders, spacing, a toggle and a list row. It plays once each time you change something."
       >
-        <ThemeTiles theme={theme} />
+        <div className="px-panel pb-3">
+          <AppearanceSpecimen look={look} />
+        </div>
       </SettingRow>
       <SettingRow
         settingId="text-size"

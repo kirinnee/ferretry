@@ -4,8 +4,8 @@
  *
  * Each one is a `SettingPreview` whose scene is a few divs drawn from theme tokens (`device-appearance-previews.css`):
  *
- *   - Colour mode:  a tiny chat in the chosen mode, drawn in the CURRENT theme family (a `data-swatch` scope re-declares
- *                   that family's light or dark tokens locally); Auto is one frame split down the middle.
+ *   - Colour mode:  a tiny chat in the chosen mode, drawn in the CURRENT style and palette (a `data-swatch`
+ *                   scope re-declares that look's light or dark tokens locally); Auto is one frame split down the middle.
  *   - Text size:    the same few lines at 100% / 112% / 125%, beside a button that keeps its size — "touch targets never
  *                   shrink", shown instead of said.
  *   - Motion:       "Follow system" is dots bouncing and a ring turning; "Reduced" is the same dots at rest.
@@ -17,10 +17,17 @@
 
 import type { MotionPreference } from '../compose/controls.ts';
 import { SettingPreview } from '../compose/setting-preview.tsx';
-import { swatchAttributes } from '../theme/catalog.ts';
+import type { PaletteId, StyleId } from '../theme/catalog.ts';
 import type { TextScale } from '../theme/preferences.ts';
 import { useMotionAllowed } from '../ui/use-motion-allowed.ts';
+import { lookAttributes } from './appearance-pickers.tsx';
 import './device-appearance-previews.css';
+
+/** The style and palette a mode preview is drawn in; the mode itself is what the preview varies. */
+export interface ModeLook {
+  readonly style: StyleId;
+  readonly palette: PaletteId;
+}
 
 export type ColourMode = 'system' | 'light' | 'dark';
 
@@ -45,9 +52,9 @@ const MOTION_WORDS: Readonly<Record<MotionPreference, string>> = {
 };
 
 /** One tiny chat: a side rail, a header line, a reply, a message and the accent button. */
-function ModePane({ family, tone }: { readonly family: string; readonly tone: 'light' | 'dark' }) {
+function ModePane({ look, tone }: { readonly look: ModeLook; readonly tone: 'light' | 'dark' }) {
   return (
-    <div className="fy-dap-pane" {...swatchAttributes(`${family}-${tone}`)} data-dap-tone={tone}>
+    <div className="fy-dap-pane" {...lookAttributes({ ...look, mode: tone })} data-dap-tone={tone}>
       <i className="fy-dap-rail" />
       <span className="fy-dap-body">
         <i className="fy-dap-line fy-dap-line--head" />
@@ -59,32 +66,32 @@ function ModePane({ family, tone }: { readonly family: string; readonly tone: 'l
   );
 }
 
-function ModeFrame({ family, mode }: { readonly family: string; readonly mode: ColourMode }) {
+function ModeFrame({ look, mode }: { readonly look: ModeLook; readonly mode: ColourMode }) {
   if (mode !== 'system') {
     return (
       <div className="fy-dap-frame" data-dap-mode={mode}>
-        <ModePane family={family} tone={mode} />
+        <ModePane look={look} tone={mode} />
       </div>
     );
   }
   // Auto: both modes in one frame, the dark one clipped to the right half.
   return (
     <div className="fy-dap-frame" data-dap-mode="system">
-      <ModePane family={family} tone="light" />
+      <ModePane look={look} tone="light" />
       <div className="fy-dap-half">
-        <ModePane family={family} tone="dark" />
+        <ModePane look={look} tone="dark" />
       </div>
     </div>
   );
 }
 
-export function ColourModePreview({ family, mode }: { readonly family: string; readonly mode: ColourMode }) {
+export function ColourModePreview({ look, mode }: { readonly look: ModeLook; readonly mode: ColourMode }) {
   return (
     <SettingPreview
       label={MODE_WORDS[mode]}
       value={mode}
-      before={<ModeFrame family={family} mode={MODE_BEFORE[mode]} />}
-      after={<ModeFrame family={family} mode={mode} />}
+      before={<ModeFrame look={look} mode={MODE_BEFORE[mode]} />}
+      after={<ModeFrame look={look} mode={mode} />}
     />
   );
 }

@@ -108,7 +108,7 @@ describe('Settings › This device', () => {
         expect(await labels('Text size')).toEqual(['Default', 'Large', 'Larger']);
         expect(await labels('Motion')).toEqual(['Follow system', 'Reduced']);
         expect(await tab.locator('.fy-page select').count(), 'no bare select on the page').toBe(0);
-        expect(await tab.locator('[data-theme-tiles] [data-family-card]').count()).toBe(11);
+        expect(await tab.locator('[data-palette-chips] [data-palette-chip]').count()).toBe(11);
         const swatch = await tab.locator('[data-theme-tiles] [data-swatch]').first().boundingBox();
         expect(swatch?.width ?? 0, 'a swatch has a real size').toBeGreaterThan(20);
         // The three segmented controls share one width and one left edge at 1280, and fill the row at 390.

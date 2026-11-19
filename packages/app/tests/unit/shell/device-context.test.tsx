@@ -139,11 +139,12 @@ describe('the device context', () => {
         scroll={new ScrollMemory(null)}
       />,
     );
-    // The page draws the theme as a radio per family and the colour mode as a segmented radio group (not selects).
+    // The page draws the theme as a radio per palette, a card per style and the colour mode as a segmented radio group (not selects).
     const checkedIn = (label: string): string | undefined =>
       view?.container.querySelector<HTMLInputElement>(`[role="radiogroup"][aria-label="${label}"] input:checked`)
         ?.value;
-    expect(checkedIn('Theme family')).toBe('mission');
+    expect(checkedIn('Palette')).toBe('mission');
+    expect(checkedIn('Style')).toBe('mission');
     expect(checkedIn('Colour mode')).toBe('dark');
   });
 
@@ -219,9 +220,9 @@ describe('the page theme switch', () => {
     expect(trigger().getAttribute('aria-label')).toBe('Theme: Studio, Auto (light)');
     await click(trigger());
     expect(panel()).not.toBeNull();
-    expect((document.activeElement as HTMLInputElement).dataset.family).toBe('studio');
+    expect((document.activeElement as HTMLInputElement).dataset.pickPalette).toBe('studio');
     await click(view?.container.querySelector('input[data-mode="dark"]'));
-    await click(view?.container.querySelector('input[data-family="neo"]'));
+    await click(view?.container.querySelector('input[data-pick-palette="neo"]'));
     expect(themes.snapshot()).toMatchObject({ family: 'neo', mode: 'dark' });
     expect(panel()).not.toBeNull();
     expect(trigger().getAttribute('aria-label')).toBe('Theme: Neo-Brutalism, Dark');
@@ -237,7 +238,7 @@ describe('the page theme switch', () => {
   test('the arrow keys, Home and End walk the families and reveal the card', async () => {
     const { themes } = await openSwitch();
     await click(trigger());
-    const list = view?.container.querySelector('[aria-label="Theme family"]') as HTMLElement;
+    const list = view?.container.querySelector('[aria-label="Palette"]') as HTMLElement;
     const press = async (key: string): Promise<void> => {
       await interact(() => list.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
     };
@@ -256,7 +257,20 @@ describe('the page theme switch', () => {
     expect(themes.snapshot().family).toBe('studio');
     // The frame after a family change re-reveals the focused card.
     await interact(() => new Promise(resolve => setTimeout(resolve, 30)));
-    expect((document.activeElement as HTMLInputElement).dataset.family).toBe('studio');
+    expect((document.activeElement as HTMLInputElement).dataset.pickPalette).toBe('studio');
+  });
+
+  test('picks the style and the palette apart, without closing', async () => {
+    const { themes } = await openSwitch();
+    await click(trigger());
+    await click(view?.container.querySelector('input[data-pick-style="geist"]'));
+    expect(themes.snapshot()).toMatchObject({ style: 'geist', palette: 'studio' });
+    await click(view?.container.querySelector('input[data-pick-palette="phosphor"]'));
+    expect(themes.snapshot()).toMatchObject({ style: 'geist', palette: 'phosphor' });
+    // Each palette swatch is drawn in the style in force.
+    const swatch = view?.container.querySelector('[data-pick-palette-card="neo"] [data-swatch]');
+    expect(swatch?.getAttribute('data-style')).toBe('geist');
+    expect(panel()).not.toBeNull();
   });
 
   test('Escape, a press outside, the scrim and the ✕ each close it', async () => {

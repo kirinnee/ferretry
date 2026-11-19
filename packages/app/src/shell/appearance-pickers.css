@@ -1,0 +1,141 @@
+/* ============================================================================
+   THE LOOK PICKERS (shell/appearance-pickers.tsx). Every colour, radius and shadow is a token: the mini scenes and
+   chip halves carry `data-swatch`, so the tokens they read are the ones of the look they advertise. Theme tokens only.
+   ========================================================================== */
+
+/* ---- a style card's scene ------------------------------------------------ */
+.fy-ap-mini {
+  align-items: center;
+  background: var(--bg);
+  background-image: var(--body-wash);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-panel);
+  display: flex;
+  gap: 10px;
+  height: 54px;
+  overflow: hidden;
+  padding: 0 12px;
+}
+.fy-ap-mini__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.fy-ap-mini__label {
+  border-top: var(--divider-width) solid var(--divider-color);
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: var(--label-weight);
+  letter-spacing: var(--tracking-label);
+  padding-top: 3px;
+  text-transform: var(--label-transform);
+}
+.fy-ap-mini__type {
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: var(--weight-display);
+  letter-spacing: var(--tracking-display);
+  line-height: 1;
+}
+.fy-ap-mini__button {
+  background: var(--accent);
+  border: var(--stroke-control) solid var(--accent-strong, var(--accent));
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-control);
+  display: block;
+  flex: 0 0 26px;
+  height: 16px;
+}
+.fy-ap-mini__card {
+  background: var(--card-bg);
+  border: var(--card-stroke) solid var(--card-border);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  display: block;
+  flex: 1 1 0;
+  height: 26px;
+  min-width: 0;
+}
+
+/* ---- the palette chips --------------------------------------------------- */
+.fy-ap-chips {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  position: relative; /* the native radios are sr-only (absolute): keep them inside the scroller */
+}
+.fy-ap-chip {
+  align-items: stretch;
+  background: var(--surface-2);
+  border: var(--stroke-panel) solid var(--border);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 44px;
+  min-width: 0;
+  padding: 6px;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
+}
+.fy-ap-chip:hover {
+  border-color: var(--muted);
+}
+.fy-ap-chip:has(:focus-visible) {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+.fy-ap-chip[data-selected='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.fy-ap-chip__swatch {
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  height: 26px;
+  overflow: hidden;
+}
+.fy-ap-chip__half {
+  align-items: center;
+  background: var(--bg);
+  display: flex;
+  flex: 1 1 0;
+  gap: 4px;
+  justify-content: center;
+  min-width: 0;
+}
+.fy-ap-chip__accent {
+  background: var(--accent);
+  border-radius: var(--radius-dot);
+  display: block;
+  height: 10px;
+  width: 10px;
+}
+.fy-ap-chip__ink {
+  background: var(--fg);
+  border-radius: var(--radius-dot);
+  display: block;
+  height: 6px;
+  width: 6px;
+}
+.fy-ap-chip__name {
+  color: var(--fg);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-ap-chip {
+    transition: none;
+  }
+}
+:root[data-motion='reduced'] .fy-ap-chip {
+  transition: none;
+}

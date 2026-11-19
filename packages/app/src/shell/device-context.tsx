@@ -5,6 +5,14 @@ import type { HandOffs } from './hand-off.ts';
 import type { InstallPromptHolder } from './install-prompt.ts';
 import { usePluginIdentity } from './plugin-identity.tsx';
 import {
+  PALETTES,
+  type PaletteEntry,
+  type PaletteId,
+  STYLES,
+  type StyleEntry,
+  type StyleId,
+} from '../theme/catalog.ts';
+import {
   type ResolvedMode,
   resolveThemeMode,
   type TextScale,
@@ -69,6 +77,11 @@ export interface DeviceTheme {
   /** The mode actually in force — never `system`. */
   readonly resolved: ResolvedMode;
   readonly families: readonly ThemeFamily[];
+  /** The styles and palettes the pickers offer (`theme/catalog.ts`), and the setters for each axis. */
+  readonly styles: readonly StyleEntry[];
+  readonly palettes: readonly PaletteEntry[];
+  readonly setStyle: (style: StyleId) => void;
+  readonly setPalette: (palette: PaletteId) => void;
   readonly setMode: (mode: ThemeMode) => void;
   readonly setFamily: (family: ThemeFamilyId) => void;
   readonly setTextScale: (scale: TextScale) => void;
@@ -90,6 +103,10 @@ export function useDeviceTheme(): DeviceTheme | null {
     preference,
     resolved: resolveThemeMode(preference.mode, device.systemDark),
     families: THEME_FAMILIES,
+    styles: STYLES,
+    palettes: PALETTES,
+    setStyle: style => void store.setStyle(style),
+    setPalette: palette => void store.setPalette(palette),
     setMode: mode => void store.setMode(mode),
     setFamily: family => void store.setFamily(family),
     setTextScale: scale => void store.setTextScale(scale),

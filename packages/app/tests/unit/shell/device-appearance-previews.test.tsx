@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { ColourModePreview, MotionPreview, TextSizePreview } from '../../../src/shell/device-appearance-previews.tsx';
 
+const LOOK = { style: 'mission', palette: 'mission' } as const;
 let mounted: Mounted | undefined;
 afterEach(async () => {
   await mounted?.unmount();
@@ -18,10 +19,10 @@ const attrs = (name: string): string[] =>
   [...(mounted?.container.querySelectorAll(`[${name}]`) ?? [])].map(node => node.getAttribute(name) ?? '');
 
 describe('ColourModePreview', () => {
-  it('should rest on the chosen tone, then play once from the opposite one when it changes, in the theme family', async () => {
-    mounted = await mount(<ColourModePreview family="mission" mode="light" />);
+  it('should rest on the chosen tone, then play once from the opposite one when it changes, in the current style and palette', async () => {
+    mounted = await mount(<ColourModePreview look={LOOK} mode="light" />);
     expect(attrs('data-dap-mode')).toEqual(['light']);
-    await mounted.render(<ColourModePreview family="mission" mode="dark" />);
+    await mounted.render(<ColourModePreview look={LOOK} mode="dark" />);
     expect(frame().getAttribute('data-sp-label')).toBe('Always dark');
     expect(attrs('data-dap-mode')).toEqual(['light', 'dark']);
     expect(attrs('data-swatch')).toEqual(['mission-light', 'mission-dark']);
@@ -29,14 +30,14 @@ describe('ColourModePreview', () => {
 
   it('should draw Auto as one frame holding both tones', async () => {
     document.documentElement.dataset.motion = 'reduced';
-    mounted = await mount(<ColourModePreview family="mission" mode="system" />);
+    mounted = await mount(<ColourModePreview look={LOOK} mode="system" />);
     expect(attrs('data-dap-mode')).toEqual(['system']);
     expect(attrs('data-swatch')).toEqual(['mission-light', 'mission-dark']);
   });
 
   it('should show only the final frame under reduced motion', async () => {
     document.documentElement.dataset.motion = 'reduced';
-    mounted = await mount(<ColourModePreview family="mission" mode="light" />);
+    mounted = await mount(<ColourModePreview look={LOOK} mode="light" />);
     expect(frame().getAttribute('data-sp-state')).toBe('still');
     expect(attrs('data-dap-mode')).toEqual(['light']);
   });

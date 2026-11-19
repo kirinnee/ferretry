@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { deviceControls } from '../../../src/compose/device-controls.ts';
-import { THEME_FAMILIES } from '../../../src/theme/preferences.ts';
+import { PALETTES, STYLES } from '../../../src/theme/catalog.ts';
 import { interact, type Mounted } from '../../support/dom.ts';
 import { bootApp, settle } from './frame-fixtures.tsx';
 
@@ -36,26 +36,83 @@ describe('Settings › This device', () => {
     expect(page().querySelector('select')).toBeNull();
   });
 
-  test('Theme is a grid of tiles, one per family, each previewing its light and dark theme', async () => {
+  test('Style is one card per style, each drawn in its own style and the palette in force', async () => {
     await boot();
-    const tiles = [...page().querySelectorAll('[data-theme-tiles] [data-family-card]')];
-    expect(tiles.map(tile => tile.getAttribute('data-family-card'))).toEqual(THEME_FAMILIES.map(family => family.id));
-    for (const tile of tiles) {
-      const id = tile.getAttribute('data-family-card');
-      expect([...tile.querySelectorAll('[data-swatch]')].map(swatch => swatch.getAttribute('data-swatch'))).toEqual([
-        `${id}-light`,
-        `${id}-dark`,
-      ]);
+    const cards = [...page().querySelectorAll('[role="radiogroup"][aria-label="Style"] [data-choice]')];
+    expect(cards.map(card => card.getAttribute('data-choice'))).toEqual(STYLES.map(style => style.id));
+    for (const card of cards) {
+      const id = card.getAttribute('data-choice');
+      const scene = card.querySelector('[data-swatch]');
+      expect(scene?.getAttribute('data-style')).toBe(id);
+      expect(scene?.getAttribute('data-palette')).toBe(document.documentElement.dataset.palette ?? 'studio');
     }
   });
 
-  test('picking a tile changes the theme', async () => {
+  test('Palette is one chip per palette, each holding its light and its dark half in the style in force', async () => {
     await boot();
-    const mission = page().querySelector<HTMLInputElement>('[data-family="mission"]');
-    await interact(() => mission?.click());
+    const chips = [...page().querySelectorAll('[data-palette-chips] [data-palette-chip]')];
+    expect(chips.map(chip => chip.getAttribute('data-palette-chip'))).toEqual(PALETTES.map(palette => palette.id));
+    for (const chip of chips) {
+      const id = chip.getAttribute('data-palette-chip');
+      const halves = [...chip.querySelectorAll('[data-swatch]')];
+      expect(halves.map(half => half.getAttribute('data-mode'))).toEqual(['light', 'dark']);
+      expect(halves.map(half => half.getAttribute('data-palette'))).toEqual([id, id]);
+      expect(halves.map(half => half.getAttribute('data-style'))).toEqual(['studio', 'studio']);
+    }
+  });
+
+  test('picking a style changes only the style, and picking a palette changes only the palette', async () => {
+    await boot();
+    const root = document.documentElement;
+    const geist = page().querySelector<HTMLInputElement>('[data-choice="geist"] input');
+    await interact(() => geist?.click());
     await settle();
-    expect(mission?.checked).toBe(true);
-    expect(document.documentElement.dataset.theme).toStartWith('mission-');
+    expect(geist?.checked).toBe(true);
+    expect(root.dataset.style).toBe('geist');
+    expect(root.dataset.palette).toBe('studio');
+    const phosphor = page().querySelector<HTMLInputElement>('[data-palette-chip="phosphor"] input');
+    await interact(() => phosphor?.click());
+    await settle();
+    expect(phosphor?.checked).toBe(true);
+    expect(root.dataset.palette).toBe('phosphor');
+    expect(root.dataset.style).toBe('geist');
+    // The chips now show their palettes in the style that is in force.
+    const half = page().querySelector('[data-palette-chip="neo"] [data-swatch]');
+    expect(half?.getAttribute('data-style')).toBe('geist');
+  });
+
+  test('one specimen shows every detail of the look, and it follows a pick', async () => {
+    await boot();
+    const specimens = page().querySelectorAll('[data-specimen]');
+    expect(specimens).toHaveLength(1);
+    const sections = [...(specimens[0]?.querySelectorAll('[data-spec-section]') ?? [])].map(node =>
+      node.getAttribute('data-spec-section'),
+    );
+    expect(sections).toEqual(['Type', 'Buttons', 'Input', 'Panel', 'Shape', 'Spacing', 'Select', 'Rows']);
+    const states = [...(specimens[0]?.querySelectorAll('.kt-btn[data-spec-state]') ?? [])].map(node =>
+      node.getAttribute('data-spec-state'),
+    );
+    expect(states).toEqual(['rest', 'hover', 'press']);
+    expect(specimens[0]?.querySelector('.kt-input[data-spec-state="focus"]')).not.toBeNull();
+    expect(specimens[0]?.getAttribute('data-spec-replays')).toBe('0');
+    await interact(() => page().querySelector<HTMLInputElement>('[data-choice="neo"] input')?.click());
+    await settle();
+    expect(page().querySelector('[data-specimen]')?.getAttribute('data-spec-style')).toBe('neo');
+    expect(page().querySelector('[data-specimen]')?.getAttribute('data-spec-replays')).toBe('1');
+  });
+
+  test('with motion reduced the specimen never replays', async () => {
+    await boot();
+    await interact(() =>
+      page()
+        .querySelector<HTMLInputElement>('[role="radiogroup"][aria-label="Motion"] input[value="reduced"]')
+        ?.click(),
+    );
+    await settle();
+    await interact(() => page().querySelector<HTMLInputElement>('[data-choice="neo"] input')?.click());
+    await settle();
+    expect(page().querySelector('[data-specimen]')?.getAttribute('data-spec-replays')).toBe('0');
+    expect(page().querySelector('[data-spec-play]')).toBeNull();
   });
 
   test('Motion offers Follow system / Reduced and Reduced stills the page', async () => {
