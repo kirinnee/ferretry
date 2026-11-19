@@ -66,6 +66,7 @@ export function scriptedLayouts(initial: LayoutsRead = readOf()): ScriptedLayout
         return script.held;
       },
       set: async (path, value) => write(`set ${path} ${value}`),
+      setMany: async changes => write(changes.map(({ path, value }) => `set ${path} ${value}`).join(' + ')),
       switchLayout: async layout => write(`use ${layout}`),
       switchTheme: async theme => write(`theme ${theme}`),
       reset: async () => write('reset'),

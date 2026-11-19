@@ -30,7 +30,7 @@ export interface ChoiceSetting {
   readonly options: readonly ChoiceOption[];
 }
 
-/** A key that takes a list of view names (`agenda, board`). */
+/** A key that takes a list of view names, drawn as rows you drag and switch (`list-places.ts`), never as typed text. */
 export interface ListSetting {
   readonly kind: 'list';
   readonly path: 'nav.items' | 'top' | 'panels.ferret.side' | 'phone.nav.items' | 'phone.top';
@@ -89,19 +89,19 @@ export const LAYOUT_SETTINGS: readonly LayoutSetting[] = [
     kind: 'list',
     path: 'nav.items',
     name: 'Navigation items',
-    hint: 'The screens in the navigation, in order, separated by commas',
+    hint: 'Drag to reorder; the eye hides a screen from the navigation',
   },
   {
     kind: 'list',
     path: 'top',
     name: 'Top bar',
-    hint: 'What the top bar shows, in order, separated by commas',
+    hint: 'Drag to reorder; the eye hides an item from the top bar',
   },
   {
     kind: 'list',
     path: 'panels.ferret.side',
     name: 'Ferret side panels',
-    hint: 'The panels beside a ferret, in order, separated by commas',
+    hint: 'Drag to reorder; the eye hides a panel beside a ferret',
   },
   {
     kind: 'choice',
@@ -151,13 +151,13 @@ export const LAYOUT_SETTINGS: readonly LayoutSetting[] = [
     kind: 'list',
     path: 'phone.nav.items',
     name: 'Phone navigation items',
-    hint: 'The screens in the navigation on a narrow screen, in order, separated by commas',
+    hint: 'Drag to reorder; the eye hides a screen from the navigation on a narrow screen',
   },
   {
     kind: 'list',
     path: 'phone.top',
     name: 'Phone top bar',
-    hint: 'What the top bar shows on a narrow screen, in order, separated by commas',
+    hint: 'Drag to reorder; the eye hides an item from the top bar on a narrow screen',
   },
 ];
 
@@ -200,17 +200,6 @@ export function listOf(layout: Layout, path: ListSetting['path']): readonly stri
     case 'phone.top':
       return layout.phone?.top ?? layout.top;
   }
-}
-
-/** A list as the text box shows it. */
-export const listText = (names: readonly string[]): string => names.join(', ');
-
-/** A list as the text box was typed: names split at commas, blanks dropped (the same split the daemon makes). */
-export function parseListText(text: string): readonly string[] {
-  return text
-    .split(',')
-    .map(part => part.trim())
-    .filter(part => part.length > 0);
 }
 
 /** A saved layout's id may only be what Layouts accepts: lowercase words joined by dashes. */

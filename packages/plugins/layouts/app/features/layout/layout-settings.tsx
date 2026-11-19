@@ -6,11 +6,12 @@
  * writes `fy layout set` makes), so every open app follows at once. "This device only" is the app's saved data
  * (`--device`): no route, nothing sent to a daemon, and a phone and a laptop can differ.
  */
-import type { DeviceLayout } from '@ferretry/app';
-import { Button, Segmented, SettingGroup, SettingRow } from '@ferretry/app';
-import { Loading } from '@ferretry/app/ui';
-import { type ReactNode, useCallback, useId, useState } from 'react';
-import type { Layout } from '../../../contract/index.ts';
+import type { DeviceLayout, NavCatalogItem } from '@ferretry/app';
+import { Button, SHELL_ITEMS, Segmented, SettingGroup, SettingRow } from '@ferretry/app';
+import { Loading, SortableList } from '@ferretry/app/ui';
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
+import { EyeIcon } from './eye-icon.tsx';
+import { DEFAULT_LAYOUT, type Layout } from '../../../contract/index.ts';
 import { useLayouts } from '../../hooks/use-layouts.ts';
 import {
   type ChoiceSetting,
@@ -19,15 +20,27 @@ import {
   LAYOUT_SETTINGS,
   type ListSetting,
   listOf,
-  listText,
   refusalSentence,
 } from '../../lib/layout-model.ts';
 import type { LayoutsClient } from '../../lib/layouts-client.ts';
+import {
+  type Change,
+  changesOf,
+  hiddenOf,
+  humanize,
+  keepPhoneNav,
+  navSources,
+  type Place,
+  type PlaceSource,
+  placesOf,
+  sourcesFromNames,
+  withHidden,
+} from '../../lib/list-places.ts';
 import { LayoutPreview } from './previews/layout-preview.tsx';
 import { NavListPreview } from './previews/nav-list-preview.tsx';
 
-/** Saves one key; answers the reason it was refused, or `undefined` once it is saved. */
-type Apply = (path: string, value: string) => Promise<string | undefined>;
+/** Saves one or more keys together; answers the reason it was refused, or `undefined` once it is saved. */
+type Apply = (changes: readonly Change[]) => Promise<string | undefined>;
 
 const INPUT_CLASS =
   'kt-input min-h-[44px] w-full min-w-0 rounded-control border border-border bg-surface-2 px-2 text-fg';
@@ -35,48 +48,73 @@ const INPUT_CLASS =
 function ListRow({
   setting,
   layout,
+  sources,
   apply,
   busy,
 }: {
   readonly setting: ListSetting;
   readonly layout: Layout;
+  readonly sources: readonly PlaceSource[];
   readonly apply: Apply;
   readonly busy: boolean;
 }) {
-  const held = listText(listOf(layout, setting.path));
-  const [draft, setDraft] = useState(held);
+  const held = placesOf(layout, setting.path, sources);
+  const heldKey = held.map(row => `${row.id}:${row.hidden ? 0 : 1}`).join('|');
+  // What was just done stays on screen until the daemon's answer arrives and matches it: the row never snaps back.
+  const [pending, setPending] = useState<readonly Place[] | undefined>(undefined);
   const [refusal, setRefusal] = useState<string | undefined>(undefined);
-  const id = useId();
-  const save = async (): Promise<void> => {
-    setRefusal(await apply(setting.path, draft));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new read of the layout (or a different list) is the trigger
+  useEffect(() => setPending(undefined), [heldKey, layout]);
+  const rows = pending ?? held;
+  const save = async (next: readonly Place[]): Promise<void> => {
+    setPending(next);
+    const reason = await apply(keepPhoneNav(layout, setting.path, sources, changesOf(setting.path, next)));
+    setRefusal(reason);
+    if (reason !== undefined) setPending(undefined);
   };
+  const visible = rows.filter(row => !row.hidden).map(row => row.label);
   return (
     <SettingRow
       name={setting.name}
       hint={setting.hint}
       preview={
         setting.path === 'nav.items' || setting.path === 'phone.nav.items' ? (
-          <NavListPreview items={listOf(layout, setting.path)} label={`${setting.name}: reorder and hide`} />
+          <NavListPreview items={visible} label={`${setting.name}: reorder and hide`} />
         ) : undefined
       }
     >
-      {/* The list is long ("ferrets, agenda, board, projects, insights, …"), so it gets the row's whole width under its
-          name rather than a narrow box beside it that cuts it off. */}
-      <span className="flex min-w-0 items-center gap-2 px-panel pb-3">
-        <input
-          id={id}
-          type="text"
-          aria-label={setting.name}
-          aria-invalid={refusal === undefined ? undefined : true}
-          className={INPUT_CLASS}
-          value={draft}
+      <div className="min-w-0 px-panel pb-3" data-layout-list={setting.path}>
+        <SortableList
+          items={rows}
+          itemKey={row => row.id}
+          itemLabel={row => row.label}
+          label={setting.name}
           disabled={busy}
-          onChange={event => setDraft(event.target.value)}
+          onReorder={next => void save(next)}
+          renderItem={row => (
+            <span className="flex min-w-0 items-center gap-2" data-hidden={row.hidden ? '' : undefined}>
+              <span className={`min-w-0 flex-1 truncate text-ui ${row.hidden ? 'text-muted line-through' : 'text-fg'}`}>
+                {row.label}
+              </span>
+              {row.locked ? null : (
+                <button
+                  type="button"
+                  aria-pressed={!row.hidden}
+                  aria-label={`${row.hidden ? 'Show' : 'Hide'} ${row.label}`}
+                  title={row.hidden ? 'Hidden: press to show' : 'Shown: press to hide'}
+                  aria-disabled={busy ? true : undefined}
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+                  onClick={() => {
+                    if (!busy) void save(withHidden(rows, row.id, !row.hidden));
+                  }}
+                >
+                  <EyeIcon hidden={row.hidden} />
+                </button>
+              )}
+            </span>
+          )}
         />
-        <Button type="button" size="sm" disabled={busy || draft === held} onClick={() => void save()}>
-          Save
-        </Button>
-      </span>
+      </div>
       {refusal === undefined ? null : (
         <p role="alert" className="m-0 px-panel pb-2 text-meta text-err">
           {refusal}
@@ -110,7 +148,7 @@ function ChoiceRow({
           value={choiceOf(layout, setting.path)}
           options={setting.options}
           disabled={busy}
-          onChange={async word => setRefusal(await apply(setting.path, word))}
+          onChange={async word => setRefusal(await apply([{ path: setting.path, value: word }]))}
         />
       )}
     >
@@ -123,8 +161,37 @@ function ChoiceRow({
   );
 }
 
+/** Where each list key's places come from: the installed nav set, the top bar's own items, the ferret side panels. */
+function sourcesOf(
+  path: ListSetting['path'],
+  layout: Layout,
+  catalog: readonly PlaceSource[] | undefined,
+): readonly PlaceSource[] {
+  switch (path) {
+    case 'nav.items':
+    case 'phone.nav.items':
+      // Outside a shell there is no installed set: the places the layout already names stand in for it.
+      return catalog ?? sourcesFromNames([...listOf(layout, path), ...(hiddenOf(layout, path) ?? [])]);
+    case 'top':
+    case 'phone.top':
+      return SHELL_ITEMS.top.map(id => ({ id, label: humanize(id) }));
+    case 'panels.ferret.side':
+      return (DEFAULT_LAYOUT.panels['ferret.side'] ?? []).map(id => ({ id, label: humanize(id) }));
+  }
+}
+
 /** Every editable key of `layout`, saved by `apply`. */
-function Keys({ layout, apply, busy }: { readonly layout: Layout; readonly apply: Apply; readonly busy: boolean }) {
+function Keys({
+  layout,
+  apply,
+  busy,
+  catalog,
+}: {
+  readonly layout: Layout;
+  readonly apply: Apply;
+  readonly busy: boolean;
+  readonly catalog: readonly PlaceSource[] | undefined;
+}) {
   return (
     <>
       {LAYOUT_SETTINGS.map(setting =>
@@ -132,10 +199,10 @@ function Keys({ layout, apply, busy }: { readonly layout: Layout; readonly apply
           <ChoiceRow key={setting.path} setting={setting} layout={layout} apply={apply} busy={busy} />
         ) : (
           <ListRow
-            // The key carries what is held, so a change made elsewhere replaces what was half typed.
-            key={`${setting.path}=${listText(listOf(layout, setting.path))}`}
+            key={setting.path}
             setting={setting}
             layout={layout}
+            sources={sourcesOf(setting.path, layout, catalog)}
             apply={apply}
             busy={busy}
           />
@@ -187,9 +254,11 @@ export interface LayoutSettingsProps {
   readonly client: LayoutsClient;
   /** This device's own choice; absent outside the shell, where the tab offers only the owner's. */
   readonly device?: DeviceLayout;
+  /** The installed navigation places (the shell's `useNavCatalog()`); absent outside the shell. */
+  readonly navCatalog?: readonly NavCatalogItem[];
 }
 
-export function LayoutSettings({ client, device }: LayoutSettingsProps) {
+export function LayoutSettings({ client, device, navCatalog }: LayoutSettingsProps) {
   const { state, refresh } = useLayouts(client);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | undefined>(undefined);
@@ -221,8 +290,15 @@ export function LayoutSettings({ client, device }: LayoutSettingsProps) {
 
   const { current, list } = state.read;
   const saved = list.layouts.filter(layout => layout.origin === 'saved');
-  const owner: Apply = (path, value) => run(() => client.set(path, value));
-  const theirs: Apply = async (path, value) => device?.set(path, value);
+  const catalog = navCatalog === undefined ? undefined : navSources(navCatalog);
+  const owner: Apply = changes => run(() => client.setMany(changes));
+  const theirs: Apply = async changes => {
+    for (const change of changes) {
+      const refused = device?.set(change.path, change.value);
+      if (refused !== undefined) return refused;
+    }
+    return undefined;
+  };
 
   return (
     <div className="flex min-w-0 flex-col gap-4" data-layout-settings="">
@@ -266,7 +342,7 @@ export function LayoutSettings({ client, device }: LayoutSettingsProps) {
       </SettingGroup>
 
       <SettingGroup label="Layout — every device">
-        <Keys layout={current.layout} apply={owner} busy={busy} />
+        <Keys layout={current.layout} apply={owner} busy={busy} catalog={catalog} />
         <SettingRow
           name="Start over"
           hint="Drop your changes and use the built-in default"
@@ -354,7 +430,7 @@ export function LayoutSettings({ client, device }: LayoutSettingsProps) {
           </summary>
           <div className="mt-2">
             <SettingGroup label="Layout — this device only">
-              <Keys layout={device.inForce} apply={theirs} busy={false} />
+              <Keys layout={device.inForce} apply={theirs} busy={false} catalog={catalog} />
               <SettingRow
                 name="Follow the owner's layout"
                 hint={
