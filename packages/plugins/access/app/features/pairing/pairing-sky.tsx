@@ -8,7 +8,8 @@
  *   - ONE static layer of faint stars (a single element, many `box-shadow`s: no animation at all);
  *   - {@link TWINKLERS}: a dozen larger stars fading in and out (opacity);
  *   - two shooting stars on long, mostly-idle loops (transform + opacity), and ONE streak that runs once on success;
- *   - the Fleet Grid: a single SVG pattern, static.
+ *   - the Fleet Grid: a single SVG pattern that BREATHES, its opacity and a hair of scale swelling and settling over 7 s
+ *     (transform + opacity on the grid's own layer; the stars and shooting stars stay as they were).
  *
  * It PAUSES WHILE THE TAB IS HIDDEN (`animation-play-state`), and under reduced motion — the OS setting or the app's
  * Motion = Reduced (`<html data-motion="reduced">`) — every animation is off and what is left is a still sky
