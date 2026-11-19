@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { loadTerminalFont, terminalFontLoader } from '../../../app/components/terminal-font-loader.ts';
 import { TERMINAL_FONT_FACE, terminalFontFamily } from '../../../app/lib/terminal-font.ts';
 import { THEME_FAMILIES } from '@ferretry/app';
-import { ensureDom } from '@ferretry/app/testing';
+import { ensureDom, readThemeCss } from '@ferretry/app/testing';
 
 // These suites read the document directly; register one before any hook or test runs.
 ensureDom();
@@ -22,7 +22,7 @@ ensureDom();
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** The themes are the shell's (`@ferretry/app`): this reads the stylesheet the app ships, not a copy of it. */
-const themes = readFileSync(join(here, '../../../../../app/src/styles/themes.css'), 'utf8');
+const themes = readThemeCss();
 const terminals = readFileSync(join(here, '../../../app/components/web-terminals.css'), 'utf8');
 
 /** Every `--font-mono` a theme declares, base included. */

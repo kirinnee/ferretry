@@ -1,0 +1,83 @@
+:root[data-palette='studio'][data-mode='light'],
+[data-swatch][data-palette='studio'][data-mode='light'] {
+  --bubble-bg: #eceffc;
+}
+
+:root[data-palette='studio'][data-mode='dark'],
+[data-swatch][data-palette='studio'][data-mode='dark'] {
+  /* ═══ structural token layer ═══ */
+  --border-strong: #6f6f73; /* 3.10:1 */
+  --chrome-fg: #83838c; /* 4.56:1 on --surface */
+  --bg: #0b0b0d;
+  --surface: #141417;
+  --surface-2: #1a1a1e;
+  --surface-3: #232329;
+  --fg: #f2f2f4;
+  --fg-soft: #c9c9d1;
+  --muted: #90909c;
+  --faint: #82828c;
+  --border: #2a2a30;
+  --border-soft: #202024;
+  --accent: #8f93ee;
+  --accent-rgb: 143 147 238;
+  --accent-fg: #0b0b0e;
+  --accent-soft: #1b1b2b;
+  --accent-border: #34345c;
+  --accent-strong: #a6a9f4;
+  --user-bg: #16161d;
+  --user-border: #8f93ee;
+  --user-rail: #3a3a63;
+  --bubble-bg: #1c1d2e;
+  --code-bg: #121215;
+  --code-border: #24242a;
+  --code-fg: #d6d6de;
+  --ok: #6fae82;
+  --ok-bg: #14241a;
+  --ok-border: #234630;
+  --warn: #c79a52;
+  --warn-bg: #241d11;
+  --warn-border: #463719;
+  --pend: #9a9aa6;
+  --pend-bg: #1b1b1f;
+  --pend-border: #2e2e35;
+  --err: #cc7d7d;
+  --err-bg: #251616;
+  --err-border: #482a2a;
+  --tool-bash: #5cc08a;
+  --tool-read: #6ea8f0;
+  --tool-edit: #e0a95a;
+  --tool-write: #b49af0;
+  --tool-patch: #ec84b6;
+  --tool-search: #4fc6dc;
+  --tool-plan: #9a9df0;
+  --tool-wait: #9aa0ac;
+  --tool-generic: #90909c;
+  --syn-comment: #90909c;
+  --syn-keyword: #c4b5fd;
+  --syn-string: #67e8f9;
+  --syn-type: #67e8f9;
+  --syn-number: #fbbf24;
+  --syn-meta: #fbbf24;
+  --syn-addition: #86efac;
+  --syn-deletion: #fca5a5;
+  --bar-bg: rgba(11, 11, 13, 0.84);
+  --shadow-sm-1: rgba(0, 0, 0, 0.4);
+  --shadow-md-1: rgba(0, 0, 0, 0.45);
+  --shadow-md-2: rgba(0, 0, 0, 0.42);
+  --shadow-lg-1: rgba(0, 0, 0, 0.5);
+  --shadow-lg-2: rgba(0, 0, 0, 0.5);
+  --scrim: rgba(0, 0, 0, 0.6);
+  --ring: rgba(143, 147, 238, 0.42);
+  --focus-color: #8f93ee;
+  --selection-bg: #2f2f5c;
+  --selection-fg: #f2f2f4;
+  /* --accent-soft is too close to the rail to read as a pill here; this is the
+   deeper indigo fill the approved proposal used. */
+  --nav-hover: var(--surface-3);
+  --nav-sel-bg: #23234a;
+  --nav-sel-fg: #dcdcff;
+  --nav-sel-sub: #aaacf0;
+  --nav-sel-edge: #3e3c7a;
+  --ground: #09090b;
+  --step-seg-now: #5f619a;
+}

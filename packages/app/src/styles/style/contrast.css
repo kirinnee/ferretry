@@ -1,0 +1,112 @@
+/* ============================================================================
+   FAMILY 4 — HIGH CONTRAST (AAA target). Not a palette swap: pure black/white
+   grounds, no soft greys, no blurred shadows and no wash at all, 2px rules on
+   every edge, a 3px focus ring, and larger type at looser leading. Every text
+   colour here targets ≥ 7:1 against its own surface.
+   ============================================================================ */
+:root[data-style='contrast'],
+[data-swatch][data-style='contrast'] {
+  /* No flourish: a choice is shown by its state, not by moving. */
+  --select-pop: 1;
+  --ghost-edge: var(--border-strong);
+  --hover-fill: color-mix(in srgb, var(--fg) 10%, transparent); /* High Contrast: stronger washes, still one cue */
+  --select-fill: color-mix(in srgb, var(--fg) 20%, transparent);
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 13.5px;
+  --text-md: 14.5px;
+  --text-lg: 16px;
+  --text-display: 1.2rem;
+  --text-input-desktop: 14.5px;
+  --weight-normal: 500;
+  --weight-medium: 600;
+  --weight-strong: 700;
+  --weight-display: 800;
+  --label-size: 11px;
+  --label-weight: 700;
+  --tracking-label: 0.06em;
+  --prose-measure: 80ch;
+  --radius-control: 2px;
+  --radius-panel: 4px;
+  --radius-badge: 2px;
+  --radius-tab: 2px;
+  --radius-input: 2px;
+  --bubble-stroke: 2px;
+  --bubble-radius: 2px;
+  --bubble-shadow: none;
+  --stroke-control: 2px;
+  --stroke-panel: 2px;
+  --divider-width: 2px;
+  --divider-color: var(--border);
+  --shadow-control: none;
+  --shadow-panel: none;
+  --shadow-popover: 0 0 0 2px var(--border); /* a ring, not a shadow */
+  --shadow-active: none;
+  --rail-active: none;
+  --control-h-desktop: 34px;
+  --control-h-sm-desktop: 30px;
+  --row-min-h-desktop: 44px;
+  --pad-control-x: 12px;
+  --pad-panel: 12px;
+  --pad-row-y: 8px;
+  --pad-cell-x: 10px;
+  --gap-xs: 6px;
+  --gap-sm: 8px;
+  --gap-md: 12px;
+  /* Every control carries a permanent outline; every link is underlined at rest. */
+  --outline-always: var(--stroke-control) solid var(--border-strong);
+  --underline-links: underline;
+  --focus-shadow: none;
+  --font-display: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  --font-size-base: 14.5px;
+  --leading-base: 1.6;
+  --tracking-display: 0;
+  --md-font-size: 15px;
+  --md-leading: 1.7;
+  --code-font-size: 13.5px;
+  --chrome-font-size: 12px;
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --border-width: 2px;
+  --border-width-heavy: 3px;
+  --focus-width: 3px;
+  --overlay: none;
+  --overlay-opacity: 0;
+  /* SOLID INVERSION, no tints: the selected row swaps ink and ground, and
+   every selection marker is full-strength ink at 3px. The one coloured
+   marker is the CURRENT step, so "here" never reads like "done". All text
+   pairs hold the family's 7:1. */
+  --control-transform: none;
+  --tab-fg: var(--muted);
+  --tab-sel-fg: var(--fg);
+  --tab-underline: var(--fg);
+  --tab-underline-width: 3px;
+  --appnav-underline: var(--fg);
+  --step-done-bg: var(--fg);
+  --step-done-fg: var(--bg);
+  --step-rail-done: var(--fg);
+  --step-seg-done: var(--fg);
+  --bubble-fg: var(--fg);
+  --bubble-border: var(--user-border);
+  --shadow-sm: none;
+  --shadow-md: 0 0 0 2px var(--border);
+  --shadow-lg: 0 0 0 3px var(--border);
+}
+
+@media (max-width: 640px) {
+  :root[data-style='contrast'] {
+    --text-2xs: 13.5px;
+    --text-xs: 15px;
+    --text-sm: 16px;
+    --text-base: 17px;
+    --text-md: 18.5px;
+    --text-lg: 21px;
+    --text-display: 1.6rem;
+    --label-size: 13.5px;
+  }
+}

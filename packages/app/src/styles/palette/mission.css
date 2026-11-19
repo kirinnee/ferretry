@@ -1,0 +1,217 @@
+:root[data-palette='mission'],
+[data-swatch][data-palette='mission'] {
+  --chrome-fg: var(--faint);
+  --nav-sel-edge: var(--accent);
+}
+
+:root[data-palette='mission'][data-mode='light'],
+[data-swatch][data-palette='mission'][data-mode='light'] {
+  /* ═══ structural token layer ═══ */
+  --border-strong: #78878a; /* 3.09:1 */
+  --bg: #f1fafc;
+  --surface: #ffffff;
+  --surface-2: #e7f5f8;
+  --surface-3: #d9eef3;
+  --fg: #05212a;
+  --fg-soft: #123f4a;
+  --muted: #345961;
+  --faint: #405f67;
+  /* HUD RULES. Raised from .2/.11 — the table wrapper, the column-header band
+   and every row divider are drawn with these two, so at .2/.11 the dashboard
+   read as floating text with no chassis. At .46/.30 the table becomes a ruled
+   telemetry field, which is the point. Both tokens are `decor` tier in the
+   audit, so raising them cannot regress a contrast claim — and control edges
+   are a separate token (--border-strong), so this does not double up there. */
+  --border: rgba(11, 82, 95, 0.46);
+  --border-soft: rgba(11, 82, 95, 0.3);
+  --accent: #0a7181;
+  --accent-rgb: 10 113 129;
+  --accent-fg: #ffffff;
+  --accent-soft: #dcf2f6;
+  --accent-border: #a2d6de;
+  --accent-strong: #06525f;
+  --user-bg: #e9f6f9;
+  --user-border: #0a7181;
+  --user-rail: #a2d6de;
+  --bubble-bg: var(--user-bg);
+  --code-bg: #eaf5f8;
+  --code-border: rgba(11, 82, 95, 0.16);
+  --code-fg: #103139;
+  --ok: #0a6f4b;
+  --ok-bg: #ddf4ea;
+  --ok-border: #a8ddc9;
+  --warn: #8a4f08;
+  --warn-bg: #fceedd;
+  --warn-border: #eccfa7;
+  --pend: #3c6771;
+  --pend-bg: #e7f0f2;
+  --pend-border: #c3d9dd;
+  --err: #a8283a;
+  --err-bg: #fbe6e9;
+  --err-border: #e8bdc4;
+  --tool-bash: #0a6f4b;
+  --tool-read: #14559c;
+  --tool-edit: #8a4f08;
+  --tool-write: #6a3a9c;
+  --tool-patch: #9c2a63;
+  --tool-search: #0a7181;
+  --tool-plan: #1c4f8a;
+  --tool-wait: #4d737c;
+  --tool-generic: #3c6771;
+  --syn-comment: #4d747e;
+  --syn-keyword: #6a2c9c;
+  --syn-string: #0d6b5e;
+  --syn-type: #0a7181;
+  --syn-number: #8a4f08;
+  --syn-meta: #8a4f08;
+  --syn-addition: #0a6f4b;
+  --syn-deletion: #a8283a;
+  --bar-bg: rgba(241, 250, 252, 0.86);
+  --shadow-sm-1: rgba(11, 82, 95, 0.22);
+  --shadow-sm-2: rgba(255, 255, 255, 0.9);
+  --shadow-md-1: rgba(11, 82, 95, 0.26);
+  --shadow-md-2: rgba(255, 255, 255, 0.9);
+  --shadow-md-3: rgba(6, 48, 56, 0.1);
+  --shadow-lg-1: rgba(6, 48, 56, 0.08);
+  --shadow-lg-2: rgba(6, 48, 56, 0.12);
+  --scrim: rgba(6, 34, 40, 0.4);
+  /* THE TELEMETRY FIELD. This is the correction: the page itself is now a ruled
+   32px grid, not a flat sheet with two 6%-alpha radial tints that vanish the
+   moment hue is removed. `--body-wash` paints `body`, so it covers the whole
+   viewport including the regions no panel occupies — the gutters, the shell
+   behind the sidebar, the area below a short table. That is what makes the
+   theme read as an instrument rather than as a page with a textured card on it.
+
+   The grid ink is the deep teal at 0.13/0.06 (major/minor), which survives
+   achromatopsia as a legible ruled field while staying far below text weight.
+   Calmed from 0.14/0.077 and re-pitched to a 96px major / 32px minor module
+   (was 128/32) so the field reads as a precise ruled instrument rather than
+   busy graph paper, and to match dark's grid exactly — both modes now draw the
+   same chassis. The old radials were removed long ago; the budget is the grid's.
+
+   `repeating-linear-gradient` on purpose rather than `linear-gradient` plus a
+   `background-size`: it tiles itself, so the whole field stays inside
+   themes.css and needs no change to `body` in index.css (which is not mine).
+   `background-attachment: fixed` is already on `body`, so the grid is pinned to
+   the viewport and reads as an instrument backdrop the panes travel over. */
+  --body-wash:
+    repeating-linear-gradient(90deg, rgba(11, 82, 95, 0.13) 0 1px, transparent 1px 96px),
+    repeating-linear-gradient(180deg, rgba(11, 82, 95, 0.13) 0 1px, transparent 1px 96px),
+    repeating-linear-gradient(90deg, rgba(11, 82, 95, 0.06) 0 1px, transparent 1px 32px),
+    repeating-linear-gradient(180deg, rgba(11, 82, 95, 0.06) 0 1px, transparent 1px 32px);
+  /* The PANEL grid, aligned to the same 32px module as the page grid above so
+   the two read as one continuous field rather than a textured card sitting on a
+   ruled page. The family block sets this from `--accent-rgb` at 0.05, which is
+   right for dark (cyan glowing on near-black) and invisible for light (teal on
+   white) — so light restates it with the deep-teal ink at 0.075. Now that the
+   dashboard table wrapper IS a `.kt-panel`, this is what keeps the panel from
+   masking the field underneath it.
+
+   Contrast note: this is a 1px line at 0.075 over `--surface`, which darkens
+   the ground to L≈0.95 at the line itself. Worst body ink (`--faint`) measures
+   5.1:1 there versus 5.4:1 on clean white — still clear of 4.5, and only on the
+   line. The audit models `--body-wash` but not `--panel-texture`, so that
+   figure is hand-checked rather than gated. */
+  --texture-ink: rgba(11, 82, 95, 0.075);
+  --ring: rgba(10, 113, 129, 0.3);
+  --focus-color: #06525f;
+  --selection-bg: #b7e7ee;
+  --selection-fg: #05212a;
+  --nav-hover: var(--surface-2);
+  --nav-sel-bg: var(--accent-soft);
+  --nav-sel-fg: var(--accent-strong);
+  --nav-sel-sub: var(--accent);
+  --ground: var(--surface-3);
+  --step-seg-now: #519aa6;
+}
+
+:root[data-palette='mission'][data-mode='dark'],
+[data-swatch][data-palette='mission'][data-mode='dark'] {
+  /* ═══ structural token layer ═══ */
+  /* from the reference --line-strong .32, keeps the teal cast */
+  --border-strong: #586f75; /* 3.12:1 */
+  --bg: #050a0f;
+  --surface: #081219;
+  --surface-2: #0b1821;
+  --surface-3: #09212a;
+  --fg: #effcff;
+  --fg-soft: #c7dee3;
+  --muted: #a7c0c7;
+  --faint: #809da5;
+  --border: rgba(151, 217, 224, 0.18);
+  --border-soft: rgba(151, 217, 224, 0.1);
+  --accent: #47f3ff;
+  --accent-rgb: 71 243 255;
+  --accent-fg: #03121a;
+  --accent-soft: rgba(71, 243, 255, 0.1);
+  --accent-border: rgba(71, 243, 255, 0.38);
+  --accent-strong: #9ff9ff;
+  --user-bg: #071a22;
+  --user-border: #47f3ff;
+  --user-rail: rgba(71, 243, 255, 0.42);
+  --bubble-bg: var(--user-bg);
+  --code-bg: #030609;
+  --code-border: rgba(151, 217, 224, 0.16);
+  --code-fg: #d8f2f6;
+  --ok: #5ee6a8;
+  --ok-bg: rgba(94, 230, 168, 0.1);
+  --ok-border: rgba(94, 230, 168, 0.32);
+  --warn: #ffad55;
+  --warn-bg: rgba(255, 173, 85, 0.1);
+  --warn-border: rgba(255, 173, 85, 0.32);
+  --pend: #a7c0c7;
+  --pend-bg: rgba(151, 217, 224, 0.08);
+  --pend-border: rgba(151, 217, 224, 0.24);
+  --err: #ff6b7a;
+  --err-bg: rgba(255, 107, 122, 0.1);
+  --err-border: rgba(255, 107, 122, 0.34);
+  --tool-bash: #5ee6a8;
+  --tool-read: #63a9ff;
+  --tool-edit: #ffad55;
+  --tool-write: #c28cff;
+  --tool-patch: #ff8fb0;
+  --tool-search: #47f3ff;
+  --tool-plan: #b9d7ff;
+  --tool-wait: #809da5;
+  --tool-generic: #a7c0c7;
+  --syn-comment: #809da5;
+  --syn-keyword: #c28cff;
+  --syn-string: #5ee6a8;
+  --syn-type: #47f3ff;
+  --syn-number: #ffad55;
+  --syn-meta: #ffd3a2;
+  --syn-addition: #5ee6a8;
+  --syn-deletion: #ff6b7a;
+  --bar-bg: rgba(5, 10, 15, 0.86);
+  --shadow-sm-1: rgba(151, 217, 224, 0.08);
+  --shadow-md-1: rgba(151, 217, 224, 0.09);
+  --shadow-md-2: rgba(0, 0, 0, 0.5);
+  --shadow-lg-1: rgba(151, 217, 224, 0.11);
+  --shadow-lg-2: rgba(0, 0, 0, 0.58);
+  --scrim: rgba(2, 6, 10, 0.72);
+  /* THE RULED FIELD, dark. The old radial glow-wash was the effect that read as
+   "sci-fi console"; it is replaced by the same ruled instrument grid light
+   uses, faint cyan on near-black, aligned to the 32px panel module (96px major
+   / 32px minor). Both modes now share one chassis, so the family is defined by
+   the grid, not by a glow. A whisper of vertical grade under the grid keeps the
+   ground from reading as dead-flat black. */
+  --body-wash:
+    repeating-linear-gradient(90deg, rgba(120, 200, 214, 0.055) 0 1px, transparent 1px 96px),
+    repeating-linear-gradient(180deg, rgba(120, 200, 214, 0.055) 0 1px, transparent 1px 96px),
+    repeating-linear-gradient(90deg, rgba(120, 200, 214, 0.03) 0 1px, transparent 1px 32px),
+    repeating-linear-gradient(180deg, rgba(120, 200, 214, 0.03) 0 1px, transparent 1px 32px),
+    linear-gradient(180deg, #060d13 0%, #04090e 100%);
+  --ring: rgba(71, 243, 255, 0.34);
+  --focus-color: #47f3ff;
+  --selection-bg: #47f3ff;
+  --selection-fg: #041016;
+  /* Opaque on purpose: --accent-soft is 10% cyan, which would composite
+   differently over the rail, a card and the ground. This is that same 10%
+   cyan, pre-composited over --surface. */
+  --nav-hover: var(--surface-3);
+  --nav-sel-bg: #0e2830;
+  --nav-sel-fg: var(--accent);
+  --nav-sel-sub: var(--muted);
+  --ground: #020509;
+  --step-seg-now: #226e77;
+}

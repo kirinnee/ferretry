@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readThemeCss } from '../../../src/testing/theme-css.ts';
 
 const src = (path: string): string => readFileSync(join(import.meta.dir, '../../../src', path), 'utf8');
 const css = src('ui/design-system.css');
-const themes = src('styles/themes.css');
+const themes = readThemeCss();
 const rule = (selector: RegExp): string => css.match(selector)?.[0] ?? '';
 
 describe('the shared menu row', () => {
@@ -28,7 +29,7 @@ describe('the shared menu row', () => {
   });
 
   it('a dark theme raises its menu one step off the page', () => {
-    expect(themes).toMatch(/\[data-theme\$='-dark'\][^{]*\{\s*--menu-bg: var\(--surface-2\);/u);
+    expect(themes).toMatch(/\[data-mode='dark'\][^{]*\{\s*--menu-bg: var\(--surface-2\);/u);
   });
 
   it('the shared menus use it: the context menu rows and the picker list', () => {
@@ -66,8 +67,8 @@ describe('the shared menu row', () => {
     expect(picker).toContain('[--menu-item-align:flex-start]');
   });
 
-  it('every compact family names its own focus ring and a >=3:1 control edge (the baseline is Studio LIGHT)', () => {
-    const block = themes.match(/\n:root\[data-theme\^='phosphor-'\],[^{]*\{[^}]*--border-strong:[^}]*\}/u)?.[0] ?? '';
+  it('every compact palette names its own focus ring and a >=3:1 control edge (the baseline is Studio LIGHT)', () => {
+    const block = themes.match(/\n:root\[data-palette='phosphor'\],[^{]*\{[^}]*--border-strong:[^}]*\}/u)?.[0] ?? '';
     expect(block).toContain('--focus-color: var(--accent);');
     expect(block).toContain('--border-strong: color-mix(in srgb, var(--fg) 58%, var(--surface));');
   });

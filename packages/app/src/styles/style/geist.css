@@ -1,0 +1,212 @@
+/* ============================================================================
+   FAMILY 5 — GEIST (Vercel). Near-absolute black and white, engineered
+   restraint, generous negative space. The look of the Vercel dashboard: a page
+   that is mostly quiet whitespace, hairline greys ruling it into regions, small
+   precise type, and colour spent only where it does a job (the one blue accent
+   for links, focus and primary action).
+
+   ── THE HARD PROBLEM: why this is not "the other black-and-white one" ───────
+   Two monochrome families already ship — Contrast (AAA, MAXIMAL: pure #000/#fff
+   grounds, 2px black edges on everything, permanent outlines, underlined links,
+   large heavy type, 44px rows) and Neo (BRUTALIST: hard 2–3px black rules,
+   0 radius, flat offset-ink shadows, black display weights). A Vercel family is
+   also monochrome, so it has to earn its identity STRUCTURALLY or it fails the
+   ship gate (name the family from a greyscale screenshot). For a monochrome
+   family the greyscale shot IS the colour shot — there is nowhere to hide — so
+   every differentiator below is a greyscale differentiator by construction:
+
+     1. BORDER WEIGHT + LAYERING — the strongest tell. Contrast and Neo both draw
+        MAXIMUM-contrast HEAVY black edges (2–3px, #000/#fff). Geist draws a 1px
+        HAIRLINE in a QUIET grey (`--border` #dcdcde light / #363636 dark) AND
+        leans on a DECISIVE surface step (page → card → raised tier) so the FILL
+        separates regions where the thin edge alone can't. The first shipped Geist
+        used a near-invisible #eaeaea/#2a2a2a hairline and NO surface step to
+        speak of; on a 30-row console the structure dissolved into mush — the
+        precise reason it was reworked. It is still unmistakable in greyscale:
+        thin quiet rules over clearly layered planes, versus Contrast's stark
+        black boxes and Neo's black-outlined blocks. `--border-width-heavy` stays
+        1px too — Geist never thickens; commitment here is layering, not weight.
+     2. TYPE WEIGHT + SIZE — Geist is SMALL and LIGHT (13px base, 400/500/600,
+        tight negative tracking). Contrast is large and heavy (14.5px, 500–800);
+        Neo is chunky black (up to 900). Grey text that reads thin and small vs
+        thick and big is unmistakable with hue removed.
+     3. RADIUS — a consistent modest ~6px. Neo is 0 (hard), Contrast is 2px
+        (near-hard). 6px is visibly rounder than both yet far from Ember's pills.
+     4. ELEVATION — a WHISPER soft shadow at most; controls rest FLAT on a
+        hairline. Neo casts a hard offset ink block; Contrast casts nothing (uses
+        rings). Geist's soft-blur-almost-nothing is a third, distinct read.
+     5. NEGATIVE SPACE — airy: small controls with GENEROUS padding and gaps, on
+        a clean flat ground (no wash, no texture, no overlay). Density carries a
+        lot here — the opposite of Mission's tight instrument panel.
+
+   ── NO MARKETING LAYER (the DASHBOARD, not vercel.com) ──────────────────────
+   An earlier Geist wore vercel.com's MARKETING aesthetic: a near-black canvas lit
+   by an AURORA of radial spotlights (`--body-wash`), a gradient sheen on panels
+   (`--panel-texture`), and an accent GLOW on controls, panels and the focus ring.
+   It was REMOVED. On a fleet console you stare at for hours the aurora was pure
+   costume — a novelty that wears off exactly the way Mission's scanlines did — and
+   four glowing spotlights behind 30 rows of live data fought the data for
+   attention. The reference is the Vercel DASHBOARD, which is clean, flat and
+   near-black, not the homepage. So `--body-wash`, `--panel-texture` and the accent
+   glow on `--shadow-*` / `--focus-shadow` are all gone; `--glow-alpha` stays 0 and
+   the reduced-motion path is a no-op. The identity is carried entirely by
+   structure — layered surfaces, legible hairlines, small precise type, negative
+   space — which is what survives the greyscale gate anyway. A side benefit: with
+   no wash brightening the ground, every body ink is verified AA on the flat
+   surface directly, no WASH_PEAK bookkeeping to keep in step.
+
+   ── FONTS ───────────────────────────────────────────────────────────────────
+   Geist Sans / Geist Mono is the voice, but this is an offline PWA with a strict
+   CSP and a deliberately small bundle, and no family bundles a webfont — they
+   all ride SYSTEM STACKS. Geist is a geometric-humanist grotesque very close to
+   SF / Inter / Segoe, so we name `Geist` first (anyone who has it installed gets
+   the real thing) and fall back to the system Geist-alikes. Bundling Geist would
+   make it the ONLY webfont in the app for a KB cost the identity does not need —
+   the family is carried by structure (hairlines, radius, weight, space), not by
+   the exact glyphs. `--font-ui` stays SANS (not mono like Mission) so the chrome
+   reads as clean Vercel sans; mono is reserved for code/data via `--font-mono`.
+
+   BORDERS AND THE CONTRAST GATE — the hairline is where 1.4.11 bites. `--border`
+   / `--border-soft` are DECORATIVE (card/panel/divider edges, identified by
+   their own fill + content) and the audit tiers them `decor`, so the true
+   #eaeaea hairline is legal there. The LOAD-BEARING control edge is a separate
+   token, `--border-strong`, which the audit hard-checks at ≥3:1 against every
+   surface — so inputs and outline controls get a real, if still restrained, grey
+   that a user can find. That split is honest: a Vercel field edge genuinely is
+   more visible than a divider between two list rows.
+   ============================================================================ */
+:root[data-style='geist'],
+[data-swatch][data-style='geist'] {
+  /* ═══ structural token layer ═══ */
+  /* Geist first; then the system faces that approximate it. Display == body:
+   Vercel has no separate display face, restraint is the point. Mono is Geist
+   Mono for code and data, not the chrome (that stays sans, unlike Mission). */
+  --font-display:
+    'Geist', 'Geist Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', system-ui,
+    sans-serif;
+  --font-body:
+    'Geist', 'Geist Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', system-ui,
+    sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  /* Small, precise, LIGHT — the greyscale weight tell vs Contrast (heavy) and
+   Neo (black). Sentence-case labels with a whisper of tracking, never shouted
+   caps and never small-caps — a seventh distinct label treatment. */
+  --label-transform: none;
+  --label-variant: normal;
+  --label-size: 11px;
+  --label-weight: 500;
+  --tracking-label: 0.01em;
+  --display-transform: none;
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-strong: 600;
+  --weight-display: 600;
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 12.5px;
+  --text-md: 13px;
+  --text-lg: 14.5px;
+  --text-display: 1.1rem;
+  --text-input-desktop: 13px;
+  --font-size-base: 13px;
+  --leading-base: 1.5;
+  --leading-tight: 1.25;
+  /* Geist's negative tracking is a big part of its precise, engineered feel. */
+  --tracking-display: -0.021em;
+  --tracking-body: -0.006em;
+  --md-font-size: 13.5px;
+  --md-leading: 1.6;
+  --code-font-size: 12.5px;
+  --chrome-font-size: 11px;
+  --prose-measure: 76ch;
+  /* One consistent modest radius. Rounder than Neo (0) and Contrast (2px),
+   nowhere near Ember's pills. */
+  --radius-control: 6px;
+  --radius-panel: 8px;
+  --radius-badge: 6px;
+  --radius-tab: 6px;
+  --radius-input: 6px;
+  --bubble-border: var(--border);
+  --bubble-stroke: 1px;
+  --bubble-radius: 10px;
+  --bubble-shadow: var(--shadow-sm);
+  --glow-alpha: 0;
+  --shadow-control: none;
+  --shadow-panel: var(--shadow-md);
+  --shadow-popover: var(--shadow-lg);
+  --press-translate: 0px;
+  --rule-inset: none;
+  --rail-active: none;
+  --divider-color: var(--border-soft);
+  /* Airy: small controls, generous padding and gaps. Negative space is a
+   load-bearing part of the identity, so this is deliberately roomier than
+   Studio and the opposite of Mission's tight panel. */
+  --control-h-desktop: 32px;
+  --control-h-sm-desktop: 28px;
+  --row-min-h-desktop: 40px;
+  --pad-control-x: 14px;
+  --pad-badge-x: 8px;
+  --pad-panel: 16px;
+  --pad-row-y: 8px;
+  --pad-cell-x: 12px;
+  --gap-xs: 6px;
+  --gap-sm: 8px;
+  --gap-md: 14px;
+  /* Panels are flat lit planes — no texture, no glow. Region separation is
+   carried by the surface STEP (a card sits a clear tint off the page) and the
+   crisp hairline around it, the way the Vercel dashboard actually works, not
+   by a painted gradient. No overlay (it would sit ABOVE text). */
+  --panel-bg: var(--surface);
+  --panel-texture: none;
+  --panel-texture-size: auto;
+  --overlay: none;
+  --overlay-opacity: 0;
+  /* Focus is a crisp 2px accent ring — no bloom. Precise, not luminous. Not a
+   permanent outline, links not underlined — the calm end of the spectrum,
+   unlike Contrast. */
+  --focus-shadow: none;
+  --outline-always: none;
+  --underline-links: none;
+  /* The raw ramp echoes the roles so utility-shaped call sites stay on-family. */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  /* Hairline everywhere — "heavy" never thickens past 1px, which is the whole
+   point of the family and its clearest separation from Contrast/Neo in grey. */
+  --border-width: 1px;
+  --border-width-heavy: 1px;
+  /* A quiet blue-tinted pill on a 1px accent hairline — colour spent only
+   where it does a job, and never a heavier edge than the family allows. */
+  --control-transform: none;
+  --bubble-fg: var(--fg);
+  --bubble-border: var(--border);
+  /* Quiet neutral blurs, no accent glow — panels lift a hair, controls stay flat. */
+  --shadow-sm: 0 1px 2px var(--shadow-sm-1);
+}
+
+:root[data-style='geist'][data-mode='light'],
+[data-swatch][data-style='geist'][data-mode='light'] {
+  --shadow-md: 0 1px 2px var(--shadow-md-1), 0 8px 24px -6px var(--shadow-md-2);
+  --shadow-lg: 0 2px 4px var(--shadow-lg-1), 0 16px 40px -8px var(--shadow-lg-2);
+}
+
+:root[data-style='geist'][data-mode='dark'],
+[data-swatch][data-style='geist'][data-mode='dark'] {
+  --shadow-md: 0 1px 2px var(--shadow-md-1), 0 10px 34px -8px var(--shadow-md-2);
+  --shadow-lg: 0 2px 4px var(--shadow-lg-1), 0 20px 56px -10px var(--shadow-lg-2);
+}
+
+@media (max-width: 640px) {
+  :root[data-style='geist'] {
+    --text-2xs: 12px;
+    --text-xs: 13.5px;
+    --text-sm: 14.5px;
+    --text-base: 15.5px;
+    --text-md: 16.5px;
+    --text-lg: 18px;
+    --text-display: 1.35rem;
+    --label-size: 12.5px;
+  }
+}

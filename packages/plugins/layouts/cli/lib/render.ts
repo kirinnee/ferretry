@@ -24,7 +24,7 @@ export function layoutLines(layout: Layout): readonly string[] {
 export function currentLines(current: CurrentLayout): readonly string[] {
   return [
     ...layoutLines(current.layout),
-    `theme    ${current.theme.id} (${current.theme.label}, on ${current.theme.base})`,
+    `theme    ${current.theme.id} (${current.theme.label}, on ${current.theme.style ?? current.theme.base ?? 'this device'})`,
   ];
 }
 

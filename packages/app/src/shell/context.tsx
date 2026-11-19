@@ -16,7 +16,7 @@ import {
   resolveThemeMode,
   type ThemePreference,
   type ThemePreferenceStore,
-  themeAttribute,
+  applyThemeAxes,
   manifestHrefFor,
   MANIFEST_LINK_ID,
   themeColorFromComputedStyle,
@@ -104,8 +104,9 @@ function useMedia(browser: ShellWindow, query: string): boolean {
 }
 
 /**
- * Publishes the theme on the root. The family, mode and text scale are THIS device's (a device setting, §5.2); the
- * owner's theme from the daemon (`fy theme use`) lays its light and dark tokens over that family.
+ * Publishes the theme on the root. The style, palette, mode and text scale are THIS device's (a device setting, §5.2); the
+ * owner's theme from the daemon (`fy theme use`) lays its light and dark tokens over them, and names a style or a palette
+ * of its own only when it says so.
  */
 /**
  * The window colour for the OS chrome and the themed install manifest, as today's `use-theme.ts` set them: the ONE
@@ -145,12 +146,18 @@ function useAppliedTheme(
 ): void {
   useEffect(() => {
     const root = browser.document.documentElement;
-    root.dataset.theme = themeAttribute(preference.family, resolveThemeMode(preference.mode, dark));
+    const resolved = resolveThemeMode(preference.mode, dark);
+    // The owner's theme item may name a style and/or a palette: then it wins over this device's pick for that axis.
+    const look = {
+      ...preference,
+      style: ownerTheme?.style ?? preference.style,
+      palette: ownerTheme?.palette ?? preference.palette,
+    };
+    applyThemeAxes(root, look, resolved);
     root.dataset.density = density;
     applyTextScale(root, preference.textScale);
-    const resolved = resolveThemeMode(preference.mode, dark);
     applyThemeItem(root, ownerTheme, resolved);
-    applyWindowColour(browser.document, preference.family, resolved);
+    applyWindowColour(browser.document, look.palette, resolved);
   }, [browser, dark, density, preference, ownerTheme]);
 }
 

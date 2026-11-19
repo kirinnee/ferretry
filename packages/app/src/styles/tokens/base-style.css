@@ -1,0 +1,253 @@
+:root,
+[data-swatch] {
+  /* ═══ structural token layer ═══ */
+  /* ---- typography ---- */
+  --font-ui: var(--font-body);
+  --font-prose: var(--font-body);
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 12.5px;
+  --text-md: 13.5px;
+  --text-lg: 15px;
+  --text-display: 1.15rem;
+  --text-input-desktop: 13.5px;
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-strong: 600;
+  --weight-display: 650;
+  --leading-tight: 1.3;
+  --tracking-label: 0.1em;
+  --tracking-body: 0;
+  --label-transform: uppercase;
+  --label-variant: normal;
+  --label-size: 10px;
+  --label-weight: 600;
+  --display-transform: none;
+  --prose-measure: 90ch;
+  /* ---- geometry roles (components consume THESE, never the raw ramp) ---- */
+  --radius-control: var(--radius-sm);
+  --radius-panel: var(--radius-lg);
+  --radius-badge: var(--radius-xs);
+  --radius-tab: var(--radius-sm);
+  --radius-input: var(--radius-sm);
+  --radius-dot: 9999px; /* never themed — shape is a non-colour status signal */
+  --notch: 0px;
+  --clip-control: none;
+  --clip-panel: none;
+  --bracket-size: 0px;
+  /* ---- stroke ---- */
+  --stroke: var(--border-width);
+  --stroke-heavy: var(--border-width-heavy);
+  --stroke-control: 1px;
+  --stroke-panel: 1px;
+  --divider-width: 1px;
+  --divider-color: var(--border-soft);
+  --rule-inset: none;
+  --shadow-control: var(--shadow-sm);
+  --shadow-panel: var(--shadow-md);
+  --shadow-popover: var(--shadow-lg);
+  --shadow-active: none;
+  --press-translate: 0px;
+  --rail-active: none;
+  /* ONE highlight cue per row, app-wide: a light NEUTRAL fill (ink-over-transparent, so it reads on any surface and in
+   every theme). Selected and hovered rows, chips, tabs and nav entries all take these two; none adds a rail, an accent
+   border, a ring or a weight change on top. Keyboard focus is the separate `--focus-*` ring. */
+  --hover-fill: color-mix(in srgb, var(--fg) 6%, transparent);
+  --select-fill: color-mix(in srgb, var(--fg) 11%, transparent);
+  /* ---- menu roles: every dropdown, context menu, picker list and the Modes menu reads THESE ----
+   One surface, one edge, one shadow, and the row states a keyboard or a pointer reaches. The edge is the
+   control edge (>=3:1 against the page in every theme, >=7:1 in High Contrast), so a menu never melts into
+   the page whatever its shadow does. The hover wash is the page ink mixed into the menu surface, so it is
+   visible on a white menu and on a near-black one alike; a dark theme raises the surface (below). */
+  --menu-bg: var(--surface);
+  --menu-edge: var(--border-strong);
+  --menu-shadow: var(--shadow-popover);
+  --menu-radius: var(--radius-panel);
+  --menu-item-h: 34px;
+  --menu-item-hover: var(--hover-fill);
+  --menu-item-active: var(--select-fill);
+  --menu-item-active-fg: var(--fg);
+  --menu-sep: var(--border);
+  /* ---- density ---- */
+  --space-unit: 4px;
+  --control-h-desktop: 28px;
+  --control-h-sm-desktop: 24px;
+  --row-min-h-desktop: 34px;
+  --pad-control-x: 10px;
+  --pad-badge-x: 8px;
+  --pad-panel: 10px;
+  --pad-row-y: 6px;
+  --pad-cell-x: 8px;
+  --gap-xs: 4px;
+  --gap-sm: 6px;
+  --gap-md: 10px;
+  /* ---- surface treatment ---- */
+  --panel-bg: var(--surface);
+  --panel-texture: none;
+  --panel-texture-size: auto;
+  /* ---- accessibility ---- */
+  --focus-shadow: none;
+  --outline-always: none;
+  --underline-links: none;
+  /* ---- MOBILE ACCESSIBILITY FLOOR — declared ONCE, here (lead ruling).
+   Freddie CONSUMES these; he does not declare them. Families set the
+   `*-desktop` tokens; var() substitution is lazy and per-element, so when a
+   family block below changes --control-h-desktop on :root these four
+   re-resolve automatically. max() means no theme can drop below the floor. */
+  --target-floor: 0px;
+  --input-font-floor: 0px;
+  --control-h: max(var(--control-h-desktop), var(--target-floor));
+  --control-h-sm: max(var(--control-h-sm-desktop), var(--target-floor));
+  --row-min-h: max(var(--row-min-h-desktop), var(--target-floor));
+  --text-input: max(var(--text-input-desktop), var(--input-font-floor));
+  /* ---- typography ---- */
+  --font-body: 'Inter var', Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-display: 'Inter var', Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'JetBrains Mono', 'SFMono-Regular', 'Cascadia Mono', Menlo, Consolas, monospace;
+  --font-size-base: 13.5px;
+  --leading-base: 1.55;
+  --tracking-display: -0.01em;
+  --md-font-size: 13.75px;
+  --md-leading: 1.62;
+  --code-font-size: 12.5px;
+  --chrome-font-size: 11px;
+  /* ---- vertical flow: ONE spacing scale for reading surfaces ----
+   The transcript, the lists and the headers space themselves from these, never from literals, so a
+   family that re-tunes its type re-tunes its rhythm in the same place. The steps are 4px multiples;
+   the paragraph and list gaps are `em`, so they follow the text they separate. The phone ramp
+   (styles/index.css DENSITY RAMP) re-tunes the same names for a 17px body. */
+  --flow-1: 4px;
+  --flow-2: 8px;
+  --flow-3: 12px;
+  --flow-4: 16px;
+  --flow-5: 24px;
+  /* Between two machine rows (tools, commands, notices): tight, so a run of them reads as one block. */
+  --flow-chrome: 2px;
+  /* Machine rows that follow a message belong to it. */
+  --flow-chrome-after: 6px;
+  /* Between two messages, and the stronger gap where the speaker changes. */
+  --flow-message: 14px;
+  --flow-turn: 18px;
+  /* The live "Pontificating… 42s" row stands apart from the last thing that happened. */
+  --flow-live: 10px;
+  --flow-paragraph: 0.55em;
+  --flow-list: 0.25em;
+  /* ---- geometry ---- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 13px;
+  --radius-pill: 9999px;
+  --border-width: 1px;
+  --border-width-heavy: 2px;
+  --bubble-fg: var(--fg);
+  --bubble-border: var(--border-soft);
+  --bubble-stroke: var(--border-width);
+  --bubble-radius: var(--radius-panel);
+  --bubble-shadow: var(--shadow-sm);
+  /* ---- transcript card roles ----
+   Everything the transcript draws as a card of its own rather than as prose — a peer message, a
+   "Sent to", a sub-ferret start, a question, a harness dialog, compaction, the dictation review —
+   wears the SAME stroke and shadow as the human bubble, so a Neo transcript is inked and offset
+   throughout and a Studio one stays hairlined and soft. The radius is the panel's, with a smaller
+   `--card-tail-radius` on the corner nearest the speaker. Cards carry no accent rail on their
+   leading side. Families restate the bubble/radius/stroke ramp these read
+   from, never these names, so a new family inherits cards that already match it.
+   Declared on :root/[data-swatch] alongside the values they read, so each resolves per theme. */
+  --card-bg: var(--surface);
+  --card-border: var(--border);
+  --card-stroke: var(--bubble-stroke);
+  --card-radius: var(--radius-panel);
+  --card-tail-radius: var(--radius-xs);
+  --card-shadow: var(--bubble-shadow);
+  /* ---- icon-only ghost controls (the composer's attach and mic) ----
+   Quiet by default: no fill, no edge, no shadow. A family whose every control is an inked block
+   (Neo) or must never be invisible (High Contrast) restates these, so a bare icon is never the one
+   unstyled control in a row of themed ones. */
+  --ghost-bg: transparent;
+  --ghost-edge: transparent;
+  --ghost-shadow: none;
+  /* ---- data-visualisation palette (an fy-render `chart`, a Mermaid diagram) ----
+   Eight series colours, read by `components/fy-render-theme.ts` and never by a payload: an author asks
+   for a slot or a tone, never a colour. Each slot NAMES a hue every family already restates per mode
+   and tunes for contrast against its own surface, so a new family gets a palette that matches it
+   without writing one. The ORDER is measured, not chosen: across every family and mode, the first five
+   stay at least 70 apart in RGB (of 441) and all eight at least 40, which the browser suite re-checks
+   against this sheet (`fy-render-component.visual.test.tsx`). The accent is NOT a slot: in several
+   families it IS one of these hues (Mission's cyan is its search teal), so a chart that wants the brand
+   colour asks for `tone: accent`. Declared here, alongside the values they read, so each resolves per
+   theme. */
+  --viz-1: var(--tool-read);
+  --viz-2: var(--tool-edit);
+  --viz-3: var(--tool-bash);
+  --viz-4: var(--tool-patch);
+  --viz-5: var(--syn-keyword);
+  --viz-6: var(--tool-search);
+  --viz-7: var(--src-claude);
+  --viz-8: var(--err);
+  --glow-alpha: 0;
+  --shadow-glow: 0 0 30px rgb(var(--accent-rgb) / var(--glow-alpha));
+  --shadow-sm: 0 1px 1px var(--shadow-sm-1);
+  --shadow-md: 0 1px 2px var(--shadow-md-1), 0 4px 12px var(--shadow-md-2);
+  --shadow-lg: 0 2px 4px var(--shadow-lg-1), 0 16px 40px var(--shadow-lg-2);
+  --overlay: none;
+  --overlay-opacity: 0;
+  --overlay-blend: normal;
+  /* ---- motion: how long and how eased a change is; a style may be calm or snappy, a palette never decides ---- */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 360ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasis: cubic-bezier(0.3, 0, 0.2, 1.25);
+  /* How far a selected choice pops (scale) when it is chosen; 1 is no pop. */
+  --select-pop: 1.04;
+  --focus-width: 2px;
+  --focus-offset: 2px;
+  /* ---- navigation, tabs, stepper, grouped cards ----
+   The Settings rail marks its selected row as a soft FILLED pill — never a
+   side bar — so these are fill/ink/edge triples rather than a rail colour.
+   Every family restates the literal ones in its own mode blocks: the compact
+   families 6–11 do not declare --surface-3 / --border-strong / --accent-strong,
+   so a baseline literal or one of those references would leak Studio indigo
+   into them. tests/unit/theme-navigation-tokens.test.ts resolves all 22 themes
+   and gates every pairing below (text >=4.5:1, >=7:1 in High Contrast;
+   graphics >=3:1). */
+  /* Owner ruling: NO all-caps on navigation or buttons, in any family.
+   --label-transform still shouts eyebrows and badges; this one never does. */
+  --control-transform: none;
+  --nav-sel-shadow: none;
+  --tab-fg: var(--muted);
+  --tab-sel-fg: var(--accent);
+  --tab-underline: var(--accent);
+  --tab-underline-width: 2px;
+  --tab-rule: var(--border);
+  --appnav-fg: var(--muted);
+  --appnav-sel-fg: var(--fg);
+  --appnav-underline: var(--accent);
+  --step-done-bg: var(--accent);
+  --step-done-fg: var(--accent-fg);
+  --step-now-edge: var(--accent);
+  --step-now-fg: var(--accent);
+  --step-todo-fg: var(--muted);
+  --step-rail-done: var(--accent);
+  --step-seg-done: var(--accent);
+}
+
+:root[data-mode='dark'],
+[data-swatch][data-mode='dark'] {
+  --menu-bg: var(--surface-2);
+}
+
+@media (max-width: 640px) {
+  :root[data-style] {
+    --text-2xs: 12.5px;
+    --text-xs: 13.5px;
+    --text-sm: 14.5px;
+    --text-base: 15.5px;
+    --text-md: 16.5px;
+    --text-lg: 18.5px;
+    --text-display: 1.4rem;
+    --label-size: 12.5px;
+  }
+}

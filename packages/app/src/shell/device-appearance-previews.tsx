@@ -17,6 +17,7 @@
 
 import type { MotionPreference } from '../compose/controls.ts';
 import { SettingPreview } from '../compose/setting-preview.tsx';
+import { swatchAttributes } from '../theme/catalog.ts';
 import type { TextScale } from '../theme/preferences.ts';
 import { useMotionAllowed } from '../ui/use-motion-allowed.ts';
 import './device-appearance-previews.css';
@@ -46,7 +47,7 @@ const MOTION_WORDS: Readonly<Record<MotionPreference, string>> = {
 /** One tiny chat: a side rail, a header line, a reply, a message and the accent button. */
 function ModePane({ family, tone }: { readonly family: string; readonly tone: 'light' | 'dark' }) {
   return (
-    <div className="fy-dap-pane" data-swatch={`${family}-${tone}`} data-dap-tone={tone}>
+    <div className="fy-dap-pane" {...swatchAttributes(`${family}-${tone}`)} data-dap-tone={tone}>
       <i className="fy-dap-rail" />
       <span className="fy-dap-body">
         <i className="fy-dap-line fy-dap-line--head" />

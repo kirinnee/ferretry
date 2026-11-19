@@ -1107,15 +1107,15 @@ body {
    These tokens are DEFINED in themes.css; this is a viewport-conditional
    re-tune of the same names, not a second definition.
 
-   `:root[data-theme]` is in the selector, not bare `:root` (anderson). The
-   per-family blocks in themes.css are attribute-qualified — `:root[data-theme^='ember-']`
+   `:root[data-style]` is in the selector, not bare `:root` (anderson). The
+   per-style blocks in themes.css are attribute-qualified — `:root[data-style='neo']`
    is (0,2,0) — so a bare `:root` here is (0,1,0) and LOSES on specificity: this
    whole ramp was silently inert for neo, ember and contrast, which are exactly
    the families that re-tune the type scale. Equal specificity plus later source
    order wins deterministically. */
 @media (max-width: 640px) {
   :root,
-  :root[data-theme] {
+  :root[data-style] {
     /* 16px is the phone baseline, not a "large" setting: it is what iOS and
        Android use for body copy, it is the size below which Safari zooms a
        focused field, and the reader's actual complaint was that this app was
@@ -1329,7 +1329,7 @@ body {
 .kt-btn--sm.kt-btn--flush-start {
   margin-inline-start: calc(-1 * (var(--pad-control-x) * 0.8 + var(--stroke-control)));
 }
-:root[data-theme^='contrast-'] .kt-btn--flush-start[data-variant='ghost'] {
+:root[data-style='contrast'] .kt-btn--flush-start[data-variant='ghost'] {
   margin-inline-start: 0;
 }
 
@@ -2437,24 +2437,24 @@ body {
    Opt-in via `data-hud` on a panel. Drawn as an inset pseudo-element rather
    than as a border so it never affects layout, and deliberately NOT clip-path,
    so a bracketed panel can still host a popover. */
-:root[data-theme^='mission-'] .kt-panel[data-hud]::before,
-:root[data-theme^='mission-'] .kt-panel[data-hud]::after {
+:root[data-style='mission'] .kt-panel[data-hud]::before,
+:root[data-style='mission'] .kt-panel[data-hud]::after {
   content: '';
   position: absolute;
   width: var(--bracket-size);
   height: var(--bracket-size);
   pointer-events: none;
 }
-:root[data-theme^='mission-'] .kt-panel[data-hud] {
+:root[data-style='mission'] .kt-panel[data-hud] {
   position: relative;
 }
-:root[data-theme^='mission-'] .kt-panel[data-hud]::before {
+:root[data-style='mission'] .kt-panel[data-hud]::before {
   top: -1px;
   left: -1px;
   border-top: var(--stroke-heavy) solid var(--accent);
   border-left: var(--stroke-heavy) solid var(--accent);
 }
-:root[data-theme^='mission-'] .kt-panel[data-hud]::after {
+:root[data-style='mission'] .kt-panel[data-hud]::after {
   right: -1px;
   bottom: -1px;
   border-right: var(--stroke-heavy) solid var(--accent);
@@ -2465,20 +2465,12 @@ body {
    A ghost button with no resting border is a legibility failure in the family
    whose entire purpose is redundant explicit affordance, so the ghost variant
    gets its edge back. Links are underlined at rest, not on hover. */
-:root[data-theme^='contrast-'] .kt-btn[data-variant='ghost'] {
+:root[data-style='contrast'] .kt-btn[data-variant='ghost'] {
   border-color: var(--border-strong);
 }
-:root[data-theme^='contrast-'] a,
-:root[data-theme^='contrast-'] .md a {
+:root[data-style='contrast'] a,
+:root[data-style='contrast'] .md a {
   text-decoration-line: var(--underline-links);
-}
-
-/* ---- Ember: paper seams, not floating cards ---------------------------
-   Depth comes from a top inset rule (the seam where one sheet overlaps
-   another) plus generous padding. `--shadow-panel` is still a soft warm blur
-   here, but the seam is what reads first. */
-:root[data-theme^='ember-'] .kt-panel__header {
-  box-shadow: var(--rule-inset);
 }
 
 /* Portrait gate — shown only when the platform reports a phone-sized screen turned

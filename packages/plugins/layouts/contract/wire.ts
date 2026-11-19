@@ -83,7 +83,29 @@ export const LayoutSchema = z.strictObject({
 });
 export type Layout = z.infer<typeof LayoutSchema>;
 
-/** The built-in theme families the app ships (`theme/preferences.ts`); a theme item names the one it starts from. */
+/**
+ * THE ONE LIST of the theme axes the app ships (`app/src/theme/catalog.ts` adds the labels, fonts and pairings; the
+ * pre-paint script restates the ids, pinned by `pre-paint.test.ts`). A look is a STYLE (how things are drawn) and a
+ * PALETTE (which colours); light/dark is a third axis, the MODE.
+ */
+export const STYLE_IDS = ['studio', 'mission', 'neo', 'geist', 'contrast'] as const;
+export type StyleId = (typeof STYLE_IDS)[number];
+export const PALETTE_IDS = [
+  'studio',
+  'mission',
+  'neo',
+  'geist',
+  'contrast',
+  'phosphor',
+  'blueprint',
+  'broadsheet',
+  'wayfinding',
+  'ledger',
+  'ma',
+] as const;
+export type PaletteId = (typeof PALETTE_IDS)[number];
+
+/** The pre-split single "family" ids: a theme item's legacy `base`, and the stored preference's `family`. */
 export const THEME_FAMILY_IDS = [
   'studio',
   'mission',
@@ -183,14 +205,17 @@ export const TokensSchema = z.strictObject(
 );
 
 /**
- * `themes/<name>.yaml`: a built-in family plus colour, type and spacing tokens laid over it, light and dark apart.
+ * `themes/<name>.yaml`: optionally a style and a palette, plus colour, type and spacing tokens laid over them, light and
+ * dark apart. `base` is the pre-split spelling (a family id); it is still accepted and, as before, not applied.
  * This contract owns the token names and value grammar; both daemon and app refuse names the stylesheet does not
  * read and values that could close a declaration, load a resource, or smuggle an expression.
  */
 export const ThemeSchema = z.strictObject({
   id: ThemeIdSchema,
   label: z.string().min(1).max(60),
-  base: z.enum(THEME_FAMILY_IDS),
+  base: z.enum(THEME_FAMILY_IDS).optional(),
+  style: z.enum(STYLE_IDS).optional(),
+  palette: z.enum(PALETTE_IDS).optional(),
   light: TokensSchema.default({}),
   dark: TokensSchema.default({}),
 });

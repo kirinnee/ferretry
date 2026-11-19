@@ -15,6 +15,7 @@ export { DaemonClient } from '../client/daemon-client.ts';
 export { ensureDom, interact, type Mounted, mount, must, pressKey } from './dom.ts';
 export { render, run, runAsync, runUntil } from './react.ts';
 export { settleUntil } from './settle.ts';
+export { readCssWithImports, readStyleFile, readThemeCss, themeStylesDir } from './theme-css.ts';
 export { RouterProvider } from './router.tsx';
 export { WithAppHooks } from './app-hooks.tsx';
 export { type PlacedPanel, WithSlotPanels } from './slot-panels.tsx';

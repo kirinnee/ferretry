@@ -1,0 +1,120 @@
+:root,
+[data-swatch] {
+  color-scheme: light;
+  /* Chrome ink is its OWN contrast-checked token now. It used to be --faint
+   dimmed by a subtree opacity, which nero measured at 1.92:1 on nested
+   subtree content — a whole-subtree opacity dims things it was never sized
+   against. The tier is now separated by size (--chrome-font-size), family
+   (mono) and this ink, all of which are measurable. 4.77:1 on --surface. */
+  --chrome-fg: #6e6e77;
+  /* Control edges — the strokes that IDENTIFY an interactive thing. Contrast-
+   constrained (>=3:1, >=7:1 in High Contrast), unlike decorative --border. */
+  --border-strong: #868689;
+  /* ---- elevation roles ---- */
+  --shadow-ink: transparent; /* only Neo uses a hard offset ink */
+  /* ---- neutrals — cool zinc, low chroma so the accent + syntax carry ---- */
+  --bg: #fbfbfc;
+  --surface: #ffffff;
+  --surface-2: #f5f5f7;
+  --surface-3: #ededf1;
+  --fg: #17171b;
+  --fg-soft: #45454e;
+  --muted: #666673;
+  --faint: #6f6f78;
+  --border: #e7e7ec;
+  --border-soft: #efeff3;
+  /* ---- single accent — refined indigo ---- */
+  --accent: #4f52d6;
+  --accent-rgb: 79 82 214;
+  --accent-fg: #ffffff;
+  --accent-soft: #eeeffc;
+  --accent-border: #d6d8f5;
+  --accent-strong: #3f42c4;
+  /* ---- peer turn surface ---- */
+  --user-bg: #f6f7fb;
+  --user-border: #4f52d6;
+  --user-rail: #c9cbef;
+  /* ---- genuine human bubble roles ---- */
+  --bubble-bg: var(--user-bg);
+  /* ---- code / mono surfaces ---- */
+  --code-bg: #f5f5f7;
+  --code-border: #e7e7ec;
+  --code-fg: #2b2b31;
+  /* ---- status ---- */
+  --ok: #3d7b50;
+  --ok-bg: #eef4f0;
+  --ok-border: #cfe2d6;
+  --warn: #8a6420;
+  --warn-bg: #f7f1e6;
+  --warn-border: #e7dac0;
+  --pend: #5b5b66;
+  --pend-bg: #f2f2f4;
+  --pend-border: #e2e2e8;
+  --err: #a14040;
+  --err-bg: #f7eded;
+  --err-border: #e6cfcf;
+  /* ---- conversation-source hues: Claude warm, Codex cool (Ferretry is the accent). One hue per
+   source for every theme: `session-screens.css` mixes it with the theme's own ink and surface. */
+  --src-claude: #d4683f;
+  --src-codex: #138fa8;
+  --src-computer: #7a6bd4;
+  /* ---- per-tool-type hues (consistent colour per tool across a transcript) */
+  --tool-bash: #2b7e4e;
+  --tool-read: #2e6cd0;
+  --tool-edit: #9c6218;
+  --tool-write: #7c53d6;
+  --tool-patch: #bd407d;
+  --tool-search: #0c7a8f;
+  --tool-plan: #5b5bd6;
+  --tool-wait: #696f7d;
+  --tool-generic: #6e6e7c;
+  /* ---- syntax (consumed by highlight.css) ---- */
+  --syn-comment: #6d6d7c;
+  --syn-keyword: #7c3aed;
+  --syn-string: #0e7490;
+  --syn-type: #0e7490;
+  --syn-number: #b45309;
+  --syn-meta: #b45309;
+  --syn-addition: #15803d;
+  --syn-deletion: #b91c1c;
+  /* ---- chrome / effects ---- */
+  --bar-bg: rgba(251, 251, 252, 0.82);
+  /* Shadow COLOURS, three layer slots per elevation (the style draws the geometry: `style/<id>.css`). An unused slot is
+     transparent, so a style that draws fewer layers than a palette offers simply ignores the rest. */
+  --shadow-sm-1: rgba(24, 24, 27, 0.04);
+  --shadow-sm-2: transparent;
+  --shadow-sm-3: transparent;
+  --shadow-md-1: rgba(24, 24, 27, 0.06);
+  --shadow-md-2: rgba(24, 24, 27, 0.05);
+  --shadow-md-3: transparent;
+  --shadow-lg-1: rgba(24, 24, 27, 0.07);
+  --shadow-lg-2: rgba(24, 24, 27, 0.1);
+  --shadow-lg-3: transparent;
+  /* The ink of a style's panel grid / scanline texture (`--panel-texture` in `style/<id>.css` draws the geometry). */
+  --texture-ink: rgb(var(--accent-rgb) / 0.05);
+  --body-wash: none;
+  --scrim: rgba(24, 24, 27, 0.38);
+  /* ---- focus + selection ---- */
+  --ring: rgba(79, 82, 214, 0.38);
+  --focus-color: #4f52d6;
+  --selection-bg: #d9daf8;
+  --selection-fg: #17171b;
+  --nav-hover: var(--surface-2);
+  --nav-sel-bg: var(--accent-soft);
+  --nav-sel-fg: var(--accent-strong); /* 6.60:1 on --nav-sel-bg */
+  --nav-sel-sub: var(--accent); /* 5.24:1 on --nav-sel-bg */
+  --nav-sel-edge: var(--accent-border);
+  /* The recessed page behind a phone's inset grouped cards (cards are --surface). */
+  --ground: var(--surface-3);
+  --step-todo-edge: var(--border-strong);
+  --step-rail: var(--border);
+  --step-seg: var(--border);
+  /* A paler step of the accent — still >=3:1, but plainly not "done". */
+  --step-seg-now: #8486e2;
+}
+
+/* The mode answers the browser's own colour scheme (scrollbars, form controls). Not a palette's business. */
+:root[data-mode='dark'],
+[data-swatch][data-mode='dark'] {
+  color-scheme: dark;
+}

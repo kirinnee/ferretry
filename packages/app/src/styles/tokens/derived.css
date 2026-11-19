@@ -1,0 +1,70 @@
+/* ============================================================================
+   THE COMPACT PALETTES' CORE ROLES, which they never declared.
+
+   Phosphor, Blueprint, Broadsheet, Wayfinding, Ledger and Ma restate their palette (bg, surface, fg,
+   muted, accent) and leave every other role to the `:root` baseline — which is Studio LIGHT. So in
+   both their modes a button's ink (`--fg-soft`) was Studio's dark grey, `--surface-3` was near-white,
+   control edges were Studio's mid-grey and the status colours were light-theme ones: on a dark ground
+   every outlined or ghost button, and every Settings row, was close to invisible. Each role is now
+   DERIVED from the palette's own seed colours, so it stays native to it, and the dark modes take the house
+   dark status colours rather than light-theme ones.
+
+   This file is COLOUR ONLY (palette-owned tokens), and is imported after every `palette/<id>.css`.
+   ============================================================================ */
+:root[data-palette='phosphor'],
+:root[data-palette='blueprint'],
+:root[data-palette='broadsheet'],
+:root[data-palette='wayfinding'],
+:root[data-palette='ledger'],
+:root[data-palette='ma'],
+[data-swatch][data-palette='phosphor'],
+[data-swatch][data-palette='blueprint'],
+[data-swatch][data-palette='broadsheet'],
+[data-swatch][data-palette='wayfinding'],
+[data-swatch][data-palette='ledger'],
+[data-swatch][data-palette='ma'] {
+  --fg-soft: color-mix(in srgb, var(--fg) 78%, var(--muted));
+  --faint: var(--muted);
+  --chrome-fg: var(--muted);
+  --surface-3: color-mix(in srgb, var(--surface) 88%, var(--fg));
+  /* 58%, not 50%: the control edge is held to >=3:1 against the PAGE (--bg), and 50% left Phosphor, Blueprint and
+     Broadsheet LIGHT at 2.7:1 (the test walks every theme). */
+  --border-strong: color-mix(in srgb, var(--fg) 58%, var(--surface));
+  /* The focus ring is the palette's accent: without it these inherited Studio LIGHT's #4f52d6 and their dark
+     modes drew a ring of 1.3-2.7:1 on the menu and on a checked row. */
+  --focus-color: var(--accent);
+  --accent-strong: color-mix(in srgb, var(--accent) 78%, var(--fg));
+  --code-bg: color-mix(in srgb, var(--surface) 92%, var(--fg));
+  --code-border: var(--border);
+  --code-fg: var(--fg);
+  /* The human's own message bubble, which fell back to Studio LIGHT's near-white and painted light
+     ink on white in every dark mode of these palettes. */
+  --user-bg: color-mix(in srgb, var(--surface) 90%, var(--accent));
+  --user-border: var(--accent);
+  --user-rail: color-mix(in srgb, var(--accent) 40%, var(--surface));
+}
+:root[data-palette='phosphor'][data-mode='dark'],
+:root[data-palette='blueprint'][data-mode='dark'],
+:root[data-palette='broadsheet'][data-mode='dark'],
+:root[data-palette='wayfinding'][data-mode='dark'],
+:root[data-palette='ledger'][data-mode='dark'],
+:root[data-palette='ma'][data-mode='dark'],
+[data-swatch][data-palette='phosphor'][data-mode='dark'],
+[data-swatch][data-palette='blueprint'][data-mode='dark'],
+[data-swatch][data-palette='broadsheet'][data-mode='dark'],
+[data-swatch][data-palette='wayfinding'][data-mode='dark'],
+[data-swatch][data-palette='ledger'][data-mode='dark'],
+[data-swatch][data-palette='ma'][data-mode='dark'] {
+  --ok: #6fae82;
+  --ok-bg: color-mix(in srgb, #6fae82 14%, var(--surface));
+  --ok-border: color-mix(in srgb, #6fae82 40%, var(--surface));
+  --warn: #c79a52;
+  --warn-bg: color-mix(in srgb, #c79a52 14%, var(--surface));
+  --warn-border: color-mix(in srgb, #c79a52 40%, var(--surface));
+  --err: #e08a8a;
+  --err-bg: color-mix(in srgb, #e08a8a 14%, var(--surface));
+  --err-border: color-mix(in srgb, #e08a8a 40%, var(--surface));
+  --pend: var(--muted);
+  --pend-bg: var(--surface-2);
+  --pend-border: var(--border);
+}

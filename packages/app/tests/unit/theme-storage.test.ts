@@ -67,8 +67,15 @@ describe('theme preference', () => {
     themes.setMode('dark');
     expect(new ThemePreferenceStore(store).snapshot()).toEqual({
       family: 'mission',
+      style: 'mission',
+      palette: 'mission',
       mode: 'dark',
       textScale: 'default',
+    });
+    // Only the axes are stored: `family` is derived on read.
+    expect(JSON.parse(store.entries()[APP_STORAGE.theme] ?? '')).toEqual({
+      format: 1,
+      value: { style: 'mission', palette: 'mission', mode: 'dark', textScale: 'default' },
     });
   });
 
@@ -76,7 +83,13 @@ describe('theme preference', () => {
     const store = memoryStore({
       [APP_STORAGE.theme]: JSON.stringify({ format: 1, value: { family: 'ember', mode: 'dark', textScale: 'large' } }),
     });
-    expect(new ThemePreferenceStore(store).snapshot()).toEqual({ family: 'studio', mode: 'dark', textScale: 'large' });
+    expect(new ThemePreferenceStore(store).snapshot()).toEqual({
+      family: 'studio',
+      style: 'studio',
+      palette: 'studio',
+      mode: 'dark',
+      textScale: 'large',
+    });
   });
 
   test('an old key is never read', () => {
