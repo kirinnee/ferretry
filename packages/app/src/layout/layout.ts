@@ -184,7 +184,15 @@ const SCALAR_PATHS: ReadonlySet<string> = new Set([
 ]);
 
 /** Paths that take a list (`agenda,board`), besides `panels.<slot>`. */
-const LIST_PATHS: ReadonlySet<string> = new Set(['nav.items', 'top', 'composer.tools', 'phone.nav.items', 'phone.top']);
+const LIST_PATHS: ReadonlySet<string> = new Set([
+  'nav.items',
+  'nav.hidden',
+  'top',
+  'composer.tools',
+  'phone.nav.items',
+  'phone.nav.hidden',
+  'phone.top',
+]);
 
 function keysOf(path: string): { readonly keys: readonly string[]; readonly list: boolean } | undefined {
   if (path.startsWith('panels.') && path.length > 'panels.'.length)

@@ -20,6 +20,24 @@ describe('fy layout set: one change, checked whole', () => {
     expect(fromArray.ok && fromArray.overrides.nav?.items).toEqual(['agenda', 'board']);
   });
 
+  test('nav.hidden and phone.nav.hidden take a list, and an empty one still names the key', () => {
+    const result = setPaths(DEFAULT_LAYOUT, {}, [
+      { path: 'nav.hidden', value: 'agenda, board' },
+      { path: 'phone.nav.hidden', value: [] },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.overrides).toEqual({ nav: { hidden: ['agenda', 'board'] }, phone: { nav: { hidden: [] } } });
+    const laid = applyOverrides(DEFAULT_LAYOUT, result.overrides);
+    expect(laid.ok && laid.layout.nav.hidden).toEqual(['agenda', 'board']);
+    expect(laid.ok && laid.layout.phone?.nav?.hidden).toEqual([]);
+  });
+
+  test('a layout saved before hidden existed has none, so it keeps listing exactly its items', () => {
+    expect(DEFAULT_LAYOUT.nav.hidden).toBeUndefined();
+    expect(COMPACT_LAYOUT.nav.hidden).toBeUndefined();
+  });
+
   test('a slot name with a dot is one key: panels.ferret.side', () => {
     const result = setPaths(DEFAULT_LAYOUT, {}, [{ path: 'panels.ferret.side', value: 'queue' }]);
     expect(result.ok && result.overrides.panels).toEqual({ 'ferret.side': ['queue'] });

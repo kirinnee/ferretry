@@ -27,7 +27,18 @@ export const ViewNameSchema = z
   .regex(/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)?$/u);
 
 const NavStyleSchema = z.enum(['rail', 'bar', 'list']);
-const NavFields = { side: NavSideSchema, style: NavStyleSchema, items: z.array(ViewNameSchema).max(24) };
+const NavFields = {
+  side: NavSideSchema,
+  style: NavStyleSchema,
+  /** The order the nav lists its places in. */
+  items: z.array(ViewNameSchema).max(24),
+  /**
+   * Places the nav does not show. Naming this key (even empty) makes `items` an ORDER rather than a whole list: every
+   * installed nav screen not named in `items` follows it, so a plugin installed later appears by itself. A layout that
+   * never names it keeps `items` as the exact list, as layouts saved before this field drew.
+   */
+  hidden: z.array(ViewNameSchema).max(24).optional(),
+};
 const NavSchema = z.strictObject({ ...NavFields, style: NavStyleSchema.default('rail') });
 /** For overrides: no default, or laying the override over a layout would reset the keys it did not name. */
 const NavPartialSchema = z.strictObject(NavFields).partial();
