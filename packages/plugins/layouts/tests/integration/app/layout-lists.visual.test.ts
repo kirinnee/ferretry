@@ -105,18 +105,18 @@ describe('the layout lists', () => {
         await tab.mouse.down();
         for (let step = 1; step <= 6; step += 1) await tab.mouse.move(x, y + step * 18);
         expect(await list.locator('li[data-state="held"]').count(), 'one row is held').toBe(1);
+        // The rows that made way slide for 150 ms: the frame is taken once they have arrived.
+        await tab.waitForTimeout(350);
         if (shotsDir !== '') await list.screenshot({ path: join(shotsDir, `${variant.name}-mid-drag.png`) });
         await tab.mouse.up();
         const after = await keysOf(list);
         expect(after).not.toEqual(before);
         expect([...after].sort()).toEqual([...before].sort());
         expect(await list.locator('li[data-state="held"]').count()).toBe(0);
+        await tab.waitForTimeout(350);
         if (shotsDir !== '') await list.screenshot({ path: join(shotsDir, `${variant.name}-dropped.png`) });
         await tab.setViewportSize({ width: variant.width, height: 4_000 });
-        if (shotsDir !== '')
-          await tab
-            .locator('[data-setting-group="Layout — every device"]')
-            .screenshot({ path: join(shotsDir, `${variant.name}-group.png`) });
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${variant.name}-page.png`), fullPage: true });
         const overflow = await tab.evaluate(
           () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
         );

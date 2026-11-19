@@ -106,5 +106,6 @@ describe('the list rows', () => {
   test('a name with no label is spoken in words', () => {
     expect(humanize('daemon-picker')).toBe('Daemon picker');
     expect(humanize('board.board')).toBe('Board');
+    expect(humanize('mcp-servers')).toBe('MCP servers');
   });
 });

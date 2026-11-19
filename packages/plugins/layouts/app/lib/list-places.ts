@@ -36,8 +36,9 @@ export type ListPath = 'nav.items' | 'top' | 'panels.ferret.side' | 'phone.nav.i
 /** `daemon-picker` → `Daemon picker`: the name a place has when nothing else names it. */
 export const humanize = (id: string): string => {
   const bare = id.includes('.') ? id.slice(id.lastIndexOf('.') + 1) : id;
-  const words = bare.replace(/-/gu, ' ');
-  return words.charAt(0).toUpperCase() + words.slice(1);
+  const words = bare.split('-').map(word => (word === 'mcp' ? 'MCP' : word));
+  const text = words.join(' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
 };
 
 const LOCKED = 'settings';
