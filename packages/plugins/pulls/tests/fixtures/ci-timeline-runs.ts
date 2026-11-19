@@ -118,3 +118,109 @@ export const MATRIX: { readonly run: CiRun; readonly now: number } = {
     sec(300),
   ),
 };
+
+// ─── plain `CiRun`s for the cases E8's builder cannot make on purpose (a stale snapshot, the biggest run) ────────────
+
+const iso = (seconds: number): string => new Date(T0 + seconds * 1000).toISOString();
+const SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+
+/** The biggest run the contract allows (256 jobs x 500 steps), every step a different whole number of seconds. */
+export const BIG_RUN = (jobCount = 256, stepCount = 500): CiRun => ({
+  id: 9005,
+  name: 'CI',
+  status: 'failed',
+  trigger: 'push',
+  attempt: 1,
+  headSha: SHA,
+  createdAt: iso(0),
+  start: iso(1),
+  end: iso(10_000),
+  queuedMs: 1_000,
+  wallMs: 10_000_000,
+  jobs: Array.from({ length: jobCount }, (_, jobIndex) => ({
+    id: jobIndex + 1,
+    name: `job ${jobIndex + 1}`,
+    status: jobIndex === jobCount - 1 ? ('failed' as const) : ('passed' as const),
+    queuedMs: 1_000,
+    start: iso(1),
+    end: iso(1 + stepCount * 3),
+    steps: Array.from({ length: stepCount }, (_, stepIndex) => ({
+      name: `step ${stepIndex + 1}`,
+      number: stepIndex + 1,
+      status: 'passed' as const,
+      start: iso(1 + stepIndex * 3),
+      end: iso(1 + stepIndex * 3 + 1 + ((stepIndex + jobIndex) % 2)),
+    })),
+  })),
+});
+
+/** A cancelled run: its job stopped 11 s in, holding a step E8 clamped to that end but still flagged live. */
+export const CANCELLED_RUN: CiRun = {
+  id: 9006,
+  name: 'CI',
+  status: 'cancelled',
+  trigger: 'push',
+  attempt: 1,
+  headSha: SHA,
+  createdAt: iso(0),
+  start: iso(1),
+  end: iso(11),
+  queuedMs: 1_000,
+  wallMs: 11_000,
+  jobs: [
+    {
+      id: 8,
+      name: 'test',
+      status: 'cancelled',
+      queuedMs: 1_000,
+      start: iso(1),
+      end: iso(11),
+      steps: [
+        { name: 'Check out', number: 1, status: 'passed', start: iso(1), end: iso(2) },
+        { name: 'Unit tests', number: 2, status: 'running', start: iso(2), end: iso(11), live: true, clamped: true },
+      ],
+    },
+  ],
+};
+
+/** A live run read at 1 s: a live job and step, and a queued job (no bar) that has waited 1 s. Draw it later and it ticks. */
+export const SNAPSHOT_RUN: CiRun = {
+  id: 9007,
+  name: 'CI',
+  status: 'running',
+  trigger: 'push',
+  attempt: 1,
+  headSha: SHA,
+  createdAt: iso(0),
+  queuedMs: 0,
+  wallMs: 1_000,
+  live: true,
+  jobs: [
+    {
+      id: 9,
+      name: 'test',
+      status: 'running',
+      queuedMs: 0,
+      start: iso(0),
+      end: iso(1),
+      live: true,
+      steps: [{ name: 'Unit tests', number: 1, status: 'running', start: iso(0), end: iso(1), live: true }],
+    },
+    { id: 10, name: 'deploy', status: 'queued', queuedMs: 1_000, steps: [] },
+  ],
+};
+
+/** A live run where nothing has started: the wait is the clock's, never the snapshot's. */
+export const WAITING_RUN: CiRun = {
+  id: 9008,
+  name: 'CI',
+  status: 'queued',
+  trigger: 'push',
+  attempt: 1,
+  headSha: SHA,
+  createdAt: iso(0),
+  queuedMs: 1_000,
+  wallMs: 1_000,
+  live: true,
+  jobs: [{ id: 11, name: 'build', status: 'queued', queuedMs: 1_000, steps: [] }],
+};

@@ -1,16 +1,23 @@
 /**
  * The browser entry for the CI timeline shots over FAKE data (no daemon): the real `CiTimeline` on E8's fixtures.
  *
- *   ?theme=<family>-<mode>&case=finished|running|matrix
+ *   ?theme=<family>-<mode>&case=finished|running|matrix|big   (big is 256 jobs x 500 steps, the most the contract allows)
  */
 import { createRoot } from 'react-dom/client';
 import { CiTimeline } from '../../../../app/features/ci-timeline/index.ts';
-import { FINISHED, MATRIX, RUNNING } from '../../../fixtures/ci-timeline-runs.ts';
+import { BIG_RUN, FINISHED, MATRIX, RUNNING, sec } from '../../../fixtures/ci-timeline-runs.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const chosen = params.get('case') ?? 'finished';
-const scene = chosen === 'running' ? RUNNING : chosen === 'matrix' ? MATRIX : FINISHED;
+const scene =
+  chosen === 'running'
+    ? RUNNING
+    : chosen === 'matrix'
+      ? MATRIX
+      : chosen === 'big'
+        ? { run: BIG_RUN(), now: sec(20_000) }
+        : FINISHED;
 
 const root = document.getElementById('root');
 if (root !== null)

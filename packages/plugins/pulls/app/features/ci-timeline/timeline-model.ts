@@ -8,16 +8,27 @@
  *  - A job's QUEUE WAIT is the span from the origin to its start (or, for a job that never started, `queuedMs`).
  *  - A skipped job or step has no bar; the row stays, so the matrix reads whole.
  *  - Focus order is job, then its steps, then the next job. Arrow keys move through it (`moveFocus`).
+ *  - ONE clock. A bar ends where E8 bounded it (a step clamped inside its job ends where the job ends). An item that is
+ *    still marked live ticks to `nowMs` only while its job AND its run are live too, so a "live" step in a cancelled job is
+ *    never drawn past it. The wall time, the first job's wait and the wait of a job that never started are read on the
+ *    same clock as the bars and the now-line, never from the snapshot's own numbers.
+ *  - BOUNDED. A run draws its `DRAWN_JOBS` longest jobs and, in each, its `DRAWN_STEPS` longest steps; the rest fold into
+ *    ONE "N shorter" mark per row (steps) and one "N shorter jobs" row (jobs). Nothing is lost: `hiddenJobs` and
+ *    `listSteps` hand the screen every folded one as text, and the folded marks are in the keyboard order. The cost of a
+ *    layout is the drawn marks, never the 256 x 500 the contract allows.
  */
-import type { CiJob, CiRun, CiStatus, CiStep } from '../../../contract/index.ts';
+import type { CiRun, CiStatus, CiStep } from '../../../contract/index.ts';
 
 /** A drawn bar: `startMs`/`endMs` are offsets from the run's creation, both inside `[0, spanMs]`. */
 export interface TimelineMark {
-  /** Unique in the layout: `j<jobIndex>` for a job, `j<jobIndex>s<stepIndex>` for a step. */
+  /** Unique in the layout: `j<jobIndex>` for a job, `j<jobIndex>s<stepIndex>` for a step, `...more` for a folded one. */
   readonly key: string;
-  readonly kind: 'job' | 'step';
+  /** The row this mark sits on. */
+  readonly rowKey: string;
+  /** `more` is the one mark that stands for several shorter jobs or steps (`count` of them). */
+  readonly kind: 'job' | 'step' | 'more';
   readonly name: string;
-  /** The job's name for a step; the same as `name` for a job. */
+  /** The job's name for a step or a folded set of steps; the same as `name` for a job. */
   readonly jobName: string;
   readonly status: CiStatus;
   readonly startMs: number;
@@ -25,18 +36,25 @@ export interface TimelineMark {
   readonly live: boolean;
   /** A step that fell outside its job (clock skew) and was pulled inside. */
   readonly clamped: boolean;
+  /** How many jobs or steps a `more` mark folds. */
+  readonly count?: number;
 }
 
 export interface TimelineRow {
   readonly key: string;
+  /** Which job of the run this is (`-1` for the folded "N shorter jobs" row). */
   readonly jobIndex: number;
+  /** Where the row is drawn, top to bottom (`-1` for a job that was folded away). */
+  readonly rowIndex: number;
   readonly name: string;
   readonly status: CiStatus;
   readonly live: boolean;
   /** The job's own bar, or `undefined` for a job that never started (queued, skipped, cancelled before it began). */
   readonly bar: TimelineMark | undefined;
-  /** The steps with a bar, in the order GitHub numbers them. */
+  /** The steps with a bar that are drawn (the longest few), in the order GitHub numbers them, then a folded mark. */
   readonly steps: readonly TimelineMark[];
+  /** How many steps the job has in all, drawn or not. */
+  readonly stepCount: number;
   /** How long the job waited from the origin; `0` for a skipped job. The hatched span is `[0, queueMs]`. */
   readonly queueMs: number;
 }
@@ -49,14 +67,28 @@ export interface TimelineTick {
 export interface TimelineLayout {
   /** The origin: the run's creation, in epoch ms. */
   readonly originMs: number;
+  /** The clock the layout was read on, in epoch ms. */
+  readonly clockMs: number;
   /** The width of the time axis: the run's wall time (to now while live), never less than one second. */
   readonly spanMs: number;
+  /** The run's wall time on the layout's clock: ticking while the run is live, else what E8 recorded. */
+  readonly wallMs: number;
+  /** How long the run waited before its first job started, on the layout's clock; `started` says whether one did. */
+  readonly queuedMs: number;
+  readonly started: boolean;
   /** Where "now" is on the axis while the run is live; `undefined` once it is final. */
   readonly nowMs: number | undefined;
+  /** The drawn rows, top to bottom; the last is the folded "N shorter jobs" row when some jobs were folded. */
   readonly rows: readonly TimelineRow[];
+  /** The jobs folded into that last row, in the order E8 gives, as rows without steps (`listSteps` opens one). */
+  readonly hiddenJobs: readonly TimelineRow[];
 }
 
 const MIN_SPAN_MS = 1_000;
+/** How many jobs get a row of their own; the rest share one "N shorter jobs" row. */
+export const DRAWN_JOBS = 24;
+/** How many steps of one job get a segment of their own; the rest share one "N shorter steps" mark. */
+export const DRAWN_STEPS = 12;
 
 const offset = (instant: string | undefined, originMs: number): number | undefined => {
   if (instant === undefined) return undefined;
@@ -65,113 +97,302 @@ const offset = (instant: string | undefined, originMs: number): number | undefin
 };
 const clampTo = (value: number, span: number): number => Math.min(Math.max(value, 0), span);
 
-/** The bar of an item that has one: its offsets inside `[0, span]`, or `undefined` when it has no start. */
-function barOf(
+/** An item's bar before it is fitted to the axis: offsets from the origin, the end never before the start. */
+interface Raw {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * The bar of an item that has one, or `undefined` when it has no start. It ends where E8 ended it, unless `mayTick` (its
+ * job and its run are live) and it is itself live: then it ends now.
+ */
+function rawBar(
   item: { readonly start?: string; readonly end?: string; readonly live?: boolean },
   originMs: number,
-  span: number,
   nowOffset: number,
-): { startMs: number; endMs: number } | undefined {
+  mayTick: boolean,
+): Raw | undefined {
   const start = offset(item.start, originMs);
   if (start === undefined) return undefined;
-  const end = item.live === true ? nowOffset : (offset(item.end, originMs) ?? start);
-  const from = clampTo(start, span);
-  return { startMs: from, endMs: clampTo(Math.max(end, from), span) };
+  const end = mayTick && item.live === true ? nowOffset : (offset(item.end, originMs) ?? start);
+  return { start, end: Math.max(end, start) };
 }
+
+/** A raw bar fitted inside `[0, span]`. */
+const fitted = (raw: Raw, span: number): { startMs: number; endMs: number } => {
+  const startMs = clampTo(raw.start, span);
+  return { startMs, endMs: clampTo(Math.max(raw.end, startMs), span) };
+};
+
+/** The bad news first: a folded mark wears the most urgent status among what it holds. */
+const URGENCY: readonly CiStatus[] = ['failed', 'cancelled', 'running', 'passed', 'queued', 'skipped'];
+function mostUrgent(statuses: readonly CiStatus[]): CiStatus {
+  let best = URGENCY.length;
+  for (const status of statuses) best = Math.min(best, URGENCY.indexOf(status));
+  return URGENCY[best] ?? 'skipped';
+}
+
+/** The `limit` longest of `items` (the first of equals) in their own order, and the rest, also in their own order. */
+function longest<T>(
+  items: readonly T[],
+  length: (item: T) => number,
+  limit: number,
+): { readonly shown: readonly T[]; readonly rest: readonly T[] } {
+  if (items.length <= limit) return { shown: items, rest: [] };
+  const chosen = new Set(
+    items
+      .map((item, index) => ({ index, ms: length(item) }))
+      .sort((a, b) => b.ms - a.ms || a.index - b.index)
+      .slice(0, limit)
+      .map(entry => entry.index),
+  );
+  return {
+    shown: items.filter((_, index) => chosen.has(index)),
+    rest: items.filter((_, index) => !chosen.has(index)),
+  };
+}
+
+const lengthOf = (raw: Raw | undefined): number => (raw === undefined ? 0 : raw.end - raw.start);
+const jobsWord = (count: number): string => `${count} shorter ${count === 1 ? 'job' : 'jobs'}`;
+const stepsWord = (count: number): string => `${count} shorter ${count === 1 ? 'step' : 'steps'}`;
+
+/** What a row is drawn from: a job, or, for a CI that is not GitHub Actions, the run itself. */
+interface Subject {
+  readonly index: number;
+  readonly name: string;
+  readonly status: CiStatus;
+  readonly live: boolean;
+  readonly queuedMs: number;
+  readonly steps: readonly CiStep[];
+  readonly raw: Raw | undefined;
+}
+
+/** A step with a bar, before it is fitted. */
+interface StepBar {
+  readonly index: number;
+  readonly step: CiStep;
+  readonly raw: Raw;
+}
+
+const stepMark = (bar: StepBar, rowKey: string, jobName: string, span: number): TimelineMark => ({
+  key: `${rowKey}s${bar.index}`,
+  rowKey,
+  kind: 'step',
+  name: bar.step.name,
+  jobName,
+  status: bar.step.status,
+  ...fitted(bar.raw, span),
+  live: bar.step.live === true,
+  clamped: bar.step.clamped === true,
+});
+
+/** One mark for several folded ones: it spans from the first start to the last end and wears the most urgent status. */
+function foldedMark(
+  key: string,
+  rowKey: string,
+  name: string,
+  jobName: string,
+  folded: readonly { readonly raw: Raw; readonly status: CiStatus; readonly live: boolean }[],
+  count: number,
+  span: number,
+): TimelineMark | undefined {
+  if (folded.length === 0) return undefined;
+  let start = Number.POSITIVE_INFINITY;
+  let end = 0;
+  for (const item of folded) {
+    start = Math.min(start, item.raw.start);
+    end = Math.max(end, item.raw.end);
+  }
+  return {
+    key,
+    rowKey,
+    kind: 'more',
+    name,
+    jobName,
+    status: mostUrgent(folded.map(item => item.status)),
+    ...fitted({ start, end: Math.max(end, start) }, span),
+    live: folded.some(item => item.live),
+    clamped: false,
+    count,
+  };
+}
+
+const stepBars = (subject: Subject, originMs: number, nowOffset: number, mayTick: boolean): readonly StepBar[] =>
+  subject.steps.flatMap((step, index): StepBar[] => {
+    const raw = rawBar(step, originMs, nowOffset, mayTick);
+    return raw === undefined ? [] : [{ index, step, raw }];
+  });
 
 /** Lay a run out. `nowMs` is the clock the caller reads (a prop in a screenshot), so the same inputs always draw the same. */
 export function layoutTimeline(run: CiRun, nowMs: number): TimelineLayout {
   const originMs = Date.parse(run.createdAt);
   const nowOffset = Math.max(0, nowMs - originMs);
-  // Wide enough for the run's wall time AND every bar the data draws (a clock that disagrees must not clip a bar).
-  const ends = [run.wallMs, run.live === true ? nowOffset : 0];
-  for (const job of run.jobs) {
-    ends.push(offset(job.end, originMs) ?? 0, job.queuedMs);
-    for (const step of job.steps) ends.push(offset(step.end, originMs) ?? 0);
-  }
-  const spanMs = Math.max(MIN_SPAN_MS, ...ends);
+  const runTicking = run.live === true;
+  const wallMs = runTicking ? nowOffset : run.wallMs;
 
-  const rows: TimelineRow[] =
+  const subjects: readonly Subject[] =
     run.jobs.length > 0
-      ? run.jobs.map((job, jobIndex) => rowOfJob(job, jobIndex, originMs, spanMs, nowOffset))
-      : [rowOfRun(run, originMs, spanMs, nowOffset)];
-  return { originMs, spanMs, nowMs: run.live === true ? Math.min(nowOffset, spanMs) : undefined, rows };
-}
-
-function rowOfJob(job: CiJob, jobIndex: number, originMs: number, spanMs: number, nowOffset: number): TimelineRow {
-  const key = `j${jobIndex}`;
-  const geometry = barOf(job, originMs, spanMs, nowOffset);
-  const bar: TimelineMark | undefined =
-    geometry === undefined
-      ? undefined
-      : {
-          key,
-          kind: 'job',
+      ? run.jobs.map((job, index) => ({
+          index,
           name: job.name,
-          jobName: job.name,
           status: job.status,
-          ...geometry,
           live: job.live === true,
-          clamped: false,
-        };
-  const steps = job.steps.flatMap((step, stepIndex): TimelineMark[] => {
-    const stepGeometry = barOf(step, originMs, spanMs, nowOffset);
-    return stepGeometry === undefined ? [] : [stepMark(step, `${key}s${stepIndex}`, job.name, stepGeometry)];
+          queuedMs: job.queuedMs,
+          steps: job.steps,
+          raw: rawBar(job, originMs, nowOffset, runTicking),
+        }))
+      : [
+          {
+            index: 0,
+            name: run.name,
+            status: run.status,
+            live: runTicking,
+            queuedMs: run.queuedMs,
+            steps: [],
+            raw: rawBar(run, originMs, nowOffset, runTicking),
+          },
+        ];
+
+  // A job that never started waits until now while the run is live and the job is not final (E8 stops it at the run's
+  // last change once it is); a job that started waited until it did.
+  const waitOf = (subject: Subject): number => {
+    if (subject.status === 'skipped') return 0;
+    if (subject.raw !== undefined) return Math.max(0, subject.raw.start);
+    return runTicking && (subject.status === 'queued' || subject.status === 'running') ? nowOffset : subject.queuedMs;
+  };
+
+  let firstStart: number | undefined;
+  if (run.jobs.length > 0)
+    for (const subject of subjects)
+      if (subject.raw !== undefined)
+        firstStart = firstStart === undefined ? subject.raw.start : Math.min(firstStart, subject.raw.start);
+
+  const { shown, rest } = longest(subjects, subject => lengthOf(subject.raw), DRAWN_JOBS);
+  const bars = shown.map(subject =>
+    longest(stepBars(subject, originMs, nowOffset, runTicking && subject.live), bar => lengthOf(bar.raw), DRAWN_STEPS),
+  );
+
+  // Wide enough for the run's wall time AND every bar the data draws (a clock that disagrees must not clip a bar).
+  let spanMs = Math.max(MIN_SPAN_MS, wallMs);
+  for (const subject of subjects) spanMs = Math.max(spanMs, waitOf(subject), subject.raw?.end ?? 0);
+  for (const { shown: drawn, rest: folded } of bars)
+    for (const bar of [...drawn, ...folded]) spanMs = Math.max(spanMs, bar.raw.end);
+
+  const rowOf = (subject: Subject, rowIndex: number, steps: readonly TimelineMark[]): TimelineRow => {
+    const key = `j${subject.index}`;
+    const bar: TimelineMark | undefined =
+      subject.raw === undefined
+        ? undefined
+        : {
+            key,
+            rowKey: key,
+            kind: 'job',
+            name: subject.name,
+            jobName: subject.name,
+            status: subject.status,
+            ...fitted(subject.raw, spanMs),
+            live: subject.live,
+            clamped: false,
+          };
+    return {
+      key,
+      jobIndex: subject.index,
+      rowIndex,
+      name: subject.name,
+      status: subject.status,
+      live: subject.live,
+      bar,
+      steps,
+      stepCount: subject.steps.length,
+      queueMs: clampTo(waitOf(subject), spanMs),
+    };
+  };
+
+  const rows: TimelineRow[] = shown.map((subject, at) => {
+    const key = `j${subject.index}`;
+    const { shown: drawn, rest: folded } = bars[at] ?? { shown: [], rest: [] };
+    const more = foldedMark(
+      `${key}more`,
+      key,
+      stepsWord(folded.length),
+      subject.name,
+      folded.map(bar => ({ raw: bar.raw, status: bar.step.status, live: bar.step.live === true })),
+      folded.length,
+      spanMs,
+    );
+    return rowOf(subject, at, [...drawn.map(bar => stepMark(bar, key, subject.name, spanMs)), ...(more ? [more] : [])]);
   });
+
+  const hiddenJobs = rest.map(subject => rowOf(subject, -1, []));
+  if (rest.length > 0) {
+    const name = jobsWord(rest.length);
+    const bar = foldedMark(
+      'jmore',
+      'jmore',
+      name,
+      name,
+      rest.flatMap(subject =>
+        subject.raw === undefined ? [] : [{ raw: subject.raw, status: subject.status, live: subject.live }],
+      ),
+      rest.length,
+      spanMs,
+    );
+    rows.push({
+      key: 'jmore',
+      jobIndex: -1,
+      rowIndex: rows.length,
+      name,
+      status: mostUrgent(rest.map(subject => subject.status)),
+      live: rest.some(subject => subject.live),
+      bar,
+      steps: [],
+      stepCount: 0,
+      queueMs: 0,
+    });
+  }
+
   return {
-    key,
-    jobIndex,
-    name: job.name,
-    status: job.status,
-    live: job.live === true,
-    bar,
-    steps,
-    queueMs: job.status === 'skipped' ? 0 : clampTo(bar === undefined ? job.queuedMs : bar.startMs, spanMs),
+    originMs,
+    clockMs: nowMs,
+    spanMs,
+    wallMs,
+    queuedMs:
+      firstStart !== undefined ? Math.max(0, firstStart) : runTicking && run.jobs.length > 0 ? nowOffset : run.queuedMs,
+    started: firstStart !== undefined,
+    nowMs: runTicking ? Math.min(nowOffset, spanMs) : undefined,
+    rows,
+    hiddenJobs,
   };
 }
 
-const stepMark = (
-  step: CiStep,
-  key: string,
-  jobName: string,
-  geometry: { startMs: number; endMs: number },
-): TimelineMark => ({
-  key,
-  kind: 'step',
-  name: step.name,
-  jobName,
-  status: step.status,
-  ...geometry,
-  live: step.live === true,
-  clamped: step.clamped === true,
-});
-
-/** A CI that is not GitHub Actions has no jobs: the run itself is the one row, one bar, no steps. */
-function rowOfRun(run: CiRun, originMs: number, spanMs: number, nowOffset: number): TimelineRow {
-  const geometry = barOf(run, originMs, spanMs, nowOffset);
-  const bar: TimelineMark | undefined =
-    geometry === undefined
-      ? undefined
-      : {
-          key: 'j0',
-          kind: 'job',
-          name: run.name,
-          jobName: run.name,
-          status: run.status,
-          ...geometry,
-          live: run.live === true,
-          clamped: false,
-        };
-  return {
-    key: 'j0',
-    jobIndex: 0,
-    name: run.name,
-    status: run.status,
-    live: run.live === true,
-    bar,
-    steps: [],
-    queueMs: run.status === 'skipped' ? 0 : clampTo(bar === undefined ? run.queuedMs : bar.startMs, spanMs),
-  };
+/**
+ * Every step of one job that has a bar and is NOT drawn on its row (the shorter ones, or every one of a job that was
+ * folded away), in the order GitHub numbers them. Read on the layout's own clock, so they agree with the chart.
+ */
+export function listSteps(run: CiRun, layout: TimelineLayout, jobIndex: number): readonly TimelineMark[] {
+  const job = run.jobs[jobIndex];
+  if (job === undefined) return [];
+  const drawn = new Set(layout.rows.find(row => row.jobIndex === jobIndex)?.steps.map(mark => mark.key));
+  const nowOffset = Math.max(0, layout.clockMs - layout.originMs);
+  const mayTick = run.live === true && job.live === true;
+  const rowKey = `j${jobIndex}`;
+  return stepBars(
+    {
+      index: jobIndex,
+      name: job.name,
+      status: job.status,
+      live: job.live === true,
+      queuedMs: job.queuedMs,
+      steps: job.steps,
+      raw: undefined,
+    },
+    layout.originMs,
+    nowOffset,
+    mayTick,
+  )
+    .filter(bar => !drawn.has(`${rowKey}s${bar.index}`))
+    .map(bar => stepMark(bar, rowKey, job.name, layout.spanMs));
 }
 
 // ─── time words ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -277,8 +498,9 @@ export function describeMark(
   queueMs: number,
   localTime: (offsetMs: number) => string = () => '',
 ): string {
-  const what = mark.kind === 'step' ? `${mark.jobName} › ${mark.name}` : mark.name;
+  const alone = mark.kind === 'job' || (mark.kind === 'more' && mark.jobName === mark.name);
+  const what = alone ? mark.name : `${mark.jobName} › ${mark.name}`;
   const length = `${mark.live ? 'running for ' : ''}${formatSpan(mark.endMs - mark.startMs)}`;
   const wait = mark.kind === 'job' && queueMs > 0 ? `, waited ${formatSpan(queueMs)} first` : '';
-  return `${what}: ${mark.status}, started ${formatOffset(mark.startMs)}${localTime(mark.startMs) === '' ? '' : ` (${localTime(mark.startMs)})`}, ${length}${wait}${mark.clamped ? ' (time adjusted to fit its job)' : ''}`;
+  return `${what}: ${mark.status}, started ${formatOffset(mark.startMs)}${localTime(mark.startMs) === '' ? '' : ` (${localTime(mark.startMs)})`}, ${length}${wait}${mark.clamped ? ' (time adjusted to fit its job)' : ''}${mark.kind === 'more' ? ' (press Enter to list them)' : ''}`;
 }

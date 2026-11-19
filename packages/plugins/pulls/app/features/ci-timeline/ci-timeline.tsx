@@ -8,7 +8,12 @@
  *   - hover and keyboard focus show ONE highlight and ONE readout line (name, start, duration, status): arrows walk the
  *     marks (left/right inside a row, up/down between rows, Home/End), so the chart is a single tab stop;
  *   - on a phone the chart scrolls sideways INSIDE its own box (never the page) and the job names stay put; "Fit"
- *     squeezes the whole run into the box instead.
+ *     squeezes the whole run into the box instead;
+ *   - the chart is bounded: the longest few jobs and, in each, the longest few steps get a bar; the rest fold into one
+ *     "N shorter" mark (a thin bar under the steps, a last row for jobs). A mark is a tab stop like any other, and Enter on
+ *     it (or a click) opens the text list under the chart, which names every folded job and step. The list is built only
+ *     when asked for, so a run of 256 jobs x 500 steps costs the same few hundred nodes as a small one;
+ *   - ONE clock for the graph and every number on it: the wall time, the first job's wait and each wait are read at `now`.
  *
  * Colours are the app's status tokens, never a text colour; every status also has a glyph and a word in the label column,
  * so nothing is carried by colour alone. Times on screen are the device's local time.
@@ -37,6 +42,7 @@ import {
   focusOrder,
   formatSpan,
   layoutTimeline,
+  listSteps,
   moveFocus,
   plotWidth,
   timelineTicks,
@@ -128,6 +134,39 @@ function StatusGlyph({ status }: { readonly status: CiStatus }): ReactElement {
   );
 }
 
+/** One job's folded steps as text, built only while it is open (500 steps are 500 lines only when asked for). */
+function FoldedSteps(props: {
+  readonly id: string;
+  readonly label: string;
+  readonly status: CiStatus;
+  readonly open: boolean;
+  readonly onOpen: (id: string, open: boolean) => void;
+  readonly marks: () => readonly TimelineMark[];
+  readonly clock: (offsetMs: number) => string;
+}): ReactElement {
+  const { id, label, status, open, onOpen, marks, clock } = props;
+  return (
+    <details
+      data-ci-timeline-fold={id}
+      data-status={status}
+      open={open}
+      onToggle={event => onOpen(id, event.currentTarget.open)}
+      className="ml-3"
+    >
+      <summary className="cursor-pointer py-0.5">{label}</summary>
+      {open ? (
+        <ul className="m-0 list-none p-0 pl-3">
+          {marks().map(mark => (
+            <li key={mark.key} data-ci-timeline-item={mark.key} data-status={mark.status}>
+              {describeMark(mark, 0, clock)}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </details>
+  );
+}
+
 const labelLength = (row: TimelineRow): string => {
   if (row.bar !== undefined) return `${row.live ? 'running ' : ''}${formatSpan(row.bar.endMs - row.bar.startMs)}`;
   if (row.status === 'skipped') return 'skipped';
@@ -135,6 +174,7 @@ const labelLength = (row: TimelineRow): string => {
 };
 
 const GAP = 2;
+const MORE_H = 5;
 /** Approximate width of an axis label in px (11 px type), to keep the now-line off a tick's text. */
 const labelWidth = (label: string): number => label.length * 6.4 + 8;
 
@@ -168,9 +208,31 @@ export function CiTimeline({ run, now: fixedNow }: CiTimelineProps): ReactElemen
   const tabbable = known(focused) ? focused : order[0]?.key;
   const activeKey = active !== undefined && known(active.key) ? active.key : undefined;
 
+  // The text list of what the chart folded: closed until asked for, and each job's steps open on their own.
+  const [listOpen, setListOpen] = useState(false);
+  const [openFolds, setOpenFolds] = useState<ReadonlySet<string>>(new Set());
+  const openMore = useCallback((mark: TimelineMark): void => {
+    setListOpen(true);
+    if (mark.rowKey !== 'jmore') setOpenFolds(current => new Set(current).add(mark.rowKey));
+  }, []);
+  const setFold = useCallback((key: string, open: boolean): void => {
+    setOpenFolds(current => {
+      const next = new Set(current);
+      if (open) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
+
   const svgRef = useRef<SVGSVGElement | null>(null);
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
+      const folded = order.find(mark => mark.key === tabbable);
+      if ((event.key === 'Enter' || event.key === ' ') && folded?.kind === 'more') {
+        event.preventDefault();
+        openMore(folded);
+        return;
+      }
       if (!FOCUS_KEYS.includes(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
       event.preventDefault();
       const next = moveFocus(layout, tabbable, event.key as FocusKey);
@@ -179,7 +241,7 @@ export function CiTimeline({ run, now: fixedNow }: CiTimelineProps): ReactElemen
       setActive({ key: next, via: 'focus' });
       svgRef.current?.querySelector<SVGElement>(`[data-mark="${next}"]`)?.focus();
     },
-    [layout, tabbable],
+    [layout, order, tabbable, openMore],
   );
 
   const clock = useMemo(() => localClock(layout.originMs), [layout.originMs]);
@@ -190,8 +252,12 @@ export function CiTimeline({ run, now: fixedNow }: CiTimelineProps): ReactElemen
     if (mark !== undefined) return describeMark(mark, mark.kind === 'job' ? (queueOf.get(mark.key) ?? 0) : 0, clock);
     const waiting = queueHover === undefined ? undefined : layout.rows.find(row => row.key === queueHover);
     if (waiting !== undefined) return `${waiting.name}: waited ${formatSpan(waiting.queueMs)} before it started`;
-    const first = run.queuedMs > 0 ? `, first job started after ${formatSpan(run.queuedMs)}` : '';
-    return `${run.name}: ${run.status}, attempt ${run.attempt}, ${run.live === true ? 'running for ' : 'took '}${formatSpan(run.wallMs)}${first}.${fitMatters ? ' Tap a bar for its times; scroll sideways for the rest, or tap Fit.' : ' Hover or focus a bar for its times.'}`;
+    const first = layout.started
+      ? `, first job started after ${formatSpan(layout.queuedMs)}`
+      : layout.queuedMs > 0
+        ? `, still waiting to start (${formatSpan(layout.queuedMs)})`
+        : '';
+    return `${run.name}: ${run.status}, attempt ${run.attempt}, ${run.live === true ? 'running for ' : 'took '}${formatSpan(layout.wallMs)}${first}.${fitMatters ? ' Tap a bar for its times; scroll sideways for the rest, or tap Fit.' : ' Hover or focus a bar for its times.'}`;
   })();
 
   // First view: a live run opens at its now-line, a failed one at its first failing bar, so the answer is on screen. A
@@ -228,6 +294,15 @@ export function CiTimeline({ run, now: fixedNow }: CiTimelineProps): ReactElemen
     setFade(current => (current.left === next.left && current.right === next.right ? current : next));
   }, [scrollNode]);
 
+  const foldedSteps = layout.rows.filter(row => row.steps.at(-1)?.kind === 'more');
+  let foldedStepCount = 0;
+  for (const row of foldedSteps) foldedStepCount += row.steps.at(-1)?.count ?? 0;
+  const foldedJobCount = layout.hiddenJobs.length;
+  const foldedWords = [
+    ...(foldedJobCount > 0 ? [`${foldedJobCount} shorter ${foldedJobCount === 1 ? 'job' : 'jobs'}`] : []),
+    ...(foldedStepCount > 0 ? [`${foldedStepCount} shorter ${foldedStepCount === 1 ? 'step' : 'steps'}`] : []),
+  ].join(' and ');
+
   const usedStatuses = new Set<CiStatus>();
   let anyQueue = false;
   for (const row of layout.rows) {
@@ -253,6 +328,7 @@ export function CiTimeline({ run, now: fixedNow }: CiTimelineProps): ReactElemen
         aria-label={describeMark(mark, mark.kind === 'job' ? (queueOf.get(mark.key) ?? 0) : 0, clock)}
         tabIndex={mark.key === tabbable ? 0 : -1}
         style={{ outline: 'none', cursor: 'default' }}
+        onClick={mark.kind === 'more' ? () => openMore(mark) : undefined}
         onPointerEnter={() => setActive({ key: mark.key, via: 'hover' })}
         onPointerLeave={() => setActive(focused === undefined ? undefined : { key: focused, via: 'focus' })}
         onFocus={() => {
@@ -284,16 +360,15 @@ export function CiTimeline({ run, now: fixedNow }: CiTimelineProps): ReactElemen
   );
 
   const activeMark = activeKey === undefined ? undefined : markOf.get(activeKey);
-  const rowTop = (row: TimelineRow): number => AXIS_H + row.jobIndex * ROW_H;
+  const rowTop = (row: TimelineRow): number => AXIS_H + row.rowIndex * ROW_H;
+  const moreY = (row: TimelineRow): number => rowTop(row) + (ROW_H - BAR_H) / 2 + BAR_H + 3;
   const ringTarget = (() => {
     if (activeMark === undefined) return undefined;
-    const row = layout.rows.find(
-      candidate => activeMark.key === candidate.key || activeMark.key.startsWith(`${candidate.key}s`),
-    );
+    const row = layout.rows.find(candidate => candidate.key === activeMark.rowKey);
     if (row === undefined) return undefined;
-    return activeMark.kind === 'job'
-      ? ring(activeMark, rowTop(row) + (ROW_H - BAR_H) / 2, BAR_H)
-      : ring(activeMark, rowTop(row) + (ROW_H - STEP_H) / 2, STEP_H);
+    const barTop = rowTop(row) + (ROW_H - BAR_H) / 2;
+    if (activeMark.kind === 'step') return ring(activeMark, rowTop(row) + (ROW_H - STEP_H) / 2, STEP_H);
+    return activeMark.key === row.key ? ring(activeMark, barTop, BAR_H) : ring(activeMark, barTop + BAR_H + 3, MORE_H);
   })();
 
   return (
@@ -406,7 +481,7 @@ export function CiTimeline({ run, now: fixedNow }: CiTimelineProps): ReactElemen
                   const stepY = top + (ROW_H - STEP_H) / 2;
                   const queueW = xOf(row.queueMs, layout.spanMs, plot) - xOf(0, layout.spanMs, plot);
                   const bar = row.bar;
-                  const solid = bar !== undefined && row.steps.length === 0;
+                  const solid = bar !== undefined && row.steps.length === 0 && bar.kind === 'job';
                   return (
                     <g key={row.key} data-row={row.key}>
                       {row.jobIndex < layout.rows.length - 1 ? (
@@ -441,7 +516,7 @@ export function CiTimeline({ run, now: fixedNow }: CiTimelineProps): ReactElemen
                           height={BAR_H}
                           rx={4}
                           fill={STATUS_COLOR[bar.status]}
-                          fillOpacity={solid ? 1 : 0.25}
+                          fillOpacity={solid ? 1 : bar.kind === 'more' ? 0.5 : 0.25}
                           pointerEvents="none"
                         />
                       ) : null}
@@ -465,6 +540,21 @@ export function CiTimeline({ run, now: fixedNow }: CiTimelineProps): ReactElemen
                         const x = xOf(step.startMs, layout.spanMs, plot);
                         const w = barWidth(step, layout.spanMs, plot);
                         const gap = w > 2 * GAP + 2 ? GAP / 2 : 0;
+                        if (step.kind === 'more')
+                          return (
+                            <rect
+                              key={step.key}
+                              data-more={step.key}
+                              x={x}
+                              y={moreY(row)}
+                              width={w}
+                              height={MORE_H}
+                              rx={2}
+                              fill={STATUS_COLOR[step.status]}
+                              fillOpacity={0.6}
+                              pointerEvents="none"
+                            />
+                          );
                         return (
                           <g key={step.key} pointerEvents="none">
                             <rect
@@ -490,7 +580,9 @@ export function CiTimeline({ run, now: fixedNow }: CiTimelineProps): ReactElemen
                         );
                       })}
                       {bar !== undefined ? hit(bar, barY, BAR_H) : null}
-                      {row.steps.map(step => hit(step, stepY - 2, STEP_H + 4))}
+                      {row.steps.map(step =>
+                        step.kind === 'more' ? hit(step, moreY(row) - 2, MORE_H + 4) : hit(step, stepY - 2, STEP_H + 4),
+                      )}
                     </g>
                   );
                 })}
@@ -534,6 +626,56 @@ export function CiTimeline({ run, now: fixedNow }: CiTimelineProps): ReactElemen
         ) : null}
       </div>
 
+      {foldedWords === '' ? null : (
+        <details
+          data-ci-timeline-more
+          open={listOpen}
+          onToggle={event => setListOpen(event.currentTarget.open)}
+          className="mt-2 text-xs text-fg-soft"
+        >
+          <summary className="cursor-pointer py-1 font-medium text-fg">List {foldedWords}</summary>
+          {listOpen ? (
+            <ul className="m-0 flex list-none flex-col gap-1 p-0 pt-1">
+              {layout.hiddenJobs.map(row => (
+                <li key={row.key} data-ci-timeline-item={row.key} data-status={row.status}>
+                  {row.bar === undefined ? (
+                    <span>
+                      {row.name}: {STATUS_WORD[row.status].toLowerCase()}
+                    </span>
+                  ) : (
+                    <span>{describeMark(row.bar, row.queueMs, clock)}</span>
+                  )}
+                  {row.stepCount > 0 ? (
+                    <FoldedSteps
+                      id={row.key}
+                      label={`${row.stepCount} ${row.stepCount === 1 ? 'step' : 'steps'}`}
+                      status={row.status}
+                      open={openFolds.has(row.key)}
+                      onOpen={setFold}
+                      marks={() => listSteps(run, layout, row.jobIndex)}
+                      clock={clock}
+                    />
+                  ) : null}
+                </li>
+              ))}
+              {foldedSteps.map(row => (
+                <li key={row.key}>
+                  <FoldedSteps
+                    id={row.key}
+                    label={`${row.name}: ${row.steps.at(-1)?.name ?? ''}`}
+                    status={row.status}
+                    open={openFolds.has(row.key)}
+                    onOpen={setFold}
+                    marks={() => listSteps(run, layout, row.jobIndex)}
+                    clock={clock}
+                  />
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </details>
+      )}
+
       <ul
         data-ci-timeline-legend
         className="m-0 mt-2 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-[11px] text-muted"
@@ -549,6 +691,14 @@ export function CiTimeline({ run, now: fixedNow }: CiTimelineProps): ReactElemen
               {STATUS_WORD[status]}
             </li>
           ))}
+        {foldedWords === '' ? null : (
+          <li className="flex items-center gap-1.5">
+            <svg width={22} height={10} aria-hidden="true">
+              <rect width={22} height={5} y={2} rx={2} fill="var(--muted)" fillOpacity={0.6} />
+            </svg>
+            Shorter ones folded (Enter on a bar lists them)
+          </li>
+        )}
         {anyQueue ? (
           <li className="flex items-center gap-1.5">
             <svg width={22} height={10} aria-hidden="true">

@@ -6,6 +6,8 @@
  *    and Fit squeezes the whole run into the box; on a wide screen there is no Fit and nothing scrolls;
  *  - hover shows ONE ring and one readout; a live run has a now-line.
  *
+ * The biggest run the contract allows (256 jobs x 500 steps) draws a bounded chart on a phone and lists the rest as text.
+ *
  * Set `FY_CI_TIMELINE_SHOTS_DIR` to keep `<case>-<viewport>-<theme>.png`.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
@@ -74,6 +76,58 @@ const VARIANTS = [
 const CASES = ['finished', 'running', 'matrix'] as const;
 
 describe('the CI timeline', () => {
+  for (const variant of VARIANTS)
+    it(`big ${variant.name}: a bounded chart, every folded mark reachable, the rest listed as text`, async () => {
+      const context = await browser.newContext({
+        viewport: { width: variant.width, height: 2_400 },
+        deviceScaleFactor: variant.phone ? 2 : 1,
+        hasTouch: variant.phone,
+        isMobile: variant.phone,
+        colorScheme: variant.scheme,
+      });
+      const origin = server?.url.origin ?? '';
+      await context.route('**/*', async route =>
+        new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+      );
+      const tab = await context.newPage();
+      const problems: string[] = [];
+      tab.on('pageerror', error => problems.push(error.message));
+      try {
+        await tab.goto(`${origin}/?theme=studio-${variant.scheme}&case=big`);
+        await tab.waitForSelector('[data-scene-ready] [data-ci-timeline] [data-step]');
+        // 24 job rows and the folded one; 12 steps and a folded mark in each: the same few hundred marks however big the run is.
+        expect(await tab.locator('[data-ci-timeline-row]').count()).toBe(25);
+        expect(await tab.locator('[data-mark]').count()).toBe(24 * 14 + 1);
+        expect(await tab.locator('[data-ci-timeline-item]').count()).toBe(0);
+        expect(
+          await tab.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+        ).toBeLessThanOrEqual(0);
+        if (shotsDir !== '')
+          await tab.locator('[data-ci-timeline]').screenshot({ path: join(shotsDir, `big-${variant.name}.png`) });
+        // The folded jobs open the text list: one line per folded job, none of the 232 out of reach.
+        await tab.locator('[data-ci-timeline-more] > summary').click();
+        await tab.waitForSelector('[data-ci-timeline-item]');
+        expect(await tab.locator('li[data-ci-timeline-item^="j"][data-status]').count()).toBe(232);
+        expect(await tab.locator('[data-ci-timeline-more] > summary').textContent()).toBe(
+          'List 232 shorter jobs and 11712 shorter steps',
+        );
+        expect(
+          await tab.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+        ).toBeLessThanOrEqual(0);
+        await tab.evaluate(() => document.querySelector('[data-ci-timeline-more]')?.scrollIntoView());
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `big-list-${variant.name}.png`) });
+        // The folded JOBS come first (they are the first half of the title), then the steps of the jobs that are drawn.
+        const first = await tab
+          .locator('[data-ci-timeline-more] [data-ci-timeline-item]')
+          .first()
+          .getAttribute('data-ci-timeline-item');
+        expect(first).toBe('j24');
+        expect(problems).toEqual([]);
+      } finally {
+        await context.close();
+      }
+    });
+
   for (const variant of VARIANTS)
     for (const scene of CASES) {
       it(`${scene} ${variant.name}: drawn once, scrolls only inside its box on a phone, one ring on hover`, async () => {

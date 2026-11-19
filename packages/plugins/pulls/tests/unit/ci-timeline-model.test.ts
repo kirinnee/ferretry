@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  DRAWN_JOBS,
+  DRAWN_STEPS,
   PLOT_MIN_PX,
   barWidth,
   canFit,
@@ -8,12 +10,23 @@ import {
   formatOffset,
   formatSpan,
   layoutTimeline,
+  listSteps,
   moveFocus,
   plotWidth,
   timelineTicks,
   xOf,
 } from '../../app/features/ci-timeline/timeline-model.ts';
-import { FINISHED, MATRIX, RUNNING } from '../fixtures/ci-timeline-runs.ts';
+import { CiRunSchema } from '../../contract/index.ts';
+import {
+  BIG_RUN,
+  CANCELLED_RUN,
+  FINISHED,
+  MATRIX,
+  RUNNING,
+  SNAPSHOT_RUN,
+  WAITING_RUN,
+  sec,
+} from '../fixtures/ci-timeline-runs.ts';
 
 const finished = layoutTimeline(FINISHED.run, FINISHED.now);
 const running = layoutTimeline(RUNNING.run, RUNNING.now);
@@ -197,5 +210,182 @@ describe('what a mark says', () => {
       'test › Unit tests: failed, started +1 m 15 s (09:01:15), 55 s',
     );
     expect(describeMark(row(running, 'test').bar!, 42_000)).toContain('running for 53 s');
+  });
+});
+
+describe('the fixtures are real contract shapes', () => {
+  test('parse as a CiRun', () => {
+    for (const run of [BIG_RUN(), CANCELLED_RUN, SNAPSHOT_RUN, WAITING_RUN])
+      expect(CiRunSchema.safeParse(run).success).toBe(true);
+  });
+});
+
+describe('one clock', () => {
+  test('a live step in a cancelled job keeps E8’s end: an hour later it is still inside its job, and so is the span', () => {
+    for (const now of [sec(11), sec(3_611)]) {
+      const layout = layoutTimeline(CANCELLED_RUN, now);
+      const job = row(layout, 'test');
+      expect(job.bar).toMatchObject({ startMs: 1_000, endMs: 11_000, live: false });
+      expect(job.steps.map(step => [step.startMs, step.endMs])).toEqual([
+        [1_000, 2_000],
+        [2_000, 11_000],
+      ]);
+      expect(job.steps[1]).toMatchObject({ live: true, clamped: true });
+      expect(layout.spanMs).toBe(11_000);
+      expect(layout.wallMs).toBe(11_000);
+      expect(layout.nowMs).toBeUndefined();
+    }
+  });
+
+  test('a live item ticks to now only while its job and its run are live too', () => {
+    const at = (run: typeof SNAPSHOT_RUN, seconds: number) => row(layoutTimeline(run, sec(seconds)), 'test');
+    expect(at(SNAPSHOT_RUN, 131).bar?.endMs).toBe(131_000);
+    expect(at(SNAPSHOT_RUN, 131).steps[0]?.endMs).toBe(131_000);
+    const job = SNAPSHOT_RUN.jobs[0];
+    if (job === undefined) throw new Error('fixture job');
+    // A job that is no longer live keeps E8's end, and so does its still-flagged step.
+    const stoppedJob = { ...SNAPSHOT_RUN, jobs: [{ ...job, live: undefined }] };
+    expect(at(stoppedJob, 131).bar?.endMs).toBe(1_000);
+    expect(at(stoppedJob, 131).steps[0]?.endMs).toBe(1_000);
+    // A run that is no longer live keeps E8's end for every level below it.
+    const stoppedRun = { ...SNAPSHOT_RUN, live: undefined };
+    expect(at(stoppedRun, 131).bar?.endMs).toBe(1_000);
+    expect(at(stoppedRun, 131).steps[0]?.endMs).toBe(1_000);
+  });
+
+  test('the wall time, the now-line, the span and the wait of a queued job all read the same moment', () => {
+    for (const [seconds, ticked] of [
+      [1, 1_000],
+      [131, 131_000],
+    ] as const) {
+      const layout = layoutTimeline(SNAPSHOT_RUN, sec(seconds));
+      expect(layout.wallMs).toBe(ticked);
+      expect(layout.nowMs).toBe(ticked);
+      expect(layout.spanMs).toBe(ticked);
+      expect(row(layout, 'deploy').queueMs).toBe(ticked);
+      expect(layout.queuedMs).toBe(0);
+      expect(layout.started).toBe(true);
+    }
+    // A run that has finished reads E8's numbers for what it recorded, however late it is drawn.
+    const done = layoutTimeline(FINISHED.run, sec(99_999));
+    expect(done.wallMs).toBe(135_000);
+    expect(done.spanMs).toBe(135_000);
+    expect(row(done, 'build').queueMs).toBe(10_000);
+    expect(layoutTimeline(RUNNING.run, sec(-5)).wallMs).toBe(0);
+  });
+
+  test('nothing started: the wait is the clock’s while the run is live, and E8’s once it is not', () => {
+    const live = layoutTimeline(WAITING_RUN, sec(131));
+    expect(live).toMatchObject({ started: false, queuedMs: 131_000, wallMs: 131_000 });
+    expect(row(live, 'build').queueMs).toBe(131_000);
+    const stopped = layoutTimeline({ ...WAITING_RUN, live: undefined }, sec(131));
+    expect(stopped).toMatchObject({ started: false, queuedMs: 1_000, wallMs: 1_000 });
+    expect(row(stopped, 'build').queueMs).toBe(1_000);
+    // A check run (no jobs) reads its own wait; the first job's start is for runs that have jobs.
+    expect(layoutTimeline({ ...WAITING_RUN, jobs: [] }, sec(131))).toMatchObject({ started: false, queuedMs: 1_000 });
+  });
+
+  test('the first job’s wait is its start offset, however late the run is drawn', () => {
+    expect(layoutTimeline(RUNNING.run, sec(500))).toMatchObject({ started: true, queuedMs: 8_000 });
+    expect(layoutTimeline(FINISHED.run, sec(500))).toMatchObject({ started: true, queuedMs: 10_000 });
+  });
+});
+
+describe('a run of the biggest size the contract allows', () => {
+  const big = BIG_RUN();
+  const layout = layoutTimeline(big, sec(20_000));
+  const marks = focusOrder(layout);
+
+  test('draws the longest few jobs and, in each, the longest few steps; the rest fold into one mark', () => {
+    expect(layout.rows).toHaveLength(DRAWN_JOBS + 1);
+    // Jobs are equal: the first of equals are drawn, in their own order, and the folded row is last.
+    expect(layout.rows.slice(0, DRAWN_JOBS).map(r => r.jobIndex)).toEqual(
+      Array.from({ length: DRAWN_JOBS }, (_, i) => i),
+    );
+    expect(layout.rows.map(r => r.rowIndex)).toEqual(layout.rows.map((_, i) => i));
+    const folded = layout.rows.at(-1);
+    expect(folded).toMatchObject({ key: 'jmore', jobIndex: -1, name: '232 shorter jobs', status: 'failed' });
+    expect(folded?.bar).toMatchObject({ kind: 'more', count: 232, status: 'failed', rowKey: 'jmore' });
+    expect(layout.hiddenJobs).toHaveLength(256 - DRAWN_JOBS);
+    expect(layout.hiddenJobs.every(job => job.steps.length === 0 && job.rowIndex === -1 && job.stepCount === 500)).toBe(
+      true,
+    );
+    // 24 job bars, each with 12 steps and one folded mark, then the folded row's bar.
+    expect(marks).toHaveLength(DRAWN_JOBS * (1 + DRAWN_STEPS + 1) + 1);
+    const first = layout.rows[0];
+    expect(first?.steps.slice(0, -1).map(step => step.key)).toEqual(
+      Array.from({ length: DRAWN_STEPS }, (_, i) => `j0s${1 + 2 * i}`),
+    );
+    expect(first?.steps.at(-1)).toMatchObject({ kind: 'more', key: 'j0more', name: '488 shorter steps', count: 488 });
+    expect(new Set(marks.map(mark => mark.key)).size).toBe(marks.length);
+    for (const mark of marks) {
+      expect(mark.startMs).toBeGreaterThanOrEqual(0);
+      expect(mark.endMs).toBeLessThanOrEqual(layout.spanMs);
+    }
+  });
+
+  test('every step is still there as text: the folded ones of a job are exactly the ones not drawn', () => {
+    const hidden = listSteps(big, layout, 0);
+    expect(hidden).toHaveLength(500 - DRAWN_STEPS);
+    const drawn = layout.rows[0]?.steps.filter(step => step.kind === 'step') ?? [];
+    expect(new Set([...drawn, ...hidden].map(mark => mark.key)).size).toBe(500);
+    // A job that was folded away lists all 500; one that does not exist lists none.
+    expect(listSteps(big, layout, 100)).toHaveLength(500);
+    expect(listSteps(big, layout, 9_999)).toEqual([]);
+  });
+
+  test('the keyboard reaches the folded marks, and the words say what Enter does', () => {
+    expect(moveFocus(layout, 'j0s23', 'ArrowRight')).toBe('j0more');
+    expect(moveFocus(layout, 'j0more', 'ArrowDown')).toBe('j1more');
+    expect(moveFocus(layout, 'j23more', 'ArrowDown')).toBe('jmore');
+    const more = layout.rows[0]?.steps.at(-1);
+    expect(describeMark(more!, 0)).toContain('job 1 › 488 shorter steps: passed');
+    expect(describeMark(more!, 0)).toContain('press Enter to list them');
+    expect(describeMark(layout.rows.at(-1)!.bar!, 0)).toContain('232 shorter jobs: failed');
+  });
+});
+
+describe('folding the small cases', () => {
+  const queued = (count: number) => ({
+    ...WAITING_RUN,
+    jobs: Array.from({ length: count }, (_, index) => ({
+      id: index + 1,
+      name: `job ${index + 1}`,
+      status: 'queued' as const,
+      queuedMs: 1_000,
+      steps: [],
+    })),
+  });
+
+  test('one job over the limit folds as "1 shorter job"; folded jobs that never started have no bar to draw', () => {
+    const layout = layoutTimeline(queued(DRAWN_JOBS + 1), sec(5));
+    expect(layout.rows.at(-1)).toMatchObject({ name: '1 shorter job', status: 'queued', bar: undefined, live: false });
+    expect(layout.hiddenJobs).toHaveLength(1);
+    expect(layoutTimeline(queued(DRAWN_JOBS), sec(5)).hiddenJobs).toEqual([]);
+  });
+
+  test('one step over the limit folds as "1 shorter step", wearing the most urgent status of what it holds', () => {
+    const step = (number: number, status: 'passed' | 'failed' | 'running', live = false) => ({
+      name: `s${number}`,
+      number,
+      status,
+      start: new Date(number === 1 ? sec(55) : sec(number)).toISOString(),
+      end: new Date(number === 1 ? sec(56) : sec(number) + 20_000).toISOString(),
+      ...(live ? { live: true } : {}),
+    });
+    const job = {
+      id: 1,
+      name: 'long',
+      status: 'running' as const,
+      queuedMs: 0,
+      start: new Date(sec(0)).toISOString(),
+      end: new Date(sec(100)).toISOString(),
+      live: true,
+      steps: [step(1, 'failed', true), ...Array.from({ length: DRAWN_STEPS }, (_, i) => step(i + 2, 'passed'))],
+    };
+    const run = { ...SNAPSHOT_RUN, jobs: [job] };
+    const long = row(layoutTimeline(run, sec(60)), 'long');
+    expect(long.steps.at(-1)).toMatchObject({ name: '1 shorter step', status: 'failed', live: true, count: 1 });
+    expect(long.steps.filter(mark => mark.kind === 'step')).toHaveLength(DRAWN_STEPS);
   });
 });
