@@ -579,6 +579,36 @@ describe('LoginSignIn with a Codex link', () => {
     await view.unmount();
   });
 
+  it('starts a new sign-in with an empty code field after a pasted, unsent code was left on the failed one', async () => {
+    let started = 0;
+    let reads = 0;
+    const { view } = await open(
+      {
+        [LOGIN]: () => {
+          started += 1;
+          return started === 1 ? claudeFlow('awaiting-code') : { ...claudeFlow('awaiting-code'), flowId: 'flow-2' };
+        },
+        [FLOW_GET]: () => {
+          reads += 1;
+          return claudeFlow('failed');
+        },
+      },
+      { pollMs: 5 },
+    );
+    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+    await type(
+      must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'the code field'),
+      'fake-unsent-code',
+    );
+    await wait(30);
+    expect(reads).toBeGreaterThan(0);
+    expect(state(view.container)).toBe('failed');
+    await click(button(view.container, 'Start a new sign-in'), 'Start a new sign-in');
+    expect(state(view.container)).toBe('awaiting-code');
+    expect(must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'the code field').value).toBe('');
+    await view.unmount();
+  });
+
   it('offers a link sign-in as a real outlined button, never a bare ghost', async () => {
     const { view } = await open({ [LOGIN]: codexFlow('awaiting-approval') }, { login: CODEX });
     expect(button(view.container, 'Sign in with a link instead').getAttribute('data-variant')).toBeNull();

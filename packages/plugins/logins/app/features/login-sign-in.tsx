@@ -244,9 +244,10 @@ export function LoginSignIn({ login, machineName, client, onSignedIn, pollMs = S
   return (
     <div data-login-sign-in={flow.state}>
       {flow.harness === 'claude-code' ? (
-        <ClaudeLoginPanel {...common} flow={flow} onSubmitCode={code => void submit(code)} />
+        <ClaudeLoginPanel key={flow.flowId} {...common} flow={flow} onSubmitCode={code => void submit(code)} />
       ) : (
         <CodexLoginPanel
+          key={flow.flowId}
           {...common}
           flow={flow}
           linked={linkStart}
