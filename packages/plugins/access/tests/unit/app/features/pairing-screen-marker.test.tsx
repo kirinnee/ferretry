@@ -139,10 +139,14 @@ describe('the pairing-screen marker', () => {
     const screen = await mount(screenElement());
     try {
       expect(markers()).toBe(0);
-      const reveal = [...screen.container.querySelectorAll('button')].find(button =>
-        button.textContent?.includes('Paste'),
+      // The ways are radio cards (a label over a native radio), so the pasted way is chosen by pressing its card.
+      const reveal = must(
+        [...screen.container.querySelectorAll<HTMLLabelElement>('[data-pair-ways] label')].find(card =>
+          card.textContent?.includes('Paste a link'),
+        ) ?? null,
+        'the pasted way',
       );
-      if (reveal !== undefined) await interact(() => reveal.click());
+      await interact(() => reveal.click());
       const input = must(
         screen.container.querySelector('input[aria-label="Pairing link"]'),
         'the paste field',
