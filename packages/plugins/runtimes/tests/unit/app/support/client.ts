@@ -11,6 +11,8 @@ export interface Call {
   readonly query: Readonly<Record<string, string>> | undefined;
   readonly body: unknown;
   readonly headers?: Readonly<Record<string, string>> | undefined;
+  /** A read nobody asked for: it must never raise a passkey prompt. */
+  readonly quiet?: boolean | undefined;
 }
 
 export type Route = unknown | Error | ((call: Call) => unknown);
@@ -23,9 +25,17 @@ export const scripted = (routes: Readonly<Record<string, Route>>, calls: Call[] 
       readonly query?: Readonly<Record<string, string>>;
       readonly body?: unknown;
       readonly headers?: Readonly<Record<string, string>>;
+      readonly quiet?: boolean;
     },
   ): Promise<Answer> => {
-    const call: Call = { route, params: init?.params, query: init?.query, body: init?.body, headers: init?.headers };
+    const call: Call = {
+      route,
+      params: init?.params,
+      query: init?.query,
+      body: init?.body,
+      headers: init?.headers,
+      quiet: init?.quiet,
+    };
     calls.push(call);
     // A script may key a route by its concrete path (`POST /v1/x/abc/apply`) or by the template the half called.
     const concrete = route.replace(/:(\w+)/gu, (_, name: string) => init?.params?.[name] ?? `:${name}`);
