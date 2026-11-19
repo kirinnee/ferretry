@@ -24,6 +24,11 @@ import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
 setDefaultTimeout(60_000);
 
+const must = <T>(value: T | null | undefined, what: string): T => {
+  if (value === null || value === undefined) throw new Error(`expected ${what} to be present`);
+  return value;
+};
+
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_PAIRING_SCENE_SHOTS_DIR ?? '';
 /** `FY_PAIRING_SCENE_SCALE=2` keeps the desktop shots at 2x too (a phone is always 2x), so a picture holds up when zoomed. */
@@ -265,6 +270,12 @@ describe('The pair page: mascot and night sky', () => {
           expect(await tab.locator('main button:visible').allInnerTexts()).toEqual(['Add a passkey now', 'Not now']);
           expect(await tab.locator('[data-variant="primary"]').allInnerTexts()).toEqual(['Add a passkey now']);
           expect(await tab.locator('#pairing-title').innerText()).toBe('Connected');
+          // A8 shot 01: each answer is at least 44 px tall, auto width (well under the card), and the row has room.
+          for (const name of ['Add a passkey now', 'Not now']) {
+            const box = must(await tab.getByRole('button', { name }).boundingBox(), name);
+            expect(box.height, `${name} is at least 44 px tall`).toBeGreaterThanOrEqual(44);
+            expect(box.width, `${name} is not a full-width bar`).toBeLessThan(variant.width * 0.8);
+          }
           // The offer draws its own surface, so it carries no sky halo around its words.
           expect(await offer.evaluate(node => getComputedStyle(node).textShadow)).toBe('none');
           // It sits inside the viewport on a phone: no horizontal scroll.
@@ -275,6 +286,34 @@ describe('The pair page: mascot and night sky', () => {
         } finally {
           await close();
         }
+      }
+    });
+  }
+
+  for (const variant of VARIANTS) {
+    it(`${variant.name}: a cold open offers scan, upload and paste as three equal cards, none a full-width bar`, async () => {
+      const { tab, problems, close } = await open(variant, '&arrival=cold&scan=camera');
+      try {
+        const ways = tab.locator('[data-pair-ways] label');
+        expect(await ways.allInnerTexts()).toEqual(['Scan QR code', 'Upload a QR image', 'Paste a link']);
+        const boxes = await Promise.all(
+          [0, 1, 2].map(async index => must(await ways.nth(index).boundingBox(), 'a way')),
+        );
+        for (const box of boxes) expect(box.height, 'at least 44 px tall').toBeGreaterThanOrEqual(44);
+        expect(new Set(boxes.map(box => Math.round(box.width))).size, 'equal widths').toBe(1);
+        // The app's choice cards: a row where there is room, a stack where there is not (a phone).
+        const rows = new Set(boxes.map(box => Math.round(box.y))).size;
+        expect(rows, variant.phone ? 'stacked' : 'one row').toBe(variant.phone ? 3 : 1);
+        expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        await shot(tab, variant, 'ways');
+        await ways.nth(2).click();
+        await tab.waitForSelector('input[aria-label="Pairing link"]');
+        const submit = must(await tab.getByRole('button', { name: 'Use this link' }).boundingBox(), 'the submit');
+        expect(submit.width, 'the submit is not a full-width bar').toBeLessThan(variant.width * 0.6);
+        await shot(tab, variant, 'ways-paste');
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
       }
     });
   }

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+import { StrictMode } from 'react';
 
 import { PairScanner } from '../../../../app/features/pairing/pair-scanner.tsx';
 import { DevicePermissionsContext } from '../../../../app/hooks/use-device-permissions.ts';
+import { NO_QR_IN_IMAGE, QrImageError } from '../../../../app/features/pairing/qr-image.ts';
 import { type QrPreview, type QrScanHost, ScanError } from '../../../../app/lib/pair-scan.ts';
 import { interact, mount, must } from '../../../support/app/dom.ts';
 
@@ -13,15 +15,28 @@ const buttonNamed = (container: HTMLElement, text: string): HTMLButtonElement =>
     `a button labelled ${text}`,
   );
 
+/** One of the three ways, by its title: the card (a label over a native radio) the person presses. */
+const wayNamed = (container: HTMLElement, text: string): HTMLLabelElement =>
+  must(
+    [...container.querySelectorAll<HTMLLabelElement>('[data-pair-ways] label')].find(candidate =>
+      candidate.textContent?.includes(text),
+    ) ?? null,
+    `a way titled ${text}`,
+  );
+
+const wayOff = (way: HTMLElement): boolean => must(way.querySelector('input'), 'the way radio').disabled;
+
 const viewfinder = (container: HTMLElement): HTMLElement =>
   must(container.querySelector('section[aria-label="Camera viewfinder"]'), 'the viewfinder');
 
 describe('PairScanner', () => {
   it('rests as one obvious action, with the camera hidden until it is asked for', async () => {
-    const screen = await mount(<PairScanner host={never} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
+    const screen = await mount(
+      <PairScanner host={never} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
+    );
 
-    const scan = buttonNamed(screen.container, 'Scan QR code');
-    expect(scan.disabled).toBe(false);
+    const scan = wayNamed(screen.container, 'Scan QR code');
+    expect(wayOff(scan)).toBe(false);
     expect(viewfinder(screen.container).className).toBe('hidden');
     // The video is mounted from the first paint: the decoder reads this exact
     // element, and mounting it with the scan would be a race against the camera.
@@ -30,16 +45,20 @@ describe('PairScanner', () => {
   });
 
   it('offers nothing to press when this browser has no camera to offer', async () => {
-    const screen = await mount(<PairScanner host={null} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
+    const screen = await mount(
+      <PairScanner host={null} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
+    );
 
-    expect(buttonNamed(screen.container, 'Scan QR code').disabled).toBe(true);
+    expect(wayOff(wayNamed(screen.container, 'Scan QR code'))).toBe(true);
     await screen.unmount();
   });
 
   it('shows the viewfinder while scanning and says the camera is still opening', async () => {
-    const screen = await mount(<PairScanner host={never} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
+    const screen = await mount(
+      <PairScanner host={never} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
+    );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect(viewfinder(screen.container).className).not.toBe('hidden');
     expect(screen.container.textContent).toContain('Starting the camera…');
@@ -69,10 +88,16 @@ describe('PairScanner', () => {
     };
     const decoded: string[] = [];
     const screen = await mount(
-      <PairScanner host={host} label="Scan QR code" onText={text => decoded.push(text)} onFailed={() => {}} />,
+      <PairScanner
+        host={host}
+        pasteOpen={false}
+        onPaste={() => {}}
+        onText={text => decoded.push(text)}
+        onFailed={() => {}}
+      />,
     );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect((seen[0] as HTMLElement).tagName).toBe('VIDEO');
     expect(released).toBeNull();
@@ -96,9 +121,11 @@ describe('PairScanner', () => {
         return await new Promise<string>(() => {});
       },
     };
-    const screen = await mount(<PairScanner host={host} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
+    const screen = await mount(
+      <PairScanner host={host} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
+    );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect(video?.muted).toBe(true);
     expect(video?.hasAttribute('muted')).toBe(true);
@@ -117,22 +144,26 @@ describe('PairScanner', () => {
         return await new Promise<string>(() => {});
       },
     };
-    const screen = await mount(<PairScanner host={host} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
+    const screen = await mount(
+      <PairScanner host={host} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
+    );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect(screen.container.textContent).toContain('Stop scanning');
     await screen.unmount();
   });
 
   it('stops on request and returns to the resting action', async () => {
-    const screen = await mount(<PairScanner host={never} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
+    const screen = await mount(
+      <PairScanner host={never} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
+    );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
     await interact(() => buttonNamed(screen.container, 'Stop scanning').click());
 
     expect(viewfinder(screen.container).className).toBe('hidden');
-    expect(buttonNamed(screen.container, 'Scan QR code').disabled).toBe(false);
+    expect(wayOff(wayNamed(screen.container, 'Scan QR code'))).toBe(false);
     await screen.unmount();
   });
 
@@ -145,10 +176,16 @@ describe('PairScanner', () => {
       },
     };
     const screen = await mount(
-      <PairScanner host={host} label="Scan QR code" onText={() => {}} onFailed={() => (revealed += 1)} />,
+      <PairScanner
+        host={host}
+        pasteOpen={false}
+        onPaste={() => {}}
+        onText={() => {}}
+        onFailed={() => (revealed += 1)}
+      />,
     );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect(must(screen.container.querySelector('[role="alert"]'), 'the refusal').textContent).toContain(
       'Camera access is turned off for Ferretry on this device.',
@@ -171,11 +208,11 @@ describe('PairScanner', () => {
     };
     const screen = await mount(
       <DevicePermissionsContext.Provider value={hostWithFacts}>
-        <PairScanner host={host} label="Scan QR code" onText={() => {}} onFailed={() => {}} />
+        <PairScanner host={host} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />
       </DevicePermissionsContext.Provider>,
     );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     const howTo = must(screen.container.querySelector('[data-camera-howto]'), 'the how-to');
     expect(howTo.textContent).toContain('find Ferretry in the list of apps');
@@ -190,16 +227,20 @@ describe('PairScanner', () => {
         throw new ScanError('camera-busy', 'The camera is in use by another app.');
       },
     };
-    const screen = await mount(<PairScanner host={host} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
+    const screen = await mount(
+      <PairScanner host={host} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
+    );
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect(screen.container.querySelector('[data-camera-howto]')).toBeNull();
     await screen.unmount();
   });
 
   it('says why there is no scanner, on a secure page and on an insecure one', async () => {
-    const secure = await mount(<PairScanner host={null} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
+    const secure = await mount(
+      <PairScanner host={null} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
+    );
     expect(must(secure.container.querySelector('[data-camera-unavailable]'), 'the note').textContent).toContain(
       'This browser cannot scan here',
     );
@@ -212,7 +253,7 @@ describe('PairScanner', () => {
     };
     const screen = await mount(
       <DevicePermissionsContext.Provider value={insecure}>
-        <PairScanner host={null} label="Scan QR code" onText={() => {}} onFailed={() => {}} />
+        <PairScanner host={null} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />
       </DevicePermissionsContext.Provider>,
     );
     expect(must(screen.container.querySelector('[data-camera-unavailable]'), 'the note').textContent).toContain(
@@ -222,8 +263,286 @@ describe('PairScanner', () => {
   });
 
   it('shows no unavailable note when the browser can scan', async () => {
-    const screen = await mount(<PairScanner host={never} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
+    const screen = await mount(
+      <PairScanner host={never} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
+    );
     expect(screen.container.querySelector('[data-camera-unavailable]')).toBeNull();
+    await screen.unmount();
+  });
+});
+
+describe('PairScanner: the three equal ways', () => {
+  const FAKE_LINK = 'https://pwa.example.test/pair#v1;url=https%3A%2F%2Fdaemon.example.test;code=FAKE-0000;fp=fy_fake';
+
+  /** Choose one picture in the upload input, as the file picker would. */
+  const choose = async (container: HTMLElement): Promise<HTMLInputElement> => {
+    const input = must(container.querySelector('input[data-pair-upload]'), 'the upload input') as HTMLInputElement;
+    const picture = new File(['pixels'], 'screenshot.png', { type: 'image/png' });
+    Object.defineProperty(input, 'files', { configurable: true, value: [picture] });
+    Object.defineProperty(input, 'value', {
+      configurable: true,
+      writable: true,
+      value: 'C:\\fakepath\\screenshot.png',
+    });
+    await interact(() => input.dispatchEvent(new Event('change', { bubbles: true })));
+    return input;
+  };
+
+  it('offers scan, upload and paste side by side, none of them full width', async () => {
+    const screen = await mount(
+      <PairScanner host={never} pasteOpen={false} onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
+    );
+
+    const ways = must(screen.container.querySelector('[data-pair-ways]'), 'the ways');
+    const labels = [...ways.querySelectorAll('label')].map(way => way.textContent);
+    expect(ways.querySelector('[role="radiogroup"]')).not.toBeNull();
+    expect(labels).toEqual(['Scan QR code', 'Upload a QR image', 'Paste a link']);
+    const input = must(
+      screen.container.querySelector('input[data-pair-upload]'),
+      'the upload input',
+    ) as HTMLInputElement;
+    expect(input.type).toBe('file');
+    expect(input.accept).toBe('image/*');
+    await screen.unmount();
+  });
+
+  it('keeps upload and paste available where there is no camera', async () => {
+    const screen = await mount(
+      <PairScanner host={null} pasteOpen onPaste={() => {}} onText={() => {}} onFailed={() => {}} />,
+    );
+
+    expect(wayOff(wayNamed(screen.container, 'Scan QR code'))).toBe(true);
+    expect(wayOff(wayNamed(screen.container, 'Upload a QR image'))).toBe(false);
+    expect(wayNamed(screen.container, 'Paste a link').getAttribute('data-selected')).toBe('true');
+    await screen.unmount();
+  });
+
+  it('hands the decoded link up as text, clears the input, and shows and stores nothing of it', async () => {
+    const decoded: string[] = [];
+    const read: string[] = [];
+    const screen = await mount(
+      <PairScanner
+        host={never}
+        pasteOpen={false}
+        onPaste={() => {}}
+        readImage={async file => {
+          read.push((file as File).name);
+          return FAKE_LINK;
+        }}
+        onText={text => decoded.push(text)}
+        onFailed={() => {}}
+      />,
+    );
+
+    const input = await choose(screen.container);
+
+    expect(read).toEqual(['screenshot.png']);
+    expect(decoded).toEqual([FAKE_LINK]);
+    expect(input.value).toBe('');
+    // The code reaches neither the page's text nor either storage.
+    expect(document.body.textContent).not.toContain('FAKE-0000');
+    expect(document.body.innerHTML).not.toContain('FAKE-0000');
+    expect(JSON.stringify({ ...localStorage })).not.toContain('FAKE-0000');
+    expect(JSON.stringify({ ...sessionStorage })).not.toContain('FAKE-0000');
+    await screen.unmount();
+  });
+
+  it('says "No QR code found in that image" when the picture has none, and delivers nothing', async () => {
+    const decoded: string[] = [];
+    const screen = await mount(
+      <PairScanner
+        host={never}
+        pasteOpen={false}
+        onPaste={() => {}}
+        readImage={async () => {
+          throw new QrImageError('no-qr', NO_QR_IN_IMAGE);
+        }}
+        onText={text => decoded.push(text)}
+        onFailed={() => {}}
+      />,
+    );
+
+    const input = await choose(screen.container);
+
+    expect(must(screen.container.querySelector('[data-pair-upload-problem]'), 'the problem').textContent).toBe(
+      'No QR code found in that image.',
+    );
+    expect(decoded).toEqual([]);
+    expect(input.value).toBe('');
+    await screen.unmount();
+  });
+
+  it('lets go of a read that finishes after this way is gone: nothing is handed up', async () => {
+    const decoded: string[] = [];
+    let finish: (text: string) => void = () => {};
+    const screen = await mount(
+      <PairScanner
+        host={never}
+        pasteOpen={false}
+        onPaste={() => {}}
+        readImage={async () => await new Promise<string>(resolve => (finish = resolve))}
+        onText={text => decoded.push(text)}
+        onFailed={() => {}}
+      />,
+    );
+    await choose(screen.container);
+    expect(wayOff(wayNamed(screen.container, 'Reading…'))).toBe(true);
+
+    await screen.unmount();
+    await interact(() => finish(FAKE_LINK));
+
+    expect(decoded).toEqual([]);
+  });
+
+  it('lets go of a read still in flight when the paste way is chosen', async () => {
+    const decoded: string[] = [];
+    let pasted = 0;
+    let finish: (text: string) => void = () => {};
+    const screen = await mount(
+      <PairScanner
+        host={never}
+        pasteOpen={false}
+        onPaste={() => (pasted += 1)}
+        readImage={async () => await new Promise<string>(resolve => (finish = resolve))}
+        onText={text => decoded.push(text)}
+        onFailed={() => {}}
+      />,
+    );
+    await choose(screen.container);
+
+    await interact(() => wayNamed(screen.container, 'Paste a link').click());
+    expect(pasted).toBe(1);
+    expect(wayOff(wayNamed(screen.container, 'Upload a QR image'))).toBe(false);
+    await interact(() => finish(FAKE_LINK));
+
+    expect(decoded).toEqual([]);
+    expect(screen.container.querySelector('[data-pair-upload-problem]')).toBeNull();
+    await screen.unmount();
+  });
+
+  it('lets go of a read when the paste way is chosen AGAIN, with its field already open', async () => {
+    const decoded: string[] = [];
+    let pasted = 0;
+    let finish: (text: string) => void = () => {};
+    const screen = await mount(
+      <PairScanner
+        host={null}
+        pasteOpen
+        onPaste={() => (pasted += 1)}
+        readImage={async () => await new Promise<string>(resolve => (finish = resolve))}
+        onText={text => decoded.push(text)}
+        onFailed={() => {}}
+      />,
+    );
+    await choose(screen.container);
+
+    // The way is already the chosen one, so the radio raises no change: the click itself is the choice.
+    await interact(() => wayNamed(screen.container, 'Paste a link').click());
+    expect(wayOff(wayNamed(screen.container, 'Upload a QR image'))).toBe(false);
+    await interact(() => finish(FAKE_LINK));
+
+    expect(decoded).toEqual([]);
+    expect(pasted).toBe(0);
+    await screen.unmount();
+  });
+
+  it('lets go of a read still in flight when anything is typed in the paste field', async () => {
+    const decoded: string[] = [];
+    let finish: (text: string) => void = () => {};
+    const element = (typedRevision: number) => (
+      <PairScanner
+        host={null}
+        pasteOpen
+        typedRevision={typedRevision}
+        onPaste={() => {}}
+        readImage={async () => await new Promise<string>(resolve => (finish = resolve))}
+        onText={text => decoded.push(text)}
+        onFailed={() => {}}
+      />
+    );
+    const screen = await mount(element(3));
+    await choose(screen.container);
+
+    await screen.render(element(4));
+    expect(wayOff(wayNamed(screen.container, 'Upload a QR image'))).toBe(false);
+    await interact(() => finish(FAKE_LINK));
+
+    expect(decoded).toEqual([]);
+    await screen.unmount();
+  });
+
+  it('lets go of a read still in flight when the camera starts', async () => {
+    const decoded: string[] = [];
+    let finish: (text: string) => void = () => {};
+    const screen = await mount(
+      <PairScanner
+        host={never}
+        pasteOpen={false}
+        onPaste={() => {}}
+        readImage={async () => await new Promise<string>(resolve => (finish = resolve))}
+        onText={text => decoded.push(text)}
+        onFailed={() => {}}
+      />,
+    );
+    await choose(screen.container);
+
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
+    await interact(() => finish(FAKE_LINK));
+
+    expect(decoded).toEqual([]);
+    await screen.unmount();
+  });
+
+  it('under StrictMode shows the error for a bad image, frees the button, and a retry works', async () => {
+    const decoded: string[] = [];
+    let attempt = 0;
+    const screen = await mount(
+      <StrictMode>
+        <PairScanner
+          host={never}
+          pasteOpen={false}
+          onPaste={() => {}}
+          readImage={async () => {
+            attempt += 1;
+            if (attempt === 1) throw new QrImageError('no-qr', NO_QR_IN_IMAGE);
+            return FAKE_LINK;
+          }}
+          onText={text => decoded.push(text)}
+          onFailed={() => {}}
+        />
+      </StrictMode>,
+    );
+
+    await choose(screen.container);
+
+    expect(must(screen.container.querySelector('[data-pair-upload-problem]'), 'the problem').textContent).toBe(
+      'No QR code found in that image.',
+    );
+    expect(wayOff(wayNamed(screen.container, 'Upload a QR image'))).toBe(false);
+    expect(decoded).toEqual([]);
+
+    await choose(screen.container);
+
+    expect(decoded).toEqual([FAKE_LINK]);
+    expect(screen.container.querySelector('[data-pair-upload-problem]')).toBeNull();
+    await screen.unmount();
+  });
+
+  it('opens the paste field from the third way', async () => {
+    let pasted = 0;
+    const screen = await mount(
+      <PairScanner
+        host={never}
+        pasteOpen={false}
+        onPaste={() => (pasted += 1)}
+        onText={() => {}}
+        onFailed={() => {}}
+      />,
+    );
+
+    await interact(() => wayNamed(screen.container, 'Paste a link').click());
+
+    expect(pasted).toBe(1);
     await screen.unmount();
   });
 });

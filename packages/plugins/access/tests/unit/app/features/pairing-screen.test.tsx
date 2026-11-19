@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
+import { StrictMode } from 'react';
 
 import { PairingScreen } from '../../../../app/features/pairing/pairing-screen.tsx';
 import { DeviceKeyUnsupportedError, UNSUPPORTED_DEVICE_KEY_SENTENCE } from '../../../../app/lib/device-keys.ts';
@@ -42,6 +43,17 @@ const buttonNamed = (container: HTMLElement, text: string): HTMLButtonElement =>
     `a button labelled ${text}`,
   );
 
+/** One of the three ways, by its title: the card (a label over a native radio) the person presses. */
+const wayNamed = (container: HTMLElement, text: string): HTMLLabelElement =>
+  must(
+    [...container.querySelectorAll<HTMLLabelElement>('[data-pair-ways] label')].find(candidate =>
+      candidate.textContent?.includes(text),
+    ) ?? null,
+    `a way titled ${text}`,
+  );
+
+const wayOff = (way: HTMLElement): boolean => must(way.querySelector('input'), 'the way radio').disabled;
+
 const typeLink = async (container: HTMLElement, value: string): Promise<void> => {
   const input = must(
     container.querySelector('input[aria-label="Pairing link"]'),
@@ -75,14 +87,14 @@ describe('PairingScreen cold open', () => {
     const screen = await screenWith();
 
     expect(screen.container.textContent).toContain('Connect a daemon');
-    expect(buttonNamed(screen.container, 'Scan QR code')).toBeDefined();
+    expect(wayNamed(screen.container, 'Scan QR code')).toBeDefined();
     // The card that used to say "0" and then explain that it was 0.
     expect(screen.container.textContent).not.toContain('Paired daemons');
     expect(screen.container.textContent).not.toContain('No daemons are paired yet');
     expect(screen.container.querySelector('ul[aria-label="Paired daemons"]')).toBeNull();
     // Paste is present but quiet: a link to reveal, not the hero control.
     expect(screen.container.querySelector('input[aria-label="Pairing link"]')).toBeNull();
-    expect(screen.container.textContent).toContain('Paste a link instead');
+    expect(screen.container.textContent).toContain('Paste a link');
     await screen.unmount();
   });
 
@@ -98,13 +110,13 @@ describe('PairingScreen cold open', () => {
 
   it('reveals the paste field on request, and permanently when there is no camera', async () => {
     const screen = await screenWith();
-    await interact(() => buttonNamed(screen.container, 'Paste a link instead').click());
+    await interact(() => wayNamed(screen.container, 'Paste a link').click());
     expect(screen.container.querySelector('input[aria-label="Pairing link"]')).not.toBeNull();
     await screen.unmount();
 
     const noCamera = await screenWith({ scanHost: null });
     expect(noCamera.container.querySelector('input[aria-label="Pairing link"]')).not.toBeNull();
-    expect(noCamera.container.textContent).not.toContain('Paste a link instead');
+    expect(wayOff(wayNamed(noCamera.container, 'Scan QR code'))).toBe(true);
     await noCamera.unmount();
   });
 });
@@ -130,7 +142,7 @@ describe('PairingScreen with daemons already paired', () => {
     expect(screen.container.textContent?.split('https://gamma.example.test')).toHaveLength(2);
     expect(screen.container.textContent).not.toContain('alpha-secret');
     expect(screen.container.textContent).not.toContain('beta-secret');
-    expect(buttonNamed(screen.container, 'Pair another daemon')).toBeDefined();
+    expect(wayNamed(screen.container, 'Scan QR code')).toBeDefined();
 
     const chosen = must(screen.container.querySelector('button[aria-current="true"]'), 'the selected daemon');
     const forget = must(screen.container.querySelector('button[aria-label="Forget beta-host"]'), 'the forget control');
@@ -354,7 +366,7 @@ describe('PairingScreen scanned and pasted links', () => {
   it('confirms a scanned pairing link before exchanging it', async () => {
     const screen = await screenWith({ scanHost: scanningHost(LINK) });
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect(screen.container.textContent).toContain('Pair this device?');
     expect(screen.container.textContent).toContain('daemon.example.test');
@@ -364,7 +376,7 @@ describe('PairingScreen scanned and pasted links', () => {
   it('refuses a QR code that is not a pairing link', async () => {
     const screen = await screenWith({ scanHost: scanningHost('https://example.com/some-other-qr') });
 
-    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+    await interact(() => wayNamed(screen.container, 'Scan QR code').click());
 
     expect(screen.container.textContent).toContain('That is not a Ferretry pairing link.');
     await screen.unmount();
@@ -378,7 +390,7 @@ describe('PairingScreen scanned and pasted links', () => {
       },
     });
 
-    await interact(() => buttonNamed(screen.container, 'Paste a link instead').click());
+    await interact(() => wayNamed(screen.container, 'Paste a link').click());
     await typeLink(screen.container, 'not a link');
     await submitForm(screen.container);
 
@@ -391,13 +403,19 @@ describe('PairingScreen scanned and pasted links', () => {
     const screen = await screenWith({ scanHost: null });
 
     await typeLink(screen.container, LINK);
-    const input = must(screen.container.querySelector('input'), 'the paste field') as HTMLInputElement;
+    const input = must(
+      screen.container.querySelector('input[aria-label="Pairing link"]'),
+      'the paste field',
+    ) as HTMLInputElement;
     expect(input.value).toBe(LINK);
     await submitForm(screen.container);
 
     expect(screen.container.textContent).toContain('Pair this device?');
     await interact(() => buttonNamed(screen.container, 'Not now').click());
-    expect((must(screen.container.querySelector('input'), 'the paste field') as HTMLInputElement).value).toBe('');
+    expect(
+      (must(screen.container.querySelector('input[aria-label="Pairing link"]'), 'the paste field') as HTMLInputElement)
+        .value,
+    ).toBe('');
     await screen.unmount();
   });
 });
@@ -603,6 +621,145 @@ describe('PairingScreen pasted link', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]?.code).toBe('7F3K-Q2ND');
     await screen.unmount();
+  });
+});
+
+describe('PairingScreen uploaded QR image', () => {
+  const FAKE_UPLOAD_LINK =
+    'https://pwa.example.test/pair#v1;url=https%3A%2F%2Fuploaded.example.test;code=FAKE-2222;fp=fy_daemon_ddddddddddddddddddddddddddddddddddddddddddd';
+  const FAKE_PASTED_LINK =
+    'https://pwa.example.test/pair#v1;url=https%3A%2F%2Fpasted.example.test;code=FAKE-3333;fp=fy_daemon_ddddddddddddddddddddddddddddddddddddddddddd';
+
+  const chooseImage = async (container: HTMLElement): Promise<void> => {
+    const input = must(container.querySelector('input[data-pair-upload]'), 'the upload input') as HTMLInputElement;
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: [new File(['pixels'], 'code.png', { type: 'image/png' })],
+    });
+    await interact(() => input.dispatchEvent(new Event('change', { bubbles: true })));
+  };
+
+  it('does not switch the confirm screen when a slow upload finishes after another link was pasted', async () => {
+    let finish: (text: string) => void = () => {};
+    const screen = await screenWith({
+      readImage: async () => await new Promise<string>(resolve => (finish = resolve)),
+    });
+
+    await chooseImage(screen.container);
+    await interact(() => wayNamed(screen.container, 'Paste a link').click());
+    await typeLink(screen.container, FAKE_PASTED_LINK);
+    await submitForm(screen.container);
+    expect(screen.container.textContent).toContain('pasted.example.test');
+
+    await interact(() => finish(FAKE_UPLOAD_LINK));
+
+    expect(screen.container.textContent).toContain('Pair this device?');
+    expect(screen.container.textContent).toContain('pasted.example.test');
+    expect(screen.container.textContent).not.toContain('uploaded.example.test');
+    await screen.unmount();
+  });
+
+  it('keeps a half-typed link when a slow upload finishes after Paste was chosen again, field already open', async () => {
+    for (const scanHost of [idleHost, null]) {
+      let finish: (text: string) => void = () => {};
+      const screen = await screenWith({
+        scanHost,
+        readImage: async () => await new Promise<string>(resolve => (finish = resolve)),
+      });
+      // With a camera the field is opened first; without one it is open from the start.
+      if (scanHost !== null) await interact(() => wayNamed(screen.container, 'Paste a link').click());
+      expect(screen.container.querySelector('input[aria-label="Pairing link"]')).not.toBeNull();
+
+      await chooseImage(screen.container);
+      await interact(() => wayNamed(screen.container, 'Paste a link').click());
+      await typeLink(screen.container, FAKE_PASTED_LINK);
+      await interact(() => finish(FAKE_UPLOAD_LINK));
+
+      expect(screen.container.textContent).not.toContain('Pair this device?');
+      const field = must(screen.container.querySelector('input[aria-label="Pairing link"]'), 'the paste field');
+      expect((field as HTMLInputElement).value).toBe(FAKE_PASTED_LINK);
+      await screen.unmount();
+    }
+  });
+
+  it('keeps a link being typed when a slow upload finishes, even with no second choice of Paste', async () => {
+    let finish: (text: string) => void = () => {};
+    const screen = await screenWith({
+      scanHost: null,
+      readImage: async () => await new Promise<string>(resolve => (finish = resolve)),
+    });
+
+    await chooseImage(screen.container);
+    await typeLink(screen.container, FAKE_PASTED_LINK);
+    await interact(() => finish(FAKE_UPLOAD_LINK));
+
+    expect(screen.container.textContent).not.toContain('Pair this device?');
+    expect(
+      (must(screen.container.querySelector('input[aria-label="Pairing link"]'), 'the field') as HTMLInputElement).value,
+    ).toBe(FAKE_PASTED_LINK);
+    await screen.unmount();
+  });
+
+  it('confirms the uploaded link when nothing else was chosen meanwhile', async () => {
+    const screen = await screenWith({ readImage: async () => FAKE_UPLOAD_LINK });
+
+    await chooseImage(screen.container);
+
+    expect(screen.container.textContent).toContain('Pair this device?');
+    expect(screen.container.textContent).toContain('uploaded.example.test');
+    await screen.unmount();
+  });
+
+  it('shows the error for an unreadable image under StrictMode', async () => {
+    const screen = await mount(
+      <StrictMode>
+        <PairingScreen
+          connections={[]}
+          selectedDaemonId={null}
+          scanHost={idleHost}
+          readImage={async () => {
+            throw new Error('not an image');
+          }}
+          onPair={async () => {}}
+          onRemove={() => {}}
+          onSelect={() => {}}
+        />
+      </StrictMode>,
+    );
+
+    await chooseImage(screen.container);
+
+    expect(must(screen.container.querySelector('[data-pair-upload-problem]'), 'the problem').textContent).toBe(
+      'That image could not be read.',
+    );
+    expect(wayOff(wayNamed(screen.container, 'Upload a QR image'))).toBe(false);
+    await screen.unmount();
+  });
+
+  it('never writes a pairing code to the console, whichever way it was read', async () => {
+    const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map(method =>
+      spyOn(console, method).mockImplementation(() => {}),
+    );
+    try {
+      const uploaded = await screenWith({ readImage: async () => FAKE_UPLOAD_LINK });
+      await chooseImage(uploaded.container);
+      await uploaded.unmount();
+
+      const scanned = await screenWith({ scanHost: scanningHost(FAKE_UPLOAD_LINK) });
+      await interact(() => wayNamed(scanned.container, 'Scan QR code').click());
+      await scanned.unmount();
+
+      const pasted = await screenWith({ scanHost: null });
+      await typeLink(pasted.container, FAKE_PASTED_LINK);
+      await submitForm(pasted.container);
+      await pasted.unmount();
+
+      const printed = spies.flatMap(spy => spy.mock.calls.map(call => call.map(String).join(' '))).join('\n');
+      expect(printed).not.toContain('FAKE-2222');
+      expect(printed).not.toContain('FAKE-3333');
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
   });
 });
 
