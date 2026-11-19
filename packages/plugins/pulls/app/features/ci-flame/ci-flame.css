@@ -124,3 +124,35 @@
   line-height: 1.45;
   color: var(--muted);
 }
+/* The folded bar ("N shorter steps") is a hatched, quieter version of any bar; its list is plain text. */
+.fy-flame-bar[data-kind='more'] .fy-flame-fill {
+  fill: color-mix(in srgb, var(--tone, var(--pend)) 22%, var(--surface));
+  stroke-dasharray: 4 3;
+}
+.fy-flame-more {
+  font-size: 13px;
+}
+.fy-flame-more > summary {
+  cursor: pointer;
+  padding: 4px 0;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.fy-flame-more-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 16rem;
+  overflow-y: auto;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+.fy-flame-more-list li {
+  padding: 2px 0;
+}
+.fy-flame .fy-flame-more-list .fy-flame-back {
+  text-align: left;
+}

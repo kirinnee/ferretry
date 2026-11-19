@@ -145,3 +145,73 @@ export const QUEUED_RUN: CiRun = {
   live: true,
   jobs: [job(7, 'test', 'queued', undefined, undefined, [])],
 };
+
+/** The biggest run the contract allows (256 jobs, 500 steps each), every job and step lasting a different, whole number of seconds. */
+export const BIG_RUN = (jobCount = 256, stepCount = 500): CiRun => ({
+  id: 9005,
+  name: 'CI',
+  status: 'failed',
+  trigger: 'push',
+  attempt: 1,
+  headSha: SHA,
+  createdAt: iso(0),
+  start: iso(1),
+  end: iso(10_000),
+  queuedMs: 1_000,
+  wallMs: 10_000_000,
+  jobs: Array.from({ length: jobCount }, (_, jobIndex) =>
+    job(
+      jobIndex + 1,
+      `job ${jobIndex + 1}`,
+      jobIndex === jobCount - 1 ? 'failed' : 'passed',
+      1,
+      1 + stepCount * 3,
+      Array.from({ length: stepCount }, (_, stepIndex) =>
+        step(
+          stepIndex + 1,
+          `step ${stepIndex + 1}`,
+          'passed',
+          1 + stepIndex * 3,
+          1 + stepIndex * 3 + 1 + ((stepIndex + jobIndex) % 2),
+        ),
+      ),
+    ),
+  ),
+});
+
+/** A cancelled job that stopped 10 s in, holding a step E8 clamped to that end (still flagged live): 9 s long, for good. */
+export const CANCELLED_RUN: CiRun = {
+  id: 9006,
+  name: 'CI',
+  status: 'cancelled',
+  trigger: 'push',
+  attempt: 1,
+  headSha: SHA,
+  createdAt: iso(0),
+  start: iso(1),
+  end: iso(11),
+  queuedMs: 1_000,
+  wallMs: 11_000,
+  jobs: [
+    job(8, 'test', 'cancelled', 1, 11, [
+      step(1, 'Check out', 'passed', 1, 2),
+      { ...step(2, 'Unit tests', 'running', 2, 11, true), clamped: true },
+    ]),
+  ],
+};
+
+/** A live run, a live job and a live step, all 1 s old at the snapshot the caller took. */
+export const SNAPSHOT_RUN: CiRun = {
+  id: 9007,
+  name: 'CI',
+  status: 'running',
+  trigger: 'push',
+  attempt: 1,
+  headSha: SHA,
+  createdAt: iso(0),
+  start: iso(0),
+  queuedMs: 0,
+  wallMs: 1_000,
+  live: true,
+  jobs: [job(9, 'test', 'running', 0, 1, [step(1, 'Unit tests', 'running', 0, 1, true)], true)],
+};

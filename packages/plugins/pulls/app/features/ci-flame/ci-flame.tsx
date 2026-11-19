@@ -4,13 +4,18 @@
  * (Enter or Space on a focused one); the breadcrumb above goes back. Plain SVG, no chart library.
  *
  * One fixed line under the chart says what the widths mean, with the two numbers a person compares: the total time spent
- * and the run's wall time. The chart takes the run and "now" as arguments; the caller owns the clock.
+ * and the run's wall time, both read on the same clock. The chart takes the run and "now" as arguments; the caller owns
+ * the clock.
+ *
+ * The chart is bounded: a bar draws its longest few children and folds the rest into one "N shorter" bar, so a run of 256
+ * jobs and 500 steps each costs the same few dozen bars as a small one. Nothing is lost: the folded ones are listed as text
+ * under the chart (open it from the bar or from its summary), and a folded job can be zoomed into from that list.
  */
-import { type KeyboardEvent, useLayoutEffect, useState } from 'react';
+import { type KeyboardEvent, useLayoutEffect, useMemo, useState } from 'react';
 import type { CiRun, CiStatus } from '../../../contract/index.ts';
 import './ci-flame.css';
 import { formatDuration } from './format.ts';
-import { buildFlame, findPath, type FlameBar, type FlameNode, layoutBars } from './model.ts';
+import { buildFlame, findPath, type FlameBar, type FlameNode, hiddenChildren, layoutBars } from './model.ts';
 
 const ROW_HEIGHT = 30;
 const STATUS_WORD: Readonly<Record<CiStatus, string>> = {
@@ -21,7 +26,7 @@ const STATUS_WORD: Readonly<Record<CiStatus, string>> = {
   cancelled: 'cancelled',
   skipped: 'skipped',
 };
-const KIND_WORD = { run: 'Run', job: 'Job', step: 'Step' } as const;
+const KIND_WORD = { run: 'Run', job: 'Job', step: 'Step', more: '' } as const;
 
 /** The sentence under the chart. Parallel jobs add up, so the total is usually longer than the wall time. */
 const unbroken = (ms: number): string => formatDuration(ms).replaceAll(' ', '\u00a0');
@@ -46,7 +51,8 @@ export const barLabel = (node: FlameNode, px: number): string => {
 const describe = (node: FlameNode, of: FlameNode): string => {
   const share = of.ms === 0 ? 0 : Math.round((node.ms / of.ms) * 100);
   const where = node === of ? '' : ` · ${share}% of ${of.name}`;
-  return `${KIND_WORD[node.kind]} ${node.name} · ${STATUS_WORD[node.status]} · ${formatDuration(node.ms)}${where}`;
+  const kind = KIND_WORD[node.kind];
+  return `${kind === '' ? '' : `${kind} `}${node.name} · ${STATUS_WORD[node.status]} · ${formatDuration(node.ms)}${where}`;
 };
 
 function Bar(props: {
@@ -100,10 +106,11 @@ function Bar(props: {
 
 export function CiFlame(props: { readonly run: CiRun; readonly nowMs: number }) {
   const { run, nowMs } = props;
-  const flame = buildFlame(run, nowMs);
+  const flame = useMemo(() => buildFlame(run, nowMs), [run, nowMs]);
   const [focusKey, setFocusKey] = useState('run');
   const [pickedKey, setPickedKey] = useState<string | undefined>(undefined);
   const [activeKey, setActiveKey] = useState<string | undefined>(undefined);
+  const [listOpen, setListOpen] = useState(false);
   const [chartEl, setChartEl] = useState<SVGSVGElement | null>(null);
   const [chartPx, setChartPx] = useState(0);
   useLayoutEffect(() => {
@@ -126,18 +133,32 @@ export function CiFlame(props: { readonly run: CiRun; readonly nowMs: number }) 
   const trail = findPath(root, focusKey) ?? [root];
   const focus = trail.at(-1) ?? root;
   const bars = layoutBars(focus);
-  const rows = Math.max(...bars.map(bar => bar.row)) + 1;
+  let rows = 1;
+  for (const bar of bars) rows = Math.max(rows, bar.row + 1);
   const byKey = new Map(bars.map(bar => [bar.node.key, bar.node]));
-  const shown = byKey.get(activeKey ?? pickedKey ?? '') ?? focus;
+  const picked = pickedKey === undefined ? undefined : (byKey.get(pickedKey) ?? findPath(root, pickedKey)?.at(-1));
+  const shown = byKey.get(activeKey ?? '') ?? picked ?? focus;
   const statuses = [...new Set(bars.map(bar => bar.node.status))];
+  const hidden = hiddenChildren(focus);
 
   const zoomTo = (key: string): void => {
     setFocusKey(key);
     setPickedKey(undefined);
+    setListOpen(false);
   };
   const pick = (node: FlameNode): void => {
+    if (node.kind === 'more') {
+      // A folded bar belongs to the node above it: zoom there and open the list of what was folded.
+      setFocusKey(node.key.slice('more:'.length));
+      setPickedKey(undefined);
+      setListOpen(true);
+      return;
+    }
     setPickedKey(node.key);
-    if (node.children.length > 0) setFocusKey(node.key);
+    if (node.children.length > 0) {
+      setFocusKey(node.key);
+      setListOpen(false);
+    }
   };
 
   return (
@@ -177,6 +198,34 @@ export function CiFlame(props: { readonly run: CiRun; readonly nowMs: number }) 
       <p className="fy-flame-readout" data-flame-readout="" aria-live="polite">
         {describe(shown, focus)}
       </p>
+      {hidden.length > 0 ? (
+        <details
+          className="fy-flame-more"
+          data-flame-more=""
+          open={listOpen}
+          onToggle={event => setListOpen(event.currentTarget.open)}
+        >
+          <summary>
+            List {hidden.length} shorter{' '}
+            {focus.kind === 'run' ? (hidden.length === 1 ? 'job' : 'jobs') : hidden.length === 1 ? 'step' : 'steps'}
+          </summary>
+          {listOpen ? (
+            <ul className="fy-flame-more-list">
+              {hidden.map(node => (
+                <li key={node.key} data-status={node.status} data-flame-item={node.key}>
+                  {node.children.length > 0 ? (
+                    <button type="button" className="fy-flame-back" onClick={() => pick(node)}>
+                      {describe(node, focus)}
+                    </button>
+                  ) : (
+                    describe(node, focus)
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </details>
+      ) : null}
       <ul className="fy-flame-legend" aria-label="Colours">
         {statuses.map(status => (
           <li key={status} data-status={status}>
@@ -186,7 +235,7 @@ export function CiFlame(props: { readonly run: CiRun; readonly nowMs: number }) 
         ))}
       </ul>
       <p className="fy-flame-note" data-flame-note="">
-        {flameNote(root.ms, run.wallMs)}
+        {flameNote(root.ms, flame.wallMs)}
       </p>
       {flame.unplotted > 0 ? (
         <p className="fy-flame-note" data-flame-unplotted="">

@@ -3,7 +3,7 @@
  * still going, and a CI that is not GitHub Actions; light and dark, phone and desktop. It checks what only a browser can:
  * the bars sit inside the chart, no sideways scroll, and every label keeps >= 4.5:1 on its bar's colour.
  *
- * Set `FY_FLAME_SHOTS_DIR` to keep `<viewport>-<scheme>-<case>.png` (cases: whole, zoomed, running, check).
+ * Set `FY_FLAME_SHOTS_DIR` to keep `<viewport>-<scheme>-<case>.png` (cases: whole, zoomed, running, check, big, big-list).
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -181,6 +181,37 @@ describe('the CI flamegraph', () => {
 
         await page.locator('.fy-flame-back').click();
         expect(await page.locator('[data-flame-bar="job:1"]').count()).toBe(1);
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+
+    it(`${variant.name}: the biggest run the contract allows (256 jobs x 500 steps) draws a bounded chart and lists the rest`, async () => {
+      const { page, close, problems } = await open(variant, 'big');
+      try {
+        // 1 run + 13 job bars + 12 x 13 step bars: the same few dozen bars however big the run is.
+        expect(await page.locator('[data-flame-bar]').count()).toBe(170);
+        await noSidewaysScroll(page);
+        await shot(page, variant, 'big');
+        const chart = must(await page.locator('.fy-flame-chart').boundingBox(), 'the chart');
+        for (const box of await page.locator('[data-flame-bar] .fy-flame-fill').evaluateAll(elements =>
+          elements.map(element => {
+            const { left, right } = element.getBoundingClientRect();
+            return { left, right };
+          }),
+        )) {
+          expect(box.left).toBeGreaterThanOrEqual(chart.x - 0.5);
+          expect(box.right).toBeLessThanOrEqual(chart.x + chart.width + 0.5);
+        }
+        // The folded bar opens the text list: every folded job is one line, and none of the 244 is out of reach.
+        await page.locator('[data-flame-bar="more:run"]').click();
+        await page.waitForSelector('[data-flame-item]');
+        await page.mouse.move(0, 0);
+        expect(await page.locator('[data-flame-item]').count()).toBe(244);
+        expect(await page.locator('[data-flame-more] summary').textContent()).toBe('List 244 shorter jobs');
+        await noSidewaysScroll(page);
+        await shot(page, variant, 'big-list');
         expect(problems).toEqual([]);
       } finally {
         await close();
