@@ -147,8 +147,24 @@ mkdir -p "${coverage_dir}"
 # "no JUnit report", and the status became its 2: on 2026-11-19 the kernel group died that way three times in
 # private-files-pinned.test.ts and the log said neither the signal nor the memory. Say how it ended, the last file
 # and test it printed, and what the memory cgroup counted, so the next one is diagnosable from the log alone.
+# The memory cgroup's own events file (cgroup v2); FY_CI_MEMORY_EVENTS names another one, for the runner's test.
+memory_events_file() {
+  [[ -n ${FY_CI_MEMORY_EVENTS:-} ]] && echo "${FY_CI_MEMORY_EVENTS}" && return 0
+  local cgroup
+  cgroup="$(sed -n 's|^0::||p' /proc/self/cgroup 2>/dev/null || true)"
+  [[ -n ${cgroup} ]] && echo "/sys/fs/cgroup${cgroup}/memory.events"
+  return 0
+}
+# How many kills the kernel's OOM killer has made in this job's cgroup so far (nothing when it cannot be read).
+oom_kill_count() {
+  local file
+  file="$(memory_events_file)"
+  [[ -n ${file} && -r ${file} ]] && awk '$1 == "oom_kill" { print $2 }' "${file}"
+  return 0
+}
+
 say_how_it_died() {
-  local status=$1 log=$2 how
+  local status=$1 log=$2 oom_before=${3:-} how
   how="exit ${status}"
   if ((status > 128 && status < 160)); then
     how="exit ${status} = signal SIG$(kill -l $((status - 128)) 2>/dev/null || echo "$((status - 128))")"
@@ -158,27 +174,39 @@ say_how_it_died() {
     echo "❌ ${mode} test process died before writing its JUnit report: ${how}"
     echo "   last file it started: $(grep -a -E '\.test\.tsx?:$' "${log}" | tail -1)"
     echo "   last test it printed: $(grep -a -E '\((pass|fail|skip|todo)\)' "${log}" | tail -1 | cut -c1-300)"
-    [[ ${status} -eq 137 ]] &&
-      echo "   SIGKILL with no crash report and no STALLED line is almost always the kernel's OOM killer: the runner ran out of memory."
-    # cgroup v2: this job's memory events (oom_kill counts every OOM kill in it, the host's own included) and what is left.
-    local cgroup
-    cgroup="$(sed -n 's|^0::||p' /proc/self/cgroup 2>/dev/null || true)"
-    [[ -n ${cgroup} && -r /sys/fs/cgroup${cgroup}/memory.events ]] &&
-      echo "   memory.events of ${cgroup}: $(tr '\n' ' ' <"/sys/fs/cgroup${cgroup}/memory.events")"
+    # Only what was observed: the OOM killer is named ONLY when the cgroup's oom_kill count rose while this process ran
+    # (it counts every kill in the job's cgroup, the host's own included). A SIGKILL with no such rise is not claimed.
+    local oom_after
+    oom_after="$(oom_kill_count)"
+    if [[ ${status} -eq 137 ]]; then
+      if [[ -z ${oom_before} || -z ${oom_after} ]]; then
+        echo "   killed by SIGKILL; whether the OOM killer did it is unknown (the cgroup's oom_kill count is unreadable)."
+      elif ((oom_after > oom_before)); then
+        echo "   killed by the kernel's out-of-memory killer: oom_kill rose from ${oom_before} to ${oom_after} during this process."
+      else
+        echo "   killed by SIGKILL (not by the OOM killer: oom_kill unchanged at ${oom_after})."
+      fi
+    fi
+    # cgroup v2: this job's memory events and what is left.
+    local events
+    events="$(memory_events_file)"
+    [[ -n ${events} && -r ${events} ]] &&
+      echo "   memory.events (${events}): $(tr '\n' ' ' <"${events}")"
     [[ -r /proc/meminfo ]] && echo "   now: $(grep -E '^(MemTotal|MemAvailable):' /proc/meminfo | tr -s ' ' | tr '\n' ' ')"
   } >&2
 }
 
 # ONE PROCESS: the files run in one bun process, its ledger at ${coverage_file}.
 run_one() {
-  local run_config=$1 run_dir=$2
+  local run_config=$1 run_dir=$2 oom_before
   shift 2
+  oom_before="$(oom_kill_count)"
   set +e
   ./scripts/test/swept.sh bun scripts/test/stall-watch.ts "${FY_TEST_STALL_SECONDS:-300}" -- bun test --config="${run_config}" "${timeout_flag[@]}" --coverage --reporter=junit --reporter-outfile="${run_dir}/junit.xml" "$@" 2>&1 | tee "${run_dir}/console.log"
   local status=${PIPESTATUS[0]}
   if [[ ${status} -ne 0 && ! -s "${run_dir}/junit.xml" ]]; then
     # Nothing to rescue without a report: keep the process's own status, never quarantine's generic 2.
-    say_how_it_died "${status}" "${run_dir}/console.log"
+    say_how_it_died "${status}" "${run_dir}/console.log" "${oom_before}"
     set -e
     return "${status}"
   fi
