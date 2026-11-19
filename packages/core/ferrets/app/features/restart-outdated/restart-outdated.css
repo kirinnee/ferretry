@@ -58,8 +58,8 @@
 }
 .fy-sbar__options-badge {
   position: absolute;
-  top: 0;
-  right: 0;
+  top: -4px;
+  right: -4px;
   min-width: 14px;
   padding: 0 3px;
   border-radius: 7px;

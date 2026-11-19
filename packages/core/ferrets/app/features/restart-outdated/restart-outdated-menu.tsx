@@ -1,6 +1,6 @@
 /**
  * THE LIST'S ⋯: one button beside Mine · All · Agents that holds what is the list's own but not worth a line of it —
- * "Show stopped" (a toggle with a check), "Group Needs you at the top" (the device's own setting, a toggle too), and
+ * "Show stopped" (a toggle with a check), "Needs you on top" (the device's own setting, a toggle too), and
  * "Restart outdated (N)" while any ferret is outdated (or a press is in flight). The ⋯ wears the outdated count as a
  * small badge, so the one thing a reader may need without having looked is findable.
  */
@@ -42,7 +42,7 @@ export function ListOptions({
     },
     {
       key: 'group-needs-you',
-      label: 'Group Needs you at the top',
+      label: 'Needs you on top',
       icon: <Pin aria-hidden="true" size={14} />,
       checked: toggles.groupNeedsYou,
       onSelect: () => toggles.onGroupNeedsYou(!toggles.groupNeedsYou),
