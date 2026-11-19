@@ -84,6 +84,7 @@
   --gap-md: 10px;
   /* ---- surface treatment ---- */
   --panel-bg: var(--surface);
+  --body-wash: none;
   --panel-texture: none;
   --panel-texture-size: auto;
   /* ---- accessibility ---- */

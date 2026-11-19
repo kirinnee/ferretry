@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { PALETTE_IDS, STYLE_IDS, ThemeSchema, THEME_FAMILY_IDS } from '@ferretry/plugin-layouts/contract';
 import { memoryStore } from '../../src/storage/records.ts';
 import { APP_STORAGE } from '../../src/storage/names.ts';
-import { PALETTES, STYLES, lookOfFamily, swatchAttributes } from '../../src/theme/catalog.ts';
+import { PALETTES, STYLES, familyOfPalette, lookOfFamily, swatchAttributes } from '../../src/theme/catalog.ts';
 import { ThemePreferenceStore } from '../../src/theme/preferences.ts';
 import { readCssWithImports, readStyleFile, themeStylesDir } from '../../src/testing/theme-css.ts';
 
@@ -58,7 +58,9 @@ describe('style files are non-colour only', () => {
       expect(stray).toEqual([]);
     });
     it(`${style}: every rule is keyed by its own style (and optionally the mode)`, () => {
-      const selectors = [...withoutComments(css).matchAll(/([^{}]+)\{/gu)].map(match => (match[1] as string).trim());
+      const selectors = [...withoutComments(css).matchAll(/(?:^|[{}])([^{}]+)\{/gu)].map(match =>
+        (match[1] as string).trim(),
+      );
       for (const selector of selectors.filter(selector => !selector.startsWith('@media'))) {
         expect(selector).toContain(`[data-style='${style}']`);
         expect(selector).not.toContain('data-palette');
@@ -76,7 +78,9 @@ describe('palette files are colour only', () => {
       expect(withoutComments(css)).not.toContain('color-scheme');
     });
     it(`${palette}: every rule is keyed by its own palette (and optionally the mode)`, () => {
-      const selectors = [...withoutComments(css).matchAll(/([^{}]+)\{/gu)].map(match => (match[1] as string).trim());
+      const selectors = [...withoutComments(css).matchAll(/(?:^|[{}])([^{}]+)\{/gu)].map(match =>
+        (match[1] as string).trim(),
+      );
       for (const selector of selectors) {
         expect(selector).toContain(`[data-palette='${palette}']`);
         expect(selector).not.toContain('data-style');
@@ -177,6 +181,14 @@ describe('a stored pre-split family reads as its style and palette', () => {
     expect(themes.snapshot()).toMatchObject({ style: 'neo', palette: 'ma', family: 'ma' });
     themes.setFamily('phosphor');
     expect(themes.snapshot()).toMatchObject({ style: 'mission', palette: 'phosphor' });
+  });
+});
+
+describe('a palette that is not one of the original families', () => {
+  it('still reads and writes, and the picker falls back to the default look instead of needing a frozen family entry', () => {
+    // A palette added after the family list froze (T12/T17 add to PALETTE_IDS only): the guard answers for it.
+    expect(familyOfPalette('dusk' as (typeof PALETTE_IDS)[number])).toBe('studio');
+    for (const palette of PALETTE_IDS) expect(familyOfPalette(palette)).toBe(palette);
   });
 });
 

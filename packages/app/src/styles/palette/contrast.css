@@ -4,7 +4,6 @@
   /* An UNDECORATED instrument, not monochrome Neo: no offset shadows, no display
    face, no casing games — redundant explicit affordance instead. */
   --chrome-fg: var(--faint);
-  --body-wash: none;
   --nav-hover: var(--surface-2);
   --nav-sel-bg: var(--fg);
   --nav-sel-fg: var(--bg);

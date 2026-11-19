@@ -26,6 +26,7 @@ import { type KeyValueStore, readRecord, writeRecord } from '../storage/records.
 import {
   DEFAULT_PALETTE,
   DEFAULT_STYLE,
+  familyOfPalette,
   isFamilyId,
   isPaletteId,
   isStyleId,
@@ -103,14 +104,19 @@ export interface StoredThemePreference {
 }
 
 /**
- * What a reader gets: the stored axes plus `family`, the single-pick look that names the current PALETTE (a palette id is a
- * family id). It is derived, never stored, and exists so the pre-split picker keeps working until Appearance shows the axes.
+ * What a reader gets: the stored axes plus `family`, the single-pick look the picker shows as selected for the current
+ * PALETTE (`familyOfPalette`: the palette itself while it is one of the original eleven, the default look otherwise, so a
+ * palette added later needs no entry in the frozen family list). It is derived, never stored, and exists so the pre-split
+ * picker keeps working until Appearance shows the axes.
  */
 export interface ThemePreference extends StoredThemePreference {
   readonly family: ThemeFamilyId;
 }
 
-const withFamily = (stored: StoredThemePreference): ThemePreference => ({ ...stored, family: stored.palette });
+const withFamily = (stored: StoredThemePreference): ThemePreference => ({
+  ...stored,
+  family: familyOfPalette(stored.palette),
+});
 
 export const DEFAULT_THEME_PREFERENCE: ThemePreference = Object.freeze(
   withFamily({ style: DEFAULT_STYLE, palette: DEFAULT_PALETTE, mode: 'system', textScale: 'default' }),

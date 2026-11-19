@@ -80,6 +80,7 @@ export const PALETTES: readonly PaletteEntry[] = Object.freeze([
 
 export const DEFAULT_STYLE: StyleId = 'studio';
 export const DEFAULT_PALETTE: PaletteId = 'studio';
+const DEFAULT_FAMILY: ThemeFamilyId = 'studio';
 
 export const isStyleId = (value: unknown): value is StyleId =>
   typeof value === 'string' && (STYLE_IDS as readonly string[]).includes(value);
@@ -87,6 +88,13 @@ export const isPaletteId = (value: unknown): value is PaletteId =>
   typeof value === 'string' && (PALETTE_IDS as readonly string[]).includes(value);
 export const isFamilyId = (value: unknown): value is ThemeFamilyId =>
   typeof value === 'string' && (THEME_FAMILY_IDS as readonly string[]).includes(value);
+
+/**
+ * The single-pick LOOK the picker shows as selected for a palette. A family id is a palette id only for the eleven
+ * ORIGINAL palettes (`THEME_FAMILY_IDS` is frozen at the pre-split list); a palette added later is not a family, so the
+ * picker falls back to the default look rather than the type system demanding a new frozen entry. Read-side only.
+ */
+export const familyOfPalette = (palette: PaletteId): ThemeFamilyId => (isFamilyId(palette) ? palette : DEFAULT_FAMILY);
 
 /** What a pre-split family (a stored `family`, a theme item's `base`) is on the three axes. A family id is a palette id. */
 export function lookOfFamily(family: ThemeFamilyId): { readonly style: StyleId; readonly palette: PaletteId } {

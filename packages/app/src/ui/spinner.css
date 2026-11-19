@@ -72,3 +72,70 @@
   --spinner-sweep: 30;
   --spinner-timing: linear;
 }
+
+.fy-spinner {
+  animation: fy-spinner-turn var(--spinner-speed) var(--spinner-timing) infinite;
+  display: inline-block;
+  filter: var(--spinner-glow);
+  flex: 0 0 auto;
+  overflow: visible;
+  transform-origin: 50% 50%;
+  vertical-align: middle;
+}
+.fy-spinner-track {
+  stroke: var(--spinner-track);
+  stroke-dasharray: var(--spinner-track-dash);
+  stroke-width: var(--spinner-stroke);
+}
+.fy-spinner-arc {
+  stroke: var(--spinner-arc);
+  stroke-dasharray: var(--spinner-sweep) 100;
+  stroke-linecap: var(--spinner-cap);
+  stroke-width: var(--spinner-stroke);
+}
+
+@keyframes fy-spinner-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes fy-spinner-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}
+
+/* Reduced motion: the whole ring pulses in place. These outrank index.css's global `*` stills by
+   specificity, which is the only way an `!important` there can be answered. */
+@media (prefers-reduced-motion: reduce) {
+  .fy-spinner.fy-spinner {
+    animation: fy-spinner-pulse 1.6s ease-in-out infinite !important;
+    filter: none;
+  }
+  .fy-spinner .fy-spinner-arc {
+    stroke-dasharray: 100 0;
+  }
+}
+:root[data-motion='reduced'] .fy-spinner.fy-spinner {
+  animation: fy-spinner-pulse 1.6s ease-in-out infinite !important;
+  filter: none;
+}
+:root[data-motion='reduced'] .fy-spinner .fy-spinner-arc {
+  stroke-dasharray: 100 0;
+}
+
+/* ON AN ACCENT FILL (Send while a message leaves): the arc is the button's own ink, so it keeps the
+   contrast the label would have, and the busy button is not dimmed like a disabled one — it is busy,
+   not unavailable. */
+.fy-spinner--on-accent {
+  --spinner-arc: var(--accent-fg);
+  --spinner-track: color-mix(in srgb, var(--accent-fg) 30%, transparent);
+  --spinner-glow: none;
+}
+.fy-composer-send[data-sending]:disabled {
+  opacity: 1;
+}

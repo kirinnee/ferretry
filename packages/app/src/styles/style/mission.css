@@ -65,6 +65,19 @@
    tell; the panel now reads its identity from the grid texture and the seated
    hairline, not a gradient sheen. */
   --panel-bg: var(--surface);
+  /* THE TELEMETRY FIELD. The page itself is a ruled grid — a 96px major / 32px minor module — not a flat sheet with two
+   faint radial tints that vanish the moment hue is removed. `--body-wash` paints `body`, so it covers the whole
+   viewport including the regions no panel occupies (the gutters, the shell behind the sidebar, the area below a short
+   table), which is what makes the style read as an instrument. The GEOMETRY is this style's, so any palette can wear it;
+   the palette supplies only the inks (`--grid-ink-*`) and the ground's two stops (`--field-ground-*`, transparent unless
+   the palette grades its ground). `repeating-linear-gradient` on purpose rather than `linear-gradient` plus a
+   `background-size`: it tiles itself, and `body` already carries `background-attachment: fixed`. */
+  --body-wash:
+    repeating-linear-gradient(90deg, var(--grid-ink-major) 0 1px, transparent 1px 96px),
+    repeating-linear-gradient(180deg, var(--grid-ink-major) 0 1px, transparent 1px 96px),
+    repeating-linear-gradient(90deg, var(--grid-ink-minor) 0 1px, transparent 1px 32px),
+    repeating-linear-gradient(180deg, var(--grid-ink-minor) 0 1px, transparent 1px 32px),
+    linear-gradient(180deg, var(--field-ground-top) 0%, var(--field-ground-bottom) 100%);
   /* 32px instrument grid on panels, aligned to the same module as the page grid
    so a panel is a continuous piece of the ruled field, not a textured card. */
   --panel-texture:

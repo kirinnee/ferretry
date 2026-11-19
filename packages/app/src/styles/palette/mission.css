@@ -75,30 +75,13 @@
   --shadow-lg-1: rgba(6, 48, 56, 0.08);
   --shadow-lg-2: rgba(6, 48, 56, 0.12);
   --scrim: rgba(6, 34, 40, 0.4);
-  /* THE TELEMETRY FIELD. This is the correction: the page itself is now a ruled
-   32px grid, not a flat sheet with two 6%-alpha radial tints that vanish the
-   moment hue is removed. `--body-wash` paints `body`, so it covers the whole
-   viewport including the regions no panel occupies — the gutters, the shell
-   behind the sidebar, the area below a short table. That is what makes the
-   theme read as an instrument rather than as a page with a textured card on it.
-
-   The grid ink is the deep teal at 0.13/0.06 (major/minor), which survives
-   achromatopsia as a legible ruled field while staying far below text weight.
-   Calmed from 0.14/0.077 and re-pitched to a 96px major / 32px minor module
-   (was 128/32) so the field reads as a precise ruled instrument rather than
-   busy graph paper, and to match dark's grid exactly — both modes now draw the
-   same chassis. The old radials were removed long ago; the budget is the grid's.
-
-   `repeating-linear-gradient` on purpose rather than `linear-gradient` plus a
-   `background-size`: it tiles itself, so the whole field stays inside
-   themes.css and needs no change to `body` in index.css (which is not mine).
-   `background-attachment: fixed` is already on `body`, so the grid is pinned to
-   the viewport and reads as an instrument backdrop the panes travel over. */
-  --body-wash:
-    repeating-linear-gradient(90deg, rgba(11, 82, 95, 0.13) 0 1px, transparent 1px 96px),
-    repeating-linear-gradient(180deg, rgba(11, 82, 95, 0.13) 0 1px, transparent 1px 96px),
-    repeating-linear-gradient(90deg, rgba(11, 82, 95, 0.06) 0 1px, transparent 1px 32px),
-    repeating-linear-gradient(180deg, rgba(11, 82, 95, 0.06) 0 1px, transparent 1px 32px);
+  /* THE TELEMETRY FIELD'S INKS. The ruled page grid itself (96px major / 32px minor, drawn by `--body-wash` in
+   `style/mission.css`) is the style's; the palette only says what colour the rules are. Deep teal at 0.13 / 0.06
+   (major / minor) survives achromatopsia as a legible ruled field while staying far below text weight. */
+  --grid-ink-major: rgba(11, 82, 95, 0.13);
+  --grid-ink-minor: rgba(11, 82, 95, 0.06);
+  --field-ground-top: transparent;
+  --field-ground-bottom: transparent;
   /* The PANEL grid, aligned to the same 32px module as the page grid above so
    the two read as one continuous field rather than a textured card sitting on a
    ruled page. The family block sets this from `--accent-rgb` at 0.05, which is
@@ -189,18 +172,12 @@
   --shadow-lg-1: rgba(151, 217, 224, 0.11);
   --shadow-lg-2: rgba(0, 0, 0, 0.58);
   --scrim: rgba(2, 6, 10, 0.72);
-  /* THE RULED FIELD, dark. The old radial glow-wash was the effect that read as
-   "sci-fi console"; it is replaced by the same ruled instrument grid light
-   uses, faint cyan on near-black, aligned to the 32px panel module (96px major
-   / 32px minor). Both modes now share one chassis, so the family is defined by
-   the grid, not by a glow. A whisper of vertical grade under the grid keeps the
-   ground from reading as dead-flat black. */
-  --body-wash:
-    repeating-linear-gradient(90deg, rgba(120, 200, 214, 0.055) 0 1px, transparent 1px 96px),
-    repeating-linear-gradient(180deg, rgba(120, 200, 214, 0.055) 0 1px, transparent 1px 96px),
-    repeating-linear-gradient(90deg, rgba(120, 200, 214, 0.03) 0 1px, transparent 1px 32px),
-    repeating-linear-gradient(180deg, rgba(120, 200, 214, 0.03) 0 1px, transparent 1px 32px),
-    linear-gradient(180deg, #060d13 0%, #04090e 100%);
+  /* THE RULED FIELD'S INKS, dark: faint cyan on near-black, with a whisper of vertical grade under the grid so the
+   ground does not read as dead-flat black. The grid's geometry is the style's (`style/mission.css`). */
+  --grid-ink-major: rgba(120, 200, 214, 0.055);
+  --grid-ink-minor: rgba(120, 200, 214, 0.03);
+  --field-ground-top: #060d13;
+  --field-ground-bottom: #04090e;
   --ring: rgba(71, 243, 255, 0.34);
   --focus-color: #47f3ff;
   --selection-bg: #47f3ff;

@@ -96,7 +96,6 @@
   /* No wash. The marketing aurora was removed (see header): a clean flat ground
    is the Vercel DASHBOARD, and it lets the layered surfaces + hairlines carry
    the structure without a gradient competing with 30 rows of data. */
-  --body-wash: none;
   --ring: rgba(0, 96, 223, 0.42);
   --focus-color: #0060df;
   --selection-bg: #cfe3fd;
@@ -186,7 +185,6 @@
   /* No wash. The marketing aurora was removed (see header): the clean near-black
    canvas is the Vercel DASHBOARD, and the layered surfaces + legible hairlines
    carry the structure without four radial spotlights behind the data. */
-  --body-wash: none;
   --ring: rgba(59, 158, 255, 0.55);
   --focus-color: #3b9eff;
   --selection-bg: #163a5f;

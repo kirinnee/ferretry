@@ -213,7 +213,7 @@ export const TokensSchema = z.strictObject(
 export const ThemeSchema = z.strictObject({
   id: ThemeIdSchema,
   label: z.string().min(1).max(60),
-  base: z.enum(THEME_FAMILY_IDS).optional(),
+  base: z.enum(THEME_FAMILY_IDS).optional(), // legacy spelling, accepted and IGNORED (the shell reads only `style` / `palette`)
   style: z.enum(STYLE_IDS).optional(),
   palette: z.enum(PALETTE_IDS).optional(),
   light: TokensSchema.default({}),
