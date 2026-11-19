@@ -776,6 +776,24 @@ describe('the import preview', () => {
   });
 });
 
+describe('an environment variable whose NAME is shaped like a key', () => {
+  it('should be left out and never repeated in the plan, whatever its value', () => {
+    // Arrange — a fake key-shaped name assembled at runtime, so no source line holds one.
+    const keyShaped = ['ghp', 'a1B2c3D4e5F6a1B2c3D4e5F6'].join('_');
+    const scan = claude({
+      settings: text('/s', JSON.stringify({ env: { [keyShaped]: 'x', LOG_LEVEL: 'debug' } })),
+    });
+
+    // Act
+    const plan = planImport([scan], { digest });
+
+    // Assert
+    should(JSON.stringify(plan)).not.containEql(keyShaped);
+    should(plan.secrets).deepEqual([]);
+    should(Object.keys(plan.credentials)).not.containEql(keyShaped);
+  });
+});
+
 describe('looksSecret', () => {
   it('should flag credential-shaped names and token-shaped values', () => {
     should(looksSecret('GITHUB_TOKEN', 'abcdefghij')).be.true();
