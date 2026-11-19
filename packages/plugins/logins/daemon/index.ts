@@ -52,6 +52,7 @@ import { modelCatalogSourcesView } from './lib/models/sources.ts';
 import { presetFromFile, type ProviderPreset, type ProviderPresetFile } from './lib/presets/schema.ts';
 import { ProviderPresetService } from './lib/provider-probe/presets.ts';
 import { ProviderProbeService } from './lib/provider-probe/service.ts';
+import { LoginEnvImport } from './features/host-import/env-import.ts';
 import { loginChangesPort } from './lib/changes/port.ts';
 import { LoginChangeService } from './lib/changes/service.ts';
 import { changeRoutes } from './lib/routes/changes.ts';
@@ -452,7 +453,17 @@ export function buildLoginsDaemon() {
             refreshLocal: () => localModels.refresh(),
           }),
         },
-        provides: { logins: perNeeder(apiFor), loginChanges: changesApi },
+        provides: {
+          logins: perNeeder(apiFor),
+          loginChanges: changesApi,
+          // The setup import adds a harness's own `env` to the login it made (r9 A8): references and plain text only.
+          loginEnvImport: new LoginEnvImport({
+            files,
+            // The PERSON's write (the setup import is their act): a reference to a secret goes into effect only for the owner, and is
+            // otherwise held for them, exactly as it is for any other editor.
+            write: (id, patch) => config.writeAsCaller(LOGINS_CONFIG, id, { patch }),
+          }),
+        },
         hooks: {
           'logins:anthropic': kinds.anthropic,
           'logins:openai': kinds.openai,

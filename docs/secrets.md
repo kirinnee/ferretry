@@ -529,6 +529,14 @@ A ferret started on a login launches with that login's environment, and an agent
 - **Not pinned in a file.** A project's own `.claude` settings win over the login's environment (see "A login's variables and a
   repository's own Claude settings"): the login's values are in the child's environment only, and the `launch-settings.json` the harness
   writes into the agent home carries no `env`.
+- **An import puts the host's own `env` here, as references.** The setup import moves a secret-looking value of a harness's own
+  `env` into the Vault (create-only, "A key an import files"); Logins then adds the variable to the imported runtime's login
+  file as `${secret:NAME}` (`daemon/features/host-import`), through its own config write, so a `${secret:}` is resolved at
+  launch instead of landing literally in a Codex settings item. It only adds: a variable the login already has is kept. It is
+  handed references and plain text only, so it never holds a value; one that still looks like a key is left out and named.
+  A reserved variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, …) is skipped, and `GH_TOKEN`, `GITHUB_TOKEN` and
+  `GH_ENTERPRISE_TOKEN` come in only when the person ticks them: a token in a login's environment can be read by every ferret on
+  that login.
 - **A `${secret:NAME}` in a Claude settings item, MCP config or instruction** reaches its file in the agent home as that literal reference,
   which nothing resolves (the Vault resolves a reference only into a child's environment): a reference is a name, not a value.
 

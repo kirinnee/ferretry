@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { testHost } from '@ferretry/kernel/testing';
 import { emptyVault } from '../support/fake-vault.ts';
-import { LoginChangeError, LoginChangesPort, LoginsPort } from '../../contract/index.ts';
+import { LoginChangeError, LoginChangesPort, LoginEnvImportPort, LoginsPort } from '../../contract/index.ts';
 import { loginsConformance } from '../../contract/testing/index.ts';
 import daemon from '../../daemon/index.ts';
 
@@ -66,6 +66,57 @@ describe('the Logins port changes through the same service as the routes', () =>
       expect((viaPort as LoginChangeError).code).toBe('login_change_refused');
       expect(viaRoute.status).toBe(409);
       expect(viaRoute.json<{ code: string }>().code).toBe('login_change_refused');
+    } finally {
+      await host.stop();
+    }
+  });
+});
+
+describe('the Logins port that takes an imported harness environment', () => {
+  test('writes plain text to the login file in effect, keeps what is there, and writes no raw secret', async () => {
+    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: files });
+    try {
+      const api = host.provided(LoginEnvImportPort);
+      const env = {
+        ANTHROPIC_BASE_URL: 'https://gateway.example.test',
+        GH_TOKEN: '${secret:GH_TOKEN}',
+        CLAUDE_CONFIG_DIR: '/elsewhere',
+      };
+      const first = await api.import({ login: 'work', harness: 'claude-code', env });
+      expect(first).toMatchObject({ outcome: 'written', added: ['ANTHROPIC_BASE_URL'], kept: [] });
+      expect(first.outcome === 'written' ? first.skipped.map(entry => entry.name) : []).toEqual([
+        'GH_TOKEN',
+        'CLAUDE_CONFIG_DIR',
+      ]);
+      // The second import reads the file the first one wrote: it is already there.
+      expect(await api.import({ login: 'work', harness: 'claude-code', env })).toMatchObject({
+        outcome: 'unchanged',
+        kept: ['ANTHROPIC_BASE_URL'],
+      });
+      const raw = await api.import({
+        login: 'work',
+        harness: 'claude-code',
+        env: { OPENAI_API_KEY: 'sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789' },
+      });
+      expect(raw.outcome).toBe('unchanged');
+      expect(JSON.stringify(raw)).not.toContain('sk-proj');
+      expect(await api.import({ login: 'team', harness: 'claude-code', env })).toEqual({
+        outcome: 'refused',
+        reason: 'the login team is not a claude-code login',
+      });
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('holds a secret reference for the owner when the caller is not the owner, and says so', async () => {
+    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: files });
+    try {
+      const answer = await host
+        .provided(LoginEnvImportPort)
+        .import({ login: 'work', harness: 'claude-code', env: { ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}' } });
+      expect(answer).toMatchObject({ outcome: 'held', added: ['ANTHROPIC_API_KEY'] });
+      expect(JSON.stringify(answer)).toContain('only the owner may add');
     } finally {
       await host.stop();
     }
