@@ -37,10 +37,10 @@ export function CiTab({ pull, checks }: { readonly pull: PullDetail; readonly ch
             <li className="flex min-w-0 items-center justify-between gap-sm" data-pull-check={check.status} key={index}>
               <span className="min-w-0 truncate text-ui text-fg">
                 {check.url === undefined ? (
-                  check.name
+                  <bdi>{check.name}</bdi>
                 ) : (
                   <a href={check.url} rel="noopener noreferrer" target="_blank">
-                    {check.name}
+                    <bdi>{check.name}</bdi>
                   </a>
                 )}
               </span>

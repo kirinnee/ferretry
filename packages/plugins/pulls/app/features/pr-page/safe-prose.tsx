@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useMemo } from 'react';
 import { type Block, type Inline, parseProse } from './prose-model.ts';
 
 /**
@@ -79,9 +79,10 @@ function drawBlocks(blocks: readonly Block[], sourceUrl: string, key = ''): Reac
 }
 
 export function SafeProse({ text, sourceUrl }: { readonly text: string; readonly sourceUrl: string }) {
+  const blocks = useMemo(() => parseProse(text), [text]);
   return (
     <div className="md fy-seg min-w-0 break-words" data-gh-text="">
-      {drawBlocks(parseProse(text), sourceUrl)}
+      {drawBlocks(blocks, sourceUrl)}
     </div>
   );
 }

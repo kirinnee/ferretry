@@ -110,6 +110,35 @@ describe('structure and bounds', () => {
     }
     expect(depth).toBeLessThanOrEqual(3);
   });
+  test('a comment is removed; an unclosed one hides the rest, in one pass', () => {
+    const texts = (blocks: readonly Block[]): string =>
+      blocks.map(block => (block.kind === 'paragraph' ? JSON.stringify(block.inline) : block.kind)).join('|');
+    expect(texts(parseProse('a<!-- x -->b<!-- y -->c'))).toContain('abc');
+    expect(texts(parseProse('keep <!-- never closed\nhidden'))).toBe(texts(parseProse('keep ')));
+  });
+  test('an address past the bound stays text, not a link or an image', () => {
+    const long = `https://example.com/${'a'.repeat(2100)}`;
+    expect(inline(`[x](${long})`).every(node => node.kind === 'text')).toBe(true);
+    expect(inline(`![x](${long})`).every(node => node.kind === 'text')).toBe(true);
+    expect(inline(`<${long}>`).some(node => node.kind === 'link')).toBe(false);
+  });
+  test('indented continuation lines stay in their list item, in order', () => {
+    const [list] = parseProse('- one\n  two\n  three **x**\n- next');
+    expect(list?.kind === 'list' ? list.items.length : 0).toBe(2);
+    expect(list?.kind === 'list' ? texts(list.items[0] ?? []) : '').toContain('one two three');
+  });
+  test('a table is shown as the text it was written as; strike and italic are read', () => {
+    expect(parseProse('| a | b |\n|---|---|\n| 1 | 2 |')).toEqual([
+      { kind: 'code', text: '| a | b |\n|---|---|\n| 1 | 2 |' },
+    ]);
+    expect(inline('~~gone~~ and *lean* and _lean_').map(node => node.kind)).toEqual([
+      'strike',
+      'text',
+      'italic',
+      'text',
+      'italic',
+    ]);
+  });
   test('a hostile input is read, not run: it parses to plain text or code', () => {
     expect(() => parseProse(`${'*'.repeat(200)}\n${'[a](b'.repeat(50)}\n${'<!--'.repeat(50)}`)).not.toThrow();
     expect(parseProse('`'.repeat(100)).length).toBeGreaterThan(0);

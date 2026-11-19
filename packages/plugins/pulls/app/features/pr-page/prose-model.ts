@@ -51,9 +51,26 @@ const NUMBERED = /^ {0,3}\d{1,9}[.)]\s+(.*)$/u;
 const QUOTE = /^ {0,3}>\s?(.*)$/u;
 const TASK = /^\[( |x|X)\]\s+/u;
 
+/**
+ * `<!-- … -->` removed in one linear pass (indexOf, never a lazy regex: an unclosed comment repeated would re-scan to
+ * the end from every opener). An unclosed comment hides the rest of the text, as it does on GitHub.
+ */
+function stripComments(text: string): string {
+  let out = '';
+  let at = 0;
+  for (;;) {
+    const open = text.indexOf('<!--', at);
+    if (open < 0) return out + text.slice(at);
+    out += text.slice(at, open);
+    const close = text.indexOf('-->', open + 4);
+    if (close < 0) return out;
+    at = close + 3;
+  }
+}
+
 /** The text as blocks. */
 export function parseProse(text: string): readonly Block[] {
-  const clean = text.slice(0, MAX_INPUT).replace(/<!--[\s\S]*?-->/gu, '');
+  const clean = stripComments(text.slice(0, MAX_INPUT));
   return blocks(clean.split(/\r\n|\r|\n/u), 0);
 }
 
@@ -122,15 +139,16 @@ function blocks(lines: readonly string[], depth: number): readonly Block[] {
     if (BULLET.test(line) || NUMBERED.test(line)) {
       flush();
       const ordered = !BULLET.test(line);
-      const items: (readonly Inline[])[] = [];
+      const items: Inline[][] = [];
       while (at < lines.length) {
         const current = lines[at] ?? '';
         const match = (ordered ? NUMBERED : BULLET).exec(current);
         if (match?.[1] === undefined) {
           // An indented continuation (or a nested list line) belongs to the item above, as text.
           if (/^\s{2,}\S/u.test(current) && items.length > 0) {
-            const last = items.pop() ?? [];
-            items.push([...last, { kind: 'text', text: ' ' }, ...inline(current.trim())]);
+            const last = items[items.length - 1] ?? [];
+            last.push({ kind: 'text', text: ' ' });
+            for (const part of inline(current.trim())) last.push(part);
             at += 1;
             continue;
           }
@@ -164,7 +182,7 @@ function blocks(lines: readonly string[], depth: number): readonly Block[] {
 }
 
 const TOKEN =
-  /`([^`\n]+)`|!\[([^\]\n]*)\]\(([^)\n]*)\)|\[([^\]\n]+)\]\(([^)\s\n]+)(?:\s+"[^"\n]*")?\)|<(https?:\/\/[^>\s]+)>|(?<![="'(\w/])(https?:\/\/[^\s<>()[\]]+[^\s<>()[\].,;:!?'"])|\*\*([^*\n]+)\*\*|__([^_\n]+)__|~~([^~\n]+)~~|\*([^*\s][^*\n]*)\*|(?<![\w])_([^_\s][^_\n]*)_(?![\w])/gu;
+  /`([^`\n]+)`|!\[([^\]\n]{0,500})\]\(([^)\n]{0,2000})\)|\[([^\]\n]{1,500})\]\(([^)\s\n]{1,2000})(?:\s+"[^"\n]*")?\)|<(https?:\/\/[^>\s]{1,2000})>|(?<![="'(\w/])(https?:\/\/[^\s<>()[\]]+[^\s<>()[\].,;:!?'"])|\*\*([^*\n]+)\*\*|__([^_\n]+)__|~~([^~\n]+)~~|\*([^*\s][^*\n]*)\*|(?<![\w])_([^_\s][^_\n]*)_(?![\w])/gu;
 
 /** Inline text. `nest` is how deep bold/italic/link text may itself be read (one level). */
 export function inline(text: string, nest = 1): readonly Inline[] {

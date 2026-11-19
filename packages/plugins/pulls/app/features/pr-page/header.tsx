@@ -25,7 +25,7 @@ export function PullHeader({ pull }: { readonly pull: PullDetail }) {
     <header className="grid gap-xs border-b border-border-strong pb-panel" data-pull-header="">
       <p className="m-0 text-meta font-semibold uppercase tracking-wide text-muted">{repo}</p>
       <h1 className="m-0 break-words font-display text-display font-bold tracking-display">
-        {pull.title} <span className="font-normal text-muted">#{pull.number}</span>
+        <bdi>{pull.title}</bdi> <span className="font-normal text-muted">#{pull.number}</span>
       </h1>
       <div className="flex flex-wrap items-center gap-xs">
         <Badge
@@ -45,8 +45,10 @@ export function PullHeader({ pull }: { readonly pull: PullDetail }) {
         </Badge>
       </div>
       <p className="m-0 text-meta text-muted">
-        <strong className="font-medium text-fg">{pull.author.login}</strong> {MERGE_VERB[pull.state]}{' '}
-        <code>{pull.headRef}</code> into <code>{pull.baseRef}</code>
+        <strong className="font-medium text-fg">
+          <bdi>{pull.author.login}</bdi>
+        </strong>{' '}
+        {MERGE_VERB[pull.state]} <code>{pull.headRef}</code> into <code>{pull.baseRef}</code>
       </p>
       <p className="m-0 text-meta text-muted">
         Opened {localTime(pull.createdAt)} · updated {localTime(pull.updatedAt)}

@@ -35,7 +35,10 @@ function Entry({
       <header className="flex items-start gap-xs text-meta text-muted">
         <Who login={login} />
         <p className="m-0 min-w-0 break-words">
-          <strong className="font-medium text-fg">{login}</strong> {verb}
+          <strong className="font-medium text-fg">
+            <bdi>{login}</bdi>
+          </strong>{' '}
+          {verb}
           {when !== undefined && (
             <>
               {' · '}
