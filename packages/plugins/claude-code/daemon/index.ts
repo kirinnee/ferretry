@@ -160,7 +160,6 @@ export default implementDaemon(manifest, {
           put: claudeSettingsPut({
             def: CLAUDE_CODE_SETTINGS as ConfigCollectionDef<SettingsItem>,
             config: kernel.config,
-            say: sentence => kernel.log.info(sentence),
           }),
         },
         'runtimes.components.hooks.claude:components': claudeHooksSource(

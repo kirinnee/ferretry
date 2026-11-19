@@ -14,7 +14,6 @@ const text = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 const SECRET = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH';
 
 async function world(judge: boolean) {
-  const said: string[] = [];
   const files = createConfigFiles({
     home: '/home/fy',
     fs: createMemoryHostFs(),
@@ -26,12 +25,12 @@ async function world(judge: boolean) {
   });
   await files.reload();
   const config = files.port('claude-code');
-  return { config, said, put: claudeSettingsPut({ def: DEF, config, say: sentence => said.push(sentence) }) };
+  return { config, put: claudeSettingsPut({ def: DEF, config }) };
 }
 
 describe('claudeSettingsPut over the real config writer', () => {
-  test('writes the file, says what it kept out (keys only), and never the values', async () => {
-    const { config, put, said } = await world(true);
+  test('writes the file, warns what it kept out (keys only), and never the values', async () => {
+    const { config, put } = await world(true);
     const answer = await put(
       'imported',
       text({
@@ -39,12 +38,13 @@ describe('claudeSettingsPut over the real config writer', () => {
         document: { model: 'opus', hooks: { Stop: [] }, apiKeyHelper: '/bin/secret-helper' },
       }),
     );
-    expect(answer).toEqual({ ok: true });
     expect(config.collection(DEF).get('imported')).toEqual({ settings: { model: 'opus' } });
-    expect(said).toHaveLength(1);
-    expect(said[0]).toContain('hooks');
-    expect(said[0]).toContain('apiKeyHelper');
-    expect(said[0]).not.toContain('secret-helper');
+    if (!answer.ok) throw new Error('refused');
+    const said = (answer.warnings ?? []).join(' ');
+    expect(answer.warnings).toHaveLength(2);
+    expect(said).toContain('hooks');
+    expect(said).toContain('apiKeyHelper');
+    expect(said).not.toContain('secret-helper');
   });
 
   test('a raw secret in the document is refused, nothing is written, and the answer never repeats it', async () => {

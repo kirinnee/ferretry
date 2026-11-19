@@ -15,8 +15,6 @@ import { importedSettings } from './settings-document.ts';
 export interface HostImportPorts {
   readonly def: ConfigCollectionDef<SettingsItem>;
   readonly config: Pick<ConfigPort, 'collection' | 'write'>;
-  /** Where the kept-out sentences go (the owner's log). */
-  readonly say: (sentence: string) => void;
 }
 
 const refused = (reason: string): ComponentPutResult => ({ ok: false, reason });
@@ -34,10 +32,12 @@ export function claudeSettingsPut(ports: HostImportPorts): NonNullable<ProfileCo
     switch (outcome.kind) {
       case 'written':
       case 'held':
-        if (made.dropped.length > 0) {
-          ports.say(`Imported Claude Code settings "${name}" without: ${made.dropped.join('; ')}.`);
-        }
-        return outcome.kind === 'held' ? { ok: true, held: true } : { ok: true };
+        // What was kept out rides back as warnings (keys and reasons, never a value): the apply answer says them.
+        return {
+          ok: true,
+          ...(outcome.kind === 'held' ? { held: true as const } : {}),
+          ...(made.dropped.length === 0 ? {} : { warnings: made.dropped }),
+        };
       case 'conflict':
         return refused('a Claude Code settings item by that name already exists; an import never replaces one');
       case 'refused':

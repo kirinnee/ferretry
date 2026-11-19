@@ -72,7 +72,15 @@ describe('claude-code settings put (r9 A6)', () => {
         env: { TOP: 'level' },
       }),
     );
-    expect(answer).toEqual({ ok: true });
+    expect(answer.ok).toBe(true);
+    if (answer.ok)
+      expect(answer.warnings?.map(sentence => sentence.split(':')[0])).toEqual([
+        'hooks',
+        'env',
+        'apiKeyHelper',
+        'statusLine',
+        'env',
+      ]);
     expect(await source.read('imported')).toEqual({ harness: 'claude-code', document: { model: 'opus' } });
     const written = JSON.stringify(host.state('claude-code'));
     for (const word of ['evil.example', 'get-key', 'echo hi', 'bar', 'level', 'apiKeyHelper', 'statusLine']) {
