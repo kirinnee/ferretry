@@ -19,9 +19,12 @@ const CLIENT = 'Ov23FAKECLIENTID';
 /** The fake sealed port, remembering the one handle this plugin opened so a test can look inside its own document. */
 class SpySealed extends FakeSealedDocuments {
   handle: SealedDocumentHandle | undefined;
+  keyHandle: SealedDocumentHandle | undefined;
   override open(own: StatePort, document: SealedDocumentDef): SealedDocumentHandle {
-    this.handle = super.open(own, document);
-    return this.handle;
+    const opened = super.open(own, document);
+    if (document === GIT_ACCOUNT_TOKENS) this.handle = opened;
+    else this.keyHandle = opened;
+    return opened;
   }
 }
 
@@ -311,7 +314,7 @@ describe('listing, removing and the port', () => {
       await expect(port.api('gha_4242' as never, { method: 'GET', path })).rejects.toMatchObject({ status: 403 });
     await expect(port.api('gha_9' as never, { method: 'GET', path: '/user' })).rejects.toMatchObject({ status: 404 });
     // The listing has no method that returns a token.
-    expect(Object.keys(port).sort()).toEqual(['api', 'list', 'recordKeys', 'run']);
+    expect(Object.keys(port).sort()).toEqual(['agentSocket', 'api', 'knownHostsFile', 'list', 'recordKeys', 'run']);
     expect(JSON.stringify(await port.list())).not.toContain(FAKE_TOKEN);
   });
 

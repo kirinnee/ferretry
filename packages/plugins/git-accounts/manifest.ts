@@ -6,6 +6,8 @@ import {
   GIT_ACCOUNT_AUDIT_SKIP,
   GIT_ACCOUNT_CAPS,
   GIT_ACCOUNT_GUARD,
+  GIT_ACCOUNT_KEY_GUARD,
+  GIT_ACCOUNT_KEYS,
   GIT_ACCOUNT_TOKENS,
   GIT_ACCOUNTS_WORDS,
   GitAccountsConfigDef,
@@ -21,6 +23,10 @@ import {
  * list, because every agent can `fy secret use` a shared secret and a GitHub token is too strong for that. Only the
  * daemon half opens it, to place it on a request to `api.github.com`. No route, command, port method, `use` or
  * `${secret:}` returns or reaches it. The plugin is called `git-accounts` because `connections` is the network carrier.
+ *
+ * THE SSH KEY (B3). One ed25519 key per account, made in the daemon, its private half sealed in `keys.json` (also private)
+ * and fed to a per-account `ssh-agent` on stdin; only the public half is registered at GitHub and returned. A ferret
+ * can use the agent's socket and can never read the key (docs/secrets.md, "A Git account's SSH key").
  *
  * Capabilities: no new one. Connect and remove are `secrets.configure` (passkey step-up from a paired device); the
  * list is `secrets.use`.
@@ -72,6 +78,22 @@ export default definePlugin({
         audit: audit(GIT_ACCOUNT_AUDIT.removed),
         guard: GIT_ACCOUNT_GUARD,
       }),
+      route('POST /v1/git-accounts/:id/keys', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: GIT_ACCOUNT_CAPS.configure,
+        noStore: true,
+        audit: audit(GIT_ACCOUNT_AUDIT.keyAdded),
+        guard: GIT_ACCOUNT_KEY_GUARD,
+      }),
+      route('DELETE /v1/git-accounts/:id/keys/:purpose', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: GIT_ACCOUNT_CAPS.configure,
+        noStore: true,
+        audit: audit(GIT_ACCOUNT_AUDIT.keyRemoved),
+        guard: GIT_ACCOUNT_KEY_GUARD,
+      }),
     ],
     cli: [
       verb('git account add', {
@@ -93,9 +115,9 @@ export default definePlugin({
   },
 
   /** Never reached by a ferret, through any root: the sealed OAuth tokens. */
-  privacy: { private: ['tokens.json'] },
+  privacy: { private: ['tokens.json', 'keys.json'] },
   data: {
-    state: [GitAccountsState, GIT_ACCOUNT_TOKENS.state],
+    state: [GitAccountsState, GIT_ACCOUNT_TOKENS.state, GIT_ACCOUNT_KEYS.state],
     config: [GitAccountsConfigDef],
     readModels: ['list'],
     publishes: [GitAccountDisconnected],
@@ -104,7 +126,7 @@ export default definePlugin({
   permissions: {
     roots: [],
     // `gh` runs as an account, with its token in that child's environment alone (`GitAccountsApi.run`).
-    spawn: ['gh'],
+    spawn: ['gh', 'ssh-agent', 'ssh-add'],
     // The device flow and the profile read (github.com), the profile and key calls (api.github.com): nowhere else.
     network: ['github.com', 'api.github.com'],
   },

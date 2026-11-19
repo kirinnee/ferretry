@@ -65,6 +65,14 @@ export interface GitAccountsApi {
   run(account: GitAccountId, spec: GitRunSpec): Promise<GitRunResult>;
   /** Records the public halves of the keys registered for an account (so removing the account deletes them too). */
   recordKeys(account: GitAccountId, keys: GitAccountKeys): Promise<void>;
+  /**
+   * The ssh-agent socket that holds this account's own key (the one Ferretry made), started on first ask with the key
+   * loaded. `undefined` when the account has no such key (none, or the person's own key, which the host's agent holds).
+   * A path is not a secret: whoever can open the socket can ask it to sign or to authenticate, never to hand the key over.
+   */
+  agentSocket(account: GitAccountId): Promise<string | undefined>;
+  /** A `known_hosts` file pinning GitHub's published host keys (`GITHUB_HOST_KEYS`), for `UserKnownHostsFile`. */
+  knownHostsFile(): Promise<string>;
 }
 export const GitAccountsPort = definePort<GitAccountsApi>('git-accounts');
 

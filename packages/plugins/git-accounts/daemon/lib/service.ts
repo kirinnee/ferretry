@@ -30,10 +30,16 @@ export class GitAccountsService {
     private readonly scratch: ScratchPort,
     /** Tells the rest of the daemon an account is gone, once its token and record are. */
     private readonly removed: (id: GitAccountId) => unknown,
+    /** Runs once an account is on its way out, after its keys are off GitHub and before its token goes (B3: stops its agent, drops its private key). */
+    private readonly beforeForget: (id: GitAccountId) => Promise<void> = async () => undefined,
   ) {}
 
   list(): Promise<readonly GitAccount[]> {
     return this.book.list();
+  }
+
+  find(id: GitAccountId): Promise<GitAccount | undefined> {
+    return this.book.find(id);
   }
 
   recordKeys(id: GitAccountId, keys: GitAccountKeys): Promise<void> {
@@ -131,6 +137,7 @@ export class GitAccountsService {
       // A token with no record (a connect whose record never landed) must still be removable, or it is stranded.
       if ((await this.book.token(id)) === undefined)
         throw new ApiError(404, 'no such Git account', GIT_ACCOUNT_CODES.unknownAccount);
+      await this.beforeForget(id);
       await this.book.forget(id);
       await this.removed(id);
       return { id, removed: true, keysLeftOnProvider: [], revokeAt: GITHUB_REVOKE_URL };
@@ -142,7 +149,8 @@ export class GitAccountsService {
       { key: account.keys.signing, base: '/user/ssh_signing_keys' },
     ];
     for (const { key, base } of registered) {
-      if (key === undefined) continue;
+      // A key the person already had (`source: own`) was never ours to delete.
+      if (key === undefined || key.source === 'own' || key.githubKeyId === undefined) continue;
       if (token === undefined) {
         left.push(key.title);
         continue;
@@ -158,6 +166,7 @@ export class GitAccountsService {
         left.push(key.title);
       }
     }
+    await this.beforeForget(id);
     await this.book.forget(id);
     await this.removed(id);
     return { id, removed: true, keysLeftOnProvider: left, revokeAt: GITHUB_REVOKE_URL };
