@@ -163,15 +163,36 @@ export class HostHarnessScanner {
     return hints;
   }
 
-  /** The located command and the MCP commands this machine lacks, added to what was read. */
+  /**
+   * The located command and the MCP commands this machine lacks, added to what was read. A command whose place the
+   * scan may not look at (an absolute path outside the folders Runtimes may read) is neither found nor missing: it
+   * is named as unchecked in the harness's problems, and the scan goes on.
+   */
   async #complete(scan: Omit<HostHarnessScan, 'command' | 'missingCommands'>): Promise<HostHarnessScan> {
     const command = await this.deps.commands.resolve(scan.harness);
     const partial: HostHarnessScan = { ...scan, missingCommands: [] };
     const missing = new Set<string>();
+    const unchecked = new Set<string>();
     for (const server of scannedMcpServers(partial)) {
-      if (server.command !== undefined && !(await this.#commandExists(server.command))) missing.add(server.command);
+      if (server.command === undefined) continue;
+      try {
+        if (!(await this.#commandExists(server.command))) missing.add(server.command);
+      } catch {
+        unchecked.add(server.command);
+      }
     }
-    return { ...partial, ...(command === undefined ? {} : { command }), missingCommands: [...missing] };
+    return {
+      ...partial,
+      ...(command === undefined ? {} : { command }),
+      missingCommands: [...missing],
+      problems: [
+        ...partial.problems,
+        ...[...unchecked].map(
+          name =>
+            `Could not check whether the MCP command ${name} exists, because it is outside the folders Ferretry may read.`,
+        ),
+      ],
+    };
   }
 
   async #commandExists(command: string): Promise<boolean> {

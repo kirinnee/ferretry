@@ -285,3 +285,91 @@ describe('the wire contract for skip and the scan', () => {
     should(JSON.stringify(body)).not.containEql(FAKE_KEY);
   });
 });
+
+describe('planImport — a skip is applied before models and settings are derived', () => {
+  /** A Codex host whose models differ from the Starter ones, so "taken from the host" can be told from "the starter". */
+  const hostCodex = (): HostHarnessScan =>
+    codex({
+      settings: text(
+        '/h/.codex/config.toml',
+        [
+          'model = "gpt-host-1"',
+          '[profiles.fast]',
+          'model = "gpt-5.6-mini"',
+          'model_reasoning_effort = "low"',
+          '[profiles.deep]',
+          'model_reasoning_effort = "high"',
+        ].join('\n'),
+      ),
+    });
+  const modelsOf = (plan: ImportPlan, harness: 'claude' | 'codex'): { models: string[]; default: string } =>
+    plan.components.find(item => item.kind === 'modelSets' && item.name.startsWith(harness))?.value as {
+      models: string[];
+      default: string;
+    };
+  const settingsFileOf = (plan: ImportPlan): string =>
+    plan.files.map(file => (file.kind === 'write' ? file.content : '')).join('\n');
+
+  it('should not take the default model from skipped Codex settings', () => {
+    const plan = planImport([hostCodex()], { digest, skip: [importItemId('codex', 'settings')] });
+
+    const set = modelsOf(plan, 'codex');
+    should(set.models).not.containEql('gpt-host-1');
+    should(set.models).not.containEql('gpt-5.6-mini');
+    should(set.default).not.equal('gpt-host-1');
+    should(settingsFileOf(plan)).not.containEql('gpt-host-1');
+  });
+
+  it('should leave an accepted Codex profile out of the model set and the written settings', () => {
+    const plan = planImport([hostCodex()], { digest, skip: [importNamedItemId('codex', 'profile', 'fast')] });
+
+    should(modelsOf(plan, 'codex').models).not.containEql('gpt-5.6-mini');
+    should(modelsOf(plan, 'codex').models).containEql('gpt-host-1');
+    const written = settingsFileOf(plan);
+    should(written).not.containEql('gpt-5.6-mini');
+    should(written).not.containEql('profiles.fast');
+    should(written).containEql('profiles.deep');
+    // The profile is still LISTED, so the screen can show it and let the person take the skip back.
+    should(plan.preview.harnesses[0]?.codexProfiles.map(profile => profile.name)).deepEqual(['fast', 'deep']);
+  });
+
+  it('should keep every profile when none is skipped, and when the skipped name is not there', () => {
+    const plan = planImport([hostCodex()], { digest, skip: [importNamedItemId('codex', 'profile', 'nope')] });
+
+    should(modelsOf(plan, 'codex').models).containEql('gpt-5.6-mini');
+    should(settingsFileOf(plan)).containEql('profiles.fast');
+  });
+
+  it('should drop the profiles table when every profile is skipped', () => {
+    const plan = planImport([hostCodex()], {
+      digest,
+      skip: [importNamedItemId('codex', 'profile', 'fast'), importNamedItemId('codex', 'profile', 'deep')],
+    });
+
+    should(settingsFileOf(plan)).not.containEql('profiles');
+  });
+
+  it('should take no model from a Claude settings or env that was skipped', () => {
+    const settings = text(
+      '/h/.claude/settings.json',
+      JSON.stringify({ model: 'claude-host-1', env: { ANTHROPIC_MODEL: 'claude-sonnet-5' } }),
+    );
+    const base = modelsOf(planImport([claude({ settings })], { digest }), 'claude');
+    should(base.models).containEql('claude-host-1');
+    should(base.models).containEql('claude-sonnet-5');
+
+    const noSettings = modelsOf(
+      planImport([claude({ settings })], { digest, skip: [importItemId('claude-code', 'settings')] }),
+      'claude',
+    );
+    should(noSettings.models).not.containEql('claude-host-1');
+    should(noSettings.models).not.containEql('claude-sonnet-5');
+
+    const noEnv = modelsOf(
+      planImport([claude({ settings })], { digest, skip: [importItemId('claude-code', 'env')] }),
+      'claude',
+    );
+    should(noEnv.models).containEql('claude-host-1');
+    should(noEnv.models).not.containEql('claude-sonnet-5');
+  });
+});

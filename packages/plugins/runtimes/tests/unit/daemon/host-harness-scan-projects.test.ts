@@ -66,3 +66,50 @@ describe('project instructions hints', () => {
     expect(scans[1]?.projectInstructions).toBeUndefined();
   });
 });
+
+describe('MCP commands the scan may not look at', () => {
+  const claudeJson = JSON.stringify({
+    mcpServers: {
+      outside: { command: '/opt/tools/outside-mcp' },
+      inside: { command: '/home/bin/inside-mcp' },
+      gone: { command: '/home/bin/gone-mcp' },
+    },
+  });
+  const scan = async () => {
+    const files: HostFiles = {
+      readText: async path => (path === '/home/.claude.json' ? claudeJson : undefined),
+      readBytes: async () => undefined,
+      stat: async path => {
+        if (path === '/home/.claude.json') return { kind: 'file', size: claudeJson.length };
+        if (path === '/home/bin/inside-mcp') return { kind: 'file', size: 10 };
+        if (path.startsWith('/opt/')) throw new Error(`${path} is outside the folders Runtimes may read`);
+        return undefined;
+      },
+      lstat: async path => (path === '/home/.claude.json' ? { kind: 'file', size: claudeJson.length } : undefined),
+      list: async () => undefined,
+    };
+    return await new HostHarnessScanner({
+      userHome: '/home',
+      files,
+      commands: { resolve: () => undefined },
+      logins: fakeLogins([]),
+      maxDocumentBytes: 4096,
+    }).scan();
+  };
+
+  it('should finish the scan of both harnesses and leave the refused command neither missing nor found', async () => {
+    const scans = await scan();
+
+    expect(scans.map(one => one.harness)).toEqual(['claude', 'codex']);
+    expect(scans[0]?.missingCommands).toEqual(['/home/bin/gone-mcp']);
+  });
+
+  it('should say the refused command was not checked, without a path outside the readable folders being read', async () => {
+    const scans = await scan();
+
+    expect(scans[0]?.problems).toEqual([
+      'Could not check whether the MCP command /opt/tools/outside-mcp exists, because it is outside the folders Ferretry may read.',
+    ]);
+    expect(scans[1]?.problems).toEqual([]);
+  });
+});

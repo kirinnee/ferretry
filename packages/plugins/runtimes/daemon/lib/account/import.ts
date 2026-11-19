@@ -701,7 +701,24 @@ function harvest(
     }
   }
   const env = envImport?.env ?? {};
+  // What the person chose to leave out is filtered out HERE, before the model set is derived and the file is written:
+  // a skipped profile (`<harness>:profile:<name>`) is gone from both, and skipped settings leave nothing for a default model.
+  const profileTable = rest.profiles;
+  if (isRecord(profileTable)) {
+    const kept = Object.fromEntries(
+      Object.entries(profileTable).filter(([name]) => !skip.has(importNamedItemId(key, 'profile', name))),
+    );
+    if (Object.keys(kept).length === 0) delete rest.profiles;
+    else rest.profiles = kept;
+  }
   if (skipped('settings')) for (const name of Object.keys(rest)) delete rest[name];
+  const modelSource: SettingsObject = {
+    ...(rest.model === undefined ? {} : { model: rest.model }),
+    ...(rest.profiles === undefined ? {} : { profiles: rest.profiles }),
+    ...(harness === 'claude' && !skipped('env') && !skipped('settings') && isRecord(parsed?.env)
+      ? { env: parsed.env }
+      : {}),
+  };
   const hasRest = Object.keys(rest).length > 0;
   const hasEnv = Object.keys(env).length > 0;
   const settings: HarnessHarvest['settings'] =
@@ -776,7 +793,7 @@ function harvest(
     codexProfiles: harness === 'codex' ? codexProfilesOf(parsed) : [],
     mcp,
     skills,
-    modelSet: modelSetOf(harness, parsed),
+    modelSet: modelSetOf(harness, modelSource),
     secretKeys,
     problems,
     found: instructions !== undefined || settings !== undefined || mcp.length > 0 || skills.length > 0,
