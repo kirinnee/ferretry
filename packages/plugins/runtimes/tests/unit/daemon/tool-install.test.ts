@@ -420,10 +420,13 @@ describe('ToolInstallService.install: argv and output', () => {
       'fetching',
       'using npm_abcdefghijklmnop1234 to log in',
       '//registry.npmjs.org/:_authToken=hunter2hunter2',
+      'npm error 404 https://alice:hunter2pass99xyz@registry.example.com/pkg/-/pkg.tgz',
     ];
     for (const result of [
       { kind: 'exited', code: 1, tail: leaky.slice(0, 2) },
       { kind: 'exited', code: 1, tail: leaky },
+      { kind: 'exited', code: 1, tail: leaky.slice(3) },
+      { kind: 'timed-out', tail: leaky.slice(3) },
       { kind: 'timed-out', tail: leaky.slice(0, 2) },
       { kind: 'timed-out', tail: leaky },
     ] as const) {
@@ -433,6 +436,7 @@ describe('ToolInstallService.install: argv and output', () => {
         should(text).not.containEql('npm_abcdef');
         should(text).not.containEql('hunter2');
         should(text).not.containEql('_authToken');
+        should(text).not.containEql('hunter2pass99xyz');
       }
       should(outcome.reason).match(/It said: /u);
     }

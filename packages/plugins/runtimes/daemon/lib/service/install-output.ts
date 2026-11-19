@@ -6,7 +6,7 @@
  * happened, so every line goes through here first: colour and control characters out, token-shaped words hidden, any line
  * that names a credential dropped whole, and the whole thing bounded. Pure.
  */
-import { HIDDEN_VALUE_TEXT, looksSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
+import { HIDDEN_VALUE_TEXT, looksSecret, SECRET_TOKEN_SOURCE, urlPasswordCuts } from '@ferretry/std/credential-words';
 import { stripTerminalEscapes } from './foreign.ts';
 
 /** How many trailing lines an answer carries. */
@@ -23,11 +23,18 @@ const CREDENTIAL_LINE = /(?:_authToken|_auth\b|_password|authorization\s*:|beare
 /** `NAME=value` words, so a secret-named variable's value is hidden even when it has no known prefix. */
 const ASSIGNMENT = /\b([A-Za-z_][A-Za-z0-9_]*)=(\S+)/gu;
 
+/** The line with every URL user's password (`scheme://user:PASS@host`) hidden, whatever the password looks like. */
+function withoutUrlPasswords(line: string): string {
+  return [...urlPasswordCuts(line)]
+    .sort((a, b) => b[0] - a[0])
+    .reduce((text, [from, to]) => `${text.slice(0, from)}${HIDDEN_VALUE_TEXT}${text.slice(to)}`, line);
+}
+
 function scrubLine(raw: string): string | undefined {
   const line = stripTerminalEscapes(raw).trim();
   if (line === '') return undefined;
   if (CREDENTIAL_LINE.test(line)) return `${HIDDEN_VALUE_TEXT} (a line that names a credential was left out)`;
-  const hidden = line
+  const hidden = withoutUrlPasswords(line)
     .replaceAll(TOKEN_WORDS, HIDDEN_VALUE_TEXT)
     .replaceAll(ASSIGNMENT, (whole, name: string, value: string) =>
       looksSecret(name, value) ? `${name}=${HIDDEN_VALUE_TEXT}` : whole,

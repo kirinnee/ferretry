@@ -276,6 +276,15 @@ describe('scrubInstallOutput', () => {
     should(shown.join('\n')).not.containEql('Bearer abc');
   });
 
+  it('hides the password of a URL user even when it is not token-shaped', () => {
+    const shown = scrubInstallOutput([
+      'npm error 404 https://alice:hunter2pass99xyz@registry.example.com/pkg/-/pkg.tgz',
+    ]);
+    should(shown.join('\n')).not.containEql('hunter2pass99xyz');
+    should(shown.join('\n')).containEql('alice:');
+    should(shown.join('\n')).containEql('@registry.example.com');
+  });
+
   it('strips colour, cuts long lines and keeps the last twenty', () => {
     const lines = Array.from({ length: 30 }, (_, index) => `\u001b[32mline ${index}\u001b[0m`);
     const shown = scrubInstallOutput([...lines, 'x'.repeat(500)]);
