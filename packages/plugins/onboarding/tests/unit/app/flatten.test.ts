@@ -235,3 +235,26 @@ describe('flattening: the client phase', () => {
     expect(flow.client).toEqual([]);
   });
 });
+
+describe('flattening: which pages are written against StepHost', () => {
+  test('a step carries its declaration; a step that declares nothing is a legacy page', () => {
+    const daemon: PairedDaemon = {
+      id: A,
+      name: 'Studio',
+      steps: [
+        view('onboarding', 'name', 5, 'daemon', { stepHost: true }),
+        view('logins', 'login', 30, 'daemon'),
+        view('voice', 'voice', 3, 'client', { stepHost: true }),
+        view('old', 'thing', 4, 'client'),
+      ],
+    };
+    const flow = flattenFlow({ journey: 'first-time', target: A, daemons: [daemon], ledger: EMPTY_LEDGER });
+    const hosted = Object.fromEntries(stepsOf([...flow.daemon, ...flow.client]).map(step => [step.key, step.stepHost]));
+    expect(hosted).toEqual({
+      'onboarding.name': true,
+      'logins.login': false,
+      'voice.voice': true,
+      'old.thing': false,
+    });
+  });
+});

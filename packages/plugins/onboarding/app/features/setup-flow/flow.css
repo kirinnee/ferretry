@@ -121,3 +121,28 @@
   max-width: 880px;
   padding: 24px 16px;
 }
+
+.fy-sf-unsaved--end {
+  align-items: flex-start;
+  flex-direction: column;
+}
+.fy-sf-unsaved__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fy-sf-unsaved__list li {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fy-sf-unsaved button {
+  min-height: 44px;
+}
+.fy-sf-later:disabled {
+  opacity: 0.4;
+}

@@ -36,6 +36,8 @@ export interface FlowStep {
   readonly appliesTo: readonly { readonly daemon: string; readonly name: string }[];
   /** Machine names to put in the "Only on <machine>" chip; empty when the step applies to every paired daemon. */
   readonly onlyOn: readonly string[];
+  /** The step's page is written against `StepHost`: the shell draws it under a loading cover. Without it the page is a legacy one: no cover, Next enabled, done recorded on Next. */
+  readonly stepHost: boolean;
   /** Set when the flow never mounts the step. */
   readonly skip?: 'already-set';
   /** A daemon step's recorded state on the machine (`pending` when nothing was recorded); client steps have none. */
@@ -126,6 +128,7 @@ export function flattenFlow(input: FlattenInput): Flow {
               order: step.order,
               appliesTo: [{ daemon: target.id, name: target.name }],
               onlyOn: [],
+              stepHost: step.stepHost === true,
               state: step.state,
             };
           });
@@ -160,6 +163,7 @@ export function flattenFlow(input: FlattenInput): Flow {
         order: step.order,
         appliesTo: on.map(daemon => ({ daemon: daemon.id, name: daemon.name })),
         onlyOn: partial ? on.map(daemon => daemon.name) : [],
+        stepHost: step.stepHost === true,
         ...(isClientStepSet(input.ledger, step.plugin, step.id) ? { skip: 'already-set' as const } : {}),
       };
     });

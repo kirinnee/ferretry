@@ -527,7 +527,7 @@ export default definePlugin({
     ],
   },
 
-  onboarding: [{ id: 'start', title: 'Start fresh or copy', order: 10 }],
+  onboarding: [{ id: 'start', title: 'Start fresh or copy', order: 10, stepHost: true }],
   doctor: ['runtimes-config'],
 
   permissions: {

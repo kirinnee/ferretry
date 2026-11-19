@@ -119,8 +119,8 @@ export default definePlugin({
   },
 
   onboarding: [
-    { id: 'name', title: 'Name this machine', order: 5, group: 'This machine' },
-    { id: 'appearance', title: 'Appearance', order: 1, side: 'client', group: 'This device' },
+    { id: 'name', title: 'Name this machine', order: 5, group: 'This machine', stepHost: true },
+    { id: 'appearance', title: 'Appearance', order: 1, side: 'client', group: 'This device', stepHost: true },
   ],
 
   data: {

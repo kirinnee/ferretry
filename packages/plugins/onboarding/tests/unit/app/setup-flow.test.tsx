@@ -49,6 +49,30 @@ function BusyPage({ step }: { readonly step: StepHost }): ReactNode {
   return <p>working</p>;
 }
 
+/** A page whose save is slow: it holds the footer (busy) until the test lets the save finish, then answers and moves on. */
+const slow: { finish: () => void } = { finish: () => undefined };
+function SlowSavePage({ step }: { readonly step: StepHost }): ReactNode {
+  useEffect(() => {
+    step.ready();
+    step.busy('Saving…');
+    slow.finish = () => {
+      step.busy(null);
+      step.done();
+      step.next();
+    };
+  }, [step]);
+  return <p>saving</p>;
+}
+/** A page that keeps its host and calls it late, after the person has moved on. */
+const stale: { host: StepHost | undefined } = { host: undefined };
+function StalePage({ step }: { readonly step: StepHost }): ReactNode {
+  useEffect(() => {
+    step.ready();
+    stale.host = step;
+  }, [step]);
+  return <p>stale</p>;
+}
+
 const PAGES: Readonly<Record<string, (step: StepHost) => ReactNode>> = {
   'onboarding.name': step => <ReadyPage step={step} />,
   'onboarding.appearance': step => <ReadyPage step={step} />,
@@ -58,6 +82,10 @@ const PAGES: Readonly<Record<string, (step: StepHost) => ReactNode>> = {
   'fake-pack.look': step => <LookPage step={step} />,
   'fake-pack.silent': () => <SilentPage />,
   'fake-pack.busy': step => <BusyPage step={step} />,
+  'fake-pack.slowsave': step => <SlowSavePage step={step} />,
+  'fake-pack.stale': step => <StalePage step={step} />,
+  'fake-pack.after': step => <ReadyPage step={step} />,
+  'fake-pack.legacy': () => <p>an old page that never calls ready</p>,
 };
 
 const stepPanel = (plugin: string, id: string): PlacedPanel => ({
@@ -78,6 +106,8 @@ function setup(options: {
   readonly silenceMs?: number;
   readonly storage?: Map<string, string>;
   readonly failAnswers?: boolean;
+  /** Step ids whose answer the machine refuses (a test may empty it to let a retry through). */
+  readonly failSteps?: Set<string>;
 }) {
   const machines = options.machines ?? [fakeDaemon(A, 'Studio')];
   const answers: { daemon: string; plugin: string; step: string; state: string }[] = [];
@@ -86,7 +116,8 @@ function setup(options: {
     const client = {
       async call(route: string, request?: { params?: { plugin: string; stepId: string }; body?: { state: string } }) {
         if (route === 'GET /v1/onboarding') return { steps: machine.steps, complete: false, setUp: false };
-        if (options.failAnswers === true) throw new Error('refused');
+        if (options.failAnswers === true || options.failSteps?.has(request?.params?.stepId ?? '') === true)
+          throw new Error('refused');
         answers.push({
           daemon: machine.id,
           plugin: request?.params?.plugin ?? '',
@@ -313,7 +344,17 @@ describe('the setup flow', () => {
 describe('a page under its loading cover', () => {
   const only = (key: string, plugin = 'fake-pack') => {
     const id = key.split('.')[1] ?? key;
-    return [{ plugin, id, title: 'Slow thing', order: 1, side: 'daemon' as const, state: 'pending' as const }];
+    return [
+      {
+        plugin,
+        id,
+        title: 'Slow thing',
+        order: 1,
+        side: 'daemon' as const,
+        stepHost: true as const,
+        state: 'pending' as const,
+      },
+    ];
   };
   const slow = (key: string, silenceMs: number) =>
     setup({ machines: [{ id: A, name: 'Studio', steps: only(key) }], silenceMs });
@@ -340,6 +381,190 @@ describe('a page under its loading cover', () => {
     view = await mount(slow('fake-pack.busy', 10_000).tree);
     await settle();
     expect(view.container.querySelector('[data-flow-busy]')?.textContent).toBe('Installing…');
+    expect(view.container.querySelector<HTMLButtonElement>('[data-step-next]')?.disabled).toBe(true);
+  });
+});
+
+describe('Later is not final', () => {
+  it('Later → Back → Next records done on the machine, once, after the later', async () => {
+    const run = setup({});
+    view = await mount(run.tree);
+    await settle();
+    await next(); // name
+    await settle();
+    await click('Later'); // welcome: later
+    await settle();
+    expect(pageKey()).toBe('fake-pack.choose');
+    await press('[data-step-back]');
+    expect(pageKey()).toBe('fake-pack.welcome');
+    await next(); // welcome: done
+    await settle();
+    await press('[data-step-back]');
+    await next(); // again: nothing new is written
+    await settle();
+    expect(run.answers.filter(answer => answer.step === 'welcome').map(answer => answer.state)).toEqual([
+      'later',
+      'done',
+    ]);
+  });
+
+  it('Later → Back → Next on a client page moves it from the later list onto the device ledger', async () => {
+    const run = setup({ search: '?phase=client' });
+    view = await mount(run.tree);
+    await settle();
+    await click('Later'); // appearance: later
+    await settle();
+    expect(pageKey()).toBe('fake-pack.look');
+    expect(Object.keys((JSON.parse(run.store.get(CLIENT_LATER_KEY) ?? '{}') as { steps: object }).steps)).toEqual([
+      'onboarding.appearance',
+    ]);
+    expect(run.store.get(CLIENT_LEDGER_KEY)).toBeUndefined();
+    await press('[data-step-back]');
+    expect(pageKey()).toBe('onboarding.appearance');
+    await next();
+    await settle();
+    const ledger = JSON.parse(run.store.get(CLIENT_LEDGER_KEY) ?? '{}') as { steps: Record<string, unknown> };
+    expect(Object.keys(ledger.steps)).toEqual(['onboarding.appearance']);
+    await press('[data-step-back]');
+    await next(); // a repeat writes nothing more
+    const ledgerWrites = run.writes.filter(key => key === CLIENT_LEDGER_KEY);
+    expect(ledgerWrites).toHaveLength(1);
+  });
+});
+
+describe('answers the machine did not take', () => {
+  const walkToEnd = async (): Promise<void> => {
+    for (let count = 0; count < 6; count += 1) {
+      await next();
+      await settle();
+    }
+  };
+  const unsavedSteps = (): (string | null)[] =>
+    [...(view?.container.querySelectorAll('[data-flow-end] [data-flow-unsaved-step]') ?? [])].map(item =>
+      item.getAttribute('data-flow-unsaved-step'),
+    );
+
+  it('keeps each failed answer per step to the end screen, which names them with a Try again', async () => {
+    const failSteps = new Set(['name', 'finish']);
+    const run = setup({ failSteps });
+    view = await mount(run.tree);
+    await settle();
+    await walkToEnd();
+    expect(view.container.querySelector('[data-flow-end]')).not.toBeNull();
+    // choose and welcome were saved after name failed: they did not clear the name's failure.
+    expect(unsavedSteps()).toEqual(['onboarding.name', 'fake-pack.finish']);
+    expect(view.container.querySelector('[data-flow-end] [role="alert"]')?.textContent).toContain('2 answers');
+    // Retry one step: only that one leaves the list.
+    failSteps.delete('name');
+    await press('[data-flow-retry-save="onboarding.name"]');
+    await settle();
+    expect(unsavedSteps()).toEqual(['fake-pack.finish']);
+    expect(run.answers.filter(answer => answer.step === 'name')).toEqual([
+      { daemon: A, plugin: 'onboarding', step: 'name', state: 'done' },
+    ]);
+    failSteps.delete('finish');
+    await press('[data-flow-retry-save="fake-pack.finish"]');
+    await settle();
+    expect(unsavedSteps()).toEqual([]);
+    expect(view.container.querySelector('[data-onboarding-summary]')).not.toBeNull();
+  });
+
+  it('one successful answer does not clear an earlier failure on the page either', async () => {
+    const failSteps = new Set(['name']);
+    view = await mount(setup({ failSteps }).tree);
+    await settle();
+    await next(); // name fails
+    await settle();
+    await next(); // welcome saves
+    await settle();
+    expect(view.container.querySelector('[data-flow-unsaved]')?.textContent).toContain('That answer was not saved');
+  });
+});
+
+describe('a page that is still working, and a page that has gone', () => {
+  const two = (first: string, second: string) =>
+    setup({
+      machines: [
+        {
+          id: A,
+          name: 'Studio',
+          steps: [first, second].map((id, index) => ({
+            plugin: 'fake-pack',
+            id,
+            title: id,
+            order: index + 1,
+            side: 'daemon' as const,
+            stepHost: true as const,
+            state: 'pending' as const,
+          })),
+        },
+      ],
+    });
+
+  it('locks Next, Back and Later while a save is slow, and the late save moves on exactly one page', async () => {
+    view = await mount(two('slowsave', 'after').tree);
+    await settle();
+    expect(pageKey()).toBe('fake-pack.slowsave');
+    expect(view.container.querySelector<HTMLButtonElement>('[data-step-next]')?.disabled).toBe(true);
+    expect(view.container.querySelector<HTMLButtonElement>('[data-flow-later]')?.disabled).toBe(true);
+    await next(); // a locked button does nothing
+    await settle();
+    expect(pageKey()).toBe('fake-pack.slowsave');
+    await interact(() => slow.finish());
+    await settle();
+    expect(pageKey()).toBe('fake-pack.after');
+  });
+
+  it('ignores a navigation callback from a page the run has already left', async () => {
+    view = await mount(two('stale', 'after').tree);
+    await settle();
+    expect(pageKey()).toBe('fake-pack.stale');
+    const host = stale.host;
+    await next();
+    await settle();
+    expect(pageKey()).toBe('fake-pack.after');
+    await interact(() => host?.next()); // the old page's late call: ignored
+    await interact(() => host?.back());
+    await settle();
+    expect(pageKey()).toBe('fake-pack.after');
+    expect(view.container.querySelector('[data-flow-end]')).toBeNull();
+  });
+});
+
+describe('a legacy page beside a StepHost page', () => {
+  it('draws the legacy page with no cover and Next enabled, records done on Next, and still covers the StepHost page', async () => {
+    const run = setup({
+      machines: [
+        {
+          id: A,
+          name: 'Studio',
+          steps: [
+            { plugin: 'fake-pack', id: 'legacy', title: 'Legacy', order: 1, side: 'daemon', state: 'pending' },
+            {
+              plugin: 'fake-pack',
+              id: 'silent',
+              title: 'Silent',
+              order: 2,
+              side: 'daemon',
+              stepHost: true,
+              state: 'pending',
+            },
+          ],
+        },
+      ],
+      silenceMs: 10_000,
+    });
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('fake-pack.legacy');
+    expect(view.container.querySelector('[data-flow-cover]')).toBeNull();
+    expect(view.container.querySelector<HTMLButtonElement>('[data-step-next]')?.disabled).toBe(false);
+    expect(view.container.textContent).toContain('an old page that never calls ready');
+    await next();
+    await settle();
+    expect(run.answers).toEqual([{ daemon: A, plugin: 'fake-pack', step: 'legacy', state: 'done' }]);
+    expect(pageKey()).toBe('fake-pack.silent');
+    expect(view.container.querySelector('[data-flow-cover]')).not.toBeNull();
     expect(view.container.querySelector<HTMLButtonElement>('[data-step-next]')?.disabled).toBe(true);
   });
 });

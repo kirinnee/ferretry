@@ -113,9 +113,12 @@ function NameThisMachineView({ initial, busy, refusal, problem, onSave, onSkip }
 export function NameThisMachine({
   daemon,
   onDecided,
+  onBusy,
 }: {
   readonly daemon: string;
   readonly onDecided?: (decision: NameDecision) => void;
+  /** A host that draws the step as one page of a flow learns when a save is running (so it can lock its own footer). */
+  readonly onBusy?: (busy: boolean) => void;
 }) {
   const { runtime } = useShell();
   useRuntimeVersion(runtime);
@@ -129,6 +132,11 @@ export function NameThisMachine({
   // The host's callback is read when it is called, so a new function each render never restarts the look below.
   const decided = useRef(onDecided);
   decided.current = onDecided;
+  const working = useRef(onBusy);
+  working.current = onBusy;
+  useEffect(() => {
+    working.current?.(busy);
+  }, [busy]);
   const settle = (): void => {
     runtime.daemons.nameSettled(daemon);
     decided.current?.('settled');

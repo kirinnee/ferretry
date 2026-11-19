@@ -117,8 +117,8 @@ export default definePlugin({
   // First run, this DEVICE's half (r10 O15): Voice (the engine cards), then Speed-ups (the keys this browser holds), which
   // draws only after a local engine was picked. Both configure the browser, so each is asked once per device.
   onboarding: [
-    { id: 'voice', title: 'Voice', order: 3, side: 'client' },
-    { id: 'speedups', title: 'Speed-ups', order: 4, side: 'client' },
+    { id: 'voice', title: 'Voice', order: 3, side: 'client', stepHost: true },
+    { id: 'speedups', title: 'Speed-ups', order: 4, side: 'client', stepHost: true },
   ],
 
   permissions: {

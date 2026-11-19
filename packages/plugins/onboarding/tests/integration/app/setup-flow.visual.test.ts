@@ -57,7 +57,18 @@ const VIEWPORTS = [
   { name: '1280', width: 1_280, height: 800, phone: false },
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
-const CASES = ['loading', 'silent', 'choice', 'chip', 'busy', 'transition', 'end'] as const;
+const CASES = [
+  'loading',
+  'silent',
+  'choice',
+  'chip',
+  'busy',
+  'transition',
+  'end',
+  'legacy',
+  'unsaved',
+  'end-unsaved',
+] as const;
 
 describe('the setup flow', () => {
   for (const viewport of VIEWPORTS)
@@ -130,8 +141,24 @@ describe('the setup flow', () => {
               expect(later?.height ?? 0, 'Later is a 44px target').toBeGreaterThanOrEqual(43.5);
             }
             if (scene === 'chip') expect(await tab.textContent('[data-only-on]')).toBe('Only on studio-box');
-            if (scene === 'busy')
+            if (scene === 'busy') {
               expect(await tab.$eval('[data-step-next]', next => (next as HTMLButtonElement).disabled)).toBe(true);
+              expect(await tab.$eval('[data-step-back]', back => (back as HTMLButtonElement).disabled)).toBe(true);
+              expect(await tab.$eval('[data-flow-later]', later => (later as HTMLButtonElement).disabled)).toBe(true);
+            }
+            if (scene === 'legacy') {
+              expect(await tab.$eval('[data-step-next]', next => (next as HTMLButtonElement).disabled)).toBe(false);
+              expect(await tab.$('[data-flow-cover]'), 'a legacy page has no cover').toBeNull();
+            }
+            if (scene === 'unsaved' || scene === 'end-unsaved') {
+              expect(await tab.$('[data-flow-unsaved]'), `${scene}: says an answer was not saved`).not.toBeNull();
+              const retries = await tab.$$eval('[data-flow-retry-save]', buttons =>
+                buttons.map(button => button.getBoundingClientRect().height),
+              );
+              expect(retries.length, `${scene}: a Try again`).toBeGreaterThan(0);
+              for (const height of retries)
+                expect(height, `${scene}: Try again is a 44px target`).toBeGreaterThanOrEqual(43.5);
+            }
             if (shotsDir !== '')
               await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${scene}.png`), fullPage: true });
           }

@@ -6,6 +6,7 @@
  */
 import { daemonHomeHref, StepPageFrame, useOptionalRouter, useScreenHref } from '@ferretry/app';
 import { Button } from '@ferretry/app/ui';
+import type { Unsaved } from './use-setup-flow.ts';
 import { type ComponentProps, type ReactNode, useMemo } from 'react';
 import { SetupSummary } from '../../views/steps-screen.tsx';
 import { addProjectHref, projectAction } from '../stepper/project-action.ts';
@@ -14,10 +15,15 @@ export function EndPage({
   daemon,
   onBack,
   summary,
+  unsaved = [],
+  onRetry,
 }: {
   readonly daemon: string;
   readonly onBack: (() => void) | undefined;
   readonly summary: ComponentProps<typeof SetupSummary>['steps'];
+  /** Answers the machine did not take: each is named, with its own Try again. */
+  readonly unsaved?: readonly Unsaved[];
+  readonly onRetry?: (key: string) => void;
 }): ReactNode {
   const router = useOptionalRouter();
   const screenHref = useScreenHref();
@@ -38,6 +44,23 @@ export function EndPage({
       next={{ label: action?.label ?? 'Open this machine', onClick: action?.run ?? home }}
     >
       <div className="fy-sf-end" data-flow-end="">
+        {unsaved.length === 0 ? null : (
+          <div className="fy-sf-unsaved fy-sf-unsaved--end" data-flow-unsaved="">
+            <p role="alert" className="fy-sf-note">
+              {unsaved.length === 1 ? 'This answer was not saved:' : `${unsaved.length} answers were not saved:`}
+            </p>
+            <ul className="fy-sf-unsaved__list">
+              {unsaved.map(item => (
+                <li key={item.step.key} data-flow-unsaved-step={item.step.key}>
+                  <span>{item.step.title}</span>
+                  <Button size="sm" onClick={() => onRetry?.(item.step.key)} data-flow-retry-save={item.step.key}>
+                    Try again
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <SetupSummary daemon={daemon} steps={summary} />
         {action?.alternative === undefined ? null : (
           <div className="fy-sf-end__actions">

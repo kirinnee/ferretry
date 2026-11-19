@@ -38,6 +38,8 @@ export const StepViewSchema = z.strictObject({
   side: StepSideSchema.optional(),
   /** The progress bar's segment title; absent means the plugin's own title. */
   group: z.string().min(1).optional(),
+  /** The step's page is written against `StepHost`; absent means a legacy page (no loading cover). */
+  stepHost: z.literal(true).optional(),
   state: StepStateSchema,
   at: InstantSchema.optional(),
   /**

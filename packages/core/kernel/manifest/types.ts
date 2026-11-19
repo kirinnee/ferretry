@@ -248,6 +248,8 @@ export interface OnboardingDecl {
   readonly side?: OnboardingSide;
   /** The segment title in the progress bar; default the plugin's title. */
   readonly group?: string;
+  /** True when the step's page is written against `StepHost` (it calls `ready()`/`skip()`): the shell then draws it under a loading cover. A step without it is a legacy page: no cover, Next enabled, recorded done on Next. */
+  readonly stepHost?: true;
 }
 
 /**

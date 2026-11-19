@@ -7,6 +7,9 @@
  * What the shell guarantees, so no page can break the flow:
  *   1. A page mounts under a loading cover until it calls `ready()` or `skip()`; after {@link STEP_SILENCE_MS} of
  *      silence the cover offers "Skip this step", so a broken page never blocks.
+ *      This holds for a step that declares `stepHost: true` in its manifest entry (its page is written against this host).
+ *      A step that declares nothing is a LEGACY page, not yet written against `StepHost` (it never calls `ready()`): the
+ *      shell draws it with no cover and Next enabled, and records done on Next (rule 5), so it is never trapped.
  *   2. Conditions belong to the page: it reads its own plugin's routes and its `segment`, then `skip('not-needed')`.
  *   3. A client step already on the device's ledger is skipped before it mounts (`already-set`).
  *   4. `done()` on a daemon step POSTs `done`; on a client step it writes the device ledger. Nothing else does.

@@ -36,8 +36,16 @@ export function createSetupFlow(client: PluginClient, deps: FlowDeps = {}) {
           </div>
         );
       if (flow.at === END || flow.page === undefined)
-        return <EndPage daemon={flow.target} onBack={flow.canBack ? flow.back : undefined} summary={flow.summary} />;
-      const { page } = flow;
+        return (
+          <EndPage
+            daemon={flow.target}
+            onBack={flow.canBack ? () => flow.back(END, flow.visit) : undefined}
+            summary={flow.summary}
+            unsaved={flow.unsaved}
+            onRetry={flow.retryStep}
+          />
+        );
+      const { page, visit } = flow;
       return (
         <FlowPage
           key={page.key}
@@ -54,10 +62,10 @@ export function createSetupFlow(client: PluginClient, deps: FlowDeps = {}) {
           remember={patch => flow.remember(page.plugin, patch)}
           onDone={() => flow.done(page)}
           onSkip={why => flow.skip(page, why)}
-          onNext={flow.next}
-          onBack={flow.back}
-          onLater={() => flow.later(page)}
-          unsaved={flow.unsaved === undefined ? undefined : { retry: flow.retrySave }}
+          onNext={() => flow.next(page.key, visit)}
+          onBack={() => flow.back(page.key, visit)}
+          onLater={() => flow.later(page, visit)}
+          unsaved={flow.unsaved.length === 0 ? undefined : { count: flow.unsaved.length, retry: flow.retrySave }}
           {...(deps.silenceMs === undefined ? {} : { silenceMs: deps.silenceMs })}
         />
       );

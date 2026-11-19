@@ -61,6 +61,14 @@ describe('moving through the run', () => {
   const pages = pagesOf(flowOf());
   const none = new Set<string>();
 
+  test('every move counts a new visit, so a callback from a page already left can be told apart', () => {
+    const start = startRun(pages, none);
+    const second = advance(start, pages, none);
+    const back = retreat(second);
+    expect([start.visit, second.visit, back.visit]).toEqual([0, 1, 2]);
+    expect(back.at).toBe(start.at);
+  });
+
   test('Next goes forward, Back returns to where the person came from, the end stays the end', () => {
     let state = startRun(pages, none);
     expect(state.at).toBe('onboarding.name');

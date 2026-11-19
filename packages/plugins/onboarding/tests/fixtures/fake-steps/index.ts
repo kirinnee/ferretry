@@ -13,14 +13,31 @@ const step = (id: string, title: string, order: number, side: 'daemon' | 'client
   title,
   order,
   side,
+  stepHost: true,
   state: 'pending',
   ...(group === undefined ? {} : { group }),
 });
 
 /** What one daemon with the fake plugin returns from `GET /v1/onboarding` (plus Onboarding's own two pages). */
 export const fakeStepViews = (options: { readonly withFake?: boolean } = {}): readonly StepView[] => [
-  { plugin: 'onboarding', id: 'name', title: 'Name this machine', order: 5, side: 'daemon', state: 'pending' },
-  { plugin: 'onboarding', id: 'appearance', title: 'Appearance', order: 1, side: 'client', state: 'pending' },
+  {
+    plugin: 'onboarding',
+    id: 'name',
+    title: 'Name this machine',
+    order: 5,
+    side: 'daemon',
+    stepHost: true,
+    state: 'pending',
+  },
+  {
+    plugin: 'onboarding',
+    id: 'appearance',
+    title: 'Appearance',
+    order: 1,
+    side: 'client',
+    stepHost: true,
+    state: 'pending',
+  },
   ...(options.withFake === false
     ? []
     : [

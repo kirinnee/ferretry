@@ -5,7 +5,11 @@
  *   a re-flatten would then drop the very page on screen as `already-set`. Resuming after a reload reads again.
  * - Answers: a daemon step is recorded on the machine (`POST /v1/onboarding/steps/…`); a client step on the device ledger
  *   (done) or the device's later list (later). A failed record never holds the person on a page: the flow moves on and
- *   says "That answer was not saved" with Try again.
+ *   says "That answer was not saved" with Try again. Each failed answer is kept PER STEP until it is saved (one success
+ *   never clears another step's failure), so the end page can say which ones failed.
+ * - A later answer may become done (Later → Back → Next records done), but the same answer is never written twice.
+ * - Every move a page asks for (Next, Back, Later) names the page visit that issued it; a callback from a page the run
+ *   has already left is ignored, so a slow page can never advance whichever page is current.
  * - A plugin's segment memory (`StepHost.segment`) lives HERE, in memory, for this run only. Nothing in this file writes
  *   storage except the two device lists above.
  */
@@ -76,7 +80,7 @@ type Loading =
     };
 
 /** An answer the machine did not take: shown with Try again, and the page itself is long gone. */
-interface Unsaved {
+export interface Unsaved {
   readonly step: FlowStep;
   readonly state: Exclude<StepState, 'pending'>;
 }
@@ -92,16 +96,19 @@ export interface SetupFlow {
   readonly page: FlowStep | undefined;
   readonly canBack: boolean;
   readonly progress: ProgressRead | undefined;
-  readonly unsaved: Unsaved | undefined;
+  /** Every answer the machine did not take, oldest first; one entry per step. */
+  readonly unsaved: readonly Unsaved[];
+  /** The move counter of this run: pass it back with `next`, `back` and `later` so a stale page's call is ignored. */
+  readonly visit: number;
   /** The machine this run sets up (and where a client page's panel is drawn when no other carries it). */
   readonly target: string | undefined;
   readonly memoryOf: (plugin: string) => StepSegmentMemory;
   readonly remember: (plugin: string, patch: StepSegmentMemory) => void;
   readonly done: (step: FlowStep) => void;
   readonly skip: (step: FlowStep, why: 'not-needed' | 'already-set') => void;
-  readonly next: () => void;
-  readonly back: () => void;
-  readonly later: (step: FlowStep) => void;
+  readonly next: (key: string, visit: number) => void;
+  readonly back: (key: string, visit: number) => void;
+  readonly later: (step: FlowStep, visit: number) => void;
   readonly retry: () => void;
   /** The machine's own steps and where each ended: what the closing summary lists (a page that skipped itself is not in it). */
   readonly summary: readonly {
@@ -110,7 +117,10 @@ export interface SetupFlow {
     readonly title: string;
     readonly state: StepState;
   }[];
+  /** Tries every unsaved answer again. */
   readonly retrySave: () => void;
+  /** Tries one step's unsaved answer again. */
+  readonly retryStep: (key: string) => void;
 }
 
 export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFlow {
@@ -124,17 +134,22 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     readFlowAddress(deps.search?.() ?? (typeof window === 'undefined' ? '' : window.location.search)),
   );
   const [loading, setLoading] = useState<Loading>({ kind: 'loading' });
-  const [run, setRun] = useState<RunState>({ at: 'end', trail: [], gone: new Set(), direction: 'forward' });
-  const [unsaved, setUnsaved] = useState<Unsaved | undefined>(undefined);
+  const [run, setRun] = useState<RunState>({ at: 'end', trail: [], gone: new Set(), direction: 'forward', visit: 0 });
+  const [failed, setFailed] = useState<Readonly<Record<string, Unsaved>>>({});
+  /** The newest daemon answer sent per step: an older one's late reply says nothing about the step any more. */
+  const sent = useRef(new Map<string, number>());
+  /** The run as the last render saw it (for guards that must not wait for the next render). */
+  const runNow = useRef<RunState | undefined>(undefined);
   const [attempt, setAttempt] = useState(0);
   /** How each machine step ended during this run, for the closing summary. */
   const [outcomes, setOutcomes] = useState<Readonly<Record<string, StepState>>>({});
   /** Segment memory: per plugin, this run only, never stored. */
   const memory = useRef(new Map<string, StepSegmentMemory>());
-  /** Pages already answered during this run (so Next after a `done()` records nothing twice). */
-  const answeredNow = useRef(new Set<string>());
+  /** How each page was answered during this run (so Next after a `done()` records nothing twice, and Later may become done). */
+  const answeredNow = useRef(new Map<string, HowAnswered>());
   const stage = useRef(loading);
   stage.current = loading;
+  runNow.current = run;
   const targetRow = rows.find(row => row.daemon === target);
   const targetReady = targetRow !== undefined;
 
@@ -172,7 +187,10 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
       if (!live) return;
       setLoading({ kind: 'ready', flow, pages, answered, journey: address.journey });
       setRun(startRun(pages, answered));
-      answeredNow.current = new Set();
+      answeredNow.current = new Map();
+      sent.current = new Map();
+      setFailed({});
+      setOutcomes({});
     };
     read().catch(() => {
       if (live) setLoading({ kind: 'failed' });
@@ -191,12 +209,20 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
       if (target === undefined) return;
       if (step.phase === 'daemon') {
         const state = how;
-        setOutcomes(known => ({ ...known, [step.key]: state }));
+        const mine = (sent.current.get(step.key) ?? 0) + 1;
+        sent.current.set(step.key, mine);
+        const newest = (): boolean => sent.current.get(step.key) === mine;
         void onboardingScreen(client)
           .answer(step.plugin, step.id, { state })
           .then(
-            () => setUnsaved(undefined),
-            () => setUnsaved({ step, state }),
+            () => {
+              if (!newest()) return;
+              setOutcomes(known => ({ ...known, [step.key]: state }));
+              setFailed(known => Object.fromEntries(Object.entries(known).filter(([key]) => key !== step.key)));
+            },
+            () => {
+              if (newest()) setFailed(known => ({ ...known, [step.key]: { step, state } }));
+            },
           );
         return;
       }
@@ -208,44 +234,65 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     [client, target],
   );
 
-  const done = useCallback(
-    (step: FlowStep): void => {
-      if (answeredNow.current.has(step.key)) return;
-      answeredNow.current.add(step.key);
-      record(step, 'done');
+  /**
+   * Writes one answer unless it would repeat what was already written. A later answer may be replaced by a final one
+   * (Later → Back → Next records done); a final answer (done, found, skipped) stands, and a repeat of any answer writes nothing.
+   */
+  const answer = useCallback(
+    (step: FlowStep, how: HowAnswered): void => {
+      const before = answeredNow.current.get(step.key);
+      if (before === how || (before !== undefined && before !== 'later')) return;
+      answeredNow.current.set(step.key, how);
+      record(step, how);
     },
     [record],
   );
+  /** Whether the page that issued a move is still the one on screen (a stale callback is ignored). */
+  const current = useCallback(
+    (key: string, visit: number): boolean => runNow.current?.at === key && runNow.current.visit === visit,
+    [],
+  );
+  const done = useCallback((step: FlowStep): void => answer(step, 'done'), [answer]);
   const later = useCallback(
-    (step: FlowStep): void => {
-      if (!answeredNow.current.has(step.key)) {
-        answeredNow.current.add(step.key);
-        record(step, 'later');
-      }
-      setRun(state => advance(state, pages, answered));
+    (step: FlowStep, visit: number): void => {
+      if (!current(step.key, visit)) return;
+      answer(step, 'later');
+      setRun(state => (state.at === step.key && state.visit === visit ? advance(state, pages, answered) : state));
     },
-    [record, pages, answered],
+    [answer, current, pages, answered],
   );
   const skip = useCallback(
     (step: FlowStep, why: 'not-needed' | 'already-set'): void => {
-      if (!answeredNow.current.has(step.key)) {
-        answeredNow.current.add(step.key);
-        // Already set is a fact worth keeping (found / on the ledger); not needed on a machine is the page's own call.
-        record(step, why === 'already-set' ? 'found' : 'skipped');
-      }
+      // Already set is a fact worth keeping (found / on the ledger); not needed on a machine is the page's own call.
+      answer(step, why === 'already-set' ? 'found' : 'skipped');
       setRun(state => dropPage(state, pages, answered, step.key));
     },
-    [record, pages, answered],
+    [answer, pages, answered],
   );
-  const next = useCallback((): void => {
-    const here = pages.find(candidate => candidate.key === run.at);
-    if (here !== undefined) done(here);
-    setRun(state => advance(state, pages, answered));
-  }, [pages, answered, done, run.at]);
-  const back = useCallback((): void => setRun(retreat), []);
+  const next = useCallback(
+    (key: string, visit: number): void => {
+      if (!current(key, visit)) return;
+      const here = pages.find(candidate => candidate.key === key);
+      if (here !== undefined) done(here);
+      setRun(state => (state.at === key && state.visit === visit ? advance(state, pages, answered) : state));
+    },
+    [current, pages, answered, done],
+  );
+  const back = useCallback(
+    (key: string, visit: number): void =>
+      setRun(state => (state.at === key && state.visit === visit ? retreat(state) : state)),
+    [],
+  );
+  const retryStep = useCallback(
+    (key: string): void => {
+      const unsaved = failed[key];
+      if (unsaved !== undefined) record(unsaved.step, unsaved.state);
+    },
+    [failed, record],
+  );
   const retrySave = useCallback((): void => {
-    if (unsaved !== undefined) record(unsaved.step, unsaved.state);
-  }, [unsaved, record]);
+    for (const unsaved of Object.values(failed)) record(unsaved.step, unsaved.state);
+  }, [failed, record]);
 
   const page = pages.find(candidate => candidate.key === run.at);
   const progress =
@@ -259,7 +306,8 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     page,
     canBack: run.trail.some(key => !run.gone.has(key)),
     progress,
-    unsaved,
+    unsaved: Object.values(failed),
+    visit: run.visit,
     target,
     memoryOf: plugin => memory.current.get(plugin) ?? {},
     remember: (plugin, patch) => {
@@ -284,5 +332,6 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
               state: outcomes[step.key] ?? step.state ?? 'pending',
             })),
     retrySave,
+    retryStep,
   };
 }

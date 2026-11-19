@@ -6,7 +6,9 @@
  *   1. the page is mounted at once but hidden under a cover ("Checking …") until it calls `ready()` or `skip()`; the cover
  *      and the page never show together, so nothing pops in;
  *   2. after STEP_SILENCE_MS of silence the cover adds "Skip this step": a page that never answers never blocks;
- *   3. `busy(label)` locks Next and says what is happening; `done()` is recorded once.
+ *   3. `busy(label)` locks the whole footer (Next, Back, Later) and says what is happening; `done()` is recorded once;
+ *   4. a step that does not declare `stepHost` is a LEGACY page (it never calls `ready()`): it is drawn with no cover, Next
+ *      enabled and done recorded on Next, so a page not yet written against StepHost is never trapped behind a cover.
  * Next, Back and Later are the shell's, so every page has the same footer.
  */
 import { PanelSlot, StepPageFrame, useSlotPanels } from '@ferretry/app';
@@ -33,8 +35,8 @@ export interface FlowPageProps {
   readonly onNext: () => void;
   readonly onBack: () => void;
   readonly onLater: () => void;
-  /** The answer the machine did not take, and the way to try again. */
-  readonly unsaved?: { readonly retry: () => void } | undefined;
+  /** The answers the machine did not take, and the way to try again. */
+  readonly unsaved?: { readonly count: number; readonly retry: () => void } | undefined;
   /** Test seam: how long a page may stay silent. */
   readonly silenceMs?: number;
   /** What draws the page. The default is the plugin's own panel in the `onboarding.step` slot; a scene or test hands its own. */
@@ -74,7 +76,8 @@ function OnlyOnChip({ names }: { readonly names: readonly string[] }): ReactNode
 export function FlowPage(props: FlowPageProps): ReactNode {
   const { step, daemon, progress, direction, canBack, unsaved } = props;
   const moving = useMotionAllowed();
-  const [ready, setReady] = useState(false);
+  // A legacy page (no `stepHost`) never says it is ready, so it starts ready and has no cover.
+  const [ready, setReady] = useState(!step.stepHost);
   const [busy, setBusy] = useState<string | null>(null);
   const [silent, setSilent] = useState(false);
   // The host is made once per page: its calls reach the latest callbacks through this ref.
@@ -108,7 +111,7 @@ export function FlowPage(props: FlowPageProps): ReactNode {
     <StepPageFrame
       title={step.title}
       {...(progress === undefined ? {} : { progress })}
-      {...(canBack ? { back: { onClick: props.onBack } } : {})}
+      {...(canBack ? { back: { onClick: props.onBack, disabled: busy !== null } } : {})}
       next={{ label: 'Next', disabled: locked, busy: busy !== null, onClick: props.onNext }}
     >
       <div
@@ -147,7 +150,7 @@ export function FlowPage(props: FlowPageProps): ReactNode {
         {unsaved === undefined ? null : (
           <div className="fy-sf-unsaved" data-flow-unsaved="">
             <p role="alert" className="fy-sf-note">
-              That answer was not saved.
+              {unsaved.count > 1 ? `${unsaved.count} answers were not saved.` : 'That answer was not saved.'}
             </p>
             <Button size="sm" onClick={unsaved.retry} data-flow-retry-save="">
               Try again
@@ -160,6 +163,7 @@ export function FlowPage(props: FlowPageProps): ReactNode {
             size="sm"
             className="fy-sf-later"
             title="Come back to this from Settings"
+            disabled={busy !== null}
             onClick={props.onLater}
             data-flow-later=""
           >

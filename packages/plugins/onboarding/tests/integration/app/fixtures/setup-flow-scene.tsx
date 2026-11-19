@@ -4,10 +4,12 @@
  * is the flow screen's own.
  *
  *   ?theme=<family>-<mode>
- *   ?case=loading|silent|choice|chip|busy|transition|end
+ *   ?case=loading|silent|choice|chip|busy|transition|end|legacy|unsaved|end-unsaved
  *            loading = the page has not said ready (the cover); silent = 10 s of silence (Skip this step); choice = a
  *            fake page with three choice cards; chip = the same on a page only one machine carries; busy = a long act
- *            (Next locked); transition = the choice page frozen mid slide-in; end = the last page
+ *            (the whole footer locked); transition = the choice page frozen mid slide-in; end = the last page;
+ *            legacy = a page not yet written against StepHost (no cover, Next enabled); unsaved = a page with two
+ *            answers the machine did not take; end-unsaved = the last page naming the answers that were not saved
  */
 import { LivingBackground } from '@ferretry/app/ui';
 import { ChoiceCards } from '@ferretry/app';
@@ -31,6 +33,7 @@ const STEP: FlowStep = {
   order: 21,
   appliesTo: [{ daemon: 'fy_daemon_a', name: 'studio-box' }],
   onlyOn: scene === 'chip' ? ['studio-box'] : [],
+  stepHost: scene !== 'legacy',
   state: 'pending',
 };
 const PROGRESS = {
@@ -91,11 +94,20 @@ const common = {
 };
 
 function Scene(): ReactNode {
-  if (scene === 'end')
+  if (scene === 'end' || scene === 'end-unsaved')
     return (
       <EndPage
         daemon="fy_daemon_a"
         onBack={noop}
+        onRetry={noop}
+        unsaved={
+          scene === 'end'
+            ? []
+            : [
+                { step: { ...STEP, key: 'onboarding.name', title: 'Name this machine' }, state: 'done' },
+                { step: { ...STEP, key: 'warden.warden', title: 'Warden' }, state: 'later' },
+              ]
+        }
         summary={[
           { plugin: 'onboarding', id: 'name', title: 'Name this machine', state: 'done' },
           { plugin: 'fake-pack', id: 'choose', title: 'How should it import?', state: 'done' },
@@ -108,8 +120,17 @@ function Scene(): ReactNode {
       ? () => <Quiet />
       : scene === 'busy'
         ? (host: StepHost) => <Busy host={host} />
-        : (host: StepHost) => <Choice host={host} />;
-  return <FlowPage {...common} render={render} silenceMs={scene === 'silent' ? 30 : 600_000} />;
+        : scene === 'legacy'
+          ? () => <p>A page that has not been moved to the step host yet.</p>
+          : (host: StepHost) => <Choice host={host} />;
+  return (
+    <FlowPage
+      {...common}
+      render={render}
+      silenceMs={scene === 'silent' ? 30 : 600_000}
+      {...(scene === 'unsaved' ? { unsaved: { count: 2, retry: noop } } : {})}
+    />
+  );
 }
 
 // A frame frozen mid slide-in, for the transition shot.

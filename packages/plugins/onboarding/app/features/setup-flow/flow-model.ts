@@ -24,6 +24,8 @@ export interface RunState {
   readonly gone: ReadonlySet<string>;
   /** Which way the last move went: the page slides in from that side. */
   readonly direction: 'forward' | 'back';
+  /** Counts the moves of this run: a callback a page handed out is good only for the visit it was made in (see use-setup-flow.ts). */
+  readonly visit: number;
 }
 
 /** Every page the flow could mount, in flow order: the machine's, then this device's. */
@@ -55,6 +57,7 @@ export const startRun = (pages: readonly FlowStep[], answered: ReadonlySet<strin
   trail: [],
   gone: NONE,
   direction: 'forward',
+  visit: 0,
 });
 
 /** Moves on from the current page to the next one still to ask. At the end it stays at the end. */
@@ -62,7 +65,7 @@ export function advance(state: RunState, pages: readonly FlowStep[], answered: R
   if (state.at === END) return state;
   const index = pages.findIndex(page => page.key === state.at);
   const at = liveAfter(pages, answered, state.gone, index + 1);
-  return { ...state, at, trail: [...state.trail, state.at], direction: 'forward' };
+  return { ...state, at, trail: [...state.trail, state.at], direction: 'forward', visit: state.visit + 1 };
 }
 
 /** Goes back to the page the person came from, passing none that has gone since. At the first page it stays. */
@@ -70,7 +73,7 @@ export function retreat(state: RunState): RunState {
   const trail = [...state.trail];
   let back = trail.pop();
   while (back !== undefined && state.gone.has(back)) back = trail.pop();
-  return back === undefined ? state : { ...state, at: back, trail, direction: 'back' };
+  return back === undefined ? state : { ...state, at: back, trail, direction: 'back', visit: state.visit + 1 };
 }
 
 /**
@@ -87,7 +90,13 @@ export function dropPage(
   const gone = new Set(state.gone).add(key);
   if (state.at !== key) return { ...state, gone };
   const index = pages.findIndex(page => page.key === key);
-  return { ...state, gone, at: liveAfter(pages, answered, gone, index + 1), direction: 'forward' };
+  return {
+    ...state,
+    gone,
+    at: liveAfter(pages, answered, gone, index + 1),
+    direction: 'forward',
+    visit: state.visit + 1,
+  };
 }
 
 /** The pages that still count: not answered before the run, not gone. */

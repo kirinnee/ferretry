@@ -152,3 +152,8 @@
   color: var(--muted);
   font-size: calc(var(--font-size-base) - 1.5px);
 }
+
+/* A ghost Back locked while the page is working must read as locked next to the busy Next (the global fade is too faint on a ghost). */
+.fy-spf__button[data-variant='ghost']:disabled {
+  opacity: 0.4;
+}
