@@ -19,8 +19,14 @@ set -euo pipefail
 #      constant instead of spelling it.
 #   4. The script itself behaves: the production app by default with no define, a named app with its own origin,
 #      key file and defines, and a refusal of anything but a plain https origin.
-#   5. Only the preview's workflow sets `FY_HOSTED_APP_ORIGIN`; production's must not.
-#   6. Every tracked shell script under scripts/ is committed executable (mode 100755). The app build, the daemon
+#   5. Only the preview's workflow sets `FY_HOSTED_APP_ORIGIN`; production's must not. The preview's sets it exactly once,
+#      under the workflow-level `env:` block (`--workflow-origin <file>` prints it or fails): the same line under
+#      another top-level key leaves `env.FY_HOSTED_APP_ORIGIN` null while nix would still build the preview.
+#   6. The nix build (nix/ferretry.nix) follows the same switch: `default` compiles with no define (byte for byte what
+#      it was), and the separate `preview` output compiles with the origin the preview workflow names, through this
+#      script's own --defines. A nix build is pure, so the preview is its own output and never a switch on `default`
+#      (which lands on main). No origin is spelled in nix. Read from the derivations' build scripts, never built.
+#   7. Every tracked shell script under scripts/ is committed executable (mode 100755). The app build, the daemon
 #      compile and the signing scripts RUN them by path: a script committed 100644 fails with EACCES there, and a
 #      caller that read the failure as "no output" once compiled a daemon for the production app, silently.
 #
@@ -164,11 +170,73 @@ check_routes() {
   local workflow
   for workflow in .github/workflows/*.yaml; do
     if [[ ${workflow} == .github/workflows/pwa-pages-v5.yaml ]]; then
-      rg -q '^  FY_HOSTED_APP_ORIGIN: https://ferretry-v5\.pages\.dev$' "${workflow}" ||
+      [[ "$(workflow_origin "${workflow}")" == 'https://ferretry-v5.pages.dev' ]] ||
         fail "${workflow} must set FY_HOSTED_APP_ORIGIN to the preview origin at workflow level" || status=1
     elif rg -q 'FY_HOSTED_APP_ORIGIN' "${workflow}"; then
       fail "${workflow} must not set FY_HOSTED_APP_ORIGIN; only the preview workflow builds for another app" || status=1
     fi
+  done
+  return "${status}"
+}
+
+# The nix route, read from the derivations' own build scripts (evaluated, never built): the production output asks
+# nothing and defines nothing, the preview output asks the script with the workflow's origin and passes the defines.
+# The origin a workflow sets at WORKFLOW level: `  FY_HOSTED_APP_ORIGIN: https://...` under the top-level `env:` key, before
+# the next top-level key. The same line under any other top-level key (`run-name`, `jobs`, ...) leaves the workflow's
+# `env.FY_HOSTED_APP_ORIGIN` null while nix would still build the preview, so it is refused, and so are a missing line
+# and a duplicate. nix/ferretry.nix applies the same rule to the same file. Prints the origin or fails loudly.
+workflow_origin() {
+  local file="$1" found
+  found="$(awk '
+    /^[^ #\t][^:]*:/ { key = $0; sub(/:.*/, "", key) }
+    /^  FY_HOSTED_APP_ORIGIN: / {
+      anywhere++
+      if (key == "env") { inenv++; value = $0; sub(/^  FY_HOSTED_APP_ORIGIN: /, "", value) }
+    }
+    END { printf "%d %d %s\n", inenv + 0, anywhere + 0, value }
+  ' "${file}")" || {
+    fail "could not read ${file}" || true
+    return 1
+  }
+  local inenv anywhere value
+  read -r inenv anywhere value <<<"${found}"
+  if [[ ${inenv} -ne 1 || ${anywhere} -ne 1 ]]; then
+    fail "${file} must set FY_HOSTED_APP_ORIGIN exactly once, under the workflow-level 'env:' block (found ${inenv} there, ${anywhere} in all)" || true
+    return 1
+  fi
+  printf '%s\n' "${value}"
+}
+
+check_nix() {
+  local status=0 system=x86_64-linux workflow=.github/workflows/pwa-pages-v5.yaml origin default_phase preview_phase attr
+  if rg -q 'pages\.dev' nix/ferretry.nix; then
+    fail "nix/ferretry.nix spells a hosted app origin; it must read the preview's from ${workflow}" || status=1
+  fi
+  origin="$(workflow_origin "${workflow}")" || return 1
+  [[ ${origin} =~ ^https://[^\ ]+$ ]] || {
+    fail "${workflow} names no https FY_HOSTED_APP_ORIGIN (got '${origin}')" || true
+    return 1
+  }
+  for attr in fy fyd; do
+    default_phase="$(nix eval --raw ".#packages.${system}.${attr}.buildPhase")" || {
+      fail "could not evaluate .#packages.${system}.${attr}.buildPhase" || true
+      return 1
+    }
+    preview_phase="$(nix eval --raw ".#packages.${system}.${attr}-preview.buildPhase")" || {
+      fail "could not evaluate .#packages.${system}.${attr}-preview.buildPhase" || true
+      return 1
+    }
+    if [[ ${default_phase} == *hosted-app-origin* || ${default_phase} == *--define* ]]; then
+      fail "the nix ${attr} output must compile with no hosted app define (it is main's default)" || status=1
+    fi
+    [[ ${preview_phase} == *"export FY_HOSTED_APP_ORIGIN=${origin}"* ]] ||
+      fail "the nix ${attr}-preview output must set FY_HOSTED_APP_ORIGIN to ${origin} (the preview workflow's)" || status=1
+    # shellcheck disable=SC2016 # the literal text of the derivation's build script
+    [[ ${preview_phase} == *'hosted_app_output="$(bash ./scripts/ci/hosted-app-origin.sh --defines)"'* ]] ||
+      fail "the nix ${attr}-preview output must capture scripts/ci/hosted-app-origin.sh --defines in an assignment" || status=1
+    # shellcheck disable=SC2016 # the literal text of the derivation's build script
+    [[ ${preview_phase} == *'"${hosted_app_defines[@]}"'* ]] ||
+      fail "the nix ${attr}-preview output must pass those defines to every compile" || status=1
   done
   return "${status}"
 }
@@ -186,6 +254,10 @@ main() {
     check_owner "$(cd "${2:?--root needs a directory}" && pwd)"
     return
   fi
+  if [[ ${1:-} == --workflow-origin ]]; then
+    workflow_origin "${2:?--workflow-origin needs a workflow file}"
+    return
+  fi
   local root_dir
   root_dir="$(git rev-parse --show-toplevel)"
   cd "${root_dir}"
@@ -193,6 +265,7 @@ main() {
   local status=0
   check_owner "${root_dir}" || status=1
   check_routes || status=1
+  check_nix || status=1
   check_executable || status=1
   ((status == 0)) || exit 1
   echo "✅ the hosted app origin has one owner and every build route asks one script"
