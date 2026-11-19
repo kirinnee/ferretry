@@ -1,7 +1,7 @@
 /**
  * The browser entry for the GitHub accounts screen over FAKE data (no daemon): the REAL surface, read from a scripted client.
  *
- *   ?theme=<family>-<mode>   ?accounts=none|two   ?poll=pending|expired|done   (the clock is pinned at 08:00, 15:00 left)
+ *   ?theme=<family>-<mode>   ?accounts=none|two   ?poll=pending|expired|done|stepup   (the clock is pinned at 08:00, 15:00 left)
  */
 import { createRoot } from 'react-dom/client';
 import { AccountsSurface } from '../../../../app/features/accounts/accounts-surface.tsx';
@@ -13,6 +13,7 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const poll = params.get('poll') ?? 'pending';
 const script = scriptedGithub({
   accounts: params.get('accounts') === 'two' ? [octo, hubot] : [],
+  pollNeedsPress: poll === 'stepup',
   polls: [poll === 'expired' ? { status: 'expired' } : { status: 'pending', interval: 1 }],
 });
 

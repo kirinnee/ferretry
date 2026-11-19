@@ -12,6 +12,9 @@ export interface CodeCardProps {
   readonly flow: GitDeviceFlow;
   /** GitHub asked for fewer polls: said once, quietly. */
   readonly slow: boolean;
+  /** The daemon wants the passkey before it will answer the next check: the code stays, the person presses to finish. */
+  readonly needsStepUp: boolean;
+  readonly onConfirmStepUp: () => void;
   readonly onCancel: () => void;
   /** The clock; tests and screenshots pin it. */
   readonly now?: () => number;
@@ -29,7 +32,7 @@ function useSecondClock(now: () => number): number {
 
 type CopyState = 'idle' | 'copied' | 'failed';
 
-export function CodeCard({ flow, slow, onCancel, now = Date.now }: CodeCardProps) {
+export function CodeCard({ flow, slow, needsStepUp, onConfirmStepUp, onCancel, now = Date.now }: CodeCardProps) {
   const left = remainingMs(flow.expiresAt, useSecondClock(now));
   const [copy, setCopy] = useState<CopyState>('idle');
   const link = safeVerificationUri(flow.verificationUri);
@@ -89,6 +92,21 @@ export function CodeCard({ flow, slow, onCancel, now = Date.now }: CodeCardProps
       <p role="status" className={`m-0 text-meta ${copy === 'failed' ? 'text-warn' : 'text-ok'}`}>
         {copy === 'copied' ? 'Copied' : copy === 'failed' ? 'Copy was blocked — select the code instead' : ''}
       </p>
+      {needsStepUp ? (
+        <div className="flex flex-col gap-2" data-testid="git-step-up">
+          <p className="m-0 text-cell leading-base text-muted">
+            Once you have typed the code on GitHub, confirm it is you here so this machine can finish connecting.
+          </p>
+          <button
+            type="button"
+            className="kt-btn min-h-[44px] justify-center sm:self-start"
+            data-variant="primary"
+            onClick={onConfirmStepUp}
+          >
+            Confirm with your passkey to finish
+          </button>
+        </div>
+      ) : null}
       {slow ? (
         <p className="m-0 text-meta text-faint">GitHub asked for a slower check; this page is waiting longer.</p>
       ) : null}

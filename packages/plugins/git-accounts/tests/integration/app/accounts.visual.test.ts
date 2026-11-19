@@ -1,6 +1,6 @@
 /**
  * THE GITHUB ACCOUNTS SCREEN in a real browser over fake data (`fixtures/accounts-scene.tsx`): empty, the consent words,
- * the waiting code card, two connected accounts and an expired code, light and dark, 390 and 1280 wide. The page never
+ * the waiting code card, the code card asking for the passkey press, two connected accounts and an expired code, light and dark, 390 and 1280 wide. The page never
  * scrolls sideways and the code is on screen in full.
  *
  * Set `FY_GIT_ACCOUNTS_SHOTS_DIR` to keep `<viewport>-<theme>-<state>.png`.
@@ -135,6 +135,18 @@ describe('the GitHub accounts screen', () => {
         expect(two.problems).toEqual([]);
       } finally {
         await two.close();
+      }
+
+      const stepUp = await open(variant, '&poll=stepup');
+      try {
+        await press(stepUp.tab, 'Connect a GitHub account');
+        await press(stepUp.tab, 'Continue to GitHub');
+        await stepUp.tab.waitForSelector('[data-testid="git-step-up"]');
+        expect(await stepUp.tab.locator('[data-testid="git-user-code"]').innerText()).toBe('WDJB-MJHT');
+        await shot(stepUp.tab, variant, 'step-up');
+        expect(stepUp.problems).toEqual([]);
+      } finally {
+        await stepUp.close();
       }
 
       const expired = await open(variant, '&poll=expired');

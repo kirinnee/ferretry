@@ -20,7 +20,7 @@ export interface ConnectPanelProps {
 }
 
 export function ConnectPanel({ client, onConnected, pollDelay, now, connected, idleNote }: ConnectPanelProps) {
-  const { state, ask, cancel, proceed } = useDeviceFlow({
+  const { state, ask, cancel, proceed, confirmStepUp } = useDeviceFlow({
     client,
     onConnected,
     ...(pollDelay === undefined ? {} : { pollDelay }),
@@ -35,7 +35,16 @@ export function ConnectPanel({ client, onConnected, pollDelay, now, connected, i
       </p>
     );
   if (state.step === 'waiting')
-    return <CodeCard flow={state.flow} slow={state.slow} onCancel={cancel} {...(now === undefined ? {} : { now })} />;
+    return (
+      <CodeCard
+        flow={state.flow}
+        slow={state.slow}
+        needsStepUp={state.needsStepUp}
+        onConfirmStepUp={() => void confirmStepUp(state)}
+        onCancel={cancel}
+        {...(now === undefined ? {} : { now })}
+      />
+    );
 
   return (
     <div className="flex flex-col gap-2">

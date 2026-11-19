@@ -9,11 +9,13 @@ import { buttonNamed, click, interact, mount, q, settle, settleUntil } from '../
 import {
   EXPIRES,
   FAKE_USER_CODE,
+  type Call,
   hubot,
   NOW,
   octo,
   type ScriptOptions,
   scriptedGithub,
+  stepUpRefusal,
 } from '../../support/scripted-github.ts';
 
 const mounts: Array<{ unmount: () => Promise<void> }> = [];
@@ -179,6 +181,204 @@ describe('connecting an account', () => {
     await settleUntil(() => mounted.container.querySelector('[data-testid="git-expired"]') !== null);
     expect(mounted.container.querySelector('[data-testid="git-expired"]')).not.toBeNull();
     expect(script.calls.filter(c => c.route.startsWith('GET /v1/git-accounts/github/device'))).toHaveLength(0);
+  });
+});
+
+const polls = (calls: readonly Call[]) => calls.filter(c => c.route === 'GET /v1/git-accounts/github/device/:flowId');
+
+/** Opens the code card on a daemon that wants the passkey for every unattended poll, and waits for the button. */
+async function waitForStepUp(options: ScriptOptions) {
+  const opened = await open({ pollNeedsPress: true, ...options });
+  await click(buttonNamed(opened.root, 'Connect a GitHub account'));
+  await click(buttonNamed(opened.root, 'Continue to GitHub'));
+  await settleUntil(() => opened.root.querySelector('[data-testid="git-step-up"]') !== null);
+  return opened;
+}
+
+describe('failures along the way', () => {
+  it('says a failed poll in the page’s words, not as a lost step-up', async () => {
+    const { root } = await open({
+      failures: {
+        'GET /v1/git-accounts/github/device/:flowId': Object.assign(new Error('x'), { code: 'provider_refused' }),
+      },
+    });
+    await click(buttonNamed(root, 'Connect a GitHub account'));
+    await click(buttonNamed(root, 'Continue to GitHub'));
+    await settleUntil(() => root.querySelector('[data-testid="git-error"]') !== null);
+    expect(q(root, '[data-testid="git-error"]').textContent).toContain('GitHub refused');
+    expect(root.querySelector('[data-testid="git-step-up"]')).toBeNull();
+  });
+
+  it('says so when the clipboard is blocked', async () => {
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async () => Promise.reject(new Error('blocked')) },
+    });
+    const { root } = await open();
+    await click(buttonNamed(root, 'Connect a GitHub account'));
+    await click(buttonNamed(root, 'Continue to GitHub'));
+    await click(buttonNamed(root, 'Copy code'));
+    await settle();
+    expect(root.textContent).toContain('Copy was blocked');
+  });
+
+  it('says a failed re-read after connecting as a failure, not an empty list', async () => {
+    const { root } = await open({
+      listReadsBeforeFailing: 1,
+      polls: [{ status: 'done', accountId: hubot.id, login: hubot.login }],
+      connects: hubot,
+    });
+    await click(buttonNamed(root, 'Connect a GitHub account'));
+    await click(buttonNamed(root, 'Continue to GitHub'));
+    await settleUntil(() => root.textContent?.includes('GitHub accounts unavailable') === true);
+    expect(root.textContent).toContain('list gone');
+  });
+
+  it('says a failed removal', async () => {
+    const { root } = await open({
+      accounts: [octo],
+      failures: { 'DELETE /v1/git-accounts/:id': new Error('could not remove') },
+    });
+    await click(buttonNamed(root, 'Remove @octo-fake'));
+    await click(buttonNamed(root, 'Remove @octo-fake'));
+    await settle();
+    expect(q(root, '[role="alert"]').textContent).toContain('could not remove');
+  });
+});
+
+describe('a daemon that wants the passkey for every step (per-action confirmation)', () => {
+  it('keeps the code on screen, stops polling, and finishes the SAME flow on a press', async () => {
+    const { root, calls, accounts } = await waitForStepUp({
+      polls: [{ status: 'done', accountId: hubot.id, login: hubot.login }],
+      connects: hubot,
+    });
+    // The unattended poll was refused: the code, its countdown and the one button are still there.
+    expect(q(root, '[data-testid="git-user-code"]').textContent).toBe(FAKE_USER_CODE);
+    expect(root.querySelector('[data-testid="git-error"]')).toBeNull();
+    expect(buttonNamed(root, 'Confirm with your passkey to finish')).toBeTruthy();
+    expect(buttonNamed(root, 'Copy code')).toBeTruthy();
+
+    // Polling has stopped: no second unattended poll, however long the page waits, and no passkey dialog was asked.
+    await settle(40);
+    expect(polls(calls)).toHaveLength(1);
+    expect(polls(calls)[0]?.init?.quiet).toBeUndefined();
+
+    await click(buttonNamed(root, 'Confirm with your passkey to finish'));
+    await settleUntil(() => root.querySelector('[data-testid="git-done"]') !== null);
+    expect(q(root, '[data-testid="git-done"]').textContent).toContain('Connected @hubot-fake');
+    // One flow, ever: the press polled the flow it had, it never started another.
+    expect(posted(calls)).toHaveLength(1);
+    expect(polls(calls)).toHaveLength(2);
+    expect(polls(calls)[1]?.init).toEqual({ params: { flowId: 'flow_0123456789abcdef' }, quiet: false });
+    expect(accounts.map(each => each.id)).toEqual([hubot.id]);
+  });
+
+  it('keeps polling the same flow after the press while GitHub is still waiting', async () => {
+    const { root, calls } = await waitForStepUp({ polls: [{ status: 'pending', interval: 1 }] });
+    await click(buttonNamed(root, 'Confirm with your passkey to finish'));
+    await settle();
+    // The press was answered `pending`: the button goes, the code stays, and unattended polling resumes.
+    expect(root.querySelector('[data-testid="git-step-up"]')).toBeNull();
+    expect(q(root, '[data-testid="git-user-code"]').textContent).toBe(FAKE_USER_CODE);
+    await settleUntil(() => polls(calls).length >= 3);
+    expect(posted(calls)).toHaveLength(1);
+  });
+
+  it('leaves the code and the button where they were when the prompt is cancelled', async () => {
+    const { root, calls } = await waitForStepUp({
+      cancelledPresses: 1,
+      polls: [{ status: 'done', accountId: hubot.id, login: hubot.login }],
+      connects: hubot,
+    });
+    await click(buttonNamed(root, 'Confirm with your passkey to finish'));
+    await settle();
+    expect(q(root, '[data-testid="git-user-code"]').textContent).toBe(FAKE_USER_CODE);
+    expect(buttonNamed(root, 'Confirm with your passkey to finish')).toBeTruthy();
+    expect(root.querySelector('[data-testid="git-error"]')).toBeNull();
+    await click(buttonNamed(root, 'Confirm with your passkey to finish'));
+    await settleUntil(() => root.querySelector('[data-testid="git-done"]') !== null);
+    expect(posted(calls)).toHaveLength(1);
+  });
+
+  it('says a failed press in the page’s words', async () => {
+    const { root } = await waitForStepUp({
+      pressedFailure: Object.assign(new Error('x'), { code: 'provider_unreachable' }),
+    });
+    await click(buttonNamed(root, 'Confirm with your passkey to finish'));
+    await settleUntil(() => root.querySelector('[data-testid="git-error"]') !== null);
+    expect(q(root, '[data-testid="git-error"]').textContent).toContain('could not reach GitHub');
+  });
+
+  it('ignores a press that answers after the person cancelled the connection', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const { root } = await waitForStepUp({
+      pressedGate: gate,
+      polls: [{ status: 'done', accountId: hubot.id, login: hubot.login }],
+      connects: hubot,
+    });
+    await click(buttonNamed(root, 'Confirm with your passkey to finish'));
+    await click(buttonNamed(root, 'Cancel'));
+    release();
+    await settle(10);
+    expect(root.querySelector('[data-testid="git-done"]')).toBeNull();
+    expect(root.querySelector('[data-testid="git-code-card"]')).toBeNull();
+  });
+
+  it('ignores a press that FAILS after the person cancelled the connection', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const { root } = await waitForStepUp({ pressedGate: gate, pressedFailure: stepUpRefusal() });
+    await click(buttonNamed(root, 'Confirm with your passkey to finish'));
+    await click(buttonNamed(root, 'Cancel'));
+    release();
+    await settle(10);
+    expect(root.querySelector('[data-testid="git-step-up"]')).toBeNull();
+    expect(root.querySelector('[data-testid="git-error"]')).toBeNull();
+  });
+
+  it('drops the code at its own expiry while the page waits for the press', async () => {
+    let clock = NOW;
+    const script = scriptedGithub({ pollNeedsPress: true });
+    const mounted = await mount(<AccountsSurface client={script.client} pollDelay={() => 5} now={() => clock} />);
+    mounts.push(mounted);
+    await settle();
+    await click(buttonNamed(mounted.container, 'Connect a GitHub account'));
+    // The code is good for another 60ms when it arrives.
+    clock = Date.parse(EXPIRES) - 60;
+    await click(buttonNamed(mounted.container, 'Continue to GitHub'));
+    await settleUntil(() => mounted.container.querySelector('[data-testid="git-step-up"]') !== null, 5);
+    await settleUntil(() => mounted.container.querySelector('[data-testid="git-expired"]') !== null);
+    expect(mounted.container.querySelector('[data-testid="git-user-code"]')).toBeNull();
+    expect(mounted.container.querySelector('[data-testid="git-step-up"]')).toBeNull();
+    expect(q(mounted.container, '[data-testid="git-expired"]').textContent).toContain('ran out of time');
+    expect(buttonNamed(mounted.container, 'Try again')).toBeTruthy();
+  });
+});
+
+describe('a code that expires between two polls', () => {
+  it('goes at its own expiry, not at the next scheduled poll, and offers Try again', async () => {
+    let clock = NOW;
+    const script = scriptedGithub();
+    // The poll interval (an hour) far outlasts the code's last 50ms.
+    const mounted = await mount(
+      <AccountsSurface client={script.client} pollDelay={() => 3_600_000} now={() => clock} />,
+    );
+    mounts.push(mounted);
+    await settle();
+    await click(buttonNamed(mounted.container, 'Connect a GitHub account'));
+    clock = Date.parse(EXPIRES) - 50;
+    await click(buttonNamed(mounted.container, 'Continue to GitHub'));
+    expect(mounted.container.querySelector('[data-testid="git-user-code"]')).not.toBeNull();
+    await settleUntil(() => mounted.container.querySelector('[data-testid="git-expired"]') !== null);
+    expect(mounted.container.querySelector('[data-testid="git-user-code"]')).toBeNull();
+    expect(q(mounted.container, '[data-testid="git-expired"]').textContent).toContain('ran out of time');
+    expect(buttonNamed(mounted.container, 'Try again')).toBeTruthy();
+    expect(polls(script.calls)).toHaveLength(0);
   });
 });
 

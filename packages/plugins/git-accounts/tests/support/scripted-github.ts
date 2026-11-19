@@ -49,19 +49,43 @@ export interface ScriptOptions {
   /** A route that throws this. */
   failures?: Record<string, unknown>;
   keysLeftOnProvider?: string[];
+  /**
+   * Per-action confirmation: a poll nobody pressed for is refused for want of the passkey step-up (403
+   * `grant_step_up_required`), as the daemon client answers an unattended read once the proof is spent; a poll sent
+   * with `quiet: false` is the person's press, so the step-up runs and the poll is answered.
+   */
+  pollNeedsPress?: boolean;
+  /** The list answers this many reads, then fails (the re-read after a connection). */
+  listReadsBeforeFailing?: number;
+  /** This many pressed polls are still refused (a cancelled passkey prompt) before one is answered. */
+  cancelledPresses?: number;
+  /** A pressed poll waits for this before it answers (a press still in flight). */
+  pressedGate?: Promise<void>;
+  /** A pressed poll fails with this, after the gate. */
+  pressedFailure?: unknown;
 }
+
+export const stepUpRefusal = () => Object.assign(new Error('step up'), { status: 403, code: 'grant_step_up_required' });
 
 export function scriptedGithub(options: ScriptOptions = {}) {
   const accounts = [...(options.accounts ?? [])];
   const polls = options.polls ?? [{ status: 'pending', interval: 1 }];
   let polled = 0;
+  let listReads = 0;
+  let cancelled = options.cancelledPresses ?? 0;
   const calls: Call[] = [];
   const client = {
     call: async (route: string, init?: Call['init']) => {
       calls.push({ route, init });
       const failure = options.failures?.[route];
       if (failure !== undefined) throw failure;
-      if (route === 'GET /v1/git-accounts') return structuredClone(accounts);
+      if (route === 'GET /v1/git-accounts') {
+        if (options.listReadsBeforeFailing !== undefined) {
+          if (listReads >= options.listReadsBeforeFailing) throw new Error('list gone');
+          listReads += 1;
+        }
+        return structuredClone(accounts);
+      }
       if (route === 'POST /v1/git-accounts/github/device')
         return {
           flowId: FLOW_ID,
@@ -72,6 +96,16 @@ export function scriptedGithub(options: ScriptOptions = {}) {
           interval: 1,
         };
       if (route === 'GET /v1/git-accounts/github/device/:flowId') {
+        const pressed = init?.quiet === false;
+        if (options.pollNeedsPress === true && !pressed) throw stepUpRefusal();
+        if (pressed) {
+          await options.pressedGate;
+          if (options.pressedFailure !== undefined) throw options.pressedFailure;
+          if (cancelled > 0) {
+            cancelled -= 1;
+            throw stepUpRefusal();
+          }
+        }
         const status = polls[Math.min(polled, polls.length - 1)] as GitDeviceFlowStatus;
         polled += 1;
         if (status.status === 'done' && options.connects !== undefined) accounts.push(options.connects);
