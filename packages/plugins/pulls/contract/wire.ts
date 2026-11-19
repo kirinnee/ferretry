@@ -138,6 +138,18 @@ export const ReviewThreadSchema = z.strictObject({
 });
 export type ReviewThread = z.infer<typeof ReviewThreadSchema>;
 
+/** Most threads one answer carries (ten pages of fifty). A PR with more says `truncated`. */
+export const MAX_REVIEW_THREADS = 500;
+
+/** `GET /v1/pulls/:project/:repo/:number/threads` (E6): every review thread of one PR, read from GitHub's GraphQL. */
+export const ReviewThreadsAnswerSchema = z.strictObject({
+  threads: z.array(ReviewThreadSchema).max(MAX_REVIEW_THREADS),
+  /** GitHub has more threads than were read (the page bound), or some thread could not be shown. */
+  truncated: z.boolean(),
+  fetchedAt: Instant,
+});
+export type ReviewThreadsAnswer = z.infer<typeof ReviewThreadsAnswerSchema>;
+
 // ─── CI: runs, jobs, steps and timing ─────────────────────────────────────────────────────────────────────────────
 
 /** One word for a run, a job or a step; GitHub's status + conclusion pair folded. */
