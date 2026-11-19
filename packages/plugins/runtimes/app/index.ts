@@ -35,6 +35,13 @@ const pickerView = (client: RuntimesClient): AppComponent<PanelProps> =>
     ),
   );
 
+/** The import wizard's step body: its module loads when the step is first drawn. */
+const importStep = (client: LiveRuntimesClient): AppComponent<PanelProps> =>
+  lazyComponent<PanelProps>(
+    async () =>
+      (await import('./features/import-wizard/import-step.tsx')).createImportStep(client) as AppComponent<PanelProps>,
+  );
+
 const accountPanel = (
   client: LiveRuntimesClient,
   factory: 'createNewFerretAccountPanel' | 'createMoveAccountPanel',
@@ -74,6 +81,8 @@ export default provideToShell(
           'runtimes.runtimes',
           settingsView('runtimes-settings', 'createRuntimesSettings', client) as AppComponent<PanelProps>,
         ),
+        // "Bring your setup": the import wizard (A10).
+        'onboarding-import': forSubject('runtimes.import', importStep(client)),
         // v4's "Start from…" and "Agent controls" steps.
         'onboarding-start': forSubject(
           'runtimes.start',

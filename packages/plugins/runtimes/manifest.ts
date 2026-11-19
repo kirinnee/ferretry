@@ -416,6 +416,22 @@ export default definePlugin({
         label: 'Read a machine’s API key names for a copy',
         calls: 'GET /v1/secrets',
       }),
+      // The import wizard reads this machine's scan (names only) and each tool's installed version.
+      appAction('runtimes.import-scan', {
+        on: 'daemon',
+        label: 'Look at this machine’s Claude Code and Codex setup',
+        calls: 'GET /v1/runtimes/setup/scan',
+      }),
+      appAction('runtimes.import-claude-version', {
+        on: 'daemon',
+        label: 'Read the installed Claude Code version',
+        calls: 'GET /v1/claude-code/update',
+      }),
+      appAction('runtimes.import-codex-version', {
+        on: 'daemon',
+        label: 'Read the installed Codex version',
+        calls: 'GET /v1/codex/update',
+      }),
       // A landed copy completes the first run's "Start from…" step, as the steps screen's Done does.
       appAction('runtimes.start-done', {
         on: 'daemon',
@@ -468,6 +484,8 @@ export default definePlugin({
       panel('onboarding.step', { id: 'onboarding-step', order: 40 }),
       // v4's "Start from…" and "Agent controls" steps.
       panel('onboarding.step', { id: 'onboarding-start', order: 10 }),
+      // "Bring your setup": the import wizard, Claude Code then Codex (A10).
+      panel('onboarding.step', { id: 'onboarding-import', order: 15 }),
       panel('onboarding.step', { id: 'onboarding-controls', order: 75 }),
     ],
   },
@@ -512,6 +530,7 @@ export default definePlugin({
 
   onboarding: [
     { id: 'start', title: 'Start from…', order: 10 },
+    { id: 'import', title: 'Bring your setup', order: 15 },
     { id: 'runtimes', title: 'Name your runtimes', order: 40 },
     { id: 'controls', title: 'Agent controls', order: 75 },
   ],
