@@ -44,6 +44,7 @@ import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
 import { browserDeviceName } from '@ferretry/app';
 import { normalizedDeviceName } from '../../lib/device-name.ts';
 import { FerretMascot, type FerretPose } from './ferret-mascot.tsx';
+import { MachineNameField, machineNameChoice } from './machine-name-field.tsx';
 import { PairScanner } from './pair-scanner.tsx';
 import {
   FirstPasskeyOffer,
@@ -64,8 +65,11 @@ interface PairedAs {
   readonly connection?: DaemonConnection;
 }
 
-/** Exchanges the code; `deviceName` is what the person called this device on the confirm screen. */
-type PairingExchange = (seed: PairingSeed, deviceName: string) => Promise<PairedAs | void>;
+/**
+ * Exchanges the code; `deviceName` is what the person called this device on the confirm screen, and `machineName`
+ * (absent when the field was left empty) what they called the machine, for the host to save once paired.
+ */
+type PairingExchange = (seed: PairingSeed, deviceName: string, machineName?: string) => Promise<PairedAs | void>;
 
 /** Whether this page runs on a loopback address, i.e. on the daemon's own machine. */
 const pageIsLocal = (): boolean => {
@@ -224,6 +228,7 @@ export function PairingScreen({
   }, [onStatedFailure, statedFailure]);
   // Chosen once per screen, so a person editing it is never overwritten and two attempts send one name.
   const [deviceName, setDeviceName] = useState(defaultName);
+  const [machineName, setMachineName] = useState('');
   const [pasting, setPasting] = useState(false);
   /** The pasted link holds a live code: it lives only in the input's own value, read on submit, never in state or markup. */
   const link = useSecretField(typed => typed.trim().length);
@@ -264,10 +269,10 @@ export function PairingScreen({
     setStage({ kind: 'confirm', seed });
   };
 
-  const pair = async (seed: PairingSeed, name: string): Promise<void> => {
+  const pair = async (seed: PairingSeed, name: string, machine?: string): Promise<void> => {
     setStage({ kind: 'pairing', seed });
     try {
-      const as = await onPair(seed, name);
+      const as = await onPair(seed, name, machine);
       setStage({
         kind: 'paired',
         path: describeDaemonPath({ address: seed.daemonUrl, name: as?.machine, via: as?.via, sameMachine }),
@@ -295,9 +300,11 @@ export function PairingScreen({
     return (
       <PairingFocus
         stage={stage}
-        onPair={(seed, name) => void pair(seed, name)}
+        onPair={(seed, name, machine) => void pair(seed, name, machine)}
         deviceName={deviceName}
         onDeviceName={setDeviceName}
+        machineName={machineName}
+        onMachineName={setMachineName}
         onCancel={startOver}
         paired={connections.length > 0}
         embedded={embedded}
@@ -592,7 +599,10 @@ function HowThisWorks() {
 
 interface PairingFocusProps {
   readonly stage: Exclude<Stage, { kind: 'browse' }>;
-  readonly onPair: (seed: PairingSeed, deviceName: string) => void;
+  readonly onPair: (seed: PairingSeed, deviceName: string, machineName?: string) => void;
+  /** What the person is calling the machine; empty keeps its host name until the later step offers one. */
+  readonly machineName: string;
+  readonly onMachineName: (name: string) => void;
   readonly onCancel: () => void;
   /** What this device will be called at the machine, as the person has it in the field. */
   readonly deviceName: string;
@@ -622,6 +632,8 @@ function PairingFocus({
   embedded,
   deviceName,
   onDeviceName,
+  machineName,
+  onMachineName,
   sameMachine,
   passkeyClient,
   passkeyOffer,
@@ -800,6 +812,8 @@ function PairingFocus({
         </p>
       )}
 
+      <MachineNameField value={machineName} disabled={busy} onChange={onMachineName} />
+
       {/*
         `data-pair-confirm` names the one control that starts a redemption, so a harness presses it
         by identity rather than by position or by a design-system attribute. Both fallbacks are
@@ -813,9 +827,12 @@ function PairingFocus({
         data-variant="primary"
         data-pair-confirm=""
         onClick={() => {
-          if (sendableName !== undefined) onPair(seed, sendableName);
+          const machine = machineNameChoice(machineName);
+          if (sendableName === undefined || machine.kind === 'refused') return;
+          if (machine.kind === 'none') onPair(seed, sendableName);
+          else onPair(seed, sendableName, machine.name);
         }}
-        disabled={busy || sendableName === undefined}
+        disabled={busy || sendableName === undefined || machineNameChoice(machineName).kind === 'refused'}
       >
         {busy ? 'Pairing…' : 'Pair this device'}
       </button>

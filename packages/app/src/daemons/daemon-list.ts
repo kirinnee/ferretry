@@ -163,6 +163,15 @@ export interface PairingInput {
   readonly carriers?: readonly unknown[];
   /** Ask, once this app shows the machine, whether to name it (set by a pairing; never stored, never set by a re-read). */
   readonly askName?: true;
+  /** The name the person typed on the pair screen: saved with the new grant as soon as the machine answers, so no step asks. */
+  readonly chosenName?: string;
+}
+
+/** A name typed on the pair screen and where its save stands: waiting for the machine, running, or failed (with why). */
+export interface ChosenName {
+  readonly name: string;
+  readonly state: 'waiting' | 'saving' | 'failed';
+  readonly problem?: string;
 }
 
 /** The list, shaped for `useSyncExternalStore`: `snapshot()` is identity-stable between changes. */
@@ -175,6 +184,8 @@ export class DaemonList {
   readonly #caches = new Set<DaemonScopedCache>();
   /** Machines just paired that may still be asked for a name. In memory only: a reload does not ask again. */
   readonly #naming = new Set<string>();
+  /** Names typed at pairing, from the pair until saved (or until the step shows why not). In memory only. */
+  readonly #chosen = new Map<string, ChosenName>();
   #snapshot: DaemonListSnapshot;
 
   constructor(options: DaemonListOptions) {
@@ -242,6 +253,9 @@ export class DaemonList {
     const retained = [record, ...others].slice(0, MAX_DAEMONS);
     for (const evicted of [record, ...others].slice(MAX_DAEMONS)) this.#gone(evicted.daemon);
     if (input.askName === true) this.#naming.add(record.daemon);
+    const chosen = input.chosenName?.trim();
+    if (chosen !== undefined && chosen.length > 0) this.#chosen.set(record.daemon, { name: chosen, state: 'waiting' });
+    else this.#chosen.delete(record.daemon);
     this.#commit({ daemons: retained, selected: record.daemon });
     return record;
   }
@@ -279,6 +293,32 @@ export class DaemonList {
     return this.#naming.has(daemon);
   }
 
+  /** The name typed at pairing for this machine, until it is saved: where its save stands, and why it failed. */
+  chosenName(daemon: string): ChosenName | undefined {
+    return this.#chosen.get(daemon);
+  }
+
+  /** The save of the chosen name starts: answers the name once, so two callers never both write it. */
+  startChosenName(daemon: string): string | undefined {
+    const chosen = this.#chosen.get(daemon);
+    if (chosen?.state !== 'waiting') return undefined;
+    this.#chosen.set(daemon, { name: chosen.name, state: 'saving' });
+    return chosen.name;
+  }
+
+  /** The chosen name could not be saved: kept, with the reason, for the "Name this machine" step to offer again. */
+  chosenFailed(daemon: string, problem: string): void {
+    const chosen = this.#chosen.get(daemon);
+    if (chosen === undefined) return;
+    this.#chosen.set(daemon, { name: chosen.name, state: 'failed', problem });
+    for (const listener of this.#listeners) listener();
+  }
+
+  /** The chosen name is in the machine's file: nothing waits any more. */
+  chosenSaved(daemon: string): void {
+    this.#chosen.delete(daemon);
+  }
+
   /** The person asked to name this machine (the machine switcher's "Name this machine"): the step is offered again. */
   askToName(daemon: string): void {
     if (this.get(daemon) === undefined || this.#naming.has(daemon)) return;
@@ -288,6 +328,7 @@ export class DaemonList {
 
   /** The offer to name this machine was answered or skipped: it is not made again. */
   nameSettled(daemon: string): void {
+    this.#chosen.delete(daemon);
     if (!this.#naming.delete(daemon)) return;
     for (const listener of this.#listeners) listener();
   }
@@ -306,6 +347,7 @@ export class DaemonList {
 
   #gone(daemon: string): void {
     this.#naming.delete(daemon);
+    this.#chosen.delete(daemon);
     for (const cache of this.#caches) cache.clearDaemon(daemon);
     let forgotten: void | Promise<void>;
     try {
