@@ -42,7 +42,20 @@ export class AccountBook {
 
   /** Adds an account, or, for one already connected, replaces its token and facts and keeps its keys and date. */
   async upsert(facts: AccountFacts, token: string): Promise<GitAccount> {
-    await this.tokens.put(facts.id as SealedName, token);
+    const name = facts.id as SealedName;
+    const before = await this.tokens.get(name);
+    await this.tokens.put(name, token);
+    try {
+      return await this.#record(facts);
+    } catch (error) {
+      // The record did not land: put the sealed entry back as it was (an old token) or remove it (a new account), so
+      // no token is left that nothing names.
+      await (before === undefined ? this.tokens.delete(name) : this.tokens.put(name, before)).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async #record(facts: AccountFacts): Promise<GitAccount> {
     let stored: GitAccount | undefined;
     const done = await this.state.update(GitAccountsState, current => {
       const accounts = current?.accounts ?? [];

@@ -2,7 +2,9 @@
  * GitHub's OAuth device flow, daemon side. No client secret exists: `client_id` + `device_code` is the whole proof.
  *
  * The `device_code` is a bearer for the token (whoever polls it after the person authorizes receives the token), so
- * it lives only in this map. The page gets OUR flow id and the short user code. A poll faster than the interval is
+ * it lives only in this map, and only while the flow can still use it: it is dropped the moment the flow is done,
+ * denied or expired (a timer at the expiry, and a check on every read). The page gets OUR flow id and the short user
+ * code. A poll faster than the interval is
  * answered `pending` without asking GitHub, and a `slow_down` adds five seconds, as GitHub's rules say.
  */
 import { randomBytes } from 'node:crypto';
@@ -50,13 +52,17 @@ const UserAnswer = z.object({
 type Final = Extract<GitDeviceFlowStatus, { status: 'done' | 'expired' | 'denied' }>;
 
 interface Flow {
-  readonly deviceCode: string;
+  /** Gone (`undefined`) as soon as the flow is terminal or past its expiry. */
+  deviceCode: string | undefined;
   readonly expiresAtMs: number;
   interval: number;
   nextPollMs: number;
   final?: Final;
   finalAtMs?: number;
   polling?: Promise<GitDeviceFlowStatus>;
+  /** The account this flow filed, until the route has taken it to record it (once). */
+  connected?: GitAccountId;
+  cancelExpiry?: () => void;
 }
 
 export interface DeviceFlowDeps {
@@ -65,6 +71,8 @@ export interface DeviceFlowDeps {
   readonly clientId: () => string;
   readonly nowMs: () => number;
   readonly newId?: () => string;
+  /** Runs `fn` after `ms`; returns how to cancel (the kernel clock's `after`). */
+  readonly after: (ms: number, fn: () => void) => () => void;
 }
 
 export class GithubDeviceFlows {
@@ -100,12 +108,16 @@ export class GithubDeviceFlows {
     const now = this.deps.nowMs();
     const flowId = (this.deps.newId ?? (() => randomBytes(18).toString('base64url')))();
     const expiresAtMs = now + parsed.data.expires_in * 1000;
-    this.#flows.set(flowId, {
+    const flow: Flow = {
       deviceCode: parsed.data.device_code,
       expiresAtMs,
       interval: parsed.data.interval,
       nextPollMs: now + parsed.data.interval * 1000,
+    };
+    flow.cancelExpiry = this.deps.after(parsed.data.expires_in * 1000, () => {
+      if (flow.final === undefined && flow.polling === undefined) this.#settle(flow, { status: 'expired' });
     });
+    this.#flows.set(flowId, flow);
     return {
       flowId,
       provider: 'github',
@@ -129,13 +141,30 @@ export class GithubDeviceFlows {
     return await flow.polling;
   }
 
+  /** The account a finished flow filed, once: the first caller gets it, so the connect is recorded once. */
+  takeConnected(flowId: string): GitAccountId | undefined {
+    const flow = this.#flows.get(flowId);
+    const id = flow?.connected;
+    if (flow !== undefined) delete flow.connected;
+    return id;
+  }
+
+  /** How many flows still hold a device code (a count, for a test and the doctor; never a code). */
+  liveDeviceCodes(): number {
+    return [...this.#flows.values()].filter(flow => flow.deviceCode !== undefined).length;
+  }
+
   #settle(flow: Flow, final: Final): Final {
+    flow.deviceCode = undefined;
+    flow.cancelExpiry?.();
+    flow.cancelExpiry = undefined;
     flow.final = final;
     flow.finalAtMs = this.deps.nowMs();
     return final;
   }
 
   async #ask(flow: Flow): Promise<GitDeviceFlowStatus> {
+    if (flow.deviceCode === undefined) return this.#settle(flow, { status: 'expired' });
     const response = await this.deps.http.request({
       method: 'POST',
       url: ACCESS_TOKEN_URL,
@@ -188,6 +217,7 @@ export class GithubDeviceFlows {
       },
       token,
     );
+    flow.connected = id;
     return this.#settle(flow, { status: 'done', accountId: id, login: user.data.login });
   }
 

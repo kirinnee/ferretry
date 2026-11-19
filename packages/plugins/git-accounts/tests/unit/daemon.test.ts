@@ -1,11 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import { deviceStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
+import { deviceStanding, FakeGate, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type { CallStanding } from '@ferretry/kernel/contract';
 import type { SealedDocumentDef, SealedDocumentHandle } from '@ferretry/core-vault/contract';
 import { FakeSealedDocuments } from '@ferretry/core-vault/contract/testing';
 import type { SpawnOptions, SpawnResult, StatePort } from '@ferretry/kernel/contract';
 import { testHost } from '@ferretry/kernel/testing';
-import { GitAccountsPort, GitDeviceFlowStatusSchema } from '../../contract/index.ts';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import type { GitAccountId } from '../../contract/index.ts';
+import { GIT_ACCOUNT_TOKENS, GitAccountsPort, GitDeviceFlowStatusSchema } from '../../contract/index.ts';
+import { AccountBook } from '../../daemon/lib/accounts.ts';
+import { GithubDeviceFlows } from '../../daemon/lib/device-flow.ts';
+import type { GithubHttp, GithubRequest, GithubResponse } from '../../daemon/lib/github-http.ts';
 import daemon from '../../daemon/index.ts';
 import { FAKE_DEVICE_CODE, FAKE_TOKEN, FAKE_USER_CODE, FakeGithub } from './fake-github.ts';
 
@@ -27,10 +32,11 @@ async function boot(
   options: { clientId?: string; standing?: () => CallStanding; spawn?: (call: SpawnCall) => SpawnResult } = {},
 ) {
   const sealed = new SpySealed();
+  const gate = new FakeGate();
   const host = await testHost({
     plugins: [daemon],
     gate: new StandInAdmission(() => (options.standing ?? (() => ownerStanding()))()),
-    fakes: { sealed },
+    fakes: { sealed, gate },
     fetch: github.fetch,
     ...(options.spawn === undefined
       ? {}
@@ -47,7 +53,7 @@ async function boot(
     return response;
   };
   const wait = async (seconds: number) => await host.clock.advance(seconds * 1000);
-  return { host, sealed, request, responses, wait };
+  return { host, sealed, gate, request, responses, wait };
 }
 
 /** Everything a client could ever read, scanned for the token and the device code. */
@@ -373,20 +379,22 @@ describe('listing, removing and the port', () => {
       return { exitCode: 0, signal: null, stdout: `as ${FAKE_TOKEN}`, stderr: `bad ${FAKE_TOKEN} and ${FAKE_TOKEN}` };
     });
     const port = host.provided(GitAccountsPort);
-    const result = await port.run('gha_4242' as never, { program: 'gh', args: ['auth', 'status'], timeoutMs: 5_000 });
+    const result = await port.run('gha_4242' as never, { program: 'gh', args: ['pr', 'list'], timeoutMs: 5_000 });
     expect(result).toEqual({ exitCode: 0, stdout: 'as [redacted]', stderr: 'bad [redacted] and [redacted]' });
     expect(JSON.stringify(result)).not.toContain(FAKE_TOKEN);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.program).toBe('gh');
-    expect(calls[0]?.args).toEqual(['auth', 'status']);
+    expect(calls[0]?.args).toEqual(['pr', 'list']);
     expect(calls[0]?.args.join(' ')).not.toContain(FAKE_TOKEN);
-    expect(calls[0]?.options?.env).toEqual({ GH_TOKEN: FAKE_TOKEN });
+    expect((calls[0]?.options?.env as Record<string, string> | undefined)?.GH_TOKEN).toBe(FAKE_TOKEN);
     expect(calls[0]?.options?.sealed).toBe(true);
     // Only gh, only a connected account.
     await expect(port.run('gha_4242' as never, { program: 'sh' as never, args: ['-c', 'env'] })).rejects.toMatchObject({
       status: 403,
     });
-    await expect(port.run('gha_9' as never, { program: 'gh', args: [] })).rejects.toMatchObject({ status: 404 });
+    await expect(port.run('gha_9' as never, { program: 'gh', args: ['pr', 'list'] })).rejects.toMatchObject({
+      status: 404,
+    });
     expect(calls).toHaveLength(1);
   });
 
@@ -409,5 +417,349 @@ describe('who may do what (existing capabilities, no new one)', () => {
     expect((await request('POST', '/v1/git-accounts/github/device')).status).toBe(403);
     expect((await request('DELETE', '/v1/git-accounts/gha_1')).status).toBe(403);
     expect(github.seen).toEqual([]);
+  });
+});
+
+const EMPTY: SpawnResult = { exitCode: 0, signal: null, stdout: '', stderr: '' };
+
+describe('gh runs as an account, narrowed (review HIGH 1)', () => {
+  async function ready(spawn: (call: SpawnCall) => SpawnResult = () => EMPTY) {
+    const github = new FakeGithub();
+    github.tokenAnswers = [{ access_token: FAKE_TOKEN, scope: 'read:user' }];
+    const calls: SpawnCall[] = [];
+    const world = await boot(github, {
+      spawn: call => {
+        calls.push(call);
+        return spawn(call);
+      },
+    });
+    const flow = (await world.request('POST', '/v1/git-accounts/github/device')).json<{ flowId: string }>();
+    await world.wait(5);
+    await world.request('GET', `/v1/git-accounts/github/device/${flow.flowId}`);
+    return { ...world, calls, port: world.host.provided(GitAccountsPort) };
+  }
+  const run = (port: { run: Function }, args: string[]) =>
+    port.run('gha_4242' as never, { program: 'gh', args }) as Promise<unknown>;
+
+  const REFUSED: readonly (readonly string[])[] = [
+    ['auth', 'token'],
+    ['auth', 'status', '-t'],
+    ['auth', 'status', '--show-token'],
+    ['auth', 'login'],
+    ['auth', 'refresh'],
+    ['auth', 'setup-git'],
+    ['extension', 'install', 'owner/gh-evil'],
+    ['ext', 'list'],
+    ['alias', 'set', 'x', '!env'],
+    ['config', 'get', 'oauth_token', '-h', 'github.com'],
+    ['config', 'set', 'editor', 'sh'],
+    ['codespace', 'ssh'],
+    ['gist', 'create'],
+    ['browse'],
+    ['completion', '-s', 'bash'],
+    ['--version'],
+    ['-R', 'o/r', 'pr', 'list'],
+    ['api', '/user', '--hostname', 'ghe.example.com'],
+    ['api', '/user', '--hostname=ghe.example.com'],
+    ['api', '/x', '--input', '/etc/passwd'],
+    ['api', '/x', '--input=/etc/passwd'],
+    ['pr', 'create', '--body-file', '/etc/passwd'],
+    ['release', 'create', 'v1', '--notes-file=/etc/passwd'],
+    ['pr', 'comment', '1', '-F', '/etc/passwd'],
+    ['pr', 'comment', '1', '-F/etc/passwd'],
+    ['api', '/x', '-F', 'data=@/etc/passwd'],
+    ['api', '/x', '--field', 'data=@/etc/passwd'],
+    ['api', '/x', '--field=data=@/etc/passwd'],
+    ['api', 'https://evil.example/collect'],
+    ['api', 'http://api.github.com/user'],
+    ['repo', 'view', 'ghe.example.com/o/r'],
+    [],
+  ];
+  for (const args of REFUSED)
+    test(`refuses gh ${args.join(' ') || '(nothing)'}: a 403 and no child is started`, async () => {
+      const { port, calls } = await ready();
+      await expect(run(port, [...args])).rejects.toMatchObject({ status: 403 });
+      expect(calls).toHaveLength(0);
+    });
+
+  test('allows the commands the units need, and github.com addresses', async () => {
+    const { port, calls } = await ready();
+    const ok: string[][] = [
+      ['api', '/repos/o/r/pulls'],
+      ['api', 'https://api.github.com/user'],
+      ['api', '/x', '-F', 'n=1', '-f', 'body=hello'],
+      ['pr', 'view', 'https://github.com/o/r/pull/1'],
+      ['run', 'list'],
+      ['repo', 'view', 'github.com/o/r'],
+      ['issue', 'list'],
+      ['workflow', 'run', 'ci.yaml'],
+      ['release', 'list'],
+      ['search', 'prs', 'x'],
+    ];
+    for (const args of ok) await run(port, args);
+    expect(calls.map(call => call.args[0])).toEqual(ok.map(args => args[0]));
+  });
+
+  test('the child runs in an empty private folder that is its HOME and gh config, with nothing interactive', async () => {
+    let seen:
+      | { cwd: string; env: Record<string, string>; editorMode: number; editorBody: string; homeEntries: number }
+      | undefined;
+    const { port, calls } = await ready(call => {
+      const env = call.options?.env as Record<string, string>;
+      const cwd = String(call.options?.cwd);
+      seen = {
+        cwd,
+        env,
+        editorMode: statSync(env.EDITOR as string).mode & 0o777,
+        editorBody: readFileSync(env.EDITOR as string, 'utf8'),
+        homeEntries: 0,
+      };
+      return EMPTY;
+    });
+    await run(port, ['pr', 'list']);
+    expect(calls).toHaveLength(1);
+    const env = seen?.env as Record<string, string>;
+    expect(env.GH_TOKEN).toBe(FAKE_TOKEN);
+    expect(env.GH_CONFIG_DIR?.startsWith(`${seen?.cwd}/`)).toBe(true);
+    expect(env.HOME?.startsWith(`${seen?.cwd}/`)).toBe(true);
+    expect(env.HOME).not.toBe(process.env.HOME);
+    expect(env.GH_PROMPT_DISABLED).toBe('1');
+    expect([env.GH_PAGER, env.PAGER]).toEqual(['cat', 'cat']);
+    expect(env.GH_NO_UPDATE_NOTIFIER).toBe('1');
+    expect(env.GH_HOST).toBe('github.com');
+    const refuser = env.EDITOR as string;
+    for (const name of ['GH_EDITOR', 'GIT_EDITOR', 'EDITOR', 'VISUAL', 'BROWSER', 'GH_BROWSER'])
+      expect(env[name]).toBe(refuser);
+    expect(seen?.editorMode).toBe(0o700);
+    expect(seen?.editorBody).toBe('#!/bin/sh\nexit 1\n');
+    expect(calls[0]?.options?.sealed).toBe(true);
+    // The folder goes away with the run, even a failed one.
+    expect(existsSync(seen?.cwd as string)).toBe(false);
+  });
+
+  test('the folder is removed when the child fails too', async () => {
+    let cwd = '';
+    const { port } = await ready(call => {
+      cwd = String(call.options?.cwd);
+      throw new Error('spawn failed');
+    });
+    await expect(run(port, ['pr', 'list'])).rejects.toThrow('spawn failed');
+    expect(existsSync(cwd)).toBe(false);
+  });
+
+  test('output is scrubbed of the exact token and of any GitHub-token-shaped text', async () => {
+    const other = 'ghp_' + 'a1B2c3D4'.repeat(5);
+    const pat = 'github_pat_11ABCDEFG0abcdefghijkl_' + 'Z9y8X7w6'.repeat(6);
+    const { port } = await ready(() => ({
+      exitCode: 0,
+      signal: null,
+      stdout: `${FAKE_TOKEN} ${other} ok`,
+      stderr: `${pat} gho_0123456789abcdefghij ghs_0123456789abcdefghij ghu_0123456789abcdefghij`,
+    }));
+    const result = (await port.run('gha_4242' as never, { program: 'gh', args: ['pr', 'list'] })) as {
+      stdout: string;
+      stderr: string;
+    };
+    expect(result.stdout).toBe('[redacted] [redacted] ok');
+    expect(result.stderr).toBe('[redacted] [redacted] [redacted] [redacted]');
+  });
+});
+
+describe('a provider that reflects the bearer (review MED 2)', () => {
+  async function connectedReflecting() {
+    const github = new FakeGithub();
+    github.tokenAnswers = [{ access_token: FAKE_TOKEN, scope: 'read:user' }];
+    github.reflect = true;
+    const world = await boot(github);
+    const flow = (await world.request('POST', '/v1/git-accounts/github/device')).json<{ flowId: string }>();
+    await world.wait(5);
+    await world.request('GET', `/v1/git-accounts/github/device/${flow.flowId}`);
+    return { ...world, port: world.host.provided(GitAccountsPort) };
+  }
+
+  test('a body that echoes the token in any spelling, a key that holds it, and headers that carry it are masked', async () => {
+    const { port } = await connectedReflecting();
+    const answer = await port.api('gha_4242' as never, { method: 'GET', path: '/reflect' });
+    const everything = JSON.stringify(answer);
+    expect(everything).not.toContain(FAKE_TOKEN);
+    expect(everything).not.toContain(encodeURIComponent(FAKE_TOKEN));
+    expect(everything).not.toContain(Buffer.from(FAKE_TOKEN).toString('base64'));
+    expect(everything).toContain('[redacted]');
+    // What does not hold the token is kept as it was.
+    expect((answer.body as { number: number }).number).toBe(5);
+    expect((answer.body as { nested: { list: string[] } }).nested.list[0]).toBe('ok');
+    expect(answer.status).toBe(401);
+    expect(answer.headers.etag).toBe('[redacted]');
+    expect(answer.headers.link).toBe('[redacted]');
+  });
+
+  test('a body that is not JSON is not passed on', async () => {
+    const { port } = await connectedReflecting();
+    const answer = await port.api('gha_4242' as never, { method: 'GET', path: '/html' });
+    expect(answer.body).toBeNull();
+    expect(JSON.stringify(answer)).not.toContain(FAKE_TOKEN);
+  });
+});
+
+describe('device codes are dropped as soon as a flow ends (review MED 3)', () => {
+  class ScriptedHttp implements GithubHttp {
+    answers: Array<Record<string, unknown>> = [{ error: 'authorization_pending' }];
+    async request(request: GithubRequest): Promise<GithubResponse> {
+      if (request.url.endsWith('/login/device/code'))
+        return {
+          status: 200,
+          headers: {},
+          body: {
+            device_code: FAKE_DEVICE_CODE,
+            user_code: FAKE_USER_CODE,
+            verification_uri: 'https://github.com/login/device',
+            expires_in: 60,
+            interval: 5,
+          },
+        };
+      if (request.url.endsWith('/login/oauth/access_token'))
+        return { status: 200, headers: {}, body: this.answers.shift() ?? { error: 'authorization_pending' } };
+      return { status: 200, headers: {}, body: { id: 7, login: 'octo' } };
+    }
+  }
+  function world() {
+    let now = 1_000_000;
+    const timers: Array<{ at: number; fn: () => void; live: boolean }> = [];
+    const http = new ScriptedHttp();
+    let held: unknown;
+    const stateStub = {
+      read: async () => ({ ok: true, value: held }),
+      update: async (_file: unknown, fn: (current: unknown) => unknown) => {
+        held = await fn(held);
+        return { ok: true, value: held };
+      },
+    } as unknown as StatePort;
+    const book = new AccountBook(stateStub, new FakeSealedDocuments().open(stateStub, GIT_ACCOUNT_TOKENS), () => 'now');
+    const flows = new GithubDeviceFlows({
+      http,
+      book,
+      clientId: () => 'cid',
+      nowMs: () => now,
+      after: (ms, fn) => {
+        const timer = { at: now + ms, fn, live: true };
+        timers.push(timer);
+        return () => {
+          timer.live = false;
+        };
+      },
+    });
+    const advance = (ms: number) => {
+      now += ms;
+      for (const timer of timers) if (timer.live && timer.at <= now) (timer.live = false), timer.fn();
+    };
+    return { flows, http, advance, book };
+  }
+
+  test('denied and expired_token drop the code the moment they are seen', async () => {
+    for (const error of ['access_denied', 'expired_token']) {
+      const { flows, http, advance } = world();
+      http.answers = [{ error }];
+      const started = await flows.start();
+      expect(flows.liveDeviceCodes()).toBe(1);
+      advance(5_000);
+      expect((await flows.poll(started.flowId)).status).toBe(error === 'access_denied' ? 'denied' : 'expired');
+      expect(flows.liveDeviceCodes()).toBe(0);
+    }
+  });
+
+  test('a flow nobody polls drops its code at its expiry, by timer, with no start or read needed', async () => {
+    const { flows, advance } = world();
+    const started = await flows.start();
+    expect(flows.liveDeviceCodes()).toBe(1);
+    advance(59_000);
+    expect(flows.liveDeviceCodes()).toBe(1);
+    advance(2_000);
+    expect(flows.liveDeviceCodes()).toBe(0);
+    expect(await flows.poll(started.flowId)).toEqual({ status: 'expired' });
+  });
+
+  test('a read past the expiry drops it too, and a done flow drops it and cancels its timer', async () => {
+    const { flows, http, advance } = world();
+    const first = await flows.start();
+    advance(61_000);
+    // (the timer already ran in this harness; a read stays expired)
+    expect((await flows.poll(first.flowId)).status).toBe('expired');
+    http.answers = [{ access_token: FAKE_TOKEN, scope: 'read:user' }];
+    const second = await flows.start();
+    advance(5_000);
+    expect((await flows.poll(second.flowId)).status).toBe('done');
+    expect(flows.liveDeviceCodes()).toBe(0);
+  });
+});
+
+describe('a token with no record (review MED 4)', () => {
+  function failingState(): StatePort {
+    return {
+      read: async () => ({ ok: true, value: undefined }),
+      update: async () => ({ ok: false, error: { kind: 'io' } }),
+    } as unknown as StatePort;
+  }
+  const facts = { id: 'gha_9' as GitAccountId, githubId: 9, login: 'nine', scopes: [] as string[] };
+
+  test('a record that cannot be written leaves no sealed entry for a new account', async () => {
+    const state = failingState();
+    const handle = new FakeSealedDocuments().open(state, GIT_ACCOUNT_TOKENS);
+    const book = new AccountBook(state, handle, () => 'now');
+    await expect(book.upsert(facts, 'gho_NEW_TOKEN_0123456789abcdef')).rejects.toMatchObject({ status: 500 });
+    expect(await handle.names()).toEqual([]);
+  });
+
+  test('for an account already connected the old token is put back', async () => {
+    const state = failingState();
+    const handle = new FakeSealedDocuments().open(state, GIT_ACCOUNT_TOKENS);
+    await handle.put('gha_9' as never, 'gho_OLD_TOKEN_0123456789abcdef');
+    const book = new AccountBook(state, handle, () => 'now');
+    await expect(book.upsert(facts, 'gho_NEW_TOKEN_0123456789abcdef')).rejects.toMatchObject({ status: 500 });
+    expect(await handle.get('gha_9' as never)).toBe('gho_OLD_TOKEN_0123456789abcdef');
+  });
+
+  test('disconnect removes a sealed entry that has no record, and still 404s when there is neither', async () => {
+    const github = new FakeGithub();
+    const { sealed, request } = await boot(github);
+    expect((await request('DELETE', '/v1/git-accounts/gha_77')).status).toBe(404);
+    // Open the plugin's handle by asking for anything, then strand an entry the way a failed record write would have.
+    await request('GET', '/v1/git-accounts');
+    await (sealed.handle as SealedDocumentHandle).put('gha_77' as never, FAKE_TOKEN);
+    const removed = await request('DELETE', '/v1/git-accounts/gha_77');
+    expect(removed.status).toBe(200);
+    expect(removed.json()).toMatchObject({ id: 'gha_77', removed: true, keysLeftOnProvider: [] });
+    expect(await (sealed.handle as SealedDocumentHandle).names()).toEqual([]);
+    expect((await request('DELETE', '/v1/git-accounts/gha_77')).status).toBe(404);
+  });
+});
+
+describe('git-account.added is recorded once per connect, by account (review MED 5)', () => {
+  test('many polls of a done flow record one entry whose subject is the account id', async () => {
+    const github = new FakeGithub();
+    github.tokenAnswers = [{ error: 'authorization_pending' }, { access_token: FAKE_TOKEN, scope: 'read:user' }];
+    const { gate, request, wait } = await boot(github);
+    const flow = (await request('POST', '/v1/git-accounts/github/device')).json<{ flowId: string }>();
+    const path = `/v1/git-accounts/github/device/${flow.flowId}`;
+    await wait(5);
+    await request('GET', path);
+    expect(gate.audits).toEqual([]);
+    await wait(5);
+    for (let n = 0; n < 4; n += 1) expect((await request('GET', path)).json()).toMatchObject({ status: 'done' });
+    expect(gate.audits).toHaveLength(1);
+    expect(gate.audits[0]).toMatchObject({ subject: 'gha_4242', outcome: 'succeeded', actor: { kind: 'host' } });
+    expect(String(gate.audits[0]?.event)).toContain('git-account.added');
+    expect(JSON.stringify(gate.audits)).not.toContain(flow.flowId);
+    expect(JSON.stringify(gate.audits)).not.toContain(FAKE_TOKEN);
+  });
+
+  test('connecting a second account records a second entry, and a failed connect records none', async () => {
+    const github = new FakeGithub();
+    github.tokenAnswers = [{ access_token: FAKE_TOKEN, scope: 'read:user' }];
+    github.userStatus = 401;
+    const { gate, request, wait } = await boot(github);
+    const flow = (await request('POST', '/v1/git-accounts/github/device')).json<{ flowId: string }>();
+    await wait(5);
+    expect((await request('GET', `/v1/git-accounts/github/device/${flow.flowId}`)).status).toBe(502);
+    expect(gate.audits).toEqual([]);
   });
 });

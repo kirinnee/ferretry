@@ -3,6 +3,7 @@
  * following a redirect, and never logging. A request can carry a token or a device code, so a failure is a short code
  * for its KIND (a timeout, a DNS name error), never the address, the message or the body.
  */
+import { type EchoMask, echoMask, maskJson, maskText } from '@ferretry/core-vault/contract';
 import type { FetchPort } from '@ferretry/kernel/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import { GIT_ACCOUNT_CODES, type GitApiHeaders } from '../../contract/index.ts';
@@ -12,6 +13,7 @@ const TIMEOUT_MS = 15_000;
 /** A page of pull requests or check runs can be a few hundred kilobytes; the device flow's answers are tiny. */
 const MAX_BYTES = 4 * 1024 * 1024;
 const USER_AGENT = 'ferretry-git-accounts';
+const REDACTED = '[redacted]';
 
 /**
  * The only places a request may go: the two device-flow endpoints, and `api.github.com` (REST and `/graphql`). The device
@@ -54,10 +56,11 @@ async function boundedText(response: Response): Promise<string> {
 }
 
 /** The few response headers the seam hands on; each is metadata about the call, none can carry a token. */
-function headersOf(response: Response): GitApiHeaders {
+function headersOf(response: Response, around: EchoMask | undefined): GitApiHeaders {
   const pick = (name: string): string | undefined => {
     const value = response.headers.get(name);
-    return value === null || value.length > 2048 ? undefined : value;
+    if (value === null || value.length > 2048) return undefined;
+    return around === undefined ? value : maskText(value, around);
   };
   const etag = pick('etag');
   const link = pick('link');
@@ -117,14 +120,25 @@ export class FetchGithubHttp implements GithubHttp {
       );
     }
     const text = await boundedText(response);
+    // A request that carried a token gets its answer sanitized the way the Vault sanitizes a minted exchange: only JSON
+    // is kept, every string (keys too) is decoded and checked, and a string that holds the bearer in any form it can be
+    // read in is replaced WHOLE. A reply the check cannot finish is refused, never passed on unchecked.
+    const around =
+      request.bearer === undefined ? undefined : echoMask([request.bearer, `Bearer ${request.bearer}`], REDACTED);
     let parsed: unknown;
     if (text.trim() !== '') {
       try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = null;
+        parsed = JSON.parse(around === undefined ? text : maskJson(text, around));
+      } catch (error) {
+        if (error instanceof SyntaxError) parsed = null;
+        else
+          throw new ApiError(
+            502,
+            'GitHub answered with something too complex to check, so it was not passed on',
+            GIT_ACCOUNT_CODES.providerRefused,
+          );
       }
     }
-    return { status: response.status, body: parsed, headers: headersOf(response) };
+    return { status: response.status, body: parsed, headers: headersOf(response, around) };
   }
 }

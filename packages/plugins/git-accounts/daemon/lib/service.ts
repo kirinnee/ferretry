@@ -15,7 +15,8 @@ import {
   type GitRunResult,
   type GitRunSpec,
 } from '../../contract/index.ts';
-import type { SpawnPort } from '@ferretry/kernel/contract';
+import type { ScratchPort, SpawnPort } from '@ferretry/kernel/contract';
+import { checkGhArgs, scrubToken } from './gh-guard.ts';
 import type { GithubHttp } from './github-http.ts';
 import type { AccountBook } from './accounts.ts';
 
@@ -26,6 +27,7 @@ export class GitAccountsService {
     private readonly book: AccountBook,
     private readonly http: GithubHttp,
     private readonly spawn: Pick<SpawnPort, 'run'>,
+    private readonly scratch: ScratchPort,
   ) {}
 
   list(): Promise<readonly GitAccount[]> {
@@ -59,16 +61,61 @@ export class GitAccountsService {
 
   /**
    * `gh` as the account. The token goes into that one child's environment and nowhere else (`sealed`: none of the
-   * host's own variables ride along); both streams come back with the token masked, whatever the child printed.
+   * host's own variables ride along). What that child can be asked to do is narrowed three ways: the argv must pass the
+   * allow-list (`checkGhArgs`); it runs in an empty private folder that is also its HOME and `GH_CONFIG_DIR` (no
+   * host aliases, extensions or config); and nothing interactive can start (no prompt, pager, editor or browser). Both
+   * streams come back with the token, and anything shaped like a GitHub token, masked.
    */
   async run(id: GitAccountId, spec: GitRunSpec): Promise<GitRunResult> {
     if (spec.program !== 'gh')
       throw new ApiError(403, 'only gh runs with an account', GIT_ACCOUNT_CODES.invalidRequest);
+    checkGhArgs(spec.args);
     const token = await this.#tokenOf(id);
     const timeout = milliseconds(Math.min(Math.max(spec.timeoutMs ?? 60_000, 1_000), 300_000));
-    const result = await this.spawn.run('gh', [...spec.args], { env: { GH_TOKEN: token }, sealed: true, timeout });
-    const mask = (text: string): string => text.split(token).join('[redacted]');
-    return { exitCode: result.exitCode, stdout: mask(result.stdout), stderr: mask(result.stderr) };
+    const folder = await this.scratch.open();
+    try {
+      await folder.makeDirectory('home');
+      await folder.makeDirectory('home/config');
+      await folder.writeFile('refuse', '#!/bin/sh\nexit 1\n', 0o700);
+      const home = `${folder.path}/home`;
+      const refuse = `${folder.path}/refuse`;
+      const env: Record<string, string> = {
+        GH_TOKEN: token,
+        GH_HOST: 'github.com',
+        GH_CONFIG_DIR: `${home}/config`,
+        HOME: home,
+        XDG_CONFIG_HOME: `${home}/config`,
+        XDG_DATA_HOME: `${home}/data`,
+        XDG_STATE_HOME: `${home}/state`,
+        XDG_CACHE_HOME: `${home}/cache`,
+        GH_PROMPT_DISABLED: '1',
+        GH_PAGER: 'cat',
+        PAGER: 'cat',
+        GIT_PAGER: 'cat',
+        GH_EDITOR: refuse,
+        GIT_EDITOR: refuse,
+        EDITOR: refuse,
+        VISUAL: refuse,
+        GIT_ASKPASS: refuse,
+        SSH_ASKPASS: refuse,
+        BROWSER: refuse,
+        GH_BROWSER: refuse,
+        GH_NO_UPDATE_NOTIFIER: '1',
+        GH_NO_EXTENSION_UPDATE_NOTIFIER: '1',
+        GH_SPINNER_DISABLED: '1',
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_CONFIG_NOSYSTEM: '1',
+        NO_COLOR: '1',
+      };
+      const result = await this.spawn.run('gh', [...spec.args], { env, sealed: true, timeout, cwd: folder.path });
+      return {
+        exitCode: result.exitCode,
+        stdout: scrubToken(result.stdout, token),
+        stderr: scrubToken(result.stderr, token),
+      };
+    } finally {
+      await folder.close().catch(() => undefined);
+    }
   }
 
   /**
@@ -78,7 +125,13 @@ export class GitAccountsService {
    */
   async remove(id: GitAccountId): Promise<GitAccountRemoved> {
     const account = await this.book.find(id);
-    if (account === undefined) throw new ApiError(404, 'no such Git account', GIT_ACCOUNT_CODES.unknownAccount);
+    if (account === undefined) {
+      // A token with no record (a connect whose record never landed) must still be removable, or it is stranded.
+      if ((await this.book.token(id)) === undefined)
+        throw new ApiError(404, 'no such Git account', GIT_ACCOUNT_CODES.unknownAccount);
+      await this.book.forget(id);
+      return { id, removed: true, keysLeftOnProvider: [], revokeAt: GITHUB_REVOKE_URL };
+    }
     const left: string[] = [];
     const token = await this.book.token(id);
     const registered = [

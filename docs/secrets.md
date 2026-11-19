@@ -1590,7 +1590,7 @@ answers a SANITIZED reply, so the plugin never holds it.
 - **The reply is built inside the Vault**, the holder of what was sent, never a raw `Response`: the status, a
   `statusText`, an ALLOWLIST of headers (`content-type`, `mcp-session-id`, `mcp-protocol-version`, `www-authenticate`,
   `retry-after`; everything else stays in the Vault) and a body. **The Vault does not list spellings; it decodes, checks
-  and drops** (`daemon/lib/secrets/echo-mask.ts`), against the value AS SENT (and the whole header value it travelled in):
+  and drops** (`contract/echo-mask.ts`), against the value AS SENT (and the whole header value it travelled in):
   1. **Only a body the Vault can parse is returned**: JSON (`application/json`, `+json`, UTF-8), or an event stream whose
      `data` is parsed the same way. HTML, XML, plain text, NDJSON, binary and compressed bodies are DROPPED with
      "The server’s answer is not JSON, so the Vault could not check it for the sign-in and kept it." (or the compressed /
@@ -2001,7 +2001,25 @@ secret ("Per-session scoping" above), and a GitHub token is too strong for that.
   That is why the token lives in the sealed document and why nothing can read it.
 - **Use, never read, for a child.** Another plugin that needs `gh` as the account calls `GitAccountsApi.run`: the daemon
   half starts `gh` (the one declared program) with `GH_TOKEN` in that child's own, sealed environment and returns its
-  output with the token masked. There is no getter.
+  output with the token masked. There is no getter. **The token in the child's environment is the design; what that
+  child can be asked to do is narrowed:**
+  - the argv must name a command on an **allow-list** (`api pr run repo issue workflow release search`); `auth`,
+    `config`, `alias`, `extension`/`ext` and any command not listed are refused before a child starts. `--hostname`,
+    `--input`, `--body-file`, `--notes-file`, `-F` (and `api -F key=@file`), an address outside `github.com` and a repository
+    on another host are refused wherever they appear;
+  - the child runs in an **empty private folder** that is also its `HOME`, `XDG_*` and `GH_CONFIG_DIR` (no host aliases,
+    extensions or config), removed after the run, with no prompt, pager, editor, askpass or browser (each is a binary that
+    exits 1) and no update check;
+  - both streams are scrubbed of the exact token **and** of anything shaped like a GitHub token (`gh[opsur]_…`,
+    `github_pat_…`).
+- **A provider's answer is sanitized.** A request that carried the token has its reply passed through the Vault's
+  outbound-reply check (`@ferretry/core-vault/contract` `echo-mask.ts`, moved there from the Vault daemon so a plugin may use it): only JSON is kept, every string (keys too) is decoded and checked,
+  a string holding the bearer in any form is replaced whole, the headers kept are checked the same way, and a reply too
+  complex to check is refused, never passed on.
+- **The device code lives only while a flow can use it**: it is dropped the moment a flow is done, denied or expired (a
+  timer at the expiry, and a check on every read), not at the next start.
+- **A connect that cannot write its record leaves nothing behind**: the sealed entry is rolled back (an old token is put
+  back), and removing an account also removes a sealed token that has no record.
 - Connect and remove are `secrets.configure` (passkey step-up from a paired device) and are audited (`git-account.added`,
   `git-account.removed`: the account id only). The list is `secrets.use` and answers logins and key titles.
 - **Removing an account** deletes the keys this machine registered on it through the API (with the token) first, then the
@@ -2012,3 +2030,9 @@ secret ("Per-session scoping" above), and a GitHub token is too strong for that.
 **GAP.** An agent that can read the daemon's own memory or its state folder as the same OS user can reach the token, as
 for every secret here ([threat model](#threat-model)). The sealed document narrows who is _handed_ it; it is not a
 sandbox against a process running as the owner.
+
+**GAP — `gh` children.** `gh` itself is narrowed as above, but it starts `git` for `repo clone`, `pr checkout` and the like, and
+that `git` child inherits `GH_TOKEN` (the token in the child's environment is the design). A repository's own hooks or
+`.git/config` can run code in that child and read the token. The scrub catches the token only where it is printed back
+exactly or in a GitHub token's usual shape, not an encoded or split copy. Allowed commands act with `repo` scope on
+every repository the account can reach. Use `gh` as an account only in projects whose repositories you trust.

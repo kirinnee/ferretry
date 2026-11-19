@@ -21,6 +21,8 @@ export class FakeGithub {
     avatar_url: 'https://avatars.example/u/4242',
   };
   userStatus = 200;
+  /** When set, `/reflect` answers a body, a key and an ETag that echo the bearer (a hostile or broken provider). */
+  reflect = false;
   deviceInterval = 5;
   deviceExpiresIn = 900;
   verificationUri = 'https://github.com/login/device';
@@ -70,6 +72,21 @@ export class FakeGithub {
       this.#polls += 1;
       return json(answer);
     }
+    if (this.reflect && url.host === 'api.github.com' && url.pathname === '/reflect') {
+      const bearer = headers.get('authorization') ?? '';
+      const raw = bearer.replace(/^Bearer /u, '');
+      return new Response(
+        JSON.stringify({
+          message: `Bad credentials: ${bearer}`,
+          nested: { list: [`ok`, encodeURIComponent(raw), Buffer.from(raw).toString('base64')] },
+          [`key-${raw}`]: 1,
+          number: 5,
+        }),
+        { status: 401, headers: { 'content-type': 'application/json', etag: `W/"${raw}"`, link: `<${raw}>` } },
+      );
+    }
+    if (this.reflect && url.host === 'api.github.com' && url.pathname === '/html')
+      return new Response(`<p>${headers.get('authorization')}</p>`, { headers: { 'content-type': 'text/html' } });
     if (url.host === 'api.github.com' && url.pathname === '/user' && init?.method !== 'DELETE')
       return json(this.user, this.userStatus);
     if (url.host === 'api.github.com' && init?.method === 'DELETE')

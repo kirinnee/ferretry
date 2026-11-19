@@ -1,3 +1,5 @@
+import type { AuditActor, AuditDraft } from '@ferretry/core-gate/contract';
+import { auditKind } from '@ferretry/core-gate/contract';
 import {
   decodeParameter,
   ApiError,
@@ -6,6 +8,7 @@ import {
   type RouteHandler,
 } from '@ferretry/kernel/contract';
 import {
+  GIT_ACCOUNT_AUDIT,
   GIT_ACCOUNT_CODES,
   GitAccountIdSchema,
   GitAccountListSchema,
@@ -23,11 +26,36 @@ function flowIdOf(call: CallContext): string {
   return id.data;
 }
 
-export function gitAccountRoutes(flows: GithubDeviceFlows, accounts: GitAccountsService) {
+/** Who the log says connected the account: from the credential admission derived, never from the request. */
+function actorOf(call: CallContext): AuditActor {
+  const credential = (call as { credential?: { tokenClass: string; principal?: { holder: string } } }).credential;
+  if (credential === undefined) return { kind: 'anonymous' };
+  if (credential.tokenClass === 'device' && credential.principal !== undefined)
+    return { kind: 'device', deviceId: credential.principal.holder };
+  return credential.tokenClass === 'warden' ? { kind: 'warden' } : { kind: 'host' };
+}
+
+export function gitAccountRoutes(
+  flows: GithubDeviceFlows,
+  accounts: GitAccountsService,
+  record: (draft: AuditDraft) => Promise<void>,
+) {
   return {
     'POST /v1/git-accounts/github/device': async () => jsonResponse(GitDeviceFlowSchema.parse(await flows.start())),
-    'GET /v1/git-accounts/github/device/:flowId': async (call: CallContext) =>
-      jsonResponse(GitDeviceFlowStatusSchema.parse(await flows.poll(flowIdOf(call)))),
+    'GET /v1/git-accounts/github/device/:flowId': async (call: CallContext) => {
+      const flowId = flowIdOf(call);
+      const status = GitDeviceFlowStatusSchema.parse(await flows.poll(flowId));
+      // Recorded once per connect (the first poll that sees it done takes it), with the ACCOUNT id as the subject.
+      const connected = status.status === 'done' ? flows.takeConnected(flowId) : undefined;
+      if (connected !== undefined)
+        await record({
+          event: auditKind(GIT_ACCOUNT_AUDIT.added),
+          actor: actorOf(call),
+          subject: connected,
+          outcome: 'succeeded',
+        }).catch(() => undefined);
+      return jsonResponse(status);
+    },
     'GET /v1/git-accounts': async () => jsonResponse(GitAccountListSchema.parse(await accounts.list())),
     'DELETE /v1/git-accounts/:id': async (call: CallContext) => {
       const id = GitAccountIdSchema.safeParse(decodeParameter(call.params.get('id') ?? ''));

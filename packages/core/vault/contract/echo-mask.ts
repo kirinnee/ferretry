@@ -1,4 +1,4 @@
-import { MINTED_DEFAULT_BODY_BYTES, MINTED_REPLY_HEADERS, type MintedBody } from '../../../contract/index.ts';
+import { MINTED_DEFAULT_BODY_BYTES, MINTED_REPLY_HEADERS, type MintedBody } from './secrets.ts';
 
 /**
  * Sanitizing a stranger's reply to a request that carried a credential, INSIDE the Vault, the one holder of what was

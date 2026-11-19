@@ -1,3 +1,4 @@
+import { milliseconds } from '@ferretry/std';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { GIT_ACCOUNT_TOKENS, GitAccountsConfigFile, GitAccountsConfigSchema } from '../contract/index.ts';
 import manifest from '../manifest.ts';
@@ -23,10 +24,11 @@ export default implementDaemon(manifest, {
       book,
       clientId: () => settings().github.clientId,
       nowMs: () => kernel.clock.nowMs(),
+      after: (ms, fn) => kernel.clock.after(milliseconds(ms), fn),
     });
-    const service = new GitAccountsService(book, http, kernel.spawn);
+    const service = new GitAccountsService(book, http, kernel.spawn, kernel.scratch);
     return {
-      routes: gitAccountRoutes(flows, service),
+      routes: gitAccountRoutes(flows, service, async draft => await needs.gate.audit(draft)),
       provides: {
         gitAccounts: {
           list: () => service.list(),

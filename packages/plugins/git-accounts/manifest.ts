@@ -1,4 +1,4 @@
-import { audit } from '@ferretry/core-gate/contract';
+import { audit, GatePort } from '@ferretry/core-gate/contract';
 import { SealedDocumentsPort } from '@ferretry/core-vault/contract';
 import { definePlugin, route, verb } from '@ferretry/kernel/manifest';
 import {
@@ -33,7 +33,7 @@ export default definePlugin({
   kinds: ['command'],
   words: GIT_ACCOUNTS_WORDS,
 
-  needs: { sealed: SealedDocumentsPort },
+  needs: { sealed: SealedDocumentsPort, gate: GatePort },
   provides: { gitAccounts: GitAccountsPort },
 
   actions: {
@@ -51,8 +51,8 @@ export default definePlugin({
         caller: 'person',
         capability: GIT_ACCOUNT_CAPS.configure,
         noStore: true,
-        // The poll that completes the flow files the account, so it is the one that is recorded.
-        audit: audit(GIT_ACCOUNT_AUDIT.added),
+        // A poll is not an act. The connect is recorded once, by the service, with the account id (not the flow id).
+        audit: GIT_ACCOUNT_AUDIT_SKIP.pollFlow,
         guard: GIT_ACCOUNT_GUARD,
       }),
       route('GET /v1/git-accounts', {

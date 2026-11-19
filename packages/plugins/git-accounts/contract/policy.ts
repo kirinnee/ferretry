@@ -18,7 +18,9 @@ export const GIT_ACCOUNT_AUDIT = {
 
 export const GIT_ACCOUNT_AUDIT_SKIP = {
   startFlow: { skip: 'starting a flow files nothing; the account is recorded when it is added' },
-  pollFlow: { skip: 'a poll; the account is recorded as added when the flow completes' },
+  pollFlow: {
+    skip: 'a poll; the service records git-account.added once, with the account id, when the flow connects it',
+  },
   list: { skip: 'a read of logins and key titles; no token' },
 } as const satisfies Readonly<Record<string, AuditDeclaration>>;
 
