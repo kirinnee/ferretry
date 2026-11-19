@@ -118,6 +118,7 @@ export function ProjectsPage({ client, daemon }: { readonly client: ProjectsClie
       projectHref={projectId => projectPath(daemon, projectId)}
       onNavigate={navigate}
       now={now}
+      client={client}
       initiallyOpen={typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('add') === '1'}
     />
   );

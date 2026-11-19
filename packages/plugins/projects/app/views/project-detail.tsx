@@ -1,6 +1,6 @@
 import { useRouter } from '@ferretry/app';
 import { Loading, RouteLink } from '@ferretry/app/ui';
-import { ArrowLeft, Bot, FolderTree, KanbanSquare, LayoutList } from 'lucide-react';
+import { ArrowLeft, Bot, FolderTree, KanbanSquare, LayoutList, UserRound } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { type ProjectInfo, ProjectInfoSchema } from '../../contract/index.ts';
 import type { ProjectsClient } from '../lib/client.ts';
@@ -14,6 +14,7 @@ import {
   startFerret,
 } from '../lib/ferrets.ts';
 import { ferretPath, projectLanesPath, projectsPath } from '../lib/paths.ts';
+import { ProjectAccountLinks } from '../features/create-project/account-links.tsx';
 import { ProjectBoardSwitch } from './project-board-switch.tsx';
 import { useProjectsSlice } from '../hooks/use-projects.ts';
 import { ProjectFiles } from './project-files.tsx';
@@ -114,6 +115,9 @@ function ProjectDetailView({
             {project.lastActivity && (
               <p className="m-0 text-meta text-muted">Project activity: {project.lastActivity}</p>
             )}
+          </Section>
+          <Section icon={<UserRound className="text-muted" size={16} aria-hidden="true" />} title="GitHub accounts">
+            <ProjectAccountLinks client={client} project={project} />
           </Section>
           <Section icon={<KanbanSquare className="text-muted" size={16} aria-hidden="true" />} title="Board">
             <ProjectBoardSwitch client={client} projectId={project.id} />

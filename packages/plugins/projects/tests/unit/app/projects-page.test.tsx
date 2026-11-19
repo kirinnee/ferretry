@@ -5,11 +5,20 @@ import type { ProjectsClient } from '../../../app/lib/client.ts';
 import type { FerretRow } from '../../../app/lib/ferrets.ts';
 import { projectsStoreFor } from '../../../app/views/context.ts';
 import { ProjectsPage } from '../../../app/views/projects-page.tsx';
-import { ANSWERED, type Call, clickEvent, ferret, PROJECT, refusal, scripted, typeInto } from './support/client.ts';
+import { ANSWERED, type Call, clickEvent, ferret, PROJECT, refusal, scripted } from './support/client.ts';
 
 const LIST = 'GET /v1/projects';
 const REGISTER = 'POST /v1/projects';
 const FERRETS = 'GET /v1/ferrets';
+const FOLDERS = 'GET /v1/projects/folders';
+
+/** The explorer's listing of a folder (empty), as the daemon answers it: the page's "Add project" is the Create flow. */
+const folderListing = (path: string) => ({
+  path,
+  crumbs: [{ name: '~', path: '/home/k' }],
+  entries: [],
+  truncated: false,
+});
 
 // The hub's registry rows are in-app links, so the page reads the router. The shell always provides one; these suites
 // provide the shell's own (with no plugin screens), so a navigation assertion exercises production code.
@@ -33,22 +42,23 @@ const press = async (element: Element): Promise<void> => {
   await interact(() => element.dispatchEvent(clickEvent()));
 };
 
-const type = async (input: HTMLInputElement, value: string): Promise<void> => {
-  await interact(() => typeInto(input, value));
-};
+/** The folder the create flow has chosen: what the old typed path field held. */
+const chosenFolder = (mounted: Mounted): string =>
+  must(mounted.container.querySelector('[data-create-chosen] .mono'), 'the chosen folder').textContent ?? '';
 
-const pathField = (mounted: Mounted): HTMLInputElement => {
-  const label = [...mounted.container.querySelectorAll('label')].find(node =>
-    (node.textContent ?? '').startsWith('Folder'),
+const buttonNamed = (mounted: Mounted, text: string): Element =>
+  must(
+    [...mounted.container.querySelectorAll('button')].find(node => (node.textContent ?? '').trim() === text),
+    `the "${text}" button`,
   );
-  const id = must(label, 'the path label').getAttribute('for');
-  return must(mounted.container.querySelector<HTMLInputElement>(`#${id}`), 'the path field');
-};
 
-const registerByHand = async (mounted: Mounted, path: string): Promise<void> => {
+/** Drives the Create-a-project flow to its registration: open it, pick the open folder, name step, create. */
+const registerByHand = async (mounted: Mounted, _path: string): Promise<void> => {
   await press(must(mounted.container.querySelector('[aria-controls="add-project-form"]'), 'the disclosure'));
-  await type(pathField(mounted), path);
-  await press(must(mounted.container.querySelector('button[type="submit"]'), 'the submit button'));
+  await settled(mounted, c => c.querySelector('[data-explorer-state="ready"]') !== null, 'the explorer');
+  await press(buttonNamed(mounted, 'Use this folder'));
+  await press(buttonNamed(mounted, 'Next'));
+  await press(buttonNamed(mounted, 'Create project'));
 };
 
 const registry = (rows: readonly ProjectInfo[], ferrets: readonly FerretRow[] = []) =>
@@ -173,21 +183,26 @@ describe('ProjectsPage', () => {
     ]);
     // The write refreshed the registry, so the folder is a project now and no longer offered as a discovery.
     expect(reads).toBe(2);
-    expect(must(mounted.container.querySelector('[role="status"]'), 'the notice').textContent).toContain(
+    expect(must(mounted.container.querySelector('[data-project-registered]'), 'the notice').textContent).toContain(
       'Registered — scratch',
     );
     await mounted.unmount();
   });
 
   it('reports that a folder was already registered rather than claiming it created one', async () => {
-    const client = scripted({ [LIST]: [ANSWERED], [FERRETS]: [], [REGISTER]: ANSWERED });
+    const client = scripted({
+      [LIST]: [ANSWERED],
+      [FERRETS]: [],
+      [FOLDERS]: folderListing('/home/k/scratch'),
+      [REGISTER]: ANSWERED,
+    });
     const mounted = await mount(page(client));
     await settled(mounted, c => c.querySelector('h3') !== null, 'the registered row');
 
     await registerByHand(mounted, '/home/k/scratch');
     await settled(mounted, c => c.querySelector('[data-project-registered]') !== null, 'the notice');
 
-    expect(must(mounted.container.querySelector('[role="status"]'), 'the notice').textContent).toContain(
+    expect(must(mounted.container.querySelector('[data-project-registered]'), 'the notice').textContent).toContain(
       'Already registered',
     );
     await mounted.unmount();
@@ -197,6 +212,7 @@ describe('ProjectsPage', () => {
     const client = scripted({
       [LIST]: [],
       [FERRETS]: [],
+      [FOLDERS]: folderListing('/work/a/b'),
       [REGISTER]: refusal(422, 'ENOENT: no such file or directory', 'project_registration_failed'),
     });
     const mounted = await mount(page(client));
@@ -207,13 +223,19 @@ describe('ProjectsPage', () => {
       [...mounted.container.querySelectorAll('[role="alert"]')].map(node => node.textContent ?? '');
     await settled(mounted, () => alerts().some(text => text.includes('ENOENT')), 'the refusal');
 
-    expect(mounted.container.querySelector('form')).not.toBeNull();
-    expect(pathField(mounted).value).toBe('/work/a/b');
+    // The flow stays on the name step with the choice intact, so nothing has to be picked again.
+    expect(mounted.container.querySelector('[data-create-step="name"]')).not.toBeNull();
+    expect(mounted.container.textContent).toContain('Your entries are still here');
     await mounted.unmount();
   });
 
   it('dismisses a settled notice', async () => {
-    const client = scripted({ [LIST]: [], [FERRETS]: [], [REGISTER]: ANSWERED });
+    const client = scripted({
+      [LIST]: [],
+      [FERRETS]: [],
+      [FOLDERS]: folderListing('/home/k/scratch'),
+      [REGISTER]: ANSWERED,
+    });
     const mounted = await mount(page(client));
     await settled(mounted, c => c.querySelector('[data-registered-state="empty"]') !== null, 'the empty registry');
 
@@ -233,6 +255,7 @@ describe('ProjectsPage', () => {
     const workstation = scripted({
       [LIST]: [PROJECT],
       [FERRETS]: [],
+      [FOLDERS]: folderListing('/home/k/scratch'),
       [REGISTER]: async () => {
         await held;
         return ANSWERED;
@@ -265,6 +288,7 @@ describe('ProjectsPage', () => {
     const before = scripted({
       [LIST]: [],
       [FERRETS]: [],
+      [FOLDERS]: folderListing('/home/k/scratch'),
       [REGISTER]: async () => {
         await held;
         return refusal(401, 'the old credential was revoked');
@@ -284,8 +308,8 @@ describe('ProjectsPage', () => {
 
     const alerts = [...mounted.container.querySelectorAll('[role="alert"]')].map(node => node.textContent ?? '');
     expect(alerts.some(text => text.includes('the old credential was revoked'))).toBe(false);
-    // The draft is kept: "this app can no longer tell you what happened" is not a reason to delete what was typed.
-    expect(pathField(mounted).value).toBe('/home/k/scratch');
+    // The draft is kept: "this app can no longer tell you what happened" is not a reason to delete what was chosen.
+    expect(chosenFolder(mounted)).toBe('/home/k/scratch');
     await mounted.unmount();
   });
 
