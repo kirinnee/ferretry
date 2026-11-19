@@ -3,7 +3,8 @@
  *
  * Use, never read. This class never holds a token: it names an account id and an argv to the seam, and the seam puts
  * the token in that one child's environment, in an empty private folder, and masks what comes back (B1, `service.run`).
- * What this adds on top of the seam:
+ * The seam bounds each stream (4 MiB, read through the kernel's capped reader, then masked), so there is nothing to
+ * cut again here. What this adds on top of the seam:
  * - the account comes from the folder (B4's one resolver) and, for a ferret, only from the ferret's OWN folder, so a
  *   ferret cannot claim a neighbouring project's account by naming its path;
  * - the repository comes from the project's record (B5's `repos[].remote`: text the scan wrote, not a file an agent can
@@ -20,7 +21,6 @@ import type { ProjectInfo } from '@ferretry/plugin-projects/contract';
 import {
   GIT_ACCOUNT_AUDIT,
   GIT_ACCOUNT_CODES,
-  MAX_GH_OUTPUT_BYTES,
   type GhRunAnswer,
   type GhRunRequest,
   type GitAccount,
@@ -33,6 +33,8 @@ const PLAIN_RUN_MS = 120_000;
 /** The seam clamps a run to 5 minutes; a followed workflow gets all of it. */
 const FOLLOW_RUN_MS = 300_000;
 const MAX_RUNS_PER_CALLER = 4;
+/** The longest refusal a `GhRunAnswer` carries (`GhRunAnswerSchema`). */
+const MAX_REFUSAL_LENGTH = 1_000;
 
 const NO_PROJECT =
   "This folder is in no project linked to a GitHub account, so Ferretry's gh has no account here. Link one on the project page.";
@@ -60,9 +62,6 @@ const plain = (path: string): string => (path.length > 1 ? path.replace(/\/+$/u,
 const inside = (root: string, folder: string): boolean =>
   root === '/' || folder === root || folder.startsWith(`${root}/`);
 const clean = (path: string): boolean => !path.split('/').some(part => part === '..' || part === '.');
-
-const capped = (text: string): string =>
-  text.length > MAX_GH_OUTPUT_BYTES ? `${text.slice(0, MAX_GH_OUTPUT_BYTES)}\n[output cut]` : text;
 
 export class GhRunner {
   readonly #running = new Map<string, number>();
@@ -130,11 +129,18 @@ export class GhRunner {
         ...(repo === undefined ? {} : { repo }),
         ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
       });
-      return { exitCode: result.exitCode, stdout: capped(result.stdout), stderr: capped(result.stderr) };
+      return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
     } catch (error) {
-      // The seam under this one is narrower than this policy and says so in a sentence: pass that sentence on.
+      // The seam under this one is narrower than this policy and says so in a sentence: pass that sentence on, cut to
+      // what an answer may carry (a long unknown flag makes a long sentence, and an over-long one would be a 500).
       if (error instanceof ApiError && error.code === GIT_ACCOUNT_CODES.invalidRequest && error.status === 403)
-        return refused(error.message, { account: account.id });
+        return refused(error.message.slice(0, MAX_REFUSAL_LENGTH), { account: account.id });
+      // Any other failure is still a call somebody made as that account: one record (no argument, body or folder), then the error.
+      await this.#record(caller, 'failed', {
+        command: verdict.command,
+        account: account.id,
+        ...(repo === undefined ? {} : { repo }),
+      });
       throw error;
     } finally {
       const left = (this.#running.get(key) ?? 1) - 1;

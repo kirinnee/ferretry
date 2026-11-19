@@ -2175,7 +2175,7 @@ account's token"). The token is never in the ferret's environment, never in a re
   the project's first account. Outside a project linked to an account the call is refused with "This folder is in no
   project linked to a GitHub account… Link one on the project page." **The host's own `gh` is never a fallback.**
 - **A ferret may only name its own folder (or one below it)**, checked against the folder Ferrets recorded for that
-  ferret (its real path), so it cannot borrow a neighbouring project's account by naming that path. A ferret may not
+  ferret (its real path), so it cannot pick a neighbouring project's account by naming that path (but see the GAP below on a broad folder). A ferret may not
   pass `account`; the owner's own shell may (by login or id).
 - **The repository is the project's record** (`repos[].remote`, written by Projects' scan, `github.com` only), passed as
   `-R OWNER/NAME` unless the argv already names one, and filled into a `gh api` endpoint's `{owner}`/`{repo}`. **No file
@@ -2204,14 +2204,17 @@ every call that passes here must pass there too, so **the effective surface is t
 on when it refuses. B9 widens nothing under it; widening it needs a lead decision and a security review of its own.
 
 Bounds: 120 s per run (a followed run, `run watch` or `pr checks --watch`, the seam's 300 s ceiling); at most 4 runs at
-once per ferret; 4 MiB per stream. Governance: a ferret on its own session credential, or a paired device with
+once per ferret; **4 MiB per stream, enforced where the output is read**: the seam runs `gh` through the kernel's
+capped reader (`spawn.runBytes`, 4 MiB each for stdout and stderr), so a huge `run view --log`, `pr diff` or
+`api --paginate` never sits whole in the daemon's memory. A stream that was cut ends with `[output cut]`, and the scrub
+runs on the kept text AND drops any tail that could be the start of a token (the account's own, or a `gh?_…` /
+`github_pat_…` shape the cut left too short to match), so a token split at the cut never reaches the caller. Governance: a ferret on its own session credential, or a paired device with
 `secrets.use`. **Audit** `git-account.gh.run` (also for a refusal): the account id, the command as two plain words, the
 repository, the exit code and the ferret id; no other argument, no body.
 
 **What it protects against:** a ferret printing, copying or keeping the token (`gh auth token`, `gh auth status -t`,
 `gh config get oauth_token`, `hosts.yml`: the child's config folder is empty and removed); a token in a transcript; the
-host's own `gh` sign-in being used by ferrets; a repository's own git config or hooks running with the token; a ferret
-borrowing another project's account.
+host's own `gh` sign-in being used by ferrets; a repository's own git config or hooks running with the token.
 
 **What it does NOT protect against:**
 
@@ -2222,7 +2225,14 @@ borrowing another project's account.
   known ways are closed (no extensions, aliases, editor, browser or pager; no `git` in the agent's folder; the daemon's
   `PATH`), but `gh` is a large program and a new flag on an allowed command is not checked here.
 - **An agent reading the state home.** Like every holder here: a ferret's own shell runs as the same user.
-- **GAP: the scope is the whole account.** OAuth apps cannot narrow `repo` to some repositories.
+- **GAP: the scope is the whole account.** OAuth apps cannot narrow `repo` to some repositories. So `-R OWNER/NAME`, and
+  a `gh api repos/x/y/…` endpoint, reach **any repository the account can see**, not only the project's: the project's
+  repository is only the default, never a fence.
+- **GAP: a folder decides the account, and a ferret's folder can be broad.** A ferret may name only its own work folder
+  or one below it, but a ferret whose work folder is a **parent of several projects**, or a child ferret started in
+  **another project's folder**, gets that project's account (the first account the resolver finds for the folder), the
+  same as B4's SSH. Ferretry does not claim a ferret cannot use another project's account: it claims a ferret cannot
+  pick one by naming a path outside its own folder.
 
 **GAP — what the plan wanted and the seam still refuses.** No stdin and no file slots (`--body-file`, `-F`, `--input`,
 `release upload`, `gist create` from files); no `repo create|edit|fork`, `secret`, `variable`, `label`, `cache`, `ruleset`,

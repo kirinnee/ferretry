@@ -367,6 +367,124 @@ describe('bounds', () => {
   });
 });
 
+const MAX_OUTPUT = 4 * 1024 * 1024;
+const CUT = '\n[output cut]';
+
+describe('the output is bounded where it is read, and a token split at the cut never gets through', () => {
+  const run = async (stdout: string, stderr = '') => {
+    const { root } = projectFolder();
+    const world = await boot({
+      projects: [linked(root)],
+      spawn: () => ({ exitCode: 0, signal: null, stdout, stderr }),
+    });
+    const answer = await world.gh(['run', 'view', '9', '--log'], root);
+    expect(answer.status).toBe(200);
+    return { world, body: answer.json<{ exitCode: number | null; stdout: string; stderr: string }>() };
+  };
+
+  test('the child is read through the capped reader, 4 MiB a stream', async () => {
+    const { world } = await run('ok');
+    const options = world.calls[0]?.options as { maxStdoutBytes?: number; maxStderrBytes?: number };
+    expect(options.maxStdoutBytes).toBe(MAX_OUTPUT);
+    expect(options.maxStderrBytes).toBe(MAX_OUTPUT);
+  });
+
+  test('a child that writes more than 4 MiB answers at most 4 MiB and says it was cut', async () => {
+    const { body } = await run('a'.repeat(MAX_OUTPUT + 5_000));
+    expect(body.stdout).toBe(`${'a'.repeat(MAX_OUTPUT)}${CUT}`);
+    expect(body.stdout.length).toBeLessThanOrEqual(MAX_OUTPUT + CUT.length);
+  });
+
+  test('output that fits is not touched, and has no cut note', async () => {
+    const { body } = await run('a'.repeat(MAX_OUTPUT), 'warn');
+    expect(body).toEqual({ exitCode: 0, stdout: 'a'.repeat(MAX_OUTPUT), stderr: 'warn' });
+  });
+
+  test("the account's own token cut at any point inside it never appears, whole or in part", async () => {
+    for (let kept = 1; kept < FAKE_TOKEN.length; kept++) {
+      const { body } = await run(`${'a'.repeat(MAX_OUTPUT - kept)}${FAKE_TOKEN}`);
+      // Short of 16 characters after the prefix it is dropped; from there the pattern masks it. Never a character of it.
+      const rest = body.stdout.replace(/^a+/u, '');
+      expect(rest === CUT || rest === `[redacted]${CUT}`).toBe(true);
+      expect(body.stdout.startsWith('a'.repeat(MAX_OUTPUT - kept))).toBe(true);
+    }
+  });
+
+  test('a GitHub-shaped token the cut left too short for the pattern to see is dropped too', async () => {
+    const shapes = [
+      'ghp_',
+      'ghs_abc',
+      'ghu_0123456789abcde',
+      'github_pat_',
+      'github_pat_0123456789abcdefghi',
+      'gh',
+      'g',
+      'githu',
+    ];
+    for (const shape of shapes) {
+      const { body } = await run(`${'a'.repeat(MAX_OUTPUT - shape.length)}${shape}zzzz`);
+      expect(body.stdout).toBe(`${'a'.repeat(MAX_OUTPUT - shape.length)}${CUT}`);
+    }
+  });
+
+  test('a whole token inside the kept text is masked, and what the cut left after it is kept', async () => {
+    const { body } = await run(`${FAKE_TOKEN} ghp_${'Z'.repeat(30)} ${'a'.repeat(MAX_OUTPUT)}`);
+    expect(body.stdout.startsWith('[redacted] [redacted] aaaa')).toBe(true);
+    expect(body.stdout.endsWith(CUT)).toBe(true);
+    expect(body.stdout).not.toContain('gho_');
+    expect(body.stdout).not.toContain('ZZZZ');
+  });
+
+  test('a child ended by a signal has no exit code', async () => {
+    const { root } = projectFolder();
+    const world = await boot({
+      projects: [linked(root)],
+      spawn: () => ({ exitCode: null, signal: 'SIGTERM', stdout: '', stderr: '' }),
+    });
+    const answer = await world.gh(['pr', 'list'], root);
+    expect(answer.json()).toEqual({ exitCode: null, stdout: '', stderr: '' });
+  });
+});
+
+describe('a refusal is always an answer, and a failure is always recorded', () => {
+  test('the seam refusing a very long unknown flag is passed on cut to 1,000 characters, not a 500', async () => {
+    const { root } = projectFolder();
+    const world = await boot({ projects: [linked(root)] });
+    const answer = await world.gh(['api', `--${'x'.repeat(3_000)}`, 'repos/acme/app'], root);
+    expect(answer.status).toBe(200);
+    const refused = (answer.json() as { refused: string }).refused;
+    expect(refused.length).toBeGreaterThan(0);
+    expect(refused.length).toBeLessThanOrEqual(1_000);
+    expect(refused.startsWith('gh is not run that way: --xxx')).toBe(true);
+    expect(world.calls).toHaveLength(0);
+    expect(world.gate.audits).toHaveLength(1);
+    expect((world.gate.audits[0] as { outcome: string }).outcome).toBe('refused');
+  });
+
+  test('a spawn that throws is a 500 with one failed record: no argument, no folder, no body', async () => {
+    const { root } = projectFolder();
+    const world = await boot({
+      projects: [linked(root)],
+      spawn: () => {
+        throw new Error(`could not start ${FAKE_TOKEN}`);
+      },
+    });
+    const answer = await world.gh(['pr', 'list', '--search', 'private query'], root);
+    expect(answer.status).toBe(500);
+    expect(world.gate.audits).toHaveLength(1);
+    const record = world.gate.audits[0] as { outcome: string; subject?: string; detail?: Record<string, unknown> };
+    expect(record.outcome).toBe('failed');
+    expect(record.subject).toBe(ACCOUNT);
+    expect(record.detail).toEqual({ command: 'pr list', repo: 'acme/app' });
+    expect(JSON.stringify(world.gate.audits)).not.toContain('private query');
+    expect(JSON.stringify(world.gate.audits)).not.toContain(root);
+    expect(answer.body).not.toContain(FAKE_TOKEN);
+    // The call is no longer counted as running.
+    const again = await world.gh(['pr', 'list'], root);
+    expect(again.status).toBe(500);
+  });
+});
+
 describe('wire shapes', () => {
   test('no field of the request or the answer could hold a token, and both are strict', () => {
     for (const schema of [GhRunRequestSchema, GhRunAnswerSchema]) {
