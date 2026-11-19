@@ -6,7 +6,7 @@
  * to the catalogue is measured without touching this file.
  *
  * Every element the test measures says so: `data-spec="text|edge|focus"`. A `text` element is read against the colour it
- * sits on, an `edge` is a control's own border against what is behind it, a `focus` element is Tab-focused and its ring read.
+ * sits on, an `edge` is a control's own border against what is behind it, a `focus` element is reached by the real keyboard (Tab, then the arrow keys in the choice row and the menu) and its ring read; the choice cards and the menu rows are measured too, by their own classes.
  *
  *   ?style=<id>&palette=<id>&mode=<light|dark>      (the test re-sets these in place for every combination)
  */
@@ -65,7 +65,7 @@ createRoot(document.getElementById('root') as HTMLElement).render(
     <input
       aria-label="Name"
       className="kt-input"
-      data-spec="edge focus"
+      data-spec="text edge focus"
       defaultValue="Ferret name"
       style={{ maxWidth: '100%' }}
     />
@@ -98,8 +98,9 @@ createRoot(document.getElementById('root') as HTMLElement).render(
     <p style={{ marginTop: 12 }}>
       <Check aria-hidden size={16} /> <span data-spec="text">Done</span>
     </p>
+    {/* Fixed below the content (the matrix opens the page 1200px tall), so on a phone the menu never covers the text. */}
     <ContextMenu
-      anchor={{ x: 16, y: 560 }}
+      anchor={{ x: 16, y: 840 }}
       ariaLabel="Ferret actions"
       items={[
         { key: 'resume', label: 'Resume', onSelect: noop },
