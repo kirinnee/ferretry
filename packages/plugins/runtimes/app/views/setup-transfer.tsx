@@ -4,6 +4,7 @@
  * where the person picks "Start fresh" or "Copy from another machine" (two cards, never full width).
  */
 
+import { ChoiceCards } from '@ferretry/app';
 import type { AppComponent, SettingsProps } from '@ferretry/kernel/manifest';
 import { useState } from 'react';
 import { CopySettings } from '../features/fleet/setup/copy-settings.tsx';
@@ -12,7 +13,6 @@ import { useAccountChanges } from '../features/fleet/shell/apply-change-panel.ts
 import type { MachineTabProps } from '../features/fleet/shell/machine-tab.ts';
 import type { LiveRuntimesClient } from '../lib/client.ts';
 import { machineSettingsView } from './machine-settings-host.tsx';
-import { StartCards } from './start-cards.tsx';
 
 function Heading({ children }: { readonly children: string }) {
   return <h3 className="m-0 text-row font-semibold text-fg">{children}</h3>;
@@ -50,10 +50,10 @@ function StartStep({ client, machineName, machine }: MachineTabProps) {
   };
   return (
     <div className="flex min-w-0 flex-col gap-4" data-onboarding-step-body="start">
-      <StartCards
+      <ChoiceCards
         label="Start from"
         value={start}
-        onChange={setStart}
+        onChange={id => setStart(id === 'clone' ? 'clone' : 'fresh')}
         options={[
           { id: 'fresh', title: 'Start fresh', line: 'Walk through each step.' },
           {

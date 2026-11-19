@@ -651,18 +651,18 @@ describe('the machine-setup views the half builds (the first run’s steps and E
     const root = await draw<PanelProps>(
       half?.panels['onboarding-start'],
       { subject: 'runtimes.start' } as PanelProps,
-      r => r.querySelector('[data-start-card]') !== null,
+      r => r.querySelector('[data-choice]') !== null,
       'the Start step drew its two cards',
     );
-    const cards = [...root.querySelectorAll('[data-start-card]')];
-    expect(cards.map(card => card.getAttribute('data-start-card'))).toEqual(['fresh', 'clone']);
-    expect(cards.map(card => card.getAttribute('data-chosen'))).toEqual(['true', 'false']);
+    const cards = [...root.querySelectorAll('[data-choice]')];
+    expect(cards.map(card => card.getAttribute('data-choice'))).toEqual(['fresh', 'clone']);
+    expect(cards.map(card => card.getAttribute('data-selected'))).toEqual(['true', 'false']);
     // Nothing animates for the card chosen by default; only a card the person chooses plays it.
-    expect(root.querySelector('[data-just-chosen]')).toBeNull();
-    await click(must(root.querySelector('[data-start-card="clone"] input'), 'the copy card'));
-    expect(root.querySelector('[data-start-card="clone"]')?.getAttribute('data-chosen')).toBe('true');
-    expect(root.querySelector('[data-start-card="fresh"]')?.getAttribute('data-chosen')).toBe('false');
-    expect(root.querySelector('[data-just-chosen]')?.getAttribute('data-start-card')).toBe('clone');
+    expect(root.querySelector('[data-pulse="true"]')).toBeNull();
+    await click(must(root.querySelector('[data-choice="clone"] input'), 'the copy card'));
+    expect(root.querySelector('[data-choice="clone"]')?.getAttribute('data-selected')).toBe('true');
+    expect(root.querySelector('[data-choice="fresh"]')?.getAttribute('data-selected')).toBe('false');
+    expect(root.querySelector('[data-pulse="true"]')?.getAttribute('data-choice')).toBe('clone');
     // The step draws only for its own subject.
     await view?.unmount();
     view = null;

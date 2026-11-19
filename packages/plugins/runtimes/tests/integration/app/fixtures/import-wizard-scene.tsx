@@ -10,6 +10,7 @@
  *   ?view=confirm    the machine wants a passkey before it shows the setup (a quiet read is refused, nothing prompts)
  *   ?view=changed    a re-import: CLAUDE.md and a skill changed since the last time (ticked by default)
  *   ?view=signin     installed, not signed in
+ *   ?view=retry      a retry on an import that already made its runtime: no new name is asked for
  *   ?theme=<family>-<mode>
  */
 import { createRoot } from 'react-dom/client';
@@ -51,6 +52,11 @@ const scans: Readonly<Record<string, SetupScan>> = {
       { reference: 'skills/review', sources: ['~/.claude/skills/review'] },
     ],
   },
+  retry: scanOf({
+    claude: CLAUDE_FULL,
+    codex: 'absent',
+    duplicates: [{ harness: 'claude-code', existing: 'claude-default', suggested: 'claude-default-2' }],
+  }),
   signin: scanOf({ claude: { ...CLAUDE_FULL, account: { state: 'not-signed-in' } }, codex: 'absent' }),
 };
 

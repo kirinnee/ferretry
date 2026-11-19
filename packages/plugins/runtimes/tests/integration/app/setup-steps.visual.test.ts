@@ -151,7 +151,7 @@ describe('the machine-setup steps', () => {
         await tab.waitForSelector('[data-onboarding-step-body="start"]');
         if (shotsDir !== '')
           await tab.screenshot({ path: join(shotsDir, `start-from-fresh-${viewport.name}-${mode}.png`) });
-        await tab.locator('[data-start-card="clone"]').click();
+        await tab.locator('[data-choice="clone"]').click();
         await tab.waitForSelector('[data-copy-no-sources]');
         // The choose animation plays once; the shot is the settled card, never a frame in the middle of it.
         await tab.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished)));
