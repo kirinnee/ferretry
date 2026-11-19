@@ -190,6 +190,7 @@ const SWEEP: readonly Entry[] = [
   ['git-accounts', 'keys.json', false],
   ['git-accounts', 'tokens.json', false],
   ['pulls', 'cache', true],
+  ['pulls', 'watch', true],
   ['catalogs', 'link-keys.json', false],
   ['catalogs', 'member-passkeys.json', false],
   ['catalogs', 'member-unlocks.json', false],
