@@ -36,15 +36,6 @@
   right: 6px;
   top: 6px;
 }
-.fy-ls-frame[data-side='right'] {
-  flex-direction: row-reverse;
-}
-.fy-ls-frame[data-side='top'] {
-  flex-direction: column;
-}
-.fy-ls-frame[data-side='bottom'] {
-  flex-direction: column-reverse;
-}
 /* A phone: a narrow, tall frame in the middle. */
 .fy-ls-frame[data-device='phone'] {
   border-radius: 10px;
@@ -64,7 +55,7 @@
   width: 26%;
 }
 
-/* ---- the menu ------------------------------------------------------------- */
+/* ---- the menu: the left drawer, a phone's menu button, the bar of places -- */
 .fy-ls-nav {
   background: var(--surface-2);
   border: 0 solid var(--border);
@@ -73,39 +64,47 @@
   gap: var(--ls-gap);
   padding: 4px;
 }
-.fy-ls-nav[data-side='left'],
-.fy-ls-nav[data-side='right'] {
+.fy-ls-drawer {
+  border-right-width: 1px;
   flex-direction: column;
+}
+.fy-ls-drawer[data-form='rail'] {
   width: 18%;
 }
-.fy-ls-nav[data-side='left'][data-style='bar'],
-.fy-ls-nav[data-side='right'][data-style='bar'],
-.fy-ls-nav[data-side='left'][data-style='list'],
-.fy-ls-nav[data-side='right'][data-style='list'] {
+.fy-ls-drawer[data-form='open'] {
   width: 34%;
 }
-.fy-ls-nav[data-side='left'] {
-  border-right-width: 1px;
-}
-.fy-ls-nav[data-side='right'] {
-  border-left-width: 1px;
-}
-.fy-ls-nav[data-side='top'],
-.fy-ls-nav[data-side='bottom'] {
+/* The bar of places: names only, equal cells, under the page. */
+.fy-ls-bottom {
   align-items: center;
+  border-top-width: 1px;
   flex-direction: row;
   height: 17px;
+  justify-content: space-around;
   padding-block: 3px;
-}
-.fy-ls-nav[data-side='top'] {
-  border-bottom-width: 1px;
-}
-.fy-ls-nav[data-side='bottom'] {
-  border-top-width: 1px;
 }
 .fy-ls-nav[data-lit] {
   background: var(--accent-soft);
   border-color: var(--accent);
+}
+/* A phone's menu button: the drawer is shut behind it. */
+.fy-ls-menu {
+  align-self: flex-start;
+  background:
+    linear-gradient(var(--ls-ink) 0 0) 0 0 / 100% 1px no-repeat,
+    linear-gradient(var(--ls-ink) 0 0) 0 50% / 100% 1px no-repeat,
+    linear-gradient(var(--ls-ink) 0 0) 0 100% / 100% 1px no-repeat;
+  border-radius: 2px;
+  flex: none;
+  height: 7px;
+  margin: 5px 0 0 5px;
+  width: 9px;
+}
+.fy-ls-menu[data-lit] {
+  background:
+    linear-gradient(var(--accent) 0 0) 0 0 / 100% 1.5px no-repeat,
+    linear-gradient(var(--accent) 0 0) 0 50% / 100% 1.5px no-repeat,
+    linear-gradient(var(--accent) 0 0) 0 100% / 100% 1.5px no-repeat;
 }
 
 .fy-ls-item {
@@ -113,24 +112,14 @@
   border-radius: 3px;
   display: flex;
   gap: 3px;
-  min-height: 7px;
+  min-height: 9px;
   min-width: 0;
   padding: 1px 2px;
 }
-.fy-ls-nav[data-side='left'] .fy-ls-item,
-.fy-ls-nav[data-side='right'] .fy-ls-item {
-  min-height: 9px;
-}
-.fy-ls-nav[data-side='top'] .fy-ls-item,
-.fy-ls-nav[data-side='bottom'] .fy-ls-item {
-  flex: none;
-  width: 8px;
-}
-.fy-ls-nav[data-side='top'][data-style='bar'] .fy-ls-item,
-.fy-ls-nav[data-side='bottom'][data-style='bar'] .fy-ls-item,
-.fy-ls-nav[data-side='top'][data-style='list'] .fy-ls-item,
-.fy-ls-nav[data-side='bottom'][data-style='list'] .fy-ls-item {
-  width: 22px;
+.fy-ls-bottom .fy-ls-item {
+  flex: 1 1 0;
+  justify-content: center;
+  min-height: 7px;
 }
 .fy-ls-item[data-on] {
   background: color-mix(in srgb, var(--ls-ink) 55%, transparent);
@@ -155,41 +144,23 @@
 .fy-ls-nav[data-lit] .fy-ls-ico {
   background: var(--accent);
 }
-/* A rail is icons only; a list is names only; a bar is both. */
-.fy-ls-nav[data-style='rail'] .fy-ls-lbl,
-.fy-ls-nav[data-style='list'] .fy-ls-ico {
-  display: none;
+.fy-ls-nav[data-lit] .fy-ls-lbl {
+  background: color-mix(in srgb, var(--accent) 45%, var(--surface));
 }
-.fy-ls-nav[data-style='rail'] .fy-ls-item {
+/* A rail is icons only. */
+.fy-ls-drawer[data-form='rail'] .fy-ls-item {
   justify-content: center;
-}
-
-/* A phone frame is ~70px wide and the narrow one of a pair ~38px: the menu gives up padding and the icon a pixel, so a rail
-   is wide enough to hold its icon whole. */
-.fy-ls-frame[data-device='phone'] .fy-ls-nav,
-.fy-ls-frame[data-device='narrow'] .fy-ls-nav {
-  padding: 4px 2px;
-}
-.fy-ls-frame[data-device='phone'] .fy-ls-nav[data-side='left'][data-style='rail'],
-.fy-ls-frame[data-device='phone'] .fy-ls-nav[data-side='right'][data-style='rail'] {
-  width: 24%;
-}
-.fy-ls-frame[data-device='narrow'] .fy-ls-nav[data-side='left'],
-.fy-ls-frame[data-device='narrow'] .fy-ls-nav[data-side='right'] {
-  width: 30%;
-}
-.fy-ls-frame[data-device='phone'] .fy-ls-item,
-.fy-ls-frame[data-device='narrow'] .fy-ls-item {
-  padding: 1px 0;
-}
-.fy-ls-frame[data-device='phone'] .fy-ls-ico,
-.fy-ls-frame[data-device='narrow'] .fy-ls-ico {
-  height: 4px;
-  width: 4px;
 }
 
 /* ---- the page ------------------------------------------------------------- */
 .fy-ls-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.fy-ls-page {
   display: flex;
   flex: 1;
   min-height: 0;
@@ -398,4 +369,18 @@
   .fy-sp[data-sp-state='paused'] .fy-ls-nrow::after {
     animation-play-state: paused;
   }
+}
+
+/* ---- the caption under a frame: what a word does not change --------------- */
+.fy-ls-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 100%;
+  width: 160px;
+}
+.fy-ls-caption {
+  color: var(--muted);
+  font-size: 0.6875rem;
+  line-height: 1.25;
 }

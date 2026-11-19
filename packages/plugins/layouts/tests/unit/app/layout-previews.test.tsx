@@ -7,7 +7,7 @@ import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { LayoutPreview } from '../../../app/features/layout/previews/layout-preview.tsx';
 import { NavListPreview } from '../../../app/features/layout/previews/nav-list-preview.tsx';
-import { stateFor, wordBefore } from '../../../app/features/layout/previews/scene.ts';
+import { captionFor, stateFor, wordBefore } from '../../../app/features/layout/previews/scene.ts';
 import { type ChoiceSetting, LAYOUT_SETTINGS } from '../../../app/lib/layout-model.ts';
 
 const choices = LAYOUT_SETTINGS.filter((setting): setting is ChoiceSetting => setting.kind === 'choice');
@@ -18,13 +18,39 @@ const choice = (path: ChoiceSetting['path']): ChoiceSetting =>
   );
 
 describe('the scene for a layout key', () => {
-  test('a menu side puts the menu there and lights the menu', () => {
-    for (const word of ['left', 'right', 'top', 'bottom'] as const)
-      expect(stateFor('nav.side', word)).toMatchObject({ side: word, lit: 'nav', column: false, device: 'wide' });
+  test('left, right and top draw the one left drawer, as the shell does; bottom adds the bar of places', () => {
+    const left = stateFor('nav.side', 'left');
+    expect(left).toMatchObject({ drawer: 'rail', bottom: false, lit: 'nav', column: false, device: 'wide' });
+    expect(stateFor('nav.side', 'right')).toEqual(left);
+    expect(stateFor('nav.side', 'top')).toEqual(left);
+    expect(stateFor('nav.side', 'bottom')).toMatchObject({ drawer: 'rail', bottom: true, lit: 'nav' });
   });
 
-  test('a menu style changes only the style', () => {
-    expect(stateFor('nav.style', 'list')).toMatchObject({ style: 'list', side: 'left', lit: 'nav' });
+  test('a rail starts the drawer as icons; bar and list draw it open, the same as each other', () => {
+    expect(stateFor('nav.style', 'rail')).toMatchObject({ drawer: 'rail', bottom: false, lit: 'nav' });
+    expect(stateFor('nav.style', 'bar')).toMatchObject({ drawer: 'open', bottom: false, lit: 'nav' });
+    expect(stateFor('nav.style', 'list')).toEqual(stateFor('nav.style', 'bar'));
+  });
+
+  test('a phone has no drawer on screen: its style draws one frame, and only bottom adds the bar', () => {
+    for (const word of ['rail', 'bar', 'list'])
+      expect(stateFor('phone.nav.style', word)).toEqual(stateFor('phone.nav.style', 'rail'));
+    expect(stateFor('phone.nav.style', 'list')).toMatchObject({ device: 'phone', drawer: 'none', bottom: false });
+    expect(stateFor('phone.nav.side', 'right')).toEqual(stateFor('phone.nav.side', 'left'));
+    expect(stateFor('phone.nav.side', 'bottom')).toMatchObject({ drawer: 'none', bottom: true, device: 'phone' });
+  });
+
+  test('a caption says so where the shell draws a word the same as another, and only there', () => {
+    expect(captionFor('nav.side', 'right')).toContain('same as Left');
+    expect(captionFor('nav.side', 'top')).toContain('same as Left');
+    expect(captionFor('nav.side', 'left')).toBeUndefined();
+    expect(captionFor('nav.side', 'bottom')).toBeUndefined();
+    expect(captionFor('nav.style', 'bar')).toContain('same as List');
+    expect(captionFor('nav.style', 'list')).toContain('same as Bar');
+    expect(captionFor('nav.style', 'rail')).toBeUndefined();
+    expect(captionFor('phone.nav.style', 'rail')).toContain('phone');
+    expect(captionFor('phone.nav.side', 'top')).toContain('same as Left');
+    expect(captionFor('density', 'compact')).toBeUndefined();
   });
 
   test('the second column is drawn for wide-only and always on a wide screen, and for always alone on a phone', () => {
@@ -41,7 +67,7 @@ describe('the scene for a layout key', () => {
   });
 
   test('a word it does not know draws the key neutral frame instead of throwing', () => {
-    expect(stateFor('nav.side', 'sideways')).toMatchObject({ side: 'left' });
+    expect(stateFor('nav.side', 'sideways')).toMatchObject({ drawer: 'rail', bottom: false });
   });
 
   test('the loop starts from the word before, wrapping round', () => {
@@ -61,8 +87,14 @@ describe('the previews', () => {
 
   const frame = (container: HTMLElement): HTMLElement =>
     must(container.querySelector('[data-setting-preview]'), 'the frame');
-  const sides = (container: HTMLElement): string[] =>
-    [...container.querySelectorAll('.fy-ls-nav')].map(node => node.getAttribute('data-side') ?? '');
+  /** What each layer draws of the menu, in layer order: the drawer's form and whether the bar of places is there. */
+  const menus = (container: HTMLElement): string[] =>
+    [...container.querySelectorAll('.fy-ls-scene')].map(
+      scene =>
+        `${scene.querySelector('.fy-ls-drawer')?.getAttribute('data-form') ?? 'none'}${scene.querySelector('.fy-ls-bottom') === null ? '' : '+bottom'}`,
+    );
+  const caption = (container: HTMLElement): string | undefined =>
+    container.querySelector('[data-ls-caption]')?.textContent ?? undefined;
 
   test('every choice key draws, decorative, with its word in the label and one lit part per frame', async () => {
     for (const setting of choices)
@@ -89,23 +121,41 @@ describe('the previews', () => {
 
   test('it plays the word before then the word now, and shows only the word now when motion is reduced', async () => {
     const setting = choice('nav.side');
-    mounted = await mount(<LayoutPreview setting={setting} value="right" />);
+    mounted = await mount(<LayoutPreview setting={setting} value="bottom" />);
     expect(frame(mounted.container).getAttribute('data-sp-state')).toBe('playing');
-    expect(sides(mounted.container)).toEqual(['left', 'right']);
+    // The word before (top, the same as left) then the word now (the bar of places is added).
+    expect(menus(mounted.container)).toEqual(['rail', 'rail+bottom']);
     await mounted.unmount();
     document.documentElement.dataset.motion = 'reduced';
-    mounted = await mount(<LayoutPreview setting={setting} value="right" />);
+    mounted = await mount(<LayoutPreview setting={setting} value="bottom" />);
     expect(frame(mounted.container).getAttribute('data-sp-state')).toBe('still');
-    expect(sides(mounted.container)).toEqual(['right']);
+    expect(menus(mounted.container)).toEqual(['rail+bottom']);
   });
 
   test('choosing another word replays from the word that was showing', async () => {
     const setting = choice('nav.side');
     mounted = await mount(<LayoutPreview setting={setting} value="left" />);
-    expect(sides(mounted.container)).toEqual(['bottom', 'left']);
-    await mounted.render(<LayoutPreview setting={setting} value="top" />);
+    expect(menus(mounted.container)).toEqual(['rail+bottom', 'rail']);
+    await mounted.render(<LayoutPreview setting={setting} value="bottom" />);
     await interact(() => undefined);
-    expect(sides(mounted.container)).toEqual(['left', 'top']);
+    expect(menus(mounted.container)).toEqual(['rail', 'rail+bottom']);
+  });
+
+  test('a word the shell draws the same as another says so under its frame', async () => {
+    mounted = await mount(<LayoutPreview setting={choice('nav.side')} value="right" />);
+    expect(caption(mounted.container)).toContain('same as Left');
+    expect(frame(mounted.container).getAttribute('aria-hidden')).toBe('true');
+    await mounted.unmount();
+    mounted = await mount(<LayoutPreview setting={choice('nav.side')} value="left" />);
+    expect(caption(mounted.container)).toBeUndefined();
+  });
+
+  test('a phone frame draws a menu button where a wide one draws its drawer', async () => {
+    mounted = await mount(<LayoutPreview setting={choice('phone.nav.side')} value="bottom" />);
+    const after = must(mounted.container.querySelector('.fy-sp__layer--after'), 'the final layer');
+    expect(after.querySelectorAll('.fy-ls-drawer').length).toBe(0);
+    expect(after.querySelectorAll('.fy-ls-menu').length).toBe(1);
+    expect(after.querySelectorAll('.fy-ls-bottom').length).toBe(1);
   });
 
   test('a pair of frames is drawn for the second column on a wide screen', async () => {

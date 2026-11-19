@@ -130,8 +130,9 @@ describe('the layout previews', () => {
           const preview = previewOf(tab, row).first();
           await preview.scrollIntoViewIfNeeded();
           const slug = row.toLowerCase().replaceAll(' ', '-');
-          // The choice rows cross-fade between 36% and 48% of the loop; the list slides between 18% and 42%.
-          const middle = row === 'Navigation items' ? 0.3 : 0.42;
+          // The choice rows hold the first frame until 48%, then the shared crossfade brings the second one in until 54%
+          // (setting-preview.css `fy-sp-after`): 51% is the middle of that fade. The list slides between 18% and 42%.
+          const middle = row === 'Navigation items' ? 0.3 : 0.51;
           for (const [frame, at] of [
             ['f1', 0.05],
             ['f2', middle],
