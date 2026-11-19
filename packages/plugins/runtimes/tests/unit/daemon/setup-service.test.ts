@@ -4402,3 +4402,119 @@ describe('the setup.import executor adds the harness env to the login the apply 
     should(fake.asked).eql([]);
   });
 });
+
+describe('a retried import reuses what it filed', () => {
+  const applyFailsAfterFiling = async (w: World, change: ReturnType<typeof IMPORT>) => {
+    const apply = w.state.apply;
+    w.state.apply = async () => {
+      throw new Error('the manifest could not be written');
+    };
+    await w.service.executors.setup.describe(change, MACHINE);
+    await catalogRefusal(w.service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
+    w.state.apply = apply;
+  };
+
+  it('reuses the key an accepted MCP update filed in a failed import', async () => {
+    const w = world();
+    const { service, state, applied, secrets } = w;
+    const scanWith = (command: string, value: string): readonly HostHarnessScan[] => [
+      claudeScan({
+        mcp: {
+          kind: 'text',
+          source: '/person/.claude.json',
+          text: JSON.stringify({ mcpServers: { one: { command, env: { GITHUB_TOKEN: value } } } }),
+          bytes: 200,
+        },
+      }),
+      codexScan(),
+    ];
+    state.scans = scanWith('one-mcp', SECRET_VALUE);
+    await importOnce(service);
+    const written = applied[0]?.documents ?? [];
+    for (const document of written) state.assets[document.path] = document.content;
+    state.reading = configReading(modelOfWrites(written), 'rev-2');
+    state.scans = scanWith('one-mcp-v2', 'ghp_review_fixture_abcdefghijklmnopqrstuvw');
+    const offered = (await service.scan()).updates ?? [];
+    should(offered.map(update => update.reference)).eql(['mcp/one']);
+    const change = IMPORT({ acceptedUpdates: offered.map(update => update.reference) });
+    await applyFailsAfterFiling(w, change);
+    const mcpKeys = () => [...secrets.keys()].filter(name => name.startsWith('GITHUB_TOKEN'));
+    should(mcpKeys()).eql(['GITHUB_TOKEN', 'GITHUB_TOKEN_2']);
+
+    await importOnce(service, change);
+
+    should(mcpKeys()).eql(['GITHUB_TOKEN', 'GITHUB_TOKEN_2']);
+  });
+
+  it('reuses the key from a failed import when a suffix truncates a long base', async () => {
+    const w = world();
+    const { service, state, secrets } = w;
+    const variable = `CUSTOM_${'X'.repeat(49)}_API_KEY`;
+    const suffixed = `${variable.slice(0, 60)}_2`;
+    secrets.set(variable, 'owner-value-fixture');
+    state.scans = [
+      claudeScan({
+        settings: {
+          kind: 'text',
+          source: '/person/.claude/settings.json',
+          text: JSON.stringify({ env: { [variable]: SECRET_VALUE } }),
+          bytes: 200,
+        },
+      }),
+      codexScan(),
+    ];
+    const change = IMPORT();
+    await applyFailsAfterFiling(w, change);
+    should([...secrets.keys()]).eql([variable, suffixed]);
+
+    await importOnce(service, change);
+
+    should([...secrets.keys()]).eql([variable, suffixed]);
+  });
+});
+
+it('binds a reused Vault key to the login on retry', async () => {
+  type LoginEnvImport = NonNullable<FleetSetupServiceDeps['loginEnvImport']>;
+  const requests: Parameters<LoginEnvImport['import']>[0][] = [];
+  const port: LoginEnvImport = {
+    import: async request => {
+      requests.push(request);
+      return {
+        outcome: 'written',
+        added: request.minted.map(entry => entry.name),
+        kept: [],
+        skipped: [],
+        sentences: [],
+      };
+    },
+  };
+  const { service, state, secrets } = world({ overrides: { loginEnvImport: port } });
+  state.scans = [
+    claudeScan({
+      settings: {
+        kind: 'text',
+        source: '/person/.claude/settings.json',
+        text: JSON.stringify({ env: { ANTHROPIC_API_KEY: SECRET_VALUE } }),
+        bytes: 80,
+      },
+    }),
+    codexScan(),
+  ];
+  const change = IMPORT();
+  const apply = state.apply;
+  state.apply = async () => {
+    throw new Error('the manifest could not be written');
+  };
+  await service.executors.setup.describe(change, MACHINE);
+  await catalogRefusal(service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
+  should([...secrets.keys()]).eql(['ANTHROPIC_API_KEY']);
+  should(requests).length(0);
+  state.apply = apply;
+
+  const { summary } = await importOnce(service, change);
+
+  should([...secrets.keys()]).eql(['ANTHROPIC_API_KEY']);
+  should(summary).containEql('Reused from an earlier import: ANTHROPIC_API_KEY.');
+  should(requests).length(1);
+  should(requests[0]?.minted).eql([{ name: 'ANTHROPIC_API_KEY', secretName: 'ANTHROPIC_API_KEY' }]);
+});

@@ -344,8 +344,6 @@ interface Composed extends LoginEnvPlan {
   readonly documents: readonly FleetDocumentWrite[];
   /** Values to store before the apply. Never in a description, a digest or a log. */
   readonly secrets: readonly { readonly name: string; readonly value: string }[];
-  /** The keys an earlier import already filed with the same value: referenced again, not filed (names only). */
-  readonly reused?: readonly string[];
   readonly lines: readonly string[];
   readonly summary: string;
   /** What the person reviewed, so the apply runs that and nothing else. Holds no value. */
@@ -696,7 +694,13 @@ export class FleetSetupService {
       digest: text => this.deps.digest(text),
     } satisfies ImportOptions;
     // A retry after a failed apply: a key an earlier import filed with this very value is used again, not filed as `NAME_2`.
-    const probed = planImport(scans, { ...planning, existingSecrets: [] }).secrets;
+    // The keys of the updates the person accepted are filed by the apply too, so they are asked about as well.
+    const probe = planImport(scans, { ...planning, existingSecrets: [] });
+    const accepting = new Set<string>(change.acceptedUpdates ?? []);
+    const probed = uniqueByName([
+      ...probe.secrets,
+      ...probe.updates.filter(update => accepting.has(update.reference)).flatMap(update => update.secrets),
+    ]);
     const reusableSecretsHeld = await reusableSecrets(
       probed,
       existingSecrets,

@@ -3,7 +3,7 @@
  *
  * The setup import finds `env` in the host's Claude settings (and Codex's `shell_environment_policy.set`). Runtimes has
  * already filed every secret-looking value in the Vault (create-only) and hands over two lists: host text (`plain`) and
- * the variables whose secret this apply filed (`minted`, by secret NAME). This decides which of those a LOGIN carries: a
+ * the variables whose secret this import filed or reused from its own earlier run (`minted`, by secret NAME). This decides which of those a LOGIN carries: a
  * login's environment is resolved when a ferret launches, which a `${secret:}` in a settings item is not.
  *
  * Pure, and it never holds a secret: plain text that holds any reference syntax is refused (a Vault reference comes only

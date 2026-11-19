@@ -50,6 +50,7 @@ import {
 } from '../settings.ts';
 import { HARNESS_DISPLAY_NAMES, modelHarness } from './layering.ts';
 import { componentScope, scopeFits } from './scope.ts';
+import { secretNameAt } from './secret-names.ts';
 import {
   type AccountModel,
   type AccountModelDocument,
@@ -393,14 +394,8 @@ class SecretNames {
     }
     const free = (candidate: string): boolean => !this.#taken.has(candidate) && !this.#byName.has(candidate);
     let name = base;
-    let reused = false;
-    for (let index = 2; !free(name); index += 1) {
-      if (this.#taken.has(name) && this.reusable.get(name) === value) {
-        reused = true;
-        break;
-      }
-      name = `${base.slice(0, 60)}_${String(index)}`;
-    }
+    for (let index = 2; !free(name) && this.reusable.get(name) !== value; index += 1) name = secretNameAt(base, index);
+    const reused = !free(name);
     this.#byName.set(name, value);
     secrets.push({ name, value, from, ...(reused ? { reused: true as const } : {}) });
     return name;

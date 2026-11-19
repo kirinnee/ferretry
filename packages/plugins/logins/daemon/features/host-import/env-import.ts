@@ -9,7 +9,7 @@
  * - **It adds only.** A variable the login already has is kept. The write is NOT a read-modify-replace of the whole `env`:
  *   the file's etag is read FIRST and passed as `ifMatch`, so the write lands only when the disk is still what this read, and
  *   a login with an edit held for the owner is refused (a held-only key is never dropped, and a held key is never replaced).
- * - **Nothing here reads a secret or moves one.** A minted variable is a secret NAME Runtimes filed create-only; this
+ * - **Nothing here reads a secret or moves one.** A minted variable is a secret NAME Runtimes filed create-only (or confirmed it filed earlier); this
  *   writes the reference to it.
  */
 import { cap } from '@ferretry/core-gate/contract';

@@ -6,7 +6,8 @@
  *
  * - `plain`: host text, `{ name, value }`. A `${secret:…}` anywhere in it is refused with a sentence, because plain host text
  *   is not where a Vault reference comes from.
- * - `minted`: `{ name, secretName }`, built ONLY from the successful create-only puts of the apply that is calling. Logins
+ * - `minted`: `{ name, secretName }`, built ONLY from the successful create-only puts of the import that is calling: this apply's own, or a
+ *   key an earlier run of this same import filed that the Vault confirmed (`filedSame`) still holds this very value. Logins
  *   writes `${secret:<secretName>}` itself; the caller never hands over reference text.
  *
  * Only Runtimes may take this port (the provider answers every other plugin with a refusal), and the call carries the caller
@@ -50,7 +51,7 @@ export interface PlainVariable {
 /** A variable whose value this apply filed in the Vault: the secret's NAME, never its value. */
 export interface MintedVariable {
   readonly name: string;
-  /** A secret that THIS apply created (a successful create-only put). */
+  /** A secret this import filed (a successful create-only put by this apply, or a confirmed earlier one of this import). */
   readonly secretName: string;
 }
 
