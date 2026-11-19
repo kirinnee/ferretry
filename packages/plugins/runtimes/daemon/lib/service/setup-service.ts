@@ -137,6 +137,7 @@ import {
 } from './catalog-service.ts';
 import { assertMayFileSecrets, fileSecrets, uniqueByName } from './setup-secrets.ts';
 import { type ToolInstallOutcome, type ToolInstallPreview, ToolInstallRefusal } from './tool-install.ts';
+import { toolOutcomeOnWire } from './tool-install-wire.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -458,21 +459,7 @@ export class FleetSetupService {
             : 'fleet_setup_refused';
       throw new FleetSetupRefusal(code, error.message);
     }
-    // Where a tool landed is a path, and paths are not shown (§4.1 rule 8): the outcome is the word.
-    return {
-      outcomes: outcomes.map(outcome =>
-        outcome.outcome === 'already-installed'
-          ? { harness: harnessKey(outcome.harness), outcome: 'already-installed' }
-          : outcome.outcome === 'installed'
-            ? {
-                harness: harnessKey(outcome.harness),
-                outcome: 'installed',
-                command: outcome.command,
-                output: outcome.output,
-              }
-            : { ...outcome, harness: harnessKey(outcome.harness) },
-      ),
-    };
+    return { outcomes: outcomes.map(toolOutcomeOnWire) };
   }
 
   // ── Export ─────────────────────────────────────────────────────────────────────────────────────
