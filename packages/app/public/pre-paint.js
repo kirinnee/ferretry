@@ -14,7 +14,7 @@
 
 (function () {
   var KEY = 'fy:app:theme';
-  var STYLES = ['studio', 'mission', 'neo', 'geist', 'contrast', 'glass', 'neumorphism', 'retro'];
+  var STYLES = ['studio', 'mission', 'neo', 'geist', 'contrast', 'glass', 'neumorphism', 'retro', 'aqua'];
   var PALETTES = [
     'studio',
     'mission',

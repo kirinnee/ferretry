@@ -1,0 +1,130 @@
+/* ============================================================================
+   AQUA DESKTOP — a glossy, rounded "water drop" desktop look. HOW things are drawn, never WHICH colours:
+     · pill-shaped controls with a lit-from-above face (a two-stop vertical gradient, an inset top highlight);
+     · a medium radius on panels, soft deep shadows, a faint horizontal pinstripe on the page;
+     · a springy motion (a small overshoot when a choice is made), a thick glowing focus halo;
+     · Inter (already bundled) at medium weights; sentence-case labels.
+   It evokes the look and ships no Apple asset: no icon, no font, no image. Every colour comes from the active
+   palette through `var()` (a style file holds no colour value), so any palette wears it, in either mode.
+   The gloss highlights are the palette's own surface/ink/accent mixed, never a literal white.
+   ============================================================================ */
+:root[data-style='aqua'],
+[data-swatch][data-style='aqua'] {
+  /* ═══ structural token layer ═══ */
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-strong: 600;
+  --weight-display: 600;
+  --label-transform: none;
+  --label-size: 11px;
+  --label-weight: 600;
+  --tracking-label: 0.02em;
+  --tracking-display: -0.005em;
+  --leading-base: 1.5;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 12px;
+  --radius-control: var(--radius-pill);
+  --radius-panel: 12px;
+  --radius-badge: var(--radius-pill);
+  --radius-tab: var(--radius-pill);
+  --radius-input: 7px;
+  --bubble-radius: 14px;
+  --bubble-stroke: 1px;
+  --bubble-shadow: var(--shadow-sm);
+  --border-width: 1px;
+  --border-width-heavy: 2px;
+  --stroke-control: 1px;
+  --stroke-panel: 1px;
+  /* Soft, deep, close: a control sits just above the page, a panel floats, a popover hovers. */
+  --shadow-sm: 0 1px 1px var(--shadow-sm-1), 0 1px 3px var(--shadow-sm-1);
+  --shadow-md: 0 1px 2px var(--shadow-md-1), 0 6px 18px var(--shadow-md-2);
+  --shadow-lg: 0 2px 4px var(--shadow-lg-1), 0 18px 44px var(--shadow-lg-2);
+  --shadow-active: inset 0 2px 3px var(--shadow-sm-1);
+  --press-translate: 1px;
+  /* A faint horizontal pinstripe on the page: 2.5% ink, one line in four, never under body text at a contrast cost. */
+  --body-wash: repeating-linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--fg) 2.5%, transparent) 0 1px,
+    transparent 1px 4px
+  );
+  --nav-sel-shadow: var(--shadow-sm);
+  --menu-radius: 10px;
+  --menu-item-h: 32px;
+  --control-h-desktop: 28px;
+  --control-h-sm-desktop: 24px;
+  --row-min-h-desktop: 34px;
+  --pad-control-x: 14px;
+  --pad-badge-x: 9px;
+  --pad-panel: 12px;
+  --pad-row-y: 6px;
+  --pad-cell-x: 10px;
+  --gap-xs: 5px;
+  --gap-sm: 7px;
+  --gap-md: 11px;
+  /* Springy and a touch slower than Studio: a chosen item overshoots a little and settles. */
+  --motion-fast: 140ms;
+  --motion-base: 240ms;
+  --motion-slow: 420ms;
+  --ease-standard: cubic-bezier(0.25, 0.8, 0.3, 1);
+  --ease-emphasis: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --select-pop: 1.07;
+  /* A thick halo: the focus ring is the style's loudest signature, and stays a hard, visible 3px. */
+  --focus-width: 3px;
+  --focus-offset: 1px;
+  --font-display: 'Inter var', Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-body: 'Inter var', Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, 'JetBrains Mono', 'SFMono-Regular', 'Cascadia Mono', Menlo, Consolas, monospace;
+}
+
+/* THE GLOSS. Light: the face is lit from above (surface at the top, a little ink at the bottom). Dark: the lit top is a
+   little ink, fading into the surface. The primary button is the accent, brightened at the top by a thin inner line. */
+:root[data-style='aqua'][data-mode='dark'],
+[data-swatch][data-style='aqua'][data-mode='dark'] {
+  --shadow-md: 0 1px 2px var(--shadow-md-1), 0 8px 22px var(--shadow-md-2);
+}
+
+:root[data-style='aqua'][data-mode='light']
+  .kt-btn:not([data-variant='primary'], [data-variant='danger'], [data-variant='ghost']) {
+  background-image: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 92%, var(--fg)) 100%);
+}
+
+:root[data-style='aqua'][data-mode='dark']
+  .kt-btn:not([data-variant='primary'], [data-variant='danger'], [data-variant='ghost']) {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, var(--fg)) 0%, var(--surface) 100%);
+}
+
+:root[data-style='aqua'] .kt-btn[data-variant='primary'] {
+  background-image: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+  box-shadow:
+    var(--shadow-control),
+    inset 0 1px 0 color-mix(in srgb, var(--accent-fg) 38%, transparent);
+}
+
+:root[data-style='aqua'] .kt-btn:active:not(:disabled) {
+  box-shadow: var(--shadow-active);
+}
+
+/* The field is inset (a recessed well); its focus is the halo, drawn here because the shared field rule resets `outline`. */
+:root[data-style='aqua'] .kt-input {
+  box-shadow: inset 0 1px 2px var(--shadow-sm-1);
+}
+
+:root[data-style='aqua'] .kt-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+
+@media (max-width: 640px) {
+  :root[data-style='aqua'] {
+    --text-2xs: 12.5px;
+    --text-xs: 14px;
+    --text-sm: 15px;
+    --text-base: 16px;
+    --text-md: 17px;
+    --text-lg: 19px;
+    --text-display: 1.45rem;
+    --label-size: 12.5px;
+  }
+}

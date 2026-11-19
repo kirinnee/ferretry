@@ -52,6 +52,7 @@ export const STYLE_FONT_FILES: Readonly<Partial<Record<StyleId, ThemeFontFiles>>
   glass: { text: [inter], code: jetBrainsMono },
   neumorphism: { text: [nunito], code: jetBrainsMono },
   retro: { text: [publicSans], code: jetBrainsMono },
+  aqua: { text: [inter], code: jetBrainsMono },
 });
 
 /** The scope of the document a preload is added to — injected so a test can stand in for the page. */
