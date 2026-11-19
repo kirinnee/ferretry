@@ -103,6 +103,55 @@ describe('importedSettings', () => {
     expect(made.ok && made.item.settings).toEqual({ sandbox: 'on' });
   });
 
+  test('a credential by value or by its key is left out anywhere; a pointer stays; the sentence names a path only', () => {
+    const CANARY = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH';
+    const made = importedSettings(
+      text({
+        harness: 'claude',
+        document: {
+          model: 'opus',
+          nested: {
+            deeper: { password: CANARY, keep: 'yes', viaValue: CANARY },
+            pointer: '${secret:NAME}',
+            short: 'a',
+          },
+          headers: [CANARY, 'plain'],
+          apiKey: CANARY,
+        },
+        flags: ['--model', 'opus'],
+      }),
+    );
+    expect(made.ok).toBe(true);
+    if (!made.ok) return;
+    expect(made.item).toEqual({
+      settings: {
+        model: 'opus',
+        nested: { deeper: { keep: 'yes' }, pointer: '${secret:NAME}', short: 'a' },
+        headers: ['plain'],
+      },
+      flags: ['--model', 'opus'],
+    });
+    expect(made.dropped).toEqual([
+      'Not imported: nested.deeper.password looks like a secret',
+      'Not imported: nested.deeper.viaValue looks like a secret',
+      'Not imported: headers[0] looks like a secret',
+      'Not imported: apiKey looks like a secret',
+    ]);
+    expect(JSON.stringify(made)).not.toContain(CANARY);
+  });
+
+  test('a launch flag list that carries a credential is dropped whole, and the sentence says so', () => {
+    const CANARY = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH';
+    const made = importedSettings(
+      text({ harness: 'claude', document: { model: 'opus' }, flags: [`--api-key=${CANARY}`] }),
+    );
+    expect(made).toEqual({
+      ok: true,
+      item: { settings: { model: 'opus' } },
+      dropped: ['Not imported: flags look like a secret'],
+    });
+  });
+
   test('drops the component-level env too (the login holds it)', () => {
     const made = importedSettings(text({ harness: 'claude', document: { model: 'opus' }, env: { A: 'b' } }));
     expect(made).toEqual({

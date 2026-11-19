@@ -47,9 +47,40 @@ describe('claudeSettingsPut over the real config writer', () => {
     expect(said).not.toContain('secret-helper');
   });
 
-  test('a raw secret in the document is refused, nothing is written, and the answer never repeats it', async () => {
+  test('a secret anywhere in the document (canary) reaches no file; the answer names its path, never the value', async () => {
     const { config, put } = await world(true);
-    const answer = await put('leaky', text({ harness: 'claude', document: { model: 'opus', token: SECRET } }));
+    const answer = await put(
+      'leaky',
+      text({
+        harness: 'claude',
+        document: {
+          model: 'opus',
+          token: SECRET,
+          proxy: { apiKey: SECRET, bearerToken: SECRET, url: 'https://example.invalid' },
+          list: [SECRET, 'fine'],
+        },
+        flags: ['--verbose', '--api-key', SECRET],
+      }),
+    );
+    if (!answer.ok) throw new Error('refused');
+    expect(JSON.stringify(answer)).not.toContain(SECRET);
+    expect(answer.warnings).toEqual([
+      'Not imported: token looks like a secret',
+      'Not imported: proxy.apiKey looks like a secret',
+      'Not imported: proxy.bearerToken looks like a secret',
+      'Not imported: list[0] looks like a secret',
+      'Not imported: flags look like a secret',
+    ]);
+    const item = config.collection(DEF).get('leaky');
+    expect(item).toEqual({
+      settings: { model: 'opus', proxy: { url: 'https://example.invalid' }, list: ['fine'] },
+    });
+    expect(JSON.stringify(item)).not.toContain(SECRET);
+  });
+
+  test('a document that is only a secret is refused and nothing is written', async () => {
+    const { config, put } = await world(true);
+    const answer = await put('only', text({ harness: 'claude', document: { token: SECRET } }));
     expect(answer.ok).toBe(false);
     expect(JSON.stringify(answer)).not.toContain(SECRET);
     expect(config.collection(DEF).size).toBe(0);

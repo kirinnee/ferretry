@@ -15,9 +15,13 @@
  * (`sandbox.bwrapPath`, `sandbox.socatPath`, `sandbox.ripgrep`) and the plugin keys that load code with its own hooks and
  * helpers (`enabledPlugins`, `prependPlugins`, `appendPlugins`, `pluginConfigs`, `extraKnownMarketplaces`).
  *
+ * A value that is a credential by its value or by the key that holds it, ANYWHERE in the document, is left out too (see
+ * `drop-secrets.ts`: `Not imported: <path> looks like a secret`): a secret outside an env block is never copied.
+ *
  * Nothing here reads a value into a sentence: the sentences name keys, never what they held.
  */
 import { z } from 'zod';
+import { flagHoldsSecret, withoutSecrets } from './drop-secrets.ts';
 
 const RUNS_A_COMMAND = 'runs a command';
 const LOADS_CODE = 'loads code that runs a command';
@@ -95,14 +99,21 @@ export function importedSettings(documentText: string): ImportedSettings {
   }
   const shaped = ImportedSettingsSchema.safeParse(parsed);
   if (!shaped.success) return { ok: false, reason: 'the settings document is not Claude Code settings' };
-  const { document = {}, flags } = shaped.data;
+  const { document = {} } = shaped.data;
+  // A launch flag that carries a credential (`--api-key sk-…`) is a secret outside any env block: no flag list is kept then.
+  const flags = shaped.data.flags !== undefined && flagHoldsSecret(shaped.data.flags) ? undefined : shaped.data.flags;
   const dropped: string[] = [];
   const settings: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(document)) {
     const why = Object.hasOwn(NOT_IMPORTED, key) ? NOT_IMPORTED[key] : undefined;
-    if (why === undefined) settings[key] = withoutNested(key, value, dropped);
-    else dropped.push(notImported(key, why));
+    if (why !== undefined) {
+      dropped.push(notImported(key, why));
+      continue;
+    }
+    const clean = withoutSecrets(withoutNested(key, value, dropped), key, key, dropped);
+    if (clean !== undefined) settings[key] = clean;
   }
+  if (shaped.data.flags !== undefined && flags === undefined) dropped.push('Not imported: flags look like a secret');
   // The component's own `env` (a model-shape key beside `document`) is the login's too.
   if ('env' in (parsed as Record<string, unknown>)) dropped.push(notImported('env', NOT_IMPORTED.env!));
   if (Object.keys(settings).length === 0 && flags === undefined) {
