@@ -178,6 +178,11 @@ interface ImportNote {
 interface ImportRecordEntry {
   readonly sources: readonly string[];
   readonly digest: string;
+  /**
+   * Source skills the person left out when this component was made (names only). A later scan compares only what was
+   * imported, so a skill that was left out is never a change to offer; one that is new to the source still is.
+   */
+  readonly left?: readonly string[];
 }
 
 /**
@@ -207,6 +212,8 @@ interface ImportUpdate {
   readonly files: readonly ImportFile[];
   readonly secrets: readonly ImportedSecret[];
   readonly digest: string;
+  /** The skills still left out, once this update is taken. */
+  readonly left?: readonly string[];
 }
 
 /** A runtime the import did not create because one already uses that login and profile (E15). */
@@ -652,6 +659,8 @@ interface HarnessHarvest {
     readonly warnings: readonly string[];
   }[];
   readonly skills: readonly HostSkill[];
+  /** Skills the person left out (their names), which the import never reads again as a change. */
+  readonly skillsLeft: readonly string[];
   readonly modelSet: ModelSetComponent;
   readonly secretKeys: readonly string[];
   /** GitHub token variables left out until ticked (names only): listed by the scan, never filed. */
@@ -840,8 +849,12 @@ function harvest(
     return [{ name: server.name, value, source: mcpSource, warnings }];
   });
 
+  const skillsLeft: string[] = [];
   const skills = scan.skills.filter(skill => {
-    if (skip.has(importNamedItemId(key, 'skill', skill.item))) return false;
+    if (skip.has(importNamedItemId(key, 'skill', skill.item))) {
+      skillsLeft.push(skill.item);
+      return false;
+    }
     if (isUsableSkillItemName(skill.item)) return true;
     problems.push(`Skill "${skill.item}" has a folder name Ferretry cannot use, so it was not imported.`);
     return false;
@@ -855,6 +868,7 @@ function harvest(
     codexProfiles: harness === 'codex' ? codexProfilesOf(parsed) : [],
     mcp,
     skills,
+    skillsLeft,
     modelSet: modelSetOf(harness, modelSource),
     secretKeys,
     gatedKeys: envImport?.gated ?? [],
@@ -876,6 +890,10 @@ interface Candidate {
   /** Over the component and its file content, so a changed source is a changed digest. */
   readonly digestText: string;
   readonly warnings: readonly string[];
+  /** Skills of its harness the person left out, recorded so the next scan does not read them as a change. */
+  readonly left?: readonly string[];
+  /** The same candidate without those skills, for comparing with what an earlier import recorded. */
+  readonly without?: (omit: ReadonlySet<string>) => Candidate;
 }
 
 const referenceOf = (kind: ComponentKind, name: string): LayerReferenceText => `${kind}/${name}`;
@@ -1027,7 +1045,15 @@ function skillsCandidates(harvests: readonly HarnessHarvest[]): { candidates: Ca
   }
   const make = (name: string, items: readonly string[], harness?: HarnessKind): Candidate => {
     const value: SkillsComponent = { items: [...items], ...(harness === undefined ? {} : { harness }) };
+    const left = harvests.find(entry => entry.harness === harness)?.skillsLeft ?? [];
     return {
+      ...(left.length === 0 ? {} : { left }),
+      without: omit =>
+        make(
+          name,
+          items.filter(item => !omit.has(item)),
+          harness,
+        ),
       component: { kind: 'skills', name, value },
       files: files.filter(file => items.some(item => file.path === skillStorePath(item))),
       sources: items.flatMap(item => sources.get(item) ?? []),
@@ -1236,29 +1262,36 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
       }
     }
     const { kind, name } = candidate.component;
-    const digest = options.digest(candidate.digestText);
     const reference = referenceOf(kind, name);
     const previous = record.components[reference];
+    // What an earlier import left out is not compared: only what it imported can have changed.
+    const comparable =
+      previous?.left !== undefined && previous.left.length > 0 && candidate.without !== undefined
+        ? candidate.without(new Set(previous.left))
+        : candidate;
+    const digest = options.digest(comparable.digestText);
     if (existing?.components[kind][name] !== undefined && previous !== undefined) {
       if (previous.digest !== digest) {
+        const left = [...new Set([...(previous.left ?? []), ...(candidate.left ?? [])])];
         updates.push({
           reference,
-          sources: candidate.sources,
+          ...(left.length === 0 ? {} : { left }),
+          sources: comparable.sources,
           // An update never changes which tools a server serves: the item keeps the scope it has.
           component:
-            candidate.component.kind === 'mcp'
+            comparable.component.kind === 'mcp'
               ? {
-                  ...candidate.component,
+                  ...comparable.component,
                   value: {
-                    ...withoutScope(candidate.component.value),
+                    ...withoutScope(comparable.component.value),
                     ...(existing?.components.mcp[name]?.harness === undefined
                       ? {}
                       : { harness: existing.components.mcp[name].harness }),
                   },
                 }
-              : candidate.component,
-          files: candidate.files,
-          secrets: secretsOf(candidate),
+              : comparable.component,
+          files: comparable.files,
+          secrets: secretsOf(comparable),
           digest,
         });
       }
@@ -1287,7 +1320,11 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     for (const secret of secretsOf(candidate)) keptSecrets.add(secret.name);
     const freeReference = referenceOf(kind, free);
     added.push(freeReference);
-    recordEntries[freeReference] = { sources: candidate.sources, digest };
+    recordEntries[freeReference] = {
+      sources: candidate.sources,
+      digest,
+      ...(candidate.left === undefined ? {} : { left: [...candidate.left] }),
+    };
     if (candidate.warnings.length > 0) warnings[freeReference] = candidate.warnings;
   }
 
@@ -1464,7 +1501,11 @@ export function mergeImportRecord(plan: ImportPlan, acceptedUpdates: readonly La
   const components: Record<string, ImportRecordEntry> = { ...plan.record.components };
   for (const update of plan.updates) {
     if (acceptedUpdates.includes(update.reference)) {
-      components[update.reference] = { sources: update.sources, digest: update.digest };
+      components[update.reference] = {
+        sources: update.sources,
+        digest: update.digest,
+        ...(update.left === undefined ? {} : { left: update.left }),
+      };
     }
   }
   return { ...plan.record, components };

@@ -7,6 +7,8 @@ import {
   type HostDocumentRead,
   type HostHarnessScan,
   type ImportPlan,
+  mergeImport,
+  mergeImportRecord,
   planImport,
 } from '../../../daemon/lib/account/import.ts';
 
@@ -403,5 +405,59 @@ describe('planImport — a skip is applied before models and settings are derive
     );
     should(noEnv.models).containEql('claude-host-1');
     should(noEnv.models).not.containEql('claude-sonnet-5');
+  });
+});
+
+describe('Import again after a skill was left out', () => {
+  const claudeEdited = (body: string, extra: HostHarnessScan['skills'] = []) =>
+    claude({
+      instructions: text('/h/.claude/CLAUDE.md', body),
+      skills: [
+        { item: 'review', source: '/h/.claude/skills/review', digest: 'a' },
+        { item: 'deploy', source: '/h/.claude/skills/deploy', digest: 'b' },
+        ...extra,
+      ],
+    });
+  const skipDeploy = [importNamedItemId('claude-code', 'skill', 'deploy')];
+  const first = () => {
+    const plan = planImport([claudeEdited('# Claude words\n')], { digest, skip: skipDeploy });
+    return { model: mergeImport(undefined, plan), record: mergeImportRecord(plan) };
+  };
+
+  it('should offer only the changed instructions, never the skill that was left out', () => {
+    // Arrange
+    const { model, record } = first();
+
+    // Act — the scan sends no skip list; only CLAUDE.md changed.
+    const scan = planImport([claudeEdited('# Claude words, edited\n')], { digest, existing: model, record });
+    const applied = planImport([claudeEdited('# Claude words, edited\n')], {
+      digest,
+      existing: model,
+      record,
+      skip: skipDeploy,
+    });
+
+    // Assert — and the update the scan offers is one the apply offers too.
+    should(scan.updates.map(update => update.reference)).deepEqual(['instructions/claude-instructions']);
+    should(applied.updates.map(update => update.reference)).deepEqual(['instructions/claude-instructions']);
+  });
+
+  it('should still offer a skill that is new in the source, without the one that was left out', () => {
+    // Arrange
+    const { model, record } = first();
+
+    // Act
+    const scan = planImport(
+      [claudeEdited('# Claude words\n', [{ item: 'lint', source: '/h/.claude/skills/lint', digest: 'c' }])],
+      { digest, existing: model, record },
+    );
+
+    // Assert
+    should(scan.updates.map(update => update.reference)).deepEqual(['skills/claude-skills']);
+    should(scan.updates[0]?.component.value).deepEqual({ items: ['review', 'lint'], harness: 'claude' });
+    should(scan.updates[0]?.files.map(file => file.path)).not.containEql('skills/deploy');
+    should(mergeImportRecord(scan, ['skills/claude-skills']).components['skills/claude-skills']?.left).deepEqual([
+      'deploy',
+    ]);
   });
 });

@@ -2191,6 +2191,38 @@ describe('the import record, as a scan reads it', () => {
     should(await offeredWith(record => record)).deepEqual(['instructions/claude-instructions']);
   });
 
+  it('should not offer a skill the person left out, and apply the one update it does offer', async () => {
+    // Arrange — one import with the skill "deploy" unticked, then only CLAUDE.md changes.
+    const { service, state, applied } = world();
+    const two = (text: string) => [
+      claudeScan({
+        instructions: { kind: 'text', source: '/person/.claude/CLAUDE.md', text, bytes: text.length },
+        skills: [
+          { item: 'review', source: '/person/.claude/skills/review', digest: 'skill-digest' },
+          { item: 'deploy', source: '/person/.claude/skills/deploy', digest: 'deploy-digest' },
+        ],
+      }),
+      codexScan(),
+    ];
+    state.scans = two('Be kind.\n');
+    await importOnce(service, IMPORT({ skip: ['claude-code:skill:deploy'] }));
+    const written = applied[0]?.documents ?? [];
+    for (const document of written) state.assets[document.path] = document.content;
+    state.reading = configReading(modelOfWrites(written), 'rev-2');
+    state.scans = two('Be kinder.\n');
+
+    // Act
+    const scan = await service.scan();
+    await importOnce(
+      service,
+      IMPORT({ skip: ['claude-code:skill:deploy'], acceptedUpdates: ['instructions/claude-instructions'] }),
+    );
+
+    // Assert — the scan offered what the apply accepts, and the apply took it.
+    should(scan.updates.map(update => update.reference)).deepEqual(['instructions/claude-instructions']);
+    should(configTextOf(applied[1]?.documents ?? [])).containEql('Be kinder.');
+  });
+
   it('should treat a record it cannot read as no record, so nothing is offered as an update', async () => {
     should(await offeredWith(() => '{not json')).deepEqual([]);
     should(await offeredWith(record => ({ ...record, version: 2 }))).deepEqual([]);

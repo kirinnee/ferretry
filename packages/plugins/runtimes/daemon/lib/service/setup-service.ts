@@ -338,12 +338,15 @@ function parseImportRecord(text: string | undefined): ImportRecord | undefined {
     return undefined;
   }
   if (!isRecord(raw) || raw.version !== 1 || !isRecord(raw.components)) return undefined;
-  const components: Record<string, { sources: string[]; digest: string }> = {};
+  const components: Record<string, { sources: string[]; digest: string; left?: string[] }> = {};
   for (const [reference, entry] of Object.entries(raw.components)) {
     if (!isRecord(entry) || typeof entry.digest !== 'string' || !Array.isArray(entry.sources)) continue;
     components[reference] = {
       sources: entry.sources.filter(source => typeof source === 'string'),
       digest: entry.digest,
+      ...(Array.isArray(entry.left) && entry.left.some(item => typeof item === 'string')
+        ? { left: entry.left.filter((item): item is string => typeof item === 'string') }
+        : {}),
     };
   }
   const profiles = isRecord(raw.profiles)
