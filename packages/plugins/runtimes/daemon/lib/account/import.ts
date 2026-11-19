@@ -885,14 +885,6 @@ const sameText = (left: string, right: string): boolean =>
 
 const sameJson = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
 
-/** JSON with every object's keys sorted, so two readings of one server compare equal whatever order they came in. */
-const stableJson = (value: unknown): string =>
-  JSON.stringify(value, (_key, each: unknown) =>
-    typeof each === 'object' && each !== null && !Array.isArray(each)
-      ? Object.fromEntries(Object.entries(each).toSorted(([left], [right]) => left.localeCompare(right)))
-      : each,
-  );
-
 const withoutScope = (server: McpComponent): Omit<McpComponent, 'harness'> => {
   const { harness: _harness, ...rest } = server;
   return rest;
@@ -1230,24 +1222,13 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
   };
   for (const original of candidates) {
     let candidate = original;
-    // A server one tool's import already made, which the OTHER tool now holds under the same name: the same server is
-    // reused (widened to both tools, no update), a different one is kept under its own tool's name.
+    // A server another tool's import already made under this name: this tool's is its OWN item, `<tool>-<name>`, created
+    // new — whether or not the two are identical. The existing item is never widened or changed (its owner only creates),
+    // and the same tool imported again finds its own item by the same rule and updates it.
     if (original.component.kind === 'mcp') {
       const mine = original.component.value;
-      const held = existing?.components.mcp[original.component.name];
-      const heldBy = held?.harness;
-      const recorded = record.components[referenceOf('mcp', original.component.name)];
-      if (mine.harness !== undefined && heldBy !== undefined && heldBy !== mine.harness && recorded !== undefined) {
-        if (stableJson(withoutScope(held as McpComponent)) === stableJson(withoutScope(mine))) {
-          const reference = referenceOf('mcp', original.component.name);
-          components.push({ kind: 'mcp', name: original.component.name, value: withoutScope(held as McpComponent) });
-          added.push(reference);
-          recordEntries[reference] = {
-            sources: [...new Set([...recorded.sources, ...original.sources])],
-            digest: recorded.digest,
-          };
-          continue;
-        }
+      const heldBy = existing?.components.mcp[original.component.name]?.harness;
+      if (mine.harness !== undefined && heldBy !== undefined && heldBy !== mine.harness) {
         candidate = {
           ...original,
           component: { kind: 'mcp', name: harnessNamed(mine.harness, original.component.name), value: mine },
