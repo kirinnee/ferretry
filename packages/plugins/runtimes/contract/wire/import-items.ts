@@ -3,7 +3,8 @@
  * builds them and the planner that reads them.
  *
  * `<harness>:<kind>` for the things a harness has one of (`claude-code:instructions`, `claude-code:settings`,
- * `claude-code:env`), `<harness>:<kind>:<name>` for the ones it has many of (`claude-code:mcp:notes`,
+ * `claude-code:env`, `claude-code:model-set`: leaving the model set out gives the starter model set instead of the
+ * models the settings name), `<harness>:<kind>:<name>` for the ones it has many of (`claude-code:mcp:notes`,
  * `codex:skill:review`, `codex:profile:fast`). The harness is the wire key (`claude-code`, `codex`). A name
  * is what the host calls the thing — a server, a skill folder, a profile — and is never a value.
  *
@@ -15,7 +16,7 @@ import type { HarnessKeySchema } from './shared.ts';
 type HarnessKey = z.infer<typeof HarnessKeySchema>;
 
 /** What a harness has one of. */
-export const IMPORT_SINGLE_ITEMS = ['instructions', 'settings', 'env'] as const;
+export const IMPORT_SINGLE_ITEMS = ['instructions', 'settings', 'env', 'model-set'] as const;
 /** What a harness has many of, each by name. */
 export const IMPORT_NAMED_ITEMS = ['mcp', 'skill', 'profile'] as const;
 

@@ -461,3 +461,35 @@ describe('Import again after a skill was left out', () => {
     ]);
   });
 });
+
+describe('planImport — the model set can be left out on its own (r10 O8)', () => {
+  const NAMED = JSON.stringify({ model: 'claude-sonnet-5', env: { LOG_LEVEL: 'debug' } });
+  const modelSet = (plan: ImportPlan, name: string): unknown =>
+    plan.components.find(item => item.kind === 'modelSets' && item.name === name)?.value;
+
+  it('should take the models the settings name when the model set is kept', () => {
+    const plan = planImport([claude({ settings: text('/h/.claude/settings.json', NAMED) })], { digest });
+    should(modelSet(plan, 'claude-models')).deepEqual({ models: ['claude-sonnet-5'], default: 'claude-sonnet-5' });
+  });
+
+  it('should give the starter model set when the model set is skipped, settings and the rest still imported', () => {
+    const plan = planImport([claude({ settings: text('/h/.claude/settings.json', NAMED) })], {
+      digest,
+      skip: [importItemId('claude-code', 'model-set')],
+    });
+    should(modelSet(plan, 'claude-models')).deepEqual({ models: ['claude-opus-5'], default: 'claude-opus-5' });
+    should(plan.components.some(item => item.kind === 'settings')).be.true();
+    should(plan.components.some(item => item.kind === 'instructions')).be.true();
+  });
+
+  it('should skip only the named harness’s model set', () => {
+    const plan = planImport([claude(), codex()], { digest, skip: [importItemId('claude-code', 'model-set')] });
+    should(modelSet(plan, 'codex-models')).deepEqual({ models: ['gpt-5.6', 'gpt-5.6-mini'], default: 'gpt-5.6' });
+  });
+
+  it('should accept the id on the wire and refuse a model-set id with a name', () => {
+    should(ImportItemIdSchema.safeParse('claude-code:model-set').success).be.true();
+    should(ImportItemIdSchema.safeParse('codex:model-set').success).be.true();
+    should(ImportItemIdSchema.safeParse('codex:model-set:fast').success).be.false();
+  });
+});

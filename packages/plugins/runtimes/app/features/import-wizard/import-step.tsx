@@ -1,7 +1,7 @@
 /**
- * The first run's "Bring your setup" step: Claude Code, then Codex, one page each (`tool-page.tsx`). It is the body of the
- * onboarding step `runtimes.import`; the person can leave either tool out, and a copy from another machine stays its own
- * step (`runtimes.start`).
+ * The import wizard, Settings › Import: Claude Code, then Codex, one page each (`tool-page.tsx`), for bringing a tool's
+ * setup over again after the first run. It is drawn from the import kit (`../import-kit`), the same pieces Claude Code's
+ * and Codex's own first-run pages use. A copy from another machine is `setup-transfer`'s Start page.
  */
 import { Loading } from '@ferretry/app/ui';
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
@@ -9,8 +9,8 @@ import type { AppComponent, SettingsProps } from '@ferretry/kernel/manifest';
 import type { LiveRuntimesClient } from '../../lib/client.ts';
 import { machineSettingsView } from '../../views/machine-settings-host.tsx';
 import { Badge, Button } from '../../ui.ts';
-import { HARNESS_LABEL } from './mapping-words.ts';
-import { HARNESSES } from './model.ts';
+import { HARNESS_LABEL } from '../import-kit/mapping-words.ts';
+import { HARNESSES } from '../import-kit/model.ts';
 import { ToolPage } from './tool-page.tsx';
 import { useImportWizard } from './use-import-wizard.ts';
 

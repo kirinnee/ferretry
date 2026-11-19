@@ -144,9 +144,9 @@ describe('everything found', () => {
     const steps = calls.filter(call => call.route === 'POST /v1/onboarding/steps/:plugin/:stepId');
     expect(
       steps
-        .map(step => `${step.params?.['plugin']}.${step.params?.['stepId']}:${(step.body as { state: string }).state}`)
+        .map(step => `${step.params?.plugin}.${step.params?.stepId}:${(step.body as { state: string }).state}`)
         .sort(),
-    ).toEqual(['claude-code.harness:found', 'logins.login:found', 'runtimes.runtimes:done']);
+    ).toEqual(['claude-code.harness:found', 'logins.login:found']);
   });
 
   it('Next goes to Codex; its profiles are choices; Finish says where each ended', async () => {

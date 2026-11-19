@@ -1,9 +1,8 @@
 /**
- * The browser entry for the machine-setup steps this plugin contributes: the REAL "Agent controls" and "Start from…"
+ * The browser entry for the machine-setup steps this plugin contributes: the REAL "Start fresh / Copy from another machine"
  * step bodies, and the Export settings screen, over ONE FAKE machine that answers from memory. No daemon, no network.
  * Every name below is made up.
  *
- *   ?view=controls      Agent controls: the five switches and the default runtime (one switch flipped, so Save shows)
  *   ?view=start         Start from…: a fresh setup chosen
  *   ?view=start-clone   Start from…: a copy chosen (no other machine paired: the note that says so)
  *   ?view=export        Export settings, after it ran: the zip's listing, with one file left out
@@ -21,7 +20,6 @@ import { CopySettings } from '../../../../app/features/fleet/setup/copy-settings
 import { ExportSettings } from '../../../../app/features/fleet/setup/export-settings.tsx';
 import { useAccountChanges } from '../../../../app/features/fleet/shell/apply-change-panel.tsx';
 import { BUNDLE, FIRST, FOLLOWUP, UPDATE } from './copy-flow-data.ts';
-import { createAgentControlsStep } from '../../../../app/views/agent-controls-step.tsx';
 import { createStartStep } from '../../../../app/views/setup-transfer.tsx';
 import {
   type Call,
@@ -34,7 +32,7 @@ import {
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
-const view = params.get('view') ?? 'controls';
+const view = params.get('view') ?? 'start';
 
 const client = scripted({
   ...READS(),
@@ -119,7 +117,7 @@ function Scene() {
         now={() => new Date('2026-11-14T09:00:00Z')}
       />
     );
-  const step = view === 'controls' ? createAgentControlsStep(client) : createStartStep(client);
+  const step = createStartStep(client);
   return createElement(
     step as unknown as FunctionComponent<SettingsProps & PanelProps>,
     {} as SettingsProps & PanelProps,

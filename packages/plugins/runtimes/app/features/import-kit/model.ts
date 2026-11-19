@@ -17,6 +17,7 @@ import {
   type ToolInstallPlan,
   type AccountChange,
 } from '../../../contract/index.ts';
+import { buildImportChange } from './change.ts';
 import { becomes, GITHUB_TOKEN_NAMES, HARNESS_LABEL } from './mapping-words.ts';
 
 export const HARNESSES: readonly HarnessKey[] = ['claude-code', 'codex'];
@@ -45,7 +46,7 @@ export interface FoundItem {
   readonly becomes: string;
 }
 
-type GroupKey = 'instructions' | 'mcp' | 'skill' | 'settings' | 'env' | 'profile';
+export type GroupKey = 'instructions' | 'mcp' | 'skill' | 'settings' | 'env' | 'profile' | 'modelSet';
 
 export interface FoundGroup {
   readonly key: GroupKey;
@@ -246,7 +247,10 @@ export const nameProblem = (name: string): string | null => {
   return null;
 };
 
-/** The `setup.import` change for one tool. */
+/**
+ * The `setup.import` change for one tool, from the ticks of the r9 wizard. The change itself is built by the kit's
+ * `buildImportChange` (`./change.ts`), which is what a plugin's own onboarding page calls too.
+ */
 export function importChange(
   model: ToolModel,
   left: ReadonlySet<ImportItemId>,
@@ -260,14 +264,7 @@ export function importChange(
   const env = model.groups.find(group => group.key === 'env');
   // Only a token variable this scan lists, and only while the environment itself is being brought.
   const tickedEnv = (env?.githubTokens ?? []).filter(token => ticked.has(token) && !left.has(`${model.harness}:env`));
-  return {
-    kind: 'setup.import',
-    include: [model.harness],
-    names: { [model.harness]: name.trim() },
-    ...(skip.length === 0 ? {} : { skip: [...skip] }),
-    ...(tickedEnv.length === 0 ? {} : { tickedEnv }),
-    ...(acceptedUpdates.length === 0 ? {} : { acceptedUpdates }),
-  };
+  return buildImportChange(model.harness, [model.harness], skip, name, { tickedEnv, acceptedUpdates });
 }
 
 /** How many things will be imported / left out, for the button's own sentence. */
@@ -280,7 +277,7 @@ export const counts = (
   return { taken: all.length - out, left: out };
 };
 
-/** The old onboarding steps a finished tool settles: its harness step, the sign-in and the runtimes. */
+/** The old onboarding steps a finished tool settles: its harness step and the sign-in (the runtime is named on the import itself). */
 export const stepsSettledBy = (
   harness: HarnessKey,
 ): readonly {
@@ -291,7 +288,6 @@ export const stepsSettledBy = (
 }[] => [
   { plugin: harness, stepId: 'harness', state: 'found', linked: true },
   { plugin: 'logins', stepId: 'login', state: 'found', linked: true },
-  { plugin: 'runtimes', stepId: 'runtimes', state: 'done' },
 ];
 
 /** The apply's `summary`, as the sentences it is made of (A3 names each file written and each refused). */

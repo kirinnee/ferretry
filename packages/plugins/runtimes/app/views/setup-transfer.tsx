@@ -1,10 +1,9 @@
 /**
  * Where a machine's setup moves between machines: **Export settings** (a zip of its configuration files, no secrets) and
  * **Copy settings from another machine**, as a Settings tab; and the same Copy as the first run's "Start from…" step,
- * where the person picks a fresh setup or a copy of another machine's.
+ * where the person picks "Start fresh" or "Copy from another machine" (two cards, never full width).
  */
 
-import { RadioChoices } from '@ferretry/app/ui';
 import type { AppComponent, SettingsProps } from '@ferretry/kernel/manifest';
 import { useState } from 'react';
 import { CopySettings } from '../features/fleet/setup/copy-settings.tsx';
@@ -13,6 +12,7 @@ import { useAccountChanges } from '../features/fleet/shell/apply-change-panel.ts
 import type { MachineTabProps } from '../features/fleet/shell/machine-tab.ts';
 import type { LiveRuntimesClient } from '../lib/client.ts';
 import { machineSettingsView } from './machine-settings-host.tsx';
+import { StartCards } from './start-cards.tsx';
 
 function Heading({ children }: { readonly children: string }) {
   return <h3 className="m-0 text-row font-semibold text-fg">{children}</h3>;
@@ -32,7 +32,7 @@ function TransferTab({ client, machineName, machine }: MachineTabProps) {
   );
 }
 
-/** The first run's "Start from…" step. */
+/** The first run's "Start fresh / Copy from another machine" page. */
 function StartStep({ client, machineName, machine }: MachineTabProps) {
   const changes = useAccountChanges({ client });
   const [start, setStart] = useState<'fresh' | 'clone'>('fresh');
@@ -50,19 +50,16 @@ function StartStep({ client, machineName, machine }: MachineTabProps) {
   };
   return (
     <div className="flex min-w-0 flex-col gap-4" data-onboarding-step-body="start">
-      <RadioChoices
-        legend="Start from"
-        legendHidden
-        name="onboarding-start"
+      <StartCards
+        label="Start from"
         value={start}
-        onChoose={setStart}
+        onChange={setStart}
         options={[
-          { id: 'fresh', title: 'A fresh setup', detail: 'Walk through each step.' },
+          { id: 'fresh', title: 'Start fresh', line: 'Walk through each step.' },
           {
             id: 'clone',
-            title: 'Copy settings from another machine',
-            detail:
-              'Copy the Warden, learning, voice, agent controls, profiles and runtimes. Secrets and login tokens are never copied.',
+            title: 'Copy from another machine',
+            line: 'Warden, learning, voice, agent controls, profiles and runtimes. Never secrets or logins.',
           },
         ]}
       />

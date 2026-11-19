@@ -1,6 +1,6 @@
 /**
  * THE MACHINE-SETUP STEPS THIS PLUGIN CONTRIBUTES, in a real browser, over fixed fake data
- * (`fixtures/setup-steps-scene.tsx`): Agent controls, Start from…, and Export settings. Each stays inside the screen, keeps
+ * (`fixtures/setup-steps-scene.tsx`): Start fresh / Copy from another machine, and Export settings. Each stays inside the screen, keeps
  * every button a 44px target, and reads in light and dark, on a desktop and on a phone.
  *
  * Set `FY_SETUP_STEPS_SHOTS_DIR` to keep a screenshot of each case.
@@ -145,31 +145,16 @@ const insideScreen = async (tab: Page, selector: string, width: number): Promise
 describe('the machine-setup steps', () => {
   for (const viewport of VIEWPORTS)
     for (const mode of ['light', 'dark'] as const) {
-      it(`Agent controls: five switches, the default runtime, a Save once one is flipped (${viewport.name}, ${mode})`, async () => {
-        const context = await newContext(viewport, mode);
-        const tab = await open(context, 'controls', mode);
-        await tab.waitForSelector('[data-agent-control]');
-        expect(await tab.locator('[data-switch-row]').count()).toBe(5);
-        await tab.locator('[data-switch-row="Ferretry settings"] [role="switch"]').click();
-        await tab.locator('[data-switch-row="Page scripts"] [data-switch-info]').click();
-        await tab.getByText('Save what agents may control').waitFor();
-        await tab.waitForSelector('[data-default-runtime]');
-        await insideScreen(tab, '[data-switch-row], [data-default-runtime]', viewport.width);
-        for (const switchButton of await tab.locator('[role="switch"]').all())
-          expect((await switchButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-        if (shotsDir !== '')
-          await tab.screenshot({ path: join(shotsDir, `agent-controls-${viewport.name}-${mode}.png`) });
-        await context.close();
-      }, 60_000);
-
-      it(`Start from…: a fresh setup, and a copy with no other machine paired (${viewport.name}, ${mode})`, async () => {
+      it(`Start page: two cards, and a copy with no other machine paired (${viewport.name}, ${mode})`, async () => {
         const context = await newContext(viewport, mode);
         const tab = await open(context, 'start', mode);
         await tab.waitForSelector('[data-onboarding-step-body="start"]');
         if (shotsDir !== '')
           await tab.screenshot({ path: join(shotsDir, `start-from-fresh-${viewport.name}-${mode}.png`) });
-        await tab.getByText('Copy settings from another machine').click();
+        await tab.locator('[data-start-card="clone"]').click();
         await tab.waitForSelector('[data-copy-no-sources]');
+        // The choose animation plays once; the shot is the settled card, never a frame in the middle of it.
+        await tab.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished)));
         // With no machine to copy from there is no Review button to look pressable.
         expect(await tab.locator('[data-copy-read]').count()).toBe(0);
         await insideScreen(tab, '[data-onboarding-step-body="start"] *', viewport.width);

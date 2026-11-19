@@ -7,9 +7,9 @@ import { useState } from 'react';
 import type { ImportItemId } from '../../../contract/index.ts';
 import { AddLoginSlot } from '../fleet/runtimes/add-runtime-login-slots.tsx';
 import { ChangeApplyPanel } from '../fleet/shell/apply-change-panel.tsx';
-import { FoundList } from './found-list.tsx';
-import { counts, nameProblem, type ToolModel } from './model.ts';
-import { plural, toolHeadline } from './mapping-words.ts';
+import { FoundList } from '../import-kit/found-list.tsx';
+import { counts, nameProblem, type ToolModel } from '../import-kit/model.ts';
+import { plural, toolHeadline } from '../import-kit/mapping-words.ts';
 import type { ImportWizard } from './use-import-wizard.ts';
 
 function Header({ model, hideState = false }: { readonly model: ToolModel; readonly hideState?: boolean }) {

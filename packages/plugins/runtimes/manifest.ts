@@ -472,6 +472,8 @@ export default definePlugin({
         ],
       }),
       // Export this machine's settings as a zip, or copy another machine's here (v4's Setup › Export / Copy settings).
+      // Import again: the r9 wizard, kept for re-importing a tool's setup after the first run.
+      settingsTab('import', { icon: 'download', group: 'agents', label: 'Bring in again', order: 15 }),
       settingsTab('transfer', { icon: 'arrow-left-right', group: 'agents', label: 'Export & copy', order: 14 }),
     ],
     // The model and effort switches above the composer, and the account picker (with its health and quota) that
@@ -480,13 +482,10 @@ export default definePlugin({
       panel('composer.tools', { id: 'runtime-picker', order: 10 }),
       panel(NEW_FERRET_ACCOUNT_SLOT, { id: 'new-ferret-account', order: 10 }),
       panel(MOVE_ACCOUNT_SLOT, { id: 'move-account', order: 10 }),
-      // The first-run step's body (Onboarding's steps screen offers this slot): the runtimes view.
-      panel('onboarding.step', { id: 'onboarding-step', order: 40 }),
-      // v4's "Start from…" and "Agent controls" steps.
+      // The first-run "Start fresh / Copy from another machine" page (Onboarding's steps screen offers this slot). Importing
+      // Claude Code's and Codex's setup is those plugins' own pages (they build on the import kit); "Name your runtimes" is a
+      // field on their last import page, and "Agent controls" is in Settings only (r10 O8, decision D1).
       panel('onboarding.step', { id: 'onboarding-start', order: 10 }),
-      // "Bring your setup": the import wizard, Claude Code then Codex (A10).
-      panel('onboarding.step', { id: 'onboarding-import', order: 15 }),
-      panel('onboarding.step', { id: 'onboarding-controls', order: 75 }),
     ],
   },
 
@@ -528,12 +527,7 @@ export default definePlugin({
     ],
   },
 
-  onboarding: [
-    { id: 'start', title: 'Start from…', order: 10 },
-    { id: 'import', title: 'Bring your setup', order: 15 },
-    { id: 'runtimes', title: 'Name your runtimes', order: 40 },
-    { id: 'controls', title: 'Agent controls', order: 75 },
-  ],
+  onboarding: [{ id: 'start', title: 'Start fresh or copy', order: 10 }],
   doctor: ['runtimes-config'],
 
   permissions: {

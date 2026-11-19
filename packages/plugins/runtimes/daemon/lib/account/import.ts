@@ -567,11 +567,17 @@ export function declaredModelIds(settings: SettingsObject): readonly string[] {
   return found;
 }
 
+/** The starter model set: the one model a harness starts with when nothing names another. */
+const starterModelSet = (harness: HarnessKind): ModelSetComponent => ({
+  models: [FLEET_STARTER_MODELS[harness]],
+  default: FLEET_STARTER_MODELS[harness],
+});
+
 /** The model set a harness's settings imply: the models it names for that harness, or the starter. */
 function modelSetOf(harness: HarnessKind, settings: SettingsObject | undefined): ModelSetComponent {
   const named = declaredModelIds(settings ?? {}).filter(id => modelHarness(id) === harness);
   const [first] = named;
-  if (first === undefined) return { models: [FLEET_STARTER_MODELS[harness]], default: FLEET_STARTER_MODELS[harness] };
+  if (first === undefined) return starterModelSet(harness);
   return { models: [...named], default: first };
 }
 
@@ -726,7 +732,8 @@ function harvest(
 ): HarnessHarvest {
   const { harness } = scan;
   const key = itemHarness(harness);
-  const skipped = (kind: 'instructions' | 'settings' | 'env'): boolean => skip.has(importItemId(key, kind));
+  const skipped = (kind: 'instructions' | 'settings' | 'env' | 'model-set'): boolean =>
+    skip.has(importItemId(key, kind));
   const problems: string[] = [...scan.problems];
   const secretKeys: string[] = [];
   const format = HOST_SETTINGS_FORMAT[harness];
@@ -879,7 +886,8 @@ function harvest(
     mcp,
     skills,
     skillsLeft,
-    modelSet: modelSetOf(harness, modelSource),
+    // A model set left out (`<harness>:model-set`) is the starter set, not the models the settings name.
+    modelSet: skipped('model-set') ? starterModelSet(harness) : modelSetOf(harness, modelSource),
     secretKeys,
     gatedKeys: envImport?.gated ?? [],
     ...(envImport === undefined || (envImport.plain.length === 0 && envImport.minted.length === 0)
