@@ -1975,3 +1975,40 @@ import-create`, `detail.plugin`, the secret's NAME as the subject; `refused` whe
   written does not undo the create.
 - **A broken host file reports where, not what.** A scan problem for a settings file that does not parse names the file and,
   for TOML, the line and column. The parser's own message quotes the host's line, which may be a key, so it is never shown.
+
+## A Git account's token (B1: `git-accounts`)
+
+A person connects a GitHub account to the machine with GitHub's **device flow** (Settings › GitHub accounts, or
+`fy git account add`): the screen shows a short code, the person types it at `github.com/login/device`, and the daemon
+polls GitHub until it is authorized. **There is no client secret anywhere**: the OAuth app's _client id_ (public) is
+a constant in the plugin's contract, overridable in `config/git-accounts.yaml` (`github.clientId`; changing it is held
+for the owner, because it names a different app to authorize).
+
+**This is a named holder, and it is deliberately NOT the shared secret list.** Every agent can `fy secret use` any shared
+secret ("Per-session scoping" above), and a GitHub token is too strong for that. So:
+
+- The token is sealed in the plugin's **own sealed document** (`state/git-accounts/tokens.json`, `0600`, the vault's
+  key), a document no route, `use` or `${secret:NAME}` reaches and a ferret's folder never holds (`privacy.private`).
+- Only the plugin's **daemon half** opens it, in `AccountBook.token`, and only to place it on a request to
+  `api.github.com` or in the environment of the one `gh` child described below (`permissions.network` names `github.com` and `api.github.com`, nothing else). A request path outside
+  `/user`, `/user/emails`, `/user/keys[/id]` and `/user/ssh_signing_keys[/id]` is refused before it is sent.
+- **No route, CLI verb or port method returns the token**, and no wire shape has a field that could (every shape is strict;
+  a contract test reads each against `NO_SECRET_FIELDS`). The GitHub `device_code` is a bearer for the token too, so it
+  stays in the daemon: the page gets only OUR flow id and the user code.
+- The scopes are one constant (`GITHUB_SCOPES`): `read:user user:email write:public_key write:ssh_signing_key repo read:org`
+  (the owner's answer; no `workflow`). **`repo` is strong**: the token can read and write every repository the account
+  can reach, private ones included, so the consent text (`GITHUB_CONSENT`) says exactly that before anyone connects.
+  That is why the token lives in the sealed document and why nothing can read it.
+- **Use, never read, for a child.** Another plugin that needs `gh` as the account calls `GitAccountsApi.run`: the daemon
+  half starts `gh` (the one declared program) with `GH_TOKEN` in that child's own, sealed environment and returns its
+  output with the token masked. There is no getter.
+- Connect and remove are `secrets.configure` (passkey step-up from a paired device) and are audited (`git-account.added`,
+  `git-account.removed`: the account id only). The list is `secrets.use` and answers logins and key titles.
+- **Removing an account** deletes the keys this machine registered on it through the API (with the token) first, then the
+  sealed token, then the record; a key GitHub will not delete is named for the person to remove at
+  `github.com/settings/keys`. **Revoking the OAuth app's grant** needs the client secret, which Ferretry deliberately does
+  not have, so the person does that at `github.com/settings/applications`; the answer says so.
+
+**GAP.** An agent that can read the daemon's own memory or its state folder as the same OS user can reach the token, as
+for every secret here ([threat model](#threat-model)). The sealed document narrows who is _handed_ it; it is not a
+sandbox against a process running as the owner.
