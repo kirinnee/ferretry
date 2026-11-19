@@ -86,7 +86,7 @@ describe('the Layout tab', () => {
       expect(text).toContain(name);
     expect(text).toContain('the layout in use, with your changes applied');
     expect(group(view.container, 'Navigation side').querySelector<HTMLInputElement>('input:checked')?.value).toBe(
-      'top',
+      'left',
     );
     expect(view.container.textContent).not.toContain('this device only');
     await view.unmount();
@@ -119,13 +119,13 @@ describe('the Layout tab', () => {
     const view = await mount(<LayoutSettings client={script.client} />);
     await settle();
     const before = script.reads();
-    script.held = readOf({ layout: { ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'right' } } });
-    await pick(view.container, 'Navigation side', 'right');
+    script.held = readOf({ layout: { ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'bottom' } } });
+    await pick(view.container, 'Navigation side', 'bottom');
     await settle();
-    expect(script.calls).toEqual(['set nav.side right']);
+    expect(script.calls).toEqual(['set nav.side bottom']);
     expect(script.reads()).toBeGreaterThan(before);
     expect(group(view.container, 'Navigation side').querySelector<HTMLInputElement>('input:checked')?.value).toBe(
-      'right',
+      'bottom',
     );
     await view.unmount();
   });
@@ -138,10 +138,10 @@ describe('the Layout tab', () => {
     expect(group(view.container, 'Phone navigation side').querySelector<HTMLInputElement>('input:checked')?.value).toBe(
       'bottom',
     );
-    await pick(view.container, 'Phone navigation side', 'top');
+    await pick(view.container, 'Phone navigation side', 'left');
     await pick(view.container, 'Phone density', 'compact', 1);
     await settle();
-    expect(script.calls).toEqual(['set phone.nav.side top']);
+    expect(script.calls).toEqual(['set phone.nav.side left']);
     expect(device.calls).toEqual(['set phone.density compact']);
     await view.unmount();
   });

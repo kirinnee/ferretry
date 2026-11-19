@@ -18,7 +18,7 @@ const choice = (path: ChoiceSetting['path']): ChoiceSetting =>
   );
 
 describe('the scene for a layout key', () => {
-  test('left, right and top draw the one left drawer, as the shell does; bottom adds the bar of places', () => {
+  test('left draws the one left drawer, as the shell does; bottom adds the bar of places; the unoffered words draw the same as left', () => {
     const left = stateFor('nav.side', 'left');
     expect(left).toMatchObject({ drawer: 'rail', bottom: false, lit: 'nav', column: false, device: 'wide' });
     expect(stateFor('nav.side', 'right')).toEqual(left);
@@ -26,7 +26,7 @@ describe('the scene for a layout key', () => {
     expect(stateFor('nav.side', 'bottom')).toMatchObject({ drawer: 'rail', bottom: true, lit: 'nav' });
   });
 
-  test('a rail starts the drawer as icons; bar and list draw it open, the same as each other', () => {
+  test('a rail starts the drawer as icons; list draws it open, and so does the unoffered bar', () => {
     expect(stateFor('nav.style', 'rail')).toMatchObject({ drawer: 'rail', bottom: false, lit: 'nav' });
     expect(stateFor('nav.style', 'bar')).toMatchObject({ drawer: 'open', bottom: false, lit: 'nav' });
     expect(stateFor('nav.style', 'list')).toEqual(stateFor('nav.style', 'bar'));
@@ -40,16 +40,12 @@ describe('the scene for a layout key', () => {
     expect(stateFor('phone.nav.side', 'bottom')).toMatchObject({ drawer: 'none', bottom: true, device: 'phone' });
   });
 
-  test('a caption says so where the shell draws a word the same as another, and only there', () => {
-    expect(captionFor('nav.side', 'right')).toContain('same as Left');
-    expect(captionFor('nav.side', 'top')).toContain('same as Left');
+  test('a caption says so where a word draws nothing new, and only there', () => {
     expect(captionFor('nav.side', 'left')).toBeUndefined();
     expect(captionFor('nav.side', 'bottom')).toBeUndefined();
-    expect(captionFor('nav.style', 'bar')).toContain('same as List');
-    expect(captionFor('nav.style', 'list')).toContain('same as Bar');
+    expect(captionFor('nav.style', 'list')).toBeUndefined();
     expect(captionFor('nav.style', 'rail')).toBeUndefined();
     expect(captionFor('phone.nav.style', 'rail')).toContain('phone');
-    expect(captionFor('phone.nav.side', 'top')).toContain('same as Left');
     expect(captionFor('density', 'compact')).toBeUndefined();
   });
 
@@ -72,8 +68,9 @@ describe('the scene for a layout key', () => {
 
   test('the loop starts from the word before, wrapping round', () => {
     const options = choice('nav.side').options;
-    expect(wordBefore(options, 'right')).toBe('left');
+    expect(wordBefore(options, 'bottom')).toBe('left');
     expect(wordBefore(options, 'left')).toBe('bottom');
+    expect(wordBefore(options, 'right')).toBe('bottom');
   });
 });
 
@@ -141,9 +138,9 @@ describe('the previews', () => {
     expect(menus(mounted.container)).toEqual(['rail', 'rail+bottom']);
   });
 
-  test('a word the shell draws the same as another says so under its frame', async () => {
-    mounted = await mount(<LayoutPreview setting={choice('nav.side')} value="right" />);
-    expect(caption(mounted.container)).toContain('same as Left');
+  test('a word that draws nothing new on a phone says so under its frame, and no other does', async () => {
+    mounted = await mount(<LayoutPreview setting={choice('phone.nav.style')} value="list" />);
+    expect(caption(mounted.container)).toContain('No visible change on a phone');
     expect(frame(mounted.container).getAttribute('aria-hidden')).toBe('true');
     await mounted.unmount();
     mounted = await mount(<LayoutPreview setting={choice('nav.side')} value="left" />);
