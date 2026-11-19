@@ -1,11 +1,11 @@
 /**
  * THE FERRET LIST — this daemon's ferrets, live, grouped by folder (today's left sessions bar, as the `ferrets` screen).
  *
- * Top to bottom: Mine · All · Agents, each with the count choosing it would show; "Show stopped (n)"; the
- * "Pinned" group; then one group per folder. The open ferret (the route's `:ferret`) is always listed and marked
+ * Top to bottom: ONE row — Mine · All · Agents, each with the count choosing it would show, and the ⋯ menu beside them
+ * (Show stopped, Group Needs you, Restart outdated); the "Pinned" group; then one group per folder. The open ferret (the route's `:ferret`) is always listed and marked
  * `aria-current="page"`. A row is one link to the ferret's chat.
  *
- * The kind, "Show stopped" and the row density are kept for this device in the app's controls (`sessionsMode`,
+ * The kind, "Show stopped" (a toggle in the ⋯ menu) and the row density are kept for this device in the app's controls (`sessionsMode`,
  * `showStopped`, `density`): ticking it on the phone does not change the laptop. A ferret started by another is drawn
  * under it, collapsed behind a chevron (`list-model.ts`); every row has a pin button beside its ⋯ menu.
  *
@@ -187,18 +187,16 @@ export function FerretListBody({
             </button>
           ))}
         </fieldset>
-        <div className="fy-sbar__tools">
-          <label className="fy-sbar__stopped" data-sbar-show-stopped="">
-            <input
-              checked={showStopped}
-              onChange={event => set({ showStopped: event.currentTarget.checked })}
-              type="checkbox"
-            />
-            <span>Show stopped</span>
-            {view.hiddenStopped > 0 ? <span className="fy-sbar__count">({view.hiddenStopped})</span> : null}
-          </label>
-          <ListOptions restart={restart} />
-        </div>
+        <ListOptions
+          restart={restart}
+          toggles={{
+            showStopped,
+            hiddenStopped: view.hiddenStopped,
+            onShowStopped: on => set({ showStopped: on }),
+            groupNeedsYou: device.groupNeedsYou,
+            onGroupNeedsYou: on => set({ groupNeedsYou: on }),
+          }}
+        />
       </div>
       <RestartOutdatedResult restart={restart} />
       {pinFailure === null ? null : (

@@ -190,10 +190,10 @@ describe('which ferrets the list lists', () => {
     expect(emptyMessage({ mode: 'interactive', showStopped: false }, 0)).toBe('No ferrets of yours.');
     expect(emptyMessage({ mode: 'auto', showStopped: false }, 0)).toBe('No agent ferrets.');
     expect(emptyMessage({ mode: 'all', showStopped: false }, 1)).toBe(
-      'No live ferrets — 1 stopped. Tick Show stopped.',
+      'No live ferrets — 1 stopped. Switch on Show stopped in the ⋯ menu.',
     );
     expect(emptyMessage({ mode: 'auto', showStopped: false }, 2)).toBe(
-      'No live agent ferrets — 2 stopped. Tick Show stopped.',
+      'No live agent ferrets — 2 stopped. Switch on Show stopped in the ⋯ menu.',
     );
   });
 });

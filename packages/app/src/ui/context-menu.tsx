@@ -31,6 +31,7 @@
  *     the replacement once they ask for it.
  */
 
+import { Check } from 'lucide-react';
 import {
   Fragment,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -65,6 +66,11 @@ export interface ContextMenuItem {
    * follow it. A `role="separator"` is not a `menuitem`, so the roving index never lands on it.
    */
   readonly separatorBefore?: boolean;
+  /**
+   * A TOGGLE: when set the row is a `menuitemcheckbox` that says whether it is on (`aria-checked`) and draws a check
+   * at its end while on. Unset is a plain `menuitem`, so every existing menu is untouched.
+   */
+  readonly checked?: boolean;
 }
 
 export interface MenuAnchor {
@@ -324,7 +330,7 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
   // on the boolean rather than on the derived object, which is new every render.
   useEffect(() => {
     if (!open || !positioned) return;
-    const nodes = menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]');
+    const nodes = menuRef.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]');
     nodes?.[active]?.focus();
   }, [open, positioned, active]);
 
@@ -426,9 +432,11 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
         {items.map((item, index) => (
           <Fragment key={item.key}>
             {item.separatorBefore ? <hr className="kt-menu-sep" data-menu-separator="" /> : null}
+            {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: aria-checked is set only on the menuitemcheckbox role below */}
             <button
               type="button"
-              role="menuitem"
+              role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+              aria-checked={item.checked}
               data-menu-key={item.key}
               data-danger={item.danger ? '' : undefined}
               tabIndex={index === active ? 0 : -1}
@@ -461,6 +469,7 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
               )}
               {item.detail && <span className="mono shrink-0 text-meta text-muted">{item.detail}</span>}
+              {item.checked ? <Check aria-hidden="true" className="shrink-0" data-menu-check="" size={14} /> : null}
             </button>
           </Fragment>
         ))}

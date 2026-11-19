@@ -112,7 +112,7 @@ interface ModeCounts {
 /** The tallies the filter controls print, from the ferrets already past the stopped rule. */
 export interface ListTallies {
   readonly counts: ModeCounts;
-  /** How many stopped ferrets ticking "Show stopped" would add under the kind chosen. */
+  /** How many stopped ferrets switching on "Show stopped" would add under the kind chosen. */
   readonly hiddenStopped: number;
 }
 
@@ -281,7 +281,8 @@ export const MODE_SEGMENTS: readonly { readonly mode: ModeFilter; readonly label
 export const emptyMessage = (filter: FerretListFilter, hiddenStopped: number): string => {
   const kind = filter.mode === 'auto' ? 'agent ' : '';
   const of = filter.mode === 'interactive' ? ' of yours' : '';
-  if (hiddenStopped > 0) return `No live ${kind}ferrets${of} — ${hiddenStopped} stopped. Tick Show stopped.`;
+  if (hiddenStopped > 0)
+    return `No live ${kind}ferrets${of} — ${hiddenStopped} stopped. Switch on Show stopped in the ⋯ menu.`;
   return filter.mode === 'all' ? 'No ferrets are running.' : `No ${kind}ferrets${of}.`;
 };
 

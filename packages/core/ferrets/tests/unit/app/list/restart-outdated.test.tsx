@@ -139,8 +139,8 @@ describe('S-0320 Restart outdated (N) in the list ⋯ menu', () => {
     // The restarted ferret drops its mark; the queued one reads Queued in muted ink; the count stops counting both.
     expect(mark(root, 'idle-1')).toBeNull();
     expect(mark(root, 'busy-1')?.getAttribute('data-outdated-mark')).toBe('queued');
-    // Nothing is left to restart, so the ⋯ goes away with its badge.
-    expect(options(root)).toBeNull();
+    // Nothing is left to restart, so the badge goes (the ⋯ stays: Show stopped lives in it).
+    expect(options(root)?.querySelector('[data-sbar-options-badge]')).toBeNull();
     // Dismiss clears the line and the overlay: the daemon's own word is the truth again.
     await click(root.querySelector('.fy-restart-outdated__dismiss'), 'Dismiss');
     expect(root.querySelector('[data-restart-outdated-result]')).toBeNull();
