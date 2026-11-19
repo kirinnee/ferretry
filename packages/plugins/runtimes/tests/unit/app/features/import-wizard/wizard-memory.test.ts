@@ -13,6 +13,7 @@ describe('what the wizard remembers in the address', () => {
       names: { codex: 'work-codex' },
       left: { 'claude-code': new Set(['claude-code:mcp:issues' as const]), codex: new Set<never>() },
       ticked: { 'claude-code': new Set(['GITHUB_TOKEN']), codex: new Set<string>() },
+      declined: { 'claude-code': new Set(['instructions/claude']), codex: new Set<string>() },
       ends: {},
       finished: false,
     };
@@ -23,6 +24,7 @@ describe('what the wizard remembers in the address', () => {
     expect(read.names).toEqual({ codex: 'work-codex' });
     expect([...read.left['claude-code']]).toEqual(['claude-code:mcp:issues']);
     expect([...read.ticked['claude-code']]).toEqual(['GITHUB_TOKEN']);
+    expect([...read.declined['claude-code']]).toEqual(['instructions/claude']);
   });
 
   it('a damaged or hand-edited parameter reads as nothing remembered', () => {

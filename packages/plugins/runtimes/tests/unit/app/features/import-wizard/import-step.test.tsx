@@ -386,3 +386,37 @@ describe('a reload on a later step', () => {
     expect(text(second.container, '[data-import-answer-earlier]')).toContain('before this page was reloaded');
   });
 });
+
+describe('a re-import whose source changed', () => {
+  const changed = {
+    ...scanOf({ claude: CLAUDE_FULL }),
+    updates: [{ reference: 'instructions/claude', sources: ['~/.claude/CLAUDE.md'] }],
+  };
+
+  it('lists it as changed and ticked, sends it as acceptedUpdates, and the answer says it was updated', async () => {
+    const calls: Call[] = [];
+    const view = await open(routes(changed), calls);
+    const root = view.container;
+    expect(text(root, '[data-found-group="updates"]')).toContain('Changed since you last brought it in');
+    expect(root.querySelector<HTMLInputElement>('[data-found-group="updates"] input')?.checked).toBe(true);
+    await click(root, '[data-change-submit]');
+    await settle();
+    expect(calls.find(call => call.route === 'POST /v1/runtimes/proposals')?.body).toMatchObject({
+      change: { acceptedUpdates: ['instructions/claude'] },
+    });
+    expect(text(root, '[data-import-answer]')).toContain('Updated instructions/claude from its changed source.');
+  });
+
+  it('unticked, it is not sent and the answer says it was kept as it was', async () => {
+    const calls: Call[] = [];
+    const view = await open(routes(changed), calls);
+    const root = view.container;
+    await click(root, '[data-found-group="updates"] input');
+    await click(root, '[data-change-submit]');
+    await settle();
+    expect(calls.find(call => call.route === 'POST /v1/runtimes/proposals')?.body).not.toHaveProperty(
+      'change.acceptedUpdates',
+    );
+    expect(text(root, '[data-import-answer]')).toContain('instructions/claude kept as it was.');
+  });
+});

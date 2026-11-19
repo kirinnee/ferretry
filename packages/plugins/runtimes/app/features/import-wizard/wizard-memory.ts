@@ -25,6 +25,8 @@ const MemorySchema = z.strictObject({
   names: Names.optional(),
   left: Lists(ImportItemIdSchema).optional(),
   ticked: Lists(z.string().min(1).max(100)).optional(),
+  /** Changed sources the person unticked: they are kept as they were. */
+  declined: Lists(z.string().min(1).max(200)).optional(),
   /** How each finished tool ended, and whether the person pressed Finish: which step they were on. */
   ends: z.strictObject({ 'claude-code': End.optional(), codex: End.optional() }).optional(),
   finished: z.boolean().optional(),
@@ -35,6 +37,7 @@ export interface Memory {
   readonly names: Partial<Record<HarnessKey, string>>;
   readonly left: Readonly<Record<HarnessKey, ReadonlySet<ImportItemId>>>;
   readonly ticked: Readonly<Record<HarnessKey, ReadonlySet<string>>>;
+  readonly declined: Readonly<Record<HarnessKey, ReadonlySet<string>>>;
   readonly ends: Partial<Record<HarnessKey, 'imported' | 'skipped'>>;
   readonly finished: boolean;
 }
@@ -44,6 +47,7 @@ export const emptyMemory = (): Memory => ({
   names: {},
   left: { 'claude-code': new Set(), codex: new Set() },
   ticked: { 'claude-code': new Set(), codex: new Set() },
+  declined: { 'claude-code': new Set(), codex: new Set() },
   ends: {},
   finished: false,
 });
@@ -55,12 +59,13 @@ export const readMemory = (search: string): Memory => {
   try {
     const parsed = MemorySchema.safeParse(JSON.parse(raw));
     if (!parsed.success) return emptyMemory();
-    const { tool = 0, names = {}, left = {}, ticked = {}, ends = {}, finished = false } = parsed.data;
+    const { tool = 0, names = {}, left = {}, ticked = {}, declined = {}, ends = {}, finished = false } = parsed.data;
     return {
       tool,
       names,
       left: { 'claude-code': new Set(left['claude-code']), codex: new Set(left.codex) },
       ticked: { 'claude-code': new Set(ticked['claude-code']), codex: new Set(ticked.codex) },
+      declined: { 'claude-code': new Set(declined['claude-code']), codex: new Set(declined.codex) },
       ends,
       finished,
     };
@@ -77,7 +82,9 @@ const nothingRemembered = (memory: Memory): boolean =>
   memory.left['claude-code'].size +
     memory.left.codex.size +
     memory.ticked['claude-code'].size +
-    memory.ticked.codex.size ===
+    memory.ticked.codex.size +
+    memory.declined['claude-code'].size +
+    memory.declined.codex.size ===
     0;
 
 /** The address's query with this memory in it (and nothing else of the query touched), or null when it would be too long. */
@@ -92,6 +99,7 @@ export const withMemory = (search: string, memory: Memory): string | null => {
         names: memory.names,
         left: { 'claude-code': [...memory.left['claude-code']], codex: [...memory.left.codex] },
         ticked: { 'claude-code': [...memory.ticked['claude-code']], codex: [...memory.ticked.codex] },
+        declined: { 'claude-code': [...memory.declined['claude-code']], codex: [...memory.declined.codex] },
         ends: memory.ends,
         finished: memory.finished,
       }),

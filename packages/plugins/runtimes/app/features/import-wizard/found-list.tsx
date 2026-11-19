@@ -6,7 +6,7 @@
 import { Lock } from 'lucide-react';
 import { useId } from 'react';
 import type { ImportItemId } from '../../../contract/index.ts';
-import type { FoundGroup, FoundItem, LeftAlone } from './model.ts';
+import type { FoundGroup, FoundItem, LeftAlone, UpdateItem } from './model.ts';
 import { becomes } from './mapping-words.ts';
 import {
   CONVERSATIONS_LINE,
@@ -23,12 +23,15 @@ function Row({
   on,
   onChange,
   name,
+  plain = false,
   children,
 }: {
   readonly item: FoundItem;
   readonly on: boolean;
   readonly onChange: (on: boolean) => void;
   readonly name: string;
+  /** A row with no item id of its own (a changed source): always a choice, and its words stand as written. */
+  readonly plain?: boolean;
   readonly children?: React.ReactNode;
 }) {
   const id = useId();
@@ -44,14 +47,13 @@ function Row({
           type="checkbox"
           className="mt-1 h-4 w-4 shrink-0 accent-[var(--accent)]"
           checked={on}
-          disabled={item.id === null}
+          disabled={item.id === null && !plain}
           onChange={event => onChange(event.currentTarget.checked)}
         />
         <span className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="[overflow-wrap:anywhere] text-row font-semibold text-fg">{item.label}</span>
           <span className="text-cell text-fg" data-found-becomes="">
-            Becomes: {item.becomes}
-            {item.id === null ? ' · comes in with the rest' : ''}
+            {plain ? item.becomes : `Becomes: ${item.becomes}${item.id === null ? ' · comes in with the rest' : ''}`}
           </span>
           {children}
         </span>
@@ -131,11 +133,49 @@ export interface FoundListProps {
   /** The GitHub-token variables the person ticked; none until they do. */
   readonly tickedEnv: ReadonlySet<string>;
   readonly onTickEnv: (name: string, on: boolean) => void;
+  /** Sources changed since the last import: each is taken again unless unticked. */
+  readonly updates: readonly UpdateItem[];
+  readonly declined: ReadonlySet<string>;
+  readonly onTakeUpdate: (reference: string, on: boolean) => void;
 }
 
-export function FoundList({ harness, groups, left, leftAlone, onToggle, tickedEnv, onTickEnv }: FoundListProps) {
+export function FoundList({
+  harness,
+  groups,
+  left,
+  leftAlone,
+  onToggle,
+  tickedEnv,
+  onTickEnv,
+  updates,
+  declined,
+  onTakeUpdate,
+}: FoundListProps) {
   return (
     <div className="flex min-w-0 flex-col gap-4" data-found-list={harness}>
+      {updates.length === 0 ? null : (
+        <section className="flex min-w-0 flex-col gap-2" data-found-group="updates">
+          <h4 className="m-0 text-meta font-semibold uppercase text-muted">
+            Changed since you last brought it in{updates.length > 1 ? ` · ${String(updates.length)}` : ''}
+          </h4>
+          <ul className="m-0 flex list-none flex-col gap-2 p-0">
+            {updates.map(update => (
+              <Row
+                key={update.reference}
+                name="updates"
+                item={{
+                  id: null,
+                  label: update.reference,
+                  becomes: `Updated from ${update.sources.join(', ')}. Unticked, it is kept as it was`,
+                }}
+                on={!declined.has(update.reference)}
+                onChange={on => onTakeUpdate(update.reference, on)}
+                plain
+              />
+            ))}
+          </ul>
+        </section>
+      )}
       {groups.map(group => (
         <section key={group.key} className="flex min-w-0 flex-col gap-2" data-found-group={group.key}>
           <h4 className="m-0 text-meta font-semibold uppercase text-muted">

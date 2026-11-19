@@ -57,6 +57,12 @@ export interface FoundGroup {
   readonly githubTokens?: readonly string[];
 }
 
+/** One earlier import whose source changed (`SetupScan.updates`): a component's reference and where it is read from. */
+export interface UpdateItem {
+  readonly reference: string;
+  readonly sources: readonly string[];
+}
+
 /** What the wizard says it does NOT take, as fixed lines. */
 export interface LeftAlone {
   readonly hooks: number;
@@ -82,6 +88,8 @@ export interface ToolModel {
   readonly problems: readonly string[];
   /** Nothing found to bring: the tool can still get a runtime. */
   readonly empty: boolean;
+  /** Things brought in before whose host source has changed since: each is taken again only when ticked (the default). */
+  readonly updates: readonly UpdateItem[];
 }
 
 const SIGNED_IN = new Set(['signed-in', 'refresh-due']);
@@ -180,6 +188,12 @@ export function toolModel(harness: HarnessKey, scan: SetupScan, version: string 
   const installed = found?.installed ?? tool?.installed ?? false;
   const signedIn = found !== undefined && SIGNED_IN.has(found.account.state);
   const groups = found === undefined ? [] : groupsOf(harness, found);
+  // An update belongs to the tool whose own files it is read from (the scan names each source by its path).
+  const home = harness === 'claude-code' ? '.claude' : '.codex';
+  const ownSources = [found?.instructions?.source, found?.settings?.source];
+  const updates = scan.updates
+    .filter(update => update.sources.some(source => ownSources.includes(source) || source.includes(home)))
+    .map(update => ({ reference: update.reference, sources: [...update.sources] }));
   const suggested = scan.runtimes.find(entry => entry.harness === harness)?.name;
   return {
     harness,
@@ -194,7 +208,8 @@ export function toolModel(harness: HarnessKey, scan: SetupScan, version: string 
     suggestedName: suggested ?? `${harness}-default`,
     duplicateOf: scan.duplicates.find(entry => entry.harness === harness)?.existing ?? null,
     problems: found?.problems ?? [],
-    empty: groups.length === 0,
+    empty: groups.length === 0 && updates.length === 0,
+    updates,
   };
 }
 
@@ -220,7 +235,10 @@ export function importChange(
   left: ReadonlySet<ImportItemId>,
   name: string,
   ticked: ReadonlySet<string> = new Set(),
+  declined: ReadonlySet<string> = new Set(),
 ): AccountChange {
+  // Every changed source is taken again unless the person unticked it.
+  const acceptedUpdates = model.updates.map(update => update.reference).filter(reference => !declined.has(reference));
   const skip = skipList(model, left);
   const env = model.groups.find(group => group.key === 'env');
   // Only a token variable this scan lists, and only while the environment itself is being brought.
@@ -231,6 +249,7 @@ export function importChange(
     names: { [model.harness]: name.trim() },
     ...(skip.length === 0 ? {} : { skip: [...skip] }),
     ...(tickedEnv.length === 0 ? {} : { tickedEnv }),
+    ...(acceptedUpdates.length === 0 ? {} : { acceptedUpdates }),
   };
 }
 

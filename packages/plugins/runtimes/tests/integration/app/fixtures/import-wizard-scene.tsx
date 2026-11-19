@@ -8,6 +8,7 @@
  *   ?view=secrets    only a secret-looking environment to bring
  *   ?view=hooks      hooks and project instructions present (the greyed lines)
  *   ?view=confirm    the machine wants a passkey before it shows the setup (a quiet read is refused, nothing prompts)
+ *   ?view=changed    a re-import: CLAUDE.md and a skill changed since the last time (ticked by default)
  *   ?view=signin     installed, not signed in
  *   ?theme=<family>-<mode>
  */
@@ -43,6 +44,13 @@ const scans: Readonly<Record<string, SetupScan>> = {
     },
     codex: 'absent',
   }),
+  changed: {
+    ...scanOf({ claude: CLAUDE_FULL, codex: 'absent' }),
+    updates: [
+      { reference: 'instructions/claude', sources: ['~/.claude/CLAUDE.md'] },
+      { reference: 'skills/review', sources: ['~/.claude/skills/review'] },
+    ],
+  },
   signin: scanOf({ claude: { ...CLAUDE_FULL, account: { state: 'not-signed-in' } }, codex: 'absent' }),
 };
 

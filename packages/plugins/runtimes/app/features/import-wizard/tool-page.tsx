@@ -215,6 +215,9 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
           onToggle={(id, on) => wizard.toggle(harness, id, on)}
           tickedEnv={wizard.tickedEnv[harness]}
           onTickEnv={(name, on) => wizard.tickEnv(harness, name, on)}
+          updates={model.updates}
+          declined={wizard.declined[harness]}
+          onTakeUpdate={(reference, on) => wizard.takeUpdate(harness, reference, on)}
         />
       </section>
       <section className="flex min-w-0 flex-col gap-2" data-tool-name="">

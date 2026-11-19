@@ -206,3 +206,40 @@ describe('an environment that is only GitHub tokens', () => {
     expect(importChange(model, new Set(), 'x', new Set(['GH_TOKEN']))).toMatchObject({ tickedEnv: ['GH_TOKEN'] });
   });
 });
+
+describe('sources changed since the last import', () => {
+  const withUpdates = (updates: { reference: string; sources: string[] }[]) => ({
+    ...scanOf({ claude: CLAUDE_FULL, codex: CODEX_FULL }),
+    updates,
+  });
+  const scan = withUpdates([
+    { reference: 'instructions/claude', sources: ['~/.claude/CLAUDE.md'] },
+    { reference: 'skills/review', sources: ['~/.codex/skills/review'] },
+  ]);
+
+  it('belong to the tool whose files they are read from', () => {
+    expect(toolModel('claude-code', scan, null).updates.map(update => update.reference)).toEqual([
+      'instructions/claude',
+    ]);
+    expect(toolModel('codex', scan, null).updates.map(update => update.reference)).toEqual(['skills/review']);
+  });
+
+  it('are all accepted unless unticked, and nothing is sent when there are none', () => {
+    const model = toolModel('claude-code', scan, null);
+    expect(importChange(model, new Set(), 'x')).toMatchObject({ acceptedUpdates: ['instructions/claude'] });
+    expect(importChange(model, new Set(), 'x', new Set(), new Set(['instructions/claude']))).not.toHaveProperty(
+      'acceptedUpdates',
+    );
+    expect(
+      importChange(toolModel('claude-code', scanOf({ claude: CLAUDE_FULL }), null), new Set(), 'x'),
+    ).not.toHaveProperty('acceptedUpdates');
+  });
+
+  it('a tool with only a changed source is not "nothing to bring"', () => {
+    const only = {
+      ...scanOf({ claude: {} }),
+      updates: [{ reference: 'instructions/claude', sources: ['~/.claude/CLAUDE.md'] }],
+    };
+    expect(toolModel('claude-code', only, null).empty).toBe(false);
+  });
+});

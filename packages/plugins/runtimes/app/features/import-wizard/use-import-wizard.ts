@@ -67,6 +67,7 @@ export function useImportWizard(client: RuntimesClient) {
   const [tool, setTool] = useState(remembered.tool);
   const [left, setLeft] = useState<Readonly<Record<HarnessKey, ReadonlySet<ImportItemId>>>>(remembered.left);
   const [tickedEnv, setTickedEnv] = useState<Readonly<Record<HarnessKey, ReadonlySet<string>>>>(remembered.ticked);
+  const [declined, setDeclined] = useState<Readonly<Record<HarnessKey, ReadonlySet<string>>>>(remembered.declined);
   const [names, setNames] = useState<Partial<Record<HarnessKey, string>>>(remembered.names);
   // A tool that ended before the reload is shown as ended; the daemon's own sentences are not kept in the address.
   const [ends, setEnds] = useState<Partial<Record<HarnessKey, ToolEnd>>>(() =>
@@ -130,10 +131,11 @@ export function useImportWizard(client: RuntimesClient) {
       names,
       left,
       ticked: tickedEnv,
+      declined,
       ends: Object.fromEntries(Object.entries(ends).map(([harness, end]) => [harness, end.kind])),
       finished,
     });
-  }, [tool, names, left, tickedEnv, ends, finished]);
+  }, [tool, names, left, tickedEnv, declined, ends, finished]);
 
   const models = useMemo<Readonly<Record<HarnessKey, ToolModel>> | null>(
     () =>
@@ -151,6 +153,15 @@ export function useImportWizard(client: RuntimesClient) {
       const next = new Set(current[harness]);
       if (on) next.delete(id);
       else next.add(id);
+      return { ...current, [harness]: next };
+    });
+  }, []);
+
+  const takeUpdate = useCallback((harness: HarnessKey, reference: string, on: boolean): void => {
+    setDeclined(current => {
+      const next = new Set(current[harness]);
+      if (on) next.delete(reference);
+      else next.add(reference);
       return { ...current, [harness]: next };
     });
   }, []);
@@ -216,16 +227,28 @@ export function useImportWizard(client: RuntimesClient) {
       if (models === null) return;
       const model = models[harness];
       if (nameProblem(nameOf(harness)) !== null) return;
-      const result = await changes.apply(importChange(model, left[harness], nameOf(harness), tickedEnv[harness]));
+      const result = await changes.apply(
+        importChange(model, left[harness], nameOf(harness), tickedEnv[harness], declined[harness]),
+      );
       if (result.kind !== 'applied') return;
       const summary = result.outcome.outcome === 'executed' ? result.outcome.summary : 'Imported.';
       const unmarked = await settleSteps(harness);
+      const told = resultSentences(summary);
+      // What happened to each changed source, in words: the daemon names an accepted one; an unticked one is said here.
+      const updated = model.updates
+        .filter(
+          update => !declined[harness].has(update.reference) && !told.some(line => line.includes(update.reference)),
+        )
+        .map(update => `Updated ${update.reference} from its changed source.`);
+      const kept = model.updates
+        .filter(update => declined[harness].has(update.reference))
+        .map(update => `${update.reference} kept as it was.`);
       setEnds(current => ({
         ...current,
-        [harness]: { kind: 'imported', sentences: resultSentences(summary), unmarked },
+        [harness]: { kind: 'imported', sentences: [...told, ...updated, ...kept], unmarked },
       }));
     },
-    [changes, left, models, nameOf, settleSteps, tickedEnv],
+    [changes, left, models, nameOf, settleSteps, tickedEnv, declined],
   );
 
   const skip = useCallback(
@@ -251,6 +274,8 @@ export function useImportWizard(client: RuntimesClient) {
     toggle,
     tickedEnv,
     tickEnv,
+    declined,
+    takeUpdate,
     nameOf,
     setName: (harness: HarnessKey, name: string): void => setNames(current => ({ ...current, [harness]: name })),
     ends,

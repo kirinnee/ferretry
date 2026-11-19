@@ -179,6 +179,11 @@ const CASES: readonly Case[] = [
     expectText: ['not signed in', 'Sign in now, or import first and sign in after.'],
   },
   {
+    name: 'changed-since',
+    view: 'changed',
+    expectText: ['Changed since you last brought it in', 'instructions/claude', 'it is kept as it was'],
+  },
+  {
     name: 'needs-passkey-ok',
     view: 'confirm',
     expectText: [
