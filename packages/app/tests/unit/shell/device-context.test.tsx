@@ -18,6 +18,7 @@ import {
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
+import { PALETTES, type PaletteId } from '../../../src/theme/catalog.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
 import { PageThemeSwitch } from '../../../src/ui/theme-toggle.tsx';
 import { interact, type Mounted, mount } from '../../support/dom.ts';
@@ -250,7 +251,7 @@ describe('the page theme switch', () => {
     await press('ArrowLeft');
     expect(themes.snapshot().family).toBe('studio');
     await press('End');
-    expect(themes.snapshot().family).toBe('ma');
+    expect(themes.snapshot().palette).toBe(PALETTES[PALETTES.length - 1]?.id as PaletteId);
     await press('Home');
     expect(themes.snapshot().family).toBe('studio');
     await press('x');

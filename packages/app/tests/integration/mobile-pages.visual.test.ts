@@ -57,7 +57,7 @@ const PAGES = [
   { name: 'projects', path: '/d/ws/projects', ready: '.fy-main' },
   { name: 'insights', path: '/d/ws/insights', ready: '.fy-main' },
   { name: 'settings', path: '/d/ws/settings', ready: '.fy-page' },
-  { name: 'this-device', path: '/settings', ready: '[data-theme-tiles]' },
+  { name: 'this-device', path: '/settings', ready: '[data-palette-chips]' },
   { name: 'pair', path: '/pair', ready: '.fy-main' },
 ] as const;
 

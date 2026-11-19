@@ -14,6 +14,9 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
+import { PALETTES as PALETTE_ENTRIES } from '../../src/theme/catalog.ts';
+
+const PALETTE_COUNT = PALETTE_ENTRIES.length;
 
 setDefaultTimeout(30_000);
 
@@ -99,8 +102,8 @@ const shotOf = async (tab: Page, variant: (typeof VARIANTS)[number], name: strin
 
 describe('Settings › This device', () => {
   for (const variant of VARIANTS) {
-    it(`${variant.name}: words for Mode and Text size, a theme tile grid with live swatches, and a Motion control`, async () => {
-      const { tab, close } = await open(variant, '/settings', '[data-theme-tiles]');
+    it(`${variant.name}: words for Mode and Text size, a palette chip row with live swatches, and a Motion control`, async () => {
+      const { tab, close } = await open(variant, '/settings', '[data-palette-chips]');
       try {
         const labels = async (group: string) =>
           await tab.locator(`[role="radiogroup"][aria-label="${group}"] label`).allTextContents();
@@ -108,8 +111,8 @@ describe('Settings › This device', () => {
         expect(await labels('Text size')).toEqual(['Default', 'Large', 'Larger']);
         expect(await labels('Motion')).toEqual(['Follow system', 'Reduced']);
         expect(await tab.locator('.fy-page select').count(), 'no bare select on the page').toBe(0);
-        expect(await tab.locator('[data-palette-chips] [data-palette-chip]').count()).toBe(11);
-        const swatch = await tab.locator('[data-theme-tiles] [data-swatch]').first().boundingBox();
+        expect(await tab.locator('[data-palette-chips] [data-palette-chip]').count()).toBe(PALETTE_COUNT);
+        const swatch = await tab.locator('[data-palette-chips] [data-swatch]').first().boundingBox();
         expect(swatch?.width ?? 0, 'a swatch has a real size').toBeGreaterThan(20);
         // The three segmented controls share one width and one left edge at 1280, and fill the row at 390.
         const boxes = await tab.evaluate(() =>
@@ -125,7 +128,9 @@ describe('Settings › This device', () => {
         if (variant.phone) expect(boxes[0]?.width ?? 0, 'full width on a phone').toBeGreaterThan(variant.width - 120);
         // A theme's own panel shadow never spills out of its swatch over the label.
         const shadows = await tab.evaluate(() =>
-          [...document.querySelectorAll('[data-theme-tiles] .kt-swatch')].map(node => getComputedStyle(node).boxShadow),
+          [...document.querySelectorAll('[data-palette-chips] [data-swatch]')].map(
+            node => getComputedStyle(node).boxShadow,
+          ),
         );
         expect(shadows.filter(shadow => shadow !== 'none')).toEqual([]);
         // The page scrolls inside the app shell, so a "full page" shot of a phone is a tall window: Text size and Motion show.
@@ -143,7 +148,7 @@ describe('Settings › This device', () => {
 describe('the command bar', () => {
   for (const variant of VARIANTS) {
     it(`${variant.name}: opens on a short list of places, not a blank panel`, async () => {
-      const { tab, close } = await open(variant, '/settings', '[data-theme-tiles]');
+      const { tab, close } = await open(variant, '/settings', '[data-palette-chips]');
       try {
         await tab.keyboard.press('Control+K');
         await tab.waitForSelector('[role="dialog"][aria-label="Command bar"]');
