@@ -377,7 +377,8 @@ export class ToolInstallService {
   }
 
   /**
-   * Install the named harnesses, one after another, and say how each ended.
+   * Install the named harnesses, one after another, and say how each ended. The plans are decided ONCE, after the first
+   * refresh, checked against what the person was shown, and those same plans run: nothing plans again between check and spawn.
    */
   async install(
     request: ToolInstallRequest,
@@ -398,10 +399,14 @@ export class ToolInstallService {
     this.#running = true;
     try {
       await this.options.refresh?.();
-      this.#assertShownPlans(request.shown ?? []);
+      // ONE plan per harness, decided here: the plans the person's shown commands are checked against ARE the plans
+      // that run. Nothing below plans again, so a refresh after an earlier install cannot change what a later one spawns.
+      const checked = this.plans(harnesses);
+      this.#assertShownPlans(request.shown ?? [], checked);
       const outcomes: ToolInstallOutcome[] = [];
-      for (const harness of harnesses) {
-        const outcome = await this.#installOne(harness, onProgress);
+      for (const preview of checked) {
+        const harness = preview.harness;
+        const outcome = await this.#installOne(preview, onProgress);
         onProgress({ harness, stage: 'finished', outcome });
         outcomes.push(outcome);
       }
@@ -416,10 +421,14 @@ export class ToolInstallService {
    * one starts, so a changed plan stops the whole request with nothing spawned. A harness that is already installed has
    * no command to compare: it only reports that it is installed.
    */
-  #assertShownPlans(shown: readonly { readonly harness: HarnessKind; readonly command: string }[]): void {
+  #assertShownPlans(
+    shown: readonly { readonly harness: HarnessKind; readonly command: string }[],
+    checked: readonly ToolInstallPreview[],
+  ): void {
     for (const { harness, command } of shown) {
-      if (this.options.locate(harness).outcome === 'located') continue;
-      const plan = planToolInstall(harness, this.#platform(), this.options.executables);
+      const preview = checked.find(entry => entry.harness === harness);
+      if (preview === undefined || preview.installed) continue;
+      const { plan } = preview;
       const fresh = plan.kind === 'runnable' ? plan.command : plan.manualCommand;
       if (fresh !== command)
         throw new ToolInstallRefusal(
@@ -429,13 +438,14 @@ export class ToolInstallService {
     }
   }
 
+  /** Run ONE harness's already-checked preview; it never plans, so the command that runs is the one that was checked. */
   async #installOne(
-    harness: HarnessKind,
+    preview: ToolInstallPreview,
     onProgress: (step: ToolInstallProgress) => void,
   ): Promise<ToolInstallOutcome> {
-    const before = this.options.locate(harness);
-    if (before.outcome === 'located') return { harness, outcome: 'already-installed', path: before.path };
-    const plan = planToolInstall(harness, this.#platform(), this.options.executables);
+    const { harness } = preview;
+    if (preview.installed) return { harness, outcome: 'already-installed', path: preview.path };
+    const { plan } = preview;
     if (plan.kind === 'no-package-manager')
       return {
         harness,

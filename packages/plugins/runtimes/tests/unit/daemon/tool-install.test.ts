@@ -513,6 +513,42 @@ describe('ToolInstallService.install: the command that was shown', () => {
     should(runs).have.length(1);
   });
 
+  it('should run the plan it checked, never a re-plan, when the machine changes after an earlier install in the batch', async () => {
+    // brew is on PATH when the commands are shown and checked; the post-install refresh of the FIRST tool takes it away
+    // and leaves npm. A re-planning runner would now spawn npm for codex; the checked plan is brew.
+    const onPath: Record<string, string> = { brew: '/opt/homebrew/bin/brew' };
+    let refreshes = 0;
+    const { service, runs } = world({
+      onPath,
+      foundAfterRun: ['claude', 'codex'],
+      refresh: async () => {
+        refreshes += 1;
+        if (refreshes === 2) {
+          delete onPath.brew;
+          onPath.npm = '/x/npm';
+        }
+      },
+    });
+    const outcomes = await service.install(
+      {
+        harnesses: ['claude', 'codex'],
+        shown: [
+          { harness: 'claude', command: 'brew install --cask claude-code' },
+          { harness: 'codex', command: 'brew install --cask codex' },
+        ],
+      },
+      OWNER,
+    );
+    should(refreshes).be.aboveOrEqual(2);
+    should(runs.map(run => [run.executable, ...run.args])).deepEqual([
+      ['/opt/homebrew/bin/brew', 'install', '--cask', 'claude-code'],
+      ['/opt/homebrew/bin/brew', 'install', '--cask', 'codex'],
+    ]);
+    should(outcomes.map(outcome => outcome.outcome)).deepEqual(['installed', 'installed']);
+    const second = outcomes[1];
+    should(second?.outcome === 'installed' ? second.command : undefined).equal('brew install --cask codex');
+  });
+
   it('should not compare a harness that is already installed', async () => {
     const { service, runs } = world({ found: ['codex'] });
     const [outcome] = await service.install(
