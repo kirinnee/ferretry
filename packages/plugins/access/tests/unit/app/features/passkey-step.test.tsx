@@ -1,6 +1,6 @@
 /**
  * The `access.passkey` client step (r10 O6b): drawn through the real O1 `StepHost` contract type (a recording host),
- * with the shell's `ChoiceCards`. Fake machine, fake WebAuthn: no real credential is ever made.
+ * with two explicit buttons (never a selection). Fake machine, fake WebAuthn: no real credential is ever made.
  */
 import { describe, expect, it } from 'bun:test';
 import type { z } from 'zod';
@@ -57,8 +57,11 @@ const machine = (view: unknown, options: { fail?: boolean } = {}) => {
   return { client, paths };
 };
 
+/** Fake WebAuthn: counts every ceremony so a test can say none ran. */
+const created = { count: 0 };
 const credentials = (failWith?: Error): CredentialsPort => ({
   create: async () => {
+    created.count += 1;
     if (failWith !== undefined) throw failWith;
     return {
       type: 'public-key',
@@ -93,8 +96,11 @@ const draw = async (
   return { ...world, harness, screen };
 };
 
-const card = (root: HTMLElement, id: string) =>
-  must(root.querySelector<HTMLInputElement>(`input[value="${id}"]`), `the ${id} card`);
+const action = (root: HTMLElement, id: 'add' | 'later') =>
+  must(root.querySelector<HTMLButtonElement>(`button[data-passkey-${id}]`), `the ${id} button`);
+
+const press = (target: HTMLElement, key: string) =>
+  target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
 
 describe('the access.passkey client step', () => {
   it("declares itself as a client step of Access through O1's contract, with a panel in the onboarding.step slot", () => {
@@ -103,16 +109,16 @@ describe('the access.passkey client step', () => {
     expect(panel?.slot).toBe('onboarding.step');
   });
 
-  it('shows two cards (add now / not now) with the minutes left once the machine says this device has none', async () => {
+  it('shows two buttons (add / not now) with the minutes left once the machine says this device has none', async () => {
     const { harness, screen } = await draw(OPEN);
     try {
       expect(harness.decision).toBe('shown');
       const root = must(screen.container.querySelector<HTMLElement>('[data-passkey-step]'), 'the step');
-      expect(root.textContent).toContain('Add a passkey now');
+      expect(action(root, 'add').textContent).toContain('Add a passkey');
+      expect(action(root, 'later').textContent).toContain('Not now');
       expect(root.textContent).toContain('7 minutes left');
-      expect(root.textContent).toContain('Not now');
-      expect(root.querySelector('[data-choice-cards]')).not.toBeNull();
-      expect(root.querySelectorAll('input[type="radio"]').length).toBe(2);
+      expect(root.querySelectorAll('button').length).toBe(2);
+      expect(root.querySelector('input[type="radio"]')).toBeNull();
       // Nothing chosen yet, nothing run: the page only asked the machine, once.
       expect(harness.count('done')).toBe(0);
       expect(harness.count('busy')).toBe(0);
@@ -182,10 +188,10 @@ describe('the access.passkey client step', () => {
     }
   });
 
-  it('choosing "Add a passkey now" runs the fake ceremony, locks the footer while it runs, then records done', async () => {
+  it('pressing "Add a passkey" runs the fake ceremony, locks the footer while it runs, then records done', async () => {
     const { harness, paths, screen } = await draw(OPEN);
     try {
-      await interact(() => card(screen.container, 'add').click());
+      await interact(() => action(screen.container, 'add').click());
       await interact(async () => await Promise.resolve());
       await interact(async () => await Promise.resolve());
       expect(paths).toEqual(['/v1/passkeys', '/v1/passkeys/options', '/v1/passkeys']);
@@ -200,17 +206,16 @@ describe('the access.passkey client step', () => {
     }
   });
 
-  it('a refused ceremony says why, releases the footer, records nothing, and lets the person choose again', async () => {
+  it('a refused ceremony says why, releases the footer, records nothing, and lets the person press again', async () => {
     const { harness, screen } = await draw(OPEN, { credentials: () => credentials(new Error('refused')) });
     try {
-      await interact(() => card(screen.container, 'add').click());
+      await interact(() => action(screen.container, 'add').click());
       await interact(async () => await Promise.resolve());
       await interact(async () => await Promise.resolve());
       expect(screen.container.querySelector('[data-passkey-step-failure]')).not.toBeNull();
       expect(harness.count('done')).toBe(0);
       expect(harness.calls.filter(c => c.kind === 'busy').at(-1)).toEqual({ kind: 'busy', label: null });
-      expect(card(screen.container, 'add').checked).toBe(false);
-      expect(card(screen.container, 'add').disabled).toBe(false);
+      expect(action(screen.container, 'add').disabled).toBe(false);
     } finally {
       await screen.unmount();
     }
@@ -219,10 +224,43 @@ describe('the access.passkey client step', () => {
   it('"Not now" is the whole answer: it moves on at once and records nothing on the ledger', async () => {
     const { harness, paths, screen } = await draw(OPEN);
     try {
-      await interact(() => card(screen.container, 'later').click());
+      await interact(() => action(screen.container, 'later').click());
       expect(harness.count('next')).toBe(1);
       expect(harness.count('done')).toBe(0);
       expect(paths).toEqual(['/v1/passkeys']);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it('arrow, Home, End and Tab keys on the buttons do nothing: no ceremony, no step call beyond ready', async () => {
+    created.count = 0;
+    const { harness, screen } = await draw(OPEN);
+    try {
+      for (const target of [action(screen.container, 'add'), action(screen.container, 'later')])
+        for (const key of ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Home', 'End', 'Tab'])
+          await interact(() => press(target, key));
+      expect(created.count).toBe(0);
+      expect(harness.calls.map(c => c.kind)).toEqual(['ready']);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it('a second press while the ceremony runs or after it is done runs nothing again', async () => {
+    created.count = 0;
+    const { harness, screen } = await draw(OPEN);
+    try {
+      const add = action(screen.container, 'add');
+      await interact(() => {
+        add.click();
+        add.click();
+      });
+      await interact(async () => await Promise.resolve());
+      await interact(async () => await Promise.resolve());
+      expect(created.count).toBe(1);
+      expect(harness.count('done')).toBe(1);
+      expect(harness.count('next')).toBe(0);
     } finally {
       await screen.unmount();
     }
@@ -236,16 +274,19 @@ describe('the access.passkey client step', () => {
   });
 
   it('never puts a credential, challenge or key into the page text or the browser storage', async () => {
+    const snapshot = () =>
+      JSON.stringify([localStorage, sessionStorage].map(store => Object.entries(store).toSorted()));
+    const before = snapshot();
     const { screen } = await draw(OPEN);
     try {
-      await interact(() => card(screen.container, 'add').click());
+      await interact(() => action(screen.container, 'add').click());
       await interact(async () => await Promise.resolve());
       await interact(async () => await Promise.resolve());
       const text = `${document.body.textContent}${document.body.innerHTML}`;
       expect(text).not.toContain(toBase64Url(Uint8Array.of(9)));
       expect(text).not.toContain(toBase64Url(Uint8Array.of(0xaa, 0xbb)));
-      expect(localStorage.length).toBe(0);
-      expect(sessionStorage.length).toBe(0);
+      // The run may share a window with entries it did not write: assert the page changed none of them.
+      expect(snapshot()).toEqual(before);
     } finally {
       await screen.unmount();
     }

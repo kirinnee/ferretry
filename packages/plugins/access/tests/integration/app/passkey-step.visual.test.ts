@@ -2,12 +2,13 @@
  * THE `access.passkey` STEP in a real browser over fake data (`fixtures/passkey-step-scene.tsx`): the real `PasskeyStep`
  * in the real `StepPageFrame`, a fake machine and a fake credential container (no real passkey is ever made).
  *
- *  - the two cards sit in ONE row on a desktop and are not full width (each at most 320px); they stack on a phone;
- *  - each card is at least 44px tall, and the footer button is at least 44px tall and not full width;
+ *  - "Add a passkey" and "Not now" are buttons, each at least 44px tall, and the footer button is at least 44px tall
+ *    and not full width;
  *  - nothing scrolls sideways at 390 or 1280;
- *  - choosing "Add a passkey now" ends on "Passkey added" with the card checked.
+ *  - arrow, Home and End do nothing; Enter and Space on "Not now" leave the page; a press on "Add a passkey" ends on
+ *    "Passkey added".
  *
- * Set `FY_PASSKEY_STEP_SHOTS_DIR` to keep `<viewport>-<scheme>-<case>.png` (`cards`, `added`).
+ * Set `FY_PASSKEY_STEP_SHOTS_DIR` to keep `<viewport>-<scheme>-<case>.png` (`buttons`, `added`).
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -84,7 +85,7 @@ const open = async (variant: Variant) => {
   const problems: string[] = [];
   tab.on('pageerror', error => problems.push(error.message));
   await tab.goto(`${origin}/?theme=studio-${variant.scheme}`);
-  await tab.waitForSelector('[data-passkey-step] [data-choice-cards]');
+  await tab.waitForSelector('[data-passkey-step] [data-passkey-add]');
   await tab.evaluate(async () => await document.fonts.ready);
   return { tab, problems, close: async () => await context.close() };
 };
@@ -101,23 +102,15 @@ const box = async (tab: Page, selector: string) => {
 
 describe('the access.passkey step, in a real browser', () => {
   for (const variant of VARIANTS) {
-    it(`${variant.name}: two roomy cards, a 44px footer button, no sideways scroll`, async () => {
+    it(`${variant.name}: two 44px buttons, a 44px footer button, no sideways scroll`, async () => {
       const { tab, problems, close } = await open(variant);
       try {
-        await shot(tab, variant, 'cards');
-        const cards = await tab.locator('[data-choice-cards] label').evaluateAll(nodes =>
-          nodes.map(node => {
-            const rect = node.getBoundingClientRect();
-            return { top: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) };
-          }),
-        );
-        expect(cards.length).toBe(2);
-        for (const card of cards) expect(card.height).toBeGreaterThanOrEqual(44);
-        if (variant.phone) expect(cards[0]?.top).toBeLessThan(cards[1]?.top ?? 0);
-        else {
-          expect(cards[0]?.top).toBe(cards[1]?.top as number);
-          for (const card of cards) expect(card.width).toBeLessThanOrEqual(321);
-        }
+        await shot(tab, variant, 'buttons');
+        const sizes = await tab
+          .locator('[data-passkey-step] button')
+          .evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().height)));
+        expect(sizes.length).toBe(2);
+        for (const height of sizes) expect(height).toBeGreaterThanOrEqual(44);
         const next = await box(tab, '[data-step-next]');
         expect(next.height).toBeGreaterThanOrEqual(44);
         expect(next.width).toBeLessThan(variant.width * 0.6);
@@ -125,9 +118,29 @@ describe('the access.passkey step, in a real browser', () => {
           await tab.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
         ).toBe(true);
 
-        await tab.locator('[data-choice-cards] input[value="add"]').check({ force: true });
+        // Moving through the page by key starts nothing: no ceremony, no leaving.
+        await tab.locator('[data-passkey-add]').focus();
+        for (const key of ['ArrowRight', 'ArrowDown', 'Home', 'End']) await tab.keyboard.press(key);
+        expect(
+          await tab.evaluate(
+            () => (window as unknown as { __passkeyScene: { creates: number } }).__passkeyScene.creates,
+          ),
+        ).toBe(0);
+        expect(
+          await tab.evaluate(() => (window as unknown as { __passkeyScene: { nexts: number } }).__passkeyScene.nexts),
+        ).toBe(0);
+        expect(await tab.locator('[data-passkey-step-added]').count()).toBe(0);
+        // Enter and Space on "Not now" act (it moves on); then Space on "Add a passkey" runs the fake ceremony.
+        await tab.locator('[data-passkey-later]').focus();
+        await tab.keyboard.press('Enter');
+        await tab.keyboard.press('Space');
+        expect(
+          await tab.evaluate(() => (window as unknown as { __passkeyScene: { nexts: number } }).__passkeyScene.nexts),
+        ).toBe(2);
+        await tab.locator('[data-passkey-add]').focus();
+        await tab.keyboard.press('Space');
         await tab.waitForSelector('[data-passkey-step-added]');
-        expect(await tab.locator('[data-choice-cards] input[value="add"]').isChecked()).toBe(true);
+        expect(await tab.locator('[data-passkey-add]').count()).toBe(0);
         await shot(tab, variant, 'added');
         expect(problems).toEqual([]);
       } finally {

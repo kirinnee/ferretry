@@ -45,13 +45,18 @@ const machine: StepUpClient = {
     );
   },
 };
+/** What the page did, for the browser test to read: ceremonies started and times the step moved on. */
+const scene = { creates: 0, nexts: 0 };
+(window as unknown as { __passkeyScene: typeof scene }).__passkeyScene = scene;
 const fakeCredentials: CredentialsPort = {
-  create: async () =>
-    ({
+  create: async () => {
+    scene.creates += 1;
+    return {
       type: 'public-key',
       rawId: bytes(0xaa),
       response: { clientDataJSON: bytes(0x7b, 0x7d), attestationObject: bytes(1), getTransports: () => [] },
-    }) as unknown as Credential,
+    } as unknown as Credential;
+  },
   get: async () => null,
 };
 
@@ -67,7 +72,9 @@ function Scene() {
       skip: () => {},
       done: () => {},
       busy: label => setBusy(label !== null),
-      next: () => {},
+      next: () => {
+        scene.nexts += 1;
+      },
       back: () => {},
     }),
     [],

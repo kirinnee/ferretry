@@ -1,24 +1,25 @@
 /**
  * THE `access.passkey` ONBOARDING STEP (side: client): "Add a passkey on this device", drawn through the setup flow's
- * `StepHost`, with the shell's `ChoiceCards` for the answer.
+ * `StepHost`, with two explicit buttons for the answer (never a selection: a radio fires on arrow keys).
  *
  * The page decides whether to show, never the shell: it reads this machine's passkeys once and
  *   - skips as `already-set` when this device already holds a passkey for the machine,
  *   - skips as `not-needed` when there is nothing it could do (no machine in scope, no browser support, no first-passkey
  *     window open, or a read that failed or never answered),
- *   - otherwise lifts the loading cover (`ready`) and offers two cards: add one now, or not now.
- * Choosing "Add a passkey now" runs the existing `addPasskeyCeremony` (the window, who may register and the ceremony are
+ *   - otherwise lifts the loading cover (`ready`) and offers two buttons: "Add a passkey", or "Not now".
+ * Pressing "Add a passkey" runs the existing `addPasskeyCeremony` (the window, who may register and the ceremony are
  * unchanged); the page holds the footer while the browser asks (`busy`) and records the answer (`done`) only when a
- * passkey was really added. "Not now" is the whole answer and moves on at once (`next`), recording nothing, so a later
- * run still offers it while the window is open. No credential, key or challenge is kept in state or drawn; failures
+ * passkey was really added. "Not now" is the whole answer and moves on at once (`next`); the page itself records nothing, so
+ * what Next means is the shell's rule (a page that reported `ready()` and never `done()` is recorded done once), and
+ * a passkey can always be added later in Settings › Security while the window is open. No credential, key or challenge is kept in state or drawn; failures
  * show the same sentence the inline offer shows.
  */
 
-import { Fingerprint, Clock } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { Fingerprint } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
-  ChoiceCards,
+  Button,
   type CredentialsPort,
   type DeadlineSchedule,
   MACHINE_READ_DEADLINE_MS,
@@ -54,7 +55,6 @@ export interface PasskeyStepProps {
 }
 
 type Offer = { readonly client: StepUpClient; readonly view: PasskeysView };
-type Choice = 'add' | 'later' | null;
 
 export function PasskeyStep({
   step,
@@ -68,7 +68,9 @@ export function PasskeyStep({
   schedule,
 }: PasskeyStepProps) {
   const [offer, setOffer] = useState<Offer | null>(null);
-  const [choice, setChoice] = useState<Choice>(null);
+  const [adding, setAdding] = useState(false);
+  // Read synchronously, so two presses inside one event turn cannot both start the ceremony.
+  const running = useRef(false);
   const [added, setAdded] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -103,7 +105,7 @@ export function PasskeyStep({
     };
   }, [canRun, connection, createClient, deadlineMs, schedule, step]);
 
-  // While the cards show, this machine's own prompts hold back: the same offer must not pop up over them, unasked.
+  // While the buttons show, this machine's own prompts hold back: the same offer must not pop up over them, unasked.
   const holdsMachine = offer !== null && connection !== undefined;
   const daemonId = connection?.daemonId;
   useEffect(
@@ -122,7 +124,8 @@ export function PasskeyStep({
       } catch (reason) {
         step.busy(null);
         setFailure(passkeyFailureSentence(reason, here));
-        setChoice(null);
+        running.current = false;
+        setAdding(false);
         return;
       }
       step.busy(null);
@@ -132,41 +135,58 @@ export function PasskeyStep({
     [credentials, origin, step, supported],
   );
 
-  const choose = (next: string) => {
-    // Once "add" is chosen the ceremony is running or done: a second answer would race it.
-    if (offer === null || step === undefined || added || choice === 'add') return;
-    if (next === 'later') {
-      setChoice('later');
-      step.next();
-      return;
-    }
-    setChoice('add');
+  // Two explicit buttons, never a selection: a radio fires on Arrow/Home/End, and moving through choices must not
+  // start WebAuthn or leave the page. Once "add" runs or is done, a second press would race it, so it is ignored.
+  const addNow = () => {
+    if (offer === null || step === undefined || added || running.current) return;
+    running.current = true;
+    setAdding(true);
     void add(offer);
+  };
+  const notNow = () => {
+    if (step === undefined || added || running.current) return;
+    step.next();
   };
 
   if (step === undefined || offer === null) return null;
   const left = registrationMinutesLeft(offer.view.registrationClosesAt, now());
   return (
     <div data-passkey-step="" className="flex min-w-0 flex-col gap-4">
-      <ChoiceCards
-        label="Passkey for this device"
-        value={added ? 'add' : choice}
-        onChange={choose}
-        options={[
-          {
-            id: 'add',
-            title: 'Add a passkey now',
-            line: `Confirm changes on this machine with your fingerprint, face or device PIN${left === null ? '' : ` — ${left}`}.`,
-            icon: <Fingerprint size={20} />,
-          },
-          {
-            id: 'later',
-            title: 'Not now',
-            line: 'You can add one later in Settings › Security while the window is open.',
-            icon: <Clock size={20} />,
-          },
-        ]}
-      />
+      {added ? null : (
+        <p className="m-0 text-ui leading-base text-fg">
+          {`Confirm changes on this machine with your fingerprint, face or device PIN${left === null ? '' : ` — ${left}`}.`}
+        </p>
+      )}
+      {added ? null : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="primary"
+            data-passkey-add=""
+            disabled={adding}
+            onClick={addNow}
+            className="min-h-11"
+          >
+            <Fingerprint size={18} aria-hidden="true" />
+            Add a passkey
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            data-passkey-later=""
+            disabled={adding}
+            onClick={notNow}
+            className="min-h-11"
+          >
+            Not now
+          </Button>
+        </div>
+      )}
+      {added ? null : (
+        <p className="m-0 text-ui leading-base text-muted">
+          You can add one later in Settings › Security while the window is open.
+        </p>
+      )}
       {added ? (
         <p role="status" data-passkey-step-added="" className="m-0 text-ui leading-base text-ok">
           Passkey added. This device can confirm changes on this machine.
