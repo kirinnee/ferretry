@@ -128,17 +128,19 @@
   box-shadow: var(--shadow-md);
 }
 
-/* Switch: a square track in ink with a square thumb; pressing it moves it into its shadow. */
-:root[data-style='neo'] [role='switch'] > span {
+/* Switch: ONLY the shared switch's own track and thumb (`data-neo-switch-track` / `-thumb`): a square track in ink with a square
+   thumb; pressing it moves it into its shadow. A bare `[role=switch] > span` also caught every label wrapper in a row-shaped
+   switch (Grants), so the accent title sat on an accent fill and the text spans were forced 14px wide. */
+:root[data-style='neo'] [data-neo-switch-track] {
   border: var(--stroke-control) solid var(--border-strong);
   border-radius: 0;
   box-shadow: var(--shadow-sm);
   transition: translate var(--motion-fast) var(--ease-standard);
 }
-:root[data-style='neo'] [role='switch'][aria-checked='true'] > span {
+:root[data-style='neo'] [role='switch'][aria-checked='true'] [data-neo-switch-track] {
   background: var(--accent);
 }
-:root[data-style='neo'] [role='switch'] > span > span {
+:root[data-style='neo'] [data-neo-switch-thumb] {
   background: var(--surface);
   border: var(--stroke-control) solid var(--border-strong);
   border-radius: 0;
@@ -146,27 +148,28 @@
   width: 14px;
   transition: transform var(--motion-fast) var(--ease-standard);
 }
-:root[data-style='neo'] [role='switch']:active > span {
+:root[data-style='neo'] [role='switch']:active [data-neo-switch-track] {
   box-shadow: none;
   translate: var(--press-translate) var(--press-translate);
 }
 
-/* Segmented control: a ruled tray; the chosen segment is the yellow block with its shadow. */
-:root[data-style='neo'] [role='radiogroup']:not(.fy-cc__grid) {
+/* Segmented control (`data-neo-segmented` only, never any radio group): a ruled tray; the chosen segment is the yellow block
+   with its shadow. Voice's What to read is a radio group of cards and keeps its own look. */
+:root[data-style='neo'] [data-neo-segmented] {
   border-width: var(--stroke-control);
   border-color: var(--border-strong);
 }
-:root[data-style='neo'] [role='radiogroup']:not(.fy-cc__grid) > label {
+:root[data-style='neo'] [data-neo-segmented] > label {
   border: var(--stroke-control) solid transparent;
   transition: none;
 }
-:root[data-style='neo'] [role='radiogroup']:not(.fy-cc__grid) > label:has(:checked) {
+:root[data-style='neo'] [data-neo-segmented] > label:has(:checked) {
   background: var(--nav-sel-bg);
   border-color: var(--border-strong);
   box-shadow: var(--shadow-sm);
   color: var(--nav-sel-fg);
 }
-:root[data-style='neo'] [role='radiogroup']:not(.fy-cc__grid) > label:has(:focus-visible) {
+:root[data-style='neo'] [data-neo-segmented] > label:has(:focus-visible) {
   box-shadow: none;
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: 2px;

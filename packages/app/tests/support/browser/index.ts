@@ -13,3 +13,5 @@ export const sceneBuilder: string = new URL('./build-scene.ts', import.meta.url)
 
 /** The real-app scene server a visual test spawns as a child (`serve-scene.ts` says why it is a child and what it serves). */
 export const sceneServer: string = new URL('./serve-scene.ts', import.meta.url).pathname;
+
+export { ALL_PALETTE_IDS, COLOUR_TOOLS, type ColourTools, type TextContrastReport, textContrast } from './colour.ts';

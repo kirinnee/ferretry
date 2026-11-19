@@ -11,7 +11,7 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
-import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
+import { COLOUR_TOOLS, type ColourTools, sceneBuilder, sharedChromium } from '../support/browser/index.ts';
 
 setDefaultTimeout(60_000);
 
@@ -141,7 +141,10 @@ describe('the Neo-brutalism specimen', () => {
             // The hard offset has an ink on EVERY palette (owner: every style takes every palette).
             expect(report.ink).not.toBe('rgba(0, 0, 0, 0)');
             expect(report.cardShadow).not.toBe('none');
-            console.log(name, JSON.stringify({ rounded: report.rounded, blurred: report.blurred }));
+            // The style's own promise, asserted (it used to be only logged): not one rounded corner and not one blurred
+            // shadow on anything the specimen draws.
+            expect({ name, rounded: report.rounded }).toEqual({ name, rounded: [] });
+            expect({ name, blurred: report.blurred }).toEqual({ name, blurred: [] });
           } finally {
             await close();
           }
@@ -151,7 +154,11 @@ describe('the Neo-brutalism specimen', () => {
   }
 });
 
-/** Every control that takes focus draws a hard ring of at least 2px, and a press moves the block into its shadow. */
+/**
+ * Every control that takes focus draws a hard ring of at least 2px that is at least 3:1 against what is behind it (WCAG 1.4.11),
+ * on SEVERAL palettes (not only Neo's own: every style takes every palette), and a press moves the block into its shadow.
+ */
+const FOCUS_PALETTES = ['neo', 'studio', 'phosphor', 'contrast', 'wayfinding', 'ledger'] as const;
 describe('the Neo-brutalism specimen states', () => {
   const FOCUSABLE = [
     '[data-part="btn-outline"]',
@@ -161,80 +168,107 @@ describe('the Neo-brutalism specimen states', () => {
     '.fy-cc__card:has(input:not(:checked))',
     '[role="radiogroup"] label:has(input:not(:checked))',
   ] as const;
-  for (const mode of MODES) {
-    it(`${mode}: a focused control draws a ring of at least 2px; hover and press are shot`, async () => {
-      const { tab, close } = await open(WIDTHS[0], 'neo', mode);
-      try {
-        for (const [index, selector] of FOCUSABLE.entries()) {
-          const target = tab.locator(selector).first();
-          await target.scrollIntoViewIfNeeded();
-          await tab.keyboard.press('Tab'); // makes the next focus a keyboard one
-          await target.evaluate(element => {
-            const focusable = element.matches('input,button,select,textarea')
-              ? element
-              : element.querySelector('input');
-            (focusable as HTMLElement).focus({ focusVisible: true } as FocusOptions);
-          });
-          const ring = await tab.evaluate(() => {
-            const active = document.activeElement as HTMLElement;
-            const holder = active.closest('.fy-cc__card, label') ?? active;
-            const own = getComputedStyle(active);
-            const outer = getComputedStyle(holder);
-            const width = (style: CSSStyleDeclaration) =>
-              style.outlineStyle === 'none' ? 0 : Number.parseFloat(style.outlineWidth);
-            return { tag: active.tagName, width: Math.max(width(own), width(outer)) };
-          });
-          expect({ selector, tag: ring.tag, ok: ring.width >= 2 }).toEqual({ selector, tag: ring.tag, ok: true });
-          const box = await target.boundingBox();
-          if (shotsDir !== '' && box !== null)
-            await tab.screenshot({
-              path: join(shotsDir, `states-${mode}-${index}-focus.png`),
-              clip: {
-                x: Math.max(0, box.x - 12),
-                y: Math.max(0, box.y - 12),
-                width: box.width + 28,
-                height: box.height + 28,
-              },
+  for (const palette of FOCUS_PALETTES)
+    for (const mode of MODES) {
+      it(`${palette}-${mode}: a focused control draws a ring of at least 2px and 3:1; hover and press are shot`, async () => {
+        const { tab, close } = await open(WIDTHS[0], palette, mode);
+        try {
+          await tab.evaluate(COLOUR_TOOLS);
+          for (const [index, selector] of FOCUSABLE.entries()) {
+            const target = tab.locator(selector).first();
+            await target.scrollIntoViewIfNeeded();
+            await tab.keyboard.press('Tab'); // makes the next focus a keyboard one
+            await target.evaluate(element => {
+              const focusable = element.matches('input,button,select,textarea')
+                ? element
+                : element.querySelector('input');
+              (focusable as HTMLElement).focus({ focusVisible: true } as FocusOptions);
             });
-        }
-        await tab.mouse.move(0, 0);
-        for (const [label, selector] of [
-          ['btn', '[data-part="btn-outline"]'],
-          ['prim', '[data-part="btn-primary"]'],
-          ['card', '.fy-cc__card:has(input:not(:checked))'],
-        ] as const) {
-          const target = tab.locator(selector).first();
-          await target.hover();
-          const box = await target.boundingBox();
-          if (shotsDir !== '' && box !== null)
-            await tab.screenshot({
-              path: join(shotsDir, `states-${mode}-${label}-hover.png`),
-              clip: {
-                x: Math.max(0, box.x - 12),
-                y: Math.max(0, box.y - 12),
-                width: box.width + 28,
-                height: box.height + 28,
-              },
+            const ring = await tab.evaluate(() => {
+              const active = document.activeElement as HTMLElement;
+              const holder = active.closest('.fy-cc__card, label') ?? active;
+              const own = getComputedStyle(active);
+              const outer = getComputedStyle(holder);
+              const width = (style: CSSStyleDeclaration) =>
+                style.outlineStyle === 'none' ? 0 : Number.parseFloat(style.outlineWidth);
+              const drawn = width(outer) >= width(own) ? outer : own;
+              const { backdrop, ratio, rgba } = (window as unknown as { __colour: ColourTools }).__colour;
+              const ringColour = rgba(drawn.outlineColor);
+              // The ring is drawn OUTSIDE the holder, so what it must stand out from is what is behind the holder.
+              const behind = backdrop((holder.parentElement ?? holder) as HTMLElement);
+              return {
+                tag: active.tagName,
+                width: Math.max(width(own), width(outer)),
+                contrast: ratio(ringColour, behind),
+              };
             });
-          await tab.mouse.down();
-          if (shotsDir !== '' && box !== null)
-            await tab.screenshot({
-              path: join(shotsDir, `states-${mode}-${label}-press.png`),
-              clip: {
-                x: Math.max(0, box.x - 12),
-                y: Math.max(0, box.y - 12),
-                width: box.width + 28,
-                height: box.height + 28,
-              },
+            expect({ palette, selector, tag: ring.tag, ok: ring.width >= 2 }).toEqual({
+              palette,
+              selector,
+              tag: ring.tag,
+              ok: true,
             });
-          await tab.mouse.up();
+            expect({
+              palette,
+              selector,
+              ringContrastOk: ring.contrast >= 3,
+              contrast: ring.contrast.toFixed(2),
+            }).toEqual({
+              palette,
+              selector,
+              ringContrastOk: true,
+              contrast: ring.contrast.toFixed(2),
+            });
+            const box = await target.boundingBox();
+            if (shotsDir !== '' && box !== null)
+              await tab.screenshot({
+                path: join(shotsDir, `states-${palette}-${mode}-${index}-focus.png`),
+                clip: {
+                  x: Math.max(0, box.x - 12),
+                  y: Math.max(0, box.y - 12),
+                  width: box.width + 28,
+                  height: box.height + 28,
+                },
+              });
+          }
           await tab.mouse.move(0, 0);
+          for (const [label, selector] of [
+            ['btn', '[data-part="btn-outline"]'],
+            ['prim', '[data-part="btn-primary"]'],
+            ['card', '.fy-cc__card:has(input:not(:checked))'],
+          ] as const) {
+            const target = tab.locator(selector).first();
+            await target.hover();
+            const box = await target.boundingBox();
+            if (shotsDir !== '' && box !== null)
+              await tab.screenshot({
+                path: join(shotsDir, `states-${palette}-${mode}-${label}-hover.png`),
+                clip: {
+                  x: Math.max(0, box.x - 12),
+                  y: Math.max(0, box.y - 12),
+                  width: box.width + 28,
+                  height: box.height + 28,
+                },
+              });
+            await tab.mouse.down();
+            if (shotsDir !== '' && box !== null)
+              await tab.screenshot({
+                path: join(shotsDir, `states-${palette}-${mode}-${label}-press.png`),
+                clip: {
+                  x: Math.max(0, box.x - 12),
+                  y: Math.max(0, box.y - 12),
+                  width: box.width + 28,
+                  height: box.height + 28,
+                },
+              });
+            await tab.mouse.up();
+            await tab.mouse.move(0, 0);
+          }
+        } finally {
+          await close();
         }
-      } finally {
-        await close();
-      }
-    });
-  }
+      });
+    }
 
   it('the menu opens as a hard block with an offset shadow', async () => {
     const { tab, close } = await open(WIDTHS[0], 'neo', 'light', '&menu=1');

@@ -137,12 +137,14 @@ export function SettingSwitch({ checked, onChange, labelledBy, disabled = false 
     >
       <span
         aria-hidden="true"
+        data-neo-switch-track=""
         className={cn(
           'relative h-5 w-9 rounded-full border transition-colors',
           checked ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
         )}
       >
         <span
+          data-neo-switch-thumb=""
           className={cn(
             'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-fg transition-transform',
             checked ? 'translate-x-[18px]' : 'translate-x-[2px]',
