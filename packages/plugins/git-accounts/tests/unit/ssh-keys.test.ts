@@ -500,6 +500,8 @@ describe('the agent seam (fake processes)', () => {
 /** Real processes for the fakes' `run`/`start`: only the tests may spawn, and only the three declared tools. */
 function realTools() {
   const children: ChildProcess[] = [];
+  /** What each child did, so a failure on a machine where this cannot be reproduced says where it stopped. */
+  const trace: string[] = [];
   const env = (options?: SpawnOptions) => ({
     PATH: process.env.PATH ?? '',
     ...(options?.env as Record<string, string> | undefined),
@@ -511,7 +513,12 @@ function realTools() {
       let stderr = '';
       child.stdout?.on('data', chunk => (stdout += String(chunk)));
       child.stderr?.on('data', chunk => (stderr += String(chunk)));
-      child.on('close', (code, signal) => resolve({ exitCode: code, signal, stdout, stderr }));
+      const limit = setTimeout(() => child.kill('SIGKILL'), 8_000);
+      child.on('close', (code, signal) => {
+        clearTimeout(limit);
+        trace.push(`${program} ${args.join(' ')} -> ${code ?? signal} ${stderr.trim().slice(0, 200)}`);
+        resolve({ exitCode: code, signal, stdout, stderr });
+      });
       child.stdin?.end(typeof options?.stdin === 'string' ? options.stdin : undefined);
     });
   /** The test host's clock is a fake that only moves when told, so a readiness probe must not sleep on it: wait in real time here. */
@@ -537,13 +544,14 @@ function realTools() {
       closePipes: () => undefined,
     };
   };
-  return { spawn, start, children };
+  return { spawn, start, children, trace };
 }
 
 describe.skipIf(!HAVE_TOOLS)('a real ssh-agent (needs ssh-agent, ssh-add and ssh-keygen; skipped without them)', () => {
   test("the socket is 0600 in a 0700 folder, the agent holds the key and signs with it, and the account's removal ends it", async () => {
     const github = new KeyGithub();
     const real = realTools();
+    const dump = setTimeout(() => console.error(`ssh-agent test trace:\n${real.trace.join('\n')}`), 15_000);
     const world = await boot(github, real);
     const created = GitKeyResultSchema.parse(
       (await world.request('POST', `/v1/git-accounts/${ACCOUNT}/keys`, { purpose: 'both' })).json(),
@@ -584,7 +592,8 @@ describe.skipIf(!HAVE_TOOLS)('a real ssh-agent (needs ssh-agent, ssh-add and ssh
       expect(after.status).toBe(2);
       await expectNoPrivateKey(world, [listed]);
     } finally {
+      clearTimeout(dump);
       for (const child of real.children) child.kill('SIGKILL');
     }
-  });
+  }, 30_000);
 });
