@@ -6,7 +6,7 @@ import {
   provideToShell,
   type ShellProvides,
 } from '@ferretry/app';
-import type { AppComponent, PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
+import type { AppComponent, PanelProps, PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { lazyComponent } from './lazy.ts';
@@ -20,6 +20,11 @@ const loadViews = (): Promise<Record<string, unknown>> => import('./views/onboar
 const stepsScreen = (client: PluginClient): AppComponent<ScreenProps> =>
   lazyComponent<ScreenProps>(async () =>
     ((await loadViews()).createStepsScreen as (client: PluginClient) => AppComponent<ScreenProps>)(client),
+  );
+
+const stepperPanel = (client: PluginClient): AppComponent<PanelProps> =>
+  lazyComponent<PanelProps>(async () =>
+    ((await loadViews()).createStepperPanel as (client: PluginClient) => AppComponent<PanelProps>)(client),
   );
 
 const setupTab = (client: PluginClient): AppComponent<SettingsProps> =>
@@ -42,7 +47,7 @@ export default provideToShell(
       const steps = stepsScreen(client);
       return {
         screens: { onboarding: daemonlessPlaceholder, handoff: daemonlessPlaceholder, steps, setup: steps },
-        panels: {},
+        panels: { 'first-run-stepper': stepperPanel(client) },
         settings: { setup: setupTab(client) },
         renderers: {},
       };

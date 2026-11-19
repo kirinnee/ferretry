@@ -103,7 +103,7 @@ describe('the first-run page and its hand-off panel', () => {
 });
 
 describe('the feature, its routes and its settings entry', () => {
-  it('S-0314 the feature is Onboarding’s own: its screens, settings tab and shell views are declared and built, and no panel', () => {
+  it('S-0314 the feature is Onboarding’s own: its screens, settings tab and shell views are declared and built, and one panel: the Home stepper', () => {
     expect(manifest.kinds).toContain('view');
     expect((manifest.ui?.screens ?? []).map(screen => screen.id).toSorted()).toEqual([
       'handoff',
@@ -114,7 +114,10 @@ describe('the feature, its routes and its settings entry', () => {
     const half = app.build?.({ manifest: app.manifest, client: {} as PluginClient });
     expect(Object.keys(half?.screens ?? {}).toSorted()).toEqual(['handoff', 'onboarding', 'setup', 'steps']);
     expect(Object.keys(half?.settings ?? {})).toEqual(['setup']);
-    expect(half?.panels).toEqual({});
+    expect(Object.keys(half?.panels ?? {})).toEqual(['first-run-stepper']);
+    expect((manifest.ui?.panels ?? []).map(panel => `${panel.slot}.${panel.id}`)).toEqual([
+      'daemon.status.first-run-stepper',
+    ]);
   });
 
   it('S-0373 S-0398 /d/<machine>/setup opens the machine-setup screen of that machine, the steps screen the first run offers', () => {
