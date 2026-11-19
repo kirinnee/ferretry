@@ -67,7 +67,7 @@ import {
   parseCloneBase,
   serializeCloneBase,
 } from '../account/clone-base.ts';
-import type { LoginEnvImportApi, LoginEnvImportOutcome, LoginLaunchStore } from '@ferretry/plugin-logins/contract';
+import type { LoginEnvImportApi, LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import { parseAccountModel, type AccountModel, isRuntimeName, type LayerReferenceText } from '../account/schema.ts';
 import { standInsNamedBy } from '../account/runtimes-model.ts';
 import { classifyCloneKeys, recordCloneKeys } from '../account/clone-keys.ts';
@@ -87,7 +87,6 @@ import { configurationLanded, failedApplySentence } from './failed-apply.ts';
 import {
   freeName,
   type HostHarnessScan,
-  type ImportedLoginEnv,
   type ImportPlan,
   type ImportRecord,
   mergeImport,
@@ -140,6 +139,7 @@ import {
 import { assertMayFileSecrets, fileSecrets, uniqueByName } from './setup-secrets.ts';
 import { type ToolInstallOutcome, type ToolInstallPreview, ToolInstallRefusal } from './tool-install.ts';
 import { toolOutcomeOnWire } from './tool-install-wire.ts';
+import { createLogins, importLoginEnvs, type LoginEnvPlan, loginEnvPlanOf, tickedEnvOf } from './setup-login-env.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -262,10 +262,7 @@ export interface FleetSetupServiceDeps {
    * carries one), exactly as before.
    */
   readonly components?: ComponentWriter;
-  /**
-   * Logins' door for an imported harness `env` (r9 A8): Runtimes alone holds a working one. Absent on a machine wired without
-   * it: no login gets the `env`.
-   */
+  /** Logins' door for an imported harness `env` (r9 A8). Absent on a machine wired without it: no login gets the `env`. */
   readonly loginEnvImport?: LoginEnvImportApi;
   /** A content digest (sha256). */
   digest(text: string): string;
@@ -375,7 +372,7 @@ interface ConfigWrite {
   readonly put: CloneConfigFiles['write'];
 }
 
-interface Composed {
+interface Composed extends LoginEnvPlan {
   readonly model: AccountModel;
   readonly documents: readonly FleetDocumentWrite[];
   /** Values to store before the apply. Never in a description, a digest or a log. */
@@ -388,36 +385,6 @@ interface Composed {
   readonly configWrites?: readonly ConfigWrite[];
   /** The imported components another plugin owns, handed to their owners at the apply (`owner-hand-over.ts`). */
   readonly owners?: OwnedComponents;
-  /** Each imported harness's own `env` for the login this apply selected or created, added after the login exists (r9 A8). */
-  readonly loginEnvs?: readonly ImportedLoginEnv[];
-  /** The GitHub token variables the person ticked, by NAME. */
-  readonly tickedEnv?: readonly string[];
-  /** The logins this import plans to create (the model's credentials are only a name until Logins has a file for each). */
-  readonly newLogins?: readonly { readonly id: string; readonly harness: HarnessKind; readonly store: string }[];
-}
-
-/**
- * The GitHub token variables a change ticked, names only. Read structurally until the wire arm carries the field
- * (the import wizard adds `tickedEnv` to `setup.import`); anything that is not a list of strings is nothing ticked.
- */
-function tickedEnvOf(change: object): readonly string[] {
-  const named = (change as { tickedEnv?: unknown }).tickedEnv;
-  return Array.isArray(named) ? named.filter((name): name is string => typeof name === 'string') : [];
-}
-
-/** What an import of a harness's variables into its login did, in names and words (never a value). */
-function loginEnvSentences(label: string, login: string, outcome: LoginEnvImportOutcome): string[] {
-  if (outcome.outcome === 'refused') {
-    return [`The variables of your ${label} settings were not added to login ${login}: ${outcome.reason}.`];
-  }
-  const skipped = outcome.skipped.map(entry => `${entry.name} (${entry.because})`);
-  const left = skipped.length === 0 ? [] : [`Left out of login ${login}: ${skipped.join('; ')}.`];
-  if (outcome.outcome === 'unchanged') return left;
-  return [
-    `Added to login ${login}: ${outcome.added.join(', ')}.`,
-    ...(outcome.outcome === 'held' ? [`That change waits for you to confirm it: ${outcome.sentences.join(' ')}`] : []),
-    ...left,
-  ];
 }
 
 // ── The service ──────────────────────────────────────────────────────────────────────────────────
@@ -663,9 +630,7 @@ export class FleetSetupService {
     // The Vault is written first: the caller's right to write it is settled before the first write.
     assertMayFileSecrets(composed.secrets, caller, 'apply');
     await fileSecrets((name, value) => this.deps.secrets.put(name, value), composed.secrets);
-    // A login the plan names is created through Logins, its owner, BEFORE the runtimes that launch on it are written: the
-    // fleet writer persists Runtimes' own documents only, so without this a new login never gets a file.
-    await this.#createLogins(composed);
+    await createLogins(this.deps.catalog, composed);
     // Settings files go first, each through the owner's door and against the version it was compared with. The
     // record rides the batch after them, so it can only claim less than landed, never more. A write that loosens
     // is held unless the caller is at this machine (`governed: false`); a remote caller confirms it as for any
@@ -698,76 +663,11 @@ export class FleetSetupService {
       }
     }
     await this.#applyModel(model, documents, landed);
-    const sentences = [composed.summary, ...handed.sentences, ...(await this.#importLoginEnvs(composed, caller))];
+    const envSentences = await importLoginEnvs(this.deps.loginEnvImport, composed, caller);
+    const sentences = [composed.summary, ...handed.sentences, ...envSentences];
     if (held > 0)
       sentences.push(`${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`);
     return sentences.join(' ');
-  }
-
-  /**
-   * Creates each login this import plans that Logins does not have yet (`login.add`, staged and applied through Logins' own
-   * change port: its schema, its refusals, its events). One that already exists is left as it is. A refusal stops the apply
-   * before any runtime is written and says which login, and what was already kept.
-   */
-  async #createLogins(composed: Composed): Promise<void> {
-    const wanted = composed.newLogins ?? [];
-    if (wanted.length === 0) return;
-    const { credentials, loginChanges } = this.deps.catalog;
-    const have = new Set((await credentials.list()).logins.map(login => String(login.id)));
-    for (const login of wanted) {
-      if (have.has(login.id)) continue;
-      try {
-        const view = await loginChanges.stage({
-          kind: 'login.add',
-          id: login.id,
-          harness: harnessKey(login.harness),
-          store: login.store as 'host' | 'ferretry' | 'environment',
-        });
-        await loginChanges.apply(view.id);
-      } catch (error) {
-        throw new FleetCatalogRefusal(
-          'fleet_change_failed',
-          `Logins could not create the login ${login.id}: ${errorMessage(error)}. Nothing else was changed${composed.secrets.length === 0 ? '' : '; the keys already added to the secret store stay there'}.`,
-        );
-      }
-    }
-  }
-
-  /**
-   * Adds each imported harness's own `env` to the login this apply selected or created, once the login is in effect (r9 A8).
-   * The secrets are already filed (every create-only put above succeeded), so `minted` is exactly the keys this apply made:
-   * a variable whose secret was not filed is left out. Never throws: what could not be added is said in a sentence, and the
-   * import that landed stays landed.
-   */
-  async #importLoginEnvs(composed: Composed, caller?: ExecutorCaller): Promise<string[]> {
-    const envs = composed.loginEnvs ?? [];
-    if (envs.length === 0) return [];
-    const port = this.deps.loginEnvImport;
-    // A machine wired without the door adds nothing to a login, as before r9 A8: there is no one to ask.
-    if (port === undefined) return [];
-    const filed = new Set(composed.secrets.map(secret => secret.name));
-    const sentences: string[] = [];
-    for (const env of envs) {
-      const label = HARNESS_DISPLAY_NAMES[env.harness];
-      let outcome: LoginEnvImportOutcome;
-      try {
-        outcome = await port.import({
-          caller: { governance: caller?.governance },
-          login: env.login,
-          harness: harnessKey(env.harness),
-          plain: env.plain,
-          minted: env.minted.filter(entry => filed.has(entry.secretName)),
-          ticked: composed.tickedEnv ?? [],
-        });
-      } catch (error) {
-        sentences.push(
-          `The variables of your ${label} settings were not added to login ${env.login}: ${errorMessage(error)}.`,
-        );
-        continue;
-      }
-      sentences.push(...loginEnvSentences(label, env.login, outcome));
-    }
-    return sentences;
   }
 
   /** One settings file through `PUT /v1/config/file`'s semantics. Answers 1 when the write was held. */
@@ -895,10 +795,7 @@ export class FleetSetupService {
       value: secret.value,
     }));
     const runtimes = Object.keys(plan.runtimes).toSorted();
-    // What the login environments will hold is part of what was reviewed (host text and secret NAMES; never a value filed).
-    const loginEnvDigests = plan.loginEnvs.map(env =>
-      this.deps.digest(`${env.harness}\n${env.login}\n${JSON.stringify([env.plain, env.minted])}`),
-    );
+    const loginEnv = loginEnvPlanOf(change, plan, text => this.deps.digest(text));
     const lines = [
       ...Object.entries(plan.credentials).map(([id, credential]) =>
         credential.store === 'host'
@@ -930,16 +827,10 @@ export class FleetSetupService {
         secrets.map(secret => this.deps.digest(`${secret.name}\n${secret.value}`)),
         [],
         [],
-        [...handed.map(write => this.deps.digest(handedText(write))), ...loginEnvDigests],
+        [...handed.map(write => this.deps.digest(handedText(write))), ...loginEnv.digests],
       ),
       ...(owners === undefined ? {} : { owners }),
-      loginEnvs: plan.loginEnvs,
-      tickedEnv: tickedEnvOf(change),
-      newLogins: Object.entries(plan.credentials).map(([id, credential]) => ({
-        id,
-        harness: credential.harness,
-        store: credential.store,
-      })),
+      ...loginEnv.fields,
     };
   }
 
