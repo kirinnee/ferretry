@@ -16,30 +16,54 @@ export interface ThreadsTarget {
   readonly updatedAt: string;
 }
 
+/** What was read, and for which client and PR: an answer is only ever shown for the PR it was read for. */
+interface Held {
+  readonly client: PullsClient;
+  readonly pr: string;
+  readonly state: ThreadsState;
+}
+
+const LOADING: ThreadsState = { status: 'loading' };
+
 /**
- * Reads the threads when the PR page opens and when the PR changes. A re-read keeps what is on screen until the new
- * answer lands (one draw per state, no empty frame between), and a failed re-read keeps the last answer with the reason.
+ * Reads the threads when the PR page opens and when the PR changes. A re-read of the SAME pull request (its `updatedAt`
+ * moved) keeps what is on screen until the new answer lands (one draw per state, no empty frame between), and a failed
+ * re-read keeps the last answer with the reason. Another PR (or another client) starts over: its first frame is
+ * `loading`, and a failed read of it shows no thread of the PR before.
  */
 export function useThreads(client: PullsClient, target: ThreadsTarget): ThreadsState {
-  const [state, setState] = useState<ThreadsState>({ status: 'loading' });
   const { project, owner, name, number, updatedAt } = target;
+  const pr = JSON.stringify([project, owner, name, number]);
+  const [held, setHeld] = useState<Held>({ client, pr, state: LOADING });
   // biome-ignore lint/correctness/useExhaustiveDependencies: `updatedAt` is read nowhere inside, on purpose: a PR that changed reads its threads again.
   useEffect(() => {
     let live = true;
-    setState(before => (before.status === 'ready' ? { ...before, refreshing: true } : before));
+    setHeld(before =>
+      before.client !== client || before.pr !== pr
+        ? { client, pr, state: LOADING }
+        : before.state.status === 'ready'
+          ? { ...before, state: { ...before.state, refreshing: true } }
+          : before,
+    );
     fetchThreads(client, project, owner, name, number).then(
-      answer => live && setState({ status: 'ready', answer, refreshing: false }),
+      answer => live && setHeld({ client, pr, state: { status: 'ready', answer, refreshing: false } }),
       (cause: unknown) =>
         live &&
-        setState(before => ({
-          status: 'failed',
-          message: cause instanceof Error ? cause.message : 'The threads could not be read',
-          ...(before.status === 'loading' || before.answer === undefined ? {} : { answer: before.answer }),
+        setHeld(before => ({
+          client,
+          pr,
+          state: {
+            status: 'failed',
+            message: cause instanceof Error ? cause.message : 'The threads could not be read',
+            ...(before.state.status === 'loading' || before.state.answer === undefined
+              ? {}
+              : { answer: before.state.answer }),
+          },
         })),
     );
     return () => {
       live = false;
     };
-  }, [client, project, owner, name, number, updatedAt]);
-  return state;
+  }, [client, pr, project, owner, name, number, updatedAt]);
+  return held.client === client && held.pr === pr ? held.state : LOADING;
 }

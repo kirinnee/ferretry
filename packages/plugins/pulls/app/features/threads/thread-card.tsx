@@ -51,6 +51,9 @@ export function ThreadCard({
 }) {
   const count = thread.comments.length;
   const label = `${count} ${count === 1 ? 'comment' : 'comments'}`;
+  const more = thread.omittedReplies;
+  // The thread's own first comment is the address of the thread on GitHub.
+  const moreLink = more === undefined ? undefined : safeGithubUrl((thread.comments[0] as PullComment).url);
   return (
     <details
       open={!thread.resolved}
@@ -73,6 +76,19 @@ export function ThreadCard({
         {thread.comments.map(comment => (
           <Comment key={comment.id} comment={comment} />
         ))}
+        {more !== undefined && (
+          <li className="m-0 border-t border-border-strong py-sm text-meta text-fg-soft" data-thread-more={thread.id}>
+            {more} more {more === 1 ? 'reply' : 'replies'} on GitHub
+            {moreLink !== undefined && (
+              <>
+                {' '}
+                <a href={moreLink} target="_blank" rel="noopener noreferrer" className="text-accent underline">
+                  Open the thread
+                </a>
+              </>
+            )}
+          </li>
+        )}
       </ul>
     </details>
   );

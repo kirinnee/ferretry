@@ -41,6 +41,15 @@ export default definePlugin({
         audit: { skip: 'a read of one CI run’s job and step names, statuses and times' },
         guard: { none: 'job and step names, statuses and times only; no pane, page or vault text' },
       }),
+      // E6 · review threads of one PR (GraphQL; read when a PR page opens). Private code and strangers' text: not stored.
+      route('GET /v1/pulls/:project/:repo/:number/threads', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: PULLS_CAPS.read,
+        noStore: true,
+        audit: { skip: 'a read of a PR the project already lists; nothing is changed and no secret is touched' },
+        guard: { none: 'review threads of one PR: logins, comment text and links from GitHub; never a token' },
+      }),
     ],
   },
 
@@ -53,20 +62,6 @@ export default definePlugin({
 
   // Private code: no ferret reaches the cache through any root.
   privacy: { private: ['cache'] },
-
-  actions: {
-    routes: [
-      // E6 · review threads of one PR (GraphQL; read when a PR page opens). Private code and strangers' text: not stored.
-      route('GET /v1/pulls/:project/:repo/:number/threads', {
-        minimum: 'operator',
-        caller: 'any',
-        capability: PULLS_CAPS.read,
-        noStore: true,
-        audit: { skip: 'a read of a PR the project already lists; nothing is changed and no secret is touched' },
-        guard: { none: 'review threads of one PR: logins, comment text and links from GitHub; never a token' },
-      }),
-    ],
-  },
 
   permissions: { roots: [], spawn: [], network: [] },
 });

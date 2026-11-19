@@ -9,7 +9,15 @@ import {
   type ReviewThreadsAnswer,
 } from '../../../contract/index.ts';
 import type { GithubClient, ReadFailure } from '../../adapters/github/client.ts';
-import { MAX_THREAD_PAGES, REVIEW_THREADS_QUERY, THREADS_PER_PAGE, ThreadsPageSchema, toThread } from './query.ts';
+import {
+  ANSWER_TEXT_BUDGET,
+  MAX_THREAD_PAGES,
+  PAGE_SIZES,
+  type PageSize,
+  REVIEW_THREADS_QUERY,
+  ThreadsPageSchema,
+  toThread,
+} from './query.ts';
 
 /** A refusal the route turns into an HTTP answer. `message` is ours, never GitHub's text. */
 export interface ThreadsRefusal {
@@ -72,7 +80,15 @@ const refusalOf = (failure: ReadFailure): ThreadsRefusal => {
   }
 };
 
-/** Reads every review thread of one pull request (up to the page bound) through the one GitHub client. */
+/** The characters of comment text a thread carries (what the answer's budget counts). */
+const textOf = (thread: ReviewThread): number => thread.comments.reduce((sum, comment) => sum + comment.body.length, 0);
+
+/**
+ * Reads the review threads of one pull request (up to the page bound), page by page. A page the seam refused (too much
+ * data) is asked again from the same cursor with the next smaller page size. The answer as a whole has a text budget:
+ * past it, or past the page bound, or when a smaller page still fails after some threads were read, the answer keeps
+ * what it has and says `truncated`. A refusal on the very first page is a refusal.
+ */
 export async function readThreads(
   github: Pick<GithubClient, 'graphql'>,
   account: GitAccountId,
@@ -82,15 +98,30 @@ export async function readThreads(
 ): Promise<Result<ReviewThreadsAnswer, ThreadsRefusal>> {
   const threads: ReviewThread[] = [];
   let truncated = false;
+  let spent = 0;
   let after: string | null = null;
+  let size = 0;
   for (let page = 0; page < MAX_THREAD_PAGES; page += 1) {
+    const asked = PAGE_SIZES[size] as PageSize;
     const read = await github.graphql(account, REVIEW_THREADS_QUERY, {
       owner: repo.owner,
       name: repo.name,
       number,
       after,
+      threads: asked.threads,
+      comments: asked.comments,
     });
-    if (!read.ok) return err(refusalOf(read.error));
+    if (!read.ok) {
+      // Too big for the seam: the same page again, smaller. Only a refusal can mean that; a pause or a 404 cannot.
+      if (read.error.code === PULLS_CODES.refused && size + 1 < PAGE_SIZES.length) {
+        size += 1;
+        page -= 1;
+        continue;
+      }
+      if (threads.length > 0 && read.error.code === PULLS_CODES.refused)
+        return ok({ threads, truncated: true, fetchedAt: nowIso() });
+      return err(refusalOf(read.error));
+    }
     const shaped = ThreadsPageSchema.safeParse(read.value);
     const connection = shaped.success ? shaped.data.repository?.pullRequest?.reviewThreads : undefined;
     if (connection === undefined || connection === null)
@@ -99,10 +130,14 @@ export async function readThreads(
       const thread = toThread(node);
       // A thread that cannot be shown is not silently lost: the answer says it is incomplete.
       if (thread === undefined) truncated = true;
-      else if (threads.length < MAX_REVIEW_THREADS) threads.push(thread);
-      else truncated = true;
+      else if (threads.length >= MAX_REVIEW_THREADS || spent + textOf(thread) > ANSWER_TEXT_BUDGET) {
+        // Over the budget: this thread and every one after it is left on GitHub.
+        return ok({ threads, truncated: true, fetchedAt: nowIso() });
+      } else {
+        threads.push(thread);
+        spent += textOf(thread);
+      }
     }
-    if (connection.nodes.length > THREADS_PER_PAGE) truncated = true;
     if (!connection.pageInfo.hasNextPage) return ok({ threads, truncated, fetchedAt: nowIso() });
     after = connection.pageInfo.endCursor ?? null;
     if (after === null) break;

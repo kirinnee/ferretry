@@ -22,7 +22,7 @@ export interface FakeThread {
   readonly comments: readonly FakeThreadComment[];
 }
 
-const node = (thread: FakeThread) => ({
+const node = (thread: FakeThread, firstComments: number) => ({
   id: thread.id,
   isResolved: thread.resolved ?? false,
   isOutdated: thread.outdated ?? false,
@@ -31,7 +31,9 @@ const node = (thread: FakeThread) => ({
   startLine: thread.startLine ?? null,
   diffSide: thread.side ?? 'RIGHT',
   comments: {
-    nodes: thread.comments.map(comment => ({
+    totalCount: thread.comments.length,
+    pageInfo: { hasNextPage: thread.comments.length > firstComments },
+    nodes: thread.comments.slice(0, firstComments).map(comment => ({
       id: comment.id,
       body: comment.body,
       createdAt: comment.createdAt ?? '2026-11-01T10:00:00Z',
@@ -42,13 +44,16 @@ const node = (thread: FakeThread) => ({
 });
 
 /** `null` for `pullRequest` when `threads` is `undefined` (no such PR). */
-export function serveThreads(fake: FakeGithub, threads: readonly FakeThread[] | undefined, perPage = 50): void {
+export function serveThreads(fake: FakeGithub, threads: readonly FakeThread[] | undefined, perPage?: number): void {
   fake.on('POST', '/graphql', ({ body }) => {
-    const variables = (body as { variables?: { after?: string | null } }).variables ?? {};
+    const variables =
+      (body as { variables?: { after?: string | null; threads?: number; comments?: number } }).variables ?? {};
     if (threads === undefined) return { status: 200, body: { data: { repository: { pullRequest: null } } } };
+    // The page GitHub gives is the page asked for (`$threads`, `$comments`), unless a test fixes `perPage`.
+    const size = perPage ?? variables.threads ?? 50;
     const from = variables.after === null || variables.after === undefined ? 0 : Number(variables.after);
-    const slice = threads.slice(from, from + perPage);
-    const more = from + perPage < threads.length;
+    const slice = threads.slice(from, from + size);
+    const more = from + size < threads.length;
     return {
       status: 200,
       body: {
@@ -56,8 +61,8 @@ export function serveThreads(fake: FakeGithub, threads: readonly FakeThread[] | 
           repository: {
             pullRequest: {
               reviewThreads: {
-                pageInfo: { hasNextPage: more, endCursor: more ? String(from + perPage) : null },
-                nodes: slice.map(node),
+                pageInfo: { hasNextPage: more, endCursor: more ? String(from + size) : null },
+                nodes: slice.map(each => node(each, variables.comments ?? 100)),
               },
             },
           },

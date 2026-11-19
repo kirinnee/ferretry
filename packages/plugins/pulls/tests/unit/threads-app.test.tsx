@@ -164,6 +164,8 @@ describe('the thread views', () => {
 
   it('says where a thread was made', () => {
     expect(threadWhere(thread('a', { line: 5 }))).toBe('src/a.ts:5');
+    const { line: _, ...noLine } = thread('a');
+    expect(threadWhere(noLine as ReviewThread)).toBe('src/a.ts');
     expect(threadWhere(thread('a', { line: 5, startLine: 3 }))).toBe('src/a.ts:3-5');
   });
 });
@@ -194,8 +196,16 @@ describe('useThreads', () => {
     truncated: false,
     fetchedAt: '2026-11-19T00:00:00.000Z',
   });
-  const Probe = ({ client, updatedAt }: { client: { call: () => Promise<unknown> }; updatedAt: string }) => {
-    const state = useThreads(client as never, { project: 'p1', owner: 'octo', name: 'demo', number: 7, updatedAt });
+  const Probe = ({
+    client,
+    updatedAt,
+    number = 7,
+  }: {
+    client: { call: () => Promise<unknown> };
+    updatedAt: string;
+    number?: number;
+  }) => {
+    const state = useThreads(client as never, { project: 'p1', owner: 'octo', name: 'demo', number, updatedAt });
     const count = state.status === 'loading' ? 'loading' : String(state.answer?.threads.length ?? 'none');
     return (
       <p data-probe={state.status}>
@@ -233,5 +243,113 @@ describe('useThreads', () => {
       interact,
     );
     expect(text(mounted.container)).toBe('2');
+  });
+});
+
+describe('useThreads across pull requests', () => {
+  const answerOf = (ids: readonly string[]) => ({
+    threads: ids.map(id => thread(id)),
+    truncated: false,
+    fetchedAt: '2026-11-19T00:00:00.000Z',
+  });
+  const Show = ({
+    client,
+    number,
+  }: {
+    client: { call: (route: string, init?: unknown) => Promise<unknown> };
+    number: number;
+  }) => {
+    const state = useThreads(client as never, {
+      project: 'p1',
+      owner: 'octo',
+      name: 'demo',
+      number,
+      updatedAt: 'a',
+    });
+    const seen = state.status === 'loading' ? [] : (state.answer?.threads.map(t => t.id) ?? []);
+    return (
+      <p data-show={state.status} data-ids={seen.join(',')}>
+        {state.status}
+      </p>
+    );
+  };
+  const status = (container: HTMLElement) => container.querySelector('[data-show]')?.getAttribute('data-show');
+  const ids = (container: HTMLElement) => container.querySelector('[data-show]')?.getAttribute('data-ids');
+
+  it('switching PR starts over: loading with nothing of the old PR, and a failed read of the new one shows nothing stale', async () => {
+    let release: () => void = () => undefined;
+    const client = {
+      call: async (_route: string, init?: unknown) => {
+        const number = (init as { params: { number: string } }).params.number;
+        if (number === '8') {
+          await new Promise<void>(resolve => (release = resolve));
+          throw new Error('GitHub could not answer that query');
+        }
+        return answerOf(['PR7-thread']);
+      },
+    };
+    const mounted = await mount(<Show client={client} number={7} />);
+    await settleUntil(() => ids(mounted.container) === 'PR7-thread', 'PR 7 answer', interact);
+
+    await mounted.render(<Show client={client} number={8} />);
+    // The first frame for PR 8 is `loading` with none of PR 7's threads.
+    expect(status(mounted.container)).toBe('loading');
+    expect(ids(mounted.container)).toBe('');
+    release();
+    await settleUntil(() => status(mounted.container) === 'failed', 'PR 8 failure', interact);
+    expect(ids(mounted.container)).toBe('');
+
+    // Back to PR 7 reads it again; PR 8's failure is not carried over.
+    await mounted.render(<Show client={client} number={7} />);
+    await settleUntil(() => ids(mounted.container) === 'PR7-thread', 'PR 7 again', interact);
+    expect(status(mounted.container)).toBe('ready');
+  });
+
+  it('another client starts over too', async () => {
+    const first = { call: async () => answerOf(['from-first']) };
+    let release: () => void = () => undefined;
+    const second = {
+      call: async () => {
+        await new Promise<void>(resolve => (release = resolve));
+        return answerOf(['from-second']);
+      },
+    };
+    const mounted = await mount(<Show client={first} number={7} />);
+    await settleUntil(() => ids(mounted.container) === 'from-first', 'first client answer', interact);
+    await mounted.render(<Show client={second} number={7} />);
+    expect(status(mounted.container)).toBe('loading');
+    release();
+    await settleUntil(() => ids(mounted.container) === 'from-second', 'second client answer', interact);
+  });
+});
+
+describe('a thread with replies left on GitHub', () => {
+  it('says how many and links to the thread; a thread with every reply says nothing', async () => {
+    const mounted = await mount(
+      <OutdatedThreads
+        placement={placeThreads(
+          [
+            thread('M', { outdated: true, omittedReplies: 12 }),
+            thread('S', { outdated: true, omittedReplies: 1 }),
+            thread('A', { outdated: true }),
+            thread('X', {
+              outdated: true,
+              omittedReplies: 3,
+              comments: [{ ...comment('xc', 'hi'), url: 'javascript:alert(1)' }],
+            }),
+          ],
+          rows,
+        )}
+      />,
+    );
+    const more = (id: string) => mounted.container.querySelector(`[data-thread-more="${id}"]`);
+    expect(more('M')?.textContent).toContain('12 more replies on GitHub');
+    expect(more('M')?.querySelector('a')?.getAttribute('href')).toBe(
+      'https://github.com/octo/demo/pull/7#discussion_Mc',
+    );
+    expect(more('S')?.textContent).toContain('1 more reply on GitHub');
+    expect(more('A')).toBeNull();
+    expect(more('X')?.textContent).toContain('3 more replies on GitHub');
+    expect(more('X')?.querySelector('a')).toBeNull();
   });
 });
