@@ -3,7 +3,7 @@
  * still going, and a CI that is not GitHub Actions; light and dark, phone and desktop. It checks what only a browser can:
  * the bars sit inside the chart, no sideways scroll, and every label keeps >= 4.5:1 on its bar's colour.
  *
- * Set `FY_FLAME_SHOTS_DIR` to keep `<viewport>-<scheme>-<case>.png` (cases: whole, zoomed, running, check, big, big-list).
+ * Set `FY_FLAME_SHOTS_DIR` to keep `<viewport>-<scheme>-<case>.png` (cases: whole, zoomed, running, check, big, big-list-top, big-list-end).
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -108,8 +108,9 @@ const open = async (
   return { page, close: async () => await context.close(), problems };
 };
 
-const shot = async (page: Page, variant: Variant, name: string): Promise<void> => {
-  if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, `${variant.name}-${name}.png`), fullPage: true });
+/** `fullPage` is off for a page taller than Chrome paints in one shot (the 244-line list): the shot is the viewport instead. */
+const shot = async (page: Page, variant: Variant, name: string, fullPage = true): Promise<void> => {
+  if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, `${variant.name}-${name}.png`), fullPage });
 };
 
 const noSidewaysScroll = async (page: Page): Promise<void> => {
@@ -211,7 +212,10 @@ describe('the CI flamegraph', () => {
         expect(await page.locator('[data-flame-item]').count()).toBe(244);
         expect(await page.locator('[data-flame-more] summary').textContent()).toBe('List 244 shorter jobs');
         await noSidewaysScroll(page);
-        await shot(page, variant, 'big-list');
+        await shot(page, variant, 'big-list-top', false);
+        // The end of the list, the legend and the sentence under it.
+        await page.locator('[data-flame-note]').scrollIntoViewIfNeeded();
+        await shot(page, variant, 'big-list-end', false);
         expect(problems).toEqual([]);
       } finally {
         await close();
