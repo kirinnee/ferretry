@@ -998,17 +998,20 @@ describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
     return { afterClaude, second, afterCodex: mergeImport(afterClaude, second), record: mergeImportRecord(second) };
   };
 
-  it('should reuse the same MCP server for the second tool when it is identical, and add it to that tool profile', () => {
+  it('should give the second tool its OWN copy of an identical same-named MCP server, and leave the first alone', () => {
     // Act
     const { afterClaude, second, afterCodex } = claudeThenCodex(['a']);
 
-    // Assert — one server, now served to both tools, and no update asked of the person.
+    // Assert — nothing of Claude's is widened or updated; Codex's is a new scoped item in Codex's profile only.
     should(second.updates).deepEqual([]);
-    should(afterClaude.components.mcp.github).have.property('harness', 'claude');
-    should(afterCodex.components.mcp.github).deepEqual({ command: 'gh-mcp', args: ['a'] });
-    should(Object.keys(afterCodex.components.mcp)).deepEqual(['github']);
-    should(afterCodex.profiles['codex-default']?.layers).containEql('mcp/github');
+    should(second.components.map(item => item.name)).containEql('codex-github');
+    should(afterClaude.components.mcp.github).deepEqual({ command: 'gh-mcp', args: ['a'], harness: 'claude' });
+    should(afterCodex.components.mcp.github).deepEqual({ command: 'gh-mcp', args: ['a'], harness: 'claude' });
+    should(afterCodex.components.mcp['codex-github']).deepEqual({ command: 'gh-mcp', args: ['a'], harness: 'codex' });
+    should(afterCodex.profiles['codex-default']?.layers).containEql('mcp/codex-github');
+    should(afterCodex.profiles['codex-default']?.layers).not.containEql('mcp/github');
     should(afterCodex.profiles['claude-default']?.layers).containEql('mcp/github');
+    should(afterCodex.profiles['claude-default']?.layers).not.containEql('mcp/codex-github');
   });
 
   it('should keep a different same-named MCP server under its own tool name and add it to that tool profile', () => {
@@ -1034,19 +1037,48 @@ describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
     should(again.components).deepEqual([]);
   });
 
-  it('should offer no update for a widened server when either tool is imported again unchanged', () => {
-    // Arrange
-    const { afterCodex, record } = claudeThenCodex(['a']);
+  it("should map a tool's re-import to its OWN items: update the changed instructions, nothing for the unchanged server, no -2 copies", () => {
+    // Arrange — Claude (instructions, skill, github) then Codex (its own, the same github).
+    const claudeWith = (body: string) =>
+      claude({
+        instructions: text('/c', body),
+        skills: [{ item: 'x', source: '/x', digest: 'x' }],
+        mcp: text('/m', JSON.stringify({ mcpServers: { github: { command: 'gh-mcp', args: ['a'] } } })),
+      });
+    const first = planImport([claudeWith('claude words'), codex()], { digest, include: ['claude'] });
+    const afterClaude = mergeImport(undefined, first);
+    const second = planImport([claudeWith('claude words'), codexWithGithub(['a'])], {
+      digest,
+      existing: afterClaude,
+      record: mergeImportRecord(first),
+      include: ['codex'],
+    });
+    const afterCodex = mergeImport(afterClaude, second);
+    const record = mergeImportRecord(second);
+    const claudeAgain = claudeWith('claude words, edited');
 
     // Act
-    const again = planImport([claudeWithGithub(['a']), codexWithGithub(['a'])], {
+    const again = planImport([claudeAgain, codexWithGithub(['a'])], {
       digest,
       existing: afterCodex,
       record,
+      include: ['claude'],
     });
 
     // Assert
-    should(again.updates).deepEqual([]);
+    should(again.updates.map(update => update.reference)).deepEqual(['instructions/claude-instructions']);
+    should(again.components).deepEqual([]);
+    should(again.profiles).deepEqual({});
+
+    // And Codex again, unchanged, offers nothing and creates no copy either.
+    const codexAgain = planImport([claudeAgain, codexWithGithub(['a'])], {
+      digest,
+      existing: afterCodex,
+      record,
+      include: ['codex'],
+    });
+    should(codexAgain.updates).deepEqual([]);
+    should(codexAgain.components).deepEqual([]);
   });
 
   it('should update the first tool its own item when it is imported again with changed text', () => {
