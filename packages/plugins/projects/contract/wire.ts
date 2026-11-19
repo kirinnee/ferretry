@@ -1,6 +1,7 @@
 import type { Brand } from '@ferretry/std';
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
+import { MAX_PROJECT_ACCOUNTS, MAX_PROJECT_REPOS, ProjectAccountIdSchema, ProjectRepoSchema } from './repos.ts';
 
 /** A project's stable, daemon-local id. A path is not an identity. */
 export type ProjectId = Brand<string, 'ProjectId'>;
@@ -15,9 +16,19 @@ export const ProjectInfoSchema = z.strictObject({
   /** The deliberate action that created this record. Discoveries require confirmation. */
   source: z.enum(['existing-folder', 'clone', 'new-folder', 'confirmed-discovery']),
   createdAt: InstantSchema,
-  /** Present only when Git was attached while registering the folder. */
+  /**
+   * Present only when Git was attached while registering the folder: the repository the folder itself belongs to
+   * (registration dedupes on it). The repositories INSIDE the folder are `repos`.
+   */
   git: z.strictObject({ commonDirectory: z.string().min(1) }).optional(),
   lastActivity: InstantSchema.optional(),
+  /**
+   * The git accounts this project uses, by id; the first is the default. Absent (a record written before r9) reads as none.
+   * Optional on purpose: the file stays `format: 1` and every older record stays valid as it is.
+   */
+  accounts: z.array(ProjectAccountIdSchema).max(MAX_PROJECT_ACCOUNTS).optional(),
+  /** The repositories last found inside the folder (`GET /v1/projects/:id/repos` refreshes it). Absent reads as none yet. */
+  repos: z.array(ProjectRepoSchema).max(MAX_PROJECT_REPOS).optional(),
 });
 export type ProjectInfo = z.infer<typeof ProjectInfoSchema>;
 

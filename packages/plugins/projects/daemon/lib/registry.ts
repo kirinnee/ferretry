@@ -5,6 +5,7 @@ import {
   ProjectCloneUrlUnsupportedMessage,
   type ProjectId,
   type ProjectInfo,
+  type ProjectRepo,
   ProjectPathSchema,
   type ProjectRefusal,
   type RegisterProjectRequest,
@@ -97,6 +98,56 @@ export class ProjectRegistry {
     if (gone === undefined) return err({ code: 'not_found', message: `no project ${id}` });
     this.deps.removed(id);
     return ok(gone);
+  }
+
+  /**
+   * Replaces the git accounts a project uses (ids, in order; the first is the default). Repeats are dropped, the first
+   * kept. An empty list takes the field away, so a project that never had accounts stays as it was written. The ids are
+   * links only: nothing here asks whether an account exists, and a link outlives the account it names.
+   */
+  async setAccounts(id: ProjectId, accounts: readonly string[]): Promise<Result<ProjectInfo, ProjectRefusal>> {
+    const unique = [...new Set(accounts)];
+    return await this.change(id, project => {
+      const { accounts: _before, ...rest } = project;
+      return unique.length === 0 ? rest : { ...rest, accounts: unique };
+    });
+  }
+
+  /**
+   * Keeps what a scan found. A repository found again keeps the account it was given (by path); one no longer found
+   * is dropped with it. Nothing is written when nothing changed.
+   */
+  async recordRepos(
+    id: ProjectId,
+    found: readonly Omit<ProjectRepo, 'account'>[],
+  ): Promise<Result<ProjectInfo, ProjectRefusal>> {
+    return await this.change(id, project => {
+      const before = project.repos ?? [];
+      const repos = found.map(repo => {
+        const account = before.find(known => known.path === repo.path)?.account;
+        return account === undefined ? repo : { ...repo, account };
+      });
+      const { repos: _before, ...rest } = project;
+      return repos.length === 0 ? rest : { ...rest, repos };
+    });
+  }
+
+  /** One project record rewritten in the one serial store step; the write is skipped when the record is unchanged. */
+  private async change(
+    id: ProjectId,
+    edit: (project: ProjectInfo) => ProjectInfo,
+  ): Promise<Result<ProjectInfo, ProjectRefusal>> {
+    let answer: ProjectInfo | undefined;
+    await this.deps.store.update(current => {
+      const at = current.projects.findIndex(project => project.id === id);
+      const project = current.projects[at];
+      if (project === undefined) return current;
+      const next = edit(project);
+      answer = next;
+      if (JSON.stringify(next) === JSON.stringify(project)) return current;
+      return { ...current, projects: current.projects.map((each, index) => (index === at ? next : each)) };
+    });
+    return answer === undefined ? err({ code: 'not_found', message: `no project ${id}` }) : ok(answer);
   }
 
   private async materialize(request: RegisterProjectRequest): Promise<string> {
