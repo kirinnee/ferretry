@@ -4,14 +4,25 @@
  * thing that fails when a token wanders, when the catalogue and the files disagree, or when a stored pre-split
  * `family` stops reading as the style and palette it was drawn for.
  */
-import { describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { PALETTE_IDS, STYLE_IDS, ThemeSchema, THEME_FAMILY_IDS } from '@ferretry/plugin-layouts/contract';
 import { memoryStore } from '../../src/storage/records.ts';
 import { APP_STORAGE } from '../../src/storage/names.ts';
-import { PALETTES, STYLES, familyOfPalette, lookOfFamily, swatchAttributes } from '../../src/theme/catalog.ts';
-import { ThemePreferenceStore } from '../../src/theme/preferences.ts';
+import {
+  PALETTES,
+  STYLES,
+  familyOfPalette,
+  isFamilyId,
+  isPaletteId,
+  lookOfFamily,
+  lookOfPalette,
+  swatchAttributes,
+  type PaletteId,
+} from '../../src/theme/catalog.ts';
+import { applyThemeAxes, ThemePreferenceStore } from '../../src/theme/preferences.ts';
+import { applyWindowColour } from '../../src/shell/context.tsx';
 import { readCssWithImports, readStyleFile, themeStylesDir } from '../../src/testing/theme-css.ts';
 
 const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//gu, '');
@@ -119,7 +130,8 @@ describe('the catalogue, the files and themes.css agree', () => {
   it('lists the same ids in the catalogue as in the Layouts contract, in the same order', () => {
     expect(STYLES.map(entry => entry.id)).toEqual([...STYLE_IDS]);
     expect(PALETTES.map(entry => entry.id)).toEqual([...PALETTE_IDS]);
-    expect([...THEME_FAMILY_IDS].sort()).toEqual([...PALETTE_IDS].sort());
+    // The frozen families are the ORIGINAL palettes, in order; a palette added later is a palette only.
+    expect([...PALETTE_IDS].slice(0, THEME_FAMILY_IDS.length)).toEqual([...THEME_FAMILY_IDS]);
     for (const palette of PALETTES) expect(STYLE_IDS).toContain(palette.suggestedStyle);
   });
 
@@ -188,7 +200,58 @@ describe('a palette that is not one of the original families', () => {
   it('still reads and writes, and the picker falls back to the default look instead of needing a frozen family entry', () => {
     // A palette added after the family list froze (T12/T17 add to PALETTE_IDS only): the guard answers for it.
     expect(familyOfPalette('dusk' as (typeof PALETTE_IDS)[number])).toBe('studio');
-    for (const palette of PALETTE_IDS) expect(familyOfPalette(palette)).toBe(palette);
+    for (const family of THEME_FAMILY_IDS) expect(familyOfPalette(family)).toBe(family);
+    for (const palette of PALETTE_IDS.filter(id => !(THEME_FAMILY_IDS as readonly string[]).includes(id)))
+      expect(familyOfPalette(palette)).toBe('studio');
+  });
+});
+
+describe('a new palette needs no edit outside its own files', () => {
+  // The seam's claim, exercised: register a scratch palette in PALETTE_IDS ALONE (THEME_FAMILY_IDS untouched) and
+  // read it through the theme code. The signatures are pinned at compile time: window colour and the swatch take a
+  // PALETTE, so a widened PaletteId typechecks without a frozen family entry.
+  const windowColourTakesAPalette: (
+    d: Parameters<typeof applyWindowColour>[0],
+    p: PaletteId,
+    r: 'light' | 'dark',
+  ) => void = applyWindowColour;
+  const swatchTakesAnyPalette: (palette: PaletteId) => unknown = lookOfPalette;
+  const scratch = 'scratch-zz' as PaletteId;
+  const ids = PALETTE_IDS as unknown as string[];
+  beforeAll(() => ids.push(scratch));
+  afterAll(() => ids.splice(ids.indexOf(scratch), 1));
+
+  it('is a palette, not a family, and the family fallbacks answer for it', () => {
+    expect(windowColourTakesAPalette).toBe(applyWindowColour);
+    expect(swatchTakesAnyPalette).toBe(lookOfPalette);
+    expect(isPaletteId(scratch)).toBe(true);
+    expect(isFamilyId(scratch)).toBe(false);
+    expect((THEME_FAMILY_IDS as readonly string[]).includes(scratch)).toBe(false);
+    expect(familyOfPalette(scratch)).toBe('studio');
+  });
+
+  it('is stored, read back and published on the root as its own palette', () => {
+    const store = memoryStore();
+    const themes = new ThemePreferenceStore(store);
+    themes.setPalette(scratch);
+    const read = new ThemePreferenceStore(store).snapshot();
+    expect(read.palette).toBe(scratch);
+    expect(read.family).toBe('studio');
+    const root = { dataset: {} as Record<string, string>, style: { setProperty() {} } } as unknown as HTMLElement;
+    applyThemeAxes(root, read, 'dark');
+    expect(root.dataset.palette).toBe(scratch);
+  });
+
+  it('previews as itself, and moves the window colour without a family manifest of its own', () => {
+    expect(swatchAttributes(`${scratch}-dark`)).toMatchObject({ 'data-palette': scratch, 'data-mode': 'dark' });
+    const attributes: Record<string, string> = { href: '/manifest-studio-light.abc.webmanifest' };
+    const link = {
+      getAttribute: (name: string) => attributes[name],
+      setAttribute: (name: string, v: string) => (attributes[name] = v),
+    };
+    const document = { getElementById: () => link } as unknown as Parameters<typeof applyWindowColour>[0];
+    applyWindowColour(document, scratch, 'dark');
+    expect(attributes.href).toBe('/manifest-studio-dark.abc.webmanifest');
   });
 });
 

@@ -3,15 +3,15 @@
  * `data-mode`), but about a hundred scene fixtures and a few visual tests still pick a look the old way: set
  * `<html data-theme="<family>-<mode>">` (`?theme=mission-dark`, `dataset.theme = …`, `setAttribute('data-theme', …)`).
  * Rewriting each of them is churn with no value, so every scene bundle starts with this banner: whenever `data-theme`
- * is written on the root it ALSO writes the three axes the family stands for (`lookOfFamily`, the same table the app and
+ * is written on the root it ALSO writes the three axes the family stands for (`lookOfPalette`, the same table the app and
  * the pre-paint script use). It is synchronous (an attribute set followed by a `getComputedStyle` read sees the new
  * tokens) and a no-op when the axes already say the same thing, so the real shell's own publishing is never overridden.
  *
  * Scenes only. The shipped app never loads this.
  */
-import { PALETTE_IDS, lookOfFamily } from '../../../src/theme/catalog.ts';
+import { PALETTE_IDS, lookOfPalette } from '../../../src/theme/catalog.ts';
 
-const table = JSON.stringify(Object.fromEntries(PALETTE_IDS.map(id => [id, lookOfFamily(id)])));
+const table = JSON.stringify(Object.fromEntries(PALETTE_IDS.map(id => [id, lookOfPalette(id)])));
 
 export const legacyThemeBanner = `;(function () {
   if (typeof document === 'undefined') return;

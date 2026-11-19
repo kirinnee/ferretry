@@ -96,23 +96,32 @@ export const isFamilyId = (value: unknown): value is ThemeFamilyId =>
  */
 export const familyOfPalette = (palette: PaletteId): ThemeFamilyId => (isFamilyId(palette) ? palette : DEFAULT_FAMILY);
 
+/**
+ * What a single-pick look of a PALETTE is on the three axes: the palette itself and the style it was drawn for. Takes
+ * any palette, so a palette added later needs no family entry to be previewed; an id no palette answers to is the
+ * default look.
+ */
+export function lookOfPalette(palette: PaletteId): { readonly style: StyleId; readonly palette: PaletteId } {
+  const entry = PALETTES.find(candidate => candidate.id === palette);
+  return { style: entry?.suggestedStyle ?? DEFAULT_STYLE, palette: isPaletteId(palette) ? palette : DEFAULT_PALETTE };
+}
+
 /** What a pre-split family (a stored `family`, a theme item's `base`) is on the three axes. A family id is a palette id. */
 export function lookOfFamily(family: ThemeFamilyId): { readonly style: StyleId; readonly palette: PaletteId } {
-  const palette = PALETTES.find(entry => entry.id === family);
-  return { style: palette?.suggestedStyle ?? DEFAULT_STYLE, palette: palette?.id ?? DEFAULT_PALETTE };
+  return lookOfPalette(family);
 }
 
 /**
  * The attributes a preview element wears to render in a look of its own, whatever the page around it is
  * (`[data-swatch]` re-declares every token locally, `styles/themes.css`). `theme` is a single-pick look plus a mode,
- * `"<family>-<light|dark>"` (the picker's own vocabulary: a family is a palette with the style it was drawn for).
+ * `"<palette>-<light|dark>"` (the picker's own vocabulary: a palette with the style it was drawn for).
  */
 export function swatchAttributes(
   theme: string,
 ): Readonly<Record<'data-swatch' | 'data-style' | 'data-palette' | 'data-mode', string>> {
   const cut = theme.lastIndexOf('-');
-  const family = theme.slice(0, cut);
+  const palette = theme.slice(0, cut);
   const mode = theme.slice(cut + 1) === 'dark' ? 'dark' : 'light';
-  const look = lookOfFamily(isFamilyId(family) ? family : DEFAULT_PALETTE);
+  const look = lookOfPalette(isPaletteId(palette) ? palette : DEFAULT_PALETTE);
   return { 'data-swatch': theme, 'data-style': look.style, 'data-palette': look.palette, 'data-mode': mode };
 }

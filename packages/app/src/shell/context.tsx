@@ -21,6 +21,7 @@ import {
   MANIFEST_LINK_ID,
   themeColorFromComputedStyle,
 } from '../theme/preferences.ts';
+import { familyOfPalette, type PaletteId } from '../theme/catalog.ts';
 import type { ScrollMemory } from '../scroll/scroll-memory.ts';
 import { applyThemeItem, type ThemeItem } from '../theme/tokens.ts';
 import type { OwnerLayout } from '../layout/daemon-layout.ts';
@@ -113,15 +114,15 @@ function useMedia(browser: ShellWindow, query: string): boolean {
  * identified manifest link is repointed (never a second link), and one `theme-color` meta, created on demand, takes
  * the computed `--bg` (never a colour map in TypeScript). A document without these (a test's) is left alone.
  */
-function applyWindowColour(
+export function applyWindowColour(
   document: ShellWindow['document'],
-  family: ThemePreference['family'],
+  palette: PaletteId,
   resolved: 'light' | 'dark',
 ): void {
   const link = document.getElementById?.(MANIFEST_LINK_ID);
   if (link) {
     const current = link.getAttribute('href') ?? '';
-    const next = manifestHrefFor(current, family, resolved);
+    const next = manifestHrefFor(current, familyOfPalette(palette), resolved);
     // Only on a real change: assigning the same href re-fetches the manifest in some browsers.
     if (next !== current) link.setAttribute('href', next);
   }
