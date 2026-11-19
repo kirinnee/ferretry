@@ -3,7 +3,7 @@ import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/te
 import type { ConfigCollectionDef, ConfigWriteAllDocument, KernelPorts } from '@ferretry/kernel/contract';
 import { testHost } from '@ferretry/kernel/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
-import { fakeLoginChanges, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
+import { fakeLoginChanges, fakeLoginEnvImport, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import { PROFILE_ITEMS, RuntimesPort, type RuntimesApi } from '../../contract/index.ts';
 import { type RuntimesAssembly, runtimesDaemon, unavailableAssembly } from '../../daemon/index.ts';
 
@@ -77,6 +77,7 @@ export async function world(files: Record<string, unknown> = FILES, options: Wor
       ferrets: new FakeFerrets(),
       logins: fakeLogins([]),
       loginChanges: fakeLoginChanges(),
+      loginEnvImport: fakeLoginEnvImport(),
       vault: new FakeVault(),
     },
     gate: new StandInAdmission(() => ownerStanding()),

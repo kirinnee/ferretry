@@ -14,6 +14,7 @@ import {
   type LoginChangesApi,
   type LoginId,
   type LoginsApi,
+  LOGIN_ENV_IMPORT_NEEDER,
   LOGINS_CONFIG,
   LoginChanged,
   LoginsBudget,
@@ -52,6 +53,7 @@ import { modelCatalogSourcesView } from './lib/models/sources.ts';
 import { presetFromFile, type ProviderPreset, type ProviderPresetFile } from './lib/presets/schema.ts';
 import { ProviderPresetService } from './lib/provider-probe/presets.ts';
 import { ProviderProbeService } from './lib/provider-probe/service.ts';
+import { LoginEnvImport, refusedEnvImport } from './features/host-import/env-import.ts';
 import { loginChangesPort } from './lib/changes/port.ts';
 import { LoginChangeService } from './lib/changes/service.ts';
 import { changeRoutes } from './lib/routes/changes.ts';
@@ -369,6 +371,17 @@ export function buildLoginsDaemon() {
         discard: id => changes.discard(id),
       });
 
+      // The setup import's door (r9 A8): the PERSON's write (a reference to a secret goes into effect only for the owner, and is otherwise
+      // held for them, as for any other editor), pinned to the disk etag read first so it never replaces what moved.
+      const envImport = new LoginEnvImport({
+        files,
+        look: async id => ({
+          etag: await config.etag(LOGINS_CONFIG, id),
+          state: config.fileState(LOGINS_CONFIG, id).state,
+        }),
+        write: (id, patch, ifMatch) => config.writeAsCaller(LOGINS_CONFIG, id, { patch }, { ifMatch }),
+      });
+
       // Logins OWNS its change routes: add, sign out, disable, enable, label, remove. A change edits this plugin's own
       // `config/logins/<id>.yaml` through the kernel's config write port, so the one writer's rules hold (a raw secret
       // refused, the last good version kept, a loosening held for the owner).
@@ -452,7 +465,13 @@ export function buildLoginsDaemon() {
             refreshLocal: () => localModels.refresh(),
           }),
         },
-        provides: { logins: perNeeder(apiFor), loginChanges: changesApi },
+        provides: {
+          logins: perNeeder(apiFor),
+          loginChanges: changesApi,
+          // The setup import adds a harness's own `env` to the login its apply selected (r9 A8). Only Runtimes is handed a working door;
+          // every other needer gets a port that refuses.
+          loginEnvImport: perNeeder(needer => (needer.id === LOGIN_ENV_IMPORT_NEEDER ? envImport : refusedEnvImport)),
+        },
         hooks: {
           'logins:anthropic': kinds.anthropic,
           'logins:openai': kinds.openai,

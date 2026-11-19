@@ -7,7 +7,7 @@
  * order; it is not Gate, and these tests prove none of Gate's guarantees.
  */
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
-import { fakeLoginChanges, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
+import { fakeLoginChanges, fakeLoginEnvImport, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import type { CallStanding } from '@ferretry/kernel/contract';
 import { StandInAdmission, ownerStanding } from '@ferretry/core-gate/contract/testing';
@@ -35,7 +35,13 @@ export async function hostRuntimes(
   const daemon = runtimesDaemon(() => assembly) as DaemonImplementation<any>;
   const host = await testHost({
     plugins: [daemon],
-    fakes: { ferrets, logins: fakeLogins(), loginChanges: fakeLoginChanges(), vault: new FakeVault() },
+    fakes: {
+      ferrets,
+      logins: fakeLogins(),
+      loginChanges: fakeLoginChanges(),
+      loginEnvImport: fakeLoginEnvImport(),
+      vault: new FakeVault(),
+    },
     gate: new StandInAdmission(() => standing),
     ...(options.config === undefined ? {} : { config: options.config }),
   });

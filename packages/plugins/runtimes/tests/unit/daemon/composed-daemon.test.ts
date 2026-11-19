@@ -16,7 +16,12 @@ import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { type DaemonImplementation, definePlugin, type HookInvoker, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
-import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import {
+  fakeLoginChanges,
+  fakeLoginEnvImport,
+  fakeLogins,
+  sampleLogin,
+} from '@ferretry/plugin-logins/contract/testing';
 import { type ModelCatalogSourcesView, ModelCatalogSourcesSchema } from '@ferretry/plugin-logins/contract';
 import { LoginPaused, LoginResumed } from '@ferretry/plugin-usage/contract';
 import type { Instant } from '@ferretry/std';
@@ -85,6 +90,7 @@ async function compose(
       ferrets: options.ferrets ?? new FakeFerrets(),
       logins: composedLogins,
       loginChanges: fakeLoginChanges(),
+      loginEnvImport: fakeLoginEnvImport(),
       vault: options.vault ?? new FakeVault(),
     },
     gate: new StandInAdmission(() => ownerStanding()),
@@ -277,6 +283,7 @@ describe('a real apply through the composed daemon', () => {
         ferrets: new FakeFerrets(),
         logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
         loginChanges: fakeLoginChanges(),
+        loginEnvImport: fakeLoginEnvImport(),
         vault: new FakeVault(),
       },
       gate: new StandInAdmission(() => ownerStanding()),
@@ -814,6 +821,7 @@ describe('the default composition stands in for the services and keeps a broken 
         ferrets,
         logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
         loginChanges: fakeLoginChanges(),
+        loginEnvImport: fakeLoginEnvImport(),
         vault: new FakeVault(),
       },
       gate: new StandInAdmission(() => ownerStanding()),
@@ -837,6 +845,7 @@ describe('the default composition stands in for the services and keeps a broken 
         ferrets,
         logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
         loginChanges: fakeLoginChanges(),
+        loginEnvImport: fakeLoginEnvImport(),
         vault: new FakeVault(),
       },
       gate: new StandInAdmission(() => ownerStanding()),
@@ -1081,6 +1090,7 @@ describe('the homes the composed daemon provides', () => {
         ferrets: new FakeFerrets(),
         logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
         loginChanges: fakeLoginChanges(),
+        loginEnvImport: fakeLoginEnvImport(),
         vault: new FakeVault(),
       },
       gate: new StandInAdmission(() => ownerStanding()),
@@ -1138,6 +1148,7 @@ describe('M2b the auto-resume switch through the composed daemon', () => {
         ferrets: new FakeFerrets(),
         logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
         loginChanges: fakeLoginChanges(),
+        loginEnvImport: fakeLoginEnvImport(),
         vault: new FakeVault(),
       },
       gate: new StandInAdmission(() => ownerStanding()),

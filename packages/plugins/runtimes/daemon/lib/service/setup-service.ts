@@ -67,7 +67,7 @@ import {
   parseCloneBase,
   serializeCloneBase,
 } from '../account/clone-base.ts';
-import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
+import type { LoginEnvImportApi, LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import { parseAccountModel, type AccountModel, isRuntimeName, type LayerReferenceText } from '../account/schema.ts';
 import { standInsNamedBy } from '../account/runtimes-model.ts';
 import { classifyCloneKeys, recordCloneKeys } from '../account/clone-keys.ts';
@@ -139,6 +139,7 @@ import {
 import { assertMayFileSecrets, fileSecrets, uniqueByName } from './setup-secrets.ts';
 import { type ToolInstallOutcome, type ToolInstallPreview, ToolInstallRefusal } from './tool-install.ts';
 import { toolOutcomeOnWire } from './tool-install-wire.ts';
+import { createLogins, importLoginEnvs, type LoginEnvPlan, loginEnvPlanOf, tickedEnvOf } from './setup-login-env.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -228,6 +229,7 @@ export type SetupCatalogDeps = Pick<
   | 'acceptsAutoPermissionMode'
   | 'modelCatalogs'
   | 'loginStores'
+  | 'loginChanges'
   | 'budgetHolds'
 >;
 
@@ -260,6 +262,8 @@ export interface FleetSetupServiceDeps {
    * carries one), exactly as before.
    */
   readonly components?: ComponentWriter;
+  /** Logins' door for an imported harness `env` (r9 A8). Absent on a machine wired without it: no login gets the `env`. */
+  readonly loginEnvImport?: LoginEnvImportApi;
   /** A content digest (sha256). */
   digest(text: string): string;
   /**
@@ -368,7 +372,7 @@ interface ConfigWrite {
   readonly put: CloneConfigFiles['write'];
 }
 
-interface Composed {
+interface Composed extends LoginEnvPlan {
   readonly model: AccountModel;
   readonly documents: readonly FleetDocumentWrite[];
   /** Values to store before the apply. Never in a description, a digest or a log. */
@@ -626,6 +630,7 @@ export class FleetSetupService {
     // The Vault is written first: the caller's right to write it is settled before the first write.
     assertMayFileSecrets(composed.secrets, caller, 'apply');
     await fileSecrets((name, value) => this.deps.secrets.put(name, value), composed.secrets);
+    await createLogins(this.deps.catalog, composed);
     // Settings files go first, each through the owner's door and against the version it was compared with. The
     // record rides the batch after them, so it can only claim less than landed, never more. A write that loosens
     // is held unless the caller is at this machine (`governed: false`); a remote caller confirms it as for any
@@ -658,7 +663,8 @@ export class FleetSetupService {
       }
     }
     await this.#applyModel(model, documents, landed);
-    const sentences = [composed.summary, ...handed.sentences];
+    const envSentences = await importLoginEnvs(this.deps.loginEnvImport, composed, caller);
+    const sentences = [composed.summary, ...handed.sentences, ...envSentences];
     if (held > 0)
       sentences.push(`${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`);
     return sentences.join(' ');
@@ -709,6 +715,7 @@ export class FleetSetupService {
       ...(await this.#recordOption()),
       existingSecrets,
       addDuplicates: change.addDuplicates === true ? installed : [],
+      tickedEnv: tickedEnvOf(change),
       digest: text => this.deps.digest(text),
     });
     // The wire keys the names by the Ferrets harness key; the library keys them by its own word.
@@ -788,6 +795,7 @@ export class FleetSetupService {
       value: secret.value,
     }));
     const runtimes = Object.keys(plan.runtimes).toSorted();
+    const loginEnv = loginEnvPlanOf(change, plan, text => this.deps.digest(text));
     const lines = [
       ...Object.entries(plan.credentials).map(([id, credential]) =>
         credential.store === 'host'
@@ -819,9 +827,10 @@ export class FleetSetupService {
         secrets.map(secret => this.deps.digest(`${secret.name}\n${secret.value}`)),
         [],
         [],
-        handed.map(write => this.deps.digest(handedText(write))),
+        [...handed.map(write => this.deps.digest(handedText(write))), ...loginEnv.digests],
       ),
       ...(owners === undefined ? {} : { owners }),
+      ...loginEnv.fields,
     };
   }
 
