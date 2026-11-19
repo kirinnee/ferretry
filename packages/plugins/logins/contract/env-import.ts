@@ -16,6 +16,7 @@
  */
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import { definePort } from '@ferretry/kernel/contract';
+import { nameLooksLikeKey } from './secret-shape.ts';
 import type { LoginFile } from './wire.ts';
 
 /** Variables that carry a GitHub account's token. They come in unticked: see {@link GITHUB_TOKEN_SENTENCE}. */
@@ -24,6 +25,12 @@ export const GITHUB_TOKEN_NAMES: readonly string[] = ['GH_TOKEN', 'GITHUB_TOKEN'
 /** Why a GitHub token is left out unless the person ticks it (it is their choice, so ticking still works). */
 export const GITHUB_TOKEN_SENTENCE =
   "Not imported by default: ferrets' `gh` uses your connected GitHub account, and a token in a login's environment can be read by every ferret on that login.";
+
+/** What a variable name that is itself shaped like a key is called instead of being repeated (in a sentence, a scan, a warning). */
+export const MASKED_VARIABLE_NAME = '(a variable whose name looks like a key)';
+
+/** A variable name as a sentence may repeat it. */
+export const maskedVariableName = (name: string): string => (nameLooksLikeKey(name) ? MASKED_VARIABLE_NAME : name);
 
 /** The only plugin whose needs may take {@link LoginEnvImportPort}: the setup import is Runtimes' apply. */
 export const LOGIN_ENV_IMPORT_NEEDER = 'runtimes';

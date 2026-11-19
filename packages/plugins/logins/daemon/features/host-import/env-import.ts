@@ -70,8 +70,9 @@ export class LoginEnvImport implements LoginEnvImportApi {
   constructor(private readonly deps: LoginEnvImportDeps) {}
 
   async import(request: LoginEnvImportRequest): Promise<LoginEnvImportOutcome> {
-    const fleet = standingRefusal(request.caller, 'fleet');
-    if (fleet !== undefined) return { outcome: 'refused', reason: fleet };
+    // Asked first so that nobody without standing learns which logins exist, and asked again at the write (below).
+    const early = standingRefusal(request.caller, 'fleet');
+    if (early !== undefined) return { outcome: 'refused', reason: early };
     // The disk is looked at BEFORE the version in effect, so a write that carries this etag can only land on what was read.
     const look = await this.deps.look(request.login);
     const file = this.deps.files().get(request.login);
@@ -85,11 +86,6 @@ export class LoginEnvImport implements LoginEnvImportApi {
     const kept = Object.keys(plan.env).filter(name => had.has(name));
     const added = Object.keys(plan.env).filter(name => !had.has(name));
     if (added.length === 0) return { outcome: 'unchanged', kept: kept.map(shownName), skipped: plan.skipped };
-    // A reference is bound only when one of the ADDED variables is one.
-    if (added.some(name => secretReferencesIn(plan.env[name] as string).length > 0)) {
-      const secrets = standingRefusal(request.caller, 'secrets');
-      if (secrets !== undefined) return { outcome: 'refused', reason: secrets };
-    }
     if (look.state !== 'valid') {
       return {
         outcome: 'refused',
@@ -100,6 +96,14 @@ export class LoginEnvImport implements LoginEnvImportApi {
       };
     }
     const env = { ...file.env, ...Object.fromEntries(added.map(name => [name, plan.env[name] as string])) };
+    // The caller's standing is asked LAST, after every awaited read, immediately before the write: a grant revoked or
+    // narrowed while the file was read is what is judged. A reference is bound only when an ADDED variable is one.
+    const fleet = standingRefusal(request.caller, 'fleet');
+    if (fleet !== undefined) return { outcome: 'refused', reason: fleet };
+    if (added.some(name => secretReferencesIn(plan.env[name] as string).length > 0)) {
+      const secrets = standingRefusal(request.caller, 'secrets');
+      if (secrets !== undefined) return { outcome: 'refused', reason: secrets };
+    }
     const answer = await this.deps.write(request.login, { env }, look.etag);
     if (answer.kind === 'refused') {
       // The config layer names a key and a rule, never a value; this masks the values and key-shaped names it was given all the same.

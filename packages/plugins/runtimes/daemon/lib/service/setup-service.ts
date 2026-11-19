@@ -229,6 +229,7 @@ export type SetupCatalogDeps = Pick<
   | 'acceptsAutoPermissionMode'
   | 'modelCatalogs'
   | 'loginStores'
+  | 'loginChanges'
   | 'budgetHolds'
 >;
 
@@ -391,6 +392,8 @@ interface Composed {
   readonly loginEnvs?: readonly ImportedLoginEnv[];
   /** The GitHub token variables the person ticked, by NAME. */
   readonly tickedEnv?: readonly string[];
+  /** The logins this import plans to create (the model's credentials are only a name until Logins has a file for each). */
+  readonly newLogins?: readonly { readonly id: string; readonly harness: HarnessKind; readonly store: string }[];
 }
 
 /**
@@ -660,6 +663,9 @@ export class FleetSetupService {
     // The Vault is written first: the caller's right to write it is settled before the first write.
     assertMayFileSecrets(composed.secrets, caller, 'apply');
     await fileSecrets((name, value) => this.deps.secrets.put(name, value), composed.secrets);
+    // A login the plan names is created through Logins, its owner, BEFORE the runtimes that launch on it are written: the
+    // fleet writer persists Runtimes' own documents only, so without this a new login never gets a file.
+    await this.#createLogins(composed);
     // Settings files go first, each through the owner's door and against the version it was compared with. The
     // record rides the batch after them, so it can only claim less than landed, never more. A write that loosens
     // is held unless the caller is at this machine (`governed: false`); a remote caller confirms it as for any
@@ -696,6 +702,35 @@ export class FleetSetupService {
     if (held > 0)
       sentences.push(`${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`);
     return sentences.join(' ');
+  }
+
+  /**
+   * Creates each login this import plans that Logins does not have yet (`login.add`, staged and applied through Logins' own
+   * change port: its schema, its refusals, its events). One that already exists is left as it is. A refusal stops the apply
+   * before any runtime is written and says which login, and what was already kept.
+   */
+  async #createLogins(composed: Composed): Promise<void> {
+    const wanted = composed.newLogins ?? [];
+    if (wanted.length === 0) return;
+    const { credentials, loginChanges } = this.deps.catalog;
+    const have = new Set((await credentials.list()).logins.map(login => String(login.id)));
+    for (const login of wanted) {
+      if (have.has(login.id)) continue;
+      try {
+        const view = await loginChanges.stage({
+          kind: 'login.add',
+          id: login.id,
+          harness: harnessKey(login.harness),
+          store: login.store as 'host' | 'ferretry' | 'environment',
+        });
+        await loginChanges.apply(view.id);
+      } catch (error) {
+        throw new FleetCatalogRefusal(
+          'fleet_change_failed',
+          `Logins could not create the login ${login.id}: ${errorMessage(error)}. Nothing else was changed${composed.secrets.length === 0 ? '' : '; the keys already added to the secret store stay there'}.`,
+        );
+      }
+    }
   }
 
   /**
@@ -900,6 +935,11 @@ export class FleetSetupService {
       ...(owners === undefined ? {} : { owners }),
       loginEnvs: plan.loginEnvs,
       tickedEnv: tickedEnvOf(change),
+      newLogins: Object.entries(plan.credentials).map(([id, credential]) => ({
+        id,
+        harness: credential.harness,
+        store: credential.store,
+      })),
     };
   }
 

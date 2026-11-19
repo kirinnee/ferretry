@@ -14,6 +14,7 @@ import should from 'should';
 import type { CallerGovernance, GrantRefusal } from '@ferretry/core-gate/contract';
 import type { Instant } from '@ferretry/std';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
+import { fakeLoginChanges } from '@ferretry/plugin-logins/contract/testing';
 import {
   type AccountChange,
   CLONE_BUNDLE_KEYS_LIMIT,
@@ -252,6 +253,7 @@ function world(
       credentials: {
         list: async () => ({ logins: await state.emails() }) as never,
       },
+      loginChanges: fakeLoginChanges(),
       provisioner: {
         preview: async () => {
           throw new Error('not used');
@@ -4121,6 +4123,38 @@ describe('the setup.import executor adds the harness env to the login the apply 
     should(w.secrets.get('GITHUB_TOKEN')).equal(SECRET_VALUE);
     should(fake.asked[0]?.request.minted).eql([{ name: 'GITHUB_TOKEN', secretName: 'GITHUB_TOKEN' }]);
     should(fake.asked[0]?.request.ticked).eql(['GITHUB_TOKEN']);
+  });
+
+  it('should create the login the plan names through Logins, before the runtime is written and before the env is added', async () => {
+    const changes = fakeLoginChanges();
+    const fake = fakePort();
+    const w = world({ overrides: { loginEnvImport: fake.port }, catalog: { loginChanges: changes } });
+    fake.watch(w.applied);
+    w.state.emails = async () => [];
+    w.state.scans = envScan();
+    await importOnce(w.service);
+    should(changes.staged).eql([{ kind: 'login.add', id: 'claude-you', harness: 'claude-code', store: 'host' }]);
+    should(changes.applied).have.length(1);
+    should(fake.asked[0]?.request.login).equal('claude-you');
+  });
+
+  it('should leave a login that already exists alone, and say so in a sentence when Logins refuses to create one', async () => {
+    const existing = fakeLoginChanges();
+    const kept = world({ catalog: { loginChanges: existing } });
+    kept.state.scans = envScan();
+    await importOnce(kept.service);
+    should(existing.staged).eql([]);
+
+    const refusing = fakeLoginChanges();
+    refusing.refuseStage(new Error('no way') as never);
+    const w = world({ catalog: { loginChanges: refusing } });
+    w.state.emails = async () => [];
+    w.state.scans = envScan();
+    const change = IMPORT();
+    await w.service.executors.setup.describe(change, MACHINE);
+    const failure = await catalogRefusal(w.service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
+    should(failure.message).containEql('Logins could not create the login claude-you: no way');
+    should(w.applied).have.length(0);
   });
 
   it('should ask the port nothing when the person left the env out', async () => {

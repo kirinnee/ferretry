@@ -127,6 +127,29 @@ describe('the Logins port that takes an imported harness environment', () => {
     }
   });
 
+  test('adds to a login Logins just created for the apply, so a fresh machine gets its login and its env', async () => {
+    const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: { logins: {} } });
+    try {
+      const changes = host.provided(LoginChangesPort);
+      const view = await changes.stage({ kind: 'login.add', id: 'claude-you', harness: 'claude-code', store: 'host' });
+      await changes.apply(view.id);
+      const api = host.provided(LoginEnvImportPort, RUNTIMES);
+      const answer = await api.import({
+        caller: caller(),
+        login: 'claude-you',
+        harness: 'claude-code',
+        plain: plain({ ANTHROPIC_BASE_URL: 'https://gateway.example.test' }),
+        minted: [{ name: 'GITHUB_TOKEN', secretName: 'GITHUB_TOKEN' }],
+        ticked: ['GITHUB_TOKEN'],
+      });
+      expect(answer).toMatchObject({ outcome: 'held', added: ['ANTHROPIC_BASE_URL', 'GITHUB_TOKEN'] });
+      const login = await host.provided(LoginsPort).get('claude-you' as never);
+      expect(String(login?.id)).toBe('claude-you');
+    } finally {
+      await host.stop();
+    }
+  });
+
   test('is a working door for Runtimes alone: every other plugin is refused and nothing is written', async () => {
     const host = await testHost({ plugins: [daemon], fakes: { vault: emptyVault() }, config: files });
     try {

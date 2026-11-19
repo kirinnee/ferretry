@@ -34,7 +34,7 @@
  */
 import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { looksSecret } from '@ferretry/std/credential-words';
-import { GITHUB_TOKEN_NAMES } from '@ferretry/plugin-logins/contract';
+import { GITHUB_TOKEN_NAMES, maskedVariableName } from '@ferretry/plugin-logins/contract';
 import { importItemId, importNamedItemId } from '../../../contract/index.ts';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
@@ -437,33 +437,35 @@ function importEnv(
   const result: EnvImport = { env: {}, secretKeys: [], dropped: [], gated: [], plain: [], minted: [] };
   if (!isRecord(env)) return result;
   for (const [variable, raw] of Object.entries(env)) {
+    // A name that is itself shaped like a key is not repeated in a scan, a warning or a source label.
+    const shown = `${keyPrefix}${maskedVariableName(variable)}`;
     if (typeof raw !== 'string' && typeof raw !== 'number' && typeof raw !== 'boolean') {
-      result.dropped.push(`${keyPrefix}${variable} (not a text value)`);
+      result.dropped.push(`${shown} (not a text value)`);
       continue;
     }
     const value = String(raw);
     if (ticked !== undefined && isGithubTokenName(variable) && !ticked.has(variable)) {
-      result.dropped.push(`${keyPrefix}${variable} (a GitHub token: not imported unless you tick it)`);
-      result.gated.push(`${keyPrefix}${variable}`);
+      result.dropped.push(`${shown} (a GitHub token: not imported unless you tick it)`);
+      result.gated.push(shown);
       continue;
     }
     if ((RESERVED_ENV_NAMES as readonly string[]).includes(variable)) {
-      result.dropped.push(`${keyPrefix}${variable} (Ferretry sets it for each runtime)`);
+      result.dropped.push(`${shown} (Ferretry sets it for each runtime)`);
       continue;
     }
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(variable)) {
-      result.dropped.push(`${keyPrefix}${variable} (not an environment variable name)`);
+      result.dropped.push(`${shown} (not an environment variable name)`);
       continue;
     }
     if (looksSecret(variable, value)) {
-      result.secretKeys.push(`${keyPrefix}${variable}`);
-      const secretName = names.claim(variable, value, `${from} · ${keyPrefix}${variable}`, secrets);
+      result.secretKeys.push(shown);
+      const secretName = names.claim(variable, value, `${from} · ${shown}`, secrets);
       result.env[variable] = secretReference(secretName);
       result.minted.push({ name: variable, secretName });
       continue;
     }
     if (/\$\{secret:/u.test(value) && secretReferencesIn(value).length === 0) {
-      result.dropped.push(`${keyPrefix}${variable} (a malformed secret reference)`);
+      result.dropped.push(`${shown} (a malformed secret reference)`);
       continue;
     }
     result.env[variable] = value;

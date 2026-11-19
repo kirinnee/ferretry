@@ -196,6 +196,33 @@ describe('LoginEnvImport', () => {
       should(stepUp).match({ outcome: 'refused', reason: /passkey/u });
     });
 
+    it('should ask the standing after the file was read, immediately before the write', async () => {
+      let revoked = false;
+      const sequence: string[] = [];
+      const service = new LoginEnvImport({
+        files: () => new Map(Object.entries(you)),
+        look: async () => {
+          sequence.push('look');
+          // The grant is withdrawn while the file is being read.
+          revoked = true;
+          return { etag: 'e1', state: 'valid' };
+        },
+        write: async () => {
+          sequence.push('write');
+          return WRITTEN;
+        },
+      });
+      const live: LoginEnvCaller = {
+        governance: {
+          governed: true,
+          decide: () => ({ allowed: !revoked || sequence.length === 0, refusal: 'denied' }) as never,
+        },
+      };
+      const answer = await service.import(request({ caller: live, plain: plain({ A: '1' }) }));
+      should(answer).eql({ outcome: 'refused', reason: 'this device may not change a login' });
+      should(sequence).eql(['look']);
+    });
+
     it('should refuse every plugin but the setup import: the port it hands the others writes nothing', async () => {
       should(await refusedEnvImport.import(request({ plain: plain({ A: '1' }) }))).eql({
         outcome: 'refused',

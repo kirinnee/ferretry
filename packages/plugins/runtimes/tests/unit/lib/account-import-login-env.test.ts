@@ -84,6 +84,14 @@ describe('planImport — the harness env for the login (r9 A8)', () => {
     should(other.secrets.map(secret => secret.name)).eql(['GITHUB_TOKEN']);
   });
 
+  it('should not repeat a variable name that is shaped like a key in the scan or a warning', () => {
+    const keyed = 'ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
+    const plan = planImport([claude({ env: { [keyed]: FAKE_KEY, CLAUDE_CONFIG_DIR: '/else' } })], { digest });
+    const spoken = JSON.stringify([plan.preview, plan.notes, plan.secrets.map(secret => secret.from)]);
+    should(spoken.includes(keyed)).be.false();
+    should(plan.preview.harnesses[0]?.secretKeys).eql(['env.(a variable whose name looks like a key)']);
+  });
+
   it('should bring in no env when the person left the env item out', () => {
     const plan = planImport([claude(SETTINGS)], { digest, skip: ['claude-code:env'] });
     should(plan.loginEnvs).eql([]);

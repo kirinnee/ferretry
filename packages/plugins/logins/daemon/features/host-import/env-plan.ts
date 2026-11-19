@@ -12,11 +12,12 @@
  */
 import { looksSecret } from '@ferretry/std/credential-words';
 import { SecretNameSchema, secretReference } from '@ferretry/core-vault/contract';
-import { nameLooksLikeKey } from '../../../contract/secret-shape.ts';
 import { RESERVED_LOGIN_ENV_NAMES } from '../../../contract/wire.ts';
 import {
   GITHUB_TOKEN_NAMES,
   GITHUB_TOKEN_SENTENCE,
+  MASKED_VARIABLE_NAME,
+  maskedVariableName,
   type MintedVariable,
   type PlainVariable,
   type SkippedVariable,
@@ -27,10 +28,10 @@ const POSIX_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const REFERENCE_SYNTAX = /\$\{\s*secret\b/iu;
 
 /** What a name that is shaped like a key is called instead of being repeated. */
-export const MASKED_NAME = '(a variable whose name looks like a key)';
+export const MASKED_NAME = MASKED_VARIABLE_NAME;
 
 /** A name as a sentence may repeat it. */
-export const shownName = (name: string): string => (nameLooksLikeKey(name) ? MASKED_NAME : name);
+export const shownName = maskedVariableName;
 
 /** What the import takes from a block of variables. */
 export interface LoginEnvPlan {
