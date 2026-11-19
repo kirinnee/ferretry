@@ -101,3 +101,52 @@ test('a perf tier that is genuinely empty still passes out loud', () => {
   expect(result.status).toBe(0);
   expect(result.out).toContain('the perf tier holds no test file yet');
 });
+
+// A test process KILLED before it writes its JUnit report: the runner says only what it observed. `swept.sh` is
+// shimmed to print a file and a test and then SIGKILL itself (status 137); the cgroup's memory.events is a fake file
+// the shim may rewrite, so both wordings are exercised without a real OOM kill.
+const killedWorkspace = (eventsDuring: string | null): { root: string; events: string } => {
+  const root = repo();
+  put(root, 'config/test-groups.json', JSON.stringify({ unit: [{ name: 'all', prefixes: ['packages/'] }], int: [] }));
+  put(root, 'packages/x/tests/unit/x.test.ts', "test('must run', () => {});\n");
+  put(root, 'bunfig.unit.toml', '[test]\ncoverageDir = "coverage/unit"\n');
+  const events = put(root, 'memory.events', 'low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n');
+  const rewrite = eventsDuring === null ? '' : `printf '%b' ${JSON.stringify(eventsDuring)} >"${events}"\n`;
+  put(
+    root,
+    'scripts/test/swept.sh',
+    `#!/usr/bin/env bash\necho "packages/x/tests/unit/x.test.ts:"\necho "(pass) a case [1.00ms]"\n${rewrite}kill -9 $$\n`,
+    true,
+  );
+  return { root, events };
+};
+const runKilled = (workspace: { root: string; events: string }) =>
+  run(workspace.root, ['scripts/ci/test.sh', 'unit', 'all'], { FY_CI_MEMORY_EVENTS: workspace.events });
+
+test('a test process killed while the cgroup oom_kill count rose says the OOM killer did it', () => {
+  const result = runKilled(killedWorkspace('low 0\nhigh 0\nmax 0\noom 1\noom_kill 1\n'));
+  expect(result.out).toContain('exit 137 = signal SIGKILL');
+  expect(result.out).toContain("killed by the kernel's out-of-memory killer: oom_kill rose from 0 to 1");
+  expect(result.out).not.toContain('not by the OOM killer');
+  expect(result.out).toContain('last file it started: packages/x/tests/unit/x.test.ts:');
+  expect(result.out).toContain('last test it printed: (pass) a case');
+  expect(result.out).toContain('oom_kill 1');
+  expect(result.out).toContain('MemAvailable');
+  expect(result.out).not.toContain('ran out of memory');
+});
+
+test('a test process killed while oom_kill stayed put says SIGKILL, never the OOM killer', () => {
+  const result = runKilled(killedWorkspace(null));
+  expect(result.out).toContain('exit 137 = signal SIGKILL');
+  expect(result.out).toContain('killed by SIGKILL (not by the OOM killer: oom_kill unchanged at 0)');
+  expect(result.out).not.toContain('out-of-memory killer');
+  expect(result.out).not.toContain('ran out of memory');
+});
+
+test('a test process killed with no readable oom_kill count does not claim either', () => {
+  const workspace = killedWorkspace(null);
+  rmSync(workspace.events);
+  const result = runKilled(workspace);
+  expect(result.out).toContain('whether the OOM killer did it is unknown');
+  expect(result.out).not.toContain('out-of-memory killer');
+});
