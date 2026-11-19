@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { CAPABILITY_NAMES } from '@ferretry/core-gate/contract';
 import type { CapabilityGrantView, GrantsView } from '../../../../../contract/index.ts';
-import type { ReactTestRenderer } from 'react-test-renderer';
+import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { GrantStepUpPanel, GrantsCard, GrantsSurface } from '../../../../../app/features/settings/grants-settings.tsx';
 import { daemonConnection } from '../../../../../app/shell-grants.ts';
 import { STEP_UP_NOTE } from '../../../../../app/lib/grants.ts';
@@ -37,8 +37,15 @@ const text = (renderer: ReactTestRenderer): string => JSON.stringify(renderer.to
 const marked = (renderer: ReactTestRenderer, attribute: string) =>
   renderer.root.findAll(node => typeof node.type === 'string' && node.props[attribute] !== undefined);
 
-const axisSwitch = (renderer: ReactTestRenderer, id: string) =>
+/** The span that carries the `data-grant-axis` marks. */
+const axisMark = (renderer: ReactTestRenderer, id: string) =>
   renderer.root.findAll(node => typeof node.type === 'string' && node.props['data-grant-axis'] === id)[0];
+
+/** The real switch button inside a mark. */
+const switchIn = (mark: ReactTestInstance | undefined) =>
+  mark?.find(node => typeof node.type === 'string' && node.props.role === 'switch');
+
+const axisSwitch = (renderer: ReactTestRenderer, id: string) => switchIn(axisMark(renderer, id));
 
 const NO_WORDS = /password|unlock/i;
 
@@ -276,7 +283,7 @@ describe('GrantsCard', () => {
     );
     const control = axisSwitch(renderer, 'warden.use');
     expect(control?.props.disabled).toBe(true);
-    expect(control?.props['data-grant-axis-changeable']).toBe('no');
+    expect(axisMark(renderer, 'warden.use')?.props['data-grant-axis-changeable']).toBe('no');
     expect(text(renderer)).toContain('may not change this');
   });
 
@@ -292,7 +299,7 @@ describe('GrantsCard', () => {
         onChange={() => {}}
       />,
     );
-    expect(axisSwitch(renderer, 'warden.use')?.props['data-grant-axis-changeable']).toBe('yes');
+    expect(axisMark(renderer, 'warden.use')?.props['data-grant-axis-changeable']).toBe('yes');
   });
 
   it('reports the axis and the value a reader asked for, from the recorded answer', () => {
@@ -339,7 +346,7 @@ describe('GrantsCard', () => {
 
   it('disables every control while a change is in flight', () => {
     const renderer = render(<GrantsCard connection={connection()} view={view()} busy onChange={() => {}} />);
-    for (const node of marked(renderer, 'data-grant-axis')) expect(node.props.disabled).toBe(true);
+    for (const node of marked(renderer, 'data-grant-axis')) expect(switchIn(node)?.props.disabled).toBe(true);
   });
 
   it('does not report five allowed rows for a daemon that cannot read its own decision', () => {

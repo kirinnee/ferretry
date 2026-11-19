@@ -28,8 +28,8 @@
 
 import { CAPABILITY_AXES, CAPABILITY_NAMES } from '@ferretry/core-gate/contract';
 import type { CapabilityAxis } from '@ferretry/kernel/contract';
-import { CircleHelp, Info, ShieldCheck, Wifi } from 'lucide-react';
-import { useId } from 'react';
+import { SettingGroup, SettingRow } from '@ferretry/app';
+import { CircleHelp, Wifi } from 'lucide-react';
 
 import type { CapabilityGrantView } from '../../../contract/index.ts';
 import { cn, type DaemonConnection } from '../../shell-grants.ts';
@@ -54,12 +54,14 @@ import {
   weightCopy,
   weightPips,
 } from '../../lib/grants.ts';
+import { AccessTab, Notice, type NoticeTone } from './access-kit.tsx';
 
-const POSTURE_TONE: Readonly<Record<ReturnType<typeof postureCopy>['tone'], string>> = {
-  ok: 'border-ok-border bg-ok-bg text-ok',
-  disclosure: 'border-border-strong bg-surface-2 text-muted',
-  limit: 'border-warn-border bg-warn-bg text-warn',
-  fault: 'border-err-border bg-err-bg text-err',
+/** Posture tone (the vocabulary's words) to the one shared notice tone. */
+const POSTURE_NOTICE: Readonly<Record<ReturnType<typeof postureCopy>['tone'], NoticeTone>> = {
+  ok: 'ok',
+  disclosure: 'info',
+  limit: 'warn',
+  fault: 'err',
 };
 
 /** Colour AND shape per reason, so the mark survives a monochrome render. */
@@ -130,24 +132,16 @@ export function WeightMark({ weight }: { readonly weight: AccessWeight }) {
 function WeightLegend({ weights }: { readonly weights: readonly AccessWeight[] }) {
   if (weights.length === 0) return null;
   return (
-    <section
-      className="rounded-control border border-border-strong bg-surface-2 px-3 py-2"
-      aria-label="What the access marks mean"
-      data-capability-legend=""
-    >
-      <p className="m-0 flex items-center gap-1.5 text-cell font-semibold text-fg">
-        <Info size={13} aria-hidden="true" />
-        How much each one hands over
-      </p>
-      <ul className="m-0 mt-1.5 flex list-none flex-col gap-1 p-0 sm:flex-row sm:gap-4">
+    <SettingRow name="How much each one hands over" hint="The marks on the rows below.">
+      <ul className="fy-acc-legend" aria-label="What the access marks mean" data-capability-legend="">
         {weights.map(weight => (
-          <li key={weight} className="flex min-w-0 items-center gap-1.5">
+          <li key={weight}>
             <WeightMark weight={weight} />
             <span className="text-meta text-muted">{weightCopy(weight).detail}</span>
           </li>
         ))}
       </ul>
-    </section>
+    </SettingRow>
   );
 }
 
@@ -163,7 +157,7 @@ function ReasonMark({
   const reason = openReason(entry, axis, posture);
   return (
     <span className="flex min-w-0 items-center gap-1.5">
-      <span className="w-[4.5rem] shrink-0 text-meta font-semibold text-fg">{axisLabel(axis)}</span>
+      <span className="text-meta font-semibold text-fg">{axisLabel(axis)}</span>
       <span
         className={cn('rounded-control border px-2 py-0.5 text-meta font-medium', REASON_TONE[reason])}
         data-capability-open-reason={`${entry.capability}.${axis}`}
@@ -182,49 +176,36 @@ function CapabilityRow({
   readonly entry: CapabilityGrantView;
   readonly posture: ConnectionPosture;
 }) {
-  const headingId = useId();
   const deviceNote = deviceGrantNote(entry);
   return (
-    <li
-      className="flex min-w-0 flex-col gap-1.5 border-t border-border-soft py-3 first:border-t-0 first:pt-0"
-      data-capability-row={entry.capability}
-      aria-labelledby={headingId}
+    <SettingRow
+      name={capabilityLabel(entry.capability)}
+      hint={capabilityReach(entry.capability)}
+      dataAttributes={{ 'data-capability-row': entry.capability }}
+      control={() => <WeightMark weight={capabilityWeight(entry.capability)} />}
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <span id={headingId} className="text-ui font-semibold text-fg">
-          {capabilityLabel(entry.capability)}
+      <div className="fy-acc-body">
+        <span className="fy-acc-cap__axes">
+          {CAPABILITY_AXES.map(axis => (
+            <ReasonMark key={axis} entry={entry} axis={axis} posture={posture} />
+          ))}
         </span>
-        <span className="ml-auto">
-          <WeightMark weight={capabilityWeight(entry.capability)} />
-        </span>
+        {deviceNote === null ? null : (
+          <Notice tone="warn" marks={{ 'data-capability-device-note': entry.capability }}>
+            {deviceNote}
+          </Notice>
+        )}
+        {/* THE ONE-WAY DOOR, said where the switch would be. An off capability this caller may not turn
+            on is not a control — it is a statement with a remedy, and the remedy is the machine itself.
+            Rendering a toggle here would fail on press and teach somebody the product is broken rather
+            than that the operator decided. `mayGrant` is the daemon's answer; nothing is inferred. */}
+        {!entry.granted.use && !mayGrantCapability(entry) ? (
+          <Notice tone="warn" marks={{ 'data-capability-only-at-machine': entry.capability }}>
+            {grantOnlyAtMachine(entry.capability)}
+          </Notice>
+        ) : null}
       </div>
-      <p className="m-0 text-meta leading-base text-muted">{capabilityReach(entry.capability)}</p>
-      <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:gap-4">
-        {CAPABILITY_AXES.map(axis => (
-          <ReasonMark key={axis} entry={entry} axis={axis} posture={posture} />
-        ))}
-      </div>
-      {deviceNote === null ? null : (
-        <p
-          className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
-          data-capability-device-note={entry.capability}
-        >
-          {deviceNote}
-        </p>
-      )}
-      {/* THE ONE-WAY DOOR, said where the switch would be. An off capability this caller may not turn
-          on is not a control — it is a statement with a remedy, and the remedy is the machine itself.
-          Rendering a toggle here would fail on press and teach somebody the product is broken rather
-          than that the operator decided. `mayGrant` is the daemon's answer; nothing is inferred. */}
-      {!entry.granted.use && !mayGrantCapability(entry) ? (
-        <p
-          className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
-          data-capability-only-at-machine={entry.capability}
-        >
-          {grantOnlyAtMachine(entry.capability)}
-        </p>
-      ) : null}
-    </li>
+    </SettingRow>
   );
 }
 
@@ -254,7 +235,6 @@ export interface CapabilityListProps {
  * a person can build a habit around their position.
  */
 export function CapabilityList({ connection, capabilities, governed, rows = true }: CapabilityListProps) {
-  const headingId = useId();
   const posture = connectionPosture(governed);
   const copy = postureCopy(posture);
   const entries = CAPABILITY_NAMES.map(capability =>
@@ -263,60 +243,53 @@ export function CapabilityList({ connection, capabilities, governed, rows = true
   const PostureIcon = posture === 'governed' ? Wifi : CircleHelp;
 
   return (
-    <section
-      className="kt-panel flex min-w-0 flex-col gap-3 p-panel"
-      aria-labelledby={headingId}
-      data-capability-list={String(connection.daemonId)}
-      data-capability-posture={posture}
-    >
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
-          <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
-          What this browser may do here
-        </h3>
-        <span
-          className={cn(
-            'inline-flex items-center gap-1.5 rounded-control border px-2 py-0.5 text-meta font-semibold',
-            POSTURE_TONE[copy.tone],
+    <AccessTab name="capabilities">
+      <div data-capability-list={String(connection.daemonId)} data-capability-posture={posture}>
+        <SettingGroup label="What this browser may do here">
+          {/* Scope, once and prominently: this browser on this daemon, not the machine's policy for every
+              device that has ever paired with it. */}
+          <SettingRow
+            name="This connection"
+            dataAttributes={{ 'data-capability-scope-note': '' }}
+            control={() => (
+              <span
+                className="fy-acc-chip inline-flex items-center gap-1.5"
+                data-tone={copy.tone === 'ok' ? 'ok' : copy.tone === 'fault' ? 'err' : 'plain'}
+                data-capability-posture-badge={posture}
+              >
+                <PostureIcon size={13} aria-hidden="true" />
+                {copy.badge}
+              </span>
+            )}
+          >
+            {/* WHY everything below reads the way it does — the distinction the switches cannot express. */}
+            <div className="fy-acc-body" data-capability-posture-copy="">
+              <p className="fy-acc-fine">{CAPABILITY_LIST_SCOPE_NOTE}</p>
+              <Notice tone={POSTURE_NOTICE[copy.tone]}>
+                <strong className="block">{copy.headline}</strong>
+                {copy.detail}
+              </Notice>
+              {/* Which way the switches travel from HERE, stated rather than left to be discovered by pressing something. */}
+              <p className="fy-acc-fine font-semibold" data-capability-direction={posture}>
+                {REMOTE_ONE_WAY_NOTE}
+              </p>
+            </div>
+          </SettingRow>
+          <WeightLegend weights={accessWeightsPresent(entries.map(entry => entry.capability))} />
+          {entries.length === 0 ? (
+            <SettingRow name="Nothing to report" hint="This daemon listed no capabilities.">
+              <div className="fy-acc-body" role="status">
+                <p className="fy-acc-fine">
+                  This daemon listed no capabilities, so there is nothing to report. That is a failed read rather than a
+                  machine with no limits, and Ferretry will not present it as one.
+                </p>
+              </div>
+            </SettingRow>
+          ) : !rows ? null : (
+            entries.map(entry => <CapabilityRow key={entry.capability} entry={entry} posture={posture} />)
           )}
-          data-capability-posture-badge={posture}
-        >
-          <PostureIcon size={13} aria-hidden="true" />
-          {copy.badge}
-        </span>
+        </SettingGroup>
       </div>
-
-      {/* Scope, once and prominently: this browser on this daemon, not the machine's policy for every
-          device that has ever paired with it. */}
-      <p className="m-0 text-meta leading-base text-faint" data-capability-scope-note="">
-        {CAPABILITY_LIST_SCOPE_NOTE}
-      </p>
-
-      {/* WHY everything below reads the way it does — the distinction the switches cannot express. */}
-      <div className={cn('rounded-control border px-3 py-2', POSTURE_TONE[copy.tone])} data-capability-posture-copy="">
-        <p className="m-0 text-ui font-semibold leading-base">{copy.headline}</p>
-        <p className="m-0 mt-1 text-meta leading-base opacity-90">{copy.detail}</p>
-        {/* Which way the switches travel from HERE, stated rather than left to be discovered by pressing
-            something. */}
-        <p className="m-0 mt-1 text-meta font-semibold leading-base" data-capability-direction={posture}>
-          {REMOTE_ONE_WAY_NOTE}
-        </p>
-      </div>
-
-      <WeightLegend weights={accessWeightsPresent(entries.map(entry => entry.capability))} />
-
-      {entries.length === 0 ? (
-        <p className="m-0 text-cell leading-base text-muted" role="status">
-          This daemon listed no capabilities, so there is nothing to report. That is a failed read rather than a machine
-          with no limits, and Ferretry will not present it as one.
-        </p>
-      ) : !rows ? null : (
-        <ul className="m-0 flex list-none flex-col p-0" aria-label="Capabilities">
-          {entries.map(entry => (
-            <CapabilityRow key={entry.capability} entry={entry} posture={posture} />
-          ))}
-        </ul>
-      )}
-    </section>
+    </AccessTab>
   );
 }

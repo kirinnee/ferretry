@@ -16,7 +16,11 @@ import type {
   PairingInvitationLink,
 } from '../../../../../contract/index.ts';
 
-import type { ReactTestRenderer } from 'react-test-renderer';
+import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
+
+/** The real switch button inside the span that carries a `data-device-grant` mark. */
+const switchIn = (mark: ReactTestInstance | undefined) =>
+  mark?.find(node => typeof node.type === 'string' && node.props.role === 'switch');
 import should from 'should';
 import {
   AddDeviceCard,
@@ -440,7 +444,7 @@ describe('AddDeviceCard capabilities', () => {
     grants: grantsOf({ fleet: { use: true, configure: true } }),
   });
   const switchFor = (renderer: ReactTestRenderer, id: string, capability: string, axis: string) =>
-    marked(renderer, 'data-device-grant', `${id}:${capability}.${axis}`)[0];
+    switchIn(marked(renderer, 'data-device-grant', `${id}:${capability}.${axis}`)[0]);
 
   it('puts eight capabilities by two axes behind a disclosure on every device, closed by default', () => {
     // Sixteen switches per device would bury the list at 390px, so the rows stay a summary line.
@@ -497,7 +501,9 @@ describe('AddDeviceCard capabilities', () => {
     // Assert
     const refused = switchFor(renderer, DEVICE_ID, 'filesystem', 'use');
     should(refused?.props.disabled).equal(true);
-    should(refused?.props['data-device-grant-blocked']).equal('yes');
+    should(
+      marked(renderer, 'data-device-grant', `${DEVICE_ID}:filesystem.use`)[0]?.props['data-device-grant-blocked'],
+    ).equal('yes');
     const reason = marked(renderer, 'data-device-grant-reason', `${DEVICE_ID}:filesystem.use`);
     should(reason).have.length(1);
     expect(text(renderer)).toContain('ferret device grant <device> filesystem --use');
@@ -890,16 +896,18 @@ describe('AddDeviceSurface', () => {
 
     // Act — configure on also turns use on, in one request.
     await runAsync(async () =>
-      marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0]?.props.onClick(),
+      switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0])?.props.onClick(),
     );
 
     // Assert
     should(calls).containEql(`PATCH /v1/pair/devices/${DEVICE_ID}/grants`);
     should(patches).deepEqual([{ deviceId: DEVICE_ID, body: { terminal: { use: true, configure: true } } }]);
-    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props['aria-checked']).equal(true);
-    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0]?.props['aria-checked']).equal(
+    should(switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0])?.props['aria-checked']).equal(
       true,
     );
+    should(
+      switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0])?.props['aria-checked'],
+    ).equal(true);
   });
 
   it('turns configure off with use, and re-reads nothing it was not told', async () => {
@@ -915,13 +923,15 @@ describe('AddDeviceSurface', () => {
     const surface = renderer as ReactTestRenderer;
 
     // Act
-    await runAsync(async () => marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props.onClick());
+    await runAsync(async () =>
+      switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0])?.props.onClick(),
+    );
 
     // Assert
     should(patches[0]?.body).deepEqual({ terminal: { use: false, configure: false } });
-    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0]?.props['aria-checked']).equal(
-      false,
-    );
+    should(
+      switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0])?.props['aria-checked'],
+    ).equal(false);
   });
 
   it('shows a refused change inline on its device and leaves every switch as the daemon last said', async () => {
@@ -941,14 +951,20 @@ describe('AddDeviceSurface', () => {
     const surface = renderer as ReactTestRenderer;
 
     // Act
-    await runAsync(async () => marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props.onClick());
+    await runAsync(async () =>
+      switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0])?.props.onClick(),
+    );
 
     // Assert
     should(marked(surface, 'data-device-grant-failure', DEVICE_ID)).have.length(1);
     expect(text(surface)).toContain('can only be turned on from a device that holds it');
-    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props['aria-checked']).equal(false);
+    should(switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0])?.props['aria-checked']).equal(
+      false,
+    );
     // And the next attempt clears the old sentence before it asks again.
-    await runAsync(async () => marked(surface, 'data-device-grant', `${DEVICE_ID}:fleet.use`)[0]?.props.onClick());
+    await runAsync(async () =>
+      switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:fleet.use`)[0])?.props.onClick(),
+    );
     should(marked(surface, 'data-device-grant-failure')).have.length(1);
   });
 

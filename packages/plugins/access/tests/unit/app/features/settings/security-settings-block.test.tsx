@@ -12,11 +12,11 @@ import {
   type SecuritySettingsView,
   STEP_UP_REQUIRED_CODE,
 } from '@ferretry/core-gate/contract';
-import type { ReactTestRenderer } from 'react-test-renderer';
+import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import should from 'should';
 import { SecuritySettingsBlock } from '../../../../../app/features/settings/security-settings-block.tsx';
 import { daemonConnection, FyHttpError } from '../../../../../app/shell-grants.ts';
-import type { SecuritySettingsClient } from '../../../../../app/lib/security-settings-client.ts';
+import { SECURITY_SETTING_COPY, type SecuritySettingsClient } from '../../../../../app/lib/security-settings-client.ts';
 import { must } from '../../../../support/app/dom.ts';
 import { render, run, runAsync } from '../../../../support/app/react.ts';
 
@@ -97,8 +97,32 @@ const typeInto = async (block: ReactTestRenderer, field: string, value: string):
   });
 };
 
+/** The real switch button inside the span that carries a `data-security-switch` mark. */
+const switchIn = (mark: ReactTestInstance | undefined) =>
+  mark?.find(node => typeof node.type === 'string' && node.props.role === 'switch');
+
+/** The radio for one common choice ("unlockValidityHours:168"): the real Segmented's input, found by its group's name. */
+const choiceFor = (block: ReactTestRenderer, id: string) => {
+  const [field, value] = id.split(':') as [keyof typeof SECURITY_SETTING_COPY, string];
+  const group = block.root.findAll(
+    node =>
+      typeof node.type === 'string' &&
+      node.props.role === 'radiogroup' &&
+      node.props['aria-label'] === `${SECURITY_SETTING_COPY[field].label}: common choices`,
+  )[0];
+  return group?.findAll(node => node.type === 'input' && node.props.value === value)[0];
+};
+
 const press = async (block: ReactTestRenderer, marker: string, value: string): Promise<void> => {
-  const button = must(marked(block, marker, value)[0], `${marker}=${value}`);
+  if (marker === 'data-security-preset') {
+    const radio = must(choiceFor(block, value), `choice ${value}`);
+    await runAsync(async () => {
+      radio.props.onChange();
+    });
+    return;
+  }
+  const mark = must(marked(block, marker, value)[0], `${marker}=${value}`);
+  const button = marker === 'data-security-switch' ? must(switchIn(mark), `switch ${value}`) : mark;
   await runAsync(async () => {
     button.props.onClick();
   });
@@ -229,7 +253,7 @@ describe('SecuritySettingsBlock narrowing', () => {
     const block = await mountBlock(
       machine(view({}, { unlockOnOpen: false }), patch => ({ view: view({}, patch), devicesExpiring: 0 }), ledger),
     );
-    should(marked(block, 'data-security-switch', 'unlockOnOpen')[0]?.props.disabled).equal(false);
+    should(switchIn(marked(block, 'data-security-switch', 'unlockOnOpen')[0])?.props.disabled).equal(false);
 
     // Act
     await press(block, 'data-security-switch', 'unlockOnOpen');
@@ -247,7 +271,7 @@ describe('SecuritySettingsBlock narrowing', () => {
     const block = await mountBlock(
       machine(view(), patch => ({ view: view({}, { ...patch }), devicesExpiring: 0 }), ledger),
     );
-    should(marked(block, 'data-security-switch', 'stepUpOnActions')[0]?.props.disabled).equal(false);
+    should(switchIn(marked(block, 'data-security-switch', 'stepUpOnActions')[0])?.props.disabled).equal(false);
     should(marked(block, 'data-security-setting', 'stepUpWindowMinutes')).be.empty();
 
     // Act
@@ -283,7 +307,7 @@ describe('SecuritySettingsBlock loosening', () => {
 
     // Assert
     for (const field of ['unlockOnOpen', 'stepUpOnActions'])
-      should(marked(block, 'data-security-switch', field)[0]?.props.disabled).equal(true);
+      should(switchIn(marked(block, 'data-security-switch', field)[0])?.props.disabled).equal(true);
     should(marked(block, 'data-security-note', 'unlockOnOpen')).have.length(1);
     should(marked(block, 'data-security-note', 'stepUpOnActions')).have.length(1);
     expect(text(block)).toContain(`Loosening this can only be done at the machine: run ${COMMAND}.`);
@@ -320,16 +344,16 @@ describe('SecuritySettingsBlock raising how long an unlock lasts (up to a week, 
     const block = await mountBlock(machine(view(), () => new Error('unused')));
 
     // Assert
-    const presets = marked(block, 'data-security-preset');
-    should(presets.map(node => node.props['data-security-preset'])).eql([
-      'unlockValidityHours:1',
-      'unlockValidityHours:8',
-      'unlockValidityHours:24',
-      'unlockValidityHours:72',
-      'unlockValidityHours:168',
-    ]);
-    should(presets.map(node => node.children)).eql([['1 hour'], ['8 hours'], ['1 day'], ['3 days'], ['7 days']]);
-    should(presets.filter(node => node.props['aria-pressed'] === true).map(node => node.children)).eql([['8 hours']]);
+    const radios = block.root.findAll(
+      node =>
+        node.type === 'input' &&
+        node.props.type === 'radio' &&
+        ['1', '8', '24', '72', '168'].includes(node.props.value as string) &&
+        choiceFor(block, `unlockValidityHours:${node.props.value as string}`) === node,
+    );
+    should(radios.map(node => node.props.value)).eql(['1', '8', '24', '72', '168']);
+    for (const words of ['1 hour', '8 hours', '1 day', '3 days', '7 days']) expect(text(block)).toContain(words);
+    should(radios.filter(node => node.props.checked === true).map(node => node.props.value)).eql(['8']);
     run(() => block.unmount());
   });
 

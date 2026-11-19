@@ -37,6 +37,7 @@
 
 import { ConfirmToSee, Loading } from '@ferretry/app/ui';
 import type { AuditView } from '@ferretry/core-gate/contract';
+import { SettingGroup } from '@ferretry/app';
 import { CircleAlert, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -55,6 +56,7 @@ import { announceDevicesLooked } from '../device-notice/devices-looked.ts';
 import type { DaemonConnection } from '../../shell-grants.ts';
 import { grantRefusalNotice } from '../../lib/grants.ts';
 import { readSecurityLog, type SecurityLogClient } from './security-api.ts';
+import { AccessTab, ActionRow, Notice, StateBlock } from './access-kit.tsx';
 
 type AuditRecord = AuditView['records'][number];
 
@@ -135,35 +137,27 @@ function SecurityRow({ record, nowMs }: { readonly record: AuditRecord; readonly
   const badge = auditOutcomeBadge(record.outcome);
   const detail = auditDetailWords(record);
   return (
-    <li
-      className="flex min-w-0 flex-col gap-0.5 border-t border-border py-2 first:border-t-0 first:pt-0 last:pb-0"
-      data-security-log-event={record.event}
-    >
-      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="min-w-0 text-ui font-semibold text-fg">
-          {
-            // 5.0 audit kinds are open (a plugin adds its own); a kind with no sentence here shows its own name.
-            (AUDIT_EVENT_WORDS as Readonly<Record<string, string>>)[record.event] ?? record.event
-          }
+    <li className="fy-acc-log min-w-0" data-security-log-event={record.event}>
+      <div className="fy-acc-log__head">
+        <span className="fy-acc-log__what">
+          {/* An event this build has no words for is shown as its raw name, never dropped. */}
+          {(AUDIT_EVENT_WORDS as Readonly<Record<string, string>>)[record.event] ?? record.event}
         </span>
         {badge === null ? null : (
-          <span
-            className="rounded-control border border-border-strong bg-surface-2 px-1.5 py-px text-meta font-medium text-muted"
-            data-security-log-outcome={record.outcome}
-          >
+          <span className="fy-acc-chip" data-tone="plain" data-security-log-outcome={record.outcome}>
             {badge}
           </span>
         )}
       </div>
-      <p className="m-0 min-w-0 text-meta leading-base text-muted">
+      <p className="fy-acc-log__when">
         <time dateTime={record.at} title={absoluteWords(record.at)}>
           {relativeWords(record.at, nowMs)}
         </time>
         {' · by '}
-        <span className="break-words text-fg">{auditActorWords(record.actor)}</span>
+        <span className="text-fg">{auditActorWords(record.actor)}</span>
       </p>
       {detail === '' ? null : (
-        <p className="m-0 min-w-0 break-words text-meta leading-base text-muted" data-security-log-detail="">
+        <p className="fy-acc-fine" data-security-log-detail="">
           {detail}
         </p>
       )}
@@ -173,14 +167,21 @@ function SecurityRow({ record, nowMs }: { readonly record: AuditRecord; readonly
 
 function SecurityList({ records, nowMs }: { readonly records: readonly AuditRecord[]; readonly nowMs: number }) {
   return (
-    <ul className="m-0 mt-1 list-none p-0">
+    <>
       {records.map((record, index) => (
         // Records have no id; a list only ever grows at its end while mounted, so position is stable.
         <SecurityRow key={`${record.at}-${String(index)}`} record={record} nowMs={nowMs} />
       ))}
-    </ul>
+    </>
   );
 }
+
+/** A group that has nothing yet says so in one row. */
+const NoneYet = () => (
+  <li className="fy-acc-log min-w-0">
+    <p className="fy-acc-fine">None yet.</p>
+  </li>
+);
 
 /** The loaded log, separated from the read so its every state can be rendered without a client. */
 function SecurityLog({
@@ -197,75 +198,65 @@ function SecurityLog({
   const kept = [...view.kept, ...older.kept];
   const remaining = view.keptTotal - kept.length;
   return (
-    <section
-      className="kt-panel flex min-w-0 flex-col gap-2 p-panel"
-      aria-labelledby="security-log-heading"
-      data-security-log-panel=""
-    >
-      <h3 id="security-log-heading" className="m-0 text-row font-semibold text-fg">
-        Security log
-      </h3>
-      <p className="m-0 text-cell leading-base text-muted">
-        Who was paired or removed and what changed about who may reach this machine, then the recent activity: refused
-        attempts, opened terminals, used secrets. Newest first.
-      </p>
-      {view.unreadable > 0 ? (
-        <p
-          role="alert"
-          data-security-log-gaps={String(view.unreadable)}
-          className="m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
-        >
-          <TriangleAlert size={14} aria-hidden="true" className="mt-1 shrink-0" />
-          <span className="min-w-0">{securityLogGapWarning(view.unreadable)}</span>
+    <AccessTab name="audit">
+      <section aria-labelledby="security-log-heading" data-security-log-panel="">
+        <h3 id="security-log-heading" className="sr-only">
+          Security log
+        </h3>
+        <p className="fy-acc-fine fy-acc-lead">
+          Who was paired or removed and what changed about who may reach this machine, then the recent activity: refused
+          attempts, opened terminals, used secrets. Newest first.
         </p>
-      ) : null}
-      {view.records.length === 0 && view.keptTotal === 0 ? (
-        <p className="m-0 text-ui leading-base text-fg" data-security-log-empty="">
-          {SECURITY_LOG_EMPTY}
-        </p>
-      ) : (
-        <>
-          <h4 className="m-0 mt-1 text-ui font-semibold text-fg" data-security-log-section="kept">
-            Security changes
-          </h4>
-          {kept.length === 0 ? (
-            <p className="m-0 text-cell leading-base text-muted">None yet.</p>
-          ) : (
-            <SecurityList records={kept} nowMs={nowMs} />
-          )}
-          {remaining > 0 ? (
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <button
-                type="button"
-                className="kt-btn min-h-[44px]"
-                data-security-log-older=""
-                disabled={older.reading}
-                onClick={onShowOlder}
-              >
-                {older.reading ? 'Reading…' : `Show older (${String(remaining)} more)`}
-              </button>
-              {older.failure === null ? null : (
-                <span
-                  role="alert"
-                  className="min-w-0 text-cell leading-base text-err"
-                  data-security-log-older-failed=""
-                >
-                  {older.failure}
-                </span>
-              )}
+        {view.unreadable > 0 ? (
+          <Notice
+            tone="warn"
+            role="alert"
+            icon={<TriangleAlert size={14} />}
+            marks={{ 'data-security-log-gaps': String(view.unreadable) }}
+          >
+            {securityLogGapWarning(view.unreadable)}
+          </Notice>
+        ) : null}
+        {view.records.length === 0 && view.keptTotal === 0 ? (
+          <p className="fy-acc-fine text-fg" data-security-log-empty="">
+            {SECURITY_LOG_EMPTY}
+          </p>
+        ) : (
+          <>
+            <div data-security-log-section="kept">
+              <SettingGroup label="Security changes">
+                {kept.length === 0 ? <NoneYet /> : <SecurityList records={kept} nowMs={nowMs} />}
+                {remaining > 0 ? (
+                  <li className="fy-acc-log min-w-0">
+                    <ActionRow>
+                      <button
+                        type="button"
+                        className="kt-btn min-h-[44px]"
+                        data-security-log-older=""
+                        disabled={older.reading}
+                        onClick={onShowOlder}
+                      >
+                        {older.reading ? 'Reading…' : `Show older (${String(remaining)} more)`}
+                      </button>
+                      {older.failure === null ? null : (
+                        <span role="alert" className="min-w-0 text-cell text-err" data-security-log-older-failed="">
+                          {older.failure}
+                        </span>
+                      )}
+                    </ActionRow>
+                  </li>
+                ) : null}
+              </SettingGroup>
             </div>
-          ) : null}
-          <h4 className="m-0 mt-2 text-ui font-semibold text-fg" data-security-log-section="activity">
-            Recent activity
-          </h4>
-          {view.records.length === 0 ? (
-            <p className="m-0 text-cell leading-base text-muted">None yet.</p>
-          ) : (
-            <SecurityList records={view.records} nowMs={nowMs} />
-          )}
-        </>
-      )}
-    </section>
+            <div data-security-log-section="activity">
+              <SettingGroup label="Recent activity">
+                {view.records.length === 0 ? <NoneYet /> : <SecurityList records={view.records} nowMs={nowMs} />}
+              </SettingGroup>
+            </div>
+          </>
+        )}
+      </section>
+    </AccessTab>
   );
 }
 
@@ -343,40 +334,31 @@ export function SecurityLogSurface({
     return <SecurityLog view={load.view} nowMs={now()} older={load.older} onShowOlder={showOlder} />;
   if (load.status === 'refused')
     return (
-      <section
-        className="kt-panel p-panel"
-        role="status"
-        aria-label="Security log unavailable"
-        data-security-log-refused=""
+      <StateBlock
+        title={REFUSAL_WORDS[load.why].heading}
+        label="Security log unavailable"
+        marks={{ 'data-security-log-refused': '' }}
       >
-        <h3 className="m-0 text-row font-semibold text-fg">{REFUSAL_WORDS[load.why].heading}</h3>
-        <p className="mb-0 mt-1 text-cell leading-base text-muted">{REFUSAL_WORDS[load.why].intro}</p>
-        {load.reason === '' ? null : <p className="mb-0 mt-1 text-cell leading-base text-muted">{load.reason}</p>}
-        {load.why === 'passkey' ? (
-          <div className="mt-2">
-            <ConfirmToSee onConfirm={() => setReads(n => n + 1)} />
-          </div>
-        ) : null}
-        <p className="mb-0 mt-1 text-cell leading-base text-fg">{REFUSAL_WORDS[load.why].remedy}</p>
-      </section>
+        <p className="fy-acc-fine">{REFUSAL_WORDS[load.why].intro}</p>
+        {load.reason === '' ? null : <p className="fy-acc-fine">{load.reason}</p>}
+        {load.why === 'passkey' ? <ConfirmToSee onConfirm={() => setReads(n => n + 1)} /> : null}
+        <p className="fy-acc-fine text-fg">{REFUSAL_WORDS[load.why].remedy}</p>
+      </StateBlock>
     );
   if (load.status === 'failed')
     return (
-      <section
-        className="kt-panel p-panel"
+      <StateBlock
+        title="The security log could not be read"
+        label="Security log unavailable"
         role="alert"
-        aria-label="Security log unavailable"
-        data-security-log-failed=""
+        icon={<CircleAlert size={16} aria-hidden="true" className="text-err" />}
+        marks={{ 'data-security-log-failed': '' }}
       >
-        <h3 className="m-0 flex items-center gap-2 text-row font-semibold text-fg">
-          <CircleAlert size={16} aria-hidden="true" className="text-err" />
-          The security log could not be read
-        </h3>
-        <p className="mb-0 mt-1 text-cell leading-base text-muted">
+        <p className="fy-acc-fine">
           {load.reason === '' ? 'This machine did not say why.' : load.reason} This is not an empty history — nothing
           was read at all.
         </p>
-      </section>
+      </StateBlock>
     );
   return <Loading kind="page" label="Reading this machine’s security log…" />;
 }

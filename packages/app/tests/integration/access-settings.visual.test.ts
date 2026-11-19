@@ -1,0 +1,289 @@
+/**
+ * ACCESS SETTINGS in the REAL Settings shell (`fixtures/access-settings-scene.tsx`: the real `App`, the real nav, the real
+ * panel width) over one fake machine. Checked at 768 (where the real panel is about 212px wide), 1280 and 390, light and dark:
+ *  - the layout answers to the SETTINGS PANEL's width, never the window: `.fy-acc` is a size container, and the pairing code's
+ *    QR sits beside its facts only when the panel is wide enough (so at a 768px window it is stacked);
+ *  - one level of surface: no bordered box inside another bordered box;
+ *  - nothing is clipped or scrolls sideways; every control keeps the 44px floor;
+ *  - the capability switches of one device line up in two columns, a switch's box never above its words.
+ * Set `FY_ACCESS_SETTINGS_SHOTS_DIR` to keep the pictures.
+ */
+import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
+import type { Page } from 'playwright-core';
+
+setDefaultTimeout(90_000);
+
+const packageRoot = import.meta.dir;
+const shotsDir = process.env.FY_ACCESS_SETTINGS_SHOTS_DIR ?? '';
+
+let browser: Awaited<ReturnType<typeof sharedChromium>>;
+let directory = '';
+let server: ReturnType<typeof Bun.serve> | undefined;
+
+beforeAll(async () => {
+  browser = await sharedChromium();
+  directory = await mkdtemp(join(tmpdir(), 'ferretry-access-settings-'));
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      sceneBuilder,
+      '--out',
+      directory,
+      '--entry',
+      resolve(packageRoot, 'fixtures/access-settings-scene.tsx'),
+    ],
+    { cwd: packageRoot, stderr: 'pipe', stdout: 'pipe' },
+  );
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  if (code !== 0) throw new Error(`the Access settings scene did not build (${code}):\n${stderr}\n${stdout}`);
+  const manifest = JSON.parse(stdout.trim().split('\n').at(-1) as string) as { css: string; js: string };
+  const css = await readFile(manifest.css, 'utf8');
+  const js = await readFile(manifest.js, 'utf8');
+  const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
+  server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: request =>
+      new URL(request.url).pathname === '/app.js'
+        ? new Response(js, { headers: { 'content-type': 'text/javascript' } })
+        : new Response(page, { headers: { 'content-type': 'text/html' } }),
+  });
+  if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
+}, 300_000);
+
+afterAll(async () => {
+  server?.stop(true);
+  if (directory !== '') await rm(directory, { force: true, recursive: true });
+});
+
+const VIEWPORTS = [
+  { name: '768', width: 768, height: 1_000, phone: false },
+  { name: '1280', width: 1_280, height: 1_000, phone: false },
+  { name: '390', width: 390, height: 844, phone: true },
+] as const;
+const THEMES = ['studio-light', 'studio-dark'] as const;
+const TABS = ['devices', 'grants', 'security', 'audit'] as const;
+type Tab = (typeof TABS)[number];
+const READY: Record<Tab, string> = {
+  devices: '[data-add-device-surface]',
+  grants: '[data-grant-surface]',
+  security: '[data-security-settings]',
+  audit: '[data-security-log-panel]',
+};
+
+const open = async (viewport: (typeof VIEWPORTS)[number], theme: string, tab: Tab, state = 'default') => {
+  const ready = state === 'refused' ? '[data-security-log-refused]' : READY[tab];
+  const context = await browser.newContext({
+    viewport: { width: viewport.width, height: viewport.height },
+    deviceScaleFactor: viewport.phone ? 2 : 1,
+    hasTouch: viewport.phone,
+    isMobile: viewport.phone,
+    colorScheme: theme.endsWith('dark') ? 'dark' : 'light',
+  });
+  const origin = server?.url.origin ?? '';
+  await context.route('**/*', async route =>
+    new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+  );
+  const page = await context.newPage();
+  const problems: string[] = [];
+  page.on('pageerror', error => problems.push(error.message));
+  await page.goto(`${origin}/d/ws/settings/access/${tab}?theme=${theme}&state=${state}`);
+  try {
+    // A phone opens the list first; a tab link opens the page.
+    await page.waitForSelector(`${ready}, .fy-settings-page`, { timeout: 15_000 });
+    await page.waitForSelector(ready, { timeout: 15_000 });
+  } catch (error) {
+    const seen = (
+      await page
+        .locator('body')
+        .innerText()
+        .catch(() => '')
+    ).slice(0, 600);
+    throw new Error(`the scene did not draw ${ready}: ${String(error)}\n${problems.join('\n')}\nON SCREEN: ${seen}`);
+  }
+  return { page, context, problems };
+};
+
+/** The page measures that must hold on every tab at every width. */
+const measure = async (page: Page) =>
+  await page.evaluate(() => {
+    const tab = document.querySelector<HTMLElement>('.fy-acc');
+    const visible = (el: Element) => {
+      const box = el.getBoundingClientRect();
+      return box.width > 0 && box.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+    };
+    const fullBox = (el: Element) => {
+      const style = getComputedStyle(el);
+      const sides = [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth];
+      const colour = style.borderTopColor;
+      return (
+        sides.every(width => parseFloat(width) > 0) && !/rgba?\([^)]*,\s*0\)$/.test(colour) && colour !== 'transparent'
+      );
+    };
+    const nested: string[] = [];
+    for (const el of tab?.querySelectorAll('*') ?? []) {
+      // A segmented control is ONE component (its chosen option is marked by a border inside its own track).
+      if (
+        !visible(el) ||
+        !fullBox(el) ||
+        el.closest('[data-pair-qr]') === el ||
+        el.closest('[role=radiogroup]') !== null
+      )
+        continue;
+      let parent = el.parentElement;
+      while (parent !== null && parent !== tab) {
+        // A control or a chip is never a box a box can sit in; the QR plate is the one deliberate white box.
+        if (fullBox(parent) && visible(parent) && !parent.hasAttribute('data-pair-qr')) {
+          nested.push(`${(el as HTMLElement).className} in ${parent.className}`);
+          break;
+        }
+        parent = parent.parentElement;
+      }
+    }
+    const clipped: string[] = [];
+    for (const el of tab?.querySelectorAll<HTMLElement>('*') ?? []) {
+      if (!visible(el) || el.closest('.sr-only') !== null) continue;
+      const style = getComputedStyle(el);
+      if (style.overflowX === 'hidden' || style.overflowX === 'auto' || style.overflowX === 'scroll') continue;
+      if (el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0 && style.display !== 'inline')
+        clipped.push(`${el.tagName}.${String(el.className).slice(0, 40)} ${el.scrollWidth}>${el.clientWidth}`);
+    }
+    const small: string[] = [];
+    for (const el of tab?.querySelectorAll<HTMLElement>(
+      'button, [role=switch], input:not(.sr-only):not([type=radio])',
+    ) ?? []) {
+      if (!visible(el)) continue;
+      const box = el.getBoundingClientRect();
+      if (box.height < 43.5)
+        small.push(
+          `${el.tagName} ${el.getAttribute('aria-label') ?? el.textContent?.slice(0, 20) ?? ''} h=${box.height}`,
+        );
+    }
+    const wide: string[] = [];
+    for (const el of document.querySelectorAll<HTMLElement>('.fy-acc *')) {
+      const right = el.getBoundingClientRect().right;
+      if (el.getBoundingClientRect().width === 0 && el.getBoundingClientRect().height === 0) continue;
+      if (right > (tab?.getBoundingClientRect().right ?? window.innerWidth) + 1)
+        wide.push(
+          `${el.tagName}.${String(el.className).slice(0, 50)}[${el.getAttribute('role') ?? ''}] right=${Math.round(right)}`,
+        );
+    }
+    return {
+      wide: wide.slice(0, 8),
+      panel: Math.round(tab?.getBoundingClientRect().width ?? 0),
+      container: tab === null ? '' : getComputedStyle(tab).containerType,
+      pageScroll: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      tabScroll: tab === null ? 0 : tab.scrollWidth - tab.clientWidth,
+      panels: document.querySelectorAll('.fy-acc .kt-panel').length,
+      nested,
+      clipped,
+      small,
+    };
+  });
+
+describe('Access settings, in the real Settings shell, over a fake machine', () => {
+  for (const viewport of VIEWPORTS) {
+    for (const theme of THEMES) {
+      for (const tab of TABS) {
+        it(`lays out ${tab} (${viewport.name}, ${theme})`, async () => {
+          const { page, context, problems } = await open(viewport, theme, tab);
+          try {
+            await page.setViewportSize({ width: viewport.width, height: viewport.phone ? 2_400 : 1_800 });
+            if (shotsDir !== '')
+              await page.screenshot({ path: join(shotsDir, `${tab}-${viewport.name}-${theme}.png`) });
+            const m = await measure(page);
+            expect(problems).toEqual([]);
+            expect(m.wide).toEqual([]);
+            expect(m.container).toBe('inline-size');
+            expect(m.pageScroll).toBeLessThanOrEqual(0);
+            expect(m.tabScroll).toBeLessThanOrEqual(0);
+            expect(m.panels).toBe(0);
+            expect(m.nested).toEqual([]);
+            expect(m.clipped).toEqual([]);
+            expect(m.small).toEqual([]);
+            // The real panel is narrow at 768 (nav + side column + drawer take the window) and wide at 1280.
+            if (viewport.name === '768') expect(m.panel).toBeLessThan(400);
+            if (viewport.name === '1280') expect(m.panel).toBeGreaterThan(480);
+          } finally {
+            await context.close();
+          }
+        });
+      }
+    }
+  }
+
+  for (const viewport of VIEWPORTS) {
+    it(`devices: the pairing code and a device's capabilities, by the panel's width (${viewport.name})`, async () => {
+      const { page, context } = await open(viewport, 'studio-light', 'devices', 'long');
+      try {
+        await page.locator('[data-pair-mint]').click();
+        await page.locator('[data-pair-invite]').waitFor();
+        await page.locator('[data-device-capabilities]').first().locator('summary').click();
+        const m = await measure(page);
+        expect(m.pageScroll).toBeLessThanOrEqual(0);
+        expect(m.tabScroll).toBeLessThanOrEqual(0);
+        expect(m.nested).toEqual([]);
+        expect(m.clipped).toEqual([]);
+        expect(m.small).toEqual([]);
+        // The QR sits beside the facts only when the PANEL is 560px or wider; the window never decides.
+        const geometry = await page.evaluate(() => {
+          const qr = document.querySelector('[data-pair-qr]')?.getBoundingClientRect();
+          const facts = document.querySelector('.fy-acc-invite__facts')?.getBoundingClientRect();
+          const panel = document.querySelector('.fy-acc')?.getBoundingClientRect().width ?? 0;
+          return {
+            besides: qr !== undefined && facts !== undefined && facts.left >= qr.right - 1 && facts.top < qr.bottom,
+            panel,
+          };
+        });
+        expect(geometry.besides).toBe(geometry.panel >= 560);
+        // A switch's box is never above its words, and a device's capability rows line up on one right edge per column.
+        const caps = await page.evaluate(() =>
+          [
+            ...(document
+              .querySelectorAll('[data-device-capabilities]')[0]
+              ?.querySelectorAll('[data-device-capability]') ?? []),
+          ].map(row => {
+            const name = row.querySelector('.fy-acc-cap__name')?.getBoundingClientRect();
+            const axes = [...row.querySelectorAll('[role=switch]')].map(s => s.getBoundingClientRect());
+            return {
+              nameTop: name?.top ?? 0,
+              axisRights: axes.map(a => Math.round(a.right)),
+              axisTops: axes.map(a => Math.round(a.top)),
+            };
+          }),
+        );
+        expect(caps.length).toBeGreaterThan(0);
+        await page.setViewportSize({ width: viewport.width, height: viewport.phone ? 3_000 : 2_000 });
+        if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, `devices-code-${viewport.name}.png`) });
+      } finally {
+        await context.close();
+      }
+    });
+  }
+
+  it('empty and refused states stay in the same layout (1280)', async () => {
+    for (const [tab, state] of [
+      ['devices', 'empty'],
+      ['security', 'empty'],
+      ['audit', 'refused'],
+    ] as const) {
+      const { page, context } = await open(VIEWPORTS[1], 'studio-light', tab, state);
+      try {
+        const m = await measure(page);
+        expect(m.nested).toEqual([]);
+        expect(m.tabScroll).toBeLessThanOrEqual(0);
+        if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, `${tab}-${state}-1280.png`) });
+      } finally {
+        await context.close();
+      }
+    }
+  });
+});
