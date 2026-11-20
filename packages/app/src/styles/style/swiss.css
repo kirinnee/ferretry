@@ -1,0 +1,131 @@
+/* ============================================================================
+   STYLE — MINIMAL SWISS (the International Typographic Style, quietly).
+
+   HOW it draws, never WHICH colours: any palette fits (the matrix test measures all of them). It earns its row by
+   structure, which survives a greyscale screenshot:
+
+     1. THE RULE, NOT THE BOX. Regions are separated by a 1px rule and by space; nothing casts a shadow. Panels and
+        controls rest flat; only a popover lifts, by a whisper, so it does not melt into the page it floats over.
+     2. ONE GROTESQUE. Hanken Grotesk (OFL, bundled) for chrome and body alike, set tight (negative tracking), sentence
+        case, flush left. Weight does the hierarchy (400 body, 500 label, 600 head); size stays on a short ramp. Labels
+        are NOT uppercased: Mission and Neo shout, Swiss speaks plainly.
+     3. A SQUARE GRID. A 2px radius everywhere (a corner just softer than a cut), so nothing reads as a pill or a bubble.
+     4. SPACE IS THE ORNAMENT. Roomy, even padding on a 4px grid; gaps are generous so groups separate without borders.
+     5. PRECISE MOTION. Short, linear-ish ease, no overshoot (`--select-pop: 1`): a thing arrives and stops.
+     6. THE FOCUS RING is a crisp 2px line floated 2px off the edge, the same on every control.
+   ============================================================================ */
+:root[data-style='swiss'],
+[data-swatch][data-style='swiss'] {
+  --font-display:
+    'Hanken Grotesk', 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', system-ui, -apple-system, sans-serif;
+  --font-body:
+    'Hanken Grotesk', 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-size-base: 13.5px;
+  --leading-base: 1.5;
+  --leading-tight: 1.2;
+  --tracking-display: -0.025em;
+  --tracking-body: -0.006em;
+  --tracking-label: 0.005em;
+  --label-transform: none;
+  --label-variant: normal;
+  --label-size: 11.5px;
+  --label-weight: 500;
+  --display-transform: none;
+  --text-2xs: 10.5px;
+  --text-xs: 11.5px;
+  --text-sm: 12.5px;
+  --text-base: 13.5px;
+  --text-md: 14.5px;
+  --text-lg: 17px;
+  --text-display: 1.35rem;
+  --text-input-desktop: 14px;
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-strong: 600;
+  --weight-display: 600;
+  --md-font-size: 14px;
+  --md-leading: 1.6;
+  --code-font-size: 12.5px;
+  --chrome-font-size: 11.5px;
+  --prose-measure: 68ch;
+
+  /* One small radius, one hairline. */
+  --radius-xs: 1px;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 3px;
+  --radius-control: 2px;
+  --radius-panel: 2px;
+  --radius-badge: 2px;
+  --radius-tab: 0px;
+  --radius-input: 2px;
+  --border-width: 1px;
+  --border-width-heavy: 1px;
+  --stroke-control: 1px;
+  --stroke-panel: 1px;
+  --divider-width: 1px;
+  --divider-color: var(--border);
+  --bubble-stroke: 1px;
+  --bubble-radius: 2px;
+  --bubble-border: var(--border);
+  --bubble-shadow: none;
+  --card-tail-radius: 2px;
+  --card-shadow: none;
+
+  /* Flat: the rule does the work. A popover alone lifts a hair so it separates from what is behind it. */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: 0 8px 24px -12px var(--shadow-lg-2);
+  --shadow-control: none;
+  --shadow-panel: none;
+  --shadow-popover: var(--shadow-lg);
+  --shadow-active: none;
+  --press-translate: 0px;
+  --rail-active: none;
+  --nav-sel-shadow: none;
+  --control-transform: none;
+  --tab-underline-width: 2px;
+  --menu-item-h: 32px;
+  --menu-radius: 2px;
+
+  /* Roomy and even, on the 4px grid. */
+  --control-h-desktop: 30px;
+  --control-h-sm-desktop: 26px;
+  --row-min-h-desktop: 38px;
+  --pad-control-x: 14px;
+  --pad-badge-x: 8px;
+  --pad-panel: 16px;
+  --pad-row-y: 8px;
+  --pad-cell-x: 12px;
+  --gap-xs: 6px;
+  --gap-sm: 10px;
+  --gap-md: 16px;
+  --flow-3: 14px;
+  --flow-4: 20px;
+  --flow-5: 32px;
+
+  /* Precise: quick, no overshoot, no pop. */
+  --motion-fast: 90ms;
+  --motion-base: 160ms;
+  --motion-slow: 260ms;
+  --ease-standard: cubic-bezier(0.25, 0, 0.1, 1);
+  --ease-emphasis: cubic-bezier(0.25, 0, 0.1, 1);
+  --select-pop: 1;
+  --focus-width: 2px;
+  --focus-offset: 2px;
+  --glow-alpha: 0;
+}
+
+@media (max-width: 640px) {
+  :root[data-style='swiss'] {
+    --text-2xs: 12px;
+    --text-xs: 13px;
+    --text-sm: 14.5px;
+    --text-base: 15.5px;
+    --text-md: 16.5px;
+    --text-lg: 19px;
+    --text-display: 1.55rem;
+    --label-size: 12.5px;
+  }
+}

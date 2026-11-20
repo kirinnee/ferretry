@@ -19,6 +19,7 @@ import archivoBlack from '../assets/fonts/archivo-black-latin-400-normal.woff2';
 import cascadiaMono from '../assets/fonts/cascadia-mono-latin-wght-normal.woff2';
 import geist from '../assets/fonts/geist-latin-wght-normal.woff2';
 import geistMono from '../assets/fonts/geist-mono-latin-wght-normal.woff2';
+import hankenGrotesk from '../assets/fonts/hanken-grotesk-latin-wght-normal.woff2';
 import ibmPlexMono400 from '../assets/fonts/ibm-plex-mono-latin-400-normal.woff2';
 import ibmPlexMono700 from '../assets/fonts/ibm-plex-mono-latin-700-normal.woff2';
 import inter from '../assets/fonts/inter-latin-wght-normal.woff2';
@@ -54,6 +55,7 @@ export const STYLE_FONT_FILES: Readonly<Partial<Record<StyleId, ThemeFontFiles>>
   neumorphism: { text: [nunito], code: jetBrainsMono },
   retro: { text: [publicSans], code: jetBrainsMono },
   hud: { text: [orbitron, publicSans], code: [cascadiaMono] },
+  swiss: { text: [hankenGrotesk], code: jetBrainsMono },
 });
 
 /** The scope of the document a preload is added to — injected so a test can stand in for the page. */

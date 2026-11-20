@@ -2499,6 +2499,15 @@ body {
   text-decoration-line: var(--underline-links);
 }
 
+/* ---- Minimal Swiss: one crisp ring on every field -----------------------
+   A field's only keyboard mark elsewhere is a 1px border-colour change (the shared rule above). Swiss draws the same
+   2px line the buttons get, floated off the edge, so the ring is identical on every control. Pointer focus draws nothing. */
+:root[data-style='swiss'] .kt-input:focus-visible,
+:root[data-style='swiss'] .kt-composer:focus-within {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+
 /* Portrait gate — shown only when the platform reports a phone-sized screen turned
    sideways and refused screen.orientation.lock() (see lib/orientation-lock.ts).
    It is a full-bleed layer, not a banner: opaque background, highest z-index in the
