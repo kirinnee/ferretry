@@ -6,9 +6,9 @@
 
    ANY palette wears it. Every inked part reads the palette's accent (`--accent`, `--accent-rgb`, `--texture-ink`,
    `--grid-ink-*`); this file holds no colour value. Readability stays a hard rule: the body face is Public Sans at normal
-   weight, text sits on opaque-enough panels, and the focus ring is the same 2px outline as every style. The glow, the
-   veil and the brackets are effects, so `prefers-reduced-motion` / Motion: Reduced switch the glow and veil off
-   (`styles/index.css` zeroes `--glow-alpha` and `--overlay-opacity`).
+   weight, text sits on opaque panels, and the focus ring is the same 2px outline as every style. The glow is an effect, so
+   `prefers-reduced-motion` / Motion: Reduced switch it off (`styles/index.css` zeroes `--glow-alpha`); the scan-line veil is
+   static and sits under the content, so it needs no switch.
    No clip-path on controls: a notch would clip the focus ring. A panel that opts in with `.kt-panel--clipped` gets the corner cut.
    ============================================================================ */
 :root[data-style='hud'],
@@ -78,16 +78,19 @@
   --nav-sel-shadow: inset 2px 0 0 var(--accent), 0 0 12px rgb(var(--accent-rgb) / var(--glow-alpha));
   --rule-inset: inset 0 1px 0 rgb(var(--accent-rgb) / 0.18);
   --focus-shadow: 0 0 12px rgb(var(--accent-rgb) / var(--glow-alpha));
-  /* The field: a fine ruled grid with a soft light from the top edge, and a veil of scan-lines over everything. */
+  /* The field: a fine ruled grid with a soft light from the top edge, and a veil of scan-lines. The veil is part of the
+     FIELD (painted under every panel and every word), never a layer over the page: a film above the text would dim it, and
+     the readability floor (4.5:1 text, measured against what is painted behind it) is a hard rule for this style too. */
   --body-wash:
     radial-gradient(ellipse 70% 40% at 50% 0%, rgb(var(--accent-rgb) / 0.12), transparent),
+    repeating-linear-gradient(0deg, rgb(var(--accent-rgb) / 0.07) 0 1px, transparent 1px 3px),
     repeating-linear-gradient(90deg, var(--grid-ink-minor) 0 1px, transparent 1px 24px),
     repeating-linear-gradient(180deg, var(--grid-ink-minor) 0 1px, transparent 1px 24px),
     linear-gradient(180deg, var(--field-ground-top) 0%, var(--field-ground-bottom) 100%);
-  --panel-bg: color-mix(in srgb, var(--surface) 94%, transparent);
-  --menu-bg: color-mix(in srgb, var(--surface-2) 96%, transparent);
-  --overlay: repeating-linear-gradient(0deg, var(--texture-ink) 0 1px, transparent 1px 3px);
-  --overlay-opacity: 0.7;
+  --panel-bg: var(--surface);
+  --menu-bg: var(--surface-2);
+  --overlay: none;
+  --overlay-opacity: 0;
   --overlay-blend: normal;
   /* Quick and exact: a part locks into place rather than bouncing. */
   --motion-fast: 90ms;

@@ -1,7 +1,7 @@
 /**
  * THE HUD / SCI-FI FUI SPECIMEN (r10 T10) in a real browser over fake data. It reuses the Neo specimen page
  * (`fixtures/neo-specimen-scene.tsx`, which takes `?style=<id>`) so the HUD is drawn on the REAL components, then holds
- * the style to what makes it a HUD (registration brackets on a panel, a scan-line veil, a glow instead of a drop
+ * the style to what makes it a HUD (registration brackets on a panel, scan-lines under the content, a glow instead of a drop
  * shadow) and to the two checks every style must pass: a visible focus ring and no horizontal overflow. Body text must
  * also stay readable (HUD is not a `loud` style), on several palettes: every style takes every palette.
  *
@@ -103,7 +103,7 @@ describe('the HUD specimen', () => {
     for (const palette of PALETTES) {
       for (const mode of MODES) {
         const name = `${width.width}-${palette}-${mode}`;
-        it(`${name}: no overflow, panel brackets, scan-line veil, Orbitron labels, readable body text`, async () => {
+        it(`${name}: no overflow, panel brackets, scan-lines under the content, Orbitron labels, readable body text`, async () => {
           const { tab, problems, close } = await open(width, palette, mode);
           try {
             await tab.evaluate(COLOUR_TOOLS);
@@ -119,7 +119,10 @@ describe('the HUD specimen', () => {
               return {
                 overflow: doc.scrollWidth - doc.clientWidth,
                 bracket: getComputedStyle(panel, '::before').borderTopStyle,
-                veil: getComputedStyle(document.body, '::before').opacity,
+                film: getComputedStyle(document.body, '::before').opacity,
+                scanlines: /repeating-linear-gradient\(0deg|repeating-linear-gradient\(to bottom/u.test(
+                  getComputedStyle(document.body).backgroundImage,
+                ),
                 labelFont: getComputedStyle(label).fontFamily,
                 bodyFont: getComputedStyle(target).fontFamily,
                 bodyContrast: ratio(rgba(getComputedStyle(target).color), backdrop(target)),
@@ -128,7 +131,9 @@ describe('the HUD specimen', () => {
             });
             expect(report.overflow).toBeLessThanOrEqual(0);
             expect(report.bracket).toBe('solid');
-            expect(Number(report.veil)).toBeGreaterThan(0);
+            // The scan-lines live in the FIELD under the content; no film is painted over the text (it would dim it).
+            expect(report.scanlines).toBe(true);
+            expect(Number(report.film)).toBe(0);
             expect(report.labelFont).toContain('Orbitron');
             expect(report.bodyFont).toContain('Public Sans');
             expect(report.fontsLoaded).toBe(true);
