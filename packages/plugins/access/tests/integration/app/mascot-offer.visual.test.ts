@@ -230,6 +230,18 @@ describe('r11 O10: the passkey offer buttons are one fixed size', () => {
         expect(add.width, 'Add is 192 px wide').toBeCloseTo(192, 0);
         expect(later.width, 'Not now is the same width').toBeCloseTo(add.width, 0);
         expect(add.height).toBeGreaterThanOrEqual(44);
+        // The label (icon included) is centred in its button: its content box midpoint is the button midpoint ± 1 px.
+        for (const name of ['Add a passkey now', 'Not now']) {
+          const off = await tab.getByRole('button', { name }).evaluate(node => {
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            const label = range.getBoundingClientRect();
+            const box = node.getBoundingClientRect();
+            return label.left + label.width / 2 - (box.left + box.width / 2);
+          });
+          MEASURED.push(`${variant.name}: "${name}" label is ${off.toFixed(2)} px off centre`);
+          expect(Math.abs(off), `${name} label is centred`).toBeLessThanOrEqual(1);
+        }
         expect(later.height).toBeCloseTo(add.height, 0);
         const sideBySide = Math.abs(add.y - later.y) < 4;
         if (sideBySide) expect(later.x - (add.x + add.width), 'the row gap is 12 px').toBeCloseTo(12, 0);
