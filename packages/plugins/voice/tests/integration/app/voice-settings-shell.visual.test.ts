@@ -2,9 +2,10 @@
  * VOICE SETTINGS inside the REAL Settings shell (r10 S5; `fixtures/voice-settings-shell-scene.tsx`): the real app shell over
  * one fake machine, Voice's real tabs over fixed fake data, at 768, 1280 and 390 wide, light and dark.
  *
- * The rule under test is the owner's: lay out by the SETTINGS PANEL's width, never the window's. At a 768 px window the real
- * panel is only about 212 px wide (the drawer, the side column and the settings list take the rest), so nothing in the panel
- * may overflow it, every engine card is one fixed height, and every control is still a 44 px target.
+ * The rule under test is the owner's: lay out by the SETTINGS PANEL's width, never the window's. At a 768 px window the
+ * settings list stands ABOVE the panel and the panel is at least 480 px wide (it was ~212 px between two sidebars before
+ * the list was stacked), so nothing in the panel may overflow it, every engine card is one fixed height, and every
+ * control is still a 44 px target.
  *
  * Set `FY_VOICE_SETTINGS_SHOTS_DIR` to keep `<viewport>-<scheme>-<tab>.png`.
  */
@@ -157,10 +158,11 @@ describe('Voice settings in the real Settings shell', () => {
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
           await page.locator('[data-engine-show-all]').click();
           const panel = await rect(page, '.fy-settings-page');
-          // The panel is what the layout follows: report it, and hold the 768 case to the owner's measured ~212 px.
+          // The panel is what the layout follows: hold the 768 case to the stacked layout (list above, panel >= 480 px).
           if (viewport.name === '768') {
-            expect(panel.width).toBeGreaterThan(150);
-            expect(panel.width).toBeLessThan(300);
+            expect(panel.width).toBeGreaterThanOrEqual(480);
+            const nav = await rect(page, '.fy-settings-nav');
+            expect(nav.y + nav.height, 'the settings list is above the panel').toBeLessThanOrEqual(panel.y + 1);
           }
           expect(await overflowing(page), 'nothing sticks out of the panel').toEqual([]);
           // No setting's name is squeezed into a sliver beside its control: every name has room for about two words.
@@ -209,7 +211,9 @@ describe('Voice settings in the real Settings shell', () => {
             .locator('[data-after-dictating] .fy-cc__card')
             .evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().top)));
           expect(choices.length).toBe(2);
-          if (panel.width >= 520) expect(choices[0]).toBe(choices[1]);
+          // ChoiceCards stack by the GROUP's own width (480 px), which is narrower than the panel that holds it.
+          const group = await rect(page, '[data-after-dictating] .fy-cc');
+          if (group.width >= 480) expect(choices[0]).toBe(choices[1]);
           else expect(choices[1]).toBeGreaterThan(choices[0] ?? 0);
 
           // The device keys: ONE row of key + Save + Test + Remove, wrapping under the key when the panel is narrow.
@@ -219,8 +223,10 @@ describe('Voice settings in the real Settings shell', () => {
           expect(key.width).toBeLessThanOrEqual(36 * 16 + 1);
           for (const button of [save, test]) expect(button.height).toBeGreaterThanOrEqual(44);
           expect(Math.abs(save.y - test.y)).toBeLessThanOrEqual(2);
+          // The row wraps by what fits, not by a panel breakpoint: at 768 (a 480+ px panel) the key and Save may share one
+          // line; either they do (mid-aligned), or Save has wrapped to the line under the key.
           if (panel.width >= 700) expect(Math.abs(mid(key) - mid(save))).toBeLessThanOrEqual(2);
-          else expect(save.y).toBeGreaterThanOrEqual(key.y + key.height - 1);
+          else if (save.y < key.y + key.height - 1) expect(Math.abs(mid(key) - mid(save))).toBeLessThanOrEqual(2);
           expect(problems).toEqual([]);
           await shoot(page, viewport, scheme, 'voice-all-engines');
         } finally {
