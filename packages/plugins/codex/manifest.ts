@@ -31,17 +31,17 @@ import { HARNESS_DIALOG_RULES_KEY, WardenDialogRulesCodex } from '@ferretry/plug
  * themselves unless the person chose what to import at `import-choice`; `conversations` is asked in both modes.
  */
 const CODEX_STEPS = [
-  { id: 'installed', title: 'Install Codex', order: 40, group: 'Codex' },
-  { id: 'sign-in', title: 'Sign in to Codex', order: 41, group: 'Codex' },
-  { id: 'import-choice', title: 'Bring over from Codex', order: 42, group: 'Codex' },
-  { id: 'import-settings', title: 'Settings', order: 43, group: 'Codex' },
-  { id: 'import-model-set', title: 'Models', order: 44, group: 'Codex' },
-  { id: 'import-instructions', title: 'AGENTS.md', order: 45, group: 'Codex' },
-  { id: 'import-skills', title: 'Skills', order: 46, group: 'Codex' },
-  { id: 'import-mcp', title: 'MCP servers', order: 47, group: 'Codex' },
-  { id: 'conversations', title: 'Conversations', order: 48, group: 'Codex' },
-  { id: 'import-run', title: 'Bring it over', order: 49, group: 'Codex' },
-  { id: 'permission', title: 'Permissions', order: 50, group: 'Codex' },
+  { id: 'installed', title: 'Install Codex', order: 40, group: 'Codex', stepHost: true },
+  { id: 'sign-in', title: 'Sign in to Codex', order: 41, group: 'Codex', stepHost: true },
+  { id: 'import-choice', title: 'Bring over from Codex', order: 42, group: 'Codex', stepHost: true },
+  { id: 'import-settings', title: 'Settings', order: 43, group: 'Codex', stepHost: true },
+  { id: 'import-model-set', title: 'Models', order: 44, group: 'Codex', stepHost: true },
+  { id: 'import-instructions', title: 'AGENTS.md', order: 45, group: 'Codex', stepHost: true },
+  { id: 'import-skills', title: 'Skills', order: 46, group: 'Codex', stepHost: true },
+  { id: 'import-mcp', title: 'MCP servers', order: 47, group: 'Codex', stepHost: true },
+  { id: 'conversations', title: 'Conversations', order: 48, group: 'Codex', stepHost: true },
+  { id: 'import-run', title: 'Bring it over', order: 49, group: 'Codex', stepHost: true },
+  { id: 'permission', title: 'Permissions', order: 50, group: 'Codex', stepHost: true },
 ] as const;
 
 /** The panel id that draws one step's body. */
