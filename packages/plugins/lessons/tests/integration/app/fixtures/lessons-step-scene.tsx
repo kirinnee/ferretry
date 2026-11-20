@@ -1,36 +1,42 @@
 /**
- * The browser entry for the first-run Lessons page, over a fake daemon: every answer is a fixed fake. No network.
+ * The browser entry for the first-run Lessons page (r11 O8), over a fake daemon: every answer is a fixed fake. No network.
  *
- *   ?view=page    the page as the setup flow draws it (neither card chosen)
- *   ?view=before  today's step body, the Settings › Lessons view
+ *   ?view=page    the page as the setup flow draws it, inside the real StepPageFrame (neither card chosen)
+ *   ?slow=1       the PATCH answers only when the test calls `window.__release()` (a slow daemon)
  *   ?theme=<family>-<mode>
+ *
+ * The frame's Next runs the page's registered `commit` the way the shell does, and counts every PATCH on
+ * `window.__patches`, so a test can prove "Next writes once".
  */
 
 import { createRoot } from 'react-dom/client';
 import { StepPageFrame } from '@ferretry/app';
+import type { StepHost } from '@ferretry/kernel/contract';
 import { LessonsStep } from '../../../../app/features/onboarding/lessons-step.tsx';
-import { LessonsSettingsSurface } from '../../../../app/src/lessons-settings.tsx';
 import type { LessonsConnection } from '../../../../app/src/api.ts';
-import { GLOBAL_LESSONS_DOCUMENT } from '../../../../contract/index.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
-const view = params.get('view') ?? 'page';
 
-let passiveDefault = true;
+declare global {
+  interface Window {
+    __patches: unknown[];
+    __release: () => void;
+  }
+}
+window.__patches = [];
+let release: () => void = () => undefined;
+window.__release = () => release();
+
 const connection: LessonsConnection = {
   key: 'fake',
   client: {
     call: async <Value,>(route: string, init: { readonly body?: unknown } = {}): Promise<Value> => {
-      if (route === 'PATCH /v1/lessons/config')
-        passiveDefault = (init.body as { passiveDefault: boolean }).passiveDefault;
-      const answers: Record<string, unknown> = {
-        'GET /v1/lessons/ferrets': [
-          { ferretId: 'ferret-hadi', passive: true, since: '2026-10-16T09:40:00.000Z', setBy: 'default' },
-        ],
-        'GET /v1/lessons/global': { name: GLOBAL_LESSONS_DOCUMENT, text: '', etag: 'absent', notes: [] },
-      };
-      return (answers[route] ?? {
+      if (route === 'PATCH /v1/lessons/config') {
+        window.__patches.push(init.body);
+        if (params.get('slow') === '1') await new Promise<void>(resolve => (release = resolve));
+      }
+      return {
         enabled: true,
         agent: 'claude-default',
         intervalMinutes: 60,
@@ -38,24 +44,43 @@ const connection: LessonsConnection = {
         maxMinersPerRun: 2,
         maxFerretsPerRun: 20,
         minSpawnGapMinutes: 5,
-        passiveDefault,
-      }) as Value;
+        passiveDefault: true,
+      } as Value;
     },
   },
 };
 
+let save: (() => Promise<void>) | null = null;
+const host: StepHost = {
+  phase: 'daemon',
+  appliesTo: [],
+  segment: {},
+  remember: () => undefined,
+  ready: () => undefined,
+  skip: () => undefined,
+  notNeeded: () => undefined,
+  done: () => undefined,
+  busy: () => undefined,
+  commit: next => {
+    save = next;
+  },
+  next: () => undefined,
+  back: () => undefined,
+};
+
 const root = createRoot(document.getElementById('root') as HTMLElement);
 root.render(
-  view === 'before' ? (
-    <div style={{ maxWidth: 880, margin: '0 auto', padding: 16 }}>
-      <LessonsSettingsSurface connection={connection} />
-    </div>
-  ) : (
-    // The shell draws the frame around a step's body; this fixture stands in for it.
-    <StepPageFrame title="Lessons" next={{ label: 'Next' }}>
-      <LessonsStep connection={connection} />
+  // The shell draws the frame around a step's body; this fixture stands in for it.
+  <div style={{ height: '100vh', overflow: 'auto' }}>
+    <StepPageFrame
+      title="Lessons"
+      back={{ onClick: () => undefined }}
+      later={{ onClick: () => undefined }}
+      next={{ label: 'Next', onClick: () => void save?.() }}
+    >
+      <LessonsStep connection={connection} step={host} />
     </StepPageFrame>
-  ),
+  </div>,
 );
 requestAnimationFrame(() => {
   document.body.dataset.scene = 'ready';

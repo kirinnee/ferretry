@@ -1,10 +1,15 @@
 /**
- * THE FIRST-RUN LESSONS PAGE, in a real browser, over a fake daemon (`fixtures/lessons-step-scene.tsx`): two cards that are
- * never full width on a desktop and stack on a phone, the same height, nothing cut short, no sideways scroll, one tab stop,
- * and the picture in each card shows at rest and plays once when its card is chosen.
+ * THE FIRST-RUN LESSONS PAGE (r11 O8), in a real browser over a fake daemon (`fixtures/lessons-step-scene.tsx`), inside the
+ * real step frame. These asserts are the proof of the owner's lines (11): "this page is really bad … no bun example",
+ * and items 3 and 5 ("put them vertically, show the example animation on the right, reduce the description").
  *
- * Set `FY_LESSONS_STEP_SHOTS_DIR` to keep a screenshot of each case (light and dark, 1280 and 390, plus today's step body as
- * the "before").
+ *   1280: the two cards are stacked (same x and width, y increasing); the demo is in `[data-step-demo]`, right of the cards
+ *         (gap > 32px) and top-aligned with the first card (within 8px); the page text has no "bun" and is <= 160
+ *         characters; the page has no button of its own; choosing a card writes NOTHING, and Next writes exactly once.
+ *   390:  the demo is above the first card; no sideways scroll; footer buttons inside the viewport.
+ *   both: nothing is clipped; one tab stop; at rest the demo's rule is fully shown (opacity 1); with motion off it never animates.
+ *
+ * Set `FY_LESSONS_STEP_SHOTS_DIR` to keep a screenshot of each case (light and dark, 1280 and 390).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -64,7 +69,7 @@ afterAll(async () => {
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
-const open = async (view: string, viewport: (typeof VIEWPORTS)[number], mode: 'light' | 'dark') => {
+const open = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 'dark', extra = '') => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     colorScheme: mode,
@@ -76,101 +81,175 @@ const open = async (view: string, viewport: (typeof VIEWPORTS)[number], mode: 'l
     new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
   );
   const tab = await context.newPage();
-  await tab.goto(`${origin}/?view=${view}&theme=studio-${mode}`);
+  await tab.goto(`${origin}/?view=page&theme=studio-${mode}${extra}`);
   await tab.waitForSelector('[data-scene="ready"]');
+  await tab.waitForSelector('[data-choice="on"]');
   return { context, tab };
 };
 
-describe('the first-run Lessons page', () => {
+/** The words in the step's two regions: the body and the demo portaled into its sibling `[data-step-demo]`. */
+const regionText = (tab: Awaited<ReturnType<typeof open>>['tab']) =>
+  tab.evaluate(() => ({
+    body: (document.querySelector('.fy-spf__body') as HTMLElement).innerText,
+    demo: (document.querySelector('[data-step-demo]') as HTMLElement).textContent ?? '',
+    demoLabels: [...document.querySelectorAll('[data-step-demo] [aria-label], [data-step-demo] [title]')]
+      .map(node => `${node.getAttribute('aria-label') ?? ''} ${node.getAttribute('title') ?? ''}`)
+      .join(' '),
+  }));
+
+describe('r11 O8: the first-run Lessons page', () => {
   for (const viewport of VIEWPORTS)
     for (const mode of ['light', 'dark'] as const) {
-      it(`draws two cards of one height, cut nothing short and never scroll sideways (${viewport.name}, ${mode})`, async () => {
-        const { context, tab } = await open('page', viewport, mode);
-        await tab.waitForSelector('[data-choice="on"]');
-        const boxes = await tab.locator('[data-choice]').evaluateAll(nodes =>
-          nodes.map(node => {
-            const box = node.getBoundingClientRect();
-            return { height: Math.round(box.height), width: Math.round(box.width), top: Math.round(box.top) };
-          }),
-        );
-        expect(boxes.length).toBe(2);
-        expect(boxes[0]?.height).toBe(boxes[1]?.height as number);
-        if (viewport.phone) expect(boxes[0]?.top).not.toBe(boxes[1]?.top);
-        else {
-          // Side by side, each at most 320 px: never the full width of the page.
-          expect(boxes[0]?.top).toBe(boxes[1]?.top as number);
-          for (const box of boxes) expect(box.width).toBeLessThanOrEqual(320);
+      it(`stacks the cards with the demo on the right, no bun, short words (${viewport.name}, ${mode})`, async () => {
+        const { context, tab } = await open(viewport, mode);
+        const m = await tab.evaluate(() => {
+          const box = (node: Element | null) => {
+            const r = node?.getBoundingClientRect() ?? new DOMRect();
+            return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, bottom: r.bottom };
+          };
+          const body = document.querySelector('.fy-spf__body') as HTMLElement;
+          return {
+            cards: [...document.querySelectorAll('[data-choice]')].map(box),
+            demo: box(document.querySelector('[data-step-demo]')),
+            demoHasScene: document.querySelector('[data-step-demo] [data-lessons-demo]') !== null,
+            bodyText: body.innerText,
+            bodyButtons: body.querySelectorAll('button').length,
+            overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+            footer: ['[data-step-back]', '[data-step-later]', '[data-step-next]'].map(s =>
+              box(document.querySelector(s)),
+            ),
+            viewport: window.innerWidth,
+            clipped: [
+              ...document.querySelectorAll(
+                '.fy-cc__title, .fy-cc__line, .fy-lessons-step-line, .fy-lsd__said, .fy-lsd__rule',
+              ),
+            ]
+              .filter(node => node.scrollWidth > node.clientWidth)
+              .map(node => node.textContent),
+            checked: document.querySelectorAll('input[type="radio"]:checked').length,
+            tabStops: document.querySelectorAll('input[type="radio"][tabindex="0"]').length,
+          };
+        });
+        expect(m.cards).toHaveLength(2);
+        expect(m.demoHasScene).toBe(true);
+        // Stacked: one x and width, y strictly increasing.
+        expect(Math.abs((m.cards[0]?.x ?? 0) - (m.cards[1]?.x ?? 1))).toBeLessThan(0.5);
+        expect(Math.abs((m.cards[0]?.w ?? 0) - (m.cards[1]?.w ?? 1))).toBeLessThan(0.5);
+        expect(m.cards[1]?.y ?? 0).toBeGreaterThan(m.cards[0]?.bottom ?? 0);
+        if (viewport.phone) {
+          // The demo sits above the first card, and nothing scrolls sideways.
+          expect(m.demo.bottom).toBeLessThanOrEqual((m.cards[0]?.y ?? 0) + 1);
+          expect(m.demo.h).toBeLessThanOrEqual(140);
+          expect(m.overflowX).toBe(false);
+          for (const button of m.footer) {
+            expect(button.x).toBeGreaterThanOrEqual(0);
+            expect(button.right).toBeLessThanOrEqual(m.viewport);
+          }
+        } else {
+          const cardsRight = Math.max(...m.cards.map(card => card.right));
+          expect(m.demo.x).toBeGreaterThan(cardsRight + 32);
+          expect(Math.abs(m.demo.y - (m.cards[0]?.y ?? 0))).toBeLessThanOrEqual(8);
         }
-        expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-        if (!viewport.phone) {
-          // The line above the cards is no wider than the cards, and a clear step (>= 18 px) sits between them.
-          const geometry = await tab.evaluate(() => {
-            const line = document.querySelector('.fy-lessons-step-line')?.getBoundingClientRect();
-            const cards = [...document.querySelectorAll('[data-choice]')].map(node => node.getBoundingClientRect());
-            return {
-              lineRight: line?.right ?? 0,
-              lineBottom: line?.bottom ?? 0,
-              cardsRight: Math.max(...cards.map(box => box.right)),
-              cardsTop: cards[0]?.top ?? 0,
-            };
-          });
-          expect(geometry.lineRight).toBeLessThanOrEqual(geometry.cardsRight + 1);
-          expect(geometry.cardsTop - geometry.lineBottom).toBeGreaterThanOrEqual(18);
+        // The owner's words: no bun, short, nothing to press on the page itself.
+        expect(m.bodyText.toLowerCase()).not.toContain('bun');
+        // ...in the demo too (it is a sibling of the body, so the body text alone cannot see it), whichever card is picked.
+        for (const pick of [null, 'on', 'off'] as const) {
+          if (pick !== null) {
+            await tab.locator(`[data-choice="${pick}"]`).click();
+            await tab.waitForSelector(`[data-choice="${pick}"][data-selected="true"]`);
+          }
+          const regions = await regionText(tab);
+          expect(regions.demo.trim().length).toBeGreaterThan(0);
+          for (const text of [regions.body, regions.demo, regions.demoLabels])
+            expect(text.toLowerCase()).not.toContain('bun');
         }
-        const clipped = await tab
-          .locator('.fy-lsd__said, .fy-lsd__rule, .fy-cc__title, .fy-cc__line')
-          .evaluateAll(nodes =>
-            nodes.filter(node => node.scrollWidth > node.clientWidth).map(node => node.textContent),
-          );
-        expect(clipped).toEqual([]);
-        // One tab stop for the pair, and neither card is chosen on arrival.
-        expect(await tab.locator('input[type="radio"]:checked').count()).toBe(0);
-        expect(await tab.locator('input[type="radio"][tabindex="0"]').count()).toBe(1);
-        if (shotsDir !== '')
-          await tab.screenshot({ path: join(shotsDir, `after-page-${viewport.name}-${mode}.png`), fullPage: true });
+        expect(m.bodyText.length).toBeLessThanOrEqual(160);
+        expect(m.bodyButtons).toBe(0);
+        expect(m.clipped).toEqual([]);
+        expect(m.checked).toBe(0);
+        expect(m.tabStops).toBe(1);
+        await tab.waitForTimeout(1_300);
+        // The settled scene fits inside the demo column: no chip is cut by its edges.
+        const cut = await tab.evaluate(() => {
+          const demo = (document.querySelector('[data-step-demo]') as HTMLElement).getBoundingClientRect();
+          return [
+            ...document.querySelectorAll(
+              '[data-step-demo] .fy-lsd, [data-step-demo] .fy-lsd__said, [data-step-demo] .fy-lsd__shelf',
+            ),
+          ].filter(node => {
+            const r = node.getBoundingClientRect();
+            return (
+              r.top < demo.top - 0.5 ||
+              r.bottom > demo.bottom + 0.5 ||
+              r.left < demo.left - 0.5 ||
+              r.right > demo.right + 0.5
+            );
+          }).length;
+        });
+        expect(cut).toBe(0);
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `after-page-${viewport.name}-${mode}.png`) });
         await context.close();
       }, 60_000);
 
-      it(`shows the chosen card, with its picture resting on the finished scene (${viewport.name}, ${mode})`, async () => {
-        const { context, tab } = await open('page', viewport, mode);
-        await tab.waitForSelector('[data-choice="on"]');
+      it(`a click writes nothing and Next writes once, the demo follows the card (${viewport.name}, ${mode})`, async () => {
+        const { context, tab } = await open(viewport, mode);
+        await tab.locator('[data-choice="off"]').click();
+        await tab.waitForSelector('[data-choice="off"][data-selected="true"]');
+        // The picture now shows nothing filed; the card click alone has written nothing.
+        expect(await tab.locator('[data-step-demo] [data-lessons-demo][data-kept="false"]').count()).toBe(1);
+        expect(await tab.locator('[data-lessons-rule]').count()).toBe(0);
+        expect(await tab.evaluate(() => window.__patches)).toEqual([]);
+        await tab.waitForTimeout(700);
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `after-off-${viewport.name}-${mode}.png`) });
         await tab.locator('[data-choice="on"]').click();
         await tab.waitForSelector('[data-choice="on"][data-selected="true"]');
-        if (shotsDir !== '')
-          await tab.screenshot({
-            path: join(shotsDir, `after-chosen-mid-${viewport.name}-${mode}.png`),
-            fullPage: true,
-          });
-        // After the scene has played, every chip is fully shown (nothing is left at opacity 0).
-        await tab.waitForTimeout(900);
-        const opacities = await tab
-          .locator('.fy-lsd__said, .fy-lsd__arrow, .fy-lsd__rule')
-          .evaluateAll(nodes => nodes.map(node => getComputedStyle(node).opacity));
-        expect(new Set(opacities)).toEqual(new Set(['1']));
-        expect(await tab.locator('[data-lessons-now]').count()).toBe(0);
-        if (shotsDir !== '')
-          await tab.screenshot({ path: join(shotsDir, `after-chosen-${viewport.name}-${mode}.png`), fullPage: true });
-        await context.close();
-      }, 60_000);
-
-      it(`draws today's step body for the before shot (${viewport.name}, ${mode})`, async () => {
-        if (shotsDir === '') return;
-        const { context, tab } = await open('before', viewport, mode);
-        await tab.waitForSelector('[data-lessons-settings]');
-        await tab.waitForTimeout(300);
-        await tab.screenshot({ path: join(shotsDir, `before-${viewport.name}-${mode}.png`), fullPage: true });
+        await tab.waitForTimeout(1_200);
+        // After the scene played, the rule is fully shown (nothing left at opacity 0).
+        expect(await tab.locator('[data-lessons-rule]').evaluate(node => getComputedStyle(node).opacity)).toBe('1');
+        expect(await tab.evaluate(() => window.__patches)).toEqual([]);
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `after-on-${viewport.name}-${mode}.png`) });
+        await tab.locator('[data-step-next]').click();
+        await tab.waitForFunction(() => window.__patches.length > 0);
+        await tab.waitForTimeout(200);
+        expect(await tab.evaluate(() => window.__patches)).toEqual([{ passiveDefault: true }]);
         await context.close();
       }, 60_000);
     }
 
+  it('locks the cards while Next saves, so a slow answer cannot change the pick after it was captured', async () => {
+    const { context, tab } = await open(VIEWPORTS[0], 'light', '&slow=1');
+    await tab.locator('[data-choice="on"]').click();
+    await tab.waitForSelector('[data-choice="on"][data-selected="true"]');
+    await tab.locator('[data-step-next]').click();
+    await tab.waitForFunction(() => window.__patches.length > 0);
+    // The write is in flight (the fake daemon has not answered): both radios are locked.
+    const locked = await tab.evaluate(() =>
+      [...document.querySelectorAll('input[type="radio"]')].map(radio => (radio as HTMLInputElement).disabled),
+    );
+    expect(locked).toEqual([true, true]);
+    // A click that gets through anyway (forced) and the arrow keys change nothing: the pick and the picture stay Learn.
+    await tab.locator('[data-choice="off"]').click({ force: true });
+    await tab.keyboard.press('ArrowDown');
+    await tab.keyboard.press('Space');
+    expect(await tab.locator('[data-choice="on"][data-selected="true"]').count()).toBe(1);
+    expect(await tab.locator('[data-choice="off"][data-selected="true"]').count()).toBe(0);
+    expect(await tab.locator('[data-step-demo] [data-lessons-demo][data-kept="true"]').count()).toBe(1);
+    await tab.evaluate(() => window.__release());
+    // The daemon answered: the cards are open again, and exactly the captured pick was written.
+    await tab.waitForFunction(() =>
+      [...document.querySelectorAll('input[type="radio"]')].every(radio => !(radio as HTMLInputElement).disabled),
+    );
+    expect(await tab.evaluate(() => window.__patches)).toEqual([{ passiveDefault: true }]);
+    await context.close();
+  }, 60_000);
+
   it('plays no picture animation when the person turned motion off', async () => {
-    const { context, tab } = await open('page', VIEWPORTS[0], 'light');
-    await tab.waitForSelector('[data-choice="on"]');
+    const { context, tab } = await open(VIEWPORTS[0], 'light');
     await tab.evaluate(() => document.documentElement.setAttribute('data-motion', 'reduced'));
     await tab.locator('[data-choice="on"]').click();
     await tab.waitForSelector('[data-choice="on"][data-selected="true"]');
     const names = await tab
-      .locator('.fy-lsd__said, .fy-lsd__arrow, .fy-lsd__rule')
+      .locator('.fy-lsd__said, .fy-lsd__rule, .fy-lsd__empty')
       .evaluateAll(nodes => nodes.map(node => getComputedStyle(node).animationName));
     expect(new Set(names)).toEqual(new Set(['none']));
     await context.close();
