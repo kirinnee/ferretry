@@ -1,6 +1,6 @@
 /**
  * THE THEME MATRIX: every STYLE x every PALETTE x both MODES x two WIDTHS (16 x 8 x 2 x 2 = 512 combinations today), measured
- * in a real browser on one fixed specimen page (`fixtures/theme-matrix-scene.tsx`). The catalogue is the list (`STYLES`,
+ * in a real browser on one fixed specimen page (`plugins/conversation/tests/integration/app/fixtures/theme-matrix-scene.tsx`). The catalogue is the list (`STYLES`,
  * `PALETTES`), so a style or palette added to it is measured with no edit here, and a new one that cannot be read is a red
  * row the day it lands.
  *
@@ -63,6 +63,8 @@ import {
 setDefaultTimeout(60_000);
 
 const packageRoot = import.meta.dir;
+/** The specimen page's browser entry lives in Conversation's tests: it mounts Conversation's real renderer through that plugin's own half. */
+const conversationScenes = resolve(packageRoot, '../../../plugins/conversation/tests/integration/app/fixtures');
 const shotsDir = process.env.FY_THEME_MATRIX_SHOTS_DIR ?? '';
 const reportFile = process.env.FY_THEME_MATRIX_REPORT ?? '';
 /** Set to `1` to run the whole matrix with the OS "reduce transparency" setting emulated (every surface must stay readable opaque). */
@@ -139,6 +141,8 @@ const WHY = {
   spinner: 'this style shares a spinner with another; the style unit (r11 T5-T12) gives it its own',
   distinct:
     'this style differs from Studio on fewer than 6 of 8 components; the style unit (r11 T5-T12) designs the rest',
+  hypermedia:
+    'this style differs from Studio on 5 of 8 components, short only on hypermedia: no renderer reads an --hm-* slot until r12 H5 (C6), so the style unit cannot fix it; r12 H5 deletes the row',
   text: 'the High contrast palette must pass 7:1 body text hard on this style (no loud exemption); the style unit fixes it',
 } as const;
 
@@ -415,6 +419,44 @@ const KNOWN: readonly Known[] = [
     what: 'The menu beside your work',
     why: WHY.text,
   },
+  // The hypermedia component: no renderer reads an `--hm-*` slot yet (r12 H5 owns that, per C6), so every style draws the
+  // picture the same and these five reach 5 of 8 (the shared --radius-sm on .fy-render-pan no longer counts). r12 H5 deletes them.
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['antiposh'],
+    palettes: ['vintage'],
+    modes: BOTH_MODES,
+    check: 'distinct',
+    what: 'differs from Studio on fewer than 6 of 8 components',
+    why: WHY.hypermedia,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['briefing', 'swiss'],
+    palettes: ['geist'],
+    modes: BOTH_MODES,
+    check: 'distinct',
+    what: 'differs from Studio on fewer than 6 of 8 components',
+    why: WHY.hypermedia,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['exaggerated'],
+    palettes: ['studio'],
+    modes: BOTH_MODES,
+    check: 'distinct',
+    what: 'differs from Studio on fewer than 6 of 8 components',
+    why: WHY.hypermedia,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['raw'],
+    palettes: ['neo'],
+    modes: BOTH_MODES,
+    check: 'distinct',
+    what: 'differs from Studio on fewer than 6 of 8 components',
+    why: WHY.hypermedia,
+  },
 ];
 
 const pins = pinnedMisses(KNOWN);
@@ -433,7 +475,7 @@ beforeAll(async () => {
       '--out',
       directory,
       '--entry',
-      resolve(packageRoot, 'fixtures/theme-matrix-scene.tsx'),
+      resolve(conversationScenes, 'theme-matrix-scene.tsx'),
     ],
     { cwd: packageRoot, stderr: 'pipe', stdout: 'pipe' },
   );
@@ -792,8 +834,11 @@ const FACTS = `(() => {
 /**
  * The hypermedia probe's node: what the REAL renderer drew for the specimen's `FyRenderBlock` (the picture, its stage and its
  * viewport), as computed values (r11 T4's seam: `fy-render.css` consumes the `--hm-*` slots for every block it draws). The
- * declared tokens are NOT read: a token that moves with the renderer unchanged draws nothing and earns nothing. Radius,
- * stroke, shadow and the fill's alpha are the parts a "shaped" and a "flat" style differ on. Nothing here is a size or an
+ * declared tokens are NOT read: a token that moves with the renderer unchanged draws nothing and earns nothing. Stroke,
+ * shadow and the fill's alpha are the parts a "shaped" and a "flat" style differ on. The corner RADIUS is deliberately not
+ * read: until a renderer consumes `--hm-radius` (r12 H5), the only radius on the picture is the shared `--radius-sm` that
+ * `.fy-render-pan` and its image take from the control scale, which every style sets for its buttons and fields and is not
+ * hypermedia distinctness (r11 T14 review: five styles scored 6 of 8 on that alone). r12 H5 puts the radius back. Nothing here is a size or an
  * inherited font: those move with the page's layout and type, not with the renderer.
  */
 const HYPERMEDIA_NODE = `(() => {
@@ -807,7 +852,7 @@ const HYPERMEDIA_NODE = `(() => {
     const el = document.querySelector('[data-probe="hypermedia"] ' + selector);
     if (!el) return selector + ':absent';
     const cs = getComputedStyle(el);
-    return selector + ':' + [cs.borderTopLeftRadius, cs.borderTopWidth, cs.borderTopStyle, cs.boxShadow.replace(/(rgba?|color)\\([^()]*\\)/g, 'C'), alphaOf(cs.backgroundColor), cs.filter, cs.clipPath, cs.outlineStyle].join('/');
+    return selector + ':' + [cs.borderTopWidth, cs.borderTopStyle, cs.boxShadow.replace(/(rgba?|color)\\([^()]*\\)/g, 'C'), alphaOf(cs.backgroundColor), cs.filter, cs.clipPath, cs.outlineStyle].join('/');
   }).join('|');
 })()`;
 
@@ -1264,6 +1309,29 @@ describe('the probes read the real page', () => {
           await session.close();
         }
       });
+
+  it('the shared --radius-sm (what .fy-render-pan reads today) is not hypermedia distinctness', async () => {
+    // No renderer reads an --hm-* slot at this head (r12 H5 owns that), so the only thing a style can move on the picture is
+    // the shared control radius. A probe that counts it scores every style "distinct" for a change that is not hypermedia.
+    const session = await open(VIEWPORTS[0], 'light', 'real');
+    try {
+      await apply(session.tab, 'studio', 'studio', 'light');
+      const panRadius = async () =>
+        (await session.tab.evaluate(
+          `getComputedStyle(document.querySelector('[data-probe="hypermedia"] .fy-render-pan')).borderTopLeftRadius`,
+        )) as string;
+      const probe = async () => ((await session.tab.evaluate(SIGNATURE)) as Signature).hypermedia;
+      const before = { radius: await panRadius(), probe: await probe() };
+      const wash = await washed(session.tab, ':root { --radius-sm: 91px !important; }');
+      const after = { radius: await panRadius(), probe: await probe() };
+      await gone(wash);
+      expect(after.radius, 'the shared radius really changed the picture frame (the lever works)').toBe('91px');
+      expect(before.radius, 'and it was not 91px before').not.toBe('91px');
+      expect(after.probe, 'but the hypermedia signature does not move').toBe(before.probe);
+    } finally {
+      await session.close();
+    }
+  });
 
   it('a hypermedia token declared with the renderer unchanged moves nothing the probe reads', async () => {
     const session = await open(VIEWPORTS[0], 'light', 'real');

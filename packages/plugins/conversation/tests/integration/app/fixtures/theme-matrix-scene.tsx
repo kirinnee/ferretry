@@ -16,16 +16,10 @@
  */
 import { Check } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
-import { ChoiceCards } from '../../../src/compose/choice-cards.tsx';
-import { Spinner } from '../../../src/ui/spinner.tsx';
-import { Badge, Button, Card, PanelBody, PanelHeader } from '../../../src/ui/primitives.tsx';
-import { ContextMenu } from '../../../src/ui/context-menu.tsx';
-import { FyRenderBlock } from '../../../../plugins/conversation/app/render/fy-render-block.tsx';
-import {
-  type FyRenderWorkspaceReader,
-  isFyRenderEmbedBlock,
-  parseFyRender,
-} from '../../../../plugins/conversation/app/render/fy-render.ts';
+import { ChoiceCards } from '@ferretry/app';
+import { Badge, Button, Card, ContextMenu, PanelBody, PanelHeader, Spinner } from '@ferretry/app/ui';
+import { FyRenderBlock } from '../../../../app/render/fy-render-block.tsx';
+import { type FyRenderWorkspaceReader, isFyRenderEmbedBlock, parseFyRender } from '../../../../app/render/fy-render.ts';
 
 const params = new URLSearchParams(window.location.search);
 const root = document.documentElement;
