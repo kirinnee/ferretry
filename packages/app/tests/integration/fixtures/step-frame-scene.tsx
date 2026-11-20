@@ -33,7 +33,17 @@ const OPTIONS = [
 ] as const;
 
 const Demo = () => (
-  <div data-fake-demo="" style={{ height: 220, width: '100%', background: 'var(--accent-soft)' }}>
+  <div
+    data-fake-demo=""
+    style={{
+      alignItems: 'center',
+      background: 'var(--accent-soft)',
+      display: 'flex',
+      height: 300,
+      justifyContent: 'center',
+      width: '100%',
+    }}
+  >
     animation
   </div>
 );

@@ -234,3 +234,8 @@
 .fy-spf__button[data-variant='ghost']:disabled {
   opacity: 0.4;
 }
+
+/* The footer's three buttons read as equal: a ghost Back keeps a hairline edge so its fixed width is visible. */
+.fy-spf__footer .fy-spf__button[data-variant='ghost'] {
+  border-color: var(--border);
+}
