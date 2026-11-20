@@ -49,6 +49,7 @@ laundered a defect into something every gate was right to pass.
 | `pinned-toolchain.sh`         | `task test:gate`, `build-pwa.sh`         | `node` and `bun` resolve inside `/nix/store`, never to the runner image                                          |
 | `pwa-relevance.sh`            | `a-pwa-relevance`                        | the PWA browser gate's path list covers every import of its harness; docs-only skips it                          |
 | `relay-config.sh`             | `a-relay-config`, `task test:gate`       | relay code, bindings, discovery and deployment agree                                                             |
+| `repo-slug.sh`                | `a-repo-slug`                            | every shipped file names the GitHub owner/repo that root `package.json` `repository` declares                    |
 | `route-agreement.sh`          | `a-route-agreement`                      | client/daemon paths, verbs and declared method debt agree                                                        |
 | `test-tiers.sh`               | `a-test-tiers`, `task test:gate`         | tier placement and budgets, complete groups, Quick/Full events and exact-head verdict, run-all failure reporting |
 | `job-ceilings.sh`             | `a-job-ceilings`                         | every workflow job states `timeout-minutes`, a whole number from 1 to 60                                         |

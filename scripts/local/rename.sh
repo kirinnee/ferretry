@@ -63,7 +63,8 @@ rewrite() {
 
 if [ -n "${new_product}" ] && [ "${new_product}" != "${old_product}" ]; then
   echo "🔁 product: '${old_product}' -> '${new_product}'"
-  jq --arg new "${new_product}" '.name = $new' package.json >package.json.tmp
+  # The GitHub repository is named after the product, so the single-source slug moves with it.
+  jq --arg new "${new_product}" '.name = $new | .repository = ((.repository // "github:\($new)/\($new)") | sub("/[^/]+$"; "/\($new)"))' package.json >package.json.tmp
   mv package.json.tmp package.json
   for package_manifest in packages/*/package.json; do
     [ "${package_manifest}" = "packages/cli/package.json" ] && continue

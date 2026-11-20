@@ -57,6 +57,7 @@ and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Q
 | `a-pages-config`             | the PWA build and the Pages deployment publish the same directory                                |
 | `a-pwa-relevance`            | the PWA browser gate's path list covers every import of its harness; docs-only skips it          |
 | `a-relay-config`             | relay code, bindings, discovery and deployment configuration agree                               |
+| `a-repo-slug`                | every shipped file names the GitHub owner/repo that root `package.json` declares                 |
 | `a-route-agreement`          | client paths and daemon routes agree both ways; unreadable verbs are debt                        |
 | `a-test-tiers`               | tier placement and budgets; complete groups; Quick/Full event, verdict and run-all contracts     |
 | `a-job-ceilings`             | every workflow job states `timeout-minutes`, so a wedged job fails in minutes                    |

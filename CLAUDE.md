@@ -59,6 +59,8 @@ coverage variants `task test:coverage`.
 
 See [README.md](README.md#releasing) and [INSTALLATION.md](INSTALLATION.md).
 Repo invariants live in [scripts/validate/](scripts/validate/) and run from pre-commit.
+The GitHub owner is single-sourced in root `package.json` `repository`; moving the repository is
+`scripts/local/move-repo.sh --owner <new>` and [docs/runbooks/move-repo.md](docs/runbooks/move-repo.md).
 How an installed daemon learns of and applies a newer release, per install method (Homebrew, nix
 profile, nix shell, modules, deb/rpm, standalone), is [docs/updating.md](docs/updating.md).
 
