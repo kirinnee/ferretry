@@ -904,8 +904,13 @@ describe('a page that is not needed for this run (contract rule 7)', () => {
     expect(pageKey()).toBe('fake-pack.alpha');
     await chooseMode('Ask everything');
     await settle();
-    expect(pageKey()).toBe('fake-pack.run');
+    // The page that asked was SHOWN, so its later `notNeeded()` is ignored: it stays, writes nothing, and only Next moves on.
+    expect(pageKey()).toBe('fake-pack.alpha');
     expect(run.arrived).toEqual([]);
-    expect(run.writes).toEqual([]);
+    expect(run.answers).toEqual([]);
+    await next();
+    await settle();
+    expect(pageKey()).toBe('fake-pack.run');
+    expect(run.answers.map(answer => `${answer.step}:${answer.state}`)).toEqual(['alpha:done']);
   });
 });

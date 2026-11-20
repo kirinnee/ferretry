@@ -37,17 +37,31 @@ const importModeOf = (step: StepHost): ImportMode => {
 
 const ASK_AGAIN = 'Choose what to bring over first';
 
-/** The choice put back in front of an import step whose memory is empty: nothing is pre-chosen, nothing is answered by default. */
+/** The segment-memory key that says the chooser was drawn on step `id`: Back to it draws the chooser again (see {@link choiceShownOn}). */
+const SHOWN_KEY = (id: string): string => `choiceShown:${id}`;
+
+/** Whether the chooser was drawn on this step earlier in the run. */
+export const choiceShownOn = (step: StepHost, id: string): boolean => step.segment[SHOWN_KEY(id)] === true;
+
+/**
+ * The choice put back in front of an import step whose memory is empty: nothing is pre-chosen, nothing is answered by default.
+ * A pick changes LOCAL state and the segment memory only (arrow keys too): it never writes and never navigates; Next is the
+ * answer. Back to the step later draws it again with the current pick.
+ */
 function ReturnedChoice({
   step,
+  stepId,
   onChosen,
 }: {
   readonly step: StepHost;
+  readonly stepId: string;
   readonly onChosen: (mode: ImportMode) => void;
 }) {
+  const [picked, setPicked] = useState<ImportMode | null>(() => rememberedImportMode(step) ?? null);
   useEffect(() => {
     step.ready();
-    step.busy(ASK_AGAIN);
+    // Nothing chosen yet: the step cannot be answered by default. Back here with a pick standing needs no hold.
+    if (rememberedImportMode(step) === undefined) step.busy(ASK_AGAIN);
   }, [step]);
   return (
     <section
@@ -62,11 +76,13 @@ function ReturnedChoice({
       <ChoiceCards
         label="What to import from your Codex"
         options={OPTIONS}
-        value={null}
+        value={picked}
         onChange={next => {
           const chosen = IMPORT_MODES.find(candidate => candidate === next);
           if (chosen === undefined) return;
-          step.remember({ importMode: chosen });
+          setPicked(chosen);
+          // The marker rides with the pick (never alone): "the chooser was drawn here and answered" for a later Back.
+          step.remember({ importMode: chosen, [SHOWN_KEY(stepId)]: true });
           step.busy(null);
           onChosen(chosen);
         }}
@@ -81,9 +97,10 @@ export function ImportChoicePage({
 }: {
   readonly step: StepHost;
   /** Set when an import step shows this page because the memory was empty: the step carries on once a mode is chosen. */
-  readonly returned?: { readonly onChosen: (mode: ImportMode) => void };
+  readonly returned?: { readonly stepId: string; readonly onChosen: (mode: ImportMode) => void };
 }) {
-  if (returned !== undefined) return <ReturnedChoice step={step} onChosen={returned.onChosen} />;
+  if (returned !== undefined)
+    return <ReturnedChoice step={step} stepId={returned.stepId} onChosen={returned.onChosen} />;
   return <FirstChoice step={step} />;
 }
 

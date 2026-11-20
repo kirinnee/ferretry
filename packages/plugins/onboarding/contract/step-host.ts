@@ -36,6 +36,13 @@
  *      ONE write, at the END of the run: a machine step that was passed over and never asked since is recorded `skipped`
  *      then (a step left `pending` there reopens the first run on every later visit and keeps the machine incomplete). That
  *      write does not make the step answered in the run: Back -> change the answer -> Next still records `done` over it.
+ *      WHEN IT IS HONOURED: `notNeeded()` is honoured ONLY when a page calls it on MOUNT, before it has drawn its own content
+ *      (before any `ready()` or `busy(label)` in that visit): the page is passing over. A page that has been SHOWN (it drew a
+ *      question or a chooser) can NEVER become not needed in that visit: the shell ignores the call, a selection on such a page
+ *      changes local state and the segment memory only, and only Next moves on and records. A page that was shown always enters
+ *      the Back trail, and a chooser selection (arrow keys included) never writes and never navigates. A page that asked a
+ *      question and must follow the answer keeps drawing (the chooser stays, or its body takes over); it never calls
+ *      `notNeeded()` from the answer.
  */
 export type { StepHost, StepSegmentMemory } from '@ferretry/kernel/contract';
 

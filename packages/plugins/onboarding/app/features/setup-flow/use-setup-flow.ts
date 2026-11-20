@@ -20,8 +20,8 @@
  * - A page that is not needed for this run (`StepHost.notNeeded`, contract rule 7) is a mark in the run state ONLY: nothing is
  *   answered or recorded for it, a reload starts with none, and any change to its plugin's segment memory clears that
  *   plugin's marks so its pages are asked again. ONE exception to "nothing recorded": when the run reaches its END, a daemon
- *   page that was passed over at any time in this run and was never answered since (a later `remember` may have cleared
- *   its mark, but the page was still never asked) is recorded `skipped` on the machine, because a step left `pending` there reopens the first run on every
+ *   page that is STILL marked not needed (a page that was SHOWN can never be marked: the host ignores `notNeeded()` after
+ *   `ready()`/`busy(label)`, so only a page that was truly passed over is recorded) is recorded `skipped` on the machine, because a step left `pending` there reopens the first run on every
  *   later visit (steps-opener) and keeps the machine "not set up". That write is final only for the run as it ended: it does
  *   not mark the page answered in this run, so Back -> change the mode -> Next can still record `done` over it.
  */
@@ -195,8 +195,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   const memory = useRef(new Map<string, StepSegmentMemory>());
   /** How each page was answered during this run (so Next after a `done()` records nothing twice, and Later may become done). */
   const answeredNow = useRef(new Map<string, HowAnswered>());
-  /** Every page that was passed over (`notNeeded`) at any time in this run, and the ones the end of the run already told the machine about. */
-  const passedNow = useRef(new Set<string>());
+  /** The pages the end of the run already told the machine about (a page still marked not needed when the run ends). */
   const toldAtEnd = useRef(new Set<string>());
   const stage = useRef(loading);
   stage.current = loading;
@@ -250,7 +249,6 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
       setLoading({ kind: 'ready', flow, pages, answered, journey: address.journey });
       setRun(startRun(pages, answered));
       answeredNow.current = new Map();
-      passedNow.current = new Set();
       toldAtEnd.current = new Set();
       lanes.current = new Map();
       setFailed({});
@@ -367,7 +365,6 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   const notNeeded = useCallback(
     (step: FlowStep, visit: number): void => {
       if (!current(step.key, visit)) return;
-      passedNow.current.add(step.key);
       setRun(state => markNotNeeded(state, pages, answered, step.key));
     },
     [current, pages, answered],
@@ -400,13 +397,13 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   // The run ended: what is still passed over will never be asked, so the machine hears it was skipped (see the header).
   useEffect(() => {
     if (run.at !== END) return;
-    for (const key of passedNow.current) {
+    for (const key of run.notNeeded) {
       const step = pages.find(candidate => candidate.key === key);
       if (step?.phase !== 'daemon' || answeredNow.current.has(key) || toldAtEnd.current.has(key)) continue;
       toldAtEnd.current.add(key);
       sendDaemon(step, 'skipped');
     }
-  }, [run.at, pages, sendDaemon]);
+  }, [run.at, run.notNeeded, pages, sendDaemon]);
 
   const page = pages.find(candidate => candidate.key === run.at);
   const hidden = passedOver(run);

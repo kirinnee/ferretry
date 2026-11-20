@@ -56,7 +56,10 @@ export function stepHarness(options: StepHarnessOptions = {}): StepHarness {
     count: kind => calls.filter(call => call.kind === kind).length,
     get decision() {
       if (skipped() !== undefined) return 'skipped';
-      if (calls.some(call => call.kind === 'notNeeded')) return 'passed-over';
+      // Rule 7: `notNeeded()` counts only from a page still passing over; after `ready()` or a `busy(label)` the shell ignores it.
+      const shownAt = calls.findIndex(call => call.kind === 'ready' || (call.kind === 'busy' && call.label !== null));
+      const passedAt = calls.findIndex(call => call.kind === 'notNeeded');
+      if (passedAt !== -1 && (shownAt === -1 || passedAt < shownAt)) return 'passed-over';
       return calls.some(call => call.kind === 'ready') ? 'shown' : 'undecided';
     },
     get skippedWhy() {

@@ -173,6 +173,22 @@ describe('the Claude import pages inside the real setup flow', () => {
     expect(items()).toContain('claude-code:settings');
   });
 
+  test('selecting a choice with the arrow keys writes nothing and never leaves the page', async () => {
+    const { wire } = await openFlow();
+    expect(pageKey()).toBe(pageOf('import-choice'));
+    const group = must(root().querySelector('[role="radiogroup"]'), 'the choice cards');
+    for (const key of ['End', 'Home', 'ArrowRight', 'ArrowRight']) {
+      await interact(
+        () => void group.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })),
+      );
+      await settle();
+      expect(pageKey()).toBe(pageOf('import-choice'));
+    }
+    expect(root().querySelector('input[value="fresh"]:checked')).not.toBeNull();
+    expect(wire.filter(call => call.route.startsWith('POST /v1/onboarding'))).toEqual([]);
+    expect(root().querySelector('[data-flow-end]')).toBeNull();
+  });
+
   test('"Start fresh" leaves nothing to import: the final page is passed over too, and Back can still change the mode', async () => {
     const { wire } = await openFlow();
     await press('input[value="fresh"]');

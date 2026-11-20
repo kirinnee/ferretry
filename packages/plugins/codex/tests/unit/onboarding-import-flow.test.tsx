@@ -122,6 +122,16 @@ const choose = async (id: 'everything' | 'choose' | 'fresh'): Promise<void> => {
   await settle();
 };
 
+/** An arrow key on the choice's radio group: it moves AND selects, as a radio group does. */
+const arrow = async (key: 'ArrowRight' | 'ArrowLeft' | 'Home' | 'End'): Promise<void> => {
+  const group = query('[role="radiogroup"]');
+  expect(group).not.toBeNull();
+  await interact(
+    () => void group?.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })),
+  );
+  await settle();
+};
+
 const START_AT_CHOICE = ['installed', 'sign-in'];
 
 describe('the Codex import pages in the setup flow', () => {
@@ -165,13 +175,78 @@ describe('the Codex import pages in the setup flow', () => {
     expect(pageKey()).toBe('codex.import-settings');
     expect(query('[data-returned]')).not.toBeNull();
     await choose('everything');
-    // The choice came back and the pages after it are not needed: straight to Conversations, then the one import page.
+    // A pick is local: the page that showed the choice stays (Next answers it), the pages after it are passed over.
+    expect(pageKey()).toBe('codex.import-settings');
+    expect(query('[data-returned]')).not.toBeNull();
+    expect(run.written).toEqual([]);
+    await next();
     expect(pageKey()).toBe('codex.conversations');
     expect(query('[data-import-kind]')).toBeNull();
     await next();
     expect(pageKey()).toBe('codex.import-run');
     expect(query('[data-import-run]')).not.toBeNull();
     expect(run.written.filter(entry => entry.state === 'skipped')).toEqual([]);
+  });
+
+  test('after a reload Everything is one page and Back from Conversations lands on the choice, which can change the answer', async () => {
+    const run = setup({ answered: [...START_AT_CHOICE, 'import-choice'] });
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('codex.import-settings');
+    await choose('everything');
+    expect(pageKey()).toBe('codex.import-settings');
+    await next();
+    expect(pageKey()).toBe('codex.conversations');
+    // The page that showed the choice is in the Back trail, so Conversations has a Back.
+    expect(query('[data-step-back]')).not.toBeNull();
+    await back();
+    expect(pageKey()).toBe('codex.import-settings');
+    expect(query('[data-returned]')).not.toBeNull();
+    expect(query('[data-choice="everything"] input:checked')).not.toBeNull();
+    // Change the answer here: the checklist takes over this very page.
+    await choose('choose');
+    expect(pageKey()).toBe('codex.import-settings');
+    expect(query('[data-found-item]')).not.toBeNull();
+    for (const id of KIND_STEPS) {
+      expect(pageKey()).toBe(`codex.${id}`);
+      await next();
+    }
+    expect(pageKey()).toBe('codex.conversations');
+    expect(run.written.filter(entry => entry.state === 'skipped')).toEqual([]);
+  });
+
+  test('selecting a choice, arrow keys included, writes nothing and never leaves the page', async () => {
+    // Only the import steps are still to ask: the case where every page after the choice is passed over.
+    const run = setup({ answered: [...START_AT_CHOICE, 'import-choice', 'conversations', 'permission'] });
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('codex.import-settings');
+    await choose('fresh');
+    expect(pageKey()).toBe('codex.import-settings');
+    expect(run.written).toEqual([]);
+    await arrow('Home');
+    expect(query('[data-choice="everything"] input:checked')).not.toBeNull();
+    expect(pageKey()).toBe('codex.import-settings');
+    await arrow('End');
+    expect(query('[data-choice="fresh"] input:checked')).not.toBeNull();
+    expect(pageKey()).toBe('codex.import-settings');
+    expect(query('[data-flow-end]')).toBeNull();
+    expect(run.written).toEqual([]);
+    // Only Next moves on and records: the shown page is done, the passed-over ones are told skipped at the end.
+    await next();
+    expect(run.written.find(entry => entry.step === 'import-settings')?.state).toBe('done');
+  });
+
+  test('the first choice (import-choice) selected by arrow keys writes nothing and stays', async () => {
+    const run = setup({ answered: START_AT_CHOICE });
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('codex.import-choice');
+    await arrow('ArrowRight');
+    await arrow('ArrowRight');
+    expect(query('[data-choice="fresh"] input:checked')).not.toBeNull();
+    expect(pageKey()).toBe('codex.import-choice');
+    expect(run.written).toEqual([]);
   });
 
   test('a refused import leaves Back and Later working, and the person can retry', async () => {
