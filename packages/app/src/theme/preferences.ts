@@ -32,7 +32,6 @@ import {
   isStyleId,
   lookOfFamily,
   type PaletteId,
-  suggestedPaletteOfStyle,
   type StyleId,
   type ThemeFamilyId,
 } from './catalog.ts';
@@ -261,18 +260,8 @@ export class ThemePreferenceStore {
     return this.#commit(withFamily({ ...this.snapshot(), ...lookOfFamily(family) }), true);
   }
 
-  /**
-   * A style the person picks brings its own palette (`suggestedPaletteOfStyle`) while the current palette is still a
-   * DEFAULT: the app default or the previous style's own palette. A palette they chose themselves is kept, and any
-   * palette stays selectable afterwards.
-   */
   setStyle(style: StyleId): ThemePreference {
-    const current = this.snapshot();
-    const suggested = suggestedPaletteOfStyle(style);
-    const stillDefault =
-      current.palette === DEFAULT_PALETTE || current.palette === suggestedPaletteOfStyle(current.style);
-    const palette = suggested !== undefined && stillDefault ? suggested : current.palette;
-    return this.#commit(withFamily({ ...current, style, palette }), true);
+    return this.#commit(withFamily({ ...this.snapshot(), style }), true);
   }
 
   setPalette(palette: PaletteId): ThemePreference {

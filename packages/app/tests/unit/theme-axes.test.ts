@@ -204,45 +204,6 @@ describe('a stored pre-split family reads as its style and palette', () => {
   });
 });
 
-describe('choosing a style brings its own palette until the person picks one', () => {
-  it('a fresh store: Briefing arrives with the Briefing palette', () => {
-    const themes = new ThemePreferenceStore(memoryStore());
-    themes.setStyle('briefing');
-    expect(themes.snapshot()).toMatchObject({ style: 'briefing', palette: 'briefing' });
-  });
-
-  it('keeps a palette the person chose themselves, whichever style they pick', () => {
-    const themes = new ThemePreferenceStore(memoryStore());
-    themes.setPalette('hacker');
-    themes.setStyle('briefing');
-    expect(themes.snapshot()).toMatchObject({ style: 'briefing', palette: 'hacker' });
-    themes.setStyle('neo');
-    expect(themes.snapshot()).toMatchObject({ style: 'neo', palette: 'hacker' });
-  });
-
-  it("keeps an own pick of a palette that is another style's default, and any palette stays selectable", () => {
-    const themes = new ThemePreferenceStore(memoryStore());
-    themes.setPalette('briefing');
-    themes.setStyle('mission');
-    expect(themes.snapshot()).toMatchObject({ style: 'mission', palette: 'briefing' });
-    themes.setStyle('briefing');
-    themes.setPalette('ledger');
-    expect(themes.snapshot()).toMatchObject({ style: 'briefing', palette: 'ledger' });
-  });
-
-  it('switching back and forth follows the style while no palette was chosen', () => {
-    const themes = new ThemePreferenceStore(memoryStore());
-    themes.setStyle('briefing');
-    themes.setStyle('studio');
-    expect(themes.snapshot()).toMatchObject({ style: 'studio', palette: 'studio' });
-    themes.setStyle('briefing');
-    themes.setStyle('mission');
-    expect(themes.snapshot()).toMatchObject({ style: 'mission', palette: 'mission' });
-    themes.setStyle('briefing');
-    expect(themes.snapshot()).toMatchObject({ style: 'briefing', palette: 'briefing' });
-  });
-});
-
 describe('a palette that is not one of the original families', () => {
   it('still reads and writes, and the picker falls back to the default look instead of needing a frozen family entry', () => {
     // A palette added after the family list froze (T12/T17 add to PALETTE_IDS only): the guard answers for it.

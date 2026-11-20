@@ -180,13 +180,6 @@ export const isFamilyId = (value: unknown): value is ThemeFamilyId =>
 export const familyOfPalette = (palette: PaletteId): ThemeFamilyId => (isFamilyId(palette) ? palette : DEFAULT_FAMILY);
 
 /**
- * The palette a STYLE comes with: the first palette (in catalogue order) drawn for it, or undefined when none is. The
- * selection seam (`ThemePreferenceStore.setStyle`) uses it to give a style its own colours until the person picks theirs.
- */
-export const suggestedPaletteOfStyle = (style: StyleId): PaletteId | undefined =>
-  PALETTES.find(candidate => candidate.suggestedStyle === style)?.id;
-
-/**
  * What a single-pick look of a PALETTE is on the three axes: the palette itself and the style it was drawn for. Takes
  * any palette, so a palette added later needs no family entry to be previewed; an id no palette answers to is the
  * default look.
