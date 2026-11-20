@@ -29,7 +29,7 @@ describe('the hand-off payload', () => {
     // It is read aloud, typed by hand and printed inside a QR whose size grows
     // with every character. A reader can see it says `first-time`, `this`, `self`
     // and nothing else.
-    expect(encodeSetupHandoff({ route: 'add-client', step: 'pair' })).toBe('f1;route=add-client;step=pair');
+    expect(encodeSetupHandoff({ route: 'add-client', step: 'scan' })).toBe('f1;route=add-client;step=scan');
     expect(encodeSetupHandoff({ route: 'first-time', target: 'this', doer: 'self', step: 'install' })).toBe(
       'f1;route=first-time;target=this;doer=self;step=install',
     );
@@ -37,7 +37,7 @@ describe('the hand-off payload', () => {
 
   it('round-trips exactly what it was given', () => {
     for (const handoff of [
-      { route: 'add-client', step: 'pair' },
+      { route: 'add-client', step: 'scan' },
       { route: 'add-daemon', target: 'this', doer: 'self', step: 'install' },
       { route: 'first-time', target: 'other', doer: 'agent', step: 'brief' },
       { route: 'first-time', target: 'this', doer: 'self', step: 'daemon' },
@@ -84,8 +84,8 @@ describe('the hand-off link', () => {
     // The origin is a deployment fact: there is no hosted address in this bundle
     // and anyone may deploy it themselves. The query and fragment that brought
     // this reader here are dropped — they are not what the other device replays.
-    expect(setupHandoffUrl(HREF, { route: 'add-client', step: 'pair' })).toBe(
-      'https://ferretry.example.invalid/setup#fy-setup=f1;route=add-client;step=pair',
+    expect(setupHandoffUrl(HREF, { route: 'add-client', step: 'scan' })).toBe(
+      'https://ferretry.example.invalid/setup#fy-setup=f1;route=add-client;step=scan',
     );
     expect(setupPageUrl(HREF)).toBe('https://ferretry.example.invalid/setup');
     expect(SETUP_HANDOFF_KEY).toBe('fy-setup');
@@ -116,10 +116,10 @@ describe('the hand-off link', () => {
 
 describe('landing a hand-off', () => {
   it('keeps the step when the receiving device really has it', () => {
-    expect(landSetupHandoff({ route: 'add-client', step: 'pair' }, 'mobile')).toEqual({
+    expect(landSetupHandoff({ route: 'add-client', step: 'scan' }, 'mobile')).toEqual({
       kind: 'walk',
       journey: { route: 'add-client' },
-      step: 'pair',
+      step: 'scan',
     });
   });
 

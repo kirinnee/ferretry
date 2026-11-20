@@ -484,17 +484,6 @@ export function ElsewhereStage({ handoff, onAddAsClient, onAgentInstead }: Elsew
   );
 }
 
-export function PairStage({ write }: { readonly write: ClipboardWriter }) {
-  return (
-    <div className={STAGE}>
-      <CommandBlock command={PAIR_COMMAND} copyLabel="Copy pair command" write={write} />
-      <p className="m-0 text-meta leading-base text-muted">
-        Run this on the computer where the daemon is running. Keep the QR code or link it prints on that screen.
-      </p>
-    </div>
-  );
-}
-
 /**
  * The phone/browser half of pairing, without the command.
  *

@@ -23,7 +23,9 @@ import { CHECKING_HOSTED_RELAY, type HostedRelayFallback, settleHostedRelay } fr
 import {
   browserPairTripStorage,
   clearPairTrip,
+  hasNewPairing,
   type PairTripStorage,
+  pairingMarks,
   readPairTrip,
   rememberPairTrip,
 } from '../pair-trip.ts';
@@ -43,12 +45,12 @@ export const ONBOARDING_PATH = '/onboarding';
 export const PAIR_AND_RETURN = `${PAIR_PATH}?return=${encodeURIComponent(ONBOARDING_PATH)}`;
 
 /**
- * What the first run remembers across its trip to `/pair`: how many machines were paired when it left. In memory (one
+ * What the first run remembers across its trip to `/pair`: which pairings it held when it left. In memory (one
  * per route) and, beside the place the journey keeps, in this browser's storage (`../pair-trip.ts`), so a reload on the
  * pairing page does not forget it. It never holds a code (the pairing page takes its own from the address).
  */
 interface PairTrip {
-  baseline: number | undefined;
+  baseline: readonly string[] | undefined;
 }
 
 /** The OS share sheet, when this browser has one. Absent is the ordinary case. */
@@ -61,10 +63,12 @@ export const browserSetupShare = (
 
 /**
  * The pairing step. Onboarding cannot draw Access's pairing screen (it imports nothing of Access), so the step says
- * what to do and opens `/pair`, Access's own page, asking it to come back to `/onboarding`. The count of machines when
- * the person left is kept (memory and storage); on coming back, a machine more than that finishes the step and the journey goes
- * on to its next stage. A pairing seen while the step stays open (another tab) does the same. No code passes through
- * this component — the pairing page takes its own from the address.
+ * what to do and opens `/pair`, Access's own page, asking it to come back to `/onboarding`. The pairings held when
+ * the person left are kept (memory and storage); on coming back, a pairing that was not among them — a new machine, a
+ * machine paired again, or one that took the place of another at the limit — finishes the step and the journey goes
+ * on to its next stage. A pairing seen while the step stays open (another tab: the one `fy pair --open` opens) does the
+ * same, because the shell adopts the list another tab wrote. No code passes through this component — the pairing page
+ * takes its own from the address.
  */
 function PairingHandoff({
   ports,
@@ -81,15 +85,17 @@ function PairingHandoff({
   readonly onPaired: () => void;
   readonly trip: PairTrip;
 }): ReactNode {
-  const known = useRef(trip.baseline ?? readPairTrip(storage) ?? ports.daemons.snapshot().daemons.length);
+  const known = useRef(
+    new Set(trip.baseline ?? readPairTrip(storage) ?? pairingMarks(ports.daemons.snapshot().daemons)),
+  );
   useEffect(() => {
     // The trip is over once the step is on the glass again: a later visit to this step starts from the list as it is.
     trip.baseline = undefined;
     clearPairTrip(storage);
     const look = (): void => {
-      const now = ports.daemons.snapshot().daemons.length;
-      if (now > known.current) onPaired();
-      known.current = now;
+      const { daemons } = ports.daemons.snapshot();
+      if (hasNewPairing(daemons, known.current)) onPaired();
+      known.current = new Set(pairingMarks(daemons));
     };
     look();
     return ports.daemons.subscribe(look);
@@ -103,7 +109,7 @@ function PairingHandoff({
         type="button"
         variant="primary"
         onClick={() => {
-          trip.baseline = ports.daemons.snapshot().daemons.length;
+          trip.baseline = pairingMarks(ports.daemons.snapshot().daemons);
           rememberPairTrip(trip.baseline, storage);
           // The place is kept before leaving (a hand-off arrival is otherwise never written), so the return finds it.
           progress.remember();

@@ -86,7 +86,7 @@ function boot(options: { paired: boolean; steps?: typeof declaredSteps }) {
       scroll={new ScrollMemory(null)}
     />
   );
-  return { app, daemons, answered, transport };
+  return { app, daemons, answered, transport, storage };
 }
 
 describe('S14 the first run is Onboarding’s daemon-less screen', () => {
@@ -110,6 +110,26 @@ describe('S14 the first run is Onboarding’s daemon-less screen', () => {
     await view.unmount();
   });
 
+  test('S14 a pairing made in ANOTHER tab (fy pair --open) carries this tab from the same-computer step into the setup flow', async () => {
+    go('/onboarding#fy-setup=f1;route=first-time;target=this;doer=self;step=local');
+    const { app, daemons, storage } = boot({ paired: false });
+    const view = await mount(app);
+    await until(() => view.container.querySelector('[data-onboarding-screen="local"]') !== null);
+    expect(view.container.querySelector('[data-onboarding-screen="local"]')).not.toBeNull();
+    // The other tab (the one `fy pair --open` opened) writes the pairing to the shared storage; this tab is told by the
+    // browser's storage event, which the shell turns into `adopt()`.
+    const otherTab = new DaemonList({ storage, now: () => 2 });
+    otherTab.add({ daemon: 'd7', machine: 'home', deviceId: 'dev-7', address: 'http://127.0.0.1:40247' });
+    expect(daemons.snapshot().daemons).toHaveLength(0);
+    await interact(() => {
+      daemons.adopt();
+    });
+    await until(() => view.container.querySelector('[data-setup-flow]') !== null);
+    expect(window.location.pathname).toBe('/d/d7/onboarding/setup');
+    expect(window.location.search).toContain('phase=daemon');
+    await view.unmount();
+  });
+
   test('S14 the pairing step opens Access’s own page and learns of a pairing; no code passes through it', async () => {
     go('/onboarding#fy-setup=f1;route=add-client;step=scan');
     const { app, daemons } = boot({ paired: false });
@@ -127,22 +147,21 @@ describe('S14 the first run is Onboarding’s daemon-less screen', () => {
     expect(daemons.snapshot().daemons).toHaveLength(0);
   });
 
-  test('S14 a pairing seen while the pairing step is on the glass finishes the journey', async () => {
+  test('S14 a pairing seen while the pairing step is on the glass finishes the journey by opening the setup flow', async () => {
     go('/onboarding#fy-setup=f1;route=add-client;step=scan');
     const { app, daemons } = boot({ paired: false });
     const view = await mount(app);
     await until(() => view.container.querySelector('[data-onboarding-open-pair]') !== null);
-    const before = view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen');
     await interact(() => {
       daemons.add({ daemon: 'd9', machine: 'desk', deviceId: 'dev', address: 'http://127.0.0.1:40249' });
     });
-    await until(
-      () =>
-        view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen') !== before,
-    );
-    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen')).toBe(
-      'done',
-    );
+    // O5: no 'you are set up' page — the journey ends by handing the person to the setup flow on the machine just paired.
+    await until(() => view.container.querySelector('[data-setup-flow]') !== null);
+    expect(window.location.pathname).toBe('/d/d9/onboarding/setup');
+    expect(window.location.search).toBe('?phase=client&journey=pair');
+    // The journey's destination is the setup flow, drawn alone (no drawer, no bottom nav); no 'done' screen is left behind.
+    expect(view.container.querySelector('[data-setup-flow]')).not.toBeNull();
+    expect(view.container.querySelector('[data-onboarding-screen="done"]')).toBeNull();
     await view.unmount();
   });
 });

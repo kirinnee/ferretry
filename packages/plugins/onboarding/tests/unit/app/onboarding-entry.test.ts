@@ -8,7 +8,7 @@ import { entryFromHref, flowHrefAfterPairing } from '../../../app/onboarding-ent
 
 describe('entryFromHref', () => {
   it('reads the three journeys by the words the setup flow itself uses', () => {
-    expect(entryFromHref('https://f.invalid/onboarding?journey=pair')).toEqual({ route: 'add-client', step: 'pair' });
+    expect(entryFromHref('https://f.invalid/onboarding?journey=pair')).toEqual({ route: 'add-client', step: 'scan' });
     expect(entryFromHref('https://f.invalid/onboarding?journey=add-daemon')).toEqual({
       route: 'add-daemon',
       step: 'install',

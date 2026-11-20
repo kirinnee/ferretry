@@ -254,7 +254,7 @@ describe('the start screen', () => {
     await answerEntry(view.container, 'add-client');
 
     // Neither question is asked: there is nothing to install and nobody to install it.
-    expect(screenOf(view.container)).toBe('pair');
+    expect(screenOf(view.container)).toBe('scan');
     expect(view.container.textContent).not.toContain('sudo apt install fy');
     await view.unmount();
   });
@@ -687,7 +687,7 @@ describe('another computer, by hand', () => {
     expect(screenOf(view.container)).toBe('elsewhere');
     await click(buttonWith(view.container, '[data-onboarding-add-client]'));
     expect(routeOf(view.container)).toBe('add-client');
-    expect(screenOf(view.container)).toBe('pair');
+    expect(screenOf(view.container)).toBe('scan');
     await view.unmount();
   });
 
@@ -897,16 +897,14 @@ describe('how other devices reach the daemon', () => {
 });
 
 describe('the pair route', () => {
-  it('runs fy pair somewhere else, then uses the code here', async () => {
+  it('opens straight on Access’s scan, upload and paste surface: no terminal command comes first', async () => {
     const { view } = await pageWith();
     await enter(view.container, 'add-client');
 
-    expect(screenOf(view.container)).toBe('pair');
-    expect(view.container.textContent).toContain('Pair this browser · step 1 of 2');
-    expect(view.container.textContent).toContain('Run this on the computer where the daemon is running');
-    await next(view.container);
-
     expect(screenOf(view.container)).toBe('scan');
+    expect(view.container.textContent).toContain('Pair this browser · step 1 of 1');
+    expect(view.container.textContent).not.toContain('Run this on the computer where the daemon is running');
+    expect(view.container.textContent).not.toContain('Copy pair command');
     expect(must(view.container.querySelector('h2'), 'the step heading').textContent).toBe('Scan QR or paste link');
     // The pairing surface itself, unforked.
     expect(view.container.querySelector('[data-test-pair]')).not.toBeNull();
@@ -922,7 +920,6 @@ describe('the pair route', () => {
     // expires, run fy pair again" and "this step finishes itself", advice about what was working.
     const { view } = await pageWith();
     await enter(view.container, 'add-client');
-    await next(view.container);
 
     await click(buttonWith(view.container, '[data-test-stated]'));
     const stated = view.container.textContent;
@@ -949,7 +946,6 @@ describe('the pair route', () => {
   it("hands on to THIS device's own setup when the daemon answers", async () => {
     const { view, handedOff } = await pageWith();
     await enter(view.container, 'add-client');
-    await next(view.container);
     await click(buttonWith(view.container, '[data-test-pair]'));
 
     // The route reads `add-client` as the Pair journey: the client half of the flow, not the machine's steps.
@@ -961,7 +957,6 @@ describe('the pair route', () => {
 describe('with the software keyboard open', () => {
   const toScan = async (container: HTMLElement): Promise<void> => {
     await enter(container, 'add-client');
-    await next(container);
   };
 
   it('keeps the step and its actions, and hides only standing chrome', async () => {

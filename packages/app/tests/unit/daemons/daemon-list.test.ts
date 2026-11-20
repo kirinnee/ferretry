@@ -186,3 +186,40 @@ describe('asking to name a machine again', () => {
     expect(list.namePending('ghost')).toBe(false);
   });
 });
+
+describe('DaemonList.adopt (a pairing made in another tab)', () => {
+  test('takes on what another tab wrote, tells its listeners once, and writes nothing back', () => {
+    const storage = memoryStore();
+    const here = new DaemonList({ storage, now: clock() });
+    const other = new DaemonList({ storage, now: clock() });
+    let heard = 0;
+    here.subscribe(() => (heard += 1));
+    expect(here.snapshot().daemons).toEqual([]);
+
+    other.add(pairing('d1'));
+    expect(here.snapshot().daemons).toEqual([]); // not seen until adopted
+    const written = storage.entries()[APP_STORAGE.daemons];
+    here.adopt();
+    expect(here.snapshot().daemons.map(entry => entry.daemon)).toEqual(['d1']);
+    expect(here.snapshot().selected).toBe('d1');
+    expect(heard).toBe(1);
+    expect(storage.entries()[APP_STORAGE.daemons]).toBe(written);
+
+    // A list that reads the same keeps the snapshot and says nothing.
+    const kept = here.snapshot();
+    here.adopt();
+    expect(here.snapshot()).toBe(kept);
+    expect(heard).toBe(1);
+  });
+
+  test('sees a re-pair of the same machine (same count, a new device grant)', () => {
+    const storage = memoryStore();
+    const here = new DaemonList({ storage, now: clock() });
+    const other = new DaemonList({ storage, now: clock() });
+    here.add(pairing('d1'));
+    other.adopt();
+    other.add({ ...pairing('d1'), deviceId: 'dev-again' });
+    here.adopt();
+    expect(here.snapshot().daemons.map(entry => entry.deviceId)).toEqual(['dev-again']);
+  });
+});

@@ -29,7 +29,6 @@ const EVERY_STEP: readonly OnboardingStepId[] = [
   'daemon',
   'local',
   'elsewhere',
-  'pair',
   'scan',
 ];
 
@@ -68,7 +67,7 @@ describe('the setup diagram', () => {
   });
 
   it('shows an unjoined link as dashed, not merely as a different colour', async () => {
-    const unpaired = await mount(<SetupDiagram step="pair" />);
+    const unpaired = await mount(<SetupDiagram step="scan" />);
     const linkOf = (container: HTMLElement): string =>
       must(container.querySelector('span[class*="border-t"]'), 'the link').className;
 
@@ -103,8 +102,7 @@ describe('the setup diagram', () => {
     // The machine that will run the agents is elsewhere and has nothing on it yet,
     // so that end is not lit at all — on a phone or on a second computer.
     expect(await lit('elsewhere')).toEqual([false, true]);
-    // `fy pair` is on the computer; scanning is the first time both devices act.
-    expect(await lit('pair')).toEqual([true, false]);
+    // Scanning is the first time both devices act.
     expect(await lit('scan')).toEqual([true, true]);
   });
 });

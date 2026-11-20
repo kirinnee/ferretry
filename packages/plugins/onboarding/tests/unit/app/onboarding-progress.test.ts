@@ -230,20 +230,20 @@ describe('enterOnboardingRoute', () => {
       format: 1,
       stage: 'walk',
       route: 'add-client',
-      current: 'pair',
-      furthest: 'pair',
+      current: 'scan',
+      furthest: 'scan',
     });
   });
 });
 
 describe('resumeOnboardingRoute', () => {
   it('lands exactly where the other device said, when that place exists here', () => {
-    expect(resumeOnboardingRoute({ route: 'add-client', step: 'pair' }, 'mobile')).toEqual({
+    expect(resumeOnboardingRoute({ route: 'add-client', step: 'scan' }, 'mobile')).toEqual({
       format: 1,
       stage: 'walk',
       route: 'add-client',
-      current: 'pair',
-      furthest: 'pair',
+      current: 'scan',
+      furthest: 'scan',
     });
   });
 
@@ -426,7 +426,7 @@ describe('OnboardingProgressStore', () => {
     expect(store.chooseTarget('this')).toEqual({ ...FRESH_ONBOARDING_PROGRESS });
     // And the pairing entry has no target to answer either.
     store.choose('add-client');
-    expect(store.chooseTarget('this')).toMatchObject({ route: 'add-client', current: 'pair' });
+    expect(store.chooseTarget('this')).toMatchObject({ route: 'add-client', current: 'scan' });
   });
 
   it('changes who installs it from inside the journey, keeping the machine', () => {
@@ -447,7 +447,7 @@ describe('OnboardingProgressStore', () => {
     const client = onDevice('desktop', { storage: undefined });
     expect(client.switchDoer('agent')).toEqual({ ...FRESH_ONBOARDING_PROGRESS });
     client.choose('add-client');
-    expect(client.switchDoer('agent')).toMatchObject({ route: 'add-client', current: 'pair' });
+    expect(client.switchDoer('agent')).toMatchObject({ route: 'add-client', current: 'scan' });
   });
 
   it('walks the agent answer identically on a phone and on a computer', () => {
@@ -480,7 +480,7 @@ describe('OnboardingProgressStore', () => {
 
     store.choose('add-client');
     // `install` belongs to a daemon standing up here; a client never has it.
-    expect(store.goTo('install')).toMatchObject({ route: 'add-client', current: 'pair' });
+    expect(store.goTo('install')).toMatchObject({ route: 'add-client', current: 'scan' });
     expect(store.goTo('scan')).toEqual({
       format: 1,
       stage: 'walk',
@@ -533,8 +533,8 @@ describe('OnboardingProgressStore', () => {
     // `/onboarding?journey=pair`: the person already said which one by clicking the link. A stored place of ANOTHER
     // journey is not theirs.
     const storage = new MemoryStorage(walking('first-time', 'daemon'));
-    const store = onDevice('desktop', { storage, entry: { route: 'add-client', step: 'pair' } });
-    expect(store.snapshot()).toMatchObject({ route: 'add-client', current: 'pair' });
+    const store = onDevice('desktop', { storage, entry: { route: 'add-client', step: 'scan' } });
+    expect(store.snapshot()).toMatchObject({ route: 'add-client', current: 'scan' });
     expect(storage.writes).toEqual([]);
     // Set up a new daemon from a computer asks which computer, as it always did.
     expect(
@@ -660,7 +660,7 @@ describe('startOnboardingPairing', () => {
   it('sends the next visit to the pairing step, past the question, for a browser told to pair again', () => {
     // A pairing that was left, then the machine stopped accepting this browser.
     const storage = new MemoryStorage(
-      stored({ format: 1, stage: 'walk', route: 'add-client', current: 'pair', furthest: 'pair' }),
+      stored({ format: 1, stage: 'walk', route: 'add-client', current: 'scan', furthest: 'scan' }),
     );
     startOnboardingPairing('mobile', storage);
     expect(onDevice('mobile', { storage }).snapshot()).toEqual({

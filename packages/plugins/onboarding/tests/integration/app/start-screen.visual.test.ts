@@ -211,3 +211,19 @@ describe('the other computer page', () => {
     });
   }
 });
+
+describe('the Pair journey', () => {
+  for (const variant of VARIANTS) {
+    it(`${variant.name}: opens on Access's pairing surface with no terminal command first`, async () => {
+      const { tab, close } = await open(variant, 'pair', '[data-onboarding-open-pair]');
+      try {
+        await noOverflow(tab);
+        expect(await tab.locator('text=Copy pair command').count()).toBe(0);
+        expect(await tab.locator('[data-onboarding="setup"]').getAttribute('data-onboarding-screen')).toBe('scan');
+        await shot(tab, variant, 'pair');
+      } finally {
+        await close();
+      }
+    });
+  }
+});

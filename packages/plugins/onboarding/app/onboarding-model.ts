@@ -184,7 +184,7 @@ const JOURNEY: Readonly<Record<OnboardingRouteId, string>> = Object.freeze({
 });
 
 /** Every stage that any journey can put on the glass, in no particular order. */
-export type OnboardingStepId = 'brief' | 'agent-pair' | 'install' | 'daemon' | 'local' | 'elsewhere' | 'pair' | 'scan';
+export type OnboardingStepId = 'brief' | 'agent-pair' | 'install' | 'daemon' | 'local' | 'elsewhere' | 'scan';
 
 export interface OnboardingStep {
   readonly id: OnboardingStepId;
@@ -245,12 +245,6 @@ const STEPS: Readonly<Record<OnboardingStepId, OnboardingStep>> = Object.freeze(
     title: 'Open Ferretry on that computer',
     short: 'Computer',
     summary: 'Agents need a terminal, so the setup continues there.',
-  }),
-  pair: Object.freeze({
-    id: 'pair' as const,
-    title: 'Run fy pair',
-    short: 'Pair',
-    summary: 'On the computer running the daemon, print a fresh code.',
   }),
   scan: Object.freeze({
     id: 'scan' as const,
@@ -363,7 +357,8 @@ const DAEMON_STEPS: readonly OnboardingStepId[] = Object.freeze(['install', 'dae
  * - This computer, by hand: the only list with commands in it.
  */
 export const onboardingRouteSteps = (path: OnboardingPath): readonly OnboardingStepId[] => {
-  if (path.route === 'add-client') return Object.freeze(['pair', 'scan'] as OnboardingStepId[]);
+  // Pair is for somebody who already holds a QR code or link: Access's scan / upload / paste surface, with no command first.
+  if (path.route === 'add-client') return Object.freeze(['scan'] as OnboardingStepId[]);
   if (path.doer === 'agent') return Object.freeze(['brief', 'agent-pair'] as OnboardingStepId[]);
   if (path.target === 'other') return Object.freeze(['elsewhere', 'scan'] as OnboardingStepId[]);
   return DAEMON_STEPS;
@@ -504,7 +499,7 @@ export const handoffTarget = (
         journey: { route: path.route, target: 'this', doer: 'self' },
         step: 'install',
       }
-    : { receiver: 'phone', journey: { route: 'add-client' }, step: 'pair' };
+    : { receiver: 'phone', journey: { route: 'add-client' }, step: 'scan' };
 
 /* ---------- install channels, verbatim from INSTALLATION.md ---------------- */
 

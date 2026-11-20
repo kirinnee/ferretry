@@ -23,7 +23,7 @@ import { ONBOARDING_PAIR_TRIP_KEY } from '../../../app/pair-trip.ts';
 import { interact, mount } from '../support/dom.ts';
 
 interface Listing {
-  readonly daemons: readonly { readonly daemon: string }[];
+  readonly daemons: readonly { readonly daemon: string; readonly deviceId?: string }[];
   readonly selected: string | null;
 }
 
@@ -275,7 +275,8 @@ describe('S14 the first-run route’s pairing hand-off', () => {
       return seen;
     };
     expect(await screenAt('https://f.invalid/onboarding?journey=pair')).toEqual({
-      screen: 'pair',
+      // Pair opens on Access's scan / upload / paste surface: no terminal command comes first.
+      screen: 'scan',
       route: 'add-client',
     });
     // A computer adding a daemon is asked which computer first, exactly as the start screen's own card would.
@@ -396,7 +397,7 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     });
     await first.unmount();
     // Only a number is kept, beside the place the journey keeps; never a code, an address or an id.
-    expect(localStorage.getItem(ONBOARDING_PAIR_TRIP_KEY)).toBe('0');
+    expect(localStorage.getItem(ONBOARDING_PAIR_TRIP_KEY)).toBe('[]');
     expect(Object.keys(localStorage).sort()).toEqual([ONBOARDING_PROGRESS_KEY, ONBOARDING_PAIR_TRIP_KEY].sort());
     // Access paired a machine, and the document was reloaded in between: a NEW route holds nothing in memory.
     paired.set({ daemons: [{ daemon: 'd1' }], selected: 'd1' });
@@ -406,6 +407,77 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     // The trip is over once the step has been on the glass: nothing stays behind in storage.
     expect(localStorage.getItem(ONBOARDING_PAIR_TRIP_KEY)).toBeNull();
     await back.unmount();
+  });
+
+  it('a MACHINE PAIRED AGAIN finishes the step though the number of machines did not change', async () => {
+    const moves: string[] = [];
+    const paired = pairedList({ daemons: [{ daemon: 'd1', deviceId: 'dev-a' }], selected: 'd1' });
+    const OnboardingRoute = Route(paired.ports);
+    const view = await mount(
+      <OnboardingRoute
+        params={{}}
+        navigate={to => moves.push(to)}
+        location={() => 'https://f.invalid/onboarding#fy-setup=f1;route=add-client;step=scan'}
+        chooseDaemon={async () => undefined}
+      />,
+    );
+    // A re-pair replaces the entry (same machine, a fresh device grant) — the count stays at one.
+    await interact(() => paired.set({ daemons: [{ daemon: 'd1', deviceId: 'dev-b' }], selected: 'd1' }));
+    expect(moves).toEqual(['/d/d1/onboarding/setup?phase=client&journey=pair']);
+    await view.unmount();
+  });
+
+  it('a pairing AT THE LIMIT, which evicts another machine, finishes the step though the count stayed the same', async () => {
+    const moves: string[] = [];
+    const full = Array.from({ length: 20 }, (_, index) => ({ daemon: `d${index}`, deviceId: `dev-${index}` }));
+    const paired = pairedList({ daemons: full, selected: 'd0' });
+    const OnboardingRoute = Route(paired.ports);
+    const view = await mount(
+      <OnboardingRoute
+        params={{}}
+        navigate={to => moves.push(to)}
+        location={() => 'https://f.invalid/onboarding#fy-setup=f1;route=add-client;step=scan'}
+        chooseDaemon={async () => undefined}
+      />,
+    );
+    const evicted = [{ daemon: 'd-new', deviceId: 'dev-new' }, ...full.slice(0, 19)];
+    await interact(() => paired.set({ daemons: evicted, selected: 'd-new' }));
+    expect(evicted).toHaveLength(full.length);
+    expect(moves).toEqual(['/d/d-new/onboarding/setup?phase=client&journey=pair']);
+    await view.unmount();
+  });
+
+  it('a re-pair made while the person was on Access’s page is told apart from the machine that was already there', async () => {
+    startOnboardingPairing(detectDeviceKind(navigator));
+    const paired = pairedList({ daemons: [{ daemon: 'd1', deviceId: 'dev-a' }], selected: 'd1' });
+    const moves: string[] = [];
+    const props = { params: {}, location: () => BARE, chooseDaemon: async () => undefined };
+    const Before = Route(paired.ports);
+    const first = await mount(<Before {...props} navigate={() => undefined} />);
+    await interact(() => {
+      first.container.querySelector<HTMLElement>('[data-onboarding-open-pair]')?.click();
+    });
+    await first.unmount();
+    // Same machine, same count, a fresh device grant; and the document was reloaded in between.
+    paired.set({ daemons: [{ daemon: 'd1', deviceId: 'dev-b' }], selected: 'd1' });
+    const After = Route(paired.ports);
+    const back = await mount(<After {...props} navigate={(to: string) => moves.push(to)} />);
+    expect(moves).toEqual(['/d/d1/onboarding/setup?phase=client&journey=pair']);
+    await back.unmount();
+  });
+
+  it('only marks (machine and device ids) are kept across the trip: never a code', async () => {
+    startOnboardingPairing(detectDeviceKind(navigator));
+    const paired = pairedList({ daemons: [{ daemon: 'd1', deviceId: 'dev-a' }], selected: 'd1' });
+    const Before = Route(paired.ports);
+    const first = await mount(
+      <Before params={{}} navigate={() => undefined} location={() => BARE} chooseDaemon={async () => undefined} />,
+    );
+    await interact(() => {
+      first.container.querySelector<HTMLElement>('[data-onboarding-open-pair]')?.click();
+    });
+    await first.unmount();
+    expect(JSON.parse(localStorage.getItem(ONBOARDING_PAIR_TRIP_KEY) ?? 'null')).toEqual(['d1\ndev-a']);
   });
 
   it('c58-07 a kept count that is not a plain number is ignored: the step counts from the list as it is', async () => {

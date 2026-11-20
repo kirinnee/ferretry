@@ -97,13 +97,6 @@ const STATE: Record<OnboardingStepId, DiagramState> = {
     linked: false,
     label: 'The computer that will run your agents has nothing on it yet, so nothing is linked.',
   },
-  pair: {
-    machine: 'showing QR',
-    browser: 'get your phone',
-    lit: { machine: true, browser: false, link: false },
-    linked: false,
-    label: 'On your computer, fy pair is showing a QR code and link. Take that fresh code to this browser next.',
-  },
   scan: {
     machine: 'showing QR',
     browser: 'scanning or pasting',

@@ -90,7 +90,6 @@ import {
   ElsewhereStage,
   InstallStage,
   LocalStage,
-  PairStage,
   ScanStage,
 } from './onboarding-stages.tsx';
 import { OnboardingTargetChooser } from './onboarding-target-chooser.tsx';
@@ -572,8 +571,6 @@ function Stage({
           onAgentInstead={() => onChooseDoer('agent')}
         />
       );
-    case 'pair':
-      return <PairStage write={write} />;
     case 'scan':
       return <ScanStage pairing={pairing} stated={stated} />;
   }
@@ -595,6 +592,5 @@ const ADVANCE_NOTE: Record<OnboardingStepId, string> = {
   daemon: 'Nothing here waits on it. Continue once it reports that it is serving.',
   local: 'This step finishes itself when the daemon answers. Nothing here is waiting on a scan.',
   elsewhere: 'Nothing here waits on that computer. Continue when its daemon is running.',
-  pair: 'This page cannot see your terminal. Continue once the QR code or link is on your computer.',
   scan: 'This step finishes itself when the daemon answers.',
 };

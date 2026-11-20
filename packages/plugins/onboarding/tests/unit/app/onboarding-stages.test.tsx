@@ -27,7 +27,6 @@ import {
   DaemonStage,
   ElsewhereStage,
   InstallStage,
-  PairStage,
   ScanStage,
 } from '../../../app/onboarding-stages.tsx';
 import { interact, mount, must } from '../support/dom.ts';
@@ -314,17 +313,6 @@ describe('the daemon stage', () => {
     expect(aside.open).toBe(false);
     expect(aside.textContent).toContain(DAEMON_STATUS_COMMAND);
     expect(aside.textContent).toContain(DAEMON_SERVING_OUTPUT);
-    await view.unmount();
-  });
-});
-
-describe('the pair stage', () => {
-  it('only asks the computer to make a code; scanning is the next stage', async () => {
-    const view = await mount(<PairStage write={async () => {}} />);
-
-    expect(view.container.querySelector('details')).toBeNull();
-    expect(view.container.textContent).toContain('computer where the daemon is running');
-    expect(view.container.querySelector('[data-onboarding-pairing]')).toBeNull();
     await view.unmount();
   });
 });

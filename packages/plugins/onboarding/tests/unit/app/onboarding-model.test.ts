@@ -274,8 +274,8 @@ describe('the steps each set of answers walks', () => {
 
   it('gives a reader who already has a daemon nothing to install', () => {
     for (const device of ['desktop', 'mobile'] as const) {
-      expect(onboardingRouteSteps(client(device))).toEqual(['pair', 'scan']);
-      expect(onboardingStepCount(client(device))).toBe(2);
+      expect(onboardingRouteSteps(client(device))).toEqual(['scan']);
+      expect(onboardingStepCount(client(device))).toBe(1);
     }
   });
 
@@ -309,7 +309,7 @@ describe('the steps each set of answers walks', () => {
     expect(firstOnboardingStep(here())).toBe('install');
     expect(firstOnboardingStep(away())).toBe('elsewhere');
     expect(firstOnboardingStep(away('desktop', 'add-daemon'))).toBe('elsewhere');
-    expect(firstOnboardingStep(client())).toBe('pair');
+    expect(firstOnboardingStep(client())).toBe('scan');
     expect(firstOnboardingStep(here('add-daemon'))).toBe('install');
   });
 
@@ -332,7 +332,7 @@ describe('the steps each set of answers walks', () => {
     expect(nextOnboardingStep(away(), 'elsewhere')).toBe('scan');
     expect(previousOnboardingStep(here(), 'local')).toBe('daemon');
     expect(previousOnboardingStep(here(), 'daemon')).toBe('install');
-    expect(previousOnboardingStep(client(), 'pair')).toBe('pair');
+    expect(previousOnboardingStep(client(), 'scan')).toBe('scan');
     expect(furthestOnboardingStep(here(), 'daemon', 'local')).toBe('local');
     expect(furthestOnboardingStep(here(), 'local', 'install')).toBe('local');
   });
@@ -412,12 +412,12 @@ describe('handing the setup to the other device', () => {
     expect(handoffTarget(here())).toEqual({
       receiver: 'phone',
       journey: { route: 'add-client' },
-      step: 'pair',
+      step: 'scan',
     });
     expect(handoffTarget(client())).toEqual({
       receiver: 'phone',
       journey: { route: 'add-client' },
-      step: 'pair',
+      step: 'scan',
     });
   });
 

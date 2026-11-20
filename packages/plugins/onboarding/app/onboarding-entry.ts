@@ -29,7 +29,7 @@ export const entryFromHref = (href: string): SetupHandoff | undefined => {
   if (word === null || !Object.hasOwn(JOURNEY_WORDS, word)) return undefined;
   const route = JOURNEY_WORDS[word];
   if (route === undefined) return undefined;
-  return { route, step: route === 'add-client' ? 'pair' : 'install' };
+  return { route, step: route === 'add-client' ? 'scan' : 'install' };
 };
 
 /**

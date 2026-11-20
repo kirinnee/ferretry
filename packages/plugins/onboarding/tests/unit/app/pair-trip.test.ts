@@ -2,7 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import {
   browserPairTripStorage,
   clearPairTrip,
+  hasNewPairing,
   ONBOARDING_PAIR_TRIP_KEY,
+  pairingMark,
+  pairingMarks,
   type PairTripStorage,
   readPairTrip,
   rememberPairTrip,
@@ -31,44 +34,80 @@ const refusing: PairTripStorage = {
   },
 };
 
-describe('the pairing trip’s kept count', () => {
-  it('keeps one whole number under its own key and reads it back', () => {
+describe('the pairing trip’s kept marks', () => {
+  it('keeps one short list of marks under its own key and reads it back', () => {
     const storage = memory();
-    rememberPairTrip(2, storage);
-    expect([...storage.held]).toEqual([[ONBOARDING_PAIR_TRIP_KEY, '2']]);
-    expect(readPairTrip(storage)).toBe(2);
-    rememberPairTrip(0, storage);
-    expect(readPairTrip(storage)).toBe(0);
+    const marks = pairingMarks([
+      { daemon: 'd1', deviceId: 'dev-a' },
+      { daemon: 'd2', deviceId: 'dev-b' },
+    ]);
+    rememberPairTrip(marks, storage);
+    expect([...storage.held.keys()]).toEqual([ONBOARDING_PAIR_TRIP_KEY]);
+    expect(readPairTrip(storage)).toEqual(marks);
+    rememberPairTrip([], storage);
+    expect(readPairTrip(storage)).toEqual([]);
   });
 
-  it('refuses to keep anything that is not a whole, non-negative count', () => {
+  it('refuses to keep a list that is too long or holds an oversized mark', () => {
     const storage = memory();
-    for (const bad of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) rememberPairTrip(bad, storage);
+    rememberPairTrip(
+      Array.from({ length: 41 }, (_, index) => `d${index}`),
+      storage,
+    );
+    rememberPairTrip(['x'.repeat(301)], storage);
     expect(storage.held.size).toBe(0);
   });
 
-  it('reads anything but a plain whole number as nothing, so a code or a tampered value never counts', () => {
+  it('reads anything but a short list of strings as nothing, so a code or a tampered value never counts', () => {
     const storage = memory();
-    for (const bad of ['', '-1', '1.5', '1e3', ' 2', '2 ', 'abc', 'd1;code=123456', '1234567', '0x10']) {
+    const tooMany = JSON.stringify(Array.from({ length: 41 }, (_, index) => `d${index}`));
+    for (const bad of [
+      '',
+      '2',
+      'abc',
+      'd1;code=123456',
+      '{"a":1}',
+      '[1,2]',
+      '["a",1]',
+      tooMany,
+      '["' + 'x'.repeat(301) + '"]',
+    ]) {
       storage.held.set(ONBOARDING_PAIR_TRIP_KEY, bad);
       expect(readPairTrip(storage)).toBeUndefined();
     }
     expect(readPairTrip(memory())).toBeUndefined();
   });
 
+  it('tells a new pairing from one already held: a new machine, the same machine paired AGAIN, or one that took another’s place', () => {
+    const before = [
+      { daemon: 'd1', deviceId: 'dev-a' },
+      { daemon: 'd2', deviceId: 'dev-b' },
+    ];
+    const known = new Set(pairingMarks(before));
+    expect(hasNewPairing(before, known)).toBe(false);
+    expect(hasNewPairing([], known)).toBe(false);
+    // A new machine.
+    expect(hasNewPairing([...before, { daemon: 'd3', deviceId: 'dev-c' }], known)).toBe(true);
+    // A re-pair replaces the entry: the same count, the same machine, a fresh device grant.
+    expect(hasNewPairing([{ daemon: 'd1', deviceId: 'dev-z' }, before[1]!], known)).toBe(true);
+    // At the limit a pairing evicts another: the same count again.
+    expect(hasNewPairing([before[0]!, { daemon: 'd9', deviceId: 'dev-q' }], known)).toBe(true);
+    expect(pairingMark({ daemon: 'd1' })).not.toBe(pairingMark({ daemon: 'd1', deviceId: 'dev-a' }));
+  });
+
   it('forgets the trip once it is over', () => {
     const storage = memory();
-    rememberPairTrip(1, storage);
+    rememberPairTrip(['d1'], storage);
     clearPairTrip(storage);
     expect(storage.held.size).toBe(0);
     expect(readPairTrip(storage)).toBeUndefined();
   });
 
-  it('is never a failure where storage is absent or refuses: memory still holds the count', () => {
-    expect(() => rememberPairTrip(1, undefined)).not.toThrow();
+  it('is never a failure where storage is absent or refuses: memory still holds the marks', () => {
+    expect(() => rememberPairTrip(['d1'], undefined)).not.toThrow();
     expect(() => clearPairTrip(undefined)).not.toThrow();
     expect(readPairTrip(undefined)).toBeUndefined();
-    expect(() => rememberPairTrip(1, refusing)).not.toThrow();
+    expect(() => rememberPairTrip(['d1'], refusing)).not.toThrow();
     expect(() => clearPairTrip(refusing)).not.toThrow();
     expect(readPairTrip(refusing)).toBeUndefined();
   });
