@@ -10,13 +10,17 @@ import { createRoot } from 'react-dom/client';
 import { DEFAULT_LAYOUT } from '../../../../contract/index.ts';
 import manifest from '../../../../manifest.ts';
 import { LayoutSettings } from '../../../../app/features/layout/layout-settings.tsx';
-import { scriptedLayouts } from '../../../support/layouts-app.ts';
+import { listOf, readOf, scriptedLayouts } from '../../../support/layouts-app.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 if (params.get('motion') === 'reduced') document.documentElement.dataset.motion = 'reduced';
 
-const script = scriptedLayouts();
+// Eight layouts (the SelectBox opens a search field above seven), so the chooser's type-to-filter is exercised for real.
+const LAYOUT_IDS = ['default', 'compact', 'focus', 'wide', 'classic', 'sidebar-left', 'sidebar-right', 'minimal'];
+const script = scriptedLayouts(
+  readOf({}, listOf({ layouts: LAYOUT_IDS.map(id => ({ id, origin: 'built-in' as const })) })),
+);
 // What the fake daemon was asked to do, for a test to read (the same writes the verbs make: `use compact`, `theme studio`).
 (window as unknown as { __fyCalls: readonly string[] }).__fyCalls = script.calls;
 

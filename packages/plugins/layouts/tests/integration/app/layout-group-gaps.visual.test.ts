@@ -65,6 +65,7 @@ afterAll(async () => {
 });
 
 const VARIANTS = [
+  { name: '390-light', width: 390, phone: true, scheme: 'light' },
   { name: '390-dark', width: 390, phone: true, scheme: 'dark' },
   { name: '768-dark', width: 768, phone: false, scheme: 'dark' },
   { name: '1280-dark', width: 1_280, phone: false, scheme: 'dark' },
@@ -141,6 +142,17 @@ describe('the layout page groups', () => {
           expect(open?.gap).toBeLessThanOrEqual(12);
         }
         if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${variant.name}-layout-chooser-open.png`) });
+        // Eight layouts: above the auto-search threshold, so the list has a search field; typing narrows it, picking sends one write.
+        const search = tab.locator('[aria-label="Search Layout"]');
+        expect(await search.count(), 'the long list has a search field').toBe(1);
+        const before = await tab.locator('[role="option"]').count();
+        expect(before, 'every fake layout is offered before typing').toBe(8);
+        await search.fill('compact');
+        await tab.waitForFunction(() => document.querySelectorAll('[role="option"]').length === 1);
+        const after = await tab.locator('[role="option"]').allTextContents();
+        expect(after, 'non-matching options disappear').toEqual(['compact']);
+        if (shotsDir !== '')
+          await tab.screenshot({ path: join(shotsDir, `${variant.name}-layout-chooser-filtered.png`) });
         await tab.locator('[role="option"]', { hasText: 'compact' }).click();
         await tab.waitForFunction(() =>
           (window as unknown as { __fyCalls: string[] }).__fyCalls.includes('use compact'),
