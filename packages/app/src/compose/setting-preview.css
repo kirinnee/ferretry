@@ -11,7 +11,7 @@
 .fy-sp {
   --sp-loop: 1400ms;
   background: var(--surface-2);
-  border: var(--stroke-panel) solid var(--border);
+  /* No border of its own: the scene it holds draws its own frame, so a preview is never a box in a box. */
   border-radius: var(--radius-control);
   color: var(--fg);
   contain: layout paint;

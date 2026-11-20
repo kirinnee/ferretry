@@ -116,6 +116,28 @@
   gap: 8px;
   max-width: 34rem;
 }
+.fy-lr-scope-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fy-lr-scope-title {
+  color: var(--fg);
+  font-size: var(--text-cell, 0.8125rem);
+  font-weight: 600;
+}
+/* The same chip the Settings header draws for the other tabs. */
+.fy-lr-scope-chip {
+  border: var(--border-width, 1px) solid var(--border);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  padding: 1px 8px;
+}
+.fy-lr-scope-chip[data-scope='device'] {
+  border-color: var(--accent);
+  color: var(--fg);
+}
 /* A narrow panel: the scope switch is a full-width stack, one option per line, the hint under it. */
 @container (max-width: 519.98px) {
   .fy-lr-scope [data-neo-segmented] {

@@ -127,7 +127,7 @@ describe('Settings › Files, Doctor and Host checks', () => {
               );
             }
             if (view === 'files') {
-              // A file's full path is one line cut with an ellipsis, with the whole of it a hover away.
+              // A file's full path wraps (it is whole on screen, selectable, and in the title).
               const path = await tab.evaluate(() => {
                 const element = document.querySelector<HTMLElement>('[data-config-file-path]');
                 return {
@@ -136,7 +136,7 @@ describe('Settings › Files, Doctor and Host checks', () => {
                 };
               });
               expect(path.title).toContain('/home/demo/.ferretry/config/');
-              if (viewport.phone) expect(path.fits, 'a long path is cut, not scrolled').toBe(false);
+              expect(path.fits, 'a long path wraps, it is not cut').toBe(true);
             }
             if (view === 'editor') {
               // The sheet has finished rising, and Cancel and Save are whole inside the window.

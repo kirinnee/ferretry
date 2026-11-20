@@ -54,6 +54,7 @@ import {
   type TwoFactorKeySummary,
 } from '../../contract/routes/index.ts';
 import { z } from 'zod';
+import { localTimeWords } from './local-time.ts';
 import { quietInit, type ReadMode } from './step-up-refusal.ts';
 import type { AccountsClient, PasskeyWords } from '../shell.tsx';
 
@@ -221,7 +222,7 @@ export function ruleFailureWords(cause: unknown): string {
   }
 }
 
-export const timeWords = (instant: string): string => `${instant.slice(0, 16).replace('T', ' ')} UTC`;
+export const timeWords = (instant: string): string => localTimeWords(instant);
 
 /** "30 days", "1 day". */
 export const daysWords = (days: number): string => `${String(days)} ${days === 1 ? 'day' : 'days'}`;

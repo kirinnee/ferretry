@@ -193,11 +193,12 @@ describe('<EngineCard>', () => {
 });
 
 describe('the engine card stylesheet', () => {
-  it('fixes the height at 168 px and clips, so a long name or line cannot make a card taller', () => {
-    expect(CSS).toContain('--fy-engine-height: 168px;');
+  it('fixes the height at 186 px (a two-line sentence) and wraps its words, so no name or line is cut off', () => {
+    expect(CSS).toContain('--fy-engine-height: 186px;');
     expect(CSS).toMatch(/\.fy-engine-card \{[^}]*height: var\(--fy-engine-height\);[^}]*overflow: hidden;/s);
-    expect(CSS).toMatch(/\.fy-engine-name \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
-    expect(CSS).toMatch(/\.fy-engine-line \{[^}]*height: 18px;[^}]*text-overflow: ellipsis;/s);
+    expect(CSS).toMatch(/\.fy-engine-name \{[^}]*overflow-wrap: anywhere;/s);
+    expect(CSS).not.toMatch(/\.fy-engine-(name|line) \{[^}]*text-overflow: ellipsis;/s);
+    expect(CSS).toMatch(/\.fy-engine-line \{[^}]*min-height: 36px;[^}]*overflow-wrap: anywhere;/s);
   });
 
   it('puts at most three cards in a row, at least 240 px each, and stacks them on a phone', () => {

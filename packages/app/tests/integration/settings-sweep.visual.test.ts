@@ -7,6 +7,8 @@
  *  - no single text control stretches across a wide panel (a field row stops at 28rem);
  *  - the panel has exactly ONE visible h1/h2 heading and it IS the tab's title (the shell draws it for every tab; a tab draws none),
  *    and the title is drawn once: no other visible text in the panel (a heading of any level, a lone line) says the same words.
+ *  - no text is cut off (an ellipsis or a hidden overflow) without its full text in a `title`;
+ *  - no placeholder syntax (`<field>`) in visible text.
  * Set `FY_SETTINGS_SWEEP_SHOTS_DIR` to keep `<viewport>-<plugin>-<tab>.png`, and `FY_SETTINGS_SWEEP_REPORT` for the JSON report.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
@@ -109,7 +111,7 @@ const measure = () => {
         // A control is one component; only its own wrapper counts below.
       } else if (
         boxed(el) &&
-        !el.matches('input, select, textarea, summary, code, pre, kbd, img, svg') &&
+        !el.matches('summary, code, pre, kbd, img, svg, .kt-badge') &&
         !getComputedStyle(el).display.startsWith('inline')
       ) {
         const parent = el.parentElement?.closest('*');
@@ -171,7 +173,29 @@ const measure = () => {
       const box = el.getBoundingClientRect();
       if (box.right > window.innerWidth + 1) clipped.push(describe(el));
     }
+  // Text that is cut off with no way to read it: an ellipsis, or content wider than a box that hides it, unless the full
+  // text is in a `title` (on it or on what holds it).
+  const truncated: string[] = [];
+  const placeholders: string[] = [];
+  if (root !== null) {
+    for (const el of root.querySelectorAll('*')) {
+      if (!visible(el) || el.closest('svg') !== null) continue;
+      const style = getComputedStyle(el);
+      const hides = ['hidden', 'clip'].includes(style.overflowX);
+      // Only text that really is cut: it has to be wider than its box. A screen-reader-only span is 1px by design.
+      const cut =
+        hides &&
+        el.scrollWidth > el.clientWidth + 1 &&
+        (el.textContent ?? '').trim() !== '' &&
+        (style.textOverflow === 'ellipsis' || el.children.length === 0);
+      if (cut && !el.matches('.sr-only') && el.closest('[title], .sr-only') === null) truncated.push(describe(el));
+    }
+    // Placeholder syntax (`<field> <value>`) shown as if it were a real command.
+    for (const match of (root.innerText ?? '').matchAll(/<[A-Za-z][\w -]*>/gu)) placeholders.push(match[0]);
+  }
   return {
+    truncated: truncated.slice(0, 6),
+    placeholders: placeholders.slice(0, 6),
     text: (root?.innerText ?? '').replace(/\s+/g, ' ').slice(0, 160),
     panelWidth: Math.round(rootBox?.width ?? 0),
     panelHeight: Math.round(rootBox?.height ?? 0),
@@ -220,6 +244,9 @@ describe('Settings sweep: every tab, real app half, real shell', () => {
             label,
           ]);
           expect(measured.said, `${plugin}/${tab}: the title is said again by`).toEqual([]);
+          expect(measured.truncated, 'text cut off with no title to read it').toEqual([]);
+          expect(measured.nested, 'a bordered box inside a bordered box').toEqual([]);
+          expect(measured.placeholders, 'placeholder syntax in visible text').toEqual([]);
           expect(problems, 'page errors').toEqual([]);
         } finally {
           await context.close();

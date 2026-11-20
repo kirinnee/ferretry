@@ -36,7 +36,7 @@ export function AccountRow({ account, busy, onRemove }: AccountRowProps) {
           {account.login.slice(0, 1)}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="m-0 truncate text-ui font-semibold text-fg">@{account.login}</p>
+          <p className="m-0 break-all text-ui font-semibold text-fg">@{account.login}</p>
           <p className="m-0 break-words text-meta text-faint">
             <span className="whitespace-nowrap">
               {account.name === undefined || account.name === '' ? 'GitHub' : `${account.name} · GitHub`}

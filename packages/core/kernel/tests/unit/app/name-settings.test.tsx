@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'bun:test';
 import { interact, mount, must } from '@ferretry/app/testing';
 import { createElement } from 'react';
-import { hostFileText, NameSettings, NameSettingsView } from '../../../app/name-settings.tsx';
+import { hostFileText, NameSettings, NameSettingsView, noteOf } from '../../../app/name-settings.tsx';
 import { recordingClient } from '../../support/app-client.ts';
 
 const settle = async (): Promise<void> => {
@@ -57,6 +57,21 @@ const press = async (container: HTMLElement): Promise<void> => {
 };
 
 const field = (container: HTMLElement) => must(container.querySelector<HTMLInputElement>('input'), 'the name field');
+
+describe('the line under the name field', () => {
+  it('says what is showing, and says so in words when the machine has reported no name', () => {
+    expect(noteOf('owner', 'pebox')).toBe('Shown now: pebox. Leave it empty to go back to the host name.');
+    expect(noteOf('hostname', 'pebox-hostname')).toBe(
+      'Using the host name (pebox-hostname). Type a name to replace it.',
+    );
+    for (const source of ['owner', 'hostname'] as const) {
+      const words = noteOf(source, '');
+      expect(words).not.toContain('Shown now: .');
+      expect(words).not.toContain('()');
+      expect(words.length).toBeGreaterThan(20);
+    }
+  });
+});
 
 describe('Settings › General › Name', () => {
   it('shows the host name as the placeholder when no name was set', async () => {

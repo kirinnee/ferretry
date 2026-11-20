@@ -98,7 +98,7 @@ export const security = {
   },
   source: 'document',
   mayWiden: false,
-  widenCommand: 'fy daemon security set <field> <value>',
+  widenCommand: 'fy daemon security set',
 };
 
 const record = (minutesAgo: number, event: string, actor: unknown, outcome = 'succeeded', detail: object = {}) => ({

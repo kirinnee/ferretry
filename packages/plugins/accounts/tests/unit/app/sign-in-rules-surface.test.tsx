@@ -7,6 +7,7 @@ import {
   SIGN_IN_RULE_TERMINAL_RESIDUAL,
   SIGN_IN_RULE_TOTP_WARNING,
 } from '../../../contract/routes/index.ts';
+import { localTimeWords } from '../../../app/lib/local-time.ts';
 import { mount, must } from '../../support/app/dom.ts';
 import { click, settle } from '../../support/app/dom-form.ts';
 import { type RuleWorld, refused, ruleClient } from '../../support/app/sign-in-rule-client.ts';
@@ -60,7 +61,7 @@ describe('a machine’s staged rule', () => {
       expect(red.querySelector('[data-rule-row]')).toBeNull();
       expect(q(mounted.container, '[data-rule-checked] summary').textContent).toBe('How it’s checked');
       expect(q(mounted.container, '[data-rule-machine]').textContent).toBe(
-        'A machine asked for this rule at 2026-11-01 09:55 UTC',
+        `A machine asked for this rule at ${localTimeWords('2026-11-01T09:55:00Z')}`,
       );
     } finally {
       await mounted.unmount();

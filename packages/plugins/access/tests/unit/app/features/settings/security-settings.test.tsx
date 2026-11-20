@@ -35,7 +35,7 @@ const SECURITY_VIEW = {
   },
   source: 'defaults',
   mayWiden: false,
-  widenCommand: 'fy daemon security set <field> <value>',
+  widenCommand: 'fy daemon security set',
 };
 
 const CONFIRM = {

@@ -29,6 +29,7 @@ import {
   RUNS_WHAT_IT_READS_WARNING,
 } from '../../contract/routes/index.ts';
 import type { AccountsClient, PasskeyWords } from '../shell.tsx';
+import { localTimeWords } from './local-time.ts';
 import { quietInit, type ReadMode } from './step-up-refusal.ts';
 
 export type CopyClient = AccountsClient;
@@ -194,7 +195,7 @@ export { pasteFromWords as fromWords, pasteToWords as toWords } from '../../cont
 export function ruleLimits(rule: PasteRule): string {
   const count = rule.remaining === undefined ? 'any number of pastes' : `${String(rule.remaining)} more`;
   const scope = rule.sessionId === undefined ? 'any ferret' : 'one ferret';
-  const until = rule.expiresAt === undefined ? 'no end' : `until ${rule.expiresAt.slice(0, 16).replace('T', ' ')} UTC`;
+  const until = rule.expiresAt === undefined ? 'no end' : `until ${localTimeWords(rule.expiresAt)}`;
   return `${count} · ${scope} · ${until} · used ${String(rule.used)}`;
 }
 

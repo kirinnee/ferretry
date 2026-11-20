@@ -92,7 +92,7 @@ export function WardenDialogRulesView(props: WardenDialogRulesViewProps) {
   const [ferret, setFerret] = useState('');
   const waiting = view.pending.filter(each => each.ferret !== proposal?.ferret);
   return (
-    <section className="kt-panel p-panel" aria-label="Screens Ferretry clears">
+    <section className="kt-panel kt-panel--flat py-panel" aria-label="Screens Ferretry clears">
       <h3 className="m-0 text-row font-semibold text-fg">Screens Ferretry clears by itself</h3>
       <p className="mb-2 mt-1 text-cell leading-base text-muted">
         When a ferret stops on one of these, Ferretry presses the way out at once: a row that declines, or Esc. It never

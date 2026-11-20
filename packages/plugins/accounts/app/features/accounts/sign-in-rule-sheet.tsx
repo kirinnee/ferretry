@@ -36,6 +36,7 @@ import {
   surfaceOf,
   ticksProblem,
 } from '../../lib/sign-in-rules.ts';
+import { localizeUtcStamps } from '../../lib/local-time.ts';
 import { SignInRuleWords } from './sign-in-rule-words.tsx';
 
 export type RuleSheetPhase =
@@ -206,7 +207,7 @@ export function SignInRuleSheet(props: SignInRuleSheetProps) {
               .map(row => (
                 <Fragment key={row.label}>
                   <dt className="m-0">{row.label}</dt>
-                  <dd className="m-0 min-w-0 break-words">{row.value}</dd>
+                  <dd className="m-0 min-w-0 break-words">{localizeUtcStamps(row.value)}</dd>
                 </Fragment>
               ))}
           </dl>

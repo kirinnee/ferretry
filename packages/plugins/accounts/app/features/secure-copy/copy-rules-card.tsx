@@ -23,6 +23,7 @@ import {
 import './secure-copy.css';
 import { Plus, ShieldCheck, Trash2, TriangleAlert } from '../../shell.tsx';
 import { type FormEvent, type ReactNode, useId, useState } from 'react';
+import { localizeUtcStamps } from '../../lib/local-time.ts';
 import { fromWords, ruleFromForm, ruleLimits, toWords } from '../../lib/secure-copy.ts';
 
 /** A write reports whether it took, so the form clears only when the daemon accepted it. */
@@ -343,7 +344,7 @@ function WaitingRule({
         {staged.rows.map((row, index) => (
           <div key={`${String(index)} ${row.label}`} className="contents">
             <dt className="text-faint">{row.label}</dt>
-            <dd className="m-0 min-w-0 break-words text-fg">{row.value}</dd>
+            <dd className="m-0 min-w-0 break-words text-fg">{localizeUtcStamps(row.value)}</dd>
           </div>
         ))}
       </dl>

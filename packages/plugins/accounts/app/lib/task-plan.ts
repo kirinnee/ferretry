@@ -31,6 +31,7 @@ import {
   taskPlanSelection,
 } from '../../contract/routes/index.ts';
 import { z } from 'zod';
+import { localTimeWords } from './local-time.ts';
 import { quietInit, type ReadMode } from './step-up-refusal.ts';
 import type { AccountsClient, PasskeyWords } from '../shell.tsx';
 
@@ -193,7 +194,7 @@ export const usesWords = (count: number): string => (count === 1 ? '1 use' : `${
 /** "2 of 3 uses left". */
 export const usesLeftWords = (left: number, asked: number): string => `${String(left)} of ${usesWords(asked)} left`;
 
-export const timeWords = (instant: string): string => `${instant.slice(0, 16).replace('T', ' ')} UTC`;
+export const timeWords = (instant: string): string => localTimeWords(instant);
 
 /** "14:02" in the owner's own clock. */
 export const clockWords = (instant: string): string => {
