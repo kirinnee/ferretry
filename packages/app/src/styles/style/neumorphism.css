@@ -1,0 +1,171 @@
+/* ============================================================================
+   NEUMORPHISM (soft UI). Everything is moulded from ONE ground: a control, a card and a menu share the page's own
+   colour and stand out only by a pair of soft shadows, a dark one falling away from a light source at the top left and a
+   light one catching it. A pressed or selected thing is the same form pushed IN (the two shadows swap to inset). Large
+   radii, a rounded sans (Nunito, OFL), calm slow motion.
+
+   The shadows are assembled from the PALETTE's roles, so any palette wears it: the ground is the palette's `--ground`
+   (`--surface-2` in dark, where `--ground` is the recessed black), the dark side is its ink (or its scrim in dark), the
+   light side its raised surface (or its ink at a whisper in dark). This style carries no colour value.
+
+   READABLE ON PURPOSE (not `loud`): a soft shadow alone is the classic neumorphism failure, a control you cannot find. So
+   every control keeps its 1px control edge (`--border-strong`, >=3:1) and the keyboard ring stays the hard 2px ring.
+   ============================================================================ */
+:root[data-style='neumorphism'],
+[data-swatch][data-style='neumorphism'] {
+  --font-display: 'Nunito', ui-rounded, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-body: 'Nunito', ui-rounded, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'JetBrains Mono', 'SFMono-Regular', 'Cascadia Mono', Menlo, Consolas, monospace;
+  --weight-normal: 500;
+  --weight-medium: 600;
+  --weight-strong: 700;
+  --weight-display: 800;
+  --label-transform: none;
+  --label-size: 11.5px;
+  --label-weight: 700;
+  --tracking-label: 0.02em;
+  --tracking-display: 0;
+  --text-xs: 11.5px;
+  --text-sm: 12.5px;
+  --text-base: 13.5px;
+  --text-md: 14.5px;
+  --text-lg: 16px;
+  --text-input-desktop: 14px;
+  --font-size-base: 14px;
+  --leading-base: 1.55;
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-control: 14px;
+  --radius-input: 14px;
+  --radius-tab: 14px;
+  --radius-badge: 10px;
+  --stroke-control: 1px;
+  --stroke-panel: 1px;
+  --control-h-desktop: 34px;
+  --control-h-sm-desktop: 28px;
+  --row-min-h-desktop: 40px;
+  --pad-control-x: 14px;
+  --pad-panel: 16px;
+  --pad-row-y: 8px;
+  --pad-cell-x: 12px;
+  --gap-xs: 6px;
+  --gap-sm: 8px;
+  --gap-md: 14px;
+  --press-translate: 0px;
+  --select-pop: 0.97;
+  --motion-fast: 160ms;
+  --motion-base: 260ms;
+  --motion-slow: 420ms;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-emphasis: cubic-bezier(0.34, 1.2, 0.5, 1);
+  --focus-width: 2px;
+  --focus-offset: 3px;
+  /* One ground for the page, the raised things and the menus. */
+  --panel-bg: color-mix(in srgb, var(--ground) 78%, var(--surface));
+  /* `.kt-panel` lists `--shadow-panel, --rule-inset`: a bare `none` there voids the whole declaration, so the panel would lose its shadow. */
+  --rule-inset: 0 0 0 0 transparent;
+  --body-wash: linear-gradient(var(--panel-bg), var(--panel-bg));
+  --bubble-stroke: 0px;
+  --bubble-radius: 20px 20px 8px 20px;
+  --card-tail-radius: 8px;
+  --shadow-control: var(--shadow-sm);
+  --shadow-panel: var(--shadow-md);
+  --shadow-popover: var(--shadow-lg);
+  --menu-radius: 18px;
+  --menu-item-h: 38px;
+  --hover-fill: color-mix(in srgb, var(--fg) 4%, transparent);
+  --select-fill: transparent;
+}
+
+/* ---- the light side and the dark side ---- */
+:root[data-style='neumorphism'][data-mode='light'],
+[data-swatch][data-style='neumorphism'][data-mode='light'] {
+  --shadow-sm: 3px 3px 7px color-mix(in srgb, var(--fg) 17%, transparent), -3px -3px 7px var(--surface);
+  --shadow-md: 6px 6px 14px color-mix(in srgb, var(--fg) 17%, transparent), -6px -6px 14px var(--surface);
+  --shadow-lg: 10px 10px 26px color-mix(in srgb, var(--fg) 20%, transparent), -10px -10px 26px var(--surface);
+  --shadow-active: inset 3px 3px 7px color-mix(in srgb, var(--fg) 17%, transparent), inset -3px -3px 7px var(--surface);
+  --nav-sel-shadow:
+    inset 2px 2px 5px color-mix(in srgb, var(--fg) 17%, transparent), inset -2px -2px 5px var(--surface);
+}
+
+:root[data-style='neumorphism'][data-mode='dark'],
+[data-swatch][data-style='neumorphism'][data-mode='dark'] {
+  --panel-bg: color-mix(in srgb, var(--surface) 50%, var(--surface-2));
+  --shadow-sm: 3px 3px 7px var(--scrim), -3px -3px 7px color-mix(in srgb, var(--fg) 7%, transparent);
+  --shadow-md: 6px 6px 14px var(--scrim), -6px -6px 14px color-mix(in srgb, var(--fg) 7%, transparent);
+  --shadow-lg: 10px 10px 26px var(--scrim), -10px -10px 26px color-mix(in srgb, var(--fg) 8%, transparent);
+  --shadow-active: inset 3px 3px 7px var(--scrim), inset -3px -3px 7px color-mix(in srgb, var(--fg) 7%, transparent);
+  --nav-sel-shadow: inset 2px 2px 5px var(--scrim), inset -2px -2px 5px color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+/* ---- component touches: every raised thing is cut from the one ground; a field is dug into it ---- */
+:root[data-style='neumorphism']
+:is(.kt-panel, .kt-popover, .kt-groupcard, .fy-cc__card, .kt-tabbar, .bg-bg, .bg-surface),
+:root[data-style='neumorphism'] .kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger']) {
+  background: var(--panel-bg);
+}
+/* On a ground this close to every surface the control edge is the one thing that says "this is a control", so it is a step
+   stronger than the palette's own control edge (still the palette's hue). Hover and keyboard focus keep their own colours. */
+:root[data-style='neumorphism']
+:is(
+  .kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger']),
+  .kt-input,
+  .kt-popover,
+  .fy-cc__card:not([data-selected='true'])
+):not(:hover, :focus-visible) {
+  border-color: color-mix(in srgb, var(--border-strong) 80%, var(--fg));
+}
+:root[data-style='neumorphism'] .kt-btn[data-variant='danger'] {
+  background: var(--panel-bg);
+}
+/* Hover lifts a control; holding it presses it IN. The hover rule is more specific than the shared `.kt-btn:active`, so it
+   must step aside while the button is pressed or a held button looks hovered (the press translate is 0 here: the inset
+   shadow IS the press). */
+:root[data-style='neumorphism'] .kt-btn:hover:not(:disabled, :active) {
+  box-shadow: var(--shadow-md);
+}
+:root[data-style='neumorphism'] .kt-btn:active:not(:disabled) {
+  box-shadow: var(--shadow-active);
+}
+/* A raised card is cut from the page's own ground, so its fill alone (and the palette's weak `--border`) cannot separate it
+   from the page (1.0-1.1:1). Its edge is the palette's own ink pulled toward the ground, a step stronger than a control's,
+   so the card keeps its soft shadows AND a boundary of at least 3:1 on every palette and mode (the theme matrix measures it). */
+:root[data-style='neumorphism'] .kt-panel {
+  border-color: color-mix(in srgb, var(--fg) 55%, var(--ground));
+}
+:root[data-style='neumorphism'] :is(.kt-input, .kt-composer) {
+  background: var(--panel-bg);
+  box-shadow: var(--shadow-active);
+}
+/* The keyboard ring on a field is a real ring (a 1px border change alone is not a ring), drawn clear of the soft edge. */
+:root[data-style='neumorphism'] .kt-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+:root[data-style='neumorphism'] .fy-cc__card[data-selected='true'] {
+  background: var(--panel-bg);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-active);
+}
+:root[data-style='neumorphism'] .fy-cc__card {
+  box-shadow: var(--shadow-sm);
+}
+:root[data-style='neumorphism'] :is(.kt-tab, .kt-navpill)[aria-selected='true'] {
+  box-shadow: var(--nav-sel-shadow);
+  background: var(--panel-bg);
+}
+
+@media (max-width: 640px) {
+  :root[data-style='neumorphism'] {
+    --text-2xs: 12.5px;
+    --text-xs: 14px;
+    --text-sm: 15px;
+    --text-base: 16px;
+    --text-md: 17px;
+    --text-lg: 19px;
+    --text-display: 1.5rem;
+    --label-size: 12.5px;
+  }
+}

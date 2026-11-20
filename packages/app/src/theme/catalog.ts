@@ -57,6 +57,11 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
     label: 'Glassmorphism',
     blurb: 'Frosted translucent panels over a soft colour field, big radii, light edges.',
   },
+  {
+    id: 'neumorphism',
+    label: 'Neumorphism',
+    blurb: 'Soft forms moulded from one ground: paired light and dark shadows, pressed in when chosen.',
+  },
 ] as const);
 
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([

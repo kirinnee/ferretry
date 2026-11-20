@@ -69,7 +69,7 @@ createRoot(document.getElementById('root') as HTMLElement).render(
       defaultValue="Ferret name"
       style={{ maxWidth: '100%' }}
     />
-    <Card style={{ margin: '12px 0' }}>
+    <Card data-spec="panel-edge" style={{ margin: '12px 0' }}>
       <PanelHeader>
         <span data-spec="text">Card header</span>
       </PanelHeader>
