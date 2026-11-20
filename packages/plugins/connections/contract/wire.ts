@@ -175,6 +175,17 @@ export const TunnelStatusViewSchema = z.strictObject({
 });
 export type TunnelStatusView = z.infer<typeof TunnelStatusViewSchema>;
 
+/**
+ * `PUT /v1/tunnel` answers **202** with this when the change loosens how the machine is reached and so waits for the
+ * owner's confirmation: `held` is the kernel's own sentences, and `view` is the tunnel as it still is (nothing changed).
+ * A change that took effect answers 200 with the bare view, as before.
+ */
+export const TunnelHeldAnswerSchema = z.strictObject({
+  held: z.array(z.string()),
+  view: TunnelStatusViewSchema,
+});
+export type TunnelHeldAnswer = z.infer<typeof TunnelHeldAnswerSchema>;
+
 export const TunnelChangeSchema = z.strictObject({ enabled: z.boolean() });
 export type TunnelChange = z.infer<typeof TunnelChangeSchema>;
 

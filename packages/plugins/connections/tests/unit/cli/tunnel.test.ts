@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { PluginClient, VerbInvocation } from '@ferretry/kernel/manifest';
 import cli from '../../../cli/index.ts';
-import { TUNNEL_OFF_SENTENCE } from '../../../contract/index.ts';
+import { TUNNEL_HELD_WORDS, TUNNEL_OFF_SENTENCE } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
 
 const view = { enabled: false, explicit: false, state: 'off', tunnelUrl: null, sentence: TUNNEL_OFF_SENTENCE };
@@ -42,6 +42,18 @@ describe('tunnel CLI', () => {
       { route: 'PUT /v1/tunnel', init: { body: { enabled: false } } },
     ]);
     expect(lines.every(line => line.endsWith('Applied without a restart.'))).toBe(true);
+  });
+  it('a switch held for the owner is said as a pending approval with the way to approve it, and is not a failure', async () => {
+    const lines: string[] = [];
+    const client = {
+      call: async () => ({ held: ['the tunnel is turned on'], view }),
+      subscribe: () => () => undefined,
+    } as PluginClient;
+    const verbs = realVerbs(client, { out: text => lines.push(text), err: () => undefined, isTty: false });
+    expect(await verbs['tunnel on']!({ args: [], options: {} })).toBe(0);
+    expect(lines.join('\n')).toContain(TUNNEL_HELD_WORDS);
+    expect(lines.join('\n')).toContain('fy config confirm connections.yaml');
+    expect(lines.join('\n')).not.toContain('Applied without a restart.');
   });
   it('V-0248 status renders the parsed live view as text or JSON', async () => {
     const { verbs, lines } = harness();

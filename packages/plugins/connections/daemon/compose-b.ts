@@ -147,6 +147,14 @@ export function composeOtherConnections(input: ComposeInput): OtherConnections {
     device: verifiedWebRtcDevice,
     onStop: stop => kernel.lifecycle.onStop(stop),
   });
+  // A "turn on" is held for the owner, so the document can change later without this switch having been asked: the owner
+  // confirming it (Settings › Files, or fy config confirm) puts the held edit in effect, and the running tunnel follows.
+  const settingDef = manifest.data.config[0] as ConfigFileDef<ConnectionsConfig>;
+  const stopWatching = kernel.config.watch(settingDef, () => {
+    const enabled = kernel.config.file(settingDef)?.tunnel?.enabled ?? false;
+    void built.adoptTunnel(enabled).catch(() => kernel.log.warn('the tunnel could not follow its confirmed setting'));
+  });
+  kernel.lifecycle.onStop(async () => stopWatching());
   const tunnelStatus = (): TunnelStatusView => built.tunnel.view();
   const tunnel: Carrier = {
     start: async (carrierLayer: SessionLayer) => {

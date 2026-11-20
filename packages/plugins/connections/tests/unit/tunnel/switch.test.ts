@@ -63,6 +63,8 @@ interface World {
   readonly writes: DaemonTunnelCarrierEntry[];
   /** When set, the store's next write throws this. */
   failWrite: Error | undefined;
+  /** When set, the store's next write is held for the owner with these sentences. */
+  holdWrite: readonly string[] | undefined;
   /** When true, every carrier settles as soon as it is made. */
   autoSettle: boolean;
 }
@@ -70,7 +72,7 @@ interface World {
 let world: World;
 
 beforeEach(() => {
-  world = { log: [], carriers: [], writes: [], failWrite: undefined, autoSettle: true };
+  world = { log: [], carriers: [], writes: [], failWrite: undefined, holdWrite: undefined, autoSettle: true };
 });
 
 function subject(entry: DaemonTunnelCarrierEntry = OFF, explicit = false): TunnelCarrierSwitch {
@@ -80,12 +82,24 @@ function subject(entry: DaemonTunnelCarrierEntry = OFF, explicit = false): Tunne
     store: {
       write: async written => {
         if (world.failWrite !== undefined) throw world.failWrite;
+        if (world.holdWrite !== undefined) {
+          world.log.push(`held ${written.enabled ? 'on' : 'off'}`);
+          return { kind: 'held', sentences: world.holdWrite };
+        }
         world.writes.push(written);
         world.log.push(`write ${written.enabled ? 'on' : 'off'}`);
+        return undefined;
       },
     },
   });
 }
+
+/** A switch that took effect: its view. A held one fails the test, so only the held tests look at one. */
+const applied = async (tunnel: TunnelCarrierSwitch, enabled: boolean) => {
+  const result = await tunnel.change(enabled);
+  if (result.kind !== 'applied') throw new Error('the change was held for the owner');
+  return result.view;
+};
 
 const factory = (entry: DaemonTunnelCarrierEntry, explicit: boolean): FakeCarrier => {
   const carrier = new FakeCarrier(entry, explicit, world.log);
@@ -120,7 +134,7 @@ describe('the tunnel switch', () => {
     tunnel.start(factory);
 
     // Act
-    const view = await tunnel.change(true);
+    const view = await applied(tunnel, true);
 
     // Assert
     should(world.writes).deepEqual([ON]);
@@ -142,7 +156,7 @@ describe('the tunnel switch', () => {
 
     // Act
     let answered = false;
-    const pending = tunnel.change(false).then(view => {
+    const pending = applied(tunnel, false).then(view => {
       answered = true;
       return view;
     });
@@ -168,7 +182,7 @@ describe('the tunnel switch', () => {
     tunnel.start(factory);
 
     // Act
-    await tunnel.change(true);
+    await applied(tunnel, true);
 
     // Assert
     should(world.log).deepEqual(['start on (implied)', 'write on']);
@@ -187,7 +201,7 @@ describe('the tunnel switch', () => {
     };
 
     // Act
-    const view = await tunnel.change(true);
+    const view = await applied(tunnel, true);
 
     // Assert
     should(world.log).deepEqual(['start on', 'write on', 'stop on', 'start on']);
@@ -200,7 +214,7 @@ describe('the tunnel switch', () => {
     tunnel.start(factory);
 
     // Act
-    await tunnel.change(false);
+    await applied(tunnel, false);
 
     // Assert
     should(world.log).deepEqual(['start off', 'write off', 'stop off', 'start off', 'idle off']);
@@ -212,7 +226,7 @@ describe('the tunnel switch', () => {
     tunnel.start(factory);
 
     // Act
-    const [on, off] = await Promise.all([tunnel.change(true), tunnel.change(false)]);
+    const [on, off] = await Promise.all([applied(tunnel, true), applied(tunnel, false)]);
 
     // Assert
     should(world.log).deepEqual([
@@ -236,9 +250,9 @@ describe('the tunnel switch', () => {
     world.failWrite = new Error('the configuration document could not be written');
 
     // Act
-    const refused = await tunnel.change(true).catch((error: unknown) => error);
+    const refused = await applied(tunnel, true).catch((error: unknown) => error);
     world.failWrite = undefined;
-    const view = await tunnel.change(true);
+    const view = await applied(tunnel, true);
 
     // Assert
     should(refused).be.instanceOf(Error);
@@ -247,12 +261,66 @@ describe('the tunnel switch', () => {
     should(view.enabled).be.true();
   });
 
+  it('should answer a change the owner has to approve as held, and leave the carrier and the view alone', async () => {
+    // Arrange
+    const tunnel = subject(OFF, false);
+    tunnel.start(factory);
+    world.holdWrite = ['the tunnel is turned on'];
+
+    // Act
+    const result = await tunnel.change(true);
+
+    // Assert — not a failure: it resolves, says why, and nothing about the running tunnel moved.
+    should(result.kind).equal('held');
+    should(result.kind === 'held' ? result.sentences : []).deepEqual(['the tunnel is turned on']);
+    should(result.view.enabled).be.false();
+    should(tunnel.view().enabled).be.false();
+    should(world.log).deepEqual(['start off (implied)', 'held on']);
+    should(world.carriers.length).equal(1);
+  });
+
+  it('should follow the document when the owner confirms a held "on", without writing it again', async () => {
+    // Arrange
+    const tunnel = subject(OFF, false);
+    tunnel.start(factory);
+    world.holdWrite = ['the tunnel is turned on'];
+    await tunnel.change(true);
+    world.holdWrite = undefined;
+
+    // Act
+    await tunnel.adopt(true);
+    await tunnel.adopt(true);
+
+    // Assert
+    should(world.writes).deepEqual([]);
+    should(world.log).deepEqual(['start off (implied)', 'held on', 'stop off', 'start on']);
+    should(tunnel.view()).deepEqual({
+      enabled: true,
+      explicit: true,
+      state: 'provisioning',
+      tunnelUrl: null,
+      sentence: 'Tunnel: on — asking the hosted service for a tunnel',
+    });
+  });
+
+  it('should leave a running carrier alone when the document already agrees with it', async () => {
+    // Arrange
+    const tunnel = subject(ON, true);
+    tunnel.start(factory);
+
+    // Act
+    await tunnel.adopt(true);
+
+    // Assert
+    should(world.log).deepEqual(['start on']);
+  });
+
   it('should record a change asked before the boot started it, and start what the document says by then', async () => {
     // Arrange
     const tunnel = subject(OFF, false);
 
     // Act
-    const early = await tunnel.change(true);
+    const early = await applied(tunnel, true);
     tunnel.start(factory);
 
     // Assert
@@ -273,7 +341,7 @@ describe('the tunnel switch', () => {
 
     // Act
     await tunnel.stop();
-    const view = await tunnel.change(false);
+    const view = await applied(tunnel, false);
     tunnel.start(factory);
 
     // Assert

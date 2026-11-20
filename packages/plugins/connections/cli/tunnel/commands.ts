@@ -1,6 +1,6 @@
 import type { PluginClient, TerminalIo, VerbHandler } from '@ferretry/kernel/manifest';
-import { TunnelStatusViewSchema } from '../../contract/index.ts';
-import { renderTunnelChange } from './render.ts';
+import { TunnelHeldAnswerSchema, TunnelStatusViewSchema } from '../../contract/index.ts';
+import { renderTunnelChange, renderTunnelHeld } from './render.ts';
 
 /** The declared tunnel verbs, bound to the kernel's per-daemon client. */
 export function buildTunnelVerbs(
@@ -10,8 +10,14 @@ export function buildTunnelVerbs(
   const change =
     (enabled: boolean): VerbHandler =>
     async () => {
-      const view = TunnelStatusViewSchema.parse(await client.call('PUT /v1/tunnel', { body: { enabled } }));
-      io.out(renderTunnelChange(view));
+      const answer = await client.call('PUT /v1/tunnel', { body: { enabled } });
+      // A change that loosens how the machine is reached waits for the owner: said as a pending approval, not a failure.
+      const held = TunnelHeldAnswerSchema.safeParse(answer);
+      if (held.success) {
+        io.out(renderTunnelHeld(held.data));
+        return 0;
+      }
+      io.out(renderTunnelChange(TunnelStatusViewSchema.parse(answer)));
       return 0;
     };
   const status: VerbHandler = async ({ options }) => {

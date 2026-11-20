@@ -17,6 +17,7 @@
 import {
   TUNNEL_PATH,
   TunnelChangeSchema,
+  TunnelHeldAnswerSchema,
   type TunnelStatusView,
   TunnelStatusViewSchema,
   TunnelOriginSchema,
@@ -45,6 +46,14 @@ export type TunnelSwitchState =
   { readonly kind: 'unknown' } | { readonly kind: 'known'; readonly view: TunnelStatusView };
 
 const UNKNOWN: TunnelSwitchState = Object.freeze({ kind: 'unknown' });
+
+/**
+ * What a switch asked for came to: it took effect, or it waits for the owner's approval (the daemon answered 202 and
+ * the view is the tunnel as it still is). A held switch is not a failure and does not reject.
+ */
+export type TunnelSetResult =
+  | { readonly kind: 'applied'; readonly view: TunnelStatusView }
+  | { readonly kind: 'held'; readonly view: TunnelStatusView; readonly sentences: readonly string[] };
 
 /** One carrier-control request, as `DaemonCarrierRouter.control` sends it. */
 export type TunnelControl = (daemon: DaemonConnection, url: string, init: RequestInit) => Promise<Response>;
@@ -103,18 +112,28 @@ export class TunnelSwitchStore {
     }
   }
 
-  /** Switches the machine's tunnel. Rejects with the daemon's refusal — its own sentence — when it gives one. */
-  async set(daemon: DaemonConnection, enabled: boolean): Promise<TunnelStatusView> {
+  /**
+   * Switches the machine's tunnel. Turning it on can wait for the owner's approval, which resolves `held`. Rejects with
+   * the daemon's refusal — its own sentence — when it gives one.
+   */
+  async set(daemon: DaemonConnection, enabled: boolean): Promise<TunnelSetResult> {
     const response = await this.#control(daemon, TUNNEL_PATH, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(TunnelChangeSchema.parse({ enabled })),
     });
     if (!response.ok) throw await refusal(response);
-    const view = TunnelStatusViewSchema.safeParse(await response.json().catch(() => undefined));
+    const body = await response.json().catch(() => undefined);
+    if (response.status === 202) {
+      const held = TunnelHeldAnswerSchema.safeParse(body);
+      if (!held.success) throw new TunnelResponseError(502, 'the daemon answered the tunnel switch with no status');
+      this.#known(daemon, held.data.view);
+      return { kind: 'held', view: held.data.view, sentences: held.data.held };
+    }
+    const view = TunnelStatusViewSchema.safeParse(body);
     if (!view.success) throw new TunnelResponseError(502, 'the daemon answered the tunnel switch with no status');
     this.#known(daemon, view.data);
-    return view.data;
+    return { kind: 'applied', view: view.data };
   }
 
   #known(daemon: DaemonConnection, view: TunnelStatusView): TunnelSwitchState {

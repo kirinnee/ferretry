@@ -87,14 +87,34 @@ describe('the tunnel switch store', () => {
     const observed: TunnelStatusView[] = [];
     const store = new TunnelSwitchStore({ control, observed: (_daemon, view) => observed.push(view) });
 
-    const view = await store.set(daemon, true);
+    const result = await store.set(daemon, true);
 
-    should(view).eql(UP);
+    should(result).eql({ kind: 'applied', view: UP });
     should(store.state(daemon.daemonId)).eql({ kind: 'known', view: UP });
     should(observed).eql([UP]);
     should(asked[0]?.init.method).equal('PUT');
     should(asked[0]?.init.body).equal('{"enabled":true}');
     should(new Headers(asked[0]?.init.headers).get('content-type')).equal('application/json');
+  });
+
+  it('should treat a 202 as held for the owner: not a rejection, the view kept, the sentences handed on', async () => {
+    const { control } = scripted(Response.json({ held: ['the tunnel is turned on'], view: OFF }, { status: 202 }));
+    const store = new TunnelSwitchStore({ control });
+
+    const result = await store.set(daemon, true);
+
+    should(result).eql({ kind: 'held', view: OFF, sentences: ['the tunnel is turned on'] });
+    should(store.state(daemon.daemonId)).eql({ kind: 'known', view: OFF });
+  });
+
+  it('should reject a 202 that is not a held answer', async () => {
+    const { control } = scripted(Response.json({ nothing: true }, { status: 202 }));
+    const store = new TunnelSwitchStore({ control });
+
+    const refused = await store.set(daemon, true).catch((reason: unknown) => reason);
+
+    should(refused).be.instanceOf(DaemonResponseError);
+    should((refused as DaemonResponseError).status).equal(502);
   });
 
   it('should reject with the daemon’s own sentence and code, and change nothing', async () => {

@@ -88,7 +88,10 @@ export function createConnectionB(deps: {
     'GET /v1/tunnel': async () => jsonResponse(TunnelStatusViewSchema.parse(tunnel.view())),
     'PUT /v1/tunnel': async ({ request }) => {
       const change = await parseBody(request, TunnelChangeSchema);
-      return jsonResponse(TunnelStatusViewSchema.parse(await tunnel.change(change.enabled)));
+      const result = await tunnel.change(change.enabled);
+      const view = TunnelStatusViewSchema.parse(result.view);
+      // A held change is an answer, not a failure: 202, the sentences, and the tunnel as it still is.
+      return result.kind === 'held' ? jsonResponse({ held: result.sentences, view }, 202) : jsonResponse(view);
     },
     'POST /v1/webrtc/offer': async call => {
       const device = deps.device(call);
@@ -108,6 +111,8 @@ export function createConnectionB(deps: {
     tunnel,
     webrtc,
     routes,
+    /** The document's tunnel setting changed beside the switch (the owner confirmed a held edit): follow it. */
+    adoptTunnel: (enabled: boolean) => tunnel.adopt(enabled),
     startTunnel: () => tunnel.start((entry, explicit) => new TunnelCarrier({ ...deps.tunnel, entry, explicit })),
   };
 }

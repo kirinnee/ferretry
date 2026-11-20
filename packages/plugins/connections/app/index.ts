@@ -269,7 +269,11 @@ export function buildConnectionsApp(
           tunnel:
             tunnelSwitch === undefined
               ? undefined
-              : tunnelSwitchOffer(switches[daemonId], () => tunnelSwitch.set({ daemonId }, true)),
+              : tunnelSwitchOffer(
+                  switches[daemonId],
+                  () => tunnelSwitch.set({ daemonId }, true),
+                  () => tunnelSwitch.refresh({ daemonId }),
+                ),
         },
       }),
     );
