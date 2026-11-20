@@ -1,5 +1,5 @@
 /**
- * THE THEME MATRIX: every STYLE x every PALETTE x both MODES x two WIDTHS (6 x 17 x 2 x 2 = 408 combinations today), measured
+ * THE THEME MATRIX: every STYLE x every PALETTE x both MODES x two WIDTHS (16 x 8 x 2 x 2 = 512 combinations today), measured
  * in a real browser on one fixed specimen page (`fixtures/theme-matrix-scene.tsx`). The catalogue is the list (`STYLES`,
  * `PALETTES`), so a style or palette added to it is measured with no edit here, and a new one that cannot be read is a red
  * row the day it lands.
@@ -123,7 +123,8 @@ const DEVICE_FACES: readonly string[] = [
  * and says why; the identity of a miss is (width, style, palette, mode, check, what).
  *
  * The rows are by CHECK: gradient (probe 2), radius (3), size (4), distinct and spinner (5, measured on the style's own
- * default palette, light, at 1280), sidebar (6), ringclip (7), and text on the High contrast palette (probe 1).
+ * default palette, at both widths in both modes, with the real motion), sidebar (6), ringclip (7), and text on the High
+ * contrast palette (probe 1).
  */
 const WHY = {
   gradient:
@@ -147,42 +148,6 @@ const BOTH_MODES = ['light', 'dark'] as const;
 const EVERY_PALETTE = ['studio', 'geist', 'mission', 'neo', 'hacker', 'vintage', 'vaporwave', 'contrast'] as const;
 
 const KNOWN: readonly Known[] = [
-  {
-    viewports: ['1280'],
-    styles: ['antiposh'],
-    palettes: ['vintage'],
-    modes: ['light'],
-    check: 'distinct',
-    what: 'differs from Studio on fewer than 6 of 8 components',
-    why: WHY.distinct,
-  },
-  {
-    viewports: ['1280'],
-    styles: ['briefing', 'swiss'],
-    palettes: ['geist'],
-    modes: ['light'],
-    check: 'distinct',
-    what: 'differs from Studio on fewer than 6 of 8 components',
-    why: WHY.distinct,
-  },
-  {
-    viewports: ['1280'],
-    styles: ['exaggerated'],
-    palettes: ['studio'],
-    modes: ['light'],
-    check: 'distinct',
-    what: 'differs from Studio on fewer than 6 of 8 components',
-    why: WHY.distinct,
-  },
-  {
-    viewports: ['1280'],
-    styles: ['raw'],
-    palettes: ['neo'],
-    modes: ['light'],
-    check: 'distinct',
-    what: 'differs from Studio on fewer than 6 of 8 components',
-    why: WHY.distinct,
-  },
   {
     viewports: BOTH_WIDTHS,
     styles: ['lucid'],
@@ -361,32 +326,6 @@ const KNOWN: readonly Known[] = [
     why: WHY.sidebar,
   },
   {
-    viewports: BOTH_WIDTHS,
-    styles: [
-      'antiposh',
-      'briefing',
-      'exaggerated',
-      'geist',
-      'genz',
-      'glass',
-      'hud',
-      'lucid',
-      'mission',
-      'neo',
-      'neumorphism',
-      'pixel',
-      'raw',
-      'retro',
-      'studio',
-      'swiss',
-    ],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'sidebar',
-    what: 'Selected nav item',
-    why: WHY.sidebar,
-  },
-  {
     viewports: ['1280'],
     styles: ['exaggerated'],
     palettes: EVERY_PALETTE,
@@ -396,64 +335,55 @@ const KNOWN: readonly Known[] = [
     why: WHY.size,
   },
   {
-    viewports: ['1280'],
+    viewports: BOTH_WIDTHS,
     styles: ['antiposh'],
     palettes: ['vintage'],
-    modes: ['light'],
+    modes: BOTH_MODES,
     check: 'spinner',
     what: 'spinner shared with another style',
     why: WHY.spinner,
   },
   {
-    viewports: ['1280'],
+    viewports: BOTH_WIDTHS,
     styles: ['briefing', 'retro', 'swiss'],
     palettes: ['geist'],
-    modes: ['light'],
+    modes: BOTH_MODES,
     check: 'spinner',
     what: 'spinner shared with another style',
     why: WHY.spinner,
   },
   {
-    viewports: ['1280'],
+    viewports: BOTH_WIDTHS,
     styles: ['exaggerated', 'glass', 'lucid', 'neumorphism', 'studio'],
     palettes: ['studio'],
-    modes: ['light'],
+    modes: BOTH_MODES,
     check: 'spinner',
     what: 'spinner shared with another style',
     why: WHY.spinner,
   },
   {
-    viewports: ['1280'],
+    viewports: BOTH_WIDTHS,
     styles: ['genz'],
     palettes: ['vaporwave'],
-    modes: ['light'],
+    modes: BOTH_MODES,
     check: 'spinner',
     what: 'spinner shared with another style',
     why: WHY.spinner,
   },
   {
-    viewports: ['1280'],
+    viewports: BOTH_WIDTHS,
     styles: ['hud'],
     palettes: ['mission'],
-    modes: ['light'],
+    modes: BOTH_MODES,
     check: 'spinner',
     what: 'spinner shared with another style',
     why: WHY.spinner,
   },
   {
-    viewports: ['1280'],
-    styles: ['neo', 'raw'],
+    viewports: BOTH_WIDTHS,
+    styles: ['raw'],
     palettes: ['neo'],
-    modes: ['light'],
-    check: 'spinner',
-    what: 'spinner shared with another style',
-    why: WHY.spinner,
-  },
-  {
-    viewports: ['1280'],
-    styles: ['pixel'],
-    palettes: ['hacker'],
-    modes: ['light'],
+    modes: BOTH_MODES,
     check: 'spinner',
     what: 'spinner shared with another style',
     why: WHY.spinner,
@@ -675,7 +605,7 @@ const BACKDROP = `(async ({ png, runs }) => {
         if (value < worst) worst = value;
       }
     }
-    if (worst !== Number.POSITIVE_INFINITY) out.push({ what: run.what, ratio: worst, px: run.px, weight: run.weight });
+    if (worst !== Number.POSITIVE_INFINITY) out.push({ what: run.what, ratio: worst, px: run.px, weight: run.weight, muted: run.muted });
   }
   return out;
 })`;
@@ -788,10 +718,28 @@ const FACTS = `(() => {
     const found = layers.filter((layer) => /gradient\\(/.test(layer));
     if (found.length > 0) gradients.set(what, [...(gradients.get(what) ?? []), ...found]);
   };
-  // The body's FIRST background layer is the texture pattern (a style's grid, dots or lines, drawn in the palette's ink);
-  // the layers after it (the wash and the mesh) are the colour fields the owner does not want.
-  add('Page', splitTop(getComputedStyle(document.body).backgroundImage).slice(1));
+  // The only gradient the body may keep is a VERIFIED T2 tile: a layer that is exactly one of the pattern tokens
+  // (--bg-pattern-grid, -dots, -lines or -scan, read through a probe element so the string is the browser's own), repeated, in a
+  // tile-sized box. Position proves nothing: a full-page, non-repeating wash in the first layer is still a wash.
+  const tiles = new Set();
+  for (const kind of ['grid', 'dots', 'lines', 'scan']) {
+    const probe = document.createElement('i');
+    probe.style.backgroundImage = 'var(--bg-pattern-' + kind + ')';
+    document.body.append(probe);
+    tiles.add(getComputedStyle(probe).backgroundImage);
+    probe.remove();
+  }
+  const bodyStyle = getComputedStyle(document.body);
+  const sizes = splitTop(bodyStyle.backgroundSize);
+  const repeats = splitTop(bodyStyle.backgroundRepeat);
+  const isTile = (layer, index) => {
+    const size = /^(\\d*\\.?\\d+)px (\\d*\\.?\\d+)px$/.exec(sizes[index % sizes.length]);
+    return tiles.has(layer) && repeats[index % repeats.length] === 'repeat' && size !== null && size[1] === size[2] && Number.parseFloat(size[1]) <= 128;
+  };
+  add('Page', splitTop(bodyStyle.backgroundImage).filter((layer, index) => !isTile(layer, index)));
   add('Page overlay', splitTop(getComputedStyle(document.body, '::before').backgroundImage));
+  // The grain is a layer of its own (body::after): a gradient substituted for the noise is a gradient background.
+  add('Page grain', splitTop(getComputedStyle(document.body, '::after').backgroundImage));
   for (const [selector, what] of [['.kt-panel', 'Card'], ['.kt-panel__header', 'Panel header'], ['.kt-btn', 'Button'], ['.kt-input', 'Field'], ['.fy-cc__card', 'Choice card'], ['.kt-badge', 'Badge'], ['[role="menu"]', 'Menu']])
     for (const el of document.querySelectorAll(selector)) add(what, splitTop(getComputedStyle(el).backgroundImage));
   const radius = (el) => {
@@ -842,11 +790,43 @@ const FACTS = `(() => {
 })()`;
 
 /**
+ * The hypermedia probe's node: what the REAL renderer drew for the specimen's `FyRenderBlock` (the picture, its stage and its
+ * viewport), as computed values (r11 T4's seam: `fy-render.css` consumes the `--hm-*` slots for every block it draws). The
+ * declared tokens are NOT read: a token that moves with the renderer unchanged draws nothing and earns nothing. Radius,
+ * stroke, shadow and the fill's alpha are the parts a "shaped" and a "flat" style differ on. Nothing here is a size or an
+ * inherited font: those move with the page's layout and type, not with the renderer.
+ */
+const HYPERMEDIA_NODE = `(() => {
+  const alphaOf = (value) => {
+    const slash = /\\/\\s*([\\d.]+%?)\\s*\\)\$/.exec(value);
+    if (slash) return slash[1];
+    const comma = /^rgba?\\([^)]*,\\s*([\\d.]+)\\s*\\)\$/.exec(value);
+    return comma ? comma[1] : '1';
+  };
+  return ['.fy-render-stage', '.fy-render-viewport', '.fy-render-pan', '.fy-render-image'].map((selector) => {
+    const el = document.querySelector('[data-probe="hypermedia"] ' + selector);
+    if (!el) return selector + ':absent';
+    const cs = getComputedStyle(el);
+    return selector + ':' + [cs.borderTopLeftRadius, cs.borderTopWidth, cs.borderTopStyle, cs.boxShadow.replace(/(rgba?|color)\\([^()]*\\)/g, 'C'), alphaOf(cs.backgroundColor), cs.filter, cs.clipPath, cs.outlineStyle].join('/');
+  }).join('|');
+})()`;
+
+/**
  * One style's COMPONENT SIGNATURES, read in the page: for 8 probes (button, field, card, markdown h1, markdown code block,
  * spinner, hypermedia slots, background) the computed non-colour properties joined into one string. Colours are stripped, so
  * two styles that differ only in colour have the same signature (the owner: "alot of the style are color too").
  */
-const SIGNATURE = `(() => {
+const SIGNATURE = `(async () => {
+  // A stable clock: every transition is finished (its end value is the style's), every animation is held at the first frame
+  // of its active phase. The declared durations, names and keyframes are untouched, so the signature reads the real motion.
+  for (const animation of document.getAnimations()) {
+    if (animation instanceof CSSTransition) animation.finish();
+    else {
+      animation.pause();
+      animation.currentTime = animation.effect?.getComputedTiming().delay ?? 0;
+    }
+  }
+  await new Promise((done) => requestAnimationFrame(() => done(undefined)));
   const plain = (value) => value.replace(/(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\\([^()]*\\)/g, 'C');
   const read = (el, props, pseudo) => {
     if (!el) return 'missing';
@@ -857,11 +837,17 @@ const SIGNATURE = `(() => {
   const q = (selector) => document.querySelector(selector);
   const root = getComputedStyle(document.documentElement);
   const spinner = q('[data-probe="spinner"] svg');
-  const parts = spinner ? ['.fy-spinner-ring', '.fy-spinner-track', '.fy-spinner-arc', '.fy-spinner__p1', '.fy-spinner__p2', '.fy-spinner__p3', '.fy-spinner__p4'].map((selector) => {
-    const el = spinner.querySelector(selector) || spinner;
+  // EVERY rendered element of the spinner (the svg and all it draws), in document order: a part a style adds is a part measured.
+  const parts = spinner ? [spinner, ...spinner.querySelectorAll('*')].map((el) => {
+    const selector = el.tagName.toLowerCase() + '.' + (el.getAttribute('class') ?? '').trim().replace(/ +/g, '.');
     const cs = getComputedStyle(el);
     const box = el.getBoundingClientRect();
-    return selector + ':' + [cs.display, cs.visibility, cs.animationName, cs.animationDuration, cs.animationTimingFunction, cs.animationIterationCount, cs.rx, cs.transform, cs.opacity, cs.strokeDasharray, Math.round(box.width * 10), Math.round(box.height * 10)].join('/');
+    const motion = el.getAnimations().map((animation) => {
+      const timing = animation.effect.getComputedTiming();
+      const frames = animation.effect.getKeyframes().map((frame) => Object.entries(frame).filter(([key]) => key !== 'computedOffset' && key !== 'composite').map(([key, value]) => key + ':' + value).join(',')).join('>');
+      return [animation.animationName ?? animation.transitionProperty, timing.duration, timing.iterations, timing.easing, frames].join('~');
+    });
+    return selector + ':' + [cs.display, cs.visibility, cs.animationName, cs.animationDuration, cs.animationTimingFunction, cs.animationIterationCount, cs.rx, cs.transform, cs.opacity, cs.strokeDasharray, Math.round(box.width * 10), Math.round(box.height * 10), motion.join('+')].join('/');
   }) : [];
   return {
     button: read(q('.kt-btn:not([data-variant])'), [...frame, 'textTransform', 'letterSpacing', 'fontWeight', 'fontFamily', 'fontSize', 'height', 'transitionDuration']),
@@ -870,7 +856,7 @@ const SIGNATURE = `(() => {
     mdH1: read(q('.md h1'), ['fontSize', 'fontWeight', 'textTransform', 'letterSpacing', 'borderBottomWidth', 'borderBottomStyle', 'fontFamily', 'fontStyle', 'textDecorationLine']),
     mdCode: read(q('.md pre'), [...frame, 'padding', 'fontFamily', 'fontSize']),
     spinner: plain((spinner ? getComputedStyle(spinner).animationName + '|' : '') + parts.join('|')),
-    hypermedia: ['shape', 'radius', 'stroke', 'font', 'node-fill-alpha', 'edge', 'header'].map((name) => name + '=' + root.getPropertyValue('--hm-' + name).trim()).join(';'),
+    hypermedia: ${HYPERMEDIA_NODE},
     background: [plain(getComputedStyle(document.body).backgroundImage), root.getPropertyValue('--bg-pattern-size').trim(), read(document.body, ['backgroundSize', 'backgroundAttachment'], '::before'), read(document.body, ['backgroundImage', 'opacity', 'mixBlendMode'], '::after'), read(document.body, ['backgroundImage', 'opacity'], '::before')].join('|'),
   };
 })()`;
@@ -894,7 +880,16 @@ interface FocusRead {
   readonly unknown?: true;
 }
 
-const open = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 'dark') => {
+/**
+ * `motion: 'frozen'` (the matrix) kills every transition and animation so a colour is read settled. `'real'` (the style
+ * signature) leaves them as the style declares them: a transition duration and a spinner animation are the things the signature
+ * measures, so they must not be overridden; the signature freezes the clock itself, at the first frame, when it reads.
+ */
+const open = async (
+  viewport: (typeof VIEWPORTS)[number],
+  mode: 'light' | 'dark',
+  motion: 'frozen' | 'real' = 'frozen',
+) => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     colorScheme: mode,
@@ -913,7 +908,8 @@ const open = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 'dark'
     });
   await tab.goto(`${origin}/`);
   // A colour read mid-transition is neither the old theme nor the new one: measure the settled state.
-  await tab.addStyleTag({ content: '*,*::before,*::after{transition:none!important;animation:none!important}' });
+  if (motion === 'frozen')
+    await tab.addStyleTag({ content: '*,*::before,*::after{transition:none!important;animation:none!important}' });
   await tab.waitForSelector('[role="menu"] [role="menuitem"]');
   await tab.evaluate(HELPERS);
   await tab.evaluate(`window.__m.backdrop = ${BACKDROP}; window.__m.scan = ${STATIC};`);
@@ -994,7 +990,7 @@ const apply = async (tab: Page, style: string, palette: string, mode: string): P
 const settle = async (tab: Page, style: string, palette: string, mode: string): Promise<Measured> => {
   await apply(tab, style, palette, mode);
   const { runs, wanted } = (await tab.evaluate(PREPARE)) as {
-    runs: { family: string; weight: number; px: number; style: string; text: string; what: string }[];
+    runs: { family: string; weight: number; px: number; style: string; text: string; what: string; muted: boolean }[];
     wanted: string[];
   };
   // The backdrop: the page with its glyphs hidden, read pixel by pixel behind every text run.
@@ -1074,46 +1070,49 @@ for (const viewport of VIEWPORTS)
     });
 
 /**
- * Probe 5, across styles: each style on ITS default palette, light, at 1280 (the signatures carry no colour, so the palette
- * only has to be the same one the owner gets). Every style differs from Studio on >= 6 of 8 components and owns its spinner.
+ * Probe 5, across styles: each style on ITS default palette, at BOTH widths in BOTH modes (the signatures carry no colour, so the
+ * palette only has to be the same one the owner gets), read with the style's real motion. Every style differs from Studio on
+ * >= 6 of 8 components and owns its spinner, in every variant: a phone or a dark mode that falls back to Studio is a miss.
  */
-const signatures = new Map<string, Signature>();
 let contractMeasured = 0;
-describe('the style contract at 1280 in light', () => {
-  let session: Awaited<ReturnType<typeof open>>;
-  beforeAll(async () => {
-    session = await open(VIEWPORTS[0], 'light');
-    for (const style of STYLES) {
-      await apply(session.tab, style.id, style.defaultPalette, 'light');
-      signatures.set(style.id, (await session.tab.evaluate(SIGNATURE)) as Signature);
-    }
-  }, 120_000);
-  afterAll(async () => {
-    await session.close();
-  });
-  for (const style of STYLES)
-    it(`${style.id} differs from Studio on its components and has a spinner of its own`, () => {
-      contractMeasured += 1;
-      const where = { viewport: '1280', style: style.id, palette: style.defaultPalette, mode: 'light' };
-      const hard: Miss[] = [];
-      for (const miss of contractMisses(style.id, signatures)) {
-        const { verdict, key } = verdictOf(style.loud === true, where, miss, pins);
-        const row: Row = { ...where, miss };
-        if (verdict === 'known') {
-          usedPins.add(key);
-          known.push(row);
-        } else {
-          failures.push(row);
-          hard.push(miss);
+for (const viewport of VIEWPORTS)
+  for (const mode of MODES)
+    describe(`the style contract at ${viewport.name} in ${mode}`, () => {
+      const signatures = new Map<string, Signature>();
+      let session: Awaited<ReturnType<typeof open>>;
+      beforeAll(async () => {
+        session = await open(viewport, mode, 'real');
+        for (const style of STYLES) {
+          await apply(session.tab, style.id, style.defaultPalette, mode);
+          signatures.set(style.id, (await session.tab.evaluate(SIGNATURE)) as Signature);
         }
-        observed.add(key);
-      }
-      expect(
-        hard.map(miss => `${miss.check}: ${miss.what} ${miss.got} (need ${miss.need})`),
-        `${style.id} contract`,
-      ).toEqual([]);
+      }, 120_000);
+      afterAll(async () => {
+        await session.close();
+      });
+      for (const style of STYLES)
+        it(`${style.id} differs from Studio on its components and has a spinner of its own`, () => {
+          contractMeasured += 1;
+          const where = { viewport: viewport.name, style: style.id, palette: style.defaultPalette, mode };
+          const hard: Miss[] = [];
+          for (const miss of contractMisses(style.id, signatures)) {
+            const { verdict, key } = verdictOf(style.loud === true, where, miss, pins);
+            const row: Row = { ...where, miss };
+            if (verdict === 'known') {
+              usedPins.add(key);
+              known.push(row);
+            } else {
+              failures.push(row);
+              hard.push(miss);
+            }
+            observed.add(key);
+          }
+          expect(
+            hard.map(miss => `${miss.check}: ${miss.what} ${miss.got} (need ${miss.need})`),
+            `${style.id} contract at ${viewport.name} in ${mode}`,
+          ).toEqual([]);
+        });
     });
-});
 
 /**
  * The positive control for probe 7: the same walk, with every focus ring drawn INSIDE its control (a negative offset as deep as
@@ -1138,10 +1137,162 @@ describe('the ring-clip probe can pass', () => {
   });
 });
 
+/**
+ * r11 T14, the review of PR 2226: each assert below is a real-browser measurement that FAILED on the probe it replaces.
+ */
+describe('the probes read the real page', () => {
+  const washed = (tab: Page, css: string) => tab.addStyleTag({ content: css });
+  const gone = async (style: Awaited<ReturnType<Page['addStyleTag']>>) =>
+    await style.evaluate(node => (node as Element).remove());
+
+  it('the gradient probe tells a verified T2 tile from a wash on any layer, and reads the grain too', async () => {
+    const session = await open(VIEWPORTS[0], 'light');
+    try {
+      await apply(session.tab, 'studio', 'studio', 'light');
+      const read = async () => ((await session.tab.evaluate(FACTS)) as Facts).gradients.map(row => row.what).sort();
+      expect(await read(), 'Studio paints no gradient').toEqual([]);
+      // A verified tile: one of the pattern tokens, repeating, tile-sized.
+      const tile = await washed(session.tab, ':root { --bg-pattern: var(--bg-pattern-grid) !important; }');
+      expect(await read(), 'the T2 grid tile is the texture, not a wash').toEqual([]);
+      // The SAME grid image, stretched over the page and not repeated, is a wash wearing a tile's name.
+      const stretched = await washed(
+        session.tab,
+        'body { background-size: 100% 100% !important; background-repeat: no-repeat !important; }',
+      );
+      expect(await read(), 'a full-page, non-repeating grid is a wash').toEqual(['Page']);
+      await gone(stretched);
+      await gone(tile);
+      // A full-page radial wash as the ONLY layer (Chromium accepted it in the first position).
+      const wash = await washed(
+        session.tab,
+        'body { background-image: radial-gradient(circle at 50% 0%, #f00, #00f) !important; background-size: 100% 100% !important; background-repeat: no-repeat !important; }',
+      );
+      expect(await read(), 'a wash as the only layer').toEqual(['Page']);
+      await gone(wash);
+      // A gradient substituted into the grain layer.
+      const grain = await washed(
+        session.tab,
+        'body::after { background-image: linear-gradient(#f00, #00f) !important; }',
+      );
+      expect(await read(), 'a gradient grain').toEqual(['Page grain']);
+      await gone(grain);
+      expect(await read(), 'nothing left behind').toEqual([]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  /** A grey whose contrast against the page background is as near `target` as 8-bit greys allow. */
+  const greyAt = async (tab: Page, target: number) =>
+    (await tab.evaluate((want: number) => {
+      const m = (window as unknown as { __m: Record<string, (...args: unknown[]) => never> }).__m;
+      const back = m.paint!(m.behind!(document.querySelector('p[data-spec~="text"]'), true)) as number[];
+      let best = 0;
+      let gap = Number.POSITIVE_INFINITY;
+      for (let g = 0; g <= 255; g += 1) {
+        const got = m.ratio!([g, g, g], back) as number;
+        if (Math.abs(got - want) < gap) {
+          gap = Math.abs(got - want);
+          best = g;
+        }
+      }
+      return best;
+    }, target)) as number;
+
+  it('the High contrast floors hold end to end: muted text 4.5:1, body text 7:1', async () => {
+    const session = await open(VIEWPORTS[0], 'light');
+    try {
+      await apply(session.tab, 'studio', 'contrast', 'light');
+      const muted = 'Muted text is the quiet line under a title.'.slice(0, 28);
+      const body =
+        'Body text sits on the page: a sentence long enough to wrap on a phone, so the measure is real.'.slice(0, 28);
+      const textMisses = async (grey: number) => {
+        const ink = await washed(
+          session.tab,
+          `p[data-spec~="text"] { color: rgb(${grey}, ${grey}, ${grey}) !important; }`,
+        );
+        const measured = await settle(session.tab, 'studio', 'contrast', 'light');
+        await gone(ink);
+        const all = misses(measured, { style: 'studio', highContrast: true, wide: true }).filter(
+          miss => miss.check === 'text',
+        );
+        return {
+          mutedRow: measured.text.find(row => row.what === muted),
+          bodyRow: measured.text.find(row => row.what === body),
+          mutedMiss: all.find(miss => miss.what === muted),
+          bodyMiss: all.find(miss => miss.what === body),
+        };
+      };
+      // 5.5:1: over the muted floor (4.5) and under the body floor (7).
+      const mid = await textMisses(await greyAt(session.tab, 5.5));
+      expect(mid.mutedRow?.muted, 'the browser run is flagged muted').toBe(true);
+      expect(mid.bodyRow?.muted === true, 'the body run is not').toBe(false);
+      expect(mid.mutedRow?.ratio ?? 0).toBeGreaterThan(4.6);
+      expect(mid.mutedRow?.ratio ?? 0).toBeLessThan(6.9);
+      expect(mid.mutedMiss, 'muted text at 5.5:1 passes the 4.5:1 floor').toBeUndefined();
+      expect(mid.bodyMiss?.need, 'body text at 5.5:1 fails the 7:1 floor').toBe('>=7:1');
+      // 3.5:1: under both floors, and the muted one says 4.5.
+      const low = await textMisses(await greyAt(session.tab, 3.5));
+      expect(low.mutedMiss?.need, 'muted text at 3.5:1 fails the 4.5:1 floor').toBe('>=4.5:1');
+      expect(low.bodyMiss?.need).toBe('>=7:1');
+    } finally {
+      await session.close();
+    }
+  });
+
+  for (const viewport of VIEWPORTS)
+    for (const mode of MODES)
+      it(`the signature reads the REAL spinner animation, on a stable clock, at ${viewport.name} in ${mode}`, async () => {
+        const session = await open(viewport, mode, 'real');
+        try {
+          await apply(session.tab, 'studio', 'studio', mode);
+          const drawn = (await session.tab.evaluate(() => {
+            const svg = document.querySelector('[data-probe="spinner"] svg');
+            const parts = svg === null ? [] : [svg, ...svg.querySelectorAll('*')];
+            return {
+              names: parts.map(part => getComputedStyle(part).animationName).filter(name => name !== 'none'),
+              running: parts.reduce((count, part) => count + part.getAnimations().length, 0),
+            };
+          })) as { names: string[]; running: number };
+          expect(drawn.names.length, "Studio's spinner has a computed animation").toBeGreaterThan(0);
+          expect(drawn.running, 'and it is a running animation').toBeGreaterThan(0);
+          const first = ((await session.tab.evaluate(SIGNATURE)) as Signature).spinner;
+          expect(first, 'the signature carries the animation by name').toContain(drawn.names[0] as string);
+          await session.tab.waitForTimeout(350);
+          expect(((await session.tab.evaluate(SIGNATURE)) as Signature).spinner, 'a stable reading').toBe(first);
+        } finally {
+          await session.close();
+        }
+      });
+
+  it('a hypermedia token declared with the renderer unchanged moves nothing the probe reads', async () => {
+    const session = await open(VIEWPORTS[0], 'light', 'real');
+    try {
+      await apply(session.tab, 'studio', 'studio', 'light');
+      const node = async () => (await session.tab.evaluate(HYPERMEDIA_NODE)) as string;
+      const probe = async () => ((await session.tab.evaluate(SIGNATURE)) as Signature).hypermedia;
+      const before = { node: await node(), probe: await probe() };
+      expect(before.node, 'the real renderer drew the specimen').not.toContain(':absent');
+      const tokens = await washed(
+        session.tab,
+        ':root { --hm-shape: flat !important; --hm-radius: 0px !important; --hm-stroke: 3px !important; --hm-font: monospace !important; --hm-node-fill-alpha: 0.2 !important; --hm-edge: straight !important; --hm-header: none !important; }',
+      );
+      const after = { node: await node(), probe: await probe() };
+      await gone(tokens);
+      // The probe moves exactly when the rendered node moves: a disconnected consumer earns no point.
+      expect(after.probe !== before.probe, "the probe moves iff the renderer's node moves").toBe(
+        after.node !== before.node,
+      );
+    } finally {
+      await session.close();
+    }
+  });
+});
+
 describe('the known-misses ledger', () => {
   it('pins exactly the misses that exist (a pin whose miss is gone must be deleted)', () => {
     // A filtered run (-t) measures only some combinations, so a pin can look unused; only a full run can say.
-    if (measuredCombos < EXPECTED_COMBOS || contractMeasured < STYLES.length) return;
+    if (measuredCombos < EXPECTED_COMBOS || contractMeasured < STYLES.length * VIEWPORTS.length * MODES.length) return;
     expect(stalePins(pins, observed)).toEqual([]);
   });
 });

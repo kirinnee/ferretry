@@ -139,6 +139,19 @@ export function refusal(edge: ImportEdge): string | undefined {
   )
     return undefined;
 
+  // THIRD EXEMPTION: the theme matrix's hypermedia probe measures what the REAL renderer draws (a declared token that no
+  // renderer reads proves nothing), so the matrix's one specimen page mounts Conversation's `FyRenderBlock` over a parsed
+  // fence. Only that fixture, and only those two renderer files (the block and its grammar), may be reached this way.
+  if (
+    from === 'tests' &&
+    edge.fromPkg.name === '@ferretry/app' &&
+    edge.from.endsWith('/tests/integration/fixtures/theme-matrix-scene.tsx') &&
+    toPkg.name === '@ferretry/plugin-conversation' &&
+    to === 'app' &&
+    /\/app\/render\/fy-render(-block)?\.tsx?$/u.test(edge.specifier)
+  )
+    return undefined;
+
   // Another package.
   switch (to) {
     case 'kernel-contract':
