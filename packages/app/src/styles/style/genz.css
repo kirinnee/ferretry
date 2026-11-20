@@ -127,25 +127,28 @@
   font-weight: var(--weight-strong);
   rotate: -5deg;
 }
-/* The bubble face is the voice of the style: every label, card title and button draws in it. Its space glyph is narrow, so
-   words get a little extra gap or "settings controls" reads as one word. */
-:root[data-style='genz'] .kt-label,
-:root[data-style='genz'] .kt-navgroup__title,
+/* The bubble face is the voice of the style, but only at DISPLAY size: Bagel Fat One's 'e' has a tiny counter and reads as 'c'
+   below about 22px at 1x. So panel headers and card titles are big and bubbly; the small chrome (labels, nav group titles,
+   buttons) is the grotesk at its heaviest. Bagel's space glyph is narrow, so words get an extra gap. */
 :root[data-style='genz'] .kt-panel__header,
-:root[data-style='genz'] .fy-cc__title,
-:root[data-style='genz'] .kt-btn {
+:root[data-style='genz'] .kt-panel__header .kt-label,
+:root[data-style='genz'] .fy-cc__title {
   font-family: var(--font-display);
   font-weight: var(--weight-display);
-  letter-spacing: 0.03em; /* opens the letters' counters at small sizes ('e' reads as 'c' when tight at 1x) */
+  letter-spacing: 0.03em;
   word-spacing: 0.22em;
 }
-:root[data-style='genz'] .kt-label {
-  font-size: max(15px, var(--label-size));
+:root[data-style='genz'] .kt-label,
+:root[data-style='genz'] .kt-navgroup__title,
+:root[data-style='genz'] .kt-btn {
+  font-family: var(--font-body);
+  font-weight: 800;
 }
 :root[data-style='genz'] .kt-panel__header,
 :root[data-style='genz'] .kt-panel__header .kt-label {
   color: var(--fg);
-  font-size: calc(var(--text-lg) + 5px);
+  font-size: calc(var(--text-lg) + 8px);
+  text-transform: none;
 }
 /* Ink edges and the stacked shadow on every panel, not a hairline: a panel is a sticker. */
 :root[data-style='genz'] .kt-panel {
@@ -153,7 +156,7 @@
   box-shadow: var(--shadow-panel);
 }
 :root[data-style='genz'] .fy-cc__title {
-  font-size: calc(var(--font-size-base) + 3px);
+  font-size: calc(var(--font-size-base) + 8px);
 }
 /* A quiet button still has its ink edge, so it never reads as loose text. */
 :root[data-style='genz'] .kt-btn[data-variant='ghost'] {
