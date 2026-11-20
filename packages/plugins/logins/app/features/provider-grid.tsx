@@ -32,7 +32,7 @@ export function ProviderGrid({ presets, onPick, onPaste }: ProviderGridProps) {
   const searchId = useId();
   const sections = gridSections(presets, query);
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-provider-grid="">
+    <div className="fy-lg-groups min-w-0" data-provider-grid="">
       {presets.length > PROVIDER_SEARCH_THRESHOLD ? (
         <label htmlFor={searchId} className="block min-w-0">
           <span className="sr-only">Search providers</span>
@@ -44,7 +44,7 @@ export function ProviderGrid({ presets, onPick, onPaste }: ProviderGridProps) {
             placeholder="Search providers"
             autoComplete="off"
             spellCheck={false}
-            className="kt-input min-h-control w-full"
+            className="kt-input min-h-control w-full max-w-md"
             data-provider-search=""
           />
         </label>
@@ -55,9 +55,9 @@ export function ProviderGrid({ presets, onPick, onPaste }: ProviderGridProps) {
         </p>
       ) : (
         sections.map(section => (
-          <section key={section.key} className="flex min-w-0 flex-col gap-1" data-provider-section={section.key}>
-            <h4 className="m-0 text-meta font-semibold uppercase text-muted">{section.heading}</h4>
-            <ul className="m-0 grid list-none grid-cols-2 gap-2 p-0 sm:grid-cols-3 lg:grid-cols-4">
+          <section key={section.key} className="fy-lg-group" data-provider-section={section.key}>
+            <h4 className="m-0 text-meta font-semibold uppercase tracking-wide text-muted">{section.heading}</h4>
+            <ul className="fy-lg-tiles">
               {section.presets.map(preset => (
                 <ProviderTile
                   key={preset.id}
@@ -71,7 +71,7 @@ export function ProviderGrid({ presets, onPick, onPaste }: ProviderGridProps) {
           </section>
         ))
       )}
-      <button type="button" className={`${TILE} border-dashed`} data-provider-tile="paste" onClick={onPaste}>
+      <button type="button" className={`${TILE} max-w-lg border-dashed`} data-provider-tile="paste" onClick={onPaste}>
         <span className="text-row font-semibold text-fg">Paste variables…</span>
         <span className="text-cell leading-base text-muted">
           Already have them? The provider is recognised right here in the browser.

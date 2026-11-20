@@ -209,7 +209,7 @@ export function LoginSignIn({
   const linkStart = method === 'link';
   if (flow === null)
     return (
-      <section className="kt-panel flex flex-col gap-3 p-panel" data-login-sign-in="start">
+      <section className="fy-lg-group" data-login-sign-in="start">
         <div>
           <p className="m-0 text-row font-semibold text-fg">Sign in to {name}</p>
           <p className="mb-0 mt-1 text-cell leading-base text-muted">{signInCoverage(login, machineName)}</p>

@@ -14,3 +14,5 @@ export {
   changeRefusalExplanation,
   useChangeAuthority,
 } from '@ferretry/app/ui';
+/** The settings kit and the choice cards the app shell lends (`compose/`). */
+export { ChoiceCards, Segmented } from '@ferretry/app';

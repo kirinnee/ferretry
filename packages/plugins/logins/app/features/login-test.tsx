@@ -49,7 +49,7 @@ export function LoginTest({ loginId, act, client, disabled = false }: LoginTestP
   };
 
   return (
-    <div className="flex flex-col gap-2" data-login-test="">
+    <div className="flex min-w-0 flex-1 flex-col gap-2" data-login-test="">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <Button
           type="button"
@@ -74,7 +74,7 @@ export function LoginTest({ loginId, act, client, disabled = false }: LoginTestP
         )}
       </div>
       {asking ? (
-        <div role="alert" className="kt-panel flex flex-col gap-2 p-panel" data-login-test-consent="">
+        <div role="alert" className="fy-lg-open flex flex-col gap-2" data-login-test-consent="">
           <p className="m-0 text-cell leading-base text-fg">{TEST_CONSENT}</p>
           <div className="flex flex-wrap gap-2">
             <Button type="button" size="sm" variant="primary" data-login-test-send="" onClick={() => void run(true)}>

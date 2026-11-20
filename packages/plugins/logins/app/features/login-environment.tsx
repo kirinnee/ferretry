@@ -53,7 +53,7 @@ export function LoginEnvironmentSection({
 }: LoginEnvironmentSectionProps) {
   const [editing, setEditing] = useState(false);
   return (
-    <div className="kt-panel flex min-w-0 flex-col gap-3 p-panel" data-login-environment={loginId}>
+    <div className="fy-lg-group" data-login-environment={loginId}>
       <p className="m-0 text-cell leading-base text-muted">
         Variables injected into the CLI at launch. Secrets come from the secret store and are never shown.
         {environment.preset === undefined ? null : (
@@ -82,25 +82,18 @@ export function LoginEnvironmentSection({
           }}
         />
       ) : (
-        <>
-          <ul className="m-0 flex list-none flex-col gap-2 p-0">
-            {environment.variables.map(variable => (
-              <li
-                key={variable.name}
-                className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-cell"
-                data-login-variable={variable.name}
-              >
-                <span className="break-all font-mono font-semibold text-fg">{variable.name}</span>
-                <VariableValue variable={variable} />
-              </li>
-            ))}
-          </ul>
-          <div>
-            <Button type="button" data-login-env-edit="" disabled={!online} onClick={() => setEditing(true)}>
-              Edit variables
-            </Button>
-          </div>
-        </>
+        <ul className="fy-lg-pairs">
+          {environment.variables.map(variable => (
+            <li
+              key={variable.name}
+              className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-cell"
+              data-login-variable={variable.name}
+            >
+              <span className="break-all font-mono font-semibold text-fg">{variable.name}</span>
+              <VariableValue variable={variable} />
+            </li>
+          ))}
+        </ul>
       )}
       {environment.cloudCredential === undefined ? null : (
         <p className="m-0 text-cell leading-base text-fg" data-login-cloud="">
@@ -122,7 +115,14 @@ export function LoginEnvironmentSection({
           in Settings › Secrets before a runtime on it launches.
         </p>
       )}
-      <LoginTest loginId={loginId} act={environment.test} client={client} disabled={!online} />
+      <div className="flex min-w-0 flex-wrap items-start gap-x-3 gap-y-2" data-login-env-actions="">
+        {editing ? null : (
+          <Button type="button" size="sm" data-login-env-edit="" disabled={!online} onClick={() => setEditing(true)}>
+            Edit variables
+          </Button>
+        )}
+        <LoginTest loginId={loginId} act={environment.test} client={client} disabled={!online} />
+      </div>
     </div>
   );
 }

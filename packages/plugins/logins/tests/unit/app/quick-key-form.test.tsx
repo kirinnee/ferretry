@@ -468,13 +468,10 @@ describe('a preset that drives several CLIs', () => {
     const added: string[] = [];
     const view = await mountBoth(calls, added);
     const c = view.container;
-    const choice = must(c.querySelector<HTMLSelectElement>('[data-quick-key-harness]'), 'the CLI choice');
-    expect(Array.from(choice.options).map(option => option.value)).toEqual(['claude-code', 'codex']);
-    expect(choice.value).toBe('claude-code');
-    await interact(() => {
-      choice.value = 'codex';
-      choice.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const radios = Array.from(c.querySelectorAll<HTMLInputElement>('[data-quick-key-harness] input[type="radio"]'));
+    expect(radios.map(radio => radio.value)).toEqual(['claude-code', 'codex']);
+    expect(radios.find(radio => radio.checked)?.value).toBe('claude-code');
+    await interact(() => must(radios[1] ?? null, 'the Codex card').click());
     await type(view, KEY);
     await press(c.querySelector('[data-change-submit]'), 'Add');
     await until(() => added.length > 0, 'the login to be added');

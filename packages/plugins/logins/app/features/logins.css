@@ -1,0 +1,119 @@
+/* The Logins tab's layout (r10 S13). Every column count follows the width of the PANEL the tab sits in (Settings' page is
+   212px wide at a 768px window), never the window's, so none of this uses a viewport breakpoint. One surface per thing:
+   a login card is ONE bordered box; whatever opens inside it (a form, a confirmation) is plain text on that surface
+   under a hairline, never a second box. */
+.fy-lg {
+  container-type: inline-size;
+  min-width: 0;
+  max-width: 1100px;
+}
+
+/* Between groups 32px; inside a group 12px (the settings frame's rule). */
+.fy-lg-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+.fy-lg-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Login cards: one column on a narrow panel, two from 720px. */
+.fy-lg-cards {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@container (min-width: 720px) {
+  .fy-lg-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* A form of label + control rows: the label above the control on a narrow panel, beside it from 520px, the control never
+   wider than 28rem, so nothing is a full-width single input. */
+.fy-lg-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 0;
+}
+.fy-lg-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  min-width: 0;
+}
+.fy-lg-field > :where(input, select, .fy-lg-control) {
+  max-width: 28rem;
+}
+.fy-lg-field__hint {
+  grid-column: 1 / -1;
+}
+@container (min-width: 520px) {
+  .fy-lg-field {
+    grid-template-columns: minmax(9rem, 12rem) minmax(0, 28rem);
+    align-items: start;
+    column-gap: 16px;
+  }
+  .fy-lg-field > :first-child {
+    padding-top: 10px;
+  }
+  .fy-lg-field__hint {
+    grid-column: 2;
+  }
+}
+
+/* A name + value list (an environment login's variables): two columns from 520px. */
+.fy-lg-pairs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@container (min-width: 520px) {
+  .fy-lg-pairs {
+    grid-template-columns: minmax(10rem, max-content) minmax(0, 1fr);
+  }
+  .fy-lg-pairs > li {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    align-items: center;
+  }
+}
+
+/* Provider tiles: 2 across on a narrow panel, 3 from 560px, 4 from 840px. */
+.fy-lg-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@container (min-width: 560px) {
+  .fy-lg-tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@container (min-width: 840px) {
+  .fy-lg-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* What opens inside a card or a page section: a hairline above, no box. */
+.fy-lg-open {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  min-width: 0;
+}
