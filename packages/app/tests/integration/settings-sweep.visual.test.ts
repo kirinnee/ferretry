@@ -414,6 +414,13 @@ describe('Settings sweep: every tab, real app half, real shell', () => {
               path: join(shotsDir, `${viewport.name}-${scheme}-${plugin}-${tab}.png`),
               fullPage: true,
             });
+          // The shell scrolls inside itself, so a page shot cannot reach a long page's lower rows: keep the pricing key's own row.
+          if (shotsDir !== '' && plugin === 'usage' && tab === 'model-pricing')
+            await page
+              .locator('[data-pricing-row]')
+              .filter({ hasText: 'anthropic:claude-fake-1' })
+              .first()
+              .screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${plugin}-${tab}-key.png`) });
           const { full, ...kept } = measured;
           report[`${viewport.name} ${plugin}/${tab}`] = { ...kept, requests, problems, logged };
           expect(measured.sideways, 'scrolls sideways').toBeLessThanOrEqual(0);
