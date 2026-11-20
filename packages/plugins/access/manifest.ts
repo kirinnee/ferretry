@@ -308,7 +308,7 @@ export default definePlugin({
   doctor: ['notifications'],
 
   // r10 O6b: the roomier passkey offer, as a client step of the setup flow (O1's contract).
-  onboarding: [{ id: 'passkey', title: 'Passkey', order: 2, side: 'client' }],
+  onboarding: [{ id: 'passkey', title: 'Passkey', order: 2, side: 'client', stepHost: true }],
 
   permissions: { network: [...PUSH_SERVICE_HOSTS, '*.push.apple.com', '*.notify.windows.com'] },
 });

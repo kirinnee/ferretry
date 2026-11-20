@@ -104,7 +104,9 @@ const press = (target: HTMLElement, key: string) =>
 
 describe('the access.passkey client step', () => {
   it("declares itself as a client step of Access through O1's contract, with a panel in the onboarding.step slot", () => {
-    expect(manifest.onboarding).toEqual([{ id: 'passkey', title: 'Passkey', order: 2, side: 'client' }]);
+    expect(manifest.onboarding).toEqual([
+      { id: 'passkey', title: 'Passkey', order: 2, side: 'client', stepHost: true },
+    ]);
     const panel = manifest.ui?.panels?.find(p => p.id === 'onboarding-passkey');
     expect(panel?.slot).toBe('onboarding.step');
   });
