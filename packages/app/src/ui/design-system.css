@@ -329,10 +329,18 @@
   letter-spacing: var(--tracking-display);
 }
 .md h1 {
-  font-size: 1.34em;
+  font-size: var(--md-h1-size);
+  font-weight: var(--md-h1-weight);
+  text-transform: var(--md-h1-case);
+  border-bottom: var(--md-h1-rule);
+  padding-bottom: var(--md-h1-rule-pad);
 }
 .md h2 {
-  font-size: 1.19em;
+  font-size: var(--md-h2-size);
+  font-weight: var(--md-h2-weight);
+  text-transform: var(--md-h2-case);
+  border-bottom: var(--md-h2-rule);
+  padding-bottom: var(--md-h2-rule-pad);
 }
 .md h3 {
   font-size: 1.06em;
@@ -347,16 +355,16 @@
   padding-left: 1.4em;
 }
 .md ul {
-  list-style: disc;
+  list-style: var(--md-ul-marker);
 }
 .md ol {
-  list-style: decimal;
+  list-style: var(--md-ol-marker);
 }
 .md li {
   margin: var(--flow-list) 0;
 }
 .md li::marker {
-  color: var(--faint);
+  color: var(--md-list-marker-color);
 }
 .md li > ul,
 .md li > ol {
@@ -365,7 +373,11 @@
 .md a {
   color: var(--accent);
   overflow-wrap: anywhere;
-  text-decoration: underline;
+  text-decoration: var(--md-link-decoration);
+  font-weight: var(--md-link-weight);
+  background: var(--md-link-bg);
+  padding: var(--md-link-pad);
+  border-radius: var(--md-link-radius);
   text-underline-offset: 2px;
   text-decoration-color: color-mix(in srgb, var(--accent) 42%, transparent);
 }
@@ -398,8 +410,11 @@
 }
 .md blockquote {
   margin: 0.7em 0;
-  padding: 0.1em 0 0.1em 0.95em;
-  border-left: var(--stroke-heavy) solid var(--border);
+  padding: 0.1em 0 0.1em var(--md-quote-pad);
+  border-left: var(--md-quote-bar);
+  border-radius: var(--md-quote-radius);
+  background: var(--md-quote-bg);
+  font-style: var(--md-quote-font-style);
   color: var(--fg-soft);
 }
 /* inline code */
@@ -424,9 +439,11 @@
   max-width: 100%;
   margin: 0.7em 0;
   padding: 0.8em 0.95em;
-  border-radius: var(--radius-md);
+  border-radius: var(--md-code-radius);
   background: var(--code-bg);
-  border: var(--border-width) solid var(--code-border);
+  border: var(--md-code-border);
+  border-left: var(--md-code-bar);
+  box-shadow: var(--md-code-shadow);
   overflow: auto;
   overscroll-behavior-inline: contain;
   font-size: var(--code-font-size);
@@ -477,7 +494,9 @@
 }
 .md th,
 .md td {
-  border: var(--border-width) solid var(--border);
+  border: var(--md-cell-border-y);
+  border-left: var(--md-cell-border-x);
+  border-right: var(--md-cell-border-x);
   padding: 0.42em 0.7em;
   text-align: left;
   /* Wrap aggressively: break inside a long unbroken token rather than widen the
@@ -489,11 +508,12 @@
   hyphens: auto;
 }
 .md th {
-  background: var(--surface-2);
-  font-weight: 600;
+  background: var(--md-th-bg);
+  font-weight: var(--md-th-weight);
+  text-transform: var(--md-th-case);
 }
 .md tr:nth-child(even) td {
-  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+  background: var(--md-zebra);
 }
 
 /* THE PHONE'S TWO WAYS TO READ A TABLE (markdown-table.tsx). Below the phone breakpoint a table is
@@ -1637,7 +1657,7 @@ body {
 }
 .kt-groupcard {
   overflow: hidden;
-  border: var(--stroke-panel) solid var(--border-strong);
+  border: var(--stroke-panel) var(--panel-edge-line) var(--border-strong);
   border-radius: var(--radius-panel);
   background: var(--surface);
   box-shadow: var(--nav-sel-shadow, none);
@@ -2059,7 +2079,7 @@ body {
    itself allowed to be a gradient + colour (Mission). Order matters: texture
    first so it sits above the wash. */
 .kt-panel {
-  border: var(--stroke-panel) solid var(--border);
+  border: var(--stroke-panel) var(--panel-edge-line) var(--border);
   border-radius: var(--radius-panel);
   background-color: var(--surface);
   background-image: var(--panel-texture);

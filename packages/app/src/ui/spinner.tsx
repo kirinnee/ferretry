@@ -11,6 +11,11 @@
  * (`harness/live-activity-screenshot.tsx` sweeps them), and the track stays visible so the reader sees
  * the shape even in the instant the arc is small.
  *
+ * THE PARTS (r11 T2). Besides the ring the mark carries four generic parts, `.fy-spinner__p1…p4` (a 2×2 of squares in the
+ * 16-unit box), hidden by default. A style shows them (`--spinner-parts: inline`), hides the ring (`--spinner-ring:
+ * none`) and shapes/animates them in its own stylesheet: blocks, bars, pixels, brackets, an orbit, a pulsing square.
+ * The markup never changes per style, so one component serves every hand.
+ *
  * Reduced motion turns the spin into a pulse rather than stopping it — a frozen spinner reads as a
  * hung one. It is decoration: the words beside it carry the status, so it is hidden from assistive
  * technology.
@@ -45,8 +50,14 @@ export function Spinner({ size = 14, className, wait = false, delayMs }: Spinner
       viewBox="0 0 16 16"
       width={size}
     >
-      <circle className="fy-spinner-track" cx="8" cy="8" fill="none" r="6" />
-      <circle className="fy-spinner-arc" cx="8" cy="8" fill="none" pathLength="100" r="6" />
+      <g className="fy-spinner-ring">
+        <circle className="fy-spinner-track" cx="8" cy="8" fill="none" r="6" />
+        <circle className="fy-spinner-arc" cx="8" cy="8" fill="none" pathLength="100" r="6" />
+      </g>
+      <rect className="fy-spinner__p1" height="6" width="6" x="1" y="1" />
+      <rect className="fy-spinner__p2" height="6" width="6" x="9" y="1" />
+      <rect className="fy-spinner__p3" height="6" width="6" x="1" y="9" />
+      <rect className="fy-spinner__p4" height="6" width="6" x="9" y="9" />
     </svg>
   );
   if (!wait && delayMs === undefined) return mark;

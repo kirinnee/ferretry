@@ -52,8 +52,8 @@
   position: relative;
   text-align: start;
   transition:
-    border-color 160ms ease,
-    background-color 160ms ease;
+    border-color var(--motion-pop) ease,
+    background-color var(--motion-pop) ease;
 }
 .fy-cc__card:hover {
   border-color: var(--muted);
@@ -123,7 +123,7 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .fy-cc__card[data-pulse='true'] {
-    animation: fy-cc-pop 160ms ease-out;
+    animation: fy-cc-pop var(--motion-pop) var(--ease-out);
   }
 }
 /* Motion off, by the operating system OR by Settings: no scale, and no 160ms border/fill fade either. */

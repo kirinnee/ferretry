@@ -238,6 +238,92 @@
   --step-todo-fg: var(--muted);
   --step-rail-done: var(--accent);
   --step-seg-done: var(--accent);
+  /* ═══ r11 T2 · THE COMPONENT STYLE CONTRACT ═══
+   A style is every component, so each slot below has ONE consumer and a default that draws what Studio drew before the
+   slot existed. A style file restates only the slots it changes; colour always comes from the palette, never from here.
+   Where a slot is a choice between shapes (a rule, a frame, a marker) it is stated as the CSS value itself — a border
+   shorthand, a radius, a list-style — because a custom property cannot branch on a keyword. */
+  /* ---- background pattern + grain (index.css `html::before` / `body::after`) ----
+   `--bg-pattern` (the first layer of the body's background) is one of the images below (`none` | `grid` | `dots` | `lines` | `scan`), drawn in the palette's own
+   `--texture-ink`, repeated every `--bg-pattern-size`, at `--bg-pattern-alpha` of that ink. The grain is an inline SVG
+   fractal-noise data URI (no request, no image file); a style turns it on with `--grain-image: var(--grain-noise)` and
+   sets how much (`--grain-alpha`, 0 to 0.08), how coarse (`--grain-scale`) and how it blends. */
+  --bg-pattern: var(--bg-pattern-none);
+  --bg-pattern-size: 32px;
+  --bg-pattern-alpha: 100%;
+  --bg-pattern-ink: color-mix(in srgb, var(--texture-ink) var(--bg-pattern-alpha), transparent);
+  --bg-pattern-none: none;
+  --bg-pattern-grid: conic-gradient(from 90deg at 1px 1px, transparent 90deg, var(--bg-pattern-ink) 0);
+  --bg-pattern-dots: radial-gradient(circle at 50% 50%, var(--bg-pattern-ink) 1px, transparent 1.6px);
+  --bg-pattern-lines: linear-gradient(
+    135deg,
+    transparent calc(50% - 0.5px),
+    var(--bg-pattern-ink) calc(50% - 0.5px),
+    var(--bg-pattern-ink) calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
+  --bg-pattern-scan: linear-gradient(180deg, var(--bg-pattern-ink) 1px, transparent 1px);
+  --grain-image: none;
+  --grain-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  --grain-alpha: 0;
+  --grain-scale: 1;
+  --grain-blend: normal;
+  /* ---- markdown (`.md` in ui/design-system.css reads ONLY these; the defaults are the values it hard-coded) ----
+   Headings: size, weight, case, and a RULE under h1/h2 (a border shorthand, `none` = no rule) with its gap. Code: the
+   frame is `--md-code-border` (box) and/or `--md-code-bar` (the leading edge; equal to the box by default, a thick bar
+   when the box is `0 solid transparent`), with radius and an offset shadow. Quote: bar | indent | mark by the bar's
+   width, the padding and a tinted fill. Table: grid | rules | zebra by which cell edges are drawn and the stripe fill.
+   Link: underline | weight | box by decoration, weight and a tinted pill. Lists: the marker shape and its colour. */
+  --md-h1-size: 1.34em;
+  --md-h1-weight: 650;
+  --md-h1-case: none;
+  --md-h1-rule: none;
+  --md-h1-rule-pad: 0em;
+  --md-h2-size: 1.19em;
+  --md-h2-weight: 650;
+  --md-h2-case: none;
+  --md-h2-rule: none;
+  --md-h2-rule-pad: 0em;
+  --md-code-border: var(--border-width) solid var(--code-border);
+  --md-code-bar: var(--md-code-border);
+  --md-code-radius: var(--radius-md);
+  --md-code-shadow: none;
+  --md-quote-bar: var(--stroke-heavy) solid var(--border);
+  --md-quote-pad: 0.95em;
+  --md-quote-bg: transparent;
+  --md-quote-radius: 0px;
+  --md-quote-font-style: normal;
+  --md-cell-border-x: var(--border-width) solid var(--border);
+  --md-cell-border-y: var(--border-width) solid var(--border);
+  --md-th-bg: var(--surface-2);
+  --md-th-case: none;
+  --md-th-weight: 600;
+  --md-zebra: color-mix(in srgb, var(--surface-2) 55%, transparent);
+  --md-link-decoration: underline;
+  --md-link-weight: inherit;
+  --md-link-bg: transparent;
+  --md-link-pad: 0;
+  --md-link-radius: 0px;
+  --md-ul-marker: disc;
+  --md-ol-marker: decimal;
+  --md-list-marker-color: var(--faint);
+  /* ---- spinner (ui/spinner.tsx + spinner.css) ----
+   The markup is fixed: a ring (arc + track) and four generic parts `.fy-spinner__p1…p4` (a 2×2 of squares in the
+   16-unit box). A style shows the ring (`--spinner-ring: inline`) or hides it (`none`), shows the parts
+   (`--spinner-parts: inline`) and shapes/animates them in its own file; the parts turn on `--spinner-parts-speed` /
+   `--spinner-parts-timing` by default. Studio: ring only. */
+  --spinner-ring: inline;
+  --spinner-parts: none;
+  --spinner-parts-speed: 1s;
+  --spinner-parts-timing: steps(4, end);
+  /* ---- motion ---- */
+  --motion-pop: 160ms;
+  --ease-in: ease-in;
+  --ease-out: ease-out;
+  --ease-spring: var(--ease-emphasis);
+  /* ---- surfaces: the two slots that were missing ---- */
+  --focus-line: solid;
+  --panel-edge-line: solid;
 }
 
 :root[data-mode='dark'],
