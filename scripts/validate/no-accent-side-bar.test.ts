@@ -43,6 +43,14 @@ describe('the accent side-bar gate', () => {
     'an accent left border': '.a[data-open] {\n  border-left: 3px solid var(--accent);\n}\n',
     'a tone inline-start border': '.a {\n  border-inline-start: 3px solid var(--tone);\n}\n',
     'an accent left border colour': '.a[data-lit] {\n  border-left-color: var(--accent);\n}\n',
+    'an inset bar with no colour (draws currentColor)':
+      '.a[aria-current] {\n  color: var(--accent);\n  box-shadow: inset 3px 0 0;\n}\n',
+    'a colourless inset bar closed on one line':
+      '.a[aria-current] { color: var(--accent); box-shadow: inset 3px 0 0; }\n',
+    'a colourless inset bar with no semicolon': '.a[aria-current] { box-shadow: inset 3px 0 0 }\n',
+    'a colourless inset bar with a px unit and !important': '.a { box-shadow: inset 3px 0px 0px!important; }\n',
+    'a colourless inset bar first in a shadow list': '.a { box-shadow: inset 3px 0 0, 0 1px 2px #000; }\n',
+    'a colourless inset bar at the end of the line': '.a {\n  box-shadow: inset 3px 0 0\n}\n',
     'a 3px accent strip': '.a::before {\n  width: 3px;\n  background: var(--accent);\n  content: "";\n}\n',
   };
   for (const [name, css] of Object.entries(BARS))
