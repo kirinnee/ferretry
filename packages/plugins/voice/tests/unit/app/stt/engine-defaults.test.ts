@@ -37,9 +37,9 @@ describe('effectiveEngine', () => {
 
   it('picks the Parakeet that suits the device for a machine default of Parakeet, or no default', () => {
     should(effectiveEngine(null, 'parakeet', 'phone')).equal('parakeet-tdt-110m');
-    should(effectiveEngine(null, 'parakeet', 'computer')).equal('parakeet');
+    should(effectiveEngine(null, 'parakeet', 'computer')).equal('parakeet-tdt-110m');
     should(effectiveEngine(null, null, 'phone')).equal('parakeet-tdt-110m');
-    should(effectiveEngine(null, null, 'computer')).equal('parakeet');
+    should(effectiveEngine(null, null, 'computer')).equal('parakeet-tdt-110m');
   });
 
   it('names catalog models only', () => {

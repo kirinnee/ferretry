@@ -243,4 +243,52 @@ describe('the engine sentences', () => {
     expect(view.container.textContent).not.toContain('Nothing chosen yet');
     await view.unmount();
   });
+
+  it('selects the machine default an unset device dictates with, and a 110M press over Browser is a real choice (r11 S5 review)', async () => {
+    const chosen: string[] = [];
+    const small = must(
+      ON_DEVICE_MODELS.find(model => model.id === 'parakeet-tdt-110m') ?? null,
+      'the Parakeet 110M model',
+    );
+    const withVoices = {
+      models: [small, STREAMING],
+      voices: new OnDeviceVoices([
+        new OnDeviceVoice({
+          model: small,
+          support: { available: true },
+          store: new Store(),
+          openSession: options => new Session(options),
+        }),
+        voiceFor(new Store()),
+      ]),
+    };
+    const view = await mount(
+      <EngineSection
+        {...props({ ...withVoices, machineDefault: 'browser', onChange: engine => chosen.push(engine) })}
+      />,
+    );
+    const checked = (): string[] =>
+      [...view.container.querySelectorAll<HTMLInputElement>('.fy-engine-card input[type="radio"]')]
+        .filter(radio => radio.checked)
+        .map(radio => radio.value);
+    // The machine names Browser, so Browser is selected and the sentence says where the audio goes: not Parakeet.
+    expect(checked()).toEqual(['browser']);
+    expect(view.container.querySelector('[role="status"]')?.textContent).toContain(BROWSER_ACTIVE_NOTE);
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLInputElement>('input[type="radio"][value="parakeet-tdt-110m"]'),
+        'the 110M radio',
+      ).click(),
+    );
+    expect(chosen).toEqual(['parakeet-tdt-110m']);
+    // A machine default of "parakeet" means Parakeet on this device: the device's own default.
+    await view.render(<EngineSection {...props({ ...withVoices, machineDefault: 'parakeet' })} />);
+    expect(checked()).toEqual(['parakeet-tdt-110m']);
+    // An engine the device chose wins over the machine's default.
+    await view.render(
+      <EngineSection {...props({ ...withVoices, machineDefault: 'browser', value: 'sherpa-zipformer-en' })} />,
+    );
+    expect(checked()).toEqual(['sherpa-zipformer-en']);
+    await view.unmount();
+  });
 });

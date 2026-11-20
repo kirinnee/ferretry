@@ -139,7 +139,7 @@ describe('the engine cards', () => {
         );
         expect(disagree).toEqual([]);
         // The install button is a full 44 px tall (the box itself, not a hit area around a small one).
-        const first = viewport.phone ? 'parakeet-tdt-110m' : 'parakeet';
+        const first = 'parakeet-tdt-110m';
         const hit = await tab.locator(`.fy-engine-card[data-engine="${first}"] .fy-engine-mini`).evaluate(node => {
           const after = getComputedStyle(node, '::after');
           return {
@@ -182,8 +182,8 @@ describe('the engine cards', () => {
   it('opens the long text in place without changing the card height', async () => {
     const { context, tab } = await open('short', VIEWPORTS[0], 'light');
     await tab.waitForSelector('.fy-engine-card');
-    const card = tab.locator('.fy-engine-card[data-engine="parakeet"]');
-    await card.getByRole('button', { name: 'About Parakeet 0.6B' }).click();
+    const card = tab.locator('.fy-engine-card[data-engine="parakeet-tdt-110m"]');
+    await card.getByRole('button', { name: 'About Parakeet 110M' }).click();
     expect(await card.locator('.fy-engine-details').count()).toBe(1);
     expect(Math.round((await card.boundingBox())?.height ?? 0)).toBe(186);
     await tab.keyboard.press('Escape');

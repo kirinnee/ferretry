@@ -17,7 +17,7 @@ import { useOnDeviceInstall } from '../../hooks/use-on-device-install.ts';
 import { Button, cn, SettingGroup, SettingRow } from '../../shell-voice.ts';
 import { type BrowserRecognitionProvider, BrowserRecognitionSession } from '../../lib/stt/browser-recognition.ts';
 import type { BrowserRecognitionSupport } from '../../lib/stt/browser-recognition.ts';
-import { DEFAULT_ON_DEVICE_ENGINE, type DeviceClass } from '../../lib/stt/engine-defaults.ts';
+import { DEFAULT_ON_DEVICE_ENGINE, type DeviceClass, effectiveEngine } from '../../lib/stt/engine-defaults.ts';
 import { ON_DEVICE_MODELS, type OnDeviceModel } from '../../lib/stt/model-catalog.ts';
 import { formatMegabytes } from '../../lib/stt/model-store.ts';
 import type { OnDeviceVoice } from '../../lib/stt/on-device-voice.ts';
@@ -105,6 +105,8 @@ export interface EngineSectionProps {
   readonly models?: readonly OnDeviceModel[];
   /** Phone or computer: marks the engine this device dictates with until it chooses one. */
   readonly deviceClass: DeviceClass;
+  /** The machine's default engine (`voice.yaml`), which an unset device dictates with; `null` when it names none or is unread. */
+  readonly machineDefault?: 'parakeet' | 'browser' | null;
 }
 
 export function EngineSection({
@@ -117,12 +119,16 @@ export function EngineSection({
   clock = pageClock,
   models = ON_DEVICE_MODELS,
   deviceClass,
+  machineDefault = null,
 }: EngineSectionProps) {
   const voiceFor = (model: OnDeviceModel): OnDeviceVoice | null =>
     model.id === 'parakeet' && parakeet !== undefined ? parakeet : (voices?.get(model.id) ?? null);
+  // The engine Try it uses, and the card shown as selected: the chosen one, else the one the microphone dictates with
+  // (the machine's default, else this device's: Parakeet 110M), the same order dictation reads. Nothing is written until a
+  // card is pressed.
+  const trialEngine = effectiveEngine(value, machineDefault, deviceClass);
+  const inheritsBrowser = value === null && trialEngine === 'browser';
   const onDevice = isOnDeviceEngine(value);
-  // The engine Try it uses: the chosen one, or the one this device dictates with until it chooses.
-  const trialEngine = value ?? DEFAULT_ON_DEVICE_ENGINE[deviceClass];
   const trialModel = models.find(model => model.id === trialEngine);
   const trialVoice = trialModel === undefined ? null : voiceFor(trialModel);
   // The list is short on purpose (the owner: "voice options TOO much"): this device's default, the fastest and a balanced one, and
@@ -141,7 +147,7 @@ export function EngineSection({
       >
         <div className="fy-vs-body fy-vs-engines" data-engine-section="">
           <EngineCardGrid
-            value={value}
+            value={trialEngine}
             onChoose={choice => {
               if (choice !== 'off') onChange(choice);
             }}
@@ -181,14 +187,14 @@ export function EngineSection({
           ) : null}
           <p
             className={cn('fy-vs-note', value === null && 'text-muted')}
-            data-tone={onDevice ? 'ok' : value === 'browser' ? 'warn' : undefined}
+            data-tone={onDevice ? 'ok' : value === 'browser' || inheritsBrowser ? 'warn' : undefined}
             role="status"
           >
             {onDevice ? <ShieldCheck size={14} aria-hidden="true" className="mr-1 inline align-text-bottom" /> : null}
-            {value === 'browser' ? (
+            {value === 'browser' || inheritsBrowser ? (
               <Radio size={14} aria-hidden="true" className="mr-1 inline align-text-bottom" />
             ) : null}
-            {activeEngineNote(value, deviceClass)}
+            {activeEngineNote(inheritsBrowser ? 'browser' : value, deviceClass)}
           </p>
         </div>
       </SettingRow>
