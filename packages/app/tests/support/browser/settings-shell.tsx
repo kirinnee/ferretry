@@ -8,6 +8,10 @@
  *
  *   /d/ws/settings/<plugin>/<tab>      the tab, inside the shell
  *   ?theme=<family>-<mode>
+ *
+ * THE ONE RENDERER: `renderSettingsShellOf(surfaces)` mounts the real `App` over whatever surfaces it is handed; `renderSettingsShell`
+ * builds the one-plugin list for a plugin's scene, and the app's own S12 shell scene (`integration/fixtures/settings-shell-scene.tsx`)
+ * hands it the full catalog of every shipped plugin. Nothing else in the repo builds a fake machine for the shell.
  */
 
 import { implementApp, type Manifest } from '@ferretry/kernel/manifest';
@@ -53,27 +57,51 @@ const GRANTS = {
   steppedUp: false,
 };
 
+/** The page's theme from `?theme=<family>-<mode>`, applied before anything draws. */
+export function applySceneTheme(): URLSearchParams {
+  const params = new URLSearchParams(window.location.search);
+  document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+  return params;
+}
+
+/** The surface a plugin contributes to the fake machine: its manifest's real declarations with the bodies given. */
+export function settingsSurface(manifest: Manifest, bodies: Readonly<Record<string, ComponentType>>): SurfaceEntry {
+  return {
+    id: manifest.id,
+    title: manifest.title,
+    core: false,
+    contract: `h-${manifest.id}`,
+    consumes: [],
+    manifest,
+    app: implementApp(manifest, { build: () => ({ screens: {}, settings: bodies }) as never }),
+  } satisfies SurfaceEntry;
+}
+
 export function renderSettingsShell({
   manifest: given,
   bodies,
   root = document.getElementById('root'),
 }: SettingsShellScene) {
-  const params = new URLSearchParams(window.location.search);
-  document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
-  const manifest = given as Manifest;
-  const surfaces: SurfaceEntry[] = [
-    ...CORE,
-    {
-      id: manifest.id,
-      title: manifest.title,
-      core: false,
-      contract: `h-${manifest.id}`,
-      consumes: [],
-      manifest,
-      app: implementApp(manifest, { build: () => ({ screens: {}, settings: bodies }) as never }),
-    } satisfies SurfaceEntry,
-  ];
+  applySceneTheme();
+  renderSettingsShellOf([...CORE, settingsSurface(given as Manifest, bodies)], {}, root);
+}
+
+export interface ShellOptions {
+  /** The fake machine's answer to a request, asked BEFORE the defaults; `undefined` falls through to them. */
+  readonly answer?: ((request: TransportRequest) => TransportAnswer | undefined) | undefined;
+  /** The id this browser is paired under on the fake machine. */
+  readonly deviceId?: string | undefined;
+}
+
+/** The real `App` over one fake machine whose plugins are `surfaces` (the core ones included by the caller). */
+export function renderSettingsShellOf(
+  surfaces: readonly SurfaceEntry[],
+  options: ShellOptions = {},
+  root: HTMLElement | null = document.getElementById('root'),
+) {
   const transport = new FakeTransport((request: TransportRequest): TransportAnswer => {
+    const registered = options.answer?.(request);
+    if (registered !== undefined) return registered;
     if (request.path === '/v1/plugins') return json(inventoryOf(surfaces));
     if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
     if (request.path === '/v1/grants') return json(GRANTS);
@@ -89,7 +117,7 @@ export function renderSettingsShell({
   };
   const provision = { handler, Prompts: () => null } as unknown as PasskeyProvision;
   const list = new DaemonList({ storage: memoryStore(), now: () => 1 });
-  list.add({ daemon: 'ws', machine: 'workshop-host', deviceId: 'dev', address: 'http://127.0.0.1:40245' });
+  list.add({ daemon: 'ws', machine: 'workshop-host', deviceId: options.deviceId ?? 'dev', address: 'http://127.0.0.1:40245' });
   const runtime = new ShellRuntime({
     appVersion: '5.0.0',
     surfaces,

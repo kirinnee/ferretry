@@ -326,6 +326,13 @@ describe('<DictationSettings>', () => {
       select.value = 'groq';
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
+    // Choosing a hosted provider only STAGES it: nothing is written until Apply.
+    expect(patches).toEqual([]);
+    expect(view.container.textContent).toContain('Not saved yet');
+    expect(select.value).toBe('groq');
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-provider-staged] button'), 'Apply').click(),
+    );
     expect(patches).toEqual([{ enhancementProvider: 'groq', enhancementModel: 'openai/gpt-oss-120b' }]);
 
     const groq: SttSettings = { ...DEFAULT_STT_SETTINGS, enhancementProvider: 'groq' };
@@ -352,6 +359,23 @@ describe('<DictationSettings>', () => {
 
     await view.render(<DictationSettings {...settingsProps()} />);
     expect(view.container.textContent).not.toContain(CLEANUP_PROMPTS_POINTER);
+    await view.unmount();
+  });
+
+  it('writes nothing for a hosted provider until Apply, and Cancel drops it', async () => {
+    const patches: SttSettingsPatch[] = [];
+    const view = await mount(<DictationSettings {...settingsProps({ update: patch => patches.push(patch) })} />);
+    const select = must(view.container.querySelector<HTMLSelectElement>('#stt-enhancement-provider'), 'the provider');
+    await interact(() => {
+      select.value = 'cerebras';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(patches).toEqual([]);
+    const buttons = [...view.container.querySelectorAll<HTMLButtonElement>('[data-provider-staged] button')];
+    await interact(() => must(buttons.find(b => b.textContent === 'Cancel') ?? null, 'Cancel').click());
+    expect(patches).toEqual([]);
+    expect(view.container.querySelector('[data-provider-staged]')).toBeNull();
+    expect(select.value).toBe('local');
     await view.unmount();
   });
 

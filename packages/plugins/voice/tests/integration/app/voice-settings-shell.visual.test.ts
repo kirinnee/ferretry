@@ -253,6 +253,34 @@ describe('Voice settings in the real Settings shell', () => {
       });
     }
 
+  for (const viewport of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`${viewport.name} ${scheme}: an arrow key off "Off" only stages the clean-up style, and Apply says what it turns on`, async () => {
+        const { page, problems, close } = await open(viewport, scheme, 'voice-cleanup', '&style=off');
+        try {
+          const writes: string[] = [];
+          page.on('request', request => {
+            if (request.method() !== 'GET') writes.push(`${request.method()} ${request.url()}`);
+          });
+          await page.locator('[data-choice-cards] input[value="off"]').focus();
+          await page.keyboard.press('ArrowRight');
+          const staged = page.locator('[data-cleanup-staged]');
+          await staged.waitFor();
+          expect(await staged.innerText()).toContain('turns hosted clean-up ON');
+          expect(await page.locator('[data-choice-cards] input[value="fix"]').isChecked()).toBe(true);
+          for (const name of ['Apply', 'Cancel'])
+            expect((await rect(page, `[data-cleanup-staged] button:text-is("${name}")`)).height).toBeGreaterThanOrEqual(
+              44,
+            );
+          expect(await overflowing(page), 'nothing sticks out of the panel').toEqual([]);
+          expect(writes).toEqual([]);
+          expect(problems).toEqual([]);
+          await shoot(page, viewport, scheme, 'voice-cleanup-staged');
+        } finally {
+          await close();
+        }
+      });
+
   it('the Voice nav lists the device tab under This device and the clean-up tab under the machine', async () => {
     const { page, close } = await open(VIEWPORTS[1], 'light', 'voice');
     try {

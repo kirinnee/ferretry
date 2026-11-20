@@ -30,7 +30,7 @@
  * enhancer rather than about where audio goes.
  */
 
-import { type ReactNode, useMemo } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { useMachineIsOlder } from '../../shell-voice.ts';
 import { useOnDeviceVoices, useOptionalAppStore, useParakeetVoice } from '../../lib/voice-store.tsx';
 import {
@@ -139,6 +139,10 @@ const REMOTE_EXPLANATIONS: Readonly<Record<'groq' | 'cerebras', string>> = {
   cerebras: CEREBRAS_ENHANCEMENT_EXPLANATION,
 };
 
+/** Shown before Apply: picking a hosted provider is never also the act of sending text to it. */
+const HOSTED_PROVIDER_APPLY_EXPLANATION =
+  'Not saved yet. Applying this sends the recognised text of every dictation to the provider you chose (once its key is on the machine). Text that has been sent cannot be unsent.';
+
 /**
  * The patch a provider choice makes. Switching to a hosted provider resets the model to THAT
  * provider's default: a Groq model name sent to Cerebras is a refusal on every dictation.
@@ -219,6 +223,28 @@ export function DictationSettings({
    */
   const userVocabulary = useMemo(() => userContextVocabulary(settings.userContext), [settings.userContext]);
   const remote = isRemoteEnhancementProvider(settings.enhancementProvider);
+  // A hosted provider is STAGED until Apply: a select changes on an arrow key alone, and a write per change would
+  // start sending text to a provider from a stray key press. Going back to on-device only ever reduces exposure.
+  const [stagedProvider, setStagedProvider] = useState<string | null>(null);
+  const stagedPatch = stagedProvider === null ? null : providerChoicePatch(settings, stagedProvider);
+  const staged =
+    stagedPatch !== null &&
+    isRemoteEnhancementProvider(stagedPatch.enhancementProvider ?? 'local') &&
+    stagedPatch.enhancementProvider !== settings.enhancementProvider
+      ? stagedPatch
+      : null;
+  const chooseProvider = (chosen: string): void => {
+    const patch = providerChoicePatch(settings, chosen);
+    if (
+      isRemoteEnhancementProvider(patch.enhancementProvider ?? 'local') &&
+      patch.enhancementProvider !== settings.enhancementProvider
+    ) {
+      setStagedProvider(chosen);
+      return;
+    }
+    setStagedProvider(null);
+    update(patch);
+  };
 
   return (
     <div data-voice-settings="">
@@ -339,8 +365,8 @@ export function DictationSettings({
                       id="stt-enhancement-provider"
                       aria-labelledby={labelId}
                       className="kt-input fy-vs-wide min-h-[44px]"
-                      value={settings.enhancementProvider}
-                      onChange={event => update(providerChoicePatch(settings, event.target.value))}
+                      value={staged?.enhancementProvider ?? settings.enhancementProvider}
+                      onChange={event => chooseProvider(event.target.value)}
                     >
                       {ENHANCEMENT_PROVIDERS.map(entry => (
                         <option key={entry.id} value={entry.id}>
@@ -353,6 +379,32 @@ export function DictationSettings({
                     </select>
                   )}
                 />
+                {staged !== null && (
+                  <li className="fy-vs-body" data-provider-staged="">
+                    <p className="fy-vs-note" role="status">
+                      {HOSTED_PROVIDER_APPLY_EXPLANATION}
+                    </p>
+                    <div className="fy-vs-field">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStagedProvider(null);
+                          update(staged);
+                        }}
+                        className="min-h-[44px] rounded-control border border-accent bg-accent-soft px-control-x text-ui font-semibold text-accent"
+                      >
+                        Apply
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStagedProvider(null)}
+                        className="min-h-[44px] rounded-control border border-border-strong bg-surface-2 px-control-x text-ui text-fg"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </li>
+                )}
                 {remote && (
                   <SettingRow
                     name={`${settings.enhancementProvider === 'groq' ? 'Groq' : 'Cerebras'} model`}

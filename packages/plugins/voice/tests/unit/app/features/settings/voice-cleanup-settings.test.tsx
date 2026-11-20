@@ -7,6 +7,7 @@ import type {
 } from '../../../../../app/features/settings/use-machine-voice-cleanup.ts';
 import {
   CLEANUP_GUARD_EXPLANATION,
+  CLEANUP_HOSTED_ON_EXPLANATION,
   CLEANUP_OFF_EXPLANATION,
   CONVERSATION_CONTEXT_EXPLANATION,
   VoiceCleanupSettings,
@@ -90,11 +91,30 @@ describe('<VoiceCleanupSettings>', () => {
     expect(button(c, 'Save prompt').disabled).toBe(true);
   });
 
-  it('saves a chosen style', async () => {
+  it('stages a chosen style and writes it to the machine only on Apply', async () => {
     const { state, saved } = fakeState(DEFAULT_VOICE_CLEANUP);
     const c = await show(state);
     await interact(() => radioFor(c, 'Polish').click());
+    expect(saved).toEqual([]);
+    expect(radioFor(c, 'Polish').checked).toBe(true);
+    await interact(() => button(c, 'Apply').click());
     expect(saved).toEqual([{ style: 'polish' }]);
+  });
+
+  it('arrow-key navigation off Off writes nothing and says what hosted clean-up does before Apply', async () => {
+    const { state, saved } = fakeState({ ...DEFAULT_VOICE_CLEANUP, style: 'off' });
+    const c = await show(state);
+    const group = must(c.querySelector<HTMLElement>('[role="radiogroup"]'), 'the style group');
+    await interact(() => {
+      group.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    });
+    expect(radioFor(c, 'Fix mistakes only').checked).toBe(true);
+    expect(saved).toEqual([]);
+    expect(c.textContent).toContain(CLEANUP_HOSTED_ON_EXPLANATION);
+    await interact(() => button(c, 'Cancel').click());
+    expect(radioFor(c, 'Off').checked).toBe(true);
+    expect(saved).toEqual([]);
+    expect(c.querySelector('[data-cleanup-staged]')).toBeNull();
   });
 
   it('hides the prompt editor when cleanup is off and says nothing is sent', async () => {

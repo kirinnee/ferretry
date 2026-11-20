@@ -7,6 +7,7 @@
  *   /d/ws/settings/voice/voice            Voice (this device): dictation, engines, vocabulary, auto-read, device keys
  *   /d/ws/settings/voice/voice-cleanup    Voice clean-up (the machine's prompts)
  *   /d/ws/settings/voice/speedups         Speed-ups (the machine's keys)
+ *   ?style=off|fix|polish   the machine's saved clean-up style (default: fix)
  *   ?theme=<family>-<mode>   ?engine=<id>   the chosen engine (default: sherpa-zipformer-en)   ?off=1  dictation off
  *
  * The shell is the real one, so the panel is as wide as a person gets it: about 212 px at a 768 px window, because the
@@ -124,7 +125,11 @@ function VoiceBody() {
 }
 
 const cleanupState = {
-  cleanup: { ...DEFAULT_VOICE_CLEANUP, style: 'fix' as const, useConversation: true },
+  cleanup: {
+    ...DEFAULT_VOICE_CLEANUP,
+    style: (['off', 'fix', 'polish'] as const).find(style => style === params.get('style')) ?? 'fix',
+    useConversation: true,
+  },
   loaded: true,
   save: async () => ({ kind: 'applied' as const }),
 };

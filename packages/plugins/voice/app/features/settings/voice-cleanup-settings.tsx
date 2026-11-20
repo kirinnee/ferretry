@@ -43,6 +43,12 @@ export const CLEANUP_GUARD_EXPLANATION =
 export const CONVERSATION_CONTEXT_EXPLANATION =
   'Sends the latest messages of this conversation to the provider as read-only reference, so names and terms are spelled the way the conversation spells them. They are never added to your dictation.';
 
+/** Shown before Apply, so choosing a hosted style is never also the act of sending text to a provider. */
+export const CLEANUP_HOSTED_ON_EXPLANATION =
+  'Applying this turns hosted clean-up ON for every device paired to this machine: after each dictation the text you dictated (and, if conversation context is on, the latest messages) is sent to the provider you chose under Dictation › Correction provider. Text that has been sent cannot be unsent.';
+
+const CLEANUP_STYLE_STAGED_EXPLANATION = 'Not saved yet: nothing changes on this machine until you press Apply.';
+
 export const CLEANUP_OFF_EXPLANATION =
   'Hosted clean-up is off: dictation is inserted as transcribed and nothing is sent.';
 
@@ -170,6 +176,18 @@ function VoiceCleanupView({ state }: { readonly state: MachineVoiceCleanup }) {
     });
   };
   const style = cleanup.style;
+  // The choice is STAGED: the cards' arrow keys move AND select, so a write per selection would let a stray key
+  // press turn hosted clean-up on for every device. Only an explicit Apply writes.
+  const [staged, setStaged] = useState<typeof style | null>(null);
+  const pending = staged !== null && staged !== style ? staged : null;
+  const applyStyle = (next: typeof style): void => {
+    setBusy(true);
+    void save({ style: next }).then(result => {
+      setOutcome(result);
+      setBusy(false);
+      if (result.kind === 'applied') setStaged(null);
+    });
+  };
   return (
     <div data-voice-cleanup="">
       <SettingGroup label="Clean-up style">
@@ -179,11 +197,35 @@ function VoiceCleanupView({ state }: { readonly state: MachineVoiceCleanup }) {
           </p>
           <ChoiceCards
             label="Cleanup style"
-            value={style}
+            value={pending ?? style}
             disabled={busy}
-            onChange={id => commit({ style: id as typeof style })}
+            onChange={id => setStaged(id as typeof style)}
             options={CLEANUP_STYLES.map(option => ({ id: option.id, title: option.label, line: option.hint }))}
           />
+          {pending !== null && (
+            <div className="fy-vs-field" data-cleanup-staged="">
+              <p className="fy-vs-note" role="status">
+                {CLEANUP_STYLE_STAGED_EXPLANATION}{' '}
+                {style === 'off' && pending !== 'off' ? CLEANUP_HOSTED_ON_EXPLANATION : null}
+              </p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => applyStyle(pending)}
+                className="min-h-[44px] rounded-control border border-accent bg-accent-soft px-control-x text-ui font-semibold text-accent disabled:border-border disabled:bg-surface-2 disabled:text-muted disabled:opacity-60"
+              >
+                Apply
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setStaged(null)}
+                className="min-h-[44px] rounded-control border border-border-strong bg-surface-2 px-control-x text-ui text-fg disabled:text-muted disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </li>
         {style === 'off' ? (
           <li className="fy-vs-body">
