@@ -74,7 +74,7 @@ test('a long log lists only the newest twenty and says where the rest is', () =>
 test("this device's Connection panel carries the card when a log is given, and none without one", () => {
   const ports: DeviceConnectionPorts = {
     daemons: {
-      snapshot: () => ({ daemons: [{ daemon: MACHINE, machine: 'studio' }] }) as never,
+      snapshot: () => ({ daemons: [{ daemon: MACHINE, machine: 'studio', carriers: [] }] }) as never,
       subscribe: () => () => undefined,
     },
     preferences: new CarrierPreferenceStore(),

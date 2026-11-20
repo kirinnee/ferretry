@@ -387,6 +387,15 @@ export interface PluginClient {
       readonly quiet?: boolean;
     },
   ): Promise<Answer>;
+  /**
+   * The same guarded call as `call`, but the answer keeps the STATUS the daemon gave it: `call` hands back the body
+   * alone, so a half that must tell a `202` (accepted, held for the owner) from a `200` cannot. A refusal still
+   * rejects exactly as `call`'s does. Optional until every shell fills it in; a caller without it has only `call`.
+   */
+  callWithStatus?<Answer = unknown>(
+    route: string,
+    init?: Parameters<PluginClient['call']>[1],
+  ): Promise<{ readonly status: number; readonly body: Answer }>;
   subscribe<Name extends string, Payload>(event: EventDef<Name, Payload>, listener: (payload: Payload) => void): Cancel;
   /**
    * A guarded duplex socket route (F2): `key` is a socket the manifest (or a contract it imports) declares, opened
