@@ -18,7 +18,6 @@ import {
 import { RouterProvider } from '@ferretry/app/testing/router';
 import { DEVICE_SENTENCES } from '../../../app/device-kind.ts';
 import { detectDeviceKind } from '../../../app/device-kind.ts';
-import { LINK_COSTS } from '../../../app/link-costs.ts';
 import { ONBOARDING_PROGRESS_KEY, startOnboardingPairing } from '../../../app/onboarding-progress.ts';
 import { ONBOARDING_PAIR_TRIP_KEY } from '../../../app/pair-trip.ts';
 import { interact, mount } from '../support/dom.ts';
@@ -84,143 +83,29 @@ describe('S14 browserSetupShare', () => {
   });
 });
 
-describe('S14 the steps screen', () => {
-  it('says it is loading outside a shell (a client no machine was noted for) and stops listening when it goes', async () => {
-    const { client, stopped } = clientOf(() => VIEW);
-    const Steps = createStepsScreen(client);
-    const view = await mount(<Steps params={{}} />);
-    expect(view.container.textContent).toContain('Loading the setup steps');
-    await view.unmount();
-    expect(stopped()).toBe(1);
-  });
-
-  it('n3 says a failed read failed, offers a retry, and draws the steps when the retry works', async () => {
-    let offline = true;
-    const flaky = clientOf(() => {
-      if (offline) throw new Error('offline');
-      return VIEW;
-    });
-    noteClientDaemon(flaky.client, 'd1');
-    const Flaky = createStepsScreen(flaky.client);
-    const broken = await mount(<Flaky params={{}} />);
-    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
-    expect(broken.container.textContent).not.toContain('Loading the setup steps');
-    expect(broken.container.querySelector('[data-onboarding-read-failed]')?.textContent).toContain(
-      'Could not read the setup steps',
-    );
-    offline = false;
-    await interact(() => {
-      broken.container.querySelector<HTMLElement>('[data-onboarding-retry]')?.click();
-    });
-    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
-    expect(broken.container.querySelector('[data-onboarding-read-failed]')).toBeNull();
-    expect(broken.container.querySelector('[data-step="logins.login"]')).not.toBeNull();
-    await broken.unmount();
-  });
-
-  it('draws the steps once a machine is noted for the client, with the machine link on the router', async () => {
-    const working = clientOf(() => VIEW);
-    noteClientDaemon(working.client, 'd1');
-    const Working = createStepsScreen(working.client);
-    const drawn = await mount(
-      <RouterProvider>
-        <Working params={{}} />
-      </RouterProvider>,
-    );
-    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
-    expect(drawn.container.querySelector('[data-step="logins.login"]')).not.toBeNull();
-    const link = drawn.container.querySelector<HTMLAnchorElement>('[data-onboarding-open-machine]');
-    expect(link?.getAttribute('href')).toBe('/d/d1');
-    // n2: a plain click moves with the router (the browser's own navigation is held back), no page load.
-    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
-    await interact(() => {
-      link?.dispatchEvent(click);
-    });
-    expect(click.defaultPrevented).toBe(true);
-    expect(window.location.pathname).toBe('/d/d1');
-    // A modified click is the browser's (a new tab), not the router's.
-    const modified = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ctrlKey: true });
-    await interact(() => {
-      link?.dispatchEvent(modified);
-    });
-    expect(modified.defaultPrevented).toBe(false);
-    window.history.replaceState(null, '', '/');
-    await drawn.unmount();
-  });
-
-  it('closes the setup with what was set up and a Settings link for each step left for later or skipped', async () => {
-    const { client } = clientOf(() => ({
-      steps: [
-        { plugin: 'logins', id: 'login', title: 'Sign in', order: 30, state: 'done' },
-        { plugin: 'voice', id: 'voice', title: 'Voice', order: 40, state: 'later' },
-        { plugin: 'warden', id: 'warden', title: 'Warden', order: 50, state: 'skipped' },
-      ],
-      complete: true,
-      setUp: true,
-    }));
-    noteClientDaemon(client, 'd1');
-    const Steps = createStepsScreen(client);
-    const view = await mount(<Steps params={{}} />);
-    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
-    expect(view.container.querySelector('[data-onboarding-summary-set]')?.textContent).toContain('Sign in');
-    expect(view.container.querySelector('[data-onboarding-later-link="voice.voice"]')?.getAttribute('href')).toBe(
-      '/d/d1/settings/voice',
-    );
-    expect(view.container.querySelector('[data-onboarding-later-link="warden.warden"]')).not.toBeNull();
-  });
-
-  it('shows no closing summary while a step still waits', async () => {
+describe('S14 the steps screen is now a way into the setup flow', () => {
+  it('opens the flow on the machine, replacing its own entry, once', async () => {
     const { client } = clientOf(() => VIEW);
     noteClientDaemon(client, 'd1');
     const Steps = createStepsScreen(client);
-    const view = await mount(<Steps params={{}} />);
+    window.history.replaceState(null, '', '/d/d1/onboarding/steps');
+    const view = await mount(
+      <RouterProvider>
+        <Steps params={{}} />
+      </RouterProvider>,
+    );
     await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
-    expect(view.container.querySelector('[data-onboarding-summary]')).toBeNull();
-  });
-
-  it('says so when a machine has nothing to set up, and still links to the machine', async () => {
-    const { client } = clientOf(() => ({ steps: [], complete: true, setUp: false }));
-    noteClientDaemon(client, 'd1');
-    const Steps = createStepsScreen(client);
-    const view = await mount(<Steps params={{}} />);
-    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
-    expect(view.container.querySelector('[data-onboarding-no-steps]')).not.toBeNull();
-    expect(view.container.querySelector('[data-onboarding-open-machine]')?.getAttribute('href')).toBe('/d/d1');
+    expect(window.location.pathname).toBe('/d/d1/onboarding/setup');
+    expect(view.container.textContent).toContain('Opening the setup');
+    window.history.replaceState(null, '', '/');
     await view.unmount();
   });
 
-  it('M3 n1 says what linking the terminal’s sign-in costs under a found step the check marked linked, and nowhere else', async () => {
-    const steps = [
-      // Installed, not a sign-in: no mark, no sentence.
-      { plugin: 'claude-code', id: 'harness', title: 'Claude Code', order: 20, state: 'found' as const },
-      { plugin: 'codex', id: 'harness', title: 'Codex', order: 21, state: 'pending' as const },
-      // The terminal's own sign-in, linked: the sentence, whatever plugin owns the step (no plugin id is named here).
-      { plugin: 'logins', id: 'login', title: 'Sign in', order: 30, state: 'found' as const, linked: true as const },
-      {
-        plugin: 'elsewhere',
-        id: 'sign-in',
-        title: 'Elsewhere',
-        order: 31,
-        state: 'found' as const,
-        linked: true as const,
-      },
-      { plugin: 'shells', id: 'nix', title: 'Shells', order: 80, state: 'found' as const },
-      { plugin: 'runtimes', id: 'runtimes', title: 'Name your runtimes', order: 40, state: 'done' as const },
-    ];
-    const { client } = clientOf(() => ({ steps, complete: false, setUp: false }));
-    noteClientDaemon(client, 'd1');
+  it('says it is opening outside a shell (no machine, no router) and navigates nowhere', async () => {
+    const { client } = clientOf(() => VIEW);
     const Steps = createStepsScreen(client);
     const view = await mount(<Steps params={{}} />);
-    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
-    const costs = (subject: string): string | null =>
-      view.container.querySelector(`[data-step="${subject}"] [data-link-costs]`)?.textContent ?? null;
-    expect(costs('claude-code.harness')).toBeNull();
-    expect(costs('logins.login')).toBe(LINK_COSTS);
-    expect(costs('elsewhere.sign-in')).toBe(LINK_COSTS);
-    expect(costs('codex.harness')).toBeNull();
-    expect(costs('shells.nix')).toBeNull();
-    expect(costs('runtimes.runtimes')).toBeNull();
-    expect(view.container.querySelectorAll('[data-link-costs]')).toHaveLength(2);
+    expect(view.container.textContent).toContain('Opening the setup');
     await view.unmount();
   });
 
@@ -235,7 +120,7 @@ describe('S14 the steps screen', () => {
     expect(tab?.getAttribute('data-onboarding-setup-tab')).toBe('2');
     expect(tab?.textContent).toContain('2 setup steps on this machine have not been looked at yet.');
     expect(view.container.querySelector('[data-onboarding-open-steps]')?.getAttribute('href')).toBe(
-      '/d/d1/onboarding/steps',
+      '/d/d1/onboarding/setup',
     );
     await view.unmount();
 
@@ -285,46 +170,6 @@ describe('S14 the steps screen', () => {
     });
     await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
     expect(view.container.querySelector('[data-onboarding-open-steps]')).not.toBeNull();
-    await view.unmount();
-  });
-});
-
-describe('S14 answering a step', () => {
-  it('records the answer through Onboarding’s own route, and a failed answer leaves the screen as it was', async () => {
-    const sent: string[] = [];
-    let fail = false;
-    const { client } = clientOf(route => {
-      if (route === 'GET /v1/onboarding') return VIEW;
-      sent.push(route);
-      if (fail) throw new Error('refused');
-      return { ...VIEW.steps[0], state: 'done' };
-    });
-    noteClientDaemon(client, 'd1');
-    const Steps = createStepsScreen(client);
-    const view = await mount(<Steps params={{}} />);
-    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
-    const press = async (selector: string): Promise<void> => {
-      await interact(() => {
-        view.container.querySelector<HTMLElement>(selector)?.click();
-      });
-      await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
-    };
-    await press('[data-step-done]');
-    await press('[data-step-later]');
-    fail = true;
-    await press('[data-step-skip]');
-    expect(sent).toEqual([
-      'POST /v1/onboarding/steps/:plugin/:stepId',
-      'POST /v1/onboarding/steps/:plugin/:stepId',
-      'POST /v1/onboarding/steps/:plugin/:stepId',
-    ]);
-    expect(view.container.querySelector('[data-step="logins.login"]')).not.toBeNull();
-    // n3: the failed answer says so and can be tried again; a good one clears the sentence.
-    expect(view.container.querySelector('[data-onboarding-unsaved]')?.textContent).toContain('not saved');
-    fail = false;
-    await press('[data-onboarding-retry-answer]');
-    expect(sent).toHaveLength(4);
-    expect(view.container.querySelector('[data-onboarding-unsaved]')).toBeNull();
     await view.unmount();
   });
 });
@@ -606,7 +451,7 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     await interact(() => {
       open?.click();
     });
-    expect(moves).toEqual(['/d/d7/onboarding/steps']);
+    expect(moves).toEqual(['/d/d7/onboarding/setup']);
     await view.unmount();
   });
 });

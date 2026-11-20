@@ -8,6 +8,8 @@
 export { createStepsOpener } from './steps-opener.tsx';
 export { createSetupTab, createStepsScreen } from './steps-screen.tsx';
 export { createStepperPanel } from '../features/stepper/stepper-panel.tsx';
+export { createSetupFlow } from '../features/setup-flow/setup-flow.tsx';
+export { createAppearancePanel, createNamePanel } from '../features/setup-flow/shell-pages-panels.tsx';
 
 import type { DaemonlessPorts, DaemonlessScreenProps } from '@ferretry/app';
 import { browserClipboardWriter, Button } from '@ferretry/app/ui';

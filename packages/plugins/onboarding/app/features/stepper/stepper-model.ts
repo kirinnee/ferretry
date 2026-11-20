@@ -1,7 +1,7 @@
 /**
- * THE FIRST-RUN STEPPER, AS DATA (pure): the six things a new machine needs before it is a working fleet, and where each
+ * THE FIRST-RUN STEPPER, AS DATA (pure): the five things a new machine needs before it is a working fleet, and where each
  * one stands, derived from facts the daemon itself holds. Nothing here is a progress record of ours: a step is done
- * because the machine says so (a passkey exists, the machine has a name, Claude Code and Codex were looked at, a project or
+ * because the machine says so (a passkey exists, the machine has a name, every setup step the plugins declared was answered, a project or
  * a conversation exists), so the stepper
  * cannot disagree with the machine and resuming after a reload needs no bookkeeping.
  *
@@ -10,15 +10,14 @@
  * unreadable fact is never guessed: that step is `unknown`, draws no button, and never makes the stepper appear.
  */
 
-export const STEP_IDS = ['pair', 'passkey', 'name', 'claude', 'codex', 'project'] as const;
+export const STEP_IDS = ['pair', 'passkey', 'name', 'setup', 'project'] as const;
 type StepperStepId = (typeof STEP_IDS)[number];
 
 const STEP_TITLES: Readonly<Record<StepperStepId, string>> = {
   pair: 'Pair',
   passkey: 'Passkey',
   name: 'Name',
-  claude: 'Claude Code',
-  codex: 'Codex',
+  setup: 'Setup',
   project: 'Project',
 };
 
@@ -40,13 +39,12 @@ export interface StepperStep {
 export const UNKNOWN_FACTS: StepperFacts = Object.freeze({
   passkey: undefined,
   name: undefined,
-  claude: undefined,
-  codex: undefined,
+  setup: undefined,
   project: undefined,
 });
 
 /**
- * The six steps in order, each with its state. Exactly one step is `current` while an open step is known. The current
+ * The steps in order, each with its state. Exactly one step is `current` while an open step is known. The current
  * step is never chosen past a step that could not be read: a later step picked first would jump back to the earlier one
  * when it answers (a button that moves), so while an EARLIER step is unknown no step is current and nothing is drawn.
  */

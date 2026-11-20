@@ -104,7 +104,7 @@ describe('m2 a just-paired machine opens its steps page by itself', () => {
     const b = machineClient(B, 'pending');
     const { harness, went } = await open([]);
     await pairNow(harness, [B], [fakeReachRow({ daemon: B, client: b.client })]);
-    expect(went).toEqual([`/d/${B}/onboarding/steps`]);
+    expect(went).toEqual([`/d/${B}/onboarding/setup?phase=daemon&journey=add-daemon`]);
     // A later change of the list or the rows decides nothing again.
     await pairNow(harness, [B], [fakeReachRow({ daemon: B, client: b.client })]);
     expect(went).toHaveLength(1);
@@ -148,7 +148,7 @@ describe('m2 a just-paired machine opens its steps page by itself', () => {
     const b = machineClient(B, 'pending', false);
     const { harness, went } = await open([]);
     await pairNow(harness, [B], [fakeReachRow({ daemon: B, client: b.client })]);
-    expect(went).toEqual([`/d/${B}/onboarding/steps`]);
+    expect(went).toEqual([`/d/${B}/onboarding/setup?phase=daemon&journey=add-daemon`]);
   });
 
   it('opens nothing when the steps cannot be read', async () => {

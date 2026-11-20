@@ -103,20 +103,33 @@ describe('the first-run page and its hand-off panel', () => {
 });
 
 describe('the feature, its routes and its settings entry', () => {
-  it('S-0314 the feature is Onboarding’s own: its screens, settings tab and shell views are declared and built, and one panel: the Home stepper', () => {
+  it('S-0314 the feature is Onboarding’s own: its screens, settings tab and shell views are declared and built, the Home stepper and the two pages Onboarding draws in its own flow', () => {
     expect(manifest.kinds).toContain('view');
     expect((manifest.ui?.screens ?? []).map(screen => screen.id).toSorted()).toEqual([
+      'flow',
       'handoff',
       'onboarding',
       'setup',
       'steps',
     ]);
     const half = app.build?.({ manifest: app.manifest, client: {} as PluginClient });
-    expect(Object.keys(half?.screens ?? {}).toSorted()).toEqual(['handoff', 'onboarding', 'setup', 'steps']);
+    expect(Object.keys(half?.screens ?? {}).toSorted()).toEqual(['flow', 'handoff', 'onboarding', 'setup', 'steps']);
     expect(Object.keys(half?.settings ?? {})).toEqual(['setup']);
-    expect(Object.keys(half?.panels ?? {})).toEqual(['first-run-stepper']);
+    expect(Object.keys(half?.panels ?? {})).toEqual(['first-run-stepper', 'name-step', 'appearance-step']);
     expect((manifest.ui?.panels ?? []).map(panel => `${panel.slot}.${panel.id}`)).toEqual([
       'daemon.status.first-run-stepper',
+      'onboarding.step.name-step',
+      'onboarding.step.appearance-step',
+    ]);
+    // The flow is drawn alone: no drawer, bars or side column.
+    expect(manifest.ui?.screens?.find(screen => screen.id === 'flow')).toMatchObject({
+      path: 'onboarding/setup',
+      chrome: 'none',
+    });
+    // Onboarding’s own two pages: the machine’s name (daemon) and this device’s look (client).
+    expect(manifest.onboarding).toEqual([
+      expect.objectContaining({ id: 'name' }),
+      expect.objectContaining({ id: 'appearance', side: 'client' }),
     ]);
   });
 
@@ -150,7 +163,7 @@ describe('the feature, its routes and its settings entry', () => {
     await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
     expect(view.container.textContent).toContain('1 setup step on this machine has not been looked at yet.');
     expect(view.container.querySelector('[data-onboarding-open-steps]')?.getAttribute('href')).toBe(
-      '/d/d1/onboarding/steps',
+      '/d/d1/onboarding/setup',
     );
     await view.unmount();
   });

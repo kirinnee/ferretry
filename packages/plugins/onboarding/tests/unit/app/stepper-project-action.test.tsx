@@ -4,7 +4,7 @@ import { addProjectHref, projectAction } from '../../../app/features/stepper/pro
 import { StepperView } from '../../../app/features/stepper/stepper-view.tsx';
 import { deriveSteps } from '../../../app/features/stepper/stepper-model.ts';
 
-const OPEN = deriveSteps({ passkey: true, name: true, claude: true, codex: true, project: false });
+const OPEN = deriveSteps({ passkey: true, name: true, setup: true, project: false });
 const noop = (): void => undefined;
 
 describe('the Project step buttons depend on their own plugin only', () => {

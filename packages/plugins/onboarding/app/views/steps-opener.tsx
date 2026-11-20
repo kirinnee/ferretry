@@ -16,8 +16,9 @@
 
 import { type DeviceViewProps, useDevicePaired, useEveryDaemon, useOptionalRouter } from '@ferretry/app';
 import { useEffect, useRef } from 'react';
+import { sideOf } from '../../contract/index.ts';
 import { onboardingScreen } from '../onboarding-screen.ts';
-import { stepsHref } from './steps-screen.tsx';
+import { setupFlowHref } from '../features/setup-flow/flow-href.ts';
 
 /** The first run's screen ids (the manifest's `onboarding` screen and its `/setup` hand-off address): the journey that owns the address while it is open. */
 const FIRST_RUN_SCREENS: ReadonlySet<string> = new Set(['onboarding', 'handoff']);
@@ -47,10 +48,11 @@ export function createStepsOpener() {
           .load()
           .then(
             view => {
-              if (where.current || !view.steps.some(step => step.state === 'pending')) return;
+              const waiting = view.steps.filter(step => sideOf(step) === 'daemon' && step.state === 'pending');
+              if (where.current || waiting.length === 0) return;
               // v4 skipped a set-up machine that has no step answers recorded (every step still `pending`).
-              if (view.setUp && view.steps.every(step => step.state === 'pending')) return;
-              go.current(stepsHref(row.daemon), { replace: true });
+              if (view.setUp && waiting.length === view.steps.filter(step => sideOf(step) === 'daemon').length) return;
+              go.current(setupFlowHref(row.daemon, { phase: 'daemon', journey: 'add-daemon' }), { replace: true });
             },
             () => {
               // A machine that cannot say what is left opens nothing: the Setup tab is still the way there.

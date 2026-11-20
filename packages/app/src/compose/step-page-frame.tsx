@@ -22,6 +22,8 @@ import './step-page-frame.css';
 export interface StepPageBack {
   /** Defaults to "Back". */
   readonly label?: string;
+  /** Locked while the page is working (Next is locked then too). */
+  readonly disabled?: boolean;
   /** Optional: a caller that routes elsewhere (a link, a form submit) may omit it. */
   readonly onClick?: () => void;
 }
@@ -68,7 +70,13 @@ export function StepPageFrame({ title, line, demo, children, back, next, progres
       <footer className="fy-spf__footer" data-step-footer="">
         <div className="fy-spf__actions">
           {back === undefined ? null : (
-            <Button variant="ghost" className="fy-spf__button" onClick={back.onClick} data-step-back="">
+            <Button
+              variant="ghost"
+              className="fy-spf__button"
+              disabled={back.disabled === true}
+              onClick={back.onClick}
+              data-step-back=""
+            >
               {back.label ?? 'Back'}
             </Button>
           )}

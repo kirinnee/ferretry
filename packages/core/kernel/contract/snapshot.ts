@@ -41,6 +41,8 @@ export interface OnboardingEntry {
   readonly order: number;
   readonly side?: 'daemon' | 'client';
   readonly group?: string;
+  /** See `OnboardingDecl.stepHost`. */
+  readonly stepHost?: true;
 }
 
 /** Frozen after every build (§7.6 step 5). */

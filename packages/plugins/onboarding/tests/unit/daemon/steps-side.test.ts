@@ -104,3 +104,12 @@ describe('the daemon records only daemon steps', () => {
     expect((await service.view()).complete).toBe(true);
   });
 });
+
+describe('a step that declares it is written against StepHost', () => {
+  test('says so on the wire; a step that declares nothing carries nothing', () => {
+    const steps = joinProgress([entry('a', 1, { stepHost: true }), entry('b', 2)], undefined);
+    expect(steps.map(step => step.stepHost)).toEqual([true, undefined]);
+    expect(StepViewSchema.safeParse(steps[0]).success).toBe(true);
+    expect(Object.keys(steps[1] ?? {})).not.toContain('stepHost');
+  });
+});

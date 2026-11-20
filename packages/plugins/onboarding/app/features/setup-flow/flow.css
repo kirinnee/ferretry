@@ -1,0 +1,148 @@
+/* The setup flow's own touches on the shared step frame (compose/step-page-frame.css owns the frame itself).
+   Theme tokens only. The page slides in 12px and fades over 180ms; Back reverses it; nothing moves under reduced motion. */
+
+.fy-sf-root {
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+  min-height: var(--app-h, 100dvh);
+  position: relative;
+}
+/* The frame fills the screen, so its footer rests at the bottom (sticky on a phone, by the frame itself). */
+.fy-sf-root > .fy-spf {
+  flex: 1 1 auto;
+}
+@container (min-width: 600px) {
+  .fy-sf-root .fy-spf__page {
+    padding-top: clamp(24px, 8vh, 72px);
+  }
+}
+/* Next keeps its width while it works (the busy mark would otherwise move Back). */
+.fy-sf-root .fy-spf__button {
+  min-width: 6.5rem;
+}
+
+.fy-sf-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.fy-sf-page[data-motion] {
+  animation: fy-sf-in-forward 180ms ease-out both;
+}
+.fy-sf-page[data-motion][data-direction='back'] {
+  animation-name: fy-sf-in-back;
+}
+@keyframes fy-sf-in-forward {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+@keyframes fy-sf-in-back {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+}
+
+/* The cover and the page never show together: the page is `hidden` while the cover is up. */
+.fy-sf-cover {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  min-height: 240px;
+}
+.fy-sf-silent {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fy-sf-note {
+  color: var(--muted);
+  font-size: var(--font-size-base);
+  margin: 0;
+}
+.fy-sf-chip {
+  align-self: flex-start;
+}
+/* A quiet text button at the content edge, readable in both modes. */
+.fy-sf-page .fy-sf-later {
+  align-self: flex-start;
+  color: var(--fg);
+  font-size: var(--font-size-base);
+  height: auto;
+  margin-inline-start: -8px;
+  min-height: 44px;
+  padding-inline: 8px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.fy-sf-page .fy-sf-silent button {
+  height: auto;
+  min-height: 44px;
+}
+/* The cover is a short block, so "Still checking…" sits right under the spinner it belongs to. */
+.fy-sf-cover .fy-loading {
+  min-height: 160px;
+}
+.fy-sf-unsaved {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fy-sf-slot[hidden] {
+  display: none;
+}
+
+.fy-sf-end {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fy-sf-end__actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fy-sf-fail {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-inline: auto;
+  max-width: 880px;
+  padding: 24px 16px;
+}
+
+.fy-sf-unsaved--end {
+  align-items: flex-start;
+  flex-direction: column;
+}
+.fy-sf-unsaved__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fy-sf-unsaved__list li {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fy-sf-unsaved button {
+  min-height: 44px;
+}
+.fy-sf-later:disabled {
+  opacity: 0.4;
+}

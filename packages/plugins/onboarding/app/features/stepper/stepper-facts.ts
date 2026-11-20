@@ -20,7 +20,9 @@ const PasskeysSchema = z.object({ passkeys: z.array(z.unknown()) });
 const FileSchema = z.object({ exists: z.boolean(), text: z.string() });
 const FerretsSchema = z.array(z.unknown());
 const ProjectsSchema = z.array(z.unknown());
-const StepsSchema = z.object({ steps: z.array(z.object({ plugin: z.string(), id: z.string(), state: z.string() })) });
+const StepsSchema = z.object({
+  steps: z.array(z.object({ plugin: z.string(), id: z.string(), state: z.string(), side: z.string().optional() })),
+});
 const ArchivedSchema = z.object({ count: z.number() });
 
 const NAME_LINE = /^name:/mu;
@@ -73,16 +75,11 @@ export const readStepperFacts = async (
       const archived = await client.call('GET /v1/archived-sessions', { query: { limit: '1' }, ...base });
       return ArchivedSchema.parse(archived).count > 0;
     })());
-  /** The onboarding steps, read once per batch: a tool is looked at once its own step is no longer `pending`. */
-  let steps: Promise<ReadonlyMap<string, string>> | undefined;
-  const toolLooked = async (plugin: string): Promise<boolean> => {
-    steps ??= client
-      .call('GET /v1/onboarding', base)
-      .then(
-        raw => new Map(StepsSchema.parse(raw).steps.map(step => [`${step.plugin}.${step.id}`, step.state] as const)),
-      );
-    return (await steps).get(`${plugin}.harness`) !== 'pending';
-  };
+  /** Every step the plugins declared for this machine's own setup has an answer (none is `pending`); a client step is answered on the device, never here. */
+  const setupAnswered = async (): Promise<boolean> =>
+    StepsSchema.parse(await client.call('GET /v1/onboarding', base)).steps.every(
+      step => step.side === 'client' || step.state !== 'pending',
+    );
   const protectedReads: readonly [FactKey, () => Promise<StepperFact>][] = [
     [
       'name',
@@ -93,11 +90,10 @@ export const readStepperFacts = async (
         return host.exists && NAME_LINE.test(host.text);
       },
     ],
-    // Claude Code and Codex: each tool's own onboarding step has been looked at (found, done, later or skipped), or this
-    // machine already has a conversation (an established machine is not on its first run). A tool whose plugin is off
-    // declares no step: nothing to ask here, so it holds.
-    ['claude', async () => (await toolLooked('claude-code')) || (await inUse())],
-    ['codex', async () => (await toolLooked('codex')) || (await inUse())],
+    // Setup: every step the plugins declared for this machine (Claude Code, Codex, Warden, …) was answered, or this machine
+    // already has a conversation (an established machine is not on its first run). One step here: the plugins' own steps
+    // are the setup flow's, so the card names no plugin.
+    ['setup', async () => (await setupAnswered()) || (await inUse())],
     // A project is registered, or the person already works projectless (any conversation ever made). A Projects plugin
     // that is off has registered nothing and holds no answer to wait for: the step then rests on the conversations alone,
     // so it stays readable (and finishable) with Projects paused.

@@ -390,6 +390,9 @@ export { absoluteTime, relativeTime, statusLabel } from './shared/time-labels.ts
 
 // ─── mounting other plugins' views, and addressing screens ────────────────────────────────────────────────────────
 export { RendererView } from './shell/renderer-view.tsx';
+// The two pages onboarding's setup flow draws from the shell: name this machine, and this device's appearance.
+export { type NameDecision, NameThisMachine } from './shell/name-machine.tsx';
+export { DeviceAppearance } from './shell/device-appearance.tsx';
 export { ScreenHrefProvider, type ScreenHrefOf, screenHref, useScreenHref } from './router/screen-href.ts';
 
 // ─── the composer's shared kit: the editor, quoting, this device's controls and preferences ───────────────────────
