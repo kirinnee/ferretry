@@ -37,6 +37,8 @@ function setup(options: {
   readonly answered: readonly string[];
   readonly apply?: () => unknown;
   readonly noMcp?: boolean;
+  /** Answers the scan read instead of the table (a scan that fails once, then works). */
+  readonly scan?: () => unknown;
 }) {
   const steps = (manifest.onboarding ?? []).map(step => ({
     plugin: 'codex',
@@ -57,6 +59,7 @@ function setup(options: {
     'GET /v1/config/file': { path: 'harness-codex.yaml', text: '', etag: 'e1', exists: true },
   };
   const answer: Answer = (route, request) => {
+    if (route === 'GET /v1/runtimes/setup/scan' && options.scan !== undefined) return options.scan();
     if (route === 'GET /v1/onboarding') return { steps, complete: false, setUp: false };
     if (route === 'POST /v1/runtimes/proposals') {
       proposals.push((request as { body: { change: { skip?: string[] } } }).body.change);
@@ -311,8 +314,9 @@ describe('the Codex import pages in the setup flow', () => {
     expect(pageKey()).toBe('codex.conversations');
     await next();
     expect(pageKey()).toBe('codex.import-run');
-    // The four pages answered before the reload were never shown again: nobody left them out, so they are not left out.
-    expect(query('[data-import-unreviewed]')).toBeNull();
+    // The four pages answered before the reload were not shown again: the page says so, and they are not left out.
+    expect(query('[data-import-unreviewed]')?.textContent).toContain('Settings');
+    expect(query('[data-import-unreviewed]')?.textContent).not.toContain('MCP');
     await press('[data-import-run]');
     expect(run.proposals).toHaveLength(1);
     expect(run.proposals[0]?.skip).toEqual(['codex:mcp:notes']);
@@ -367,5 +371,37 @@ describe('the Codex import pages in the setup flow', () => {
     const skip = run.proposals[0]?.skip ?? [];
     expect(skip).not.toContain('codex:settings');
     expect(skip).not.toContain('codex:model-set');
+  });
+
+  test('a kind whose scan failed on its page and was never shown is not a user exclusion: no skip, and no dependent dragged in', async () => {
+    let scans = 0;
+    const run = setup({
+      answered: START_AT_CHOICE,
+      scan: () => (++scans === 1 ? new Error('Scan unavailable on Settings') : FULL),
+    });
+    view = await mount(run.tree);
+    await settle();
+    await choose('choose');
+    await next();
+    expect(pageKey()).toBe('codex.import-settings');
+    expect(query('[data-import-failed]')).not.toBeNull();
+    expect(query('[data-found-item]')).toBeNull();
+    await next(); // Settings is answered without ever being drawn
+    expect(pageKey()).toBe('codex.import-model-set');
+    await press('[data-import-look]'); // the retry works here
+    expect(query('[data-found-item="codex:model-set"] input:checked')).not.toBeNull();
+    expect(query('[data-import-settings-left]')).toBeNull();
+    for (const id of [...KIND_STEPS.slice(1), 'conversations']) {
+      expect(pageKey()).toBe(`codex.${id}`);
+      await next();
+    }
+    expect(pageKey()).toBe('codex.import-run');
+    // The page says Settings was not looked at; it does not hide it as a deliberate exclusion.
+    expect(query('[data-import-unreviewed]')?.textContent).toContain('Settings');
+    await press('[data-import-run]');
+    expect(run.proposals).toHaveLength(1);
+    const skip = run.proposals[0]?.skip ?? [];
+    for (const id of ['codex:settings', 'codex:env', 'codex:model-set']) expect(skip).not.toContain(id);
+    expect(skip).toEqual([]);
   });
 });

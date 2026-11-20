@@ -3,9 +3,8 @@
  * plugin's SEGMENT memory (`StepHost.segment`): this run only, in memory, never browser storage. Each kind page leaves one
  * entry (`review.<kind>`) saying what the person left out there; the run page reads them all.
  *
- * A kind with no entry was never reviewed in this run (a page that was skipped past): in a `choose` run the run page leaves
- * its items OUT, so nothing is brought over that the person did not see. After a reload (no `importMode`) it is not left out:
- * only what a shown page unticked is. Pure: names and ids only, never a value.
+ * A kind with no entry was never shown in this run (a reload, a failed scan on its page, a page passed over): it is NOT left out,
+ * because only what a shown page unticked is a person's exclusion. The run page says which kinds were not looked at. Pure: names and ids only, never a value.
  */
 import type { StepHost } from '../onboarding-api.ts';
 import { type ImportItemId, ImportItemIdSchema } from '@ferretry/plugin-runtimes/contract';
@@ -89,7 +88,7 @@ export const importingMode = (segment: StepHost['segment']): ImportMode | undefi
 export interface ImportPlan {
   /** The one change the run page applies. */
   readonly change: ReturnType<typeof buildImportChange>;
-  /** Kinds that had things to bring but were never reviewed in this run: their items are left out. */
+  /** Kinds that had things to bring but whose checklist was never shown in this run: not left out, only said. */
   readonly unreviewed: readonly ImportKind[];
   /** The changed sources taken again (`everything` only): the person is not asked about them one by one. */
   readonly updates: number;
@@ -102,9 +101,9 @@ const SETTINGS_ID = (model: ToolModel): ImportItemId => `${model.harness}:settin
 
 /**
  * The change for what was chosen. `everything` leaves nothing out. `choose` leaves out what each page's person unticked, and
- * everything on a kind that was never reviewed. `recovered` (a reload dropped the mode) leaves out only what the pages shown
- * since then had unticked: a kind never shown is not left out, because nobody left it out. Leaving the settings out also leaves out the models those settings name (what the
- * r9 wizard does for the same choice), and only a GitHub-token variable the person ticked is brought, and only while the
+ * nothing more: a kind whose checklist was never shown (a reload, a scan that failed on its page) is not a person's exclusion,
+ * so it adds no skip and takes no dependent with it. Leaving the settings out on their shown page also leaves out the models
+ * those settings name (what the r9 wizard does for the same choice), and only a GitHub-token variable the person ticked is brought, and only while the
  * environment itself is.
  */
 export function importPlan(model: ToolModel, mode: ImportMode, segment: StepHost['segment'], name: string): ImportPlan {
@@ -116,11 +115,10 @@ export function importPlan(model: ToolModel, mode: ImportMode, segment: StepHost
     const ids = kindItemIds(model, kind);
     const review = mode === 'everything' ? { left: [], env: [] } : reviewOf(segment, kind);
     if (review === undefined) {
-      // A kind never shown in a `choose` run is left out; in a recovered run nothing was left out by anybody, so it is not.
-      if (mode === 'choose') {
-        if (ids.length > 0) unreviewed.push(kind);
-        for (const id of ids) skip.add(id);
-      }
+      // A kind whose checklist was never shown (a reload, a scan that failed there, a page passed over) is NOT an exclusion:
+      // nobody left it out, so it adds no skip and drags none of its dependents (env, models) into the skip list. The run
+      // page says it was not looked at instead.
+      if (mode !== 'everything' && ids.length > 0) unreviewed.push(kind);
       continue;
     }
     for (const id of review.left) if (ids.includes(id)) skip.add(id);
