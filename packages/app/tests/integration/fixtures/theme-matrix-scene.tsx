@@ -34,6 +34,9 @@ createRoot(document.getElementById('root') as HTMLElement).render(
     <h1 data-spec="text" style={{ fontFamily: 'var(--font-display)' }}>
       Specimen heading
     </h1>
+    <section className="fy-page" style={{ padding: 0 }}>
+      <h1 data-spec="text">Shell page heading</h1>
+    </section>
     <p data-spec="text">
       Body text sits on the page: a sentence long enough to wrap on a phone, so the measure is real.
     </p>
