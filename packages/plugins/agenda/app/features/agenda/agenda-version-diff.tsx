@@ -6,7 +6,7 @@
  * change fold away under one line. The comparison itself is `agenda-diff.ts`'s; this only reads and draws.
  */
 
-import { Loading } from '@ferretry/app/ui';
+import { Loading, SelectBox } from '@ferretry/app/ui';
 import type { AgendaItem, AgendaViewTab } from '@ferretry/core-asks/contract';
 import { ChevronRight } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
@@ -146,7 +146,9 @@ export function VersionDiffPanel({
   const unchanged = diff.filter(section => section.status === 'unchanged');
   const heading =
     custom === null && fallback !== null ? BASIS_WORDS[fallback.basis] : `v${String(pair.from)} to v${String(pair.to)}`;
-  const options = [...list.versions].sort((a, b) => b.version - a.version);
+  const versionOptions = [...list.versions]
+    .sort((a, b) => b.version - a.version)
+    .map(version => ({ value: String(version.version), label: versionLabel(version, now) }));
 
   return (
     <section aria-label="Changes between versions" className="fy-diff" data-agenda-diff="" id={id}>
@@ -160,35 +162,29 @@ export function VersionDiffPanel({
         <div className="fy-diff__pickers">
           <label className="fy-diff__pick" htmlFor={fromId}>
             <span>From</span>
-            <select
-              className="fy-diff__select"
-              data-agenda-diff-from=""
-              id={fromId}
-              onChange={event => choose(Number(event.currentTarget.value), pair.to)}
-              value={pair.from}
-            >
-              {options.map(version => (
-                <option key={version.version} value={version.version}>
-                  {versionLabel(version, now)}
-                </option>
-              ))}
-            </select>
+            <span className="contents" data-agenda-diff-from="">
+              <SelectBox
+                className="fy-diff__select"
+                id={fromId}
+                label="From"
+                onChange={next => choose(Number(next), pair.to)}
+                options={versionOptions}
+                value={String(pair.from)}
+              />
+            </span>
           </label>
           <label className="fy-diff__pick" htmlFor={toId}>
             <span>To</span>
-            <select
-              className="fy-diff__select"
-              data-agenda-diff-to=""
-              id={toId}
-              onChange={event => choose(pair.from, Number(event.currentTarget.value))}
-              value={pair.to}
-            >
-              {options.map(version => (
-                <option key={version.version} value={version.version}>
-                  {versionLabel(version, now)}
-                </option>
-              ))}
-            </select>
+            <span className="contents" data-agenda-diff-to="">
+              <SelectBox
+                className="fy-diff__select"
+                id={toId}
+                label="To"
+                onChange={next => choose(pair.from, Number(next))}
+                options={versionOptions}
+                value={String(pair.to)}
+              />
+            </span>
           </label>
         </div>
       </div>

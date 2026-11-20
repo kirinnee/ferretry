@@ -1855,3 +1855,11 @@
 .fy-card__answered-line {
   margin: 0;
 }
+
+/* From and To are the app's SelectBox: the same width, whatever version each one shows. */
+.fy-diff__select.fy-sb__trigger {
+  width: min(100%, 17rem);
+  min-height: 32px;
+  padding: 3px 8px;
+  font-size: var(--text-sm);
+}

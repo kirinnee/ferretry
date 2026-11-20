@@ -9,6 +9,7 @@ import { DISMISS_ACTION, type InboxAction } from '../../../../app/lib/agenda-inb
 import type { DaemonId } from '../../../../app/shell.ts';
 import { registerComposerFor } from '../../../support/app/composer-quote.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
+import { chooseStarting, labelOf, openBox, optionsOpen } from '../../../support/select-box.ts';
 import { ensureDom, interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 
 // Alone, nothing has registered a DOM yet when a `describe` body reads `HTMLElement.prototype`.
@@ -511,15 +512,14 @@ describe('the version picker', () => {
     await draw(edited);
     expect(root().querySelector('.fy-card [data-agenda-version-picker]')).toBeNull();
     const picker = must(
-      (await openMenu()).querySelector<HTMLSelectElement>('[data-agenda-version-slot] [data-agenda-version-picker]'),
+      (await openMenu()).querySelector<HTMLElement>('[data-agenda-version-slot] [data-agenda-version-picker]'),
       'picker',
     );
-    expect([...picker.options].map(option => option.textContent)).toEqual(['v2 of 2 · 3m ago', expect.any(String)]);
-    expect(picker.options[1]?.textContent).toMatch(/^v1 of 2/u);
-    await interact(() => {
-      picker.value = '1';
-      picker.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await openBox(picker);
+    const listed = optionsOpen().map(labelOf);
+    expect(listed).toEqual(['v2 of 2 · 3m ago', expect.any(String)]);
+    expect(listed[1]).toMatch(/^v1 of 2/u);
+    await chooseStarting(picker, 'v1 ');
     // Picking closes the menu, and the head says an earlier version is on screen.
     expect(document.body.querySelector('[data-agenda-menu="popover"]')).toBeNull();
     // The picked control went with the menu: focus is back on ⋯, never dropped on the page.
@@ -547,13 +547,14 @@ describe('the version picker', () => {
         load: async () => edited,
       },
     });
-    const picker = must((await openMenu()).querySelector<HTMLSelectElement>('[data-agenda-version-picker]'), 'picker');
-    expect(picker.getAttribute('aria-label')).toBe('Edit');
+    const picker = must((await openMenu()).querySelector<HTMLElement>('[data-agenda-version-picker]'), 'picker');
+    await openBox(picker);
+    expect(must(picker.querySelector('[role="combobox"]'), 'combobox').getAttribute('aria-label')).toBe('Edit');
     expect(
       must(document.body.querySelector('[data-agenda-version-slot] [data-agenda-diff-toggle]'), 'Changes').textContent,
     ).toBe('Changes');
-    expect(picker.options[0]?.textContent).toMatch(/^Edit 2 of 2/u);
-    expect(picker.options[1]?.textContent).toMatch(/^Edit 1 of 2/u);
+    expect(labelOf(optionsOpen()[0] as HTMLElement)).toMatch(/^Edit 2 of 2/u);
+    expect(labelOf(optionsOpen()[1] as HTMLElement)).toMatch(/^Edit 1 of 2/u);
   });
 
   test('is not drawn for an item never edited', async () => {
@@ -711,11 +712,8 @@ describe('an input request', () => {
     } as Partial<AgendaItem>);
     await draw(input, { inputForm: <form data-fake-input="" /> });
     expect(root().querySelector('[data-agenda-section="context"]')).toBeNull();
-    const picker = must((await openMenu()).querySelector<HTMLSelectElement>('[data-agenda-version-picker]'), 'picker');
-    await interact(() => {
-      picker.value = '1';
-      picker.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const picker = must((await openMenu()).querySelector<HTMLElement>('[data-agenda-version-picker]'), 'picker');
+    await chooseStarting(picker, 'v1 ');
     expect(root().querySelector('[data-fake-input]')).toBeNull();
     expect(one('[data-agenda-section="context"]').textContent).toContain('the first prompt');
     expect(root().querySelector('[data-agenda-need]')).not.toBeNull();
