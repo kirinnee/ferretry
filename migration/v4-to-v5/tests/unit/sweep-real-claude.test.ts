@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -66,6 +66,28 @@ describe('the shim', () => {
       expect(await runShim(shim, ['hi'], {})).toBe('FAKE hi');
       expect(await runShim(shim, ['--version'], {})).toBe('REAL auto=1 --version');
       expect(await runShim(shim, ['-v'], { CLAUDE_SECURESTORAGE_CONFIG_DIR: '/elsewhere' })).toBe('REAL auto=1 -v');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('on a persisted (symlinked) slot: the real claude for the store the daemon hands it (its logical path), the fake otherwise; the shim is unchanged by the link', async () => {
+    const { root, paths, stub } = await scratch();
+    try {
+      // The logical FY_HOME is a link to a persistent folder, as the live slot's is.
+      const persistent = join(root, 'persistent-home');
+      await rename(paths.fyHome, persistent);
+      await symlink(persistent, paths.fyHome);
+      const logicalStore = storePathOf(paths.fyHome, 'claude-real');
+      const realStore = storePathOf(await realpath(paths.fyHome), 'claude-real');
+      expect(realStore).not.toBe(logicalStore);
+      await enableReal(paths, 'claude-real', stub, noRoot);
+      const shim = join(paths.harness, 'claude');
+      // 5.0 builds CLAUDE_SECURESTORAGE_CONFIG_DIR from the daemon's own FY_HOME (the logical path): that matches.
+      expect(await runShim(shim, ['hi'], { CLAUDE_SECURESTORAGE_CONFIG_DIR: logicalStore })).toBe('REAL auto=1 hi');
+      // Claude's value is an environment string, never a link target, so it stays an exact match (no second spelling).
+      expect(await runShim(shim, ['hi'], { CLAUDE_SECURESTORAGE_CONFIG_DIR: realStore })).toBe('FAKE hi');
+      expect(await readFile(shim, 'utf8')).not.toContain(realStore);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

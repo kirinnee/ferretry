@@ -61,7 +61,7 @@ const CODEX_AUTH_FILE = 'auth.json';
 
 export interface RealClaudeRecord {
   readonly login: string;
-  /** The exact string the shim compares CLAUDE_SECURESTORAGE_CONFIG_DIR with. */
+  /** The exact string the shim compares CLAUDE_SECURESTORAGE_CONFIG_DIR with (the logical store path, as the daemon's environment spells it). */
   readonly store: string;
   /** The real claude: an absolute path, resolved once at `on`. */
   readonly binary: string;
@@ -90,10 +90,10 @@ export const loginFileOf = (fyHome: string, login: string): string => join(fyHom
  * DISABLE_AUTOUPDATER=1; everything else execs the fake.
  */
 export function shimText(
-  spec: { readonly fake: string; readonly real: string; readonly store: string },
+  spec: { readonly fake: string; readonly real: string; readonly store: string; readonly realStore?: string },
   tool: RealTool = CLAUDE_TOOL,
 ): string {
-  for (const path of [spec.fake, spec.real, spec.store])
+  for (const path of [spec.fake, spec.real, spec.store, ...(spec.realStore === undefined ? [] : [spec.realStore])])
     if (!isAbsolute(path) || /[\n\r\0]/u.test(path))
       throw new Error(`shim paths must be absolute single-line paths: ${path}`);
   const real = shellQuote(spec.real);
@@ -115,29 +115,34 @@ export function shimText(
 
 /**
  * The codex shim: the real codex for (1) `--version` / `-V`, (2) a CODEX_HOME that is exactly the login's store (the sign-in, and
- * the daemon's own token refresh), (3) a CODEX_HOME whose `auth.json` is a link whose target is exactly `<store>/auth.json` (a ferret
+ * the daemon's own token refresh), (3) a CODEX_HOME whose `auth.json` is a link whose target is exactly `<store>/auth.json` (logical or real path) (a ferret
  * on a runtime of that login). Every other caller gets the fake. `readlink` prints the link's target path only; no file is opened.
  */
 function codexShimText(
-  spec: { readonly fake: string; readonly real: string; readonly store: string },
+  spec: { readonly fake: string; readonly real: string; readonly store: string; readonly realStore?: string },
   real: string,
   tool: RealTool,
 ): string {
   const store = shellQuote(spec.store);
-  const target = shellQuote(join(spec.store, CODEX_AUTH_FILE));
+  // The link's target is the LOGICAL store's auth.json or the same file by its REAL path: a persisted slot's FY_HOME goes through a
+  // link, and the 5.0 kernel writes the ferret's link with the real path. Exactly these two strings; never a prefix, glob or readlink -f.
+  const targets = [...new Set([spec.store, spec.realStore ?? spec.store])].map(s =>
+    shellQuote(join(s, CODEX_AUTH_FILE)),
+  );
   return [
     '#!/bin/sh',
     tool.marker,
     '# Real codex ONLY for the one login store below; every other caller gets the fake. Written by `slot.ts real-codex`.',
     'case "${1-}" in',
-    `  --version|-V) exec ${real} "$@" ;;`,
+    // codex's startup touches its home (a .env load, a tmp dir) before it prints, so --version gets a THROWAWAY home, removed after.
+    `  --version|-V) d=$(mktemp -d 2>/dev/null) || d=/nonexistent-fy-sweep-codex-home; CODEX_HOME="$d" ${real} "$@"; rc=$?; rm -rf "$d"; exit "$rc" ;;`,
     'esac',
     'case "${CODEX_HOME-}" in',
     `  ${store}) exec ${real} "$@" ;;`,
     'esac',
     'if [ -n "${CODEX_HOME-}" ] && [ -L "$CODEX_HOME/auth.json" ]; then',
     '  case "$(readlink "$CODEX_HOME/auth.json" 2>/dev/null)" in',
-    `    ${target}) exec ${real} "$@" ;;`,
+    `    ${targets.join('|')}) exec ${real} "$@" ;;`,
     '  esac',
     'fi',
     `exec ${shellQuote(spec.fake)} "$@"`,
@@ -240,6 +245,11 @@ const refuse = (sentence: string): never => {
 };
 
 export interface EnablePorts {
+  /**
+   * Runs `<binary> --version` (with a throwaway CODEX_HOME for codex) and returns its first line, or undefined when it could not
+   * run. Optional: when given, `on` for codex refuses a binary whose version line does not name codex, and prints the line.
+   */
+  readonly version?: (binary: string) => Promise<string | undefined>;
   /** Roots the binary's store path; returns the root link or undefined (with a reason said by the caller). */
   readonly root: (binary: string) => Promise<{ readonly link: string | undefined; readonly note?: string }>;
 }
@@ -316,6 +326,15 @@ export async function enableReal(
   if ((await headOf(real, HEAD_BYTES)).includes(tool.marker))
     return refuse(`${real} is a real-${tool.name} shim, not a real ${tool.name}`);
 
+  // Codex only: print what the binary says it is, and refuse a binary that does not say codex (a wrapper, another tool).
+  if (tool.name === 'codex' && ports.version !== undefined) {
+    const said = await ports.version(real);
+    if (said === undefined)
+      return refuse(`${real} --version did not run; refusing a binary that cannot say what it is`);
+    if (!/codex/iu.test(said)) return refuse(`${real} --version says "${said}", which does not name codex; refusing`);
+    notes.push(`${real} --version: ${said}`);
+  }
+
   // An existing folder is made private to its owner (a mode change only; its content is not opened). A missing one is left for
   // 5.0 to create at sign-in, already 0700.
   if (found !== undefined) await chmod(store, 0o700);
@@ -340,9 +359,16 @@ export async function enableReal(
     await copyFile(claude, fake);
     await chmod(fake, 0o755);
   }
+  // A persisted slot's FY_HOME goes through a link; the codex ferret's auth.json link is written with the REAL path, so the shim also
+  // accepts the store spelled by realpath(fyHome). A fyHome that cannot be resolved leaves only the logical spelling.
+  const realFyHome = await realpath(paths.fyHome).catch(() => undefined);
+  const realStore = realFyHome === undefined ? undefined : storePathOf(realFyHome, login);
   const linked = await ports.root(real);
   if (linked.note !== undefined) notes.push(linked.note);
-  await writeExecutable(claude, shimText({ fake, real, store }, tool));
+  await writeExecutable(
+    claude,
+    shimText({ fake, real, store, ...(realStore === undefined ? {} : { realStore }) }, tool),
+  );
   const record: RealClaudeRecord = { login, store, binary: real, rootedAt: linked.link ?? null };
   const temp = `${recordPathOf(paths, tool)}.tmp-${String(process.pid)}`;
   await writeFile(temp, recordText(record), { mode: 0o644 });

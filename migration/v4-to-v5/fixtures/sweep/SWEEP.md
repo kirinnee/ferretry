@@ -89,10 +89,13 @@ How the codex shim picks the login (paths only; **no `auth.json` is ever opened*
 - **Sign-in** (and the daemon's token refresh): `CODEX_HOME` is the login's store, `<FY_HOME>/state/logins/credentials/<login>`.
   The shim matches that string **exactly**.
 - **A ferret**: `CODEX_HOME` is the ferret's own home under `state/codex/agent-homes/<ferret>`, whose `auth.json` is a **link** to
-  `<store>/auth.json` (the runtime wrapper makes it). The shim runs the real codex when `readlink` of that link is exactly that path.
+  `<store>/auth.json` (the runtime wrapper makes it). The shim runs the real codex when `readlink` of that link is exactly that path
+  spelled **either way**: the logical store (`<FY_HOME>/…`) or the same file by its real path (`realpath(FY_HOME)/…`). A persisted slot's
+  FY_HOME goes through a link, and the 5.0 kernel writes the ferret's link with the real path; `on` computes both strings. Exactly
+  those two: no prefix, glob, `..` or `readlink -f`.
 
 Every other caller (another login's ferret, a home with no link or a plain `auth.json`, no `CODEX_HOME`) gets `codex.fake`.
-`--version` / `-V` always go to the real binary. Codex has no autoupdater switch, so none is set; `up` and `reset-v5` refuse while
+`--version` / `-V` always go to the real binary, run in a throwaway `CODEX_HOME` (removed after) so it never touches your own `~/.codex`. `on` also prints `<binary> --version` and refuses a binary whose version line does not name codex. Codex has no autoupdater switch, so none is set; `up` and `reset-v5` refuse while
 real codex is on (a reset removes the login with the old home; run `real-codex <n> off` first).
 
 Owner steps: add the Codex login on Logins (**Add login**, Codex, **Ferretry-managed**), tell the agent to run `real-codex 8 on <login>`,

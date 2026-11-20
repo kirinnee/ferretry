@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -62,6 +62,77 @@ async function runShim(shim: string, args: string[], env: Record<string, string>
   return out.trim();
 }
 
+describe('the codex shim on a persisted (symlinked) slot', () => {
+  test('a ferret whose auth.json link is the REAL path of the store (as the 5.0 kernel writes it) or the logical one gets the real codex; nothing else does', async () => {
+    const { root, paths, stub, ferretHome } = await scratch();
+    try {
+      // A persisted slot: the logical FY_HOME is a link to a persistent folder, as /tmp/.../slot8/... is on the live slot.
+      const persistent = join(root, 'persistent-home');
+      await rename(paths.fyHome, persistent);
+      await symlink(persistent, paths.fyHome);
+      const logicalStore = storePathOf(paths.fyHome, 'codex-real');
+      const realStore = storePathOf(await realpath(paths.fyHome), 'codex-real');
+      expect(realStore).not.toBe(logicalStore);
+
+      const { record } = await enableReal(paths, 'codex-real', stub, noRoot, CODEX_TOOL);
+      expect(record.store).toBe(logicalStore); // the record and the sign-in match stay the logical spelling
+      const shim = join(paths.harness, 'codex');
+      const shimSource = await readFile(shim, 'utf8');
+      expect(shimSource).toContain(join(realStore, 'auth.json'));
+
+      // the sign-in / token refresh hand the logical store as CODEX_HOME
+      expect(await runShim(shim, ['login'], { CODEX_HOME: logicalStore })).toBe(
+        `REAL-CODEX home=${logicalStore} login`,
+      );
+      // a ferret whose link was written with the real path (the 5.0 kernel) and one with the logical path
+      const byReal = await ferretHome('by-real', join(realStore, 'auth.json'));
+      expect(await runShim(shim, ['hi'], { CODEX_HOME: byReal })).toBe(`REAL-CODEX home=${byReal} hi`);
+      const byLogical = await ferretHome('by-logical', join(logicalStore, 'auth.json'));
+      expect(await runShim(shim, ['hi'], { CODEX_HOME: byLogical })).toBe(`REAL-CODEX home=${byLogical} hi`);
+      // exact only: another login's real path, a prefix/suffix near miss, a trailing slash, a dot-dot spelling
+      for (const [name, target] of [
+        ['other-login', join(await realpath(paths.fyHome), 'state', 'logins', 'credentials', 'x', 'auth.json')],
+        ['suffix', `${join(realStore, 'auth.json')}.bak`],
+        ['sub', join(realStore, 'sub', 'auth.json')],
+        ['dotdot', `${realStore}/../codex-real/auth.json`],
+      ] as const) {
+        const home = await ferretHome(name, target);
+        expect(await runShim(shim, ['hi'], { CODEX_HOME: home })).toBe('FAKE-CODEX hi');
+      }
+      // the real path as CODEX_HOME itself is NOT the logical store string: only the link target gets the two spellings
+      expect(await runShim(shim, ['hi'], { CODEX_HOME: realStore })).toBe('FAKE-CODEX hi');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test('on records a version line and refuses a binary that does not say codex (or does not run)', async () => {
+    const { root, paths, stub } = await scratch();
+    try {
+      const ok = await enableReal(
+        paths,
+        'codex-real',
+        stub,
+        { ...noRoot, version: async () => 'codex-cli 0.9.9' },
+        CODEX_TOOL,
+      );
+      expect(ok.notes.some(line => line.includes('--version: codex-cli 0.9.9'))).toBe(true);
+      await disableReal(paths, idle, { force: false }, CODEX_TOOL);
+      const before = await readFile(join(paths.harness, 'codex'), 'utf8');
+      await expect(
+        enableReal(paths, 'codex-real', stub, { ...noRoot, version: async () => 'node v20' }, CODEX_TOOL),
+      ).rejects.toThrow(/does not name codex/u);
+      await expect(
+        enableReal(paths, 'codex-real', stub, { ...noRoot, version: async () => undefined }, CODEX_TOOL),
+      ).rejects.toThrow(/did not run/u);
+      expect(await readFile(join(paths.harness, 'codex'), 'utf8')).toBe(before);
+      expect(await lstat(join(paths.v5Dir, 'real-codex.json')).catch(() => undefined)).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('the codex shim', () => {
   test('real for the exact store (the sign-in) and for a ferret home linked to that store; the fake for everyone else', async () => {
     const { root, paths, stub, store, ferretHome } = await scratch();
@@ -93,8 +164,17 @@ describe('the codex shim', () => {
       // the claude variable means nothing to it
       expect(await runShim(shim, ['hi'], { CLAUDE_SECURESTORAGE_CONFIG_DIR: store })).toBe('FAKE-CODEX hi');
       // --version / -V always reach the real binary
-      expect(await runShim(shim, ['--version'], {})).toBe('REAL-CODEX home= --version');
-      expect(await runShim(shim, ['-V'], { CODEX_HOME: '/elsewhere' })).toBe('REAL-CODEX home=/elsewhere -V');
+      // ...but in a THROWAWAY home (never the caller's, never unset), removed afterwards
+      const scratchTmp = join(root, 'tmp');
+      await mkdir(scratchTmp);
+      expect(await runShim(shim, ['--version'], { TMPDIR: scratchTmp })).toMatch(
+        /^REAL-CODEX home=\/\S+\/tmp\.\S+ --version$/u,
+      );
+      expect(await runShim(shim, ['-V'], { CODEX_HOME: '/elsewhere', TMPDIR: scratchTmp })).toMatch(
+        /^REAL-CODEX home=\/\S+\/tmp\.\S+ -V$/u,
+      );
+      expect(await runShim(shim, ['-V'], { CODEX_HOME: '/elsewhere', TMPDIR: scratchTmp })).not.toContain('/elsewhere');
+      expect(await readdir(scratchTmp)).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

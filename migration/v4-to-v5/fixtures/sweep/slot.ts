@@ -49,13 +49,14 @@
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import {
   chmod,
   copyFile,
   cp,
   lstat,
   mkdir,
+  mkdtemp,
   readFile,
   readdir,
   readlink,
@@ -2271,6 +2272,24 @@ async function realToolLine(slot: Slot, tool: RealTool): Promise<string> {
 const realClaudeLine = async (slot: Slot): Promise<string> => await realToolLine(slot, CLAUDE_TOOL);
 const realCodexLine = async (slot: Slot): Promise<string> => await realToolLine(slot, CODEX_TOOL);
 
+/**
+ * `<binary> --version`, first line, run in a THROWAWAY home (`homeVariable`) so it cannot touch the owner's own; undefined when it
+ * does not run or takes over 10 s. The folder is removed after.
+ */
+async function versionOf(binary: string, homeVariable: string): Promise<string | undefined> {
+  const home = await mkdtemp(join(tmpdir(), 'fy-sweep-version-'));
+  try {
+    const ran = Bun.spawnSync([binary, '--version'], {
+      env: { ...baseEnvironment(), [homeVariable]: home },
+      timeout: 10_000,
+    });
+    if (ran.exitCode !== 0) return undefined;
+    return ran.stdout.toString().split('\n')[0]?.trim() || undefined;
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+}
+
 /** The real `tool` on the caller's PATH, skipping every sweep harness-bin folder (those hold the fakes and the shim). */
 async function findRealTool(slot: Slot, tool: RealTool): Promise<string | undefined> {
   for (const folder of (process.env.PATH ?? '').split(':')) {
@@ -2316,6 +2335,7 @@ async function realTool(slot: Slot, tool: RealTool, rest: readonly string[]): Pr
         login,
         binary,
         {
+          version: tool.name === 'codex' ? async path => await versionOf(path, 'CODEX_HOME') : undefined,
           root: async path => {
             const root = storeRootOf(path);
             if (root === undefined)
