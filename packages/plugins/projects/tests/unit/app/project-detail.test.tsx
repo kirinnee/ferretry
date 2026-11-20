@@ -207,6 +207,78 @@ describe('ProjectDetailPage', () => {
   });
 });
 
+/**
+ * A faithful fake of the daemon's `POST /v1/ferrets`: it refuses a start with no `x-fy-request-id` with the daemon's own
+ * sentence (lifecycle.feature.ts) and answers a replayed id with the ferret it already started, never a second one.
+ */
+const startingDaemon = (options: { readonly loseFirstAnswer?: boolean } = {}) => {
+  const started = new Map<string, string>();
+  let lost = options.loseFirstAnswer === true;
+  const route = (call: Call): unknown => {
+    const requestId = call.headers?.['x-fy-request-id']?.trim();
+    if (requestId === undefined || requestId === '')
+      throw refusal(
+        400,
+        'a start must carry x-fy-request-id: without it a retried request starts a second session',
+        'missing_request_id',
+      );
+    const ferretId = started.get(requestId) ?? `f-${started.size + 1}`;
+    started.set(requestId, ferretId);
+    if (lost) {
+      lost = false;
+      throw new Error('the carrier dropped before the daemon answered');
+    }
+    return { id: ferretId };
+  };
+  return { route, started };
+};
+
+const startFromTheProjectPage = async (mounted: Mounted): Promise<void> => {
+  await shown(mounted);
+  await press(buttonSaying(mounted, 'Start a ferret'));
+  const field = must(
+    mounted.container.querySelector<HTMLInputElement>('#project-launch-runtime-name'),
+    'the runtime field',
+  );
+  await interact(() => typeInto(field, 'claude-code'));
+  await press(buttonSaying(mounted, 'Start interactive ferret'));
+};
+
+describe('ProjectDetailPage start carries the request id', () => {
+  it('is not refused for a missing x-fy-request-id and lands on the ferret it started', async () => {
+    const calls: Call[] = [];
+    const daemon = startingDaemon();
+    const mounted = await mount(detail(client([], { [START]: daemon.route }, calls)));
+    await startFromTheProjectPage(mounted);
+    await settleUntil(() => window.location.pathname === '/d/workstation/ferrets/f-1', 'the new ferret', interact);
+
+    expect(mounted.container.textContent).not.toContain('a start must carry x-fy-request-id');
+    const sent = calls.filter(call => call.route === START);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.headers?.['x-fy-request-id']).toMatch(/^[0-9a-f-]{36}$/u);
+    await mounted.unmount();
+  });
+
+  it('sends the SAME id on a retry of a start whose answer was lost, so one ferret exists', async () => {
+    const calls: Call[] = [];
+    const daemon = startingDaemon({ loseFirstAnswer: true });
+    const mounted = await mount(detail(client([], { [START]: daemon.route }, calls)));
+    await startFromTheProjectPage(mounted);
+    await settled(mounted, c => (c.textContent ?? '').includes('Retry launch'), 'the retry offer');
+    expect(mounted.container.textContent).toContain('the carrier dropped before the daemon answered');
+
+    await press(buttonSaying(mounted, 'Retry launch'));
+    await settleUntil(() => window.location.pathname === '/d/workstation/ferrets/f-1', 'the new ferret', interact);
+
+    const ids = calls.filter(call => call.route === START).map(call => call.headers?.['x-fy-request-id']);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toBeDefined();
+    expect(ids[1]).toBe(ids[0]);
+    expect(daemon.started.size).toBe(1);
+    await mounted.unmount();
+  });
+});
+
 describe('ProjectDetailPage lane editor entry', () => {
   it('opens the lane editor on this project’s own board from the header', async () => {
     const mounted = await mount(detail(client()));

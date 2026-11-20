@@ -66,7 +66,7 @@ function ProjectDetailView({
   readonly daemon: string;
   readonly project: ProjectInfo;
   readonly reading: FerretsReading;
-  readonly onLaunch: (request: ReturnType<typeof projectLaunchRequest>) => Promise<void>;
+  readonly onLaunch: (request: ReturnType<typeof projectLaunchRequest>, requestId: string) => Promise<void>;
   readonly onNavigate: (to: string) => void;
   readonly onBack: (to: string) => void;
 }) {
@@ -271,8 +271,8 @@ export function ProjectDetailPage({
       </main>
     );
 
-  const launch = async (request: ReturnType<typeof projectLaunchRequest>): Promise<void> => {
-    const created = await startFerret(client, request);
+  const launch = async (request: ReturnType<typeof projectLaunchRequest>, requestId: string): Promise<void> => {
+    const created = await startFerret(client, request, requestId);
     navigate(ferretPath(daemon, created.id));
   };
   return (
