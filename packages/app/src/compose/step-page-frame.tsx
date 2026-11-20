@@ -8,7 +8,7 @@
  *   </StepPageFrame>
  *
  * The title, one line, the body, and a demo box on the right at >= 900px (above the body, <= 120px tall, on a phone).
- * The footer holds Back (ghost), an optional Later (secondary) and Next (primary), in that order: auto width, min-height 44px, 12-16px vertical padding, right
+ * The footer may carry one `note` line above the buttons. It holds Back (ghost), an optional Later (secondary) and Next (primary), in that order: auto width, min-height 44px, 12-16px vertical padding, right
  * aligned, and sticky at the bottom of the screen on a phone. `next.busy` locks Next and shows the spinner.
  * Layout and motion live in `step-page-frame.css`; this file chooses no colour.
  */
@@ -57,10 +57,12 @@ export interface StepPageFrameProps {
   readonly next: StepPageNext;
   /** "Come back to this later": a real secondary button in the footer row, never a link in the page. */
   readonly later?: StepPageLater;
+  /** One short line in the footer, above the buttons, so it stays on screen with them (a failed save, say). The caller draws and colours it. */
+  readonly note?: ReactNode;
   readonly progress?: StepProgressProps;
 }
 
-export function StepPageFrame({ title, line, demo, children, back, next, later, progress }: StepPageFrameProps) {
+export function StepPageFrame({ title, line, demo, children, back, next, later, note, progress }: StepPageFrameProps) {
   const locked = next.disabled === true || next.busy === true;
   return (
     <section className="fy-spf" data-step-page="" aria-busy={next.busy === true || undefined}>
@@ -80,6 +82,7 @@ export function StepPageFrame({ title, line, demo, children, back, next, later, 
         </div>
       </div>
       <footer className="fy-spf__footer" data-step-footer="">
+        {note === undefined ? null : <div className="fy-spf__note">{note}</div>}
         <div className="fy-spf__actions">
           {back === undefined ? null : (
             <Button

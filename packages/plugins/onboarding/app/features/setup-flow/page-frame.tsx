@@ -10,7 +10,8 @@
  *   4. (r11 O1) the cover draws NOTHING for its first LOADING_DELAY_MS (300 ms): it keeps the page's height and then shows the
  *      loader, so a page that answers inside that beat never flashes one;
  *   5. (r11 O1) a page that registered `commit` is SAVED by Next (contract rule 8): the footer is busy 'Saving…', and a save that
- *      rejects keeps the page, shows the error and leaves Next ready to run it again;
+ *      rejects (or throws while it is being prepared) keeps the page, shows the error in the footer line, where it stays on screen
+ *      with Next, and leaves Next ready to run it again;
  *   6. a step that does not declare `stepHost` is a LEGACY page (it never calls `ready()`): it is drawn with no cover, Next
  *      enabled and done recorded on Next, so a page not yet written against StepHost is never trapped behind a cover.
  * Next, Back and Later are the shell's and live in the frame's footer row (Back · Later · Next), so every page has the same footer.
@@ -193,7 +194,8 @@ export function FlowPage(props: FlowPageProps): ReactNode {
     shown.current = true;
     setSaveError(null);
     setBusy('Saving…');
-    save()
+    // A save may throw while it is being prepared, before it hands back its promise: that is a failed save too.
+    new Promise<void>(resolve => resolve(save()))
       .then(
         () => {
           if (!alive.current) return;
@@ -219,6 +221,15 @@ export function FlowPage(props: FlowPageProps): ReactNode {
       {...(progress === undefined ? {} : { progress })}
       {...(canBack ? { back: { onClick: pressBack, disabled: busy !== null } } : {})}
       next={{ label: 'Next', disabled: locked, busy: busy !== null, onClick: pressNext }}
+      {...(saveError === null
+        ? {}
+        : {
+            note: (
+              <p role="alert" className="fy-sf-note" data-flow-commit-error="">
+                {saveError}
+              </p>
+            ),
+          })}
       {...(ready
         ? {
             later: {
@@ -261,11 +272,6 @@ export function FlowPage(props: FlowPageProps): ReactNode {
         {busy === null ? null : (
           <p role="status" className="fy-sf-note" data-flow-busy="">
             {busy}
-          </p>
-        )}
-        {saveError === null ? null : (
-          <p role="alert" className="fy-sf-note" data-flow-commit-error="">
-            {saveError}
           </p>
         )}
         {unsaved === undefined ? null : (

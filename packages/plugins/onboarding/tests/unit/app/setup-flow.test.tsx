@@ -66,20 +66,32 @@ function SlowSavePage({ step }: { readonly step: StepHost }): ReactNode {
   return <p>saving</p>;
 }
 /** r11 O1: a page that registers a save for Next; the test says how each run of it ends (`rejectWith` makes it reject once). */
-const saves: { runs: number; rejectWith: string | undefined; gate: Promise<void> | undefined } = {
+const saves: {
+  runs: number;
+  rejectWith: string | undefined;
+  throwWith: string | undefined;
+  gate: Promise<void> | undefined;
+} = {
   runs: 0,
   rejectWith: undefined,
+  throwWith: undefined,
   gate: undefined,
 };
 function SavePage({ step }: { readonly step: StepHost }): ReactNode {
   useEffect(() => {
     step.ready();
-    step.commit(async () => {
-      saves.runs += 1;
+    const run = async (): Promise<void> => {
       await saves.gate;
       const why = saves.rejectWith;
       saves.rejectWith = undefined;
       if (why !== undefined) throw new Error(why);
+    };
+    step.commit((): Promise<void> => {
+      saves.runs += 1;
+      const thrown = saves.throwWith;
+      saves.throwWith = undefined;
+      if (thrown !== undefined) throw new Error(thrown);
+      return run();
     });
   }, [step]);
   return <p>pick something</p>;
@@ -996,6 +1008,25 @@ describe('Next saves the choice (contract rule 8, r11 O1)', () => {
     expect(pageKey()).toBe('fake-pack.after');
     expect(errorText()).toBeUndefined();
     expect(run.answers.map(answer => `${answer.step}:${answer.state}`)).toEqual(['save:done']);
+  });
+
+  it('a save that throws while it is being prepared is a failed save: message, Next ready, retry runs it', async () => {
+    saves.runs = 0;
+    saves.throwWith = 'Could not prepare the request.';
+    const run = steps('save', 'after');
+    view = await mount(run.tree);
+    await settle();
+    await next();
+    await settle();
+    expect(saves.runs).toBe(1);
+    expect(pageKey()).toBe('fake-pack.save');
+    expect(errorText()).toBe('Could not prepare the request.');
+    expect(view.container.querySelector('[data-flow-busy]')).toBeNull();
+    expect(view.container.querySelector<HTMLButtonElement>('[data-step-next]')?.disabled).toBe(false);
+    await next();
+    await settle();
+    expect(saves.runs).toBe(2);
+    expect(pageKey()).toBe('fake-pack.after');
   });
 
   it('Next is locked and says Saving… while the save runs, and a second press does not run it twice', async () => {

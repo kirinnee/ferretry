@@ -319,6 +319,8 @@ describe('r11 O1: Next saves the choice and the loader waits 300 ms', () => {
           expect(await tab.textContent('[data-flow-commit-error]')).toContain('Could not reach the machine.');
           expect(await title(tab), 'still on the same page').toBe('How should it import?');
           expect(await saves(tab)).toBe(1);
+          // Let Next's fade back from its locked look finish before shooting.
+          await tab.waitForTimeout(400);
           if (shotsDir !== '')
             await tab.screenshot({
               path: join(shotsDir, `${viewport.name}-${scheme}-commit-failed.png`),
@@ -338,42 +340,157 @@ describe('r11 O1: Next saves the choice and the loader waits 300 ms', () => {
       });
     }
 
+  for (const scheme of ['light', 'dark'] as const)
+    for (const viewport of VIEWPORTS) {
+      it(`while the save is pending the first page stays with Next locked; releasing it moves on (${viewport.name}, ${scheme})`, async () => {
+        const { context, origin, tab } = await open(scheme, viewport.width, viewport.height);
+        try {
+          await tab.goto(`${origin}/?theme=studio-${scheme}&case=commit-gated`);
+          await tab.waitForSelector('[data-flow-page="fake-pack.choose"]:not([hidden])');
+          await tab.click('[data-step-next]');
+          await tab.waitForFunction(
+            () => (window as unknown as { __releaseSave?: () => void }).__releaseSave !== undefined,
+          );
+          await tab.waitForTimeout(250);
+          expect(await title(tab), 'still on the first page while the save is pending').toBe('How should it import?');
+          expect(
+            await tab.$eval('[data-step-next]', next => (next as HTMLButtonElement).disabled),
+            'Next is disabled while the save is pending',
+          ).toBe(true);
+          expect(await tab.textContent('[data-flow-busy]')).toBe('Saving…');
+          expect(await saves(tab), 'one save in flight').toBe(1);
+          await tab.evaluate(() => (window as unknown as { __releaseSave: () => void }).__releaseSave());
+          await tab.waitForFunction(() => document.querySelector('.fy-spf__title')?.textContent === 'Second page');
+          expect(await saves(tab), 'still one save').toBe(1);
+        } finally {
+          await context.close();
+        }
+      });
+      it(`a save that throws while it is being prepared is handled like a rejection: message, Next enabled, retry works (${viewport.name}, ${scheme})`, async () => {
+        const { context, origin, tab } = await open(scheme, viewport.width, viewport.height);
+        try {
+          const uncaught: string[] = [];
+          tab.on('pageerror', error => uncaught.push(error.message));
+          await tab.goto(`${origin}/?theme=studio-${scheme}&case=commit-throw`);
+          await tab.waitForSelector('[data-flow-page="fake-pack.choose"]:not([hidden])');
+          await tab.click('[data-step-next]');
+          await tab.waitForTimeout(400);
+          expect(uncaught, 'no uncaught error').toEqual([]);
+          expect(await tab.textContent('[data-flow-commit-error]'), 'the message is shown').toContain(
+            'Could not prepare the request.',
+          );
+          expect(await tab.$('[data-flow-busy]'), 'Saving… is cleared').toBeNull();
+          expect(
+            await tab.$eval('[data-step-next]', next => (next as HTMLButtonElement).disabled),
+            'Next is enabled to try again',
+          ).toBe(false);
+          await tab.click('[data-step-next]');
+          await tab.waitForFunction(() => document.querySelector('.fy-spf__title')?.textContent === 'Second page');
+          expect(await saves(tab), 'the retry ran the save again').toBe(2);
+        } finally {
+          await context.close();
+        }
+      });
+    }
+
   for (const scheme of ['light', 'dark'] as const) {
-    it(`a page that answers in 250 ms never has a loader visible (${scheme})`, async () => {
-      const { context, origin, tab } = await open(scheme, 1_280, 800);
+    it(`a failed save on a tall page shows its message on screen, in the footer, at 390 (${scheme})`, async () => {
+      const { context, origin, tab } = await open(scheme, 390, 844);
       try {
-        await tab.addInitScript(LOADER_SAMPLER);
-        await tab.goto(`${origin}/?theme=studio-${scheme}&case=late&ms=250`);
-        await tab.waitForFunction(() => (window as unknown as { __readyAt?: number }).__readyAt !== undefined);
-        await tab.waitForTimeout(700);
-        const seen = await tab.evaluate(() => (window as unknown as { __loader: { frames: number } }).__loader);
-        expect(seen.frames, 'no frame had a visible loader (checked every frame for 700 ms)').toBe(0);
-        expect(await tab.$('[data-flow-cover]'), 'the cover is gone once the page is ready').toBeNull();
-      } finally {
-        await context.close();
-      }
-    });
-    it(`a page that answers in 600 ms has the loader from 300 ms on, not before (${scheme})`, async () => {
-      const { context, origin, tab } = await open(scheme, 1_280, 800);
-      try {
-        await tab.addInitScript(LOADER_SAMPLER);
-        await tab.goto(`${origin}/?theme=studio-${scheme}&case=late&ms=600`);
-        await tab.waitForFunction(() => (window as unknown as { __readyAt?: number }).__readyAt !== undefined);
-        const seen = await tab.evaluate(() => {
-          const w = window as unknown as {
-            __loader: { first: number; last: number; frames: number };
-            __pageMountedAt: number;
+        await tab.goto(`${origin}/?theme=studio-${scheme}&case=commit-tall`);
+        await tab.waitForSelector('[data-flow-page="fake-pack.choose"]:not([hidden])');
+        await tab.click('[data-step-next]');
+        await tab.waitForSelector('[data-flow-commit-error]');
+        await tab.waitForTimeout(200);
+        const box = await tab.$eval('[data-flow-commit-error]', el => {
+          const r = el.getBoundingClientRect();
+          return {
+            top: r.top,
+            bottom: r.bottom,
+            left: r.left,
+            right: r.right,
+            inFooter: el.closest('[data-step-footer]') !== null,
           };
-          return { ...w.__loader, mounted: w.__pageMountedAt };
         });
-        expect(seen.frames, 'the loader was drawn').toBeGreaterThan(0);
-        const from = seen.first - seen.mounted;
-        console.info(`loader first visible ${from.toFixed(0)} ms after the page mounted (${scheme})`);
-        expect(from, `the loader first shows at ${from.toFixed(0)} ms: not before 300`).toBeGreaterThanOrEqual(295);
-        expect(from, `and soon after 300 (${from.toFixed(0)} ms)`).toBeLessThanOrEqual(420);
+        const next = await tab.$eval('[data-step-next]', el => el.getBoundingClientRect().top);
+        console.info(
+          `failed save on a tall page (${scheme}): message y ${box.top.toFixed(0)}–${box.bottom.toFixed(0)}, Next top ${next.toFixed(0)}, viewport 844`,
+        );
+        expect(box.inFooter, 'the message is in the footer').toBe(true);
+        expect(box.top, 'the message starts on screen').toBeGreaterThanOrEqual(0);
+        expect(box.bottom, 'the message ends on screen').toBeLessThanOrEqual(844);
+        expect(box.left).toBeGreaterThanOrEqual(0);
+        expect(box.right).toBeLessThanOrEqual(390);
+        expect(box.bottom, 'the message sits above Next').toBeLessThanOrEqual(next + 1);
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `390-${scheme}-commit-failed-tall.png`) });
       } finally {
         await context.close();
       }
     });
   }
+
+  it("the flow's machine-discovery cover keeps the loader's own threshold, the step cover waits in its own code", async () => {
+    const { context, origin, tab } = await open('light', 1_280, 800);
+    try {
+      await tab.goto(`${origin}/?theme=studio-light&case=discovery`);
+      await tab.waitForSelector('[data-flow-loading] .fy-loading--page');
+      const delay = await tab.$eval('[data-flow-loading] .fy-loading--page', el => getComputedStyle(el).animationDelay);
+      console.info(`discovery cover loader animation-delay: ${delay}`);
+      expect(delay, 'the machine-discovery loader keeps its threshold (not reset to 0s)').not.toBe('0s');
+      const ms = Number.parseFloat(delay) * 1_000;
+      expect(ms, 'a real, non-zero threshold').toBeGreaterThanOrEqual(150);
+      await tab.goto(`${origin}/?theme=studio-light&case=late&ms=900`);
+      await tab.waitForSelector('[data-flow-cover] .fy-loading--page');
+      const stepDelay = await tab.$eval(
+        '[data-flow-cover] .fy-loading--page',
+        el => getComputedStyle(el).animationDelay,
+      );
+      console.info(`step cover loader animation-delay: ${stepDelay}`);
+      expect(stepDelay, 'the step cover has already waited, so its loader fades in at once').toBe('0s');
+    } finally {
+      await context.close();
+    }
+  });
+
+  for (const scheme of ['light', 'dark'] as const)
+    for (const viewport of VIEWPORTS) {
+      it(`a page that answers in 250 ms never has a loader visible (${viewport.name}, ${scheme})`, async () => {
+        const { context, origin, tab } = await open(scheme, viewport.width, viewport.height);
+        try {
+          await tab.addInitScript(LOADER_SAMPLER);
+          await tab.goto(`${origin}/?theme=studio-${scheme}&case=late&ms=250`);
+          await tab.waitForFunction(() => (window as unknown as { __readyAt?: number }).__readyAt !== undefined);
+          await tab.waitForTimeout(700);
+          const seen = await tab.evaluate(() => (window as unknown as { __loader: { frames: number } }).__loader);
+          expect(seen.frames, 'no frame had a visible loader (checked every frame for 700 ms)').toBe(0);
+          expect(await tab.$('[data-flow-cover]'), 'the cover is gone once the page is ready').toBeNull();
+        } finally {
+          await context.close();
+        }
+      });
+      it(`a page that answers in 600 ms has the loader from 300 ms on, not before (${viewport.name}, ${scheme})`, async () => {
+        const { context, origin, tab } = await open(scheme, viewport.width, viewport.height);
+        try {
+          await tab.addInitScript(LOADER_SAMPLER);
+          await tab.goto(`${origin}/?theme=studio-${scheme}&case=late&ms=600`);
+          await tab.waitForFunction(() => (window as unknown as { __readyAt?: number }).__readyAt !== undefined);
+          const seen = await tab.evaluate(() => {
+            const w = window as unknown as {
+              __loader: { first: number; last: number; frames: number };
+              __pageMountedAt: number;
+            };
+            return { ...w.__loader, mounted: w.__pageMountedAt };
+          });
+          expect(seen.frames, 'the loader was drawn').toBeGreaterThan(0);
+          const from = seen.first - seen.mounted;
+          console.info(
+            `loader first visible ${from.toFixed(0)} ms after the page mounted (${viewport.name}, ${scheme})`,
+          );
+          expect(from, `the loader first shows at ${from.toFixed(0)} ms: not before 300`).toBeGreaterThanOrEqual(295);
+          expect(from, `and soon after 300 (${from.toFixed(0)} ms)`).toBeLessThanOrEqual(420);
+        } finally {
+          await context.close();
+        }
+      });
+    }
 });

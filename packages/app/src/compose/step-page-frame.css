@@ -86,6 +86,14 @@
   border-top: 1px solid var(--border);
   flex: 0 0 auto;
 }
+/* A note above the buttons (a failed save): same column and gutters as the buttons, one or two lines, always on screen with them. */
+.fy-spf__note {
+  margin-inline: auto;
+  max-width: 880px;
+  overflow-wrap: anywhere;
+  padding: 12px 16px 0;
+  text-align: end;
+}
 .fy-spf__actions {
   align-items: center;
   display: flex;
