@@ -17,6 +17,8 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 if (params.get('motion') === 'reduced') document.documentElement.dataset.motion = 'reduced';
 
 const script = scriptedLayouts();
+// What the fake daemon was asked to do, for a test to read (the same writes the verbs make: `use compact`, `theme studio`).
+(window as unknown as { __fyCalls: readonly string[] }).__fyCalls = script.calls;
 
 const PLACES: readonly (readonly [string, string, string])[] = [
   ['ferrets', 'Ferrets', 'users'],
