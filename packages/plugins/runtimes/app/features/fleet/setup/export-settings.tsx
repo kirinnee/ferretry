@@ -95,22 +95,27 @@ export function ExportSettings({
 
   return (
     <section className="flex min-w-0 flex-col gap-4" data-export-settings="" aria-labelledby="export-settings-heading">
-      <div className="flex min-w-0 flex-col gap-1">
-        <h3 id="export-settings-heading" className="m-0 text-row font-semibold text-fg">
-          Export settings
-        </h3>
-        <p className="m-0 text-cell leading-base text-muted">
-          A zip of <span className="font-mono">{machineName}</span>’s YAML configuration files — Warden, Learning,
-          Voice, logins, profiles, components and runtimes — without secrets. A file only ever names a secret as{' '}
-          <span className="font-mono">{secretReference('NAME')}</span>, never its value. Device settings are not
-          included.
-        </p>
-      </div>
-      <div>
-        <Button type="button" variant="primary" data-export-run="" disabled={phase.kind === 'reading'} onClick={run}>
-          <Download size={16} aria-hidden="true" />
-          {phase.kind === 'reading' ? 'Reading the files…' : 'Export settings'}
-        </Button>
+      <div className="flex min-w-0 flex-wrap items-end gap-x-6 gap-y-3">
+        <div className="flex min-w-[min(100%,20rem)] flex-1 flex-col gap-1">
+          <h3
+            id="export-settings-heading"
+            className="m-0 px-1 text-meta font-semibold uppercase tracking-wide text-muted"
+          >
+            Export settings
+          </h3>
+          <p className="m-0 text-cell leading-base text-muted">
+            A zip of <span className="font-mono">{machineName}</span>’s YAML configuration files — Warden, Learning,
+            Voice, logins, profiles, components and runtimes — without secrets. A file only ever names a secret as{' '}
+            <span className="font-mono">{secretReference('NAME')}</span>, never its value. Device settings are not
+            included.
+          </p>
+        </div>
+        <div>
+          <Button type="button" variant="primary" data-export-run="" disabled={phase.kind === 'reading'} onClick={run}>
+            <Download size={16} aria-hidden="true" />
+            {phase.kind === 'reading' ? 'Reading the files…' : 'Export settings'}
+          </Button>
+        </div>
       </div>
       {phase.kind === 'failed' ? (
         <SetupNote live tone="err" name="export-failed" title="Couldn’t export">

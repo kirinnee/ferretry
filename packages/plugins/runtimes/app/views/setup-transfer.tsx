@@ -15,14 +15,14 @@ import type { LiveRuntimesClient } from '../lib/client.ts';
 import { machineSettingsView } from './machine-settings-host.tsx';
 
 function Heading({ children }: { readonly children: string }) {
-  return <h3 className="m-0 text-row font-semibold text-fg">{children}</h3>;
+  return <h3 className="m-0 px-1 text-meta font-semibold uppercase tracking-wide text-muted">{children}</h3>;
 }
 
 /** Settings › Export & copy. */
 function TransferTab({ client, machineName, machine }: MachineTabProps) {
   const changes = useAccountChanges({ client });
   return (
-    <div className="flex min-w-0 flex-col gap-8" data-setup-transfer="">
+    <div className="fy-fleet flex min-w-0 flex-col gap-8" data-setup-transfer="">
       <ExportSettings client={client} machineName={machineName} />
       <section className="flex min-w-0 flex-col gap-3" data-copy-settings="">
         <Heading>Copy settings from another machine</Heading>

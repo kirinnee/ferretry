@@ -1,0 +1,76 @@
+/* Imported by `views/machine-settings-host.tsx`, which every tab sits in. The Runtimes settings tabs lay out by the width of the PANEL they sit in (r10 S11), never by the window's: the Settings
+   page body is 212px wide in a 768px window and about 724px in a 1280px one, so a viewport breakpoint (`md:`) puts a wide
+   layout into a narrow panel. `.fy-fleet` (the tab host) is the container; "wide" starts at 640px of it.
+   `fy-wide-*` shows a thing only when the panel is wide, `fy-narrow-only` only when it is not. */
+.fy-fleet {
+  container-type: inline-size;
+  container-name: fleet;
+  min-width: 0;
+}
+
+.fy-split {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+}
+.fy-wide-only,
+.fy-wide-grid,
+.fy-wide-inline {
+  display: none;
+}
+.fy-resolved-cols {
+  grid-template-columns: minmax(0, 1fr);
+}
+.fy-wide-grow {
+  width: 100%;
+}
+.fy-wide-scroll {
+  max-height: none;
+}
+
+@container fleet (min-width: 640px) {
+  .fy-split {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  }
+  .fy-wide-only {
+    display: flex !important;
+  }
+  .fy-wide-grid {
+    display: grid !important;
+  }
+  .fy-wide-inline {
+    display: inline !important;
+  }
+  .fy-narrow-only {
+    display: none !important;
+  }
+  .fy-resolved-cols {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 0.8fr);
+  }
+  .fy-wide-grow {
+    width: auto;
+    flex: 1 1 0%;
+  }
+  .fy-wide-scroll {
+    max-height: 32rem;
+    overflow-y: auto;
+  }
+  .fy-wide-grab {
+    cursor: grab;
+  }
+}
+
+/* A profile item row (library and contents): a hairline-divided line, not a box in the pane's box. Its move / remove
+   buttons sit under the name, at the right, while the panel is under 400px, so the name never runs into them. */
+.fy-item-row {
+  background: none;
+}
+@container fleet (max-width: 399px) {
+  .fy-item-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .fy-item-row > .fy-item-actions {
+    grid-column: 1;
+    justify-self: end;
+  }
+}

@@ -17,6 +17,7 @@ import type { MachineTabProps } from '../features/fleet/shell/machine-tab.ts';
 import { useMachineChanges } from '../hooks/use-machine-changes.ts';
 import type { LiveRuntimesClient } from '../lib/client.ts';
 import { Button } from '../ui.ts';
+import '../features/fleet/fleet-panel.css';
 
 type MachineRead =
   | { readonly kind: 'checking'; readonly last: MachineView | null }
@@ -80,7 +81,7 @@ export const machineSettingsView = (
     // name this view last read: a machine renamed while its setup is open must not keep reading "No runtimes on <old name>".
     const paired = usePairedDaemons();
     return (
-      <div className="flex min-w-0 flex-col gap-4" data-machine-settings="">
+      <div className="fy-fleet flex min-w-0 flex-col gap-4" data-machine-settings="">
         {read.kind === 'failed' ? (
           <div className="flex flex-wrap items-center gap-2" data-machine-unreadable="">
             <p role="alert" className="m-0 text-cell leading-base text-warn">

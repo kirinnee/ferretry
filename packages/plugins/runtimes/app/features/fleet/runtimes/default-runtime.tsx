@@ -13,6 +13,7 @@ import { useId } from 'react';
 import { Button } from '../../../ui.ts';
 import { machineSettings } from '../machine/machine-settings.ts';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
+import { Block, FleetGroup } from '../shell/fleet-group.tsx';
 import {
   AUTOMATIC_DEFAULT,
   agentRuntimes,
@@ -65,59 +66,60 @@ export function DefaultRuntimeControl({
     );
 
   return (
-    <div className="flex min-w-0 flex-col gap-2" data-default-runtime="">
-      <div className="flex min-w-0 flex-col gap-1 md:flex-row md:flex-wrap md:items-center md:gap-3">
-        <label htmlFor={id} className="shrink-0 text-cell font-semibold text-fg">
-          {DEFAULT_RUNTIME_LABEL}
-        </label>
-        <select
-          id={id}
-          aria-describedby={`${id}-hint`}
-          className="kt-input w-full min-w-0 md:w-auto md:min-w-64 md:max-w-full"
-          data-default-runtime-select=""
-          value={shown}
-          onChange={event => {
-            changes.clear();
-            const value = event.target.value;
-            onPick(value === '' || value === current ? null : value);
-          }}
-        >
-          {current === null ? <option value="">{AUTOMATIC_DEFAULT}</option> : null}
-          {candidates.map(runtime => (
-            <option
-              key={runtime.name}
-              value={runtime.name}
-              disabled={runtime.disabled !== undefined && runtime.name !== shown}
-            >
-              {defaultOptionLabel(runtime, machine)}
-            </option>
-          ))}
-        </select>
-        <p className="m-0 text-meta leading-base text-muted" data-default-runtime-hint="" id={`${id}-hint`}>
-          {DEFAULT_RUNTIME_HINT}
-        </p>
-      </div>
-      {pending ? (
-        <ChangeApplyPanel
-          machineName={machineName}
-          authority={changes.authority}
-          busy={changes.busy}
-          refusal={changes.refusal}
-          submitLabel="Save default runtime"
-          onSubmit={save}
-        >
-          <Button
-            type="button"
-            data-default-runtime-undo=""
-            onClick={() => {
+    <div data-default-runtime="">
+      <FleetGroup label={DEFAULT_RUNTIME_LABEL} name="default-runtime">
+        <Block>
+          {/* The select is as wide as its longest option up to 24rem, and never wider than the panel it sits in. */}
+          <select
+            id={id}
+            aria-label={DEFAULT_RUNTIME_LABEL}
+            aria-describedby={`${id}-hint`}
+            className="kt-input min-w-0 w-full max-w-sm"
+            data-default-runtime-select=""
+            value={shown}
+            onChange={event => {
               changes.clear();
-              onPick(null);
+              const value = event.target.value;
+              onPick(value === '' || value === current ? null : value);
             }}
           >
-            {keepDefaultLabel(current)}
-          </Button>
-        </ChangeApplyPanel>
-      ) : null}
+            {current === null ? <option value="">{AUTOMATIC_DEFAULT}</option> : null}
+            {candidates.map(runtime => (
+              <option
+                key={runtime.name}
+                value={runtime.name}
+                disabled={runtime.disabled !== undefined && runtime.name !== shown}
+              >
+                {defaultOptionLabel(runtime, machine)}
+              </option>
+            ))}
+          </select>
+          <p className="m-0 text-meta leading-base text-muted" data-default-runtime-hint="" id={`${id}-hint`}>
+            {DEFAULT_RUNTIME_HINT}
+          </p>
+          {pending ? (
+            <ChangeApplyPanel
+              machineName={machineName}
+              authority={changes.authority}
+              busy={changes.busy}
+              refusal={changes.refusal}
+              submitLabel="Save default runtime"
+              onSubmit={save}
+            >
+              <Button
+                type="button"
+                data-default-runtime-undo=""
+                onClick={() => {
+                  changes.clear();
+                  onPick(null);
+                }}
+              >
+                {keepDefaultLabel(current)}
+              </Button>
+            </ChangeApplyPanel>
+          ) : null}
+        </Block>
+      </FleetGroup>
     </div>
   );
 }

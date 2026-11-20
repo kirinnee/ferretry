@@ -7,7 +7,7 @@
  * out; a sign-in never travels (it becomes an empty slot to sign in to), and an API key is named, never carried.
  */
 
-import { daemonOfClient, type DaemonReach, useEveryDaemon } from '@ferretry/app';
+import { ChoiceCards, daemonOfClient, type DaemonReach, useEveryDaemon } from '@ferretry/app';
 import { Loading, RadioChoices, SetupNote, SetupSection } from '@ferretry/app/ui';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
@@ -565,24 +565,17 @@ export function CopySettings({
           Pair another machine first: a copy is made from a machine this browser is paired with.
         </p>
       ) : (
-        <ul className="m-0 flex list-none flex-col gap-2 p-0">
-          {sources.map(row => (
-            <li key={row.daemon} className="kt-panel flex min-w-0 items-center justify-between gap-2 p-3">
-              <label className="flex min-w-0 flex-1 items-center gap-2 text-cell font-semibold text-fg">
-                <input
-                  type="radio"
-                  name="copy-source"
-                  disabled={!row.online || row.locked}
-                  checked={picked === row.daemon}
-                  onChange={() => setPicked(row.daemon)}
-                />
-                <span className="[overflow-wrap:anywhere]">{row.machine}</span>
-                {row.online ? null : <span className="text-meta font-normal text-muted">asleep or offline</span>}
-                {row.locked ? <span className="text-meta font-normal text-muted">locked — unlock it first</span> : null}
-              </label>
-            </li>
-          ))}
-        </ul>
+        <ChoiceCards
+          label="Copy from"
+          value={picked}
+          onChange={setPicked}
+          options={sources.map(row => ({
+            id: row.daemon,
+            title: row.machine,
+            disabled: !row.online || row.locked,
+            ...(row.online ? (row.locked ? { line: 'Locked — unlock it first' } : {}) : { line: 'Asleep or offline' }),
+          }))}
+        />
       )}
       {problem === null ? null : (
         <SetupNote live tone="err" name="copy-failed" title="Couldn’t read that machine">

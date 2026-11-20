@@ -11,7 +11,8 @@
  */
 
 import { Loading } from '@ferretry/app/ui';
-import { Segmented, SettingRow, SettingSwitch } from '@ferretry/app';
+import { ChoiceCards, SettingRow, SettingSwitch } from '@ferretry/app';
+import { ShieldCheck, ShieldOff } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { AgentControl, MachineView } from '../../../../contract/index.ts';
 import { useConfigFileChanges } from '../../../hooks/use-config-file-changes.ts';
@@ -20,6 +21,7 @@ import { CONVERSATION_FILE, readKeepInSyncDocument, saveKeepInSync } from '../..
 import { reasonOf } from '../../../lib/config-files.ts';
 import { Button, cn } from '../../../ui.ts';
 import { type AccountChanges, ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
+import { Block, FleetGroup } from '../shell/fleet-group.tsx';
 import type { MachineTabProps } from '../shell/machine-tab.ts';
 import {
   AGENDA_MODE_WORDS,
@@ -36,23 +38,6 @@ import {
   runningSessionsSentence,
 } from './agents-words.ts';
 import { machineSettings } from './machine-settings.ts';
-
-function Section({
-  title,
-  name,
-  children,
-}: {
-  readonly title: string;
-  readonly name: string;
-  readonly children: React.ReactNode;
-}) {
-  return (
-    <section className="flex min-w-0 flex-col gap-2" data-setup-section={name}>
-      <h4 className="m-0 text-meta font-semibold uppercase text-muted">{title}</h4>
-      {children}
-    </section>
-  );
-}
 
 interface SectionProps {
   readonly machine: MachineView;
@@ -89,13 +74,10 @@ function SwitchRow({
   );
 }
 
-function SwitchList({ label, children }: { readonly label: string; readonly children: React.ReactNode }) {
-  return (
-    <ul className="kt-groupcard m-0 list-none p-0" aria-label={label}>
-      {children}
-    </ul>
-  );
-}
+const PERMISSION_ICONS: Readonly<Record<AgentPermissions, React.ReactNode>> = {
+  auto: <ShieldCheck size={18} aria-hidden="true" />,
+  skip: <ShieldOff size={18} aria-hidden="true" />,
+};
 
 function AgentPermissionsSection({ machine, machineName, changes, onSaved }: SectionProps) {
   const current = machine.agentPermissions;
@@ -111,47 +93,50 @@ function AgentPermissionsSection({ machine, machineName, changes, onSaved }: Sec
     });
   };
   return (
-    <Section title="Agent permissions" name="agent-permissions">
-      <Segmented
-        label="Agent permissions"
-        value={draft}
-        onChange={value => {
-          setDraft(value);
-          changes.clear();
-        }}
-        options={(['auto', 'skip'] as const).map(id => ({
-          id,
-          label: AGENT_PERMISSION_SEGMENTS[id],
-          title: AGENT_PERMISSION_WORDS[id],
-        }))}
-      />
-      <p className="m-0 text-cell leading-base text-muted" data-agent-permissions-detail="">
-        {agentPermissionDetail(draft, machineName)}
-      </p>
-      {old !== null && old !== draft && machine.runningSessions > 0 ? (
-        <p className="m-0 text-cell leading-base text-warn" data-agent-permissions-running="">
-          Applies to new sessions. {runningSessionsSentence(machine.runningSessions, old)}
+    <FleetGroup label="Agent permissions" name="agent-permissions">
+      <Block>
+        {/* Two cards side by side; only the chosen one's sentence is shown, under them. */}
+        <ChoiceCards
+          label="Agent permissions"
+          value={draft}
+          onChange={value => {
+            setDraft(value as AgentPermissions);
+            changes.clear();
+          }}
+          options={(['auto', 'skip'] as const).map(id => ({
+            id,
+            title: AGENT_PERMISSION_SEGMENTS[id],
+            icon: PERMISSION_ICONS[id],
+          }))}
+        />
+        <p className="m-0 text-cell leading-base text-muted" data-agent-permissions-detail="">
+          {agentPermissionDetail(draft, machineName)}
         </p>
-      ) : (
-        <p className="m-0 text-meta leading-base text-muted" data-agent-permissions-hint="">
-          Applies to new sessions. Agent runtimes get this through Ferretry’s fixed layer.
-        </p>
-      )}
-      {pending ? (
-        <ChangeApplyPanel
-          machineName={machineName}
-          authority={changes.authority}
-          busy={changes.busy}
-          refusal={changes.refusal}
-          submitLabel="Save agent permissions"
-          onSubmit={save}
-        >
-          <Button type="button" data-agent-permissions-undo="" onClick={() => setDraft(current)}>
-            Keep {AGENT_PERMISSION_WORDS[current]}
-          </Button>
-        </ChangeApplyPanel>
-      ) : null}
-    </Section>
+        {old !== null && old !== draft && machine.runningSessions > 0 ? (
+          <p className="m-0 text-cell leading-base text-warn" data-agent-permissions-running="">
+            Applies to new sessions. {runningSessionsSentence(machine.runningSessions, old)}
+          </p>
+        ) : (
+          <p className="m-0 text-meta leading-base text-muted" data-agent-permissions-hint="">
+            Applies to new sessions. Agent runtimes get this through Ferretry’s fixed layer.
+          </p>
+        )}
+        {pending ? (
+          <ChangeApplyPanel
+            machineName={machineName}
+            authority={changes.authority}
+            busy={changes.busy}
+            refusal={changes.refusal}
+            submitLabel="Save agent permissions"
+            onSubmit={save}
+          >
+            <Button type="button" data-agent-permissions-undo="" onClick={() => setDraft(current)}>
+              Keep {AGENT_PERMISSION_WORDS[current]}
+            </Button>
+          </ChangeApplyPanel>
+        ) : null}
+      </Block>
+    </FleetGroup>
   );
 }
 
@@ -166,40 +151,40 @@ function AgentControlSection({ machine, machineName, changes, onSaved }: Section
     });
   };
   return (
-    <Section title="What agents may control" name="agent-control">
-      <SwitchList label="What agents may control">
-        {AGENT_CONTROL_KINDS.map(kind => (
-          <SwitchRow
-            key={kind}
-            checked={draft[kind]}
-            label={AGENT_CONTROL_WORDS[kind].title}
-            {...(AGENT_CONTROL_WORDS[kind].hint === undefined ? {} : { hint: AGENT_CONTROL_WORDS[kind].hint })}
-            explanation={AGENT_CONTROL_WORDS[kind].detail}
-            onChange={on => {
-              setDraft({ ...draft, [kind]: on });
-              changes.clear();
-            }}
-          />
-        ))}
-      </SwitchList>
-      <p className="m-0 text-meta leading-base text-muted" data-agent-control-hint="">
-        Applies to an agent’s next action on {machineName}; nothing already running is interrupted.
-      </p>
-      {pending ? (
-        <ChangeApplyPanel
-          machineName={machineName}
-          authority={changes.authority}
-          busy={changes.busy}
-          refusal={changes.refusal}
-          submitLabel="Save what agents may control"
-          onSubmit={save}
-        >
-          <Button type="button" data-agent-control-undo="" onClick={() => setDraft(current)}>
-            Undo
-          </Button>
-        </ChangeApplyPanel>
-      ) : null}
-    </Section>
+    <FleetGroup label="What agents may control" name="agent-control">
+      {AGENT_CONTROL_KINDS.map(kind => (
+        <SwitchRow
+          key={kind}
+          checked={draft[kind]}
+          label={AGENT_CONTROL_WORDS[kind].title}
+          {...(AGENT_CONTROL_WORDS[kind].hint === undefined ? {} : { hint: AGENT_CONTROL_WORDS[kind].hint })}
+          explanation={AGENT_CONTROL_WORDS[kind].detail}
+          onChange={on => {
+            setDraft({ ...draft, [kind]: on });
+            changes.clear();
+          }}
+        />
+      ))}
+      <Block>
+        <p className="m-0 text-meta leading-base text-muted" data-agent-control-hint="">
+          Applies to an agent’s next action on {machineName}; nothing already running is interrupted.
+        </p>
+        {pending ? (
+          <ChangeApplyPanel
+            machineName={machineName}
+            authority={changes.authority}
+            busy={changes.busy}
+            refusal={changes.refusal}
+            submitLabel="Save what agents may control"
+            onSubmit={save}
+          >
+            <Button type="button" data-agent-control-undo="" onClick={() => setDraft(current)}>
+              Undo
+            </Button>
+          </ChangeApplyPanel>
+        ) : null}
+      </Block>
+    </FleetGroup>
   );
 }
 
@@ -215,43 +200,45 @@ function AutoResumeSection({ machine, machineName, changes, onSaved }: SectionPr
     });
   };
   return (
-    <Section title="Auto-resume after restart" name="auto-resume">
-      <SwitchList label="Auto-resume after restart">
-        <SwitchRow
-          checked={draft === 'on'}
-          label="Resume ferrets after a restart"
-          explanation={AUTO_RESUME_WORDS[draft].detail}
-          onChange={on => {
-            setDraft(on ? 'on' : 'off');
-            changes.clear();
-          }}
-        />
-      </SwitchList>
-      {last === null ? null : (
-        <div className="flex min-w-0 flex-col gap-1" data-auto-resume-summary="">
-          <p className="m-0 text-ui font-semibold text-fg">{autoResumeSentence(last.resumed)}</p>
-          {last.skipped.map(item => (
-            <p key={item.sessionId} className="m-0 text-meta leading-base text-warn" data-auto-resume-skipped="">
-              Couldn’t auto-resume {item.sessionId}: {item.reason}
-            </p>
-          ))}
-        </div>
+    <FleetGroup label="Auto-resume after restart" name="auto-resume">
+      <SwitchRow
+        checked={draft === 'on'}
+        label="Resume ferrets after a restart"
+        explanation={AUTO_RESUME_WORDS[draft].detail}
+        onChange={on => {
+          setDraft(on ? 'on' : 'off');
+          changes.clear();
+        }}
+      />
+      {last === null && !pending ? null : (
+        <Block>
+          {last === null ? null : (
+            <div className="flex min-w-0 flex-col gap-1" data-auto-resume-summary="">
+              <p className="m-0 text-ui font-semibold text-fg">{autoResumeSentence(last.resumed)}</p>
+              {last.skipped.map(item => (
+                <p key={item.sessionId} className="m-0 text-meta leading-base text-warn" data-auto-resume-skipped="">
+                  Couldn’t auto-resume {item.sessionId}: {item.reason}
+                </p>
+              ))}
+            </div>
+          )}
+          {pending ? (
+            <ChangeApplyPanel
+              machineName={machineName}
+              authority={changes.authority}
+              busy={changes.busy}
+              refusal={changes.refusal}
+              submitLabel="Save auto-resume"
+              onSubmit={save}
+            >
+              <Button type="button" data-auto-resume-undo="" onClick={() => setDraft(current)}>
+                Keep {AUTO_RESUME_WORDS[current].title}
+              </Button>
+            </ChangeApplyPanel>
+          ) : null}
+        </Block>
       )}
-      {pending ? (
-        <ChangeApplyPanel
-          machineName={machineName}
-          authority={changes.authority}
-          busy={changes.busy}
-          refusal={changes.refusal}
-          submitLabel="Save auto-resume"
-          onSubmit={save}
-        >
-          <Button type="button" data-auto-resume-undo="" onClick={() => setDraft(current)}>
-            Keep {AUTO_RESUME_WORDS[current].title}
-          </Button>
-        </ChangeApplyPanel>
-      ) : null}
-    </Section>
+    </FleetGroup>
   );
 }
 
@@ -266,33 +253,33 @@ function AgendaModeSection({ machine, machineName, changes, onSaved }: SectionPr
     });
   };
   return (
-    <Section title="Agenda mode" name="agenda-mode">
-      <SwitchList label="Agenda mode">
-        <SwitchRow
-          checked={draft === 'on'}
-          label="Agenda mode for new ferrets"
-          explanation={AGENDA_MODE_WORDS[draft].detail}
-          onChange={on => {
-            setDraft(on ? 'on' : 'off');
-            changes.clear();
-          }}
-        />
-      </SwitchList>
+    <FleetGroup label="Agenda mode" name="agenda-mode">
+      <SwitchRow
+        checked={draft === 'on'}
+        label="Agenda mode for new ferrets"
+        explanation={AGENDA_MODE_WORDS[draft].detail}
+        onChange={on => {
+          setDraft(on ? 'on' : 'off');
+          changes.clear();
+        }}
+      />
       {pending ? (
-        <ChangeApplyPanel
-          machineName={machineName}
-          authority={changes.authority}
-          busy={changes.busy}
-          refusal={changes.refusal}
-          submitLabel="Save agenda mode"
-          onSubmit={save}
-        >
-          <Button type="button" data-agenda-mode-undo="" onClick={() => setDraft(current)}>
-            Keep {AGENDA_MODE_WORDS[current].title}
-          </Button>
-        </ChangeApplyPanel>
+        <Block>
+          <ChangeApplyPanel
+            machineName={machineName}
+            authority={changes.authority}
+            busy={changes.busy}
+            refusal={changes.refusal}
+            submitLabel="Save agenda mode"
+            onSubmit={save}
+          >
+            <Button type="button" data-agenda-mode-undo="" onClick={() => setDraft(current)}>
+              Keep {AGENDA_MODE_WORDS[current].title}
+            </Button>
+          </ChangeApplyPanel>
+        </Block>
       ) : null}
-    </Section>
+    </FleetGroup>
   );
 }
 
@@ -337,26 +324,26 @@ function ConversationsSection({ client }: { readonly client: LiveRuntimesClient 
   };
 
   return (
-    <Section title="Conversations" name="conversations">
-      <SwitchList label="Conversations">
-        <SwitchRow
-          checked={on}
-          label="Keep in sync"
-          explanation={KEEP_IN_SYNC_EXPLANATION}
-          disabled={busy}
-          onChange={toggle}
-        />
-      </SwitchList>
+    <FleetGroup label="Conversations" name="conversations">
+      <SwitchRow
+        checked={on}
+        label="Keep in sync"
+        explanation={KEEP_IN_SYNC_EXPLANATION}
+        disabled={busy}
+        onChange={toggle}
+      />
       {note === null ? null : (
-        <p
-          role="status"
-          className={cn('m-0 text-meta leading-base', note.tone === 'err' ? 'text-err' : 'text-warn')}
-          data-keep-in-sync-note=""
-        >
-          {note.text}
-        </p>
+        <Block>
+          <p
+            role="status"
+            className={cn('m-0 text-meta leading-base', note.tone === 'err' ? 'text-err' : 'text-warn')}
+            data-keep-in-sync-note=""
+          >
+            {note.text}
+          </p>
+        </Block>
       )}
-    </Section>
+    </FleetGroup>
   );
 }
 
@@ -377,7 +364,7 @@ export function AgentsTab({ client, machine, machineName, checking, onRetry, onR
 
   const props = { machine, machineName, changes, onSaved };
   return (
-    <div className="flex min-w-0 flex-col gap-5" data-agents-tab="">
+    <div className="flex min-w-0 flex-col" data-agents-tab="">
       <AgentPermissionsSection key={machine.agentPermissions} {...props} />
       <AgentControlSection key={Object.values(machine.agentControl).join(',')} {...props} />
       <AutoResumeSection key={`resume-${String(machine.autoResume)}`} {...props} />

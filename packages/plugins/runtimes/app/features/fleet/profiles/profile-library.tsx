@@ -177,10 +177,10 @@ export function McpStatusFooter({ name, usedByRuntimes }: { readonly name: strin
  * centred — so a long name or a chip never reflows one row differently from the next.
  */
 export const ITEM_ROW =
-  'grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 rounded-control border border-border bg-surface px-2 py-1';
+  'fy-item-row grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 border-b border-border px-2 py-1.5 last:border-b-0';
 
 /** The right-hand cluster, centred against the whole left column. */
-export const ITEM_ACTIONS = 'col-start-2 flex shrink-0 gap-0.5';
+export const ITEM_ACTIONS = 'fy-item-actions col-start-2 flex shrink-0 gap-0.5';
 
 /** The left column: the line, then any chips beneath it. */
 export function ItemBody({ children }: { children: ReactNode }) {
@@ -234,7 +234,7 @@ export function LibraryPanel(
     <section
       aria-label="Component library"
       className={cn(
-        'kt-panel hidden min-w-0 flex-col md:flex',
+        'kt-panel fy-wide-only min-w-0 flex-col',
         removing && 'outline-dashed outline-2 outline-offset-[-2px] outline-[var(--err)]',
       )}
       data-profile-library=""
@@ -252,7 +252,7 @@ export function LibraryPanel(
         <h4 className="kt-label m-0">Library</h4>
         <FilterBar filter={filter} onFilter={onFilter} />
       </div>
-      <ul className="m-0 flex min-w-0 list-none flex-col gap-1 px-panel py-2 md:max-h-[32rem] md:overflow-y-auto">
+      <ul className="fy-wide-scroll m-0 flex min-w-0 list-none flex-col px-1 py-1">
         <LibraryRows {...props} items={shown} addedLabel="In profile" />
       </ul>
       <p className="m-0 px-panel pb-2 text-meta text-muted">

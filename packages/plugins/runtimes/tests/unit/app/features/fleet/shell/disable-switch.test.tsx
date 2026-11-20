@@ -329,8 +329,10 @@ describe('the inline switch in a card header', () => {
     expect(toggle.textContent).toBe('');
     expect(card.querySelector('[data-disable-note]')).toBeNull();
     expect(card.textContent).not.toContain('New starts can use it.');
-    const header = must(toggle.closest('[data-disable-switch]')?.parentElement ?? null, 'header row');
-    expect(header.querySelector('[data-runtime-row="claude-agent"]')).not.toBeNull();
+    const runtimeLink = must(card.querySelector('[data-runtime-row="claude-agent"]'), 'runtime link');
+    const header = must(runtimeLink.parentElement, 'header row');
+    expect(header.contains(toggle)).toBe(true);
+    expect(header.contains(runtimeLink)).toBe(true);
   });
 
   it('should word an off runtime as a small muted note, and name the state in the label', async () => {

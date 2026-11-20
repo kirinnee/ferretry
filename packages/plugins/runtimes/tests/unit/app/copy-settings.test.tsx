@@ -159,7 +159,7 @@ const toReview = async (
   mounted.push(view);
   const root = view.container;
   await interact(() =>
-    (must(root.querySelector('input[name="copy-source"]'), 'the source radio') as HTMLElement).click(),
+    (must(root.querySelector('[data-copy-source] input[type="radio"]'), 'the source radio') as HTMLElement).click(),
   );
   await interact(() => (must(root.querySelector('[data-copy-read]'), 'the Review button') as HTMLElement).click());
   await settleUntil(
