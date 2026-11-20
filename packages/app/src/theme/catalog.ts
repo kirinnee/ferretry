@@ -62,6 +62,11 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
     label: 'Neumorphism',
     blurb: 'Soft forms moulded from one ground: paired light and dark shadows, pressed in when chosen.',
   },
+  {
+    id: 'retro',
+    label: 'Retro Desktop',
+    blurb: 'An early-2000s desktop: bevelled buttons, sunken fields, gradient title strips, hard drop shadows.',
+  },
 ] as const);
 
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([
