@@ -1381,6 +1381,11 @@ body {
   background: var(--accent-soft);
   color: var(--accent);
 }
+/* ONE border level: a badge inside a card is a fill and a word, never a second outline inside the card's own. */
+.kt-panel .kt-badge,
+.kt-panel .kt-badge[data-tone] {
+  border-color: transparent;
+}
 
 /* ---- tab ---------------------------------------------------------------- */
 .kt-tab {

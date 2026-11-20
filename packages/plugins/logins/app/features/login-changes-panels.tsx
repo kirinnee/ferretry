@@ -374,7 +374,7 @@ export function CardSwitch({
         disabled={changes.busy || blocked || refusal !== null}
         title={refusal ?? undefined}
         onClick={() => void toggle()}
-        className="-my-3 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control disabled:cursor-not-allowed disabled:opacity-60"
+        className="-my-3 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control px-1 disabled:cursor-not-allowed disabled:opacity-60"
       >
         <span
           aria-hidden="true"
@@ -389,6 +389,10 @@ export function CardSwitch({
               off ? 'translate-x-[2px] bg-muted' : 'translate-x-[18px] bg-accent-fg',
             )}
           />
+        </span>
+        {/* The state in words beside the track: a switch with no word is a bare shape. */}
+        <span className="ml-2 min-w-[1.75rem] text-left text-meta font-semibold text-fg" data-switch-word="">
+          {off ? 'Off' : 'On'}
         </span>
       </button>
     </span>

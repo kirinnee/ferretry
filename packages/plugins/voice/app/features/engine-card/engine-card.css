@@ -104,7 +104,8 @@
   overflow-wrap: anywhere;
 }
 .fy-engine-badge {
-  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid transparent;
   border-radius: var(--radius-badge, 999px);
   color: var(--accent);
   flex: none;
@@ -162,7 +163,8 @@
   min-width: 0;
 }
 .fy-engine-chip {
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  border: 1px solid transparent;
   border-radius: var(--radius-badge, 999px);
   color: var(--fg);
   flex: none;

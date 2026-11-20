@@ -306,8 +306,8 @@ export function Segmented<T extends string>({
       aria-label={label}
       onKeyDown={onKeyDown}
       className={cn(
-        'relative flex min-w-0 max-w-full gap-1 rounded-control border border-border bg-surface-2 p-1 max-md:w-full',
-        fill && 'w-full',
+        'relative flex min-w-0 max-w-full gap-1 rounded-control bg-surface-2 p-1 max-md:w-full',
+        fill ? 'w-full' : 'w-fit self-start',
       )}
     >
       {options.map(option => {
@@ -320,7 +320,7 @@ export function Segmented<T extends string>({
               'flex h-auto min-h-[var(--control-h-sm)] min-w-0 cursor-pointer items-center justify-center whitespace-normal rounded-tab px-control-x py-1 text-center text-meta font-medium leading-tight transition-colors max-md:min-h-[44px] max-md:flex-1',
               'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
               checked
-                ? 'border border-accent bg-accent-soft text-accent'
+                ? 'border border-transparent bg-accent-soft font-semibold text-accent'
                 : 'border border-transparent text-muted hover:text-fg',
               fill && 'flex-1',
               disabled && 'cursor-not-allowed opacity-60',

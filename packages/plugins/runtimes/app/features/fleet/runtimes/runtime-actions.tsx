@@ -124,8 +124,9 @@ export function RuntimeActionsMenu({ runtime, refusal, onRename, onRemove, onMak
         aria-label={`Actions for ${runtime.name}`}
         data-runtime-actions={runtime.name}
         onClick={openMenu}
-        className="relative z-10 -my-3 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control border-0 bg-transparent p-0 text-muted hover:text-fg disabled:cursor-not-allowed disabled:opacity-60"
+        className="relative z-10 -my-3 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center gap-1 rounded-control border-0 bg-transparent px-1 text-meta text-muted hover:text-fg disabled:cursor-not-allowed disabled:opacity-60"
       >
+        More
         <MoreHorizontal size={18} aria-hidden="true" />
       </button>
       <ContextMenu

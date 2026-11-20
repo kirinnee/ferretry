@@ -32,6 +32,12 @@ describe('the Settings list icons', () => {
       expect(icons[0]?.getAttribute('aria-hidden')).toBe('true');
     }
     expect(link('Tab two').querySelectorAll('svg').length).toBe(0);
-    expect(nav.querySelectorAll('summary svg').length).toBe(0);
+    // A heading carries no icon of its own (no tab glyph); its one svg is the open/shut chevron, drawn aria-hidden.
+    expect(nav.querySelectorAll('summary svg:not(.fy-tab-group__chevron)').length).toBe(0);
+    for (const summary of nav.querySelectorAll('summary')) {
+      const chevrons = summary.querySelectorAll('svg.fy-tab-group__chevron');
+      expect(chevrons.length).toBe(1);
+      expect(chevrons[0]?.getAttribute('aria-hidden')).toBe('true');
+    }
   });
 });

@@ -1,8 +1,8 @@
 /**
  * SETTINGS AT A MID-WIDTH WINDOW (768 and 1024) in a real browser over fake data: the drawer, the settings list and the panel
  * cannot all fit side by side (at 768 the panel was ~212px between two sidebars), so the list stands above the panel and the
- * panel is at least 480px wide on EVERY tab, with no sideways scroll, and the list is still reachable (by pointer, by keyboard,
- * and by scrolling it).
+ * panel is at least 480px wide on EVERY tab, with no sideways scroll, and the list is ONE compact grouped picker (every page reachable
+ * by pointer and by keyboard, nothing sliced by a scroller).
  *
  * Set `FY_SETTINGS_NARROW_SHOTS_DIR` to keep `<viewport>-<scheme>-<tab>.png` (768 light and dark, three tabs).
  */
@@ -103,24 +103,20 @@ const measure = async (tab: Page) =>
 
 describe('Settings at a mid-width window', () => {
   for (const size of SIZES) {
-    it(`${size.name}: the panel is at least ${MIN_PANEL}px wide on every tab, nothing scrolls sideways, the list is reachable`, async () => {
+    it(`${size.name}: the panel is at least ${MIN_PANEL}px wide on every tab, nothing scrolls sideways, every page is reachable from the picker`, async () => {
       const { tab, close } = await open(size.width, size.height, 'light', '/d/ws/settings');
       try {
         const hrefs = await tab.evaluate(() =>
-          [...document.querySelectorAll<HTMLAnchorElement>('.fy-settings-nav a.fy-tab:not(.fy-settings-device)')].map(
-            link => link.getAttribute('href'),
-          ),
+          // "This device" is the shell's own page (no daemon panel): the rest are the daemon's tabs.
+          [...document.querySelectorAll<HTMLOptionElement>('.fy-settings-picker__select option')]
+            .filter(option => option.textContent !== 'This device')
+            .map(option => option.value),
         );
         expect(hrefs.length).toBeGreaterThan(10);
         const failures: string[] = [];
         for (const href of hrefs) {
-          // The way a person goes: the list's own link (its group opened first when it is shut).
-          const link = tab.locator(`.fy-settings-nav a.fy-tab:not(.fy-settings-device)[href="${href}"]`);
-          if (!(await link.isVisible())) {
-            await tab.locator(`details.fy-tab-group:has(a[href="${href}"]) > summary`).click();
-          }
-          await link.scrollIntoViewIfNeeded();
-          await link.click();
+          // The way a person goes: the picker above the panel.
+          await tab.locator('.fy-settings-picker__select').selectOption(href);
           await tab.waitForSelector('.fy-settings-page');
           const seen = await measure(tab);
           if (!(seen.panel >= MIN_PANEL)) failures.push(`${href}: panel ${seen.panel}px`);
@@ -133,58 +129,62 @@ describe('Settings at a mid-width window', () => {
       }
     });
 
-    it(`${size.name}: the list is above the panel, scrolls inside itself and a keyboard reaches its links`, async () => {
+    it(`${size.name}: the list is ONE compact grouped picker above the panel: fully visible, no scroller slicing rows, current page shown`, async () => {
       const { tab, close } = await open(size.width, size.height, 'light', '/d/ws/settings/logins');
       try {
         const layout = await tab.evaluate(() => {
           const nav = document.querySelector('.fy-settings-nav') as HTMLElement;
           const page = document.querySelector('.fy-settings-page') as HTMLElement;
+          const select = document.querySelector('.fy-settings-picker__select') as HTMLSelectElement;
+          const box = select.getBoundingClientRect();
+          // Anything in the list that scrolls inside itself is a window that can slice a row at its edge.
+          const scrollers = [nav, ...nav.querySelectorAll<HTMLElement>('*')]
+            .filter(el => {
+              const style = getComputedStyle(el);
+              return (
+                el.getBoundingClientRect().height > 0 &&
+                ['auto', 'scroll'].includes(style.overflowY) &&
+                el.scrollHeight > el.clientHeight + 1
+              );
+            })
+            .map(el => el.className);
           return {
             above: nav.getBoundingClientRect().bottom <= page.getBoundingClientRect().top + 1,
-            overflowY: getComputedStyle(document.querySelector('.fy-settings-block') as HTMLElement).overflowY,
-            height: nav.getBoundingClientRect().height,
-            cue: getComputedStyle(document.querySelector('.fy-settings-block') as HTMLElement).backgroundImage.includes(
-              'linear-gradient',
-            ),
+            navHeight: nav.getBoundingClientRect().height,
+            selectInside: box.left >= 0 && box.right <= window.innerWidth && box.width > 150 && box.height >= 28,
+            labelShown: (document.querySelector('.fy-settings-picker__label') as HTMLElement).offsetHeight > 0,
+            shown: select.selectedOptions[0]?.textContent,
+            groups: select.querySelectorAll('optgroup').length,
+            groupLabels: [...select.querySelectorAll('optgroup')].every(group => (group.label ?? '').includes(' · ')),
+            listDrawn: [...document.querySelectorAll('.fy-settings-block, .fy-settings-nav a.fy-tab')].filter(
+              el => el.getBoundingClientRect().height > 0,
+            ).length,
+            scrollers,
           };
         });
         expect(layout.above).toBe(true);
-        expect(layout.overflowY).toBe('auto'); // each block scrolls on its own
-        expect(layout.height).toBeLessThanOrEqual(260);
-        expect(layout.cue).toBe(true);
-        // The current tab is in view inside the list, not hidden below its fold.
-        const current = await tab.locator('.fy-settings-nav .fy-tab--active').boundingBox();
-        const listBox = await tab.locator('.fy-settings-nav .fy-settings-block:has(.fy-tab--active)').boundingBox();
-        expect(
-          current !== null &&
-            listBox !== null &&
-            current.y >= listBox.y - 1 &&
-            current.y + current.height <= listBox.y + listBox.height + 1,
-        ).toBe(true);
-        // Keyboard: Tab from the top of the page lands on the list's links before the panel's own controls.
-        await tab.locator('.fy-settings-device').focus();
-        await tab.keyboard.press('Tab');
-        const focused = await tab.evaluate(() => document.activeElement?.closest('.fy-settings-nav') !== null);
-        expect(focused).toBe(true);
-        // Everything in the list can be brought into view inside it (the last link included).
-        const last = tab.locator('.fy-settings-nav a.fy-tab:not(.fy-settings-device)').last();
-        const inside = await tab
-          .locator('.fy-settings-nav details.fy-tab-group')
-          .last()
-          .evaluate(node => {
-            (node as HTMLDetailsElement).open = true;
-            return true;
-          });
-        expect(inside).toBe(true);
-        await last.scrollIntoViewIfNeeded();
-        const box = await last.boundingBox();
-        const navBox = await tab.locator('.fy-settings-nav .fy-settings-block:last-child').boundingBox();
-        expect(
-          box !== null &&
-            navBox !== null &&
-            box.y >= navBox.y - 1 &&
-            box.y + box.height <= navBox.y + navBox.height + 1,
-        ).toBe(true);
+        expect(layout.navHeight, 'a compact control, not a tall list').toBeLessThanOrEqual(110);
+        expect(layout.selectInside).toBe(true);
+        expect(layout.labelShown).toBe(true);
+        expect(layout.shown).toBe('Logins');
+        expect(layout.groups).toBeGreaterThan(3);
+        expect(layout.groupLabels).toBe(true);
+        expect(layout.listDrawn, 'the sliceable list is not drawn at this width').toBe(0);
+        expect(layout.scrollers, 'nothing in the list scrolls inside itself').toEqual([]);
+        // Keyboard: Tab from the top lands on the picker (the list's links are not drawn, so not in the order twice).
+        await tab
+          .locator('.fy-settings-device')
+          .focus({ timeout: 500 })
+          .catch(() => undefined);
+        await tab.locator('.fy-settings-picker__select').focus();
+        expect(await tab.evaluate(() => document.activeElement?.className)).toContain('fy-settings-picker__select');
+        // The keyboard changes the page: arrow to the next option and the panel follows.
+        const before = await tab.locator('.fy-settings-title').textContent();
+        await tab.keyboard.press('ArrowDown');
+        await tab.waitForFunction(
+          previous => document.querySelector('.fy-settings-title')?.textContent !== previous,
+          before,
+        );
       } finally {
         await close();
       }

@@ -1,5 +1,7 @@
-import { useLayoutEffect, useRef } from 'react';
+import { ChevronRight } from 'lucide-react';
+import { useId, useLayoutEffect, useRef } from 'react';
 import { daemonSettingsHref, DEVICE_SETTINGS_HREF } from '../router/routes.ts';
+import { useRouter } from '../router/router.tsx';
 import { Icon } from './icons.tsx';
 import { Link } from './link.tsx';
 import {
@@ -39,8 +41,11 @@ export function SettingsNav({
   readonly named: boolean;
 }) {
   const listRef = useRef<HTMLElement>(null);
-  // A short list above the panel (a mid-width window) scrolls inside itself, each block on its own: bring the current tab into
-  // view by the scroller's own scroll and never the page's (`scrollIntoView` would move every ancestor too).
+  const router = useRouter();
+  const pickerId = useId();
+  // The list beside the panel scrolls inside itself: bring the current tab into view by the scroller's own scroll and never the
+  // page's (`scrollIntoView` would move every ancestor too). Above the panel (a mid-width window) there is no list to scroll, only
+  // the picker below.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `active` is when the current tab changes; the effect reads it from the DOM.
   useLayoutEffect(() => {
     const list = listRef.current;
@@ -58,7 +63,10 @@ export function SettingsNav({
   const groups = (list: readonly NavTab[]) =>
     groupSettingsTabs(list).map(group => (
       <details key={group.id} className="fy-tab-group" open={group.tabs.some(candidate => candidate === active)}>
-        <summary className="fy-tab-group__title">{group.label}</summary>
+        <summary className="fy-tab-group__title">
+          {group.label}
+          <ChevronRight className="fy-tab-group__chevron" size={16} aria-hidden="true" />
+        </summary>
         <div className="fy-tab-group__tabs">
           {group.tabs.map(candidate => (
             <Link
@@ -74,8 +82,41 @@ export function SettingsNav({
         </div>
       </details>
     ));
+  const hrefOf = (tab: NavTab): string => daemonSettingsHref(daemon, tab.plugin, tab.id);
+  /** The mid-width picker: every page of both blocks, in the same titled groups, as one grouped select that is always fully visible. */
+  const optgroups = (blockTitle: string, list: readonly NavTab[], first?: React.ReactNode) =>
+    groupSettingsTabs(list).map((group, index) => (
+      <optgroup key={`${blockTitle}-${group.id}`} label={`${blockTitle} · ${group.label}`}>
+        {index === 0 ? first : null}
+        {group.tabs.map(candidate => (
+          <option key={`${candidate.plugin}.${candidate.id}`} value={hrefOf(candidate)}>
+            {candidate.label}
+          </option>
+        ))}
+      </optgroup>
+    ));
   return (
     <nav ref={listRef} className="fy-tabs fy-tabs--grouped fy-settings-nav" aria-label="Plugin settings">
+      <div className="fy-settings-picker" data-settings-picker="">
+        <label className="fy-settings-picker__label" htmlFor={pickerId}>
+          Settings page
+        </label>
+        <select
+          id={pickerId}
+          className="fy-settings-picker__select"
+          value={active === undefined ? DEVICE_SETTINGS_HREF : hrefOf(active)}
+          onChange={event => router.navigate(event.target.value)}
+        >
+          {optgroups(
+            DEVICE_BLOCK_HEADING,
+            device,
+            <option key="this-device" value={DEVICE_SETTINGS_HREF}>
+              This device
+            </option>,
+          )}
+          {optgroups(`${machine} · every device`, machineTabs)}
+        </select>
+      </div>
       <section aria-labelledby="fy-settings-block-device" className="fy-settings-block">
         <p className="fy-settings-block__title" id="fy-settings-block-device">
           {DEVICE_BLOCK_HEADING}
