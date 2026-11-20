@@ -54,6 +54,11 @@ export interface RequestOptions {
   readonly headers?: Readonly<Record<string, string>>;
   readonly device?: string;
   readonly member?: string;
+  /**
+   * The page-lifetime id the kernel stamps beside the transcript-keyed `session`. Absent, the principal carries none
+   * (the old fixture shape, where `session` alone named the page); set, the two differ, as in a real session.
+   */
+  readonly appSession?: string;
   readonly clientAddress?: string;
 }
 
@@ -71,6 +76,7 @@ export function request(options: RequestOptions = {}): ApiRequest & { bodyRead: 
           holder: who as HolderId,
           session: `s-${who}` as SessionId,
           leaseUntil: addDuration(T0, minutes(15)),
+          ...(options.appSession === undefined ? {} : { appSession: options.appSession }),
         };
   return {
     method: options.method ?? 'GET',

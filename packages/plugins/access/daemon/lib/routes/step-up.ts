@@ -68,12 +68,15 @@ const STAGE_REFUSALS = {
 } as const;
 
 /**
- * The device and page a session's principal names: the kernel-stamped holder, and the session as the step-up's app
- * session (the kernel's `SessionPrincipal` carries no separate app-session id yet).
+ * The device and page a session's principal names: the kernel-stamped holder, and the page's own app session (the
+ * span key the live-connection tracker opens), never the per-connection transcript hash `session`. It falls back to
+ * `session` only for a credential that named no page.
  */
 function sessionDevice(context: RouteContext): { readonly deviceId: string; readonly appSession: string } | undefined {
   const principal = context.request.principal;
-  return principal?.kind === 'device' ? { deviceId: principal.holder, appSession: principal.session } : undefined;
+  return principal?.kind === 'device'
+    ? { deviceId: principal.holder, appSession: principal.appSession ?? principal.session }
+    : undefined;
 }
 
 /** The status and sentence for each refusal. A sentence names the person's next step, never a value. */

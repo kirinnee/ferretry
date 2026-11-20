@@ -56,7 +56,9 @@ export function request(overrides: CallOverrides = {}): ApiRequest {
       : {
           kind: 'device' as const,
           holder: overrides.device.deviceId as HolderId,
-          session: (overrides.device.appSession ?? `session-${overrides.device.deviceId}`) as SessionId,
+          // As the kernel stamps it: the transcript hash names the connection, and the page's own id rides beside it.
+          session: `transcript-${overrides.device.deviceId}` as SessionId,
+          appSession: overrides.device.appSession ?? `session-${overrides.device.deviceId}`,
           leaseUntil: LEASE,
         };
   const body = overrides.body ?? '';

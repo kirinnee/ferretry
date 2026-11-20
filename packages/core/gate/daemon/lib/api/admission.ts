@@ -266,7 +266,10 @@ export class GateAdmission implements Admission {
     const principal = credential.principal;
     const answer = this.#device(principal);
     if (answer.kind !== 'device') return undefined;
-    const subject: StepUpSubject = { deviceId: principal.holder, appSession: principal.session };
+    const subject: StepUpSubject = {
+      deviceId: principal.holder,
+      appSession: principal.appSession ?? principal.session,
+    };
     const policy = this.deps.policy();
     const unlocked = answer.standing.unlockedUntil !== undefined && answer.standing.unlockedUntil > this.deps.now();
     if (
@@ -495,7 +498,10 @@ export class GateAdmission implements Admission {
     const policy = this.deps.policy();
     const subject: StepUpSubject | undefined =
       authentication.tokenClass === 'device'
-        ? { deviceId: authentication.principal.holder, appSession: authentication.principal.session }
+        ? {
+            deviceId: authentication.principal.holder,
+            appSession: authentication.principal.appSession ?? authentication.principal.session,
+          }
         : undefined;
     const now = this.deps.now();
     const unlocked = device?.unlockedUntil !== undefined && device.unlockedUntil > now;
