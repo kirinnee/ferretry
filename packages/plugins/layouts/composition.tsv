@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+oversize	contract/wire.ts	400	2026-12-31	the one STYLE_IDS list: every r10 style adds one line; move STYLE_IDS to a registry entry after r10
