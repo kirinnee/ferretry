@@ -109,6 +109,11 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
     blurb: 'Loud on purpose: bubble type, sticker tags, stacked colour shadows, a spring on every pick.',
     loud: true,
   },
+  {
+    id: 'exaggerated',
+    label: 'Exaggerated Minimalism',
+    blurb: 'Huge hair-thin titles, vast air, one hairline for everything, no shadows.',
+  },
 ] as const);
 
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([

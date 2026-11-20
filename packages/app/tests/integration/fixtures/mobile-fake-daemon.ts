@@ -521,6 +521,17 @@ const PROJECTS = [
     createdAt: ago(80_000),
   },
 ];
+/** A project named by one unbroken word (`/d/ws/projects/<LONG_NAME_PROJECT_ID>`): the heading must wrap, never push the page sideways. */
+export const LONG_NAME_PROJECT_ID = 'c3a5e7b9-1d2f-4a60-8b4c-9e0f1a2b3c4d';
+const LONG_NAME_PROJECT = {
+  id: LONG_NAME_PROJECT_ID,
+  name: 'CustomerNotificationsService',
+  path: '/work/notifications/CustomerNotificationsService',
+  source: 'existing-folder',
+  createdAt: ago(5_000),
+  git: { commonDirectory: '/work/notifications/CustomerNotificationsService' },
+  lastActivity: ago(30),
+};
 /** One page of the project's board, narrowed the way the page asked: state and project are honoured. */
 const boardAnswer = (request: TransportRequest): unknown => {
   const state = request.query?.state ?? 'open';
@@ -1832,7 +1843,11 @@ const byRoute: Readonly<Record<string, (request: TransportRequest) => unknown>> 
   'GET /v1/carriers': () => ({ carriers: [] }),
   'GET /v1/usage': () => quotaCard,
   'GET /v1/usage/insights': insightsAnswer,
-  'GET /v1/projects': () => PROJECTS,
+  // `?longProject=1`: one more project whose name is a single unbroken word, so a page's heading is judged against it.
+  'GET /v1/projects': () =>
+    new URLSearchParams(globalThis.location?.search ?? '').get('longProject') === '1'
+      ? [LONG_NAME_PROJECT, ...PROJECTS]
+      : PROJECTS,
   'GET /v1/logins': () => LOGINS,
   'GET /v1/runtimes': () => RUNTIMES,
   'GET /v1/runtimes/profiles': () => PROFILES,

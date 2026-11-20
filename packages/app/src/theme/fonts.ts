@@ -65,6 +65,7 @@ export const STYLE_FONT_FILES: Readonly<Partial<Record<StyleId, ThemeFontFiles>>
   pixel: { text: [inter, pixelify700, pressStart2p], code: jetBrainsMono },
   briefing: { text: [poppins300, poppins600], code: ibmPlexMono },
   genz: { text: [bagelFatOne, bricolage], code: jetBrainsMono },
+  exaggerated: { text: [inter], code: jetBrainsMono },
 });
 
 /** The scope of the document a preload is added to — injected so a test can stand in for the page. */

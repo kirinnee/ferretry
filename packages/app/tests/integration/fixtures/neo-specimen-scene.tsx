@@ -23,6 +23,8 @@ root.dataset.style = params.get('style') ?? 'neo';
 root.dataset.palette = params.get('palette') ?? 'neo';
 root.dataset.mode = params.get('mode') ?? 'light';
 if (params.get('motion') === 'reduced') root.dataset.motion = 'reduced';
+// `?title=<text>`: draw a display title above the specimen (only when asked; the other styles judge the page without one).
+const title = params.get('title');
 
 const noop = () => undefined;
 
@@ -34,6 +36,15 @@ function Specimen() {
   const [chip, setChip] = useState('all');
   return (
     <main className="bg-bg text-fg" data-specimen="" style={{ minHeight: '100vh', padding: 16 }}>
+      {title === null ? null : (
+        <h1
+          className="font-display text-display font-bold tracking-display"
+          data-part="title"
+          style={{ margin: '8px 0 24px' }}
+        >
+          {title}
+        </h1>
+      )}
       <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
         <Card data-part="buttons">
           <PanelHeader>
