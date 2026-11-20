@@ -22,7 +22,6 @@ export function ConfirmButton({
     <>
       <Button
         type="button"
-        variant="primary"
         className="min-h-[44px]"
         data-config-confirm={name}
         disabled={state.status === 'busy'}

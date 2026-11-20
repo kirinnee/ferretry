@@ -40,7 +40,7 @@ export function ConsentCard({
 }) {
   return (
     <section
-      className="flex flex-col gap-3 rounded-control border border-border-strong bg-surface-2 p-3"
+      className="flex flex-col gap-3 border-t border-border pt-4"
       aria-labelledby="git-consent-heading"
       data-testid="git-consent"
     >
@@ -59,7 +59,7 @@ export function ConsentCard({
         <strong className="font-semibold text-fg">{CONSENT_MEANING_HEADING}</strong> <Rich text={CONSENT_MEANING} />
       </p>
       <p className="m-0 text-meta leading-base text-faint">{CONSENT_LIMIT}</p>
-      <div className="sticky bottom-0 flex flex-wrap gap-2 bg-surface-2 py-2">
+      <div className="sticky bottom-0 flex flex-wrap gap-2 bg-surface py-2">
         <button type="button" className="kt-btn min-h-[44px]" data-variant="primary" onClick={onContinue}>
           {CONSENT_CONTINUE}
         </button>

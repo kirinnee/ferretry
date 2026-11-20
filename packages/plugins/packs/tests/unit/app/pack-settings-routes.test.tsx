@@ -104,8 +104,9 @@ describe('Settings › Pack mode over the kernel config routes', () => {
   it('says a LOOSENING edit waits for the owner’s confirmation and never claims it applied', async () => {
     const daemon = fixtureDaemon({ holds: text => (text.includes('decision: jev') ? ['Jev decides the model'] : []) });
     const root = await open(daemon.client);
-    const jev = must([...root.querySelectorAll<HTMLInputElement>('input[name="pack-decision"]')][1], 'jev');
+    const jev = must(root.querySelector<HTMLInputElement>('[data-choice="jev"] input'), 'jev');
     await click(jev);
+    await click(byText(root, 'button', 'Apply'));
     await waitForText(root, 'not in effect until you confirm it');
     expect(root.querySelector('[data-pack-outcome]')?.getAttribute('data-pack-outcome')).toBe('pending');
     expect(textOf(root)).toContain('Jev decides the model');

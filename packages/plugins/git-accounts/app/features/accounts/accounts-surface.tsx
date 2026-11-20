@@ -115,7 +115,10 @@ export function AccountsSurface({ client, pollDelay, now }: AccountsSurfaceProps
       </p>
 
       {accounts.length === 0 ? null : (
-        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Connected GitHub accounts">
+        <ul
+          className="m-0 list-none p-0 [&>li+li]:border-t [&>li+li]:border-border"
+          aria-label="Connected GitHub accounts"
+        >
           {accounts.map(account => (
             <AccountRow key={account.id} account={account} busy={busy} onRemove={account => void remove(account)} />
           ))}

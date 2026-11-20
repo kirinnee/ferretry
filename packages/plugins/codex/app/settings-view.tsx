@@ -1,6 +1,6 @@
 /** The current Agent CLIs panel, narrowed to Codex and bound to the plugin client. */
 import { Badge, Button, SettingGroup, SettingRow } from '@ferretry/app';
-import { Loading } from '@ferretry/app/ui';
+import { cn, Loading } from '@ferretry/app/ui';
 import { useEffect, useState } from 'react';
 import type { HarnessCliView } from '../contract/index.ts';
 import type { CodexSettings } from './codex-settings.ts';
@@ -87,8 +87,10 @@ export function CodexSettingsView({ settings }: { readonly settings: CodexSettin
   const install = installWords(view.method);
   const plan = view.plan;
   const located = view.location.state === 'located';
+  const latest = knownLatest(view.check);
+  const detail = 'm-0 -mt-1 break-words pb-2 pl-panel pr-1 text-meta leading-tight text-muted';
   return (
-    <section aria-labelledby="codex-heading" className="flex flex-col gap-4">
+    <section aria-labelledby="codex-heading" className="flex min-w-0 flex-col">
       <SettingGroup label="Codex">
         <SettingRow
           name={headline(view)}
@@ -104,105 +106,113 @@ export function CodexSettingsView({ settings }: { readonly settings: CodexSettin
             </Badge>
           )}
         />
-        <SettingRow
-          name="Runs"
-          hint={
-            <>
-              <span className="break-all">{view.location.state === 'absent' ? 'nothing' : view.location.path}</span>
-              <small className="block">{locationWords(view.location)}</small>
-            </>
-          }
-        />
+        <SettingRow name="Runs" hint={locationWords(view.location)}>
+          <p className={cn(detail, 'text-ui text-fg')}>
+            {view.location.state === 'absent' ? 'nothing' : view.location.path}
+          </p>
+        </SettingRow>
         {install === undefined ? null : (
-          <SettingRow name="Installed with" control={() => <span className="text-ui text-fg">{install}</span>} />
+          <SettingRow name="Installed with">
+            <p className={cn(detail, '-mt-3 text-ui text-fg')}>{install}</p>
+          </SettingRow>
         )}
         {view.installed?.state === 'unreadable' ? <SettingRow name="Version" hint={view.installed.reason} /> : null}
         <SettingRow name="Verified" control={() => <span className="text-ui text-fg">{view.verified.version}</span>} />
         <SettingRow
           name="Latest"
-          hint={
-            view.check.state === 'never' ? (
-              'Not checked yet.'
-            ) : (
-              <>
-                {knownLatest(view.check) ?? 'Unknown'} · Checked {checkedWords(view.check.checkedAt)}
-                {view.check.state === 'failed' ? ': ' + view.check.reason : ''}
-              </>
-            )
-          }
-        />
+          hint={view.check.state === 'never' ? 'Not checked yet.' : `Checked ${checkedWords(view.check.checkedAt)}`}
+          {...(view.check.state === 'never'
+            ? {}
+            : { control: () => <span className="text-ui text-fg">{latest ?? 'Unknown'}</span> })}
+        >
+          {view.check.state === 'failed' ? <p className={detail}>{view.check.reason}</p> : null}
+        </SettingRow>
       </SettingGroup>
       {view.job === null ? null : (
-        <p className="m-0 text-ui text-fg" role="status">
+        <p className="m-0 mb-6 text-ui text-fg" role="status">
           {jobWords(view.job).text}
         </p>
       )}
-      {confirming === null ? (
-        <>
-          {plan?.kind === 'manual' ? (
-            <div className="flex flex-col gap-2 text-ui text-fg">
-              <p className="m-0">{plan.explanation}</p>
-              <ol className="m-0 flex flex-col gap-1 pl-5">
-                {plan.steps.map(step => (
-                  <li key={step.command}>
-                    <code>{step.command}</code>
-                    {step.note === undefined ? null : <p className="m-0 text-meta text-muted">{step.note}</p>}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          ) : null}
-          <div className="flex flex-wrap gap-2 max-md:[&>button]:w-full">
-            {updateChoices(view).map(choice => (
-              <Button
-                key={choice.key}
-                variant={choice.primary ? 'primary' : 'outline'}
-                disabled={busy || polling}
-                onClick={() => {
-                  if (choice.unverified) setConfirming({ target: choice.target });
-                  else void send({ target: choice.target });
-                }}
+      {plan?.kind === undefined && confirming === null ? null : (
+        <SettingGroup label="Update">
+          {confirming === null ? (
+            <>
+              {plan?.kind === 'manual' ? (
+                <li className="flex min-w-0 flex-col gap-2 py-3 pl-panel pr-1 text-ui text-fg">
+                  <p className="m-0">{plan.explanation}</p>
+                  <ol className="m-0 flex flex-col gap-1 pl-5">
+                    {plan.steps.map(step => (
+                      <li key={step.command}>
+                        <code>{step.command}</code>
+                        {step.note === undefined ? null : <p className="m-0 text-meta text-muted">{step.note}</p>}
+                      </li>
+                    ))}
+                  </ol>
+                </li>
+              ) : null}
+              {updateChoices(view).length === 0 ? null : (
+                <SettingRow
+                  name="Update"
+                  wide
+                  control={() => (
+                    <span className="flex flex-wrap items-center gap-2">
+                      {updateChoices(view).map(choice => (
+                        <Button
+                          key={choice.key}
+                          variant={choice.primary ? 'primary' : 'outline'}
+                          disabled={busy || polling}
+                          onClick={() => {
+                            if (choice.unverified) setConfirming({ target: choice.target });
+                            else void send({ target: choice.target });
+                          }}
+                        >
+                          {choice.label}
+                        </Button>
+                      ))}
+                    </span>
+                  )}
+                />
+              )}
+              {plan?.kind === 'self' ? (
+                <li className={cn(detail, 'pt-2')}>
+                  Runs {plan.steps.map(step => step.command).join(', then ')}.{' '}
+                  {plan.rollback === 'automatic'
+                    ? 'If the new version does not start, the old one is put back.'
+                    : 'This install method keeps no previous version, so a failed update cannot be undone on its own.'}
+                </li>
+              ) : null}
+            </>
+          ) : (
+            <li className="min-w-0">
+              <fieldset
+                aria-label="Not yet verified by Ferretry"
+                className="m-0 flex min-w-0 flex-col gap-2 border-0 border-l-2 border-warn py-2 pl-panel pr-1 text-ui text-fg"
               >
-                {choice.label}
-              </Button>
-            ))}
-          </div>
-          {plan?.kind === 'self' ? (
-            <p className="m-0 text-meta text-muted">
-              Runs {plan.steps.map(step => step.command).join(', then ')}.{' '}
-              {plan.rollback === 'automatic'
-                ? 'If the new version does not start, the old one is put back.'
-                : 'This install method keeps no previous version, so a failed update cannot be undone on its own.'}
-            </p>
-          ) : null}
-        </>
-      ) : (
-        <fieldset
-          aria-label="Not yet verified by Ferretry"
-          className="m-0 flex flex-col gap-2 rounded-control border border-warn p-3 text-ui text-fg"
-        >
-          <p className="m-0">{unverifiedQuestion(view, confirming.target)}</p>
-          <a href={view.verified.url} target="_blank" rel="noreferrer noopener" className="text-accent">
-            What Ferretry verifies, and the known risks
-          </a>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="primary"
-              disabled={busy}
-              onClick={() => {
-                void send({ ...confirming, confirmUnverified: true });
-              }}
-            >
-              Update anyway
-            </Button>
-            <Button disabled={busy} onClick={() => setConfirming(null)}>
-              Cancel
-            </Button>
-          </div>
-        </fieldset>
+                <p className="m-0">{unverifiedQuestion(view, confirming.target)}</p>
+                <a href={view.verified.url} target="_blank" rel="noreferrer noopener" className="text-accent">
+                  What Ferretry verifies, and the known risks
+                </a>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="primary"
+                    disabled={busy}
+                    onClick={() => {
+                      void send({ ...confirming, confirmUnverified: true });
+                    }}
+                  >
+                    Update anyway
+                  </Button>
+                  <Button disabled={busy} onClick={() => setConfirming(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </fieldset>
+            </li>
+          )}
+        </SettingGroup>
       )}
       {refusal === null ? null : (
-        <p className="m-0 text-meta text-err" role="alert">
+        <p className="m-0 mb-6 text-meta text-err" role="alert">
           {refusal}
         </p>
       )}

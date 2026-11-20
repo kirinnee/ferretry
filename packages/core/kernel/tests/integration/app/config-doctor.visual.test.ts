@@ -115,7 +115,9 @@ describe('Settings › Files, Doctor and Host checks', () => {
           const { tab, close } = await open(viewport, scheme, view);
           try {
             const text = await tab.evaluate(() => document.body.innerText);
-            for (const word of words) expect(text, `${view} says "${word}"`).toContain(word);
+            // Group headings are drawn in capitals, which `innerText` reports as such.
+            for (const word of words)
+              expect(text.toLowerCase(), `${view} says "${word}"`).toContain(word.toLowerCase());
             if (view === 'doctor') {
               // A passing row does not repeat what a miss would break, and the not-applicable row says it once.
               expect(text).not.toContain('Generated fleet wrappers cannot run.');

@@ -114,7 +114,10 @@ describe('the Agents tab', () => {
       [...section(view.container, 'agent-permissions').querySelectorAll('[role="radiogroup"] label')].map(
         el => el.textContent,
       ),
-    ).toEqual(['Auto mode', 'Skip all checks']);
+    ).toEqual([
+      'Auto modeAsks before anything risky',
+      'Skip all checksNever asks; can change any file and run any command',
+    ]);
     expect(
       [...section(view.container, 'agent-control').querySelectorAll('[data-setting-row]')].map(el =>
         el.getAttribute('data-setting-row'),

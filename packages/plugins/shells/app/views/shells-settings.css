@@ -1,0 +1,53 @@
+/* The Shells tab's layout (r10 S14). Everything follows the width of the PANEL the tab sits in (Settings' page is 212px
+   wide at a 768px window, 724px at 1280), never the window's. One surface: a group is a heading over rows divided by
+   hairlines. A shell row is its name and whole description beside its actions from 560px, stacked under it below; a field
+   row is the label above its control on a narrow panel, beside it from 520px, the control never wider than 28rem. */
+.fy-sh {
+  container-type: inline-size;
+  min-width: 0;
+}
+.fy-sh-row,
+.fy-sh-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 16px;
+  min-width: 0;
+  padding: 8px 4px 8px var(--pad-panel, 10px);
+}
+.fy-sh-row {
+  align-items: start;
+  row-gap: 8px;
+}
+.fy-sh-text,
+.fy-sh-label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.fy-sh-acts {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.fy-sh-control {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+@container (min-width: 520px) {
+  .fy-sh-field {
+    grid-template-columns: minmax(150px, 38%) minmax(0, 1fr);
+  }
+}
+@container (min-width: 560px) {
+  .fy-sh-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .fy-sh-acts {
+    justify-content: flex-end;
+    max-width: 22rem;
+  }
+}

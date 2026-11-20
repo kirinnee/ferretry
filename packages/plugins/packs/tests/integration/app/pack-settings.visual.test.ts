@@ -84,7 +84,8 @@ describe('Settings › Pack mode', () => {
             await tab.goto(`${origin}/?theme=studio-${scheme}`);
             await tab.waitForSelector('[data-pack-settings]');
             if (view === 'held') {
-              await tab.click('input[name="pack-decision"] >> nth=1');
+              await tab.click('[data-choice="jev"]');
+              await tab.getByRole('button', { name: 'Apply' }).click();
               await tab.waitForSelector('[data-pack-outcome="pending"]');
             }
             await tab.evaluate(

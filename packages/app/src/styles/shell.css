@@ -492,6 +492,17 @@
   overflow-y: auto;
   margin: 0;
   gap: 2px;
+  /* A list longer than the window scrolls inside itself and says so: a thin themed scrollbar plus a soft fade that shows only
+     while there is more above or below (the two `local` layers cover the two `scroll` shadows once an end is reached). Keyboard
+     focus on a link scrolls it natively. */
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  background:
+    linear-gradient(var(--bg) 30%, transparent) top / 100% 24px no-repeat local,
+    linear-gradient(transparent, var(--bg) 70%) bottom / 100% 24px no-repeat local,
+    linear-gradient(color-mix(in srgb, var(--fg) 14%, transparent), transparent) top / 100% 10px no-repeat scroll,
+    linear-gradient(transparent, color-mix(in srgb, var(--fg) 14%, transparent)) bottom / 100% 10px no-repeat scroll;
 }
 .fy-tabs--grouped {
   flex-direction: column;

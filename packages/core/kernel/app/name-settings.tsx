@@ -93,7 +93,7 @@ export function NameSettingsView({
         </label>
         <input
           id="settings-machine-name"
-          className="min-h-[44px] rounded-control border border-border-strong bg-surface-2 px-control-x text-row text-fg focus-visible:outline-focus focus-visible:outline-offset-focus"
+          className="min-h-[44px] w-full max-w-[28rem] rounded-control border border-border-strong bg-surface-2 px-control-x text-row text-fg focus-visible:outline-focus focus-visible:outline-offset-focus"
           value={value}
           maxLength={100}
           placeholder={source === 'hostname' ? current : 'Leave empty to use the host name'}

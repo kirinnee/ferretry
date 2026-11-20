@@ -1,0 +1,19 @@
+/* The Secure copy tab lays out by the width of its OWN card (a 768px window leaves the settings panel about 212px), never the
+   window's. A form's field pairs stack in a narrow card and sit two to a line, capped, once the card is 520px wide. */
+.fy-sc {
+  container-type: inline-size;
+  min-width: 0;
+}
+.fy-sc-pair {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+@container (min-width: 520px) {
+  .fy-sc-pair {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-width: 44rem;
+    column-gap: 16px;
+  }
+}

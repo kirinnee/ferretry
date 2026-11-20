@@ -231,15 +231,15 @@ export function RoutingPromptCard({ view, state, pollMs = CLEAN_UP_POLL_MS, time
   const counterId = `${id}-count`;
   const over = saveProblem !== null;
   return (
-    <section className="kt-panel flex min-w-0 flex-col gap-3 p-4" aria-labelledby={`${id}-h`} data-routing-card="">
+    <section className="mb-8 flex min-w-0 flex-col gap-3" aria-labelledby={`${id}-h`} data-routing-card="">
       <div className="min-w-0">
-        <h3 id={`${id}-h`} className="m-0 text-ui font-semibold">
+        <h3 id={`${id}-h`} className="m-0 px-1 text-meta font-semibold uppercase tracking-wide text-muted">
           Routing prompt
         </h3>
-        <p className="m-0 mt-1 text-meta leading-base text-muted">
+        <p className="m-0 mt-1 px-1 text-meta leading-base text-muted">
           Ferrets use this to pick which model runs each sub-task.
         </p>
-        <p className="m-0 mt-1 text-meta leading-base text-faint">
+        <p className="m-0 mt-1 px-1 text-meta leading-base text-faint">
           The asking ferret reads it in its system prompt; Jev reads it when Jev decides. Models are tried in the order
           it names them.
         </p>

@@ -101,7 +101,7 @@ describe('Settings › Security log', () => {
     const rows = [...shown.container.querySelectorAll('[data-security-log-event]')];
     expect(rows.map(row => row.textContent)).toEqual([
       'A pairing attempt was refusedRefused5 minutes ago · by someone who is not paired',
-      'A secret was used5 minutes ago · by device “Pixel 8” (…123456)carrier: relay · count: 2',
+      'A secret was used5 minutes ago · by device “Pixel 8” (…123456)reached over the relay · 2 times',
       'Remote permissions were changedFailedat an unknown time · by a supervising agent',
     ]);
     // Only a record with detail carries the detail line.

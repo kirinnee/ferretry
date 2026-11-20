@@ -1,11 +1,5 @@
-import {
-  Button,
-  type ChangeAuthority,
-  ChangeApplyPanel,
-  RadioChoices,
-  SetupNote,
-  SetupSection,
-} from '@ferretry/app/ui';
+import { ChoiceCards } from '@ferretry/app';
+import { Button, type ChangeAuthority, ChangeApplyPanel, SetupNote, SetupSection } from '@ferretry/app/ui';
 import { useState } from 'react';
 import type { BrowserMode } from '../../../contract/index.ts';
 
@@ -68,16 +62,19 @@ export function BrowserModeSection({
   };
   return (
     <SetupSection title="Browser mode" name="browser-mode">
-      <RadioChoices
-        legend="Browser mode"
-        legendHidden
-        name="browser-mode"
+      {/* Cards, staged: an arrow key moves the pick, and nothing is written until Save. */}
+      <ChoiceCards
+        label="Browser mode"
         value={draft}
-        onChoose={value => {
-          setDraft(value);
+        onChange={value => {
+          setDraft(value as BrowserMode);
           setOutcome(null);
         }}
-        options={(['headless', 'window'] as const).map(choice => ({ id: choice, ...BROWSER_MODE_WORDS[choice] }))}
+        options={(['headless', 'window'] as const).map(choice => ({
+          id: choice,
+          title: BROWSER_MODE_WORDS[choice].title,
+          line: BROWSER_MODE_WORDS[choice].detail,
+        }))}
       />
       <p className="m-0 text-meta leading-base text-muted" data-browser-mode-hint="">
         Applies the next time the browser on {machineInSentence(machineName)} starts. Neither mode solves a captcha for

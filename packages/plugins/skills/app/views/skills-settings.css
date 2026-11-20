@@ -1,0 +1,26 @@
+/* The Skills tab's layout (r10 S14). It follows the width of the PANEL the tab sits in (Settings' page is 212px wide at a
+   768px window, 724px at 1280), never the window's: one skill per line on a narrow panel, two to a line from 560px. */
+.fy-sk {
+  container-type: inline-size;
+  min-width: 0;
+}
+.fy-sk-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: 32px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fy-sk-list > li + li {
+  border-top: var(--divider-width) solid var(--border);
+}
+@container (min-width: 560px) {
+  .fy-sk-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* Two to a line: the hairline sits between the lines, so the second one starts with no rule of its own. */
+  .fy-sk-list > li:nth-child(2) {
+    border-top: 0;
+  }
+}

@@ -70,10 +70,9 @@ describe('S-0137 Settings › Ferret limits', () => {
     expect(calls).toEqual(['GET /v1/cgroups/config']);
     expect(root.textContent).toContain('Ferret limits');
     expect(root.querySelector('[data-limits-badge]')?.textContent).toBe('enforced');
-    expect([...root.querySelectorAll('[aria-label="What is in force"] li')].map(li => li.textContent)).toEqual([
-      'ferrets together may use 56 GB of memory; the daemon keeps 4 GB',
-      'hadi is slowed for memory now',
-    ]);
+    expect(
+      [...root.querySelectorAll('[data-setting-group="What is in force"] ul ul li')].map(li => li.textContent),
+    ).toEqual(['ferrets together may use 56 GB of memory; the daemon keeps 4 GB', 'hadi is slowed for memory now']);
     expect(root.querySelector('[role="alert"]')?.textContent).toContain('disk priority has no effect on this disk');
     expect(root.textContent).toContain('edit limits.yaml in Settings › Files');
     // Read-only on purpose: limits change only through limits.yaml.

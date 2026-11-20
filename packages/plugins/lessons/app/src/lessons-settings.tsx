@@ -9,7 +9,8 @@
  */
 
 import type { LessonsConfig, LessonsFerret } from '../../contract/index.ts';
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { SettingGroup, SettingRow } from '@ferretry/app';
 import { cn } from '@ferretry/app/ui';
 import type { LessonsConnection } from './api.ts';
 import { fetchLessonsConfig, lessonsErrorMessage, patchLessonsConfig } from './api.ts';
@@ -32,8 +33,6 @@ export function LessonsSettingsSurface({ connection, ferrets = null }: LessonsSe
   const [note, setNote] = useState<string | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
   const lessons = usePassiveLessons(connection);
-  const defaultTitle = useId();
-  const ferretsTitle = useId();
   const byId = useMemo(() => new Map((ferrets ?? []).map(view => [view.ferretId, view])), [ferrets]);
 
   // The default is read when the tab opens.
@@ -83,107 +82,111 @@ export function LessonsSettingsSurface({ connection, ferrets = null }: LessonsSe
   const rows = lessons.records ?? [];
 
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-lessons-settings="">
-      <section className="kt-panel flex flex-col gap-2 p-4" aria-labelledby={defaultTitle}>
-        <div className="flex flex-wrap items-start gap-3">
-          <div className="min-w-0 flex-1">
-            <h3 id={defaultTitle} className="m-0 text-ui font-semibold">
-              Passive lessons for new ferrets
-            </h3>
-            <p className="m-0 mt-1 text-meta leading-base text-muted">
-              Only controls whether new ferrets are INSTRUCTED to learn: their fixed instructions include{' '}
-              <span className="mono">fy lesson suggest "…" --scope global|repo</span>. The ferret picks Global or Repo;
-              you can change it in the Lessons hub.
-            </p>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={on}
-            aria-labelledby={defaultTitle}
-            disabled={config === null || saving}
-            onClick={() => void toggleDefault(!on)}
-            className={cn(
-              'flex min-h-[44px] shrink-0 items-center gap-2 rounded-control border px-3 text-ui font-semibold disabled:opacity-60',
-              on ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-muted',
-            )}
-          >
-            <span
-              aria-hidden="true"
-              className={cn('relative h-5 w-9 rounded-full transition-colors', on ? 'bg-accent' : 'bg-surface-3')}
+    <div className="flex min-w-0 flex-col" data-lessons-settings="">
+      <SettingGroup label="New ferrets">
+        <SettingRow
+          name="Passive lessons for new ferrets"
+          hint="Only controls whether new ferrets are INSTRUCTED to learn."
+          explanation={
+            <>
+              Their fixed instructions include <span className="mono">fy lesson suggest "…" --scope global|repo</span>.
+              The ferret picks Global or Repo; you can change it in the Lessons hub. Change a running ferret from its
+              Actions › Passive lessons, which re-instructs it.
+            </>
+          }
+          control={labelId => (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={on}
+              aria-labelledby={labelId}
+              disabled={config === null || saving}
+              onClick={() => void toggleDefault(!on)}
+              className={cn(
+                'flex min-h-[44px] shrink-0 items-center gap-2 rounded-control border px-3 text-ui font-semibold disabled:opacity-60',
+                on ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-muted',
+              )}
             >
               <span
-                className={cn(
-                  'absolute top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-[left]',
-                  on ? 'left-[18px]' : 'left-0.5',
-                )}
-              />
-            </span>
-            {config === null ? '…' : on ? 'On' : 'Off'}
-          </button>
-        </div>
-        <p className="m-0 text-meta text-faint">
-          Change a running ferret from its Actions › Passive lessons, which re-instructs it.
-        </p>
-        {held.map(sentence => (
-          <p key={sentence} role="status" className="m-0 text-meta text-warn" data-lessons-held="">
-            Waiting for your approval: {sentence}
-          </p>
-        ))}
-        {error !== null && (
-          <p role="alert" className="m-0 text-meta text-err">
-            {error}
-          </p>
-        )}
-      </section>
-      <section className="kt-panel flex flex-col gap-2 p-4" aria-labelledby={ferretsTitle}>
-        <h3 id={ferretsTitle} className="m-0 text-ui font-semibold">
-          Ferrets right now
-        </h3>
-        {note !== null && (
-          <p role="status" className="m-0 rounded-control bg-surface-2 px-3 py-2 text-meta text-fg-soft">
-            {note}
-          </p>
+                aria-hidden="true"
+                className={cn('relative h-5 w-9 rounded-full transition-colors', on ? 'bg-accent' : 'bg-surface-3')}
+              >
+                <span
+                  className={cn(
+                    'absolute top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-[left]',
+                    on ? 'left-[18px]' : 'left-0.5',
+                  )}
+                />
+              </span>
+              {config === null ? '…' : on ? 'On' : 'Off'}
+            </button>
+          )}
+        >
+          {held.length === 0 && error === null ? null : (
+            <div className="flex flex-col gap-1 pb-3 pl-panel pr-1">
+              {held.map(sentence => (
+                <p key={sentence} role="status" className="m-0 text-meta text-warn" data-lessons-held="">
+                  Waiting for your approval: {sentence}
+                </p>
+              ))}
+              {error !== null && (
+                <p role="alert" className="m-0 text-meta text-err">
+                  {error}
+                </p>
+              )}
+            </div>
+          )}
+        </SettingRow>
+      </SettingGroup>
+      <SettingGroup label="Ferrets right now">
+        {note === null ? null : (
+          <li className="py-2 pl-panel pr-1">
+            <p role="status" className="m-0 rounded-control bg-surface-2 px-3 py-2 text-meta text-fg-soft">
+              {note}
+            </p>
+          </li>
         )}
         {lessons.records === null ? (
-          lessons.unavailable ? (
-            <p className="m-0 text-meta text-muted" data-lessons-ferrets-unavailable="">
-              Which ferrets learn isn’t available on this machine.
-            </p>
-          ) : (
-            <Loading kind="bar" label="Reading which ferrets learn…" />
-          )
+          <li className="py-3 pl-panel pr-1">
+            {lessons.unavailable ? (
+              <p className="m-0 text-meta text-muted" data-lessons-ferrets-unavailable="">
+                Which ferrets learn isn’t available on this machine.
+              </p>
+            ) : (
+              <Loading kind="bar" label="Reading which ferrets learn…" />
+            )}
+          </li>
         ) : rows.length === 0 ? (
-          <p className="m-0 text-meta text-muted">No ferrets on this machine yet.</p>
+          <li className="py-3 pl-panel pr-1">
+            <p className="m-0 text-meta text-muted">No ferrets on this machine yet.</p>
+          </li>
         ) : (
-          <ul className="m-0 flex list-none flex-col p-0">
-            {rows.map(entry => {
-              const cwd = byId.get(entry.ferretId)?.folder;
-              return (
-                <li
-                  key={entry.ferretId}
-                  className="flex min-h-[44px] flex-wrap items-center gap-2 border-b border-border-soft py-1 last:border-b-0"
-                  data-lessons-ferret={entry.ferretId}
-                >
-                  <span className="min-w-0 flex-1 truncate text-ui">
-                    {sessionName(entry.ferretId, byId)}
-                    {cwd === undefined ? null : <span className="ml-2 text-meta text-faint">{basename(cwd)}</span>}
+          rows.map(entry => {
+            const cwd = byId.get(entry.ferretId)?.folder;
+            return (
+              <SettingRow
+                key={entry.ferretId}
+                name={sessionName(entry.ferretId, byId)}
+                {...(cwd === undefined ? {} : { hint: basename(cwd) })}
+                dataAttributes={{ 'data-lessons-ferret': entry.ferretId }}
+                control={() => (
+                  <span className="flex flex-wrap items-center gap-2">
+                    <Badge tone={entry.passive ? 'ok' : 'pend'}>{entry.passive ? 'On' : 'Off'}</Badge>
+                    <Button
+                      size="sm"
+                      className="min-h-[44px]"
+                      disabled={switching !== null}
+                      onClick={() => void toggleFerret(entry.ferretId, !entry.passive)}
+                    >
+                      {entry.passive ? 'Turn off' : 'Turn on'}
+                    </Button>
                   </span>
-                  <Badge tone={entry.passive ? 'ok' : 'pend'}>{entry.passive ? 'On' : 'Off'}</Badge>
-                  <Button
-                    size="sm"
-                    className="min-h-[44px]"
-                    disabled={switching !== null}
-                    onClick={() => void toggleFerret(entry.ferretId, !entry.passive)}
-                  >
-                    {entry.passive ? 'Turn off' : 'Turn on'}
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
+                )}
+              />
+            );
+          })
         )}
-      </section>
+      </SettingGroup>
       <GlobalLessonsEditor connection={connection} />
     </div>
   );

@@ -8,6 +8,7 @@
 import { CircleAlert, CircleCheck, CircleMinus, Stethoscope } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type DoctorReport, DoctorReportSchema, notBuiltCheck } from '../../contract/doctor.ts';
+import { SettingGroup, SettingRow } from '@ferretry/app';
 import { Loading } from '@ferretry/app/ui';
 import type { KernelClient } from '../lib/client.ts';
 
@@ -36,53 +37,51 @@ export function DoctorReportView({ report }: { readonly report: DoctorReport }) 
   });
   const checks = report.checks.filter(check => unbuiltName(check) === undefined);
   return (
-    <section className="kt-panel p-panel" aria-labelledby="doctor-settings-heading" data-doctor-report="">
-      <div className="flex items-center gap-2">
-        <Stethoscope size={17} className="text-accent" aria-hidden="true" />
-        <h3 id="doctor-settings-heading" className="m-0 text-row font-semibold text-fg">
-          Doctor
-        </h3>
+    <section className="flex min-w-0 flex-col" aria-labelledby="doctor-settings-heading" data-doctor-report="">
+      <div className="mb-6 flex min-w-0 flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <Stethoscope size={17} className="text-accent" aria-hidden="true" />
+          <h3 id="doctor-settings-heading" className="m-0 text-row font-semibold text-fg">
+            Doctor
+          </h3>
+        </div>
+        <p className="m-0 text-cell leading-base text-muted" data-doctor-headline="">
+          {doctorHeadline(report)}
+        </p>
       </div>
-      <p className="mb-3 mt-1 text-cell leading-base text-muted" data-doctor-headline="">
-        {doctorHeadline(report)}
-      </p>
-      <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Host dependency checks">
+      <SettingGroup label="Host dependency checks">
         {checks.map(check => {
           const Icon =
             check.status === 'present' ? CircleCheck : check.status === 'missing' ? CircleAlert : CircleMinus;
           const tone = check.status === 'missing' ? 'text-err' : check.status === 'present' ? 'text-ok' : 'text-muted';
           return (
-            // `border-strong`, not `border-soft`: this row sits on `surface-2`, where the soft hairline is invisible.
-            <li
+            <SettingRow
               key={check.name}
-              className="rounded-control border border-border-strong bg-surface-2 px-3 py-2"
-              data-doctor-check={check.name}
-              data-doctor-status={check.status}
-            >
-              <div className={`flex min-w-0 flex-wrap items-center gap-2 text-ui font-semibold ${tone}`}>
-                <Icon size={15} className="shrink-0" aria-hidden="true" /> {check.name}
-                <span className="ml-auto text-meta font-normal text-faint">{check.requirement}</span>
-              </div>
-              {/* `break-words`: a summary can carry an absolute path, one unbreakable token that would scroll a phone sideways. */}
-              <p className="mb-0 mt-1 break-words text-meta leading-base text-muted">
-                {/* What a miss breaks is said only where there is a miss: a row that passes, or does not apply here, says
-                    what it found, once. */}
-                {check.status === 'missing' ? `${withoutFinalStop(check.summary)}. ${check.impact}` : check.summary}
-              </p>
-            </li>
+              name={check.name}
+              // What a miss breaks is said only where there is a miss: a row that passes, or does not apply here, says
+              // what it found, once. The whole sentence is the title; the (i) holds the consequence.
+              hint={check.status === 'missing' ? `${withoutFinalStop(check.summary)}. ${check.impact}` : check.summary}
+              dataAttributes={{ 'data-doctor-check': check.name, 'data-doctor-status': check.status }}
+              control={() => (
+                <span className={`inline-flex min-w-0 items-center gap-1.5 text-meta font-semibold ${tone}`}>
+                  <Icon size={15} className="shrink-0" aria-hidden="true" />
+                  <span className="font-normal text-faint">{check.requirement}</span>
+                </span>
+              )}
+            />
           );
         })}
-      </ul>
+      </SettingGroup>
       {unbuilt.length === 0 ? null : (
-        <details className="mt-3 text-meta leading-base text-muted" data-doctor-unbuilt="">
-          <summary className="cursor-pointer text-faint">
+        <details className="text-meta leading-base text-muted" data-doctor-unbuilt="">
+          <summary className="min-h-[44px] cursor-pointer py-3 text-faint">
             {unbuilt.length} {unbuilt.length === 1 ? 'check is' : 'checks are'} not built yet in this build, so nothing
             was checked
           </summary>
           <p className="mb-0 mt-1 break-words">{unbuilt.join(', ')}</p>
         </details>
       )}
-      <p className="mb-0 mt-3 text-meta leading-base text-faint">{report.limitation}</p>
+      <p className="m-0 text-meta leading-base text-faint">{report.limitation}</p>
     </section>
   );
 }

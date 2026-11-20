@@ -61,8 +61,11 @@ describe('Settings › Pack mode', () => {
 
     expect(textOf(must(root.querySelector('[data-pack-jev-cap]'), 'cap'))).toBe('Daily cap: $0.25 (default $0.25)');
     expect(textOf(root)).toContain('Jev is not wired in this build yet: nothing is ranked by it and nothing is spent');
-    const jev = must([...root.querySelectorAll<HTMLInputElement>('input[name="pack-decision"]')][1], 'jev');
+    const jev = must(root.querySelector<HTMLInputElement>('[data-choice="jev"] input'), 'jev');
     await click(jev);
+    // Picking a card stages it (arrow keys pick too): nothing is written until Apply.
+    expect(patches.length).toBe(1);
+    await click(byText(root, 'button', 'Apply'));
     await waitFor(() => patches.length === 2, 'the decision save');
     expect(patches[1]).toEqual({ decision: 'jev' });
   });

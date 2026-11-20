@@ -35,6 +35,63 @@ describe('mcpRowStatus', () => {
     });
   });
 
+  it('shows a built-in server that still needs a sign-in as needing it, with Sign in on the row', () => {
+    const status = mcpRowStatus(
+      mcpServer({
+        name: 'tracker',
+        scope: 'ferretry',
+        signIn: { subject: 'tracker', required: true },
+        connection: { component: 'tracker', state: 'needs-sign-in', renewable: false, secrets: [] },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(status).toMatchObject({
+      label: 'Built in · Needs sign-in',
+      tone: 'warn',
+      signIn: 'Sign in',
+      attention: true,
+    });
+  });
+
+  it('reads every sign-in state of a built-in server on its row', () => {
+    const built = (connection: object | undefined, signIn?: object) =>
+      mcpRowStatus(
+        mcpServer({
+          name: 'tracker',
+          scope: 'ferretry',
+          ...(signIn === undefined ? {} : { signIn }),
+          ...(connection === undefined ? {} : { connection }),
+        } as never),
+        undefined,
+        NOW,
+      );
+    const base = { component: 'tracker', renewable: false, secrets: [] };
+    expect(built(undefined)).toMatchObject({ label: 'Built in', tone: 'ok', attention: false });
+    expect(built({ ...base, state: 'connected', renewable: true })).toMatchObject({
+      label: 'Built in · Signed in',
+      tone: 'ok',
+      detail: 'Ferretry renews it by itself when it runs out.',
+    });
+    const plain = built({ ...base, state: 'connected' });
+    expect(plain.label).toBe('Built in · Signed in');
+    expect(plain.detail).toBe('Started with every ferret.');
+    expect(built({ ...base, state: 'needs-sign-in' })).toMatchObject({ tone: 'warn', attention: true });
+    expect(built({ ...base, state: 'needs-sign-in' })).not.toHaveProperty('signIn');
+    expect(
+      built(
+        { ...base, state: 'expired', signedInAt: '2026-11-01T00:00:00.000Z' },
+        { subject: 'tracker', required: true },
+      ),
+    ).toMatchObject({ label: 'Built in · Expired', signIn: 'Sign in again' });
+    expect(
+      built(
+        { ...base, state: 'needs-sign-in' },
+        { subject: 'tracker', required: true, unsupported: 'Needs a browser.' },
+      ),
+    ).toMatchObject({ signInUnsupported: 'Needs a browser.' });
+  });
+
   it('says a server another scope overrides is not the one in use', () => {
     const status = mcpRowStatus(mcpServer({ name: 'docs', scope: 'user', shadowedBy: 'local' }), undefined, NOW);
     expect(status.label).toBe('Overridden by Local');

@@ -20,6 +20,7 @@ import {
   RUNS_WHAT_IT_READS_WARNING,
   runsWhatItReads,
 } from '../../../contract/routes/index.ts';
+import './secure-copy.css';
 import { Plus, ShieldCheck, Trash2, TriangleAlert } from '../../shell.tsx';
 import { type FormEvent, type ReactNode, useId, useState } from 'react';
 import { fromWords, ruleFromForm, ruleLimits, toWords } from '../../lib/secure-copy.ts';
@@ -133,11 +134,11 @@ function AddRuleForm({
 
   return (
     <form
-      className="flex flex-col gap-3 rounded-control border border-border-strong bg-surface-2 p-3"
+      className="fy-sc-form flex flex-col gap-3 border-t border-border pt-4"
       data-copy-rule-form=""
       onSubmit={event => void submit(event)}
     >
-      <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+      <div className="fy-sc-pair">
         <Field label="From">
           {id => (
             <select
@@ -171,7 +172,7 @@ function AddRuleForm({
           )}
         </Field>
       </div>
-      <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+      <div className="fy-sc-pair">
         <Field label="Into">
           {id => (
             <select
@@ -221,7 +222,7 @@ function AddRuleForm({
           )}
         </Field>
       </div>
-      <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+      <div className="fy-sc-pair">
         <Field label="Pastes it allows" hint="Empty for no count.">
           {id => (
             <input
@@ -278,10 +279,7 @@ function RuleRow({
   readonly onRemove: CopyRulesCardProps['onRemove'];
 }) {
   return (
-    <li
-      className="flex flex-wrap items-center gap-2 rounded-control border border-border bg-surface-2 p-3"
-      data-copy-rule={rule.id}
-    >
+    <li className="flex flex-wrap items-center gap-2 py-3" data-copy-rule={rule.id}>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <p className="m-0">
           <span className="min-w-0 break-words text-ui text-fg" data-copy-route="">
@@ -339,10 +337,7 @@ function WaitingRule({
   readonly onDeny: NonNullable<CopyRulesCardProps['onDenyWaiting']>;
 }) {
   return (
-    <li
-      className="flex flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
-      data-copy-rule-waiting={staged.stage}
-    >
+    <li className="flex flex-col gap-2 py-3" data-copy-rule-waiting={staged.stage}>
       <p className="m-0 text-ui text-fg">{staged.does}</p>
       <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-meta">
         {staged.rows.map((row, index) => (
@@ -397,10 +392,7 @@ function ProfileTargetsSetting({
 }) {
   const id = useId();
   return (
-    <div
-      className="flex items-start gap-3 rounded-control border border-border bg-surface-2 p-3"
-      data-copy-profile-setting=""
-    >
+    <div className="flex items-start gap-3 border-t border-border pt-4" data-copy-profile-setting="">
       <input
         id={id}
         type="checkbox"
@@ -440,7 +432,7 @@ export function CopyRulesCard({
   const [adding, setAdding] = useState(false);
   return (
     <section
-      className="kt-panel flex flex-col gap-3 p-panel"
+      className="fy-sc kt-panel flex flex-col gap-3 p-panel"
       aria-labelledby="copy-rules-heading"
       data-testid="copy-rules-card"
     >
@@ -456,7 +448,10 @@ export function CopyRulesCard({
           <h3 id="copy-rules-waiting-heading" className="m-0 text-ui font-semibold text-fg">
             Waiting for your passkey
           </h3>
-          <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Paste rules waiting for your passkey">
+          <ul
+            className="m-0 list-none p-0 [&>li+li]:border-t [&>li+li]:border-border"
+            aria-label="Paste rules waiting for your passkey"
+          >
             {waiting.map(staged => (
               <WaitingRule
                 key={staged.stage}
@@ -474,7 +469,7 @@ export function CopyRulesCard({
           No paste rules: every paste asks you.
         </p>
       ) : (
-        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Paste rules">
+        <ul className="m-0 list-none p-0 [&>li+li]:border-t [&>li+li]:border-border" aria-label="Paste rules">
           {rules.map(rule => (
             <RuleRow
               key={rule.id}

@@ -1,0 +1,25 @@
+/* The carrier preference's cards lay out by the width of the PANEL they sit in, never the window's: a 768px window leaves the
+   Settings panel about 212px, where two cards to a line are two slivers. One column below 480px, two from 480px, three from 900px. */
+.fy-cp {
+  container-type: inline-size;
+  min-width: 0;
+}
+.fy-cp__grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+@container (min-width: 480px) {
+  .fy-cp__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .fy-cp__wide {
+    grid-column: 1 / -1;
+  }
+}
+@container (min-width: 900px) {
+  .fy-cp__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

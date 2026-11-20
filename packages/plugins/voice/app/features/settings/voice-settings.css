@@ -12,7 +12,7 @@
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
 }
 
-/* A control row inside a setting: an input that stops growing at 36rem, then its buttons, all one height and aligned to
+/* A control row inside a setting: an input that stops growing at 28rem, then its buttons, all one height and aligned to
    the same line. It wraps under the input when the panel is narrower than the whole row. */
 .fy-vs-field {
   align-items: center;
@@ -24,7 +24,7 @@
 .fy-vs-field > .fy-vs-input {
   min-height: 44px;
   flex: 1 1 14rem;
-  max-width: 36rem;
+  max-width: 28rem;
   min-width: 0;
 }
 .fy-vs-field > .kt-btn,

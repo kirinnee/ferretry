@@ -1,12 +1,13 @@
 /** The `shells` Settings tab: nix on this machine, the shells and their build state, and adding one on the owner's yes. */
 
 import type { PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useState } from 'react';
 import type { NixFacts, ShellName, ShellPreview, ShellSummary } from '../../contract/index.ts';
 import { type AddDraft, addRequestOf, BUILD_TONES, BUILD_WORDS, EMPTY_DRAFT, shellLine } from '../lib/shells-model.ts';
 import { type ShellsClient, shellsClient } from '../lib/shells-client.ts';
 import { Loading } from '@ferretry/app/ui';
-import { Badge, Button, SettingGroup, SettingRow } from '../ui.ts';
+import './shells-settings.css';
+import { Badge, Button, SettingGroup, SettingRow, SettingSwitch } from '../ui.ts';
 
 const said = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -98,15 +99,15 @@ function ShellsTab({ shells }: { readonly shells: ShellsClient }) {
       );
     });
 
-  const field = 'flex min-w-0 flex-col gap-1 text-ui text-fg';
+  const input = 'kt-input min-h-[44px] w-full min-w-0 max-w-[28rem]';
   return (
-    <section data-testid="shells-settings" className="flex flex-col gap-4">
-      <p className="m-0 text-ui text-muted">
+    <section data-testid="shells-settings" className="fy-sh flex min-w-0 flex-col">
+      <p className="m-0 mb-3 text-ui text-muted">
         Each ferret works in its own set of tools, a nix shell, built once and cached.
       </p>
 
       {error !== undefined && (
-        <p role="alert" data-testid="shells-error" className="m-0 text-meta text-err">
+        <p role="alert" data-testid="shells-error" className="m-0 mb-3 text-meta text-err">
           {error}
         </p>
       )}
@@ -118,19 +119,17 @@ function ShellsTab({ shells }: { readonly shells: ShellsClient }) {
           {list === undefined && error === undefined && <Loading kind="bar" label="Loading shells…" />}
           {list?.length === 0 && <SettingRow name="No shells yet." hint="Ferrets use the machine's tools." />}
           {list?.map(shell => (
-            <SettingRow
-              key={shell.name}
-              name={shell.name}
-              hint={
-                <>
-                  {shellLine(shell)}
-                  {shell.description === undefined ? null : <span className="block">{shell.description}</span>}
-                </>
-              }
-              dataAttributes={{ 'data-shell': shell.name }}
-              wide
-              control={() => (
-                <span className="flex flex-wrap items-center gap-1">
+            <li key={shell.name} className="min-w-0" data-setting-row={shell.name} data-shell={shell.name}>
+              <div className="fy-sh-row">
+                <span className="fy-sh-text">
+                  <span className="text-ui font-semibold text-fg">{shell.name}</span>
+                  {/* The whole line: it wraps, it is never cut by an ellipsis. */}
+                  <span className="break-words text-meta leading-tight text-muted">{shellLine(shell)}</span>
+                  {shell.description === undefined ? null : (
+                    <span className="break-words text-meta leading-tight text-muted">{shell.description}</span>
+                  )}
+                </span>
+                <span className="fy-sh-acts">
                   <Badge tone={BUILD_TONES[shell.build]}>{BUILD_WORDS[shell.build]}</Badge>
                   <Button size="sm" disabled={busy !== undefined} onClick={() => void built(shell.name)}>
                     Build
@@ -142,69 +141,79 @@ function ShellsTab({ shells }: { readonly shells: ShellsClient }) {
                     Remove
                   </Button>
                 </span>
-              )}
-            />
+              </div>
+            </li>
           ))}
         </>
       </SettingGroup>
 
       <form
         data-testid="shells-add"
-        className="kt-panel flex flex-col gap-3 p-panel"
+        className="min-w-0"
         onSubmit={event => {
           event.preventDefault();
           void looked();
         }}
       >
-        <h3 className="m-0 text-meta font-semibold uppercase tracking-wide text-muted">Add a shell</h3>
-        <label className={field}>
-          <span>Name</span>
-          <input
-            className="kt-input"
-            value={draft.name}
-            onChange={event => setDraft({ ...draft, name: event.target.value })}
-          />
-        </label>
-        <label className={field}>
-          <span>Made from</span>
-          <select
-            className="kt-input"
-            value={draft.kind}
-            onChange={event => setDraft({ ...draft, kind: event.target.value === 'flake' ? 'flake' : 'packages' })}
-          >
-            <option value="packages">A package list</option>
-            <option value="flake">A flake reference</option>
-          </select>
-        </label>
-        <label className={field}>
-          <span>{draft.kind === 'flake' ? 'Flake reference' : 'Packages'}</span>
-          <input
-            className="kt-input"
-            value={draft.source}
-            onChange={event => setDraft({ ...draft, source: event.target.value })}
-          />
-        </label>
-        {draft.kind === 'flake' && (
-          <label className="flex items-center gap-2 text-ui text-fg">
-            <input
-              type="checkbox"
-              checked={draft.floating}
-              onChange={event => setDraft({ ...draft, floating: event.target.checked })}
-            />
-            <span>Floating: ask me again whenever it resolves differently</span>
-          </label>
-        )}
-        <div>
-          <Button type="submit" variant="primary" disabled={busy !== undefined}>
-            Resolve and look
-          </Button>
-        </div>
+        <SettingGroup label="Add a shell">
+          <FieldRow name="Name">
+            {labelId => (
+              <input
+                aria-labelledby={labelId}
+                className={input}
+                value={draft.name}
+                onChange={event => setDraft({ ...draft, name: event.target.value })}
+              />
+            )}
+          </FieldRow>
+          <FieldRow name="Made from">
+            {labelId => (
+              <select
+                aria-labelledby={labelId}
+                className={input}
+                value={draft.kind}
+                onChange={event => setDraft({ ...draft, kind: event.target.value === 'flake' ? 'flake' : 'packages' })}
+              >
+                <option value="packages">A package list</option>
+                <option value="flake">A flake reference</option>
+              </select>
+            )}
+          </FieldRow>
+          <FieldRow name={draft.kind === 'flake' ? 'Flake reference' : 'Packages'}>
+            {labelId => (
+              <input
+                aria-labelledby={labelId}
+                className={input}
+                value={draft.source}
+                onChange={event => setDraft({ ...draft, source: event.target.value })}
+              />
+            )}
+          </FieldRow>
+          {draft.kind === 'flake' && (
+            <FieldRow name="Floating" hint="Ask me again whenever it resolves differently">
+              {labelId => (
+                <SettingSwitch
+                  checked={draft.floating}
+                  labelledBy={labelId}
+                  onChange={floating => setDraft({ ...draft, floating })}
+                />
+              )}
+            </FieldRow>
+          )}
+          <FieldRow name="Look before adding" hint="Resolves it and shows what it locks to.">
+            {() => (
+              <Button type="submit" variant="primary" disabled={busy !== undefined}>
+                Resolve and look
+              </Button>
+            )}
+          </FieldRow>
+        </SettingGroup>
       </form>
 
       {preview !== undefined && (
         <div
           data-testid="shells-preview"
-          className="flex flex-col gap-2 rounded-control border border-border bg-surface-2 p-panel text-ui text-fg"
+          className="mb-8 flex flex-col gap-2 border-y border-border px-1 py-3 text-ui text-fg"
         >
           <p className="m-0">
             <strong>{preview.name}</strong> resolves to{' '}
@@ -239,15 +248,41 @@ function ShellsTab({ shells }: { readonly shells: ShellsClient }) {
   );
 }
 
+/** One label-and-control row of the add form: the label above the control on a narrow panel, beside it on a wide one. */
+function FieldRow({
+  name,
+  hint,
+  children,
+}: {
+  readonly name: string;
+  readonly hint?: string;
+  readonly children: (labelId: string) => ReactNode;
+}) {
+  const labelId = useId();
+  return (
+    <li className="min-w-0" data-setting-row={name}>
+      <div className="fy-sh-field">
+        <span className="fy-sh-label">
+          <span id={labelId} className="text-ui font-semibold text-fg">
+            {name}
+          </span>
+          {hint === undefined ? null : <span className="text-meta leading-tight text-muted">{hint}</span>}
+        </span>
+        <span className="fy-sh-control">{children(labelId)}</span>
+      </div>
+    </li>
+  );
+}
+
 function NixLine({ facts }: { readonly facts: NixFacts }) {
   if (facts.present)
     return (
-      <p data-testid="shells-nix" className="m-0 text-ui text-muted">
+      <p data-testid="shells-nix" className="m-0 mb-6 text-ui text-muted">
         Nix {facts.version} is on this machine.
       </p>
     );
   return (
-    <p data-testid="shells-nix" role="status" className="m-0 text-ui text-warn">
+    <p data-testid="shells-nix" role="status" className="m-0 mb-6 text-ui text-warn">
       Nix is not on this machine. {facts.consequence} {facts.remedy}
     </p>
   );

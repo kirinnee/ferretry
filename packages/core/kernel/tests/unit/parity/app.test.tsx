@@ -163,7 +163,7 @@ describe('the Kernel app half draws the surfaces today’s Settings had for conf
     expect(
       view.container.querySelector('[data-config-file="logins/work.yaml"] [data-config-file-state]')?.textContent,
     ).toBe('Invalid — last good in effect');
-    expect(view.container.querySelector('[data-config-group="logins"] h4')?.textContent).toBe('AI logins');
+    expect(view.container.querySelector('[data-config-group="logins"] h3')?.textContent).toBe('AI logins');
     expect(view.container.querySelector('[data-config-file="machine.yaml"]')?.textContent).toContain(
       `${HOME}/machine.yaml`,
     );

@@ -223,7 +223,7 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
             Runtime name
             <input
               type="text"
-              className="min-h-control w-full min-w-0 rounded-md border border-border bg-surface px-3 text-row text-fg"
+              className="min-h-control w-full min-w-0 max-w-[28rem] rounded-md border border-border bg-surface px-3 text-row text-fg"
               value={name}
               aria-invalid={invalid !== null}
               data-runtime-name={harness}

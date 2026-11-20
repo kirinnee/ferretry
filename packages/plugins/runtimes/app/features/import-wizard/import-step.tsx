@@ -25,7 +25,7 @@ function Progress({
 }) {
   return (
     <ol
-      className="m-0 grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2"
+      className="m-0 grid list-none gap-2 p-0 grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]"
       aria-label="Tools to bring in"
       data-import-progress=""
     >

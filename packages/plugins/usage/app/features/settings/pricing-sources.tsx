@@ -13,7 +13,7 @@ export function ApplicabilityDisclosure({ view }: { readonly view: AnalyticsPric
   const imageStored = view.rateApplicability.image === 'stored_not_applied';
   const toolStored = view.rateApplicability.tool === 'stored_not_applied';
   const reasoningApplied = view.rateApplicability.reasoning === 'applied_when_evidenced';
-  // A one-line hint ends in an ellipsis on a wide screen, so the whole sentence is also behind the row's (i).
+  // The hint wraps to its full sentence (the row kit would cut it to one line at 900px), and it stays behind the (i) too.
   const imageToolWords =
     imageStored && toolStored
       ? 'Recorded, not applied: there is no reliable billable evidence.'
@@ -22,7 +22,10 @@ export function ApplicabilityDisclosure({ view }: { readonly view: AnalyticsPric
     ? 'Applied when transcript evidence exists.'
     : 'Recorded; this daemon does not currently apply them.';
   return (
-    <div className="min-w-0" data-pricing-applicability="">
+    <div
+      className="min-w-0 [&_[data-setting-hint]]:overflow-visible [&_[data-setting-hint]]:whitespace-normal [&_[data-setting-hint]]:[text-overflow:clip]"
+      data-pricing-applicability=""
+    >
       <SettingGroup label="What insights applies">
         <SettingRow
           wide

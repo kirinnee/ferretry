@@ -38,7 +38,7 @@ export function BrowserProxyCredential({
   const [replacing, setReplacing] = useState(false);
   const showBox = !stored || replacing;
   return (
-    <div className="flex min-w-0 flex-col gap-1" data-browser-proxy-credential={key}>
+    <div className="flex min-w-0 max-w-[28rem] flex-col gap-1" data-browser-proxy-credential={key}>
       <label htmlFor={id} className="text-ui font-semibold text-fg">
         {what}
       </label>

@@ -27,6 +27,7 @@ import {
   AGENDA_MODE_WORDS,
   AGENT_CONTROL_KINDS,
   AGENT_CONTROL_WORDS,
+  AGENT_PERMISSION_LINES,
   AGENT_PERMISSION_SEGMENTS,
   AGENT_PERMISSION_WORDS,
   type AgentPermissions,
@@ -106,6 +107,7 @@ function AgentPermissionsSection({ machine, machineName, changes, onSaved }: Sec
           options={(['auto', 'skip'] as const).map(id => ({
             id,
             title: AGENT_PERMISSION_SEGMENTS[id],
+            line: AGENT_PERMISSION_LINES[id],
             icon: PERMISSION_ICONS[id],
           }))}
         />
@@ -365,6 +367,12 @@ export function AgentsTab({ client, machine, machineName, checking, onRetry, onR
   const props = { machine, machineName, changes, onSaved };
   return (
     <div className="flex min-w-0 flex-col" data-agents-tab="">
+      <div className="mb-6 flex min-w-0 flex-col gap-1" data-agents-heading="">
+        <h3 className="m-0 text-row font-semibold text-fg">Agents</h3>
+        <p className="m-0 text-cell leading-base text-muted">
+          How agents behave on {machineName}: what they may do and control, and whether they come back after a restart.
+        </p>
+      </div>
       <AgentPermissionsSection key={machine.agentPermissions} {...props} />
       <AgentControlSection key={Object.values(machine.agentControl).join(',')} {...props} />
       <AutoResumeSection key={`resume-${String(machine.autoResume)}`} {...props} />

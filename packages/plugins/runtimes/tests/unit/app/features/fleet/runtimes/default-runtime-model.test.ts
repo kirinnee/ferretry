@@ -41,10 +41,10 @@ describe('runtimeStateWords', () => {
 });
 
 describe('the control’s words', () => {
-  it('joins name and state, keeps only agent runtimes, and says what is kept', () => {
+  it('names the runtime only, keeps only agent runtimes, and says what is kept', () => {
     const plain = runtime({ name: 'plain' });
     const agent = runtime({ name: 'agent', agent: true });
-    expect(defaultOptionLabel(agent, machine())).toBe('agent · ready');
+    expect(defaultOptionLabel(agent)).toBe('agent');
     expect(agentRuntimes([plain, agent])).toEqual([agent]);
     expect(isDefaultRuntime(machine({ defaultRuntime: 'agent' }), agent)).toBe(true);
     expect(isDefaultRuntime(null, agent)).toBe(false);

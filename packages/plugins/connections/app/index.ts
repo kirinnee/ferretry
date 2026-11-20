@@ -255,7 +255,7 @@ export function buildConnectionsApp(
     const relayFallback = measurements.relayFallback?.(daemonId);
     return createElement(
       'div',
-      { className: 'flex min-w-0 flex-col gap-3', 'data-connection-preference': '' },
+      { className: 'flex min-w-0 flex-col gap-8', 'data-connection-preference': '' },
       createElement(CarrierInUse, { choice: measured, health: outage, relayFallback }),
       createElement(CarrierPreferenceSelector, {
         legend: 'Connection preference',

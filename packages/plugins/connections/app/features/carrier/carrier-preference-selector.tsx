@@ -17,6 +17,7 @@
  */
 
 import { Check } from 'lucide-react';
+import './carrier-preference.css';
 import { useId, useState } from 'react';
 import {
   CARRIER_PREFERENCE_LABEL,
@@ -137,7 +138,7 @@ function TunnelOffer({ offer }: { readonly offer: TunnelSwitchOffer }) {
     <section
       aria-labelledby={`${id}-question`}
       data-tunnel-offer=""
-      className="flex min-w-0 flex-col gap-1 rounded-control border border-border bg-surface-2 px-control-x py-2 sm:col-span-2"
+      className="flex min-w-0 flex-col gap-1 rounded-control border border-border bg-surface-2 px-control-x py-2 fy-cp__wide"
     >
       <p id={`${id}-question`} className="m-0 text-ui font-semibold text-fg">
         {TUNNEL_OFFER_QUESTION}
@@ -184,49 +185,50 @@ export function CarrierPreferenceSelector({
   // One name per group: two machines' groups on one page must not share a radio set.
   const name = useId();
   return (
-    <fieldset
-      className="m-0 grid min-w-0 grid-cols-1 gap-2 border-0 p-0 sm:grid-cols-2"
-      data-carrier-preference={value}
-    >
+    <fieldset className="m-0 min-w-0 border-0 p-0" data-carrier-preference={value}>
       <legend className={legendHidden ? 'sr-only' : 'mb-1 text-ui font-semibold text-fg'}>{legend}</legend>
-      {CARRIER_SETTINGS.map(preference => {
-        const checked = preference === value;
-        const note = noteFor(preference, availability);
-        const noteId = `${name}-${preference}-note`;
-        return (
-          <label
-            key={preference}
-            data-carrier-preference-option={preference}
-            className={cn(
-              'flex min-h-[52px] min-w-0 cursor-pointer flex-col items-start justify-center gap-0.5 rounded-control border px-control-x py-2 text-left transition-colors has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus',
-              checked
-                ? 'border-accent bg-accent-soft text-accent'
-                : 'border-border bg-surface-2 text-fg hover:border-accent',
-            )}
-          >
-            <input
-              type="radio"
-              name={name}
-              value={preference}
-              checked={checked}
-              onChange={() => onChange(preference)}
-              className="sr-only"
-              {...(note === undefined ? {} : { 'aria-describedby': noteId })}
-            />
-            <span className="flex w-full items-center gap-2 text-ui font-semibold">
-              {preference === 'default' ? DEFAULT_SETTING_LABEL : CARRIER_PREFERENCE_LABEL[preference]}
-              {checked ? <Check size={14} className="ml-auto shrink-0" aria-hidden="true" /> : null}
-            </span>
-            <span className="text-meta leading-tight text-muted">{CARRIER_PREFERENCE_DESCRIPTION[preference]}</span>
-            {note === undefined ? null : (
-              <span id={noteId} className="text-meta leading-tight text-warn" data-carrier-preference-note="">
-                {note}
-              </span>
-            )}
-          </label>
-        );
-      })}
-      {availability.tunnel?.off === true && walksTunnel(value) ? <TunnelOffer offer={availability.tunnel} /> : null}
+      <div className="fy-cp">
+        <div className="fy-cp__grid">
+          {CARRIER_SETTINGS.map(preference => {
+            const checked = preference === value;
+            const note = noteFor(preference, availability);
+            const noteId = `${name}-${preference}-note`;
+            return (
+              <label
+                key={preference}
+                data-carrier-preference-option={preference}
+                className={cn(
+                  'flex min-h-[52px] min-w-0 cursor-pointer flex-col items-start justify-center gap-0.5 rounded-control border px-control-x py-2 text-left transition-colors has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus',
+                  checked
+                    ? 'border-accent bg-accent-soft text-accent'
+                    : 'border-border bg-surface-2 text-fg hover:border-accent',
+                )}
+              >
+                <input
+                  type="radio"
+                  name={name}
+                  value={preference}
+                  checked={checked}
+                  onChange={() => onChange(preference)}
+                  className="sr-only"
+                  {...(note === undefined ? {} : { 'aria-describedby': noteId })}
+                />
+                <span className="flex w-full items-center gap-2 text-ui font-semibold">
+                  {preference === 'default' ? DEFAULT_SETTING_LABEL : CARRIER_PREFERENCE_LABEL[preference]}
+                  {checked ? <Check size={14} className="ml-auto shrink-0" aria-hidden="true" /> : null}
+                </span>
+                <span className="text-meta leading-tight text-muted">{CARRIER_PREFERENCE_DESCRIPTION[preference]}</span>
+                {note === undefined ? null : (
+                  <span id={noteId} className="text-meta leading-tight text-warn" data-carrier-preference-note="">
+                    {note}
+                  </span>
+                )}
+              </label>
+            );
+          })}
+          {availability.tunnel?.off === true && walksTunnel(value) ? <TunnelOffer offer={availability.tunnel} /> : null}
+        </div>
+      </div>
     </fieldset>
   );
 }
