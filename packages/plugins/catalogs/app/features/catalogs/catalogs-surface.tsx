@@ -11,7 +11,7 @@
 import type { OwnedCatalog, OwnedCatalogItem } from '../../../contract/wire/index.ts';
 import { CircleAlert, CircleCheck, FileDown, MoreHorizontal, PackagePlus, Share2, Star, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { cn, Loading } from '@ferretry/app/ui';
+import { cn, Loading, readPress } from '@ferretry/app/ui';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import { useDaemonClient } from '../../lib/client-context.tsx';
 import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '@ferretry/app/ui';
@@ -76,14 +76,18 @@ export function useCatalogs(
 ): { read: Read; reload: () => void } {
   const [read, setRead] = useState<Read>({ kind: 'loading' });
   const [tick, setTick] = useState(0);
+  // Set by `reload` (a Try again), spent by the very next read: only that one is the person's press.
+  const pressed = useRef(false);
   useEffect(() => {
     let live = true;
     // `tick` is the reload trigger: pressing Try again or finishing an act bumps it.
     void tick;
+    const press = readPress(pressed.current);
+    pressed.current = false;
     void (async () => {
       try {
         const client = await createClient(connection);
-        const list = await listCatalogs(client, sourceState ? { sourceState: true } : undefined);
+        const list = await listCatalogs(client, { ...(sourceState ? { sourceState: true } : {}), press });
         const features = await readCatalogFeatures(client);
         if (live)
           setRead({
@@ -100,7 +104,13 @@ export function useCatalogs(
       live = false;
     };
   }, [connection, createClient, sourceState, tick]);
-  return { read, reload: useCallback(() => setTick(previous => previous + 1), []) };
+  return {
+    read,
+    reload: useCallback(() => {
+      pressed.current = true;
+      setTick(previous => previous + 1);
+    }, []),
+  };
 }
 
 export function CatalogsSurface({

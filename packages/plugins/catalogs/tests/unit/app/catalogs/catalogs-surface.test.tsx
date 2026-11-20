@@ -114,7 +114,7 @@ describe('CatalogsSurface list', () => {
 
   it('shows another failure and reads again on Try again', async () => {
     let broken = true;
-    const { view } = await open({
+    const { fake, view } = await open({
       'GET /v1/catalogs': () => {
         if (broken) throw new DaemonCallError(500, 'x', 'boom');
         return { catalogs: [] };
@@ -124,6 +124,8 @@ describe('CatalogsSurface list', () => {
     broken = false;
     await tap('[data-catalog-preview-again]');
     expect(q('[data-catalogs-empty]')).not.toBeNull();
+    // e-retry: the page's own read is unmarked; the Try again read is the person's press, so a passkey prompt can open.
+    expect(fake.calls.map(call => call.quiet)).toEqual([undefined, false]);
     await view.unmount();
   });
 

@@ -52,6 +52,17 @@ describe('the Catalogs client by route key', () => {
     ]);
   });
 
+  it('carries a person’s press (`quiet: false`) to the route call, and nothing for the page’s own read', async () => {
+    calls.length = 0;
+    const client = catalogClientOf(recording({ ok: true }));
+    await client.request('/v1/catalogs', z.object({ ok: z.boolean() }));
+    await client.request('/v1/catalogs', z.object({ ok: z.boolean() }), { quiet: false });
+    expect(calls).toEqual([
+      { route: 'GET /v1/catalogs', init: {} },
+      { route: 'GET /v1/catalogs', init: { quiet: false } },
+    ]);
+  });
+
   it('refuses a path no declared route matches, before anything is sent', async () => {
     calls.length = 0;
     const client = catalogClientOf(recording({}));

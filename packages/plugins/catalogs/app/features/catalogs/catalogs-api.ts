@@ -55,6 +55,7 @@ import {
   type WithdrawnCatalogItem,
   WithdrawnCatalogItemSchema,
 } from '../../../contract/wire/index.ts';
+import type { ReadPress } from '@ferretry/app/ui';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import type { CatalogClient } from '../../lib/catalog-client.ts';
 
@@ -70,14 +71,14 @@ const catalogPath = (catalogId: string): string => `${SHARED_CATALOGS_PATH}/${en
 
 /**
  * Every catalog on this machine. `sourceState` re-reads each source to say whether it changed, so only
- * the detail view asks for it; the list does not touch a single source.
+ * the detail view asks for it; the list does not touch a single source. `press` marks a Try again the person pressed for.
  */
 export async function listCatalogs(
   client: CatalogClient,
-  options?: { sourceState?: boolean },
+  options?: { sourceState?: boolean; press?: ReadPress },
 ): Promise<OwnedCatalogList> {
   const path = options?.sourceState === true ? `${SHARED_CATALOGS_PATH}?sourceState=1` : SHARED_CATALOGS_PATH;
-  return await client.request(path, OwnedCatalogListSchema);
+  return await client.request(path, OwnedCatalogListSchema, { ...options?.press });
 }
 
 export async function createCatalog(client: CatalogClient, name: string): Promise<OwnedCatalog> {
