@@ -81,16 +81,22 @@ export interface QuickKeyFormProps {
   readonly onCancel: () => void;
   /** Open today's full form for this provider. */
   readonly onMore: () => void;
+  /** The tool the panel is locked to: the login is made for it and the form never asks which. */
+  readonly lock?: HarnessKind;
 }
 
-export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMore }: QuickKeyFormProps) {
+export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMore, lock }: QuickKeyFormProps) {
   const changes = useLoginChanges(client);
   const name = secretName(variable);
   const harnesses = quickHarnesses(preset, variable);
   const [chosen, setChosen] = useState<HarnessKind | undefined>(undefined);
   const several = harnesses.length > 1;
   const harness: HarnessKind =
-    chosen !== undefined && harnesses.includes(chosen) ? chosen : (harnesses[0] ?? preset.harness);
+    lock !== undefined && harnesses.includes(lock)
+      ? lock
+      : chosen !== undefined && harnesses.includes(chosen)
+        ? chosen
+        : (harnesses[0] ?? preset.harness);
   /** The key lives only in the field's own value: read from here on submit, never held in React state. */
   const field = useSecretField();
   const inputId = useId();
@@ -119,7 +125,7 @@ export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMo
       store: 'environment',
       preset: preset.id,
       env: loginEnvironment(preset, variable, several ? harness : undefined),
-      ...(several ? { halves: [harness] } : {}),
+      ...(several || lock !== undefined ? { halves: [harness] } : {}),
     });
     if (result.kind === 'applied') onAdded(id);
   };
@@ -182,7 +188,7 @@ export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMo
 
   return (
     <div className="flex flex-col gap-4" data-quick-key-form={preset.id}>
-      {several ? (
+      {several && lock === undefined ? (
         <div data-quick-key-harness="">
           <HarnessChoice
             label="Use it with"

@@ -24,6 +24,7 @@ const panel = (overrides: Partial<Parameters<typeof CodexLoginPanel>[0]> = {}) =
     onCancel={() => undefined}
     onUseLink={() => undefined}
     onStartLink={() => undefined}
+    onStartDeviceCode={() => undefined}
     onSubmitAddress={() => undefined}
     linked={true}
     copy={async () => {}}

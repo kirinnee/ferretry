@@ -327,6 +327,7 @@ describe('LoginSignIn', () => {
       { login: CODEX, pollMs: 5 },
     );
     expect(text(view.container, 'p.font-semibold')).toBe('Sign in to Codex');
+    await click(button(view.container, 'Use a device code instead'), 'the device choice');
     await click(view.container.querySelector('[data-change-submit]'), 'the start button');
     expect(only(calls, LOGIN)[0]?.body).toEqual({ loginId: 'codex' });
     expect(text(view.container, '[data-codex-login-user-code]')).toBe('0IER-FFQW6');
@@ -399,9 +400,9 @@ const codexLink = (state: 'awaiting-callback' | 'finishing' | 'failed', extra: R
 describe('LoginSignIn with a Codex link', () => {
   it('offers a link on the start screen and starts with one when chosen', async () => {
     const { view, calls } = await open({ [LOGIN]: codexLink('awaiting-callback') }, { login: CODEX });
-    expect(view.container.textContent).toContain('Device code didn’t work?');
-    await click(button(view.container, 'Sign in with a link instead'), 'the link choice');
+    // A link is the default (r11 O6): the start button already says so, and the other way is the offered switch.
     expect(view.container.textContent).toContain('Sign in to Codex with a link');
+    expect(view.container.textContent).toContain('You’ll paste back the address');
     await click(button(view.container, 'Use a device code instead'), 'the device choice');
     expect(view.container.querySelector('[data-login-sign-in-method]')?.getAttribute('data-login-sign-in-method')).toBe(
       'device-code',
@@ -414,9 +415,19 @@ describe('LoginSignIn with a Codex link', () => {
     await view.unmount();
   });
 
+  it('starts a Codex sign-in with a link by default, with no choice made', async () => {
+    const { view, calls } = await open({ [LOGIN]: codexLink('awaiting-callback') }, { login: CODEX });
+    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+    expect(only(calls, LOGIN)[0]?.body).toEqual({ loginId: 'codex', method: 'link' });
+    expect(state(view.container)).toBe('awaiting-callback');
+    await view.unmount();
+  });
+
   it('never offers a link for Claude, and never sends a method for it', async () => {
     const { view, calls } = await open({ [LOGIN]: claudeFlow('awaiting-code') });
     expect(view.container.querySelector('[data-login-sign-in-method]')).toBeNull();
+    // The Codex default (a link) never leaks into Claude's start button.
+    expect(view.container.querySelector('[data-change-submit]')?.textContent).toBe('Sign in to Claude Code');
     await click(view.container.querySelector('[data-change-submit]'), 'the start button');
     expect(only(calls, LOGIN)[0]?.body).toEqual({ loginId: 'claude-work' });
     await view.unmount();
@@ -440,6 +451,7 @@ describe('LoginSignIn with a Codex link', () => {
       },
       { login: CODEX, pollMs: 5 },
     );
+    await click(button(view.container, 'Use a device code instead'), 'the device choice');
     await click(view.container.querySelector('[data-change-submit]'), 'the start button');
     await click(button(view.container, 'Sign in with a link instead'), 'the switch');
     expect(only(calls, FLOW_POST)[0]?.body).toEqual({ method: 'link' });
@@ -499,6 +511,7 @@ describe('LoginSignIn with a Codex link', () => {
     await moved.view.unmount();
 
     const failed = await open({ [LOGIN]: codexLink('failed') }, { login: CODEX });
+    await click(button(failed.view.container, 'Use a device code instead'), 'the device choice');
     await click(failed.view.container.querySelector('[data-change-submit]'), 'the start button');
     await click(button(failed.view.container, 'Sign in with a link instead'), 'the link restart');
     // One press restarts as a link sign-in; there is no idle card to press a second time.
@@ -611,6 +624,7 @@ describe('LoginSignIn with a Codex link', () => {
 
   it('offers a link sign-in as a real outlined button, never a bare ghost', async () => {
     const { view } = await open({ [LOGIN]: codexFlow('awaiting-approval') }, { login: CODEX });
+    await click(button(view.container, 'Use a device code instead'), 'the device choice');
     expect(button(view.container, 'Sign in with a link instead').getAttribute('data-variant')).toBeNull();
     await click(view.container.querySelector('[data-change-submit]'), 'the start button');
     expect(button(view.container, 'Sign in with a link instead').getAttribute('data-variant')).toBeNull();

@@ -74,8 +74,8 @@ export function LoginSignIn({
   const [flow, setFlow] = useState<LoginSignInFlow | null>(null);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
-  /** Codex's sign-in method for the next start. Follows a flow that moved to a link by itself. */
-  const [method, setMethod] = useState<HarnessLoginCodexMethod>('device-code');
+  /** Codex's sign-in method for the next start: a link unless the person picks a device code (r11 O6). Follows a flow that moved to a link by itself. */
+  const [method, setMethod] = useState<HarnessLoginCodexMethod>('link');
   const reported = useRef<string | null>(null);
   /** What this caller may change here: a remote caller that needs a passkey is told so, one that is refused is not offered the button. */
   const authority = useChangeAuthority(client);
@@ -206,7 +206,7 @@ export function LoginSignIn({
     );
 
   const name = HARNESS_NAMES[login.harness];
-  const linkStart = method === 'link';
+  const linkStart = login.harness === 'codex' && method === 'link';
   if (flow === null)
     return (
       <section className="fy-lg-group" data-login-sign-in="start">
@@ -226,7 +226,7 @@ export function LoginSignIn({
         {login.harness === 'codex' ? (
           <div data-login-sign-in-method={method}>
             <p className="m-0 text-meta leading-base text-muted">
-              {linkStart ? 'You’ll paste back the address the browser ends on.' : 'Device code didn’t work?'}
+              {linkStart ? 'You’ll paste back the address the browser ends on.' : 'You’ll type a code at the provider.'}
             </p>
             <Button
               type="button"
@@ -271,6 +271,10 @@ export function LoginSignIn({
           onStartLink={() => {
             setMethod('link');
             again('link');
+          }}
+          onStartDeviceCode={() => {
+            setMethod('device-code');
+            again('device-code');
           }}
           onSubmitAddress={address => void submit(address)}
         />

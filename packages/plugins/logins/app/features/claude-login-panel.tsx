@@ -40,6 +40,7 @@ import { type FormEvent, useState } from 'react';
 import { cn } from '../ui.ts';
 import { Button } from '../ui.ts';
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../ui.ts';
+import { SignInDemo } from './sign-in-demo.tsx';
 import { ResumedNote, StartOverButton } from './sign-in-restart.tsx';
 import type { LoginPanelWording } from '../lib/harness-login-model.ts';
 
@@ -163,8 +164,7 @@ export function ClaudeLoginPanel({
         {state === 'idle' || state === 'starting' ? (
           <div className="space-y-3">
             <p className="m-0 text-ui leading-base text-muted">
-              Start here and open the link on any device. Claude shows you a code once you have signed in — bring that
-              code back to this screen.
+              Open the link, sign in, then bring the code Claude shows back here.
             </p>
             <Button type="button" variant="primary" onClick={onStart} disabled={busy || state === 'starting'}>
               <Link2 size={16} aria-hidden="true" />
@@ -175,61 +175,65 @@ export function ClaudeLoginPanel({
         ) : null}
 
         {flow?.state === 'awaiting-code' ? (
-          <div className="space-y-4">
-            <div className="rounded-control border border-accent/40 bg-accent-soft p-3">
-              <p className="m-0 text-meta font-semibold text-accent">1 · Open this link anywhere</p>
-              <div className="mt-2 flex min-w-0 items-start gap-2">
-                <code className="min-w-0 flex-1 break-all rounded-control border border-border bg-surface px-2 py-2 font-mono text-meta leading-base text-fg">
-                  {flow.verificationUrl}
-                </code>
-                <CopyButton text={flow.verificationUrl} label="Copy the Claude sign-in link" write={copy} />
+          <div className="fy-sd-host" data-claude-login-code="">
+            <div className="fy-sd-layout">
+              <div className="fy-sd-steps space-y-4" data-sign-in-steps="">
+                <div className="rounded-control border border-accent/40 bg-accent-soft p-3">
+                  <p className="m-0 text-meta font-semibold text-accent">1 · Open this link anywhere</p>
+                  <div className="mt-2 flex min-w-0 items-start gap-2">
+                    <code className="min-w-0 flex-1 break-all rounded-control border border-border bg-surface px-2 py-2 font-mono text-meta leading-base text-fg">
+                      {flow.verificationUrl}
+                    </code>
+                    <CopyButton text={flow.verificationUrl} label="Copy the Claude sign-in link" write={copy} />
+                  </div>
+                </div>
+                {flow.lastCode === 'rejected' ? (
+                  <p
+                    role="alert"
+                    data-claude-login-rejected=""
+                    className="m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+                  >
+                    <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
+                    <span>
+                      <strong className="font-semibold">Claude didn’t accept that code.</strong> Copy the whole code
+                      from the Claude page — every character — and paste it again below.
+                    </span>
+                  </p>
+                ) : null}
               </div>
+              <SignInDemo kind="code" />
+              <form className="fy-sd-form space-y-2" onSubmit={submit}>
+                <label htmlFor={`claude-login-code-${loginId}`} className="block text-ui font-semibold text-fg">
+                  2 · Paste the code Claude showed you
+                </label>
+                <textarea
+                  id={`claude-login-code-${loginId}`}
+                  name="claude-login-code"
+                  className="kt-input min-h-24 w-full resize-y font-mono text-meta"
+                  value={code}
+                  onChange={event => setCode(event.target.value)}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  disabled={busy}
+                  required
+                />
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button type="submit" variant="primary" disabled={busy || code.trim() === ''}>
+                    <ShieldCheck size={16} aria-hidden="true" />
+                    {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
+                  </Button>
+                  <StartOverButton onStartOver={onStartOver} busy={busy} />
+                  <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+                    Cancel
+                  </Button>
+                </div>
+                <p className="m-0 text-meta leading-base text-faint">
+                  Goes straight to Claude on this machine. Kept nowhere, never shown back.
+                </p>
+              </form>
             </div>
-            {flow.lastCode === 'rejected' ? (
-              <p
-                role="alert"
-                data-claude-login-rejected=""
-                className="m-0 flex items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
-              >
-                <TriangleAlert size={17} className="mt-0.5 shrink-0" aria-hidden="true" />
-                <span>
-                  <strong className="font-semibold">Claude didn’t accept that code.</strong> Copy the whole code from
-                  the Claude page — every character — and paste it again below.
-                </span>
-              </p>
-            ) : null}
-            <form className="space-y-2" onSubmit={submit}>
-              <label htmlFor={`claude-login-code-${loginId}`} className="block text-ui font-semibold text-fg">
-                2 · Paste the code Claude showed you
-              </label>
-              <textarea
-                id={`claude-login-code-${loginId}`}
-                name="claude-login-code"
-                className="kt-input min-h-24 w-full resize-y font-mono text-meta"
-                value={code}
-                onChange={event => setCode(event.target.value)}
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                disabled={busy}
-                required
-              />
-              <div className="flex flex-wrap items-center gap-3">
-                <Button type="submit" variant="primary" disabled={busy || code.trim() === ''}>
-                  <ShieldCheck size={16} aria-hidden="true" />
-                  {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
-                </Button>
-                <StartOverButton onStartOver={onStartOver} busy={busy} />
-                <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
-                  Cancel
-                </Button>
-              </div>
-              <p className="m-0 text-meta leading-base text-faint">
-                The code goes straight to the harness on the host and is kept nowhere — not here, not in a log, not in
-                this daemon. It is never shown back to you.
-              </p>
-            </form>
           </div>
         ) : null}
 

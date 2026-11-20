@@ -39,6 +39,7 @@ const element = (overrides: Partial<Parameters<typeof CodexLoginPanel>[0]> = {})
     onCancel={() => undefined}
     onUseLink={() => undefined}
     onStartLink={() => undefined}
+    onStartDeviceCode={() => undefined}
     onSubmitAddress={() => undefined}
     linked={false}
     copy={async () => {}}
@@ -64,11 +65,11 @@ const buttonNamed = (view: ReactTestRenderer, name: string): Node => {
 };
 
 describe('CodexLoginPanel', () => {
-  it('says up front that nothing comes back to this screen', () => {
+  it('says up front that nothing comes back here', () => {
     const view = mount();
 
     expect(view.root.findByProps({ 'data-codex-login': 'idle' })).toBeDefined();
-    expect(texts(view)).toContain('Nothing comes back to this screen');
+    expect(texts(view)).toContain('Nothing comes back here');
     expect(texts(view)).toContain('Sign in to Codex');
   });
 
@@ -249,7 +250,9 @@ describe('CodexLoginPanel with a link', () => {
   });
 
   it('starts as a link sign-in in words, when the link was chosen', () => {
-    expect(texts(mount({ flow: codexFlow('starting'), linked: true }))).toContain('Codex signs in with a link');
+    expect(texts(mount({ flow: codexFlow('starting'), linked: true }))).toContain(
+      'Open the link, sign in, then paste back the address',
+    );
   });
 
   const failedWith = (lastCode: 'expired' | 'rejected'): CodexLoginFlow => ({
@@ -275,5 +278,14 @@ describe('CodexLoginPanel with a link', () => {
 
     run(() => buttonNamed(view, 'Sign in with a link instead').props.onClick());
     expect(links).toBe(1);
+  });
+
+  it('offers the device code again after a LINK sign-in failed, and not the link', () => {
+    let codes = 0;
+    const view = mount({ flow: failedWith('rejected'), linked: true, onStartDeviceCode: () => (codes += 1) });
+
+    expect(texts(view)).not.toContain('Sign in with a link instead');
+    run(() => buttonNamed(view, 'Use a device code instead').props.onClick());
+    expect(codes).toBe(1);
   });
 });
