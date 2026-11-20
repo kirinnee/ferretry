@@ -98,7 +98,7 @@ describe('The Shells Settings tab', () => {
             [...document.querySelectorAll('[data-testid="shells-add"] [data-setting-row]')]
               .map(row => {
                 const label = row.querySelector('.fy-sh-label span')?.getBoundingClientRect();
-                const control = row.querySelector('input, select')?.getBoundingClientRect();
+                const control = row.querySelector('input, select, [data-select-box]')?.getBoundingClientRect();
                 return label === undefined || control === undefined
                   ? undefined
                   : {
@@ -120,6 +120,92 @@ describe('The Shells Settings tab', () => {
           );
           expect(overflow, 'nothing scrolls sideways').toBeLessThanOrEqual(0);
           if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, `${variant.name}-${scheme}-shells.png`) });
+        } finally {
+          await context.close();
+        }
+      }, 60_000);
+
+  // r11 S3a: "Made from" is the app's SelectBox, not the browser's select.
+  for (const variant of VARIANTS)
+    for (const scheme of ['dark', 'light'] as const)
+      it(`"Made from" is a SelectBox (no native select; ${variant.phone ? 'a centred dialog' : 'a listbox under it, or a dialog in a narrow panel'}) and picking a flake reveals the flake fields (${variant.name}, ${scheme})`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: variant.width, height: variant.height },
+          colorScheme: scheme,
+          deviceScaleFactor: variant.phone ? 2 : 1,
+          hasTouch: variant.phone,
+          isMobile: variant.phone,
+        });
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const page = await context.newPage();
+        page.setDefaultTimeout(8_000);
+        try {
+          await page.goto(`${origin}/?theme=studio-${scheme}&panel=${variant.panel}`);
+          await page.waitForSelector('[data-shell="rust-lab"]');
+          expect(await page.locator('[data-testid="shells-add"] select').count(), 'no native select').toBe(0);
+          const box = page.locator('[role="combobox"][aria-label="Made from"]');
+          await box.scrollIntoViewIfNeeded();
+          expect((await box.innerText()).trim()).toBe('A package list');
+          expect(await page.getByText('Floating', { exact: true }).count()).toBe(0);
+          await box.click();
+          await page.waitForTimeout(600);
+          const open = await page.evaluate(() => {
+            const panel = document.querySelector('[role="dialog"], [data-select-popover]') as HTMLElement | null;
+            const at = panel?.getBoundingClientRect();
+            return at === undefined || panel === null
+              ? null
+              : {
+                  dialog: panel.getAttribute('role') === 'dialog',
+                  dx: Math.abs(at.left + at.width / 2 - innerWidth / 2),
+                  dy: Math.abs(at.top + at.height / 2 - innerHeight / 2),
+                  options: panel.querySelectorAll('[role="option"]').length,
+                  inside: at.left >= 0 && at.right <= innerWidth,
+                };
+          });
+          expect(open?.options).toBe(2);
+          expect(open?.inside, 'the list is inside the window').toBe(true);
+          if (open?.dialog === true) {
+            expect(open.dx, 'the dialog is centred across').toBeLessThanOrEqual(8);
+            expect(open.dy, 'the dialog is centred down').toBeLessThanOrEqual(8);
+          }
+          if (variant.phone) expect(open?.dialog, 'a phone gets the dialog').toBe(true);
+          if (shotsDir !== '')
+            await page.screenshot({ path: join(shotsDir, `${variant.name}-${scheme}-made-from-open.png`) });
+          await page.locator('[role="option"]', { hasText: 'A flake reference' }).click();
+          expect((await box.innerText()).trim()).toBe('A flake reference');
+          // The same state change a native select made: the row is now a flake reference, with its Floating switch.
+          await page.getByText('Flake reference', { exact: true }).first().waitFor();
+          expect(await page.getByText('Floating', { exact: true }).count()).toBe(1);
+
+          // The adoption proof: submit the flake through Resolve and Add and read what the fake client was sent.
+          const sent = async (route: string) =>
+            page.evaluate(
+              wanted =>
+                (window as unknown as { __calls: { route: string; body?: unknown }[] }).__calls.filter(
+                  call => call.route === wanted,
+                ),
+              route,
+            );
+          expect(await sent('POST /v1/shells/preview'), 'nothing is resolved before the owner asks').toHaveLength(0);
+          await page.getByRole('textbox', { name: 'Name', exact: true }).fill('my-flake');
+          await page.getByRole('textbox', { name: 'Flake reference', exact: true }).fill('github:me/shells/abc#web');
+          await page.getByRole('switch', { name: 'Floating' }).click();
+          await page.getByRole('button', { name: 'Resolve and look' }).click();
+          await page.locator('[data-testid="shells-preview"]').waitFor();
+          const expected = { name: 'my-flake', item: { flake: 'github:me/shells/abc#web', floating: true } };
+          expect(await sent('POST /v1/shells/preview'), 'Resolve sent the flake the owner picked and typed').toEqual([
+            { route: 'POST /v1/shells/preview', body: expected },
+          ]);
+          expect(await sent('POST /v1/shells'), 'resolving adds nothing').toHaveLength(0);
+          await page.getByRole('button', { name: 'Add it' }).click();
+          await page.locator('[data-testid="shells-note"]').waitFor();
+          expect(await sent('POST /v1/shells'), 'Add sent the same flake request').toEqual([
+            { route: 'POST /v1/shells', body: expected },
+          ]);
+          expect(await page.locator('[data-testid="shells-note"]').innerText()).toContain('Added my-flake.');
         } finally {
           await context.close();
         }
