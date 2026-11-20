@@ -1,36 +1,40 @@
 /* ============================================================================
-   LUCID — a glossy, rounded desktop look. HOW things are drawn, never WHICH colours:
-     · pill-shaped controls with a lit-from-above face (a two-stop vertical gradient, an inset top highlight);
-     · a medium radius on panels, soft deep shadows, a faint horizontal pinstripe on the page;
-     · a springy motion (a small overshoot when a choice is made), a thick glowing focus halo;
-     · the system UI fonts only (no font file is bundled or preloaded for it) at medium weights; sentence-case labels.
-   It ships no icon, no font and no image. Every colour comes from the active
-   palette through `var()` (a style file holds no colour value), so any palette wears it, in either mode.
-   The gloss highlights are the palette's own surface/ink/accent mixed, never a literal white.
+   LUCID — a glossy GEL desktop look: every control is a lit capsule of liquid glass. HOW things are drawn, never WHICH colours:
+     · TYPE: the device's Lucida / system UI face, set a little wide and bold — headings are semibold, labels sentence case;
+     · every control and badge is a capsule with a HARD-STOP gloss: the top half of the face is a lighter band, the bottom
+       half a deeper one, with a bright line under the top edge and a shaded line at the foot (the gel-button look);
+     · panels are brushed sheets: a clearly visible horizontal pinstripe, a big radius, a glossy title strip, deep soft shadows;
+     · lists stripe (every second row is tinted), fields are deep recessed wells, a chosen card glows;
+     · a springy motion (a small overshoot when a choice is made), a thick glowing focus halo.
+   It ships no icon, no font and no image: the faces are the system's own (no font file is bundled or preloaded for it).
+   Every colour comes from the active palette through `var()` (a style file holds no colour value), so any palette wears it,
+   in either mode. The gloss highlights are the palette's own surface/ink/accent mixed, never a literal white.
+   A gradient face ALWAYS sits on the solid `background-color` the design system declares, so the colour a label is judged
+   against stays real; the gloss is an image over it, never instead of it.
    ============================================================================ */
 :root[data-style='lucid'],
 [data-swatch][data-style='lucid'] {
   /* ═══ structural token layer ═══ */
   --weight-normal: 400;
-  --weight-medium: 500;
-  --weight-strong: 600;
-  --weight-display: 600;
+  --weight-medium: 600;
+  --weight-strong: 700;
+  --weight-display: 700;
   --label-transform: none;
   --label-size: 11px;
-  --label-weight: 600;
-  --tracking-label: 0.02em;
-  --tracking-display: -0.005em;
+  --label-weight: 700;
+  --tracking-label: 0.01em;
+  --tracking-display: 0;
   --leading-base: 1.5;
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 9px;
-  --radius-lg: 12px;
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
   --radius-control: var(--radius-pill);
-  --radius-panel: 12px;
+  --radius-panel: 16px;
   --radius-badge: var(--radius-pill);
   --radius-tab: var(--radius-pill);
-  --radius-input: 7px;
-  --bubble-radius: 14px;
+  --radius-input: 10px;
+  --bubble-radius: 16px;
   --bubble-stroke: 1px;
   --bubble-shadow: var(--shadow-sm);
   --border-width: 1px;
@@ -38,38 +42,39 @@
   --stroke-control: 1px;
   --stroke-panel: 1px;
   /* Soft, deep, close: a control sits just above the page, a panel floats, a popover hovers. */
-  --shadow-sm: 0 1px 1px var(--shadow-sm-1), 0 1px 3px var(--shadow-sm-1);
+  --shadow-sm: 0 1px 1px var(--shadow-sm-1), 0 2px 4px var(--shadow-sm-1);
   --shadow-md: 0 1px 3px var(--shadow-md-1), 0 10px 26px var(--shadow-md-2);
   --shadow-lg: 0 2px 4px var(--shadow-lg-1), 0 18px 44px var(--shadow-lg-2);
-  --shadow-active: inset 0 2px 3px var(--shadow-sm-1);
+  --shadow-control: 0 1px 2px var(--shadow-sm-1), 0 3px 6px var(--shadow-sm-1);
+  --shadow-active: inset 0 2px 4px var(--shadow-md-1);
   --press-translate: 1px;
-  /* A faint horizontal pinstripe on the page: 2.5% ink, one line in four, never under body text at a contrast cost. */
+  /* The page is brushed: a pinstripe you can see (one line in three, 6% ink). */
   --body-wash: repeating-linear-gradient(
     180deg,
-    color-mix(in srgb, var(--fg) 2.5%, transparent) 0 1px,
-    transparent 1px 4px
+    color-mix(in srgb, var(--fg) 7%, transparent) 0 2px,
+    transparent 2px 4px
   );
-  /* The same pinstripe, finer, on every panel: a panel is a sheet of the same striped material as the page. */
+  /* The same pinstripe on every panel: a panel is a sheet of the same striped material as the page. */
   --panel-texture: repeating-linear-gradient(
     180deg,
-    color-mix(in srgb, var(--fg) 2%, transparent) 0 1px,
-    transparent 1px 4px
+    color-mix(in srgb, var(--fg) 4%, transparent) 0 1px,
+    transparent 1px 3px
   );
   --panel-texture-size: auto;
   --nav-sel-shadow: var(--shadow-sm);
-  --menu-radius: 10px;
-  --menu-item-h: 32px;
-  --control-h-desktop: 28px;
-  --control-h-sm-desktop: 24px;
-  --row-min-h-desktop: 34px;
-  --pad-control-x: 14px;
-  --pad-badge-x: 9px;
-  --pad-panel: 12px;
-  --pad-row-y: 6px;
+  --menu-radius: 12px;
+  --menu-item-h: 34px;
+  --control-h-desktop: 36px;
+  --control-h-sm-desktop: 28px;
+  --row-min-h-desktop: 38px;
+  --pad-control-x: 22px;
+  --pad-badge-x: 11px;
+  --pad-panel: 14px;
+  --pad-row-y: 7px;
   --pad-cell-x: 10px;
   --gap-xs: 5px;
-  --gap-sm: 7px;
-  --gap-md: 11px;
+  --gap-sm: 8px;
+  --gap-md: 12px;
   /* Springy and a touch slower than Studio: a chosen item overshoots a little and settles. */
   --motion-fast: 140ms;
   --motion-base: 240ms;
@@ -80,58 +85,135 @@
   /* A thick halo: the focus ring is the style's loudest signature, and stays a hard, visible 3px. */
   --focus-width: 3px;
   --focus-offset: 1px;
-  --font-display: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-  --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-display:
+    'Lucida Grande', 'Lucida Sans Unicode', 'Lucida Sans', system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', sans-serif;
+  --font-body:
+    'Lucida Grande', 'Lucida Sans Unicode', 'Lucida Sans', system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', Menlo, Consolas, monospace;
 }
 
-/* THE GLOSS. Light: the face is lit from above (surface at the top, a little ink at the bottom). Dark: the lit top is a
+/* THE GLOSS. Light: the face is lit from above (the top band is the surface, the foot a little ink). Dark: the lit top is a
    little ink, fading into the surface. The primary button is the accent, brightened at the top by a thin inner line. */
 :root[data-style='lucid'][data-mode='dark'],
 [data-swatch][data-style='lucid'][data-mode='dark'] {
   --shadow-md: 0 1px 3px var(--shadow-md-1), 0 12px 30px var(--shadow-md-2);
   /* Lit from above: a light line along a panel's top edge. */
-  --rule-inset: inset 0 1px 0 color-mix(in srgb, var(--fg) 9%, transparent);
+  --rule-inset: inset 0 1px 0 color-mix(in srgb, var(--fg) 12%, transparent);
+  /* Glass: a sheen across the top of every panel, over the pinstripe. */
+  --panel-texture:
+    linear-gradient(180deg, color-mix(in srgb, var(--fg) 7%, transparent), transparent 56px),
+    repeating-linear-gradient(180deg, color-mix(in srgb, var(--fg) 4%, transparent) 0 1px, transparent 1px 3px);
 }
 
 :root[data-style='lucid'][data-mode='light'],
 [data-swatch][data-style='lucid'][data-mode='light'] {
-  /* Lit from above: a shaded line along a panel's bottom edge, so it reads as a raised sheet. */
-  --rule-inset: inset 0 -1px 0 color-mix(in srgb, var(--fg) 7%, transparent);
+  /* Lit from above: a bright line along a panel's top edge and a shaded line at its foot, so it reads as a raised sheet. */
+  --rule-inset:
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 90%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--fg) 9%, transparent);
+  --panel-texture:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 80%, transparent), transparent 56px),
+    repeating-linear-gradient(180deg, color-mix(in srgb, var(--fg) 4%, transparent) 0 1px, transparent 1px 3px);
 }
 
+/* ---- the capsule button: a hard-stop gloss (upper half lighter, lower half deeper) ---- */
 :root[data-style='lucid'][data-mode='light']
-  .kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger']) {
-  background-image: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 92%, var(--fg)) 100%);
+.kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger'], :disabled) {
+  background-image:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 95%, transparent) 0 50%, transparent 50%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface) 92%, var(--fg)),
+      color-mix(in srgb, var(--surface) 76%, var(--fg))
+    );
+  box-shadow:
+    var(--shadow-control),
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 90%, transparent),
+    inset 0 -1px 1px color-mix(in srgb, var(--fg) 14%, transparent);
 }
 
 :root[data-style='lucid'][data-mode='dark']
-  .kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger']) {
-  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, var(--fg)) 0%, var(--surface) 100%);
-}
-
-:root[data-style='lucid'] .kt-btn[data-variant='primary'] {
-  background-image: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
+  .kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger'], :disabled) {
+  background-image:
+    linear-gradient(180deg, color-mix(in srgb, var(--fg) 12%, transparent) 0 50%, transparent 50%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 93%, var(--fg)), var(--surface));
   box-shadow:
     var(--shadow-control),
-    inset 0 1px 0 color-mix(in srgb, var(--accent-fg) 38%, transparent);
+    inset 0 1px 0 color-mix(in srgb, var(--fg) 22%, transparent);
+}
+
+:root[data-style='lucid'] .kt-btn[data-variant='primary']:not(:disabled) {
+  background-image: linear-gradient(180deg, var(--accent) 0 50%, var(--accent-strong) 50%);
+}
+
+:root[data-style='lucid'] .kt-btn[data-variant='primary']:not(:disabled):hover {
+  background-image: linear-gradient(
+    180deg,
+    var(--accent-strong) 0 50%,
+    color-mix(in srgb, var(--accent-strong) 88%, var(--fg)) 50%
+  );
 }
 
 :root[data-style='lucid'] .kt-btn:active:not(:disabled) {
   box-shadow: var(--shadow-active);
 }
 
-/* The field is inset (a recessed well); its focus is the halo, drawn here because the shared field rule resets `outline`. */
+/* ---- badges are small gel capsules too ---- */
+:root[data-style='lucid'][data-mode='light'] .kt-badge {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 55%, transparent) 0 50%, transparent 50%);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 85%, transparent);
+}
+
+:root[data-style='lucid'][data-mode='dark'] .kt-badge {
+  /* No lightened band in dark: a badge's tinted face is what its label is judged against. The lit top is a line only. */
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 20%, transparent);
+}
+
+/* ---- the field is a deep recessed well; its focus is the halo, drawn here because the shared field rule resets `outline` ---- */
 :root[data-style='lucid'] .kt-input {
-  background-image: linear-gradient(180deg, color-mix(in srgb, var(--fg) 5%, var(--surface)) 0%, var(--surface) 40%);
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--fg) 8%, var(--surface)) 0%, var(--surface) 45%);
   box-shadow:
-    inset 0 2px 3px var(--shadow-sm-1),
-    inset 0 0 0 1px color-mix(in srgb, var(--fg) 4%, transparent);
+    inset 0 3px 5px var(--shadow-md-1),
+    inset 0 0 0 1px color-mix(in srgb, var(--fg) 6%, transparent),
+    0 1px 0 color-mix(in srgb, var(--surface) 80%, transparent);
 }
 
 :root[data-style='lucid'] .kt-input:focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: var(--focus-offset);
+}
+
+/* ---- a panel's title strip is the window's glossy bar ---- */
+:root[data-style='lucid'] .kt-panel__header {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--fg) 7%, var(--surface)) 0 50%,
+    var(--surface-2) 50%
+  );
+  border-top-left-radius: calc(var(--radius-panel) - 1px);
+  border-top-right-radius: calc(var(--radius-panel) - 1px);
+}
+
+/* ---- lists stripe: every second row is tinted, the way a desktop list always did ---- */
+:root[data-style='lucid'] .kt-row:nth-child(even) {
+  background-color: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+/* ---- a choice card is a raised tile; the chosen one glows ---- */
+:root[data-style='lucid'] .fy-cc__card {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 70%, transparent) 0 50%, transparent 50%);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 85%, transparent);
+}
+
+:root[data-style='lucid'] .fy-cc__card[data-selected='true'] {
+  box-shadow:
+    0 0 0 3px var(--ring),
+    var(--shadow-sm),
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 85%, transparent);
 }
 
 @media (max-width: 640px) {
@@ -145,4 +227,23 @@
     --text-display: 1.45rem;
     --label-size: 12.5px;
   }
+}
+
+/* ---- LETTERPRESS: text on a gel face is pressed into it (a one-pixel light edge below, a dark one on a filled face) ---- */
+:root[data-style='lucid'][data-mode='light']
+:is(.kt-btn:not([data-variant='primary'], [data-variant='ghost'], :disabled), h1, h2, h3, h4) {
+  text-shadow: 0 1px 0 color-mix(in srgb, var(--surface) 95%, transparent);
+}
+
+:root[data-style='lucid'] .kt-btn[data-variant='primary']:not(:disabled) {
+  text-shadow: 0 -1px 0 color-mix(in srgb, var(--accent-strong) 55%, var(--fg));
+}
+
+/* ---- a filled button also glows in its own colour ---- */
+:root[data-style='lucid'] .kt-btn[data-variant='primary']:not(:disabled) {
+  box-shadow:
+    0 2px 10px color-mix(in srgb, var(--accent) 55%, transparent),
+    var(--shadow-control),
+    inset 0 1px 0 color-mix(in srgb, var(--accent-fg) 45%, transparent),
+    inset 0 -1px 1px color-mix(in srgb, var(--accent-strong) 70%, var(--fg));
 }

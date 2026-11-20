@@ -89,6 +89,10 @@ const DEVICE_FACES: readonly string[] = [
   'Trebuchet MS',
   'Verdana',
   'Lucida Console',
+  // Lucid names the Lucida family first so an installed copy wins; the system UI face answers everywhere else.
+  'Lucida Grande',
+  'Lucida Sans Unicode',
+  'Lucida Sans',
   // Raw Brutalism draws with the device's own serif and monospace on purpose (r10 T11).
   'Courier',
   'Times',
