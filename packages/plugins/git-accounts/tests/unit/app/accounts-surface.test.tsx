@@ -276,8 +276,8 @@ describe('a daemon that wants the passkey for every step (per-action confirmatio
   it('keeps polling the same flow after the press while GitHub is still waiting', async () => {
     const { root, calls } = await waitForStepUp({ polls: [{ status: 'pending', interval: 1 }] });
     await click(buttonNamed(root, 'Confirm with your passkey to finish'));
-    await settle();
     // The press was answered `pending`: the button goes, the code stays, and unattended polling resumes.
+    await settleUntil(() => root.querySelector('[data-testid="git-step-up"]') === null);
     expect(root.querySelector('[data-testid="git-step-up"]')).toBeNull();
     expect(q(root, '[data-testid="git-user-code"]').textContent).toBe(FAKE_USER_CODE);
     await settleUntil(() => polls(calls).length >= 3);
