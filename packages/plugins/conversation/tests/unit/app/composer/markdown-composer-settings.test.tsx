@@ -60,7 +60,15 @@ const surface = (vimEnabled = false, onChangeVim: (enabled: boolean) => void = (
   <MarkdownComposerSettings vimEnabled={vimEnabled} onChangeVim={onChangeVim} />
 );
 
-/** The Vim switch is the only switch; the editor style is a radio group. */
+/** The Vim switch is the only switch; the editor style and button layout are card groups. */
+/** Open a row's (i), so the long text behind it is in the tree. */
+const openInfo = (renderer: ReturnType<typeof render>, name: string): void => {
+  const info = renderer.root.findAll(
+    node => node.type === 'button' && node.props['aria-label'] === `More about ${name}`,
+  );
+  run(() => info[0]?.props.onClick());
+};
+
 const switches = (renderer: ReturnType<typeof render>) => renderer.root.findAllByProps({ role: 'switch' });
 
 describe('MarkdownComposerSettings', () => {
@@ -69,7 +77,7 @@ describe('MarkdownComposerSettings', () => {
       writeMdComposePref('on');
       const renderer = render(surface());
       const styles = () =>
-        renderer.root.findAll(node => node.type === 'input' && node.props.name === 'composer-editor-style');
+        renderer.root.findAll(node => node.type === 'input' && ['on', 'rich', 'off'].includes(node.props.value));
 
       expect(styles().map(style => [style.props.value, style.props.checked])).toEqual([
         ['on', true],
@@ -94,7 +102,7 @@ describe('MarkdownComposerSettings', () => {
     withBrowser(storage => {
       const renderer = render(surface());
       const layouts = () =>
-        renderer.root.findAll(node => node.type === 'input' && node.props.name === 'composer-dock-layout');
+        renderer.root.findAll(node => node.type === 'input' && ['stacked', 'row', 'auto'].includes(node.props.value));
       const tree = () => JSON.stringify(renderer.toJSON());
 
       expect(tree()).toContain('Button layout');
@@ -104,6 +112,7 @@ describe('MarkdownComposerSettings', () => {
         ['auto', false],
       ]);
       expect(DOCK_LAYOUT_EXPLANATION).toContain('never move');
+      openInfo(renderer, 'Button layout');
       expect(tree()).toContain(DOCK_LAYOUT_EXPLANATION);
 
       run(() => layouts()[0]?.props.onChange());
@@ -123,6 +132,7 @@ describe('MarkdownComposerSettings', () => {
       const renderer = render(surface());
       const tree = JSON.stringify(renderer.toJSON());
 
+      openInfo(renderer, 'Style');
       expect(MARKDOWN_COMPOSER_EXPLANATION).toContain('what you send is markdown');
       expect(MARKDOWN_COMPOSER_EXPLANATION).toContain('markers kept faintly visible');
       expect(tree).toContain('Editor style');
@@ -155,7 +165,6 @@ describe('MarkdownComposerSettings', () => {
       writeMdComposePref('off');
       const chosen: boolean[] = [];
       const renderer = render(surface(true, enabled => chosen.push(enabled)));
-      const tree = JSON.stringify(renderer.toJSON());
 
       expect(switches(renderer)[0]?.props['aria-checked']).toBe(true);
       // Escape has no on-screen key, so the limit is stated rather than implied.
@@ -163,6 +172,8 @@ describe('MarkdownComposerSettings', () => {
       expect(VIM_COMPOSER_EXPLANATION).toContain('normal and insert');
       expect(VIM_COMPOSER_EXPLANATION).not.toContain('visual');
       expect(VIM_COMPOSER_EXPLANATION).toContain('physical keyboard');
+      openInfo(renderer, 'Vim-style editing');
+      const tree = JSON.stringify(renderer.toJSON());
       expect(tree).toContain(VIM_COMPOSER_EXPLANATION);
       expect(tree).toContain('NORMAL and INSERT shown under the box');
       expect(renderer.root.findAllByType('textarea')).toHaveLength(0);

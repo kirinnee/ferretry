@@ -14,7 +14,7 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 .fy-wf-section > h3 {
   margin: 0;
@@ -49,6 +49,10 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+  align-items: start;
+}
+.fy-wf-layers + .fy-wf-fields {
+  margin-top: 20px;
 }
 @container (min-width: 640px) {
   .fy-wf-layers {
@@ -190,14 +194,14 @@ label.fy-wf-seg__opt.fy-wf-seg__opt[data-selected='true'] {
 /* Number fields: `label ... [input 6rem]`, every input on one right edge. */
 .fy-wf-fields {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
 }
 label.fy-wf-num.fy-wf-num {
   display: grid;
   max-width: 34rem;
   min-width: 0;
   margin: 0;
-  grid-template-columns: minmax(0, 1fr) 6rem;
+  grid-template-columns: minmax(0, auto) 6rem;
   align-items: center;
   gap: 4px 16px;
   font-size: var(--text-cell, 13px);
@@ -257,7 +261,7 @@ label.fy-wf-slider.fy-wf-slider {
   color: var(--warn);
 }
 .fy-wf-fields {
-  gap: 8px;
+  gap: 8px 32px;
 }
 .fy-wf-list > li {
   display: flex;
@@ -272,6 +276,9 @@ label.fy-wf-slider.fy-wf-slider {
   padding: 0;
   border: 0;
 }
+.fy-wf-rows > .fy-wf-group:not(:first-child) {
+  padding-top: 24px;
+}
 .fy-wf-legend {
   float: left;
   width: 100%;
@@ -282,16 +289,19 @@ label.fy-wf-slider.fy-wf-slider {
   color: var(--fg);
 }
 
-/* From 720px a number field's input sits in the same control column as the sliders. */
-@container (min-width: 640px) {
-  label.fy-wf-num.fy-wf-num {
-    max-width: none;
-    grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem);
-  }
-}
 .fy-wf-layer {
   padding: 8px 14px 12px;
 }
 .fy-wf-legend + * {
   clear: both;
+}
+
+/* Stacked (a narrow panel, where each field has a line of its own) the inputs share one right edge; side by side from 640px
+   each pair is as wide as its own words, so the input sits right beside its label. */
+@container (max-width: 639px) {
+  label.fy-wf-num.fy-wf-num {
+    width: 100%;
+    max-width: 28rem;
+    grid-template-columns: minmax(0, 1fr) 6rem;
+  }
 }

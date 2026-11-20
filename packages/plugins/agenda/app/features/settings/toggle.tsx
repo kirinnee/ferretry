@@ -54,18 +54,31 @@ export function Toggle({
       onClick={() => onChange(!checked)}
       className={cn(
         'flex min-h-[56px] w-full items-center gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
-        checked ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2 hover:border-accent',
+        checked ? 'border-border-strong bg-surface-2' : 'border-border bg-transparent hover:border-accent',
         disabled && 'cursor-not-allowed opacity-60',
       )}
     >
       {icon === undefined ? null : (
-        <span aria-hidden="true" className={cn('flex shrink-0', checked ? 'text-accent' : 'text-muted')}>
+        <span
+          aria-hidden="true"
+          data-tile-icon=""
+          className={cn('flex shrink-0', checked ? 'text-accent' : 'text-muted')}
+        >
           {icon}
         </span>
       )}
       <span className="min-w-0 flex-1">
-        <span className="block break-words text-ui font-semibold text-fg">{label}</span>
+        <span className={cn('block break-words text-ui font-semibold', checked ? 'text-fg' : 'text-muted')}>
+          {label}
+        </span>
         <span className="block break-words text-meta leading-base text-muted">{description}</span>
+      </span>
+      <span
+        aria-hidden="true"
+        data-tile-state=""
+        className={cn('w-7 shrink-0 text-meta font-semibold', checked ? 'text-accent' : 'text-muted')}
+      >
+        {checked ? 'On' : 'Off'}
       </span>
       <SwitchGlyph checked={checked} />
     </button>

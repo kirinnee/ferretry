@@ -128,13 +128,19 @@ describe('the Warden settings form, over a fake config', () => {
             expect(new Set(layers.map(layer => layer.top)).size).toBe(viewport.phone ? 3 : 1);
             for (const layer of layers) expect(layer.inner).toBe(false);
 
-            // Number inputs of one section share a right edge.
+            // Number inputs of one section sit beside their labels: side by side on one row, or, one to a line, on one right edge.
             const edges = await tab.evaluate(() =>
               [...document.querySelectorAll<HTMLElement>('.fy-wf-fields')].map(group =>
-                [...group.querySelectorAll('input')].map(input => Math.round(input.getBoundingClientRect().right)),
+                [...group.querySelectorAll('input')].map(input => {
+                  const box = input.getBoundingClientRect();
+                  return { top: Math.round(box.top), right: Math.round(box.right) };
+                }),
               ),
             );
-            for (const group of edges) expect(new Set(group).size).toBe(1);
+            for (const group of edges) {
+              const stacked = new Set(group.map(input => input.top)).size === group.length;
+              if (stacked) expect(new Set(group.map(input => input.right)).size).toBe(1);
+            }
 
             if (shotsDir !== '')
               await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-${state}.png`), fullPage: true });

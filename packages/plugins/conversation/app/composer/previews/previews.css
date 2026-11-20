@@ -145,7 +145,7 @@
 }
 .fy-cvp-h {
   color: var(--fg);
-  font-size: 13px;
+  font-size: 17px;
   font-weight: 700;
   line-height: 1.2;
 }
@@ -175,7 +175,12 @@
   border-radius: 6px;
   bottom: 8px;
   left: 8px;
-  padding: 5px 6px;
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  gap: 4px;
+  justify-content: center;
+  padding: 5px 8px;
   position: absolute;
   right: 8px;
   top: 8px;

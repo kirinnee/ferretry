@@ -1,9 +1,11 @@
 /* Settings › Layout rows (layout-row.tsx): a label with its control beside it and the preview next, never the control
-   at the far edge of a 1,500 px row. The page is at most 1,100 px; from 1,200 px the short rows sit two to a line. */
+   at the far edge of a 1,500 px row. The page is at most 1,100 px; once the PANEL is 640 px wide the short rows sit two to a line (container query: the panel is
+   only ~212 px wide in a 768 px window, so a viewport breakpoint would lie). */
 .fy-lr-page {
   display: flex;
   flex-direction: column;
   gap: 32px;
+  container-type: inline-size;
   max-width: 1100px;
   min-width: 0;
 }
@@ -26,7 +28,7 @@
   margin: 0;
   padding: 0;
 }
-@media (min-width: 1200px) {
+@container (min-width: 640px) {
   .fy-lr-rows {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -80,14 +82,14 @@
   display: flex;
   flex: none;
 }
-/* Two to a line: the label sits over its control, so a row stays about 520 px wide. */
-@media (min-width: 1200px) {
+/* Two to a line: the label sits over its control, so a row stays about 300 px wide. */
+@container (min-width: 640px) {
   .fy-lr-row:not([data-span='full']) .fy-lr-label {
     flex-basis: 100%;
   }
 }
-/* A phone: label, control, preview, one under the other, the control the full width. */
-@media (max-width: 767px) {
+/* A narrow panel: label, hint, control, preview, one under the other, the control the full width. */
+@container (max-width: 519.98px) {
   .fy-lr-label {
     flex-basis: 100%;
   }
@@ -102,7 +104,7 @@
 .fy-lr-row[data-span='full'] .fy-lr-control {
   flex: 1 1 24rem;
 }
-@media (max-width: 767px) {
+@container (max-width: 519.98px) {
   .fy-lr-row[data-span='full'] .fy-lr-control {
     flex-basis: 100%;
   }
@@ -113,4 +115,16 @@
   flex-direction: column;
   gap: 8px;
   max-width: 34rem;
+}
+/* A narrow panel: the scope switch is a full-width stack, one option per line, the hint under it. */
+@container (max-width: 519.98px) {
+  .fy-lr-scope [data-neo-segmented] {
+    flex-direction: column;
+    width: 100%;
+  }
+  .fy-lr-scope [data-neo-segmented] > label {
+    flex: none;
+    min-height: 44px;
+    width: 100%;
+  }
 }

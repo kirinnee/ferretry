@@ -88,7 +88,9 @@ describe('The Agenda settings tab', () => {
           expect(tiles).toHaveLength(5);
           expect(new Set(tiles.map(tile => tile.top)).size).toBe(Math.ceil(5 / variant.columns));
           for (const tile of tiles) expect(tile.height, 'a tile is a compact pair of lines').toBeLessThan(80);
-          if (!variant.phone) for (const tile of tiles) expect(tile.width, 'not full width').toBeLessThan(420);
+          // The last tile of an odd count takes the rest of its line (no orphan cell), so it alone may be wider.
+          if (!variant.phone)
+            for (const tile of tiles.slice(0, 4)) expect(tile.width, 'not full width').toBeLessThan(420);
 
           const rowTop = async (): Promise<number> =>
             await page.$eval('[data-quiet-hours-row]', node => node.getBoundingClientRect().top);

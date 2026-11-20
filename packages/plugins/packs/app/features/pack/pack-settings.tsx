@@ -127,7 +127,9 @@ const FIT = 'min-w-0 [container-type:inline-size]';
 const ROWS =
   'm-0 grid min-w-0 list-none grid-cols-1 p-0 [&>li+li]:border-t [&>li+li]:border-border ' +
   '[@container(min-width:640px)]:grid-cols-2 [@container(min-width:640px)]:gap-x-8 ' +
-  '[@container(min-width:640px)]:[&>li:nth-child(2)]:border-t-0';
+  '[@container(min-width:640px)]:[&>li:nth-child(2)]:border-t-0 ' +
+  '[@container(min-width:640px)]:[&>li:last-child:nth-child(odd)]:col-span-2 ' +
+  '[@container(min-width:640px)]:[&>li:last-child:nth-child(odd)>div]:max-w-[28rem]';
 
 /** The numbers, edited together and saved with one button: every save rewrites a file on the machine. */
 function NumbersForm({
@@ -180,7 +182,7 @@ function NumbersForm({
                   id={id}
                   type="number"
                   inputMode={setting.step === undefined ? 'numeric' : 'decimal'}
-                  className={cn('kt-input min-h-[44px] w-28 shrink-0', bad && '!border-err')}
+                  className={cn('kt-input min-h-[44px] !w-28 shrink-0', bad && '!border-err')}
                   min={setting.min}
                   max={setting.max}
                   step={setting.step ?? 1}
@@ -228,7 +230,10 @@ function PackPanel({ view, state }: { readonly view: PackView; readonly state: M
   const on = config.enabled;
   const chosen = pick ?? config.decision;
   return (
-    <div className="flex min-w-0 flex-col" data-pack-settings="">
+    <div
+      className="flex min-w-0 flex-col [&_[data-setting-hint]]:!overflow-visible [&_[data-setting-hint]]:!whitespace-normal"
+      data-pack-settings=""
+    >
       <SettingGroup label="Pack mode">
         <SettingRow
           name="Pack mode on this machine"

@@ -88,7 +88,9 @@ function SendKeyGroup({
           );
         })}
       </fieldset>
-      <SendKeyPreview device={device} outcome={selected} />
+      <div className="contents" data-no-nest="">
+        <SendKeyPreview device={device} outcome={selected} />
+      </div>
     </div>
   );
 }
