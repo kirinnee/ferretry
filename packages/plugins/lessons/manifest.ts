@@ -347,7 +347,7 @@ export default definePlugin({
     screens: [screen('lessons', { path: 'lessons', nav: { label: 'Lessons', icon: 'graduation-cap', order: 70 } })],
     panels: [
       panel(CONVERSATION_MODES_SLOT, { id: 'ferret-lessons', order: 70 }),
-      // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
+      // The first-run step's body (the setup flow offers this slot): "Learn rules from your ferrets?", two cards.
       panel('onboarding.step', { id: 'onboarding-step', order: 70 }),
     ],
     settings: [
@@ -366,7 +366,7 @@ export default definePlugin({
     takes: [{ hook: LaunchParts }, { hook: TurnEnded }],
   },
 
-  onboarding: [{ id: 'lessons', title: 'Lessons', order: 70 }],
+  onboarding: [{ id: 'lessons', title: 'Lessons', order: 70, stepHost: true }],
   doctor: ['lessons-board'],
 
   // A scan reads transcripts only through Conversation. Applying a Repo lesson writes the project's instruction file

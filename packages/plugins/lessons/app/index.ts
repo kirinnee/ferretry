@@ -3,6 +3,7 @@ import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { lessonsCommands } from './command-bar.ts';
+import { lessonsStepPanel } from './features/onboarding/step-panel.tsx';
 import { lessonsSurfaces } from './src/surfaces.tsx';
 
 /** Lessons' app half (§2.3): the Lessons screen, a ferret's toolbar panel and the Settings tab. */
@@ -14,8 +15,11 @@ export default provideToShell(
         screens: { lessons: LessonsScreen },
         panels: {
           'ferret-lessons': FerretLessons,
-          // The first-run step's body: the Settings tab's view, only for its own step.
-          'onboarding-step': forSubject('lessons.lessons', LessonsSettings as AppComponent<PanelProps>),
+          // The first-run step's body: one page with two cards, only for its own step.
+          'onboarding-step': forSubject(
+            'lessons.lessons',
+            lessonsStepPanel({ key: manifest.id, client }) as AppComponent<PanelProps>,
+          ),
         },
         settings: { lessons: LessonsSettings },
       };
