@@ -15,7 +15,7 @@
 (function () {
   var KEY = 'fy:app:theme';
   // biome-ignore format: pre-paint.test.ts pins this exact one-line text, so the formatter must not wrap it
-  var STYLES = ['studio', 'mission', 'neo', 'geist', 'contrast', 'glass', 'neumorphism', 'retro', 'lucid', 'hud', 'raw', 'swiss', 'pixel'];
+  var STYLES = ['studio', 'mission', 'neo', 'geist', 'contrast', 'glass', 'neumorphism', 'retro', 'lucid', 'hud', 'raw', 'swiss', 'pixel', 'antiposh'];
   var PALETTES = [
     'studio',
     'mission',

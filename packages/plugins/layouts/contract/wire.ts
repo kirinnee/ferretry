@@ -102,6 +102,7 @@ export const STYLE_IDS = [
   'raw',
   'swiss',
   'pixel',
+  'antiposh',
 ] as const;
 export type StyleId = (typeof STYLE_IDS)[number];
 export const PALETTE_IDS = [
@@ -199,7 +200,9 @@ export const SPACING_TOKENS = [
 ] as const;
 
 export type ThemeToken =
-  (typeof COLOUR_TOKENS)[number] | (typeof TYPE_TOKENS)[number] | (typeof SPACING_TOKENS)[number];
+  | (typeof COLOUR_TOKENS)[number]
+  | (typeof TYPE_TOKENS)[number]
+  | (typeof SPACING_TOKENS)[number];
 
 const COLOUR_VALUE =
   /^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla|oklch|oklab)\([0-9.,%\s/a-z-]{1,60}\)|transparent|currentColor)$/u;

@@ -92,6 +92,12 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
     label: 'Pixel art',
     blurb: 'Bitmap type, 2px blocks, flat offset shadows, stepped motion.',
   },
+  {
+    id: 'antiposh',
+    label: 'Anti-posh',
+    blurb: 'Photocopied zine: typewriter type, dashed edges, off-register hard shadows. Rough on purpose.',
+    loud: true,
+  },
 ] as const);
 
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([

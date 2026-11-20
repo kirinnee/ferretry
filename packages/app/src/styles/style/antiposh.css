@@ -1,0 +1,205 @@
+/* ============================================================================
+   ANTI-POSH. The opposite of polish, on purpose: a photocopied zine, a hand-made 90s page, a default browser button.
+   Typewriter body over a heavy squashed display face, thick wonky borders, hard offset shadows that do not quite line up,
+   dashed panel edges, a rough "highlighter" for what is selected and links that are underlined because nobody removed
+   the underline. Nothing is rounded the same way twice.
+
+   LOUD: it deliberately fights the readability rules (a typewriter face at body size, tight leading, a hard zine
+   shadow, a texture behind panels), so the contrast matrix reports a miss for it as a warning (`loud: true` in the catalogue).
+   What it never fights: the keyboard focus ring (a fat 3px ring, a field draws it too) and layout overflow. Faces are the
+   DEVICE'S own (Courier New / Liberation Mono for type, Impact / Arial Black for display): nothing is bundled, so there
+   is no font file or licence to carry, and no trademarked asset. Colour comes only from the palette's roles.
+   ============================================================================ */
+:root[data-style='antiposh'],
+[data-swatch][data-style='antiposh'] {
+  /* ═══ structural token layer ═══ */
+  --font-body: 'Courier New', 'Liberation Mono', monospace;
+  --font-display: Impact, 'Arial Black', sans-serif;
+  --font-mono: 'Courier New', 'Liberation Mono', monospace;
+  --font-ui: var(--font-body);
+  --font-prose: var(--font-body);
+  --font-size-base: 13.5px;
+  --leading-base: 1.42;
+  --leading-tight: 1.15;
+  --tracking-display: 0.02em;
+  --tracking-body: -0.01em;
+  --text-display: 1.6rem;
+  --weight-normal: 400;
+  --weight-medium: 700;
+  --weight-strong: 700;
+  --weight-display: 800; /* Impact has one weight, so the browser smears it bolder; where Impact is missing the fallback face goes heavy instead */
+  --display-transform: uppercase;
+  --label-transform: uppercase;
+  --label-size: 11px;
+  --label-weight: 700;
+  --tracking-label: 0.08em;
+  --control-transform: uppercase;
+  --prose-measure: 74ch;
+  /* Corners that never agree: each radius is a different size on each corner, like a cut-out scissored by hand. */
+  --radius-xs: 1px 3px 2px 4px;
+  --radius-sm: 2px 5px 3px 6px;
+  --radius-md: 3px 7px 4px 8px;
+  --radius-lg: 4px 10px 5px 11px;
+  --radius-control: 2px 7px 3px 6px;
+  --radius-panel: 3px 9px 4px 10px;
+  --radius-badge: 2px 8px 2px 8px;
+  --radius-tab: 3px 8px 0 0;
+  --radius-input: 1px 5px 2px 5px;
+  --bubble-radius: 3px 12px 4px 12px;
+  --card-tail-radius: 1px;
+  /* Thick, heavy, a little too much. */
+  --border-width: 2px;
+  --border-width-heavy: 4px;
+  --stroke-control: 3px;
+  --stroke-panel: 3px;
+  --divider-width: 2px;
+  --divider-color: var(--border-strong);
+  --bubble-stroke: 3px;
+  --bubble-border: var(--border-strong);
+  /* Hard offset shadows with NO blur, set a little off true so they read as mis-registered print. */
+  --shadow-control: 4px 3px 0 var(--shadow-ink);
+  --shadow-panel: 6px 5px 0 var(--shadow-ink);
+  --shadow-popover: 8px 6px 0 var(--shadow-ink);
+  --shadow-sm: 3px 2px 0 var(--shadow-ink);
+  --shadow-md: 5px 4px 0 var(--shadow-ink);
+  --shadow-lg: 8px 6px 0 var(--shadow-ink);
+  --bubble-shadow: 4px 3px 0 var(--shadow-ink);
+  --shadow-active: none;
+  --press-translate: 3px;
+  --rail-active: none;
+  /* A rough highlighter swipe is the selected state; hover is a heavier smudge than the house wash. */
+  --hover-fill: color-mix(in srgb, var(--fg) 12%, transparent);
+  --select-fill: color-mix(in srgb, var(--accent) 28%, transparent);
+  --menu-edge: var(--border-strong);
+  --menu-radius: 3px 9px 4px 10px;
+  --menu-item-h: 34px;
+  --tab-underline: var(--fg);
+  --tab-underline-width: 4px;
+  --appnav-underline: var(--fg);
+  --nav-sel-shadow: 3px 2px 0 var(--shadow-ink);
+  /* Faint graph-paper behind every panel, drawn in the page's own ink. Fights legibility a little, by design. */
+  --panel-texture:
+    repeating-linear-gradient(0deg, color-mix(in srgb, var(--fg) 7%, transparent) 0 1px, transparent 1px 14px),
+    repeating-linear-gradient(90deg, color-mix(in srgb, var(--fg) 7%, transparent) 0 1px, transparent 1px 14px);
+  --panel-texture-size: auto;
+  --underline-links: underline;
+  /* Cramped, then oddly roomy: padding is deliberately uneven between controls and panels. */
+  --control-h-desktop: 30px;
+  --control-h-sm-desktop: 26px;
+  --row-min-h-desktop: 36px;
+  --pad-control-x: 11px;
+  --pad-panel: 13px;
+  --pad-row-y: 6px;
+  --pad-cell-x: 9px;
+  --gap-xs: 5px;
+  --gap-sm: 7px;
+  --gap-md: 13px;
+  /* The keyboard ring is fat and hard, and stays that way. */
+  --focus-width: 3px;
+  --focus-offset: 2px;
+  /* Janky on purpose: stepped, short and a big pop. The flipbook feel of a cheap animated gif. */
+  --motion-fast: 80ms;
+  --motion-base: 160ms;
+  --motion-slow: 280ms;
+  --ease-standard: steps(4, end);
+  --ease-emphasis: steps(6, end);
+  --select-pop: 1.12;
+}
+
+@media (max-width: 640px) {
+  :root[data-style='antiposh'] {
+    --text-2xs: 12.5px;
+    --text-xs: 14px;
+    --text-sm: 15px;
+    --text-base: 16px;
+    --text-md: 17px;
+    --text-lg: 19px;
+    --text-display: 1.7rem;
+    --label-size: 12.5px;
+  }
+}
+
+/* ---- component touches: the rough edges. Hard-coded round or thin utilities get the same cut-and-paste treatment. ---- */
+
+/* Panels are dashed, like a coupon you are meant to cut out. */
+:root[data-style='antiposh'] .kt-panel,
+:root[data-style='antiposh'] .kt-details {
+  border-style: dashed;
+  border-color: var(--fg);
+}
+
+/* A button is a thick "outset" slab, the way a bare default button looked; the press flattens it into its shadow. */
+:root[data-style='antiposh'] .kt-btn {
+  border-style: outset;
+  border-color: var(--fg);
+  letter-spacing: 0.04em;
+}
+:root[data-style='antiposh'] .kt-btn[data-variant='primary'] {
+  border-style: outset;
+  border-color: var(--fg);
+}
+:root[data-style='antiposh'] .kt-btn:active:not(:disabled) {
+  border-style: inset;
+}
+
+/* A text field is a sunken ruled box, and it draws a real hard ring on keyboard focus (like a button). */
+:root[data-style='antiposh'] .kt-input {
+  border-style: inset;
+  border-color: var(--fg);
+}
+:root[data-style='antiposh'] .kt-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 1px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* The chosen choice card is the highlighter swipe, and it pops (stepped) once when picked. */
+:root[data-style='antiposh'] .fy-cc__card {
+  border-style: dashed;
+  border-color: var(--fg);
+  box-shadow: var(--shadow-control);
+}
+:root[data-style='antiposh'] .fy-cc__card[data-selected='true'] {
+  border-style: solid;
+  background:
+    linear-gradient(transparent 0 55%, color-mix(in srgb, var(--accent) 38%, transparent) 55% 92%, transparent 92%),
+    var(--select-fill);
+}
+:root[data-style='antiposh'] .fy-cc__card:has(:focus-visible) {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 3px;
+}
+@keyframes fy-antiposh-wobble {
+  0% {
+    transform: scale(var(--select-pop)) rotate(-1.2deg);
+  }
+  50% {
+    transform: scale(1) rotate(0.8deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-style='antiposh']:not([data-motion='reduced']) .fy-cc__card[data-pulse='true'] {
+    animation: fy-antiposh-wobble var(--motion-slow) var(--ease-emphasis);
+  }
+}
+
+/* A selected tab or chip takes the highlighter too, with a thick ink underline. */
+:root[data-style='antiposh'] .kt-tab[aria-pressed='true'],
+:root[data-style='antiposh'] .kt-tab[aria-selected='true'] {
+  background: var(--select-fill);
+  border-color: var(--border-strong);
+}
+
+/* Links keep the underline nobody removed, and a ghost button keeps a real ink edge (not a pale one). */
+:root[data-style='antiposh'] a,
+:root[data-style='antiposh'] .md a {
+  text-decoration-line: var(--underline-links);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+:root[data-style='antiposh'] .kt-btn[data-variant='ghost'] {
+  border-color: var(--fg);
+}
