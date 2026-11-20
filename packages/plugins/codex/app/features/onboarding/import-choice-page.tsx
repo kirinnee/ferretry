@@ -8,6 +8,7 @@
  * (every item ticked as Import everything would bring it), and the run page proposes what the pages answered.
  */
 import { ChoiceCards } from '@ferretry/app';
+import { StepBody, StepLine } from '@ferretry/plugin-runtimes/import-kit';
 import type { StepHost } from './onboarding-api.ts';
 import { useEffect, useRef, useState } from 'react';
 
@@ -18,10 +19,14 @@ const OPTIONS = [
   {
     id: 'everything',
     title: 'Import everything',
-    line: 'Settings, models, AGENTS.md, skills and servers from your Codex',
+    line: 'Settings, models, AGENTS.md, skills and MCP servers, in one go.',
   },
-  { id: 'choose', title: 'Choose what to import', line: 'One short page for each kind' },
-  { id: 'fresh', title: 'Start fresh', line: 'Nothing is copied' },
+  {
+    id: 'choose',
+    title: 'Choose what to import',
+    line: 'Go through them one at a time and leave out what you do not want.',
+  },
+  { id: 'fresh', title: 'Start fresh', line: 'Bring nothing over. You can import later from Settings.' },
 ] as const;
 
 /** The mode an earlier visit left in the segment memory; `everything` when there is none. */
@@ -41,9 +46,13 @@ export function ImportChoicePage({ step }: { readonly step: StepHost }) {
     step.ready();
   }, [step, mode]);
   return (
-    <section aria-label="Import from Codex" data-codex-step="import-choice">
+    <StepBody step="codex.import-choice" label="Import from Codex" data-codex-step="import-choice">
+      <StepLine>
+        Codex on your computer already has settings, an AGENTS.md, skills and MCP servers. Bring them to this machine?
+        Hooks are never imported.
+      </StepLine>
       <ChoiceCards
-        label="What to import from your Codex"
+        label="What to bring over"
         options={OPTIONS}
         value={mode}
         onChange={next => {
@@ -53,6 +62,6 @@ export function ImportChoicePage({ step }: { readonly step: StepHost }) {
           step.remember({ importMode: chosen });
         }}
       />
-    </section>
+    </StepBody>
   );
 }

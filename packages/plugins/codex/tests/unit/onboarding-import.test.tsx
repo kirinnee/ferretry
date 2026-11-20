@@ -212,7 +212,7 @@ describe('conversations', () => {
     expect(container.querySelector<HTMLInputElement>('input[value="off"]')?.checked).toBe(true);
   });
 
-  test('picking a card never writes: it holds Next and shows Save; Save writes only hostHistory, once, then answers', async () => {
+  test('picking a card never writes: it shows "Use: …" and "Keep …" and holds nothing; Use writes only hostHistory, once, then answers', async () => {
     const harness = stepHarness();
     const text = '# my codex\npermissionMode: skip # keep\n';
     const { container, calls } = await mount('conversations', harness, machine(FULL, FILE(text)));
@@ -220,7 +220,14 @@ describe('conversations', () => {
       container.querySelector<HTMLInputElement>('input[value="off"]')?.click();
     });
     expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
-    expect(busyLabels(harness).at(-1)).toBe('Save your choice, or leave it as it is');
+    // The same buttons as Claude Code's page, and no hold on Next: Next keeps what is saved now.
+    expect(
+      [...container.querySelectorAll('[data-conversations-confirm] button')].map(button => button.textContent),
+    ).toEqual(['Use: don’t show them', 'Keep showing them']);
+    expect(container.textContent).toContain(
+      'Nothing is saved until you press the button. Next keeps what is saved now.',
+    );
+    expect(busyLabels(harness)).toEqual([]);
     expect(harness.count('done')).toBe(0);
     await press(container, '[data-conversations-save]');
     const writes = calls.filter(call => call.route === 'PUT /v1/config/file');
@@ -234,7 +241,20 @@ describe('conversations', () => {
     expect(busyLabels(harness).at(-1)).toBeNull();
   });
 
-  test('picking the card it already is releases Next again (nothing to save)', async () => {
+  test('"Keep …" writes nothing and answers the step', async () => {
+    const harness = stepHarness();
+    const { container, calls } = await mount('conversations', harness, machine(FULL, FILE('')));
+    await act(async () => {
+      container.querySelector<HTMLInputElement>('input[value="off"]')?.click();
+    });
+    await press(container, '[data-conversations-cancel]');
+    expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
+    expect(harness.count('done')).toBe(1);
+    expect(container.querySelector('[data-conversations-confirm]')).toBeNull();
+    expect(container.querySelector<HTMLInputElement>('input[value="on"]')?.checked).toBe(true);
+  });
+
+  test('picking the card it already is shows no confirm (nothing to save)', async () => {
     const harness = stepHarness();
     const { container } = await mount('conversations', harness, machine(FULL, FILE('')));
     await act(async () => {
@@ -243,7 +263,6 @@ describe('conversations', () => {
     await act(async () => {
       container.querySelector<HTMLInputElement>('input[value="on"]')?.click();
     });
-    expect(busyLabels(harness).at(-1)).toBeNull();
     expect(container.querySelector('[data-conversations-save]')).toBeNull();
   });
 
@@ -255,7 +274,8 @@ describe('conversations', () => {
     expect(container.querySelector('[data-conversations-unknown]')?.textContent).toContain(
       'Change this at the machine: /fake/home/config/harness-codex.yaml',
     );
-    expect(container.querySelector<HTMLInputElement>('input[value="off"]')?.disabled).toBe(true);
+    // Nothing is offered to pick when the setting cannot be read (the same as Claude Code's page).
+    expect(container.querySelector('input[value="off"]')).toBeNull();
     expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
   });
 
@@ -312,7 +332,15 @@ describe('import-run', () => {
     const { container, calls } = await mount('import-run', harness, machine(FULL));
     expect(harness.decision).toBe('shown');
     expect(busyLabels(harness)).toEqual([]);
-    expect(container.querySelector('[data-import-summary]')?.textContent).toContain('Everything your Codex holds');
+    // The same page as Claude Code's: the count, what Next does, the name, Import and Skip the import.
+    expect(container.querySelector('[data-import-count]')?.textContent).toMatch(
+      /^Bringing \d+ items?\. Hooks are never imported\.$/u,
+    );
+    expect(container.querySelector('[data-import-next]')?.textContent).toContain('Next leaves the import for later');
+    expect([...container.querySelectorAll('button')].map(button => button.textContent)).toEqual([
+      'Import',
+      'Skip the import',
+    ]);
     expect(calls.some(call => call.route === 'POST /v1/runtimes/proposals')).toBe(false);
     await press(container, '[data-import-run]');
     const change = proposal(calls);
@@ -387,7 +415,7 @@ describe('import-run', () => {
       harness,
       machine(scanOf(CODEX_FULL, { duplicate: 'codex-main' })),
     );
-    expect(container.querySelector('[data-import-name]')).toBeNull();
+    expect(container.querySelector('[data-runtime-name]')).toBeNull();
     expect(container.querySelector('[data-import-existing]')?.textContent).toContain('codex-main');
     await press(container, '[data-import-run]');
     expect(proposal(calls).names).toBeUndefined();
@@ -396,7 +424,7 @@ describe('import-run', () => {
   test('an empty name is refused before anything is sent', async () => {
     const harness = stepHarness({ segment: { importMode: 'everything' } });
     const { container, calls } = await mount('import-run', harness, machine(FULL));
-    const input = container.querySelector<HTMLInputElement>('[data-import-name]');
+    const input = container.querySelector<HTMLInputElement>('[data-runtime-name]');
     expect(input?.value).toBe('codex-default');
     await act(async () => {
       if (input !== null) {

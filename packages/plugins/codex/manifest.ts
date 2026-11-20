@@ -34,7 +34,7 @@ import { HARNESS_DIALOG_RULES_KEY, WardenDialogRulesCodex } from '@ferretry/plug
 const CODEX_STEPS = [
   { id: 'installed', title: 'Install Codex', order: 40, group: 'Codex', stepHost: true },
   { id: 'sign-in', title: 'Sign in to Codex', order: 41, group: 'Codex', stepHost: true },
-  { id: 'import-choice', title: 'Bring over from Codex', order: 42, group: 'Codex', stepHost: true },
+  { id: 'import-choice', title: 'What to bring over', order: 42, group: 'Codex', stepHost: true },
   { id: 'import-settings', title: 'Settings', order: 43, group: 'Codex', stepHost: true },
   { id: 'import-model-set', title: 'Models', order: 44, group: 'Codex', stepHost: true },
   { id: 'import-instructions', title: 'AGENTS.md', order: 45, group: 'Codex', stepHost: true },
