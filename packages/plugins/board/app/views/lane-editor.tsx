@@ -13,7 +13,7 @@ import {
   MAX_GATE_OPTIONS,
   type Workflow,
 } from '../../contract/index.ts';
-import { Loading } from '@ferretry/app/ui';
+import { Loading, readPress } from '@ferretry/app/ui';
 import { ArrowDown, ArrowLeft, ArrowUp, Check, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useBoardActions, useBoardProjects } from '../hooks/use-board.ts';
@@ -800,8 +800,16 @@ export function LaneEditorPage({
       </div>
       {state === undefined || state.projects === null ? (
         state?.status === 'error' ? (
-          <p className="m-0 text-ui text-err" role="alert">
+          <p className="m-0 flex flex-wrap items-center gap-xs text-ui text-err" role="alert" data-lane-read-failed="">
             Could not read this machine’s lanes: {state.error ?? 'the read failed'}
+            <button
+              className="kt-btn kt-btn--sm"
+              data-lane-read-again=""
+              type="button"
+              onClick={() => void store.refreshProjects(connection, readPress(true))}
+            >
+              Try again
+            </button>
           </p>
         ) : (
           <Loading kind="page" label="Loading lanes…" />
@@ -816,7 +824,7 @@ export function LaneEditorPage({
           daemonId={connection.daemonId}
           actions={actions}
           names={names}
-          onReload={() => void store.refreshProjects(connection)}
+          onReload={() => void store.refreshProjects(connection, readPress(true))}
         />
       )}
     </main>

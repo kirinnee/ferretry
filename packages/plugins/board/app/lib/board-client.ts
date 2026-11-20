@@ -104,8 +104,8 @@ export interface BoardPort {
   agenda(daemon: DaemonConnection, ferret: string): Promise<AskListSnapshot | null>;
   /** Every task id on the machine. */
   ids(daemon: DaemonConnection): Promise<readonly TaskId[]>;
-  /** The projects with their lane sets. */
-  projects(daemon: DaemonConnection): Promise<readonly BoardProject[]>;
+  /** The projects with their lane sets. `press` marks a Try again / Reload a person pressed for. */
+  projects(daemon: DaemonConnection, press?: ReadPress): Promise<readonly BoardProject[]>;
   /** The daemon's own version, or `null` when it cannot be read. */
   version(daemon: DaemonConnection): Promise<string | null>;
   act(
@@ -197,8 +197,8 @@ export const clientBoardPort = (client: Pick<PluginClient, 'call'>): BoardPort =
     return answer === null ? null : readTask(answer);
   },
   ids: async () => BoardIdsResponseSchema.parse(await read<unknown>(client, 'GET /v1/board/ids', {}, false)).ids,
-  projects: async () =>
-    BoardProjectsResponseSchema.parse(await read<unknown>(client, 'GET /v1/board/projects', {}, false)).projects,
+  projects: async (_daemon, press = {}) =>
+    BoardProjectsResponseSchema.parse(await read<unknown>(client, 'GET /v1/board/projects', press, false)).projects,
   agenda: async (_daemon, ferret) => {
     try {
       const answer = await client.call<unknown>('GET /v1/ferrets/:ferretId/agenda', { params: { ferretId: ferret } });

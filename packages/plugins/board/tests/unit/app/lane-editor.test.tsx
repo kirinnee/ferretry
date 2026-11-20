@@ -921,6 +921,34 @@ describe('S-0128 the lane editor page', () => {
     );
   });
 
+  it('e-retry: a failed read has a Try again button, which reads the lanes again as the person’s press', async () => {
+    // Arrange
+    let broken = true;
+    const presses: (boolean | undefined)[] = [];
+    const port = fakePort({
+      projects: async (_daemon, press) => {
+        presses.push(press?.quiet === false ? false : undefined);
+        if (broken) throw new Error('offline');
+        return [projectOf(proposed())];
+      },
+    });
+    const view = await show(pageFor(undefined, PROJECT, port));
+    await settle();
+    expect(view.container.querySelector('[data-lane-read-failed]')).not.toBeNull();
+    broken = false;
+
+    // Act
+    await click(buttonSaying(view, 'Try again'));
+    await settle();
+
+    // Assert
+    expect(view.container.querySelector('[data-lane-read-failed]')).toBeNull();
+    expect(view.container.querySelector('h1')?.textContent).toBe('Lanes · ferretry');
+    // The page's own read (the mount) is unmarked; both the watch and the mount read are the page's, Try again is a press.
+    expect(presses.at(-1)).toBe(false);
+    expect(presses.slice(0, -1).every(press => press === undefined)).toBe(true);
+  });
+
   it('says so when the machine has no project with that id', async () => {
     // Act
     const view = await show(pageFor(async () => [projectOf(proposed())], '00000000-0000-4000-8000-0000000000ff'));
