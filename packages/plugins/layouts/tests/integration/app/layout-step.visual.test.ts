@@ -135,6 +135,9 @@ describe('r11 O11: the first-run Layout page', () => {
               body.innerText,
             ),
             bodyButtons: body.querySelectorAll('button:not([role=radio])').length,
+            dockTops: [...document.querySelectorAll('[data-step-demo] .fy-lstep-demo__dock span')].map(
+              span => span.getBoundingClientRect().top,
+            ),
             oldCards: document.querySelectorAll('[data-choice="bottom"], [data-choice="left"]').length,
             cardDemos: document.querySelectorAll('[data-layout-step] .fy-cc__demo').length,
             footer: ['[data-step-back]', '[data-step-later]', '[data-step-next]'].map(s =>
@@ -149,6 +152,7 @@ describe('r11 O11: the first-run Layout page', () => {
         expect(m.oldCards, 'no Side bar / Bottom bar cards').toBe(0);
         expect(m.cardDemos, 'the demo is the one on the right, not one inside each card').toBe(0);
         expect(m.demoScene).toBe(true);
+        expect(new Set(m.dockTops).size, 'the icons sit on one row').toBe(1);
         // Each question's cards are stacked: one x and width, y strictly increasing.
         for (const cards of m.groups) {
           expect(cards).toHaveLength(2);

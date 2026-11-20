@@ -104,11 +104,15 @@
     --lstep-demo-h: 340px;
   }
   .fy-lstep-demo__drawer {
-    padding: 12px 8px;
-    width: 84px;
+    padding: 12px 10px;
+    width: 104px;
   }
   .fy-lstep-demo__page {
-    padding: 14px;
+    gap: 16px;
+    padding: 16px;
+  }
+  .fy-lstep-demo[data-density='compact'] .fy-lstep-demo__page {
+    gap: 4px;
   }
   .fy-lstep-demo__dock {
     gap: 6px;
