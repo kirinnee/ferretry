@@ -107,7 +107,7 @@ export default definePlugin({
       // Voice clean-up is the machine's own `voice.yaml` prompts, shared by every device paired to it.
       settingsTab('voice', { icon: 'mic', group: 'behaviour', label: 'Voice', order: 60, scope: 'device' }),
       settingsTab('voice-cleanup', {
-        icon: 'mic',
+        icon: 'sparkles',
         group: 'behaviour',
         label: 'Voice clean-up',
         order: 61,
