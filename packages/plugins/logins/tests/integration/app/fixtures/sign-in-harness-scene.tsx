@@ -61,11 +61,27 @@ const preset = (id: string, label: string, harness: 'codex' | 'claude-code') => 
   offered: { available: true },
   halves: [{ harness, offered: { available: true }, models: [] }],
 });
+/** A SHARED provider (OpenRouter-like): one preset that drives both tools, each half with its own variables. */
+const SHARED = {
+  ...preset('openrouter', 'OpenRouter', 'claude-code'),
+  summary: 'OpenRouter for either tool.',
+  variables: [
+    { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: 'https://or.example.test/anthropic', required: true, allowEmpty: false, harnesses: ['claude-code'] },
+    { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'OPENROUTER_API_KEY', required: true, allowEmpty: false, harnesses: ['claude-code'] },
+    { name: 'OPENAI_BASE_URL', kind: 'plain', value: 'https://or.example.test/openai', required: true, allowEmpty: false, harnesses: ['codex'] },
+    { name: 'OPENAI_API_KEY', kind: 'secret', secret: 'OPENROUTER_API_KEY', required: true, allowEmpty: false, harnesses: ['codex'] },
+  ],
+  halves: [
+    { harness: 'claude-code', offered: { available: true }, models: [] },
+    { harness: 'codex', offered: { available: true }, models: [] },
+  ],
+};
 /** One provider per tool, so a locked panel's grid can be checked for who is NOT in it. */
 const PRESETS = [
   preset('zai-glm', 'GLM / Z.ai', 'claude-code'),
   preset('ollama-local', 'Local Ollama', 'codex'),
   preset('azure-openai', 'Azure OpenAI', 'codex'),
+  SHARED,
 ];
 
 /** The flow a start answers with, by case; the n-th start of a case may answer differently. */

@@ -41,6 +41,17 @@ const HARNESS_SUBJECTS: Readonly<Record<string, HarnessKind>> = {
 export const harnessOfSubject = (subject: string | undefined): HarnessKind | undefined =>
   subject === undefined ? undefined : HARNESS_SUBJECTS[subject];
 
+/**
+ * A provider as ONE tool sees it: only that tool's half and only the variables that half reads, so a provider shared by
+ * both tools (OpenRouter) shows, and a login made from it carries, the locked half alone — never the other tool's.
+ */
+const lockedPreset = (preset: ProviderPresetView, lock: HarnessKind): ProviderPresetView => ({
+  ...preset,
+  harness: lock,
+  halves: preset.halves.filter(half => half.harness === lock),
+  variables: preset.variables.filter(variable => variable.harnesses.includes(lock)),
+});
+
 export interface AddLoginPanelProps {
   readonly client: LoginsClient;
   /** Told the new login's id once it is added, so a screen can open it. Not used when the panel is locked to a `harness`. */
@@ -121,6 +132,8 @@ function PresetForm({
       harness,
       store: 'environment',
       preset: preset.id,
+      // Locked to one tool: the login drives that tool's half alone (absent, the daemon enables every half it offers).
+      ...(lock === undefined ? {} : { halves: [harness] }),
       env: given,
       ...(label.trim() === '' ? {} : { label: label.trim() }),
       ...(cloud.trim() === '' ? {} : { cloudCredential: cloud.trim() }),
@@ -335,7 +348,12 @@ function AddAnyLogin({
           setCatalog(
             lock === undefined
               ? read
-              : { ...read, presets: read.presets.filter(preset => usableHarnesses(preset).includes(lock)) },
+              : {
+                  ...read,
+                  presets: read.presets
+                    .filter(preset => usableHarnesses(preset).includes(lock))
+                    .map(preset => lockedPreset(preset, lock)),
+                },
           );
       },
       (error: unknown) => {

@@ -125,7 +125,7 @@ export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMo
       store: 'environment',
       preset: preset.id,
       env: loginEnvironment(preset, variable, several ? harness : undefined),
-      ...(several ? { halves: [harness] } : {}),
+      ...(several || lock !== undefined ? { halves: [harness] } : {}),
     });
     if (result.kind === 'applied') onAdded(id);
   };
