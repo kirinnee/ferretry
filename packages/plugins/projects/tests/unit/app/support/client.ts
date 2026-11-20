@@ -16,6 +16,7 @@ export interface Call {
   readonly params: Readonly<Record<string, string>> | undefined;
   readonly query: Readonly<Record<string, string>> | undefined;
   readonly body: unknown;
+  readonly headers: Readonly<Record<string, string>> | undefined;
 }
 
 export type Route = unknown | Error | ((call: Call) => unknown);
@@ -27,9 +28,10 @@ export const scripted = (routes: Readonly<Record<string, Route>>, calls: Call[] 
       readonly params?: Readonly<Record<string, string>>;
       readonly query?: Readonly<Record<string, string>>;
       readonly body?: unknown;
+      readonly headers?: Readonly<Record<string, string>>;
     },
   ): Promise<Answer> => {
-    const call: Call = { route, params: init?.params, query: init?.query, body: init?.body };
+    const call: Call = { route, params: init?.params, query: init?.query, body: init?.body, headers: init?.headers };
     calls.push(call);
     if (!(route in routes)) throw new Error(`no route ${route}`);
     const answer = routes[route];

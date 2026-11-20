@@ -1,3 +1,4 @@
+import { FY_REQUEST_ID_HEADER } from '@ferretry/app';
 import { z } from 'zod';
 import type { ProjectsClient } from './client.ts';
 import { normalizeProjectPath } from './folders.ts';
@@ -41,8 +42,14 @@ export type LaunchRequest = z.infer<typeof LaunchRequestSchema>;
 export const projectLaunchRequest = (runtime: string, folder: string): LaunchRequest =>
   LaunchRequestSchema.parse({ runtime, folder, mode: 'interactive' });
 
-export const startFerret = async (client: ProjectsClient, request: LaunchRequest) =>
-  StartedFerretSchema.parse(await client.call(FERRETS_START_ROUTE, { body: request }));
+/**
+ * Starts the ferret. A start is idempotent on its request id (the daemon refuses one with none, and answers the same id
+ * with the ferret it already started), so the id is the caller's: one per user start, the SAME one on a retry of it.
+ */
+export const startFerret = async (client: ProjectsClient, request: LaunchRequest, requestId: string) =>
+  StartedFerretSchema.parse(
+    await client.call(FERRETS_START_ROUTE, { body: request, headers: { [FY_REQUEST_ID_HEADER]: requestId } }),
+  );
 
 /** The ferrets working in a project's folder, most recently changed first. */
 export const projectFerrets = (projectPath: string, ferrets: readonly FerretRow[]): readonly FerretRow[] => {

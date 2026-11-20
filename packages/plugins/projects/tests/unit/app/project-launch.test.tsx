@@ -10,7 +10,7 @@ afterEach(async () => {
   open = null;
 });
 
-const launcher = async (onLaunch: (request: LaunchRequest) => Promise<void>): Promise<Mounted> => {
+const launcher = async (onLaunch: (request: LaunchRequest, requestId: string) => Promise<void>): Promise<Mounted> => {
   open = await mount(<ProjectLaunch project={PROJECT} onLaunch={onLaunch} />);
   return open;
 };
@@ -126,6 +126,25 @@ describe('ProjectLaunch', () => {
     await interact(async () => {
       await Promise.resolve();
     });
+  });
+
+  it('keeps one request id across a retry of the same start and mints a new one when the runtime changes', async () => {
+    const ids: string[] = [];
+    const view = await launcher(async (_request, requestId) => {
+      ids.push(requestId);
+      throw new Error('the carrier dropped');
+    });
+
+    await press(disclosure(view));
+    await type(runtimeField(view), 'claude');
+    await press(submit(view));
+    await press(submit(view));
+    await type(runtimeField(view), 'codex');
+    await press(submit(view));
+
+    expect(ids).toHaveLength(3);
+    expect(ids[1]).toBe(ids[0]);
+    expect(ids[2]).not.toBe(ids[0]);
   });
 
   it('closes the runtime field again when the disclosure is pressed twice', async () => {

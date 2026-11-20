@@ -1,12 +1,13 @@
 import type { ProjectInfo } from '../../contract/index.ts';
 import { Play, TriangleAlert } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { projectLaunchRequest } from '../lib/ferrets.ts';
 
 interface ProjectLaunchProps {
   readonly project: ProjectInfo;
-  readonly onLaunch: (request: ReturnType<typeof projectLaunchRequest>) => Promise<void>;
+  /** `requestId` names this start: it is the same on a retry of the same request, and a fresh one once the request changes. */
+  readonly onLaunch: (request: ReturnType<typeof projectLaunchRequest>, requestId: string) => Promise<void>;
 }
 
 /**
@@ -19,13 +20,19 @@ export function ProjectLaunch({ project, onLaunch }: ProjectLaunchProps) {
   const [runtime, setRuntime] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The one id of the start being tried: kept across a failed attempt so a retry of the same start cannot start a second ferret. */
+  const attempt = useRef<{ readonly key: string; readonly requestId: string } | null>(null);
 
   const launch = async (): Promise<void> => {
     if (submitting || runtime.trim() === '') return;
     setSubmitting(true);
     setError(null);
     try {
-      await onLaunch(projectLaunchRequest(runtime, project.path));
+      const request = projectLaunchRequest(runtime, project.path);
+      const key = JSON.stringify(request);
+      // A different request under the same id is a conflict at the daemon, so an edited runtime mints a new id.
+      if (attempt.current?.key !== key) attempt.current = { key, requestId: crypto.randomUUID() };
+      await onLaunch(request, attempt.current.requestId);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       setSubmitting(false);
