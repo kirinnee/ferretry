@@ -461,3 +461,101 @@ describe('ToolInstallService.install: argv and output', () => {
     should(events).deepEqual(['refresh', 'run', 'refresh']);
   });
 });
+
+describe('ToolInstallService.install: the command that was shown', () => {
+  it('should run when the shown command is the one the daemon plans now', async () => {
+    const { service, runs } = world({ onPath: { brew: '/opt/homebrew/bin/brew' }, foundAfterRun: ['codex'] });
+    const [outcome] = await service.install(
+      { harnesses: ['codex'], shown: [{ harness: 'codex', command: 'brew install --cask codex' }] },
+      OWNER,
+    );
+    should(outcome?.outcome).equal('installed');
+    should(runs).have.length(1);
+  });
+
+  it('should refuse before spawning anything when the plan changed since it was shown, and say the new command', async () => {
+    const { service, runs } = world({ onPath: { npm: '/x/npm' }, platform: 'linux' });
+    const error = await service
+      .install({ harnesses: ['codex'], shown: [{ harness: 'codex', command: 'brew install --cask codex' }] }, OWNER)
+      .catch((e: unknown) => e);
+    should(error).be.instanceOf(ToolInstallRefusal);
+    should((error as ToolInstallRefusal).code).equal('tool_install_plan_changed');
+    should((error as ToolInstallRefusal).message).containEql('npm install -g @openai/codex');
+    should((error as ToolInstallRefusal).message).containEql('nothing was run');
+    should(runs).have.length(0);
+  });
+
+  it('should stop the whole request, not just one tool, when any shown command differs', async () => {
+    const { service, runs } = world({ onPath: { brew: '/opt/homebrew/bin/brew' } });
+    const error = await service
+      .install(
+        {
+          harnesses: ['claude', 'codex'],
+          shown: [
+            { harness: 'claude', command: 'brew install --cask claude-code' },
+            { harness: 'codex', command: 'something else' },
+          ],
+        },
+        OWNER,
+      )
+      .catch((e: unknown) => e);
+    should((error as ToolInstallRefusal).code).equal('tool_install_plan_changed');
+    should(runs).have.length(0);
+  });
+
+  it('should let the next install start after a refused plan, and run its own plan when nothing was shown', async () => {
+    const { service, runs } = world({ onPath: { brew: '/opt/homebrew/bin/brew' }, foundAfterRun: ['codex'] });
+    await service
+      .install({ harnesses: ['codex'], shown: [{ harness: 'codex', command: 'old' }] }, OWNER)
+      .catch(() => undefined);
+    const [outcome] = await service.install({ harnesses: ['codex'] }, OWNER);
+    should(outcome?.outcome).equal('installed');
+    should(runs).have.length(1);
+  });
+
+  it('should run the plan it checked, never a re-plan, when the machine changes after an earlier install in the batch', async () => {
+    // brew is on PATH when the commands are shown and checked; the post-install refresh of the FIRST tool takes it away
+    // and leaves npm. A re-planning runner would now spawn npm for codex; the checked plan is brew.
+    const onPath: Record<string, string> = { brew: '/opt/homebrew/bin/brew' };
+    let refreshes = 0;
+    const { service, runs } = world({
+      onPath,
+      foundAfterRun: ['claude', 'codex'],
+      refresh: async () => {
+        refreshes += 1;
+        if (refreshes === 2) {
+          delete onPath.brew;
+          onPath.npm = '/x/npm';
+        }
+      },
+    });
+    const outcomes = await service.install(
+      {
+        harnesses: ['claude', 'codex'],
+        shown: [
+          { harness: 'claude', command: 'brew install --cask claude-code' },
+          { harness: 'codex', command: 'brew install --cask codex' },
+        ],
+      },
+      OWNER,
+    );
+    should(refreshes).be.aboveOrEqual(2);
+    should(runs.map(run => [run.executable, ...run.args])).deepEqual([
+      ['/opt/homebrew/bin/brew', 'install', '--cask', 'claude-code'],
+      ['/opt/homebrew/bin/brew', 'install', '--cask', 'codex'],
+    ]);
+    should(outcomes.map(outcome => outcome.outcome)).deepEqual(['installed', 'installed']);
+    const second = outcomes[1];
+    should(second?.outcome === 'installed' ? second.command : undefined).equal('brew install --cask codex');
+  });
+
+  it('should not compare a harness that is already installed', async () => {
+    const { service, runs } = world({ found: ['codex'] });
+    const [outcome] = await service.install(
+      { harnesses: ['codex'], shown: [{ harness: 'codex', command: 'stale' }] },
+      OWNER,
+    );
+    should(outcome?.outcome).equal('already-installed');
+    should(runs).have.length(0);
+  });
+});

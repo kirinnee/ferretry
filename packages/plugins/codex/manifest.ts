@@ -17,7 +17,7 @@ import {
 } from './contract/index.ts';
 import { cap } from '@ferretry/core-gate/contract';
 import { FerretsChanged, Harnesses, StartDecide } from '@ferretry/core-ferrets/contract';
-import { LoginChanged } from '@ferretry/plugin-logins/contract';
+import { LoginChanged, LoginsPort } from '@ferretry/plugin-logins/contract';
 import {
   PROFILE_COMPONENTS_KEY,
   ProfileCodexHooksSource,
@@ -25,6 +25,27 @@ import {
   RuntimesPort,
 } from '@ferretry/plugin-runtimes/contract';
 import { HARNESS_DIALOG_RULES_KEY, WardenDialogRulesCodex } from '@ferretry/plugin-warden/contract';
+
+/**
+ * The Codex segment of daemon setup (r10 O10): one flat list the shell linearizes. The import steps (43-47, 49) skip
+ * themselves unless the person chose what to import at `import-choice`; `conversations` is asked in both modes.
+ */
+const CODEX_STEPS = [
+  { id: 'installed', title: 'Install Codex', order: 40, group: 'Codex', stepHost: true },
+  { id: 'sign-in', title: 'Sign in to Codex', order: 41, group: 'Codex', stepHost: true },
+  { id: 'import-choice', title: 'Bring over from Codex', order: 42, group: 'Codex', stepHost: true },
+  { id: 'import-settings', title: 'Settings', order: 43, group: 'Codex', stepHost: true },
+  { id: 'import-model-set', title: 'Models', order: 44, group: 'Codex', stepHost: true },
+  { id: 'import-instructions', title: 'AGENTS.md', order: 45, group: 'Codex', stepHost: true },
+  { id: 'import-skills', title: 'Skills', order: 46, group: 'Codex', stepHost: true },
+  { id: 'import-mcp', title: 'MCP servers', order: 47, group: 'Codex', stepHost: true },
+  { id: 'conversations', title: 'Conversations', order: 48, group: 'Codex', stepHost: true },
+  { id: 'import-run', title: 'Bring it over', order: 49, group: 'Codex', stepHost: true },
+  { id: 'permission', title: 'Permissions', order: 50, group: 'Codex', stepHost: true },
+] as const;
+
+/** The panel id that draws one step's body. */
+const stepPanelId = (step: string): string => `step-${step}`;
 
 /**
  * Codex (§2.3): a harness, the same way as Claude Code. It takes `harnesses:codex` from Ferrets and needs a `runners`
@@ -44,7 +65,7 @@ export default definePlugin({
   provides: { codex: CodexPort },
   // Which settings components a runtime's profile selects (`RuntimesApi.layers`), read live and late (Runtimes takes this
   // plugin's component sources, so it cannot be a build edge): only those items reach that runtime's home.
-  uses: { runtimes: RuntimesPort },
+  uses: { runtimes: RuntimesPort, logins: LoginsPort },
 
   actions: {
     routes: [
@@ -130,8 +151,8 @@ export default definePlugin({
 
   ui: {
     settings: [settingsTab('codex', { icon: 'code-xml', group: 'tools', label: 'Codex', order: 21 })],
-    // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
-    panels: [panel('onboarding.step', { id: 'onboarding-step', order: 21 })],
+    // The body of each Codex setup step (Onboarding's flow offers this slot): one panel per step, each drawn only for its own `codex.<step>` subject.
+    panels: CODEX_STEPS.map(step => panel('onboarding.step', { id: stepPanelId(step.id), order: step.order })),
   },
 
   data: {
@@ -163,7 +184,7 @@ export default definePlugin({
     ],
   },
 
-  onboarding: [{ id: 'harness', title: 'Codex', order: 21 }],
+  onboarding: CODEX_STEPS,
   doctor: ['codex-paths'],
 
   permissions: {

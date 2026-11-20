@@ -312,7 +312,11 @@ function installEnvironment(
 
 // ─── the service ───────────────────────────────────────────────────────────────────────────────────
 
-export type ToolInstallRefusalCode = 'tool_install_unauthorized' | 'tool_install_in_progress' | 'tool_install_invalid';
+export type ToolInstallRefusalCode =
+  | 'tool_install_unauthorized'
+  | 'tool_install_in_progress'
+  | 'tool_install_invalid'
+  | 'tool_install_plan_changed';
 
 export class ToolInstallRefusal extends Error {
   constructor(
@@ -342,9 +346,10 @@ interface ToolInstallServiceOptions {
   readonly timeoutMinutes?: number;
 }
 
-/** One request: which harnesses. */
+/** One request: which harnesses, and the command the person was shown for each (when they were shown one). */
 interface ToolInstallRequest {
   readonly harnesses: readonly HarnessKind[];
+  readonly shown?: readonly { readonly harness: HarnessKind; readonly command: string }[] | undefined;
 }
 
 /** Each harness as it stands before an install: found, or the plan an install would follow. */
@@ -372,7 +377,8 @@ export class ToolInstallService {
   }
 
   /**
-   * Install the named harnesses, one after another, and say how each ended.
+   * Install the named harnesses, one after another, and say how each ended. The plans are decided ONCE, after the first
+   * refresh, checked against what the person was shown, and those same plans run: nothing plans again between check and spawn.
    */
   async install(
     request: ToolInstallRequest,
@@ -393,9 +399,14 @@ export class ToolInstallService {
     this.#running = true;
     try {
       await this.options.refresh?.();
+      // ONE plan per harness, decided here: the plans the person's shown commands are checked against ARE the plans
+      // that run. Nothing below plans again, so a refresh after an earlier install cannot change what a later one spawns.
+      const checked = this.plans(harnesses);
+      this.#assertShownPlans(request.shown ?? [], checked);
       const outcomes: ToolInstallOutcome[] = [];
-      for (const harness of harnesses) {
-        const outcome = await this.#installOne(harness, onProgress);
+      for (const preview of checked) {
+        const harness = preview.harness;
+        const outcome = await this.#installOne(preview, onProgress);
         onProgress({ harness, stage: 'finished', outcome });
         outcomes.push(outcome);
       }
@@ -405,13 +416,36 @@ export class ToolInstallService {
     }
   }
 
+  /**
+   * The command the person was shown must be the command that would run now. Checked for every harness BEFORE the first
+   * one starts, so a changed plan stops the whole request with nothing spawned. A harness that is already installed has
+   * no command to compare: it only reports that it is installed.
+   */
+  #assertShownPlans(
+    shown: readonly { readonly harness: HarnessKind; readonly command: string }[],
+    checked: readonly ToolInstallPreview[],
+  ): void {
+    for (const { harness, command } of shown) {
+      const preview = checked.find(entry => entry.harness === harness);
+      if (preview === undefined || preview.installed) continue;
+      const { plan } = preview;
+      const fresh = plan.kind === 'runnable' ? plan.command : plan.manualCommand;
+      if (fresh !== command)
+        throw new ToolInstallRefusal(
+          'tool_install_plan_changed',
+          `the install command for ${TOOL_NAME[harness]} is not the one that was shown (it is now: ${fresh}); nothing was run. Look at it, then press Install again`,
+        );
+    }
+  }
+
+  /** Run ONE harness's already-checked preview; it never plans, so the command that runs is the one that was checked. */
   async #installOne(
-    harness: HarnessKind,
+    preview: ToolInstallPreview,
     onProgress: (step: ToolInstallProgress) => void,
   ): Promise<ToolInstallOutcome> {
-    const before = this.options.locate(harness);
-    if (before.outcome === 'located') return { harness, outcome: 'already-installed', path: before.path };
-    const plan = planToolInstall(harness, this.#platform(), this.options.executables);
+    const { harness } = preview;
+    if (preview.installed) return { harness, outcome: 'already-installed', path: preview.path };
+    const { plan } = preview;
     if (plan.kind === 'no-package-manager')
       return {
         harness,
