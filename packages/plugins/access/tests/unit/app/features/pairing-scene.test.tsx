@@ -179,7 +179,13 @@ describe('the sky pauses when the tab is hidden', () => {
 });
 
 describe('the stylesheet respects reduced motion', () => {
-  const css = readFileSync(new URL('../../../../app/styles.css', import.meta.url), 'utf8');
+  // The ONE rule let through the no-preference gate: the blink, which every pose keeps under reduced motion (r11 O10 fix; it
+  // overrides the app's global stilling with `!important` on a more specific selector). Nothing else may sit outside.
+  const BLINK_EXCEPTION =
+    /^(?=[^{]*\.fy-ferret-eyes)\.fy-ferret[^{]*\{\s*animation(-play-state)?:\s*(fy-ferret-blink 5\.5s infinite( !important)?|paused);\s*\}$/gmu;
+  const raw = readFileSync(new URL('../../../../app/styles.css', import.meta.url), 'utf8');
+  // Comments say `animation:` in prose; only declarations count.
+  const css = raw.replace(/\/\*[\s\S]*?\*\//gu, '').replace(BLINK_EXCEPTION, '');
   const motionBlock = (() => {
     const start = css.indexOf('@media (prefers-reduced-motion: no-preference) {');
     const end = css.indexOf('@keyframes', start);
@@ -194,6 +200,12 @@ describe('the stylesheet respects reduced motion', () => {
     expect(outside).not.toMatch(/\banimation(-[a-z-]+)?\s*:/u);
     expect(outside).not.toMatch(/\btransition\s*:/u);
     expect(after).not.toMatch(/\banimation(-[a-z-]+)?\s*:/u);
+  });
+
+  it('lets exactly the blink through (every pose, never under a transform of its own)', () => {
+    const exceptions = raw.match(BLINK_EXCEPTION) ?? [];
+    expect(exceptions.length).toBeGreaterThanOrEqual(2);
+    for (const rule of exceptions) expect(rule).toMatch(/\.fy-ferret-eyes/u);
   });
 
   it("gates every rule in that block on the app's own Motion setting too", () => {

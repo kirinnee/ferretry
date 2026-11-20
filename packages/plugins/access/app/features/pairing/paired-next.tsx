@@ -60,7 +60,7 @@ export function PairedNext({ connection, createClient, offer, onContinue }: Pair
   const notNow = (
     <button
       type="button"
-      className="kt-btn min-h-[44px] px-6 py-3"
+      className="kt-btn fy-pair-answer py-3"
       style={{ height: 'auto' }}
       data-paired-continue=""
       onClick={move}
@@ -82,7 +82,7 @@ export function PairedNext({ connection, createClient, offer, onContinue }: Pair
       {phase === 'added' ? (
         <button
           type="button"
-          className="kt-btn min-h-[44px] px-6 py-3"
+          className="kt-btn fy-pair-answer py-3"
           style={{ height: 'auto' }}
           data-variant="primary"
           data-paired-continue=""

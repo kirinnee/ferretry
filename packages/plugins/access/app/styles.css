@@ -52,6 +52,13 @@
     width: min(100%, 300px);
   }
 }
+/* A short screen (a laptop) keeps the confirm answers above the fold: the hero is smaller until the success screen, which
+   has the room. */
+@media (min-width: 640px) and (max-height: 900px) {
+  .fy-pair-scene main:not([data-pairing-stage='paired']) .fy-pair-hero {
+    width: min(100%, 210px);
+  }
+}
 .fy-pair-badge {
   position: absolute;
   top: 2%;
@@ -311,9 +318,6 @@
   :root:not([data-motion='reduced']) .fy-ferret[data-pose='curious'] .fy-ferret-nose {
     animation: fy-ferret-sniff 0.5s ease-in-out infinite;
   }
-  :root:not([data-motion='reduced']) .fy-ferret:not([data-pose='cheer']) .fy-ferret-eyes {
-    animation: fy-ferret-blink 5.5s infinite;
-  }
   :root:not([data-motion='reduced']) .fy-ferret[data-pose='cheer'] .fy-ferret-body {
     animation: fy-ferret-rise 760ms cubic-bezier(0.2, 1.35, 0.35, 1) both;
   }
@@ -353,6 +357,49 @@
   }
   :root:not([data-motion='reduced']) .fy-sky-streak {
     animation: fy-sky-streak 1500ms 250ms cubic-bezier(0.3, 0.6, 0.4, 1) both;
+  }
+  /* r11 O10: the ferret answers a tap (`data-poke`) or, on a device that can hover, a hover, with a hello. */
+  :root:not([data-motion='reduced']) .fy-ferret[data-poke]:not([data-pose='cheer']) .fy-ferret-head {
+    animation: fy-ferret-hello 900ms ease-in-out infinite;
+  }
+  :root:not([data-motion='reduced']) .fy-ferret[data-poke]:not([data-pose='cheer']) .fy-ferret-ear-l,
+  :root:not([data-motion='reduced']) .fy-ferret[data-poke]:not([data-pose='cheer']) .fy-ferret-ear-r {
+    animation: fy-ferret-ears 380ms ease-in-out infinite;
+  }
+  :root:not([data-motion='reduced']) .fy-ferret[data-poke]:not([data-pose='cheer']) .fy-ferret-nose {
+    animation: fy-ferret-sniff 0.5s ease-in-out infinite;
+  }
+  @media (hover: hover) {
+    :root:not([data-motion='reduced']) .fy-ferret:hover:not([data-pose='cheer']) .fy-ferret-head {
+      animation: fy-ferret-hello 900ms ease-in-out infinite;
+    }
+    :root:not([data-motion='reduced']) .fy-ferret:hover:not([data-pose='cheer']) .fy-ferret-ear-l,
+    :root:not([data-motion='reduced']) .fy-ferret:hover:not([data-pose='cheer']) .fy-ferret-ear-r {
+      animation: fy-ferret-ears 380ms ease-in-out infinite;
+    }
+    :root:not([data-motion='reduced']) .fy-ferret:hover:not([data-pose='cheer']) .fy-ferret-nose {
+      animation: fy-ferret-sniff 0.5s ease-in-out infinite;
+    }
+  }
+  /* r11 O10 fix: the pupils follow the pointer (the drawing carries --fy-look-x/y, set from script), on EVERY pose. */
+  :root:not([data-motion='reduced']) .fy-ferret-look {
+    transform: translate(calc(var(--fy-look-x, 0) * 1px), calc(var(--fy-look-y, 0) * 1px));
+    transition: transform 140ms ease-out;
+  }
+  /* A tap, or a hover on a device that can hover: the whole ferret hops, and a cheering one waves its arm once more. */
+  :root:not([data-motion='reduced']) .fy-ferret[data-poke] .fy-ferret-hop {
+    animation: fy-ferret-hop 560ms ease-out;
+  }
+  :root:not([data-motion='reduced']) .fy-ferret[data-poke][data-pose='cheer'] .fy-ferret-wave-again {
+    animation: fy-ferret-wave-again 1000ms ease-in-out;
+  }
+  @media (hover: hover) {
+    :root:not([data-motion='reduced']) .fy-ferret:hover .fy-ferret-hop {
+      animation: fy-ferret-hop 560ms ease-out;
+    }
+    :root:not([data-motion='reduced']) .fy-ferret[data-pose='cheer']:hover .fy-ferret-wave-again {
+      animation: fy-ferret-wave-again 1000ms ease-in-out;
+    }
   }
   /* A hidden tab keeps nothing running: the sky and the mascot both pause. */
   :root:not([data-motion='reduced']) .fy-sky[data-paused] *,
@@ -510,4 +557,113 @@
     opacity: 0;
     transform: translate(120vw, 15vw) rotate(7deg);
   }
+}
+
+/* The blink is the ONE motion that survives reduced motion (the OS setting or the app's Motion = Reduced), and the one
+   every pose has, the cheering one included. */
+.fy-ferret-wave-again {
+  transform-box: view-box;
+  transform-origin: 149px 160px;
+}
+.fy-ferret-eyes {
+  animation: fy-ferret-blink 5.5s infinite;
+}
+/* `!important` and the extra class on purpose: the app stills EVERY animation under reduced motion (`styles/index.css`:
+   `animation: none !important` for Motion = Reduced, a 1 ms single-iteration rule for the OS setting), and the plan keeps
+   the blink as the one thing that moves. Only this selector is let through; nothing else in the ferret is. */
+.fy-ferret .fy-ferret-eyes,
+:root[data-motion='reduced'] .fy-ferret .fy-ferret-eyes {
+  animation: fy-ferret-blink 5.5s infinite !important;
+}
+.fy-ferret[data-paused] .fy-ferret-eyes {
+  animation-play-state: paused;
+}
+@keyframes fy-ferret-hop {
+  40% {
+    transform: translateY(-7px);
+  }
+}
+@keyframes fy-ferret-wave-again {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  20% {
+    transform: rotate(14deg);
+  }
+  40% {
+    transform: rotate(-8deg);
+  }
+  60% {
+    transform: rotate(14deg);
+  }
+  80% {
+    transform: rotate(-6deg);
+  }
+}
+
+/* ───────── r11 O10: the ferret answers a hover (a mouse) or a tap (a phone has no hover) ─────────
+   It rises out of the hole, tilts its head hello, wiggles its ears and sniffs. The still part (it is higher) shows under
+   reduced motion too, so the reaction is never lost; only the motion goes. `data-poke` is set by the mascot for ~1.4 s
+   after a tap. A cheering ferret is already as high as it gets and is left alone. */
+.fy-ferret {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.fy-ferret-ear-l,
+.fy-ferret-ear-r {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+.fy-ferret-ear-l {
+  --fy-ear-dir: -1;
+}
+.fy-ferret-ear-r {
+  --fy-ear-dir: 1;
+}
+.fy-ferret[data-poke]:not([data-pose='cheer']) .fy-ferret-body {
+  transform: translateY(14px);
+}
+.fy-ferret[data-poke][data-pose='curious'] .fy-ferret-body {
+  transform: translateY(4px);
+}
+@media (hover: hover) {
+  .fy-ferret:hover:not([data-pose='cheer']) .fy-ferret-body {
+    transform: translateY(14px);
+  }
+  .fy-ferret[data-pose='curious']:hover .fy-ferret-body {
+    transform: translateY(4px);
+  }
+}
+@keyframes fy-ferret-hello {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  30% {
+    transform: rotate(-7deg) translateY(-2px);
+  }
+  70% {
+    transform: rotate(7deg) translateY(-2px);
+  }
+}
+@keyframes fy-ferret-ears {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  50% {
+    transform: rotate(calc(var(--fy-ear-dir) * 14deg));
+  }
+}
+
+/* The passkey offer's two answers ("Add a passkey now", "Not now", and "Continue" after it) are one fixed size, so the
+   row reads as a set: 12 rem wide, 44 px or taller, the label centred. Where two do not fit a row they stack, 12 px apart. */
+.fy-pair-answer {
+  box-sizing: border-box;
+  inline-size: 12rem;
+  min-block-size: 44px;
+  padding-inline: 1rem;
+  justify-content: center;
+  white-space: nowrap;
 }

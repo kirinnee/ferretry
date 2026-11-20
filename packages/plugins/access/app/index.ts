@@ -70,3 +70,9 @@ export default provideToShell(
     },
   },
 );
+
+/**
+ * The ferret, for any screen that wants the mascot (the onboarding End page draws it waving). One component, one pose
+ * prop; it reacts to a hover or a tap on its own (see `ferret-mascot.tsx`).
+ */
+export { FerretMascot, type FerretMascotProps, type FerretPose } from './features/pairing/ferret-mascot.tsx';

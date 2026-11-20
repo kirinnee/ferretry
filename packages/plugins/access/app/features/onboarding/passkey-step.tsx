@@ -158,19 +158,27 @@ export function PasskeyStep({
         </p>
       )}
       {added ? null : (
-        <div className="flex flex-wrap items-center gap-2">
+        // STACKED, one fixed width (`.fy-pair-answer`, 12 rem), 12 px apart: the page's two answers read as a set. They stay
+        // two explicit buttons around WebAuthn (never a choice a key can move, never a commit): the ceremony needs a press.
+        <div className="flex flex-col items-start gap-3">
           <Button
             type="button"
             variant="primary"
             data-passkey-add=""
             disabled={adding}
             onClick={addNow}
-            className="min-h-11"
+            className="fy-pair-answer min-h-11"
           >
             <Fingerprint size={18} aria-hidden="true" />
             Add a passkey
           </Button>
-          <Button type="button" data-passkey-later="" disabled={adding} onClick={notNow} className="min-h-11">
+          <Button
+            type="button"
+            data-passkey-later=""
+            disabled={adding}
+            onClick={notNow}
+            className="fy-pair-answer min-h-11"
+          >
             Not now
           </Button>
         </div>
