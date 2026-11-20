@@ -112,4 +112,25 @@ describe('Settings › Pack mode', () => {
             await context.close();
           }
         });
+
+  it('lines the Limits inputs up on one grid, the lone last one under its neighbour (1280)', async () => {
+    const context = await browser.newContext({ viewport: { width: 1_280, height: 800 }, colorScheme: 'dark' });
+    try {
+      const tab = await context.newPage();
+      await tab.goto(`${server?.url.origin ?? ''}/?theme=studio-dark`);
+      await tab.waitForSelector('[data-pack-settings]');
+      const box = async (key: string) =>
+        await tab.evaluate((k: string) => {
+          const r = document.querySelector(`[data-pack-number="${k}"]`)?.getBoundingClientRect();
+          return { left: Math.round(r?.left ?? -1), right: Math.round(r?.right ?? -1) };
+        }, key);
+      const first = await box('interactiveChildren');
+      const second = await box('autoChildren');
+      const last = await box('maxDepth');
+      expect(second.left, 'two to a line').toBeGreaterThan(first.right);
+      expect(last, "the lone input sits exactly under the first column's input").toEqual(first);
+    } finally {
+      await context.close();
+    }
+  });
 });
