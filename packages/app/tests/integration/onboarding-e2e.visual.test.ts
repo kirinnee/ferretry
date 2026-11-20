@@ -505,7 +505,7 @@ describe('the first run, end to end', () => {
       await shot(tab, variant, 'pair-confirm');
       await measureButton(tab, variant, 'Pair this device', '[data-pair-confirm]');
       // Item 4: "Not now" is a real, bordered 44px button, not an underlined text link.
-      const notNow = await tab.locator('[data-pair-cancel]').evaluate(node => {
+      const notNow = await tab.getByRole('button', { name: 'Not now' }).evaluate(node => {
         const style = getComputedStyle(node);
         return {
           h: node.getBoundingClientRect().height,
