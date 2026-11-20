@@ -24,6 +24,7 @@ import './secure-copy.css';
 import { Plus, ShieldCheck, Trash2, TriangleAlert } from '../../shell.tsx';
 import { type FormEvent, type ReactNode, useId, useState } from 'react';
 import { localizeUtcStamps } from '../../lib/local-time.ts';
+import { WrapAtUrlSeparators } from './url-wrap.tsx';
 import { fromWords, ruleFromForm, ruleLimits, toWords } from '../../lib/secure-copy.ts';
 
 /** A write reports whether it took, so the form clears only when the daemon accepted it. */
@@ -284,9 +285,11 @@ function RuleRow({
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <p className="m-0">
           <span className="min-w-0 break-words text-ui text-fg" data-copy-route="">
-            {fromWords(rule.from)}
+            <WrapAtUrlSeparators text={fromWords(rule.from)} />
             {'\u00a0→ '}
-            <span className="font-medium">{toWords(rule.to)}</span>
+            <span className="font-medium">
+              <WrapAtUrlSeparators text={toWords(rule.to)} />
+            </span>
           </span>
         </p>
         <p className="m-0 text-meta text-faint" data-copy-rule-limits="">
@@ -339,12 +342,16 @@ function WaitingRule({
 }) {
   return (
     <li className="flex flex-col gap-2 py-3" data-copy-rule-waiting={staged.stage}>
-      <p className="m-0 text-ui text-fg">{staged.does}</p>
+      <p className="m-0 break-words text-ui text-fg">
+        <WrapAtUrlSeparators text={staged.does} />
+      </p>
       <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-meta">
         {staged.rows.map((row, index) => (
           <div key={`${String(index)} ${row.label}`} className="contents">
             <dt className="text-faint">{row.label}</dt>
-            <dd className="m-0 min-w-0 break-words text-fg">{localizeUtcStamps(row.value)}</dd>
+            <dd className="m-0 min-w-0 break-words text-fg">
+              <WrapAtUrlSeparators text={localizeUtcStamps(row.value)} />
+            </dd>
           </div>
         ))}
       </dl>
