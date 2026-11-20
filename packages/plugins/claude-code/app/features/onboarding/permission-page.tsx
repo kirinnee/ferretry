@@ -1,67 +1,38 @@
 /**
  * "Permissions" — how Claude Code handles a command it is about to run: ask first (auto mode), or never ask (Claude's
- * own `--dangerously-skip-permissions`). The page says plainly what skip allows. It writes exactly one key,
- * `permissionMode`, in `harness-claude-code.yaml` through the kernel's config route (read with its etag, written
- * against it). The file is read with the shared config reader and the one key is set with the shared one-key editor
+ * own `--dangerously-skip-permissions`). Two stacked cards, the demo on the right, and ONE line under the cards whenever
+ * Skip is shown, naming the real flag and what it allows. It writes exactly one key, `permissionMode`, in
+ * `harness-claude-code.yaml` through the kernel's config route (read with its etag, written against it), and only when the
+ * person presses Next (`useConfigChoice`: the page registers the save, contract rule 8, and draws no button of its own).
+ * The file is read with the shared config reader and the one key is set with the shared one-key editor
  * (`@ferretry/std/yaml`), so every YAML form reads right and every other key and comment stays as it was. The dangerous-rm
  * waiver is a separate Settings switch and is NOT offered here. A loosening an AGENT makes stays held for the owner; this
  * is the person's own choice.
  *
- * A pick is NOT a write: moving over the cards (arrow keys included) only selects. The page then says in full what the
- * selected mode means and offers one explicit "Use …" button; only that press writes. While a pick differs from the
- * saved mode the page holds `busy`, so the shell's Next cannot record "done" over a daemon still on the old mode: the
- * person either presses "Use …" (writes, then done) or "Keep …" (done, no write), or moves back to the saved card.
+ * A pick is NOT a write: moving over the cards (arrow keys included) only selects.
  *
  * When the route does not show the file (its text is WITHHELD because it holds a secret or does not parse, or the YAML
  * does not read), the page shows the mode as unknown, writes nothing, and says where to change it at the machine.
  */
-import { Button, ChoiceCards, type ChoiceOption } from '@ferretry/app';
+import { Button, ChoiceCards, type ChoiceOption, StepDemo } from '@ferretry/app';
 import { editConfigText, readConfigText } from '@ferretry/std/yaml';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { z } from 'zod';
+import type { z } from 'zod';
 import { PermissionModeSchema } from '../../../contract/index.ts';
 import type { ClaudeCodeClient } from '../../lib/client.ts';
+import { useConfigChoice } from './config-choice.ts';
 import { PermissionDemo } from './demos.tsx';
 import type { StepPageProps } from './props.ts';
-import { sentenceOf } from './words.ts';
 
 type Mode = z.infer<typeof PermissionModeSchema>;
 
-const FILE = 'harness-claude-code.yaml';
-const READ = 'GET /v1/config/file' as const;
-const WRITE = 'PUT /v1/config/file' as const;
-
-const FileSchema = z.looseObject({
-  text: z.string(),
-  etag: z.string().min(1),
-  absolutePath: z.string().min(1).optional(),
-  state: z.string().optional(),
-});
-const WroteSchema = z.looseObject({ etag: z.string().min(1), outcome: z.enum(['applied', 'pending']) });
-
-/** What each mode means, said in full before the press that writes it. */
-const CONSEQUENCE: Readonly<Record<Mode, { readonly button: string; readonly text: string }>> = {
-  auto: { button: 'Use Auto mode', text: 'Claude will ask you before anything risky.' },
-  skip: {
-    button: 'Use Skip permissions',
-    text: 'Claude will run every command without asking you, including deleting files. This is Claude’s --dangerously-skip-permissions. Only choose it on a machine you would let it wipe.',
-  },
-};
-
-/** The press that drops a pick and keeps what the daemon already runs. */
-const KEEP: Readonly<Record<Mode, string>> = { auto: 'Keep Auto mode', skip: 'Keep Skip permissions' };
-
 const OPTIONS: readonly ChoiceOption[] = [
-  { id: 'auto', title: 'Auto mode', line: 'Claude asks before anything risky.' },
-  {
-    id: 'skip',
-    title: 'Skip permissions',
-    line: 'Claude runs every command without asking you, including deleting files. This is Claude’s --dangerously-skip-permissions. Fastest, and only safe on a machine you would let it wipe.',
-  },
+  { id: 'auto', title: 'Auto mode', line: 'Asks before anything risky.' },
+  { id: 'skip', title: 'Skip permissions', line: 'Never asks.' },
 ];
 
-/** Why Next is locked while a pick has not been written or dropped. */
-const HOLD = 'Press “Use …” or “Keep …” to continue';
+/** What Skip allows, in plain words with the real flag: one line, shown whenever Skip is the card showing. */
+const SKIP_WARNING =
+  '--dangerously-skip-permissions runs every command, even deleting files. Only on a machine you would let it wipe.';
 
 /** The comment the route answers in place of a text it will not show (kernel `withheldComment`). */
 const WITHHELD = /^# ‹hidden›: the text of this file is not shown because/u;
@@ -92,102 +63,23 @@ export const withPermissionMode = (text: string, mode: Mode): string => {
   return editConfigText(text, { ...now, permissionMode: mode }, now, undefined);
 };
 
-interface Loaded {
-  readonly text: string;
-  readonly etag: string;
-}
+const modeOf = (text: string, state?: string): Mode | null => {
+  const found = permissionRead(text, state);
+  return found.kind === 'mode' ? found.mode : null;
+};
 
 export function PermissionPage({ client, step }: StepPageProps<ClaudeCodeClient>) {
-  const [mode, setMode] = useState<Mode | 'unknown' | null>(null);
-  /** The card selected but not yet written. */
-  const [picked, setPicked] = useState<Mode | null>(null);
-  const [where, setWhere] = useState<string>(FILE);
-  const [note, setNote] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const file = useRef<Loaded | null>(null);
-  /** Whether the page has told the shell to hold Next (`null`: unknown, the next sync says it again). */
-  const holding = useRef<boolean | null>(false);
+  const { saved, shown, pick, where, note, retry } = useConfigChoice<Mode>({
+    client,
+    step,
+    read: modeOf,
+    write: withPermissionMode,
+  });
 
-  const load = useCallback(async (): Promise<void> => {
-    try {
-      const read = FileSchema.parse(await client.call(READ, { query: { path: FILE } }));
-      const found = permissionRead(read.text, read.state);
-      setWhere(read.absolutePath ?? FILE);
-      if (found.kind === 'unknown') {
-        file.current = null; // never written: its text is not shown, or does not read
-        setMode('unknown');
-      } else {
-        file.current = { text: read.text, etag: read.etag };
-        setMode(found.mode);
-        setPicked(prior => prior ?? found.mode);
-      }
-      setNote(null);
-    } catch (error) {
-      file.current = null;
-      setNote(sentenceOf(error));
-      setMode(prior => prior ?? 'unknown');
-    }
-    step?.ready();
-  }, [client, step]);
-
-  const started = useRef(false);
-  useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    void load();
-  }, [load]);
-
-  // Hold Next while a pick differs from the saved mode; release it when the pick is written, kept or withdrawn. A save in
-  // flight owns `busy` itself ("Saving…"); the sync runs again when it ends, whichever way it went (a refused save leaves
-  // the pick unwritten, so the hold comes back).
-  useEffect(() => {
-    if (saving || mode === null) return;
-    const want = mode !== 'unknown' && picked !== null && picked !== mode;
-    if (holding.current === want) return;
-    holding.current = want;
-    step?.busy(want ? HOLD : null);
-  }, [saving, mode, picked, step]);
-
-  const keep = (): void => {
-    if (mode === null || mode === 'unknown') return;
-    setNote(null);
-    setPicked(mode);
-    holding.current = false;
-    step?.busy(null);
-    step?.done();
-  };
-
-  const choose = async (next: Mode): Promise<void> => {
-    setNote(null);
-    if (file.current === null) {
-      await load();
-      if (file.current === null) return;
-    }
-    const loaded = file.current;
-    setSaving(true);
-    holding.current = null;
-    step?.busy('Saving…');
-    try {
-      const text = withPermissionMode(loaded.text, next);
-      const wrote = WroteSchema.parse(await client.call(WRITE, { body: { path: FILE, text, etag: loaded.etag } }));
-      file.current = { text, etag: wrote.etag };
-      setMode(next);
-      setPicked(next);
-      if (wrote.outcome === 'pending') setNote('Saved, but the owner has to confirm it before it takes effect.');
-      step?.done();
-    } catch (error) {
-      setNote(sentenceOf(error));
-      file.current = null; // moved under us or refused: read it fresh on the next pick
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (mode === null) return null;
+  if (saved === null) return null;
   return (
     <div className="cc-step" data-onboarding-step="claude-code.permission">
-      <p className="cc-step__line">When Claude Code wants to run a command on this machine, should it ask you first?</p>
-      {mode === 'unknown' ? (
+      {saved === 'unknown' ? (
         <p className="cc-step__line" data-mode-unknown="">
           The current mode is unknown: this page cannot read it safely. Change this at the machine: {where}
         </p>
@@ -195,46 +87,29 @@ export function PermissionPage({ client, step }: StepPageProps<ClaudeCodeClient>
         <>
           <ChoiceCards
             label="Permissions"
+            layout="stack"
             options={OPTIONS}
-            value={picked ?? mode}
-            onChange={next => setPicked(next as Mode)}
+            value={shown ?? saved}
+            onChange={next => pick(next as Mode)}
           />
-          <PermissionDemo mode={picked ?? mode} />
-          {picked !== null && picked !== mode ? (
-            <div className="cc-confirm" data-permission-confirm="">
-              <p className="cc-step__line" role="note" data-permission-consequence={picked}>
-                {CONSEQUENCE[picked].text} Nothing is saved until you press the button.
-              </p>
-              <div className="cc-actions">
-                <Button variant="primary" disabled={saving} onClick={() => void choose(picked)}>
-                  {CONSEQUENCE[picked].button}
-                </Button>
-                <Button disabled={saving} onClick={keep}>
-                  {KEEP[mode]}
-                </Button>
-              </div>
-            </div>
+          <StepDemo>
+            <PermissionDemo mode={shown ?? saved} />
+          </StepDemo>
+          {(shown ?? saved) === 'skip' ? (
+            <p className="cc-step__line cc-step__warn" role="note" data-permission-consequence="skip">
+              {SKIP_WARNING}
+            </p>
           ) : null}
         </>
       )}
-      {saving ? (
-        <p role="status" className="cc-step__line">
-          Saving…
-        </p>
-      ) : null}
       {note === null ? null : (
         <div className="cc-actions">
           <p role="alert" className="cc-step__line">
             {note}
           </p>
-          {file.current === null && mode !== 'unknown' ? <Button onClick={() => void load()}>Try again</Button> : null}
+          <Button onClick={retry}>Try again</Button>
         </div>
       )}
-      {note !== null && mode === 'unknown' ? (
-        <div className="cc-actions">
-          <Button onClick={() => void load()}>Try again</Button>
-        </div>
-      ) : null}
     </div>
   );
 }

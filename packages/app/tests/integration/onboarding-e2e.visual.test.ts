@@ -637,7 +637,8 @@ describe('the first run, end to end', () => {
       await next(tab, 'claude-code.permission');
       expect(await recorded(tab, A, 'claude-code.import-run')).toBe('done');
 
-      // Permission: an arrow key moves the focus and writes nothing; Keep leaves the default.
+      // Permission (r11 O4): an arrow key moves the focus and writes nothing; Enter selects and still writes nothing; the page has
+      // no button of its own, and Next with the saved card showing leaves the default as it was.
       await reach(tab, 'claude-code.permission');
       walked.push('claude-code.permission');
       await inspect(tab, variant, 'claude-code.permission');
@@ -647,15 +648,19 @@ describe('the first run, end to end', () => {
       await tab.keyboard.press('ArrowUp');
       await tab.waitForTimeout(300);
       expect((await daemonOf(tab, A)).mutations.length, 'an arrow key on Permissions wrote nothing').toBe(permBefore);
-      expect(await tab.getByRole('button', { name: /^Keep / }).count(), 'an arrow key chose no other card').toBe(0);
-      // Enter chooses the focused card; that alone still writes nothing (the page's own Use / Keep does).
+      expect(
+        await tab.locator('[data-flow-page="claude-code.permission"] button').count(),
+        'Permissions draws no button of its own',
+      ).toBe(0);
+      // Enter chooses the focused card; that alone still writes nothing (only Next does).
       await tab.keyboard.press('Enter');
       await tab.waitForTimeout(300);
       expect((await daemonOf(tab, A)).mutations.length, 'choosing a card on Permissions wrote nothing').toBe(
         permBefore,
       );
       await shot(tab, variant, 'claude-code.permission-picked');
-      await tab.getByRole('button', { name: /^Keep / }).click();
+      // Back to the saved card: Next has nothing to save.
+      await tab.locator('[data-flow-page="claude-code.permission"] [data-choice="skip"]').click();
       await tab.waitForTimeout(300);
       await next(tab, 'codex.import-choice');
       expect(await recorded(tab, A, 'claude-code.permission')).toBe('done');

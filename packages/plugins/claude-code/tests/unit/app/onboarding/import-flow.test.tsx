@@ -271,14 +271,14 @@ describe('the Claude import pages inside the real setup flow', () => {
     expect(disabled('[data-flow-later]')).toBe(false);
   });
 
-  test('(c) a pick waiting for its press on Conversations holds neither Back nor Later', async () => {
+  test('(c) a pick on Conversations holds neither Back nor Later, and registers a save for Next instead of a button', async () => {
     await openFlow({
       answered: ['import-choice', 'import-settings', 'import-model-set', 'import-instructions', 'import-skills'],
     });
     await next(); // MCP → conversations
     expect(pageKey()).toBe(pageOf('conversations'));
     await press('input[value="off"]');
-    expect(root().querySelector('[data-conversations-confirm]')).not.toBeNull();
+    expect(root().querySelector('[data-flow-page] .cc-step button')).toBeNull();
     expect(disabled('[data-step-back]')).toBe(false);
     expect(disabled('[data-flow-later]')).toBe(false);
   });

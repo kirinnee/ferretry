@@ -1,0 +1,135 @@
+/**
+ * A first-run page that asks ONE question whose answer is ONE key in `harness-claude-code.yaml` (the permission mode, whether
+ * the conversations show): the file is read with its etag, the page offers the pick, and Next SAVES it (`step.commit`,
+ * contract rule 8) — the page draws no Save/Use/Keep button of its own. A pick is not a write: choosing a card (the arrow
+ * keys too) only selects; only a real Next writes, once, against the etag it read, and `Later` and Back never do. A pick
+ * equal to what is saved registers nothing, so Next just records the answer.
+ *
+ * A refused write throws: the footer shows the reason, the page stays, and the next Next reads the file afresh and tries
+ * again. A write the machine HELD for the owner is saved but not yet in effect: the footer says so once and the next Next
+ * goes on (the saved mode is then the pick, so nothing is written again). When the route does not show the file (its text
+ * is WITHHELD, or the YAML does not read), the page shows the answer as unknown and writes nothing.
+ */
+import type { StepHost } from '@ferretry/kernel/contract';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { z } from 'zod';
+import type { ClaudeCodeClient } from '../../lib/client.ts';
+import { sentenceOf } from './words.ts';
+
+const CONFIG_FILE = 'harness-claude-code.yaml';
+const READ = 'GET /v1/config/file' as const;
+const WRITE = 'PUT /v1/config/file' as const;
+
+const FileSchema = z.looseObject({
+  text: z.string(),
+  etag: z.string().min(1),
+  absolutePath: z.string().min(1).optional(),
+  state: z.string().optional(),
+});
+const WroteSchema = z.looseObject({ etag: z.string().min(1), outcome: z.enum(['applied', 'pending']) });
+
+const HELD = 'Saved, but the owner has to confirm it before it takes effect. Press Next to go on.';
+
+interface Loaded {
+  readonly text: string;
+  readonly etag: string;
+}
+
+export interface ConfigChoiceOptions<T extends string> {
+  readonly client: ClaudeCodeClient;
+  readonly step?: StepHost | undefined;
+  /** The answer the file holds, or `null` when it cannot be told safely (withheld, unreadable, a value that is not one). */
+  readonly read: (text: string, state?: string) => T | null;
+  /** The file's text with the answer set and every other key and comment left as it was. */
+  readonly write: (text: string, value: T) => string;
+}
+
+export interface ConfigChoice<T extends string> {
+  /** `null` until the first read ends; `'unknown'` when the answer cannot be told. */
+  readonly saved: T | 'unknown' | null;
+  /** The card showing: the pick, else the saved answer. */
+  readonly shown: T | null;
+  readonly pick: (next: T) => void;
+  /** Where to change it at the machine, for the unknown case. */
+  readonly where: string;
+  /** Why the file could not be read, when it could not. */
+  readonly note: string | null;
+  readonly retry: () => void;
+}
+
+export function useConfigChoice<T extends string>({
+  client,
+  step,
+  read,
+  write,
+}: ConfigChoiceOptions<T>): ConfigChoice<T> {
+  const [saved, setSaved] = useState<T | 'unknown' | null>(null);
+  const [picked, setPicked] = useState<T | null>(null);
+  const [where, setWhere] = useState<string>(CONFIG_FILE);
+  const [note, setNote] = useState<string | null>(null);
+  const file = useRef<Loaded | null>(null);
+
+  /** Reads the file; the sentence of why it could not be read, or `null`. */
+  const load = useCallback(async (): Promise<string | null> => {
+    let failure: string | null = null;
+    try {
+      const got = FileSchema.parse(await client.call(READ, { query: { path: CONFIG_FILE } }));
+      const found = read(got.text, got.state);
+      setWhere(got.absolutePath ?? CONFIG_FILE);
+      if (found === null) {
+        file.current = null; // never written: its text is not shown, or does not read
+        setSaved('unknown');
+      } else {
+        file.current = { text: got.text, etag: got.etag };
+        setSaved(found);
+        setPicked(prior => prior ?? found);
+      }
+      setNote(null);
+    } catch (error) {
+      file.current = null;
+      failure = sentenceOf(error);
+      setNote(failure);
+      setSaved(prior => prior ?? 'unknown');
+    }
+    step?.ready();
+    return failure;
+  }, [client, read, step]);
+
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    void load();
+  }, [load]);
+
+  // What Next saves follows the pick: nothing when it is the saved answer.
+  useEffect(() => {
+    if (step === undefined || saved === null || saved === 'unknown' || picked === null) return;
+    if (picked === saved) {
+      step.commit(null);
+      return;
+    }
+    step.commit(async () => {
+      const failure = file.current === null ? await load() : null;
+      const loaded = file.current as Loaded | null;
+      if (loaded === null) throw new Error(failure ?? 'The file could not be read.');
+      try {
+        const text = write(loaded.text, picked);
+        const wrote = WroteSchema.parse(
+          await client.call(WRITE, { body: { path: CONFIG_FILE, text, etag: loaded.etag } }),
+        );
+        file.current = { text, etag: wrote.etag };
+        setSaved(picked);
+        if (wrote.outcome === 'pending') throw new Error(HELD);
+      } catch (error) {
+        // Moved under us or refused: read it afresh on the next Next. (A held write is saved: the file is current.)
+        if (!(error instanceof Error && error.message === HELD)) file.current = null;
+        throw error instanceof Error ? error : new Error(sentenceOf(error));
+      }
+    });
+  }, [saved, picked, step, client, load, write]);
+
+  const pick = useCallback((next: T) => setPicked(next), []);
+  const retry = useCallback(() => void load(), [load]);
+  return { saved, shown: picked ?? (saved === 'unknown' ? null : saved), pick, where, note, retry };
+}

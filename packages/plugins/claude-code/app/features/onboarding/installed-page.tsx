@@ -5,7 +5,7 @@
  * back scrubbed). The command is read from the installer's own plan, never made up here, and nothing installs until the
  * person presses the button.
  */
-import { Button } from '@ferretry/app';
+import { Button, StepDemo } from '@ferretry/app';
 import { isStepUpRefusal } from '@ferretry/app/ui';
 import { SetupToolSchema, type ToolInstallPlan, ToolInstallResultSchema } from '@ferretry/plugin-runtimes/contract';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -175,9 +175,7 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
   const shownCommand = read.kind === 'plan' && read.plan.kind === 'runnable' ? read.plan.command : '';
   return (
     <div className="cc-step" data-onboarding-step="claude-code.installed">
-      <p className="cc-step__line">
-        Claude Code runs the ferrets that use your Claude account. It is not on this machine yet.
-      </p>
+      <p className="cc-step__line">Claude Code runs the ferrets that use your Claude account.</p>
       {read.kind === 'confirm' ? (
         <div className="cc-actions">
           <Button onClick={() => void readPlan(false)}>Show the install command</Button>
@@ -190,7 +188,7 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
       ) : null}
       {read.kind === 'plan' && read.plan.kind === 'runnable' ? (
         <>
-          <p className="cc-step__line">Ferretry will run exactly this, once you press the button:</p>
+          <p className="cc-step__line">Runs exactly this when you press Install:</p>
           <pre className="cc-command" data-install-command="">
             {read.plan.command}
           </pre>
@@ -226,7 +224,9 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
           </Button>
         </div>
       ) : null}
-      <InstalledDemo />
+      <StepDemo>
+        <InstalledDemo />
+      </StepDemo>
     </div>
   );
 }
