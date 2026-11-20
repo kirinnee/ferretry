@@ -293,6 +293,19 @@ for (const variant of [DESKTOP, DESKTOP_DARK]) {
       }
     });
 
+    it('should keep a 2-option list WITHOUT a search box in the popover (the threshold still decides on a desktop)', async () => {
+      const { tab, close } = await open(variant, '&n=2');
+      try {
+        await press(tab, variant);
+        await tab.waitForSelector('[role=listbox]');
+        expect(await tab.$('[data-select-popover] input')).toBeNull();
+        expect(await tab.$('[role=dialog]')).toBeNull();
+        await shotOf(tab, variant, 'popover-two');
+      } finally {
+        await close();
+      }
+    });
+
     it('should search 60 options, scroll the list inside the popover and leave the page where it was', async () => {
       const { tab, close } = await open(variant, '&n=60');
       try {
@@ -477,6 +490,65 @@ for (const variant of [PHONE, PHONE_DARK, NARROW]) {
         expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       } finally {
         await close();
+      }
+    });
+
+    it('should ALWAYS have a focused search field in the dialog, even for 2 options: typing filters, Enter picks ONCE', async () => {
+      const { tab, close } = await open(variant, '&n=2');
+      try {
+        await press(tab, variant);
+        await tab.waitForSelector('[role=dialog]');
+        await shotOf(tab, variant, 'dialog-two');
+        const dialog = await box(tab, '[role=dialog]');
+        if (dialog === null) throw new Error('no dialog');
+        expect(Math.abs(dialog.left + dialog.width / 2 - variant.width / 2)).toBeLessThanOrEqual(8);
+        expect(Math.abs(dialog.top + dialog.height / 2 - variant.height / 2)).toBeLessThanOrEqual(8);
+        expect(await tab.$$('[role=dialog] input')).toHaveLength(1);
+        expect(await tab.evaluate(() => document.activeElement?.tagName)).toBe('INPUT');
+        expect(await optionLabels(tab)).toEqual(['Automatic', 'Auto-approve edits']);
+        await tab.keyboard.type('approve');
+        expect(await optionLabels(tab)).toEqual(['Auto-approve edits']);
+        await shotOf(tab, variant, 'dialog-two-filtered');
+        await tab.keyboard.press('Enter');
+        await tab.waitForSelector('[role=dialog]', { state: 'detached' });
+        expect(await picks(tab)).toEqual(['auto-approve']);
+        expect(await focusedId(tab)).toBe('agent-default');
+      } finally {
+        await close();
+      }
+    });
+
+    it('should pick a filtered 2-option row by a tap, onChange once', async () => {
+      const { tab, close } = await open(variant, '&n=2');
+      try {
+        await press(tab, variant);
+        await tab.waitForSelector('[role=dialog]');
+        await tab.keyboard.type('approve');
+        await hit(tab, variant, '[role=option]');
+        await tab.waitForSelector('[role=dialog]', { state: 'detached' });
+        expect(await picks(tab)).toEqual(['auto-approve']);
+      } finally {
+        await close();
+      }
+    });
+
+    it('should honour an explicit searchable="never" in the dialog and keep 60 options searchable', async () => {
+      const never = await open(variant, '&n=2&searchable=never');
+      try {
+        await press(never.tab, variant);
+        await never.tab.waitForSelector('[role=dialog]');
+        expect(await never.tab.$('[role=dialog] input')).toBeNull();
+      } finally {
+        await never.close();
+      }
+      const many = await open(variant, '&n=60');
+      try {
+        await press(many.tab, variant);
+        await many.tab.waitForSelector('[role=dialog]');
+        expect(await many.tab.$$('[role=dialog] input')).toHaveLength(1);
+        expect(await many.tab.evaluate(() => document.activeElement?.tagName)).toBe('INPUT');
+      } finally {
+        await many.close();
       }
     });
 

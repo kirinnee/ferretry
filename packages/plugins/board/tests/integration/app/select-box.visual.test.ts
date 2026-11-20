@@ -225,7 +225,10 @@ describe('the board picks from lists with the app’s select box', () => {
           await tab.waitForSelector('[role="option"]');
           const open = await listing(tab);
           expect(open.options).toEqual(['Backlog', 'Active', 'In review', 'Shipped', 'To test (verify)', 'Closed']);
-          expect(open.hasSearch, 'six options: no search field').toBe(false);
+          // Search follows the mode: "auto" always searches in the phone dialog, and keeps the length threshold (none) on a desktop.
+          expect(open.hasSearch, `six options: search only in the phone dialog (${viewport.name})`).toBe(
+            viewport.phone,
+          );
           expect(open.listScrolls, 'six options: no scroll bar').toBe(false);
           if (viewport.phone) {
             expect(open.asDialog).toBe(true);
