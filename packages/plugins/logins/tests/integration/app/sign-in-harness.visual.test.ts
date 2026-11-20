@@ -205,51 +205,66 @@ describe('the add panel, mounted as a page mounts it (registered panel, subject 
     ['codex-add', 'Codex', 'OPENAI_', /ANTHROPIC_|claude/iu, 'codex'],
     ['claude-add', 'Claude Code', 'ANTHROPIC_', /OPENAI_|codex/iu, 'claude-code'],
   ] as const) {
-    it(`${scene}: a SHARED provider (OpenRouter) shows and sends only ${name}'s half, in the tile, the form and the request`, async () => {
-      const { tab, close } = await open(VIEWPORTS[0], 'studio-light', scene);
-      try {
-        await tab.locator('[data-add-login-other-ways] summary').click();
-        const tile = tab.locator('[data-provider-tile="openrouter"]');
-        await tile.waitFor({ state: 'visible' });
-        const tileScope = await tile.locator('[data-login-scope]').getAttribute('data-login-scope');
-        await tile.click();
-        const head = tab.locator('[data-add-login-preset="openrouter"]');
-        await head.waitFor({ state: 'visible' });
-        const headScope = await head.locator('[data-login-scope]').getAttribute('data-login-scope');
-        // The full form: every field the person would see.
-        await tab.locator('[data-quick-key-form], [data-add-login-form]').first().waitFor({ state: 'visible' });
-        if ((await tab.locator('[data-quick-key-more]').count()) > 0) await tab.locator('[data-quick-key-more]').click();
-        await tab.locator('[data-add-login-form="openrouter"]').waitFor({ state: 'visible' });
-        const fields = await tab.evaluate(() =>
-          [...document.querySelectorAll('[data-add-login-form] .fy-lg-field > span.font-mono')].map(el => el.textContent),
-        );
-        const text = await tab.evaluate(() => document.querySelector('[data-add-login-locked]')?.textContent ?? '');
-        await shot(tab, VIEWPORTS[0], 'studio-light', `${scene}-shared-form`);
-        await tab.locator('[data-add-login-form] [data-change-submit]').click();
-        await tab.waitForFunction(() =>
-          (window as unknown as { __calls: { route: string }[] }).__calls.some(
-            c => c.route === 'POST /v1/logins/changes',
-          ),
-        );
-        const staged = (await calls(tab)).filter(call => call.route === 'POST /v1/logins/changes').at(-1)?.body as {
-          harness: string;
-          halves?: string[];
-          env: Record<string, string>;
-        };
-        measured[`${scene}-shared`] = { tileScope, headScope, fields, halves: staged.halves, env: Object.keys(staged.env) };
-        expect(tileScope).toBe(half);
-        expect(headScope).toBe(tileScope);
-        expect(fields.length).toBeGreaterThan(0);
-        for (const field of fields) expect(field).toStartWith(own);
-        expect(text).not.toMatch(other);
-        expect(staged.harness).toBe(half);
-        expect(staged.halves).toEqual([half]);
-        expect(Object.keys(staged.env).length).toBeGreaterThan(0);
-        for (const key of Object.keys(staged.env)) expect(key).toStartWith(own);
-      } finally {
-        await close();
+    for (const viewport of VIEWPORTS) {
+      for (const theme of THEMES) {
+        it(`${scene}: a SHARED provider (OpenRouter) shows and sends only ${name}'s half, in the tile, the form and the request (${viewport.name}, ${theme})`, async () => {
+          const { tab, problems, close } = await open(viewport, theme, scene);
+          try {
+            await tab.locator('[data-add-login-other-ways] summary').click();
+            const tile = tab.locator('[data-provider-tile="openrouter"]');
+            await tile.waitFor({ state: 'visible' });
+            await shot(tab, viewport, theme, `${scene}-shared-grid`);
+            const tileScope = await tile.locator('[data-login-scope]').getAttribute('data-login-scope');
+            await tile.click();
+            const head = tab.locator('[data-add-login-preset="openrouter"]');
+            await head.waitFor({ state: 'visible' });
+            const headScope = await head.locator('[data-login-scope]').getAttribute('data-login-scope');
+            // The full form: every field the person would see.
+            await tab.locator('[data-quick-key-form], [data-add-login-form]').first().waitFor({ state: 'visible' });
+            if ((await tab.locator('[data-quick-key-more]').count()) > 0)
+              await tab.locator('[data-quick-key-more]').click();
+            await tab.locator('[data-add-login-form="openrouter"]').waitFor({ state: 'visible' });
+            const fields = await tab.evaluate(() =>
+              [...document.querySelectorAll('[data-add-login-form] .fy-lg-field > span.font-mono')].map(
+                el => el.textContent,
+              ),
+            );
+            const text = await tab.evaluate(() => document.querySelector('[data-add-login-locked]')?.textContent ?? '');
+            await shot(tab, viewport, theme, `${scene}-shared-form`);
+            await tab.locator('[data-add-login-form] [data-change-submit]').click();
+            await tab.waitForFunction(() =>
+              (window as unknown as { __calls: { route: string }[] }).__calls.some(
+                c => c.route === 'POST /v1/logins/changes',
+              ),
+            );
+            const staged = (await calls(tab)).filter(call => call.route === 'POST /v1/logins/changes').at(-1)?.body as {
+              harness: string;
+              halves?: string[];
+              env: Record<string, string>;
+            };
+            measured[`${scene}-shared-${viewport.name}-${theme}`] = {
+              tileScope,
+              headScope,
+              fields,
+              halves: staged.halves,
+              env: Object.keys(staged.env),
+            };
+            expect(tileScope).toBe(half);
+            expect(headScope).toBe(tileScope);
+            expect(fields.length).toBeGreaterThan(0);
+            for (const field of fields) expect(field).toStartWith(own);
+            expect(text).not.toMatch(other);
+            expect(staged.harness).toBe(half);
+            expect(staged.halves).toEqual([half]);
+            expect(Object.keys(staged.env).length).toBeGreaterThan(0);
+            for (const key of Object.keys(staged.env)) expect(key).toStartWith(own);
+            expect(problems).toEqual([]);
+          } finally {
+            await close();
+          }
+        });
       }
-    });
+    }
   }
 
   for (const viewport of VIEWPORTS) {
