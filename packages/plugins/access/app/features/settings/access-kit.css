@@ -1,0 +1,433 @@
+/* ============================================================================
+   ACCESS SETTINGS (r10 S10). Every layout answers to the SETTINGS PANEL's own width (`.fy-acc` is a size container), never
+   to the window: at a 768px window the real panel is ~212px wide, at 1280 about 700px. Theme tokens only.
+   ========================================================================== */
+
+.fy-acc {
+  container: fy-acc / inline-size;
+  min-width: 0;
+}
+/* Free text (names a device chose, daemon sentences) wraps; nothing in a tab scrolls sideways. */
+.fy-acc :is(p, span, code, li) {
+  overflow-wrap: anywhere;
+}
+
+/* ---- a sentence to read: tinted, a 3px bar on the edge, no box ---- */
+.fy-acc-notice {
+  --tone: var(--muted);
+  --tone-bg: var(--surface-2);
+  align-items: flex-start;
+  background: var(--tone-bg);
+  border-inline-start: 3px solid var(--tone);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  color: var(--fg);
+  display: flex;
+  font-size: var(--text-xs);
+  gap: 8px;
+  line-height: 1.45;
+  margin: 8px 0;
+  padding: 8px 12px;
+}
+.fy-acc-notice[data-tone='warn'] {
+  --tone: var(--warn);
+  --tone-bg: var(--warn-bg);
+}
+.fy-acc-notice[data-tone='err'] {
+  --tone: var(--err);
+  --tone-bg: var(--err-bg);
+}
+.fy-acc-notice[data-tone='ok'] {
+  --tone: var(--ok);
+  --tone-bg: var(--ok-bg);
+}
+.fy-acc-notice__icon {
+  color: var(--tone);
+  display: inline-flex;
+  flex: none;
+  padding-top: 2px;
+}
+.fy-acc-notice__text {
+  min-width: 0;
+}
+
+/* ---- a row of auto-width buttons ---- */
+.fy-acc-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ---- the confirm step of a revoke ---- */
+.fy-acc-confirm {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* ---- a labelled switch ---- */
+.fy-acc-axis {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  min-width: 0;
+}
+.fy-acc-axis__label {
+  color: var(--muted);
+  min-width: 5.5rem;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.fy-acc-axis[data-checked='yes'] .fy-acc-axis__label {
+  color: var(--fg);
+}
+
+/* ---- rows that hold a body under the name (the `SettingRow` children slot) ---- */
+/* What folds open under a device keeps clear of the next one: a step in from the name. */
+.fy-acc-body details > .fy-acc-caps,
+.fy-acc-body details > .fy-acc-notice {
+  margin-inline-start: 20px;
+}
+.fy-acc-body {
+  display: grid;
+  gap: 8px;
+  padding: 0 var(--pad-panel, 16px) 12px;
+}
+.fy-acc-fine {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  margin: 0;
+}
+.fy-acc-faint {
+  color: var(--faint);
+}
+/* A group heading's trailing note ("3 of 6 allowed") and a chip beside a name. */
+.fy-acc-chip {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+.fy-acc-chip[data-tone='ok'] {
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+  color: var(--ok);
+}
+.fy-acc-chip[data-tone='err'] {
+  background: var(--err-bg);
+  border-color: var(--err-border);
+  color: var(--err);
+}
+.fy-acc-chip[data-tone='plain'] {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  color: var(--muted);
+}
+
+/* ---- Devices: the pairing code ---- */
+.fy-acc-invite {
+  display: grid;
+  gap: 12px;
+}
+.fy-acc-invite__head {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.fy-acc-invite__title {
+  color: var(--fg);
+  font-weight: 600;
+  margin: 0;
+}
+.fy-acc-invite__main {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.fy-acc-invite__main > * {
+  min-width: 0;
+}
+.fy-acc-invite__facts {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.fy-acc-invite__url {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 6px 8px;
+  user-select: all;
+  word-break: break-all;
+}
+@container fy-acc (min-width: 560px) {
+  .fy-acc-invite__main[data-has-qr='yes'] {
+    align-items: start;
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+}
+
+/* ---- Devices and Grants: capability rows, a name with its two switches ---- */
+.fy-acc-caps {
+  display: grid;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fy-acc-cap {
+  align-items: start;
+  border-top: var(--divider-width, 1px) solid var(--border);
+  display: grid;
+  gap: 4px 16px;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 8px 0;
+}
+.fy-acc-cap:first-child {
+  border-top-width: 0;
+}
+.fy-acc-cap__name {
+  padding-top: 12px;
+  color: var(--fg);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+.fy-acc-cap__axes {
+  align-items: start;
+  display: grid;
+  gap: 4px 20px;
+  grid-template-columns: minmax(0, 1fr);
+}
+.fy-acc-cap__axis {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.fy-acc-cap__reason {
+  color: var(--warn);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  margin: 0;
+  max-width: 28ch;
+}
+@container fy-acc (min-width: 480px) {
+  .fy-acc-cap {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 20rem);
+  }
+  .fy-acc-cap__axes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+/* Two capabilities to a line when the panel is wide, so six rows are not a tall single column. */
+@container fy-acc (min-width: 820px) {
+  .fy-acc-caps[data-wide='yes'] {
+    column-gap: 40px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .fy-acc-caps[data-wide='yes'] > .fy-acc-cap:nth-child(2) {
+    border-top-width: 0;
+  }
+}
+
+/* ---- Grants: a capability row with its weight and its two switches ---- */
+.fy-acc-grant {
+  display: grid;
+  gap: 8px 16px;
+  padding: 12px var(--pad-panel, 16px);
+}
+.fy-acc-grant__head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.fy-acc-grant__name {
+  color: var(--fg);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+.fy-acc-grant__axes {
+  display: grid;
+  gap: 12px 24px;
+  grid-template-columns: minmax(0, 1fr);
+}
+.fy-acc-grant__axis {
+  align-items: start;
+  display: grid;
+  gap: 2px 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.fy-acc-grant__axis > :first-child {
+  min-width: 0;
+}
+.fy-acc-grant__question {
+  color: var(--muted);
+  display: block;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+.fy-acc-grant__badge {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+@container fy-acc (min-width: 560px) {
+  .fy-acc-grant__axes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ---- the capability legend: marks in a wrapping line ---- */
+.fy-acc-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--pad-panel, 16px) 12px;
+}
+.fy-acc-legend li {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+/* ---- Security: number + unit + save, and the passkey list ---- */
+.fy-acc-number {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.fy-acc-number input {
+  width: 6rem;
+}
+
+/* ---- Audit log ---- */
+.fy-acc-log {
+  display: grid;
+  gap: 2px;
+  padding: 8px var(--pad-panel, 16px);
+}
+.fy-acc-log__head {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+.fy-acc-log__what {
+  color: var(--fg);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+.fy-acc-log__when {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  margin: 0;
+}
+
+/* ---- a tab that cannot show its list ---- */
+.fy-acc-state {
+  border-block: var(--divider-width, 1px) solid var(--border);
+  display: grid;
+  gap: 8px;
+  padding: 12px var(--pad-panel, 16px);
+}
+.fy-acc-state__title {
+  align-items: center;
+  color: var(--fg);
+  display: flex;
+  font-size: var(--text-base);
+  font-weight: 600;
+  gap: 8px;
+  margin: 0;
+}
+.fy-acc-state p {
+  margin: 0;
+}
+
+/* ============================================================================
+   THE SETTINGS ROW, BY THE PANEL'S WIDTH.
+   `SettingRow` (the app's kit) lays itself out by the WINDOW's width: at a 768px window its "wide" breakpoint says there is
+   room for a name and a control side by side, but the real panel is ~212px there (the nav and the side column take the rest),
+   so the control ran off the right edge. Inside an Access tab the same row is laid out by `.fy-acc`'s own width instead:
+   below 560px the name takes its own line and the control sits under it, left-aligned and wrapping; from 560px the name keeps
+   40% and the control sits beside it. Only inline rules on the row's own marks (`data-setting-*`); nothing is cut.
+   ========================================================================== */
+@container fy-acc (max-width: 559.98px) {
+  .fy-acc [data-setting-row] > div:first-child {
+    flex-wrap: wrap;
+  }
+  .fy-acc [data-setting-row] > div:first-child > span:first-child {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .fy-acc [data-setting-hint] {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+  .fy-acc [data-setting-controls] {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+  }
+  /* The empty slot kept for an (i) is no use when the control has its own line. */
+  .fy-acc [data-setting-controls] > span[aria-hidden='true']:last-child:empty {
+    display: none;
+  }
+  /* The choices wrap into rows that each fill the width, so a last lone choice is as wide as the rest. */
+  .fy-acc [data-setting-controls] [role='radiogroup'] {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .fy-acc [data-setting-controls] [role='radiogroup'] > label {
+    flex: 1 1 5.5rem;
+  }
+}
+@container fy-acc (min-width: 560px) {
+  .fy-acc [data-setting-row] > div:first-child > span:first-child {
+    flex: 0 0 40%;
+    min-width: 0;
+  }
+  .fy-acc [data-setting-controls] {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .fy-acc [data-setting-hint] {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+}
+
+/* The one-line lead-in over a tab's first group keeps a step of air before the heading. */
+.fy-acc-fine.fy-acc-lead {
+  margin-bottom: 16px;
+}
+
+/* A segmented control's radios are `sr-only` (absolute, no offsets), and in a wrapped row their static position can land past
+   the panel's edge: pin them to the control's own corner so they never widen the tab. */
+.fy-acc [role='radiogroup'] > label > input.sr-only {
+  inset-inline-start: 0;
+  top: 0;
+}
+
+/* The short reason under a switch ("Fixed on the host") is a quiet line, not a block. */
+.fy-acc-notice.fy-acc-grant__badge {
+  margin: 0;
+  padding: 2px 8px;
+}

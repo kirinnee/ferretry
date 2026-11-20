@@ -16,7 +16,11 @@ import type {
   PairingInvitationLink,
 } from '../../../../../contract/index.ts';
 
-import type { ReactTestRenderer } from 'react-test-renderer';
+import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
+
+/** The real switch button inside the span that carries a `data-device-grant` mark. */
+const switchIn = (mark: ReactTestInstance | undefined) =>
+  mark?.find(node => typeof node.type === 'string' && node.props.role === 'switch');
 import should from 'should';
 import {
   AddDeviceCard,
@@ -320,6 +324,7 @@ describe('AddDeviceCard', () => {
 
     // Act
     run(() => marked(renderer, 'data-pair-revoke-code')[0]?.props.onClick());
+    run(() => marked(renderer, 'data-pair-revoke-code-confirm')[0]?.props.onClick());
     run(() => marked(renderer, 'data-pair-discard')[0]?.props.onClick());
 
     // Assert
@@ -362,6 +367,7 @@ describe('AddDeviceCard', () => {
 
     // Act
     run(() => marked(renderer, 'data-pair-revoke-device', OTHER_DEVICE_ID)[0]?.props.onClick());
+    run(() => marked(renderer, 'data-pair-revoke-device-confirm', OTHER_DEVICE_ID)[0]?.props.onClick());
 
     // Assert
     should(asked).deepEqual([OTHER_DEVICE_ID]);
@@ -440,7 +446,7 @@ describe('AddDeviceCard capabilities', () => {
     grants: grantsOf({ fleet: { use: true, configure: true } }),
   });
   const switchFor = (renderer: ReactTestRenderer, id: string, capability: string, axis: string) =>
-    marked(renderer, 'data-device-grant', `${id}:${capability}.${axis}`)[0];
+    switchIn(marked(renderer, 'data-device-grant', `${id}:${capability}.${axis}`)[0]);
 
   it('puts eight capabilities by two axes behind a disclosure on every device, closed by default', () => {
     // Sixteen switches per device would bury the list at 390px, so the rows stay a summary line.
@@ -497,7 +503,9 @@ describe('AddDeviceCard capabilities', () => {
     // Assert
     const refused = switchFor(renderer, DEVICE_ID, 'filesystem', 'use');
     should(refused?.props.disabled).equal(true);
-    should(refused?.props['data-device-grant-blocked']).equal('yes');
+    should(
+      marked(renderer, 'data-device-grant', `${DEVICE_ID}:filesystem.use`)[0]?.props['data-device-grant-blocked'],
+    ).equal('yes');
     const reason = marked(renderer, 'data-device-grant-reason', `${DEVICE_ID}:filesystem.use`);
     should(reason).have.length(1);
     expect(text(renderer)).toContain('ferret device grant <device> filesystem --use');
@@ -696,6 +704,9 @@ describe('AddDeviceSurface device note slot', () => {
     await runAsync(async () =>
       marked(renderer as ReactTestRenderer, 'data-pair-revoke-device', DEVICE_ID)[0]?.props.onClick(),
     );
+    await runAsync(async () =>
+      marked(renderer as ReactTestRenderer, 'data-pair-revoke-device-confirm', DEVICE_ID)[0]?.props.onClick(),
+    );
 
     // Assert
     should(marked(renderer as ReactTestRenderer, 'data-slot')).be.empty();
@@ -734,6 +745,7 @@ describe('AddDeviceSurface', () => {
     await runAsync(async () => marked(surface, 'data-pair-mint')[0]?.props.onClick());
     const showed = marked(surface, 'data-pair-code').length;
     await runAsync(async () => marked(surface, 'data-pair-revoke-code')[0]?.props.onClick());
+    await runAsync(async () => marked(surface, 'data-pair-revoke-code-confirm')[0]?.props.onClick());
 
     // Assert — and the code is gone from the screen once the machine has ended it.
     should(showed).equal(1);
@@ -759,6 +771,7 @@ describe('AddDeviceSurface', () => {
     // Act
     await runAsync(async () => marked(surface, 'data-pair-mint')[0]?.props.onClick());
     await runAsync(async () => marked(surface, 'data-pair-revoke-code')[0]?.props.onClick());
+    await runAsync(async () => marked(surface, 'data-pair-revoke-code-confirm')[0]?.props.onClick());
 
     // Assert
     should(marked(surface, 'data-pair-code')).have.length(1);
@@ -848,10 +861,60 @@ describe('AddDeviceSurface', () => {
 
     // Act
     await runAsync(async () => marked(surface, 'data-pair-revoke-device', DEVICE_ID)[0]?.props.onClick());
+    await runAsync(async () => marked(surface, 'data-pair-revoke-device-confirm', DEVICE_ID)[0]?.props.onClick());
 
     // Assert
     should(calls).containEql(`DELETE /v1/pair/devices/${DEVICE_ID}`);
     should(marked(surface, 'data-paired-device')).be.empty();
+  });
+
+  it('sends no request on the first press of a revoke, says what happens, and Cancel leaves the device alone', async () => {
+    // Arrange
+    const calls: string[] = [];
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(<AddDeviceSurface connection={connection()} createClient={fakeClient({ calls })} />);
+    });
+    const surface = renderer as ReactTestRenderer;
+    const before = calls.length;
+
+    // Act
+    await runAsync(async () => marked(surface, 'data-pair-revoke-device', DEVICE_ID)[0]?.props.onClick());
+
+    // Assert — the press opened a question; nothing was sent.
+    should(calls.length).equal(before);
+    should(marked(surface, 'data-pair-revoke-device-confirming', DEVICE_ID)).have.length(1);
+    expect(text(surface)).toContain('signs this browser out of this machine');
+
+    // Act — Cancel closes it and still sends nothing.
+    await runAsync(async () => marked(surface, 'data-pair-revoke-device-cancel', DEVICE_ID)[0]?.props.onClick());
+    should(marked(surface, 'data-pair-revoke-device-confirming')).be.empty();
+    should(calls.length).equal(before);
+    should(marked(surface, 'data-paired-device')).have.length(1);
+  });
+
+  it('sends no request on the first press of Revoke now, and Cancel keeps the code live', async () => {
+    // Arrange
+    const calls: string[] = [];
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(
+        <AddDeviceSurface connection={connection()} createClient={fakeClient({ calls })} now={() => NOW} />,
+      );
+    });
+    const surface = renderer as ReactTestRenderer;
+    await runAsync(async () => marked(surface, 'data-pair-mint')[0]?.props.onClick());
+    const before = calls.length;
+
+    // Act
+    await runAsync(async () => marked(surface, 'data-pair-revoke-code')[0]?.props.onClick());
+
+    // Assert
+    should(calls.length).equal(before);
+    should(marked(surface, 'data-pair-revoke-code-confirming')).have.length(1);
+    await runAsync(async () => marked(surface, 'data-pair-revoke-code-cancel')[0]?.props.onClick());
+    should(calls.length).equal(before);
+    should(marked(surface, 'data-pair-code')).have.length(1);
   });
 
   it('keeps a device listed when its revoke failed, because it can still reach the machine', async () => {
@@ -872,6 +935,7 @@ describe('AddDeviceSurface', () => {
 
     // Act
     await runAsync(async () => marked(surface, 'data-pair-revoke-device', DEVICE_ID)[0]?.props.onClick());
+    await runAsync(async () => marked(surface, 'data-pair-revoke-device-confirm', DEVICE_ID)[0]?.props.onClick());
 
     // Assert
     should(marked(surface, 'data-paired-device')).have.length(1);
@@ -890,16 +954,18 @@ describe('AddDeviceSurface', () => {
 
     // Act — configure on also turns use on, in one request.
     await runAsync(async () =>
-      marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0]?.props.onClick(),
+      switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0])?.props.onClick(),
     );
 
     // Assert
     should(calls).containEql(`PATCH /v1/pair/devices/${DEVICE_ID}/grants`);
     should(patches).deepEqual([{ deviceId: DEVICE_ID, body: { terminal: { use: true, configure: true } } }]);
-    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props['aria-checked']).equal(true);
-    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0]?.props['aria-checked']).equal(
+    should(switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0])?.props['aria-checked']).equal(
       true,
     );
+    should(
+      switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0])?.props['aria-checked'],
+    ).equal(true);
   });
 
   it('turns configure off with use, and re-reads nothing it was not told', async () => {
@@ -915,13 +981,15 @@ describe('AddDeviceSurface', () => {
     const surface = renderer as ReactTestRenderer;
 
     // Act
-    await runAsync(async () => marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props.onClick());
+    await runAsync(async () =>
+      switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0])?.props.onClick(),
+    );
 
     // Assert
     should(patches[0]?.body).deepEqual({ terminal: { use: false, configure: false } });
-    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0]?.props['aria-checked']).equal(
-      false,
-    );
+    should(
+      switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.configure`)[0])?.props['aria-checked'],
+    ).equal(false);
   });
 
   it('shows a refused change inline on its device and leaves every switch as the daemon last said', async () => {
@@ -941,14 +1009,20 @@ describe('AddDeviceSurface', () => {
     const surface = renderer as ReactTestRenderer;
 
     // Act
-    await runAsync(async () => marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props.onClick());
+    await runAsync(async () =>
+      switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0])?.props.onClick(),
+    );
 
     // Assert
     should(marked(surface, 'data-device-grant-failure', DEVICE_ID)).have.length(1);
     expect(text(surface)).toContain('can only be turned on from a device that holds it');
-    should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props['aria-checked']).equal(false);
+    should(switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0])?.props['aria-checked']).equal(
+      false,
+    );
     // And the next attempt clears the old sentence before it asks again.
-    await runAsync(async () => marked(surface, 'data-device-grant', `${DEVICE_ID}:fleet.use`)[0]?.props.onClick());
+    await runAsync(async () =>
+      switchIn(marked(surface, 'data-device-grant', `${DEVICE_ID}:fleet.use`)[0])?.props.onClick(),
+    );
     should(marked(surface, 'data-device-grant-failure')).have.length(1);
   });
 

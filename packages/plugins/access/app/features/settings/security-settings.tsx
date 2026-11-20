@@ -23,8 +23,8 @@
 
 import { Loading } from '@ferretry/app/ui';
 import type { PasskeysView } from '../../../contract/index.ts';
-import { Fingerprint, Plus } from 'lucide-react';
-import { useCallback, useEffect, useId, useState } from 'react';
+import { Plus } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 
 import {
   confirmExistingSentence,
@@ -47,6 +47,9 @@ import { SecuritySettingsBlock } from './security-settings-block.tsx';
 
 export type PasskeyClientFactory = (connection: DaemonConnection) => Promise<StepUpClient>;
 
+import { SettingGroup, SettingRow } from '@ferretry/app';
+import { AccessTab, Notice } from './access-kit.tsx';
+
 const LOAD_FAILURE = 'This machine did not answer the list of passkeys. Reload the page, or try again in a moment.';
 const REFRESH_FAILURE = 'The passkey was added, but the list could not be refreshed. Reload the page to see it.';
 
@@ -64,7 +67,6 @@ interface SecurityCardProps {
 
 /** The panel's content for a loaded list. Pure over its props so every state is one render. */
 function SecurityCard({ view, supported, origin, machine, deviceId, busy, failure, onAdd }: SecurityCardProps) {
-  const headingId = useId();
   const windowCommand = passkeyWindowCommand({
     ...(view.deviceName === undefined ? {} : { name: view.deviceName }),
     id: deviceId,
@@ -76,78 +78,83 @@ function SecurityCard({ view, supported, origin, machine, deviceId, busy, failur
       ? registrationClosesSentence(view.registrationClosesAt)
       : null;
   return (
-    <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel" aria-labelledby={headingId} data-security-card="">
-      <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
-        <Fingerprint size={16} className="text-accent" aria-hidden="true" />
-        Passkeys on this device
-      </h3>
-      <p className="m-0 text-cell leading-base text-muted" data-security-cost="">
-        {PASSKEY_COST_SENTENCE}
-      </p>
-      {view.passkeys.length === 0 ? (
-        <p className="m-0 text-cell leading-base text-muted" data-security-empty="">
-          This device has no passkey for this machine yet.
-        </p>
-      ) : (
-        <ul className="m-0 flex min-w-0 list-none flex-col p-0">
-          {view.passkeys.map(passkey => (
-            <li
-              key={passkey.id}
-              data-security-passkey={passkey.id}
-              className="min-w-0 break-words border-t border-border-soft py-2 text-ui text-fg first:border-t-0"
-            >
-              {passkeyLabel(passkey)}
-            </li>
-          ))}
-        </ul>
-      )}
-      {canAdd ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            disabled={busy}
-            data-security-add=""
-            onClick={onAdd}
-            className="kt-btn disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Plus size={15} aria-hidden="true" />
-            Add a passkey
-          </button>
-          {closes === null ? null : (
-            <span className="text-meta leading-base text-faint" data-security-closes="">
-              {closes}
-            </span>
-          )}
-          {view.registration === 'confirm-existing' ? (
-            <span className="text-meta leading-base text-faint" data-security-confirm-existing="">
-              {confirmExistingSentence(machine)}
-            </span>
-          ) : null}
-        </div>
-      ) : (
-        <div data-security-unavailable="">
-          {supported && view.passkeys.length === 0 ? (
-            <>
-              <p className="m-0 text-cell leading-base text-muted">{NO_WINDOW_SENTENCE}</p>
-              <OwnerCommand command={windowCommand} />
-            </>
-          ) : (
-            <p className="m-0 text-cell leading-base text-muted">
-              {supported ? registrationClosedSentence(true, windowCommand) : unsupportedSentence(origin)}
-            </p>
-          )}
-        </div>
-      )}
-      {failure === null ? null : (
-        <p
-          role="alert"
-          data-security-failure=""
-          className="m-0 rounded-control border border-err-border bg-err-bg px-2 py-1 text-meta leading-base text-err"
+    <div data-security-card="">
+      <SettingGroup label="Passkeys on this device">
+        {/* The cost, said before the button: what a passkey is for and what it does not do. */}
+        <SettingRow
+          name="What a passkey does here"
+          hint="Asked once to unlock this machine."
+          dataAttributes={{ 'data-security-cost': '' }}
         >
+          <div className="fy-acc-body">
+            <p className="fy-acc-fine">{PASSKEY_COST_SENTENCE}</p>
+          </div>
+        </SettingRow>
+        {view.passkeys.length === 0 ? (
+          <SettingRow
+            name="No passkey yet"
+            hint="This device has no passkey for this machine yet."
+            dataAttributes={{ 'data-security-empty': '' }}
+          />
+        ) : (
+          view.passkeys.map(passkey => (
+            <SettingRow
+              key={passkey.id}
+              name={passkeyLabel(passkey)}
+              dataAttributes={{ 'data-security-passkey': passkey.id }}
+            />
+          ))
+        )}
+        {canAdd ? (
+          <SettingRow
+            name="Add a passkey"
+            hint={
+              closes !== null ? (
+                <span data-security-closes="">{closes}</span>
+              ) : view.registration === 'confirm-existing' ? (
+                <span data-security-confirm-existing="">{confirmExistingSentence(machine)}</span>
+              ) : undefined
+            }
+            control={() => (
+              <button
+                type="button"
+                disabled={busy}
+                data-security-add=""
+                onClick={onAdd}
+                className="kt-btn min-h-[44px] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Plus size={15} aria-hidden="true" />
+                Add a passkey
+              </button>
+            )}
+          />
+        ) : (
+          <SettingRow
+            name="Adding a passkey"
+            hint="Not available right now."
+            dataAttributes={{ 'data-security-unavailable': '' }}
+          >
+            <div className="fy-acc-body">
+              {supported && view.passkeys.length === 0 ? (
+                <>
+                  <p className="fy-acc-fine">{NO_WINDOW_SENTENCE}</p>
+                  <OwnerCommand command={windowCommand} />
+                </>
+              ) : (
+                <p className="fy-acc-fine">
+                  {supported ? registrationClosedSentence(true, windowCommand) : unsupportedSentence(origin)}
+                </p>
+              )}
+            </div>
+          </SettingRow>
+        )}
+      </SettingGroup>
+      {failure === null ? null : (
+        <Notice tone="err" role="alert" marks={{ 'data-security-failure': '' }}>
           {failure}
-        </p>
+        </Notice>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -225,9 +232,8 @@ export function SecuritySurface({
     }
     setBusy(false);
   }, [credentials, loaded, origin, supported]);
-
   return (
-    <div className="flex min-w-0 flex-col gap-2">
+    <AccessTab name="security">
       {loaded.kind === 'ready' ? (
         <SecurityCard
           view={loaded.view}
@@ -243,11 +249,11 @@ export function SecuritySurface({
         // Nothing is drawn in place while reading (an empty bordered panel would only flash): the shell's one bar says so.
         <Loading kind="bar" label="Reading the passkeys this device holds…" />
       ) : (
-        <section className="kt-panel p-panel" role="status" aria-label="Passkeys" data-security-state={loaded.kind}>
-          <p className="m-0 text-cell leading-base text-muted">{LOAD_FAILURE}</p>
-        </section>
+        <Notice tone="warn" role="status" marks={{ 'data-security-state': loaded.kind }}>
+          {LOAD_FAILURE}
+        </Notice>
       )}
       <SecuritySettingsBlock connection={connection} createClient={createClient} />
-    </div>
+    </AccessTab>
   );
 }

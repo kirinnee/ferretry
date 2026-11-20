@@ -33,9 +33,10 @@ import {
   widensSecurity,
   widensWithPasskey,
 } from '@ferretry/core-gate/contract';
-import { SlidersHorizontal } from 'lucide-react';
+import { SettingGroup, SettingRow, Segmented } from '@ferretry/app';
 import { useEffect, useId, useState } from 'react';
-import { cn, type DaemonConnection } from '../../shell-grants.ts';
+import type { DaemonConnection } from '../../shell-grants.ts';
+import { AccessTab, LabelledSwitch, Notice, StateBlock } from './access-kit.tsx';
 import {
   boundsLabel,
   boundsSentence,
@@ -71,19 +72,23 @@ const rowsFor = (view: SecuritySettingsView): readonly SecuritySettingField[] =>
   'idleExpiryDays',
 ];
 
-const ERROR_TONE = 'rounded-control border border-err-border bg-err-bg px-2 py-1 text-err';
-const LIMIT_TONE = 'rounded-control border border-border bg-surface-2 px-2 py-1 text-muted';
-
 interface NumberRowProps {
   readonly field: NumericSecuritySetting;
   readonly view: SecuritySettingsView;
+  /** What is typed but not saved; `undefined` while the input shows the saved value. */
   readonly draft: string | undefined;
   readonly busy: boolean;
   readonly onDraft: (draft: string) => void;
   readonly onSave: (value: number) => void;
 }
 
-/** One numeric setting: its value, its bounds, and a field with a Save that appears once it differs. */
+/** The id the "other value" segment carries when what is typed is not one of the common choices. */
+const CUSTOM_CHOICE = 'custom';
+
+/**
+ * A number with its common choices: a `Segmented` for the presets, a number box, its unit, and Save once it differs from the
+ * saved value. A preset only fills the box; Save sends it. The saved value, the bounds and any limit sit under the row.
+ */
 function NumberRow({ field, view, draft, busy, onDraft, onSave }: NumberRowProps) {
   const inputId = useId();
   const noteId = useId();
@@ -93,6 +98,7 @@ function NumberRow({ field, view, draft, busy, onDraft, onSave }: NumberRowProps
   const dirty = draft !== undefined && draft !== String(current);
   const parsed = draft === undefined ? null : parseSettingDraft(field, draft);
   const outOfBounds = dirty && draft !== undefined ? boundsSentence(field, draft) : null;
+  // A change that widens (loosens) security is held at the machine unless it can ride a passkey.
   const widens = parsed !== null && widensSecurity(field, current, parsed) && !view.mayWiden;
   const withPasskey = widens && widensWithPasskey(field);
   const blocked = widens && !withPasskey;
@@ -101,92 +107,88 @@ function NumberRow({ field, view, draft, busy, onDraft, onSave }: NumberRowProps
     (blocked ? widenAtMachineSentence(view.widenCommand) : withPasskey ? WIDEN_WITH_PASSKEY_SENTENCE : null);
   const shown = draft ?? String(current);
   const presets = SECURITY_SETTING_PRESETS[field] ?? [];
+  const onPreset = presets.some(value => String(value) === shown);
   return (
-    <div className="min-w-0 border-t border-border-soft py-2 first:border-t-0" data-security-setting={field}>
-      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3">
-        <label htmlFor={inputId} className="min-w-0 text-ui font-semibold text-fg">
-          {copy.label}
-        </label>
-        <span className="text-ui text-fg" data-security-value={field}>
-          {describeSettingValue(field, current)}
-        </span>
-      </div>
-      <p className="m-0 text-meta leading-base text-muted">{copy.explanation}</p>
-      <p className="m-0 text-meta leading-base text-muted" data-security-bounds={field}>
-        {boundsLabel(field)}
-      </p>
-      {presets.length === 0 ? null : (
-        <fieldset
-          className="m-0 mt-1 flex min-w-0 flex-wrap gap-1.5 border-0 p-0"
-          aria-label={`${copy.label}: common choices`}
-        >
-          {presets.map(value => {
-            const chosen = shown === String(value);
-            return (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={chosen}
-                disabled={busy}
-                data-security-preset={`${field}:${value}`}
-                onClick={() => onDraft(String(value))}
-                className={cn(
-                  'min-h-[44px] rounded-control border px-control-x text-ui transition-colors',
-                  chosen ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-fg',
-                  busy ? 'cursor-not-allowed opacity-70' : 'hover:border-accent',
-                )}
-              >
-                {describeSettingValue(field, value)}
-              </button>
-            );
-          })}
-        </fieldset>
+    <SettingRow
+      name={copy.label}
+      hint={copy.explanation}
+      wide
+      dataAttributes={{ 'data-security-setting': field }}
+      control={() => (
+        <div className="fy-acc-number">
+          {presets.length === 0 ? null : (
+            <Segmented
+              label={`${copy.label}: common choices`}
+              value={onPreset ? shown : CUSTOM_CHOICE}
+              disabled={busy}
+              options={[
+                ...presets.map(value => ({ id: String(value), label: describeSettingValue(field, value) })),
+                ...(onPreset ? [] : [{ id: CUSTOM_CHOICE, label: 'Other' }]),
+              ]}
+              onChange={next => {
+                if (next !== CUSTOM_CHOICE) onDraft(next);
+              }}
+            />
+          )}
+          <input
+            id={inputId}
+            type="number"
+            inputMode="numeric"
+            min={bounds.min}
+            max={bounds.max}
+            step={1}
+            value={shown}
+            disabled={busy}
+            aria-label={copy.label}
+            aria-describedby={note === null ? undefined : noteId}
+            aria-invalid={outOfBounds === null ? undefined : true}
+            data-security-input={field}
+            onChange={event => onDraft(event.currentTarget.value)}
+            className="kt-input !min-h-[44px] !w-24 min-w-0"
+          />
+          <span className="text-meta text-muted" aria-hidden="true">
+            {copy.unit?.many}
+          </span>
+          {dirty ? (
+            <button
+              type="button"
+              className="kt-btn min-h-[44px]"
+              data-variant="primary"
+              data-security-save={field}
+              disabled={busy || parsed === null || blocked}
+              onClick={() => {
+                if (parsed !== null) onSave(parsed);
+              }}
+            >
+              Save
+            </button>
+          ) : null}
+        </div>
       )}
-      <div className="mt-1 flex flex-wrap items-center gap-2">
-        <input
-          id={inputId}
-          type="number"
-          inputMode="numeric"
-          min={bounds.min}
-          max={bounds.max}
-          step={1}
-          value={shown}
-          disabled={busy}
-          aria-describedby={note === null ? undefined : noteId}
-          aria-invalid={outOfBounds === null ? undefined : true}
-          data-security-input={field}
-          onChange={event => onDraft(event.currentTarget.value)}
-          className="kt-input !min-h-[44px] !w-24 min-w-0"
-        />
-        <span className="text-meta text-muted" aria-hidden="true">
-          {copy.unit?.many}
-        </span>
-        {dirty ? (
-          <button
-            type="button"
-            className="kt-btn min-h-[44px]"
-            data-variant="primary"
-            data-security-save={field}
-            disabled={busy || parsed === null || blocked}
-            onClick={() => {
-              if (parsed !== null) onSave(parsed);
+    >
+      <div className="fy-acc-body">
+        <p className="fy-acc-fine">
+          Now{' '}
+          <span className="font-semibold text-fg" data-security-value={field}>
+            {describeSettingValue(field, current)}
+          </span>
+          {' · '}
+          <span data-security-bounds={field}>{boundsLabel(field)}</span>
+        </p>
+        {note === null ? null : (
+          <Notice
+            tone={outOfBounds === null ? 'info' : 'err'}
+            id={noteId}
+            marks={{
+              'data-security-note-kind': outOfBounds === null ? (blocked ? 'at-machine' : 'passkey') : 'bounds',
+              'data-security-note': field,
             }}
           >
-            Save
-          </button>
-        ) : null}
+            {note}
+          </Notice>
+        )}
       </div>
-      {note === null ? null : (
-        <p
-          id={noteId}
-          className={cn('m-0 mt-1 text-meta leading-base', outOfBounds === null ? LIMIT_TONE : ERROR_TONE)}
-          data-security-note-kind={outOfBounds === null ? (blocked ? 'at-machine' : 'passkey') : 'bounds'}
-          data-security-note={field}
-        >
-          {note}
-        </p>
-      )}
-    </div>
+    </SettingRow>
   );
 }
 
@@ -199,40 +201,39 @@ interface SwitchRowProps {
 
 /** A switch. Turning it on tightens; turning it off loosens, so it is dead without `mayWiden`. */
 function SwitchRow({ field, view, busy, onSave }: SwitchRowProps) {
-  const noteId = useId();
   const copy = SECURITY_SETTING_COPY[field];
   const on = view.settings[field];
   const dead = on && !view.mayWiden;
   return (
-    <div className="min-w-0 border-t border-border-soft py-2 first:border-t-0" data-security-setting={field}>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={on}
-        aria-describedby={dead ? noteId : undefined}
-        disabled={busy || dead}
-        data-security-switch={field}
-        onClick={() => onSave(!on)}
-        className={cn(
-          'flex min-h-[44px] w-full items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
-          on ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2',
-          busy || dead ? 'cursor-not-allowed opacity-70' : 'hover:border-accent',
-        )}
-      >
-        <span className="min-w-0">
-          <span className={cn('block text-ui font-semibold', on ? 'text-accent' : 'text-fg')}>{copy.label}</span>
-          <span className="block text-meta leading-base text-muted">{copy.explanation}</span>
-        </span>
-        <span className="shrink-0 text-ui text-fg" data-security-value={field}>
-          {on ? 'On' : 'Off'}
-        </span>
-      </button>
+    <SettingRow
+      name={copy.label}
+      hint={copy.explanation}
+      dataAttributes={{ 'data-security-setting': field }}
+      control={() => (
+        <>
+          <span className="text-ui text-fg" data-security-value={field}>
+            {on ? 'On' : 'Off'}
+          </span>
+          <LabelledSwitch
+            label={on ? 'On' : 'Off'}
+            showLabel={false}
+            accessibleName={`${copy.label}${dead ? `. ${widenAtMachineSentence(view.widenCommand)}` : ''}`}
+            checked={on}
+            disabled={busy || dead}
+            onChange={next => onSave(next)}
+            marks={{ 'data-security-switch': field }}
+          />
+        </>
+      )}
+    >
       {dead ? (
-        <p id={noteId} className={cn('m-0 mt-1 text-meta leading-base', LIMIT_TONE)} data-security-note={field}>
-          {widenAtMachineSentence(view.widenCommand)}
-        </p>
+        <div className="fy-acc-body">
+          <Notice tone="info" marks={{ 'data-security-note': field }}>
+            {widenAtMachineSentence(view.widenCommand)}
+          </Notice>
+        </div>
       ) : null}
-    </div>
+    </SettingRow>
   );
 }
 
@@ -248,7 +249,6 @@ export interface SecuritySettingsBlockProps {
 
 /** The live block for one machine. Reads once, never polls, and sends only the field that changed. */
 export function SecuritySettingsBlock({ connection, createClient }: SecuritySettingsBlockProps) {
-  const headingId = useId();
   const [loaded, setLoaded] = useState<Loaded>({ kind: 'loading' });
   const [drafts, setDrafts] = useState<Readonly<Partial<Record<NumericSecuritySetting, string>>>>({});
   const [busy, setBusy] = useState(false);
@@ -286,14 +286,13 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
     );
   if (loaded.kind !== 'ready')
     return (
-      <section
-        className="kt-panel p-panel"
-        role="status"
-        aria-label="Security settings"
-        data-security-settings-state={loaded.kind}
+      <StateBlock
+        title="Security settings"
+        label="Security settings"
+        marks={{ 'data-security-settings-state': loaded.kind }}
       >
-        <p className="m-0 text-cell leading-base text-muted">{SECURITY_LOAD_FAILURE}</p>
-      </section>
+        <p className="fy-acc-fine">{SECURITY_LOAD_FAILURE}</p>
+      </StateBlock>
     );
 
   const { client, view } = loaded;
@@ -326,53 +325,49 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
   };
 
   return (
-    <section
-      className="kt-panel flex min-w-0 flex-col gap-2 p-panel"
-      aria-labelledby={headingId}
-      data-security-settings=""
-    >
-      <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
-        <SlidersHorizontal size={16} className="text-accent" aria-hidden="true" />
-        Security settings
-      </h3>
-      {view.source === 'damaged' ? (
-        <p role="alert" className={cn('m-0 text-meta leading-base', ERROR_TONE)} data-security-damaged="">
-          {DAMAGED_SETTINGS_SENTENCE}
-        </p>
-      ) : null}
-      <div className="flex min-w-0 flex-col">
-        {rowsFor(view).map(field =>
-          isSecuritySwitch(field) ? (
-            <SwitchRow
-              key={field}
-              field={field}
-              view={view}
-              busy={busy}
-              onSave={value => void save({ [field]: value }, field)}
-            />
-          ) : (
-            <NumberRow
-              key={field}
-              field={field}
-              view={view}
-              draft={drafts[field]}
-              busy={busy}
-              onDraft={draft => setDrafts(current => ({ ...current, [field]: draft }))}
-              onSave={value => void save({ [field]: value }, field)}
-            />
-          ),
+    <AccessTab name="security-settings">
+      <div data-security-settings="">
+        <SettingGroup label="Security settings">
+          {view.source === 'damaged' ? (
+            <li className="min-w-0">
+              <Notice tone="err" role="alert" marks={{ 'data-security-damaged': '' }}>
+                {DAMAGED_SETTINGS_SENTENCE}
+              </Notice>
+            </li>
+          ) : null}
+          {rowsFor(view).map(field =>
+            isSecuritySwitch(field) ? (
+              <SwitchRow
+                key={field}
+                field={field}
+                view={view}
+                busy={busy}
+                onSave={value => void save({ [field]: value }, field)}
+              />
+            ) : (
+              <NumberRow
+                key={field}
+                field={field}
+                view={view}
+                draft={drafts[field]}
+                busy={busy}
+                onDraft={draft => setDrafts(current => ({ ...current, [field]: draft }))}
+                onSave={value => void save({ [field]: value }, field)}
+              />
+            ),
+          )}
+        </SettingGroup>
+        {notice === null ? null : (
+          <Notice tone="info" role="status" marks={{ 'data-security-notice': '' }}>
+            {notice}
+          </Notice>
+        )}
+        {failure === null ? null : (
+          <Notice tone="err" role="alert" marks={{ 'data-security-failure-settings': '' }}>
+            {failure}
+          </Notice>
         )}
       </div>
-      {notice === null ? null : (
-        <p role="status" className="m-0 text-meta leading-base text-muted" data-security-notice="">
-          {notice}
-        </p>
-      )}
-      {failure === null ? null : (
-        <p role="alert" className={cn('m-0 text-meta leading-base', ERROR_TONE)} data-security-failure-settings="">
-          {failure}
-        </p>
-      )}
-    </section>
+    </AccessTab>
   );
 }

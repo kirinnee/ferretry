@@ -26,10 +26,11 @@
 
 import { CAPABILITY_AXES, CAPABILITY_NAMES, type CapabilityName } from '@ferretry/core-gate/contract';
 import type { CapabilityAxis } from '@ferretry/kernel/contract';
-import { CircleAlert, Fingerprint, ShieldCheck } from 'lucide-react';
+import { SettingGroup, SettingRow } from '@ferretry/app';
+import { CircleAlert, Fingerprint } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
 import type { CapabilityGrantView, GrantsView } from '../../../contract/index.ts';
-import { cn, type DaemonConnection, useDaemonClient, useStepUpRequest } from '../../shell-grants.ts';
+import { type DaemonConnection, useDaemonClient, useStepUpRequest } from '../../shell-grants.ts';
 import {
   axisGuidance,
   axisLabel,
@@ -53,13 +54,14 @@ import {
 import { CapabilityList, WeightMark } from './capability-list.tsx';
 import { changeGrants, type GrantClient, readGrants } from './grants-api.ts';
 import { Loading } from '@ferretry/app/ui';
+import { AccessTab, LabelledSwitch, Notice, type NoticeTone, StateBlock } from './access-kit.tsx';
 
 /** The tone each guidance level paints with, kept in one place so five rows cannot disagree. */
-const TONE_CLASS: Readonly<Record<GrantGuidance['tone'], string>> = {
-  ok: 'border-ok-border bg-ok-bg text-ok',
-  disclosure: 'border-border-strong bg-surface-2 text-muted',
-  limit: 'border-warn-border bg-warn-bg text-warn',
-  fault: 'border-err-border bg-err-bg text-err',
+const TONE: Readonly<Record<GrantGuidance['tone'], NoticeTone>> = {
+  ok: 'ok',
+  disclosure: 'info',
+  limit: 'warn',
+  fault: 'err',
 };
 
 /**
@@ -67,8 +69,8 @@ const TONE_CLASS: Readonly<Record<GrantGuidance['tone'], string>> = {
  *
  * THE REASON IS NEVER HOVER-ONLY. A person meeting a control they cannot move needs the reason at the same
  * moment, in the flow of the page: a refusal that is a fault is shown whole, and one that repeats on every row (a
- * passkey; fixed on the host) is a short visible badge, with its full sentence kept in the page for a screen reader
- * (it is what the switch is described by) and said once, in full, in the panels above the cards.
+ * passkey; fixed on the host) is a short visible badge, with its full sentence kept in the page for a screen reader (and
+ * said once, in full, in the panels above the cards).
  */
 function AxisControl({
   entry,
@@ -80,31 +82,14 @@ function AxisControl({
 }: {
   readonly entry: CapabilityGrantView;
   readonly axis: CapabilityAxis;
-  /** Whether the daemon would accept this browser changing this axis at all. */
   readonly changeable: boolean;
-  /** True when this caller may switch the capability off but never back on. */
   readonly oneWay: boolean;
   readonly busy: boolean;
   readonly onChange: (next: boolean) => void;
 }) {
   const recorded = entry.granted[axis];
-  /**
-   * An off axis a one-way caller may never turn on is NOT A CONTROL.
-   *
-   * Rendering a switch that fails on press teaches somebody the product is broken; the truth is that
-   * the machine decided, and a sentence naming the machine is the useful thing in its place. This is
-   * the owner's rule made structural: "do not render a control that always fails."
-   */
   const deadWideningSwitch = oneWay && !recorded;
   const disabled = busy || !changeable || deadWideningSwitch;
-  const describedBy = useId();
-  /**
-   * The one sentence that keeps this from being a greyed switch.
-   *
-   * Composed in `src/lib/grants.ts` rather than here, because the ALLOWED-but-immovable case needs its
-   * own wording and getting it wrong is silent: reusing the `configure` refusal on an allowed `use`
-   * row tells a person their access is switched off when it is on.
-   */
   const reason = deadWideningSwitch
     ? {
         tone: 'limit' as const,
@@ -113,67 +98,51 @@ function AxisControl({
         offersStepUp: false,
       }
     : axisGuidance(entry, axis, changeable);
+  const whole = !reason.offersStepUp && reason.tone === 'fault';
+  // The sentence the short badge stands for is what the switch is described by (a screen reader hears it with the switch).
+  const reasonId = useId();
 
   return (
-    <div className="min-w-0">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={recorded}
-        aria-describedby={describedBy}
+    <div className="fy-acc-grant__axis">
+      <span>
+        <span className="text-ui font-semibold text-fg">{axisLabel(axis)}</span>
+        <span className="fy-acc-grant__question">{axisQuestion(axis)}</span>
+      </span>
+      <LabelledSwitch
+        label={axisLabel(axis)}
+        showLabel={false}
+        accessibleName={`${capabilityLabel(entry.capability)} — ${axisLabel(axis)}`}
+        describedBy={reasonId}
+        checked={recorded}
         disabled={disabled}
-        data-grant-axis={`${entry.capability}.${axis}`}
-        data-grant-axis-changeable={changeable ? 'yes' : 'no'}
-        onClick={() => onChange(!recorded)}
-        className={cn(
-          'flex min-h-[44px] w-full items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
-          recorded ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2',
-          disabled ? 'cursor-not-allowed opacity-70' : 'hover:border-accent',
-        )}
-      >
-        <span className="min-w-0">
-          <span className={cn('block text-ui font-semibold', recorded ? 'text-accent' : 'text-fg')}>
-            {axisLabel(axis)}
-          </span>
-          <span className="block text-meta leading-base text-muted">{axisQuestion(axis)}</span>
-        </span>
-        <span
-          aria-hidden="true"
-          className={cn(
-            'relative h-5 w-9 shrink-0 rounded-full border transition-colors',
-            recorded ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
-          )}
-        >
-          <span
-            className={cn(
-              'absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-fg transition-transform',
-              recorded ? 'translate-x-[18px]' : 'translate-x-[2px]',
-            )}
-          />
-        </span>
-      </button>
+        onChange={onChange}
+        marks={{
+          'data-grant-axis': `${entry.capability}.${axis}`,
+          'data-grant-axis-changeable': changeable ? 'yes' : 'no',
+        }}
+      />
       {/* The same few sentences repeat on every row (a passkey; fixed on the host; only at the machine), and the panels
-          above already say them once: a row shows the short badge, and the sentence stays for a screen reader (it is what
-          the switch is described by). A refusal that is a fault is the one row-specific thing, so it is shown whole. */}
-      <p
-        id={describedBy}
-        className={cn('m-0 mt-1 rounded-control border px-2 py-1 text-meta leading-base', TONE_CLASS[reason.tone])}
-        data-grant-axis-reason={`${entry.capability}.${axis}`}
+          above already say them once: a row shows the short badge. A refusal that is a fault is the one row-specific thing,
+          so it is shown whole. */}
+      <Notice
+        tone={TONE[reason.tone]}
+        id={reasonId}
+        className="fy-acc-grant__badge"
+        marks={{ 'data-grant-axis-reason': `${entry.capability}.${axis}` }}
       >
-        {reason.offersStepUp || reason.tone !== 'fault' ? (
+        {whole ? (
+          reason.explanation
+        ) : (
           <>
             <span aria-hidden="true">{reason.badge}</span>
             <span className="sr-only">{reason.explanation}</span>
           </>
-        ) : (
-          reason.explanation
         )}
-      </p>
+      </Notice>
     </div>
   );
 }
 
-/** One capability: what it reaches, where the answer came from, and both axes. */
 function CapabilityCard({
   entry,
   view,
@@ -186,83 +155,62 @@ function CapabilityCard({
   readonly onChange: (axis: CapabilityAxis, next: boolean) => void;
 }) {
   const headingId = useId();
-  /**
-   * Whether this browser may change this capability's grants at all — the DAEMON's rule, in
-   * `grantChangeable`. A passkey step-up never decides it: that can be obtained on the spot.
-   */
   const changeable = grantChangeable(view, entry);
-  /**
-   * Whether a switch here can travel back.
-   *
-   * `mayGrant` is false for every browser, unconditionally — no passkey step-up buys widening, and a
-   * browser on the machine itself is still a browser. So for such a caller an OFF axis is not a control
-   * at all, and an ON axis is a door that only closes. Both facts are stated rather than discovered by
-   * pressing something.
-   */
   const oneWay = !entry.mayGrant;
   const deviceNote = deviceGrantNote(entry);
 
   return (
-    <section
-      className="kt-panel flex min-w-0 flex-col gap-2 p-panel"
-      aria-labelledby={headingId}
-      data-grant-capability={entry.capability}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <h4 id={headingId} className="m-0 text-ui font-semibold text-fg">
-          {capabilityLabel(entry.capability)}
-        </h4>
-        <span
-          className="rounded-control border border-border-strong bg-surface-2 px-2 py-0.5 text-meta text-faint"
-          data-grant-origin={entry.origin}
-        >
-          {entry.origin === 'config file' ? 'set by the operator' : 'product default'}
-        </span>
-        <span className="ml-auto">
+    <li className="min-w-0" data-grant-capability={entry.capability} aria-labelledby={headingId}>
+      <div className="fy-acc-grant">
+        <div className="fy-acc-grant__head">
+          <h4 id={headingId} className="fy-acc-grant__name m-0">
+            {capabilityLabel(entry.capability)}
+          </h4>
           <WeightMark weight={capabilityWeight(entry.capability)} />
-        </span>
-      </div>
-      <p className="m-0 text-meta leading-base text-muted">{capabilityReach(entry.capability)}</p>
-      <p className="m-0 text-meta leading-base text-faint">{originNote(entry)}</p>
-      {deviceNote === null ? null : (
-        <p
-          className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
-          data-grant-device-note={entry.capability}
-        >
-          {deviceNote}
+          <span className="fy-acc-chip" data-tone="plain" data-grant-origin={entry.origin}>
+            {entry.origin === 'config file' ? 'set by the operator' : 'product default'}
+          </span>
+        </div>
+        <p className="fy-acc-fine">
+          {capabilityReach(entry.capability)} {originNote(entry)}
         </p>
-      )}
-      <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-        {CAPABILITY_AXES.map(axis => (
-          <AxisControl
-            key={axis}
-            entry={entry}
-            axis={axis}
-            changeable={changeable}
-            oneWay={oneWay}
-            busy={busy}
-            onChange={next => onChange(axis, next)}
-          />
-        ))}
+        {deviceNote === null ? null : (
+          <Notice tone="warn" marks={{ 'data-grant-device-note': entry.capability }}>
+            {deviceNote}
+          </Notice>
+        )}
+        <div className="fy-acc-grant__axes">
+          {CAPABILITY_AXES.map(axis => (
+            <AxisControl
+              key={axis}
+              entry={entry}
+              axis={axis}
+              changeable={changeable}
+              oneWay={oneWay}
+              busy={busy}
+              onChange={next => onChange(axis, next)}
+            />
+          ))}
+        </div>
+        {/* THE ONE-WAY DOOR, said before anybody walks through it. A browser may switch this off
+            and can never switch it back on, so the consequence belongs beside the switch rather than in
+            a document read afterwards. It is shown while the capability is still ON, because that is the
+            only moment the warning can change what somebody does. */}
+        {oneWay && entry.granted.use ? (
+          <details className="text-meta leading-base text-warn" data-grant-one-way={entry.capability}>
+            <summary className="min-h-[44px] cursor-pointer py-3 leading-snug">
+              Switching this off cannot be undone from here
+            </summary>
+            <Notice tone="warn">{remoteRevokeWarning(entry.capability)}</Notice>
+          </details>
+        ) : null}
       </div>
-      {/* THE ONE-WAY DOOR, said before anybody walks through it. A browser may switch this off
-          and can never switch it back on, so the consequence belongs beside the switch rather than in
-          a document read afterwards. It is shown while the capability is still ON, because that is the
-          only moment the warning can change what somebody does. */}
-      {oneWay && entry.granted.use ? (
-        <details className="text-meta leading-base text-warn" data-grant-one-way={entry.capability}>
-          <summary className="cursor-pointer">Switching this off cannot be undone from here</summary>
-          <p className="m-0 mt-1 rounded-control border border-warn-border bg-warn-bg px-2 py-1">
-            {remoteRevokeWarning(entry.capability)}
-          </p>
-        </details>
-      ) : null}
-    </section>
+    </li>
   );
 }
 
 /**
- * The passkey panel: says whether this device has confirmed, and offers to.
+ * The passkey row: says whether this device has confirmed, and offers to.
  *
  * ONE SENTENCE AND ONE BUTTON. The button is the app's own step-up prompt, so a second prompt component
  * would be a second place for the ceremony to go wrong. It is rendered only for a governed caller who has
@@ -279,18 +227,14 @@ export function GrantStepUpPanel({
   readonly onStepUp?: (() => void) | undefined;
 }) {
   return (
-    <section
-      className="kt-panel flex min-w-0 flex-col gap-2 p-panel"
-      aria-label="Passkey confirmation"
-      data-grant-step-up={steppedUp ? 'held' : 'needed'}
-    >
-      <p className="m-0 flex items-center gap-1.5 text-ui font-semibold text-fg">
-        <Fingerprint size={15} className="text-accent" aria-hidden="true" />
-        {steppedUp ? 'Confirmed with your passkey' : 'Passkey confirmation'}
-      </p>
-      <p className="m-0 text-meta leading-base text-muted">{STEP_UP_NOTE}</p>
-      {steppedUp || onStepUp === undefined ? null : (
-        <div>
+    <SettingRow
+      name={steppedUp ? 'Confirmed with your passkey' : 'Passkey confirmation'}
+      hint={steppedUp ? 'Changes here go through.' : 'Needed before a change here.'}
+      dataAttributes={{ 'data-grant-step-up': steppedUp ? 'held' : 'needed' }}
+      control={() =>
+        steppedUp || onStepUp === undefined ? (
+          <Fingerprint size={16} className="text-accent" aria-hidden="true" />
+        ) : (
           <button
             type="button"
             className="kt-btn min-h-[44px]"
@@ -301,9 +245,13 @@ export function GrantStepUpPanel({
             <Fingerprint size={15} aria-hidden="true" />
             Confirm with passkey…
           </button>
-        </div>
-      )}
-    </section>
+        )
+      }
+    >
+      <div className="fy-acc-body">
+        <p className="fy-acc-fine">{STEP_UP_NOTE}</p>
+      </div>
+    </SettingRow>
   );
 }
 
@@ -332,88 +280,67 @@ export function GrantsCard({
   onChange,
   onStepUp,
 }: GrantsCardProps) {
-  const headingId = useId();
-  /**
-   * The rows, in the protocol's declared order rather than the array's arrival order.
-   *
-   * A daemon is free to serve them in any order, and five permission rows that reshuffle between
-   * reads are five rows a person cannot build a habit around. A capability the view omits is simply
-   * absent — this screen never invents a row and therefore never shows an answer nobody gave.
-   */
   const entries = CAPABILITY_NAMES.map(capability =>
     view.capabilities.find(candidate => candidate.capability === capability),
   ).filter((entry): entry is CapabilityGrantView => entry !== undefined);
-  /** Which of the connections this is, from the DAEMON's own account of the request. */
   const posture = connectionPosture(view.governed);
 
   return (
-    <section
-      className="flex min-w-0 flex-col gap-3"
-      aria-labelledby={headingId}
-      data-grant-surface={String(connection.daemonId)}
-    >
-      {/* READING BEFORE CHANGING. The list answers "what may this browser do here, why, and how much
-          does each one hand over"; the switches below answer "change it". Somebody arriving from a
-          refused control needs the first question answered before the second is even relevant.
-
-          `governed` is PASSED rather than inferred. It is the DAEMON's account of the connection —
-          `isGovernedCaller(request.loopback)` — and letting the list fall back to `mayGrant` unanimity here
-          would be the second derivation of one fact, harmless while `mayGrant` is `!governed` and wrong the
-          moment it is not. It is never inferred from this page's address, which would invert the answer
-          over a relay. */}
-      <CapabilityList connection={connection} capabilities={view.capabilities} governed={view.governed} rows={false} />
-      <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
-            <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
-            What a paired device may do
-          </h3>
-          {view.governed ? (
-            <span
-              className={cn(
-                'rounded-control border px-2 py-0.5 text-meta font-medium',
-                view.steppedUp ? TONE_CLASS.ok : TONE_CLASS.disclosure,
-              )}
-              data-grant-stepped-up={view.steppedUp ? 'yes' : 'no'}
-            >
-              {view.steppedUp ? 'passkey confirmed' : 'passkey not confirmed yet'}
-            </span>
-          ) : null}
-        </div>
-        {/* The line that stops the commonest wrong reading of this whole screen, BRANCHED because one
-            sentence cannot be true for every connection. */}
-        <p className="m-0 text-cell leading-base text-muted" data-grant-scope={grantScopeKey(posture)}>
-          {grantScopeNote(posture)}
-        </p>
-      </section>
-
-      {/* The passkey, for a caller the limits govern. */}
-      {view.governed ? <GrantStepUpPanel steppedUp={view.steppedUp} busy={busy} onStepUp={onStepUp} /> : null}
-
-      {entries.map(entry => (
-        <CapabilityCard
-          key={entry.capability}
-          entry={entry}
-          view={view}
-          busy={busy}
-          onChange={(axis, next) => onChange(entry.capability, axis, next)}
+    <AccessTab name="grants">
+      <div data-grant-surface={String(connection.daemonId)}>
+        {/* READING BEFORE CHANGING. The list answers "what may this browser do here, why, and how much
+            does each one hand over"; the switches below answer "change it". `governed` is PASSED rather than
+            inferred: it is the DAEMON's account of the connection, and it is never inferred from this page's
+            address, which would invert the answer over a relay. */}
+        <CapabilityList
+          connection={connection}
+          capabilities={view.capabilities}
+          governed={view.governed}
+          rows={false}
         />
-      ))}
-
-      {changeFailure === null ? null : (
-        <p
-          role="alert"
-          className={cn('m-0 rounded-control border px-3 py-2 text-ui leading-base', TONE_CLASS.fault)}
-          data-grant-change-failure=""
-        >
-          <CircleAlert size={14} className="mr-1 inline" aria-hidden="true" />
-          {/* The daemon's own sentence, whole. It already names the command a human runs, composed by
-              the layer that knows what this product's client is called; replacing it with wording
-              invented here would either repeat it or contradict it. */}
-          {changeFailure}
-        </p>
-      )}
-    </section>
+        <SettingGroup label="What a paired device may do">
+          {/* The line that stops the commonest wrong reading of this whole screen, BRANCHED because one sentence
+              cannot be true for every connection. */}
+          <SettingRow
+            name="Who these switches cover"
+            dataAttributes={{ 'data-grant-scope': grantScopeKey(posture) }}
+            control={() =>
+              view.governed ? (
+                <span
+                  className="fy-acc-chip"
+                  data-tone={view.steppedUp ? 'ok' : 'plain'}
+                  data-grant-stepped-up={view.steppedUp ? 'yes' : 'no'}
+                >
+                  {view.steppedUp ? 'passkey confirmed' : 'passkey not confirmed yet'}
+                </span>
+              ) : null
+            }
+          >
+            <div className="fy-acc-body">
+              <p className="fy-acc-fine">{grantScopeNote(posture)}</p>
+            </div>
+          </SettingRow>
+          {/* The passkey, for a caller the limits govern. */}
+          {view.governed ? <GrantStepUpPanel steppedUp={view.steppedUp} busy={busy} onStepUp={onStepUp} /> : null}
+          {entries.map(entry => (
+            <CapabilityCard
+              key={entry.capability}
+              entry={entry}
+              view={view}
+              busy={busy}
+              onChange={(axis, next) => onChange(entry.capability, axis, next)}
+            />
+          ))}
+        </SettingGroup>
+        {changeFailure === null ? null : (
+          // The daemon's own sentence, whole. It already names the command a human runs, composed by the layer that
+          // knows what this product's client is called.
+          <Notice tone="err" role="alert" icon={<CircleAlert size={14} />} marks={{ 'data-grant-change-failure': '' }}>
+            {changeFailure}
+          </Notice>
+        )}
+      </div>
+    </AccessTab>
   );
 }
 
@@ -531,18 +458,17 @@ export function GrantsSurface({
     );
   if (loadFailure?.daemonId === connection.daemonId)
     return (
-      <section className="kt-panel p-panel" role="status" aria-label="Capability grants unavailable">
-        <h3 className="m-0 text-row font-semibold text-fg">Capability limits unavailable</h3>
-        <p className="mb-0 mt-1 text-cell leading-base text-muted">
+      <StateBlock title="Capability limits unavailable" label="Capability grants unavailable">
+        <p className="fy-acc-fine">
           This daemon did not say what a paired device may do on it, so Ferretry will not show a limit or claim there is
           none. Nothing here is evidence that this machine is unrestricted.
         </p>
         {/* The daemon's own words, on their own line rather than run into the sentence above: they are
             a message from somewhere else, and appending one mid-paragraph reads as a typo. */}
-        <p className="mb-0 mt-2 text-meta leading-base text-faint" data-grant-load-failure="">
+        <p className="fy-acc-fine fy-acc-faint" data-grant-load-failure="">
           {loadFailure.reason}
         </p>
-      </section>
+      </StateBlock>
     );
   return <Loading kind="page" label="Reading what this machine allows a paired device to do…" />;
 }
