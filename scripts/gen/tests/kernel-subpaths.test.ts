@@ -89,6 +89,19 @@ describe('context-imports: a plugin’s halves share pure code through their own
   });
 });
 
+describe('context-imports: Runtimes’ public import kit', () => {
+  test('an app half may import exactly the kit; every other path of Runtimes’ app half, and any other half, is refused', () => {
+    expect(refusal(edge('codex', 'app/index.ts', '@ferretry/plugin-runtimes/import-kit'))).toBeUndefined();
+    for (const specifier of ['@ferretry/plugin-runtimes/app', '../../runtimes/app/features/import-kit/index.ts'])
+      expect(refusal(edge('codex', 'app/index.ts', specifier))).toContain(
+        'another package is reached only through its contract',
+      );
+    expect(refusal(edge('codex', 'daemon/index.ts', '@ferretry/plugin-runtimes/import-kit'))).toContain(
+      'another package is reached only through its contract',
+    );
+  });
+});
+
 describe('context-imports: @ferretry/kernel/worker', () => {
   test('a daemon half (its worker module) imports it; an app half or a contract does not', () => {
     expect(refusal(edge('asks', 'daemon/lib/archive/worker.ts', '@ferretry/kernel/worker'))).toBeUndefined();

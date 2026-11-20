@@ -2,7 +2,8 @@
  * `context-imports` (§2.1, §7.9, spine §4): a package imports another's non-contract files; a contract imports anything
  * but `zod`, `@ferretry/std`, `@ferretry/kernel/contract` and other contracts; a manifest imports anything but the
  * kernel's manifest SDK, the kernel contract and contracts. `./daemon`, `./app`, `./cli`, `./manifest` are imported
- * only by the generated registries, except the build seam: the shell's `vite.config.ts` imports a plugin's
+ * only by the generated registries, except Runtimes' public `@ferretry/plugin-runtimes/import-kit` (an app half may import exactly
+ * that) and the build seam: the shell's `vite.config.ts` imports a plugin's
  * `app/vite-<name>.ts`. Type-only imports count: a type edge is still an edge.
  */
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
@@ -98,6 +99,10 @@ export function refusal(edge: ImportEdge): string | undefined {
       return `${edge.specifier} is not the app shell's public API: tests import @ferretry/app, /ui, /worker, /testing, /testing/browser, /testing/router and /testing/settings-shell only`;
     return `${edge.specifier} is imported only by app halves (and @ferretry/app/testing only by tests)`;
   }
+
+  // ONE PUBLIC APP EXPORT: Runtimes' import kit (`@ferretry/plugin-runtimes/import-kit`, r10 O8) is what Claude Code's and Codex's
+  // onboarding pages are built on. An app half may import exactly that specifier; no other path of Runtimes' app half, no wildcard.
+  if (from === 'app' && edge.specifier === '@ferretry/plugin-runtimes/import-kit') return undefined;
 
   // The build seam: a plugin's build needs (workers, aliases, a build-time transform) live in its `app/vite-<name>.ts`, and
   // the shell's single `vite.config.ts` takes them from there. There is no per-plugin `build.ts` yet, and a config
