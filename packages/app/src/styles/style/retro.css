@@ -162,3 +162,9 @@
 [data-mode='dark'] [data-style='retro'] .kt-panel__header {
   background-image: linear-gradient(180deg, color-mix(in srgb, var(--fg) 12%, var(--surface)) 0%, var(--surface) 100%);
 }
+/* DARK: a button is lit from the top only, and sits on the plain surface where a label is drawn (a coloured label, Danger's red,
+   loses contrast on a face that grows lighter beneath it). */
+[data-style='retro'][data-mode='dark'] .kt-btn:not([data-variant='primary'], :disabled),
+[data-mode='dark'] [data-style='retro'] .kt-btn:not([data-variant='primary'], :disabled) {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--fg) 8%, var(--surface)) 0%, var(--surface) 55%);
+}
