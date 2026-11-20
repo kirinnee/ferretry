@@ -253,7 +253,7 @@ export const TokensSchema = z.strictObject(
  * This contract owns the token names and value grammar; both daemon and app refuse names the stylesheet does not
  * read and values that could close a declaration, load a resource, or smuggle an expression.
  */
-export const ThemeSchema = z.strictObject({
+const ThemeObjectSchema = z.strictObject({
   id: ThemeIdSchema,
   label: z.string().min(1).max(60),
   base: z.enum(THEME_FAMILY_IDS).optional(), // legacy spelling, accepted and IGNORED (the shell reads only `style` / `palette`)
@@ -263,7 +263,18 @@ export const ThemeSchema = z.strictObject({
   light: TokensSchema.default({}),
   dark: TokensSchema.default({}),
 });
-export type Theme = z.infer<typeof ThemeSchema>;
+
+/**
+ * A style-only `contrast` item (the removed style) keeps its High contrast choice: with no palette of its own it reads as
+ * Studio in the `contrast` palette. A palette the item names itself wins. Read mapping only; nothing is rewritten.
+ */
+export const ThemeSchema = z.preprocess(value => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  const item = value as Record<string, unknown>;
+  const palette = currentStyleId(item.style)?.palette;
+  return palette !== undefined && item.palette === undefined ? { ...item, palette } : value;
+}, ThemeObjectSchema);
+export type Theme = z.infer<typeof ThemeObjectSchema>;
 
 /**
  * The keys of a layout that `config/layout.yaml` may change, field by field, so `fy layout set nav.side right` stores
