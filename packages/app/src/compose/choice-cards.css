@@ -37,7 +37,8 @@
 .fy-cc__card {
   align-items: flex-start;
   background: var(--surface-2);
-  border: var(--stroke-panel) solid var(--border);
+  /* The card's ONLY boundary is this border, so it is the control edge (>=3:1, WCAG 1.4.11), not the decorative hairline. */
+  border: var(--stroke-panel) solid var(--border-strong);
   border-radius: var(--radius-panel);
   color: var(--fg);
   cursor: pointer;

@@ -88,132 +88,13 @@ const DEVICE_FACES: readonly string[] = [
 ];
 
 /**
- * Every palette that exists today, WRITTEN OUT. It is deliberately not `PALETTES.map(...)`: a palette added to the catalogue
- * is in no pin until somebody reads what it misses and adds it here.
+ * Misses that exist TODAY and are not this test's to fix: EMPTY, every earlier pin (text-field focus ring, unselected choice
+ * card edge, Ledger dark status inks) has been fixed in the CSS. A row is the cross product of the lists it names, every list
+ * explicit (never `PALETTES.map(...)`: a palette added to the catalogue is in no pin until somebody reads what it misses), and
+ * says why; the identity of a miss is (width, style, palette, mode, check, what). The observed misses are compared with these
+ * pins both ways, so fixing a cause means deleting its row.
  */
-const EVERY_PALETTE = [
-  'studio',
-  'mission',
-  'neo',
-  'geist',
-  'contrast',
-  'phosphor',
-  'blueprint',
-  'broadsheet',
-  'wayfinding',
-  'ledger',
-  'ma',
-  'vaporwave',
-  'cyberpunk',
-  'hacker',
-  'vintage',
-  'mesh',
-  'retrofuture',
-] as const;
-// The five original styles plus Glassmorphism (r10 T5): its only misses are these same shared ones (choice-card edges,
-// Ledger dark inks), pinned by exact identity until unit T3m fixes them for every style.
-const EVERY_STYLE = ['studio', 'mission', 'neo', 'geist', 'contrast', 'glass'] as const;
-const BOTH_WIDTHS = ['1280', '390'] as const;
-
-/**
- * Misses that exist TODAY and are not this test's to fix (each is a palette value or a shared rule another unit owns, and the
- * theme-parity capture pins every token, so a palette cannot be nudged here). Each row is the cross product of the lists it
- * names, every list explicit, and says why; the exact identity of every miss is (width, style, palette, mode, check, what).
- * The observed misses are compared with these pins both ways, so fixing a cause means deleting its row.
- */
-const KNOWN: readonly Known[] = [
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['studio', 'mission', 'geist'],
-    palettes: EVERY_PALETTE,
-    modes: ['light', 'dark'],
-    check: 'focus',
-    what: 'Name (border) ring',
-    why: ".kt-input sets outline: var(--outline-always) (none outside Contrast), which outranks the shell :focus-visible ring, so a text field's only focus mark is a 1px border-colour change",
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: EVERY_STYLE,
-    palettes: [
-      'studio',
-      'mission',
-      'geist',
-      'phosphor',
-      'blueprint',
-      'broadsheet',
-      'wayfinding',
-      'ledger',
-      'ma',
-      'vaporwave',
-      'cyberpunk',
-      'hacker',
-      'vintage',
-      'mesh',
-      'retrofuture',
-    ],
-    modes: ['light'],
-    check: 'edge',
-    what: 'Choice right edge',
-    why: 'An UNSELECTED choice card draws its edge in --border over --surface-2, 1.2-3:1 against the page in these light palettes (the card has no other boundary)',
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: EVERY_STYLE,
-    palettes: [
-      'studio',
-      'mission',
-      'geist',
-      'phosphor',
-      'ma',
-      'vaporwave',
-      'cyberpunk',
-      'hacker',
-      'vintage',
-      'mesh',
-      'retrofuture',
-    ],
-    modes: ['dark'],
-    check: 'edge',
-    what: 'Choice right edge',
-    why: 'An UNSELECTED choice card draws its edge in --border over --surface-2, 1.2-3:1 against the page in these dark palettes (the card has no other boundary)',
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: [...EVERY_STYLE, 'neumorphism'],
-    palettes: ['ledger'],
-    modes: ['dark'],
-    check: 'text',
-    what: 'ok',
-    why: 'Ledger dark status inks on their tint are 4.15-4.31:1',
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: [...EVERY_STYLE, 'neumorphism'],
-    palettes: ['ledger'],
-    modes: ['dark'],
-    check: 'text',
-    what: 'warn',
-    why: 'Ledger dark status inks on their tint are 4.15-4.31:1',
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: [...EVERY_STYLE, 'neumorphism'],
-    palettes: ['ledger'],
-    modes: ['dark'],
-    check: 'text',
-    what: 'err',
-    why: 'Ledger dark status inks on their tint are 4.15-4.31:1',
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: EVERY_STYLE,
-    palettes: ['ledger'],
-    modes: ['dark'],
-    check: 'text',
-    what: 'Stop ferret',
-    why: 'Ledger dark status inks on their tint are 4.15-4.31:1',
-  },
-];
+const KNOWN: readonly Known[] = [];
 const pins = pinnedMisses(KNOWN);
 const usedPins = new Set<string>();
 

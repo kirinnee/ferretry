@@ -34,3 +34,13 @@
   --step-todo-edge: var(--muted);
   --step-seg-now: #498859;
 }
+
+/* Status inks on their own 14% tint: the shared dark inks (tokens/derived.css, which loads AFTER this file at the same
+   specificity) read 4.15-4.31:1 over Ledger's green surfaces, so each is lifted to clear the 4.5:1 text floor. The doubled
+   `:root` / `[data-swatch]` outranks that shared block; only the INK moves, the tint and border mixes keep the shared hues. */
+:root:root[data-palette='ledger'][data-mode='dark'],
+[data-swatch][data-swatch][data-palette='ledger'][data-mode='dark'] {
+  --ok: #80c294;
+  --warn: #d6ac62;
+  --err: #ee9c9c;
+}
