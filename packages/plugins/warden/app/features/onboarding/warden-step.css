@@ -1,5 +1,5 @@
-/* The Warden's first-run page: one line, the cards (the shell's ChoiceCards), a Jev note, and a small demo. Colour and
-   shape come from the shell's tokens. Buttons are auto width, 44px tall. The demo plays once and rests on its last
+/* The Warden's first-run page: the cards (the shell's stacked ChoiceCards), Voice's Jev key row under them, and a small demo in
+   the frame's right column. Colour and shape come from the shell's tokens. The demo plays once and rests on its last
    frame; with motion off it is only that frame. */
 .wd-step {
   display: flex;
@@ -47,8 +47,8 @@
   flex-wrap: wrap;
   font-size: var(--font-size-meta, 0.875em);
   gap: 8px 16px;
-  max-width: 420px;
-  min-height: 56px;
+  min-height: 160px;
+  width: 100%;
   padding: 12px 16px;
 }
 .wd-demo__ferret {
@@ -118,4 +118,11 @@
   100% {
     opacity: 1;
   }
+}
+/* Voice's key row, as the Warden page draws it: its buttons are one fixed width, like every button in a step. */
+[data-warden-key-row] .fy-vs-field > button {
+  inline-size: 8.5rem;
+}
+[data-warden-key-row] .fy-vs-body {
+  padding-inline: 0;
 }

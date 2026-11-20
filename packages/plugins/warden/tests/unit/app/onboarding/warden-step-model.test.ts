@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import {
   choiceOf,
   patchFor,
-  keyStillOpen,
   WARDEN_CHOICES,
   wardenFileExists,
 } from '../../../../app/features/onboarding/warden-step-model.ts';
@@ -33,16 +32,5 @@ describe('whether warden.yaml is already on the machine', () => {
 
   it('does not count a file that is not there', () => {
     expect(wardenFileExists({ exists: false })).toBe(false);
-  });
-});
-
-describe('whether an answer leaves the Jev key to settle', () => {
-  it('holds only for a Jev answer whose key is stored but not named, or not stored', () => {
-    expect(keyStillOpen('jev', 'not_named')).toBe(true);
-    expect(keyStillOpen('llm', 'missing')).toBe(true);
-    expect(keyStillOpen('jev', 'set')).toBe(false);
-    expect(keyStillOpen('jev', 'off')).toBe(false);
-    expect(keyStillOpen('jev', 'unknown')).toBe(false);
-    expect(keyStillOpen('rules', 'not_named')).toBe(false);
   });
 });

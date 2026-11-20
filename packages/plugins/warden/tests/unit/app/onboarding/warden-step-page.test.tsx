@@ -1,6 +1,7 @@
 /**
- * The Warden's first-run page: skipped when warden.yaml is already on the machine; otherwise three cards that write only
- * the switch and the layers, a Jev note that never asks for a key here, a demo that is decoration, and no storage write.
+ * The Warden's first-run page (r11 O7): skipped when warden.yaml exists; otherwise three stacked cards, a default pick
+ * that writes NOTHING by itself, and one `commit` that Next runs: it writes only the switch and the layers, names a stored
+ * Jev key, and asks once before going on with no key. The key is typed in Voice's row (`keyRow`), never here.
  * The file read is the route's REAL reply (`GET /v1/config/file`: path, exists, text, state, …), never a made-up field.
  */
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
@@ -99,19 +100,15 @@ const open = async (scene: Scene = {}) => {
     readKey: async () => key,
   };
   const run = recordedStep();
-  const page = await mount(<WardenStepPage deps={deps} step={run.host} speedupsHref="/d/m1/settings/voice/speedups" />);
+  const page = await mount(
+    <WardenStepPage deps={deps} step={run.host} keyRow={<input type="password" data-fake-key-row="" />} />,
+  );
   mounted.push(page);
   await settle();
   const setKey = (next: SpeedupsView | 'off'): void => {
     key = next;
   };
   return { page, run, patches, named: () => named, setKey };
-};
-
-const press = async (page: Mounted, label: string): Promise<void> => {
-  const button = [...page.container.querySelectorAll('button')].find(b => b.textContent === label);
-  await interact(() => must(button ?? null, label).click());
-  await settle();
 };
 
 const pick = async (page: Mounted, id: string): Promise<void> => {
@@ -142,122 +139,94 @@ describe('the Warden step page', () => {
     expect(run.events).toEqual(['ready']);
   });
 
-  it('shows three cards with nothing chosen and writes nothing until the person picks', async () => {
+  it('shows three stacked cards with the free answer chosen, registers a commit, and writes nothing yet', async () => {
     const { page, run, patches } = await open();
-    const titles = [...page.container.querySelectorAll('[data-choice]')].map(card => card.getAttribute('data-choice'));
-    expect(titles).toEqual(['rules', 'jev', 'llm']);
-    expect(page.container.querySelectorAll('[data-selected="true"]').length).toBe(0);
-    expect(run.events).toEqual(['ready']);
+    const ids = [...page.container.querySelectorAll('[data-choice]')].map(card => card.getAttribute('data-choice'));
+    expect(ids).toEqual(['rules', 'jev', 'llm']);
+    expect(page.container.querySelector('[data-choice-cards]')?.getAttribute('data-layout')).toBe('stack');
+    expect(page.container.querySelector('[data-selected="true"]')?.getAttribute('data-choice')).toBe('rules');
+    expect(run.events).toEqual(['ready', 'commit']);
     expect(patches).toEqual([]);
+    // No button of its own: Next is the only thing to press, and the free answer has no key row.
+    expect(page.container.querySelectorAll('button').length).toBe(0);
+    expect(page.container.querySelector('[data-fake-key-row]')).toBeNull();
   });
 
-  it('writes only the switch and the layers for a pick, and tells the host it is done', async () => {
+  it('writes nothing for a pick (arrow keys and clicks only choose); Next writes only the switch and the layers', async () => {
     const storageBefore = { local: localStorage.length, session: sessionStorage.length };
-    const { page, run, patches } = await open();
-    await pick(page, 'rules');
-    expect(patches).toEqual([{ enabled: true, layers: { jev: false, llm: false } }]);
-    expect(run.events).toEqual(['ready', 'busy:Saving…', 'busy:null', 'done']);
-    expect(page.container.querySelector('[data-warden-demo="rules"]')).not.toBeNull();
-    // No Jev note for the free answer.
-    expect(page.container.querySelector('[data-warden-jev]')).toBeNull();
-    // Nothing is kept in the browser: the answer is on the daemon, and the page remembers nothing of its own.
+    const { page, run, patches } = await open({ key: 'off' });
+    await pick(page, 'llm');
+    expect(patches).toEqual([]);
+    await interact(() => run.runCommit());
+    expect(patches).toEqual([{ enabled: true, layers: { jev: true, llm: true } }]);
+    expect(page.container.querySelector('[data-warden-demo="llm"]')).not.toBeNull();
+    // The page never calls done or busy itself: the shell does, around the commit.
+    expect(run.events.filter(event => event === 'done' || event.startsWith('busy'))).toEqual([]);
+    // Nothing is kept in the browser: the answer is on the daemon.
     expect({ local: localStorage.length, session: sessionStorage.length }).toEqual(storageBefore);
   });
 
-  it('turns both layers on for the LLM card and keeps the key out of the page', async () => {
-    const { page, patches } = await open({ key: speedups(false) });
-    await pick(page, 'llm');
-    expect(patches).toEqual([{ enabled: true, layers: { jev: true, llm: true } }]);
-    const note = must(page.container.querySelector('[data-warden-jev="missing"]'), 'missing note');
-    expect(note.textContent).toContain('optional');
-    expect(note.textContent).toContain('every flag goes to the investigation');
-    expect(note.querySelector('a')?.getAttribute('href')).toBe('/d/m1/settings/voice/speedups');
-    // This page never asks for a key.
-    expect(page.container.querySelector('input[type="password"], input[type="text"], textarea')).toBeNull();
-  });
-
-  it('says a stored but unnamed key is not used yet, holds the step, and names it on request', async () => {
-    const { page, named, run } = await open({ key: speedups(true) });
+  it("draws Voice's key row under the cards for a Jev answer only, and no link into Settings", async () => {
+    const { page } = await open({ key: speedups(false) });
+    expect(page.container.querySelector('[data-fake-key-row]')).toBeNull();
     await pick(page, 'jev');
-    expect(run.events).toEqual(['ready', 'busy:Saving…', 'busy:Waiting for the Jev key…']);
-    expect(must(page.container.querySelector('[data-warden-jev="not_named"]'), 'not named').textContent).toContain(
-      'every flag is shown to you',
-    );
-    const button = [...page.container.querySelectorAll('button')].find(b => b.textContent === 'Use the stored key');
-    await interact(() => must(button ?? null, 'use button').click());
-    await settle();
-    expect(named()).toBe(1);
-    expect(page.container.querySelector('[data-warden-jev="set"]')).not.toBeNull();
-    expect(run.events.slice(-2)).toEqual(['busy:null', 'done']);
-  });
-
-  it('lets the person go on without naming the stored key, and only then is the step done', async () => {
-    const { page, run, named } = await open({ key: speedups(true) });
+    expect(page.container.querySelector('[data-fake-key-row]')).not.toBeNull();
     await pick(page, 'llm');
-    expect(run.events).not.toContain('done');
-    await press(page, 'Go on without a key');
-    expect(named()).toBe(0);
-    expect(run.events.slice(-2)).toEqual(['busy:null', 'done']);
+    expect(page.container.querySelector('[data-fake-key-row]')).not.toBeNull();
+    await pick(page, 'rules');
+    expect(page.container.querySelector('[data-fake-key-row]')).toBeNull();
+    expect(page.container.querySelector('a')).toBeNull();
+    expect(page.container.textContent).not.toContain('Check again');
+    expect(page.container.textContent).not.toContain('Waiting for the Jev key');
   });
 
-  it('reaches "Use the stored key" after the key is saved in Speed-ups, without picking Jev again', async () => {
-    const { page, run, patches, named, setKey } = await open({ key: speedups(false) });
+  it('names a stored key in warden.yaml when Next is pressed, after writing the layers', async () => {
+    const { page, run, patches, named } = await open({ key: speedups(true) });
     await pick(page, 'jev');
-    // No key yet: the step is held, not done.
-    expect(page.container.querySelector('[data-warden-jev="missing"]')).not.toBeNull();
-    expect(run.events).toEqual(['ready', 'busy:Saving…', 'busy:Waiting for the Jev key…']);
-    // The owner saves the key in Speed-ups, then comes back and asks the page to look again: no second card pick.
-    setKey(speedups(true));
-    await press(page, 'Check again');
-    expect(page.container.querySelector('[data-warden-jev="not_named"]')).not.toBeNull();
-    expect(run.events).not.toContain('done');
-    await press(page, 'Use the stored key');
-    expect(named()).toBe(1);
+    await interact(() => run.runCommit());
     expect(patches).toEqual([{ enabled: true, layers: { jev: true, llm: false } }]);
-    expect(run.events.slice(-2)).toEqual(['busy:null', 'done']);
-    // The key itself never reaches the page: no field and no value anywhere in it.
-    expect(page.container.querySelector('input[type="password"], input[type="text"], textarea')).toBeNull();
-    expect(page.container.textContent).not.toContain('JEV_API_KEY');
+    expect(named()).toBe(1);
   });
 
-  it('is done at once on a later pick once the key is named, with nothing to hold', async () => {
-    const { page, run, setKey } = await open({ key: speedups(true) });
+  it('writes and names nothing for the free answer even when a key is stored', async () => {
+    const { run, patches, named } = await open({ key: speedups(true) });
+    await interact(() => run.runCommit());
+    expect(patches).toEqual([{ enabled: true, layers: { jev: false, llm: false } }]);
+    expect(named()).toBe(0);
+  });
+
+  it('asks ONCE, before writing, when Jev is picked and no key is saved; the next Next says yes', async () => {
+    const { page, run, patches, named } = await open({ key: speedups(false) });
+    await pick(page, 'llm');
+    await expect(interact(() => run.runCommit())).rejects.toThrow('Go on without one?');
+    expect(patches).toEqual([]);
+    await interact(() => run.runCommit());
+    expect(patches).toEqual([{ enabled: true, layers: { jev: true, llm: true } }]);
+    expect(named()).toBe(0);
+  });
+
+  it('asks again after a new pick, and not at all once a key was saved in the row meanwhile', async () => {
+    const { page, run, patches, setKey, named } = await open({ key: speedups(false) });
     await pick(page, 'jev');
-    await press(page, 'Use the stored key');
+    await expect(interact(() => run.runCommit())).rejects.toThrow('Go on without one?');
+    // The person pastes a key in Voice's row: the commit reads it fresh and names it.
     setKey(speedups(true));
-    await pick(page, 'llm');
-    expect(run.events.at(-1)).toBe('done');
-    expect(page.container.querySelector('[data-warden-jev="set"]')).not.toBeNull();
+    await interact(() => run.runCommit());
+    expect(patches).toEqual([{ enabled: true, layers: { jev: true, llm: false } }]);
+    expect(named()).toBe(1);
   });
 
-  it('lets the person go on without any key, and the step is held until they do', async () => {
-    const { page, run } = await open({ key: speedups(false) });
-    await pick(page, 'llm');
-    expect(run.events).not.toContain('done');
-    await press(page, 'Go on without a key');
-    expect(run.events.slice(-2)).toEqual(['busy:null', 'done']);
+  it('does not ask when Voice is off (no place to add a key)', async () => {
+    const off = await open({ key: 'off' });
+    await pick(off.page, 'jev');
+    await interact(() => off.run.runCommit());
+    expect(off.patches.length).toBe(1);
   });
 
-  it('says when a loosening waits for the owner, and is still done', async () => {
-    const { page, run } = await open({ held: ['LLM investigation is switched on'], key: 'off' });
-    await pick(page, 'llm');
-    expect(page.container.textContent).toContain('waits for you to confirm it: LLM investigation is switched on');
-    expect(run.events.slice(-2)).toEqual(['busy:null', 'done']);
-  });
-
-  it('says so and is not done when the daemon refuses the write', async () => {
-    const { page, run } = await open({ refuse: 'That is not yours to change.' });
+  it('lets a refused write reach the shell as an error, with nothing written', async () => {
+    const { page, run, patches } = await open({ refuse: 'That is not yours to change.', key: 'off' });
     await pick(page, 'jev');
-    expect(page.container.textContent).toContain('That is not yours to change.');
-    expect(run.events).not.toContain('done');
-    expect(page.container.querySelectorAll('[data-selected="true"]').length).toBe(0);
-  });
-
-  it('reads Voice being off as "no place to add a key", not as a missing key', async () => {
-    const { page } = await open({ key: 'off' });
-    await pick(page, 'jev');
-    expect(must(page.container.querySelector('[data-warden-jev="off"]'), 'off note').textContent).toContain(
-      'switched off on this machine',
-    );
+    await expect(interact(() => run.runCommit())).rejects.toThrow('That is not yours to change.');
+    expect(patches).toEqual([]);
   });
 });

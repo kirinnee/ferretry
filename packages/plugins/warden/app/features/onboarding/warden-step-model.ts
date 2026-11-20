@@ -1,7 +1,6 @@
 /**
  * The Warden's first-run page, worked out without a browser: the three answers, what each one writes to `warden.yaml`,
- * which answer a machine's settings already spell, whether `warden.yaml` is already on the machine, and whether an answer
- * leaves a Jev key still to be named.
+ * which answer a machine's settings already spell, and whether `warden.yaml` is already on the machine.
  *
  * The three cards are cumulative, in the order they cost: the rules alone are free; Jev adds a cheap guard that clears
  * flags it is sure are healthy; the LLM investigation adds a read-only look at every flag Jev passed on. Each answer
@@ -22,17 +21,17 @@ export const WARDEN_CHOICES: readonly WardenChoiceCopy[] = [
   {
     id: 'rules',
     title: 'Rules only',
-    line: 'Free. Rules spot a stuck or dead ferret and show it to you. No AI runs and nothing is spent.',
+    line: 'Free. Flags stuck or dead ferrets.',
   },
   {
     id: 'jev',
     title: '+ Jev',
-    line: 'Jev is a cheap AI check that clears the flags it is sure are fine. Needs a Jev key; up to $0.50 a day.',
+    line: 'A cheap AI check clears false alarms. Up to $0.50 a day.',
   },
   {
     id: 'llm',
     title: '+ LLM investigation',
-    line: 'A read-only AI look at every flag Jev passes on. Up to $2 a day more.',
+    line: 'A read-only AI look at the rest. Up to $2 a day more.',
   },
 ];
 
@@ -66,10 +65,3 @@ export interface WardenFileRead {
  * answer, and it may say `enabled: false` on purpose, so the page never offers to write over it.
  */
 export const wardenFileExists = (read: WardenFileRead): boolean => read.exists;
-
-/**
- * Whether an answer leaves the Jev key still to settle: the key is stored but not named in `warden.yaml`, or not stored
- * yet, and the answer uses Jev. The page then holds its step open until the key is named or the person goes on without.
- */
-export const keyStillOpen = (choice: WardenChoice, keyState: string): boolean =>
-  choice !== 'rules' && (keyState === 'not_named' || keyState === 'missing');

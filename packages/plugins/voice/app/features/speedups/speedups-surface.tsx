@@ -17,19 +17,29 @@
  * renders as a stated refusal, and a damaged vault says so rather than showing every key unset.
  */
 
-import { MIN_SECRET_VALUE_LENGTH, SecretInput, SettingGroup, SettingRow, useSecretField } from '../../shell-voice.ts';
-import type { SpeedupStatus, SpeedupsView, SpeedupTestResult } from '../../../contract/index.ts';
-import { AlertTriangle, Check, ExternalLink, FlaskConical, KeyRound } from 'lucide-react';
-import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
+import { SettingGroup, SettingRow } from '../../shell-voice.ts';
+import type { SpeedupStatus, SpeedupsView } from '../../../contract/index.ts';
+import { AlertTriangle } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../shell-voice.ts';
 import { useConfigChangeEffect, useDaemonClient } from '../../lib/voice-store.tsx';
 import { putSecret } from '../../shell-voice.ts';
-import { viewerTime } from '@ferretry/app';
 import { ConfirmToSee, isStepUpRefusal, Loading } from '@ferretry/app/ui';
+import {
+  keyDraftProblem,
+  lastTestLine,
+  type SpeedupCardProps,
+  type SpeedupClientFactory,
+  SpeedupKeyForm,
+  StatusChip,
+  withTestResult,
+} from './key-row.tsx';
 import { readSpeedups, type SpeedupClient, testSpeedup } from './speedups-api.ts';
 import '../settings/voice-settings.css';
 
-export type SpeedupClientFactory = (connection: DaemonConnection) => Promise<SpeedupClient>;
+// The key row's pieces live in `key-row.tsx` (a page that is not Settings draws the same row); re-exported for callers.
+export { keyDraftProblem, lastTestLine, withTestResult };
+export type { SpeedupCardProps, SpeedupClientFactory };
 
 export const SPEEDUPS_INTRO =
   'Optional keys that make this machine faster or cheaper. Each one is stored in this machine’s secret store: it is never shown again, never sent to this browser, and only ever sent to its own provider.';
@@ -37,75 +47,8 @@ export const SPEEDUPS_INTRO =
 export const SPEEDUPS_FALLBACK =
   'Without them nothing breaks: the Warden investigates every flag with its own model, and dictation uses on-device word correction.';
 
-/** One line about the last Test, or nothing when there was none. */
-export function lastTestLine(status: SpeedupStatus): string | undefined {
-  const last = status.lastTest;
-  if (last === undefined) return undefined;
-  const timing = last.latencyMs === undefined ? '' : ` · ${Math.round(last.latencyMs)} ms`;
-  const verdict = last.ok ? 'Worked' : 'Failed';
-  const stale = status.testStale ? ' The key has changed since — test again.' : '';
-  return `${verdict} ${viewerTime(last.at)}${timing}. ${last.message}${stale}`;
-}
-
-/** Why a pasted key cannot be saved yet, or nothing. */
-export function keyDraftProblem(value: string): string | undefined {
-  return value === '' ? undefined : keyLengthProblem(value.trim().length);
-}
-
-/** The same from how many characters (spaces around it not counted) are typed: the field's value is never held in state. */
-function keyLengthProblem(length: number): string | undefined {
-  if (length === 0 || length >= MIN_SECRET_VALUE_LENGTH) return undefined;
-  return `At least ${MIN_SECRET_VALUE_LENGTH} characters. That looks too short to be a whole key.`;
-}
-
-export interface SpeedupCardProps {
-  readonly status: SpeedupStatus;
-  /** False when the secret store could not be read: "set" is then unknown, never "not set". */
-  readonly vaultReadable: boolean;
-  /** What THIS card is doing right now. */
-  readonly busy: 'saving' | 'testing' | null;
-  /** Another card is busy: one key at a time, so two Tests never race for the same ledger line. */
-  readonly locked?: boolean;
-  readonly error: string | null;
-  readonly onSave: (value: string) => void | Promise<void>;
-  readonly onTest: () => void | Promise<void>;
-}
-
-function StatusChip({ status, vaultReadable }: { readonly status: SpeedupStatus; readonly vaultReadable: boolean }) {
-  if (!vaultReadable)
-    return <span className="rounded-control bg-warn-bg px-2 py-0.5 text-meta font-medium text-warn">Can’t tell</span>;
-  if (status.set)
-    return (
-      <span
-        className="inline-flex items-center gap-1 rounded-control bg-accent-soft px-2 py-0.5 text-meta font-medium text-ok"
-        data-speedup-set=""
-      >
-        <Check size={12} aria-hidden="true" /> Set
-      </span>
-    );
-  return <span className="rounded-control bg-surface-2 px-2 py-0.5 text-meta font-medium text-faint">Not set</span>;
-}
-
-export function SpeedupCard({ status, vaultReadable, busy, locked = false, error, onSave, onTest }: SpeedupCardProps) {
-  const fieldId = useId();
-  // The key lives only in the field's own value (read on Save); state knows how long it is, never what it says.
-  const key = useSecretField(typed => typed.trim().length);
-  const [replacing, setReplacing] = useState(false);
-  const problem = keyLengthProblem(key.length);
-  const idle = busy === null && !locked;
-  const ready = key.length >= MIN_SECRET_VALUE_LENGTH && idle;
-  const showField = !status.set || replacing;
-  const line = lastTestLine(status);
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    if (!ready) return;
-    void Promise.resolve(onSave(key.read().trim())).then(() => {
-      key.clear();
-      setReplacing(false);
-    });
-  };
-
+export function SpeedupCard(props: SpeedupCardProps) {
+  const { status, vaultReadable } = props;
   return (
     <SettingRow
       name={status.label}
@@ -119,86 +62,7 @@ export function SpeedupCard({ status, vaultReadable, busy, locked = false, error
         </div>
       }
     >
-      <form className="fy-vs-body" onSubmit={submit} aria-label={`Save the ${status.label} key`}>
-        <p className="fy-vs-note text-fg">{status.purpose}</p>
-        {/* ONE row (shot 09): the key (36rem at most), Save and Test, all one height, on one line; it wraps under the key
-            when the panel is narrower than the whole row. */}
-        <div className="fy-vs-field">
-          {showField ? (
-            <>
-              <SecretInput
-                id={fieldId}
-                field={key}
-                aria-label={`${status.label} key (${status.secretName})`}
-                className="kt-input fy-vs-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
-                placeholder="paste it here — it is never shown again"
-              />
-              <button type="submit" className="kt-btn" data-variant="primary" disabled={!ready}>
-                <KeyRound size={14} aria-hidden="true" /> {busy === 'saving' ? 'Saving…' : 'Save'}
-              </button>
-              {status.set && (
-                <button
-                  type="button"
-                  className="kt-btn"
-                  onClick={() => {
-                    key.clear();
-                    setReplacing(false);
-                  }}
-                >
-                  Cancel
-                </button>
-              )}
-            </>
-          ) : (
-            <button
-              type="button"
-              className="kt-btn"
-              disabled={!idle}
-              onClick={() => setReplacing(true)}
-              aria-label={`Replace the ${status.label} key`}
-            >
-              <KeyRound size={14} aria-hidden="true" /> Replace key
-            </button>
-          )}
-          <button
-            type="button"
-            className="kt-btn"
-            disabled={!status.set || !idle}
-            onClick={() => void onTest()}
-            aria-label={`Test the ${status.label} key`}
-          >
-            <FlaskConical size={14} aria-hidden="true" /> {busy === 'testing' ? 'Testing…' : 'Test'}
-          </button>
-        </div>
-        {problem !== undefined && (
-          <p className="fy-vs-note" data-tone="warn">
-            {problem}
-          </p>
-        )}
-        <p className="fy-vs-note">
-          Get a key:{' '}
-          <a href={status.keyUrl} target="_blank" rel="noreferrer noopener" className="break-all text-accent underline">
-            {status.keyUrl}
-            <ExternalLink size={12} aria-hidden="true" className="ml-1 inline align-baseline" />
-          </a>
-          . {status.testNote} Saved as <code>{status.secretName}</code>.
-        </p>
-        {line !== undefined && (
-          <p
-            className="fy-vs-note"
-            data-tone={status.lastTest?.ok === true && !status.testStale ? 'ok' : 'warn'}
-            role="status"
-            data-speedup-last-test=""
-          >
-            {line}
-          </p>
-        )}
-        {error !== null && (
-          <p role="alert" className="fy-vs-note" data-tone="warn">
-            {error}
-          </p>
-        )}
-      </form>
+      <SpeedupKeyForm {...props} />
     </SettingRow>
   );
 }
@@ -260,16 +124,6 @@ interface Loaded {
 }
 
 const reason = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
-
-/** Merge one Test's answer into the view, so the card shows it without a second read. */
-export function withTestResult(view: SpeedupsView, result: SpeedupTestResult): SpeedupsView {
-  return {
-    ...view,
-    providers: view.providers.map(status =>
-      status.provider === result.provider ? { ...status, lastTest: result, testStale: false } : status,
-    ),
-  };
-}
 
 export function SpeedupsSurface({
   connection,
