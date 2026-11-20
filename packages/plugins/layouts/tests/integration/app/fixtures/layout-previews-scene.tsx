@@ -49,7 +49,7 @@ const chip = tab === undefined || tab.scopeChip === false ? null : (tab.scope ??
 const root = document.getElementById('root');
 if (root !== null)
   createRoot(root).render(
-    <div className="p-4" data-scene-ready="">
+    <div className="fy-page p-4" data-scene-ready="">
       <header className="fy-settings-head" data-scene-header="">
         <h1>Settings</h1>
         <p className="fy-settings-machine">
