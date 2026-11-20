@@ -102,6 +102,7 @@ export const STYLE_IDS = [
   'raw',
   'swiss',
   'pixel',
+  'antiposh',
 ] as const;
 export type StyleId = (typeof STYLE_IDS)[number];
 export const PALETTE_IDS = [

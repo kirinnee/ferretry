@@ -145,8 +145,8 @@ describe('the catalogue, the files and themes.css agree', () => {
 
   it('lets a style declare it fights the readability rules, and only a style', () => {
     for (const style of STYLES) expect(['undefined', 'boolean']).toContain(typeof style.loud);
-    // None of today's five is loud; the flag is for the styles that will be.
-    expect(STYLES.filter(style => style.loud === true)).toEqual([]);
+    // The loud ones are named here, so a style cannot become loud (contrast misses only warn) without somebody saying so.
+    expect(STYLES.filter(style => style.loud === true).map(style => style.id)).toEqual(['antiposh']);
     for (const palette of PALETTES) expect(Object.keys(palette)).not.toContain('loud');
   });
 });
