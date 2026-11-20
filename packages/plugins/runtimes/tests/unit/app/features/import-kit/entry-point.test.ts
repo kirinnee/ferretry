@@ -11,6 +11,7 @@ describe('the import kit public entry point', () => {
       'kindGroups',
       'kindItemIds',
       'kindSkips',
+      'nameProblem',
       'HARNESS_LABEL',
       'HARNESSES',
       'ImportResultList',

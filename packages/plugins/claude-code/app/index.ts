@@ -49,6 +49,13 @@ export default implementApp(manifest, {
       'onboarding-installed': stepPage(client, 'installed', 'InstalledPage'),
       'onboarding-sign-in': stepPage(client, 'sign-in', 'SignInPage'),
       'onboarding-import-choice': stepPage(client, 'import-choice', 'ImportChoicePage'),
+      'onboarding-import-settings': stepPage(client, 'import-settings', 'SettingsPage'),
+      'onboarding-import-model-set': stepPage(client, 'import-model-set', 'ModelSetPage'),
+      'onboarding-import-instructions': stepPage(client, 'import-instructions', 'InstructionsPage'),
+      'onboarding-import-skills': stepPage(client, 'import-skills', 'SkillsPage'),
+      'onboarding-import-mcp': stepPage(client, 'import-mcp', 'McpPage'),
+      'onboarding-conversations': stepPage(client, 'conversations', 'ConversationsPage'),
+      'onboarding-import-run': stepPage(client, 'import-run', 'ImportRunPage'),
       'onboarding-permission': stepPage(client, 'permission', 'PermissionPage'),
       'permission-request': lazyComponent<PanelProps>(async () => {
         const view = await loadView('permission-panel');

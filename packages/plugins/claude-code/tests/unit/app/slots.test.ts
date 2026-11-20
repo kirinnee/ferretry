@@ -49,6 +49,13 @@ describe('the Claude segment of the first run (r10 O7)', () => {
       'claude-code.onboarding-installed',
       'claude-code.onboarding-sign-in',
       'claude-code.onboarding-import-choice',
+      'claude-code.onboarding-import-settings',
+      'claude-code.onboarding-import-model-set',
+      'claude-code.onboarding-import-instructions',
+      'claude-code.onboarding-import-skills',
+      'claude-code.onboarding-import-mcp',
+      'claude-code.onboarding-conversations',
+      'claude-code.onboarding-import-run',
       'claude-code.onboarding-permission',
     ]);
   });

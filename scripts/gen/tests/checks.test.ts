@@ -383,10 +383,17 @@ describe('context-imports', () => {
     expect(found).toContain('other/tests/send.test.ts:1: @ferretry/core-mailbox/daemon');
   });
 
-  test("only Codex's tests may import Onboarding's app half and manifest (the real setup flow): Codex's app half and any other package's tests are still refused", async () => {
+  test("only Claude Code's and Codex's tests may import Onboarding's app half and manifest (the real setup flow): their app halves and any other package's tests are still refused", async () => {
     const f = ws([
       {
         id: 'codex',
+        files: {
+          'tests/flow.test.ts': `import '@ferretry/plugin-onboarding/app';\nimport '@ferretry/plugin-onboarding/manifest';\n`,
+          'app/page.ts': `import '@ferretry/plugin-onboarding/app';\n`,
+        },
+      },
+      {
+        id: 'claude-code',
         files: {
           'tests/flow.test.ts': `import '@ferretry/plugin-onboarding/app';\nimport '@ferretry/plugin-onboarding/manifest';\n`,
           'app/page.ts': `import '@ferretry/plugin-onboarding/app';\n`,
@@ -397,7 +404,9 @@ describe('context-imports', () => {
     ]);
     const found = messages(await run(contextImports, f));
     expect(found).not.toContain('codex/tests/flow.test.ts');
+    expect(found).not.toContain('claude-code/tests/flow.test.ts');
     expect(found).toContain('codex/app/page.ts:1: @ferretry/plugin-onboarding/app');
+    expect(found).toContain('claude-code/app/page.ts:1: @ferretry/plugin-onboarding/app');
     expect(found).toContain('other/tests/flow.test.ts:1: @ferretry/plugin-onboarding/app');
   });
 

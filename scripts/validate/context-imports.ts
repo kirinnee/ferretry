@@ -9,6 +9,9 @@
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
 import type { Area, ImportEdge } from '../gen/lib/imports.ts';
 
+/** The packages whose tests drive Onboarding's real setup flow (see the second exemption in `refusal`). */
+const FLOW_DRIVING_TESTS: ReadonlySet<string> = new Set(['@ferretry/plugin-claude-code', '@ferretry/plugin-codex']);
+
 const CONTRACT_EXTERNALS = new Set(['zod']);
 const MANIFEST_EXTERNALS = new Set(['zod']);
 
@@ -126,11 +129,11 @@ export function refusal(edge: ImportEdge): string | undefined {
     return undefined;
 
   // SECOND EXEMPTION: a step page's behaviour (a skip is recorded on the machine and drops the page for the run; Back, Later and
-  // busy live in the frame) exists only in Onboarding's setup flow, so the Codex import pages' tests drive the real flow screen.
-  // Only Codex's tests may reach Onboarding's app half and its manifest, and only for that.
+  // busy live in the frame) exists only in Onboarding's setup flow, so the Claude Code and Codex import pages' tests
+  // drive the real flow screen. Only those two packages' tests may reach Onboarding's app half and its manifest, and only for that.
   if (
     from === 'tests' &&
-    edge.fromPkg.name === '@ferretry/plugin-codex' &&
+    FLOW_DRIVING_TESTS.has(edge.fromPkg.name) &&
     toPkg.name === '@ferretry/plugin-onboarding' &&
     (to === 'app' || to === 'manifest')
   )
