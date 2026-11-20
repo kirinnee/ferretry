@@ -1,9 +1,21 @@
 /**
- * THE CODEX SEGMENT'S FIRST-RUN PAGES, in a real browser, over fixed fake data (no real name, path or login). The scene
- * (`fixtures/onboarding-scene.tsx`) draws the real pages inside the app's `StepPageFrame`. Each page must stay on screen,
- * keep every button a 44px target and never take the full width of a desktop, in light and dark.
+ * THE CODEX SEGMENT'S FIRST-RUN PAGES (r11 O5), in a real browser over fixed fake data (no real name, path or login). The
+ * scene (`fixtures/onboarding-scene.tsx`) draws the REAL pages inside the app's own `StepPageFrame`, with the footer's Next
+ * running the page's registered `commit` the way the shell does. These asserts are the proof of the owner's lines:
  *
- * Set `FY_O10_SHOTS_DIR` to keep a screenshot of each case.
+ *   (3, 5)  at 1280 the cards are STACKED (one x and width, y increasing), the demo is in `[data-step-demo]` to the RIGHT of
+ *           them (gap > 32 px, top within 8 px of the first card's top), the page's own words are <= 160 characters, and the
+ *           page has no button of its own (permission, conversations, import-choice). At 390 the demo is ABOVE the cards and
+ *           <= 140 px tall, the three footer buttons are inside the viewport, and nothing scrolls sideways.
+ *   (1, 5)  Back / Later / Next are 136 px wide (+-1) and >= 44 px tall at 1280; equal thirds inside the viewport at 390.
+ *   (6)     no Codex page says "Claude" (the whole screen's text, light and dark, 390 and 1280), and the sign-in page mounts the
+ *           add-login panel with the subject `harness:codex` that LOCKS it (Logins' own browser suite mounts the real panel
+ *           with that subject and proves: no chooser, no grid, the link first, and the shared provider's summary naming
+ *           Codex alone; the page cannot import it: another package is reached only through its contract).
+ *   save    a pick writes NOTHING (a click or an arrow key); Next writes exactly once, `permissionMode` only; a pick back on
+ *           the saved card clears the save; a held change keeps the page and a second Next tries again.
+ *
+ * Set `FY_O5_SHOTS_DIR` to keep a screenshot of each case.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -11,26 +23,29 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
-import { expectDemo, expectKitFrame, factsOf, SAME_AS_CLAUDE } from './fixtures/parity.ts';
 
 const packageRoot = import.meta.dir;
-const shotsDir = process.env.FY_O10_SHOTS_DIR ?? '';
+const shotsDir = process.env.FY_O5_SHOTS_DIR ?? '';
 
 const SCENE_CSS = 'html, body, #root { min-height: 100%; margin: 0; }';
 
 const VIEWPORTS = [
   { name: 'phone-390', width: 390, height: 844, phone: true },
   { name: 'desktop-1280', width: 1_280, height: 800, phone: false },
-  { name: 'tablet-768', width: 768, height: 1_024, phone: false },
 ] as const;
+type Viewport = (typeof VIEWPORTS)[number];
+
+/** Every page, with whether it has cards, a demo, and a button of its own. */
 const PAGES = [
-  'installed',
-  'sign-in',
-  'sign-in-checking',
-  'import-choice',
-  'permission',
-  'permission-confirm',
-  'permission-unknown',
+  { page: 'installed', cards: 0, demo: true },
+  { page: 'sign-in', cards: 0, demo: false },
+  { page: 'sign-in-link', cards: 0, demo: false },
+  { page: 'sign-in-checking', cards: 0, demo: false },
+  { page: 'import-choice', cards: 3, demo: true },
+  { page: 'conversations', cards: 2, demo: true },
+  { page: 'permission', cards: 2, demo: true },
+  { page: 'permission-auto', cards: 2, demo: true },
+  { page: 'permission-unknown', cards: 0, demo: false },
 ] as const;
 
 let browser: Browser;
@@ -38,7 +53,7 @@ let directory = '';
 let server: ReturnType<typeof Bun.serve> | undefined;
 
 const build = async (): Promise<{ readonly css: string; readonly js: string }> => {
-  directory = await mkdtemp(join(tmpdir(), 'ferretry-o10-'));
+  directory = await mkdtemp(join(tmpdir(), 'ferretry-o5-'));
   const child = Bun.spawn(
     [process.execPath, sceneBuilder, '--out', directory, '--entry', 'fixtures/onboarding-scene.tsx'],
     { cwd: packageRoot, stderr: 'pipe', stdout: 'pipe' },
@@ -75,7 +90,7 @@ afterAll(async () => {
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
-const newContext = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 'dark'): Promise<BrowserContext> => {
+const newContext = async (viewport: Viewport, mode: 'light' | 'dark'): Promise<BrowserContext> => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     colorScheme: mode,
@@ -89,101 +104,216 @@ const newContext = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 
   return context;
 };
 
-const open = async (context: BrowserContext, page: string, mode: 'light' | 'dark'): Promise<Page> => {
+const open = async (context: BrowserContext, page: string, mode: 'light' | 'dark', extra = ''): Promise<Page> => {
   const tab = await context.newPage();
-  await tab.goto(`${server?.url.origin ?? ''}/?page=${page}&theme=studio-${mode}`);
+  await tab.goto(`${server?.url.origin ?? ''}/?page=${page}&theme=studio-${mode}${extra}`);
   await tab.waitForSelector('[data-codex-step]');
-  // The confirm shot is the Auto file after the person pressed the Skip card: the warning and its confirm, nothing written.
-  if (page === 'permission-confirm') await tab.locator('input[value="skip"]').check({ force: true });
   // Let the card animation and the demo (about 1.5 s) finish: a shot shows the last frame.
-  await tab.waitForTimeout((await tab.locator('[data-demo]').count()) > 0 ? 1_700 : 800);
+  await tab.waitForTimeout((await tab.locator('[data-demo]').count()) > 0 ? 1_700 : 600);
   return tab;
 };
 
-describe('the Codex segment pages', () => {
+const shot = async (tab: Page, name: string): Promise<void> => {
+  if (shotsDir !== '') await tab.screenshot({ fullPage: true, path: join(shotsDir, `${name}.png`) });
+};
+
+interface Box {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  readonly right: number;
+  readonly bottom: number;
+}
+
+/** Everything the layout asserts need, measured in one pass. */
+const measure = async (tab: Page) =>
+  await tab.evaluate(() => {
+    const box = (node: Element | null): Box => {
+      const r = node?.getBoundingClientRect() ?? new DOMRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, bottom: r.bottom };
+    };
+    const body = document.querySelector('.fy-spf__body') as HTMLElement;
+    const titles = [...document.querySelectorAll('[data-choice] .fy-cc__title')].map(
+      node => (node as HTMLElement).innerText,
+    );
+    let words = body.innerText;
+    for (const title of titles) words = words.replace(title, '');
+    return {
+      cards: [...document.querySelectorAll('[data-choice]')].map(box),
+      demo: box(document.querySelector('[data-step-demo]')),
+      hasDemo: document.querySelector('[data-step-demo] [data-demo]') !== null,
+      words: words.replace(/\s+/gu, ' ').trim(),
+      pageButtons: body.querySelectorAll('button').length,
+      overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      footer: ['[data-step-back]', '[data-step-later]', '[data-step-next]'].map(s => box(document.querySelector(s))),
+      viewport: window.innerWidth,
+      screen: document.body.innerText,
+    };
+  });
+
+describe('r11 O5: every Codex page, laid out as the owner asked', () => {
   for (const viewport of VIEWPORTS)
     for (const mode of ['light', 'dark'] as const)
-      for (const page of PAGES)
-        it(`${page}: inside the screen, buttons 44px, never full width, at ${viewport.name}, ${mode}`, async () => {
+      for (const { page, cards, demo } of PAGES) {
+        it(`${page}: stacked, demo ${viewport.phone ? 'above' : 'right'}, footer 136, no Claude, at ${viewport.name}, ${mode}`, async () => {
           const context = await newContext(viewport, mode);
           const tab = await open(context, page, mode);
-          expect(await tab.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
-          for (const button of await tab.locator('[data-step-footer] button, [data-codex-step] button').all()) {
-            const box = await button.boundingBox();
-            expect(box?.height).toBeGreaterThanOrEqual(44);
-            expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
-            if (!viewport.phone) expect(box?.width).toBeLessThan(viewport.width / 2);
+          const m = await measure(tab);
+
+          // (6) The whole screen never says Claude.
+          expect(m.screen.toLowerCase(), 'the page never names Claude').not.toContain('claude');
+          expect(m.overflowX).toBe(false);
+
+          // (1, 5) The footer: three equal fixed buttons.
+          for (const button of m.footer) {
+            expect(button.h).toBeGreaterThanOrEqual(44);
+            expect(button.x).toBeGreaterThanOrEqual(0);
+            expect(button.right).toBeLessThanOrEqual(m.viewport);
           }
-          // Nothing inside the page body runs past the screen edge (a long flag or command wraps).
-          for (const node of await tab.locator('[data-codex-step] *').all()) {
-            const box = await node.boundingBox();
-            if (box !== null) expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+          const widths = m.footer.map(button => button.w);
+          if (viewport.phone) expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1);
+          else for (const width of widths) expect(Math.abs(width - 136)).toBeLessThanOrEqual(1);
+
+          // (3) Stacked cards.
+          expect(m.cards).toHaveLength(cards);
+          for (let at = 1; at < cards; at += 1) {
+            expect(Math.abs((m.cards[at]?.x ?? 0) - (m.cards[0]?.x ?? 1))).toBeLessThan(0.5);
+            expect(Math.abs((m.cards[at]?.w ?? 0) - (m.cards[0]?.w ?? 1))).toBeLessThan(0.5);
+            expect(m.cards[at]?.y ?? 0).toBeGreaterThan(m.cards[at - 1]?.bottom ?? 0);
           }
-          if (shotsDir !== '')
-            await tab.screenshot({ fullPage: true, path: join(shotsDir, `${page}-${viewport.name}-${mode}.png`) });
+
+          // (3) The demo: right of the cards (or the page's words) on a desktop, above them on a phone.
+          expect(m.hasDemo).toBe(demo);
+          if (demo && cards > 0) {
+            if (viewport.phone) {
+              expect(m.demo.bottom).toBeLessThanOrEqual((m.cards[0]?.y ?? 0) + 1);
+              expect(m.demo.h).toBeLessThanOrEqual(140);
+            } else {
+              expect(m.demo.x).toBeGreaterThan(Math.max(...m.cards.map(card => card.right)) + 32);
+              expect(Math.abs(m.demo.y - (m.cards[0]?.y ?? 0))).toBeLessThanOrEqual(8);
+            }
+          }
+          if (demo && cards === 0 && !viewport.phone) {
+            const text = await tab.locator('[data-codex-step]').boundingBox();
+            expect(m.demo.x).toBeGreaterThan((text?.x ?? 0) + (text?.width ?? 0) - 1);
+          }
+
+          // (5) Fewer words: the page's own words (cards' titles left out) fit a glance; no button of its own on a pick page.
+          if (cards > 0) {
+            expect(m.words.length, m.words).toBeLessThanOrEqual(160);
+            expect(m.pageButtons).toBe(0);
+          }
+          await shot(tab, `${page}-${viewport.name}-${mode}`);
           await context.close();
         }, 60_000);
+      }
+});
 
-  it('permission: the current value is the selected card, and the real flag is named', async () => {
+describe('r11 O5: permission saves on Next only', () => {
+  const puts = (tab: Page) => tab.evaluate(() => window.__puts as { text: string; path: string }[]);
+
+  it('Skip -> Auto: a click and arrow keys write nothing; Next writes once, permissionMode only; Auto (saved) -> Next writes nothing', async () => {
     const context = await newContext(VIEWPORTS[1], 'light');
     const tab = await open(context, 'permission', 'light');
     expect(await tab.locator('input[value="skip"]').isChecked()).toBe(true);
-    expect(await tab.locator('[data-codex-step]').innerText()).toContain('--dangerously-bypass-approvals-and-sandbox');
-    await tab.locator('input[value="auto"]').click({ force: true });
-    await tab.waitForTimeout(400);
-    if (shotsDir !== '')
-      await tab.screenshot({ fullPage: true, path: join(shotsDir, 'permission-auto-desktop-1280-light.png') });
+    // The warning is the one line under the cards while Skip is selected: plain words and the real flag.
+    const words = await tab.locator('[data-permission-words="skip"]').innerText();
+    expect(words).toContain('Runs every command without asking, even deleting files.');
+    expect(words).toContain('--dangerously-bypass-approvals-and-sandbox');
+    await tab.locator('[data-choice="auto"]').click();
+    await tab.waitForSelector('[data-choice="auto"][data-selected="true"]');
+    await tab.keyboard.press('ArrowDown');
+    await tab.keyboard.press('ArrowUp');
+    expect(await puts(tab)).toEqual([]);
+    // The demo follows the pick, and the warning is gone with Skip.
+    expect(await tab.locator('[data-step-demo] [data-demo="permission-auto"]').count()).toBe(1);
+    expect(await tab.locator('[data-permission-words]').count()).toBe(0);
+    await tab.locator('[data-step-next]').click();
+    await tab.waitForFunction(() => window.__puts.length > 0);
+    await tab.waitForTimeout(200);
+    const written = await puts(tab);
+    expect(written).toHaveLength(1);
+    // Only permissionMode differs from the file the page read.
+    expect(written[0]?.text).toBe('binary: /fake/bin/codex\npermissionMode: auto\n');
+    expect(written[0]?.path).toBe('harness-codex.yaml');
+    // Auto is now the saved card: choosing Skip and back to Auto, then Next, writes nothing more.
+    await tab.locator('[data-choice="skip"]').click();
+    await tab.locator('[data-choice="auto"]').click();
+    await tab.locator('[data-step-next]').click();
+    await tab.waitForTimeout(300);
+    expect(await puts(tab)).toHaveLength(1);
     await context.close();
   }, 60_000);
 
-  // ── The same page as Claude Code's, measured in the browser (the gate found Codex without the demo box and with other buttons) ──
-  for (const mode of ['light', 'dark'] as const)
-    for (const viewport of VIEWPORTS) {
-      it(`installed: the kit's frame, the demo box and Claude Code's button set, at ${viewport.name}, ${mode}`, async () => {
-        const context = await newContext(viewport, mode);
-        const tab = await open(context, 'installed', mode);
-        const facts = await factsOf(tab);
-        expectKitFrame(facts, 'installed');
-        expectDemo(facts, SAME_AS_CLAUDE.installed.demo, 'installed');
-        expect(facts.buttons).toEqual([...SAME_AS_CLAUDE.installed.buttons]);
-        await context.close();
-      }, 60_000);
+  it('on the saved card, Next writes nothing', async () => {
+    const context = await newContext(VIEWPORTS[1], 'light');
+    const tab = await open(context, 'permission-auto', 'light');
+    expect(await tab.locator('input[value="auto"]').isChecked()).toBe(true);
+    await tab.locator('[data-step-next]').click();
+    await tab.waitForTimeout(300);
+    expect(await puts(tab)).toEqual([]);
+    expect(await tab.evaluate(() => window.__nextError)).toBe('');
+    await context.close();
+  }, 60_000);
 
-      it(`import-choice: the kit's frame, an intro line and three cards, at ${viewport.name}, ${mode}`, async () => {
-        const context = await newContext(viewport, mode);
-        const tab = await open(context, 'import-choice', mode);
-        const facts = await factsOf(tab);
-        expectKitFrame(facts, 'import-choice');
-        expect(facts.lines).toBeGreaterThanOrEqual(SAME_AS_CLAUDE.importChoice.minLines);
-        expect(facts.cards).toBe(SAME_AS_CLAUDE.importChoice.cards);
-        expect(await tab.locator('[data-codex-step] .ob-step__line').first().innerText()).toContain(
-          'Hooks are never imported.',
-        );
-        expect(facts.demo, 'import-choice has no demo, as on Claude Code').toBeNull();
-        await context.close();
-      }, 60_000);
+  it('a change the daemon holds: the page stays, says why, and a second Next tries again', async () => {
+    const context = await newContext(VIEWPORTS[1], 'light');
+    const tab = await open(context, 'permission-auto', 'light', '&held=1');
+    await tab.locator('[data-choice="skip"]').click();
+    await tab.locator('[data-step-next]').click();
+    await tab.waitForFunction(() => window.__nextError !== '');
+    expect(await tab.evaluate(() => window.__nextError)).toContain('waiting for your confirmation');
+    await tab.locator('[data-step-next]').click();
+    await tab.waitForFunction(() => window.__puts.length > 1);
+    expect(await puts(tab)).toHaveLength(2);
+    await context.close();
+  }, 60_000);
 
-      it(`permission: the demo follows the pick, and a pick shows "Use …" and "Keep …" like Claude Code, at ${viewport.name}, ${mode}`, async () => {
-        const context = await newContext(viewport, mode);
-        const tab = await open(context, 'permission', mode);
-        let facts = await factsOf(tab);
-        expectKitFrame(facts, 'permission');
-        expect(facts.cards).toBe(SAME_AS_CLAUDE.permission.cards);
-        expectDemo(facts, SAME_AS_CLAUDE.permission.demo, 'permission');
-        expect(facts.buttons, 'no button before a pick').toEqual([]);
-        await tab.locator('input[value="auto"]').check({ force: true });
-        await tab.waitForSelector('[data-permission-confirm]');
-        facts = await factsOf(tab);
-        expectDemo(facts, SAME_AS_CLAUDE.permissionPick.demo, 'permission (picked)');
-        expect(facts.buttons).toEqual([...SAME_AS_CLAUDE.permissionPick.buttons]);
-        expectKitFrame(facts, 'permission (picked)');
-        await tab.waitForTimeout(1_700);
-        if (shotsDir !== '')
-          await tab.screenshot({
-            fullPage: true,
-            path: join(shotsDir, `permission-picked-${viewport.name}-${mode}.png`),
-          });
-        await context.close();
-      }, 60_000);
-    }
+  it('a file the page cannot read safely offers no card and writes nothing', async () => {
+    const context = await newContext(VIEWPORTS[1], 'light');
+    const tab = await open(context, 'permission-unknown', 'light');
+    expect(await tab.locator('[data-choice]').count()).toBe(0);
+    await tab.locator('[data-step-next]').click();
+    await tab.waitForTimeout(300);
+    expect(await puts(tab)).toEqual([]);
+    await context.close();
+  }, 60_000);
+
+  it('conversations: a click writes nothing; Next writes hostHistory once', async () => {
+    const context = await newContext(VIEWPORTS[1], 'light');
+    const tab = await open(context, 'conversations', 'light');
+    await tab.locator('[data-choice="off"]').click();
+    await tab.waitForSelector('[data-choice="off"][data-selected="true"]');
+    expect(await puts(tab)).toEqual([]);
+    await tab.locator('[data-step-next]').click();
+    await tab.waitForFunction(() => window.__puts.length > 0);
+    const written = await puts(tab);
+    expect(written).toHaveLength(1);
+    expect(written[0]?.text).toContain('hostHistory: false');
+    await context.close();
+  }, 60_000);
+});
+
+describe("r11 O5: the sign-in page is Codex's own", () => {
+  it('a machine with no Codex login mounts the add-login panel LOCKED to Codex (subject harness:codex): no chooser, no grid, no Claude', async () => {
+    const context = await newContext(VIEWPORTS[1], 'light');
+    const tab = await open(context, 'sign-in', 'light');
+    const slot = tab.locator('[data-fake-logins="add-login"]');
+    await slot.waitFor({ state: 'visible' });
+    // The subject is what Logins reads to lock the panel (`harnessOfSubject`); without it the panel opens on the tool chooser.
+    expect(await slot.getAttribute('data-fake-logins-subject')).toBe('harness:codex');
+    expect(await tab.locator('input[type="radio"], [role="radiogroup"], [data-provider-grid]').count()).toBe(0);
+    expect((await tab.evaluate(() => document.body.innerText)).toLowerCase()).not.toContain('claude');
+    await context.close();
+  }, 60_000);
+
+  it("a login that needs signing in mounts its own Codex sign-in, by its id (the link-first panel is Logins' own)", async () => {
+    const context = await newContext(VIEWPORTS[1], 'light');
+    const tab = await open(context, 'sign-in-link', 'light');
+    const slot = tab.locator('[data-fake-logins="codex-login"]');
+    await slot.waitFor({ state: 'visible' });
+    expect(await slot.getAttribute('data-fake-logins-subject')).toBe('codex-main');
+    await context.close();
+  }, 60_000);
 });

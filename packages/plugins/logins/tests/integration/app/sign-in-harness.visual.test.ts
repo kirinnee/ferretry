@@ -219,6 +219,10 @@ describe('the add panel, mounted as a page mounts it (registered panel, subject 
             const head = tab.locator('[data-add-login-preset="openrouter"]');
             await head.waitFor({ state: 'visible' });
             const headScope = await head.locator('[data-login-scope]').getAttribute('data-login-scope');
+            // r11 O5: the summary under the locked panel names the locked tool alone (the REAL both-tools sentence, narrowed).
+            const said = await head.innerText();
+            expect(said).toContain(`${name} through OpenRouter with one key`);
+            expect(said).not.toMatch(other);
             // The full form: every field the person would see.
             await tab.locator('[data-quick-key-form], [data-add-login-form]').first().waitFor({ state: 'visible' });
             if ((await tab.locator('[data-quick-key-more]').count()) > 0)

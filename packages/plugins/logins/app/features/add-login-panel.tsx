@@ -20,6 +20,7 @@ import type { ProviderPresetCatalog, ProviderPresetView } from '../../contract/i
 import { LoginScopeChip } from '../components/login-scope-chip.tsx';
 import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { useLoginChanges } from '../lib/login-changes.ts';
+import { lockedSummary } from '../lib/locked-summary.ts';
 import { readLogins, readPresets } from '../lib/logins-api.ts';
 import { HARNESS_NAMES, HARNESSES, type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
 import { type Prefill, withheldSentence } from '../lib/paste-model.ts';
@@ -48,6 +49,7 @@ export const harnessOfSubject = (subject: string | undefined): HarnessKind | und
 const lockedPreset = (preset: ProviderPresetView, lock: HarnessKind): ProviderPresetView => ({
   ...preset,
   harness: lock,
+  summary: lockedSummary(preset.summary, lock),
   halves: preset.halves.filter(half => half.harness === lock),
   variables: preset.variables.filter(variable => variable.harnesses.includes(lock)),
 });

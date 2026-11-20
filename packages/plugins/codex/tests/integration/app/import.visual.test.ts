@@ -30,7 +30,6 @@ const PAGES = [
   'skills',
   'mcp',
   'conversations',
-  'conversations-pick',
   'run',
   'run-done',
   'run-everything',
@@ -97,11 +96,6 @@ const open = async (context: BrowserContext, page: string, mode: 'light' | 'dark
   const tab = await context.newPage();
   await tab.goto(`${server?.url.origin ?? ''}/?page=${page}&theme=studio-${mode}`);
   await tab.waitForSelector('[data-codex-step]');
-  // The pick shot is the page after the person chose the other card: Save and Leave it as it is, nothing written.
-  if (page === 'conversations-pick') {
-    await tab.waitForSelector('input[value="off"]:not([disabled])');
-    await tab.locator('input[value="off"]').check({ force: true });
-  }
   // The done shot is the run page after the one import.
   if (page === 'run-done') {
     await tab.waitForSelector('[data-import-run]');
@@ -137,36 +131,10 @@ describe('the Codex import pages', () => {
           await context.close();
         }, 60_000);
 
-  it('conversations: the owner’s sentence is on screen, and the pick has not written anything', async () => {
-    const context = await newContext(VIEWPORTS[1], 'light');
-    const tab = await open(context, 'conversations-pick', 'light');
-    expect(await tab.locator('[data-conversations-words]').innerText()).toBe(
-      'One way: Ferretry reads them and never changes them. A conversation is copied only when you continue it here.',
-    );
-    expect(await tab.locator('[data-conversations-save]').count()).toBe(1);
-    await context.close();
-  }, 60_000);
-
-  // ── The same pages as Claude Code's, measured in the browser ──
+  // ── The run and kind pages keep the import kit's frame, measured in the browser (the conversations page is proved in onboarding.visual.test.ts) ──
   for (const mode of ['light', 'dark'] as const)
     for (const viewport of VIEWPORTS) {
       const at = `at ${viewport.name}, ${mode}`;
-      it(`conversations: the kit's frame, two cards, the owner's words; a pick shows Claude Code's buttons, ${at}`, async () => {
-        const context = await newContext(viewport, mode);
-        const tab = await open(context, 'conversations', mode);
-        const facts = await factsOf(tab);
-        expectKitFrame(facts, 'conversations');
-        expect(facts.cards).toBe(SAME_AS_CLAUDE.conversations.cards);
-        expect(facts.lines).toBeGreaterThanOrEqual(SAME_AS_CLAUDE.conversations.minLines);
-        expect(facts.buttons, 'no button before a pick').toEqual([]);
-        await tab.locator('input[value="off"]').check({ force: true });
-        await tab.waitForSelector('[data-conversations-confirm]');
-        const picked = await factsOf(tab);
-        expect(picked.buttons).toEqual([...SAME_AS_CLAUDE.conversationsPick.buttons]);
-        expectKitFrame(picked, 'conversations (picked)');
-        await context.close();
-      }, 60_000);
-
       it(`run: the count, what Next does, the kit's name field, and Import + Skip the import like Claude Code, ${at}`, async () => {
         const context = await newContext(viewport, mode);
         const tab = await open(context, 'run', mode);

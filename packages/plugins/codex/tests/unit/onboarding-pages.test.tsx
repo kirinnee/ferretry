@@ -9,6 +9,7 @@ import { ABSENT_VIEW } from '../../contract/testing/index.ts';
 import type { HarnessCliView } from '../../contract/index.ts';
 import { readConfigText } from '@ferretry/std/yaml';
 import { modeOf, signInFacts, withMode } from '../../app/features/onboarding/onboarding-api.ts';
+import { signInPanelFor } from '../../app/features/onboarding/sign-in-page.tsx';
 import { createRoot } from '../support/dom.ts';
 import { type StepHarness, stepHarness } from '@ferretry/plugin-onboarding/contract/testing';
 
@@ -226,22 +227,22 @@ describe('sign-in', () => {
     const harness = stepHarness();
     const { container } = await mount('sign-in', harness, () => list(sampleLogin('claude-main')));
     expect(harness.decision).toBe('shown');
-    expect(container.textContent).toContain('no Codex login');
+    expect(container.textContent).toContain('No Codex login');
   });
 
   test('a login that needs signing in is shown, never skipped', async () => {
     const harness = stepHarness();
     const { container } = await mount('sign-in', harness, () => list(codexLogin('needs_sign_in')));
     expect(harness.decision).toBe('shown');
-    expect(container.textContent).toContain('Sign in to your Codex account on this machine');
-    expect(container.textContent).not.toContain('no Codex login');
+    expect(container.textContent).toContain('Sign in to Codex on this machine');
+    expect(container.textContent).not.toContain('No Codex login');
   });
 
   test('a switched-off ready login is not signed in: the step is shown, never skipped', async () => {
     const harness = stepHarness();
     const { container } = await mount('sign-in', harness, () => list(codexLogin('ready', { disabled: true })));
     expect(harness.decision).toBe('shown');
-    expect(container.textContent).toContain('no Codex login');
+    expect(container.textContent).toContain('No Codex login');
   });
 
   test('a login that is still being checked is not signed in: it says so and offers to check again', async () => {
@@ -264,7 +265,23 @@ describe('sign-in', () => {
       list(codexLogin('needs_sign_in', { canSignIn: false })),
     );
     expect(harness.decision).toBe('shown');
-    expect(container.textContent).toContain('no Codex login');
+    expect(container.textContent).toContain('No Codex login');
+  });
+
+  test('the add-login panel is mounted LOCKED to Codex (subject harness:codex), never the open chooser', () => {
+    // Logins reads the tool from this subject (`harnessOfSubject`, proven in logins' own suite): without it the panel opens on the
+    // Claude Code / Codex chooser and a provider grid (owner line 6).
+    expect(signInPanelFor({ state: 'no-login' })).toEqual({ panel: 'add-login', subject: 'harness:codex' });
+    const login = codexLogin('needs_sign_in', { id: 'b' });
+    expect(signInPanelFor({ state: 'needs-sign-in', login })).toEqual({ panel: 'codex-login', subject: 'b' });
+  });
+
+  test('the words on the sign-in page never name Claude', async () => {
+    for (const rows of [[], [codexLogin('needs_sign_in')], [codexLogin('checking')]]) {
+      const harness = stepHarness();
+      const { container } = await mount('sign-in', harness, () => list(...rows));
+      expect(container.textContent?.toLowerCase()).not.toContain('claude');
+    }
   });
 
   test('the facts pick the signable login among several, and ignore switched-off rows', () => {
@@ -289,6 +306,8 @@ describe('import-choice', () => {
     expect(harness.segment.importMode).toBe('everything');
     expect(container.querySelector<HTMLInputElement>('input[value="everything"]')?.checked).toBe(true);
     expect(container.querySelectorAll('input[type="radio"]').length).toBe(3);
+    // The demo follows the pick (portaled into the frame in the flow; inline here, outside a frame).
+    expect(container.querySelector('[data-demo="import-everything"]')).not.toBeNull();
   });
 
   test('a choice is remembered, not saved (the shell records Next); a returning page opens on the earlier choice', async () => {
@@ -298,6 +317,7 @@ describe('import-choice', () => {
       container.querySelector<HTMLInputElement>('input[value="fresh"]')?.click();
     });
     expect(harness.segment.importMode).toBe('fresh');
+    expect(container.querySelector('[data-demo="import-fresh"]')).not.toBeNull();
     expect(harness.count('done')).toBe(0);
     const again = stepHarness({ segment: { importMode: 'choose' } });
     const second = await mount('import-choice', again, () => ({}));
@@ -323,34 +343,62 @@ describe('permission', () => {
     });
     await act(async () => {});
   };
-  const putOf = (calls: readonly Call[]) => calls.find(call => call.route === 'PUT /v1/config/file');
-  const putText = (calls: readonly Call[]) => (putOf(calls)?.options?.body as { text: string } | undefined)?.text ?? '';
-  const busyLabels = (harness: StepHarness) =>
-    harness.calls.filter(call => call.kind === 'busy').map(call => (call.kind === 'busy' ? call.label : ''));
+  /** What the shell's Next does: run the registered save, then (it, not the page) record the step. */
+  const next = async (harness: StepHarness) => {
+    await act(async () => {
+      await harness.runCommit();
+    });
+  };
+  const nextRefused = async (harness: StepHarness): Promise<string> => {
+    let said = '';
+    await act(async () => {
+      await harness.runCommit().catch((cause: unknown) => {
+        said = cause instanceof Error ? cause.message : String(cause);
+      });
+    });
+    return said;
+  };
+  const putOf = (calls: readonly Call[]) => calls.filter(call => call.route === 'PUT /v1/config/file');
+  const putText = (calls: readonly Call[]) =>
+    (putOf(calls).at(0)?.options?.body as { text: string } | undefined)?.text ?? '';
 
   test('opens on the config value (skip when unset), says what skip allows and names the real flag', async () => {
     const harness = stepHarness();
     const { container } = await mount('permission', harness, () => file(''));
     expect(radio(container, 'skip')?.checked).toBe(true);
     expect(container.textContent).toContain('--dangerously-bypass-approvals-and-sandbox');
-    expect(container.textContent).toContain('without asking you, including deleting files');
+    expect(container.textContent).toContain('Runs every command without asking, even deleting files.');
+    // Cards stacked, and nothing to press on the page: Next is the only way to save.
+    expect(container.querySelector('[data-choice-cards][data-layout="stack"]')).not.toBeNull();
+    expect(container.querySelectorAll('button').length).toBe(0);
+    expect(harness.hasCommit).toBe(false);
   });
 
-  test('choosing Auto writes only permissionMode, every other line kept', async () => {
+  test('the page names only Codex (no Claude anywhere), with the plain apostrophe fixed to a typographic one', async () => {
+    const harness = stepHarness();
+    const { container } = await mount('permission', harness, () => file(''));
+    expect(container.textContent?.toLowerCase()).not.toContain('claude');
+    expect(container.textContent).toContain('Codex’s');
+    expect(container.textContent).not.toContain("Codex's");
+  });
+
+  test('choosing Auto writes nothing until Next: then only permissionMode changes, every other line kept', async () => {
     const harness = stepHarness();
     const text = 'binary: /opt/codex # mine\nsearchPaths:\n  - ~/bin\npermissionMode: skip\n';
     const { container, calls } = await mount('permission', harness, route =>
       route.startsWith('PUT') ? { outcome: 'applied' } : file(text),
     );
     await choose(container, 'auto');
-    expect(putOf(calls)).toBeUndefined();
-    await press(container, '[data-permission-use]');
-    expect(putOf(calls)?.options?.body).toEqual({
+    expect(putOf(calls)).toEqual([]);
+    expect(harness.hasCommit).toBe(true);
+    // Moving over the cards with the arrow keys selects only, and writes nothing.
+    await next(harness);
+    expect(putOf(calls)).toHaveLength(1);
+    expect(putOf(calls)[0]?.options?.body).toEqual({
       path: 'harness-codex.yaml',
       text: 'binary: /opt/codex # mine\nsearchPaths:\n  - ~/bin\npermissionMode: auto\n',
       etag: 'e1',
     });
-    expect(harness.count('done')).toBe(1);
   });
 
   // Valid YAML spellings of "Auto" that a line pattern misreads, and the one-key edit that must not corrupt them.
@@ -370,13 +418,12 @@ describe('permission', () => {
       expect(radio(container, 'auto')?.checked).toBe(true);
       expect(container.querySelector('[data-permission-words]')).toBeNull();
       await choose(container, 'skip');
-      await press(container, '[data-permission-use]');
+      await next(harness);
       const written = putText(calls);
       const read = readConfigText(written);
       expect(read.ok).toBe(true);
       expect(read.ok ? (read.read.value as { permissionMode?: string }).permissionMode : undefined).toBe('skip');
       expect(written.match(/permissionMode/gu)?.length).toBe(1);
-      expect(harness.count('done')).toBe(1);
     });
   }
 
@@ -388,7 +435,7 @@ describe('permission', () => {
         : file('# mine\nbinary: /opt/codex\npermissionMode: skip # keep\n'),
     );
     await choose(container, 'auto');
-    await press(container, '[data-permission-use]');
+    await next(harness);
     expect(putText(calls)).toBe('# mine\nbinary: /opt/codex\npermissionMode: auto # keep\n');
   });
 
@@ -398,62 +445,62 @@ describe('permission', () => {
     expect(radio(container, 'skip')?.checked).toBe(true);
   });
 
-  test('a pick shows the whole consequence and the demo first, and writes nothing until "Use …" is pressed', async () => {
+  test('a pick shows the warning and the demo at once, writes nothing, and never holds Next', async () => {
     const harness = stepHarness();
     const { container, calls } = await mount('permission', harness, route =>
       route.startsWith('PUT') ? { outcome: 'applied' } : file('permissionMode: auto\n'),
     );
     expect(container.querySelector('[data-permission-words]')).toBeNull();
     await choose(container, 'skip');
-    // The selection shows the warning (no approvals, no sandbox, deleting files, the real flag) and nothing was written.
+    // The selection shows the warning (what it allows in plain words, the real flag) and nothing was written.
     expect(radio(container, 'skip')?.checked).toBe(true);
-    expect(container.querySelector('[data-permission-words="skip"]')?.textContent).toContain(
-      '--dangerously-bypass-approvals-and-sandbox',
-    );
-    expect(container.textContent).toContain('including deleting files');
-    expect(container.textContent).toContain('no approvals, no sandbox');
-    expect(putOf(calls)).toBeUndefined();
-    expect(container.querySelector('[data-demo="permission-skip"]')).not.toBeNull();
-    // Not answerable by default while the pick waits: the page holds the step busy, so Next cannot record it.
-    expect(busyLabels(harness).at(-1)).toBe('Press “Use …” or “Keep …” to continue');
+    const words = container.querySelector('[data-permission-words="skip"]')?.textContent ?? '';
+    expect(words).toContain('--dangerously-bypass-approvals-and-sandbox');
+    expect(words).toContain('Runs every command without asking, even deleting files.');
+    expect(putOf(calls)).toEqual([]);
+    // Rule 8: no page-made hold on Next (no busy label at all), no done() from the page, no page button.
+    expect(harness.calls.filter(call => call.kind === 'busy')).toEqual([]);
     expect(harness.count('done')).toBe(0);
-    await press(container, '[data-permission-use]');
+    expect(container.querySelectorAll('button').length).toBe(0);
+    await next(harness);
     expect(putText(calls)).toBe('permissionMode: skip\n');
-    expect(harness.count('done')).toBe(1);
-    expect(busyLabels(harness).at(-1)).toBeNull();
+    // The shell records the step on a resolved commit; the page does not.
+    expect(harness.count('done')).toBe(0);
   });
 
-  test('"Keep …" leaves Auto in place, writes nothing and answers the step', async () => {
+  test('going back to the saved card clears the save: Next then writes nothing', async () => {
     const harness = stepHarness();
     const { container, calls } = await mount('permission', harness, () => file('permissionMode: auto\n'));
     await choose(container, 'skip');
-    await press(container, '[data-permission-cancel]');
-    expect(radio(container, 'auto')?.checked).toBe(true);
-    expect(container.querySelector('[data-permission-words]')).toBeNull();
-    expect(putOf(calls)).toBeUndefined();
-    expect(busyLabels(harness).at(-1)).toBeNull();
-    expect(harness.count('done')).toBe(1);
-  });
-
-  test('picking Auto while the Skip confirm is open drops the confirm', async () => {
-    const harness = stepHarness();
-    const { container, calls } = await mount('permission', harness, () => file('permissionMode: auto\n'));
-    await choose(container, 'skip');
+    expect(harness.hasCommit).toBe(true);
     await choose(container, 'auto');
-    expect(container.querySelector('[data-permission-confirm]')).toBeNull();
-    expect(putOf(calls)).toBeUndefined();
-    expect(busyLabels(harness).at(-1)).toBeNull();
+    expect(harness.hasCommit).toBe(false);
+    expect(container.querySelector('[data-permission-words]')).toBeNull();
+    await next(harness);
+    expect(putOf(calls)).toEqual([]);
   });
 
-  test('a change the daemon holds is said, not shown as saved', async () => {
+  test('a change the daemon holds is said, Next stays on the page, and a second Next tries again', async () => {
     const harness = stepHarness();
-    const { container } = await mount('permission', harness, route =>
+    const { container, calls } = await mount('permission', harness, route =>
       route.startsWith('PUT') ? { outcome: 'pending' } : file('permissionMode: auto\n'),
     );
     await choose(container, 'skip');
-    await press(container, '[data-permission-use]');
-    expect(container.querySelector('[data-permission-note]')?.textContent).toContain('waiting for your confirmation');
+    expect(await nextRefused(harness)).toContain('waiting for your confirmation');
     expect(harness.count('done')).toBe(0);
+    expect(await nextRefused(harness)).toContain('waiting for your confirmation');
+    expect(putOf(calls)).toHaveLength(2);
+  });
+
+  test('a refused write says the daemon’s words and keeps the pick', async () => {
+    const harness = stepHarness();
+    const { container } = await mount('permission', harness, route =>
+      route.startsWith('PUT') ? new Error('That file changed.') : file('permissionMode: auto\n'),
+    );
+    await choose(container, 'skip');
+    expect(await nextRefused(harness)).toBe('That file changed.');
+    expect(radio(container, 'skip')?.checked).toBe(true);
+    expect(harness.hasCommit).toBe(true);
   });
 
   const WITHHELD =
@@ -475,12 +522,12 @@ describe('permission', () => {
       expect(container.querySelector('[data-permission-unknown]')?.textContent).toContain(
         'Change this at the machine: /home/fixture/config/harness-codex.yaml',
       );
-      // Nothing is offered to pick when the mode cannot be read (the same as Claude Code's page).
+      // Nothing is offered to pick when the mode cannot be read.
       expect(radio(container, 'skip')).toBeNull();
       expect(radio(container, 'auto')).toBeNull();
       expect(container.querySelector('[data-demo]')).toBeNull();
-      expect(putOf(calls)).toBeUndefined();
-      expect(container.querySelector('[data-permission-confirm]')).toBeNull();
+      expect(putOf(calls)).toEqual([]);
+      expect(harness.hasCommit).toBe(false);
       expect(harness.count('done')).toBe(0);
     });
   }

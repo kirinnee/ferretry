@@ -193,17 +193,30 @@ describe('conversations', () => {
       ...extra,
     },
   });
+  const writes = (calls: readonly Call[]) => calls.filter(call => call.route === 'PUT /v1/config/file');
+  const pick = async (container: HTMLElement, value: string) => {
+    await act(async () => {
+      container.querySelector<HTMLInputElement>(`input[value="${value}"]`)?.click();
+    });
+  };
+  const next = async (harness: ReturnType<typeof stepHarness>) => {
+    await act(async () => {
+      await harness.runCommit();
+    });
+  };
 
   test('says the owner’s words, reads the value back from the file (no import mode needed), and writes nothing on opening', async () => {
     const harness = stepHarness();
     const { container, calls } = await mount('conversations', harness, machine(FULL, FILE('permissionMode: skip\n')));
     expect(container.querySelector('[data-conversations-words]')?.textContent).toBe(ONE_WAY_WORDS);
-    expect(ONE_WAY_WORDS).toBe(
-      'One way: Ferretry reads them and never changes them. A conversation is copied only when you continue it here.',
-    );
     expect(container.querySelector<HTMLInputElement>('input[value="on"]')?.checked).toBe(true);
     expect(harness.decision).toBe('shown');
-    expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
+    expect(writes(calls)).toEqual([]);
+    expect(harness.hasCommit).toBe(false);
+    // Stacked cards and nothing to press on the page; the page never names Claude.
+    expect(container.querySelector('[data-choice-cards][data-layout="stack"]')).not.toBeNull();
+    expect(container.querySelectorAll('button').length).toBe(0);
+    expect(container.textContent?.toLowerCase()).not.toContain('claude');
   });
 
   test('a file that says off opens on off', async () => {
@@ -212,58 +225,34 @@ describe('conversations', () => {
     expect(container.querySelector<HTMLInputElement>('input[value="off"]')?.checked).toBe(true);
   });
 
-  test('picking a card never writes: it shows "Use: …" and "Keep …" and holds nothing; Use writes only hostHistory, once, then answers', async () => {
+  test('picking a card never writes and holds nothing; Next writes only hostHistory, once', async () => {
     const harness = stepHarness();
     const text = '# my codex\npermissionMode: skip # keep\n';
     const { container, calls } = await mount('conversations', harness, machine(FULL, FILE(text)));
-    await act(async () => {
-      container.querySelector<HTMLInputElement>('input[value="off"]')?.click();
-    });
-    expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
-    // The same buttons as Claude Code's page, and no hold on Next: Next keeps what is saved now.
-    expect(
-      [...container.querySelectorAll('[data-conversations-confirm] button')].map(button => button.textContent),
-    ).toEqual(['Use: don’t show them', 'Keep showing them']);
-    expect(container.textContent).toContain(
-      'Nothing is saved until you press the button. Next keeps what is saved now.',
-    );
+    await pick(container, 'off');
+    expect(writes(calls)).toEqual([]);
+    expect(harness.hasCommit).toBe(true);
+    expect(container.querySelector('[data-demo="conversations-off"]')).not.toBeNull();
     expect(busyLabels(harness)).toEqual([]);
     expect(harness.count('done')).toBe(0);
-    await press(container, '[data-conversations-save]');
-    const writes = calls.filter(call => call.route === 'PUT /v1/config/file');
-    expect(writes.length).toBe(1);
-    const body = writes[0]?.options?.body as { path: string; text: string; etag: string };
+    await next(harness);
+    expect(writes(calls)).toHaveLength(1);
+    const body = writes(calls)[0]?.options?.body as { path: string; text: string; etag: string };
     expect(body.path).toBe('harness-codex.yaml');
     expect(body.text).toContain('hostHistory: false');
     expect(body.text).toContain('# my codex');
     expect(body.text).toContain('permissionMode: skip # keep');
-    expect(harness.count('done')).toBe(1);
-    expect(busyLabels(harness).at(-1)).toBeNull();
   });
 
-  test('"Keep …" writes nothing and answers the step', async () => {
+  test('going back to the saved card clears the save: Next writes nothing', async () => {
     const harness = stepHarness();
     const { container, calls } = await mount('conversations', harness, machine(FULL, FILE('')));
-    await act(async () => {
-      container.querySelector<HTMLInputElement>('input[value="off"]')?.click();
-    });
-    await press(container, '[data-conversations-cancel]');
-    expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
-    expect(harness.count('done')).toBe(1);
-    expect(container.querySelector('[data-conversations-confirm]')).toBeNull();
-    expect(container.querySelector<HTMLInputElement>('input[value="on"]')?.checked).toBe(true);
-  });
-
-  test('picking the card it already is shows no confirm (nothing to save)', async () => {
-    const harness = stepHarness();
-    const { container } = await mount('conversations', harness, machine(FULL, FILE('')));
-    await act(async () => {
-      container.querySelector<HTMLInputElement>('input[value="off"]')?.click();
-    });
-    await act(async () => {
-      container.querySelector<HTMLInputElement>('input[value="on"]')?.click();
-    });
-    expect(container.querySelector('[data-conversations-save]')).toBeNull();
+    await pick(container, 'off');
+    expect(harness.hasCommit).toBe(true);
+    await pick(container, 'on');
+    expect(harness.hasCommit).toBe(false);
+    await next(harness);
+    expect(writes(calls)).toEqual([]);
   });
 
   test('a file the daemon withholds is never written: it says where to change it', async () => {
@@ -274,25 +263,27 @@ describe('conversations', () => {
     expect(container.querySelector('[data-conversations-unknown]')?.textContent).toContain(
       'Change this at the machine: /fake/home/config/harness-codex.yaml',
     );
-    // Nothing is offered to pick when the setting cannot be read (the same as Claude Code's page).
+    // Nothing is offered to pick when the setting cannot be read.
     expect(container.querySelector('input[value="off"]')).toBeNull();
-    expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
+    expect(writes(calls)).toEqual([]);
+    expect(harness.hasCommit).toBe(false);
   });
 
-  test('a change the daemon holds is said to be waiting, never shown as saved', async () => {
+  test('a change the daemon holds is said to be waiting, Next stays, and is never shown as saved', async () => {
     const harness = stepHarness();
     const { container } = await mount(
       'conversations',
       harness,
       machine(FULL, { ...FILE('hostHistory: false\n'), 'PUT /v1/config/file': { outcome: 'pending' } }),
     );
+    await pick(container, 'on');
+    let said = '';
     await act(async () => {
-      container.querySelector<HTMLInputElement>('input[value="on"]')?.click();
+      await harness.runCommit().catch((cause: unknown) => {
+        said = cause instanceof Error ? cause.message : String(cause);
+      });
     });
-    await press(container, '[data-conversations-save]');
-    expect(container.querySelector('[data-conversations-note]')?.textContent).toContain(
-      'waiting for your confirmation',
-    );
+    expect(said).toContain('waiting for your confirmation');
     expect(harness.count('done')).toBe(0);
   });
 });

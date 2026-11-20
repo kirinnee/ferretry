@@ -1,29 +1,29 @@
 /**
- * Step `permission`: Auto mode or Skip permissions. The card that is selected on opening is the config value (default
- * `skip`, owner !A525). A write changes ONLY `permissionMode` in `config/harness-codex.yaml`, through the config route and
- * the shared one-key editor, so every other key and comment stays.
+ * Step `permission`: Auto mode or Skip permissions (r11 O5). Two stacked cards on the left, the demo on the right
+ * (`StepDemo`), nothing to press on the page: the footer's Next saves the pick.
  *
- * A pick is NOT a write: moving over the cards (arrow keys included) only selects. The page then says in full what the selected
- * mode means (for Skip: no approvals, no sandbox, deleting files, the real flag) and offers one explicit "Use …" button; only that
- * press writes. While a pick differs from the saved mode the page holds `busy`, so the shell's Next cannot record "done" over a
- * daemon still on the old mode: the person either presses "Use …" (writes, then done) or "Keep …" (done, no write), or moves back
- * to the saved card. A file the page cannot read safely (withheld by the daemon, or not valid YAML) shows the mode as unknown and
- * writes nothing: "Change this at the machine: <file>". If the daemon holds the change anyway the page says so instead of showing
- * it as saved. The dangerous-rm waiver is a separate Settings switch and is not offered here. The same page, words, demo and
- * buttons as Claude Code's.
+ * The card selected on opening is the config value (default `skip`, owner !A525). A pick is NOT a write: moving over the
+ * cards (arrow keys included) only selects. When the pick differs from the saved mode the page registers `host.commit`
+ * (contract rule 8); only a real Next press runs it, under the shell's "Saving…": it changes ONLY `permissionMode` in
+ * `config/harness-codex.yaml`, through the config route and the shared one-key editor, so every other key and comment
+ * stays. When the pick equals the saved mode the commit is cleared and Next writes nothing. A refusal, or a change the
+ * daemon HOLDS for the owner's confirmation, rejects the commit: the footer says why, the page stays, Next can try again.
+ * A file the page cannot read safely (withheld by the daemon, or not valid YAML) shows the mode as unknown and writes
+ * nothing: "Change this at the machine: <file>". While Skip is selected ONE line names the real flag and says in plain
+ * words what it allows. The dangerous-rm waiver is a separate Settings switch and is not offered here.
  */
-import { Button, ChoiceCards, type ChoiceOption } from '@ferretry/app';
-import { PermissionDemo, StepActions, StepBody, StepConfirm, StepLine } from '@ferretry/plugin-runtimes/import-kit';
+import { ChoiceCards, type ChoiceOption, StepDemo } from '@ferretry/app';
+import { PermissionDemo, StepBody, StepLine } from '@ferretry/plugin-runtimes/import-kit';
 import type { StepHost } from './onboarding-api.ts';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AUTO_WORDS,
   type ConfigFile,
   type OnboardingClient,
   type PermissionMode,
   SKIP_FLAG,
-  SKIP_LEAD,
-  SKIP_TAIL,
+  SKIP_PLAIN,
+  SKIP_WORDS,
   changeAtMachineWords,
   currentMode,
   readConfig,
@@ -31,22 +31,11 @@ import {
   writeMode,
 } from './onboarding-api.ts';
 
-const SKIP_WORDS = `${SKIP_LEAD} ${SKIP_FLAG}${SKIP_TAIL}`;
-
-/** What each mode means, said in full before the press that writes it. */
-const CONSEQUENCE: Readonly<Record<PermissionMode, { readonly button: string; readonly text: string }>> = {
-  auto: { button: 'Use Auto mode', text: AUTO_WORDS },
-  skip: { button: 'Use Skip permissions', text: SKIP_WORDS },
-};
-const KEEP: Readonly<Record<PermissionMode, string>> = { auto: 'Keep Auto mode', skip: 'Keep Skip permissions' };
-
 const OPTIONS: readonly ChoiceOption[] = [
   { id: 'auto', title: 'Auto mode', line: AUTO_WORDS },
-  { id: 'skip', title: 'Skip permissions', line: `${SKIP_WORDS.replace(/\.$/u, '')}.` },
+  { id: 'skip', title: 'Skip permissions', line: SKIP_WORDS },
 ];
 
-/** Why Next is locked while a pick has not been written or dropped. */
-const HOLD = 'Press “Use …” or “Keep …” to continue';
 const HELD_WORDS = 'That change is waiting for your confirmation in Settings › Codex.';
 
 const isMode = (value: string): value is PermissionMode => value === 'auto' || value === 'skip';
@@ -58,7 +47,11 @@ export function PermissionPage({ client, step }: { readonly client: OnboardingCl
   /** The card selected but not yet written. */
   const [picked, setPicked] = useState<PermissionMode | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  /** True from the moment Next starts the write until the daemon answers: the pick the footer captured is the one saved. */
   const [saving, setSaving] = useState(false);
+  // What a commit reads is the file as it is NOW, never a stale copy from the render that registered it.
+  const latest = useRef<ConfigFile | null>(null);
+  latest.current = file;
 
   useEffect(() => {
     let current = true;
@@ -79,47 +72,43 @@ export function PermissionPage({ client, step }: { readonly client: OnboardingCl
     };
   }, [client, step]);
 
-  const shown: PermissionMode | null = picked ?? mode;
-  const pending = picked !== null && mode !== null && picked !== mode;
+  const save = useCallback(
+    (chosen: PermissionMode) => async (): Promise<void> => {
+      const now = latest.current;
+      if (now === null) throw new Error('The permission file has not been read yet.');
+      setSaving(true);
+      try {
+        const result = await writeMode(client, now, chosen).catch((cause: unknown) => {
+          throw new Error(refusalWords(cause));
+        });
+        const fresh = await readConfig(client);
+        setFile(fresh);
+        // A change the daemon holds for the owner is not saved: say so, stay, and let Next try again.
+        if (result === 'held') throw new Error(HELD_WORDS);
+        setMode(currentMode(fresh) ?? chosen);
+        setPicked(null);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [client],
+  );
 
-  // Hold Next while a pick differs from the saved mode; release it when the pick is written, kept or withdrawn. A save in flight
-  // owns `busy` itself ("Saving…").
-  useEffect(() => {
-    if (saving) return;
-    step.busy(pending ? HOLD : null);
-  }, [saving, pending, step]);
-
-  const write = async (chosen: PermissionMode): Promise<void> => {
-    if (file === null || mode === null) return;
-    setSaving(true);
+  const choose = (next: string): void => {
+    if (!isMode(next) || mode === null) return;
     setNote(null);
-    step.busy('Saving…');
-    try {
-      const result = await writeMode(client, file, chosen);
-      const fresh = await readConfig(client);
-      setFile(fresh);
-      setMode(currentMode(fresh) ?? chosen);
+    if (next === mode) {
       setPicked(null);
-      if (result === 'held') setNote(HELD_WORDS);
-      else step.done();
-    } catch (cause) {
-      setNote(refusalWords(cause));
-    } finally {
-      setSaving(false);
+      step.commit(null);
+    } else {
+      setPicked(next);
+      step.commit(save(next));
     }
   };
 
-  const keep = (): void => {
-    if (mode === null) return;
-    setNote(null);
-    setPicked(null);
-    step.busy(null);
-    step.done();
-  };
-
+  const shown: PermissionMode | null = picked ?? mode;
   return (
     <StepBody step="codex.permission" label="Codex permissions" data-codex-step="permission">
-      <StepLine>When Codex wants to run a command on this machine, should it ask you first?</StepLine>
       {file !== null && mode === null ? (
         <StepLine role="alert" data-permission-unknown="">
           The current mode is unknown: this page cannot read it safely. {changeAtMachineWords(file)}
@@ -128,32 +117,24 @@ export function PermissionPage({ client, step }: { readonly client: OnboardingCl
         <>
           <ChoiceCards
             label="Permissions"
+            layout="stack"
             options={OPTIONS}
             value={file === null || shown === null ? null : shown}
             disabled={file === null || mode === null || saving}
-            onChange={next => {
-              if (isMode(next)) setPicked(next);
-            }}
+            onChange={choose}
           />
-          {shown === null ? null : <PermissionDemo tool="Codex" mode={shown} />}
-          {pending && picked !== null && mode !== null ? (
-            <StepConfirm data-permission-confirm="">
-              <StepLine role="note" data-permission-words={picked}>
-                {CONSEQUENCE[picked].text} Nothing is saved until you press the button.
-              </StepLine>
-              <StepActions>
-                <Button variant="primary" disabled={saving} data-permission-use="" onClick={() => void write(picked)}>
-                  {CONSEQUENCE[picked].button}
-                </Button>
-                <Button disabled={saving} data-permission-cancel="" onClick={keep}>
-                  {KEEP[mode]}
-                </Button>
-              </StepActions>
-            </StepConfirm>
+          {shown === 'skip' ? (
+            <StepLine role="note" data-permission-words="skip">
+              {SKIP_PLAIN} Codex’s <code>{SKIP_FLAG}</code>.
+            </StepLine>
           ) : null}
+          {shown === null ? null : (
+            <StepDemo>
+              <PermissionDemo tool="Codex" mode={shown} />
+            </StepDemo>
+          )}
         </>
       )}
-      {saving ? <StepLine role="status">Saving…</StepLine> : null}
       {note === null ? null : (
         <StepLine role="alert" data-permission-note="">
           {note}

@@ -56,44 +56,11 @@ export const factsOf = async (tab: Page): Promise<PageFacts> =>
     };
   });
 
-/** Claude Code's page, said once per page: what a Codex page must match. */
+/** Claude Code's run page, said once: what a Codex run page must match. The other Codex pages are proved by their own owner-line asserts. */
 export const SAME_AS_CLAUDE = {
-  installed: {
-    demo: { kind: 'installed', text: '$ codex --version codex-cli 0.166.0' },
-    // Claude: one "Install Claude Code" button while the command is runnable and nothing has failed.
-    buttons: ['Install Codex'],
-  },
-  importChoice: { cards: 3, minLines: 1 },
-  conversations: { cards: 2, minLines: 2 },
-  // Claude: the pick shows "Use: …" and "Keep …" (conversations-page.tsx).
-  conversationsPick: { buttons: ['Use: don’t show them', 'Keep showing them'] },
-  permission: {
-    cards: 2,
-    minLines: 1,
-    demo: { kind: 'permission-skip', text: '› rm -rf build/ ✓ ran, without asking' },
-  },
-  // Claude: the pick shows "Use Auto mode" and "Keep Skip permissions" (permission-page.tsx).
-  permissionPick: {
-    demo: { kind: 'permission-auto', text: '› rm -rf build/ Run this command? [y/N]' },
-    buttons: ['Use Auto mode', 'Keep Skip permissions'],
-  },
   // Claude: "Import" and "Skip the import", the runtime name field, the count line and what Next does (import-run-page.tsx).
   importRun: { buttons: ['Import', 'Skip the import'] },
 } as const;
-
-/** The kit's demo box is on the page, drawn by the kit's CSS, playing, and says what Claude's says. */
-export const expectDemo = (
-  facts: PageFacts,
-  want: { readonly kind: string; readonly text: string },
-  page: string,
-): void => {
-  expect(facts.demo, `${page}: a demo box, as on Claude Code's page`).not.toBeNull();
-  expect(facts.demo?.kind, `${page}: the demo kind`).toBe(want.kind);
-  expect(facts.demo?.drawn, `${page}: the demo box is drawn (border and surface)`).toBe(true);
-  expect(facts.demo?.height ?? 0, `${page}: the demo box has its height`).toBeGreaterThanOrEqual(80);
-  expect(facts.demo?.animated, `${page}: the demo plays`).toBe(true);
-  expect(facts.demo?.text, `${page}: the demo says`).toBe(want.text);
-};
 
 /** The page body is the kit's frame, and its buttons are the kit's row. */
 export const expectKitFrame = (facts: PageFacts, page: string): void => {

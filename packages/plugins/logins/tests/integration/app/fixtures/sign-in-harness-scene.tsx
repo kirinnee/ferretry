@@ -64,7 +64,9 @@ const preset = (id: string, label: string, harness: 'codex' | 'claude-code') => 
 /** A SHARED provider (OpenRouter-like): one preset that drives both tools, each half with its own variables. */
 const SHARED = {
   ...preset('openrouter', 'OpenRouter', 'claude-code'),
-  summary: 'OpenRouter for either tool.',
+  // Word for word as the daemon's endpoint data says it (openrouter.yaml; the unit suite reads that file itself).
+  summary:
+    'Claude Code and Codex through OpenRouter with one key, on Anthropic and OpenAI models or any other it routes to.',
   variables: [
     {
       name: 'ANTHROPIC_BASE_URL',
