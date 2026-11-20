@@ -98,6 +98,11 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
     blurb: 'Photocopied zine: typewriter type, dashed edges, off-register hard shadows. Rough on purpose.',
     loud: true,
   },
+  {
+    id: 'briefing',
+    label: 'Briefing',
+    blurb: 'A calm written report: thin Poppins, mono numbers, pill controls, soft shadows, a hot focus ring.',
+  },
 ] as const);
 
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([
@@ -147,6 +152,12 @@ export const PALETTES: readonly PaletteEntry[] = Object.freeze([
     label: 'Retro futurism',
     blurb: 'Space-age navy, sunset orange and teal.',
     suggestedStyle: 'neo',
+  },
+  {
+    id: 'briefing',
+    label: 'Briefing',
+    blurb: 'Lavender-grey page, navy ink, indigo accent, one hot pink.',
+    suggestedStyle: 'briefing',
   },
 ] as const);
 

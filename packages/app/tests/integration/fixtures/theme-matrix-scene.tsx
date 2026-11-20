@@ -98,6 +98,9 @@ createRoot(document.getElementById('root') as HTMLElement).render(
     <p style={{ marginTop: 12 }}>
       <Check aria-hidden size={16} /> <span data-spec="text">Done</span>
     </p>
+    <section className="fy-page" style={{ padding: 0 }}>
+      <h1 data-spec="text">Shell page heading</h1>
+    </section>
     {/* Fixed below the content (the matrix opens the page 1200px tall), so on a phone the menu never covers the text. */}
     <ContextMenu
       anchor={{ x: 16, y: 840 }}

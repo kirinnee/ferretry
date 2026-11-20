@@ -103,6 +103,7 @@ export const STYLE_IDS = [
   'swiss',
   'pixel',
   'antiposh',
+  'briefing',
 ] as const;
 export type StyleId = (typeof STYLE_IDS)[number];
 export const PALETTE_IDS = [
@@ -123,6 +124,7 @@ export const PALETTE_IDS = [
   'vintage',
   'mesh',
   'retrofuture',
+  'briefing',
 ] as const;
 export type PaletteId = (typeof PALETTE_IDS)[number];
 

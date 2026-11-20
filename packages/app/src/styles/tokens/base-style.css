@@ -16,6 +16,8 @@
   --weight-medium: 500;
   --weight-strong: 600;
   --weight-display: 650;
+  /* The shell page heading (`.fy-page h1`). Defaults to 400, the weight an h1 had before this token existed (the page sets no body weight, so it inherited the initial one), so a style that does not set it draws the same; Briefing sets its display weight. */
+  --weight-heading: 400;
   --leading-tight: 1.3;
   --tracking-label: 0.1em;
   --tracking-body: 0;

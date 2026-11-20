@@ -1,0 +1,158 @@
+/* ============================================================================
+   BRIEFING — the look of a long, calm written report: thin Poppins body over
+   semibold Poppins headings, IBM Plex Mono for every number, label and kicker,
+   pill-shaped controls on medium-radius cards, soft small shadows, generous
+   spacing, and a HOT focus ring (a 3px saturated outline plus a soft halo).
+
+   Look only: the type scale, spacing, radii, shadows, rules and motion are
+   reproduced as tokens; no text, logo or image from any report is copied. Any
+   palette can wear it; the one named "Briefing" (navy, indigo, hot pink) is
+   its suggested pairing.
+
+   Fonts: Poppins 300 + 600 and IBM Plex Mono 400 + 700, bundled as OFL woff2
+   (`src/assets/fonts/LICENSES.md`). Poppins has no 400/500 cut here, so the
+   declared faces map 100–450 to the thin cut and 500–900 to the semibold one;
+   `--weight-normal` is therefore 300 and every emphasis is 600.
+   ============================================================================ */
+:root[data-style='briefing'],
+[data-swatch][data-style='briefing'] {
+  /* ═══ structural token layer ═══ */
+  --font-display: 'Poppins', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-body: 'Poppins', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
+  /* Thin body, semibold everything that matters: one key point per line. */
+  --weight-normal: 300;
+  --weight-medium: 600;
+  --weight-strong: 600;
+  --weight-display: 600;
+  --weight-heading: var(--weight-display);
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-display: 1.4rem;
+  --text-input-desktop: 14px;
+  --font-size-base: 14px;
+  --leading-base: 1.62;
+  --leading-tight: 1.25;
+  --tracking-display: -0.03em;
+  --tracking-body: 0;
+  --md-font-size: 14.5px;
+  --md-leading: 1.7;
+  --code-font-size: 12.5px;
+  --chrome-font-size: 12px;
+  --prose-measure: 66ch;
+  /* Kickers and table heads are mono capitals with wide tracking. */
+  --label-transform: uppercase;
+  --label-variant: normal;
+  --label-size: 11px;
+  --label-weight: 400;
+  --tracking-label: 0.14em;
+  --display-transform: none;
+  /* Pills for controls, a medium radius for cards, a small one for chips of code. */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-control: var(--radius-pill);
+  --radius-tab: var(--radius-pill);
+  --radius-badge: var(--radius-pill);
+  --radius-input: var(--radius-md);
+  --radius-panel: var(--radius-md);
+  --bubble-radius: var(--radius-md);
+  --bubble-stroke: 1px;
+  --bubble-border: var(--border);
+  --bubble-shadow: var(--shadow-sm);
+  --card-tail-radius: var(--radius-xs);
+  --stroke-control: 1px;
+  --stroke-panel: 1px;
+  --divider-width: 1px;
+  --divider-color: var(--border);
+  --shadow-control: var(--shadow-sm);
+  --shadow-panel: var(--shadow-sm);
+  --shadow-popover: var(--shadow-lg);
+  /* Soft, small, navy-tinted: two layers, the way a printed card sits on a page. */
+  --shadow-sm: 0 1px 2px var(--shadow-sm-1), 0 2px 6px var(--shadow-sm-1);
+  --shadow-md: 0 6px 16px var(--shadow-md-1), 0 1px 3px var(--shadow-md-2);
+  --shadow-lg: 0 18px 44px var(--shadow-lg-2), 0 4px 12px var(--shadow-lg-1);
+  --press-translate: 0px;
+  --rail-active: none;
+  /* Generous: controls are 40px pills, rows breathe, panels are roomy. */
+  --control-h-desktop: 36px;
+  --control-h-sm-desktop: 30px;
+  --row-min-h-desktop: 44px;
+  --pad-control-x: 18px;
+  --pad-badge-x: 10px;
+  --pad-panel: 16px;
+  --pad-row-y: 10px;
+  --pad-cell-x: 12px;
+  --gap-xs: 6px;
+  --gap-sm: 8px;
+  --gap-md: 14px;
+  --flow-message: 16px;
+  --flow-turn: 24px;
+  --flow-paragraph: 0.7em;
+  /* Hot focus: thick, saturated, off the edge, with a soft halo. */
+  --focus-width: 3px;
+  --focus-offset: 2px;
+  --focus-shadow: 0 0 0 4px var(--ring);
+  /* Calm and eased: nothing loops, every change is under 600ms. */
+  --motion-fast: 160ms;
+  --motion-base: 320ms;
+  --motion-slow: 560ms;
+  --ease-standard: cubic-bezier(0.2, 0.75, 0.25, 1);
+  --ease-emphasis: cubic-bezier(0.2, 0.75, 0.25, 1.15);
+  --select-pop: 1.03;
+}
+
+:root[data-style='briefing'][data-mode='dark'],
+[data-swatch][data-style='briefing'][data-mode='dark'] {
+  --shadow-sm: 0 1px 2px var(--shadow-sm-1);
+  --shadow-md: 0 6px 18px var(--shadow-md-1), 0 1px 3px var(--shadow-md-2);
+  --shadow-lg: 0 18px 44px var(--shadow-lg-2), 0 4px 12px var(--shadow-lg-1);
+}
+
+/* ---- component touches: the few things tokens alone cannot say ---- */
+
+/* Eyebrows, table heads and badges read in mono, like the report's kickers. */
+:root[data-style='briefing'] .kt-label,
+[data-swatch][data-style='briefing'] .kt-label,
+:root[data-style='briefing'] .kt-badge,
+[data-swatch][data-style='briefing'] .kt-badge {
+  font-family: var(--font-mono);
+}
+
+/* A filled button lifts a little more than a quiet one, as the report's primary action does. */
+:root[data-style='briefing'] .kt-btn[data-variant='primary'],
+[data-swatch][data-style='briefing'] .kt-btn[data-variant='primary'] {
+  box-shadow: var(--shadow-md);
+}
+
+/* A text field's keyboard focus is the same hot outline a button draws, not only a border-colour change. */
+:root[data-style='briefing'] .kt-input:focus-visible,
+[data-swatch][data-style='briefing'] .kt-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+  box-shadow: var(--focus-shadow);
+}
+
+/* The halo rides every keyboard focus the shell's ring draws. */
+:root[data-style='briefing'] .kt-btn:focus-visible,
+[data-swatch][data-style='briefing'] .kt-btn:focus-visible {
+  box-shadow: var(--focus-shadow);
+}
+
+@media (max-width: 640px) {
+  :root[data-style='briefing'] {
+    --text-2xs: 12.5px;
+    --text-xs: 14px;
+    --text-sm: 15px;
+    --text-base: 16px;
+    --text-md: 17px;
+    --text-lg: 19px;
+    --text-display: 1.5rem;
+    --label-size: 12.5px;
+  }
+}

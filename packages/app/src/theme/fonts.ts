@@ -29,6 +29,8 @@ import pressStart2p from '../assets/fonts/press-start-2p-latin-400-normal.woff2'
 import jetBrainsMono400 from '../assets/fonts/jetbrains-mono-latin-400-normal.woff2';
 import jetBrainsMono700 from '../assets/fonts/jetbrains-mono-latin-700-normal.woff2';
 import nunito from '../assets/fonts/nunito-latin-wght-normal.woff2';
+import poppins300 from '../assets/fonts/poppins-latin-300-normal.woff2';
+import poppins600 from '../assets/fonts/poppins-latin-600-normal.woff2';
 import publicSans from '../assets/fonts/public-sans-latin-wght-normal.woff2';
 import type { StyleId } from './catalog.ts';
 
@@ -59,6 +61,7 @@ export const STYLE_FONT_FILES: Readonly<Partial<Record<StyleId, ThemeFontFiles>>
   hud: { text: [orbitron, publicSans], code: [cascadiaMono] },
   swiss: { text: [hankenGrotesk], code: jetBrainsMono },
   pixel: { text: [inter, pixelify700, pressStart2p], code: jetBrainsMono },
+  briefing: { text: [poppins300, poppins600], code: ibmPlexMono },
 });
 
 /** The scope of the document a preload is added to — injected so a test can stand in for the page. */
