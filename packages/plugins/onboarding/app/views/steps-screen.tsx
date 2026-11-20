@@ -91,6 +91,9 @@ export interface SummaryStep {
   readonly state: StepState;
 }
 
+/** The plugin whose setup page names the machine itself. */
+const MACHINE_PLUGIN = 'onboarding';
+
 /** "A", "A and B", "A, B and C". */
 const listOf = (names: readonly string[]): string =>
   names.length < 2 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
@@ -139,14 +142,19 @@ export function SetupSummary({
 }): ReactNode {
   if (steps.length === 0 || steps.some(step => step.state === 'pending')) return null;
   const groups = groupsOf(steps);
-  const set = groups.filter(group => group.set > 0);
   const left = groups.filter(group => group.left > 0);
+  // The machine's own page (its name) is not a thing to list: the sentence is about what was brought in.
+  const named = groups.filter(group => group.set > 0);
+  const set = named.some(group => group.plugin !== MACHINE_PLUGIN)
+    ? named.filter(group => group.plugin !== MACHINE_PLUGIN)
+    : named;
   return (
     <section className="kt-panel flex flex-col gap-3 p-4" data-onboarding-summary="">
       <p className="m-0 text-row leading-base text-fg" data-onboarding-summary-set="">
         {set.length === 0
           ? 'Nothing was set up this time.'
-          : `Set up on this machine: ${listOf(set.map(group => group.group))}.`}
+          : `Set up on this machine: ${listOf(set.map(group => group.group))}.`}{' '}
+        {left.length === 0 ? 'Nothing was skipped.' : null}
       </p>
       {left.length === 0 ? null : (
         <div className="flex flex-col gap-1" data-onboarding-summary-later="">

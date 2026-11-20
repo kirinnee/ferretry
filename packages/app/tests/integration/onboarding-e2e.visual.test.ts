@@ -588,6 +588,11 @@ describe('the first run, end to end', () => {
       expect(summary.split('\n').length, 'the end page summary is a few lines, not a list of every page').toBeLessThan(
         8,
       );
+      expect(summary, 'the end page says what was skipped').toMatch(/Nothing was skipped|Skipped for now/u);
+      for (const height of await tab
+        .locator('[data-flow-end] button')
+        .evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().height)))
+        expect(height, 'the end page buttons are 44px tall').toBeGreaterThanOrEqual(43.5);
       expect(await tab.locator('[data-flow-end]').count()).toBe(1);
       await shot(tab, variant, 'end');
       // Every machine step ended up answered, each exactly once.

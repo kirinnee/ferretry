@@ -117,6 +117,10 @@
   flex-direction: column;
   gap: 12px;
 }
+/* Every button on the last page is a 44px target, like the footer's. */
+.fy-sf-end button {
+  min-height: 44px;
+}
 .fy-sf-end__actions {
   align-items: center;
   display: flex;
