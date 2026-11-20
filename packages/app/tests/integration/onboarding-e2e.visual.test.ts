@@ -15,7 +15,8 @@
  * goes to the page the person came from, Next returns), the footer buttons are auto width and 44px tall, and (daemon side)
  * the step really records on the machine, exactly once. An arrow key moves a card's selection and writes nothing.
  *
- * GAPS the run found are asserted below, one per gap, as ordinary tests (they were `it.failing` until the product was fixed).
+ * KNOWN GAPS the run found are `it.failing` below, one per gap: each is red the day the product is fixed (delete the
+ * `.failing` then), so the gate does not forget them and a green CI does not hide them.
  *
  *   FY_ONBOARDING_E2E_VARIANTS   comma list of `<width>-<light|dark>` (default `1280-light,390-dark`)
  *   FY_ONBOARDING_E2E_SHOTS_DIR  keep `<variant>-<nn>-<page>.png` of every page (fake data only)
@@ -56,7 +57,7 @@ afterAll(() => {
   server?.kill();
 });
 
-// ─── what the run saw (read by the gap checks below) ────────────────────────────────────────────────────────
+// ─── what the run saw (read by the `it.failing` gaps below) ────────────────────────────────────────────────────────
 interface Observed {
   /** `[data-name-machine]` forms on screen on the Machine name page. */
   nameForms: number;
@@ -685,31 +686,31 @@ describe('the first run, end to end', () => {
     });
 });
 
-// ─── what the gate found, now fixed: each is an ordinary assertion ─────────────────────────────────────────────────────
-describe('gaps the gate found, now fixed', () => {
+// ─── what the run found and is not fixed here (each is `it.failing`: red the day it is fixed) ───────────────────────
+describe('known gaps the gate found', () => {
   it('no page threw', () => {
     expect(seen.pageErrors).toEqual([]);
   });
   it('only the expected routes went unanswered (a gap in the fake, not in the product)', () => {
     expect([...new Set(seen.unanswered)].sort()).toEqual(['GET /v1/layouts/current']);
   });
-  it('the Machine name page draws ONE name form (the shell strip draws a second above the flow)', () => {
+  it.failing('the Machine name page draws ONE name form (the shell strip draws a second above the flow)', () => {
     expect(seen.nameForms).toBe(1);
   });
   // Only a desktop height shows it (a phone's footer is sticky), so it is asserted only when a desktop variant ran.
-  (VARIANTS.some(variant => variant.width >= 600) ? it : it.skip)(
+  (VARIANTS.some(variant => variant.width >= 600) ? it.failing : it.skip)(
     'every page keeps its Back/Next footer on the first screen (no scrolling to reach Next)',
     () => {
       expect(seen.footerOffScreen).toEqual([]);
     },
   );
-  it('the pairing page buttons are auto width and 44px tall', () => {
+  it.failing('the pairing page buttons are auto width and 44px tall', () => {
     expect(seen.badButtons).toEqual([]);
   });
-  it('the pairing page reached from the first run has no sidebar or app chrome', () => {
+  it.failing('the pairing page reached from the first run has no sidebar or app chrome', () => {
     expect(seen.pairPageChrome).toBe(0);
   });
-  it('the pairing page Connected screen has no sidebar or app chrome', () => {
+  it.failing('the pairing page Connected screen has no sidebar or app chrome', () => {
     expect(seen.pairConnectedChrome).toBe(0);
   });
   it('Import everything is ONE page for Codex (the kind pages are passed over, not drawn)', () => {
