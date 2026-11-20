@@ -57,6 +57,7 @@ afterAll(async () => {
 
 const VARIANTS = [
   { name: '1280', width: 1_280, height: 640, phone: false, columns: 3 },
+  { name: '768', width: 768, height: 800, phone: false, columns: 2 },
   { name: '390', width: 390, height: 844, phone: true, columns: 1 },
 ] as const;
 
@@ -91,6 +92,50 @@ describe('The Agenda settings tab', () => {
           // The last tile of an odd count takes the rest of its line (no orphan cell), so it alone may be wider.
           if (!variant.phone)
             for (const tile of tiles.slice(0, 4)) expect(tile.width, 'not full width').toBeLessThan(420);
+
+          // The helper words (the intro, each tile's line, the quiet-hours hint) read at the settings body size (12px or more, the
+          // 'cell' step or the 'ui' step the other tabs use) and stay AA (4.5:1) against the surface they sit on.
+          const helpers = await page.evaluate(() => {
+            const channels = (value: string): number[] => {
+              const probe = document.createElement('canvas').getContext('2d');
+              if (probe === null) return [0, 0, 0, 1];
+              probe.clearRect(0, 0, 1, 1);
+              probe.fillStyle = value;
+              probe.fillRect(0, 0, 1, 1);
+              const [r = 0, g = 0, b = 0, a = 0] = probe.getImageData(0, 0, 1, 1).data;
+              return [r, g, b, a / 255];
+            };
+            const surface = (node: Element): number[] => {
+              for (let at: Element | null = node; at !== null; at = at.parentElement) {
+                const colour = channels(getComputedStyle(at).backgroundColor);
+                if ((colour[3] ?? 0) > 0.99) return colour;
+              }
+              return [0, 0, 0, 1];
+            };
+            const luminance = (c: number[]): number => {
+              const [r = 0, g = 0, b = 0] = c.slice(0, 3).map(v => {
+                const s = v / 255;
+                return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+              });
+              return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            };
+            const nodes = [
+              document.querySelector('section[aria-label="Notification filter"] > p'),
+              ...document.querySelectorAll('fieldset [role="switch"] .min-w-0 > span:nth-of-type(2)'),
+              document.querySelector('[data-quiet-hours-hint]'),
+            ].filter((node): node is Element => node !== null);
+            return nodes.map(node => {
+              const style = getComputedStyle(node);
+              const text = channels(style.color);
+              const [a, b] = [luminance(text), luminance(surface(node))].sort((x, y) => y - x) as [number, number];
+              return { size: Number.parseFloat(style.fontSize), contrast: (a + 0.05) / (b + 0.05) };
+            });
+          });
+          expect(helpers).toHaveLength(7);
+          for (const helper of helpers) {
+            expect(helper.size, 'helper words use the settings body size').toBeGreaterThanOrEqual(12);
+            expect(helper.contrast, 'helper words are AA').toBeGreaterThanOrEqual(4.5);
+          }
 
           const rowTop = async (): Promise<number> =>
             await page.$eval('[data-quiet-hours-row]', node => node.getBoundingClientRect().top);

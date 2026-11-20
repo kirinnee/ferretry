@@ -71,7 +71,7 @@ export function Toggle({
         <span className={cn('block break-words text-ui font-semibold', checked ? 'text-fg' : 'text-muted')}>
           {label}
         </span>
-        <span className="block break-words text-meta leading-base text-muted">{description}</span>
+        <span className="block break-words text-cell leading-base text-muted">{description}</span>
       </span>
       <span
         aria-hidden="true"
