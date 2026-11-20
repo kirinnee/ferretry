@@ -6,7 +6,7 @@
  *
  * ONE SCROLL BOX. The sheet is as tall as its step needs, up to 94 dvh; the Close row stays put and the step body below
  * it is the only thing that scrolls, and only when it is longer than the room. Nothing inside it scrolls on its own
- * (the folder list is plain flow), and the frame's `min-height: 100%` is lifted so a short step does not stretch.
+ * (the folder list is plain flow), and the frame's `min-height: 100%` is lifted so a short step does not stretch. The step's footer (Back / Next) sticks to the foot of the sheet, so a long folder list never pushes it out of reach.
  */
 import { useDialogFocus, useLayoutMode, useScrimDismiss } from '@ferretry/app/ui';
 import { X } from 'lucide-react';
@@ -55,7 +55,7 @@ export function CreateSheet({ onClose, children }: CreateSheetProps) {
           </button>
         </div>
         <div
-          className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden [&_.fy-spf]:min-h-0"
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden [&_.fy-spf]:min-h-0 [&_.fy-spf__footer]:sticky [&_.fy-spf__footer]:bottom-0 [&_.fy-spf__footer]:z-10"
           data-create-body=""
         >
           {children}

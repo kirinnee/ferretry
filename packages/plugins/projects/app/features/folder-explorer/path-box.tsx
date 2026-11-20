@@ -34,7 +34,7 @@ export function PathBox({ current, refusal, onGo, onRestore }: PathBoxProps) {
         else if (typed !== current || refusal !== null) onGo(typed);
       }}
     >
-      <div className="flex items-start gap-xs">
+      <div className="flex items-stretch gap-xs">
         <input
           type="text"
           className="kt-input mono min-h-control min-w-0 flex-1"

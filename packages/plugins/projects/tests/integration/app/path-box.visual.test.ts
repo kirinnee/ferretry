@@ -129,11 +129,24 @@ describe('create sheet scroll bars', () => {
             horizontal: [],
           });
 
+          // The path box and its Go button are one row, one height.
+          const sizes = await tab.evaluate(() => {
+            const form = document.querySelector('[data-explorer-path-box]');
+            const height = (selector: string) => form?.querySelector(selector)?.getBoundingClientRect().height ?? 0;
+            return { input: height('input'), go: height('button') };
+          });
+          expect(Math.abs(sizes.input - sizes.go), 'input and Go are the same height').toBeLessThanOrEqual(1);
+
           // SIXTY folders: exactly ONE element scrolls (the sheet's body), and nothing scrolls sideways.
           await open('folders=60');
           await shot('sixty-folders');
           const long = (await scrollers(tab)) as { vertical: string[]; horizontal: string[] };
           expect(long.horizontal, 'no sideways bar').toEqual([]);
+          // The footer (Next) stays inside the sheet and on screen however long the list is.
+          const next = await tab.getByRole('button', { name: 'Next' }).boundingBox();
+          expect(next !== null && next.y >= 0 && next.y + next.height <= viewport.height, 'Next is on screen').toBe(
+            true,
+          );
           expect(long.vertical.length, `exactly one element scrolls, got ${long.vertical.join(' | ')}`).toBe(1);
         }));
 });
