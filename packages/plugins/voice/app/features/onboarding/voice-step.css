@@ -1,18 +1,196 @@
-/* The first-run Voice pages: a title, one line, then the body. The shell owns the page frame (width, footer). */
+/* The first-run Voice pages: one line, the body on the left, a picture in the frame's right column (`StepDemo`). The shell owns
+   the page frame (title, width, footer). Colour and shape come from the shell's tokens. */
 .fy-voice-step {
   display: flex;
   flex-direction: column;
   gap: var(--gap-md, 12px);
   min-width: 0;
 }
-.fy-voice-step-title {
-  color: var(--fg);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-strong, 600);
-  margin: 0;
-}
 .fy-voice-step-line {
   color: var(--muted);
   font-size: var(--text-md);
   margin: 0;
+}
+
+/* The engine cards as a stacked list: one column, and a card sized for it: the name and line on top, the bars beside the
+   Install button underneath. The chips ("Live words", "On device") stay in the card's "i" text; the card is 108 px, so five fit
+   in a laptop window with the footer. */
+.fy-voice-step .fy-engine-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+.fy-voice-step .fy-engine-card {
+  --fy-engine-height: 108px;
+}
+.fy-voice-step .fy-engine-body {
+  align-content: start;
+  column-gap: 10px;
+  display: grid;
+  /* The right column is one width on every card, so every card's bars end in the same place whatever its Install slot says. */
+  grid-template-columns: minmax(0, 1fr) 9.5rem;
+  grid-template-rows: 18px 18px 44px;
+  row-gap: 3px;
+}
+.fy-voice-step .fy-engine-head,
+.fy-voice-step .fy-engine-line {
+  grid-column: 1 / -1;
+}
+.fy-voice-step .fy-engine-bars[data-option-bars],
+.fy-voice-step .fy-engine-none {
+  grid-column: 1;
+  grid-row: 3;
+}
+/* A card with no bars (the browser's voice, Off) sets its sentence in the middle of the row the bars would fill. */
+.fy-voice-step .fy-engine-none {
+  align-self: center;
+  margin: 0;
+}
+.fy-voice-step .fy-engine-foot {
+  grid-column: 2;
+  grid-row: 3;
+  justify-content: flex-end;
+  margin-top: 0;
+}
+.fy-voice-step .fy-engine-chips {
+  display: none;
+}
+.fy-voice-step .fy-engine-line {
+  min-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 520px) {
+  .fy-voice-step .fy-engine-bars [data-option-bar] {
+    grid-template-columns: 66px minmax(0, 1fr) 64px;
+  }
+}
+
+/* "Show every engine": a disclosure (summary), not a button, as tall as a button to press. */
+.fy-voice-more > summary {
+  align-items: center;
+  color: var(--accent);
+  cursor: pointer;
+  display: inline-flex;
+  min-height: 44px;
+  text-decoration: underline;
+}
+.fy-voice-more > summary:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: var(--focus-offset, 2px);
+}
+
+/* The key cards sit in the left column; their buttons are one row that wraps. */
+.fy-voice-step [data-device-key] .fy-vs-field > button {
+  min-inline-size: 5.5rem;
+}
+
+/* The Speed-ups page names itself once: the group's own heading and its intro row repeat the page's line. */
+.fy-voice-step [data-setting-group] > h3,
+.fy-voice-step [data-setting-group] > ul > li:first-child {
+  display: none;
+}
+
+/* A key card's (i) sits at the row's top corner, not alone on a line of its own under the name. */
+.fy-voice-step [data-device-key] {
+  position: relative;
+}
+.fy-voice-step [data-device-key] [data-setting-controls] {
+  flex: none;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  min-width: 0;
+  position: absolute;
+}
+.fy-voice-step [data-device-key] [data-setting-controls] ~ * {
+  margin-block-start: 0;
+}
+
+/* The demo: drawn inside the frame's own panel (no second border), centred; it plays once when it mounts (the Voice page
+   re-keys it on a new pick) and rests on its last frame. */
+.fy-vd {
+  align-items: center;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  font-size: var(--text-lg);
+  gap: 12px;
+  justify-content: center;
+  min-height: 140px;
+  padding: 20px;
+  text-align: center;
+  width: 100%;
+}
+.fy-vd__mic {
+  align-items: center;
+  background: var(--accent-soft);
+  border-radius: var(--radius-dot, 50%);
+  color: var(--accent);
+  display: inline-flex;
+  flex: none;
+  height: 48px;
+  justify-content: center;
+  width: 48px;
+}
+.fy-vd[data-voice-demo='off'] .fy-vd__mic {
+  background: var(--surface-3, var(--border-soft));
+  color: var(--muted);
+}
+.fy-vd__off {
+  color: var(--muted);
+}
+.fy-vd__words {
+  color: var(--fg);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.4em;
+  justify-content: center;
+  min-width: 0;
+}
+.fy-vd__word {
+  opacity: 1;
+}
+.fy-vd__said {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--faint, var(--muted));
+}
+.fy-vd__cleaned {
+  color: var(--fg);
+  font-weight: var(--weight-strong, 600);
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* Live: each word lands as it is spoken. After Stop: the words wait, then arrive together. */
+  .fy-vd[data-voice-demo='live'] .fy-vd__word {
+    animation: fy-vd-word 280ms ease-out both;
+    animation-delay: calc(var(--i) * 280ms);
+  }
+  .fy-vd[data-voice-demo='after'] .fy-vd__word {
+    animation: fy-vd-word 280ms ease-out both;
+    animation-delay: 1500ms;
+  }
+  .fy-vd[data-voice-demo='off'] .fy-vd__off {
+    animation: fy-vd-word 280ms ease-out both;
+  }
+  .fy-vd--clean .fy-vd__cleaned {
+    animation: fy-vd-word 320ms ease-out 700ms both;
+  }
+}
+:root[data-motion='reduced'] .fy-vd *,
+:root[data-motion='reduced'] .fy-vd {
+  animation: none;
+}
+@keyframes fy-vd-word {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Off has no bars and nothing to install, so its sentence takes the whole row. */
+.fy-voice-step .fy-engine-card[data-engine='off'] .fy-engine-none {
+  grid-column: 1 / -1;
 }

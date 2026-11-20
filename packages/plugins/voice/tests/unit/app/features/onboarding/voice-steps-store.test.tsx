@@ -5,7 +5,7 @@
  *
  *   - a card whose engine cannot run here (unsupported browser, or no voice built in this copy) cannot be chosen: nothing is
  *     saved and the step is not answered;
- *   - "Make clean-up faster" answers the step only when a key was really saved, and resumes as saved after a reload.
+ *   - "Speed-ups" answers the step only when a key was really saved, and resumes as saved after a reload.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
@@ -23,6 +23,7 @@ const KEY = 'gsk_test_0123456789abcdXY';
 
 const fakeHost = () => {
   const calls: string[] = [];
+  let saving: (() => Promise<void>) | null = null;
   const host: StepHost = {
     phase: 'client',
     appliesTo: [],
@@ -31,13 +32,15 @@ const fakeHost = () => {
     ready: () => void calls.push('ready'),
     skip: why => void calls.push(`skip:${why}`),
     notNeeded: () => void calls.push('notNeeded'),
-    commit: () => undefined,
+    commit: next => {
+      saving = next;
+    },
     done: () => void calls.push('done'),
     busy: label => void calls.push(`busy:${label}`),
     next: () => void calls.push('next'),
     back: () => void calls.push('back'),
   };
-  return { calls, host };
+  return { calls, host, save: () => saving };
 };
 
 class AbsentStore implements ModelInstaller {
@@ -115,7 +118,7 @@ describe('<VoiceStep> over the real voice store', () => {
   ] as const) {
     it(`cannot choose an engine in ${name}: the card is disabled, says why, and nothing is saved or answered`, async () => {
       const store = storeOver(voices);
-      const { calls, host } = fakeHost();
+      const { host, save } = fakeHost();
       const view = await mount(
         <StoreProvider store={store}>
           <VoiceStepContainer step={host} />
@@ -133,7 +136,7 @@ describe('<VoiceStep> over the real voice store', () => {
       expect(input.disabled).toBe(true);
       await interact(() => input.click());
       expect(store.stt.get()).toEqual(before);
-      expect(calls).not.toContain('done');
+      expect(save()).toBeNull();
       // The explanation is in the radio's own description, too, so it is spoken.
       const described = must(document.getElementById(input.getAttribute('aria-describedby') ?? ''), 'description');
       expect(described.textContent).toContain('Not available here');
@@ -143,7 +146,7 @@ describe('<VoiceStep> over the real voice store', () => {
 
   it('still lets the browser voice and Off be chosen when no on-device engine can run', async () => {
     const store = storeOver(catalog(false));
-    const { calls, host } = fakeHost();
+    const { host, save } = fakeHost();
     const view = await mount(
       <StoreProvider store={store}>
         <VoiceStepContainer step={host} />
@@ -151,14 +154,15 @@ describe('<VoiceStep> over the real voice store', () => {
     );
     await settle();
     await interact(() => radio(view.container, 'off').click());
+    expect(store.stt.get().enabled).toBe(true);
+    await interact(async () => await save()?.());
     expect(store.stt.get().enabled).toBe(false);
-    expect(calls.filter(call => call === 'done')).toEqual(['done']);
     await view.unmount();
   });
 
-  it('saves the engine and answers the step when a supported card is chosen', async () => {
+  it('saves the engine when Next runs the save of a supported card that was chosen', async () => {
     const store = storeOver(catalog(true));
-    const { calls, host } = fakeHost();
+    const { host, save } = fakeHost();
     const view = await mount(
       <StoreProvider store={store}>
         <VoiceStepContainer step={host} />
@@ -168,8 +172,9 @@ describe('<VoiceStep> over the real voice store', () => {
     const input = radio(view.container, 'sherpa-zipformer-en');
     expect(input.disabled).toBe(false);
     await interact(() => input.click());
+    expect(store.stt.get().engine).toBeNull();
+    await interact(async () => await save()?.());
     expect(store.stt.get()).toMatchObject({ enabled: true, engine: 'sherpa-zipformer-en' });
-    expect(calls.filter(call => call === 'done')).toEqual(['done']);
     await view.unmount();
   });
 });
