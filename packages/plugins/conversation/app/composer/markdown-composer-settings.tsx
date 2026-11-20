@@ -84,10 +84,8 @@ function CardsBody({
         </p>
       </div>
       {preview === undefined ? null : (
-        // An illustration drawn in its own mini-frame, not a second surface: the sweep must not count its parts as boxes.
-        <div className="contents" data-no-nest="">
-          {preview}
-        </div>
+        // An illustration drawn in its own mini-frame; its parts keep to one border level too (the sweep counts them).
+        <div className="contents">{preview}</div>
       )}
     </div>
   );

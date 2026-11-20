@@ -131,7 +131,7 @@ export function ComposerSuggestionsSettings({
             </div>
           ) : null}
         </div>
-        <div className="contents" data-no-nest="">
+        <div className="contents">
           <SuggestionsPreview keys={preferences.suggestionKeys} skills={skills} />
         </div>
       </div>

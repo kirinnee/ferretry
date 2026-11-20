@@ -305,3 +305,8 @@ label.fy-wf-slider.fy-wf-slider {
     grid-template-columns: minmax(0, 1fr) 6rem;
   }
 }
+/* ONE border level: a chip inside a layer card (its "key set") is a fill and a word, not a second outline inside the card's own. */
+.fy-wf-layer .kt-badge,
+.fy-wf-layer .kt-badge[data-tone] {
+  border-color: transparent;
+}

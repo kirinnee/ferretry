@@ -318,7 +318,7 @@ describe('the switch on a login', () => {
 });
 
 describe('the inline switch in a card header', () => {
-  it('should sit in the header row beside the runtime name, with no box, no On label and no helper while on', async () => {
+  it('should sit in the header row beside the runtime name, with no box, no helper while on and the state in a visible word (On)', async () => {
     // Act
     const view = await openRuntimes('#machines/studio-mac/runtimes');
 
@@ -326,7 +326,8 @@ describe('the inline switch in a card header', () => {
     const card = must(view.container.querySelector('[data-runtime-card="claude-agent"]'), 'card');
     const toggle = switchOf(view.container, 'claude-agent');
     expect(toggle.getAttribute('aria-label')).toBe('claude-agent: on for new starts');
-    expect(toggle.textContent).toBe('');
+    // The state is a word you can see beside the track (g3-set-b): a bare shape was the complaint.
+    expect(toggle.textContent).toBe('On');
     expect(card.querySelector('[data-disable-note]')).toBeNull();
     expect(card.textContent).not.toContain('New starts can use it.');
     const runtimeLink = must(card.querySelector('[data-runtime-row="claude-agent"]'), 'runtime link');

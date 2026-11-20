@@ -138,15 +138,3 @@
   border-color: var(--accent);
   color: var(--fg);
 }
-/* A narrow panel: the scope switch is a full-width stack, one option per line, the hint under it. */
-@container (max-width: 519.98px) {
-  .fy-lr-scope [data-neo-segmented] {
-    flex-direction: column;
-    width: 100%;
-  }
-  .fy-lr-scope [data-neo-segmented] > label {
-    flex: none;
-    min-height: 44px;
-    width: 100%;
-  }
-}

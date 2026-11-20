@@ -87,11 +87,7 @@ function LayerCard({
         {on !== undefined && onToggle !== undefined && <Switch on={on} label={`${title} on`} onToggle={onToggle} />}
       </div>
       <span className="fy-wf-layer__line">{line}</span>
-      {state !== undefined && (
-        <span className="fy-wf-layer__state" data-no-nest="">
-          {state}
-        </span>
-      )}
+      {state !== undefined && <span className="fy-wf-layer__state">{state}</span>}
     </div>
   );
 }

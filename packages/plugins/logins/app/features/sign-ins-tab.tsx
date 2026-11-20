@@ -433,10 +433,11 @@ function LoginRow({
           />
           <button
             type="button"
-            className="inline-flex min-h-[44px] min-w-[28px] shrink-0 items-center justify-center border-0 bg-transparent p-0 text-muted"
+            className="inline-flex min-h-[44px] min-w-[28px] shrink-0 items-center justify-center gap-1 border-0 bg-transparent p-0 text-meta text-muted"
             aria-label={`Open ${login.id}`}
             onClick={onOpen}
           >
+            Open
             <ChevronRight size={16} aria-hidden="true" />
           </button>
         </span>
@@ -469,7 +470,7 @@ function LoginRow({
           }}
         />
       ) : (
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="mt-auto flex flex-wrap items-center justify-end gap-2" data-login-card-footer="">
           {refusal === null ? null : (
             <span className="min-w-0 flex-1 text-meta leading-base text-muted" data-login-card-locked="">
               Remove is off here: {refusal}

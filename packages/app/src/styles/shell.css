@@ -530,14 +530,20 @@
   display: none;
 }
 /* The open/shut cue: a chevron that turns down when the group is open (the phone list reads as rows, not as a bare heading). */
-.fy-tab-group__title::after {
-  content: '›';
-  font-size: 1.1rem;
-  line-height: 1;
+.fy-tab-group__chevron {
+  flex: none;
   transition: transform 0.12s;
 }
-.fy-tab-group[open] > .fy-tab-group__title::after {
+.fy-tab-group[open] > .fy-tab-group__title .fy-tab-group__chevron {
   transform: rotate(90deg);
+}
+/* The mid-width picker is drawn only where the list gives way to it (see the 768–1099px block below). */
+.fy-settings-picker {
+  display: none;
+}
+/* A ring on an entry at the edge of the scrolling list is drawn INSIDE the entry, so the scroller never clips it. */
+.fy-settings-nav :is(.fy-tab, .fy-tab-group__title):focus-visible {
+  outline-offset: -2px;
 }
 .fy-tab-group__tabs {
   display: flex;
@@ -768,37 +774,47 @@
 }
 
 /* A MID-WIDTH WINDOW (768–1099px): the drawer, the settings list AND the panel cannot all fit (at 768 the panel was ~212px
-   wide, between two sidebars). The list gives its column up and stands ABOVE the panel as a short scrolling list (the same
-   scroll cue as beside it, the same links, still in the tab order) and the panel takes the whole row. The number is
-   `SETTINGS_STACKED_BELOW` in shell/panel-widths.ts, which fits saved widths to the same rule. */
+   wide, between two sidebars). The list gives its column up: ABOVE the panel it is ONE grouped select (every page, the same
+   titled groups, always fully visible: no scroller slicing rows at its edges) and the panel takes the whole row. The list's
+   links are not drawn there, so they are not in the tab order twice. The number is `SETTINGS_STACKED_BELOW` in
+   shell/panel-widths.ts, which fits saved widths to the same rule. */
 @media (min-width: 768px) and (max-width: 1099.98px) {
   .fy-settings-body {
     display: block;
   }
-  /* The two blocks (this device / the machine) stand side by side and each scrolls ON ITS OWN, so a short block is never
-     left as an empty column beside a long one; the cue and the keyboard behave as they do in the column. */
   .fy-settings-nav {
     position: static;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    align-items: start;
-    column-gap: 24px;
+    display: block;
     max-height: none;
     overflow: visible;
     margin-bottom: 16px;
-    padding-bottom: 4px;
+    padding-bottom: 12px;
     border-bottom: var(--border-width, 1px) solid var(--border);
     background: none;
   }
   .fy-settings-block {
-    max-height: min(240px, 34vh);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-    background: var(--fy-scroll-cue);
+    display: none;
   }
-  .fy-settings-block + .fy-settings-block {
-    margin-top: 0;
+  .fy-settings-picker {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+  }
+  .fy-settings-picker__label {
+    color: var(--fg-soft);
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+  .fy-settings-picker__select {
+    flex: 0 1 28rem;
+    min-width: 0;
+    min-height: var(--control-h, 36px);
+    padding: 0 10px;
+    border: var(--border-width, 1px) solid var(--border);
+    border-radius: var(--radius-control, 8px);
+    background: var(--surface);
+    color: var(--fg);
+    font: inherit;
   }
 }

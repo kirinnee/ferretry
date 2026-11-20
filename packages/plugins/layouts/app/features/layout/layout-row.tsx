@@ -45,7 +45,7 @@ export function LayoutRow({ id, name, hint, control, caption, preview, full = fa
           )}
         </div>
         {preview === undefined || preview === null ? null : (
-          <span className="fy-lr-preview" aria-hidden="true" data-no-nest="" data-setting-preview-slot="">
+          <span className="fy-lr-preview" aria-hidden="true" data-setting-preview-slot="">
             {preview}
           </span>
         )}

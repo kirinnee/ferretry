@@ -85,8 +85,17 @@ const TABS = generated.surfaces
   )
   .filter(item => only.length === 0 || only.includes(item.plugin) || only.includes(`${item.plugin}/${item.tab}`));
 
+/** The tabs whose switches and arrows must each say a word you can see. */
+const LABELLED_TABS = ['logins/logins', 'runtimes/runtimes'];
+
+/**
+ * The only elements allowed a border inside a bordered box, each with its reason. A native form control and a button keep a border:
+ * it is the affordance that says "type here" / "press here", and the card around it is a surface, not a second level of the same kind.
+ */
+const ALLOWED_NESTED = 'input, select, textarea, button, summary, img, svg, hr, [role=switch] *';
+
 /** What a settings page must keep (S1/S2): measured in the page, returned as plain data. */
-const measure = () => {
+const measure = (allowed: string) => {
   const root = document.querySelector<HTMLElement>('.fy-settings-page');
   const visible = (el: Element) => {
     const box = el.getBoundingClientRect();
@@ -103,25 +112,42 @@ const measure = () => {
       (el.textContent ?? '').trim() ? ` "${(el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40)}"` : ''
     }`;
   const nested: string[] = [];
+  const boxes: string[] = [];
   const wide: string[] = [];
   if (root !== null) {
     for (const el of root.querySelectorAll('*')) {
       if (!visible(el)) continue;
-      if (el.closest('[role=radiogroup], [role=tablist], [role=switch], button, [data-no-nest]') !== null) {
-        // A control is one component; only its own wrapper counts below.
-      } else if (
-        boxed(el) &&
-        !el.matches('summary, code, pre, kbd, img, svg, .kt-badge') &&
-        !getComputedStyle(el).display.startsWith('inline')
-      ) {
-        const parent = el.parentElement?.closest('*');
-        let up: Element | null = parent ?? null;
+      // ONE border level (g3-set-b): a chip, a pill, a keycap, a segmented tray or a card inside a bordered card or phone mock uses a
+      // fill or text weight, never a second border. NOTHING is exempt by where it sits (not "inside a button", not "inline", not a
+      // `data-no-nest` opt-out: those hid the chips the gate found); the only elements allowed a border are ALLOWED_NESTED.
+      if (boxed(el) && !el.matches(allowed)) {
+        boxes.push(describe(el));
+        let up: Element | null = el.parentElement;
         while (up !== null && up !== root) {
           if (boxed(up) && visible(up)) {
             nested.push(`${describe(up)}  >  ${describe(el)}`);
             break;
           }
           up = up.parentElement;
+        }
+        // A mock drawn with absolutely placed parts (a keycap over a phone's text box) has no DOM nesting but is nested all the same:
+        // a bordered thing that sits inside the painted rectangle of another bordered thing counts too.
+        if (up === root || up === null) {
+          const inner = el.getBoundingClientRect();
+          for (const other of root.querySelectorAll('*')) {
+            if (other === el || other.contains(el) || el.contains(other) || !visible(other) || !boxed(other)) continue;
+            const outer = other.getBoundingClientRect();
+            if (
+              outer.width * outer.height > inner.width * inner.height &&
+              inner.left >= outer.left - 1 &&
+              inner.right <= outer.right + 1 &&
+              inner.top >= outer.top - 1 &&
+              inner.bottom <= outer.bottom + 1
+            ) {
+              nested.push(`${describe(other)}  >(painted inside)  ${describe(el)}`);
+              break;
+            }
+          }
         }
       }
       if (
@@ -164,6 +190,61 @@ const measure = () => {
       if ((el.textContent ?? '').trim().toLowerCase() === words) said.push(describe(el));
     }
   }
+  // A segmented control is as wide as its options: where its options keep their own width (they share the track out equally only on a
+  // phone or when the caller asks to fill), the track holds no more than a little slack beyond them. The gate saw a ~544px track with
+  // two small options bunched at its left.
+  const stretched: string[] = [];
+  const stacked: string[] = [];
+  if (root !== null)
+    for (const group of root.querySelectorAll<HTMLElement>('[role=radiogroup][data-neo-segmented]')) {
+      if (!visible(group)) continue;
+      const options = [...group.querySelectorAll<HTMLElement>(':scope > label')];
+      // Two or three options are ONE row of choices (five may wrap to a second line), never a stack that fills the width (the gate's 768/390 layouts scope switch).
+      const rects = options.map(option => option.getBoundingClientRect());
+      if (
+        options.length <= 3 &&
+        rects.every((rect, index) => index === 0 || rect.top >= (rects[index - 1]?.bottom ?? 0) - 1)
+      )
+        stacked.push(`${describe(group)} stacked`);
+      if (options.some(option => parseFloat(getComputedStyle(option).flexGrow) > 0)) continue;
+      const inner = options.reduce((sum, option) => sum + option.getBoundingClientRect().width, 0);
+      const slack = group.getBoundingClientRect().width - inner;
+      if (slack > options.length * 4 + 16) stretched.push(`${describe(group)} slack ${Math.round(slack)}px`);
+    }
+  // A switch, an open-arrow or a menu button carries a word you can SEE, not only a shape and a hidden name (sr-only text and aria
+  // labels do not count: they are for a screen reader, and the gate's complaint was about what a person sees).
+  const unlabelled: string[] = [];
+  if (root !== null)
+    for (const control of root.querySelectorAll<HTMLElement>('button, [role=switch]')) {
+      if (!visible(control)) continue;
+      const walker = document.createTreeWalker(control, NodeFilter.SHOW_TEXT);
+      let seen = '';
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        const holder = node.parentElement;
+        if (holder !== null && holder.closest('.sr-only, svg, [aria-hidden=true]') === null)
+          seen += node.textContent ?? '';
+      }
+      seen = seen.trim();
+      if (seen === '') unlabelled.push(describe(control));
+    }
+  // Cards in one row end on one line: their footers (the Remove row) sit at the same bottom edge.
+  const footerMisaligned: string[] = [];
+  if (root !== null) {
+    const cards = [...root.querySelectorAll<HTMLElement>('[data-login-card-wrap]')].filter(visible);
+    const rows = new Map<number, HTMLElement[]>();
+    for (const card of cards) {
+      const top = Math.round(card.getBoundingClientRect().top);
+      rows.set(top, [...(rows.get(top) ?? []), card]);
+    }
+    for (const row of rows.values()) {
+      const bottoms = row.flatMap(card => {
+        const footer = card.querySelector('[data-login-card-footer]');
+        return footer === null ? [] : [Math.round(footer.getBoundingClientRect().bottom)];
+      });
+      if (bottoms.length > 1 && Math.max(...bottoms) - Math.min(...bottoms) > 1)
+        footerMisaligned.push(`footer bottoms ${bottoms.join(' vs ')}`);
+    }
+  }
   const sideways = document.documentElement.scrollWidth - document.documentElement.clientWidth;
   const rootBox = root?.getBoundingClientRect();
   const clipped: string[] = [];
@@ -204,6 +285,11 @@ const measure = () => {
     said,
     nested: nested.slice(0, 6),
     nestedCount: nested.length,
+    stretched,
+    stacked,
+    unlabelled: unlabelled.slice(0, 6),
+    footerMisaligned,
+    boxes: boxes.slice(0, 30),
     wide: wide.slice(0, 6),
     clipped: clipped.slice(0, 6),
   };
@@ -232,7 +318,7 @@ describe('Settings sweep: every tab, real app half, real shell', () => {
           await page.waitForSelector('.fy-settings-page', { timeout: 20_000 });
           // The page draws, its reads settle, then it is measured and kept.
           await page.waitForTimeout(1_200);
-          const measured = await page.evaluate(measure);
+          const measured = await page.evaluate(measure, ALLOWED_NESTED);
           const requests = await page.evaluate(() => [
             ...new Set((globalThis as { __fyRequests?: string[] }).__fyRequests ?? []),
           ]);
@@ -247,6 +333,12 @@ describe('Settings sweep: every tab, real app half, real shell', () => {
           expect(measured.truncated, 'text cut off with no title to read it').toEqual([]);
           expect(measured.nested, 'a bordered box inside a bordered box').toEqual([]);
           expect(measured.placeholders, 'placeholder syntax in visible text').toEqual([]);
+          expect(measured.stretched, 'a segmented control wider than its options').toEqual([]);
+          expect(measured.stacked, 'a segmented control drawn as a stack, one option per line').toEqual([]);
+          expect(measured.footerMisaligned, 'cards in a row end on different lines').toEqual([]);
+          // Logins and Runtimes carry a visible word on every switch, arrow and menu button (g3-set-b item 2).
+          if (LABELLED_TABS.includes(`${plugin}/${tab}`))
+            expect(measured.unlabelled, 'a control with no visible word').toEqual([]);
           expect(problems, 'page errors').toEqual([]);
         } finally {
           await context.close();
@@ -254,6 +346,50 @@ describe('Settings sweep: every tab, real app half, real shell', () => {
       });
     }
   }
+});
+
+/**
+ * THE SWEEP'S OWN CHECKS HAVE TEETH: a page that breaks each rule on purpose is measured with the very same function, and it must
+ * be caught. (The gate found the earlier asserts too weak: they exempted anything inline, inside a button, or marked `data-no-nest`.)
+ */
+describe('Settings sweep: the checks catch what they claim to', () => {
+  it('flags a chip inside a card, a keycap painted inside a mock, a stretched segmented control and an unlabelled icon button', async () => {
+    const context = await browser.newContext({ viewport: { width: 1_280, height: 1_000 }, colorScheme: 'dark' });
+    const origin = server?.url.origin ?? '';
+    await context.route('**/*', async route =>
+      new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+    );
+    const page = await context.newPage();
+    try {
+      await page.goto(`${origin}/d/ws/settings/kernel/name?theme=studio-dark`);
+      await page.waitForSelector('.fy-settings-page', { timeout: 20_000 });
+      await page.evaluate(() => {
+        const root = document.querySelector('.fy-settings-page') as HTMLElement;
+        const bad = document.createElement('div');
+        const line = 'border:1px solid #888;';
+        bad.innerHTML = [
+          `<div style="${line}padding:8px;position:relative;width:300px;height:80px"><span style="${line}border-radius:999px;padding:1px 8px">chip</span></div>`,
+          `<div style="position:relative;width:300px;height:80px"><div style="position:absolute;inset:0;${line}"></div><span style="position:absolute;right:6px;bottom:6px;${line}width:16px;height:14px"></span></div>`,
+          `<div role="radiogroup" data-neo-segmented style="display:flex;width:520px"><label style="width:60px">A</label><label style="width:60px">B</label></div>`,
+          '<button type="button"><svg width="12" height="12"></svg></button>',
+        ].join('');
+        root.append(bad);
+      });
+      const caught = await page.evaluate(measure, ALLOWED_NESTED);
+      expect(
+        caught.nested.some(line => line.includes('chip')),
+        'a chip inside a bordered card',
+      ).toBe(true);
+      expect(
+        caught.nested.some(line => line.includes('painted inside')),
+        'a part painted inside a bordered mock',
+      ).toBe(true);
+      expect(caught.stretched.length, 'a stretched segmented control').toBe(1);
+      expect(caught.unlabelled.length, 'an icon button with no word').toBeGreaterThanOrEqual(1);
+    } finally {
+      await context.close();
+    }
+  });
 });
 
 /**
@@ -280,6 +416,8 @@ describe('Settings list: scrolls and says so at 800px tall', () => {
           for (const group of document.querySelectorAll('nav[aria-label="Plugin settings"] details.fy-tab-group'))
             (group as HTMLDetailsElement).open = true;
         });
+        // The chevrons turn over 120ms: let the opened groups settle so the picture shows chevrons, not a half turn.
+        await page.waitForTimeout(400);
         const nav = page.locator('.fy-settings-nav');
         const facts = await nav.evaluate(el => {
           const style = getComputedStyle(el);
@@ -305,6 +443,32 @@ describe('Settings list: scrolls and says so at 800px tall', () => {
           return list !== undefined && link !== undefined && link.bottom <= list.bottom + 1 && link.top >= list.top - 1;
         });
         expect(inside, 'the last entry is fully inside the list once focused').toBe(true);
+        // The focus ring is drawn INSIDE the entry (a negative offset), so the list's own edge cannot clip it, and it is drawn.
+        const ring = await page.evaluate(() => {
+          const style = getComputedStyle(document.activeElement as Element);
+          return {
+            offset: parseFloat(style.outlineOffset),
+            style: style.outlineStyle,
+            width: parseFloat(style.outlineWidth),
+          };
+        });
+        expect(ring.style, 'a visible focus ring').not.toBe('none');
+        expect(ring.width).toBeGreaterThan(0);
+        expect(ring.offset, 'the ring is inside the entry, not outside where the scroller clips it').toBeLessThan(0);
+        // Every group heading shows a real chevron icon (an svg), not a text glyph from a pseudo-element or the browser's triangle.
+        const headings = await nav.evaluate(el =>
+          [...el.querySelectorAll('summary.fy-tab-group__title')].map(summary => ({
+            icon: summary.querySelector('svg.fy-tab-group__chevron') !== null,
+            glyph: getComputedStyle(summary, '::after').content,
+            marker: getComputedStyle(summary).listStyleType,
+          })),
+        );
+        expect(headings.length).toBeGreaterThan(5);
+        for (const heading of headings) {
+          expect(heading.icon, 'a chevron icon on the group heading').toBe(true);
+          expect(['none', 'normal']).toContain(heading.glyph);
+          expect(heading.marker).toBe('none');
+        }
         expect(await nav.evaluate(el => el.scrollTop), 'it scrolled to get there').toBeGreaterThan(0);
         if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, 'nav-cue-bottom.png') });
       } finally {
