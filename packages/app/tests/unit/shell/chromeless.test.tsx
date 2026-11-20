@@ -8,6 +8,7 @@ import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
 import type { ShellWindow } from '../../../src/shell/context.tsx';
 import { drawerState } from '../../../src/shell/drawer-state.ts';
+import { APP_STORAGE } from '../../../src/storage/names.ts';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
@@ -173,6 +174,31 @@ describe('chrome-less screens', () => {
     await settle();
     expect(mounted.container.querySelector('[data-testid="plain"]')).not.toBeNull();
     expect(commandBar()).toBeNull();
+    await mounted.unmount();
+  });
+
+  // e-cmdb: Cmd/Ctrl+B has no drawer to toggle on a chrome-less screen and must never write the remembered rail setting.
+  test('Ctrl-B on a chrome-less screen draws no drawer and leaves the remembered rail setting alone (wide and phone)', async () => {
+    for (const viewport of ['wide', 'phone'] as const) {
+      const mounted = await open('/flow', viewport);
+      await interact(() => pressKey(document.body, 'b', { ctrlKey: true }));
+      await interact(() => pressKey(document.body, 'b', { metaKey: true }));
+      await settle();
+      expect(mounted.container.querySelector(CHROME)).toBeNull();
+      expect(drawerState.open()).toBe(false);
+      expect(drawerState.collapsed()).toBeUndefined();
+      expect(window.localStorage.getItem(APP_STORAGE.drawer)).toBeNull();
+      await mounted.unmount();
+    }
+  });
+
+  test('Ctrl-B still toggles the drawer on an ordinary screen', async () => {
+    const mounted = await open('/plain', 'wide');
+    const before = mounted.container.querySelector('.fy-drawer--rail') !== null;
+    await interact(() => pressKey(document.body, 'b', { ctrlKey: true }));
+    await settle();
+    expect(mounted.container.querySelector('.fy-drawer--rail') !== null).toBe(!before);
+    expect(window.localStorage.getItem(APP_STORAGE.drawer)).not.toBeNull();
     await mounted.unmount();
   });
 });

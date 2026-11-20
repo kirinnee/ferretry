@@ -3,6 +3,8 @@
  * (`fixtures/chromeless-scene.tsx`): the `flow` screen has no drawer, nav, side column or title bar and the page uses the
  * whole width; the `plain` screen next to it keeps them.
  *
+ * Cmd/Ctrl+B (e-cmdb) on the `flow` screen draws no drawer and never writes the remembered rail setting; on `plain` it toggles.
+ *
  * Set `FY_CHROMELESS_SHOTS_DIR` to keep `<viewport>-<scheme>-<view>.png`.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
@@ -57,6 +59,7 @@ afterAll(async () => {
 
 const VIEWPORTS = [
   { name: '1280', width: 1_280, height: 800, phone: false },
+  { name: '768', width: 768, height: 900, phone: false },
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 
@@ -90,6 +93,17 @@ describe('chrome-less screens', () => {
         const { tab, close } = await open(viewport, scheme, 'flow', '/flow');
         try {
           expect(await tab.locator(CHROME).count(), 'no chrome').toBe(0);
+          // e-cmdb: the drawer shortcut does nothing here and never writes the remembered rail setting.
+          await tab.keyboard.press('Control+b');
+          await tab.keyboard.press('Meta+b');
+          await tab.evaluate(
+            () => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+          );
+          expect(await tab.locator(`${CHROME}, .fy-drawer-scrim`).count(), 'no drawer after Ctrl/Cmd+B').toBe(0);
+          expect(
+            await tab.evaluate(() => Object.keys(localStorage).filter(key => key.includes('drawer'))),
+            'the remembered rail setting was not written',
+          ).toEqual([]);
           const box = await tab.locator('.fy-main').boundingBox();
           expect(box?.x, 'the page starts at the left edge').toBe(0);
           expect(Math.round(box?.width ?? 0), 'the page uses the full width').toBe(viewport.width);
@@ -107,6 +121,12 @@ describe('chrome-less screens', () => {
         const { tab, close } = await open(viewport, scheme, 'plain', '/plain');
         try {
           expect(await tab.locator(CHROME).count(), 'chrome is there').toBeGreaterThan(0);
+          if (!viewport.phone) {
+            const rail = async () => await tab.locator('.fy-drawer--rail').count();
+            const before = await rail();
+            await tab.keyboard.press('Control+b');
+            expect(await rail(), 'Ctrl+B still toggles the rail on an ordinary screen').toBe(before === 0 ? 1 : 0);
+          }
           if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-plain.png`) });
         } finally {
           await close();
