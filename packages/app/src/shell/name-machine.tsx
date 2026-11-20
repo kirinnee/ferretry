@@ -80,10 +80,16 @@ function NameThisMachineView({ initial, busy, refusal, problem, onSave, onSkip }
             </p>
           )}
           <div className="flex flex-wrap gap-2">
-            <button type="submit" className="kt-btn" data-variant="primary" disabled={busy}>
+            <button type="submit" className="kt-btn min-h-[44px]" data-variant="primary" disabled={busy}>
               {busy ? 'Saving…' : 'Save name'}
             </button>
-            <button type="button" className="kt-btn" disabled={busy} data-name-machine-skip="" onClick={onSkip}>
+            <button
+              type="button"
+              className="kt-btn min-h-[44px]"
+              disabled={busy}
+              data-name-machine-skip=""
+              onClick={onSkip}
+            >
               Not now
             </button>
           </div>
@@ -96,7 +102,7 @@ function NameThisMachineView({ initial, busy, refusal, problem, onSave, onSkip }
           <p className="m-0 text-meta leading-base text-faint">
             It keeps its host name. Name it later in Settings › General › Name, from a device that may.
           </p>
-          <button type="button" className="kt-btn self-start" data-name-machine-skip="" onClick={onSkip}>
+          <button type="button" className="kt-btn min-h-[44px] self-start" data-name-machine-skip="" onClick={onSkip}>
             Continue
           </button>
         </div>

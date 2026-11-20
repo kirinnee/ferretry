@@ -22,6 +22,7 @@
  *   FY_ONBOARDING_E2E_SHOTS_DIR  keep `<variant>-<nn>-<page>.png` of every page (fake data only)
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
+import { appendFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright-core';
@@ -73,6 +74,8 @@ interface Observed {
   /** Requests the fake machines had no answer for. */
   unanswered: string[];
   pageErrors: string[];
+  /** Every page's counter and segment count, in order (printed with FY_ONBOARDING_E2E_SHOTS_DIR). */
+  counters: string[];
 }
 const seen: Observed = {
   nameForms: -1,
@@ -83,6 +86,7 @@ const seen: Observed = {
   codexKindPagesInEverything: -1,
   unanswered: [],
   pageErrors: [],
+  counters: [],
 };
 
 // ─── small helpers ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -175,8 +179,54 @@ const inspect = async (tab: Page, variant: Variant, key: string, opts: { first?:
       back: document.querySelectorAll('[data-step-back]').length,
       next: document.querySelectorAll('[data-step-next]').length,
       nextOff: (document.querySelector('[data-step-next]') as HTMLButtonElement | null)?.disabled ?? true,
+      counter: (() => {
+        const bar = document.querySelector('[data-step-progress] [role="progressbar"]');
+        const segments = [...document.querySelectorAll<HTMLElement>('[data-step-progress] [data-segment]')];
+        const here = segments.find(segment => segment.dataset.state === 'current');
+        return {
+          text: document.querySelector('.fy-sp-progress__text')?.textContent ?? '',
+          now: Number(bar?.getAttribute('aria-valuenow')),
+          max: Number(bar?.getAttribute('aria-valuemax')),
+          states: segments.map(segment => segment.dataset.state ?? ''),
+          label: here?.textContent ?? '',
+          fill:
+            here === undefined
+              ? Number.NaN
+              : Number.parseFloat(getComputedStyle(here).getPropertyValue('--fy-sp-fill')),
+        };
+      })(),
     };
   }, CHROME);
+  // ONE counter meaning on every page: "<segment> · n of m" says what the bar draws (one lit segment, the ones before it
+  // done, the current one filled n of m), and n is never past m.
+  const said = /^(.*) · (\d+) of (\d+)$/u.exec(read.counter.text);
+  expect(said, `${key}: the counter reads '<stage> · n of m' (read '${read.counter.text}')`).not.toBeNull();
+  const [, , saidN = '', saidM = ''] = said ?? [];
+  expect([Number(saidN), Number(saidM)], `${key}: the counter and the progress bar say the same numbers`).toEqual([
+    read.counter.now,
+    read.counter.max,
+  ]);
+  expect(read.counter.now, `${key}: n is not past m`).toBeLessThanOrEqual(read.counter.max);
+  expect(
+    read.counter.states.filter(state => state === 'current'),
+    `${key}: exactly one segment is current`,
+  ).toHaveLength(1);
+  const at = read.counter.states.indexOf('current');
+  expect(
+    read.counter.states.every((state, index) => state === (index < at ? 'done' : index === at ? 'current' : 'ahead')),
+    `${key}: the bar reads left to right (${read.counter.states.join(',')})`,
+  ).toBe(true);
+  expect(read.counter.text.startsWith(read.counter.label), `${key}: the counter names the lit segment`).toBe(true);
+  expect(read.counter.fill, `${key}: the lit segment is filled n of m`).toBeCloseTo(
+    read.counter.now / read.counter.max,
+    3,
+  );
+  if (shotsDir !== '')
+    appendFileSync(
+      join(shotsDir, `${variant.name}-counters.txt`),
+      `${key}: ${read.counter.text} [${read.counter.states.length} segments]\n`,
+    );
+  seen.counters.push(`${variant.name}:${key}: ${read.counter.text} [${read.counter.states.length} segments]`);
   expect(read.chrome, `${key}: no sidebar or app chrome`).toBe(0);
   expect(read.unsaved, `${key}: no "answer was not saved" notice`).toBe(0);
   expect(read.overflow, `${key}: no sideways scroll`).toBeLessThanOrEqual(0);
@@ -334,6 +384,12 @@ describe('the first run, end to end', () => {
       walked.push('onboarding.name');
       seen.nameForms = await tab.locator('[data-name-machine]').count();
       await inspect(tab, variant, 'onboarding.name', { first: true });
+      // The name form's own buttons are the 44px, auto width buttons of the footer (not a 28px row of small ones).
+      for (const button of await tab.locator('[data-flow-page="onboarding.name"] form button').all()) {
+        const box = await button.boundingBox();
+        expect(box?.height ?? 0, 'Machine name: Save name / Not now are 44px tall').toBeGreaterThanOrEqual(43.5);
+        expect(box?.width ?? 0, 'Machine name: its buttons are auto width').toBeLessThan(0.5 * variant.width);
+      }
       await shot(tab, variant, 'onboarding.name');
       // Save the name: the machine takes it through the host file, and the flow goes on by itself.
       await tab.getByLabel('Machine name').last().fill('studio-mac');
@@ -501,13 +557,49 @@ describe('the first run, end to end', () => {
       await reach(tab, 'voice.voice');
       walked.push('voice.voice');
       await inspect(tab, variant, 'voice.voice');
+      // Voice: every Install button is 44px tall, and no engine card clips its own text (a card hides overflow).
+      const installs = await tab
+        .locator('.fy-engine-card button.fy-engine-mini')
+        .evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().height * 10) / 10));
+      expect(installs.length, 'Voice: at least one Install button').toBeGreaterThan(0);
+      for (const height of installs)
+        expect(height, 'Voice: an Install button is 44px tall').toBeGreaterThanOrEqual(43.5);
       await shot(tab, variant, 'voice.voice');
+      await tab.getByRole('button', { name: 'Show every engine' }).click();
+      // The Off card, on its own, so its whole text can be read in the picture (the page shot scrolls past it).
+      const off = tab.locator('.fy-engine-card[data-engine="off"]');
+      // Centred, so the footer bar does not sit over its lower half in the picture.
+      await off.evaluate(node => node.scrollIntoView({ block: 'center' }));
+      expect(await off.innerText(), 'Voice: the Off card shows its whole text').toContain('Settings › Voice.');
+      if (shotsDir !== '') await off.screenshot({ path: join(shotsDir, `${variant.name}-voice-off-card.png`) });
+      const clipped = await tab
+        .locator('.fy-engine-card')
+        .evaluateAll(nodes =>
+          nodes
+            .filter(node => node.scrollHeight > node.clientHeight)
+            .map(node => (node as HTMLElement).dataset.engine ?? ''),
+        );
+      expect(clipped, 'Voice: no engine card clips its text').toEqual([]);
+      await shot(tab, variant, 'voice.voice-all-engines');
       await next(tab, 'end');
       expect(Object.keys(await ledgerOf(tab))).toContain('voice.voice');
 
       // ── the end page ────────────────────────────────────────────────────────────────────────────────────────────
       expect(await tab.locator(CHROME).count(), 'the end page has no app chrome').toBe(0);
       expect(await tab.locator('[data-flow-unsaved]').count(), 'the end page lists no unsaved answer').toBe(0);
+      // The end page says what was set up in a sentence: no raw dump of page titles or ids.
+      const summary = await tab.locator('[data-onboarding-summary]').innerText();
+      expect(summary, 'the end page says what was set up').toMatch(/^Set up on this machine: /u);
+      for (const raw of ['What to bring over', 'Bring it over', 'import-choice', 'claude-code.', 'Conversations'])
+        expect(summary, `the end page does not list the page title '${raw}'`).not.toContain(raw);
+      expect(summary.split('\n').length, 'the end page summary is a few lines, not a list of every page').toBeLessThan(
+        8,
+      );
+      expect(summary, 'the end page says what was skipped').toMatch(/Nothing was skipped|Skipped for now/u);
+      for (const height of await tab
+        .locator('[data-flow-end] button')
+        .evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().height)))
+        expect(height, 'the end page buttons are 44px tall').toBeGreaterThanOrEqual(43.5);
       expect(await tab.locator('[data-flow-end]').count()).toBe(1);
       await shot(tab, variant, 'end');
       // Every machine step ended up answered, each exactly once.
@@ -587,6 +679,9 @@ describe('the first run, end to end', () => {
       // Each client page was asked once in the whole journey: the Pair journey did not ask them again.
       expect(walked.filter(key => key === 'onboarding.appearance')).toHaveLength(1);
 
+      if (shotsDir !== '')
+        await Bun.write(join(shotsDir, `${variant.name}-counters.txt`), `${seen.counters.join('\n')}\n`);
+      seen.counters.length = 0;
       seen.unanswered = [...(await daemonOf(tab, A)).unanswered, ...(await daemonOf(tab, B)).unanswered];
       await context.close();
     });

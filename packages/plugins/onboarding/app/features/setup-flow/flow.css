@@ -117,6 +117,19 @@
   flex-direction: column;
   gap: 12px;
 }
+/* Every button on the last page is a 44px target, like the footer's, and sits at the start of its line. */
+.fy-sf-end button {
+  align-self: flex-start;
+  min-height: 44px;
+}
+/* The ghost button's own padding would indent its label from the text above it. */
+.fy-sf-end [data-flow-end-home] {
+  margin-inline-start: calc(-1 * var(--pad-control-x));
+}
+/* The ghost button's own padding would indent its label from the text above it. */
+.fy-sf-end [data-flow-end-home] {
+  margin-inline-start: calc(-1 * var(--pad-control-x));
+}
 .fy-sf-end__actions {
   align-items: center;
   display: flex;

@@ -170,12 +170,15 @@ export interface ProgressRead {
   readonly current: string;
   readonly step: number;
   readonly of: number;
+  /** The counter is the current segment's own pages, so the bar fills that segment `step` of `of` (see `StepProgress`). */
+  readonly fills: true;
 }
 
 /**
  * The bar for the page on screen: one segment per plugin that still has a page to ask on the machine, then one for this
- * device; "n of m" counts the live pages of the current segment, so skipped pages never count and the total can shrink
- * but never grows backwards.
+ * device. "n of m" has ONE meaning on every page: the pages of the current segment this run has shown plus the ones still to
+ * show (`m`), and the place of the page on screen among them (`n`). A page passed over or answered before the run never
+ * counts, so `m` can shrink once a page says it is not needed and never grows; the bar fills the current segment `n` of `m`.
  */
 export function progressOf(
   flow: Flow,
@@ -205,5 +208,6 @@ export function progressOf(
     current: id,
     step: Math.max(1, place + 1),
     of: Math.max(1, inSegment.length),
+    fills: true,
   };
 }

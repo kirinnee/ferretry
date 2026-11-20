@@ -193,11 +193,11 @@ describe('<EngineCard>', () => {
 });
 
 describe('the engine card stylesheet', () => {
-  it('fixes the height at 132 px and clips, so a long name or line cannot make a card taller', () => {
-    expect(CSS).toContain('--fy-engine-height: 132px;');
+  it('fixes the height at 168 px and clips, so a long name or line cannot make a card taller', () => {
+    expect(CSS).toContain('--fy-engine-height: 168px;');
     expect(CSS).toMatch(/\.fy-engine-card \{[^}]*height: var\(--fy-engine-height\);[^}]*overflow: hidden;/s);
     expect(CSS).toMatch(/\.fy-engine-name \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
-    expect(CSS).toMatch(/\.fy-engine-line \{[^}]*height: 16px;[^}]*text-overflow: ellipsis;/s);
+    expect(CSS).toMatch(/\.fy-engine-line \{[^}]*height: 18px;[^}]*text-overflow: ellipsis;/s);
   });
 
   it('puts at most three cards in a row, at least 240 px each, and stacks them on a phone', () => {
@@ -211,8 +211,9 @@ describe('the engine card stylesheet', () => {
     expect(CSS).toMatch(/:root\[data-motion='reduced'\][^{]*\{[^}]*animation: none/);
   });
 
-  it('keeps every small button a 44 px press target without drawing it that big', () => {
-    expect(CSS).toMatch(/\.fy-engine-hit::after \{[^}]*inset: -10px -6px;/s);
+  it('draws every card button a full 44 px tall', () => {
+    expect(CSS).toMatch(/:root \.fy-engine-mini \{[^}]*min-height: 44px;/s);
+    expect(CSS).not.toMatch(/\.fy-engine-none \{[^}]*max-height/s);
   });
 });
 

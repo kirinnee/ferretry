@@ -122,6 +122,8 @@ describe('the progress bar', () => {
     expect(read?.segments.map(segment => segment.label)).toEqual(['Onboarding', 'Fake Pack', 'This device']);
     expect(read?.current).toBe('fake-pack');
     expect([read?.step, read?.of]).toEqual([2, 3]);
+    // The bar fills the current segment 2 of 3: the words and the bar are one reading.
+    expect(read?.fills).toBe(true);
   });
 
   test('a skipped page never counts: the total shrinks, it never grows backwards', () => {

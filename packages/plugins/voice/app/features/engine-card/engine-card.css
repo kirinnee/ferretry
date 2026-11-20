@@ -12,7 +12,7 @@
   padding: 0;
 }
 .fy-engine-card {
-  --fy-engine-height: 132px;
+  --fy-engine-height: 168px;
   background: var(--surface-2);
   border: var(--stroke-control, 1px) solid var(--border);
   border-radius: var(--radius-control);
@@ -56,6 +56,10 @@
   height: 100%;
   padding: 8px 10px;
   pointer-events: none;
+}
+/* No row gives way to another: a row that has too little room would otherwise squash the one above it. */
+.fy-engine-body > * {
+  flex-shrink: 0;
 }
 .fy-engine-head {
   align-items: center;
@@ -112,9 +116,10 @@
 }
 .fy-engine-line {
   color: var(--muted);
+  flex: none;
   font-size: var(--text-sm);
-  height: 16px;
-  line-height: 16px;
+  height: 18px;
+  line-height: 18px;
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -144,18 +149,20 @@
 .fy-engine-foot {
   align-items: center;
   display: flex;
-  gap: 6px;
-  height: 26px;
+  gap: 10px;
+  height: 44px;
   justify-content: space-between;
   margin-top: auto;
   min-width: 0;
 }
+/* Chips wrap onto a second row beside a wide Install button rather than being cut off by it. */
 .fy-engine-chips {
+  align-content: center;
   display: flex;
   flex: 1 1 0;
+  flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
-  overflow: hidden;
 }
 .fy-engine-chip {
   border: 1px solid var(--border);
@@ -205,7 +212,7 @@
   color: var(--fg);
   font-size: var(--text-xs);
 }
-/* The small buttons: above the stretched radio, small to look at, a full 44 px to press. */
+/* The small buttons: above the stretched radio, a full 44 px tall to press. */
 .fy-engine-mini {
   align-items: center;
   background: var(--surface);
@@ -218,8 +225,8 @@
   font: inherit;
   font-size: var(--text-xs);
   gap: 4px;
-  min-height: 24px;
-  padding: 0 8px;
+  min-height: 44px;
+  padding: 0 10px;
   pointer-events: auto;
   position: relative;
   white-space: nowrap;
@@ -302,11 +309,9 @@
 }
 .fy-engine-none {
   color: var(--muted);
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
   line-height: 1.35;
-  margin: 0;
-  max-height: 43px;
-  overflow: hidden;
+  margin: 2px 0 0;
 }
 .fy-engine-card:has([data-state='installing']) .fy-engine-line {
   color: var(--accent);
@@ -330,11 +335,11 @@
   opacity: 1;
 }
 
-/* A touch screen's global `:root button { min-height/min-width: 44px }` would make both small buttons a 44 px BOX and push
-   the card's rows apart. They stay small to look at; the ::after hit area (`.fy-engine-hit`) is the 44 px to press. `:root`
-   outranks the global rule. */
+/* The card's buttons (Install, Resume, Cancel, Close) are a full 44 px tall, like every other button on a page of the
+   flow; `:root` outranks a touch screen's global `button { min-height/min-width }` rule. The card is tall enough
+   (168 px) to hold that row and the longest text without clipping either. */
 :root .fy-engine-mini {
-  min-height: 24px;
+  min-height: 44px;
   min-width: 0;
 }
 :root .fy-engine-info {

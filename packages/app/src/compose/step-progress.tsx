@@ -8,6 +8,8 @@
  * Segments before the current one are filled, so the bar reads left to right. Colour comes from theme tokens.
  */
 
+import type { CSSProperties } from 'react';
+
 export interface StepSegment {
   readonly id: string;
   readonly label: string;
@@ -20,6 +22,11 @@ export interface StepProgressProps {
   /** The page's place among the pages still ahead: `n` of `of` (skipped pages never count). */
   readonly step: number;
   readonly of: number;
+  /**
+   * Set when `step` / `of` count the pages INSIDE the current segment (the setup flow): the current segment then fills
+   * `step` of `of` of its length, so the bar and the words say the same thing. Unset, every segment is one whole stage.
+   */
+  readonly fills?: true;
 }
 
 /** The words under the bar: "Claude Code · 3 of 7". */
@@ -28,7 +35,7 @@ export function stepProgressText(segments: readonly StepSegment[], current: stri
   return label === '' ? `${step} of ${of}` : `${label} · ${step} of ${of}`;
 }
 
-export function StepProgress({ segments, current, step, of }: StepProgressProps) {
+export function StepProgress({ segments, current, step, of, fills }: StepProgressProps) {
   const at = segments.findIndex(segment => segment.id === current);
   const text = stepProgressText(segments, current, step, of);
   return (
@@ -48,6 +55,12 @@ export function StepProgress({ segments, current, step, of }: StepProgressProps)
             className="fy-sp-progress__segment"
             data-state={index < at ? 'done' : index === at ? 'current' : 'ahead'}
             data-segment={segment.id}
+            {...(fills === true && index === at
+              ? {
+                  'data-fills': '',
+                  style: { '--fy-sp-fill': Math.min(1, Math.max(0, step / Math.max(1, of))) } as CSSProperties,
+                }
+              : {})}
           >
             <span className="fy-sp-progress__label">{segment.label}</span>
           </span>

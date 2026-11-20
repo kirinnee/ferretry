@@ -7,8 +7,8 @@
 import { daemonHomeHref, StepPageFrame, useOptionalRouter, useScreenHref } from '@ferretry/app';
 import { Button } from '@ferretry/app/ui';
 import type { Unsaved } from './use-setup-flow.ts';
-import { type ComponentProps, type ReactNode, useMemo } from 'react';
-import { SetupSummary } from '../../views/steps-screen.tsx';
+import { type ReactNode, useMemo } from 'react';
+import { SetupSummary, type SummaryStep } from '../../views/steps-screen.tsx';
 import { addProjectHref, projectAction } from '../stepper/project-action.ts';
 
 export function EndPage({
@@ -20,7 +20,7 @@ export function EndPage({
 }: {
   readonly daemon: string;
   readonly onBack: (() => void) | undefined;
-  readonly summary: ComponentProps<typeof SetupSummary>['steps'];
+  readonly summary: readonly SummaryStep[];
   /** Answers the machine did not take: each is named, with its own Try again. */
   readonly unsaved?: readonly Unsaved[];
   readonly onRetry?: (key: string) => void;

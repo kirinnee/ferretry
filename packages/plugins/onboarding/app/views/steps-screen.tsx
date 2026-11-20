@@ -12,14 +12,6 @@ import { type OnboardingView, sideOf, type StepState } from '../../contract/inde
 import { setupFlowHref } from '../features/setup-flow/flow-href.ts';
 import { onboardingScreen } from '../onboarding-screen.ts';
 
-const STATE_LABEL: Readonly<Record<StepState, string>> = {
-  pending: 'Not looked at yet',
-  found: 'Already set up',
-  later: 'Left for later',
-  done: 'Done',
-  skipped: 'Skipped',
-};
-
 type Reading =
   | { readonly kind: 'loading' }
   | { readonly kind: 'failed' }
@@ -81,56 +73,90 @@ function RouterLink({
   );
 }
 
-/** A step's title as a list item reads it: the trailing ellipsis of "Start from…" means "pick" and has no place here. */
-const plainTitle = (title: string): string => title.replace(/…$/u, '');
+/** A step's group, as the closing summary reads it (the page titles are never listed: they say nothing out of context). */
+export interface SummaryStep {
+  readonly plugin: string;
+  readonly id: string;
+  readonly title: string;
+  /** The progress bar's name for the step's plugin ("Claude Code"): what the summary calls it. */
+  readonly group: string;
+  readonly state: StepState;
+}
+
+/** The plugin whose setup page names the machine itself. */
+const MACHINE_PLUGIN = 'onboarding';
+
+/** "A", "A and B", "A, B and C". */
+const listOf = (names: readonly string[]): string =>
+  names.length < 2 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+
+interface SummaryGroup {
+  readonly plugin: string;
+  readonly group: string;
+  readonly set: number;
+  readonly left: number;
+}
+
+/** One entry per plugin, in the order the flow met them: how many of its pages were set up and how many were not. */
+const groupsOf = (steps: readonly SummaryStep[]): readonly SummaryGroup[] => {
+  const groups = new Map<string, SummaryGroup>();
+  for (const step of steps) {
+    const before = groups.get(step.plugin) ?? {
+      plugin: step.plugin,
+      group: step.group,
+      set: 0,
+      left: 0,
+    };
+    const wasSet = step.state === 'done' || step.state === 'found';
+    groups.set(step.plugin, {
+      ...before,
+      set: before.set + (wasSet ? 1 : 0),
+      left: before.left + (wasSet ? 0 : 1),
+    });
+  }
+  return [...groups.values()];
+};
 
 /**
- * The close of the setup, once no step waits for an answer: what was set up, and each step left for later or skipped,
- * with the way to its settings, so nothing left undone is lost.
+ * The close of the setup, once no step waits for an answer, in a few plain sentences: what was set up here, and what was
+ * skipped, each with the way to its Settings so nothing left undone is lost. It names plugins ("Claude Code"), never the
+ * pages inside them.
  */
 export function SetupSummary({
   daemon,
   steps,
 }: {
   readonly daemon: string;
-  readonly steps: readonly {
-    readonly plugin: string;
-    readonly id: string;
-    readonly title: string;
-    readonly state: StepState;
-  }[];
+  readonly steps: readonly SummaryStep[];
 }): ReactNode {
   if (steps.length === 0 || steps.some(step => step.state === 'pending')) return null;
-  const set = steps.filter(step => step.state === 'done' || step.state === 'found');
-  const later = steps.filter(step => step.state === 'later' || step.state === 'skipped');
+  const groups = groupsOf(steps);
+  const left = groups.filter(group => group.left > 0);
+  // The machine's own page (its name) is not a thing to list: the sentence is about what was brought in.
+  const named = groups.filter(group => group.set > 0);
+  const set = named.some(group => group.plugin !== MACHINE_PLUGIN)
+    ? named.filter(group => group.plugin !== MACHINE_PLUGIN)
+    : named;
   return (
-    <section className="kt-panel flex flex-col gap-2 p-3" data-onboarding-summary="">
-      <h2 className="m-0 text-cell font-semibold">Setup is finished</h2>
-      <div className="flex flex-col gap-1" data-onboarding-summary-set="">
-        <p className="m-0 text-cell text-muted">{set.length === 0 ? 'No step was set up here.' : 'Set up:'}</p>
-        {set.length === 0 ? null : (
-          <ul className="m-0 flex list-none flex-col p-0 text-cell">
-            {set.map(step => (
-              <li key={`${step.plugin}.${step.id}`} className="flex min-h-11 items-center">
-                {plainTitle(step.title)}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      {later.length === 0 ? null : (
+    <section className="kt-panel flex flex-col gap-3 p-4" data-onboarding-summary="">
+      <p className="m-0 text-row leading-base text-fg" data-onboarding-summary-set="">
+        {set.length === 0
+          ? 'Nothing was set up this time.'
+          : `Set up on this machine: ${listOf(set.map(group => group.group))}.`}{' '}
+        {left.length === 0 ? 'Nothing was skipped.' : null}
+      </p>
+      {left.length === 0 ? null : (
         <div className="flex flex-col gap-1" data-onboarding-summary-later="">
-          <p className="m-0 text-cell text-muted">Set up later, from Settings:</p>
+          <p className="m-0 text-cell leading-base text-muted">
+            Skipped for now. You can change these any time in Settings:
+          </p>
           <ul className="m-0 flex list-none flex-col p-0">
-            {later.map(step => (
-              <li key={`${step.plugin}.${step.id}`} className="flex min-h-11 items-center gap-2">
-                <RouterLink
-                  href={daemonSettingsHref(daemon, step.plugin)}
-                  data-onboarding-later-link={`${step.plugin}.${step.id}`}
-                >
-                  {plainTitle(step.title)}
+            {left.map(group => (
+              <li key={group.plugin} className="flex min-h-11 items-center gap-2">
+                <RouterLink href={daemonSettingsHref(daemon, group.plugin)} data-onboarding-later-link={group.plugin}>
+                  {group.group}
                 </RouterLink>
-                <span className="text-meta text-muted">({STATE_LABEL[step.state].toLowerCase()})</span>
+                {group.set > 0 ? <span className="text-meta text-muted">(some pages skipped)</span> : null}
               </li>
             ))}
           </ul>

@@ -4,16 +4,16 @@
  * system as bars).
  *
  * WHAT IS ON THE CARD, and nothing else: the name, one plain line, three bars (Speed / Accuracy / Size, `engine-numbers.ts`),
- * two chips, and — for an engine that downloads — one small Install button. The measured paragraph, licence and languages
+ * two chips, and — for an engine that downloads — one Install button. The measured paragraph, licence and languages
  * sit behind the "i" disclosure, which covers the card in place so the card never changes height. The card is a fixed
- * 132 px tall (`engine-card.css`), however long the name.
+ * 168 px tall (`engine-card.css`), however long the name.
  *
  * THE SELECTION IS THE WHOLE CARD. A real radio input is stretched over the card (`.fy-engine-radio`), so the group is
  * one tab stop, the arrow keys move the choice, and a click anywhere on the card chooses it. The Install and "i" buttons
  * sit above that input, so pressing them never changes the choice, and no interactive control is nested inside a label.
  * The check badge pops once when the card is chosen (`data-pop`), and not at all when motion is reduced.
  *
- * NO AUTOFOCUS (this app's touch rules). The small buttons keep a 44 px hit area through an extended touch target.
+ * NO AUTOFOCUS (this app's touch rules). The card's buttons are a full 44 px tall.
  */
 
 import { Check, Download, Info, X } from 'lucide-react';
@@ -97,7 +97,7 @@ function InstallSlot({ install, name }: { readonly install: InstallView; readonl
           <span className="fy-engine-progress-text">{install.percent}%</span>
           <button
             type="button"
-            className="fy-engine-mini fy-engine-hit"
+            className="fy-engine-mini"
             aria-label={`Cancel the ${name} download`}
             onClick={install.onCancel}
           >
@@ -107,7 +107,7 @@ function InstallSlot({ install, name }: { readonly install: InstallView; readonl
       );
     case 'partial':
       return (
-        <button type="button" className="fy-engine-mini fy-engine-hit" data-state="partial" onClick={install.onInstall}>
+        <button type="button" className="fy-engine-mini" data-state="partial" onClick={install.onInstall}>
           <Download size={12} aria-hidden="true" /> Resume ({install.left})
         </button>
       );
@@ -115,7 +115,7 @@ function InstallSlot({ install, name }: { readonly install: InstallView; readonl
       return (
         <button
           type="button"
-          className="fy-engine-mini fy-engine-hit"
+          className="fy-engine-mini"
           data-state="idle"
           aria-label={`Install ${name} (${install.size})`}
           onClick={install.onInstall}
