@@ -128,12 +128,16 @@
   background-image: var(--panel-texture);
   background-size: var(--panel-texture-size);
 }
-/* Sticker tags: a badge is a tilted pill, big enough to read. */
+/* Sticker tags: a badge is a tilted pill, big enough to read. The tilt lifts each end by (width x sin 3deg), so the sticker
+   is capped at 18em (~10px of lift at the 11px face) and carries 6px of line margin: it stays inside its own line box and
+   never overdraws the next line. A longer label shortens with an ellipsis (the full text is the title). */
 :root[data-style='genz'] .kt-badge {
   border-color: var(--border-strong);
   font-size: max(11px, var(--text-2xs));
   font-weight: var(--weight-strong);
-  rotate: -5deg;
+  margin-block: 6px;
+  max-width: min(100%, 18em);
+  rotate: -3deg;
 }
 /* The bubble face is the voice of the style, but only at DISPLAY size: Bagel Fat One's 'e' has a tiny counter and reads as 'c'
    below about 22px at 1x. So panel headers and card titles are big and bubbly; the small chrome (labels, nav group titles,

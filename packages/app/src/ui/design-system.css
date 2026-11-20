@@ -1350,6 +1350,14 @@ body {
   letter-spacing: var(--tracking-label);
   text-transform: var(--label-transform);
   white-space: nowrap;
+  /* A label longer than its line shortens instead of pushing the page sideways (the full text is the title). */
+  max-width: 100%;
+  min-width: 0;
+}
+.kt-badge__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .kt-badge[data-tone='ok'] {
   border-color: var(--ok-border);
