@@ -220,7 +220,7 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
               onChange={event => setValueLength(event.target.value.length)}
             />
           </label>
-          <button type="submit" className="kt-btn min-h-[44px] justify-center" data-variant="primary" disabled={!ready}>
+          <button type="submit" className="kt-btn justify-center" data-variant="primary" disabled={!ready}>
             <Plus size={14} aria-hidden="true" /> {busy === null ? 'Save' : 'Saving…'}
           </button>
         </div>
