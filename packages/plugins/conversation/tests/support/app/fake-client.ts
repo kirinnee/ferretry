@@ -16,6 +16,8 @@ export interface RecordedCall {
   readonly query: Readonly<Record<string, string>>;
   readonly body: unknown;
   readonly headers: Readonly<Record<string, string>>;
+  /** `false` when the read was a person's press (a Try again); absent for a read the page made by itself. */
+  readonly quiet?: false;
 }
 
 export type CallHandler = (call: RecordedCall) => unknown;
@@ -60,6 +62,7 @@ export const fakeClient = (
         query: init.query ?? {},
         body: init.body,
         headers: { ...(init.headers ?? {}) },
+        ...(init.quiet === false ? { quiet: false as const } : {}),
       };
       calls.push(call);
       const handler = handlers.get(route) ?? (typeof answers === 'function' ? answers : undefined);

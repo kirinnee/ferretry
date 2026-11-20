@@ -124,6 +124,13 @@ describe('R265 the transcript validator memory', () => {
     ]);
   });
 
+  test('e-retry an older page a person pressed for carries the press to the route call; the page’s own read carries none', async () => {
+    const world = daemon();
+    await readLogPage(world.client, 'a', { before: 400, file: 'f1' }, new ValidatedLogMemory());
+    await readLogPage(world.client, 'a', { before: 400, file: 'f1' }, new ValidatedLogMemory(), { quiet: false });
+    expect(world.client.calls.map(call => call.quiet)).toEqual([undefined, false]);
+  });
+
   test('R265 a client with no conditional read reads every tail whole', async () => {
     const client = fakeClient({ [LOG_PAGE]: call => page(call.params['ferretId'] ?? '', 'plain') });
     expect((await readLogPage(client, 'a')).log).toBe('plain');

@@ -29,7 +29,7 @@ afterEach(async () => {
 
 const control = (status: TranscriptHistoryStatus, loads: string[] = []): TranscriptHistoryControl => ({
   status,
-  loadOlder: () => loads.push(status),
+  loadOlder: press => loads.push(press?.quiet === false ? `${status}:press` : status),
 });
 
 describe('wantsOlder', () => {
@@ -74,7 +74,8 @@ describe('TranscriptHistoryRow', () => {
     const retry = must(mounted.container.querySelector('button'), 'the retry button');
     expect(retry.textContent).toContain('try again');
     await interact(() => retry.click());
-    expect(loads).toEqual(['more', 'error']);
+    // e-retry: both buttons are a person's press, so a passkey prompt can open even after a Cancel.
+    expect(loads).toEqual(['more:press', 'error:press']);
   });
 });
 

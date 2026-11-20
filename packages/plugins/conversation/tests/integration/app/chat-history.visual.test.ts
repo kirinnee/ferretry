@@ -173,6 +173,58 @@ describe('scrolling a long chat back to its first message', () => {
       }, 120_000);
 });
 
+const RETRY_CASES = [
+  { name: '390', width: 390, height: 844, scheme: 'dark', scale: 2 },
+  { name: '768', width: 768, height: 900, scheme: 'dark', scale: 1 },
+  { name: '1280', width: 1_280, height: 800, scheme: 'dark', scale: 1 },
+  { name: '1280', width: 1_280, height: 800, scheme: 'light', scale: 1 },
+] as const;
+
+/** e-retry: a failed older page offers a real button, and pressing it is the person's press, so a passkey prompt can open. */
+describe('a failed older page', () => {
+  for (const { name, width, height, scheme, scale } of RETRY_CASES)
+    it(`offers a labelled retry that loads it as the person's press (${name}, ${scheme})`, async () => {
+      const context = await browser.newContext({
+        viewport: { width, height },
+        colorScheme: scheme,
+        deviceScaleFactor: scale,
+      });
+      try {
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const tab = await context.newPage();
+        await tab.goto(`${origin}/?theme=studio-${scheme}`);
+        await tab.waitForFunction(() => document.body.innerText.includes('Answer 1499.'));
+        await framesSettled(tab);
+
+        await tab.evaluate(() => window.__failOlder());
+        for (let step = 0; step < 60 && (await status(tab)) !== 'error'; step += 1) {
+          await wheelUp(tab, 100_000);
+          await tab.waitForTimeout(40);
+        }
+        expect(await status(tab)).toBe('error');
+        await wheelUp(tab, 100_000);
+        await framesSettled(tab);
+        const retry = tab.getByRole('button', { name: /try again/iu });
+        expect(await retry.count()).toBe(1);
+        await shoot(tab, `retry-${name}-${scheme}-failed`);
+        // The failed read was the page's own (the reader scrolled): no press yet.
+        expect(await tab.evaluate(() => window.__olderPresses)).toEqual([null]);
+
+        await retry.click();
+        await tab.waitForFunction(() => window.__historyStatus !== 'error');
+        await tab.waitForFunction(() => window.__olderPresses.length >= 2);
+        expect((await tab.evaluate(() => window.__olderPresses))[1]).toBe(false);
+        await tab.waitForFunction(() => window.__historyStatus === 'more' || window.__historyStatus === 'start');
+        await shoot(tab, `retry-${name}-${scheme}-loaded`);
+      } finally {
+        await context.close();
+      }
+    }, 120_000);
+});
+
 describe('searching a long chat and jumping to a match', () => {
   for (const { name, viewport, deviceScaleFactor } of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const)
@@ -238,5 +290,7 @@ declare global {
     __holdOlder: () => void;
     __releaseOlder: () => void;
     __historyStatus: TranscriptHistoryStatus;
+    __failOlder: () => void;
+    __olderPresses: (false | null)[];
   }
 }

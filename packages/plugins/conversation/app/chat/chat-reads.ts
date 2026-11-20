@@ -15,6 +15,7 @@
  */
 
 import { FerretSummarySchema } from '@ferretry/core-ferrets/contract';
+import type { ReadPress } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
   type HandoffDocument,
@@ -102,11 +103,12 @@ export const readLogPage = async (
   ferretId: string,
   options: LogPageOptions = {},
   memory: ValidatedLogMemory = memoryOf(client),
+  press: ReadPress = {},
 ): Promise<LogPage> => {
   const query = logPageQuery(options);
   const conditional = client.conditional;
   if (Object.keys(query).length > 0 || conditional === undefined)
-    return LogPageSchema.parse(await client.call(LOG_PAGE, { params: { ferretId }, query }));
+    return LogPageSchema.parse(await client.call(LOG_PAGE, { params: { ferretId }, query, ...press }));
   const path = `${LOG_PAGE} ${ferretId}`;
   // Captured BEFORE the request, so a read of another ferret that evicts it meanwhile cannot leave a `304` with
   // nothing to stand for.
@@ -191,7 +193,7 @@ export const submitSend = async (
 /** The refresh's reads, bound to one client. */
 export const chatReadApi = (client: Pick<PluginClient, 'call' | 'conditional'>): ChatReadApi => ({
   get: id => readChatSession(client, id),
-  logPage: (id, options) => readLogPage(client, id, options),
+  logPage: (id, options, press) => readLogPage(client, id, options, undefined, press),
   // The ledger is read UNPARSED and degraded field by field (`send-ledger.ts`): one unknown value never drops a row.
   sends: id => readLedgerSends(client, id),
   // The queue's window, as the queue page reads it (`queue/send-queue.ts`).

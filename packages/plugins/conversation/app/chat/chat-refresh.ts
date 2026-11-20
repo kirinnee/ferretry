@@ -1,3 +1,4 @@
+import type { ReadPress } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { type QueuedMessage } from '@ferretry/core-mailbox/contract';
 import { type LogPageOptions, splitTranscriptImageMarkers, type TranscriptImageMarker } from '../../contract/index.ts';
@@ -678,7 +679,7 @@ export interface ChatReadApi {
   /** The ferret's view (`GET /v1/ferrets/:ferretId`). */
   readonly get: (id: string) => Promise<ChatSession>;
   /** One page of the transcript: the tail, or the page `before` a byte (`GET …/log-page`). */
-  readonly logPage: (id: string, options?: LogPageOptions) => Promise<LogPage>;
+  readonly logPage: (id: string, options?: LogPageOptions, press?: ReadPress) => Promise<LogPage>;
   /** The ferret's send ledger. Optional: a reader that does not show sends never asks. */
   readonly sends?: (id: string) => Promise<readonly unknown[]>;
   /** The ferret's durable queue. Optional. */
@@ -806,7 +807,7 @@ export interface ChatRefreshControl {
    * time: a call while one is loading is the same load. Nothing to do at the start of the conversation,
    * or on a daemon that cannot page.
    */
-  readonly loadOlder: () => Promise<void>;
+  readonly loadOlder: (press?: ReadPress) => Promise<void>;
   /**
    * Load older pages until the chat reaches back to `offset` of the transcript file `file` (a search
    * hit's place); `false` when it cannot (`chat-search-model.ts`).
@@ -912,7 +913,7 @@ export const startChatRefresh = (input: ChatRefreshInput): ChatRefreshControl =>
   const historyEntries = (): readonly TranscriptEntry[] =>
     transcriptEntriesFromLog(historyLog(history), undefined, undefined, historyOffsets(history));
 
-  const loadOlder = (limit?: number): Promise<void> => {
+  const loadOlder = (limit?: number, press?: ReadPress): Promise<void> => {
     const logPage = input.api.logPage;
     const before = oldestStart(history);
     const file = history.tail?.file;
@@ -920,7 +921,7 @@ export const startChatRefresh = (input: ChatRefreshInput): ChatRefreshControl =>
     if (stopped || before === null || before === 0 || file === undefined) return Promise.resolve();
     older = 'loading';
     sayHistory();
-    olderLoad = logPage(input.ferretId, { before, file, ...(limit === undefined ? {} : { limit }) })
+    olderLoad = logPage(input.ferretId, { before, file, ...(limit === undefined ? {} : { limit }) }, press)
       .then(
         page => {
           if (stopped) return;
@@ -1093,7 +1094,7 @@ export const startChatRefresh = (input: ChatRefreshInput): ChatRefreshControl =>
     nudge,
     watchQueue,
     acted,
-    loadOlder: () => loadOlder(),
+    loadOlder: press => loadOlder(undefined, press),
     loadUntil,
     file: () => history.tail?.file,
     stop: () => {
