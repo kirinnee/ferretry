@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react';
 import { daemonSettingsHref, DEVICE_SETTINGS_HREF } from '../router/routes.ts';
 import { Icon } from './icons.tsx';
 import { Link } from './link.tsx';
@@ -37,6 +38,22 @@ export function SettingsNav({
   /** A tab is named by the address (so the list marks it current for assistive tech, not just by colour). */
   readonly named: boolean;
 }) {
+  const listRef = useRef<HTMLElement>(null);
+  // A short list above the panel (a mid-width window) scrolls inside itself, each block on its own: bring the current tab into
+  // view by the scroller's own scroll and never the page's (`scrollIntoView` would move every ancestor too).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `active` is when the current tab changes; the effect reads it from the DOM.
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const current = list?.querySelector<HTMLElement>('.fy-tab--active');
+    if (list === null || current === null || current === undefined) return;
+    for (const scroller of [current.closest<HTMLElement>('.fy-settings-block'), list]) {
+      if (scroller === null || scroller.scrollHeight <= scroller.clientHeight) continue;
+      const edge = scroller.getBoundingClientRect();
+      const at = current.getBoundingClientRect();
+      if (at.bottom > edge.bottom) scroller.scrollTop += at.bottom - edge.bottom + 8;
+      else if (at.top < edge.top) scroller.scrollTop -= edge.top - at.top + 8;
+    }
+  }, [active]);
   const { device, machine: machineTabs } = splitTabsByScope(tabs);
   const groups = (list: readonly NavTab[]) =>
     groupSettingsTabs(list).map(group => (
@@ -58,7 +75,7 @@ export function SettingsNav({
       </details>
     ));
   return (
-    <nav className="fy-tabs fy-tabs--grouped fy-settings-nav" aria-label="Plugin settings">
+    <nav ref={listRef} className="fy-tabs fy-tabs--grouped fy-settings-nav" aria-label="Plugin settings">
       <section aria-labelledby="fy-settings-block-device" className="fy-settings-block">
         <p className="fy-settings-block__title" id="fy-settings-block-device">
           {DEVICE_BLOCK_HEADING}
