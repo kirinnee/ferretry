@@ -174,7 +174,7 @@ describe('the route table', () => {
     ]);
   });
   it("is the operator's, uncached, behind sharing.use, on every route", () => {
-    const narrowing = new Set(['PUT /version', 'PATCH /:linkId', 'POST /copy', 'DELETE /:linkId']);
+    const narrowing = new Set(['POST ', 'PUT /version', 'PATCH /:linkId', 'POST /copy', 'DELETE /:linkId']);
     for (const route of routes) {
       should(route.minimum).equal('operator');
       should(route.noStore).equal(true);

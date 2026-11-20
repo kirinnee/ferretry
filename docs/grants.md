@@ -383,7 +383,7 @@ The questions above, answered for it ([design/catalogs.md](design/catalogs.md) Â
    ([catalogs.md](catalogs.md) "A link works on the carriers pairing uses").
    Download links ([catalogs.md](catalogs.md#the-daemon-3f-4)) are `sharing.use` as well: making one, moving one to
    another version, and widening one (a later end, a higher or no cap) want a fresh `share-link` passkey from a
-   governed caller (the act `share-catalog` does not buy, and the reverse), Copy and a narrowing change need
+   governed caller (the act `share-catalog` does not buy, and the reverse; these routes ask the grant and the unlock at the door and claim the proof themselves, so a zero-minute step-up window cannot spend it first, and they spend the general step-up after a successful claim, so under that window the proof buys exactly that one act), Copy and a narrowing change need
    only the unlock, and turning one off asks for nothing. A ferret may list and read links but never preview, make,
    copy, move, change or turn one off (403 `forbidden`). A link's URL and key leave the machine in the make and Copy answers only.
 3. **So the way back on the control** is the same sentence every capability's remote turn-off carries:
