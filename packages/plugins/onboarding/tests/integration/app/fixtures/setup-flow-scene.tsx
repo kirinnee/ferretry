@@ -4,12 +4,14 @@
  * is the flow screen's own.
  *
  *   ?theme=<family>-<mode>
- *   ?case=loading|silent|choice|chip|busy|transition|end|legacy|unsaved|end-unsaved
+ *   ?case=loading|silent|choice|chip|busy|transition|end|legacy|unsaved|end-unsaved|mid|tall
  *            loading = the page has not said ready (the cover); silent = 10 s of silence (Skip this step); choice = a
  *            fake page with three choice cards; chip = the same on a page only one machine carries; busy = a long act
  *            (the whole footer locked); transition = the choice page frozen mid slide-in; end = the last page;
  *            legacy = a page not yet written against StepHost (no cover, Next enabled); unsaved = a page with two
- *            answers the machine did not take; end-unsaved = the last page naming the answers that were not saved
+ *            answers the machine did not take; end-unsaved = the last page naming the answers that were not saved;
+ *            mid / tall = a page a little under / far over one screen of content (560px / 1600px of cards), drawn INSIDE a
+ *            scroll box like the real shell's chrome-less `.fy-main` (the flow is scrolled by that box, not by the document)
  */
 import { LivingBackground } from '@ferretry/app/ui';
 import { ChoiceCards } from '@ferretry/app';
@@ -68,6 +70,24 @@ function Choice({ host }: { readonly host: StepHost }): ReactNode {
     />
   );
 }
+/** A page of `height` px of cards, the last one marked `data-last-content` (the test reads where it ends). */
+function Cards({ host, height }: { readonly host: StepHost; readonly height: number }): ReactNode {
+  useEffect(() => host.ready(), [host]);
+  const count = Math.round(height / 112);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {Array.from({ length: count }, (_, index) => `card-${index + 1}`).map((id, index) => (
+        <div
+          key={id}
+          style={{ border: '1px solid var(--border)', borderRadius: 12, height: 100, padding: 12 }}
+          {...(index === count - 1 ? { 'data-last-content': '' } : {})}
+        >
+          {id}
+        </div>
+      ))}
+    </div>
+  );
+}
 const Quiet = (): ReactNode => <p>Fake page that has not answered yet.</p>;
 function Busy({ host }: { readonly host: StepHost }): ReactNode {
   useEffect(() => {
@@ -120,9 +140,11 @@ function Scene(): ReactNode {
       ? () => <Quiet />
       : scene === 'busy'
         ? (host: StepHost) => <Busy host={host} />
-        : scene === 'legacy'
-          ? () => <p>A page that has not been moved to the step host yet.</p>
-          : (host: StepHost) => <Choice host={host} />;
+        : scene === 'mid' || scene === 'tall'
+          ? (host: StepHost) => <Cards host={host} height={scene === 'mid' ? 560 : 1_600} />
+          : scene === 'legacy'
+            ? () => <p>A page that has not been moved to the step host yet.</p>
+            : (host: StepHost) => <Choice host={host} />;
   return (
     <FlowPage
       {...common}
@@ -141,10 +163,26 @@ if (scene === 'transition') {
 }
 
 const root = document.getElementById('root');
+/** The real shell draws a chrome-less screen inside `.fy-frame > .fy-main` (a fixed box whose main area scrolls, no padding). */
+const inShell = scene === 'mid' || scene === 'tall';
+const flow = (
+  <div className="fy-sf-root" data-scene-ready="">
+    <LivingBackground />
+    <Scene />
+  </div>
+);
 if (root !== null)
   createRoot(root).render(
-    <div className="fy-sf-root" data-scene-ready="">
-      <LivingBackground />
-      <Scene />
-    </div>,
+    inShell ? (
+      <div style={{ bottom: 0, display: 'flex', left: 0, position: 'fixed', right: 0, top: 0 }} data-scene-frame="">
+        <main
+          style={{ flex: 1, minHeight: 0, minWidth: 0, overflowY: 'auto', position: 'relative' }}
+          data-scene-main=""
+        >
+          {flow}
+        </main>
+      </div>
+    ) : (
+      flow
+    ),
   );

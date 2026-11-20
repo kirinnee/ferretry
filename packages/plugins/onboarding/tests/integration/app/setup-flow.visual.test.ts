@@ -167,3 +167,85 @@ describe('the setup flow', () => {
         }
       });
 });
+
+// ─── the page frame in the shell's scroll box (r10-1 gate gap 4 and the phone line) ─────────────────────────────────────
+// A page a little under one screen and one far over it, scrolled by the shell's own box: on a desktop the footer (Back / Next)
+// is on the first screen with no dead gap under the title, and on a phone the last thing on the page ends above the footer.
+describe('the page frame in the shell scroll box', () => {
+  for (const viewport of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      for (const scene of ['mid', 'tall'] as const)
+        it(`keeps Next on the first screen and nothing under the footer (${scene}, ${viewport.name}, ${scheme})`, async () => {
+          const context = await browser.newContext({
+            viewport: { width: viewport.width, height: viewport.height },
+            colorScheme: scheme,
+            deviceScaleFactor: viewport.phone ? 2 : 1,
+            hasTouch: viewport.phone,
+            isMobile: viewport.phone,
+          });
+          const origin = server?.url.origin ?? '';
+          await context.route('**/*', async route =>
+            new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+          );
+          const tab = await context.newPage();
+          try {
+            await tab.goto(`${origin}/?theme=studio-${scheme}&case=${scene}`);
+            await tab.waitForSelector('[data-scene-ready] [data-last-content]');
+            await tab.waitForTimeout(300);
+            const read = () =>
+              tab.evaluate(() => {
+                const rect = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
+                const main = document.querySelector('[data-scene-main]') as HTMLElement;
+                const title = rect('.fy-spf__title');
+                const first = rect('.fy-sf-slot > div > div');
+                return {
+                  innerHeight: window.innerHeight,
+                  scrolls: main.scrollHeight > main.clientHeight,
+                  next: rect('[data-step-next]'),
+                  footer: rect('[data-step-footer]'),
+                  last: rect('[data-last-content]'),
+                  gap: title === undefined || first === undefined ? -1 : first.top - title.bottom,
+                  docOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                };
+              });
+            // First screen, nothing scrolled: Next is inside the viewport whatever the page's height, and the title sits
+            // right over the page (the dead gap under it is gone).
+            const top = await read();
+            expect(top.next, `${scene}: a Next button`).toBeDefined();
+            expect(top.next?.top ?? -1, `${scene}: Next starts inside the viewport`).toBeGreaterThanOrEqual(0);
+            expect(top.next?.bottom ?? 1e9, `${scene}: Next ends inside the viewport`).toBeLessThanOrEqual(
+              top.innerHeight + 0.5,
+            );
+            expect(top.gap, `${scene}: the page starts under its title`).toBeGreaterThanOrEqual(0);
+            expect(top.gap, `${scene}: no dead gap under the title`).toBeLessThanOrEqual(40);
+            expect(top.docOverflow, `${scene}: no sideways scroll`).toBeLessThanOrEqual(0);
+            if (scene === 'tall') expect(top.scrolls, 'tall: the shell box scrolls').toBe(true);
+            // Scrolled to the end: the last thing on the page ends above the footer (nothing hides under it).
+            await tab.evaluate(() => {
+              const main = document.querySelector('[data-scene-main]') as HTMLElement;
+              main.scrollTop = main.scrollHeight;
+            });
+            await tab.waitForTimeout(150);
+            const end = await read();
+            expect(end.last?.bottom ?? 1e9, `${scene}: the last content ends above the footer`).toBeLessThanOrEqual(
+              (end.footer?.top ?? 0) + 0.5,
+            );
+            expect(end.next?.bottom ?? 1e9, `${scene}: Next is still on screen at the end`).toBeLessThanOrEqual(
+              end.innerHeight + 0.5,
+            );
+            if (shotsDir !== '') {
+              await tab.evaluate(() => {
+                (document.querySelector('[data-scene-main]') as HTMLElement).scrollTop = 0;
+              });
+              await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${scene}-top.png`) });
+              await tab.evaluate(() => {
+                const main = document.querySelector('[data-scene-main]') as HTMLElement;
+                main.scrollTop = main.scrollHeight;
+              });
+              await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${scene}-end.png`) });
+            }
+          } finally {
+            await context.close();
+          }
+        });
+});

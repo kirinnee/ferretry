@@ -12,10 +12,22 @@
 .fy-sf-root > .fy-spf {
   flex: 1 1 auto;
 }
-@container (min-width: 600px) {
-  .fy-sf-root .fy-spf__page {
-    padding-top: clamp(24px, 8vh, 72px);
-  }
+/* The footer (Back / Later / Next) is in view on the first screen at EVERY width: the shell scrolls the flow inside its own
+   box, so the footer sticks to the bottom of that box (the frame makes it sticky on a phone only) and a page taller than the
+   screen scrolls under it. The page ends one footer's height above the bottom edge, so at the end of the scroll nothing hides
+   behind it. No band of empty space sits above the title: the page starts one gutter under the top edge. */
+.fy-sf-root {
+  /* 12px + the 44px target + 12px of padding and the 1px rule; the safe area is paid under the buttons. */
+  --fy-sf-footer-h: calc(69px + env(safe-area-inset-bottom, 0px));
+}
+.fy-sf-root .fy-spf__page {
+  padding-block: 16px var(--fy-sf-footer-h);
+}
+.fy-sf-root .fy-spf__footer {
+  bottom: 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  position: sticky;
+  z-index: 1;
 }
 /* Next keeps its width while it works (the busy mark would otherwise move Back). */
 .fy-sf-root .fy-spf__button {
