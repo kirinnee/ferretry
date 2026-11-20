@@ -117,7 +117,12 @@ export function renderSettingsShellOf(
   };
   const provision = { handler, Prompts: () => null } as unknown as PasskeyProvision;
   const list = new DaemonList({ storage: memoryStore(), now: () => 1 });
-  list.add({ daemon: 'ws', machine: 'workshop-host', deviceId: options.deviceId ?? 'dev', address: 'http://127.0.0.1:40245' });
+  list.add({
+    daemon: 'ws',
+    machine: 'workshop-host',
+    deviceId: options.deviceId ?? 'dev',
+    address: 'http://127.0.0.1:40245',
+  });
   const runtime = new ShellRuntime({
     appVersion: '5.0.0',
     surfaces,
