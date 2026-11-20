@@ -10,7 +10,7 @@
  * The title, one line, the body, and a demo column on the right at >= 900px of the frame (choices 44% | demo, the demo
  * sticky; above the body, <= 140px tall, on a phone). A page fills the column with `demo` or, from anywhere in its body,
  * with `<StepDemo>` (`step-demo.tsx`); a page with neither draws no column.
- * The footer holds Back (ghost), an optional Later (secondary) and Next (primary), in that order: each exactly 8.5rem wide
+ * The footer may carry one `note` line above the buttons. It holds Back (ghost), an optional Later (secondary) and Next (primary), in that order: each exactly 8.5rem wide
  * (136px), 44px tall, 12px apart, right-aligned; on a phone the three share the row in equal thirds, sticky at the bottom of the screen. `next.busy` locks Next
  * and shows the spinner. Any Button in the body is the same width and height (one rule in the CSS).
  * Layout and motion live in `step-page-frame.css`; this file chooses no colour.
@@ -61,10 +61,12 @@ export interface StepPageFrameProps {
   readonly next: StepPageNext;
   /** "Come back to this later": a real secondary button in the footer row, never a link in the page. */
   readonly later?: StepPageLater;
+  /** One short line in the footer, above the buttons, so it stays on screen with them (a failed save, say). The caller draws and colours it. */
+  readonly note?: ReactNode;
   readonly progress?: StepProgressProps;
 }
 
-export function StepPageFrame({ title, line, demo, children, back, next, later, progress }: StepPageFrameProps) {
+export function StepPageFrame({ title, line, demo, children, back, next, later, note, progress }: StepPageFrameProps) {
   const locked = next.disabled === true || next.busy === true;
   // The demo column always exists so a StepDemo can portal into it; `:empty` (css) hides it while nothing is drawn there.
   const [slot, setSlot] = useState<HTMLElement | null>(null);
@@ -85,6 +87,7 @@ export function StepPageFrame({ title, line, demo, children, back, next, later, 
           </div>
         </div>
         <footer className="fy-spf__footer" data-step-footer="">
+          {note === undefined ? null : <div className="fy-spf__note">{note}</div>}
           <div className="fy-spf__actions">
             {back === undefined ? null : (
               <Button
