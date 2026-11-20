@@ -2,10 +2,11 @@ import { expect, it } from 'bun:test';
 import { headersFrom, queryFrom, type ApiRequest, type RouteHandler } from '@ferretry/kernel/contract';
 import { device, owner, testArrival, testPrincipal } from '@ferretry/kernel/testing';
 import { instantFromEpochMs } from '@ferretry/std';
+import { TUNNEL_OFF_SENTENCE } from '../../../contract/index.ts';
 import { createConnectionB, verifiedWebRtcDevice } from '../../../daemon/connection-b.ts';
 import { noConnection, unusedSigner } from '../../support/session-layer-stubs.ts';
 
-function harness() {
+function harness(hold?: readonly string[]) {
   const offers: string[] = [];
   const writes: boolean[] = [];
   const built = createConnectionB({
@@ -35,7 +36,9 @@ function harness() {
     },
     tunnelStore: {
       write: async entry => {
+        if (hold !== undefined) return { kind: 'held', sentences: hold };
         writes.push(entry.enabled);
+        return undefined;
       },
     },
     webrtc: {
@@ -104,6 +107,26 @@ it('R657 tunnel handlers parse a switch, persist it and answer its live view', a
   expect(h.writes).toEqual([true]);
   const response = await h.built.routes['GET /v1/tunnel']();
   expect(JSON.parse(response.body)).toMatchObject({ enabled: true, explicit: true, state: 'provisioning' });
+});
+
+it('a tunnel switch held for the owner answers 202 with what is held and the tunnel as it still is, never a 500', async () => {
+  const h = harness(['the tunnel is turned on']);
+  const response = await h.built.routes['PUT /v1/tunnel'](h.call('{"enabled":true}', true));
+  expect(response.status).toBe(202);
+  expect(JSON.parse(response.body)).toEqual({
+    held: ['the tunnel is turned on'],
+    view: {
+      enabled: false,
+      explicit: false,
+      state: 'off',
+      tunnelUrl: null,
+      sentence: TUNNEL_OFF_SENTENCE,
+    },
+  });
+  // Nothing was written and the tunnel did not start: it is still off until the owner confirms.
+  expect(h.writes).toEqual([]);
+  const view = await h.built.routes['GET /v1/tunnel']();
+  expect(JSON.parse(view.body)).toMatchObject({ enabled: false, state: 'off' });
 });
 
 it('R684 peer replacement keys come only from the kernel principal appSession', () => {

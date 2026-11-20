@@ -11,6 +11,10 @@
  * what releases a held tunnel at boot: the signed release, and `state/tunnel.json` forgotten once the
  * service answers. The answer waits for that release, so "off" means the tunnel is back in the pool.
  *
+ * A HELD WRITE IS AN ANSWER, NOT A FAILURE. Turning the tunnel on loosens how the machine is reached, so the document's
+ * edit waits for the owner ({@link TunnelChangeResult} `held`): the carrier is untouched and the view still says off. When
+ * the owner confirms it the document changes, and {@link adopt} brings the running carrier into step with it.
+ *
  * THE DOCUMENT IS WRITTEN FIRST. A switch that ran the carrier and then failed to record it would
  * be undone by the next boot without a word; written first, a failed write is an error the caller
  * sees and the running carrier is untouched.
@@ -41,13 +45,22 @@ export type TunnelCarrierFactory = (entry: DaemonTunnelCarrierEntry, explicit: b
 
 /** Where the switch writes its decision: exactly the one tunnel entry, in the operator's document. */
 export interface TunnelEntryStorePort {
-  write(entry: DaemonTunnelCarrierEntry): Promise<void>;
+  /** Resolves `held` when the edit waits for the owner; `undefined` (or `written`) when it is in the document. */
+  write(entry: DaemonTunnelCarrierEntry): Promise<TunnelEntryWrite | undefined>;
 }
+
+/** What the store did with an entry: wrote it, or kept it waiting for the owner's confirmation. */
+type TunnelEntryWrite = { readonly kind: 'written' } | { readonly kind: 'held'; readonly sentences: readonly string[] };
+
+/** What a switch asked for came to: it took effect, or it waits for the owner (the view is unchanged). */
+export type TunnelChangeResult =
+  | { readonly kind: 'applied'; readonly view: TunnelStatusView }
+  | { readonly kind: 'held'; readonly view: TunnelStatusView; readonly sentences: readonly string[] };
 
 /** What the `/v1/tunnel` routes ask. */
 interface TunnelSwitchPort {
   view(): TunnelStatusView;
-  change(enabled: boolean): Promise<TunnelStatusView>;
+  change(enabled: boolean): Promise<TunnelChangeResult>;
 }
 
 export interface TunnelCarrierSwitchDependencies {
@@ -93,22 +106,38 @@ export class TunnelCarrierSwitch implements TunnelSwitchPort {
    * with an off carrier and waits for that one's release, so asking again retries a release that found
    * no answer.
    */
-  async change(enabled: boolean): Promise<TunnelStatusView> {
+  async change(enabled: boolean): Promise<TunnelChangeResult> {
     return await this.#serially(async () => {
       const entry: DaemonTunnelCarrierEntry = { kind: 'tunnel', source: 'discovery', enabled };
-      await this.deps.store.write(entry);
-      const wasOn = this.#entry.enabled;
-      this.#entry = entry;
-      this.#explicit = true;
-      if (this.#create === undefined || this.#stopped) return this.view();
-      const running = this.#carrier?.status.state;
-      if (enabled && wasOn && running !== undefined && running !== 'unavailable') return this.view();
-      await this.#carrier?.stop();
-      this.#replace();
-      // An off carrier's whole work is the release; it is bounded by the provisioner's own timeout.
-      if (!enabled) await this.#carrier?.idle();
-      return this.view();
+      const written = await this.deps.store.write(entry);
+      if (written?.kind === 'held') return { kind: 'held', view: this.view(), sentences: written.sentences };
+      return { kind: 'applied', view: await this.#apply(enabled) };
     });
+  }
+
+  /**
+   * Brings the running carrier into step with what the document now says, when it was changed beside this switch: the
+   * owner confirming a held "on". Nothing is written, and a document that already agrees changes nothing.
+   */
+  async adopt(enabled: boolean): Promise<void> {
+    await this.#serially(async () => {
+      if (enabled === this.#entry.enabled) return;
+      await this.#apply(enabled);
+    });
+  }
+
+  async #apply(enabled: boolean): Promise<TunnelStatusView> {
+    const wasOn = this.#entry.enabled;
+    this.#entry = { kind: 'tunnel', source: 'discovery', enabled };
+    this.#explicit = true;
+    if (this.#create === undefined || this.#stopped) return this.view();
+    const running = this.#carrier?.status.state;
+    if (enabled && wasOn && running !== undefined && running !== 'unavailable') return this.view();
+    await this.#carrier?.stop();
+    this.#replace();
+    // An off carrier's whole work is the release; it is bounded by the provisioner's own timeout.
+    if (!enabled) await this.#carrier?.idle();
+    return this.view();
   }
 
   /** Stops the running carrier for good. The held tunnel is kept, exactly as a daemon shutdown keeps it. */

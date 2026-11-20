@@ -228,6 +228,22 @@ export interface TunnelSignInput {
 
 export const TUNNEL_PATH = '/v1/tunnel';
 export const TUNNEL_OFF_SENTENCE = 'Tunnel: off (opt-in) — turn on with fy tunnel on or Settings › Connection';
+/** The file a tunnel switch is written to, which is what an owner confirms. */
+export const TUNNEL_CONFIG_FILE = 'connections.yaml';
+/** The headline when turning the tunnel on waits for the owner: a held edit is a pending approval, not a failure. */
+export const TUNNEL_HELD_TITLE = 'Waiting for your OK';
+/** Said under {@link TUNNEL_HELD_TITLE}. */
+export const TUNNEL_HELD_DETAIL =
+  'Not an error. Turning the tunnel on changes how this machine can be reached, so nothing has changed yet.';
+/** How to approve it in the app. */
+export const TUNNEL_APPROVE_IN_APP =
+  'Approve in the app: Settings › Files, then Confirm under "Waiting for you". You’ll be asked for your passkey.';
+/** How to approve it at the machine: the command, and what it says before it. */
+export const TUNNEL_APPROVE_AT_MACHINE = 'Or at the machine, run:';
+export const TUNNEL_APPROVE_COMMAND = `fy config confirm ${TUNNEL_CONFIG_FILE}`;
+/** The whole held message as one text, for a terminal. */
+export const TUNNEL_HELD_WORDS = `${TUNNEL_HELD_TITLE}. ${TUNNEL_HELD_DETAIL}`;
+export const TUNNEL_APPROVE_WORDS = `${TUNNEL_APPROVE_IN_APP} ${TUNNEL_APPROVE_AT_MACHINE} ${TUNNEL_APPROVE_COMMAND}`;
 export const WEBRTC_SESSION_CHANNEL_LABEL = 'fy-session';
 export const WEBRTC_GATHER_REFLEXIVE_GRACE_MS = 250;
 

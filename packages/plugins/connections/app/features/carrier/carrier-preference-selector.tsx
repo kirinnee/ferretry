@@ -26,7 +26,14 @@ import {
   DEFAULT_SETTING_LABEL,
 } from '../../lib/carrier-preference.ts';
 import { cn } from '../../lib/class-names.ts';
-import type { TunnelStatusView } from '../../../contract/index.ts';
+import {
+  TUNNEL_APPROVE_AT_MACHINE,
+  TUNNEL_APPROVE_COMMAND,
+  TUNNEL_APPROVE_IN_APP,
+  TUNNEL_HELD_DETAIL,
+  TUNNEL_HELD_TITLE,
+  type TunnelStatusView,
+} from '../../../contract/index.ts';
 type TunnelSwitchState = { readonly kind: 'unknown' } | { readonly kind: 'known'; readonly view: TunnelStatusView };
 import { Button } from '../../shell/primitives.tsx';
 
@@ -60,8 +67,10 @@ interface TunnelSwitchOffer {
   readonly sentence: string;
   /** Whether the tunnel is switched off for this machine, which is the opt-in default. */
   readonly off: boolean;
-  /** Turns the tunnel on. Rejects with the daemon's own sentence when it refuses. */
-  readonly turnOn: () => Promise<void>;
+  /** Turns the tunnel on. Resolves `held` when it waits for the owner's approval; rejects with the daemon's own sentence when it refuses. */
+  readonly turnOn: () => Promise<'applied' | 'held'>;
+  /** Asks the machine again, once the owner has approved: resolves whether its tunnel is now on. */
+  readonly recheck: () => Promise<boolean>;
 }
 
 /**
@@ -70,14 +79,17 @@ interface TunnelSwitchOffer {
  */
 export const tunnelSwitchOffer = (
   state: TunnelSwitchState | undefined,
-  turnOn: () => Promise<unknown>,
+  turnOn: () => Promise<{ readonly kind: 'applied' | 'held' }>,
+  recheck: () => Promise<TunnelSwitchState | undefined>,
 ): TunnelSwitchOffer | undefined =>
   state?.kind === 'known'
     ? {
         sentence: state.view.sentence,
         off: !state.view.enabled,
-        turnOn: async () => {
-          await turnOn();
+        turnOn: async () => (await turnOn()).kind,
+        recheck: async () => {
+          const again = await recheck();
+          return again?.kind === 'known' && again.view.enabled;
         },
       }
     : undefined;
@@ -121,19 +133,71 @@ const noteFor = (preference: CarrierSetting, availability: CarrierPreferenceAvai
  */
 function TunnelOffer({ offer }: { readonly offer: TunnelSwitchOffer }) {
   const id = useId();
-  const [phase, setPhase] = useState<'asking' | 'working' | 'dismissed'>('asking');
+  const [phase, setPhase] = useState<'asking' | 'working' | 'held' | 'dismissed'>('asking');
+  const [stillWaiting, setStillWaiting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   if (phase === 'dismissed') return null;
   const turnOn = async (): Promise<void> => {
     setPhase('working');
     setError(undefined);
     try {
-      await offer.turnOn();
+      // A held switch is not a failure: the owner has to approve it, and the card says how.
+      setPhase((await offer.turnOn()) === 'held' ? 'held' : 'asking');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       setPhase('asking');
     }
   };
+  const check = async (): Promise<void> => {
+    setStillWaiting(false);
+    try {
+      // Once the tunnel is on the offer goes away by itself; otherwise the approval has not arrived yet.
+      if (!(await offer.recheck())) setStillWaiting(true);
+    } catch {
+      setStillWaiting(true);
+    }
+  };
+  if (phase === 'held')
+    return (
+      <section
+        aria-labelledby={`${id}-question`}
+        data-tunnel-offer="held"
+        className="flex min-w-0 flex-col gap-1 rounded-control border border-border bg-surface-2 px-control-x py-2 fy-cp__wide"
+      >
+        <p id={`${id}-question`} role="status" className="m-0 text-ui font-semibold text-fg" data-tunnel-held="">
+          {TUNNEL_HELD_TITLE}
+        </p>
+        <p className="m-0 text-meta leading-tight text-muted" data-tunnel-held-detail="">
+          {TUNNEL_HELD_DETAIL}
+        </p>
+        <p className="m-0 text-meta leading-tight text-fg" data-tunnel-approve-app="">
+          {TUNNEL_APPROVE_IN_APP}
+        </p>
+        <p className="m-0 text-meta leading-tight text-fg" data-tunnel-approve-machine="">
+          {TUNNEL_APPROVE_AT_MACHINE}
+          <code className="mt-1 block overflow-x-auto whitespace-nowrap font-mono">{TUNNEL_APPROVE_COMMAND}</code>
+        </p>
+        {stillWaiting ? (
+          <p className="m-0 text-meta leading-tight text-warn" data-tunnel-still-waiting="">
+            Still waiting: it has not been approved yet.
+          </p>
+        ) : null}
+        <div className="mt-1 flex flex-wrap gap-2">
+          <Button type="button" variant="primary" size="sm" className="min-h-[44px]" onClick={() => void check()}>
+            Check again
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="min-h-[44px]"
+            onClick={() => setPhase('dismissed')}
+          >
+            Dismiss
+          </Button>
+        </div>
+      </section>
+    );
   return (
     <section
       aria-labelledby={`${id}-question`}

@@ -65,16 +65,16 @@ guarantee(
   },
 );
 
-it('BG-012 m-3 a refusal with nothing to say keeps the plain sentence, and a held write says it waits for the owner', async () => {
+it('BG-012 m-3 a refusal with nothing to say keeps the plain sentence, and a held write is an answer, not a throw', async () => {
   await expect(writeTunnelSetting(over({ kind: 'conflict' }), def, true)).rejects.toThrow(
     'the tunnel setting could not be written to its document',
   );
   await expect(
     writeTunnelSetting(over({ kind: 'held', etag: 'e', id: 'i', sentences: ['x'] }), def, true),
-  ).rejects.toThrow('waits for the owner to confirm');
-  await expect(
-    writeTunnelSetting(over({ kind: 'written', etag: 'e', loosened: [] }), def, false),
-  ).resolves.toBeUndefined();
+  ).resolves.toEqual({ kind: 'held', sentences: ['x'] });
+  await expect(writeTunnelSetting(over({ kind: 'written', etag: 'e', loosened: [] }), def, false)).resolves.toEqual({
+    kind: 'written',
+  });
 });
 
 /**
