@@ -13,6 +13,7 @@ import { Ellipsis } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { type PopoverPlace, placePopover, useLayoutMode } from '../../shell.ts';
+import { SelectBox } from '@ferretry/app/ui';
 import { revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
 import { snoozePicks } from '../../lib/agenda-snooze.ts';
 import { BottomSheet } from '../../shell.ts';
@@ -44,6 +45,8 @@ export function AgendaItemMenu({ open, onOpenChange, label = 'Item options', chi
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (root.current?.contains(target) === true || panel.current?.contains(target) === true) return;
+      // The version picker's own list (a popover, or a dialog) is drawn on the page body too: a press in it is the menu's.
+      if (target instanceof Element && target.closest('[data-select-popover], .fy-dialog') !== null) return;
       onOpenChange(false);
     };
     document.addEventListener('pointerdown', onPointer);
@@ -114,6 +117,12 @@ export function AgendaItemMenu({ open, onOpenChange, label = 'Item options', chi
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (!open || sheet || event.key !== 'Escape') return;
+    // A key from the version picker's open list is the LIST's: it is drawn on the page body (outside this wrapper and the
+    // popover) but React still bubbles its events here through the portal. Ownership is by DOM, so that Esc is left to the
+    // select box, which closes just the list and puts the focus back on Version, with this menu still open.
+    const from = event.target;
+    if (!(from instanceof Node) || (root.current?.contains(from) !== true && panel.current?.contains(from) !== true))
+      return;
     // Esc closes the menu, not the item it sits on.
     event.preventDefault();
     event.stopPropagation();
@@ -236,19 +245,18 @@ export function VersionPicker({
   const when = (version: number): string =>
     version === count ? shortAgo(atOf(version), now) : revisionStamp(atOf(version), now);
   return (
-    <select
-      aria-label={asEdits ? 'Edit' : 'Version'}
-      className="fy-item-menu__version"
-      data-agenda-version-picker=""
-      onChange={event => onShow(Number(event.currentTarget.value))}
-      value={shown}
-    >
-      {Array.from({ length: count }, (_, at) => count - at).map(version => (
-        <option key={version} value={version}>
-          {`${asEdits ? 'Edit ' : 'v'}${String(version)} of ${String(count)}${when(version) === '' ? '' : ` · ${when(version)}`}`}
-        </option>
-      ))}
-    </select>
+    <span className="contents" data-agenda-version-picker="">
+      <SelectBox
+        className="fy-item-menu__version"
+        label={asEdits ? 'Edit' : 'Version'}
+        onChange={next => onShow(Number(next))}
+        options={Array.from({ length: count }, (_, at) => count - at).map(version => ({
+          value: String(version),
+          label: `${asEdits ? 'Edit ' : 'v'}${String(version)} of ${String(count)}${when(version) === '' ? '' : ` · ${when(version)}`}`,
+        }))}
+        value={String(shown)}
+      />
+    </span>
   );
 }
 

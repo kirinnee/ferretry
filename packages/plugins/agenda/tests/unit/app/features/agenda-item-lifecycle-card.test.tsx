@@ -4,6 +4,7 @@ import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view
 import { agendaProse } from '../../../../app/features/agenda/agenda-prose.tsx';
 import type { AgendaMergeView, AgendaVersionsView } from '../../../../app/features/agenda/use-item-lifecycle.ts';
 import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
+import { chooseStarting } from '../../../support/select-box.ts';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { settleUntil } from '@ferretry/app/testing';
 
@@ -105,14 +106,8 @@ describe('the item head’s version slot and lineage', () => {
       { revisions: [{ at, by: 'agent', changed: ['subject'], previous: { subject: 'Old' } }] } as never,
       { merge },
     );
-    const picker = must(
-      (await openMenu(root)).querySelector<HTMLSelectElement>('[data-agenda-version-picker]'),
-      'picker',
-    );
-    await interact(() => {
-      picker.value = '1';
-      picker.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const picker = must((await openMenu(root)).querySelector<HTMLElement>('[data-agenda-version-picker]'), 'picker');
+    await chooseStarting(picker, 'v1 ');
     expect((await openMenu(root)).querySelector('[data-agenda-merge-open]')).toBeNull();
   });
 });

@@ -5,6 +5,7 @@ import { daemonConnection } from '../../../../app/shell.ts';
 import { daemonSessionScope } from '../../../../app/shell.ts';
 import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
 import { callFromFetch } from '../../../support/app/call-from-fetch.ts';
+import { SelectBox } from '@ferretry/app/ui';
 import { ensureDom, render, run } from '@ferretry/app/testing';
 
 ensureDom();
@@ -83,8 +84,8 @@ test('picking an older version while the input card holds the view lets the hold
     // The owner's card says a follow-up offer is on screen: the view is held.
     run(() => view.root.findByType(AgendaInputCard).props.onHold(true));
     run(() => view.root.findByProps({ 'data-agenda-menu-toggle': '' }).props.onClick());
-    const picker = view.root.findByProps({ 'data-agenda-version-picker': '' });
-    run(() => picker.props.onChange({ currentTarget: { value: '1' } }));
+    const picker = view.root.findByType(SelectBox);
+    run(() => picker.props.onChange('1'));
     expect(view.root.findAllByProps({ 'data-agenda-old-version': '' }).length).toBeGreaterThan(0);
     // The older version keeps its own prompt: no card is drawn to say it, so the card and its hold are gone.
     expect(view.root.findAllByType(AgendaInputCard)).toHaveLength(0);

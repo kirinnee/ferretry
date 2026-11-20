@@ -5,6 +5,7 @@ import { AgendaItemView, type AgendaItemViewProps } from '../../../../app/featur
 import type { HistoryEvent } from '../../../../app/lib/agenda-history.ts';
 import type { InboxAction } from '../../../../app/lib/agenda-inbox.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
+import { chooseStarting } from '../../../support/select-box.ts';
 import { ensureDom, interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 // Alone, nothing has registered a DOM yet when `beforeEach` reads `window` ("window is not defined").
@@ -422,11 +423,8 @@ describe('what it needs from you', () => {
   test('draws no card ask on an earlier version, which only reads', async () => {
     await draw(full);
     await interact(() => one<HTMLButtonElement>('[data-agenda-menu-toggle]').click());
-    const picker = must(document.body.querySelector<HTMLSelectElement>('[data-agenda-version-picker]'), 'the picker');
-    await interact(() => {
-      picker.value = '1';
-      picker.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const picker = must(document.body.querySelector<HTMLElement>('[data-agenda-version-picker]'), 'the picker');
+    await chooseStarting(picker, 'v1 ');
     expect(root().querySelector('[data-agenda-card-ask]')).toBeNull();
   });
 });

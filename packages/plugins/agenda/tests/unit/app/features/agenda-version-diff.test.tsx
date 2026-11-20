@@ -3,6 +3,7 @@ import type { AgendaItem, AgendaVersionList } from '@ferretry/core-asks/contract
 import { VersionDiffPanel } from '../../../../app/features/agenda/agenda-version-diff.tsx';
 import type { AgendaVersionsView } from '../../../../app/features/agenda/use-item-lifecycle.ts';
 import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
+import { chooseStarting } from '../../../support/select-box.ts';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { settleUntil } from '@ferretry/app/testing';
 
@@ -126,22 +127,16 @@ describe('the comparison', () => {
 
   test('lets the owner pick any two versions, in whichever order', async () => {
     const root = await draw(viewOf(listOf(3, 2)));
-    const from = must(root.querySelector<HTMLSelectElement>('[data-agenda-diff-from]'), 'from');
-    await interact(() => {
-      from.value = '1';
-      from.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const from = must(root.querySelector<HTMLElement>('[data-agenda-diff-from]'), 'from');
+    await chooseStarting(from, 'v1 ');
     await settleUntil(
       () => root.querySelector('[data-agenda-diff-section="ask"]') !== null,
       'the wider diff',
       interact,
     );
     expect(root.querySelector('[data-agenda-diff-basis]')?.textContent).toBe('v1 to v3');
-    const to = must(root.querySelector<HTMLSelectElement>('[data-agenda-diff-to]'), 'to');
-    await interact(() => {
-      to.value = '1';
-      to.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const to = must(root.querySelector<HTMLElement>('[data-agenda-diff-to]'), 'to');
+    await chooseStarting(to, 'v1 ');
     await settleUntil(
       () => root.querySelector('[data-agenda-diff-summary]')?.textContent?.includes('Pick two different') === true,
       'the same-version note',
@@ -152,15 +147,9 @@ describe('the comparison', () => {
 
   test('returns to the default when the owner picks the default pair again', async () => {
     const root = await draw(viewOf(listOf(3, 2)));
-    const from = must(root.querySelector<HTMLSelectElement>('[data-agenda-diff-from]'), 'from');
-    await interact(() => {
-      from.value = '1';
-      from.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    await interact(() => {
-      from.value = '2';
-      from.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const from = must(root.querySelector<HTMLElement>('[data-agenda-diff-from]'), 'from');
+    await chooseStarting(from, 'v1 ');
+    await chooseStarting(from, 'v2 ');
     await settleUntil(
       () => root.querySelector('[data-agenda-diff-basis]')?.textContent?.includes('Since you last looked') === true,
       'the default again',
