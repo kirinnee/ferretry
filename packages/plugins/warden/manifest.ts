@@ -219,7 +219,7 @@ export default definePlugin({
       // Ferrets' own pages: the Warden's word about a ferret in its Info, and its row in the Actions ▾ menu.
       panel('ferret.side', { id: 'ferret-warden', order: 30 }),
       panel(ACTIONS_ROW_SLOT, { id: 'ask-warden-row', order: 90 }),
-      // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
+      // The first-run step's body (the setup flow offers this slot): one simple page, not the Settings tab.
       panel('onboarding.step', { id: 'onboarding-step', order: 60 }),
     ],
     settings: [settingsTab('warden', { icon: 'shield', group: 'supervision', label: 'Warden', order: 60 })],
@@ -242,7 +242,17 @@ export default definePlugin({
     offers: [{ hook: WardenDialogRulesClaude }, { hook: WardenDialogRulesCodex }],
   },
 
-  onboarding: [{ id: 'warden', title: 'Warden', order: 60 }],
+  // One daemon-side page; its group is the plugin title. The id stays `warden` so an answer recorded before r10 still counts.
+  onboarding: [
+    {
+      id: 'warden',
+      title: 'Let the Warden watch your ferrets?',
+      order: 60,
+      side: 'daemon',
+      group: 'Warden',
+      stepHost: true,
+    },
+  ],
   doctor: ['warden-sweep'],
   // It reads reports and the Jev guard model over the network; it starts wardens (ferrets) through Ferrets, not a process.
   permissions: { roots: [], network: ['api.typesafe.ai'], spawn: [], secrets: ['JEV_API_KEY'] },

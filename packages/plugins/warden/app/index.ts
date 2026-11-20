@@ -5,7 +5,7 @@ import manifest from '../manifest.ts';
 import { wardenCommands } from './command-bar.ts';
 import { lazyComponent } from './lazy.ts';
 
-type ViewName = 'warden-screen' | 'warden-settings' | 'warden-dashboard' | 'warden-ferret';
+type ViewName = 'warden-screen' | 'warden-settings' | 'warden-dashboard' | 'warden-ferret' | 'warden-onboarding';
 
 /**
  * A view module (React), loaded on first use. The specifier is a Vite dynamic-import variable (`./views/*.tsx`), which
@@ -35,10 +35,10 @@ export default provideToShell(
         'warden-verdicts': viewOf<PanelProps>('warden-dashboard', 'createWardenVerdictsPanel', client),
         'ferret-warden': viewOf<PanelProps>('warden-ferret', 'createWardenFerretPanel', client),
         'ask-warden-row': viewOf<PanelProps>('warden-ferret', 'createAskWardenPanel', client),
-        // The first-run step's body: the Settings tab's view, only for its own step.
+        // The first-run step's body: one simple page (rules / + Jev / + LLM), only for its own step.
         'onboarding-step': forSubject(
           'warden.warden',
-          viewOf<SettingsProps>('warden-settings', 'createWardenSettings', client) as AppComponent<PanelProps>,
+          viewOf<PanelProps>('warden-onboarding', 'createWardenOnboarding', client),
         ),
       },
       settings: { warden: viewOf<SettingsProps>('warden-settings', 'createWardenSettings', client) },
