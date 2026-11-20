@@ -67,6 +67,7 @@ import { useMachineVoiceEngine } from '../fleet/setup/voice-default.ts';
 import {
   ChoiceCards,
   type DaemonConnection,
+  SelectBox,
   SettingGroup,
   SettingRow,
   SettingSwitch,
@@ -374,23 +375,18 @@ export function DictationSettings({
                       )}
                     </div>
                   }
-                  control={labelId => (
-                    <select
+                  control={() => (
+                    <SelectBox
+                      className="fy-vs-wide min-h-[44px]"
                       id="stt-enhancement-provider"
-                      aria-labelledby={labelId}
-                      className="kt-input fy-vs-wide min-h-[44px]"
+                      label="Correction provider"
+                      onChange={chooseProvider}
+                      options={[
+                        ...ENHANCEMENT_PROVIDERS.map(entry => ({ value: entry.id, label: entry.label })),
+                        { value: 'login', label: LOGIN_CLEANUP_UNAVAILABLE, disabled: true },
+                      ]}
                       value={staged?.enhancementProvider ?? settings.enhancementProvider}
-                      onChange={event => chooseProvider(event.target.value)}
-                    >
-                      {ENHANCEMENT_PROVIDERS.map(entry => (
-                        <option key={entry.id} value={entry.id}>
-                          {entry.label}
-                        </option>
-                      ))}
-                      <option value="login" disabled>
-                        {LOGIN_CLEANUP_UNAVAILABLE}
-                      </option>
-                    </select>
+                    />
                   )}
                 />
                 {staged !== null && (

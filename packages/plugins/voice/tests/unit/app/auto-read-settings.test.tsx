@@ -63,6 +63,18 @@ const change = async (element: HTMLElement, value: string): Promise<void> => {
   });
 };
 
+/** A select box is a combobox button; its list is drawn in the document body. Opens it and presses the option with these words. */
+const pick = async (box: HTMLElement, label: string): Promise<void> => {
+  await interact(() => box.click());
+  const option = must(
+    [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+      candidate => candidate.querySelector('[data-label]')?.textContent === label,
+    ) ?? null,
+    `the option "${label}"`,
+  );
+  await interact(() => option.click());
+};
+
 const NEEDS_UPDATE =
   'Auto-read needs a newer Ferretry on your computer. Until you update the Ferretry app on your computer, nothing is read on its own, but Read aloud on a message still works.';
 
@@ -229,18 +241,21 @@ describe('<AutoReadSettings>', () => {
   test('longest reading: 30 seconds up to no limit', async () => {
     const r = rig();
     const root = await show(r);
-    const select = byId<HTMLSelectElement>(root, 'auto-read-length');
-    expect([...select.options].map(option => option.textContent)).toEqual([
-      '30 seconds',
-      '1 minute',
-      '2 minutes',
-      '5 minutes',
-      'No limit',
-    ]);
-    expect(select.value).toBe('60');
-    await change(select, 'none');
+    const select = byId<HTMLElement>(root, 'auto-read-length');
+    expect(root.querySelector('select')).toBeNull();
+    expect(select.getAttribute('role')).toBe('combobox');
+    await interact(() => select.click());
+    expect(
+      [...document.querySelectorAll<HTMLElement>('[role="option"]')].map(
+        option => option.querySelector('[data-label]')?.textContent,
+      ),
+    ).toEqual(['30 seconds', '1 minute', '2 minutes', '5 minutes', 'No limit']);
+    await interact(() => select.click());
+    expect(select.textContent).toBe('1 minute');
+    await pick(select, 'No limit');
     expect(r.store.get().maxSeconds).toBeNull();
-    await change(select, '30');
+    await pick(select, '30 seconds');
+    expect(r.store.get().maxSeconds).toBe(30);
     expect(r.store.get().maxSeconds).toBe(30);
   });
 

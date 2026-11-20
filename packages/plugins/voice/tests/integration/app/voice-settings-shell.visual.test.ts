@@ -432,4 +432,113 @@ describe('Voice settings in the real Settings shell', () => {
           await close();
         }
       });
+
+  // r11 S3a: Voice's lists are the app's SelectBox, not the browser's select.
+  for (const viewport of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const) {
+      it(`${viewport.name} ${scheme}: "Longest reading" is a SelectBox (no native select; ${viewport.phone ? 'a centred dialog' : viewport.name === '768' ? 'a centred dialog (the panel is a narrow container)' : 'a listbox under it'}); picking saves and survives a reload`, async () => {
+        const { page, problems, close } = await open(viewport, scheme, 'voice');
+        try {
+          expect(await page.locator('.fy-settings-page select').count(), 'no native select on the tab').toBe(0);
+          const box = page.locator('#auto-read-length');
+          await box.scrollIntoViewIfNeeded();
+          expect(await box.getAttribute('role')).toBe('combobox');
+          const before = (await box.innerText()).trim();
+          expect(before).not.toBe('No limit');
+          await box.click();
+          await page.waitForTimeout(600);
+          const open = await page.evaluate(() => {
+            const panel = document.querySelector('[role="dialog"], [data-select-popover]') as HTMLElement | null;
+            const at = panel?.getBoundingClientRect();
+            const button = document.querySelector('#auto-read-length')?.getBoundingClientRect();
+            return at === undefined || button === undefined || panel === null
+              ? null
+              : {
+                  dialog: panel.getAttribute('role') === 'dialog',
+                  gap: at.top - button.bottom,
+                  above: button.top - at.bottom,
+                  dx: Math.abs(at.left + at.width / 2 - innerWidth / 2),
+                  dy: Math.abs(at.top + at.height / 2 - innerHeight / 2),
+                  options: panel.querySelectorAll('[role="option"]').length,
+                };
+          });
+          expect(open?.options, 'the five lengths').toBe(5);
+          // A phone, or a panel narrower than 600px (the stacked 768 layout): the centred dialog. Wide: the listbox.
+          const asDialog = viewport.phone || viewport.name === '768';
+          expect(open?.dialog).toBe(asDialog);
+          if (asDialog) {
+            expect(open?.dx, 'the dialog is centred across').toBeLessThanOrEqual(8);
+            expect(open?.dy, 'the dialog is centred down').toBeLessThanOrEqual(8);
+          } else {
+            // Under the button, or above it when the window's foot is too near.
+            const near = Math.min(Math.abs(open?.gap ?? 999), Math.abs(open?.above ?? 999));
+            expect(near, 'the list opens right at the button').toBeLessThanOrEqual(12);
+          }
+          if (shotsDir !== '')
+            await page.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-longest-reading-open.png`) });
+          await page.locator('[role="option"]', { hasText: 'No limit' }).click();
+          expect((await box.innerText()).trim()).toBe('No limit');
+          // The PERSISTED choice, not the label: the device store holds "no limit" as a null length.
+          const saved = await page.evaluate(() => {
+            for (let i = 0; i < localStorage.length; i++) {
+              const key = localStorage.key(i) as string;
+              if (/voice/i.test(key) && /maxSeconds/.test(localStorage.getItem(key) ?? ''))
+                return JSON.parse(localStorage.getItem(key) as string) as { maxSeconds: number | null };
+            }
+            return null;
+          });
+          expect(saved?.maxSeconds, 'the device store saved "no limit" as a null length').toBeNull();
+          await page.reload();
+          await page.waitForSelector('#auto-read-length');
+          expect((await page.locator('#auto-read-length').innerText()).trim(), 'the pick was saved').toBe('No limit');
+          expect(problems).toEqual([]);
+        } finally {
+          await close();
+        }
+      });
+    }
+
+  // r11 S3a: the correction provider is the app's SelectBox too; its choice is a write the page saves.
+  for (const viewport of VIEWPORTS.filter(each => each.name !== '768'))
+    for (const scheme of ['light', 'dark'] as const) {
+      it(`${viewport.name} ${scheme}: "Correction provider" is a SelectBox; picking on-device saves it, picking a hosted one stages it until Apply`, async () => {
+        const { page, problems, close } = await open(viewport, scheme, 'voice');
+        try {
+          const box = page.locator('#stt-enhancement-provider');
+          await box.scrollIntoViewIfNeeded();
+          expect(await box.getAttribute('role')).toBe('combobox');
+          expect((await box.innerText()).trim()).toBe('On-device word correction');
+          const writes = async (): Promise<unknown[]> =>
+            await page.evaluate(() => (window as unknown as { __voiceWrites: unknown[] }).__voiceWrites);
+          const before = (await writes()).length;
+          await box.click();
+          await page.waitForTimeout(600);
+          expect(
+            await page.locator('[role="dialog"] [role="option"], [data-select-popover] [role="option"]').count(),
+          ).toBe(4);
+          // A hosted provider is staged: choosing it saves nothing until Apply.
+          await page.locator('[role="option"]', { hasText: 'Groq clean-up' }).click();
+          await page.locator('[data-provider-staged]').waitFor();
+          expect((await writes()).length, 'a hosted choice saves nothing before Apply').toBe(before);
+          await page.locator('[data-provider-staged] button:text-is("Apply")').click();
+          expect((await box.innerText()).trim()).toBe('Groq clean-up');
+          const applied = (await writes()).slice(before);
+          expect(applied.length, 'Apply saves once').toBe(1);
+          expect((applied[0] as { enhancementProvider?: string }).enhancementProvider, 'the saved provider').toBe(
+            'groq',
+          );
+          // And back to on-device saves straight away.
+          await box.click();
+          await page.waitForTimeout(600);
+          await page.locator('[role="option"]', { hasText: 'On-device word correction' }).click();
+          const back = (await writes()).slice(before + 1);
+          expect(back.length, 'on-device saves once, with no Apply').toBe(1);
+          expect((back[0] as { enhancementProvider?: string }).enhancementProvider, 'the saved provider').toBe('local');
+          expect((await box.innerText()).trim()).toBe('On-device word correction');
+          expect(problems).toEqual([]);
+        } finally {
+          await close();
+        }
+      });
+    }
 });

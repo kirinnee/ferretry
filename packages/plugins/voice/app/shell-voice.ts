@@ -37,6 +37,7 @@ export {
   isSpeechWorkerScriptUrl,
   isWorkerScriptUrl,
   SecretInput,
+  SelectBox,
   Textarea,
   trustedWorkerUrl,
   useDocumentVisible,

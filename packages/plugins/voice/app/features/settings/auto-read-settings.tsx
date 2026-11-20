@@ -29,7 +29,7 @@ import {
 import type { SpeakerVoice } from '../../lib/voice-chat/ports.ts';
 import type { ReadAloudController } from '../../lib/voice-chat/read-aloud.ts';
 import { voiceNote } from '../../lib/voice-chat/voice-choice.ts';
-import { Button, ChoiceCards, SettingGroup, SettingRow, SettingSwitch } from '../../shell-voice.ts';
+import { Button, ChoiceCards, SelectBox, SettingGroup, SettingRow, SettingSwitch } from '../../shell-voice.ts';
 import './voice-settings.css';
 import { VoicePicker } from './voice-picker.tsx';
 
@@ -250,22 +250,18 @@ function Supported({
           hint="A longer reply stops at this length"
           wide
           explanation="A longer reply stops at this length and says “There’s more on screen.” Faster speech fits more words in the same time."
-          control={labelId => (
-            <select
-              aria-labelledby={labelId}
+          control={() => (
+            <SelectBox
+              className="fy-ar-target fy-vs-wide"
               id="auto-read-length"
-              className="kt-input fy-ar-target fy-vs-wide"
+              label="Longest reading"
+              onChange={chosen => update({ maxSeconds: chosen === 'none' ? null : Number(chosen) })}
+              options={READING_LENGTH_OPTIONS.map(option => ({
+                value: option.seconds === null ? 'none' : String(option.seconds),
+                label: option.label,
+              }))}
               value={settings.maxSeconds === null ? 'none' : String(settings.maxSeconds)}
-              onChange={event =>
-                update({ maxSeconds: event.target.value === 'none' ? null : Number(event.target.value) })
-              }
-            >
-              {READING_LENGTH_OPTIONS.map(option => (
-                <option key={String(option.seconds)} value={option.seconds === null ? 'none' : String(option.seconds)}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            />
           )}
         />
 
