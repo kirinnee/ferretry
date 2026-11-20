@@ -1,11 +1,15 @@
-import { Loading } from '@ferretry/app/ui';
+import { Loading, type ReadPress, readPress } from '@ferretry/app/ui';
 import type { TranscriptHistoryStatus } from './transcript-history.ts';
 
 /** What the top of the transcript offers, and the one way to ask for more of it. */
 export interface TranscriptHistoryControl {
   readonly status: TranscriptHistoryStatus;
-  /** Load the page just older than the oldest message on screen. A call while one loads is that load. */
-  readonly loadOlder: () => void;
+  /**
+   * Load the page just older than the oldest message on screen. A call while one loads is that load. The row's button
+   * passes `readPress(true)`: a person's own press, so a passkey prompt can open even after a Cancel. The reader's
+   * scrolling near the top passes nothing.
+   */
+  readonly loadOlder: (press?: ReadPress) => void;
 }
 
 /**
@@ -37,7 +41,7 @@ export function TranscriptHistoryRow({ control }: { readonly control: Transcript
       ) : status === 'start' ? (
         <span className="fy-transcript-history__note">Beginning of the conversation</span>
       ) : (
-        <button className="fy-transcript-history__button" onClick={loadOlder} type="button">
+        <button className="fy-transcript-history__button" onClick={() => loadOlder(readPress(true))} type="button">
           {status === 'error' ? 'Couldn’t load older messages — try again' : 'Load older messages'}
         </button>
       )}

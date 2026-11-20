@@ -8,6 +8,9 @@
  * `window.__holdOlder()` holds the next older page until `window.__releaseOlder()`, so the loading state
  * can be seen; `window.__appendMessages(n)` lands `n` new records at the tail while older ones are held.
  *
+ * `window.__failOlder()` makes the next older page fail; `window.__olderPresses` lists, for every older page read, whether
+ * it was a person's press (`false`, a button) or the page's own read (`null`, the reader scrolling near the top).
+ *
  * `?search=1` puts the chat's search bar over it, searching the same conversation the way `log-search`
  * does: every record, oldest first, by the byte its record begins at.
  *
@@ -15,6 +18,7 @@
  */
 
 import { FerretIdSchema, type FerretView } from '@ferretry/core-ferrets/contract';
+import type { ReadPress } from '@ferretry/app/ui';
 import type { LogPageOptions, LogPage, LogSearch } from '../../../../contract/index.ts';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChatSearch, type ChatSearchPort } from '../../../../app/search/chat-search.tsx';
@@ -33,6 +37,8 @@ declare global {
     __holdOlder: () => void;
     __releaseOlder: () => void;
     __appendMessages: (count: number) => void;
+    __failOlder: () => void;
+    __olderPresses: (false | null)[];
     __historyStatus: TranscriptHistoryStatus;
     __pagesRead: number;
   }
@@ -70,11 +76,21 @@ window.__holdOlder = () => {
 };
 window.__releaseOlder = () => release();
 window.__pagesRead = 0;
+window.__olderPresses = [];
+let failNext = false;
+window.__failOlder = () => {
+  failNext = true;
+};
 
-const logPage = async (_id: string, options: LogPageOptions = {}): Promise<LogPage> => {
+const logPage = async (_id: string, options: LogPageOptions = {}, press: ReadPress = {}): Promise<LogPage> => {
   if (options.before !== undefined) {
     window.__pagesRead += 1;
+    if (options.from === undefined) window.__olderPresses.push(press.quiet === false ? false : null);
     await new Promise(resolve => setTimeout(resolve, DELAY_MS));
+    if (failNext && options.from === undefined) {
+      failNext = false;
+      throw new Error('the machine did not answer');
+    }
     if (options.from === undefined && hold !== undefined) {
       const held = hold;
       hold = undefined;
@@ -159,7 +175,7 @@ function Scene() {
     [control],
   );
   const history = useMemo<TranscriptHistoryControl>(
-    () => ({ status, loadOlder: () => void control?.loadOlder() }),
+    () => ({ status, loadOlder: press => void control?.loadOlder(press) }),
     [control, status],
   );
   return (

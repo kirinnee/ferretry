@@ -157,7 +157,7 @@ function ChatRoute({ ask, client, daemonId, embedded, ferretId }: ChatRouteProps
   /** Whether the last question read FAILED: the summary's status cannot say it changed, so a refresh retries it. */
   const questionFailed = useRef(false);
   const history = useMemo<TranscriptHistoryControl>(
-    () => ({ status: historyStatus, loadOlder: () => void refreshControl.current?.loadOlder() }),
+    () => ({ status: historyStatus, loadOlder: press => void refreshControl.current?.loadOlder(press) }),
     [historyStatus],
   );
 
