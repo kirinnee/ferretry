@@ -167,7 +167,7 @@ export default definePlugin({
 
   // "Without nix on the machine, Shells says so in onboarding and ferrets use the machine's tools" (§4.9): one daemon
   // page that skips itself when nix is found.
-  onboarding: [{ id: 'nix', title: 'Shells', order: 80, side: 'daemon', group: 'Shells' }],
+  onboarding: [{ id: 'nix', title: 'Shells', order: 80, side: 'daemon', group: 'Shells', stepHost: true }],
   doctor: ['shells-nix'],
 
   // nix fetches flake inputs itself, so no host is reachable through `kernel.fetch`; the build runs under `nix`.
