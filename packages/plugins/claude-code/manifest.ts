@@ -262,17 +262,17 @@ export default definePlugin({
   // The Claude segment (side: daemon, group: Claude Code: both are the defaults). The import steps 23-29 have their pages
   // in O7b; the retired `harness` step is replaced by `installed`.
   onboarding: [
-    { id: 'installed', title: 'Install Claude Code', order: 20 },
-    { id: 'sign-in', title: 'Sign in to Claude', order: 21 },
-    { id: 'import-choice', title: 'What to bring over', order: 22 },
-    { id: 'import-settings', title: 'Settings', order: 23 },
-    { id: 'import-model-set', title: 'Models', order: 24 },
-    { id: 'import-instructions', title: 'CLAUDE.md', order: 25 },
-    { id: 'import-skills', title: 'Skills', order: 26 },
-    { id: 'import-mcp', title: 'MCP servers', order: 27 },
-    { id: 'conversations', title: 'Conversations', order: 28 },
-    { id: 'import-run', title: 'Bring it over', order: 29 },
-    { id: 'permission', title: 'Permissions', order: 30 },
+    { id: 'installed', title: 'Install Claude Code', order: 20, stepHost: true },
+    { id: 'sign-in', title: 'Sign in to Claude', order: 21, stepHost: true },
+    { id: 'import-choice', title: 'What to bring over', order: 22, stepHost: true },
+    { id: 'import-settings', title: 'Settings', order: 23, stepHost: true },
+    { id: 'import-model-set', title: 'Models', order: 24, stepHost: true },
+    { id: 'import-instructions', title: 'CLAUDE.md', order: 25, stepHost: true },
+    { id: 'import-skills', title: 'Skills', order: 26, stepHost: true },
+    { id: 'import-mcp', title: 'MCP servers', order: 27, stepHost: true },
+    { id: 'conversations', title: 'Conversations', order: 28, stepHost: true },
+    { id: 'import-run', title: 'Bring it over', order: 29, stepHost: true },
+    { id: 'permission', title: 'Permissions', order: 30, stepHost: true },
   ],
   doctor: ['claude-code-paths'],
 

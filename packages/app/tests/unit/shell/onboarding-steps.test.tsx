@@ -20,7 +20,7 @@ import { CORE, FakeTransport, inventoryOf, json } from '../client/fixtures.ts';
  * screen offers the `onboarding.step` slot, and every plugin that declared a step reaches it with a panel.
  */
 
-const ids = ['onboarding', 'claude-code', 'codex', 'logins', 'runtimes', 'shells'] as const;
+const ids = ['onboarding', 'claude-code', 'codex', 'runtimes', 'shells'] as const;
 const real = ids.map(id => generated.surfaces.find(entry => entry.id === id) as SurfaceEntry);
 const surfaces: SurfaceEntry[] = [...CORE, ...real];
 
@@ -179,7 +179,7 @@ describe('S14 the steps come from the plugins', () => {
     const shown = view.container.querySelector('[data-flow-page]')?.getAttribute('data-flow-page');
     expect(declaredSteps.map(step => `${step.plugin}.${step.id}`)).toContain(shown ?? '');
     expect([...new Set(declaredSteps.map(step => step.plugin))].toSorted()).toEqual(
-      ['claude-code', 'codex', 'logins', 'onboarding', 'runtimes', 'shells'].toSorted(),
+      ['claude-code', 'codex', 'onboarding', 'runtimes', 'shells'].toSorted(),
     );
     await view.unmount();
   });
