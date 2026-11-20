@@ -12,6 +12,8 @@
  *
  * On a NEW selection the card plays a 160ms scale 0.98 -> 1 (`data-pulse`). The value it was given on mount never
  * plays it, and with motion off (the OS query or Settings › Motion = reduced) `data-pulse` is never set.
+ * `layout="stack"` is the onboarding page's list: one vertical column filling its parent, each card an icon, a title and
+ * ONE line (clamped to 2), 64-80px tall, the same select animation. The default `"row"` is unchanged.
  * `option.demo` is an optional mini-scene drawn above the text (a `SettingPreview`, a lottie); it is decorative.
  */
 
@@ -40,6 +42,8 @@ export interface ChoiceCardsProps {
   readonly onChange: (next: string) => void;
   /** Cards share the row and stay at most 320px wide; `auto` is the only layout today. */
   readonly columns?: 'auto';
+  /** `row` (default): cards share rows. `stack`: one vertical list of compact cards filling the parent's width. */
+  readonly layout?: 'row' | 'stack';
   readonly disabled?: boolean;
 }
 
@@ -95,7 +99,7 @@ export function onRadioGroupKeyDown(event: KeyboardEvent<HTMLElement>): void {
   revealChoice(radios[next]);
 }
 
-export function ChoiceCards({ label, options, value, onChange, disabled = false }: ChoiceCardsProps) {
+export function ChoiceCards({ label, options, value, onChange, disabled = false, layout = 'row' }: ChoiceCardsProps) {
   const group = useId();
   const motion = useMotionAllowed();
   const [pulse, setPulse] = useState<string | null>(null);
@@ -109,7 +113,7 @@ export function ChoiceCards({ label, options, value, onChange, disabled = false 
     ? value
     : (options.find(option => option.disabled !== true)?.id ?? null);
   return (
-    <div className="fy-cc" data-choice-cards="">
+    <div className="fy-cc" data-choice-cards="" data-layout={layout}>
       <div
         role="radiogroup"
         aria-label={label}

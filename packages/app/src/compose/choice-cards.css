@@ -113,6 +113,44 @@
   display: inline-flex;
 }
 
+/* ---- layout="stack": one vertical list, compact cards (r11 O2) ---- */
+.fy-cc[data-layout='stack'] .fy-cc__grid {
+  grid-template-columns: 1fr;
+  max-width: none;
+}
+.fy-cc[data-layout='stack'] .fy-cc__card {
+  align-items: center;
+  column-gap: 12px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: 'icon title' 'icon line';
+  max-width: none;
+  min-height: 64px;
+  padding-block: 10px;
+  row-gap: 2px;
+}
+.fy-cc[data-layout='stack'] .fy-cc__card:not(:has(.fy-cc__icon)) {
+  grid-template-areas: 'title' 'line';
+  grid-template-columns: minmax(0, 1fr);
+}
+.fy-cc[data-layout='stack'] .fy-cc__icon {
+  grid-area: icon;
+}
+.fy-cc[data-layout='stack'] .fy-cc__title {
+  grid-area: title;
+}
+.fy-cc[data-layout='stack'] .fy-cc__line {
+  -webkit-box-orient: vertical;
+  display: -webkit-box;
+  grid-area: line;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.fy-cc[data-layout='stack'] .fy-cc__demo {
+  display: none;
+}
+
 @keyframes fy-cc-pop {
   from {
     transform: scale(0.98);

@@ -318,7 +318,7 @@ describe('ChoiceCards motion in the real CSS', () => {
 
 describe('StepPageFrame in a real browser', () => {
   for (const variant of VARIANTS) {
-    it(`${variant.name}: footer buttons are auto width, >= 44px tall, ${variant.phone ? 'sticky and in view' : 'right aligned'}`, async () => {
+    it(`${variant.name}: footer buttons are fixed width, >= 44px tall, ${variant.phone ? 'sticky and in view' : 'right aligned'}`, async () => {
       const { tab, problems, close } = await open(variant, variant.phone ? '&scene=frame&tall=1' : '&scene=frame');
       try {
         const info = await tab.evaluate(() => {
@@ -374,7 +374,7 @@ describe('StepPageFrame in a real browser', () => {
         expect(info.paddingTop).toBeLessThanOrEqual(16);
         expect(info.paddingBottom).toBeGreaterThanOrEqual(12);
         expect(info.paddingBottom).toBeLessThanOrEqual(16);
-        // Auto width: a small share of the page, never a stretched bar.
+        // Fixed width (r11 O2 asserts the exact 136px): a small share of the page, never a stretched bar.
         expect(info.next.width).toBeLessThan(info.viewportWidth * 0.5);
         expect(info.back.width).toBeLessThan(info.viewportWidth * 0.5);
         expect(info.overflowX).toBe(false);
