@@ -77,6 +77,11 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
     label: 'HUD',
     blurb: 'A sci-fi heads-up display: corner brackets, thin lit rules, a soft signal glow, scan-lines.',
   },
+  {
+    id: 'raw',
+    label: 'Raw Brutalism',
+    blurb: 'The unstyled web on purpose: system serif and mono, square boxes, hard rules, no shadows.',
+  },
 ] as const);
 
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([

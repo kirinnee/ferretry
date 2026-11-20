@@ -6,7 +6,7 @@
        <html data-style="studio" data-palette="geist" data-mode="dark">
 
    style   ∈ studio | mission | neo | contrast | geist | glass
-           | neumorphism | retro | lucid | hud  HOW things are drawn: type, weights, tracking, radii,
+           | neumorphism | retro | lucid | hud | raw  HOW things are drawn: type, weights, tracking, radii,
                                                             stroke widths, shadow GEOMETRY, spacing, control heights,
                                                             focus width/offset, texture, motion. NO colour value.
    palette ∈ studio | mission | neo | contrast | geist      WHICH colours: the seed colours, the status/syntax/tool
@@ -53,6 +53,7 @@
 @import './style/retro.css';
 @import './style/lucid.css';
 @import './style/hud.css';
+@import './style/raw.css';
 
 @import './palette/studio.css';
 @import './palette/mission.css';

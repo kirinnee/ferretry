@@ -99,6 +99,7 @@ export const STYLE_IDS = [
   'retro',
   'lucid',
   'hud',
+  'raw',
 ] as const;
 export type StyleId = (typeof STYLE_IDS)[number];
 export const PALETTE_IDS = [

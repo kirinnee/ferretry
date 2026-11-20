@@ -1,0 +1,277 @@
+/* ============================================================================
+   RAW BRUTALISM (r10 T11). The look of the unstyled web, kept on purpose: the device's own serif for reading and its own
+   monospace for everything that labels, square corners, hard 2px ink rules on every edge, NO shadow of any kind, links
+   underlined at rest, and no easing at all, so a change simply happens. Colour comes from the palette's roles alone,
+   so every palette takes it.
+
+   It is deliberately NOT Neo-Brutalism. Neo is a polished poster: a webfont display face, a flat OFFSET shadow every block
+   casts and presses into, a yellow "selected" block, a hard pop on choice. Raw has no webfont (nothing to load, no
+   licence), no offset and no shadow (a thing is outlined, never lifted), no pop and no press travel (a pressed control
+   INVERTS: ink on paper becomes paper on ink), and a serif body. Where Neo says "block", Raw says "box with a border".
+
+   Nothing here fights readability: ink on paper at the palette's own contrast, a 3px focus ring that stays hard, and type
+   a size up from the house default because a system serif reads small. So it is not `loud`.
+   ============================================================================ */
+:root[data-style='raw'],
+[data-swatch][data-style='raw'] {
+  /* ═══ structural token layer ═══ */
+  --ghost-bg: transparent;
+  --ghost-edge: var(--border-strong);
+  --ghost-shadow: none;
+  /* No flourish: a choice is shown by its state, never by moving, and nothing eases. */
+  --select-pop: 1;
+  --press-translate: 0px;
+  --motion-fast: 0ms;
+  --motion-base: 0ms;
+  --motion-slow: 0ms;
+  --ease-standard: linear;
+  --ease-emphasis: linear;
+  --hover-fill: color-mix(in srgb, var(--fg) 9%, transparent);
+  --select-fill: color-mix(in srgb, var(--fg) 16%, transparent);
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13.5px;
+  --text-base: 14.5px;
+  --text-md: 15.5px;
+  --text-lg: 17px;
+  --text-display: 1.3rem;
+  --text-input-desktop: 15px;
+  --weight-normal: 400;
+  --weight-medium: 700;
+  --weight-strong: 700;
+  --weight-display: 700;
+  --label-size: 11px;
+  --label-weight: 700;
+  --tracking-label: 0.02em;
+  --prose-measure: 78ch;
+  --radius-control: 0px;
+  --radius-panel: 0px;
+  --radius-badge: 0px;
+  --radius-tab: 0px;
+  --radius-input: 0px;
+  --radius-pill: 0px;
+  --bubble-stroke: 2px;
+  --bubble-radius: 0px;
+  --bubble-shadow: none;
+  --stroke-control: 2px;
+  --stroke-panel: 2px;
+  --divider-width: 2px;
+  --divider-color: var(--border-strong);
+  --card-border: var(--border-strong);
+  /* No shadow anywhere: a menu, a card and a button are told apart from the page by their rule alone. */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-control: none;
+  --shadow-panel: none;
+  --shadow-popover: none;
+  --shadow-active: none;
+  --rail-active: none;
+  --control-h-desktop: 32px;
+  --control-h-sm-desktop: 28px;
+  --row-min-h-desktop: 40px;
+  --pad-control-x: 12px;
+  --pad-panel: 12px;
+  --pad-row-y: 8px;
+  --pad-cell-x: 10px;
+  --gap-xs: 6px;
+  --gap-sm: 8px;
+  --gap-md: 12px;
+  /* A hard ring that sits right against the rule it marks. */
+  --focus-width: 3px;
+  --focus-offset: 2px;
+  --focus-shadow: none;
+  --underline-links: underline;
+  /* The device's own faces, on purpose: a serif to read and a monospace to label. Nothing is downloaded. */
+  --font-display: 'Courier New', Courier, 'Liberation Mono', 'Nimbus Mono PS', ui-monospace, monospace;
+  --font-body: 'Times New Roman', Times, 'Liberation Serif', 'Nimbus Roman', 'Noto Serif', serif;
+  --font-mono: 'Courier New', Courier, 'Liberation Mono', 'Nimbus Mono PS', ui-monospace, monospace;
+  --font-size-base: 14.5px;
+  --leading-base: 1.5;
+  --tracking-display: 0;
+  --md-font-size: 15.5px;
+  --md-leading: 1.6;
+  --code-font-size: 13.5px;
+  --chrome-font-size: 12px;
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --border-width: 2px;
+  --border-width-heavy: 3px;
+  --control-transform: none;
+  --tab-sel-fg: var(--fg);
+  --tab-underline: var(--fg);
+  --tab-underline-width: 3px;
+  --appnav-underline: var(--fg);
+  --bubble-fg: var(--fg);
+  --bubble-border: var(--border-strong);
+}
+
+@media (max-width: 640px) {
+  :root[data-style='raw'] {
+    --text-2xs: 12.5px;
+    --text-xs: 14px;
+    --text-sm: 15.5px;
+    --text-base: 16.5px;
+    --text-md: 17.5px;
+    --text-lg: 20px;
+    --text-display: 1.6rem;
+    --label-size: 13px;
+  }
+}
+
+/* ============================================================================
+   RAW COMPONENT TOUCHES. The tokens carry the style into everything that reads them; these are the few places a component
+   draws its own state. Colour only from roles.
+   ========================================================================== */
+
+/* Nothing eases: a change simply happens. Components set their own durations as literals (a button 120ms, a switch 150ms),
+   so the motion tokens above cannot reach them; this does. Animations (a spinner) are not transitions and keep running. */
+:root[data-style='raw'] *,
+:root[data-style='raw'] *::before,
+:root[data-style='raw'] *::after {
+  transition-delay: 0s;
+  transition-duration: 0s;
+}
+
+/* Links are underlined at rest, as on the unstyled web. */
+:root[data-style='raw'] a,
+:root[data-style='raw'] .md a {
+  text-decoration-line: var(--underline-links);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
+/* A field's own `outline: none` (design-system.css) wins over the shell's ring, so a field showed only a border change.
+   Raw draws the hard ring, hard against the rule. */
+:root[data-style='raw'] .kt-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 0;
+}
+
+/* A panel and a message are ruled in ink, not in the palette's pale hairline; the message is paper, never a tinted block. */
+:root[data-style='raw'] .kt-panel {
+  border-color: var(--border-strong);
+}
+:root[data-style='raw'] .kt-bubble {
+  background: var(--surface);
+}
+
+/* Hover and press INVERT a plain control (ink on paper becomes paper on ink): the one cue, no shadow, no travel. Primary
+   and danger keep their own fills and take the palette's hover for them. */
+:root[data-style='raw']
+.kt-btn:not([data-variant='primary'], [data-variant='danger']):not(:disabled):is(:hover, :active) {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+:root[data-style='raw'] .kt-btn[data-variant='primary']:active:not(:disabled) {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+
+/* Switch: a plain ruled box and a square marker, no easing. */
+:root[data-style='raw'] [data-neo-switch-track] {
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  box-shadow: none;
+}
+:root[data-style='raw'] [role='switch'][aria-checked='true'] [data-neo-switch-track] {
+  background: var(--fg);
+}
+:root[data-style='raw'] [data-neo-switch-thumb] {
+  background: var(--bg);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  height: 14px;
+  width: 14px;
+}
+
+/* Segmented control: a ruled tray; the chosen segment is inverted ink. */
+:root[data-style='raw'] [data-neo-segmented] {
+  border-width: var(--stroke-control);
+  border-color: var(--border-strong);
+}
+:root[data-style='raw'] [data-neo-segmented] > label {
+  border: var(--stroke-control) solid transparent;
+}
+:root[data-style='raw'] [data-neo-segmented] > label:has(:checked) {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+:root[data-style='raw'] [data-neo-segmented] > label:has(:focus-visible) {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 2px;
+}
+
+/* Choice cards: a ruled box; the chosen one is inverted, with no lift and no pop. */
+:root[data-style='raw'] .fy-cc__card {
+  background: var(--surface);
+  box-shadow: none;
+}
+:root[data-style='raw'] .fy-cc__card:not([aria-disabled='true']):hover {
+  background: var(--hover-fill);
+  border-color: var(--border-strong);
+}
+:root[data-style='raw'] .fy-cc__card[data-selected='true'] {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+:root[data-style='raw'] .fy-cc__card[data-selected='true'] .fy-cc__line {
+  color: var(--bg);
+}
+:root[data-style='raw'] .fy-cc__card:has(:focus-visible) {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 3px;
+}
+:root[data-style='raw'] .fy-cc__check {
+  background: var(--bg);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  color: var(--fg);
+}
+
+/* Progress: empty = paper box, done = solid ink, current = the accent, each a ruled box. */
+:root[data-style='raw'] .fy-sp-progress__segment {
+  background: var(--surface);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  height: 12px;
+  opacity: 1;
+}
+:root[data-style='raw'] .fy-sp-progress__segment[data-state='done'] {
+  background: var(--fg);
+}
+:root[data-style='raw'] .fy-sp-progress__segment[data-state='current'] {
+  background: var(--accent);
+}
+
+/* Bars: a ruled track with a solid fill. */
+:root[data-style='raw'] [data-option-bar-track] {
+  background: var(--surface);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  height: 12px;
+}
+
+/* A pressed chip or tab is inverted ink, like the chosen card. */
+:root[data-style='raw'] .kt-tab[aria-pressed='true'],
+:root[data-style='raw'] .kt-tab[aria-selected='true'] {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+:root[data-style='raw'] .kt-tab[aria-pressed='true'] .mono,
+:root[data-style='raw'] .kt-tab[aria-selected='true'] .mono {
+  color: var(--bg);
+}
+
+/* Every badge tone is ruled in ink, whatever its tint. */
+:root[data-style='raw'] .kt-badge,
+:root[data-style='raw'] .kt-badge[data-tone] {
+  border-color: var(--border-strong);
+}
