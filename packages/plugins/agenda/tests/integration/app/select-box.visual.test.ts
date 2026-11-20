@@ -142,39 +142,54 @@ describe('the agenda picks from lists with the app’s select box', () => {
       });
 
   for (const viewport of VIEWPORTS)
-    it(`the compare's From / To pick a version and read it (${viewport.name})`, async () => {
-      const { context, tab } = await openScene('diff', viewport, 'light');
-      try {
-        await tab.waitForSelector('[data-agenda-diff-from] [role="combobox"]');
-        expect(await tab.locator('select').count()).toBe(0);
-        // Never looked: the default pair runs from the first version to the latest.
-        expect(await tab.textContent('[data-agenda-diff-basis]')).toContain('v1 to v3');
-        await tab.click('[data-agenda-diff-from] [role="combobox"]');
-        await tab.waitForSelector('[role="option"]');
-        const open = await listing(tab);
-        expect(open.options.length).toBe(3);
-        if (viewport.phone) {
-          expect(open.asDialog).toBe(true);
-          expect(open.centreDx ?? 99).toBeLessThanOrEqual(8);
-          expect(open.centreDy ?? 99).toBeLessThanOrEqual(8);
+    for (const theme of THEMES)
+      it(`the compare's From / To pick a version and read it (${viewport.name}, ${theme})`, async () => {
+        const { context, tab } = await openScene('diff', viewport, theme);
+        try {
+          await tab.waitForSelector('[data-agenda-diff-from] [role="combobox"]');
+          expect(await tab.locator('select').count()).toBe(0);
+          // Never looked: the default pair runs from the first version to the latest.
+          expect(await tab.textContent('[data-agenda-diff-basis]')).toContain('v1 to v3');
+          // From and To are the same width, whatever version each one shows (measured).
+          const widths = await tab.evaluate(() =>
+            ['from', 'to'].map(
+              which =>
+                document.querySelector(`[data-agenda-diff-${which}] [role="combobox"]`)?.getBoundingClientRect()
+                  .width ?? -1,
+            ),
+          );
+          expect(
+            Math.abs((widths[0] ?? 0) - (widths[1] ?? 99)),
+            `From ${String(widths[0])}px, To ${String(widths[1])}px`,
+          ).toBeLessThanOrEqual(1);
+          await tab.click('[data-agenda-diff-from] [role="combobox"]');
+          await tab.waitForSelector('[role="option"]');
+          const open = await listing(tab);
+          expect(open.options.length).toBe(3);
+          if (viewport.phone) {
+            expect(open.asDialog).toBe(true);
+            expect(open.centreDx ?? 99).toBeLessThanOrEqual(8);
+            expect(open.centreDy ?? 99).toBeLessThanOrEqual(8);
+          }
+          if (shotsDir !== '') await tab.waitForTimeout(450);
+          if (shotsDir !== '')
+            await tab.screenshot({
+              animations: 'disabled',
+              path: join(shotsDir, `${viewport.name}-${theme}-diff-open.png`),
+            });
+          await tab.locator('[role="option"]', { hasText: /^v2 ·/u }).click();
+          await tab.waitForFunction(
+            () => document.querySelector('[data-agenda-diff-basis]')?.textContent === 'v2 to v3',
+          );
+          const loads = await tab.evaluate(() => (window as unknown as { __loads: number[] }).__loads);
+          expect(new Set(loads)).toEqual(new Set([1, 2, 3]));
+          // Esc closes a list and gives the focus back to its button.
+          await tab.click('[data-agenda-diff-to] [role="combobox"]');
+          await tab.keyboard.press('Escape');
+          await tab.waitForFunction(() => document.querySelector('[role="option"]') === null);
+          expect(await tab.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('To');
+        } finally {
+          await context.close();
         }
-        if (shotsDir !== '') await tab.waitForTimeout(450);
-        if (shotsDir !== '')
-          await tab.screenshot({
-            animations: 'disabled',
-            path: join(shotsDir, `${viewport.name}-light-diff-open.png`),
-          });
-        await tab.locator('[role="option"]', { hasText: /^v2 ·/u }).click();
-        await tab.waitForFunction(() => document.querySelector('[data-agenda-diff-basis]')?.textContent === 'v2 to v3');
-        const loads = await tab.evaluate(() => (window as unknown as { __loads: number[] }).__loads);
-        expect(new Set(loads)).toEqual(new Set([1, 2, 3]));
-        // Esc closes a list and gives the focus back to its button.
-        await tab.click('[data-agenda-diff-to] [role="combobox"]');
-        await tab.keyboard.press('Escape');
-        await tab.waitForFunction(() => document.querySelector('[role="option"]') === null);
-        expect(await tab.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('To');
-      } finally {
-        await context.close();
-      }
-    });
+      });
 });

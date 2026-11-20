@@ -1857,8 +1857,12 @@
 }
 
 /* From and To are the app's SelectBox: the same width, whatever version each one shows. */
+.fy-diff__pickers > .fy-diff__pick {
+  flex: 1 1 13rem;
+  max-width: 20rem;
+}
 .fy-diff__select.fy-sb__trigger {
-  width: min(100%, 17rem);
+  width: 100%;
   min-height: 32px;
   padding: 3px 8px;
   font-size: var(--text-sm);
