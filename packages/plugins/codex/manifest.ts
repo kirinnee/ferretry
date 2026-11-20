@@ -27,8 +27,9 @@ import {
 import { HARNESS_DIALOG_RULES_KEY, WardenDialogRulesCodex } from '@ferretry/plugin-warden/contract';
 
 /**
- * The Codex segment of daemon setup (r10 O10): one flat list the shell linearizes. The import steps (43-47, 49) skip
- * themselves unless the person chose what to import at `import-choice`; `conversations` is asked in both modes.
+ * The Codex segment of daemon setup (r10 O10): one flat list the shell linearizes. The import steps (43-47, 49) follow the
+ * CURRENT answer at `import-choice` and are shown (never skipped, which the shell persists) when it is not "choose what";
+ * `conversations` is asked in both modes.
  */
 const CODEX_STEPS = [
   { id: 'installed', title: 'Install Codex', order: 40, group: 'Codex', stepHost: true },

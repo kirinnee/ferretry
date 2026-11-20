@@ -1,0 +1,161 @@
+/**
+ * The five "choose what to import" pages (settings, models, AGENTS.md, skills, MCP servers), one component for all of them.
+ * Each shows what the scan found of its ONE kind as a checklist with what each thing becomes, and says nothing else.
+ *
+ * It follows the CURRENT `importMode`, never a choice that can still change: when the person did not choose what to import at
+ * `import-choice` it reads nothing and says why (`NotChoosing`; Next answers it), because a page that skipped itself would be
+ * gone for the rest of the run and Back -> Customize could not reach it. It skips itself (`not-needed`) only when the scan found
+ * nothing of its kind, which no choice here changes. Nothing is written here: what is left unticked is the segment memory (`review.<kind>`),
+ * and the one import happens once, at `import-run`. A scan that wants the passkey waits for the person's own press; a scan that
+ * failed says so and offers a retry, so a page never hangs under its loading cover.
+ */
+import type { ImportItemId } from '@ferretry/plugin-runtimes/contract';
+import { FoundKindList, type ImportKind, kindFound } from '@ferretry/plugin-runtimes/import-kit';
+import { useEffect, useRef, useState } from 'react';
+import type { OnboardingClient, StepHost } from '../onboarding-api.ts';
+import { importingMode, KIND_WORDS, rememberReview, reviewOf, STEP_OF_KIND } from './import-memory.ts';
+import { ScanProblem } from './scan-problem.tsx';
+import { useRunScan } from './use-run-scan.ts';
+
+const LEAD: Readonly<Record<ImportKind, string>> = {
+  settings: 'Your Codex settings file. Untick what you would rather set up again here.',
+  'model-set': 'The models your settings name, and each Codex profile.',
+  instructions: 'Your AGENTS.md, the standing instructions every Codex session reads.',
+  skills: 'The skills in your Codex.',
+  mcp: 'The MCP servers your Codex is set up with.',
+};
+
+/**
+ * Not choosing (everything, or fresh): the page has nothing to ask and reads nothing. It is shown (never skipped, which would
+ * persist and drop it for the run) so a later Back -> Customize finds it again; Next records the defaults as done.
+ */
+function NotChoosing({ step, kind }: { readonly step: StepHost; readonly kind: ImportKind }) {
+  const everything = importingMode(step.segment) === 'everything';
+  useEffect(() => {
+    step.ready();
+  }, [step]);
+  return (
+    <section
+      aria-label={`Import Codex ${KIND_WORDS[kind]}`}
+      className="flex max-w-xl flex-col gap-3"
+      data-codex-step={STEP_OF_KIND[kind]}
+      data-import-kind={kind}
+      data-import-not-choosing={everything ? 'everything' : 'fresh'}
+    >
+      <p className="m-0 text-cell text-muted">
+        {everything
+          ? 'Included by Import everything. There is nothing to choose here.'
+          : `Nothing comes over: you chose to start fresh. Go back to choose ${KIND_WORDS[kind]}.`}
+      </p>
+    </section>
+  );
+}
+
+export function KindPage({
+  client,
+  step,
+  kind,
+}: {
+  readonly client: OnboardingClient;
+  readonly step: StepHost;
+  readonly kind: ImportKind;
+}) {
+  return importingMode(step.segment) === 'choose' ? (
+    <KindBody client={client} step={step} kind={kind} />
+  ) : (
+    <NotChoosing step={step} kind={kind} />
+  );
+}
+
+function KindBody({
+  client,
+  step,
+  kind,
+}: {
+  readonly client: OnboardingClient;
+  readonly step: StepHost;
+  readonly kind: ImportKind;
+}) {
+  const scan = useRunScan(client, step);
+  const earlier = reviewOf(step.segment, kind);
+  const [left, setLeft] = useState<ReadonlySet<ImportItemId>>(() => new Set(earlier?.left));
+  const [tickedEnv, setTickedEnv] = useState<ReadonlySet<string>>(() => new Set(earlier?.env));
+  const told = useRef<'none' | 'ready' | 'skipped'>('none');
+  const seeded = useRef(false);
+
+  const { read, model } = scan;
+  const found = model !== null && kindFound(model, kind);
+  useEffect(() => {
+    if (told.current === 'skipped') return;
+    if (model === null) {
+      if ((read.kind === 'confirm' || read.kind === 'failed') && told.current === 'none') {
+        told.current = 'ready';
+        step.ready();
+      }
+      return;
+    }
+    if (!found) {
+      told.current = 'skipped';
+      step.skip('not-needed');
+      return;
+    }
+    if (!seeded.current) {
+      // What is on screen is the answer: Next with every box as it stands records exactly this.
+      seeded.current = true;
+      rememberReview(step, kind, { left: [...left], env: [...tickedEnv] });
+    }
+    if (told.current === 'none') {
+      told.current = 'ready';
+      step.ready();
+    }
+  }, [read.kind, model, found, step, kind, left, tickedEnv]);
+
+  const answer = (nextLeft: ReadonlySet<ImportItemId>, nextEnv: ReadonlySet<string>): void => {
+    setLeft(nextLeft);
+    setTickedEnv(nextEnv);
+    rememberReview(step, kind, { left: [...nextLeft], env: [...nextEnv] });
+  };
+
+  const settingsLeftOut =
+    kind === 'model-set' &&
+    model !== null &&
+    reviewOf(step.segment, 'settings')?.left.includes(`${model.harness}:settings`) === true;
+  return (
+    <section
+      aria-label={`Import Codex ${KIND_WORDS[kind]}`}
+      className="flex max-w-xl flex-col gap-3"
+      data-codex-step={STEP_OF_KIND[kind]}
+      data-import-kind={kind}
+    >
+      <ScanProblem read={read} look={scan.look} />
+      {model !== null && found ? (
+        <>
+          <p className="m-0 text-cell text-muted">{LEAD[kind]}</p>
+          {settingsLeftOut ? (
+            <p className="m-0 text-cell text-muted" data-import-settings-left="">
+              You left Settings out, so the models they name are left out too.
+            </p>
+          ) : null}
+          <FoundKindList
+            model={model}
+            kind={kind}
+            left={left}
+            onToggle={(id, on) => {
+              const next = new Set(left);
+              if (on) next.delete(id);
+              else next.add(id);
+              answer(next, tickedEnv);
+            }}
+            tickedEnv={tickedEnv}
+            onTickEnv={(name, on) => {
+              const next = new Set(tickedEnv);
+              if (on) next.add(name);
+              else next.delete(name);
+              answer(left, next);
+            }}
+          />
+        </>
+      ) : null}
+    </section>
+  );
+}

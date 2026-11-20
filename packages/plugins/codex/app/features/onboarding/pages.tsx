@@ -7,6 +7,7 @@
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import { createElement, type ReactElement, useEffect, useState } from 'react';
 import { ImportChoicePage, rememberedImportMode } from './import-choice-page.tsx';
+import { IMPORT_PAGES } from './import/index.ts';
 import { InstalledPage } from './installed-page.tsx';
 import type { OnboardingClient, StepHost } from './onboarding-api.ts';
 import { PermissionPage } from './permission-page.tsx';
@@ -14,8 +15,9 @@ import { SignInPage } from './sign-in-page.tsx';
 
 type Page = (client: OnboardingClient, step: StepHost) => ReactElement;
 
-/** Step id → page. O10b adds the import pages here, one line each. */
+/** Step id → page. The import pages are spread in from `import/`. */
 const PAGES: Readonly<Record<string, Page>> = {
+  ...IMPORT_PAGES,
   installed: (client, step) => createElement(InstalledPage, { client, step }),
   'sign-in': (client, step) => createElement(SignInPage, { client, step }),
   'import-choice': (_client, step) => createElement(ImportChoicePage, { step }),
