@@ -140,6 +140,29 @@ describe('the Shells step', () => {
     expect(view.container.textContent).toContain('Couldn’t check');
   });
 
+  it("says the daemon's words as sentences, in few words, with a picture only for a real answer", async () => {
+    expect(
+      shellsStepView({
+        kind: 'facts',
+        facts: {
+          present: false,
+          consequence: 'ferrets use the tools already on this machine',
+          remedy: 'install nix to give each ferret its own shell',
+        },
+      }),
+    ).toMatchObject({
+      line: 'Nix is not on this machine.',
+      consequence: 'Ferrets use the tools already on this machine.',
+      remedy: 'Install nix to give each ferret its own shell.',
+    });
+    const missing = await open(async () => ABSENT);
+    expect(missing.view.container.querySelector('[data-shells-demo]')).not.toBeNull();
+    const unreadable = await open(async () => {
+      throw new Error('offline');
+    });
+    expect(unreadable.view.container.querySelector('[data-shells-demo]')).toBeNull();
+  });
+
   it('the words come from one pure function', () => {
     expect(shellsStepView(PRESENT)).toEqual({ kind: 'hide' });
     expect(shellsStepView({ kind: 'unreadable' })).toMatchObject({

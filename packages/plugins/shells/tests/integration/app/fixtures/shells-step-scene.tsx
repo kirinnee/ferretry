@@ -14,6 +14,14 @@ import type { NixCheck } from '../../../../app/features/onboarding/shells-step-m
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 
+declare global {
+  interface Window {
+    /** Every call the page made on its host that would save something: a `commit` registered, a `done`. */
+    __writes: string[];
+  }
+}
+window.__writes = [];
+
 const host: StepHost = {
   phase: 'daemon',
   appliesTo: [],
@@ -22,8 +30,8 @@ const host: StepHost = {
   ready: () => undefined,
   skip: () => undefined,
   notNeeded: () => undefined,
-  commit: () => undefined,
-  done: () => undefined,
+  commit: save => void (save !== null && window.__writes.push('commit')),
+  done: () => void window.__writes.push('done'),
   busy: () => undefined,
   next: () => undefined,
   back: () => undefined,
@@ -35,8 +43,8 @@ const check = async (): Promise<NixCheck> => {
     kind: 'facts',
     facts: {
       present: false,
-      consequence: 'Ferrets use the machine’s own tools until nix is installed.',
-      remedy: 'Install nix from nixos.org, then open Settings › Shells to add a shell.',
+      consequence: 'ferrets use the tools already on this machine',
+      remedy: 'install nix to give each ferret its own shell',
     },
   };
 };

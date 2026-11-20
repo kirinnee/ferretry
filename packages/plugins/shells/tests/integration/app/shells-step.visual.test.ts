@@ -98,3 +98,87 @@ describe('The Shells onboarding step', () => {
           }
         }, 60_000);
 });
+
+/**
+ * r11 O13: THE SHELLS PAGE, laid out as the owner asked (items 3 and 5): the picture on the right, the words cut. Real
+ * Chromium over fake data inside the real step frame. At 1280 the demo (`[data-step-demo]`) is right of the words (gap
+ * > 32px) and top-aligned with them (within 8px); at 390 it is above them and at most 140px tall, with nothing
+ * scrolling sideways. The page text is at most 160 characters, it has no button of its own when nix is missing (the one
+ * retry button of the failed check is the only exception), and Next saves nothing: the page registers no commit.
+ */
+describe('r11 O13: the Shells page layout', () => {
+  for (const variant of VARIANTS)
+    for (const scheme of ['light', 'dark'] as const)
+      for (const outcome of ['missing', 'unreadable'] as const)
+        it(`puts the demo beside the words and keeps them short (${variant.name}, ${scheme}, ${outcome})`, async () => {
+          const context = await browser.newContext({
+            viewport: { width: variant.width, height: variant.height },
+            colorScheme: scheme,
+            deviceScaleFactor: variant.phone ? 2 : 1,
+            hasTouch: variant.phone,
+            isMobile: variant.phone,
+          });
+          const origin = server?.url.origin ?? '';
+          await context.route('**/*', async route =>
+            new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+          );
+          const page = await context.newPage();
+          try {
+            await page.goto(`${origin}/?theme=studio-${scheme}&case=${outcome}`);
+            await page.waitForSelector(`[data-testid="shells-step"][data-outcome="${outcome}"]`);
+            await page.waitForTimeout(1_300);
+            const m = await page.evaluate(() => {
+              const box = (node: Element | null) => {
+                const r = node?.getBoundingClientRect() ?? new DOMRect();
+                return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, bottom: r.bottom };
+              };
+              const step = document.querySelector('[data-testid="shells-step"]');
+              const body = document.querySelector('.fy-spf__body') as HTMLElement;
+              const words = [...(step?.children ?? [])].filter(node => !node.hasAttribute('data-step-demo'));
+              const demo = document.querySelector('[data-step-demo]') as HTMLElement | null;
+              const footer = ['[data-step-back]', '[data-step-later]', '[data-step-next]'].map(s =>
+                box(document.querySelector(s)),
+              );
+              return {
+                demo: box(demo),
+                hasDemo: demo !== null && demo.textContent !== '',
+                words: words.map(box),
+                text: body.innerText,
+                buttons: body.querySelectorAll('button').length,
+                writes: window.__writes,
+                overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+                viewport: window.innerWidth,
+                footer,
+                clipped: [...body.querySelectorAll('p')].filter(p => p.scrollWidth > p.clientWidth + 1).length,
+              };
+            });
+            expect(m.hasDemo, 'the picture is drawn into the frame’s demo column, and only for a real answer').toBe(
+              outcome === 'missing',
+            );
+            expect(m.words.length).toBeGreaterThan(0);
+            if (outcome === 'unreadable') {
+              // No picture claims what ferrets use when the check failed: nothing to place beside the words.
+            } else if (variant.phone) {
+              expect(m.demo.bottom).toBeLessThanOrEqual((m.words[0]?.y ?? 0) + 1);
+              expect(m.demo.h).toBeLessThanOrEqual(140);
+              for (const button of m.footer) {
+                expect(button.x).toBeGreaterThanOrEqual(0);
+                expect(button.right).toBeLessThanOrEqual(m.viewport);
+              }
+            } else {
+              const wordsRight = Math.max(...m.words.map(word => word.right));
+              expect(m.demo.x).toBeGreaterThan(wordsRight + 32);
+              expect(Math.abs(m.demo.y - (m.words[0]?.y ?? 0))).toBeLessThanOrEqual(8);
+            }
+            expect(m.overflowX).toBe(false);
+            expect(m.text.length).toBeLessThanOrEqual(160);
+            expect(m.buttons).toBe(outcome === 'unreadable' ? 1 : 0);
+            expect(m.writes, 'nothing here is a pick, so nothing is registered to save').toEqual([]);
+            expect(m.clipped).toBe(0);
+            if (shotsDir !== '')
+              await page.screenshot({ path: join(shotsDir, `after-${variant.name}-${scheme}-${outcome}.png`) });
+          } finally {
+            await context.close();
+          }
+        }, 60_000);
+});

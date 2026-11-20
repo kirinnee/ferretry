@@ -20,15 +20,22 @@ export type ShellsStepView =
       readonly remedy: string;
     };
 
+/** The daemon words a sentence: a capital to start, a full stop to end. */
+function sentence(words: string): string {
+  const text = words.trim();
+  if (text === '') return text;
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}${/[.!?]$/.test(text) ? '' : '.'}`;
+}
+
 export function shellsStepView(check: NixCheck): ShellsStepView {
   if (check.kind === 'facts' && check.facts.present) return { kind: 'hide' };
   if (check.kind === 'facts' && !check.facts.present)
     return {
       kind: 'show',
       outcome: 'missing',
-      line: 'Nix is not on this machine. A shell gives each ferret its own set of tools, built once and cached.',
-      consequence: check.facts.consequence,
-      remedy: check.facts.remedy,
+      line: 'Nix is not on this machine.',
+      consequence: sentence(check.facts.consequence),
+      remedy: sentence(check.facts.remedy),
     };
   return {
     kind: 'show',
