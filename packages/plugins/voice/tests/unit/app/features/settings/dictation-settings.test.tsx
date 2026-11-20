@@ -83,6 +83,18 @@ const engineSection = (container: HTMLElement): HTMLElement =>
 const radio = (container: HTMLElement, value: string): HTMLInputElement =>
   must(container.querySelector<HTMLInputElement>(`input[type="radio"][value="${value}"]`), `the ${value} radio`);
 
+/** A select box is a combobox button; its list is drawn in the document body. Opens it and presses the option with these words. */
+const pick = async (box: HTMLElement, label: string): Promise<void> => {
+  await interact(() => box.click());
+  const option = must(
+    [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+      candidate => candidate.querySelector('[data-label]')?.textContent === label,
+    ) ?? null,
+    `the option "${label}"`,
+  );
+  await interact(() => option.click());
+};
+
 describe('<DictationSettings> after dictating', () => {
   const afterSection = (container: HTMLElement): HTMLElement =>
     must(container.querySelector('[data-after-dictating]'), 'the after-dictating section');
@@ -329,15 +341,12 @@ describe('<DictationSettings>', () => {
     expect(view.container.textContent).toContain('WORDS ONLY.');
     expect(view.container.querySelector('#stt-enhancement-model')).toBeNull();
 
-    const select = must(view.container.querySelector<HTMLSelectElement>('#stt-enhancement-provider'), 'the provider');
-    await interact(() => {
-      select.value = 'groq';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const select = must(view.container.querySelector<HTMLElement>('#stt-enhancement-provider'), 'the provider');
+    await pick(select, 'Groq clean-up');
     // Choosing a hosted provider only STAGES it: nothing is written until Apply.
     expect(patches).toEqual([]);
     expect(view.container.textContent).toContain('Not saved yet');
-    expect(select.value).toBe('groq');
+    expect(select.textContent).toBe('Groq clean-up');
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-provider-staged] button'), 'Apply').click(),
     );
@@ -373,17 +382,14 @@ describe('<DictationSettings>', () => {
   it('writes nothing for a hosted provider until Apply, and Cancel drops it', async () => {
     const patches: SttSettingsPatch[] = [];
     const view = await mount(<DictationSettings {...settingsProps({ update: patch => patches.push(patch) })} />);
-    const select = must(view.container.querySelector<HTMLSelectElement>('#stt-enhancement-provider'), 'the provider');
-    await interact(() => {
-      select.value = 'cerebras';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const select = must(view.container.querySelector<HTMLElement>('#stt-enhancement-provider'), 'the provider');
+    await pick(select, 'Cerebras clean-up');
     expect(patches).toEqual([]);
     const buttons = [...view.container.querySelectorAll<HTMLButtonElement>('[data-provider-staged] button')];
     await interact(() => must(buttons.find(b => b.textContent === 'Cancel') ?? null, 'Cancel').click());
     expect(patches).toEqual([]);
     expect(view.container.querySelector('[data-provider-staged]')).toBeNull();
-    expect(select.value).toBe('local');
+    expect(select.textContent).toBe('On-device word correction');
     await view.unmount();
   });
 
@@ -393,11 +399,8 @@ describe('<DictationSettings>', () => {
     const view = await mount(
       <DictationSettings {...settingsProps({ settings: groq, update: patch => patches.push(patch) })} />,
     );
-    const select = must(view.container.querySelector<HTMLSelectElement>('#stt-enhancement-provider'), 'the provider');
-    await interact(() => {
-      select.value = 'local';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const select = must(view.container.querySelector<HTMLElement>('#stt-enhancement-provider'), 'the provider');
+    await pick(select, 'On-device word correction');
     expect(patches).toEqual([{ enhancementProvider: 'local' }]);
     await view.unmount();
   });
@@ -422,9 +425,18 @@ describe('<DictationSettings>', () => {
 
   it('shows using a login as a choice that cannot be picked yet', async () => {
     const view = await mount(<DictationSettings {...settingsProps()} />);
-    const login = must(view.container.querySelector<HTMLOptionElement>('option[value="login"]'), 'the login option');
-    expect(login.disabled).toBe(true);
-    expect(login.textContent).toBe(LOGIN_CLEANUP_UNAVAILABLE);
+    const box = must(view.container.querySelector<HTMLElement>('#stt-enhancement-provider'), 'the provider');
+    await interact(() => box.click());
+    const login = must(
+      [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+        option => option.querySelector('[data-label]')?.textContent === LOGIN_CLEANUP_UNAVAILABLE,
+      ) ?? null,
+      'the login option',
+    );
+    expect(login.getAttribute('aria-disabled')).toBe('true');
+    // Pressing it changes nothing: no patch, no staged provider.
+    await interact(() => login.click());
+    expect(view.container.querySelector('[data-provider-staged]')).toBeNull();
     await view.unmount();
   });
 

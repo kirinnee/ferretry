@@ -432,4 +432,58 @@ describe('Voice settings in the real Settings shell', () => {
           await close();
         }
       });
+
+  // r11 S3a: Voice's lists are the app's SelectBox, not the browser's select.
+  for (const viewport of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const) {
+      it(`${viewport.name} ${scheme}: "Longest reading" is a SelectBox (no native select; ${viewport.phone ? 'a centred dialog' : viewport.name === '768' ? 'a centred dialog (the panel is a narrow container)' : 'a listbox under it'}); picking saves and survives a reload`, async () => {
+        const { page, problems, close } = await open(viewport, scheme, 'voice');
+        try {
+          expect(await page.locator('.fy-settings-page select').count(), 'no native select on the tab').toBe(0);
+          const box = page.locator('#auto-read-length');
+          await box.scrollIntoViewIfNeeded();
+          expect(await box.getAttribute('role')).toBe('combobox');
+          const before = (await box.innerText()).trim();
+          expect(before).not.toBe('No limit');
+          await box.click();
+          await page.waitForTimeout(600);
+          const open = await page.evaluate(() => {
+            const panel = document.querySelector('[role="dialog"], [data-select-popover]') as HTMLElement | null;
+            const at = panel?.getBoundingClientRect();
+            const button = document.querySelector('#auto-read-length')?.getBoundingClientRect();
+            return at === undefined || button === undefined || panel === null
+              ? null
+              : {
+                  dialog: panel.getAttribute('role') === 'dialog',
+                  gap: at.top - button.bottom,
+                  above: button.top - at.bottom,
+                  dx: Math.abs(at.left + at.width / 2 - innerWidth / 2),
+                  dy: Math.abs(at.top + at.height / 2 - innerHeight / 2),
+                  options: panel.querySelectorAll('[role="option"]').length,
+                };
+          });
+          expect(open?.options, 'the five lengths').toBe(5);
+          // A phone, or a panel narrower than 600px (the stacked 768 layout): the centred dialog. Wide: the listbox.
+          const asDialog = viewport.phone || viewport.name === '768';
+          expect(open?.dialog).toBe(asDialog);
+          if (asDialog) {
+            expect(open?.dx, 'the dialog is centred across').toBeLessThanOrEqual(8);
+            expect(open?.dy, 'the dialog is centred down').toBeLessThanOrEqual(8);
+          } else {
+            // Under the button, or above it when the window's foot is too near.
+            const near = Math.min(Math.abs(open?.gap ?? 999), Math.abs(open?.above ?? 999));
+            expect(near, 'the list opens right at the button').toBeLessThanOrEqual(12);
+          }
+          if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-longest-reading-open.png` ) });
+          await page.locator('[role="option"]', { hasText: 'No limit' }).click();
+          expect((await box.innerText()).trim()).toBe('No limit');
+          await page.reload();
+          await page.waitForSelector('#auto-read-length');
+          expect((await page.locator('#auto-read-length').innerText()).trim(), 'the pick was saved').toBe('No limit');
+          expect(problems).toEqual([]);
+        } finally {
+          await close();
+        }
+      });
+    }
 });
