@@ -248,8 +248,9 @@ const inspect = async (tab: Page, variant: Variant, key: string, opts: { first?:
     expect(button.h, `${key}: ${button.label} is a 44px target`).toBeGreaterThanOrEqual(43.5);
   }
   // Item 3: the title sits right over the page (no dead band between them), and Later is a real button in the footer row
-  // (Back · Later · Next), never a link floating in the page.
-  const gap = await gapUnderTitle(tab, '.fy-spf__head', '.fy-spf__body');
+  // (Back · Later · Next), never a link floating in the page. Measured from `.fy-spf__main` (demo + body): on a phone the
+  // populated demo panel is drawn ABOVE the body, so the body alone would count the demo's height as dead space.
+  const gap = await gapUnderTitle(tab, '.fy-spf__head', '.fy-spf__main');
   expect(gap.gap, `${key}: something is drawn under the title (first: ${gap.first})`).toBeGreaterThanOrEqual(0);
   expect(gap.gap, `${key}: no dead gap between the title and the page (first thing: ${gap.first})`).toBeLessThanOrEqual(
     40,
