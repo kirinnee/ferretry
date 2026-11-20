@@ -174,15 +174,24 @@ describe('the permission page', () => {
     const group = must(view.container.querySelector('[role="radiogroup"]'), 'the cards');
     const key = (name: string) =>
       interact(() => {
-        must(view.container.querySelector<HTMLInputElement>('input:checked'), 'checked').dispatchEvent(
-          new KeyboardEvent('keydown', { key: name, bubbles: true }),
-        );
+        // The key goes to the radio holding the focus (the checked one until an arrow has moved it).
+        const focused = document.activeElement;
+        const holder =
+          focused instanceof HTMLInputElement && view.container.contains(focused)
+            ? focused
+            : must(view.container.querySelector<HTMLInputElement>('input:checked'), 'checked');
+        holder.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
       });
     expect(group).toBeDefined();
-    await key('ArrowLeft'); // skip -> auto
+    await key('ArrowLeft'); // focus moves skip -> auto, and nothing is picked
+    await settle();
+    expect(view.container.querySelector('[data-permission-consequence="auto"]')).toBeNull();
+    expect(view.container.querySelector('[data-permission-confirm]')).toBeNull();
+    await key('Enter'); // Enter picks the focused card: auto
     await settle();
     expect(view.container.querySelector('[data-permission-consequence="auto"]')).not.toBeNull();
-    await key('ArrowRight'); // auto -> skip: back to the saved one
+    await key('ArrowRight'); // focus moves to skip: still auto
+    await key('Enter'); // back to the saved one
     await settle();
     // The hold came with the pick and goes with it.
     expect(run.events).toEqual(['ready', 'busy:Press “Use …” or “Keep …” to continue', 'busy:null']);

@@ -104,10 +104,19 @@ describe('<VoiceCleanupSettings>', () => {
   it('arrow-key navigation off Off writes nothing and says what hosted clean-up does before Apply', async () => {
     const { state, saved } = fakeState({ ...DEFAULT_VOICE_CLEANUP, style: 'off' });
     const c = await show(state);
-    const group = must(c.querySelector<HTMLElement>('[role="radiogroup"]'), 'the style group');
-    await interact(() => {
-      group.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
-    });
+    const press = (key: string) =>
+      interact(() => {
+        radioFor(c, key === 'Enter' ? 'Fix mistakes only' : 'Off').dispatchEvent(
+          new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+        );
+      });
+    // An arrow only moves the focus; Enter chooses the card it is on.
+    await press('ArrowRight');
+    expect(radioFor(c, 'Off').checked).toBe(true);
+    expect(radioFor(c, 'Fix mistakes only').checked).toBe(false);
+    expect(document.activeElement).toBe(radioFor(c, 'Fix mistakes only'));
+    expect(c.textContent).not.toContain(CLEANUP_HOSTED_ON_EXPLANATION);
+    await press('Enter');
     expect(radioFor(c, 'Fix mistakes only').checked).toBe(true);
     expect(saved).toEqual([]);
     expect(c.textContent).toContain(CLEANUP_HOSTED_ON_EXPLANATION);

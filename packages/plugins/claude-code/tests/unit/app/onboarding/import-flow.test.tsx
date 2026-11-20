@@ -178,12 +178,25 @@ describe('the Claude import pages inside the real setup flow', () => {
     expect(pageKey()).toBe(pageOf('import-choice'));
     const group = must(root().querySelector('[role="radiogroup"]'), 'the choice cards');
     for (const key of ['End', 'Home', 'ArrowRight', 'ArrowRight']) {
+      // The key goes to the radio holding the focus (the checked one until an arrow has moved it).
+      const focused = document.activeElement;
+      const holder =
+        focused instanceof HTMLInputElement && group.contains(focused)
+          ? focused
+          : must(group.querySelector<HTMLInputElement>('input:checked'), 'the checked card');
       await interact(
-        () => void group.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })),
+        () => void holder.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })),
       );
       await settle();
       expect(pageKey()).toBe(pageOf('import-choice'));
     }
+    // The arrows moved the focus only: the card that was chosen still is, and Enter chooses the focused one.
+    expect(root().querySelector('input[value="fresh"]:checked')).toBeNull();
+    const landed = must(document.activeElement as HTMLInputElement | null, 'the focused card');
+    await interact(
+      () => void landed.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })),
+    );
+    await settle();
     expect(root().querySelector('input[value="fresh"]:checked')).not.toBeNull();
     expect(wire.filter(call => call.route.startsWith('POST /v1/onboarding'))).toEqual([]);
     expect(root().querySelector('[data-flow-end]')).toBeNull();

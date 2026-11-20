@@ -4,6 +4,7 @@
  * with the rest of Settings.
  */
 
+import { onRadioGroupKeyDown } from '../compose/choice-cards.tsx';
 import { cn } from './lib/class-names.ts';
 import { Check } from 'lucide-react';
 import { type ReactNode, useId, useRef } from 'react';
@@ -101,7 +102,11 @@ function ChoiceList<T extends string>({
   // Only a card the person picked settles: resting on the saved value plays nothing.
   const picked = useRef<string | null>(null);
   return (
-    <fieldset className="relative m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" data-setup-choices={name}>
+    <fieldset
+      className="relative m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0"
+      data-setup-choices={name}
+      onKeyDown={onRadioGroupKeyDown}
+    >
       <legend className={legendHidden ? 'sr-only' : 'mb-1 block w-full text-cell font-medium text-fg'}>{legend}</legend>
       {options.map(option => {
         const id = `${uid}-${option.id}`;

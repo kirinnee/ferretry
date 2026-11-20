@@ -19,8 +19,9 @@
  */
 
 import { ChevronRight, Info } from 'lucide-react';
-import { type KeyboardEvent, type ReactNode, useContext, useId, useState } from 'react';
+import { type ReactNode, useContext, useId, useState } from 'react';
 import { cn } from '../ui/lib/class-names.ts';
+import { onRadioGroupKeyDown } from './choice-cards.tsx';
 import { PanelTitleContext } from './panel-title.ts';
 /** A deep-link target id (`#setting-<id>`); each settings tab owns its own ids. */
 type SettingId = string;
@@ -267,9 +268,10 @@ export interface SegmentedProps<T extends string> {
 }
 
 /**
- * Roving radios: the checked option is the one tab stop, the arrow keys move and select, and `Home` / `End`
- * jump. `relative` on the group is load-bearing: the radios are `sr-only` (absolute), and without a
- * positioned group they escape the page's scroller and scroll the fixed `.kt-shell` when focused.
+ * Roving radios: the checked option is the one tab stop, the arrow keys move the focus only (a setting is written on
+ * Enter, Space or a click, never on an arrow), and `Home` / `End` jump. `relative` on the group is load-bearing: the
+ * radios are `sr-only` (absolute), and without a positioned group they escape the page's scroller and scroll the fixed
+ * `.kt-shell` when focused.
  */
 export function Segmented<T extends string>({
   label,
@@ -280,31 +282,12 @@ export function Segmented<T extends string>({
   fill = false,
 }: SegmentedProps<T>) {
   const group = useId();
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const keys = ['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'];
-    if (disabled || !keys.includes(event.key)) return;
-    event.preventDefault();
-    const index = options.findIndex(option => option.id === value);
-    const last = options.length - 1;
-    const next =
-      event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? last
-          : event.key === 'ArrowDown' || event.key === 'ArrowRight'
-            ? Math.min(last, index + 1)
-            : Math.max(0, index - 1);
-    const target = options[next];
-    if (target === undefined) return;
-    onChange(target.id);
-    event.currentTarget.querySelector<HTMLInputElement>(`input[value="${target.id}"]`)?.focus({ preventScroll: true });
-  };
   return (
     <div
       role="radiogroup"
       data-neo-segmented=""
       aria-label={label}
-      onKeyDown={onKeyDown}
+      onKeyDown={disabled ? undefined : onRadioGroupKeyDown}
       className={cn(
         'relative flex min-w-0 max-w-full gap-1 rounded-control bg-surface-2 p-1 max-md:w-full',
         fill ? 'w-full' : 'w-fit self-start',

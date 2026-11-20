@@ -10,6 +10,7 @@
  * chosen but not installed asks, in the dictation control, to be installed, as it always has.
  */
 
+import { onRadioGroupKeyDown } from '@ferretry/app';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useOnDeviceInstall } from '../../hooks/use-on-device-install.ts';
 import { cn } from '../../shell-voice.ts';
@@ -233,7 +234,13 @@ export function EngineCardGrid({
   const voiceFor = (model: OnDeviceModel): OnDeviceVoice | null =>
     model.id === 'parakeet' && parakeet !== undefined ? parakeet : (voices?.get(model.id) ?? null);
   return (
-    <div role="radiogroup" aria-label={label} data-count={count} className={cn('fy-engine-grid', className)}>
+    <div
+      role="radiogroup"
+      aria-label={label}
+      data-count={count}
+      onKeyDown={onRadioGroupKeyDown}
+      className={cn('fy-engine-grid', className)}
+    >
       {models.map(model => (
         <OnDeviceCard
           key={model.id}

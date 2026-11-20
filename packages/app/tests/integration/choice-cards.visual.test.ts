@@ -68,9 +68,15 @@ const VARIANTS = [
   { name: '390-light', width: 390, height: 800, phone: true, scheme: 'light' },
   { name: '390-dark', width: 390, height: 800, phone: true, scheme: 'dark' },
 ] as const;
-type Variant = (typeof VARIANTS)[number];
+interface Viewport {
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly phone: boolean;
+  readonly scheme: 'light' | 'dark';
+}
 
-const open = async (variant: Variant, query: string, reducedMotion: 'reduce' | 'no-preference' = 'no-preference') => {
+const open = async (variant: Viewport, query: string, reducedMotion: 'reduce' | 'no-preference' = 'no-preference') => {
   const context = await browser.newContext({
     viewport: { width: variant.width, height: variant.height },
     deviceScaleFactor: variant.phone ? 2 : 1,
@@ -92,7 +98,7 @@ const open = async (variant: Variant, query: string, reducedMotion: 'reduce' | '
   return { tab, problems, close: async () => await context.close() };
 };
 
-const shotOf = async (tab: Page, variant: Variant, name: string): Promise<void> => {
+const shotOf = async (tab: Page, variant: Viewport, name: string): Promise<void> => {
   if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${variant.name}-${name}.png`) });
 };
 
@@ -104,6 +110,46 @@ const layoutOf = async (tab: Page) =>
     const perRow = rows.map(top => boxes.filter(box => Math.round(box.top) === top).length);
     return { widths: boxes.map(box => Math.round(box.width)), perRow };
   });
+
+const KEY_VARIANTS: readonly Viewport[] = [
+  { name: '390-dark', width: 390, height: 800, phone: true, scheme: 'dark' },
+  { name: '768-dark', width: 768, height: 800, phone: false, scheme: 'dark' },
+  { name: '1280-dark', width: 1_280, height: 800, phone: false, scheme: 'dark' },
+  { name: '1280-light', width: 1_280, height: 800, phone: false, scheme: 'light' },
+];
+
+describe('ChoiceCards keyboard', () => {
+  for (const variant of KEY_VARIANTS) {
+    it(`${variant.name}: should move the focus on an arrow key and choose only on Enter or Space, never on the arrow`, async () => {
+      const { tab, close } = await open(variant, '&scene=cards&n=3&w=832');
+      try {
+        const state = async () =>
+          await tab.evaluate(() => ({
+            selected: document.querySelector('.fy-cc__card[data-selected="true"]')?.getAttribute('data-choice') ?? null,
+            focused: (document.activeElement as HTMLInputElement | null)?.value ?? null,
+          }));
+        await tab.keyboard.press('Tab');
+        expect(await state()).toEqual({ selected: 'left', focused: 'left' });
+        await tab.keyboard.press('ArrowRight');
+        await tab.keyboard.press('ArrowRight');
+        await shotOf(tab, variant, 'keyboard-arrowed-not-chosen');
+        // The focus travelled to the last card, and the answer did not move: an arrow is not a choice.
+        expect(await state()).toEqual({ selected: 'left', focused: 'bottom' });
+        await tab.keyboard.press('ArrowLeft');
+        expect(await state()).toEqual({ selected: 'left', focused: 'right' });
+        await tab.keyboard.press('Enter');
+        expect(await state()).toEqual({ selected: 'right', focused: 'right' });
+        await tab.keyboard.press('ArrowRight');
+        expect(await state()).toEqual({ selected: 'right', focused: 'bottom' });
+        await tab.keyboard.press('Space');
+        expect(await state()).toEqual({ selected: 'bottom', focused: 'bottom' });
+        await shotOf(tab, variant, 'keyboard-chosen');
+      } finally {
+        await close();
+      }
+    });
+  }
+});
 
 describe('ChoiceCards layout', () => {
   it('should put 3 cards in ONE row in an 832px group, each at most 320px', async () => {

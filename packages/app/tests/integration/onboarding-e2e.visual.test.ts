@@ -556,7 +556,8 @@ describe('the first run, end to end', () => {
       );
       await shot(tab, variant, 'claude-code.import-choice');
       await backAndForth(tab, 'onboarding.name', 'claude-code.import-choice');
-      // An arrow key moves the selection and writes nothing: no request, no answer, nothing on the device ledger.
+      // An arrow key moves the FOCUS and writes nothing: no request, no answer, nothing on the device ledger, and the
+      // card is not chosen until Enter (or Space, or a click).
       const before = await daemonOf(tab, A);
       const ledgerBefore = JSON.stringify(await ledgerOf(tab));
       await tab.locator('input[name]:checked, input[type="radio"]:checked').first().focus();
@@ -566,10 +567,16 @@ describe('the first run, end to end', () => {
       expect(after.mutations.length, 'an arrow key sent nothing to the machine').toBe(before.mutations.length);
       expect(after.answers.length, 'an arrow key recorded no answer').toBe(before.answers.length);
       expect(JSON.stringify(await ledgerOf(tab)), 'an arrow key wrote nothing on this device').toBe(ledgerBefore);
-      expect(await tab.locator('label[data-choice="choose"]').getAttribute('data-selected'), 'the arrow moved it').toBe(
+      expect(
+        await tab.locator('label[data-choice="choose"]').getAttribute('data-selected'),
+        'the arrow chose nothing',
+      ).toBe('false');
+      await tab.keyboard.press('Enter');
+      await tab.waitForTimeout(300);
+      expect(await tab.locator('label[data-choice="choose"]').getAttribute('data-selected'), 'Enter chose it').toBe(
         'true',
       );
-      // Item 1 (continued): the arrow key picked Choose, so the count is already 9 on this very page, not a page later.
+      // Item 1 (continued): Enter picked Choose, so the count is already 9 on this very page, not a page later.
       expect(await counterOf(tab), 'Claude: Choose counts all of its pages as soon as it is picked').toBe(
         'Claude Code · page 1 of 9',
       );
@@ -618,7 +625,7 @@ describe('the first run, end to end', () => {
       await next(tab, 'claude-code.permission');
       expect(await recorded(tab, A, 'claude-code.import-run')).toBe('done');
 
-      // Permission: an arrow key moves the card and writes nothing; Keep leaves the default.
+      // Permission: an arrow key moves the focus and writes nothing; Keep leaves the default.
       await reach(tab, 'claude-code.permission');
       walked.push('claude-code.permission');
       await inspect(tab, variant, 'claude-code.permission');
@@ -628,6 +635,13 @@ describe('the first run, end to end', () => {
       await tab.keyboard.press('ArrowUp');
       await tab.waitForTimeout(300);
       expect((await daemonOf(tab, A)).mutations.length, 'an arrow key on Permissions wrote nothing').toBe(permBefore);
+      expect(await tab.getByRole('button', { name: /^Keep / }).count(), 'an arrow key chose no other card').toBe(0);
+      // Enter chooses the focused card; that alone still writes nothing (the page's own Use / Keep does).
+      await tab.keyboard.press('Enter');
+      await tab.waitForTimeout(300);
+      expect((await daemonOf(tab, A)).mutations.length, 'choosing a card on Permissions wrote nothing').toBe(
+        permBefore,
+      );
       await shot(tab, variant, 'claude-code.permission-picked');
       await tab.getByRole('button', { name: /^Keep / }).click();
       await tab.waitForTimeout(300);
@@ -693,8 +707,10 @@ describe('the first run, end to end', () => {
         appearanceBefore,
       );
       expect(await ledgerOf(tab), 'nothing is on the device ledger before Next').toEqual({});
-      // Put the style back, so the pages after it are shot in the look the person had.
+      // Enter chooses the focused style; put the style back, so the pages after it are shot in the look the person had.
+      await tab.keyboard.press('Enter');
       await tab.keyboard.press('ArrowLeft');
+      await tab.keyboard.press('Enter');
       await tab.waitForTimeout(300);
       await next(tab, 'layouts.layout');
       expect(Object.keys(await ledgerOf(tab)), 'Appearance is on the device ledger after Next').toContain(

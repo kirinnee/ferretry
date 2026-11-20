@@ -214,20 +214,28 @@ describe('the start screen', () => {
   });
 
   it('starts nothing on selection: Continue is off until a card is chosen, and the arrow keys only move the choice', async () => {
-    // ChoiceCards fires on arrow keys exactly as a radio group does, so an answer that acted on selection would act for a
-    // person who only pressed an arrow.
+    // An arrow only moves the focus and Enter chooses, so an answer that acted on selection would act only for a person
+    // who chose it.
     const { view } = await pageWith();
     const go = buttonWith(view.container, '[data-onboarding-continue]');
     expect(go.disabled).toBe(true);
 
-    const group = must(view.container.querySelector('[role="radiogroup"]'), 'the cards');
-    await interact(() =>
-      group.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })),
+    const press = (holder: HTMLInputElement, key: string) =>
+      interact(() => holder.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
+    const first = must(
+      view.container.querySelector<HTMLInputElement>('[data-choice-cards] input[tabindex="0"]'),
+      'first',
     );
+    first.focus();
+    await press(first, 'ArrowDown');
+    expect(document.activeElement).toBe(cardOf(view.container, 'add-client'));
+    expect(cardOf(view.container, 'add-client').checked).toBe(false);
+    expect(buttonWith(view.container, '[data-onboarding-continue]').disabled).toBe(true);
+    await press(cardOf(view.container, 'add-client'), 'Enter');
     expect(cardOf(view.container, 'add-client').checked).toBe(true);
-    await interact(() =>
-      group.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })),
-    );
+    await press(cardOf(view.container, 'add-client'), 'ArrowDown');
+    expect(cardOf(view.container, 'add-daemon').checked).toBe(false);
+    await press(cardOf(view.container, 'add-daemon'), 'Enter');
     expect(cardOf(view.container, 'add-daemon').checked).toBe(true);
     // Two arrows later the journey has still not started.
     expect(screenOf(view.container)).toBe('entry');
