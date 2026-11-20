@@ -1,18 +1,24 @@
 /* ============================================================================
-   STYLE — MINIMAL SWISS (the International Typographic Style, quietly).
+   STYLE — MINIMAL SWISS (the International Typographic Style).
 
    HOW it draws, never WHICH colours: any palette fits (the matrix test measures all of them). It earns its row by
-   structure, which survives a greyscale screenshot:
+   structure, which survives a greyscale screenshot, and it is the OPPOSITE of Geist on every axis a Geist page reads
+   by: Geist is rounded, soft and quiet; Swiss is square, flat and typographic.
 
-     1. THE RULE, NOT THE BOX. Regions are separated by a 1px rule and by space; nothing casts a shadow. Panels and
-        controls rest flat; only a popover lifts, by a whisper, so it does not melt into the page it floats over.
-     2. ONE GROTESQUE. Hanken Grotesk (OFL, bundled) for chrome and body alike, set tight (negative tracking), sentence
-        case, flush left. Weight does the hierarchy (400 body, 500 label, 600 head); size stays on a short ramp. Labels
-        are NOT uppercased: Mission and Neo shout, Swiss speaks plainly.
-     3. A SQUARE GRID. A 2px radius everywhere (a corner just softer than a cut), so nothing reads as a pill or a bubble.
-     4. SPACE IS THE ORNAMENT. Roomy, even padding on a 4px grid; gaps are generous so groups separate without borders.
-     5. PRECISE MOTION. Short, linear-ish ease, no overshoot (`--select-pop: 1`): a thing arrives and stops.
-     6. THE FOCUS RING is a crisp 2px line floated 2px off the edge, the same on every control.
+     1. NOTHING IS ROUND. Every radius is 0: buttons, fields, badges, panels, menus and bubbles are plain rectangles on
+        a grid. (Geist: 6-10px.) Nothing casts a shadow either, a popover included; a hard edge does the lifting.
+     2. THE HEAVY RULE. A panel and a field are each topped by a 3px rule in the page ink, the way a Swiss poster sets a
+        bar over a column of text; the rest of the box is a 1px hairline. The rule, not a tint or a blur, is what
+        separates one region from the next. (Geist: a hairline and a surface step.)
+     3. TYPE CARRIES THE HIERARCHY. One grotesque (Hanken Grotesk, OFL, bundled), set LARGE and BOLD for headings
+        (700, tight -0.045em, a steep size ramp) against a plain 14px body, so the jump from head to text is the loudest
+        thing on the page. Labels, eyebrows and badges are small BOLD CAPITALS with wide tracking, the classic Swiss
+        caption. (Geist: one quiet weight and sentence-case labels.)
+     4. BLOCK CONTROLS. Controls are tall, square and wide (36px, 18px of side padding), weight 600, so a button reads as
+        a block set on the grid, not as a pill or a chip. (Geist: 32px, 14px, 500.)
+     5. SPACE IN GROUPS. Tight inside a group, a wide gap between groups: the white space is structural, not even.
+     6. INSTANT MOTION. A change arrives in a blink on a linear curve, with no overshoot (`--select-pop: 1`).
+     7. THE FOCUS RING is a blunt 3px line flush with the edge, the same on every control.
    ============================================================================ */
 :root[data-style='swiss'],
 [data-swatch][data-style='swiss'] {
@@ -21,99 +27,105 @@
   --font-body:
     'Hanken Grotesk', 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
-  --font-size-base: 13.5px;
-  --leading-base: 1.5;
-  --leading-tight: 1.2;
-  --tracking-display: -0.025em;
-  --tracking-body: -0.006em;
-  --tracking-label: 0.005em;
-  --label-transform: none;
+  --font-size-base: 14px;
+  --leading-base: 1.45;
+  --leading-tight: 1.1;
+  --tracking-display: -0.045em;
+  --tracking-body: -0.01em;
+  --tracking-label: 0.14em;
+  --label-transform: uppercase;
   --label-variant: normal;
-  --label-size: 11.5px;
-  --label-weight: 500;
+  --label-size: 10.5px;
+  --label-weight: 700;
   --display-transform: none;
-  --text-2xs: 10.5px;
-  --text-xs: 11.5px;
+  --text-2xs: 10px;
+  --text-xs: 11px;
   --text-sm: 12.5px;
-  --text-base: 13.5px;
-  --text-md: 14.5px;
-  --text-lg: 17px;
-  --text-display: 1.35rem;
+  --text-base: 14px;
+  --text-md: 15.5px;
+  --text-lg: 21px;
+  --text-display: 2.1rem;
   --text-input-desktop: 14px;
   --weight-normal: 400;
-  --weight-medium: 500;
-  --weight-strong: 600;
-  --weight-display: 600;
-  --md-font-size: 14px;
-  --md-leading: 1.6;
+  --weight-medium: 600;
+  --weight-strong: 700;
+  --weight-display: 700;
+  --md-font-size: 14.5px;
+  --md-leading: 1.55;
   --code-font-size: 12.5px;
-  --chrome-font-size: 11.5px;
-  --prose-measure: 68ch;
+  --chrome-font-size: 10.5px;
+  --prose-measure: 62ch;
 
-  /* One small radius, one hairline. */
-  --radius-xs: 1px;
-  --radius-sm: 2px;
-  --radius-md: 2px;
-  --radius-lg: 3px;
-  --radius-control: 2px;
-  --radius-panel: 2px;
-  --radius-badge: 2px;
+  /* Square: no radius anywhere. */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-control: 0px;
+  --radius-panel: 0px;
+  --radius-badge: 0px;
   --radius-tab: 0px;
-  --radius-input: 2px;
+  --radius-input: 0px;
+  --bubble-radius: 0px;
+  --card-tail-radius: 0px;
+  --menu-radius: 0px;
+
+  /* A 1px hairline all round and a 3px ink rule across the top of a panel or a field. */
   --border-width: 1px;
-  --border-width-heavy: 1px;
+  --border-width-heavy: 2px;
   --stroke-control: 1px;
   --stroke-panel: 1px;
   --divider-width: 1px;
-  --divider-color: var(--border);
+  --divider-color: var(--border-strong);
+  --rule-inset: inset 0 3px 0 0 var(--fg);
   --bubble-stroke: 1px;
-  --bubble-radius: 2px;
-  --bubble-border: var(--border);
-  --bubble-shadow: none;
-  --card-tail-radius: 2px;
-  --card-shadow: none;
+  --bubble-border: var(--border-strong);
+  --card-border: var(--border-strong);
 
-  /* Flat: the rule does the work. A popover alone lifts a hair so it separates from what is behind it. */
+  /* Flat: no shadow at all, a popover included (its edge is already a 3:1 control edge). */
   --shadow-sm: none;
   --shadow-md: none;
-  --shadow-lg: 0 8px 24px -12px var(--shadow-lg-2);
+  --shadow-lg: none;
   --shadow-control: none;
-  --shadow-panel: none;
-  --shadow-popover: var(--shadow-lg);
+  /* `.kt-panel` lists `--shadow-panel, --rule-inset`: a bare `none` there voids the whole declaration (and the rule with it). */
+  --shadow-panel: 0 0 0 0 transparent;
+  --shadow-popover: none;
   --shadow-active: none;
+  --bubble-shadow: none;
+  --card-shadow: none;
   --press-translate: 0px;
   --rail-active: none;
   --nav-sel-shadow: none;
   --control-transform: none;
-  --tab-underline-width: 2px;
-  --menu-item-h: 32px;
-  --menu-radius: 2px;
+  --tab-underline-width: 3px;
+  --menu-item-h: 34px;
 
-  /* Roomy and even, on the 4px grid. */
-  --control-h-desktop: 30px;
-  --control-h-sm-desktop: 26px;
-  --row-min-h-desktop: 38px;
-  --pad-control-x: 14px;
+  /* Block controls, tight inside a group and wide between groups. */
+  --control-h-desktop: 36px;
+  --control-h-sm-desktop: 28px;
+  --row-min-h-desktop: 40px;
+  --pad-control-x: 18px;
   --pad-badge-x: 8px;
-  --pad-panel: 16px;
-  --pad-row-y: 8px;
-  --pad-cell-x: 12px;
-  --gap-xs: 6px;
-  --gap-sm: 10px;
-  --gap-md: 16px;
-  --flow-3: 14px;
-  --flow-4: 20px;
-  --flow-5: 32px;
+  --pad-panel: 20px;
+  --pad-row-y: 10px;
+  --pad-cell-x: 14px;
+  --gap-xs: 4px;
+  --gap-sm: 8px;
+  --gap-md: 20px;
+  --flow-2: 6px;
+  --flow-3: 12px;
+  --flow-4: 24px;
+  --flow-5: 40px;
 
-  /* Precise: quick, no overshoot, no pop. */
-  --motion-fast: 90ms;
-  --motion-base: 160ms;
-  --motion-slow: 260ms;
-  --ease-standard: cubic-bezier(0.25, 0, 0.1, 1);
-  --ease-emphasis: cubic-bezier(0.25, 0, 0.1, 1);
+  /* Instant and linear: it arrives and stops. */
+  --motion-fast: 50ms;
+  --motion-base: 90ms;
+  --motion-slow: 140ms;
+  --ease-standard: linear;
+  --ease-emphasis: linear;
   --select-pop: 1;
-  --focus-width: 2px;
-  --focus-offset: 2px;
+  --focus-width: 3px;
+  --focus-offset: 0px;
   --glow-alpha: 0;
 }
 
@@ -123,9 +135,9 @@
     --text-xs: 13px;
     --text-sm: 14.5px;
     --text-base: 15.5px;
-    --text-md: 16.5px;
-    --text-lg: 19px;
-    --text-display: 1.55rem;
-    --label-size: 12.5px;
+    --text-md: 17px;
+    --text-lg: 23px;
+    --text-display: 2.2rem;
+    --label-size: 12px;
   }
 }
