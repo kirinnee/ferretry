@@ -65,12 +65,13 @@ describe('the conversations page', () => {
     expect(run.events).toEqual(['ready']);
   });
 
-  it('a pick writes nothing and holds Next; only "Use …" writes, one key, against the etag it read', async () => {
+  it('a pick writes nothing and holds nothing (Back and Later stay free); only "Use …" writes, one key, against the etag it read', async () => {
     const calls: Call[] = [];
     const { view, run } = await open(FILE, calls);
     await click(view, 'input[value="off"]');
     expect(calls.map(call => call.route)).toEqual(['GET /v1/config/file']);
-    expect(run.events.at(-1)).toBe('busy:Press “Use …” or “Keep …” to continue');
+    expect(run.events).toEqual(['ready']);
+    expect(view.container.querySelector('[data-conversations-confirm]')?.textContent).toContain('Next keeps');
     await click(view, '[data-conversations-confirm] button');
     await settle();
     expect(calls.find(call => call.route === 'PUT /v1/config/file')?.init?.body).toEqual({
@@ -88,7 +89,7 @@ describe('the conversations page', () => {
     const buttons = view.container.querySelectorAll<HTMLButtonElement>('[data-conversations-confirm] button');
     await interact(() => must(buttons[1], 'keep').click());
     expect(calls.map(call => call.route)).toEqual(['GET /v1/config/file']);
-    expect(run.events.slice(-2)).toEqual(['busy:null', 'done']);
+    expect(run.events.slice(-2)).toEqual(['ready', 'done']);
   });
 
   it('an unreadable file says so and writes nothing', async () => {

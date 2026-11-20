@@ -1,0 +1,255 @@
+/**
+ * The Claude import pages inside the REAL setup flow (Onboarding's `createSetupFlow` / `FlowPage`), over a fake machine.
+ * What is asserted is what the person can do: a skip is irreversible in the flow, so no page whose relevance depends on a
+ * choice that Back can change may skip; Back and Later are never held by a page that only waits for input; and a run
+ * that lost its memory in a reload still imports selectively. The flow screen is Onboarding's own (a tests-only carve-out in
+ * `context-imports`); the pages are this plugin's own panels.
+ */
+import { afterEach, describe, expect, test } from 'bun:test';
+import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
+import { type ComponentType, Suspense, type ReactNode } from 'react';
+import onboardingApp from '@ferretry/plugin-onboarding/app';
+import onboardingManifest from '@ferretry/plugin-onboarding/manifest';
+import app from '../../../../app/index.ts';
+import manifest from '../../../../manifest.ts';
+import { importRoutes, scanOf } from '../../../fixtures/onboarding/scan.ts';
+import {
+  deviceViewHarness,
+  ensureDom,
+  fakeReachRow,
+  interact,
+  type Mounted,
+  mount,
+  must,
+  noteClientDaemon,
+  type PlacedPanel,
+  WithSlotPanels,
+} from '@ferretry/app/testing';
+
+ensureDom();
+
+const DAEMON = 'fy_daemon_a';
+const IDS = [
+  'import-choice',
+  'import-settings',
+  'import-model-set',
+  'import-instructions',
+  'import-skills',
+  'import-mcp',
+  'conversations',
+  'import-run',
+] as const;
+
+interface Wire {
+  readonly route: string;
+  readonly body?: unknown;
+}
+
+function machineWith(options: { readonly answered?: readonly string[]; readonly refuse?: boolean }) {
+  const wire: Wire[] = [];
+  const steps = (manifest.onboarding ?? [])
+    .filter(step => (IDS as readonly string[]).includes(step.id))
+    .map(step => ({
+      plugin: 'claude-code',
+      id: step.id,
+      title: step.title,
+      order: step.order,
+      side: 'daemon',
+      group: 'Claude Code',
+      stepHost: true,
+      state: options.answered?.includes(step.id) === true ? 'done' : 'pending',
+    }));
+  const table: Record<string, unknown> = {
+    ...importRoutes(scanOf()),
+    'GET /v1/config/file': { text: 'binary: /fake/bin/claude\n', etag: 'e1' },
+    ...(options.refuse === true
+      ? {
+          'POST /v1/runtimes/proposals': () => {
+            throw new Error('This machine is busy.');
+          },
+        }
+      : {}),
+  };
+  const client = {
+    async call(route: string, request?: { body?: unknown }) {
+      wire.push({ route, ...(request?.body === undefined ? {} : { body: request.body }) });
+      if (route === 'GET /v1/onboarding') return { steps, complete: false, setUp: false };
+      if (route.startsWith('POST /v1/onboarding')) return {};
+      if (!(route in table)) throw new Error(`no route ${route}`);
+      const answer = table[route];
+      return typeof answer === 'function' ? (answer as (call: unknown) => unknown)(request ?? {}) : answer;
+    },
+    subscribe: () => () => undefined,
+  } as unknown as PluginClient;
+  noteClientDaemon(client, DAEMON);
+  return { client, wire };
+}
+
+let view: Mounted | undefined;
+afterEach(async () => {
+  await view?.unmount();
+  view = undefined;
+});
+
+/** The real flow screen, with the real Claude pages placed in the `onboarding.step` slot. */
+async function openFlow(options: { readonly answered?: readonly string[]; readonly refuse?: boolean } = {}) {
+  const { client, wire } = machineWith(options);
+  const harness = deviceViewHarness({ plugin: 'onboarding', fragments: [] });
+  harness.setRows([fakeReachRow({ daemon: DAEMON, machine: 'Studio', client })]);
+  const built = must(app.build?.({ manifest, client } as never), 'the claude-code app half');
+  const panels = (manifest.ui?.panels ?? [])
+    .filter(panel => panel.slot === 'onboarding.step')
+    .map(
+      (panel): PlacedPanel => ({
+        plugin: 'claude-code',
+        id: panel.id,
+        view: props => {
+          const Page = (built.panels as Record<string, unknown>)[panel.id] as ComponentType<PanelProps>;
+          return <Page {...(props as PanelProps)} />;
+        },
+      }),
+    );
+  const onboardingScreens = must(
+    onboardingApp.build?.({ manifest: onboardingManifest, client } as never)?.screens,
+    'the onboarding screens',
+  ) as Record<string, unknown>;
+  const Flow = must(onboardingScreens.flow, 'the flow screen') as ComponentType;
+  const tree: ReactNode = (
+    <harness.Harness place="daemon">
+      <WithSlotPanels slots={{ 'onboarding.step': panels }}>
+        <Suspense fallback={null}>
+          <Flow />
+        </Suspense>
+      </WithSlotPanels>
+    </harness.Harness>
+  );
+  view = await mount(tree);
+  await settle();
+  return { wire };
+}
+
+const settle = async (): Promise<void> => {
+  await interact(async () => {
+    for (let turn = 0; turn < 40; turn += 1) await new Promise(resolve => setTimeout(resolve, 0));
+  });
+};
+const root = (): HTMLElement => must(view, 'a mounted flow').container;
+const press = async (selector: string): Promise<void> => {
+  await interact(() => must(root().querySelector<HTMLElement>(selector), selector).click());
+  await settle();
+};
+const pageKey = (): string | null | undefined =>
+  root().querySelector('[data-flow-page]')?.getAttribute('data-flow-page');
+const pageOf = (id: string): string => `claude-code.${id}`;
+const next = () => press('[data-step-next]');
+const back = () => press('[data-step-back]');
+const items = (): string[] =>
+  [...root().querySelectorAll('[data-found-item]')].map(node => node.getAttribute('data-found-item') ?? '');
+const disabled = (selector: string): boolean =>
+  must(root().querySelector<HTMLButtonElement>(selector), selector).disabled;
+const proposals = (wire: readonly Wire[]) => wire.filter(call => call.route === 'POST /v1/runtimes/proposals');
+
+describe('the Claude import pages inside the real setup flow', () => {
+  test('(a) Everything → Conversations → Back → Choose still reaches the one-by-one pages', async () => {
+    await openFlow();
+    expect(pageKey()).toBe(pageOf('import-choice'));
+    await next(); // the default card is "Import everything"
+    for (const id of ['import-settings', 'import-model-set', 'import-instructions', 'import-skills', 'import-mcp']) {
+      expect(pageKey()).toBe(pageOf(id));
+      expect(root().querySelector('[data-import-included="everything"]')).not.toBeNull();
+      await next();
+    }
+    expect(pageKey()).toBe(pageOf('conversations'));
+    for (let step = 0; step < 6; step += 1) await back();
+    expect(pageKey()).toBe(pageOf('import-choice'));
+    await press('input[value="choose"]');
+    await next();
+    expect(pageKey()).toBe(pageOf('import-settings'));
+    expect(items()).toContain('claude-code:settings');
+  });
+
+  test('"Start fresh" keeps the final page in the run, saying it is not needed, so Back can still change it', async () => {
+    await openFlow();
+    await press('input[value="fresh"]');
+    for (let step = 0; step < 7; step += 1) await next();
+    expect(pageKey()).toBe(pageOf('import-run'));
+    expect(root().querySelector('[data-import-fresh]')).not.toBeNull();
+    await back();
+    await back();
+    expect(pageKey()).toBe(pageOf('import-mcp'));
+  });
+
+  test('(b) after a reload mid-run, a left-out MCP server is in the skip list the import sends', async () => {
+    // The machine already recorded the earlier pages, so the run resumes at MCP with no memory of the choice.
+    await openFlow({
+      answered: ['import-choice', 'import-settings', 'import-model-set', 'import-instructions', 'import-skills'],
+    }).then(async ({ wire }) => {
+      expect(pageKey()).toBe(pageOf('import-mcp'));
+      expect(root().querySelector('[data-import-lost]')).not.toBeNull();
+      await press('[data-found-item="claude-code:mcp:issues"] input');
+      await next(); // conversations
+      await next(); // the final page
+      expect(pageKey()).toBe(pageOf('import-run'));
+      await press('input[value="everything"]');
+      await press('.cc-actions button');
+      const [sent] = proposals(wire).map(call => call.body as { change: { skip?: string[] } });
+      expect(sent?.change.skip).toEqual(['claude-code:mcp:issues']);
+    });
+  });
+
+  test('(c) Back and Later stay enabled on the final page before any write and after a refusal', async () => {
+    const { wire } = await openFlow({
+      answered: [
+        'import-choice',
+        'import-settings',
+        'import-model-set',
+        'import-instructions',
+        'import-skills',
+        'import-mcp',
+      ],
+      refuse: true,
+    });
+    expect(pageKey()).toBe(pageOf('conversations'));
+    await next();
+    expect(pageKey()).toBe(pageOf('import-run'));
+    expect(disabled('[data-step-back]')).toBe(false);
+    expect(disabled('[data-flow-later]')).toBe(false);
+    await press('input[value="everything"]');
+    await press('.cc-actions button');
+    expect(proposals(wire)).toHaveLength(1);
+    expect(root().querySelector('[data-import-refusal]')?.textContent).toContain('busy');
+    expect(disabled('[data-step-back]')).toBe(false);
+    expect(disabled('[data-flow-later]')).toBe(false);
+  });
+
+  test('(c) a pick waiting for its press on Conversations holds neither Back nor Later', async () => {
+    await openFlow({
+      answered: ['import-choice', 'import-settings', 'import-model-set', 'import-instructions', 'import-skills'],
+    });
+    await next(); // MCP → conversations
+    expect(pageKey()).toBe(pageOf('conversations'));
+    await press('input[value="off"]');
+    expect(root().querySelector('[data-conversations-confirm]')).not.toBeNull();
+    expect(disabled('[data-step-back]')).toBe(false);
+    expect(disabled('[data-flow-later]')).toBe(false);
+  });
+
+  test('(d) leaving Settings out and bringing it back with Back keeps the Models page', async () => {
+    await openFlow();
+    await press('input[value="choose"]');
+    await next();
+    expect(pageKey()).toBe(pageOf('import-settings'));
+    await press('[data-found-item="claude-code:settings"] input'); // leave Settings out
+    await next();
+    expect(pageKey()).toBe(pageOf('import-model-set'));
+    expect(root().querySelector('[data-needs-settings]')).not.toBeNull();
+    expect(items()).toEqual([]);
+    await back();
+    expect(pageKey()).toBe(pageOf('import-settings'));
+    await press('[data-found-item="claude-code:settings"] input'); // bring it back
+    await next();
+    expect(pageKey()).toBe(pageOf('import-model-set'));
+    expect(root().querySelector('[data-needs-settings]')).toBeNull();
+    expect(items().length).toBeGreaterThan(0);
+  });
+});

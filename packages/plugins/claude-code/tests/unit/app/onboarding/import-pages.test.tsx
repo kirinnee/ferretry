@@ -60,10 +60,14 @@ const writes = (calls: readonly Call[]): Call[] =>
 
 describe('each kind page decides for itself', () => {
   for (const kind of KINDS) {
-    it(`${kind}: skips on "everything" and on "fresh", and shows on "choose"`, async () => {
+    it(`${kind}: on "everything" and on "fresh" it STAYS (a skip is irreversible) and says why; it shows on "choose"`, async () => {
       for (const importMode of ['everything', 'fresh']) {
-        const { run } = await open(PAGES[kind], { importMode });
-        expect(run.events).toEqual(['skip:not-needed']);
+        const { run, view } = await open(PAGES[kind], { importMode });
+        expect(run.events).toEqual(['ready']);
+        expect(view.container.querySelector('[data-import-included]')?.getAttribute('data-import-included')).toBe(
+          importMode,
+        );
+        expect(view.container.querySelector('[data-found-item]')).toBeNull();
       }
       const { run, view } = await open(PAGES[kind], { importMode: 'choose' });
       expect(run.events).toEqual(['ready']);
@@ -85,10 +89,12 @@ describe('each kind page decides for itself', () => {
     }
   });
 
-  it('skips the model set when its settings were left out', async () => {
+  it('the model set stays when its settings were left out, and says the models come from the settings', async () => {
     const left = JSON.stringify([importItemId('claude-code', 'settings')]);
-    const { run } = await open(PAGES['model-set'], { importMode: 'choose', 'skip:settings': left });
-    expect(run.events).toEqual(['skip:not-needed']);
+    const { run, view } = await open(PAGES['model-set'], { importMode: 'choose', 'skip:settings': left });
+    expect(run.events).toEqual(['ready']);
+    expect(view.container.querySelector('[data-needs-settings]')).not.toBeNull();
+    expect(view.container.querySelector('[data-found-item]')).toBeNull();
   });
 
   it('skips when Claude Code is not installed (the scan has nothing of it)', async () => {
@@ -143,7 +149,7 @@ const proposals = (calls: readonly Call[]) => calls.filter(call => call.route ==
 describe('the import run', () => {
   it('"everything" is the only import page: it sends one setup.import with nothing left out', async () => {
     const { view, run, calls } = await open(ImportRunPage, { importMode: 'everything' });
-    expect(run.events).toEqual(['ready', 'busy:Press “Import” or “Skip the import” to continue']);
+    expect(run.events).toEqual(['ready']);
     expect(proposals(calls)).toHaveLength(0);
     await click(view, '.cc-actions button');
     await settle();
@@ -182,9 +188,11 @@ describe('the import run', () => {
     expect(JSON.stringify(sent)).not.toContain('hook');
   });
 
-  it('"fresh" skips the page and sends nothing', async () => {
-    const { run, calls } = await open(ImportRunPage, { importMode: 'fresh' });
-    expect(run.events).toEqual(['skip:not-needed']);
+  it('"fresh" stays in the run, says it is not needed, and sends nothing', async () => {
+    const { run, calls, view } = await open(ImportRunPage, { importMode: 'fresh' });
+    expect(run.events).toEqual(['ready']);
+    expect(view.container.querySelector('[data-import-fresh]')).not.toBeNull();
+    expect(view.container.querySelector('.cc-actions button')).toBeNull();
     expect(writes(calls)).toEqual([]);
   });
 
@@ -197,6 +205,25 @@ describe('the import run', () => {
       ),
     );
     expect(run.events).toEqual(['skip:not-needed']);
+  });
+
+  it('after a reload the import is SELECTIVE: what the kind pages unticked since is in the proposal skip list', async () => {
+    const mcp = await open(McpPage, {});
+    await click(mcp.view, '[data-found-item="claude-code:mcp:issues"] input');
+    const run = await open(ImportRunPage, mcp.run.step.segment);
+    await click(run.view, 'input[value="everything"]');
+    expect(run.view.container.querySelector('[data-import-count]')?.textContent).toContain('leaving out 1');
+    await click(run.view, '.cc-actions button');
+    await settle();
+    const [sent] = proposals(run.calls).map(call => call.init?.body as { change: { skip?: string[] } });
+    expect(sent?.change.skip).toEqual(['claude-code:mcp:issues']);
+  });
+
+  it('the run never holds the footer before a write: busy is only for the request in flight', async () => {
+    const { run } = await open(ImportRunPage, { importMode: 'choose' });
+    expect(run.events).toEqual(['ready']);
+    const lost = await open(ImportRunPage, {});
+    expect(lost.run.events).toEqual(['ready']);
   });
 
   it('after a reload it asks again; picking a card (arrow keys included) sends nothing; only Import does', async () => {
@@ -220,17 +247,17 @@ describe('the import run', () => {
     const buttons = view.container.querySelectorAll<HTMLButtonElement>('.cc-actions button');
     await interact(() => must(buttons[1], 'skip').click());
     expect(writes(calls)).toEqual([]);
-    expect(run.events.slice(-2)).toEqual(['busy:null', 'done']);
+    expect(run.events.slice(-2)).toEqual(['ready', 'done']);
   });
 
-  it('a refused import shows the reason, keeps Next held, and can be tried again', async () => {
+  it('a refused import shows the reason, frees the footer, and can be tried again', async () => {
     const routes = importRoutes(scanOf());
     routes['POST /v1/runtimes/proposals'] = new Error('This machine is busy.');
     const { view, run } = await open(ImportRunPage, { importMode: 'everything' }, routes);
     await click(view, '.cc-actions button');
     await settle();
     expect(view.container.querySelector('[data-import-refusal]')?.textContent).toContain('busy');
-    expect(run.events.at(-1)).toBe('busy:Press “Import” or “Skip the import” to continue');
+    expect(run.events.at(-1)).toBe('busy:null');
     expect(run.events).not.toContain('done');
   });
 

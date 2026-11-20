@@ -4,8 +4,8 @@
  * only when the person continues it here. Turning it off stops the READING and deletes nothing in `~/.claude`.
  *
  * A pick is NOT a write (ChoiceCards moves AND selects on the arrow keys): the page says what the pick means and offers one
- * explicit "Use …" press that writes; while a pick differs from what is saved it holds `busy`, so Next cannot record
- * "done" over a daemon still on the old value. It writes exactly one key. The same shape as the permission page.
+ * explicit "Use …" press that writes. `busy` is held only while that write is in flight; a pick waiting for its press holds
+ * nothing (Back and Later stay free), and the page says Next keeps what is saved now. It writes exactly one key.
  */
 import { Button, ChoiceCards, type ChoiceOption } from '@ferretry/app';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -39,7 +39,6 @@ const OPTIONS: readonly ChoiceOption[] = [
 ];
 const USE: Readonly<Record<Choice, string>> = { on: 'Use: show them here', off: 'Use: don’t show them' };
 const KEEP: Readonly<Record<Choice, string>> = { on: 'Keep showing them', off: 'Keep them hidden' };
-const HOLD = 'Press “Use …” or “Keep …” to continue';
 
 interface Loaded {
   readonly text: string;
@@ -53,7 +52,6 @@ export function ConversationsPage({ client, step }: StepPageProps<ClaudeCodeClie
   const [note, setNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const file = useRef<Loaded | null>(null);
-  const holding = useRef<boolean | null>(false);
 
   const load = useCallback(async (): Promise<void> => {
     try {
@@ -84,20 +82,10 @@ export function ConversationsPage({ client, step }: StepPageProps<ClaudeCodeClie
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (saving || saved === null) return;
-    const want = saved !== 'unknown' && picked !== null && picked !== saved;
-    if (holding.current === want) return;
-    holding.current = want;
-    step?.busy(want ? HOLD : null);
-  }, [saving, saved, picked, step]);
-
   const keep = (): void => {
     if (saved === null || saved === 'unknown') return;
     setNote(null);
     setPicked(saved);
-    holding.current = false;
-    step?.busy(null);
     step?.done();
   };
 
@@ -109,7 +97,6 @@ export function ConversationsPage({ client, step }: StepPageProps<ClaudeCodeClie
     }
     const loaded = file.current;
     setSaving(true);
-    holding.current = null;
     step?.busy('Saving…');
     try {
       const text = withHostHistory(loaded.text, next === 'on');
@@ -124,6 +111,7 @@ export function ConversationsPage({ client, step }: StepPageProps<ClaudeCodeClie
       file.current = null;
     } finally {
       setSaving(false);
+      step?.busy(null);
     }
   };
 
@@ -149,7 +137,7 @@ export function ConversationsPage({ client, step }: StepPageProps<ClaudeCodeClie
           {picked !== null && picked !== saved ? (
             <div className="cc-confirm" data-conversations-confirm="">
               <p className="cc-step__line" role="note">
-                Nothing is saved until you press the button.
+                Nothing is saved until you press the button. Next keeps what is saved now.
               </p>
               <div className="cc-actions">
                 <Button variant="primary" disabled={saving} onClick={() => void choose(picked)}>
