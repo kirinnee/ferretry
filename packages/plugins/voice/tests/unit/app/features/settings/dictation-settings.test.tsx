@@ -71,6 +71,12 @@ const reveal = async (container: HTMLElement): Promise<void> => {
   }
 };
 
+/** The short list hides the large Parakeet 0.6B; one press shows every engine. */
+const showEveryEngine = async (container: HTMLElement): Promise<void> =>
+  await interact(() =>
+    must(container.querySelector<HTMLButtonElement>('[data-engine-show-all]'), 'show every engine').click(),
+  );
+
 const engineSection = (container: HTMLElement): HTMLElement =>
   must(container.querySelector('[data-engine-section]'), 'the voice engine section');
 
@@ -131,10 +137,10 @@ describe('<DictationSettings>', () => {
     const section = engineSection(view.container);
     for (const model of ON_DEVICE_MODELS) {
       expect(section.querySelector(`[data-engine="${model.id}"]`)).not.toBeNull();
-      expect(radio(view.container, model.id).checked).toBe(false);
+      expect(radio(view.container, model.id).checked).toBe(model.id === 'parakeet-tdt-110m');
     }
     expect(section.querySelector('[data-engine="browser"]')?.textContent).toContain('Not on device');
-    // Nobody has chosen yet: no radio is set, and the screen names what this device dictates with meanwhile.
+    // Nobody has chosen yet: Parakeet 110M reads as selected, and the screen names what this device dictates with meanwhile.
     expect(radio(view.container, 'parakeet').checked).toBe(false);
     expect(radio(view.container, 'browser').checked).toBe(false);
     expect(section.textContent).toContain(defaultEngineNote('computer'));
@@ -159,6 +165,7 @@ describe('<DictationSettings>', () => {
   it('reads Parakeet from the app store, and says so when there is none', async () => {
     // Outside a store (this suite) the on-device engine is honestly unavailable, never a crash.
     const view = await mount(<DictationSettings {...settingsProps()} />);
+    await showEveryEngine(view.container);
     expect(engineSection(view.container).textContent).toContain('Parakeet is not available in this copy of Ferretry.');
     await view.unmount();
   });
@@ -166,6 +173,7 @@ describe('<DictationSettings>', () => {
   it('records the chosen engine through the one update port', async () => {
     const patches: SttSettingsPatch[] = [];
     const view = await mount(<DictationSettings {...settingsProps({ update: patch => patches.push(patch) })} />);
+    await showEveryEngine(view.container);
     // A card that cannot work here (Parakeet, outside a store) cannot be chosen (r10 O15): its radio is disabled.
     expect(radio(view.container, 'parakeet').disabled).toBe(true);
     await interact(() => radio(view.container, 'browser').click());

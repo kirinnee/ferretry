@@ -69,11 +69,17 @@ describe('<VoiceStep>', () => {
     const view = await mount(<VoiceStep {...voiceProps({ step: host })} />);
     expect(view.container.querySelector('h2')?.textContent).toBe(VOICE_STEP_TITLE);
     expect(calls).toEqual(['ready']);
-    expect(engines(view.container)).toEqual(['parakeet', 'sherpa-zipformer-en', 'moonshine-base-en', 'browser', 'off']);
+    expect(engines(view.container)).toEqual([
+      'parakeet-tdt-110m',
+      'sherpa-zipformer-en',
+      'moonshine-base-en',
+      'browser',
+      'off',
+    ]);
     await view.unmount();
   });
 
-  it('puts the phone’s own default first on a phone', async () => {
+  it('puts Parakeet 110M first on a phone, as it does on a computer', async () => {
     const view = await mount(<VoiceStep {...voiceProps({ deviceClass: 'phone' })} />);
     expect(engines(view.container)[0]).toBe('parakeet-tdt-110m');
     await view.unmount();

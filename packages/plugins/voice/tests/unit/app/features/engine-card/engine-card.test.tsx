@@ -256,7 +256,8 @@ describe('<EngineCardGrid>', () => {
     expect(card(phone.container, 'parakeet').textContent).not.toContain('Default');
     await phone.unmount();
     const computer = await mount(<EngineCardGrid {...gridProps({ deviceClass: 'computer' })} />);
-    expect(card(computer.container, 'parakeet').textContent).toContain('Default');
+    expect(card(computer.container, 'parakeet-tdt-110m').textContent).toContain('Default');
+    expect(card(computer.container, 'parakeet').textContent).not.toContain('Default');
     await computer.unmount();
   });
 

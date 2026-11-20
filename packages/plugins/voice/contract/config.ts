@@ -47,6 +47,8 @@ export const VoiceConfigSchema = z.strictObject({
   /**
    * The speech engine a device paired to this machine uses until that device picks its own (New machine
    * setup's Voice step writes it). Transcription always runs ON the device; this only names the default.
+   * `parakeet` means "Parakeet on this device": every device resolves it to Parakeet TDT 110M (a person's own pick
+   * in Settings › Voice always wins); `browser` is the browser's own recognition.
    */
   defaultEngine: VoiceEngineSchema.optional(),
   postProcessing: z

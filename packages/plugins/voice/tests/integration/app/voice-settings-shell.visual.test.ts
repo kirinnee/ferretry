@@ -347,4 +347,44 @@ describe('Voice settings in the real Settings shell', () => {
       await close();
     }
   });
+
+  // r11 S5 (the owner: "voice default to parakeet 110M"): a device that has never chosen an engine shows Parakeet 110M
+  // selected, on a computer and on a phone; a device that chose one keeps it, even the bigger Parakeet.
+  for (const viewport of [VIEWPORTS[1], VIEWPORTS[2]])
+    it(`${viewport.name}: a fresh device has Parakeet 110M selected, and a stored pick is kept`, async () => {
+      const device = viewport.phone ? 'phone' : 'computer';
+      const fresh = await open(viewport, 'light', 'voice', `&engine=none&device=${device}`);
+      try {
+        await fresh.page.waitForSelector('.fy-engine-card');
+        const checked = await fresh.page.evaluate(() =>
+          [...document.querySelectorAll<HTMLInputElement>('.fy-engine-card input[type="radio"]')]
+            .filter(radio => radio.checked)
+            .map(radio => radio.closest<HTMLElement>('.fy-engine-card')?.dataset['engine'] ?? ''),
+        );
+        expect(checked, 'exactly the 110M card is selected').toEqual(['parakeet-tdt-110m']);
+        expect(await fresh.page.locator('.fy-engine-card[data-engine="parakeet-tdt-110m"]').innerText()).toContain(
+          'Parakeet 110M',
+        );
+      } finally {
+        await fresh.close();
+      }
+      for (const [pick, label] of [
+        ['parakeet', 'Parakeet'],
+        ['sherpa-zipformer-en', 'Zipformer'],
+      ] as const) {
+        const stored = await open(viewport, 'light', 'voice', `&engine=${pick}&device=${device}`);
+        try {
+          await stored.page.waitForSelector('.fy-engine-card');
+          if (pick === 'parakeet') await stored.page.getByRole('button', { name: /Show every engine/u }).click();
+          const checked = await stored.page.evaluate(() =>
+            [...document.querySelectorAll<HTMLInputElement>('.fy-engine-card input[type="radio"]')]
+              .filter(radio => radio.checked)
+              .map(radio => radio.closest<HTMLElement>('.fy-engine-card')?.dataset['engine'] ?? ''),
+          );
+          expect(checked, `${label} stays the pick`).toEqual([pick]);
+        } finally {
+          await stored.close();
+        }
+      }
+    });
 });

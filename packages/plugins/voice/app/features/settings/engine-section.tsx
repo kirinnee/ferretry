@@ -121,7 +121,8 @@ export function EngineSection({
   const voiceFor = (model: OnDeviceModel): OnDeviceVoice | null =>
     model.id === 'parakeet' && parakeet !== undefined ? parakeet : (voices?.get(model.id) ?? null);
   const onDevice = isOnDeviceEngine(value);
-  // The engine Try it uses: the chosen one, or the one this device dictates with until it chooses.
+  // The engine Try it uses, and the card shown as selected: the chosen one, or the one this device dictates with until it
+  // chooses (Parakeet 110M). Nothing is written until a card is pressed.
   const trialEngine = value ?? DEFAULT_ON_DEVICE_ENGINE[deviceClass];
   const trialModel = models.find(model => model.id === trialEngine);
   const trialVoice = trialModel === undefined ? null : voiceFor(trialModel);
@@ -141,7 +142,7 @@ export function EngineSection({
       >
         <div className="fy-vs-body fy-vs-engines" data-engine-section="">
           <EngineCardGrid
-            value={value}
+            value={trialEngine}
             onChoose={choice => {
               if (choice !== 'off') onChange(choice);
             }}

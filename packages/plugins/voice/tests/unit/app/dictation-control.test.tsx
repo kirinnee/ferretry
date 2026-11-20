@@ -686,7 +686,7 @@ describe('<DictationControl> names the engine that will listen', () => {
         <DictationControl {...controlProps({ settings: settingsWith({ engine: null }), deviceClass: 'computer' })} />
       </StoreProvider>,
     );
-    expect(micButton(computer.container).getAttribute('title')).toContain('Parakeet transcribes on this device');
+    expect(micButton(computer.container).getAttribute('title')).toContain('Parakeet 110M transcribes on this device');
     await computer.unmount();
   });
 });
@@ -704,11 +704,6 @@ const voicesStore = (): AppStore => {
 };
 
 describe('<DictationControl> machine default engine', () => {
-  const parakeetStore = () => {
-    const voice = { support: { available: true } } as unknown as ParakeetVoice;
-    return { voice, carrier: { fetch: async () => new Response() } } as unknown as AppStore;
-  };
-
   const machineClient = (text: string, reads: string[]) => async () =>
     ({
       request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
@@ -739,13 +734,15 @@ describe('<DictationControl> machine default engine', () => {
   it("dictates with the machine's default engine when this device has picked none", async () => {
     const reads: string[] = [];
     const view = await mount(
-      <StoreProvider store={parakeetStore()}>
+      <StoreProvider store={voicesStore()}>
         <DaemonClientProvider client={machineClient('defaultEngine: parakeet\n', reads)}>
           <DictationControl {...controlProps({ settings: settingsWith({ engine: null }) })} />
         </DaemonClientProvider>
       </StoreProvider>,
     );
-    expect(await settledTitle(view.container, 'Parakeet transcribes on this device')).not.toContain('Choose a voice');
+    expect(await settledTitle(view.container, 'Parakeet 110M transcribes on this device')).not.toContain(
+      'Choose a voice',
+    );
     expect(reads).toEqual(['/v1/config/file?path=voice.yaml']);
     await view.unmount();
   });

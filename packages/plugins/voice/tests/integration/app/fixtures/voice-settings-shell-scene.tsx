@@ -8,7 +8,8 @@
  *   /d/ws/settings/voice/voice-cleanup    Voice clean-up (the machine's prompts)
  *   /d/ws/settings/voice/speedups         Speed-ups (the machine's keys)
  *   ?style=off|fix|polish   the machine's saved clean-up style (default: fix)
- *   ?theme=<family>-<mode>   ?engine=<id>   the chosen engine (default: sherpa-zipformer-en)   ?off=1  dictation off
+ *   ?theme=<family>-<mode>   ?engine=<id>|none   the chosen engine (default: sherpa-zipformer-en; none = a fresh device)   ?off=1  dictation off
+ *   ?device=phone|computer   the device class the page reports (default: computer)
  *
  * The shell is the real one, so the panel is as wide as a person gets it: at a 768 px window the settings list stands
  * ABOVE the panel and the panel is at least 480 px wide (it was about 212 px when the list sat beside it).
@@ -40,7 +41,8 @@ import { DeviceSpeedupKeys } from '../../../../app/lib/stt/speedup-keys.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
-const engine = (params.get('engine') ?? 'sherpa-zipformer-en') as DictationEngineId;
+const engineParam = params.get('engine') ?? 'sherpa-zipformer-en';
+const engine = (engineParam === 'none' ? null : engineParam) as DictationEngineId | null;
 const off = params.get('off') === '1';
 
 class FakeStore implements ModelInstaller {
@@ -82,7 +84,7 @@ const voices = new OnDeviceVoices(
 );
 await voices.refresh();
 
-const deviceClass: DeviceClass = 'computer';
+const deviceClass: DeviceClass = params.get('device') === 'phone' ? 'phone' : 'computer';
 const AVAILABLE = { available: true, availability: 'available', implementation: 'standard' } as const;
 
 /** The device keys' own vault, in memory: a saved Groq key ends in "ab", Cerebras has none. */
