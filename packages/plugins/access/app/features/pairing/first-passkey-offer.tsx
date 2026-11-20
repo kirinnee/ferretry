@@ -148,7 +148,7 @@ export function FirstPasskeyOffer({
       <p className="m-0 text-balance text-ui leading-base text-fg">
         You can add a passkey for this device now{left === null ? '' : ` — ${left}`}.
       </p>
-      {/* One row, auto-width buttons, each at least 44 px tall with room around the label: never a full-width bar. */}
+      {/* One row of fixed-width buttons (`.fy-pair-answer`, the same 12 rem each), at least 44 px tall: never a full-width bar. */}
       <div className="flex flex-wrap items-center justify-center gap-3">
         <button
           type="button"
@@ -156,7 +156,7 @@ export function FirstPasskeyOffer({
           data-first-passkey-add=""
           onClick={() => void add()}
           data-variant="primary"
-          className="kt-btn min-h-[44px] px-6 py-3 disabled:cursor-not-allowed disabled:opacity-60"
+          className="kt-btn fy-pair-answer py-3 disabled:cursor-not-allowed disabled:opacity-60"
           style={{ height: 'auto' }}
         >
           <Fingerprint size={16} aria-hidden="true" />

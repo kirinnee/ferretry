@@ -17,13 +17,16 @@
  * changes the drawing; every motion is CSS (transform and opacity only) so it costs no script, stills under
  * reduced motion (the OS setting or the app's Motion = Reduced) and holds its FINAL picture then.
  *
+ * REACTS: hovering it (a mouse) or tapping it (a phone) raises it out of the hole, tilts its head hello, wiggles its ears
+ * and sniffs (`app/styles.css`, "the ferret answers a hover"); a cheering ferret is left alone.
+ *
  * Decorative: `aria-hidden`. The words next to it carry the meaning, and a screen reader announcing "image, ferret" for
  * a flourish is noise.
  *
  * COLOUR: the Fleet Grid logo's own token, `--accent`, mixed toward white and black in `app/styles.css` (`.fy-ferret`),
  * so the ferret re-tints with the theme and reads on light and dark. There is no hand-picked hex.
  */
-import { useId } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { cn, useDocumentVisible } from '@ferretry/app/ui';
 
 export type FerretPose = 'peek' | 'curious' | 'cheer';
@@ -33,17 +36,31 @@ export interface FerretMascotProps {
   readonly className?: string;
 }
 
+/** How long a tap keeps the ferret perked up. */
+const POKE_MS = 1_400;
+
 export function FerretMascot({ pose, className }: FerretMascotProps) {
   // Unique per instance: two mascots on one page must not share a clip path or a gradient.
   const id = `fy-ferret-${useId().replaceAll(':', '')}`;
   // A hidden tab keeps nothing running (the sky pauses the same way).
   const visible = useDocumentVisible();
   const cheering = pose === 'cheer';
+  // A tap pokes the ferret for a moment (a phone has no hover); a mouse hover is pure CSS.
+  const [poked, setPoked] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const poke = () => {
+    clearTimeout(timer.current);
+    setPoked(true);
+    timer.current = setTimeout(() => setPoked(false), POKE_MS);
+  };
   return (
     <svg
       className={cn('fy-ferret', className)}
       data-pose={pose}
       data-paused={visible ? undefined : ''}
+      data-poke={poked ? '' : undefined}
+      onClick={poke}
       viewBox="0 0 240 190"
       aria-hidden="true"
       focusable="false"
@@ -69,10 +86,14 @@ export function FerretMascot({ pose, className }: FerretMascotProps) {
           <ellipse className="fy-ferret-fur" cx="120" cy="164" rx="46" ry="40" />
           <g className="fy-ferret-head">
             {/* Small rounded ears, low on the sides of a wide oval head. */}
-            <ellipse className="fy-ferret-fur" cx="77" cy="84" rx="9" ry="10.5" />
-            <ellipse className="fy-ferret-fur" cx="163" cy="84" rx="9" ry="10.5" />
-            <ellipse className="fy-ferret-ear" cx="77" cy="85" rx="4.2" ry="5.6" />
-            <ellipse className="fy-ferret-ear" cx="163" cy="85" rx="4.2" ry="5.6" />
+            <g className="fy-ferret-ear-l">
+              <ellipse className="fy-ferret-fur" cx="77" cy="84" rx="9" ry="10.5" />
+              <ellipse className="fy-ferret-ear" cx="77" cy="85" rx="4.2" ry="5.6" />
+            </g>
+            <g className="fy-ferret-ear-r">
+              <ellipse className="fy-ferret-fur" cx="163" cy="84" rx="9" ry="10.5" />
+              <ellipse className="fy-ferret-ear" cx="163" cy="85" rx="4.2" ry="5.6" />
+            </g>
             <ellipse className="fy-ferret-fur" cx="120" cy="102" rx="49" ry="32" />
             <ellipse className="fy-ferret-cream" cx="120" cy="116" rx="36" ry="21" />
             <ellipse fill={`url(#${id}-glow)`} cx="102" cy="99" rx="20" ry="17" />

@@ -213,8 +213,8 @@ describe('the passkey offer as a page (A565 shot 01 spacing)', () => {
       expect(notNow.getAttribute('data-variant')).toBeNull();
       expect(notNow.classList.contains('kt-btn')).toBe(true);
       for (const button of [add, notNow]) {
-        expect(button.className).toContain('min-h-[44px]');
-        expect(button.className).toContain('px-6');
+        // One fixed size (`.fy-pair-answer`: 12 rem wide, 44 px or taller): the real-browser assert is mascot-offer.visual.test.ts.
+        expect(button.className).toContain('fy-pair-answer');
         expect(button.className).toContain('py-3');
         expect(button.className).not.toContain('w-full');
       }
