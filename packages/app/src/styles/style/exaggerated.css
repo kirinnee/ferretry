@@ -1,0 +1,244 @@
+/* ============================================================================
+   EXAGGERATED MINIMALISM (r10 T14). Minimalism pushed past comfortable: almost nothing is drawn, and what is drawn is
+   drawn at an extreme. Four exaggerations carry the identity, each one a structural token and none a colour:
+
+     1. SCALE.   Titles are huge and hair-thin (weight 200, tight negative tracking); everything else is small and
+                 quiet. The jump between the two is the look. Geist is small and even; this one is small AND enormous.
+     2. SPACE.   Padding and gaps are doubled. A panel is mostly air, a row is tall, a control is wide.
+     3. LINE.    No radius, no shadow, no fill-as-decoration. A region is a single 1px rule; a selected thing is a
+                 heavier underline, never a box.
+     4. LABEL.   Eyebrows are 10px, widely tracked capitals: the one place the style shouts, by whispering.
+
+   Fonts: Inter (already bundled, OFL) at its light weights. No new file. Colour is the PALETTE's: this file holds none,
+   so every palette takes this style.
+
+   NOT loud. It is readable by construction: ink and surface are the palette's, the edge a control relies on is the
+   palette's `--border-strong`, and the focus ring is a full 2px rule floating well clear of the control.
+   ============================================================================ */
+:root[data-style='exaggerated'],
+[data-swatch][data-style='exaggerated'] {
+  /* ═══ structural token layer ═══ */
+  --font-display: 'Inter', 'Inter var', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-body: 'Inter', 'Inter var', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --weight-normal: 300;
+  --weight-medium: 400;
+  --weight-strong: 500;
+  --weight-display: 200;
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 17px;
+  /* The exaggeration: a title is six times the body. */
+  --text-display: 5rem;
+  --text-input-desktop: 14px;
+  --font-size-base: 13px;
+  --leading-base: 1.7;
+  --leading-tight: 1.15;
+  --tracking-display: -0.045em;
+  --tracking-body: 0.005em;
+  --md-font-size: 14px;
+  --md-leading: 1.8;
+  --chrome-font-size: 11px;
+  --prose-measure: 64ch;
+  --label-transform: uppercase;
+  --label-size: 10px;
+  --label-weight: 400;
+  --tracking-label: 0.24em;
+  --control-transform: none;
+  /* No rounding anywhere: a rule and a corner are the whole vocabulary. */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-control: 0px;
+  --radius-panel: 0px;
+  --radius-badge: 0px;
+  --radius-tab: 0px;
+  --radius-input: 0px;
+  --bubble-radius: 0px;
+  --card-radius: 0px;
+  --card-tail-radius: 0px;
+  /* One hairline. "Heavy" is the underline that marks a selection, 2px, never a box. */
+  --border-width: 1px;
+  --border-width-heavy: 2px;
+  --stroke-control: 1px;
+  --stroke-panel: 1px;
+  --divider-width: 1px;
+  --divider-color: var(--border);
+  --bubble-stroke: 1px;
+  --bubble-border: var(--border);
+  --bubble-fg: var(--fg);
+  /* Nothing floats off the page: no shadow at all, depth is the rule. */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-control: none;
+  --shadow-panel: none;
+  --shadow-popover: none;
+  --bubble-shadow: none;
+  --glow-alpha: 0;
+  --press-translate: 0px;
+  --rail-active: none;
+  --rule-inset: none;
+  --menu-item-h: 40px;
+  --tab-underline-width: 2px;
+  --tab-sel-fg: var(--fg);
+  --tab-underline: var(--fg);
+  --appnav-underline: var(--fg);
+  /* Calm: a slow, long ease, and a selection that barely moves. */
+  --motion-fast: 200ms;
+  --motion-base: 360ms;
+  --motion-slow: 600ms;
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-emphasis: cubic-bezier(0.22, 1, 0.36, 1);
+  --select-pop: 1;
+  /* Air: roughly double the house density. */
+  --control-h-desktop: 38px;
+  --control-h-sm-desktop: 32px;
+  --row-min-h-desktop: 52px;
+  --pad-control-x: 22px;
+  --pad-badge-x: 10px;
+  --pad-panel: 28px;
+  --pad-row-y: 14px;
+  --pad-cell-x: 18px;
+  --gap-xs: 8px;
+  --gap-sm: 12px;
+  --gap-md: 20px;
+  --flow-3: 16px;
+  --flow-4: 24px;
+  --flow-5: 40px;
+  --flow-message: 24px;
+  --flow-turn: 32px;
+  /* The ring floats well clear of the control, a full 2px. */
+  --focus-width: 2px;
+  --focus-offset: 4px;
+  --focus-shadow: none;
+  --outline-always: none;
+  --underline-links: none;
+  --panel-bg: var(--surface);
+  --panel-texture: none;
+  --overlay: none;
+  --overlay-opacity: 0;
+}
+
+@media (max-width: 640px) {
+  :root[data-style='exaggerated'] {
+    --text-2xs: 12.5px;
+    --text-xs: 13.5px;
+    --text-sm: 14.5px;
+    --text-base: 15.5px;
+    --text-md: 16.5px;
+    --text-lg: 19px;
+    /* Still huge on a phone, but 390 px must not overflow: the largest word fits at this size. */
+    --text-display: 3rem;
+    --label-size: 12px;
+    --tracking-label: 0.16em;
+    /* A phone has less width to spend on air. */
+    --pad-panel: 18px;
+    --pad-control-x: 16px;
+    --pad-cell-x: 12px;
+  }
+}
+
+/* ============================================================================
+   COMPONENT TOUCHES. The tokens above reach everything that reads them; these are the pieces that draw a soft fill, a
+   pill or a shadow of their own. Colour only from roles.
+   ========================================================================== */
+
+/* A text field is an empty ruled frame: no fill, one hairline in the control edge colour. */
+:root[data-style='exaggerated'] .kt-input {
+  background: transparent;
+  border-color: var(--border-strong);
+}
+:root[data-style='exaggerated'] .kt-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+
+/* A choice card is a ruled cell; the chosen one takes an ink frame and a ruled tick, not a fill. */
+:root[data-style='exaggerated'] .fy-cc__card {
+  background: transparent;
+  box-shadow: none;
+  transition: border-color var(--motion-base) var(--ease-standard);
+}
+:root[data-style='exaggerated'] .fy-cc__card[data-selected='true'] {
+  border-color: var(--fg);
+}
+:root[data-style='exaggerated'] .fy-cc__card:has(:focus-visible) {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+:root[data-style='exaggerated'] .fy-cc__check {
+  background: transparent;
+  border: var(--stroke-control) solid var(--fg);
+  border-radius: 0;
+  color: var(--fg);
+}
+
+/* The switch is an empty ruled frame with a square mark; ON inverts to ink, never an accent block. */
+:root[data-style='exaggerated'] [data-neo-switch-track] {
+  background: transparent;
+  border-color: var(--border-strong);
+  border-radius: 0;
+}
+:root[data-style='exaggerated'] [role='switch'][aria-checked='true'] [data-neo-switch-track] {
+  background: var(--fg);
+  border-color: var(--fg);
+}
+:root[data-style='exaggerated'] [data-neo-switch-thumb] {
+  border-radius: 0;
+  transition: transform var(--motion-base) var(--ease-standard);
+}
+:root[data-style='exaggerated'] [role='switch'][aria-checked='true'] [data-neo-switch-thumb] {
+  background: var(--bg);
+}
+
+/* A badge and a message bubble are outlined, never tinted blocks. */
+:root[data-style='exaggerated'] .kt-badge,
+:root[data-style='exaggerated'] .kt-badge[data-tone] {
+  background: transparent;
+  border-color: currentColor;
+}
+:root[data-style='exaggerated'] .kt-bubble {
+  background: transparent;
+  border-color: var(--border-strong);
+}
+
+/* "Selected" is one 2px rule beneath the thing, never a box: the segmented control's chosen segment and a pressed chip or tab. */
+:root[data-style='exaggerated'] [data-neo-segmented] {
+  background: transparent;
+  border-color: var(--border);
+}
+:root[data-style='exaggerated'] [data-neo-segmented] > label {
+  transition: box-shadow var(--motion-base) var(--ease-standard);
+}
+:root[data-style='exaggerated'] [data-neo-segmented] > label:has(:checked),
+:root[data-style='exaggerated'] .kt-tab[aria-pressed='true'],
+:root[data-style='exaggerated'] .kt-tab[aria-selected='true'] {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: inset 0 calc(var(--border-width-heavy) * -1) 0 var(--fg);
+  color: var(--fg);
+}
+
+/* Progress is a row of hairlines: done is full ink, now is the accent and a little taller, the rest are rules. */
+:root[data-style='exaggerated'] .fy-sp-progress__segment {
+  border-radius: 0;
+  height: 2px;
+}
+:root[data-style='exaggerated'] .fy-sp-progress__segment[data-state='done'] {
+  background: var(--fg);
+  opacity: 1;
+}
+:root[data-style='exaggerated'] .fy-sp-progress__segment[data-state='current'] {
+  background: var(--accent);
+  height: 4px;
+}
+
+/* A bar track is a hairline, the fill a heavier line over it. */
+:root[data-style='exaggerated'] [data-option-bar-track] {
+  border-radius: 0;
+  height: 2px;
+}

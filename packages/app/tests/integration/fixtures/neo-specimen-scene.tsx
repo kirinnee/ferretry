@@ -34,6 +34,13 @@ function Specimen() {
   const [chip, setChip] = useState('all');
   return (
     <main className="bg-bg text-fg" data-specimen="" style={{ minHeight: '100vh', padding: 16 }}>
+      <h1
+        className="font-display text-display font-bold tracking-display"
+        data-part="title"
+        style={{ margin: '8px 0 24px' }}
+      >
+        Specimen
+      </h1>
       <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
         <Card data-part="buttons">
           <PanelHeader>
