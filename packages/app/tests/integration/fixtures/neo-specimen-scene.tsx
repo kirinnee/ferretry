@@ -61,6 +61,16 @@ function Specimen() {
               <Badge tone="pend">pending</Badge>
               <Badge tone="accent">accent</Badge>
             </div>
+            {/* A user-defined label of any length (a login label) must wrap inside its row, in every style. */}
+            <div className="flex min-w-0 flex-wrap gap-1" data-part="long-label" style={{ marginTop: 12 }}>
+              <Badge tone="accent">
+                work-laptop-staging-environment-sign-in-for-the-platform-engineering-team-2026
+              </Badge>
+            </div>
+            <div className="md" style={{ marginTop: 12 }}>
+              <h2>Display heading</h2>
+              <p>Body prose stays in a readable face.</p>
+            </div>
           </PanelBody>
         </Card>
 

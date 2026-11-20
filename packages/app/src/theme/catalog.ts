@@ -87,6 +87,11 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
     label: 'Minimal Swiss',
     blurb: 'Ruled, flat and square: one tight grotesque, space instead of boxes.',
   },
+  {
+    id: 'pixel',
+    label: 'Pixel art',
+    blurb: 'Bitmap type, 2px blocks, flat offset shadows, stepped motion.',
+  },
 ] as const);
 
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([

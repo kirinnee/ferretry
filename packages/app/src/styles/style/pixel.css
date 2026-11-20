@@ -1,0 +1,310 @@
+/* ============================================================================
+   PIXEL ART (r10 T9). A bitmap-era interface: every edge lands on a 2px "pixel", corners are square, a block casts a flat
+   offset shadow and presses into it, and motion moves in whole frames (`steps()`), never a tween. The look is drawn with
+   structure and type only, so ANY palette can wear it (owner: every style takes every palette):
+
+     type     Pixelify Sans 700 draws display headings and Press Start 2P the short fixed labels; body prose, data and code stay
+              in the readable house stacks (Inter, JetBrains Mono / system), because a bitmap face is hard to read at length. Both are
+              OFL woff2 under `assets/fonts/`; none is a trademarked or platform face. `font-synthesis` is off so a bitmap
+              face is never smeared into a fake bold or italic.
+     edges    2px solid ink on every control and panel, radius 0, a hard 2px/4px offset shadow, no blur anywhere.
+     ground   a faint 8px pixel grid on the page, drawn in the palette's own `--texture-ink`.
+     motion   stepped: a press, a hover and a select land in 3-4 frames.
+     focus    a 3px ring on a 2px gap, the same hard rule as Neo's, so the keyboard is never lost in a busy block.
+
+   This style is NOT `loud`: it keeps the readability rules (every pair clears the contrast matrix). Colour comes only from
+   roles; no colour value lives here (`tests/unit/theme-axes.test.ts`).
+   ============================================================================ */
+:root[data-style='pixel'],
+[data-swatch][data-style='pixel'] {
+  /* ═══ structural token layer ═══ */
+  --font-display: 'Pixelify Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-body: 'Inter var', Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, 'JetBrains Mono', 'SFMono-Regular', 'Cascadia Mono', Menlo, Consolas, monospace;
+  --font-size-base: 15px;
+  --leading-base: 1.5;
+  --tracking-display: 0.02em;
+  --tracking-body: 0;
+  --md-font-size: 15px;
+  --md-leading: 1.6;
+  --code-font-size: 13px;
+  --chrome-font-size: 13px;
+  --text-2xs: 12.5px;
+  --text-xs: 13px;
+  --text-sm: 14px;
+  --text-base: 15px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-display: 1.25rem;
+  --text-input-desktop: 15px;
+  --weight-normal: 400;
+  --weight-medium: 700;
+  --weight-strong: 700;
+  --weight-display: 700;
+  --label-size: 10px;
+  --label-weight: 400;
+  --tracking-label: 0.06em;
+  --prose-measure: 80ch;
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-control: 0px;
+  --radius-panel: 0px;
+  --radius-badge: 0px;
+  --radius-tab: 0px;
+  --radius-input: 0px;
+  --bubble-radius: 0px;
+  --bubble-stroke: 2px;
+  --bubble-shadow: 2px 2px 0 var(--shadow-ink);
+  --border-width: 2px;
+  --border-width-heavy: 4px;
+  --stroke-control: 2px;
+  --stroke-panel: 2px;
+  --divider-width: 2px;
+  --divider-color: var(--border);
+  /* A panel is as chunky as the controls inside it (the soft hairline made panels read as another style). */
+  --card-border: var(--border-strong);
+  /* Flat offset blocks, zero blur: a 2px step for a control, 4px for a panel, 6px for what floats. */
+  --shadow-sm: 2px 2px 0 var(--shadow-ink);
+  --shadow-md: 4px 4px 0 var(--shadow-ink);
+  --shadow-lg: 6px 6px 0 var(--shadow-ink);
+  --shadow-control: 2px 2px 0 var(--shadow-ink);
+  --shadow-panel: 4px 4px 0 var(--shadow-ink);
+  --shadow-popover: 6px 6px 0 var(--shadow-ink);
+  --shadow-active: none;
+  --press-translate: 2px;
+  --rail-active: none;
+  --ghost-bg: var(--surface);
+  --ghost-edge: var(--border);
+  --ghost-shadow: var(--shadow-control);
+  /* The page is a faint pixel grid in the palette's own texture ink; panels stay flat so text never sits on a pattern. */
+  --body-wash:
+    repeating-linear-gradient(90deg, var(--texture-ink) 0 2px, transparent 2px 8px),
+    repeating-linear-gradient(180deg, var(--texture-ink) 0 2px, transparent 2px 8px);
+  --panel-texture: none;
+  --panel-bg: var(--surface);
+  /* Whole frames, not a tween. A bitmap does not scale smoothly, so the select "pop" is a small step up. */
+  --motion-fast: 80ms;
+  --motion-base: 150ms;
+  --motion-slow: 260ms;
+  --ease-standard: steps(3, end);
+  --ease-emphasis: steps(4, end);
+  --select-pop: 1.06;
+  --focus-width: 3px;
+  --focus-offset: 2px;
+  --control-transform: none;
+  --nav-sel-shadow: 2px 2px 0 var(--shadow-ink);
+  --tab-sel-fg: var(--fg);
+  --tab-underline: var(--fg);
+  --tab-underline-width: 4px;
+  --appnav-underline: var(--fg);
+  --bubble-fg: var(--fg);
+  --bubble-border: var(--user-border);
+  /* Chunkier than the house density: a pixel control reads as a block you can hit. */
+  --control-h-desktop: 34px;
+  --control-h-sm-desktop: 28px;
+  --row-min-h-desktop: 40px;
+  --pad-control-x: 14px;
+  --pad-panel: 14px;
+  --pad-row-y: 8px;
+  --pad-cell-x: 10px;
+  --gap-xs: 6px;
+  --gap-sm: 8px;
+  --gap-md: 12px;
+  --menu-item-h: 38px;
+}
+
+@media (max-width: 640px) {
+  :root[data-style='pixel'] {
+    --text-2xs: 12.5px;
+    --text-xs: 14px;
+    --text-sm: 15px;
+    --text-base: 16.5px;
+    --text-md: 17.5px;
+    --text-lg: 20px;
+    --text-display: 1.55rem;
+    --label-size: 11px;
+  }
+}
+
+/* ============================================================================
+   PIXEL COMPONENT TOUCHES. The tokens above carry the style into everything that reads them; these are the few pieces that
+   draw with their own type, curve or tween. Colour comes only from roles.
+   ========================================================================== */
+
+/* A panel edge is as heavy as the controls inside it. */
+:root[data-style='pixel'] .kt-panel {
+  border-color: var(--border-strong);
+}
+
+/* A bitmap face is never faked bold or italic, and bitmap art is never smoothed when scaled. */
+:root[data-style='pixel'] {
+  font-synthesis: none;
+}
+:root[data-style='pixel'] img,
+:root[data-style='pixel'] canvas,
+:root[data-style='pixel'] video {
+  image-rendering: pixelated;
+}
+
+/* The small caps labels are the one place the 8px bitmap face (Press Start 2P) is used: short fixed words, never a paragraph
+   and never user text. A badge holds a user-defined label or a status of any length, so it keeps the readable body face and
+   wraps instead of widening its row (Press Start is ~2x as wide per letter). */
+:root[data-style='pixel'] .kt-label,
+:root[data-style='pixel'] .kt-navgroup__title {
+  font-family: 'Press Start 2P', system-ui, sans-serif;
+  line-height: 1.6;
+}
+:root[data-style='pixel'] .kt-badge {
+  font-family: var(--font-body);
+  line-height: 1.4;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* The keyboard on a text field: the field's own `outline: none` would leave only a border change. */
+:root[data-style='pixel'] .kt-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 0;
+  box-shadow: var(--shadow-md);
+}
+
+/* Switch: a square track with a square thumb that steps across (no slide). */
+:root[data-style='pixel'] [data-neo-switch-track] {
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  box-shadow: var(--shadow-sm);
+  transition: none;
+}
+:root[data-style='pixel'] [role='switch'][aria-checked='true'] [data-neo-switch-track] {
+  background: var(--accent);
+}
+:root[data-style='pixel'] [data-neo-switch-thumb] {
+  background: var(--surface);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  height: 14px;
+  width: 14px;
+  transition: transform var(--motion-fast) var(--ease-standard);
+}
+:root[data-style='pixel'] [role='switch']:active [data-neo-switch-track] {
+  box-shadow: none;
+  translate: var(--press-translate) var(--press-translate);
+}
+
+/* Segmented control: a ruled tray; the chosen segment is the inverted block. */
+:root[data-style='pixel'] [data-neo-segmented] {
+  border-width: var(--stroke-control);
+  border-color: var(--border-strong);
+}
+:root[data-style='pixel'] [data-neo-segmented] > label {
+  border: var(--stroke-control) solid transparent;
+  transition: none;
+}
+:root[data-style='pixel'] [data-neo-segmented] > label:has(:checked) {
+  background: var(--nav-sel-bg);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+  color: var(--nav-sel-fg);
+}
+:root[data-style='pixel'] [data-neo-segmented] > label:has(:focus-visible) {
+  box-shadow: none;
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 2px;
+}
+
+/* Choice cards: a block with a flat shadow that steps up on hover, presses on click and pops one frame when chosen. */
+:root[data-style='pixel'] .fy-cc__card {
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
+  transition:
+    translate var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+:root[data-style='pixel'] .fy-cc__card:not([aria-disabled='true']):hover {
+  border-color: var(--border-strong);
+  translate: -2px -2px;
+}
+:root[data-style='pixel'] .fy-cc__card:not([aria-disabled='true']):active {
+  box-shadow: none;
+  translate: var(--press-translate) var(--press-translate);
+}
+:root[data-style='pixel'] .fy-cc__card[data-selected='true'] {
+  background: var(--nav-sel-bg);
+  border-color: var(--border-strong);
+  color: var(--nav-sel-fg);
+}
+:root[data-style='pixel'] .fy-cc__card[data-selected='true'] .fy-cc__line {
+  color: var(--nav-sel-sub);
+}
+:root[data-style='pixel'] .fy-cc__card:has(:focus-visible) {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 3px;
+}
+:root[data-style='pixel'] .fy-cc__card[aria-disabled='true'] {
+  box-shadow: none;
+}
+:root[data-style='pixel'] .fy-cc__check {
+  background: var(--accent);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+}
+@keyframes fy-pixel-pop {
+  from {
+    transform: scale(var(--select-pop));
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-style='pixel']:not([data-motion='reduced']) .fy-cc__card[data-pulse='true'] {
+    animation: fy-pixel-pop var(--motion-base) var(--ease-standard);
+  }
+}
+
+/* Progress: a health bar, each step a ruled block: empty = surface, done = ink, current = the accent. */
+:root[data-style='pixel'] .fy-sp-progress__bar {
+  gap: 4px;
+}
+:root[data-style='pixel'] .fy-sp-progress__segment {
+  background: var(--surface);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  height: 12px;
+  opacity: 1;
+}
+:root[data-style='pixel'] .fy-sp-progress__segment[data-state='done'] {
+  background: var(--fg);
+}
+:root[data-style='pixel'] .fy-sp-progress__segment[data-state='current'] {
+  background: var(--accent);
+}
+
+/* Bars (voice engine speed / accuracy / size): a ruled track with a solid fill. */
+:root[data-style='pixel'] [data-option-bar-track] {
+  background: var(--surface);
+  border: var(--stroke-control) solid var(--border-strong);
+  height: 12px;
+}
+
+/* A pressed chip or tab is the inverted block, like the selected row. */
+:root[data-style='pixel'] .kt-tab[aria-pressed='true'],
+:root[data-style='pixel'] .kt-tab[aria-selected='true'] {
+  background: var(--nav-sel-bg);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+  color: var(--nav-sel-fg);
+}
+:root[data-style='pixel'] .kt-tab[aria-pressed='true'] .mono,
+:root[data-style='pixel'] .kt-tab[aria-selected='true'] .mono {
+  color: var(--nav-sel-sub);
+}
+
+/* Every badge tone is ruled in ink, whatever its tint. */
+:root[data-style='pixel'] .kt-badge,
+:root[data-style='pixel'] .kt-badge[data-tone] {
+  border-color: var(--border-strong);
+}

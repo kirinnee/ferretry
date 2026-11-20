@@ -176,7 +176,15 @@ function LoginBadges({ login }: { readonly login: LoginView }) {
           Disabled
         </Badge>
       )}
-      {login.label === undefined ? null : <Badge tone="accent">{login.label}</Badge>}
+      {login.label === undefined ? null : (
+        <Badge
+          tone="accent"
+          className="max-w-full !whitespace-normal [overflow-wrap:anywhere]"
+          data-login-label-badge=""
+        >
+          {login.label}
+        </Badge>
+      )}
       {slot === null ? null : <Badge className="max-w-full !whitespace-normal">{slot}</Badge>}
       {terminal === null ? null : <Badge className="max-w-full !whitespace-normal">{terminal}</Badge>}
     </span>
