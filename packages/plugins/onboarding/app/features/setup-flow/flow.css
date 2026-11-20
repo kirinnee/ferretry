@@ -117,8 +117,9 @@
   flex-direction: column;
   gap: 12px;
 }
-/* Every button on the last page is a 44px target, like the footer's. */
+/* Every button on the last page is a 44px target, like the footer's, and sits at the start of its line. */
 .fy-sf-end button {
+  align-self: flex-start;
   min-height: 44px;
 }
 .fy-sf-end__actions {

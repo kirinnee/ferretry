@@ -563,7 +563,13 @@ describe('the first run, end to end', () => {
       expect(installs.length, 'Voice: at least one Install button').toBeGreaterThan(0);
       for (const height of installs)
         expect(height, 'Voice: an Install button is 44px tall').toBeGreaterThanOrEqual(43.5);
+      await shot(tab, variant, 'voice.voice');
       await tab.getByRole('button', { name: 'Show every engine' }).click();
+      // The Off card, on its own, so its whole text can be read in the picture (the page shot scrolls past it).
+      const off = tab.locator('.fy-engine-card[data-engine="off"]');
+      await off.scrollIntoViewIfNeeded();
+      expect(await off.innerText(), 'Voice: the Off card shows its whole text').toContain('Settings › Voice.');
+      if (shotsDir !== '') await off.screenshot({ path: join(shotsDir, `${variant.name}-voice-off-card.png`) });
       const clipped = await tab
         .locator('.fy-engine-card')
         .evaluateAll(nodes =>
@@ -573,7 +579,6 @@ describe('the first run, end to end', () => {
         );
       expect(clipped, 'Voice: no engine card clips its text').toEqual([]);
       await shot(tab, variant, 'voice.voice-all-engines');
-      await shot(tab, variant, 'voice.voice');
       await next(tab, 'end');
       expect(Object.keys(await ledgerOf(tab))).toContain('voice.voice');
 

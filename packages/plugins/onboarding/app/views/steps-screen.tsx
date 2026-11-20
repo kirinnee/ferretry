@@ -12,14 +12,6 @@ import { type OnboardingView, sideOf, type StepState } from '../../contract/inde
 import { setupFlowHref } from '../features/setup-flow/flow-href.ts';
 import { onboardingScreen } from '../onboarding-screen.ts';
 
-const STATE_LABEL: Readonly<Record<StepState, string>> = {
-  pending: 'Not looked at yet',
-  found: 'Already set up',
-  later: 'Left for later',
-  done: 'Done',
-  skipped: 'Skipped',
-};
-
 type Reading =
   | { readonly kind: 'loading' }
   | { readonly kind: 'failed' }
@@ -103,7 +95,6 @@ interface SummaryGroup {
   readonly group: string;
   readonly set: number;
   readonly left: number;
-  readonly state: StepState;
 }
 
 /** One entry per plugin, in the order the flow met them: how many of its pages were set up and how many were not. */
@@ -115,14 +106,12 @@ const groupsOf = (steps: readonly SummaryStep[]): readonly SummaryGroup[] => {
       group: step.group,
       set: 0,
       left: 0,
-      state: step.state,
     };
     const wasSet = step.state === 'done' || step.state === 'found';
     groups.set(step.plugin, {
       ...before,
       set: before.set + (wasSet ? 1 : 0),
       left: before.left + (wasSet ? 0 : 1),
-      state: wasSet ? before.state : step.state,
     });
   }
   return [...groups.values()];
@@ -167,9 +156,7 @@ export function SetupSummary({
                 <RouterLink href={daemonSettingsHref(daemon, group.plugin)} data-onboarding-later-link={group.plugin}>
                   {group.group}
                 </RouterLink>
-                <span className="text-meta text-muted">
-                  ({group.set > 0 ? 'some pages skipped' : STATE_LABEL[group.state].toLowerCase()})
-                </span>
+                <span className="text-meta text-muted">({group.set > 0 ? 'some pages skipped' : 'skipped'})</span>
               </li>
             ))}
           </ul>
