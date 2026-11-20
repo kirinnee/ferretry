@@ -156,7 +156,10 @@ const body =
   page === 'installed' ? (
     <InstalledPage client={client} step={step} />
   ) : page === 'import-returned' ? (
-    <ImportChoicePage step={step} returned={{ stepId: 'import-settings', onChosen: () => undefined }} />
+    <ImportChoicePage
+      step={step}
+      returned={{ stepId: 'import-settings', continues: () => false, onContinue: () => undefined }}
+    />
   ) : page === 'sign-in' || page === 'sign-in-checking' ? (
     <div className="flex flex-col gap-3">
       <SignInPage client={client} step={step} />

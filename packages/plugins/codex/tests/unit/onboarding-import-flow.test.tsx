@@ -33,7 +33,11 @@ const KIND_STEPS = ['import-settings', 'import-model-set', 'import-instructions'
 type Answer = (route: string, options?: { body?: unknown; quiet?: boolean }) => unknown;
 
 /** One machine whose Codex steps `answered` are already done (a reload mid-run); the rest are still to ask. */
-function setup(options: { readonly answered: readonly string[]; readonly apply?: () => unknown }) {
+function setup(options: {
+  readonly answered: readonly string[];
+  readonly apply?: () => unknown;
+  readonly noMcp?: boolean;
+}) {
   const steps = (manifest.onboarding ?? []).map(step => ({
     plugin: 'codex',
     id: step.id,
@@ -47,7 +51,7 @@ function setup(options: { readonly answered: readonly string[]; readonly apply?:
   const written: { step: string; state: string }[] = [];
   const proposals: { skip?: string[] }[] = [];
   const table: Record<string, unknown> = {
-    'GET /v1/runtimes/setup/scan': FULL,
+    'GET /v1/runtimes/setup/scan': options.noMcp === true ? scanOf({ ...CODEX_FULL, mcpServers: [] }) : FULL,
     'GET /v1/codex/update': { installed: { state: 'ok', version: '0.9.0' } },
     'GET /v1/runtimes/machine': MACHINE,
     'GET /v1/config/file': { path: 'harness-codex.yaml', text: '', etag: 'e1', exists: true },
@@ -132,6 +136,9 @@ const arrow = async (key: 'ArrowRight' | 'ArrowLeft' | 'Home' | 'End'): Promise<
   await settle();
 };
 
+/** The explicit Continue of a recovered chooser whose pick has a body to show (the pick alone never hands over). */
+const proceed = () => press('[data-returned-continue]');
+
 const START_AT_CHOICE = ['installed', 'sign-in'];
 
 describe('the Codex import pages in the setup flow', () => {
@@ -206,6 +213,8 @@ describe('the Codex import pages in the setup flow', () => {
     // Change the answer here: the checklist takes over this very page.
     await choose('choose');
     expect(pageKey()).toBe('codex.import-settings');
+    expect(query('[data-found-item]')).toBeNull();
+    await proceed();
     expect(query('[data-found-item]')).not.toBeNull();
     for (const id of KIND_STEPS) {
       expect(pageKey()).toBe(`codex.${id}`);
@@ -249,6 +258,54 @@ describe('the Codex import pages in the setup flow', () => {
     expect(run.written).toEqual([]);
   });
 
+  test('the recovered chooser holds on an arrow key in every mode: Customize with an empty kind records nothing', async () => {
+    // import-mcp is the first pending step and the scan holds no MCP servers: the body would record a skip at once.
+    const run = setup({ answered: [...START_AT_CHOICE, 'import-choice', ...KIND_STEPS.slice(0, 4)], noMcp: true });
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('codex.import-mcp');
+    await arrow('ArrowRight'); // Customize
+    expect(query('[data-choice="choose"] input:checked')).not.toBeNull();
+    expect(query('[data-returned]')).not.toBeNull();
+    expect(pageKey()).toBe('codex.import-mcp');
+    expect(run.written).toEqual([]);
+    // The chooser is still there to change the answer.
+    await arrow('ArrowRight'); // Fresh
+    expect(query('[data-choice="fresh"] input:checked')).not.toBeNull();
+    expect(query('[data-returned]')).not.toBeNull();
+    expect(run.written).toEqual([]);
+    await arrow('Home');
+    expect(query('[data-choice="everything"] input:checked')).not.toBeNull();
+    expect(run.written).toEqual([]);
+  });
+
+  test('a recovered chooser with a non-empty scan keeps the chooser when Customize is picked, until Continue', async () => {
+    const run = setup({ answered: [...START_AT_CHOICE, 'import-choice'] });
+    view = await mount(run.tree);
+    await settle();
+    await arrow('ArrowRight'); // Customize
+    expect(pageKey()).toBe('codex.import-settings');
+    expect(query('[data-returned]')).not.toBeNull();
+    expect(query('[data-found-item]')).toBeNull();
+    await arrow('End'); // the person changes their mind: still possible
+    expect(query('[data-choice="fresh"] input:checked')).not.toBeNull();
+    expect(query('[data-returned-continue]')).toBeNull();
+    expect(run.written).toEqual([]);
+  });
+
+  test('the recovered Everything choice returns on Back after Next', async () => {
+    const run = setup({ answered: [...START_AT_CHOICE, 'import-choice'] });
+    view = await mount(run.tree);
+    await settle();
+    await arrow('Home');
+    expect(query('[data-returned]')).not.toBeNull();
+    expect(run.written).toEqual([]);
+    await next();
+    expect(pageKey()).toBe('codex.conversations');
+    await back();
+    expect(query('[data-returned]')).not.toBeNull();
+  });
+
   test('a refused import leaves Back and Later working, and the person can retry', async () => {
     let refuse = true;
     const run = setup({
@@ -265,6 +322,8 @@ describe('the Codex import pages in the setup flow', () => {
     await settle();
     expect(pageKey()).toBe('codex.import-run');
     await choose('everything');
+    expect(query('[data-import-run]')).toBeNull();
+    await proceed();
     expect(query('[data-import-run]')).not.toBeNull();
     // Before anything is pressed nothing is held: the person may go Back or choose Later.
     expect(query<HTMLButtonElement>('[data-flow-later]')?.disabled).toBe(false);
@@ -288,6 +347,8 @@ describe('the Codex import pages in the setup flow', () => {
     expect(query('[data-returned]')).not.toBeNull();
     await choose('choose');
     expect(pageKey()).toBe('codex.import-mcp');
+    expect(query('[data-found-item]')).toBeNull();
+    await proceed();
     const box = query<HTMLInputElement>('[data-found-item="codex:mcp:notes"] input[type="checkbox"]');
     expect(box).not.toBeNull();
     await interact(() => box?.click());

@@ -627,8 +627,15 @@ describe('import steps after a reload', () => {
     await act(async () => {});
     expect(after.segment.importMode).toBe('choose');
     expect(after.calls.filter(call => call.kind === 'busy').at(-1)).toEqual({ kind: 'busy', label: null });
-    expect(container.querySelector('[data-codex-step="import-choice"]')).toBeNull();
+    // The pick alone holds the chooser (nothing recorded, no scan read, no skip); only Continue hands over to the body.
+    expect(container.querySelector('[data-codex-step="import-choice"]')).not.toBeNull();
     expect(after.count('done')).toBe(0);
+    expect(after.skippedWhy).toBeUndefined();
+    await act(async () => {
+      container.querySelector<HTMLElement>('[data-returned-continue]')?.click();
+    });
+    await act(async () => {});
+    expect(container.querySelector('[data-codex-step="import-choice"]')).toBeNull();
     // The step carries on into its own body (the settings page) and is not skipped by the missing choice.
     expect(container.querySelector('[data-codex-step="import-settings"]')).not.toBeNull();
     expect(after.skippedWhy).toBeUndefined();

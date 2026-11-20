@@ -8,7 +8,7 @@
  * (`returned`) and does not run, skip-by-choice or answer itself until the person has chosen. In that form nothing is chosen
  * for the person (no default is remembered) and the step is `busy` until they press a card, so Next cannot answer it either.
  */
-import { ChoiceCards } from '@ferretry/app';
+import { Button, ChoiceCards } from '@ferretry/app';
 import type { StepHost } from './onboarding-api.ts';
 import { useEffect, useRef, useState } from 'react';
 
@@ -45,17 +45,21 @@ export const choiceShownOn = (step: StepHost, id: string): boolean => step.segme
 
 /**
  * The choice put back in front of an import step whose memory is empty: nothing is pre-chosen, nothing is answered by default.
- * A pick changes LOCAL state and the segment memory only (arrow keys too): it never writes and never navigates; Next is the
- * answer. Back to the step later draws it again with the current pick.
+ * A pick changes LOCAL state and the segment memory only (arrow keys too): it never writes, never navigates and never swaps the
+ * page for the step's body; the chooser HOLDS until the person acts. Next is the answer. When the step has something to draw
+ * for the pick (`continues`), an explicit "Continue" button, never the pick itself, hands over to the body. Back to the step
+ * later draws it again with the current pick.
  */
 function ReturnedChoice({
   step,
   stepId,
-  onChosen,
+  continues,
+  onContinue,
 }: {
   readonly step: StepHost;
   readonly stepId: string;
-  readonly onChosen: (mode: ImportMode) => void;
+  readonly continues: (mode: ImportMode) => boolean;
+  readonly onContinue: () => void;
 }) {
   const [picked, setPicked] = useState<ImportMode | null>(() => rememberedImportMode(step) ?? null);
   useEffect(() => {
@@ -84,9 +88,15 @@ function ReturnedChoice({
           // The marker rides with the pick (never alone): "the chooser was drawn here and answered" for a later Back.
           step.remember({ importMode: chosen, [SHOWN_KEY(stepId)]: true });
           step.busy(null);
-          onChosen(chosen);
         }}
       />
+      {picked !== null && continues(picked) ? (
+        <div>
+          <Button variant="ghost" size="sm" onClick={onContinue} data-returned-continue="">
+            Continue
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -96,11 +106,22 @@ export function ImportChoicePage({
   returned,
 }: {
   readonly step: StepHost;
-  /** Set when an import step shows this page because the memory was empty: the step carries on once a mode is chosen. */
-  readonly returned?: { readonly stepId: string; readonly onChosen: (mode: ImportMode) => void };
+  /** Set when an import step shows this page because the memory was empty: it holds until Next, or Continue where the step has a body to show. */
+  readonly returned?: {
+    readonly stepId: string;
+    readonly continues: (mode: ImportMode) => boolean;
+    readonly onContinue: () => void;
+  };
 }) {
   if (returned !== undefined)
-    return <ReturnedChoice step={step} stepId={returned.stepId} onChosen={returned.onChosen} />;
+    return (
+      <ReturnedChoice
+        step={step}
+        stepId={returned.stepId}
+        continues={returned.continues}
+        onContinue={returned.onContinue}
+      />
+    );
   return <FirstChoice step={step} />;
 }
 

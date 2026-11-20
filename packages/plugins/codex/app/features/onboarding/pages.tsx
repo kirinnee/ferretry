@@ -41,10 +41,11 @@ const drawsFor = (id: string, mode: ImportMode): boolean =>
 /**
  * An import step with no remembered `importMode` (a reload since the choice was answered) brings the choice back before
  * anything else: it neither runs, skips, nor is answered by default until the person has chosen. A pick is local state only
- * (contract rule 7): the page that SHOWED the chooser is never passed over in that visit, so when the pick means this step has
- * nothing to draw the chooser stays (Next answers it and moves on), and when it has something to draw the step's own body takes
- * over. Back to a step that showed the chooser draws the chooser again when its body would draw nothing, so the person can
- * change the answer.
+ * (contract rule 7): the page that SHOWED the chooser is never passed over in that visit, and the chooser HOLDS in every mode
+ * (Everything, Customize, Fresh) until the person acts: Next answers it and moves on, and where the step has a body to show for
+ * the pick, an explicit Continue hands over to it (the pick alone never does, so nothing is read or recorded by an arrow key).
+ * Back to a step that showed the chooser draws the chooser again when its body would draw nothing, so the person can change the
+ * answer.
  */
 function AfterChoice({
   id,
@@ -61,7 +62,7 @@ function AfterChoice({
   if (!asked || swapped) return body();
   return createElement(ImportChoicePage, {
     step,
-    returned: { stepId: id, onChosen: mode => setSwapped(drawsFor(id, mode)) },
+    returned: { stepId: id, continues: mode => drawsFor(id, mode), onContinue: () => setSwapped(true) },
   });
 }
 
