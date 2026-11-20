@@ -7,7 +7,8 @@ import { fakeClient } from '../support/catalog-client.ts';
 import { crypto } from '../support/catalog-files.ts';
 import { installPreview, installRecord } from '../support/catalog-views.ts';
 import { click, settle } from '../support/dom-form.ts';
-import { interact, mount } from '@ferretry/app/testing';
+import { mount, must } from '@ferretry/app/testing';
+import { choose as chooseOption, labelsOf, shownBy } from '../support/select-box.ts';
 import { type SharedItemFixture, sharedItemFixture } from '../support/shared-screens.ts';
 
 /** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
@@ -120,6 +121,12 @@ describe('reading a shared item', () => {
   });
 });
 
+/** Opens the select box inside `selector`, picks the option that says `label`. */
+const choose = async (selector: string, label: string): Promise<void> => {
+  await chooseOption(must(q(selector), selector), label);
+  await settle();
+};
+
 describe('Install on a machine', () => {
   it('hands the verified item to the one paired machine and goes back when closed', async () => {
     const { view, asked } = await sheet('mcp', machines(alpha), {
@@ -137,16 +144,8 @@ describe('Install on a machine', () => {
         (q('[data-catalog-file-item] input') as HTMLInputElement).checked,
     ).toBe(true);
 
-    const choose = async (selector: string, value: string) => {
-      const select = q(selector) as HTMLSelectElement;
-      await interact(() => {
-        select.value = value;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-      });
-      await settle();
-    };
-    await choose('[data-catalog-scope]', 'runtime');
-    await choose('[data-catalog-runtime]', 'box');
+    await choose('[data-catalog-scope]', 'A runtime');
+    await choose('[data-catalog-runtime]', 'box · default');
     await click(q('[data-catalog-preview]'));
     await settle();
     expect(q('[data-catalog-confirm]')).not.toBeNull();
@@ -157,24 +156,13 @@ describe('Install on a machine', () => {
 
   it('lets the person pick which machine, and uses that machine’s own client', async () => {
     const { view, asked } = await sheet('skill', machines(alpha, beta));
-    const select = q('[data-shared-machine]') as HTMLSelectElement;
-    expect([...select.options].map(option => option.textContent)).toEqual(['Studio laptop', 'Build box']);
-    await interact(() => {
-      select.value = 'beta';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const select = must(q('[data-shared-machine]'), 'the machine box');
+    expect(await labelsOf(select)).toEqual(['Studio laptop', 'Build box']);
+    await chooseOption(select, 'Build box');
     await click(q('[data-shared-install-button]'));
     await settle();
-    const choose = async (selector: string, value: string) => {
-      const picker = q(selector) as HTMLSelectElement;
-      await interact(() => {
-        picker.value = value;
-        picker.dispatchEvent(new Event('change', { bubbles: true }));
-      });
-      await settle();
-    };
-    await choose('[data-catalog-scope]', 'runtime');
-    await choose('[data-catalog-runtime]', 'box');
+    await choose('[data-catalog-scope]', 'A runtime');
+    await choose('[data-catalog-runtime]', 'box · default');
     await click(q('[data-catalog-preview]'));
     await settle();
     expect(asked.length).toBeGreaterThan(0);
@@ -200,8 +188,8 @@ describe('Install on a machine', () => {
     );
     await click(q('[data-shared-install-button]'));
     await settle();
-    expect((q('[data-catalog-scope]') as HTMLSelectElement).value).toBe('runtime');
-    expect((q('[data-catalog-runtime]') as HTMLSelectElement).value).toBe('box');
+    expect(shownBy(must(q('[data-catalog-scope]'), 'the scope box'))).toBe('A runtime');
+    expect(shownBy(must(q('[data-catalog-runtime]'), 'the runtime box'))).toBe('box · default');
     await view.unmount();
   });
 });

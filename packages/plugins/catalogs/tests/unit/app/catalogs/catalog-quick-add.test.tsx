@@ -8,7 +8,8 @@ import { memberView } from '../support/catalog-sharing.ts';
 import { addedAnswer, CATALOG, ITEM, itemPreview, ownedCatalog, sharedItem, TOKEN } from '../support/catalog-views.ts';
 import { byText, click, settle } from '../support/dom-form.ts';
 import { healthOf } from '../support/health.ts';
-import { interact, mount } from '@ferretry/app/testing';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { choose as chooseOption, labelsOf, shownBy } from '../support/select-box.ts';
 import { installManualClock, type ManualClock } from '../support/manual-clock.ts';
 
 beforeEach(() => {
@@ -256,7 +257,7 @@ describe('one tap', () => {
     await tapAdd();
     expect(q('[data-catalog-notice]')?.textContent).toBe('It has something to read first.');
     expect(q('[data-catalog-preview-block]')?.textContent).toContain('It carries a script.');
-    expect((q('[data-catalog-picker]') as HTMLSelectElement).value).toBe(CATALOG);
+    expect(shownBy(must(q('[data-catalog-picker]'), 'the catalog box'))).toStartWith('Team skills');
     expect(q('[data-catalog-preview]')?.textContent).toBe('Read again');
     await click(q('[data-catalog-add]'));
     expect(callsTo(fake, `/v1/catalogs/${CATALOG}/items`)[0]?.body).toEqual({ source, digest: preview.digest });
@@ -271,11 +272,7 @@ describe('one tap', () => {
       more: { 'POST /v1/catalog-items/quick-add': () => ({ outcome: 'review', reasons: ['problems'], preview }) },
     });
     await tapAdd();
-    const picker = q('[data-catalog-picker]') as HTMLSelectElement;
-    await interact(() => {
-      picker.value = SECOND;
-      picker.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await chooseOption(must(q('[data-catalog-picker]'), 'the catalog box'), 'Other · 1 item');
     expect(q('[data-catalog-preview-block]')).not.toBeNull();
     expect(q('[data-catalog-notice]')).toBeNull();
     await view.unmount();
@@ -455,8 +452,10 @@ describe('Publish in another catalog…', () => {
     });
     await pickMenu('Publish in another catalog…');
     expect(q('[data-catalog-sheet="add"]')?.textContent).toContain('Add to another catalog');
-    const picker = q('[data-catalog-picker]') as HTMLSelectElement;
-    expect([...picker.options].map(option => option.value)).toEqual([SECOND, '__new']);
+    expect(await labelsOf(must(q('[data-catalog-picker]'), 'the catalog box'))).toEqual([
+      'Other · 0 items',
+      'A new catalog…',
+    ]);
     expect(callsTo(fake, `/v1/catalogs/${SECOND}/items/preview`)[0]?.body).toEqual({ itemId: ITEM });
     expect(q('[data-catalog-preview-block]')?.textContent).toContain('version 2');
     expect(q('[data-catalog-preview]')?.textContent).toBe('Read again');

@@ -35,7 +35,7 @@ import type { DaemonConnection } from '../../lib/machine.ts';
 const PAIRING_TICK_MS = 1_000;
 import { encodeQr, QrEncodeError, type QrMatrix } from '../../lib/qr.ts';
 import { useDaemonClient } from '../../lib/client-context.tsx';
-import { Button } from '@ferretry/app/ui';
+import { Button, SelectBox } from '@ferretry/app/ui';
 import { CatalogSheet, FailureLine, SharingOffPanel } from './catalog-parts.tsx';
 import { endShare, listMembers, mintShare } from './catalog-shares-api.ts';
 import {
@@ -293,19 +293,15 @@ function ShareForm({
         <label htmlFor={expiryId} className="text-meta font-semibold text-muted">
           The link works for
         </label>
-        <select
-          id={expiryId}
-          className="kt-input"
-          value={draft.expiresIn}
-          onChange={event => onDraft({ ...draft, expiresIn: event.target.value as ShareDraft['expiresIn'] })}
-          data-share-expiry=""
-        >
-          {EXPIRY_CHOICES.map(choice => (
-            <option key={choice.value} value={choice.value}>
-              {choice.label}
-            </option>
-          ))}
-        </select>
+        <div data-share-expiry="">
+          <SelectBox
+            id={expiryId}
+            label="The link works for"
+            value={draft.expiresIn}
+            onChange={next => onDraft({ ...draft, expiresIn: next as ShareDraft['expiresIn'] })}
+            options={EXPIRY_CHOICES.map(choice => ({ value: choice.value, label: choice.label }))}
+          />
+        </div>
       </div>
 
       <fieldset className="m-0 flex min-w-0 flex-col gap-xs border-0 p-0" aria-labelledby={usesGroup}>

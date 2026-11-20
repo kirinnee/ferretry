@@ -14,7 +14,8 @@ import {
   sharedItem,
 } from '../support/catalog-views.ts';
 import { click, settle, typeInto } from '../support/dom-form.ts';
-import { mount } from '@ferretry/app/testing';
+import { mount, must } from '@ferretry/app/testing';
+import { choose as chooseOption } from '../support/select-box.ts';
 
 const connection = daemonConnection({ daemonId: 'alpha' });
 const source = { kind: 'skill', skill: '/home/k/.claude/skills/pdf-tools/SKILL.md' } as const;
@@ -195,9 +196,7 @@ describe('AddToCatalogSheet', () => {
       'POST /v1/catalogs': () => second,
       [`POST /v1/catalogs/${second.id}/items`]: () => published,
     });
-    const picker = q('[data-catalog-picker]') as HTMLSelectElement;
-    picker.value = '__new';
-    picker.dispatchEvent(new Event('change', { bubbles: true }));
+    await chooseOption(must(q('[data-catalog-picker]'), 'the catalog box'), 'A new catalog…');
     await settle();
     await typeInto(q('[data-catalog-new-name]'), 'Fresh');
     await click(q('[data-catalog-preview]'));
@@ -257,9 +256,7 @@ describe('AddToCatalogSheet', () => {
       'GET /v1/catalogs': list(ownedCatalog(), second),
       [`POST /v1/catalogs/${second.id}/items/preview`]: () => itemPreview({ catalogId: second.id }),
     });
-    const picker = q('[data-catalog-picker]') as HTMLSelectElement;
-    picker.value = second.id;
-    picker.dispatchEvent(new Event('change', { bubbles: true }));
+    await chooseOption(must(q('[data-catalog-picker]'), 'the catalog box'), 'Other · 1 item');
     await settle();
     await click(q('[data-catalog-preview]'));
     expect(fake.calls.at(-1)?.path).toBe(`/v1/catalogs/${second.id}/items/preview`);

@@ -13,7 +13,7 @@ import { CircleCheck, FileUp } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import { useDaemonClient } from '../../lib/client-context.tsx';
-import { Button } from '@ferretry/app/ui';
+import { Button, SelectBox } from '@ferretry/app/ui';
 import { Fingerprint } from '../shared/shared-parts.tsx';
 import { listSecrets, type SecretList } from '../../lib/secrets.ts';
 import { fingerprintStart, shortDigest } from './catalog-review-model.ts';
@@ -570,100 +570,99 @@ function TargetPicker({
   return (
     <div className="flex min-w-0 flex-col gap-sm" data-catalog-target="">
       <Field label="Install into" htmlFor={where}>
-        <select
-          id={where}
-          className="kt-input"
-          value={draft.scope ?? ''}
-          onChange={event => {
-            const scope = event.target.value;
-            onDraft(scope === 'project' || scope === 'runtime' ? { scope } : {});
-          }}
-          disabled={busy}
-          data-catalog-scope=""
-        >
-          <option value="">{CHOOSE_PLACEHOLDER}</option>
-          <option value="project">A project</option>
-          <option value="runtime">A runtime</option>
-        </select>
+        <div data-catalog-scope="">
+          <SelectBox
+            id={where}
+            label="Install into"
+            value={draft.scope ?? ''}
+            onChange={scope => onDraft(scope === 'project' || scope === 'runtime' ? { scope } : {})}
+            disabled={busy}
+            options={[
+              { value: '', label: CHOOSE_PLACEHOLDER },
+              { value: 'project', label: 'A project' },
+              { value: 'runtime', label: 'A runtime' },
+            ]}
+          />
+        </div>
       </Field>
       {draft.scope === 'project' ? (
         <>
           <Field label="Project" htmlFor={project}>
-            <select
-              id={project}
-              className="kt-input"
-              value={draft.projectRoot ?? ''}
-              onChange={event => {
-                const { harness: kept } = draft;
-                onDraft({
-                  scope: 'project',
-                  ...(kept === undefined ? {} : { harness: kept }),
-                  ...(event.target.value === '' ? {} : { projectRoot: event.target.value }),
-                });
-              }}
-              disabled={busy}
-              data-catalog-project=""
-            >
-              <option value="">{CHOOSE_PLACEHOLDER}</option>
-              {options.projects.map(item => (
-                <option key={item.root} value={item.root}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
+            <div data-catalog-project="">
+              <SelectBox
+                id={project}
+                label="Project"
+                value={draft.projectRoot ?? ''}
+                onChange={root => {
+                  const { harness: kept } = draft;
+                  onDraft({
+                    scope: 'project',
+                    ...(kept === undefined ? {} : { harness: kept }),
+                    ...(root === '' ? {} : { projectRoot: root }),
+                  });
+                }}
+                disabled={busy}
+                options={[
+                  { value: '', label: CHOOSE_PLACEHOLDER },
+                  ...options.projects.map(item => ({ value: item.root, label: item.label })),
+                ]}
+              />
+            </div>
           </Field>
           <Field label="For which agent" htmlFor={harness}>
-            <select
-              id={harness}
-              className="kt-input"
-              value={draft.harness ?? ''}
-              onChange={event => {
-                const next = event.target.value;
-                const { projectRoot: kept } = draft;
-                onDraft({
-                  scope: 'project',
-                  ...(kept === undefined ? {} : { projectRoot: kept }),
-                  ...(next === 'claude' || next === 'codex' ? { harness: next } : {}),
-                });
-              }}
-              disabled={busy}
-              data-catalog-harness=""
-            >
-              <option value="">{CHOOSE_PLACEHOLDER}</option>
-              <option value="claude">Claude</option>
-              <option value="codex">Codex</option>
-            </select>
+            <div data-catalog-harness="">
+              <SelectBox
+                id={harness}
+                label="For which agent"
+                value={draft.harness ?? ''}
+                onChange={next => {
+                  const { projectRoot: kept } = draft;
+                  onDraft({
+                    scope: 'project',
+                    ...(kept === undefined ? {} : { projectRoot: kept }),
+                    ...(next === 'claude' || next === 'codex' ? { harness: next } : {}),
+                  });
+                }}
+                disabled={busy}
+                options={[
+                  { value: '', label: CHOOSE_PLACEHOLDER },
+                  { value: 'claude', label: 'Claude' },
+                  { value: 'codex', label: 'Codex' },
+                ]}
+              />
+            </div>
           </Field>
         </>
       ) : null}
       {draft.scope === 'runtime' ? (
         <Field label="Runtime" htmlFor={runtime}>
-          <select
-            id={runtime}
-            className="kt-input"
-            value={draft.runtime ?? ''}
-            onChange={event => {
-              const picked = options.runtimes.find(item => item.runtime === event.target.value);
-              onDraft(
-                picked === undefined
-                  ? { scope: 'runtime' }
-                  : {
-                      scope: 'runtime',
-                      runtime: picked.runtime,
-                      ...(picked.profiles[0] === undefined ? {} : { profile: picked.profiles[0] }),
-                    },
-              );
-            }}
-            disabled={busy}
-            data-catalog-runtime=""
-          >
-            <option value="">{CHOOSE_PLACEHOLDER}</option>
-            {options.runtimes.map(item => (
-              <option key={item.runtime} value={item.runtime}>
-                {item.runtime} · {item.profiles.join(', ')}
-              </option>
-            ))}
-          </select>
+          <div data-catalog-runtime="">
+            <SelectBox
+              id={runtime}
+              label="Runtime"
+              value={draft.runtime ?? ''}
+              onChange={name => {
+                const picked = options.runtimes.find(item => item.runtime === name);
+                onDraft(
+                  picked === undefined
+                    ? { scope: 'runtime' }
+                    : {
+                        scope: 'runtime',
+                        runtime: picked.runtime,
+                        ...(picked.profiles[0] === undefined ? {} : { profile: picked.profiles[0] }),
+                      },
+                );
+              }}
+              disabled={busy}
+              options={[
+                { value: '', label: CHOOSE_PLACEHOLDER },
+                ...options.runtimes.map(item => ({
+                  value: item.runtime,
+                  label: `${item.runtime} · ${item.profiles.join(', ')}`,
+                })),
+              ]}
+            />
+          </div>
         </Field>
       ) : null}
     </div>
@@ -819,24 +818,19 @@ function SecretPicker({
       <label htmlFor={id} className="break-all font-mono text-meta font-semibold text-fg">
         {placeholder}
       </label>
-      <select
-        id={id}
-        className="kt-input"
-        value={value}
-        onChange={event => {
-          const next = event.target.value;
-          onChoice(next === UNCHOSEN ? undefined : next === UNBOUND ? null : next);
-        }}
-        data-catalog-secret-picker=""
-      >
-        <option value={UNCHOSEN}>{CHOOSE_PLACEHOLDER}</option>
-        <option value={UNBOUND}>{LEAVE_UNBOUND}</option>
-        {names.map(name => (
-          <option key={name} value={name}>
-            {name}
-          </option>
-        ))}
-      </select>
+      <div data-catalog-secret-picker="">
+        <SelectBox
+          id={id}
+          label={`Secret for ${placeholder}`}
+          value={value}
+          onChange={next => onChoice(next === UNCHOSEN ? undefined : next === UNBOUND ? null : next)}
+          options={[
+            { value: UNCHOSEN, label: CHOOSE_PLACEHOLDER },
+            { value: UNBOUND, label: LEAVE_UNBOUND },
+            ...names.map(name => ({ value: name, label: name })),
+          ]}
+        />
+      </div>
       {hint === null ? null : <p className="m-0 text-meta text-muted">{hint}</p>}
       {note === null ? null : (
         <p className="m-0 break-words text-cell text-fg" data-catalog-secret-note="">

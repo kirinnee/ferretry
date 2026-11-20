@@ -17,7 +17,7 @@ import { CircleAlert } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import { useDaemonClient } from '../../lib/client-context.tsx';
-import { Button, Loading } from '@ferretry/app/ui';
+import { Button, Loading, SelectBox } from '@ferretry/app/ui';
 import { formatBytes, plural } from './catalog-review-model.ts';
 import { MarkedText, ReviewBody, WarningList } from './catalog-review-view.tsx';
 import { CatalogSheet, FailureLine, SharingOffPanel } from './catalog-parts.tsx';
@@ -345,25 +345,25 @@ export function AddToCatalogSheet({
                   <label htmlFor={pickerId} className="text-meta font-semibold text-muted">
                     Catalog
                   </label>
-                  <select
-                    id={pickerId}
-                    className="kt-input"
-                    value={choice?.kind === 'existing' ? choice.catalogId : '__new'}
-                    onChange={event =>
-                      event.target.value === '__new'
-                        ? choose({ kind: 'new', name: newName })
-                        : choose({ kind: 'existing', catalogId: event.target.value })
-                    }
-                    data-catalog-picker=""
-                  >
-                    {eligible.map(catalog => (
-                      <option key={catalog.id} value={catalog.id}>
-                        {catalog.name} ·{' '}
-                        {plural(catalog.items.filter(item => item.withdrawnAt === undefined).length, 'item')}
-                      </option>
-                    ))}
-                    <option value="__new">A new catalog…</option>
-                  </select>
+                  <div data-catalog-picker="">
+                    <SelectBox
+                      id={pickerId}
+                      label="Catalog"
+                      value={choice?.kind === 'existing' ? choice.catalogId : '__new'}
+                      onChange={next =>
+                        next === '__new'
+                          ? choose({ kind: 'new', name: newName })
+                          : choose({ kind: 'existing', catalogId: next })
+                      }
+                      options={[
+                        ...eligible.map(catalog => ({
+                          value: catalog.id,
+                          label: `${catalog.name} · ${plural(catalog.items.filter(item => item.withdrawnAt === undefined).length, 'item')}`,
+                        })),
+                        { value: '__new', label: 'A new catalog…' },
+                      ]}
+                    />
+                  </div>
                 </div>
               ) : (
                 <p className="m-0 text-cell text-muted">
