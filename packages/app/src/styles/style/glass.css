@@ -97,12 +97,22 @@
   --shadow-lg: 0 24px 64px -14px var(--shadow-lg-2);
 }
 
-/* ---- component touches: the glass itself. Only blur, translucency and the light edge; no colour literal. ---- */
+/* ---- component touches: the glass itself. Only blur, translucency and the light edge; no colour literal. ----
+   THE BLUR IS SCOPED. A blur costs a compositor layer per element, so it belongs only on a GROUP surface (a section,
+   fieldset, aside or header panel that is not itself inside another panel) and on what FLOATS (sheet, details,
+   popover, menu, dialog). A repeated ROW (`li`, `article`, a panel inside a panel: Lessons rows, Catalogs member
+   rows, voice log entries) keeps the translucent paint and the light edge but never blurs: thirty blurs in a list is
+   thirty layers over a backdrop the group around them already blurs. */
 :root[data-style='glass'] .kt-panel,
 :root[data-style='glass'] .kt-details,
 :root[data-style='glass'] .kt-sheet {
   border-color: color-mix(in srgb, var(--fg) 16%, transparent);
   background-color: var(--panel-bg);
+}
+:root[data-style='glass'] .kt-panel:is(section, fieldset, aside, header):not(.kt-panel .kt-panel),
+:root[data-style='glass'] .kt-panel:is([role='dialog'], [aria-modal='true']),
+:root[data-style='glass'] .kt-details,
+:root[data-style='glass'] .kt-sheet {
   -webkit-backdrop-filter: blur(18px) saturate(1.5);
   backdrop-filter: blur(18px) saturate(1.5);
 }
@@ -130,5 +140,37 @@
     --text-lg: 19px;
     --text-display: 1.5rem;
     --label-size: 12.5px;
+  }
+}
+
+/* ---- reduced transparency: the OS asks for no see-through paint. Every glass surface becomes OPAQUE and nothing blurs. ----
+   The role tokens are the one place the translucency lives, so restating them (light and dark; the dark block
+   outranks the light one) turns every panel, card and menu solid. The edge is mixed over the surface instead of the
+   page so it stays a solid line. The blur is switched off with `!important` because the scoped selectors above are
+   more specific than any one selector that could name every surface here. */
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-style='glass'],
+  [data-swatch][data-style='glass'] {
+    --panel-bg: var(--surface);
+    --card-bg: var(--surface);
+    --menu-bg: var(--surface);
+  }
+  :root[data-style='glass'][data-mode='dark'],
+  [data-swatch][data-style='glass'][data-mode='dark'] {
+    --panel-bg: var(--surface);
+    --card-bg: var(--surface);
+    --menu-bg: var(--surface-2);
+  }
+  :root[data-style='glass'] .kt-panel,
+  :root[data-style='glass'] .kt-details,
+  :root[data-style='glass'] .kt-sheet {
+    border-color: color-mix(in srgb, var(--fg) 16%, var(--surface));
+  }
+  :root[data-style='glass'] .kt-panel,
+  :root[data-style='glass'] .kt-details,
+  :root[data-style='glass'] .kt-sheet,
+  :root[data-style='glass'] .kt-popover {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
   }
 }
