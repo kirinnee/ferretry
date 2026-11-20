@@ -190,3 +190,61 @@ describe('Settings sweep: every tab, real app half, real shell', () => {
     }
   }
 });
+
+/**
+ * THE SETTINGS LIST AT 800px TALL (r10 S14): with every group open the list is longer than the window, so it scrolls inside itself
+ * and says so (a thin themed scrollbar and a soft fade at an end that has more), and keyboard focus on its last entry brings that
+ * entry into sight instead of clipping it.
+ */
+describe('Settings list: scrolls and says so at 800px tall', () => {
+  for (const viewport of [{ name: '1280x800', width: 1_280, height: 800 }] as const) {
+    it(`${viewport.name}: every group open, the list scrolls inside itself, shows a cue, and its last entry is reachable`, async () => {
+      const context = await browser.newContext({
+        viewport: { width: viewport.width, height: viewport.height },
+        colorScheme: 'dark',
+      });
+      const origin = server?.url.origin ?? '';
+      await context.route('**/*', async route =>
+        new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+      );
+      const page = await context.newPage();
+      try {
+        await page.goto(`${origin}/d/ws/settings/kernel/name?theme=studio-dark`);
+        await page.waitForSelector('nav[aria-label="Plugin settings"] .fy-tab-group', { timeout: 20_000 });
+        await page.evaluate(() => {
+          for (const group of document.querySelectorAll('nav[aria-label="Plugin settings"] details.fy-tab-group'))
+            (group as HTMLDetailsElement).open = true;
+        });
+        const nav = page.locator('.fy-settings-nav');
+        const facts = await nav.evaluate(el => {
+          const style = getComputedStyle(el);
+          return {
+            scrolls: el.scrollHeight > el.clientHeight + 1,
+            overflowY: style.overflowY,
+            fades: (style.backgroundImage.match(/linear-gradient/gu) ?? []).length,
+            thin: style.scrollbarWidth,
+            height: Math.round(el.getBoundingClientRect().height),
+          };
+        });
+        expect(facts.scrolls, `the list (${facts.height}px) is longer than its box`).toBe(true);
+        expect(['auto', 'scroll']).toContain(facts.overflowY);
+        expect(facts.fades, 'two fades and two shadows').toBe(4);
+        expect(facts.thin).toBe('thin');
+        if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, 'nav-cue-top.png') });
+        // Focus on the last entry scrolls it into the box: it is not clipped.
+        const last = nav.locator('a').last();
+        await last.focus();
+        const inside = await page.evaluate(() => {
+          const list = document.querySelector('.fy-settings-nav')?.getBoundingClientRect();
+          const link = document.activeElement?.getBoundingClientRect();
+          return list !== undefined && link !== undefined && link.bottom <= list.bottom + 1 && link.top >= list.top - 1;
+        });
+        expect(inside, 'the last entry is fully inside the list once focused').toBe(true);
+        expect(await nav.evaluate(el => el.scrollTop), 'it scrolled to get there').toBeGreaterThan(0);
+        if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, 'nav-cue-bottom.png') });
+      } finally {
+        await context.close();
+      }
+    });
+  }
+});

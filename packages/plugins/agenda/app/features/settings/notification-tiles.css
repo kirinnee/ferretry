@@ -25,3 +25,25 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
+/* No orphan: when the last tile would sit alone on its line it takes the rest of that line. The fieldset's first child is its
+   legend, so the tiles are children 2..n+1 (two columns: an odd tile count; three: a count of 3k + 2, one empty cell). */
+@container (min-width: 520px) {
+  .fy-notify-grid > :last-child:nth-child(even) {
+    grid-column: 1 / -1;
+  }
+}
+@container (min-width: 780px) {
+  .fy-notify-grid > :last-child:nth-child(even) {
+    grid-column: auto;
+  }
+  .fy-notify-grid > :last-child:nth-child(3n) {
+    grid-column: span 2;
+  }
+}
+/* In a narrow panel the icon gives its room to the words, so a one-line description wraps as little as it can. */
+@container (max-width: 359px) {
+  .fy-notify-grid [data-tile-icon] {
+    display: none;
+  }
+}

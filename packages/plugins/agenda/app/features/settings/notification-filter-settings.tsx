@@ -57,7 +57,7 @@ export function NotificationFilterSettingsView({
   const { categories, quietHours } = preferences;
   return (
     <section className="flex flex-col gap-4" aria-label="Notification filter">
-      <p className="m-0 text-meta leading-base text-faint">{NOTIFICATION_FILTER_INTRO}</p>
+      <p className="m-0 text-meta leading-base text-muted">{NOTIFICATION_FILTER_INTRO}</p>
       <div className="fy-notify-tiles">
         <fieldset className="fy-notify-grid">
           <legend className="sr-only">Show me</legend>
@@ -74,7 +74,7 @@ export function NotificationFilterSettingsView({
           ))}
         </fieldset>
       </div>
-      <div className="flex min-h-[56px] flex-wrap items-center gap-x-4 gap-y-2" data-quiet-hours-row="">
+      <div className="mt-4 flex min-h-[56px] flex-wrap items-center gap-x-4 gap-y-2" data-quiet-hours-row="">
         <button
           type="button"
           role="switch"
@@ -89,6 +89,9 @@ export function NotificationFilterSettingsView({
           <span className="text-ui font-semibold text-fg">Quiet hours</span>
           <SwitchGlyph checked={quietHours.enabled} />
         </button>
+        <span className="min-w-0 flex-1 basis-[16rem] text-meta leading-base text-muted" data-quiet-hours-hint="">
+          Show nothing during a daily window, even for a kind that is switched on.
+        </span>
         {quietHours.enabled && (
           <>
             <label className="flex min-h-[44px] items-center gap-2 text-ui text-fg">

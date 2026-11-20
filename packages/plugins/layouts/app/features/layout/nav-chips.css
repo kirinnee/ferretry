@@ -1,22 +1,16 @@
-/* The navigation chips (nav-chips.tsx): a compact grid, one column on a phone, two from 640 px, three from 1100 px. */
+/* The navigation chips (nav-chips.tsx): as many columns as the LIST's own width holds (a chip needs ~14rem to show its
+   full name beside Earlier, Later and the eye), one column in a narrow panel. */
+[data-nav-chips] {
+  container-type: inline-size;
+}
 .fy-chips {
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr));
   list-style: none;
   margin: 0;
   padding: 0;
   position: relative;
-}
-@media (min-width: 640px) {
-  .fy-chips {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-@media (min-width: 1100px) {
-  .fy-chips {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }
 
 .fy-chip {
@@ -106,4 +100,19 @@
 .fy-chip-act[aria-disabled='true'] {
   cursor: not-allowed;
   opacity: 0.35;
+}
+
+/* A narrow list (a phone, or the ~212 px settings panel of a 768 px window): the name has the first line to itself, so
+   it reads in full, and Earlier, Later and the eye share the line under it, each a full 44 px target. */
+@container (max-width: 19.99rem) {
+  .fy-chip {
+    flex-wrap: wrap;
+  }
+  .fy-chip-main {
+    flex: 1 0 100%;
+  }
+  .fy-chip-act {
+    flex: 1 1 0;
+    width: auto;
+  }
 }

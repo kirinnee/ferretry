@@ -5,7 +5,7 @@
  * (`@ferretry/app`'s one device-controls store), so a change here is the change every composer on this device reads.
  * The message-marks legend joins this tab with the chat (C3).
  */
-import { useDeviceControls } from '@ferretry/app';
+import { SettingGroup, SettingRow, useDeviceControls } from '@ferretry/app';
 import type { ReactNode } from 'react';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { COMPOSER_SUGGESTIONS_INTRO, ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
@@ -14,16 +14,14 @@ import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
 interface SectionDefinition {
   readonly id: string;
   readonly label: string;
-  readonly description: string;
+  readonly description?: string;
 }
 
-/** Today's settings-catalog entries for the three, word for word. */
+/** The three groups. The Style description is the Style row's (i) text (`EDITOR_STYLE_INTRO`); the others are their rows' hint and (i). */
 const SECTIONS = {
   markdown: {
     id: 'composer-markdown',
     label: 'Editor style',
-    description:
-      'Markdown, Notion-style (the default) formats as you type — headings at their real size, bold, lists that continue on Enter, checklists, quotes, code — with the markers kept faintly visible; Rich text hides the markers and adds a toolbar; or choose a plain text box. Whichever style, you send markdown. Optional Vim-style modal keys live here too.',
   },
   enterKey: {
     id: 'composer-enter-key',
@@ -38,52 +36,43 @@ const SECTIONS = {
   },
 } as const satisfies Record<string, SectionDefinition>;
 
-/** One section, drawn as today's `SettingsSection`. */
-function SettingsSection({
-  definition,
-  children,
-}: {
-  readonly definition: SectionDefinition;
-  readonly children: ReactNode;
-}) {
-  const headingId = `settings-${definition.id}-heading`;
-  return (
-    <section
-      id={`settings-${definition.id}`}
-      data-setting-id={definition.id}
-      tabIndex={-1}
-      className="kt-panel p-panel outline-none focus-visible:ring-2 focus-visible:ring-accent"
-      aria-labelledby={headingId}
-    >
-      <h3 id={headingId} className="m-0 text-row font-semibold text-fg">
-        {definition.label}
-      </h3>
-      <p className="mt-1 text-cell leading-base text-muted">{definition.description}</p>
-      <div className="mt-3">{children}</div>
-    </section>
-  );
+/** The body of a setting row that is not a one-line control: the same left edge as the row's name. */
+function Body({ children }: { readonly children: ReactNode }) {
+  return <div className="min-w-0 pb-3 pl-panel pr-1 pt-1">{children}</div>;
 }
 
 export function ConversationSettings(): ReactNode {
   const { device, set } = useDeviceControls();
   return (
     <>
-      <SettingsSection definition={SECTIONS.markdown}>
+      <SettingGroup label={SECTIONS.markdown.label} settingId={SECTIONS.markdown.id}>
         <MarkdownComposerSettings
           vimEnabled={device.composerVimMode}
           onChangeVim={composerVimMode => set({ composerVimMode })}
         />
-      </SettingsSection>
-      <SettingsSection definition={SECTIONS.enterKey}>
-        <ComposerEnterKeySettings
-          preference={device.composerEnterKey}
-          phonePreference={device.composerPhoneEnterKey}
-          onChange={patch => set(patch)}
-        />
-      </SettingsSection>
-      <SettingsSection definition={SECTIONS.suggestions}>
-        <ComposerSuggestionsSettings preferences={device} onChange={patch => set(patch)} />
-      </SettingsSection>
+      </SettingGroup>
+      <SettingGroup label={SECTIONS.enterKey.label} settingId={SECTIONS.enterKey.id}>
+        <SettingRow
+          name="Enter key"
+          hint="Whether Enter sends or starts a new line."
+          explanation={SECTIONS.enterKey.description}
+        >
+          <Body>
+            <ComposerEnterKeySettings
+              preference={device.composerEnterKey}
+              phonePreference={device.composerPhoneEnterKey}
+              onChange={patch => set(patch)}
+            />
+          </Body>
+        </SettingRow>
+      </SettingGroup>
+      <SettingGroup label={SECTIONS.suggestions.label} settingId={SECTIONS.suggestions.id}>
+        <SettingRow name="Menu keys" hint={SECTIONS.suggestions.description}>
+          <Body>
+            <ComposerSuggestionsSettings preferences={device} onChange={patch => set(patch)} />
+          </Body>
+        </SettingRow>
+      </SettingGroup>
     </>
   );
 }

@@ -116,3 +116,9 @@
     width: 12rem;
   }
 }
+
+/* A budget's Daily / Weekly row: the same air above its fields as below them (the kit's row only has 4px each side, which
+   put the inputs against the hairline), so every row of the group has equal padding. */
+[data-usage-stack] > :first-child {
+  padding-block: 12px;
+}

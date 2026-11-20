@@ -1,0 +1,47 @@
+/* The composer editor rows (Style, Button layout): the cards sit in ONE row under the row's name, the line for the chosen
+   card under them, and the preview (Style only) beside them, or under them where the panel is too narrow for both.
+   They lay out by the width of the PANEL (container queries), never the window's. Theme tokens only. */
+.fy-cm-body {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  min-width: 0;
+  padding: 4px 4px 12px var(--pad-panel, 16px);
+}
+.fy-cm-main {
+  display: flex;
+  flex: 1 1 30rem;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.fy-cm-cards {
+  min-width: 0;
+}
+.fy-cm-caption {
+  color: var(--muted);
+  font-size: var(--text-sm, 12px);
+  line-height: 1.4;
+  margin: 0;
+}
+/* Three cards share the row down to the narrowest the cards themselves allow (480px, below which they stack); the title
+   wraps rather than the row breaking in two. */
+@container (min-width: 480px) {
+  .fy-cm-cards .fy-cc__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+/* Stacked (a phone, a narrow panel): the cards are compact so three of them do not fill the screen. */
+@container (max-width: 479.98px) {
+  .fy-cm-cards .fy-cc__card {
+    gap: 0;
+    min-height: 0;
+    padding: 8px 14px;
+  }
+}
+/* A card that is only a title does not keep the 72px a title-over-line card needs. */
+.fy-cm-cards .fy-cc__card {
+  min-height: 44px;
+  padding-block: 12px;
+}

@@ -131,7 +131,9 @@ export function ComposerSuggestionsSettings({
             </div>
           ) : null}
         </div>
-        <SuggestionsPreview keys={preferences.suggestionKeys} skills={skills} />
+        <div className="contents" data-no-nest="">
+          <SuggestionsPreview keys={preferences.suggestionKeys} skills={skills} />
+        </div>
       </div>
       <button
         aria-checked={skills}
