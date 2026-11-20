@@ -7,10 +7,9 @@
  * A preview shows ONLY what the live shell draws today (`packages/app/src/shell/frame.tsx`, `drawer.tsx`,
  * `drawer-nav.tsx`) and never geometry it does not have: the menu is always the left drawer, so a word that the shell
  * draws the same as another draws the same picture here.
- *   - side `left`: the left drawer, nothing else. `bottom`: the drawer AND a bar of places under the page. (`right` and
- *     `top` are not offered: they draw what `left` draws.)
- *   - style `rail`: the drawer starts as a slim icon rail. `list`: it starts open, icon and name. (`bar` is not offered:
- *     it draws what `list` draws.)
+ *   - the navigation form: `dock-icons` / `dock-words` are the drawer with its places docked at its foot (a row of icons, or
+ *     icon + word cells); `list` is the list at the drawer's top; `bottom` is the bar of places under the page, and the drawer
+ *     then holds no places of its own. (`right`, `top` and `bar` are not offered: they draw what the default draws.)
  *   - on a phone the drawer is shut behind a menu button, so a phone's side `left` draws the menu button alone;
  *     only side `bottom` adds the bar of places. A phone has no style row.
  */
@@ -19,6 +18,8 @@ import type { ChoiceSetting } from '../../../lib/layout-model.ts';
 /** The drawer's form: a slim icon `rail`, `open` (icon and name), or `none` (a phone: shut behind its menu button). */
 type Drawer = 'rail' | 'open' | 'none';
 type Density = 'comfortable' | 'compact';
+/** Where the drawer draws its places: docked at its foot (icons or words), as a list at its top, or not at all (a bottom bar has them). */
+type Places = 'dock-icons' | 'dock-words' | 'list' | 'none';
 /** The part of the frame the setting changes. */
 type Lit = 'nav' | 'column' | 'rows';
 
@@ -26,6 +27,7 @@ export interface MiniShellState {
   /** `phone` is a narrow frame (the phone variants of each key); `wide` is a desktop window. */
   readonly device: 'wide' | 'phone';
   readonly drawer: Drawer;
+  readonly places: Places;
   /** Is the bar of places drawn under the page? (Navigation side `bottom`.) */
   readonly bottom: boolean;
   /** Is the second column beside the page drawn? */
@@ -41,6 +43,7 @@ export interface MiniShellState {
 const NEUTRAL: MiniShellState = {
   device: 'wide',
   drawer: 'rail',
+  places: 'list',
   bottom: false,
   column: false,
   density: 'comfortable',
@@ -62,10 +65,16 @@ export function stateFor(path: ChoiceSetting['path'], word: string): MiniShellSt
     drawer: phone ? 'none' : NEUTRAL.drawer,
   };
   switch (key) {
+    case 'nav.form':
+      return {
+        ...base,
+        drawer: 'open',
+        places:
+          word === 'bottom' ? 'none' : word === 'list' ? 'list' : word === 'dock-words' ? 'dock-words' : 'dock-icons',
+        bottom: word === 'bottom',
+      };
     case 'nav.side':
-      return { ...base, bottom: word === 'bottom' };
-    case 'nav.style':
-      return { ...base, drawer: word === 'rail' ? 'rail' : 'open' };
+      return { ...base, places: word === 'bottom' ? 'none' : 'dock-icons', bottom: word === 'bottom' };
     case 'side.show':
       // `wide-only` shows the column on a wide screen and not on a narrow one; `always` shows it on both.
       return phone

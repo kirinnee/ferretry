@@ -88,6 +88,7 @@ export interface FramePlan {
   readonly nav: {
     readonly side: ResolvedLayout['nav']['side'];
     readonly style: ResolvedLayout['nav']['style'];
+    readonly labels: ResolvedLayout['nav']['labels'];
     readonly entries: readonly NavEntry[];
   };
   readonly top: readonly string[];
@@ -194,7 +195,7 @@ export function planFrame(layout: ResolvedLayout, views: Views): FramePlan {
   }
   return {
     layoutId: layout.id,
-    nav: { side: layout.nav.side, style: layout.nav.style, entries },
+    nav: { side: layout.nav.side, style: layout.nav.style, labels: layout.nav.labels, entries },
     top: layout.top,
     side: { show: layout.side.show, holds: side, at: layout.side.at ?? 'right' },
     density: layout.density,

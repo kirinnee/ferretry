@@ -150,10 +150,10 @@ describe("the ferret list screen (today's sessions bar and its drawer)", () => {
     expect(root.querySelector('[data-sbar-session][aria-current="page"]')).toBeNull();
   });
 
-  it('S-0231 replaced: no Ferrets drawer; on a phone the ferrets screen is the first bottom-nav item and opens the live list', async () => {
-    // The layout the shell resolves for a phone puts the nav at the bottom with `ferrets` first (the shell owns nav, §5.3).
-    expect(DEFAULT_LAYOUT.phone?.nav?.side).toBe('bottom');
-    expect(DEFAULT_LAYOUT.phone?.nav?.items?.[0]).toBe('ferrets');
+  it('S-0231 replaced: no Ferrets drawer; on a phone the ferrets screen is the first place in the nav in the menu and opens the live list', async () => {
+    // The layout the shell resolves for a phone is the wide one (r11 S1: the places are docked in the menu, no bottom bar) with `ferrets` first (the shell owns nav, §5.3).
+    expect(DEFAULT_LAYOUT.phone?.nav).toBeUndefined();
+    expect(DEFAULT_LAYOUT.nav.items[0]).toBe('ferrets');
     expect(manifest.ui?.screens?.some(screen => screen.id === 'ferrets' && screen.nav !== undefined)).toBe(true);
     // Opening it draws this daemon's ferrets, live, with the open ferret marked.
     const root = await drawList('/d/dm1/ferrets/f-2/chat');

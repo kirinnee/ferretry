@@ -354,17 +354,27 @@ const agendaManifest = stub('agenda', [{ id: 'agenda', path: 'agenda', label: 'A
 const boardManifest = stub('board', [
   { id: 'board', path: 'board/:project?', label: 'Board', icon: 'columns', order: 2 },
 ]);
+// Conversation's `links` screen (r11 S1: "Conversations" is a default nav place): the ids, path, label, icon and order its manifest declares.
+const conversationManifest = stub('conversation', [
+  { id: 'links', path: 'links', label: 'Conversations', icon: 'messages', order: 25 },
+]);
+const projectsManifest = stub('projects', [
+  { id: 'projects', path: 'projects', label: 'Projects', icon: 'folder', order: 35 },
+]);
 const usageManifest = manifestOf('usage', {
   ui: {
     screens: [{ id: 'insights', path: 'insights', nav: { label: 'Insights', icon: 'chart', order: 3 } }],
     panels: [],
   },
 });
+const COMPOSER_TOOLS = DEFAULT_LAYOUT['composer.tools'] ?? [];
 const panelsManifest = manifestOf('stubs', {
   ui: {
     panels: [
       ...SIDE.map((id, order) => ({ id, slot: 'ferret.side', order })),
       ...TOOLBAR.map(([id], order) => ({ id, slot: 'ferret.toolbar', order })),
+      // The composer's tools the default layout lists: a device layout laid over the default is checked against these.
+      ...COMPOSER_TOOLS.map((id, order) => ({ id, slot: 'composer.tools', order })),
     ],
   },
 });
@@ -416,6 +426,20 @@ const surfaces: readonly SurfaceEntry[] = [
     provideToShell(implementApp(boardManifest, { build: () => ({ screens: { board: page('Board') } }) } as never), {}),
   ),
   entryOf(
+    projectsManifest,
+    provideToShell(
+      implementApp(projectsManifest, { build: () => ({ screens: { projects: page('Projects') } }) } as never),
+      {},
+    ),
+  ),
+  entryOf(
+    conversationManifest,
+    provideToShell(
+      implementApp(conversationManifest, { build: () => ({ screens: { links: page('Conversations') } }) } as never),
+      {},
+    ),
+  ),
+  entryOf(
     usageManifest,
     provideToShell(
       implementApp(usageManifest, { build: () => ({ screens: { insights: page('Insights') } }) } as never),
@@ -436,6 +460,7 @@ const surfaces: readonly SurfaceEntry[] = [
           panels: {
             ...Object.fromEntries(SIDE.map(id => [id, panelStand(id)])),
             ...Object.fromEntries(TOOLBAR.map(([id, stand]) => [id, stand])),
+            ...Object.fromEntries(COMPOSER_TOOLS.map(id => [id, () => null])),
           },
         }),
       } as never),
@@ -499,6 +524,24 @@ const runtime = new ShellRuntime({
   },
 });
 const storage = memoryStore();
+// `?nav=<form>` and `?phonenav=<side>` lay this DEVICE's choice over the default layout, the way Settings › Layout's device scope does:
+// icons | words (the sidebar foot), list, rail, bottom; `?phonenav=bottom` is the phone-only bottom bar switch.
+const deviceLayouts = new DeviceLayoutStore(storage);
+const NAV_FORMS: Readonly<Record<string, readonly (readonly [string, string])[]>> = {
+  icons: [
+    ['nav.style', 'dock'],
+    ['nav.labels', 'icons'],
+  ],
+  words: [
+    ['nav.style', 'dock'],
+    ['nav.labels', 'words'],
+  ],
+  list: [['nav.style', 'list']],
+  rail: [['nav.style', 'rail']],
+  bottom: [['nav.side', 'bottom']],
+};
+for (const [path, value] of NAV_FORMS[params.get('nav') ?? ''] ?? []) deviceLayouts.set(DEFAULT_LAYOUT, path, value);
+if (params.get('phonenav') === 'bottom') deviceLayouts.set(DEFAULT_LAYOUT, 'phone.nav.side', 'bottom');
 
 const root = document.getElementById('root');
 if (root !== null)
@@ -506,7 +549,7 @@ if (root !== null)
     <App
       runtime={runtime}
       themes={new ThemePreferenceStore(storage)}
-      layouts={new DeviceLayoutStore(storage)}
+      layouts={deviceLayouts}
       browser={window}
       scroll={new ScrollMemory(null)}
     />,

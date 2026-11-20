@@ -20,6 +20,7 @@ import {
 const SCALAR_PATHS: ReadonlySet<string> = new Set([
   'nav.side',
   'nav.style',
+  'nav.labels',
   'side.show',
   'side.holds',
   'side.at',
@@ -168,16 +169,16 @@ export function resolveCurrent(
  * `top` and `bar` draw what `left` and `list` draw, and Settings no longer offers them.
  */
 const NAV_SIDES: readonly string[] = ['left', 'bottom'];
-const NAV_STYLES: readonly string[] = ['rail', 'list'];
+const NAV_STYLES: readonly string[] = ['rail', 'list', 'dock'];
 
 /**
  * A layout copied to a name of its own, with a navigation word the shell does not draw read as the one it does (the
- * default `left` and `list`): a saved copy never carries a choice Settings cannot show or change. The order of the
+ * default `left` and the sidebar-foot `dock`; the old `bar` is `dock`): a saved copy never carries a choice Settings cannot show or change. The order of the
  * places is kept, and a key the layout did not set for a phone stays unset.
  */
 export function normalizeNav(layout: Layout): Layout {
   const side = (word: string): Layout['nav']['side'] => (NAV_SIDES.includes(word) ? (word as 'left') : 'left');
-  const style = (word: string): Layout['nav']['style'] => (NAV_STYLES.includes(word) ? (word as 'list') : 'list');
+  const style = (word: string): Layout['nav']['style'] => (NAV_STYLES.includes(word) ? (word as 'list') : 'dock');
   const phoneNav = layout.phone?.nav;
   const phone =
     layout.phone === undefined || phoneNav === undefined

@@ -468,11 +468,11 @@ describe('the Needs-you nav panel (device-level)', () => {
     expect(column.view.container.querySelector('[data-testid="needs-you"]')?.getAttribute('data-form')).toBe('column');
   });
 
-  // The default nav is v4's destination row along the top: no second "Needs you" list under it (the Agenda entry's count
+  // The default nav is docked at the drawer's foot as icons: no second "Needs you" list under it (the Agenda entry's count
   // is the one badge), so only `compact`, a rail, still draws the panel.
   for (const layout of BUILT_IN_LAYOUTS) {
-    const drawn = layout.nav.side !== 'top';
-    test(`shell S4 (U-L): under the built-in "${layout.id}" layout on a desktop the Needs-you panel is ${drawn ? 'drawn once, in the rail form' : 'not drawn (the nav is a top row, its badge is the count)'}`, async () => {
+    const drawn = layout.nav.style !== 'dock';
+    test(`shell S4 (U-L): under the built-in "${layout.id}" layout on a desktop the Needs-you panel is ${drawn ? 'drawn once, in the rail form' : 'not drawn (the nav is docked icons, its badge is the count)'}`, async () => {
       const app = await bootApp({
         surfaces: [inbox],
         machines: ['d1', 'd2'],
@@ -483,7 +483,7 @@ describe('the Needs-you nav panel (device-level)', () => {
       expect(panels('inbox.needs-you')).toBe(drawn ? 1 : 0);
       if (drawn)
         expect(app.view.container.querySelector('[data-testid="needs-you"]')?.getAttribute('data-form')).toBe('rail');
-      else expect(app.view.container.querySelector('.fy-nav--drawer')).not.toBeNull();
+      else expect(app.view.container.querySelector('.fy-nav--dock')).not.toBeNull();
     });
   }
 
@@ -654,7 +654,7 @@ describe('the side column', () => {
     // The left column is the drawer's list slot, not a column of the frame: the page is alone in the columns.
     expect(orderOf(app.view.container)).toEqual(['main']);
     expect(app.view.container.querySelector('.fy-drawer__list')).not.toBeNull();
-    expect(app.view.container.querySelector('.fy-nav--drawer')).not.toBeNull();
+    expect(app.view.container.querySelector('.fy-nav--dock')).not.toBeNull();
   });
 
   test('U-L: the nav entry whose page is on screen is marked as the current page', async () => {
@@ -666,7 +666,8 @@ describe('the side column', () => {
     });
     view = app.view;
     const current = [...app.view.container.querySelectorAll('.fy-nav__item[aria-current="page"]')];
-    expect(current.map(node => node.textContent)).toEqual(['Inbox']);
+    // A docked icon with no icon of its own shows its first letter and names itself to assistive tech: read the name.
+    expect(current.map(node => node.querySelector('.sr-only, .fy-nav__label')?.textContent)).toEqual(['Inbox']);
   });
 
   test('U-L: a layout that asks for the right edge gets the side column after the page', async () => {

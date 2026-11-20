@@ -8,7 +8,7 @@
  *
  *  - NO SIDEWAYS SCROLL: the page's `scrollWidth` is no wider than its `clientWidth` (a clipped or overflowing control is how a
  *    phone page usually goes wrong);
- *  - THE BOTTOM BAR holds every place the wide bar has, in cells that each fit their label and are at least 44px tall;
+ *  - THE PHONE'S DRAWER holds every place at its foot (r11 S1; no bottom bar), in cells at least 44px tall;
  *  - THE COMPOSER'S STATUS LINE stays inside the screen however long the model's name is (the ring and the quota keep their size,
  *    the name is what is cut short);
  *  - A FERRET ROW's title ends before its pin and ⋯ buttons, never under them.
@@ -115,39 +115,47 @@ describe('no page scrolls sideways at a phone width', () => {
           });
 });
 
-describe('the bottom bar', () => {
+describe('the places on a phone (r11 S1, owner C2: in the drawer at its foot, no bottom bar)', () => {
   for (const width of WIDTHS)
-    it(`at ${width}: six places, each label whole, each cell 44px tall, none over the next`, async () => {
-      const { tab, close } = await open(width, 'light', '/d/ws/ferrets', '[data-sbar-session]');
+    it(`at ${width}: no bottom bar; the menu opens a drawer whose dock holds every place, each a finger tall, none over the next`, async () => {
+      const { tab, close } = await open(width, 'light', '/d/ws/agenda', '.fy-main');
       try {
-        const cells = await tab.evaluate(() =>
-          [...document.querySelectorAll('.fy-nav--bottom .fy-nav__item')].map(item => {
-            const box = item.getBoundingClientRect();
-            return {
-              text: (item.firstChild?.textContent ?? '').trim(),
-              left: box.left,
-              right: box.right,
-              height: box.height,
-              cut: item.scrollWidth > item.clientWidth,
-            };
-          }),
-        );
-        expect(cells.map(cell => cell.text)).toEqual([
+        expect(await tab.locator('.fy-nav--bottom, [data-slot="bottom"]').count(), 'no bottom bar').toBe(0);
+        await tab.click('button[aria-label="Menu"]');
+        await tab.waitForSelector('.fy-drawer--overlay');
+        const seen = await tab.evaluate(() => {
+          const drawer = document.querySelector('.fy-drawer')?.getBoundingClientRect();
+          return {
+            drawerRight: drawer?.right ?? 0,
+            drawerBottom: drawer?.bottom ?? 0,
+            cells: [...document.querySelectorAll('nav[data-nav="dock"] .fy-nav__item')].map(item => {
+              const box = item.getBoundingClientRect();
+              return {
+                text: (item.querySelector('.sr-only, .fy-nav__label')?.textContent ?? '').trim(),
+                left: box.left,
+                right: box.right,
+                bottom: box.bottom,
+                height: box.height,
+                width: box.width,
+              };
+            }),
+          };
+        });
+        expect(seen.cells.map(cell => cell.text)).toEqual([
           'Ferrets',
+          'Conversations',
           'Agenda',
           'Board',
           'Projects',
           'Insights',
           'Settings',
         ]);
-        for (const [index, cell] of cells.entries()) {
-          expect(cell.cut, `${cell.text} is not cut short`).toBe(false);
+        for (const cell of seen.cells) {
           expect(cell.height, `${cell.text} is a finger tall`).toBeGreaterThanOrEqual(44);
+          expect(cell.width, `${cell.text} is a finger wide`).toBeGreaterThanOrEqual(40);
           expect(cell.left).toBeGreaterThanOrEqual(0);
-          expect(cell.right).toBeLessThanOrEqual(width);
-          const next = cells[index + 1];
-          if (next !== undefined)
-            expect(cell.right, `${cell.text} ends before ${next.text}`).toBeLessThanOrEqual(next.left + 1);
+          expect(cell.right, `${cell.text} is inside the drawer`).toBeLessThanOrEqual(seen.drawerRight + 1);
+          expect(cell.bottom, `${cell.text} is inside the drawer foot`).toBeLessThanOrEqual(seen.drawerBottom + 1);
         }
       } finally {
         await close();
@@ -205,15 +213,17 @@ describe('a ferret row', () => {
 });
 
 describe('where you are', () => {
-  it("on a ferret's chat the bottom bar marks Ferrets as the current place", async () => {
-    const { tab, close } = await open(390, 'light', '/d/ws/ferrets/zoe/chat', '[data-composer-send]');
+  it('on a phone the dock in the drawer marks the page on screen as the current place', async () => {
+    const { tab, close } = await open(390, 'light', '/d/ws/agenda', '.fy-main');
     try {
+      await tab.click('button[aria-label="Menu"]');
+      await tab.waitForSelector('.fy-drawer--overlay');
       const current = await tab.evaluate(() =>
-        [...document.querySelectorAll('.fy-nav--bottom .fy-nav__item[aria-current="page"]')].map(item =>
-          (item.firstChild?.textContent ?? '').trim(),
+        [...document.querySelectorAll('nav[data-nav="dock"] .fy-nav__item[aria-current="page"]')].map(item =>
+          (item.querySelector('.sr-only, .fy-nav__label')?.textContent ?? '').trim(),
         ),
       );
-      expect(current).toEqual(['Ferrets']);
+      expect(current).toEqual(['Agenda']);
     } finally {
       await close();
     }

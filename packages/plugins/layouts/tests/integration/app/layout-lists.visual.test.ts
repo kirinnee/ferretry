@@ -135,9 +135,7 @@ describe('the layout lists', () => {
         await tab.locator('[data-layout-scope="device"]').waitFor();
         // The pill's selected state eases in; the frame is taken once it has settled.
         await tab.waitForTimeout(350);
-        expect(await tab.locator('[role="radiogroup"][aria-label="Navigation side"]').count(), 'one set of rows').toBe(
-          1,
-        );
+        expect(await tab.locator('[role="radiogroup"][aria-label="Navigation"]').count(), 'one set of rows').toBe(1);
         if (shotsDir !== '')
           await tab.screenshot({ path: join(shotsDir, `${variant.name}-device.png`), fullPage: true });
         const overflow = await tab.evaluate(

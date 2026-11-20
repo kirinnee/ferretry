@@ -140,10 +140,10 @@ describe('the layout step', () => {
       }
     });
 
-    it(`${variant.name}: choosing Bottom and Compact plays each demo once, and then it rests`, async () => {
+    it(`${variant.name}: choosing Words and Compact plays each demo once, and then it rests`, async () => {
       const { tab, close } = await open(variant);
       try {
-        await tab.locator('[data-choice="bottom"]').click();
+        await tab.locator('[data-choice="words"]').click();
         await tab.locator('[data-choice="compact"]').click();
         await seek(tab, 120);
         await shot(tab, variant, 'mid-animation');
@@ -160,17 +160,32 @@ describe('the layout step', () => {
         const picked = await tab.$$eval('[data-layout-step] input:checked', inputs =>
           inputs.map(input => (input as HTMLInputElement).value),
         );
-        expect(picked).toEqual(['bottom', 'compact']);
+        expect(picked).toEqual(['words', 'compact']);
       } finally {
         await close();
       }
     });
   }
 
+  it('390: Icons takes effect on a phone whose layout sets phone.nav.labels=words (the phone key is written where it wins)', async () => {
+    const phone = VARIANTS[2];
+    const { tab, close } = await open(phone, '&phoneLabels=words');
+    try {
+      const nav = (value: string) => tab.locator(`[aria-label="Navigation"] input[value="${value}"]`);
+      expect(await nav('words').isChecked(), 'the phone starts on the Words its layout set').toBe(true);
+      await tab.locator('[data-choice="icons"]').click();
+      expect(await nav('icons').isChecked(), 'the EFFECTIVE phone choice is now Icons').toBe(true);
+      expect(await nav('words').isChecked()).toBe(false);
+      await shot(tab, phone, 'phone-label-override');
+    } finally {
+      await close();
+    }
+  });
+
   it('with motion off nothing plays at all', async () => {
     const { tab, close } = await open(VARIANTS[0], '&motion=reduced');
     try {
-      await tab.locator('[data-choice="bottom"]').click();
+      await tab.locator('[data-choice="words"]').click();
       await tab.locator('[data-choice="compact"]').click();
       const moving = await tab.evaluate(
         () => document.getAnimations().filter(animation => animation.playState === 'running').length,

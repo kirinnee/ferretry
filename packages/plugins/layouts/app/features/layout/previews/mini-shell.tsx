@@ -26,12 +26,31 @@ function Item({
 }
 
 /** The left drawer: a slim rail of icons, or open with an icon and a name on every row. */
-function Drawer({ form, lit }: { readonly form: 'rail' | 'open'; readonly lit: boolean }) {
+function Drawer({
+  form,
+  places,
+  lit,
+}: {
+  readonly form: 'rail' | 'open';
+  readonly places: MiniShellState['places'];
+  readonly lit: boolean;
+}) {
+  const docked = places === 'dock-icons' || places === 'dock-words';
   return (
-    <div className="fy-ls-nav fy-ls-drawer" data-form={form} data-lit={lit ? '' : undefined}>
-      {ITEMS.map(index => (
-        <Item key={index} index={index} iconed labelled={form === 'open'} />
-      ))}
+    <div className="fy-ls-nav fy-ls-drawer" data-form={form} data-places={places} data-lit={lit ? '' : undefined}>
+      {places === 'list' ? (
+        ITEMS.map(index => <Item key={index} index={index} iconed labelled={form === 'open'} />)
+      ) : (
+        // The places are docked (or a bottom bar has them): the drawer's body is the ferret list, a few ghost rows.
+        <span className="fy-ls-spacer" />
+      )}
+      {docked ? (
+        <div className="fy-ls-dock" data-labels={places === 'dock-words' ? 'words' : 'icons'}>
+          {ITEMS.map(index => (
+            <Item key={index} index={index} iconed labelled={places === 'dock-words'} />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -63,7 +82,7 @@ function Frame({
   const navLit = state.lit === 'nav';
   return (
     <div className="fy-ls-frame" data-device={device}>
-      {drawer === 'none' ? null : <Drawer form={drawer} lit={navLit && !state.bottom} />}
+      {drawer === 'none' ? null : <Drawer form={drawer} places={state.places} lit={navLit && !state.bottom} />}
       <div className="fy-ls-body">
         {drawer === 'none' ? <span className="fy-ls-menu" data-lit={navLit && !state.bottom ? '' : undefined} /> : null}
         <div className="fy-ls-page">

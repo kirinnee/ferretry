@@ -48,7 +48,11 @@ const surfaces = [
       { id: 'insights', slot: 'ferret.side', order: 70 },
     ],
   }),
-  plugin('conversation', { panels: [{ id: 'queue', slot: 'ferret.side', order: 10 }] }),
+  plugin('conversation', {
+    // `links` is Conversations (r11 S1): a default nav place, order 25 as its real manifest declares.
+    screens: [{ id: 'links', path: 'links', nav: { label: 'Conversations', order: 25 } }],
+    panels: [{ id: 'queue', slot: 'ferret.side', order: 10 }],
+  }),
   // The rest of what the real manifests declare for `ferret.side` (the default layout lists every one of them).
   plugin('terminals', {
     panels: [
@@ -73,9 +77,9 @@ const views = viewsOf(surfaces);
 describe('U-L: the default layout puts the ferret list on the left, and a saved layout is kept as it was', () => {
   const planOf = (layout: typeof DEFAULT_LAYOUT) => planFrame(resolveLayout(layout, 'wide'), viewsOf(surfaces));
 
-  test('the built-in default is a top nav row with the ferret column on the left', () => {
+  test('the built-in default is a side bar with the places docked at its foot, and the ferret column on the left', () => {
     const plan = planOf(DEFAULT_LAYOUT);
-    expect(plan.nav.side).toBe('top');
+    expect(plan.nav).toMatchObject({ side: 'left', style: 'dock', labels: 'icons' });
     expect(plan.side.at).toBe('left');
     expect(plan.side.holds).toMatchObject({ kind: 'screen', screen: { id: 'ferrets' } });
   });
@@ -91,8 +95,9 @@ describe('U-L: the default layout puts the ferret list on the left, and a saved 
     expect(planOf(saved).nav.side).toBe('left');
   });
 
-  test('the phone keeps the bottom bar, and a device override that names an edge wins', () => {
-    expect(resolveLayout(DEFAULT_LAYOUT, 'phone').nav.side).toBe('bottom');
+  test('a phone follows the wide layout (the places in its menu, no bottom bar), and a device override that names an edge wins', () => {
+    expect(resolveLayout(DEFAULT_LAYOUT, 'phone').nav).toEqual(resolveLayout(DEFAULT_LAYOUT, 'wide').nav);
+    expect(resolveLayout(DEFAULT_LAYOUT, 'phone').nav.side).toBe('left');
     const moved = applyOverrides(DEFAULT_LAYOUT, { side: { at: 'right' } });
     expect(moved === undefined ? undefined : planOf(moved).side.at).toBe('right');
     const set = setDeviceOverride(DEFAULT_LAYOUT, {}, 'side.at', 'right');
@@ -136,19 +141,30 @@ describe('the layout item', () => {
     expect(checkLayout(layout, views.installed).map(issue => issue.at)).toEqual(['top', 'panels.ferret.side']);
   });
 
-  test('phone overrides apply only on a phone', () => {
-    expect(resolveLayout(DEFAULT_LAYOUT, 'wide').nav.side).toBe('top');
-    const phone = resolveLayout(DEFAULT_LAYOUT, 'phone');
+  test('phone overrides apply only on a phone; a stored top, right or bar reads as the side bar with its places docked', () => {
+    expect(resolveLayout(DEFAULT_LAYOUT, 'wide').nav.side).toBe('left');
+    const withBar = applyOverrides(DEFAULT_LAYOUT, { phone: { nav: { side: 'bottom' } } });
+    if (withBar === undefined) throw new Error('the override is a layout');
+    expect(resolveLayout(withBar, 'wide').nav.side).toBe('left');
+    const phone = resolveLayout(withBar, 'phone');
     expect(phone.nav).toEqual({
       side: 'bottom',
-      style: 'bar',
-      items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'],
+      style: 'dock',
+      labels: 'icons',
+      items: ['ferrets', 'conversation.links', 'agenda', 'board', 'projects', 'insights', 'settings'],
     });
     // The ferret list is the first bottom-nav item on a phone (S-0231: no Ferrets drawer).
     const bottom = planFrame(phone, views).nav.entries[0];
     expect(bottom?.kind === 'screen' ? `${bottom.screen.plugin}.${bottom.screen.id}` : bottom?.item).toBe(
       'ferrets.ferrets',
     );
+    // Conversations is the second default place.
+    const second = planFrame(phone, views).nav.entries[1];
+    expect(second?.kind === 'screen' ? `${second.screen.plugin}.${second.screen.id}` : second?.item).toBe(
+      'conversation.links',
+    );
+    const stored = LayoutSchema.parse({ id: 'old', nav: { side: 'top', style: 'bar', items: ['agenda'] } });
+    expect(resolveLayout(stored, 'wide').nav).toMatchObject({ side: 'left', style: 'dock' });
   });
 });
 
@@ -218,10 +234,8 @@ describe('the owner layout and this device (§5.3)', () => {
 
   test('applyOverrides lays phone fields over the phone overrides the layout has', () => {
     const laid = applyOverrides(DEFAULT_LAYOUT, { phone: { nav: { side: 'top' } } });
-    expect(laid?.phone?.nav).toEqual({
-      side: 'top',
-      items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'],
-    });
+    // The built-in layout has no phone nav of its own (a phone follows the wide one), so the override is all there is.
+    expect(laid?.phone?.nav).toEqual({ side: 'top' });
   });
 });
 
@@ -241,6 +255,7 @@ describe('the frame plan', () => {
     const plan = planFrame(resolveLayout(DEFAULT_LAYOUT, 'wide'), views);
     expect(plan.nav.entries.map(e => (e.kind === 'screen' ? `${e.screen.plugin}.${e.screen.id}` : e.item))).toEqual([
       'ferrets.ferrets',
+      'conversation.links',
       'agenda.agenda',
       'board.board',
       'projects.projects',

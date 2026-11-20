@@ -57,20 +57,12 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
+  justify-content: flex-end;
   padding: 8px 6px;
-  width: 30px;
+  width: 52px;
 }
 .fy-lstep-demo[data-demo='density'] .fy-lstep-demo__drawer {
   display: none;
-}
-.fy-lstep-demo__item {
-  background: var(--muted);
-  background: color-mix(in srgb, var(--muted) 50%, var(--bg));
-  border-radius: 3px;
-  height: 8px;
-}
-.fy-lstep-demo__item[data-on] {
-  background: var(--accent);
 }
 .fy-lstep-demo__body {
   display: flex;
@@ -99,22 +91,24 @@
 .fy-lstep-demo[data-density='compact'] .fy-lstep-demo__row {
   height: 6px;
 }
-.fy-lstep-demo__bottom {
-  background: var(--surface-2);
-  border-block-start: 1px solid var(--border);
+/* The dock at the drawer's foot: small squares in a row for icons, wide bars in two columns for words. */
+.fy-lstep-demo__dock {
   display: flex;
-  gap: 10px;
-  justify-content: center;
-  padding: 6px;
+  flex-wrap: wrap;
+  gap: 3px;
 }
-.fy-lstep-demo__bottom span {
+.fy-lstep-demo__dock span {
   background: var(--muted);
   background: color-mix(in srgb, var(--muted) 50%, var(--bg));
   border-radius: 3px;
   height: 7px;
-  width: 22px;
+  width: 7px;
 }
-.fy-lstep-demo__bottom span[data-on] {
+.fy-lstep-demo[data-labels='words'] .fy-lstep-demo__dock span {
+  flex: 1 0 40%;
+  width: auto;
+}
+.fy-lstep-demo__dock span[data-on] {
   background: var(--accent);
 }
 
@@ -129,7 +123,7 @@
   }
 }
 @media (prefers-reduced-motion: no-preference) {
-  .fy-cc__card[data-pulse='true'] .fy-lstep-demo__bottom[data-moves] {
+  .fy-cc__card[data-pulse='true'] .fy-lstep-demo__dock[data-moves] {
     animation: fy-lstep-rise 280ms ease-out;
   }
   .fy-cc__card[data-pulse='true'] .fy-lstep-demo__page[data-moves] .fy-lstep-demo__row {
@@ -151,7 +145,7 @@
     animation-delay: 200ms;
   }
 }
-:root[data-motion='reduced'] .fy-lstep-demo__bottom,
+:root[data-motion='reduced'] .fy-lstep-demo__dock,
 :root[data-motion='reduced'] .fy-lstep-demo__row {
   animation: none;
 }

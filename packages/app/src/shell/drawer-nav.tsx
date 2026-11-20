@@ -5,12 +5,20 @@ import { useShell } from './context.tsx';
 import { Link } from './pages.tsx';
 
 /**
- * THE APP'S DESTINATIONS, once, in the two places they are drawn: as icon + label rows in the left drawer (a slim rail shows the
- * icon alone, or the label's first letter where a destination declares no icon), and as the phone's bottom bar. A destination
- * with no address is one the person cannot open from here, and reads as plain text.
+ * THE APP'S DESTINATIONS, once, in the places they are drawn: DOCKED at the foot of the left drawer (the default, r11 S1: a row
+ * of icons, or icon + word cells; a slim rail stacks the icons), as icon + label rows in a list at the drawer's top, and as a
+ * bottom bar. A destination with no address is one the person cannot open from here, and reads as plain text.
  */
 
-function Row({ target, rail }: { readonly target: NavTarget; readonly rail: boolean }) {
+/** Where the drawer draws its places: docked at its foot, as a list at its top, or not at all (a bottom bar has them). */
+export type NavPlacement = 'dock' | 'list' | 'none';
+
+export function navPlacement(nav: { readonly side: string; readonly style: string }): NavPlacement {
+  if (nav.side === 'bottom') return 'none';
+  return nav.style === 'dock' ? 'dock' : 'list';
+}
+
+function Row({ target, rail, tip }: { readonly target: NavTarget; readonly rail: boolean; readonly tip?: boolean }) {
   const { entry, to, label, current, icon } = target;
   // A plugin's count for its own entry, summed over every machine (S4), on every nav form.
   const badge =
@@ -31,9 +39,11 @@ function Row({ target, rail }: { readonly target: NavTarget; readonly rail: bool
     </>
   );
   return to === undefined ? (
-    <span className="fy-nav__item fy-nav__item--off">{body}</span>
+    <span className="fy-nav__item fy-nav__item--off" {...(tip === true ? { title: label } : {})}>
+      {body}
+    </span>
   ) : (
-    <Link to={to} className="fy-nav__item" current={current}>
+    <Link to={to} className="fy-nav__item" current={current} title={tip === true ? label : undefined}>
       {body}
     </Link>
   );
@@ -54,6 +64,29 @@ export function DrawerNav({ daemon, rail }: { readonly daemon: string | undefine
         <Row key={target.key} target={target} rail={rail} />
       ))}
       {panels ? <DevicePanels slot="nav" form={form} /> : null}
+    </nav>
+  );
+}
+
+/**
+ * THE DOCK (r11 S1): the places at the foot of the drawer. `labels: 'icons'` is a row of icon cells whose name is their tooltip
+ * and accessible name; `'words'` is a grid of icon + word cells; a collapsed rail stacks the icons whatever the choice. It draws no
+ * device-level nav panels (Needs you…): a list under a row of icons has no room, and the Agenda place's count is the one badge.
+ */
+export function DrawerDock({ daemon, rail }: { readonly daemon: string | undefined; readonly rail: boolean }) {
+  const { plan } = useShell();
+  const targets = useNavTargets(daemon);
+  const words = plan.nav.labels === 'words' && !rail;
+  return (
+    <nav
+      className={`fy-nav fy-nav--dock fy-nav--dock-${rail ? 'rail' : words ? 'words' : 'icons'}`}
+      data-slot="nav"
+      data-nav="dock"
+      aria-label="Places"
+    >
+      {targets.map(target => (
+        <Row key={target.key} target={target} rail={!words} tip />
+      ))}
     </nav>
   );
 }

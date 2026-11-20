@@ -26,10 +26,18 @@ export const ViewNameSchema = z
   .max(80)
   .regex(/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)?$/u);
 
-const NavStyleSchema = z.enum(['rail', 'bar', 'list']);
+/**
+ * How the places are drawn. `dock` (the default, r11 S1) is a row of icons, or icon + word cells, at the FOOT of the side bar;
+ * `list` is the list at the top of the side bar; `rail` is that list on a side bar that starts as a slim strip. `bar` is a word
+ * older layouts carry for the old top bar: it draws as `dock`.
+ */
+const NavStyleSchema = z.enum(['rail', 'bar', 'list', 'dock']);
+/** What a docked place shows: its icon alone (the name is its tooltip and accessible name) or its icon and its word. */
+export const NavLabelsSchema = z.enum(['icons', 'words']);
 const NavFields = {
   side: NavSideSchema,
   style: NavStyleSchema,
+  labels: NavLabelsSchema,
   /** The order the nav lists its places in. */
   items: z.array(ViewNameSchema).max(24),
   /**
@@ -39,7 +47,11 @@ const NavFields = {
    */
   hidden: z.array(ViewNameSchema).max(24).optional(),
 };
-const NavSchema = z.strictObject({ ...NavFields, style: NavStyleSchema.default('rail') });
+const NavSchema = z.strictObject({
+  ...NavFields,
+  style: NavStyleSchema.default('rail'),
+  labels: NavLabelsSchema.default('icons'),
+});
 /** For overrides: no default, or laying the override over a layout would reset the keys it did not name. */
 const NavPartialSchema = z.strictObject(NavFields).partial();
 

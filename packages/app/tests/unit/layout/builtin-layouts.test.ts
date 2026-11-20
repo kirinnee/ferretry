@@ -24,9 +24,10 @@ describe('the shipped layouts against the generated surfaces', () => {
       expect(chooseLayout([layout], installed)).toEqual({ kind: 'applied', layout });
     });
 
-    test(`the ${layout.id} layout puts the ferret list first in the nav, on a wide screen and on a phone`, () => {
+    test(`the ${layout.id} layout puts the ferret list first in the nav, then Conversations; a phone follows it (no phone nav)`, () => {
       expect(layout.nav.items[0]).toBe('ferrets');
-      expect(layout.phone?.nav?.items?.[0]).toBe('ferrets');
+      expect(layout.nav.items[1]).toBe('conversation.links'); // r11 S1: Conversations is a default place (it was Find-only)
+      expect(layout.phone?.nav).toBeUndefined();
     });
   }
 

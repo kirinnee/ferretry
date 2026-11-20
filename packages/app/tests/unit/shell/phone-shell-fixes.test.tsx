@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { implementApp } from '@ferretry/kernel/manifest';
 import { provideToShell } from '../../../src/connect/provides.ts';
+import { storedOverrides } from '../../../src/layout/device-layout.ts';
+import { APP_STORAGE } from '../../../src/storage/names.ts';
+import { memoryStore, writeRecord } from '../../../src/storage/records.ts';
 import { interact, type Mounted } from '../../support/dom.ts';
 import { bootApp, entryOf, manifestOf, settle } from './frame-fixtures.tsx';
 
@@ -141,10 +144,35 @@ describe('one h1 per phone page (2016)', () => {
 });
 
 describe('the bottom bar and the keyboard (U-M)', () => {
-  test('the phone’s bottom bar is marked to step aside while the keyboard is up', async () => {
-    const app = await bootApp({ surfaces: [demoEntry], machines: ['d1'], path: '/d/d1/inbox', viewport: 'phone' });
+  test('the phone’s bottom bar (the Settings › Layout switch; none by default) is marked to step aside while the keyboard is up', async () => {
+    // This device asks for the bottom bar on a phone. The layout names only what the demo plugin installs, so it is accepted.
+    const storage = memoryStore();
+    writeRecord(
+      storage,
+      APP_STORAGE.layout,
+      storedOverrides({
+        nav: { items: ['inbox', 'settings'] },
+        'composer.tools': [],
+        panels: { 'ferret.side': [] },
+        side: { holds: 'none' },
+        phone: { nav: { side: 'bottom' } },
+      }),
+    );
+    const app = await bootApp({
+      surfaces: [demoEntry],
+      machines: ['d1'],
+      path: '/d/d1/inbox',
+      viewport: 'phone',
+      storage,
+    });
     view = app.view;
     expect(q('nav[data-slot="bottom"]')?.hasAttribute('data-kb-hide')).toBe(true);
+  });
+
+  test('by default a phone has no bottom bar at all: the places are in the menu', async () => {
+    const app = await bootApp({ surfaces: [demoEntry], machines: ['d1'], path: '/d/d1/inbox', viewport: 'phone' });
+    view = app.view;
+    expect(q('nav[data-slot="bottom"], .fy-nav--bottom')).toBeNull();
   });
 
   test('a wide screen’s nav is never marked', async () => {

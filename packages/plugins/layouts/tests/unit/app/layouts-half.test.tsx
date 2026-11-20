@@ -42,7 +42,7 @@ describe('Layouts’ app half', () => {
     );
     await settle();
     expect([...calls].sort()).toEqual(['GET /v1/layouts', 'GET /v1/layouts/current']);
-    expect(view.container.textContent).toContain('Navigation side');
+    expect(view.container.textContent).toContain('Navigation');
     await view.unmount();
   });
 });

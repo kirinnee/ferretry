@@ -2,7 +2,7 @@
 import { Segmented } from '@ferretry/app';
 import { useId, useState } from 'react';
 import type { Layout } from '../../../contract/index.ts';
-import { type ChoiceSetting, choiceOf } from '../../lib/layout-model.ts';
+import { type ChoiceSetting, changesFor, choiceOf } from '../../lib/layout-model.ts';
 import type { Change } from '../../lib/list-places.ts';
 import { LayoutRow } from './layout-row.tsx';
 import { LayoutPreview } from './previews/layout-preview.tsx';
@@ -37,7 +37,7 @@ export function ChoiceRow({
           value={value}
           options={setting.options}
           disabled={busy}
-          onChange={async word => setRefusal(await apply([{ path: setting.path, value: word }]))}
+          onChange={async word => setRefusal(await apply(changesFor(setting.path, word)))}
         />
       )}
     >

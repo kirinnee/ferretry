@@ -23,7 +23,7 @@ export interface LayoutStepProps {
 }
 
 const demoOf = (question: LayoutQuestion, answer: string) =>
-  question.id === 'nav' ? <NavDemo side={answer} /> : <DensityDemo density={answer} />;
+  question.id === 'nav' ? <NavDemo labels={answer} /> : <DensityDemo density={answer} />;
 
 export function LayoutStep({ step, device, viewport }: LayoutStepProps) {
   const [problem, setProblem] = useState<string | undefined>(undefined);

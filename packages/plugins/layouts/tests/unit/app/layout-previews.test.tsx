@@ -19,18 +19,17 @@ const choice = (path: ChoiceSetting['path']): ChoiceSetting =>
   );
 
 describe('the scene for a layout key', () => {
-  test('left draws the one left drawer, as the shell does; bottom adds the bar of places; the unoffered words draw the same as left', () => {
-    const left = stateFor('nav.side', 'left');
-    expect(left).toMatchObject({ drawer: 'rail', bottom: false, lit: 'nav', column: false, device: 'wide' });
-    expect(stateFor('nav.side', 'right')).toEqual(left);
-    expect(stateFor('nav.side', 'top')).toEqual(left);
-    expect(stateFor('nav.side', 'bottom')).toMatchObject({ drawer: 'rail', bottom: true, lit: 'nav' });
-  });
-
-  test('a rail starts the drawer as icons; list draws it open, and so does the unoffered bar', () => {
-    expect(stateFor('nav.style', 'rail')).toMatchObject({ drawer: 'rail', bottom: false, lit: 'nav' });
-    expect(stateFor('nav.style', 'bar')).toMatchObject({ drawer: 'open', bottom: false, lit: 'nav' });
-    expect(stateFor('nav.style', 'list')).toEqual(stateFor('nav.style', 'bar'));
+  test('the navigation forms: the places docked at the drawer foot (icons or words), a list at its top, or a bottom bar and an empty drawer', () => {
+    expect(stateFor('nav.form', 'dock-icons')).toMatchObject({
+      drawer: 'open',
+      places: 'dock-icons',
+      bottom: false,
+      lit: 'nav',
+      device: 'wide',
+    });
+    expect(stateFor('nav.form', 'dock-words')).toMatchObject({ drawer: 'open', places: 'dock-words', bottom: false });
+    expect(stateFor('nav.form', 'list')).toMatchObject({ drawer: 'open', places: 'list', bottom: false });
+    expect(stateFor('nav.form', 'bottom')).toMatchObject({ drawer: 'open', places: 'none', bottom: true, lit: 'nav' });
   });
 
   test('a phone has no drawer on screen: only bottom adds the bar', () => {
@@ -52,14 +51,15 @@ describe('the scene for a layout key', () => {
   });
 
   test('a word it does not know draws the key neutral frame instead of throwing', () => {
-    expect(stateFor('nav.side', 'sideways')).toMatchObject({ drawer: 'rail', bottom: false });
+    expect(stateFor('nav.form', 'sideways')).toMatchObject({ drawer: 'open', places: 'dock-icons', bottom: false });
   });
 
   test('the loop starts from the word before, wrapping round', () => {
-    const options = choice('nav.side').options;
-    expect(wordBefore(options, 'bottom')).toBe('left');
-    expect(wordBefore(options, 'left')).toBe('bottom');
-    expect(wordBefore(options, 'right')).toBe('bottom');
+    const options = choice('nav.form').options;
+    expect(wordBefore(options, 'dock-words')).toBe('dock-icons');
+    expect(wordBefore(options, 'bottom')).toBe('list');
+    expect(wordBefore(options, 'dock-icons')).toBe('bottom');
+    expect(wordBefore(options, 'sideways')).toBe('bottom');
   });
 });
 
@@ -73,11 +73,11 @@ describe('the previews', () => {
 
   const frame = (container: HTMLElement): HTMLElement =>
     must(container.querySelector('[data-setting-preview]'), 'the frame');
-  /** What each layer draws of the menu, in layer order: the drawer's form and whether the bar of places is there. */
+  /** What each layer draws of the menu, in layer order: where the drawer holds the places and whether the bar of places is there. */
   const menus = (container: HTMLElement): string[] =>
     [...container.querySelectorAll('.fy-ls-scene')].map(
       scene =>
-        `${scene.querySelector('.fy-ls-drawer')?.getAttribute('data-form') ?? 'none'}${scene.querySelector('.fy-ls-bottom') === null ? '' : '+bottom'}`,
+        `${scene.querySelector('.fy-ls-drawer')?.getAttribute('data-places') ?? 'no-drawer'}${scene.querySelector('.fy-ls-bottom') === null ? '' : '+bottom'}`,
     );
 
   test('every choice key draws, decorative, with its word in the label and one lit part per frame', async () => {
@@ -104,28 +104,28 @@ describe('the previews', () => {
   });
 
   test('it plays the word before then the word now, and shows only the word now when motion is reduced', async () => {
-    const setting = choice('nav.side');
-    mounted = await mount(<LayoutPreview setting={setting} value="left" />);
+    const setting = choice('nav.form');
+    mounted = await mount(<LayoutPreview setting={setting} value="dock-icons" />);
     expect(frame(mounted.container).getAttribute('data-sp-state')).toBe('still');
     await mounted.render(<LayoutPreview setting={setting} value="bottom" />);
     expect(frame(mounted.container).getAttribute('data-sp-state')).toBe('playing');
-    // The word before (top, the same as left) then the word now (the bar of places is added).
-    expect(menus(mounted.container)).toEqual(['rail', 'rail+bottom']);
+    // The word before (the places docked at the drawer's foot) then the word now (the bar of places, and none in the drawer).
+    expect(menus(mounted.container)).toEqual(['dock-icons', 'none+bottom']);
     await mounted.unmount();
     document.documentElement.dataset.motion = 'reduced';
     mounted = await mount(<LayoutPreview setting={setting} value="bottom" />);
     expect(frame(mounted.container).getAttribute('data-sp-state')).toBe('still');
-    expect(menus(mounted.container)).toEqual(['rail+bottom']);
+    expect(menus(mounted.container)).toEqual(['none+bottom']);
   });
 
   test('choosing another word replays from the word that was showing', async () => {
-    const setting = choice('nav.side');
+    const setting = choice('nav.form');
     mounted = await mount(<LayoutPreview setting={setting} value="bottom" />);
-    await mounted.render(<LayoutPreview setting={setting} value="left" />);
-    expect(menus(mounted.container)).toEqual(['rail+bottom', 'rail']);
+    await mounted.render(<LayoutPreview setting={setting} value="dock-icons" />);
+    expect(menus(mounted.container)).toEqual(['none+bottom', 'dock-icons']);
     await mounted.render(<LayoutPreview setting={setting} value="bottom" />);
     await interact(() => undefined);
-    expect(menus(mounted.container)).toEqual(['rail', 'rail+bottom']);
+    expect(menus(mounted.container)).toEqual(['dock-icons', 'none+bottom']);
   });
 
   test('a preview frame is decorative', async () => {

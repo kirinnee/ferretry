@@ -228,10 +228,11 @@ describe('Board for <ferret> (S-0449)', () => {
 });
 
 describe('the app nav', () => {
-  it('carries Projects between Board and Insights, as v4’s bar did', () => {
+  it('carries Conversations second (r11 S1) and Projects between Board and Insights, as v4’s bar did', () => {
     const plan = planFrame(resolveLayout(DEFAULT_LAYOUT, 'wide'), views);
     expect(plan.nav.entries.map(entry => (entry.kind === 'screen' ? entry.screen.label : entry.item))).toEqual([
       'Ferrets',
+      'Conversations',
       'Agenda',
       'Board',
       'Projects',

@@ -78,14 +78,13 @@ describe('the Layout tab', () => {
     for (const name of [
       'Layout',
       'Theme',
-      'Navigation side',
-      'Navigation style',
+      'Navigation',
       'Second column',
       'Density',
       'Navigation items',
       'Top bar',
       'Ferret side panels',
-      'Phone navigation side',
+      'Phone navigation',
       'Phone second column',
       'Phone density',
       'Phone navigation items',
@@ -93,8 +92,8 @@ describe('the Layout tab', () => {
     ])
       expect(text).toContain(name);
     expect(text).toContain('the layout in use, with your changes applied');
-    expect(group(view.container, 'Navigation side').querySelector<HTMLInputElement>('input:checked')?.value).toBe(
-      'left',
+    expect(group(view.container, 'Navigation').querySelector<HTMLInputElement>('input:checked')?.value).toBe(
+      'dock-icons',
     );
     expect(view.container.textContent).not.toContain('this device only');
     await view.unmount();
@@ -118,7 +117,7 @@ describe('the Layout tab', () => {
     };
     await interact(() => working.push());
     await settle();
-    expect(kept.container.textContent).toContain('Navigation side');
+    expect(kept.container.textContent).toContain('Navigation');
     await kept.unmount();
   });
 
@@ -128,13 +127,11 @@ describe('the Layout tab', () => {
     await settle();
     const before = script.reads();
     script.held = readOf({ layout: { ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'bottom' } } });
-    await pick(view.container, 'Navigation side', 'bottom');
+    await pick(view.container, 'Navigation', 'bottom');
     await settle();
     expect(script.calls).toEqual(['set nav.side bottom']);
     expect(script.reads()).toBeGreaterThan(before);
-    expect(group(view.container, 'Navigation side').querySelector<HTMLInputElement>('input:checked')?.value).toBe(
-      'bottom',
-    );
+    expect(group(view.container, 'Navigation').querySelector<HTMLInputElement>('input:checked')?.value).toBe('bottom');
     await view.unmount();
   });
 
@@ -143,17 +140,18 @@ describe('the Layout tab', () => {
     const device = fakeDevice();
     const view = await mount(<LayoutSettings client={script.client} device={device} />);
     await settle();
-    expect(group(view.container, 'Phone navigation side').querySelector<HTMLInputElement>('input:checked')?.value).toBe(
-      'bottom',
+    // A phone follows the wide layout: the places are in its menu, and the bottom bar is the one switch.
+    expect(group(view.container, 'Phone navigation').querySelector<HTMLInputElement>('input:checked')?.value).toBe(
+      'left',
     );
-    await pick(view.container, 'Phone navigation side', 'left');
+    await pick(view.container, 'Phone navigation', 'bottom');
     await settle();
-    expect(script.calls).toEqual(['set phone.nav.side left']);
+    expect(script.calls).toEqual(['set phone.nav.side bottom']);
     await pickScope(view.container, 'device');
     await pick(view.container, 'Phone density', 'compact');
     await settle();
     expect(device.calls).toEqual(['set phone.density compact']);
-    expect(script.calls).toEqual(['set phone.nav.side left']);
+    expect(script.calls).toEqual(['set phone.nav.side bottom']);
     await view.unmount();
   });
 
@@ -176,6 +174,7 @@ describe('the Layout tab', () => {
     }
     expect(names(view.container, 'nav.items')).toEqual([
       'ferrets',
+      'conversation.links',
       'agenda',
       'board',
       'projects',
@@ -192,7 +191,7 @@ describe('the Layout tab', () => {
     await interact(() => press(list(view.container, 'nav.items'), 'Move Ferrets later').click());
     await settle();
     expect(script.calls).toEqual([
-      'set nav.items agenda,ferrets,board,projects,insights,settings + set nav.hidden  + set phone.nav.hidden ',
+      'set nav.items conversation.links,ferrets,agenda,board,projects,insights,settings + set nav.hidden ',
     ]);
     await view.unmount();
   });
@@ -213,7 +212,7 @@ describe('the Layout tab', () => {
     await key('Enter');
     await settle();
     expect(script.calls).toEqual([
-      'set nav.items board,ferrets,agenda,projects,insights,settings + set nav.hidden  + set phone.nav.hidden ',
+      'set nav.items ferrets,board,conversation.links,agenda,projects,insights,settings + set nav.hidden ',
     ]);
     await view.unmount();
   });
@@ -225,7 +224,7 @@ describe('the Layout tab', () => {
     await interact(() => press(list(view.container, 'nav.items'), 'Hide Board').click());
     await settle();
     expect(script.calls).toEqual([
-      'set nav.items ferrets,agenda,board,projects,insights,settings + set nav.hidden board + set phone.nav.hidden ',
+      'set nav.items ferrets,conversation.links,agenda,board,projects,insights,settings + set nav.hidden board',
     ]);
     const nav = list(view.container, 'nav.items');
     expect(
@@ -268,7 +267,7 @@ describe('the Layout tab', () => {
     await interact(() => press(list(view.container, 'nav.items'), 'Show Board').click());
     await settle();
     expect(script.calls).toEqual([
-      'set nav.items ferrets,agenda,board,projects,insights,settings + set nav.hidden  + set phone.nav.hidden board',
+      'set nav.items ferrets,conversation.links,agenda,board,projects,insights,settings + set nav.hidden ',
     ]);
     await view.unmount();
   });
@@ -292,7 +291,7 @@ describe('the Layout tab', () => {
     await interact(() => press(list(view.container, 'phone.nav.items'), 'Hide Projects').click());
     await settle();
     expect(script.calls).toEqual([
-      'set phone.nav.items ferrets,agenda,board,projects,insights,settings + set phone.nav.hidden projects',
+      'set phone.nav.items ferrets,conversation.links,agenda,board,projects,insights,settings + set phone.nav.hidden projects',
     ]);
     await pickScope(view.container, 'device');
     await interact(() => press(list(view.container, 'phone.top'), 'Move Daemon picker later').click());
@@ -404,9 +403,9 @@ describe('the Layout tab', () => {
     expect(view.container.querySelector('.fy-lr-scope-title')?.textContent).toBe('Where a change is saved');
     expect(chip()).toBe('This machine · every device');
     // One set of rows in either scope: a key is never drawn twice.
-    expect(view.container.querySelectorAll('[role="radiogroup"][aria-label="Navigation side"]')).toHaveLength(1);
+    expect(view.container.querySelectorAll('[role="radiogroup"][aria-label="Navigation"]')).toHaveLength(1);
     await pickScope(view.container, 'device');
-    expect(view.container.querySelectorAll('[role="radiogroup"][aria-label="Navigation side"]')).toHaveLength(1);
+    expect(view.container.querySelectorAll('[role="radiogroup"][aria-label="Navigation"]')).toHaveLength(1);
     expect(chip()).toBe('Only this browser');
     expect(view.container.textContent).not.toContain('Layout — this device only');
     expect(view.container.querySelectorAll('h1,h2')).toHaveLength(0);
@@ -425,7 +424,7 @@ describe('the Layout tab', () => {
     expect(group(view.container, 'Density').querySelector<HTMLInputElement>('input:checked')?.value).toBe('compact');
     expect(view.container.textContent).toContain('This device has 1 change of its own');
     expect(view.container.textContent).not.toContain('Save as a new layout');
-    await pick(view.container, 'Navigation side', 'bottom');
+    await pick(view.container, 'Navigation', 'bottom');
     await interact(() => press(view.container, 'Follow again').click());
     expect(device.calls).toEqual(['set nav.side bottom', 'reset']);
     expect(script.calls).toEqual([]);
@@ -516,7 +515,7 @@ describe('the Layout tab', () => {
     await interact(() => document.dispatchEvent(point('pointerup', 130)));
     await settle();
     expect(script.calls).toHaveLength(1);
-    expect(script.calls[0]).toContain('set nav.items agenda,board,ferrets,projects');
+    expect(script.calls[0]).toContain('set nav.items conversation.links,agenda,ferrets,board,projects');
     await view.unmount();
   });
 

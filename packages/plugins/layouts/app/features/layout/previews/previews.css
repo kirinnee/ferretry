@@ -79,6 +79,28 @@
 .fy-ls-drawer[data-form='open'] {
   width: 34%;
 }
+/* The docked places: at the drawer's foot, under the (ghost) ferret list. */
+.fy-ls-spacer {
+  flex: 1;
+}
+.fy-ls-dock {
+  display: flex;
+  flex: none;
+  gap: var(--ls-gap);
+}
+.fy-ls-dock[data-labels='icons'] .fy-ls-item {
+  flex: 1 1 0;
+  justify-content: center;
+}
+.fy-ls-dock[data-labels='words'] {
+  flex-wrap: wrap;
+}
+.fy-ls-dock[data-labels='words'] .fy-ls-item {
+  flex: 1 1 40%;
+}
+.fy-ls-drawer[data-form='rail'] .fy-ls-dock {
+  flex-direction: column;
+}
 /* The bar of places: names only, equal cells, under the page. */
 .fy-ls-bottom {
   align-items: center;
