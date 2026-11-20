@@ -2004,6 +2004,12 @@ body {
 .kt-composer:focus-within {
   border-color: var(--focus-color);
 }
+/* The field's keyboard ring is the shell's own (width, colour, offset 0 so it hugs the edge), written here because
+   `.kt-input` resets `outline` to `--outline-always` and must not leave the border colour as the only mark. */
+.kt-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 0;
+}
 .kt-composer :is(input, textarea):focus,
 .kt-composer :is(input, textarea):focus-visible {
   border-color: transparent;
