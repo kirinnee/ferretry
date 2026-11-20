@@ -2410,7 +2410,9 @@ body {
   /* A full-width row, so scrolled content never shows beside the handle. */
   background: inherit;
 }
-.kt-sheet > :where(:not(.kt-sheet__grip)) {
+/* A direct child that scrolls sideways ON PURPOSE (`overflow-auto` / `overflow-x-auto`, e.g. the Markdown table's full-screen
+   pan box) keeps its own scroller: clipping it would leave its rightmost columns unreachable. */
+.kt-sheet > :where(:not(.kt-sheet__grip, .overflow-auto, .overflow-x-auto, .overflow-x-scroll, .overflow-scroll)) {
   min-width: 0;
   max-width: 100%;
   overflow-x: clip;

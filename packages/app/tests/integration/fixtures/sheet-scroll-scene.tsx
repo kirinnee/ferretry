@@ -9,6 +9,8 @@
  *   ?wide=1               one unbreakable 900px line in the content: it must be clipped, never get a sideways bar
  */
 import { createRoot } from 'react-dom/client';
+import { MarkdownTable } from '../../../src/prose/markdown-table.tsx';
+import { TableViewPreferenceStore } from '../../../src/prose/table-view-preference.ts';
 import { BottomSheet } from '../../../src/ui/bottom-sheet.tsx';
 
 const params = new URLSearchParams(window.location.search);
@@ -115,6 +117,36 @@ const SCENES: Record<string, () => React.ReactNode> = {
   ),
 };
 
+/** prose/markdown-table.tsx "Full screen": the REAL component, on the Table view, with a table wider than the phone. */
+const tableStore = new TableViewPreferenceStore({ getItem: () => 'table', setItem: () => undefined });
+const WIDE_COLUMNS = Array.from({ length: 12 }, (_, index) => `Column ${index + 1}`);
+const tableScene = () => (
+  <div className="md">
+    <MarkdownTable store={tableStore}>
+      <thead>
+        <tr>
+          {WIDE_COLUMNS.map(name => (
+            <th key={name}>{name}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {Array.from({ length: COUNT }, (_, index) => `row-${index}`).map((key, row) => (
+          <tr key={key}>
+            {WIDE_COLUMNS.map(name => (
+              <td key={name} style={{ whiteSpace: 'nowrap' }}>
+                {name} value {row + 1}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </MarkdownTable>
+  </div>
+);
+
 createRoot(document.getElementById('root') as HTMLElement).render(
-  <div data-scene={sheet}>{(SCENES[sheet] ?? (SCENES.chooser as () => React.ReactNode))()}</div>,
+  <div data-scene={sheet}>
+    {sheet === 'table' ? tableScene() : (SCENES[sheet] ?? (SCENES.chooser as () => React.ReactNode))()}
+  </div>,
 );

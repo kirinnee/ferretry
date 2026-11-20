@@ -9,6 +9,9 @@
  *                  stays pinned to the panel's top edge while it scrolls
  *   wide content   a 900px-wide line is clipped by the sheet: no element grows a horizontal bar
  *
+ * The Markdown table's "Full screen" sheet (the real `MarkdownTable`, a 12-column table on a phone) is the one caller whose body
+ * scrolls BOTH ways: the sheet's sideways clip must not reach it, so its rightmost column stays reachable by panning.
+ *
  * Set `FY_SHEET_SCROLL_SHOTS_DIR` to keep `<viewport>-<theme>-<scene>-<size>.png`, plus `-end` (long content scrolled to its end).
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
@@ -194,6 +197,68 @@ describe('a sheet shows a scroll bar only when it needs one', () => {
           expect({ scene, horizontal: result.horizontal }).toEqual({ scene, horizontal: [] });
         }
       });
+    });
+  }
+});
+
+interface TablePan {
+  readonly overflowX: string;
+  readonly overflowY: string;
+  readonly clientWidth: number;
+  readonly scrollWidth: number;
+  readonly scrolledTo: number;
+  readonly lastColumnRight: number;
+  readonly boxRight: number;
+}
+
+const measureFullScreenTable = async (scheme: 'light' | 'dark'): Promise<TablePan> => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 800 },
+    deviceScaleFactor: 2,
+    hasTouch: true,
+    isMobile: true,
+    colorScheme: scheme,
+  });
+  try {
+    const tab = await context.newPage();
+    await tab.goto(`${server?.url.origin ?? ''}/?theme=studio-${scheme}&sheet=table&size=short`);
+    await tab.click('[data-md-table-full]');
+    await tab.waitForSelector('[role="dialog"] [data-md-table-view="table"]');
+    await tab.evaluate(async () => {
+      await Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => undefined)));
+    });
+    if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `390-${scheme}-table-full.png`) });
+    const result = await tab.evaluate(() => {
+      const box = document.querySelector<HTMLElement>('[role="dialog"] [data-md-table-view="table"]') as HTMLElement;
+      const style = getComputedStyle(box);
+      const before = { overflowX: style.overflowX, overflowY: style.overflowY };
+      box.scrollLeft = box.scrollWidth;
+      const lastCell = box.querySelector<HTMLElement>('thead th:last-child') as HTMLElement;
+      return {
+        ...before,
+        clientWidth: box.clientWidth,
+        scrollWidth: box.scrollWidth,
+        scrolledTo: box.scrollLeft,
+        lastColumnRight: lastCell.getBoundingClientRect().right,
+        boxRight: box.getBoundingClientRect().right,
+      };
+    });
+    if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `390-${scheme}-table-full-end.png`) });
+    return result;
+  } finally {
+    await context.close();
+  }
+};
+
+describe('the Markdown table full-screen sheet keeps its own two-way scroller', () => {
+  for (const scheme of ['light', 'dark'] as const) {
+    it(`390 ${scheme}: a table wider than the sheet can be panned to its last column`, async () => {
+      const pan = await measureFullScreenTable(scheme);
+      expect(pan.overflowX).toBe('auto');
+      expect(pan.overflowY).toBe('auto');
+      expect(pan.scrollWidth).toBeGreaterThan(pan.clientWidth);
+      expect(pan.scrolledTo).toBeGreaterThan(0);
+      expect(pan.lastColumnRight).toBeLessThanOrEqual(pan.boxRight + 1);
     });
   }
 });
