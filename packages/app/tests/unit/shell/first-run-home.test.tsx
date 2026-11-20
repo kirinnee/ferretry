@@ -162,6 +162,40 @@ describe('S14 first run', () => {
     await view.unmount();
   });
 
+  test('r10 O5 the daemons list offers the two repeat journeys, which open Onboarding on that journey', async () => {
+    go('/nowhere');
+    const view = await mount(setup({ paired: true, withOnboarding: true }));
+    await settle();
+    await interact(() => {
+      view.container.querySelector<HTMLAnchorElement>('a[href="/app/"]')?.click();
+    });
+    await settle();
+    const pair = view.container.querySelector<HTMLAnchorElement>('a[href="/onboarding?journey=pair"]');
+    const daemon = view.container.querySelector<HTMLAnchorElement>('a[href="/onboarding?journey=add-daemon"]');
+    expect(pair?.textContent).toBe('Pair a device');
+    expect(daemon?.textContent).toBe('Set up a new daemon');
+    // Buttons by look: the repeat journeys are the actions of this page, not two more sentences.
+    expect(pair?.className).toContain('kt-btn');
+    expect(daemon?.className).toContain('kt-btn');
+    await interact(() => daemon?.click());
+    await settle();
+    expect(window.location.pathname).toBe('/onboarding');
+    expect(window.location.search).toBe('?journey=add-daemon');
+    await view.unmount();
+  });
+
+  test('r10 O5 with no Onboarding installed the daemons list offers no repeat journeys', async () => {
+    go('/nowhere');
+    const view = await mount(setup({ paired: true, withOnboarding: false }));
+    await settle();
+    await interact(() => {
+      view.container.querySelector<HTMLAnchorElement>('a[href="/app/"]')?.click();
+    });
+    await settle();
+    expect(view.container.querySelector('a[href^="/onboarding"]')).toBeNull();
+    await view.unmount();
+  });
+
   test('E2-54 with no Access installed the daemons list offers no pairing link', async () => {
     go('/nowhere');
     const view = await mount(setup({ paired: true, withOnboarding: true }));

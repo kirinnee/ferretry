@@ -96,10 +96,10 @@ export default definePlugin({
   ui: {
     // Daemon-less on purpose: the first run happens before any daemon is paired.
     screens: [
-      screen('onboarding', { path: '/onboarding', daemonless: true }),
+      screen('onboarding', { path: '/onboarding', daemonless: true, chrome: 'none' }),
       // The address a hand-off link carries to the OTHER device (`/setup#fy-setup=…`, v4's `setupPath`): the SAME first-run page,
       // drawn by the same view, with the place the link carries read from its fragment. One page, two addresses.
-      screen('handoff', { path: '/setup', daemonless: true }),
+      screen('handoff', { path: '/setup', daemonless: true, chrome: 'none' }),
       // The setup flow: every plugin's declared steps as ONE multi-page stepper, drawn alone (no drawer, bars or side
       // column); it OFFERS the `onboarding.step` slot (contract/slots.ts), one panel mounted per page.
       screen('flow', { path: 'onboarding/setup', chrome: 'none' }),

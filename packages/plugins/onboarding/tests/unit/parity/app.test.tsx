@@ -38,7 +38,7 @@ beforeEach(() => localStorage.clear());
 afterEach(() => localStorage.clear());
 
 describe('the first-run page and its hand-off panel', () => {
-  it('S-0166 OnboardingPage opens on the entry question: three ways in, each a button, and nothing else asked yet', async () => {
+  it('S-0166 OnboardingPage opens on the start screen: three cards to choose from and a Continue button, and nothing else asked yet', async () => {
     const view = await mount(
       <OnboardingPage
         progress={new OnboardingProgressStore({ storage: new MemoryStorage(), device: 'desktop' })}
@@ -46,24 +46,27 @@ describe('the first-run page and its hand-off panel', () => {
         channel="apt"
         href={HREF}
         share={undefined}
-        fleetReady={false}
-        connectionStatus={null}
         fallback={CHECKING_HOSTED_RELAY}
-        onOpenFleet={() => undefined}
+        onHandOff={() => undefined}
         renderPairing={() => null}
       />,
     );
     const root = must(view.container.querySelector<HTMLElement>('[data-onboarding="setup"]'), 'the setup screen');
     expect(root.getAttribute('data-onboarding-screen')).toBe('entry');
-    const routes = [...view.container.querySelectorAll<HTMLButtonElement>('button[data-onboarding-route]')].map(
-      button => button.getAttribute('data-onboarding-route'),
+    const routes = [...view.container.querySelectorAll<HTMLInputElement>('[data-choice-cards] input')].map(
+      input => input.value,
     );
     expect(routes.toSorted()).toEqual(['add-client', 'add-daemon', 'first-time']);
     await interact(() => {
       must(
-        view.container.querySelector<HTMLElement>('button[data-onboarding-route="add-client"]'),
-        'the add-a-client answer',
+        view.container.querySelector<HTMLElement>('[data-choice-cards] input[value="add-client"]'),
+        'the Pair answer',
       ).click();
+    });
+    // Choosing a card starts nothing: Continue does.
+    expect(root.getAttribute('data-onboarding-screen')).toBe('entry');
+    await interact(() => {
+      must(view.container.querySelector<HTMLElement>('[data-onboarding-continue]'), 'Continue').click();
     });
     expect(root.getAttribute('data-onboarding-route')).toBe('add-client');
     await view.unmount();
@@ -121,11 +124,17 @@ describe('the feature, its routes and its settings entry', () => {
       'onboarding.step.name-step',
       'onboarding.step.appearance-step',
     ]);
-    // The flow is drawn alone: no drawer, bars or side column.
+    // The flow, the daemon-less first run and its hand-off link are drawn alone: no drawer, bars or side column.
     expect(manifest.ui?.screens?.find(screen => screen.id === 'flow')).toMatchObject({
       path: 'onboarding/setup',
       chrome: 'none',
     });
+    for (const id of ['onboarding', 'handoff']) {
+      expect(manifest.ui?.screens?.find(screen => screen.id === id)).toMatchObject({
+        daemonless: true,
+        chrome: 'none',
+      });
+    }
     // Onboarding’s own two pages: the machine’s name (daemon) and this device’s look (client).
     expect(manifest.onboarding).toEqual([
       expect.objectContaining({ id: 'name' }),

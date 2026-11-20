@@ -203,23 +203,86 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     expect(paired.listening()).toBe(0);
   });
 
-  it('a pairing seen while the pairing step is open finishes the journey', async () => {
+  it('a pairing seen while the pairing step is open hands the person to the setup flow, on this device’s own half', async () => {
+    const moves: string[] = [];
     const paired = pairedList({ daemons: [], selected: null });
     const OnboardingRoute = Route(paired.ports);
     const view = await mount(
       <OnboardingRoute
         params={{}}
-        navigate={() => undefined}
+        navigate={to => moves.push(to)}
         location={() => 'https://f.invalid/onboarding#fy-setup=f1;route=add-client;step=scan'}
         chooseDaemon={async () => undefined}
       />,
     );
     const screen = () =>
       view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen');
-    expect(screen()).not.toBe('done');
+    expect(screen()).toBe('scan');
     await interact(() => paired.set({ daemons: [{ daemon: 'd1' }], selected: 'd1' }));
-    expect(screen()).toBe('done');
+    // A Pair journey asks the CLIENT half only: the machine it paired with is already set up. No "you are set up" page.
+    expect(moves).toEqual(['/d/d1/onboarding/setup?phase=client&journey=pair']);
+    expect(view.container.textContent).not.toContain('You are set up');
+    // The place is forgotten on disk (a later visit starts at the start screen) without redrawing the screen being left.
+    expect(JSON.parse(localStorage.getItem(ONBOARDING_PROGRESS_KEY) ?? '{}')).toEqual({ format: 1, stage: 'entry' });
+    expect(screen()).toBe('scan');
     await view.unmount();
+  });
+
+  it('a new machine hands off to ITS OWN steps first, then this device’s, on a first-time or add-a-daemon journey', async () => {
+    for (const [route, journey] of [
+      ['first-time', 'first-time'],
+      ['add-daemon', 'add-daemon'],
+    ] as const) {
+      localStorage.clear();
+      const moves: string[] = [];
+      const paired = pairedList({ daemons: [], selected: null });
+      const OnboardingRoute = Route(paired.ports);
+      const view = await mount(
+        <OnboardingRoute
+          params={{}}
+          navigate={to => moves.push(to)}
+          location={() => `https://f.invalid/onboarding#fy-setup=f1;route=${route};target=other;doer=self;step=scan`}
+          chooseDaemon={async () => undefined}
+        />,
+      );
+      await interact(() => paired.set({ daemons: [{ daemon: 'd7' }], selected: 'd7' }));
+      expect(moves).toEqual([`/d/d7/onboarding/setup?phase=daemon&journey=${journey}`]);
+      await view.unmount();
+    }
+  });
+
+  it('opens the journey a link of the app names, with no start screen: Pair, and Set up a new daemon', async () => {
+    const screenAt = async (
+      href: string,
+    ): Promise<{ screen: string | null | undefined; route: string | null | undefined }> => {
+      localStorage.clear();
+      const paired = pairedList({ daemons: [{ daemon: 'd1' }], selected: 'd1' });
+      const OnboardingRoute = Route(paired.ports);
+      const view = await mount(
+        <OnboardingRoute
+          params={{}}
+          navigate={() => undefined}
+          location={() => href}
+          chooseDaemon={async () => undefined}
+        />,
+      );
+      const root = view.container.querySelector('[data-onboarding="setup"]');
+      const seen = {
+        screen: root?.getAttribute('data-onboarding-screen'),
+        route: root?.getAttribute('data-onboarding-route'),
+      };
+      await view.unmount();
+      return seen;
+    };
+    expect(await screenAt('https://f.invalid/onboarding?journey=pair')).toEqual({
+      screen: 'pair',
+      route: 'add-client',
+    });
+    // A computer adding a daemon is asked which computer first, exactly as the start screen's own card would.
+    expect((await screenAt('https://f.invalid/onboarding?journey=add-daemon')).screen).toBe('target');
+    // A word the page does not know is no answer: the start screen.
+    expect((await screenAt('https://f.invalid/onboarding?journey=nothing')).screen).toBe('entry');
+    expect((await screenAt('https://f.invalid/onboarding')).screen).toBe('entry');
   });
 
   /** The return Access navigates to: the bare first-run address, with no fragment. */
@@ -228,7 +291,7 @@ describe('S14 the first-run route’s pairing hand-off', () => {
   const screenOf = (view: { container: HTMLElement }) =>
     view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen');
 
-  it('M2 coming back from the pairing page with a new machine finishes the step and shows the next stage', async () => {
+  it('M2 coming back from the pairing page with a new machine finishes the step and opens the setup flow', async () => {
     // A walk this browser already stored (Pair again, or an earlier visit) is on the pairing step.
     startOnboardingPairing(detectDeviceKind(navigator));
     let here = BARE;
@@ -256,25 +319,25 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     paired.set({ daemons: [{ daemon: 'd1' }], selected: 'd1' });
     here = BARE;
     const back = await mount(draw());
-    expect(screenOf(back)).toBe('done');
-    expect(back.container.querySelector('[data-onboarding-open-pair]')).toBeNull();
+    expect(moves).toEqual([PAIR_AND_RETURN, '/d/d1/onboarding/setup?phase=client&journey=pair']);
     await back.unmount();
   });
 
-  it('M2 a hand-off arrival that went to the pairing page lands on the "it worked" stage when it comes back', async () => {
+  it('M2 a hand-off arrival that went to the pairing page opens the setup flow when it comes back', async () => {
     let here = HANDOFF;
+    const moves: string[] = [];
     const paired = pairedList({ daemons: [], selected: null });
     const OnboardingRoute = Route(paired.ports);
     const draw = () => (
       <OnboardingRoute
         params={{}}
-        navigate={() => undefined}
+        navigate={to => moves.push(to)}
         location={() => here}
         chooseDaemon={async () => undefined}
       />
     );
     const first = await mount(draw());
-    expect(screenOf(first)).not.toBe('done');
+    expect(screenOf(first)).toBe('scan');
     await interact(() => {
       first.container.querySelector<HTMLElement>('[data-onboarding-open-pair]')?.click();
     });
@@ -283,7 +346,7 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     paired.set({ daemons: [{ daemon: 'd1' }], selected: 'd1' });
     here = BARE;
     const back = await mount(draw());
-    expect(screenOf(back)).toBe('done');
+    expect(moves).toEqual([PAIR_AND_RETURN, '/d/d1/onboarding/setup?phase=client&journey=pair']);
     await back.unmount();
   });
 
@@ -324,6 +387,8 @@ describe('S14 the first-run route’s pairing hand-off', () => {
       location: () => BARE,
       chooseDaemon: async () => undefined,
     };
+    const moves: string[] = [];
+    const afterProps = { ...props, navigate: (to: string) => moves.push(to) };
     const Before = Route(paired.ports);
     const first = await mount(<Before {...props} />);
     await interact(() => {
@@ -336,8 +401,8 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     // Access paired a machine, and the document was reloaded in between: a NEW route holds nothing in memory.
     paired.set({ daemons: [{ daemon: 'd1' }], selected: 'd1' });
     const AfterReload = Route(paired.ports);
-    const back = await mount(<AfterReload {...props} />);
-    expect(screenOf(back)).toBe('done');
+    const back = await mount(<AfterReload {...afterProps} />);
+    expect(moves).toEqual(['/d/d1/onboarding/setup?phase=client&journey=pair']);
     // The trip is over once the step has been on the glass: nothing stays behind in storage.
     expect(localStorage.getItem(ONBOARDING_PAIR_TRIP_KEY)).toBeNull();
     await back.unmount();
@@ -352,7 +417,7 @@ describe('S14 the first-run route’s pairing hand-off', () => {
       <AfterReload params={{}} navigate={() => undefined} location={() => BARE} chooseDaemon={async () => undefined} />,
     );
     expect(view.container.querySelector('[data-onboarding-open-pair]')).not.toBeNull();
-    expect(screenOf(view)).not.toBe('done');
+    expect(screenOf(view)).toBe('scan');
     expect(localStorage.getItem(ONBOARDING_PAIR_TRIP_KEY)).toBeNull();
     await view.unmount();
   });
@@ -432,26 +497,21 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     await view.unmount();
   });
 
-  it('opens the machine’s steps page, not its sessions, once a daemon is paired and selected', async () => {
+  it('opens the setup flow of the machine that was paired, never its sessions, and falls back to the last one listed', async () => {
     const moves: string[] = [];
-    const paired = pairedList({ daemons: [{ daemon: 'd7' }], selected: 'd7' });
+    // Nothing selected (a list that lost its selection): the newest machine listed is the one that was just paired.
+    const paired = pairedList({ daemons: [], selected: null });
     const OnboardingRoute = Route(paired.ports);
     const view = await mount(
       <OnboardingRoute
         params={{}}
         navigate={to => moves.push(to)}
-        location={() => 'https://f.invalid/onboarding#fy-setup=f1;route=add-client;step=done'}
+        location={() => 'https://f.invalid/onboarding#fy-setup=f1;route=add-client;step=scan'}
         chooseDaemon={async () => undefined}
       />,
     );
-    const open = [...view.container.querySelectorAll<HTMLElement>('button')].find(button =>
-      /open/i.test(button.textContent ?? ''),
-    );
-    expect(open).toBeDefined();
-    await interact(() => {
-      open?.click();
-    });
-    expect(moves).toEqual(['/d/d7/onboarding/setup']);
+    await interact(() => paired.set({ daemons: [{ daemon: 'd6' }, { daemon: 'd7' }], selected: null }));
+    expect(moves).toEqual(['/d/d7/onboarding/setup?phase=client&journey=pair']);
     await view.unmount();
   });
 });

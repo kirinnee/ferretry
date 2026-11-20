@@ -23,14 +23,14 @@ import { mount, must } from '../support/dom.ts';
  * the model's business and is tested there.
  */
 const EVERY_STEP: readonly OnboardingStepId[] = [
+  'brief',
+  'agent-pair',
   'install',
-  'agents',
   'daemon',
   'local',
   'elsewhere',
-  'handoff',
   'pair',
-  'done',
+  'scan',
 ];
 
 const figureOf = (container: HTMLElement): HTMLElement =>
@@ -50,7 +50,10 @@ describe('the setup diagram', () => {
     }
 
     expect(new Set(labels).size).toBe(EVERY_STEP.length);
-    expect(labels.at(-1)).toContain('linked to the daemon');
+    // The steps r10 O5 removed (installing an agent, adding a phone, "you are set up") have no picture to keep.
+    expect(labels.join(' ')).not.toContain('agent harness');
+    expect(labels.join(' ')).not.toContain('adding a phone');
+    expect(labels.join(' ')).not.toContain('linked to the daemon running on your machine');
   });
 
   it('hides its own text from a reader who is given the sentence', async () => {
@@ -72,7 +75,8 @@ describe('the setup diagram', () => {
     expect(linkOf(unpaired.container)).toContain('border-dashed');
     await unpaired.unmount();
 
-    const paired = await mount(<SetupDiagram step="done" />);
+    // The same-machine step is the one whose link is already solid: there is nothing to scan.
+    const paired = await mount(<SetupDiagram step="local" />);
     expect(linkOf(paired.container)).toContain('border-solid');
     // …and it gains a tick, so the join is a shape too.
     expect(paired.container.querySelector('svg.lucide-check')).not.toBeNull();
@@ -93,7 +97,6 @@ describe('the setup diagram', () => {
     };
 
     // Install is work on the machine alone; the browser is not doing anything.
-    expect(await lit('agents')).toEqual([true, false]);
     expect(await lit('install')).toEqual([true, false]);
     // The same-machine collapse lights BOTH ends: they are one machine.
     expect(await lit('local')).toEqual([true, true]);

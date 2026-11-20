@@ -144,17 +144,17 @@ describe('landing a hand-off', () => {
     });
   });
 
-  it('asks the question the payload left open rather than answering it', () => {
+  it('asks which computer when the payload left it open, and lands on the commands when it left the doer open', () => {
     expect(landSetupHandoff({ route: 'add-daemon', step: 'install' }, 'desktop')).toEqual({
       kind: 'ask',
       question: 'target',
       route: 'add-daemon',
     });
+    // Who installs it is no question any more (r10 O5): a link with no doer is "by hand".
     expect(landSetupHandoff({ route: 'first-time', target: 'other', step: 'elsewhere' }, 'desktop')).toEqual({
-      kind: 'ask',
-      question: 'doer',
-      route: 'first-time',
-      target: 'other',
+      kind: 'walk',
+      journey: { route: 'first-time', target: 'other', doer: 'self' },
+      step: 'elsewhere',
     });
   });
 

@@ -13,9 +13,10 @@ export { createAppearancePanel, createNamePanel } from '../features/setup-flow/s
 
 import type { DaemonlessPorts, DaemonlessScreenProps } from '@ferretry/app';
 import { browserClipboardWriter, Button } from '@ferretry/app/ui';
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { detectDeviceKind } from '../device-kind.ts';
-import { detectInstallChannel } from '../onboarding-model.ts';
+import { flowHrefAfterPairing, entryFromHref } from '../onboarding-entry.ts';
+import { detectInstallChannel, type OnboardingRouteId } from '../onboarding-model.ts';
 import { OnboardingPage } from '../onboarding-page.tsx';
 import { OnboardingProgressStore } from '../onboarding-progress.ts';
 import { CHECKING_HOSTED_RELAY, type HostedRelayFallback, settleHostedRelay } from '../hosted-relay-state.ts';
@@ -28,7 +29,6 @@ import {
 } from '../pair-trip.ts';
 import { setupHandoffFromHref } from '../setup-handoff.ts';
 import type { SetupSharePort } from '../setup-handoff-panel.tsx';
-import { stepsHref } from './steps-screen.tsx';
 
 /** Where Access draws its pairing screen: first contact with a daemon is Access's, never Onboarding's. */
 export const PAIR_PATH = '/pair';
@@ -121,16 +121,17 @@ function PairingHandoff({
 export function createOnboardingRoute(ports: DaemonlessPorts) {
   const trip: PairTrip = { baseline: undefined };
   return function OnboardingRoute({ navigate, location }: DaemonlessScreenProps) {
-    const paired = useSyncExternalStore(ports.daemons.subscribe, ports.daemons.snapshot, ports.daemons.snapshot);
     const device = useMemo(() => detectDeviceKind(navigator), []);
     // A hand-off carries a place (route and step) from another device: never a code or a credential.
     const [handoff] = useState(() => setupHandoffFromHref(location()));
+    // `/onboarding?journey=pair|add-daemon` (the app's own links) opens that journey without the start screen.
+    const [entry] = useState(() => entryFromHref(location()));
     const [progress] = useState(
       () =>
         new OnboardingProgressStore({
           device,
-          paired: paired.daemons.length > 0,
           ...(handoff === undefined ? {} : { handoff }),
+          ...(entry === undefined ? {} : { entry }),
         }),
     );
     const channel = useMemo(() => detectInstallChannel(navigator.userAgent), []);
@@ -143,20 +144,30 @@ export function createOnboardingRoute(ports: DaemonlessPorts) {
       // The shell hands over what Connections already read: one answer, once (`settleHostedRelay` never rejects).
       void settleHostedRelay(ports.hostedRelay).then(setFallback);
     }, []);
-    const selected = paired.selected;
-    const openFleet = useCallback(() => {
-      if (selected !== null) navigate(stepsHref(selected));
-    }, [navigate, selected]);
+    /*
+     * THE DAEMON ANSWERED: this half is over. The machine that was just paired is the selected one (pairing selects it), so
+     * the setup flow opens on it, on the half the journey asked for. The place is forgotten without redrawing the screen the
+     * person is leaving, so there is no frame of the start screen between the two pages.
+     */
+    const handOff = useCallback(
+      (route: OnboardingRouteId) => {
+        const { selected: chosen, daemons } = ports.daemons.snapshot();
+        const daemon = chosen ?? daemons.at(-1)?.daemon ?? null;
+        if (daemon === null) return;
+        progress.finish();
+        navigate(flowHrefAfterPairing(daemon, route));
+      },
+      [navigate, progress],
+    );
     return (
       <OnboardingPage
         progress={progress}
         write={write}
         channel={channel}
-        fleetReady={selected !== null}
         fallback={fallback}
         href={href}
         share={share}
-        onOpenFleet={openFleet}
+        onHandOff={handOff}
         renderPairing={({ onPaired }) => (
           <PairingHandoff
             ports={ports}

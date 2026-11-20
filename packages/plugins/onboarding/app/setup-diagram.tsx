@@ -61,19 +61,6 @@ const STATE: Record<OnboardingStepId, DiagramState> = {
     linked: false,
     label: 'Your machine, where Ferretry is being installed, is not yet linked to this browser.',
   },
-  /*
-   * STILL THE MACHINE END, and deliberately not drawn as progress toward the link:
-   * installing an agent harness is what makes the daemon able to do anything, and
-   * it happens entirely on the far side of a line that does not exist yet.
-   */
-  agents: {
-    machine: 'adding an agent',
-    browser: 'waiting',
-    lit: { machine: true, browser: false, link: false },
-    linked: false,
-    label:
-      'Your machine is getting an agent harness — Claude Code or Codex — for Ferretry to run. This browser is not linked yet.',
-  },
   daemon: {
     machine: 'fyd running',
     browser: 'waiting',
@@ -110,17 +97,6 @@ const STATE: Record<OnboardingStepId, DiagramState> = {
     linked: false,
     label: 'The computer that will run your agents has nothing on it yet, so nothing is linked.',
   },
-  /*
-   * The link is live and the reader is being offered a SECOND browser. The
-   * existing pair stays lit and joined — the offer costs them nothing they have.
-   */
-  handoff: {
-    machine: 'fyd running',
-    browser: 'adding a phone',
-    lit: { machine: true, browser: true, link: true },
-    linked: true,
-    label: 'This browser is linked to the daemon, and a phone is being offered the same link.',
-  },
   pair: {
     machine: 'showing QR',
     browser: 'get your phone',
@@ -134,13 +110,6 @@ const STATE: Record<OnboardingStepId, DiagramState> = {
     lit: { machine: true, browser: true, link: true },
     linked: false,
     label: 'Your computer is showing the fresh QR code while this browser scans it or pastes its link.',
-  },
-  done: {
-    machine: 'fyd running',
-    browser: 'linked',
-    lit: { machine: true, browser: true, link: true },
-    linked: true,
-    label: 'This browser is linked to the daemon running on your machine.',
   },
 };
 

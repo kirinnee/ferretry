@@ -193,18 +193,18 @@ export const setupPageUrl = (href: string): string => new URL('/setup', href).to
  *   can never do, so the phone keeps its own forced answer and lands on the screen
  *   that hands the daemon half to a computer. Refusing outright would drop
  *   somebody who is mid-setup back to the beginning over a field they never typed.
- * - A LINK THAT DOES NOT SAY ENOUGH ASKS. A payload with no doer names a journey
- *   whose steps are not decided yet, and inventing one would be exactly the
- *   damaged-state-as-empty-state mistake — so the reader is asked that question,
- *   with everything the link DID say already answered.
+ * - A LINK THAT DOES NOT SAY WHICH COMPUTER ASKS. A payload with no machine names
+ *   a journey whose steps are not decided yet, and inventing one would be exactly
+ *   the damaged-state-as-empty-state mistake — so the reader is asked that
+ *   question. A link with no doer is NOT incomplete: who installs it is no longer
+ *   a question (r10 O5), so it lands on the commands, "I do it myself".
  */
 export type SetupLanding =
   | { readonly kind: 'walk'; readonly journey: OnboardingJourney; readonly step: OnboardingStepId }
   | {
       readonly kind: 'ask';
-      readonly question: 'target' | 'doer';
+      readonly question: 'target';
       readonly route: OnboardingDaemonRouteId;
-      readonly target?: SetupTargetId | undefined;
     };
 
 /** The journey a landing walks, opened at the proposed step when that step is really on it. */
@@ -220,6 +220,5 @@ export const landSetupHandoff = (handoff: SetupHandoff, device: DeviceKind): Set
   /* The device's own answer wins whenever the proposed one is impossible here. */
   const target = handoff.target !== undefined && isTargetPossible(handoff.target, device) ? handoff.target : presumed;
   if (target === undefined) return { kind: 'ask', question: 'target', route };
-  if (handoff.doer === undefined) return { kind: 'ask', question: 'doer', route, target };
-  return walkFrom({ route, target, doer: handoff.doer }, device, handoff.step);
+  return walkFrom({ route, target, doer: handoff.doer ?? 'self' }, device, handoff.step);
 };
