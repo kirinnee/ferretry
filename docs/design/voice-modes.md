@@ -477,13 +477,6 @@ Added to `docs/relay-protocol.md` §10 by slice B3:
 - **Existing devices start with `voice` OFF** — the closed-set rule every new capability follows (a
   record written before a capability existed reads it as off, `StatePairingRepository`). Whether to
   widen them once, as Sharing did, is **D5**.
-- **Adding `voice` must not break Sharing's repair.** `sharing-follows-pairing.ts` asks that **every
-  capability except Sharing** be fully on, computed from today's `DAEMON_CAPABILITIES`. Once `voice`
-  exists (and is off), a device upgrading straight from before Sharing would fail that test, and a
-  voice repair that required Sharing would fail too, so neither would fire. B1 therefore **pins
-  Sharing's predicate to the seven capabilities that existed before it**, runs the Sharing repair
-  before any voice repair, and adds an upgrade test from a pre-Sharing `devices.json` straight to a
-  build with `voice`.
 
 ### 4.2 The privacy promise, reworded
 

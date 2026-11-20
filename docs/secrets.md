@@ -321,65 +321,23 @@ The saved logins became **accounts** (one identity: label, plain username, passw
 login maps onto it, is in [input requests](input-requests.md#accounts-and-sign-ins-data-model); this is the store.
 The code is `packages/daemon/src/lib/secrets/accounts.ts`.
 
-| File (`state/`, all `0600`) | Holds                                                                       | Written by                      |
-| --------------------------- | --------------------------------------------------------------------------- | ------------------------------- |
-| `login-entries.json`        | the index, `v: 2`: accounts by handle, sign-ins by id. Nothing secret.      | every change (the commit point) |
-| `login-secrets.json`        | the secret fields, sealed under the vault's key, filed under account keys   | a change that seals a value     |
-| `login-entries.v1.json`     | the saved-login index exactly as it was before the migration (`v: 1` bytes) | the migration, once, if absent  |
+| File (`state/`, all `0600`) | Holds                                                                     | Written by                      |
+| --------------------------- | ------------------------------------------------------------------------- | ------------------------------- |
+| `login-entries.json`        | the index, `v: 2`: accounts by handle, sign-ins by id. Nothing secret.    | every change (the commit point) |
+| `login-secrets.json`        | the secret fields, sealed under the vault's key, filed under account keys | a change that seals a value     |
 
-**The migration runs once, at boot, before any route mounts**, under the store's one lock:
+An index that is not `v: 2` is **damaged** ([damaged is not empty](#damaged-is-not-empty)): the account directory
+says so, nothing is swept, and accounts and sign-ins stop working until the file is fixed or moved aside.
 
-1. Read the index. Absent: nothing to do. It parses as neither version: **damaged** — nothing is migrated,
-   written or swept ([damaged is not empty](#damaged-is-not-empty)). Already `v: 2`: nothing to migrate.
-2. A `v: 1` index: read the sealed document. Every sealed name the saved logins point at must be in it, and the
-   accounts must point at every one of them. Otherwise **damaged**: nothing is migrated, nothing swept.
-3. Keep the `v: 1` bytes as `login-entries.v1.json`, **only if no such file exists**.
-4. Write the `v: 2` index. **This is the one commit point.**
-5. **The sealed document is not written at all.** An account keeps its saved login's key, so every sealed name is
-   the one it always was; only the index moves where it names a value from. The sweep then runs against `v: 2`.
+**The boot sweep runs once, before any route mounts**, under the store's one lock:
 
-A stop before 4 leaves `v: 1` in place, and the next boot does the same again, to the same ids. A stop after 4 is
-committed. A reader before the commit migrates `v: 1` in memory with the same pure function, so it sees exactly
-what the commit will write; a change made before the commit (there is none at boot, but the rule holds) keeps the
-`v: 1` copy first and checks the sealed document the same way.
+1. Read the index. Absent: nothing to do. It does not parse: **damaged**, nothing is written or swept.
+2. Every sealed name the accounts point at must be in the sealed document. Otherwise **damaged**: nothing is swept.
+3. Sweep the sealed values nothing points at.
 
 **The sweep keeps every seal an account points at: its password AND each 2FA key's seed.** The list it keeps is
 built from one function in the protocol (`sealedNamesOf`); a sweep that walked only the password would delete
 every saved 2FA seed at the next boot, and a test fails if it does.
-
-**The migration is one kept `security.changed` record** (`kind: accounts-migrated`), in counts only: saved
-logins, accounts, sign-ins, facts dropped (seen at a place that is none of the login's), places dropped, via
-links dropped, 2FA seeds moved, and providers left without a link. The boot log names those providers: a login
-went **via** them (Sign in with Google), the provider signs in on no site, so the link was dropped and nothing
-ties them to that site's page any more. Give such an account its site in Settings › Accounts.
-
-### Going back to an older daemon
-
-An older daemon reads `login-entries.json` with its `v: 1` schema, so a `v: 2` index is **damaged** to it, never
-empty: its list says so, every change to a saved login refuses, its boot sweep keeps everything, saved values stay
-masked, and no card offers a saved login. To go back:
-
-1. Stop the daemon.
-2. `mv ~/.ferretry/state/login-entries.v1.json ~/.ferretry/state/login-entries.json`
-3. Start the older daemon.
-
-Every change made to accounts after the upgrade is lost: the older daemon sees the saved logins as they were. A
-value sealed after the upgrade stays in `login-secrets.json`, masked, until the older daemon's sweep removes it.
-
-**A password or seed you changed or deleted after the upgrade is gone from the restored index too.** The new daemon
-swept the old value once nothing pointed at it, but the restored `v: 1` index still names it. Both daemons then read
-the store as **damaged** — it fails closed, never empty:
-
-- the older daemon types nothing for that login ("lost its password") and its boot sweep keeps everything;
-- upgrading again, the migration finds a saved login naming a value that is not there, so it migrates nothing and
-  **every change refuses**, including the delete that would fix it.
-
-To repair it, in the **older** daemon, before upgrading again:
-
-1. Find the login the older daemon says has lost its password or 2FA seed.
-2. Type its password (or seed) again, or delete that login: `fy account edit <NAME> --password` (or `--totp` in
-   that older `fy`), or `fy account rm <NAME>`; Settings › Accounts does the same.
-3. Upgrade. The index now names only values that are there, so it migrates.
 
 ### Routes
 

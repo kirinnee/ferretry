@@ -1,10 +1,8 @@
 /**
  * A member's name is their user ID on this machine (docs/catalogs.md § Members): two members never share one,
- * compared by `memberNameKey`. This file is the pure part of that rule: finding a free name, and the one-time
- * upgrade of a file written before names were IDs.
+ * compared by `memberNameKey`. This file is the pure part of that rule: finding a free name for a person whose name is taken.
  */
 import { memberNameKey } from '@ferretry/protocol';
-import type { StoredMember } from './document.ts';
 
 /** The most a stored name may hold (the protocol's label limit). */
 const NAME_MAX = 80;
@@ -32,48 +30,7 @@ export function freeMemberName(name: string, taken: ReadonlySet<string>): string
 }
 
 /**
- * Every member with a name of their own. The OLDEST member keeps the plain name; each later one becomes
- * `name (2)`, `name (3)`, … whose key nobody holds, original or new. Nobody is merged and nobody loses a browser, a catalog or a passkey: only the name
- * changes. Answers the same document when no two members shared a name.
- */
-export function uniqueMemberNames(members: readonly StoredMember[]): {
-  readonly members: readonly StoredMember[];
-  readonly renames: readonly MemberRename[];
-} {
-  // Oldest first decides who keeps the name; the file order breaks a tie, so the result is deterministic.
-  const order = members
-    .map((member, index) => ({ member, index }))
-    .sort((a, b) => Date.parse(a.member.createdAt) - Date.parse(b.member.createdAt) || a.index - b.index);
-  // Every name somebody already has is taken before anyone is renamed: a person whose name was unique never changes,
-  // and a new name is never an ID that already means someone else.
-  const taken = new Set(members.map(member => memberNameKey(member.label)));
-  const seen = new Set<string>();
-  const renamed = new Map<string, string>();
-  for (const { member } of order) {
-    const key = memberNameKey(member.label);
-    if (!seen.has(key)) {
-      seen.add(key);
-      continue;
-    }
-    const name = freeMemberName(member.label, taken);
-    taken.add(memberNameKey(name));
-    renamed.set(member.memberId, name);
-  }
-  if (renamed.size === 0) return { members, renames: [] };
-  return {
-    members: members.map(member => {
-      const to = renamed.get(member.memberId);
-      return to === undefined ? member : { ...member, label: to };
-    }),
-    renames: order.flatMap(({ member }) => {
-      const to = renamed.get(member.memberId);
-      return to === undefined ? [] : [{ memberId: member.memberId, from: member.label, to }];
-    }),
-  };
-}
-
-/**
- * What the owner reads once after an upgrade renamed people. The names are the owner's own text, so they are
+ * What the owner reads once after people were renamed. The names are the owner's own text, so they are
  * only ever shown here and never written to the audit log.
  */
 export function renameNotice(renames: readonly MemberRename[]): string {

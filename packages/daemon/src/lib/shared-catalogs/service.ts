@@ -11,13 +11,6 @@
  * ## Writes are one at a time
  *
  * The document is read, changed and written whole, so two writes at once would lose one. They queue.
- *
- * ## The upgrade from version 1
- *
- * The first call that finds a version 1 document upgrades it (`migrate.ts`) INSIDE that queue, so two first
- * calls upgrade once, and every write starts from a version 2 document. The upgrade is repeatable step by step:
- * the shared copies, then the backup of the old file, then the new file. A failure leaves the old file as it
- * was, and the next call tries again.
  */
 
 import { basename, dirname } from 'node:path';
@@ -102,7 +95,6 @@ import {
   withListedItem,
   withNewItem,
   withUnlistedItem,
-  upgradeCatalogsV2,
   withoutCatalog,
   withoutEntry,
   withPublishedVersion,
@@ -126,7 +118,6 @@ import {
   skillSummary,
 } from './freeze.ts';
 import { describeMcpServer, lookupMcpServer, mcpSetupOf } from './mcp-source.ts';
-import { migrateCatalogs } from './migrate.ts';
 import type {
   CatalogBlobStore,
   CatalogDocumentStore,
@@ -485,7 +476,7 @@ export class SharedCatalogService {
       problems: prepared.problems,
       keep: () =>
         this.#serially(async () => {
-          const writable = await this.#writable();
+          const writable = await this.#document();
           if (writable.items.some(candidate => candidate.itemId === itemId)) return;
           const item: StoredSharedItem = {
             itemId,
@@ -507,7 +498,7 @@ export class SharedCatalogService {
   holdsLinkVersion(itemId: string, version: number): Promise<boolean> {
     // In the queue, so a retire already in flight finishes before this reads: it then sees the retired version.
     return this.#serially(async () => {
-      const item = (await this.#writable()).items.find(candidate => candidate.itemId === itemId);
+      const item = (await this.#document()).items.find(candidate => candidate.itemId === itemId);
       const stored = item?.versions.find(candidate => candidate.version === version);
       return stored !== undefined && stored.retiredAt === undefined;
     });
@@ -520,7 +511,7 @@ export class SharedCatalogService {
     return this.#serially(async () => {
       const identity = await this.#identity();
       const id = randomId(this.deps.crypto, 'cat_');
-      const next = withCatalog(await this.#writable(), {
+      const next = withCatalog(await this.#document(), {
         id,
         name: request.name,
         description: request.description ?? '',
@@ -536,7 +527,7 @@ export class SharedCatalogService {
     if (request.visibility === 'public') throw new CatalogRefusal('public_unavailable', CATALOG_PUBLIC_UNAVAILABLE);
     return this.#serially(async () => {
       const identity = await this.#identity();
-      const document = await this.#writable();
+      const document = await this.#document();
       const patched = withCatalogPatch(document, catalogId, request, instant(this.deps.now()));
       const next = request.role === 'default' ? withDefault(patched, catalogId) : patched;
       if (next !== document) await this.#commit(next);
@@ -546,7 +537,7 @@ export class SharedCatalogService {
 
   remove(catalogId: string): Promise<DeletedCatalog> {
     return this.#serially(async () => {
-      const next = withoutCatalog(await this.#writable(), catalogId);
+      const next = withoutCatalog(await this.#document(), catalogId);
       // BEFORE the catalog's own file changes: a failure in between leaves people without a catalog that still
       // exists, never holding a name for one that is gone.
       await this.deps.membership?.forgetCatalog(catalogId);
@@ -561,7 +552,7 @@ export class SharedCatalogService {
     if ('itemId' in request) return this.#addExisting(catalogId, request.itemId, request.version);
     return this.#serially(async () => {
       const identity = await this.#identity();
-      const document = await this.#writable();
+      const document = await this.#document();
       const catalog = findCatalog(document, catalogId);
       const prepared = await this.#prepare({ source: request.source, summary: request.summary });
       await this.#bind(identity, prepared, request.digest);
@@ -588,7 +579,7 @@ export class SharedCatalogService {
   #addExisting(catalogId: string, itemId: string, version: number): Promise<PublishedCatalogItem> {
     return this.#serially(async () => {
       const identity = await this.#identity();
-      const document = await this.#writable();
+      const document = await this.#document();
       const catalog = findCatalog(document, catalogId);
       const next = await this.#listExisting(document, catalog.id, findItem(document, itemId), version);
       await this.#commit(next);
@@ -627,7 +618,7 @@ export class SharedCatalogService {
   quickAdd(caller: string, request: QuickAddRequest): Promise<QuickAddAnswer> {
     return this.#serially(async () => {
       const identity = await this.#identity();
-      const document = await this.#writable();
+      const document = await this.#document();
       const reference = 'source' in request ? await this.#resolve(request.source) : undefined;
       const matches =
         'itemId' in request
@@ -809,7 +800,7 @@ export class SharedCatalogService {
           'That Undo has run out, or was already used. Withdraw the item from the catalog instead.',
         );
       if (record === undefined) throw gone();
-      const document = await this.#writable();
+      const document = await this.#document();
       const catalog = document.catalogs.find(candidate => candidate.id === record.catalogId);
       const entry = catalog?.entries.find(candidate => candidate.itemId === record.itemId);
       if (catalog === undefined || entry === undefined || entry.withdrawnAt !== undefined) {
@@ -854,7 +845,7 @@ export class SharedCatalogService {
   ): Promise<PublishedCatalogItem> {
     return this.#serially(async () => {
       const identity = await this.#identity();
-      const document = await this.#writable();
+      const document = await this.#document();
       const catalog = findCatalog(document, catalogId);
       const next = await this.#publish(identity, document, this.#listed(document, catalog, itemId), request.digest);
       return await this.#published(next, identity, findCatalog(next, catalogId), itemId);
@@ -868,7 +859,7 @@ export class SharedCatalogService {
   publishItemVersion(itemId: string, request: { readonly digest: string }): Promise<PublishedSharedItem> {
     return this.#serially(async () => {
       const identity = await this.#identity();
-      const document = await this.#writable();
+      const document = await this.#document();
       const next = await this.#publish(identity, document, { item: findItem(document, itemId) }, request.digest);
       const stored = itemOf(next, itemId);
       const current = currentVersion(stored);
@@ -896,7 +887,7 @@ export class SharedCatalogService {
   ): Promise<PublishedSharedItem> {
     return this.#serially(async () => {
       const identity = await this.#identity();
-      const document = await this.#writable();
+      const document = await this.#document();
       const next = withCurrentVersion(document, itemId, request.version, request.from, instant(this.deps.now()));
       await this.#commit(next);
       const stored = itemOf(next, itemId);
@@ -921,7 +912,7 @@ export class SharedCatalogService {
    */
   setRetired(itemId: string, version: number, retired: boolean): Promise<RetiredVersion> {
     return this.#serially(async () => {
-      const document = await this.#writable();
+      const document = await this.#document();
       if (retired) await this.#refuseLinked(document, itemId, version);
       const next = withRetired(document, itemId, version, retired, instant(this.deps.now()));
       if (next !== document) await this.#commit(next);
@@ -983,7 +974,7 @@ export class SharedCatalogService {
 
   withdraw(catalogId: string, itemId: string): Promise<WithdrawnCatalogItem> {
     return this.#serially(async () => {
-      const next = withWithdrawn(await this.#writable(), catalogId, itemId, instant(this.deps.now()));
+      const next = withWithdrawn(await this.#document(), catalogId, itemId, instant(this.deps.now()));
       await this.#commit(next);
       const catalog = findCatalog(next, catalogId);
       return {
@@ -1003,7 +994,7 @@ export class SharedCatalogService {
 
   async #export(catalogId: string, request: ExportCatalogRequest): Promise<SharedCatalogFile> {
     const identity = await this.#identity();
-    const document = await this.#writable();
+    const document = await this.#document();
     const catalog = findCatalog(document, catalogId);
     const live = liveEntries(catalog);
     const chosen = new Set(request.itemIds ?? live.map(entry => entry.itemId));
@@ -1054,7 +1045,7 @@ export class SharedCatalogService {
   signedManifest(catalogId: string): Promise<SignedCatalogManifest> {
     return this.#serially(async () => {
       const identity = await this.#identity();
-      const document = await this.#writable();
+      const document = await this.#document();
       return await this.#signedManifest(document, identity, findCatalog(document, catalogId));
     });
   }
@@ -1080,7 +1071,7 @@ export class SharedCatalogService {
   signedVersions(catalogId: string, itemId: string): Promise<SignedCatalogItemVersions> {
     return this.#serially(async () => {
       const identity = await this.#identity();
-      const document = await this.#writable();
+      const document = await this.#document();
       const catalog = findCatalog(document, catalogId);
       const entry = findEntry(catalog, itemId);
       const item = itemOf(document, itemId);
@@ -1193,36 +1184,10 @@ export class SharedCatalogService {
     return result;
   }
 
-  /**
-   * The document for a read. A version 1 or 2 file is upgraded first, and only inside the queue: whoever gets
-   * there first does it, the rest find version 3.
-   */
+  /** The document as the file holds it, or the empty one on a machine that has never published. */
   async #document(): Promise<CatalogsDocument> {
     const raw = await this.deps.documents.readRaw();
-    if (raw.version === 3) return raw.doc;
-    if (raw.version === 'none') return EMPTY_CATALOGS_DOCUMENT;
-    return await this.#serially(() => this.#writable());
-  }
-
-  /** The document for a write, which already runs in the queue: version 1 or 2 is upgraded here, once. */
-  async #writable(): Promise<CatalogsDocument> {
-    const raw = await this.deps.documents.readRaw();
-    if (raw.version === 3) return raw.doc;
-    if (raw.version === 'none') return EMPTY_CATALOGS_DOCUMENT;
-    if (raw.version === 2) {
-      // Version 2 to 3 changes no data. The old file is kept first so that a build which wrote it can be restored.
-      const upgraded = upgradeCatalogsV2(raw.doc);
-      await this.deps.documents.writeBackupV2(raw.text);
-      await this.deps.documents.write(upgraded);
-      return upgraded;
-    }
-    // Three repeatable steps, in this order: the shared copies, the old file kept as it was, the new file. A crash
-    // between any two leaves the old file in place and is repaired by the next call making the same bytes.
-    const migration = await migrateCatalogs(this.deps.crypto, raw.doc, digest => this.deps.blobs.get(digest));
-    for (const blob of migration.sharedBlobs) await this.deps.blobs.put(blob.digest, blob.text);
-    await this.deps.documents.writeBackupV1(raw.text);
-    await this.deps.documents.write(migration.document);
-    return migration.document;
+    return raw.version === 'none' ? EMPTY_CATALOGS_DOCUMENT : raw.doc;
   }
 
   async #identity(): Promise<DaemonIdentity> {

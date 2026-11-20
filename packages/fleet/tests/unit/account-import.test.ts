@@ -289,7 +289,6 @@ describe('planImport — a machine with both harnesses set up', () => {
   });
 
   it('should record what it made so Import again can tell what changed', () => {
-    should(plan.record.profile).be.undefined();
     should(plan.record.profiles).deepEqual({ claude: 'claude-default', codex: 'codex-default' });
     should(plan.record.components['instructions/main']?.sources).deepEqual([
       '/h/.claude/CLAUDE.md',
@@ -883,37 +882,5 @@ describe('planImport — one profile per harness (P7)', () => {
 
     // Assert
     should(again.profiles).deepEqual({ 'codex-starter': { layers: ['modelSets/codex-models-2'] } });
-  });
-
-  it('should still extend the ONE shared profile a record written before P7 names', () => {
-    // Arrange — the old shape: one Default holding both harnesses' parts, recorded as `profile`.
-    const first = planImport(fullScans(), { digest });
-    const shared = mergeImport(undefined, first);
-    const legacyLayers = [
-      ...(shared.profiles['claude-default']?.layers ?? []),
-      ...(shared.profiles['codex-default']?.layers ?? []),
-    ].filter((layer, index, all) => all.indexOf(layer) === index && layer !== 'mcp/linear');
-    const { linear: _linear, ...mcp } = shared.components.mcp;
-    const { 'mcp/linear': _recorded, ...components } = first.record.components;
-    const existing = {
-      ...shared,
-      components: { ...shared.components, mcp },
-      profiles: { default: { layers: legacyLayers } },
-      runtimes: {
-        'claude-default': { credential: 'claude-you', profile: 'default', agent: true },
-        'codex-default': { credential: 'codex-you', profile: 'default', agent: true },
-      },
-    };
-    const record = { version: 1 as const, components, profile: 'default' };
-
-    // Act — Codex's "linear" server is new since that import.
-    const again = planImport(fullScans(), { digest, existing, record });
-
-    // Assert — the legacy profile takes what is new; no per-harness profile appears beside it.
-    should(again.profiles.default?.layers.at(-1)).equal('mcp/linear');
-    should(Object.keys(again.profiles)).deepEqual(['default']);
-    should(again.record.profile).equal('default');
-    should(again.record.profiles).deepEqual({ claude: 'default', codex: 'default' });
-    should(again.duplicates.map(duplicate => duplicate.existing)).deepEqual(['claude-default', 'codex-default']);
   });
 });

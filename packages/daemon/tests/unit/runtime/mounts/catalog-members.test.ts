@@ -881,9 +881,6 @@ describe('a person’s user ID on the wire', () => {
 describe('the code leaves in one answer only', () => {
   class MemoryMembers {
     document: MembersDocument = EMPTY_MEMBERS_DOCUMENT;
-    takeUpgrade() {
-      return undefined;
-    }
     async read() {
       return this.document;
     }

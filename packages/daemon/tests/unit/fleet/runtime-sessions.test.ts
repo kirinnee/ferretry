@@ -32,12 +32,11 @@ const RENAME = {
 };
 
 describe('sessionRunsOn', () => {
-  it('should match a record by name, former name, id, wrapper path or launched executable', () => {
+  it('should match a record by name, former name, id or launched executable', () => {
     // Act / Assert
     should(sessionRunsOn(record(), RUNTIME)).be.true();
     should(sessionRunsOn(record({ agent: 'glm-b' }), RUNTIME)).be.true();
     should(sessionRunsOn(record({ agent: RUNTIME.id }), RUNTIME)).be.true();
-    should(sessionRunsOn(record({ agent: RUNTIME.wrapper }), RUNTIME)).be.true();
     should(sessionRunsOn(record({ agent: 'other', executable: RUNTIME.wrapper }), RUNTIME)).be.true();
   });
 
@@ -89,14 +88,6 @@ describe('renamedSessionConfig', () => {
 
     // Assert
     should(next).deepEqual({ id: 's-1', agent: 'glm-work', command: [RENAME.toWrapper, '--resume', 'abc'], turn: 4 });
-  });
-
-  it('should keep an agent spelled as a wrapper path a wrapper path', () => {
-    // Act
-    const next = renamedSessionConfig({ agent: RENAME.fromWrapper }, RENAME);
-
-    // Assert
-    should(next).deepEqual({ agent: RENAME.toWrapper });
   });
 
   it('should move only the argv when the record names the runtime there alone', () => {

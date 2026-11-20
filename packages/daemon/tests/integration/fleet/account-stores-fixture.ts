@@ -132,12 +132,12 @@ export async function seedAccountStores(paths: FoundationPaths): Promise<void> {
 async function assertSeeded(paths: FoundationPaths): Promise<void> {
   const files = new StateFileSystem(paths);
   const stored = await new FileLoginIndexStore(paths, files).read();
-  if (stored?.v !== 2) throw new Error('the account index is not a version 2 index');
-  const held = stored.document.accounts[SEEDED_ACCOUNT.handle];
+  if (stored === undefined) throw new Error('the account index is missing');
+  const held = stored.accounts[SEEDED_ACCOUNT.handle];
   if (held === undefined) throw new Error('the seeded account is missing');
   const kinds = (held.factors ?? []).map(factor => factor.kind);
   if (kinds.join() !== SEEDED_ACCOUNT.factorKinds.join()) throw new Error(`unexpected factors ${kinds.join()}`);
-  if (stored.document.signIns[SIGN_IN]?.account !== ACCOUNT_KEY) throw new Error('the seeded sign-in is missing');
+  if (stored.signIns[SIGN_IN]?.account !== ACCOUNT_KEY) throw new Error('the seeded sign-in is missing');
   const document = parseVaultDocument((await files.readText(path.join(paths.state, LOGIN_SECRETS_DOCUMENT))) ?? '');
   const sealedNames = Object.keys(document.entries).toSorted();
   if (sealedNames.join() !== [...sealedNamesOf(held)].toSorted().join())

@@ -82,7 +82,6 @@ import type {
   CatalogMembersStore,
   CatalogSharesStore,
   MemberAuditSink,
-  MembersUpgrade,
   MemberSessionCloser,
   ShareCodeHasher,
   ShareLinkSource,
@@ -235,46 +234,7 @@ export class CatalogMemberService {
 
   async #load(): Promise<void> {
     const [members, shares] = await Promise.all([this.deps.members.read(), this.deps.shares.read()]);
-    const upgrade = this.deps.members.takeUpgrade();
-    if (upgrade === undefined) {
-      this.#state ??= { members, shares };
-      return;
-    }
-    // In the write queue, so nothing else touches the shares file while the upgrade is being written.
-    await this.#serially(async () => {
-      await this.#upgraded(upgrade, { members, shares });
-    });
-  }
-
-  /**
-   * The file was written before a name was an ID and people shared one: the later ones were renamed in memory.
-   * The original is put aside and the upgraded file written first; only once that has succeeded is the upgrade
-   * audited (by ID: the names are the owner's own text, so they stay out of the log) and told to the owner, once.
-   * A disk that will not take the write refuses the load: nothing is served from a state that is not on disk
-   * with its original kept, nothing is audited or announced, and the next attempt starts again from the old file.
-   */
-  async #upgraded(upgrade: MembersUpgrade, loaded: State): Promise<void> {
-    const renamed = new Map(upgrade.renames.map(rename => [rename.memberId, rename.to] as const));
-    const followed: SharesDocument = {
-      ...loaded.shares,
-      shares: loaded.shares.shares.map(share => {
-        const label = renamed.get(share.memberId);
-        return label === undefined ? share : { ...share, memberLabel: label };
-      }),
-    };
-    try {
-      await upgrade.commit();
-    } catch (error) {
-      throw new CatalogMemberRefusal(
-        'store_damaged',
-        `members.json could not be upgraded so every name is unique (${error instanceof Error ? error.message : 'the write failed'}). Nothing was changed; it is tried again next time.`,
-      );
-    }
-    this.#state ??= { members: loaded.members, shares: followed };
-    // The labels a waiting invite carries follow the rename; if this write fails they are corrected at the next shares write.
-    if (upgrade.renames.length > 0) await this.deps.shares.write(followed).catch(() => undefined);
-    for (const rename of upgrade.renames) await this.#renamed(rename);
-    this.deps.onRenamed?.(upgrade.renames);
+    this.#state ??= { members, shares };
   }
 
   async #renamed(rename: MemberRename): Promise<void> {

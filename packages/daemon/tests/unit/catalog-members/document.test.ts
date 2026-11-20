@@ -7,7 +7,6 @@ import {
   documentProblem,
   EMPTY_MEMBERS_DOCUMENT,
   EMPTY_SHARES_DOCUMENT,
-  LegacyMembersDocumentSchema,
   MembersDocumentSchema,
   SHARE_SUCCESS_WINDOW_MAX,
   SharesDocumentSchema,
@@ -268,26 +267,12 @@ describe('a member name is a user ID', () => {
     should(problem).containEql(`${memberId(2)} has the same name as`);
   });
 
-  it('should read an old file with a shared name only through the legacy check', () => {
-    const document = membersDoc(storedMember(1, { label: 'Sam' }), storedMember(2, { label: 'sam' }));
-
-    should(MembersDocumentSchema.safeParse(document).success).be.false();
-    should(LegacyMembersDocumentSchema.safeParse(document).success).be.true();
-  });
-
-  it('should keep every other rule in the legacy check', () => {
-    const document = membersDoc(storedMember(1), storedMember(1));
-
-    should(LegacyMembersDocumentSchema.safeParse(document).success).be.false();
-  });
-
   it('should still read a stored name that mixes scripts or holds a private-use character', () => {
     const labels = ['Team Москва', 'Ana (Анна)', `Old${String.fromCodePoint(0xe000)}name`];
     const members = membersDoc(...labels.map((label, index) => storedMember(index + 1, { label })));
     const shares = sharesDoc(...labels.map((memberLabel, index) => storedShare(index + 1, { memberLabel })));
 
     should(MembersDocumentSchema.safeParse(members).success).be.true();
-    should(LegacyMembersDocumentSchema.safeParse(members).success).be.true();
     should(SharesDocumentSchema.safeParse(shares).success).be.true();
   });
 

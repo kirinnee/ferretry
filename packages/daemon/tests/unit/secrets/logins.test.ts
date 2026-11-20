@@ -1,11 +1,15 @@
 import { describe, it } from 'bun:test';
-import { MAX_LOGIN_ENTRIES, type PutLoginEntry, PutLoginEntryRequestSchema } from '@ferretry/protocol';
+import {
+  type AccountIndexDocument,
+  MAX_LOGIN_ENTRIES,
+  type PutLoginEntry,
+  PutLoginEntryRequestSchema,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
   combinedValues,
   LoginDirectory,
   LoginEntryError,
-  type LoginIndexDocument,
   type LoginIndexStore,
   LoginVault,
   SecretRedactor,
@@ -126,17 +130,16 @@ describe('the saved-login directory', () => {
 
   it('should refuse a new entry past the cap, and still change an existing one', async () => {
     const w = world();
-    const entries: LoginIndexDocument['entries'] = {};
+    const accounts: AccountIndexDocument['accounts'] = {};
     for (let index = 0; index < MAX_LOGIN_ENTRIES; index += 1)
-      entries[`E${index}`] = {
+      accounts[`E${index}`] = {
         key: `L${index.toString(16).toUpperCase().padStart(24, '0')}`,
         label: `e${index}`,
-        match: [],
         seals: {},
         createdAt: CLOCK.now(),
         updatedAt: CLOCK.now(),
       };
-    w.index.document = { v: 1, entries };
+    w.index.document = { v: 2, accounts, signIns: {} };
     should((await w.directory.put('ONE_MORE', change({ label: 'x' })).catch(error => error)).failure).equal('full');
     should((await w.directory.put('E0', change({ label: 'renamed' }))).label).equal('renamed');
   });
@@ -198,7 +201,7 @@ describe('the saved-login vault', () => {
   it('should still mask a sealed value no entry names any more', async () => {
     const w = world();
     await w.directory.put('SUDO', change({ label: 'sudo', password: PASSWORD }));
-    w.index.document = { v: 1, entries: {} };
+    w.index.document = { v: 2, accounts: {}, signIns: {} };
     should([...(await w.vault.values()).values()]).deepEqual([PASSWORD]);
   });
 
@@ -240,7 +243,6 @@ describe('the saved-login vault when what it reads is wrong', () => {
         throw new Error('the disk went away');
       },
       write: async () => undefined,
-      keepVersion1: async () => undefined,
     };
     const vault = new LoginVault(broken, new MemorySecretDocuments(), new FakeSecretCipher());
     should(await vault.values().catch(error => error)).be.instanceOf(Error);
@@ -255,16 +257,23 @@ describe('the saved-login vault when what it reads is wrong', () => {
 });
 
 describe('how a saved login signs in, at rest', () => {
-  it('should read an entry saved before methods as a password one on its web hosts, without rewriting it', async () => {
+  it('should read a sign-in saved without a method as a password one on its web hosts, without rewriting it', async () => {
     const index = new MemoryLoginIndex();
-    const old: LoginIndexDocument = {
-      v: 1,
-      entries: {
+    const old: AccountIndexDocument = {
+      v: 2,
+      accounts: {
         GITHUB: {
           key: 'L000000000000000000000000',
           label: 'GitHub',
-          match: ['github.com', 'git@github.com'],
           seals: {},
+          createdAt: CLOCK.now(),
+          updatedAt: CLOCK.now(),
+        },
+      },
+      signIns: {
+        si_0000000000000001: {
+          account: 'L000000000000000000000000',
+          place: { kind: 'site', domains: ['github.com'], match: ['github.com'] },
           createdAt: CLOCK.now(),
           updatedAt: CLOCK.now(),
         },

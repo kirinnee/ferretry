@@ -1,14 +1,13 @@
-import { TotpParametersSchema } from '@ferretry/protocol';
+import { type AccountIndexDocument, TotpParametersSchema } from '@ferretry/protocol';
 import {
   AccountDirectory,
   type AccountDirectoryOptions,
   AccountVault,
-  type LoginIndexDocument,
   type SecretVaultDocument,
 } from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments } from '../runtime/mounts/support.ts';
 
-/** A version 1 saved-login store, as an older daemon left it, and a daemon booting over it. */
+/** An account store, and a daemon booting over it. */
 
 export const CLOCK = { now: () => '2026-10-31T09:00:00.000Z' };
 const T = '2026-10-01T00:00:00.000Z';
@@ -37,24 +36,51 @@ export const SEAL = {
 const fact = (at: string) => ({ at, surface: 'page' as const, identity: '0123456789abcdef', since: T });
 
 /**
- * GitHub (a website and an ssh host, a password and a 2FA seed, a recipe with auto-apply, a proposal, a fact seen on
- * its site and one seen on another page), Google (a provider that signs in on no site), a site that went via it, and
- * sudo on this machine.
+ * GitHub (a website and an ssh host, a password and a 2FA key, a recipe with auto-apply, a proposal, a fact seen on its
+ * site), Google (an account that signs in on no site), a site that went via it, and sudo on this machine.
  */
-export function version1(): LoginIndexDocument {
+function storedAccounts(): AccountIndexDocument {
   return {
-    v: 1,
-    entries: {
+    v: 2,
+    accounts: {
       GITHUB: {
         key: KEY.GITHUB,
         label: 'GitHub',
-        match: ['github.com', 'ssh@build.example.com'],
         username: 'kirin',
-        seals: { password: SEAL.githubPassword, totp: SEAL.githubSeed },
-        totp: TotpParametersSchema.parse({}),
+        seals: { password: SEAL.githubPassword },
+        factors: [
+          {
+            id: 'tf_000000000001',
+            kind: 'totp',
+            label: 'Authenticator app',
+            seal: SEAL.githubSeed,
+            params: TotpParametersSchema.parse({}),
+            addedAt: T,
+            addedBy: 'owner',
+          },
+        ],
+        createdAt: T,
+        updatedAt: T,
+      },
+      GOOGLE: {
+        key: KEY.GOOGLE,
+        label: 'Google',
+        username: 'kirin@example.com',
+        seals: { password: SEAL.googlePassword },
+        createdAt: T,
+        updatedAt: T,
+      },
+      SITE: { key: KEY.SITE, label: 'Site', seals: {}, createdAt: T, updatedAt: T },
+      SUDO: { key: KEY.SUDO, label: 'sudo', seals: { password: SEAL.sudoPassword }, createdAt: T, updatedAt: T },
+    },
+    signIns: {
+      si_0000000000000001: {
+        account: KEY.GITHUB,
+        place: { kind: 'site', domains: ['github.com'], match: ['github.com'] },
         recipe: 'Open github.com and sign in',
+        recipeVersion: 1,
         autoApplyRecipe: true,
-        observed: [fact('github.com'), fact('gitlab.com')],
+        observed: [fact('github.com')],
         proposals: [
           {
             id: 'rp_0000000000000001',
@@ -68,29 +94,22 @@ export function version1(): LoginIndexDocument {
         createdAt: T,
         updatedAt: T,
       },
-      GOOGLE: {
-        key: KEY.GOOGLE,
-        label: 'Google',
-        match: [],
-        username: 'kirin@example.com',
-        seals: { password: SEAL.googlePassword },
+      si_0000000000000002: {
+        account: KEY.GITHUB,
+        place: { kind: 'terminal', tool: 'ssh', host: 'kirin-box', dest: 'build.example.com' },
         createdAt: T,
         updatedAt: T,
       },
-      SITE: {
-        key: KEY.SITE,
-        label: 'Site',
-        match: ['site.example'],
-        method: { kind: 'google', via: 'GOOGLE' },
-        seals: {},
+      si_0000000000000003: {
+        account: KEY.SITE,
+        place: { kind: 'site', domains: ['site.example'], match: ['site.example'] },
+        method: { kind: 'google' },
         createdAt: T,
         updatedAt: T,
       },
-      SUDO: {
-        key: KEY.SUDO,
-        label: 'sudo',
-        match: ['sudo@kirin-box'],
-        seals: { password: SEAL.sudoPassword },
+      si_0000000000000004: {
+        account: KEY.SUDO,
+        place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
         createdAt: T,
         updatedAt: T,
       },
@@ -98,7 +117,7 @@ export function version1(): LoginIndexDocument {
   };
 }
 
-/** A sealed document that counts its writes: the migration must make none. */
+/** A sealed document that counts its writes: a boot that sweeps nothing must make none. */
 export class CountingSealed extends MemorySecretDocuments {
   writes = 0;
   failing = false;
@@ -109,25 +128,9 @@ export class CountingSealed extends MemorySecretDocuments {
   }
 }
 
-/** An index whose next writes fail on demand: the commit, or the version 1 copy before it. */
-export class FailingIndex extends MemoryLoginIndex {
-  failCommit = false;
-  failCopy = false;
-  commits = 0;
-  override async write(document: Parameters<MemoryLoginIndex['write']>[0]): Promise<void> {
-    if (this.failCommit) throw new Error('disk full writing the index');
-    this.commits += 1;
-    await super.write(document);
-  }
-  override async keepVersion1(bytes: string): Promise<void> {
-    if (this.failCopy) throw new Error('disk full writing the copy');
-    await super.keepVersion1(bytes);
-  }
-}
-
-/** The version 1 store on "disk": its index and its sealed document (with one orphan). */
-export async function plant<Index extends MemoryLoginIndex = FailingIndex>(
-  index: Index = new FailingIndex() as unknown as Index,
+/** The store on "disk": its index and its sealed document (with one orphan unless `orphan` is false). */
+export async function plant(
+  index: MemoryLoginIndex = new MemoryLoginIndex(),
   sealed: CountingSealed = new CountingSealed(),
   options: { readonly orphan?: boolean } = {},
 ) {
@@ -144,7 +147,7 @@ export async function plant<Index extends MemoryLoginIndex = FailingIndex>(
     entries[name] = { ...(await cipher.seal(name, value)), createdAt: T, updatedAt: T };
   await sealed.write({ v: 1, cipher: cipher.algorithm, entries });
   sealed.writes = 0;
-  index.document = version1();
+  index.document = storedAccounts();
   return { index, sealed, cipher };
 }
 
@@ -155,7 +158,7 @@ export function daemonOver(
   options: AccountDirectoryOptions = {},
 ) {
   const cipher = new FakeSecretCipher();
-  const vault = new AccountVault(index, sealed, cipher, { hostName: 'kirin-box.local', clock: CLOCK });
+  const vault = new AccountVault(index, sealed, cipher);
   const directory = new AccountDirectory(index, sealed, cipher, CLOCK, {
     hostName: 'kirin-box.local',
     seals: vault,

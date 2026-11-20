@@ -205,11 +205,8 @@ What exists on the machine that makes a catalog. Everything here needs the **`sh
 
 ### Making and exporting a catalog
 
-> **Upgrading.** A device that held **every** capability before Sharing existed — the owner's phone — gets
-> Sharing on once, at the first boot of this release, with nothing to run: what it would hold if it were paired
-> today (owner decision; [grants.md](grants.md#capability-eight-was-added-sharing) says exactly when). Any other
-> device can have it turned on in the app (Settings › Devices) by a device that has Sharing on and may manage
-> devices, or at the machine with `fy device grant <device> sharing --use`. The host's own `fy catalog` commands are not
+> **Turning Sharing on.** A device paired before Sharing existed can have it turned on in the app (Settings › Devices) by
+> a device that has Sharing on and may manage devices, or at the machine with `fy device grant <device> sharing --use`. The host's own `fy catalog` commands are not
 > governed by a device grant and work at once. See [grants.md](grants.md#changing-a-devices-grants).
 
 ```text
@@ -288,7 +285,7 @@ between them are byte-identical**. A reader that saw revision 7 refuses a signed
 
 Exactly one catalog's revision rises for a rename, a description, an add (new or existing), a withdrawal or a relist. A new version raises the revision of **every catalog that lists the item live** (one write carries all of them, whichever route published it), and leaves a catalog that withdrew the item alone. Making a catalog the default changes no manifest, so no revision rises.
 
-A catalog serves the versions from the one it joined at (or was relisted at) onward: the entry's optional `sinceVersion` (absent means 1, so catalogs made before 3c-2 serve every version) is set to the item's current version when an existing item is added or relisted, and `frozenItem` refuses any older version as `item_unknown`, so **a catalog never serves a version below its `sinceVersion`**. Publishing a new version leaves `sinceVersion` alone. `sinceVersion` is a floor, not a ceiling: when an item is added or relisted while newer versions already exist (the current version was rolled back), the entry also stores `joinedAtMax`, the newest version that existed then, because the person who added it reviewed `sinceVersion` and was never shown the ones between. **A catalog may serve its `sinceVersion`, its current version, and any version after `joinedAtMax`; never one in between.** `joinedAtMax` is absent (no gap) unless a newer version existed, so entries from before 3d-2 carry none; see the declared gap below. A live entry's `sinceVersion` can never be newer than the item's current version: the document is refused as damaged if it is. Only the current version is exported. The first call on a 3d-2 daemon raises the file to **`schemaVersion: 3`** (same shape, nothing else changes) and keeps the old file as `catalogs.v2.json`, so a 3c-1 or 3d-1 daemon, which only reads versions it knows, refuses it (`store_damaged`) and never writes. A downgrade needs the file restored: stop the daemon, `mv catalogs.v2.json catalogs.json` ([Going back from version 3](#upgrading-from-version-2)). Without that, a 3d-1 build would have read the file, ignored `joinedAtMax` and retirement, and written entries back without them.
+A catalog serves the versions from the one it joined at (or was relisted at) onward: the entry's optional `sinceVersion` (absent means 1, so catalogs made before 3c-2 serve every version) is set to the item's current version when an existing item is added or relisted, and `frozenItem` refuses any older version as `item_unknown`, so **a catalog never serves a version below its `sinceVersion`**. Publishing a new version leaves `sinceVersion` alone. `sinceVersion` is a floor, not a ceiling: when an item is added or relisted while newer versions already exist (the current version was rolled back), the entry also stores `joinedAtMax`, the newest version that existed then, because the person who added it reviewed `sinceVersion` and was never shown the ones between. **A catalog may serve its `sinceVersion`, its current version, and any version after `joinedAtMax`; never one in between.** `joinedAtMax` is absent (no gap) unless a newer version existed, so entries from before 3d-2 carry none. A live entry's `sinceVersion` can never be newer than the item's current version: the document is refused as damaged if it is. Only the current version is exported. The file is **`schemaVersion: 3`**, so a daemon that does not know `joinedAtMax` and retirement refuses it (`store_damaged`) and never writes it back without them.
 
 The publisher name the manifest carries is **stored with the catalog** when it is made (the machine's
 name then) and signed from the store at every export, so a change of host name does not change the bytes
@@ -461,13 +458,6 @@ above.
 verified with, and a manifest older than the revision of that catalog the app has already seen is refused, so a stale or
 replayed list cannot install an older version.
 
-**Declared gap.** An entry written before 3d-2 has a `sinceVersion` but no `joinedAtMax`, and the 2→3 upgrade does not
-invent one. That is safe because the window needs a rollback, no released build could roll an item back, and so such an
-entry never sat below a newer version. The one way to open it is to run a 3d-1 build on a file that a 3d-2 build had
-already rolled back (3d-1 would add entries without `joinedAtMax`). The version 3 file stops that: a 3d-1 build refuses
-it (`store_damaged`) and never writes. It happens only if the owner restores `catalogs.v2.json` over a file that holds a
-rollback, which the downgrade note above warns against.
-
 ### One item in many catalogs, and the default (catalogs 3c-2)
 
 An item is kept once and can be listed in any number of catalogs. `POST /items` with `{itemId, version}` lists an item
@@ -626,13 +616,11 @@ Under `<FY_HOME>/state/catalogs/`, directory `0700`, files `0600`, written atomi
 
 - `blobs/<hex>.json`: one frozen item version each, **content-addressed**: the name is the SHA-256 of the
   file's text, so a file that holds other text is replaced with the right text on the next write (see the gap
-  below). Version 2 stores the **shared copy**, named by the hex of its `contentDigest` (no `sha256:` prefix
+  below). It stores the **shared copy**, named by the hex of its `contentDigest` (no `sha256:` prefix
   in the file name), once per version. Reading it for a
   catalog sets the three placeholder fields back (a pure step), and **every read checks both**: the
   shared copy against its `contentDigest`, and the re-identified item against that catalog's
   `bindings[catalogId].digest`. A blob is written before the document that lists it.
-- `catalogs.v1.json`: the version 1 file as it was, kept by the upgrade (see below). Nothing reads it.
-- `catalogs.v2.json`: the version 2 file as it was, kept by the 2→3 upgrade (see below). Nothing reads it.
 
 Mutations are serialised, so two requests never interleave a read-modify-write. A new version of an item
 raises the `revision` of **every** catalog that lists it live, in one document write; a catalog where it
@@ -640,59 +628,6 @@ is withdrawn is not raised, but still gets a binding so it can be listed again l
 
 Deleting a catalog removes it and its bindings and **keeps the items and versions** it listed (and their
 shared copies); the route still answers as before. Nothing yet removes an item no catalog lists.
-
-#### Upgrading from version 1
-
-A version 1 `catalogs.json` listed items inside each catalog, with one blob per catalog version. The
-first call that finds one upgrades it, **inside the write queue**, so two first calls upgrade once. The
-steps run in this order and each is safe to run again:
-
-1. Read every version 1 blob and **verify it against the digest the file lists**. Any blob that is
-   missing, not JSON, not an item, not the item the file says it is, or that no longer hashes to its
-   digest stops the upgrade with `store_damaged` naming `blobs/<hex>.json`. **Nothing is written.** The
-   next call tries again; restore the file, or install the previous Ferretry version.
-2. Write the shared copies (`blobs/<hex of contentDigest>.json`, no `sha256:` prefix).
-3. Write `catalogs.v1.json` with the exact text of the old file.
-4. Write the version 2 `catalogs.json`.
-
-A crash between any two steps leaves the version 1 file in place, and the next call repeats the upgrade
-to the same bytes. The upgrade is pure and deterministic: a version 2 file is left alone. It changes
-**nothing a member or an installer can see**: the signed manifests, the per-catalog items, their digests
-and the revisions are byte-identical before and after, and the next export equals the one before.
-The version 1 per-catalog blobs stay on disk.
-
-**One thing does change: a preview held across the upgrade is stale.** A version 1 `contentDigest` kept the
-catalog's real id; a version 2 one is catalog-independent (the shared copy carries placeholder ids). A
-preview taken before the upgrade and sent back after it is therefore answered `409 changed_since_preview`;
-take a new preview and send that. Nothing is published by the refusal.
-
-**Going back.** A previous daemon only reads `schemaVersion: 1`; it refuses the version 2 file and never
-writes to it (`store_damaged`). To go back: stop the daemon, move `catalogs.v1.json` over `catalogs.json`
-(`mv catalogs.v1.json catalogs.json`), then start the previous version. **Caveat:** everything changed
-since the upgrade is lost, and revision numbers may be **reused**, which an installer that saw the newer
-revision refuses ([the revision rule](#the-revision-rule)). The refusal's advice to "move the file
-aside" is the wrong way back: the previous daemon then starts with no catalogs, and the next upgrade
-would write a new `catalogs.v1.json` over the backup.
-
-**If the version 2 file was already moved aside** and the previous daemon has run since, stop the daemon
-first. Copy `catalogs.v1.json` somewhere safe if it is the backup you want to keep. Then either put the
-moved-aside file back as `catalogs.json` (it is a whole, valid version 2 file, so the newer daemon reads
-it as it was, with every shared copy still in `blobs/`), or, to go back to version 1, move your saved
-`catalogs.v1.json` over `catalogs.json` as above. Anything the previous daemon published in between is in
-the file it wrote and is lost either way; keep that file too if you need it.
-
-#### Upgrading from version 2
-
-Version 3 has the same shape as version 2. It exists so that a build that does not know `joinedAtMax` or retirement
-cannot read the file and write it back without them. The first call that finds a version 2 file, inside the write
-queue, writes `catalogs.v2.json` with the exact text of the old file, then writes the version 3 `catalogs.json`. A
-crash between the two leaves the version 2 file in place and the next call repeats both to the same bytes. A version 3
-file is left alone.
-
-**Going back from version 3.** A 3c-1 or 3d-1 daemon refuses the version 3 file and never writes to it
-(`store_damaged`). To go back: stop the daemon, `mv catalogs.v2.json catalogs.json`, then start the previous version.
-Everything changed since the upgrade is lost and revision numbers may be reused, as for version 1. Copy
-`catalogs.v2.json` somewhere safe first if you want to keep it: a later upgrade writes a new one over it.
 
 ### Audit
 
@@ -1053,7 +988,7 @@ still the `label` of a member and the `name` of a person in a mint, so nothing a
   another (an all-Cyrillic name that looks Latin), and no check here catches it. Only the owner types names, and a
   joiner never picks one. The members file refuses two members with the same key. Every write checks the schema
   first, so a duplicate is a refusal with nothing written (`store_damaged`, "members.json was not written"). A
-  file that already holds one (written before names were IDs) is upgraded, below, not called damaged.
+  file that already holds one is refused as damaged (`store_damaged`), and nothing in it is changed.
 - **Mint names a person by ID.** `member` takes `{ "name": "Alice" }`: whoever holds that ID is reached
   (`existing`), and an ID nobody holds makes a new person. The older arms stay accepted. `{ "kind": "new",
 "label" }` for an ID that is taken is refused `409 member_exists` with the `memberId` that holds it ("Someone
@@ -1075,22 +1010,14 @@ still the `label` of a member and the `name` of a person in a mint, so nothing a
 - **Asking first.** `GET /v1/catalog-members?name=Alice` also answers `match`, the `memberId` that holds or
   has reserved that ID (nothing else, no name), so a share sheet can say "Alice is already in" before it mints.
   The same capability as the list; any other query parameter is a `400`.
-- **Upgrading a machine that already has twins.** A `members.json` written before names were IDs may hold two
-  people of one name. It is not damaged: the first read keeps the **oldest** member's name and makes the later
-  ones "‹name› (2)", "(3)", … (within 80 characters). Nobody is merged, and no browser, catalog or passkey moves.
-  The original file is kept as `state/catalogs/members.before-unique-names.json`, then the new one is written
-  atomically, once; a crash before that leaves the old file and the next boot does it again. A name that was
-  already unique never changes, and no one is given an ID someone already held (so a file with "Alice", "alice" and
-  "Alice (2)" becomes "Alice", "alice (3)" and "Alice (2)": the second is renamed to the first number nobody holds).
-  The backup is never replaced: when the plain name is taken by a different file, the next is numbered
-  (`members.before-unique-names.2.json`). The upgrade runs in the same queue as every other write, and only
-  after its write succeeded is each rename audited (`catalog.member.renamed`, `reason: "duplicate-name"`, IDs
-  only) and the owner told once; if it cannot write, the members file is refused as unreadable, with nothing
-  half-done and nothing audited, and the next boot tries again. The notice: "2 people had the same user ID, so the later one was renamed: alice → alice (2). Each still signs in with
-  their passkeys. Rename or remove whichever is wrong in Sharing › People." (for several people: "Several people had the
-  same user ID, so the later ones were renamed: …"). **GAP:** the notice has no path to the app yet. The daemon
-  holds it for its own log (`bootNotices`, stderr), and no route or event carries it to the owner's browser, so the app
-  cannot show it once. The sentence is final so that the day a channel exists nothing about the words changes.
+- **A join whose ID was taken meanwhile.** The joiner gets the first free "‹name› (2)", "(3)", … (within 80
+  characters) and nobody is merged. The rename is audited (`catalog.member.renamed`, `reason: "duplicate-name"`, IDs
+  only) and the owner is told once: "2 people had the same user ID, so the later one was renamed: alice → alice (2).
+  Each still signs in with their passkeys. Rename or remove whichever is wrong in Sharing › People." (for several
+  people: "Several people had the same user ID, so the later ones were renamed: …"). **GAP:** the notice has no path to
+  the app yet. The daemon holds it for its own log (`bootNotices`, stderr), and no route or event carries it to the
+  owner's browser, so the app cannot show it once. The sentence is final so that the day a channel exists nothing
+  about the words changes.
 - **A person's passkeys.** The daemon can list ONE person's passkeys across all of their browsers
   (`MemberPasskeyService.passkeysOf`). It is an internal read, not a route. A passkey's WebAuthn `user.id`
   is unchanged: a passkey belongs to a browser's member key, not to the person. The `user.id` stays per browser on
@@ -1774,15 +1701,12 @@ What this does **not** protect against, said plainly (more in design §4.8):
   a folder replaced by a link in that instant is followed for that one read. The attacker must already be
   the same user on the publisher, and the content is shown in the preview and bound by its digest.
 - **A damaged shared copy is healed only when something writes it again.** A blob's name is the digest of its
-  text, so writing one replaces a file that holds other text (atomically, 0600). The upgrade and a new
-  version write the shared copies they need, so a damaged one is repaired then. A copy no write touches stays
+  text, so writing one replaces a file that holds other text (atomically, 0600). A new
+  version writes the shared copies it needs, so a damaged one is repaired then. A copy no write touches stays
   damaged until it is needed: every read checks it against its `contentDigest` and answers `store_damaged`,
   so nothing wrong is served. Restore the file from a backup in the meantime.
-- **One damaged version 1 blob stops the upgrade for every catalog** (it fails closed rather than
-  upgrade some). Nothing is written, and the daemon keeps answering `store_damaged` for catalogs until
-  the file is restored or the previous version is installed.
-- **Going back loses changes and can reuse revisions** ([Storage](#upgrading-from-version-1)). Orphaned
-  items (a deleted catalog's, or the old per-catalog blobs) are kept; nothing collects them yet.
+- **Going back loses changes and can reuse revisions.** Orphaned
+  items (a deleted catalog's) are kept; nothing collects them yet.
 - **Retiring hides a version, it does not recall one.** A retired version stays in the store and in anything already
   installed from it, and a member who already holds its bytes keeps them. It stops being offered by the list and
   the item route. The owner's app shows retired versions (3d-4); nothing installs from the version list yet (3d-3).

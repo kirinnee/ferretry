@@ -1928,7 +1928,6 @@ describe('parseImportRecord', () => {
       parseImportRecord(
         JSON.stringify({
           version: 1,
-          profile: 'default',
           components: {
             'instructions/main': { sources: ['/a', 3], digest: 'd' },
             'mcp/bad': { sources: 'x', digest: 'd' },
@@ -1939,7 +1938,6 @@ describe('parseImportRecord', () => {
     ).deepEqual({
       version: 1,
       components: { 'instructions/main': { sources: ['/a'], digest: 'd' } },
-      profile: 'default',
     });
     should(parseImportRecord(JSON.stringify({ version: 1, components: {} }))).deepEqual({ version: 1, components: {} });
   });

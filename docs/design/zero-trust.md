@@ -313,10 +313,10 @@ allowed`, never `4403`, which would tell the device it is unpaired. The re-check
 }
 ```
 
-A v1 document (records carrying `tokenHash`) is read as **no devices**: every device pairs again
-once, the boot trail says how many grants were dropped and why, and the next write replaces the file.
-That is the owner's decision ("NO backward compatibility needed"), and it is the only migration that
-deletes the bearer path completely rather than keeping a reader for it.
+A v1 document (records carrying `tokenHash`) is **refused**: the daemon does not start on it, and the error names
+the file, says no device in it can sign in any more, and gives the one-line empty `schemaVersion: 2` document (with the daemon's id) to replace its contents with before every device is paired again ([pairing.md](../pairing.md)). That is the owner's decision ("NO backward
+compatibility needed"), and it is the only migration that deletes the bearer path completely rather than keeping a
+reader for it.
 
 The browser drops its stored `deviceToken` the same way: a stored connection without a device key is
 not a pairing, and the app shows the pairing screen for it.
