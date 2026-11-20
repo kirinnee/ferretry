@@ -67,7 +67,11 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
     label: 'Retro Desktop',
     blurb: 'An early-2000s desktop: bevelled buttons, sunken fields, gradient title strips, hard drop shadows.',
   },
-  { id: 'aqua', label: 'Aqua Desktop', blurb: 'Glossy pill controls, soft deep shadows, a springy halo focus.' },
+  {
+    id: 'lucid',
+    label: 'Lucid',
+    blurb: 'Glossy pill controls, soft deep shadows, a springy halo focus, system fonts.',
+  },
 ] as const);
 
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([

@@ -1,15 +1,15 @@
 /* ============================================================================
-   AQUA DESKTOP — a glossy, rounded "water drop" desktop look. HOW things are drawn, never WHICH colours:
+   LUCID — a glossy, rounded desktop look. HOW things are drawn, never WHICH colours:
      · pill-shaped controls with a lit-from-above face (a two-stop vertical gradient, an inset top highlight);
      · a medium radius on panels, soft deep shadows, a faint horizontal pinstripe on the page;
      · a springy motion (a small overshoot when a choice is made), a thick glowing focus halo;
-     · Inter (already bundled) at medium weights; sentence-case labels.
-   It evokes the look and ships no Apple asset: no icon, no font, no image. Every colour comes from the active
+     · the system UI fonts only (no font file is bundled or preloaded for it) at medium weights; sentence-case labels.
+   It ships no icon, no font and no image. Every colour comes from the active
    palette through `var()` (a style file holds no colour value), so any palette wears it, in either mode.
    The gloss highlights are the palette's own surface/ink/accent mixed, never a literal white.
    ============================================================================ */
-:root[data-style='aqua'],
-[data-swatch][data-style='aqua'] {
+:root[data-style='lucid'],
+[data-swatch][data-style='lucid'] {
   /* ═══ structural token layer ═══ */
   --weight-normal: 400;
   --weight-medium: 500;
@@ -80,60 +80,62 @@
   /* A thick halo: the focus ring is the style's loudest signature, and stays a hard, visible 3px. */
   --focus-width: 3px;
   --focus-offset: 1px;
-  --font-display: 'Inter var', Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-body: 'Inter var', Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-  --font-mono: ui-monospace, 'JetBrains Mono', 'SFMono-Regular', 'Cascadia Mono', Menlo, Consolas, monospace;
+  --font-display: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', Menlo, Consolas, monospace;
 }
 
 /* THE GLOSS. Light: the face is lit from above (surface at the top, a little ink at the bottom). Dark: the lit top is a
    little ink, fading into the surface. The primary button is the accent, brightened at the top by a thin inner line. */
-:root[data-style='aqua'][data-mode='dark'],
-[data-swatch][data-style='aqua'][data-mode='dark'] {
+:root[data-style='lucid'][data-mode='dark'],
+[data-swatch][data-style='lucid'][data-mode='dark'] {
   --shadow-md: 0 1px 3px var(--shadow-md-1), 0 12px 30px var(--shadow-md-2);
   /* Lit from above: a light line along a panel's top edge. */
   --rule-inset: inset 0 1px 0 color-mix(in srgb, var(--fg) 9%, transparent);
 }
 
-:root[data-style='aqua'][data-mode='light'],
-[data-swatch][data-style='aqua'][data-mode='light'] {
+:root[data-style='lucid'][data-mode='light'],
+[data-swatch][data-style='lucid'][data-mode='light'] {
   /* Lit from above: a shaded line along a panel's bottom edge, so it reads as a raised sheet. */
   --rule-inset: inset 0 -1px 0 color-mix(in srgb, var(--fg) 7%, transparent);
 }
 
-:root[data-style='aqua'][data-mode='light'] .kt-btn:not([data-variant='primary'], [data-variant='ghost']) {
+:root[data-style='lucid'][data-mode='light']
+  .kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger']) {
   background-image: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 92%, var(--fg)) 100%);
 }
 
-:root[data-style='aqua'][data-mode='dark'] .kt-btn:not([data-variant='primary'], [data-variant='ghost']) {
+:root[data-style='lucid'][data-mode='dark']
+  .kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger']) {
   background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, var(--fg)) 0%, var(--surface) 100%);
 }
 
-:root[data-style='aqua'] .kt-btn[data-variant='primary'] {
+:root[data-style='lucid'] .kt-btn[data-variant='primary'] {
   background-image: linear-gradient(180deg, var(--accent) 0%, var(--accent-strong) 100%);
   box-shadow:
     var(--shadow-control),
     inset 0 1px 0 color-mix(in srgb, var(--accent-fg) 38%, transparent);
 }
 
-:root[data-style='aqua'] .kt-btn:active:not(:disabled) {
+:root[data-style='lucid'] .kt-btn:active:not(:disabled) {
   box-shadow: var(--shadow-active);
 }
 
 /* The field is inset (a recessed well); its focus is the halo, drawn here because the shared field rule resets `outline`. */
-:root[data-style='aqua'] .kt-input {
+:root[data-style='lucid'] .kt-input {
   background-image: linear-gradient(180deg, color-mix(in srgb, var(--fg) 5%, var(--surface)) 0%, var(--surface) 40%);
   box-shadow:
     inset 0 2px 3px var(--shadow-sm-1),
     inset 0 0 0 1px color-mix(in srgb, var(--fg) 4%, transparent);
 }
 
-:root[data-style='aqua'] .kt-input:focus-visible {
+:root[data-style='lucid'] .kt-input:focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: var(--focus-offset);
 }
 
 @media (max-width: 640px) {
-  :root[data-style='aqua'] {
+  :root[data-style='lucid'] {
     --text-2xs: 12.5px;
     --text-xs: 14px;
     --text-sm: 15px;
