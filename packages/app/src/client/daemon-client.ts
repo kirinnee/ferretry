@@ -440,6 +440,7 @@ export class DaemonClient {
     const background = options.origin === 'background';
     return {
       call: (route, init) => this.#call(caller, route, init, background),
+      callWithStatus: (route, init) => this.#callWithStatus(caller, route, init, background),
       conditional: (route, params, init) => this.#conditional(caller, route, params, init, background),
       subscribe: (event, listener) => this.#subscribe(caller, event, listener),
       socket: (key, params, listeners, query) => this.#socket(caller, key, params, listeners, query),
@@ -550,9 +551,19 @@ export class DaemonClient {
     background = false,
   ): Promise<Answer> {
     // Only the allow-listed headers cross (`allowedCallHeaders`); any other key a half passes is dropped.
+    return (await this.#callWithStatus<Answer>(caller, route, init, background)).body;
+  }
+
+  /** {@link #call}, keeping the status the daemon answered with (a `202` held for the owner is not a `200`). */
+  async #callWithStatus<Answer>(
+    caller: string,
+    route: string,
+    init: Parameters<PluginClient['call']>[1] = {},
+    background = false,
+  ): Promise<{ readonly status: number; readonly body: Answer }> {
     const answer = await this.#answered(caller, route, init, allowedCallHeaders(init.headers), background);
     if (answer.status >= 400) throw refusal(answer);
-    return answer.body as Answer;
+    return { status: answer.status, body: answer.body as Answer };
   }
 
   /**

@@ -30,8 +30,9 @@ const jsonResponse = (body: unknown, status: number): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
 /**
- * A client's call, as the response the daemon gave. An answer with a status is returned as it came (the daemon's own
- * sentence in `error`); a call that never got an answer rejects, as a failed request does.
+ * A client's call, as the response the daemon gave. An answer comes back with the status the daemon gave it (a `202` held
+ * for the owner stays a `202`; a refusal carries the daemon's own sentence in `error`); a call that never got an
+ * answer rejects, as a failed request does.
  */
 function introducerRequest(client: PluginClient): IntroducerRequest {
   return async (path, init = {}) => {
@@ -40,11 +41,15 @@ function introducerRequest(client: PluginClient): IntroducerRequest {
     if (!INTRODUCED_ROUTES.has(route)) throw new Error(NOT_INTRODUCED);
     const body = typeof init.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined;
     try {
-      const answer = await client.call(route, {
+      const call = {
         ...(body === undefined ? {} : { body }),
         ...(init.signal === undefined || init.signal === null ? {} : { signal: init.signal }),
-      });
-      return jsonResponse(answer, 200);
+      };
+      // The daemon's own status goes back with its body: a `202` (a tunnel switch held for the owner) is not a `200`.
+      // A client that can only hand over the body (`call`) has no status to keep, so its answer is a 200.
+      if (client.callWithStatus === undefined) return jsonResponse(await client.call(route, call), 200);
+      const answer = await client.callWithStatus(route, call);
+      return jsonResponse(answer.body, answer.status);
     } catch (error) {
       // A refusal is the daemon's answer; anything else (a carrier that ended, a deadline) is no answer at all.
       if (error instanceof DaemonCallError && error.carrier !== true) {

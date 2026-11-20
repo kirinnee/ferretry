@@ -25,6 +25,10 @@ export interface DeviceConnectionPorts {
 
 const machineName = (daemon: PairedDaemon): string => daemon.machine;
 
+/** Whether the carrier set stored for this machine names a tunnel. */
+const publishesTunnel = (daemon: PairedDaemon): boolean =>
+  daemon.carriers.some(carrier => (carrier as { kind?: unknown } | null)?.kind === 'tunnel');
+
 export function DeviceConnectionPanel({ daemons, preferences, drops, webrtc }: DeviceConnectionPorts) {
   const list = useSyncExternalStore(daemons.subscribe, daemons.snapshot, daemons.snapshot);
   const chosen = useSyncExternalStore(
@@ -48,7 +52,8 @@ export function DeviceConnectionPanel({ daemons, preferences, drops, webrtc }: D
           value: settingOf(chosen[daemon.daemon]),
           onChange: value =>
             value === 'default' ? preferences.reset(daemon.daemon) : preferences.set(daemon.daemon, value),
-          availability: { webrtc },
+          // The set this device stores for the machine says whether a tunnel is published: with none, "Tunnel only" is greyed.
+          availability: { webrtc, tunnelPublished: publishesTunnel(daemon) },
         }),
       )}
       {drops === undefined

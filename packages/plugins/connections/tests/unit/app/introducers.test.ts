@@ -89,6 +89,30 @@ describe('the clients the router asks through', () => {
     await expect(registry.read('broken')).rejects.toThrow('deadline');
   });
 
+  test('a 202 the daemon gave (a tunnel switch held for the owner) reaches the caller as a 202, not a 200', async () => {
+    const registry = new IntroducerRegistry();
+    const held = { held: ['the tunnel is turned on'], view: { enabled: false } };
+    const calls: string[] = [];
+    // As the shell's client: `call` is the body alone (the status is gone), `callWithStatus` keeps it.
+    registry.attach('daemon-a', {
+      call: async (route: string) => {
+        calls.push(`call ${route}`);
+        return held;
+      },
+      callWithStatus: async (route: string) => {
+        calls.push(`status ${route}`);
+        return { status: 202, body: held };
+      },
+    } as unknown as PluginClient);
+
+    const answer = await registry.request('daemon-a')?.('/v1/tunnel', { method: 'PUT', body: '{"enabled":true}' });
+
+    expect(answer?.status).toBe(202);
+    expect(answer?.ok).toBe(true);
+    expect(await answer?.json()).toEqual(held);
+    expect(calls).toEqual(['status PUT /v1/tunnel']);
+  });
+
   test('R636 a refusal is the daemon’s answer with its status and sentence; a call that got no answer rejects', async () => {
     const registry = new IntroducerRegistry();
     registry.attach('refusing', clientAnswering(new DaemonCallError(409, 'webrtc_busy', 'WebRTC is busy')).client);
