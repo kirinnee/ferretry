@@ -5,8 +5,8 @@
  *
  *   A MOUSE      a button with the chosen option and a chevron. It opens a popover listbox under the button (flipped above
  *                it when the room below is short), with a search field on top once the list is long (`searchable="auto"`:
- *                more than 7 options). The popover is drawn in `document.body`, so no card's `overflow` clips it.
- *   A PHONE      (a container under 600px, or a coarse primary pointer) the same panel in a centred `Dialog`: search focused,
+ *                more than 7 options; `"never"` opts out). The popover is drawn in `document.body`, so no card's `overflow` clips it.
+ *   A PHONE      (a container under 600px, or a coarse primary pointer) the same panel in a centred `Dialog`: search ALWAYS there (`"auto"` means always in the dialog), focused,
  *                the list scrolling inside it, a Cancel button, the page behind inert. "Container" is the button's nearest
  *                ancestor that is a CSS container (`container-type`), else the window, so a narrow pane in a wide window
  *                gets the dialog too.
@@ -387,7 +387,9 @@ export function SelectBox({
   const [seed, setSeed] = useState('');
   const asDialog = useDialogMode(triggerRef);
   const giveFocusBack = useRef(false);
-  const search = isSearchable(searchable, options.length);
+  // In the centred dialog "auto" ALWAYS searches (a phone has no popover to type-ahead in; the owner's "like a combo box,
+  // where people can type to search"); on a desktop it keeps the length threshold. "never" stays an explicit opt-out.
+  const search = searchable === 'auto' && asDialog ? true : isSearchable(searchable, options.length);
   const chosen = options.find(option => option.value === value);
 
   // After the commit that closes it (when the dialog's page is no longer inert): the focus returns to the button.
