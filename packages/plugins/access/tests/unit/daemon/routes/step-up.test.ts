@@ -292,6 +292,67 @@ describe('the ceremonies that need no staged subject', () => {
     should(jsonBody(granted)).have.property('expiresAt');
   });
 
+  describe('the proof is keyed by the page, not by the connection transcript', () => {
+    const assertion = {
+      credentialId: 'AQIDBA',
+      clientDataJSON: 'Y2xpZW50',
+      authenticatorData: 'YXV0aA',
+      signature: 'c2ln',
+    };
+    /** A good passkey on the PHONE's `app-one` page, whose transcript-keyed `session` is NOT `app-one`. */
+    async function provedOnce() {
+      const world = machine();
+      await world.ask('POST /v1/step-up/options', { origin: ORIGIN }, { device: phone });
+      const granted = await world.ask('POST /v1/step-up', assertion, { device: phone });
+      should(granted.status).equal(200);
+      return world;
+    }
+
+    it('P2 should hold the proof for the page that made it, so the held confirm that follows takes it on the first try', async () => {
+      // Arrange
+      const world = await provedOnce();
+
+      // Act
+      const held = world.registry.freshlyHeld(phone, world.clock.now);
+      const claimed = world.registry.claimFresh(phone, world.clock.now);
+      const again = world.registry.claimFresh(phone, world.clock.now);
+
+      // Assert
+      should([held, claimed, again]).deepEqual([true, true, false]);
+    });
+
+    it('P2 should not hold the proof under the transcript hash, another page of the device, or another device', async () => {
+      // Arrange
+      const world = await provedOnce();
+      const subjects = [
+        { deviceId: phoneId, appSession: `transcript-${phoneId}` },
+        { deviceId: phoneId, appSession: 'app-two' },
+        { deviceId: laptopId, appSession: 'app-one' },
+        laptop,
+      ];
+
+      // Act
+      const held = subjects.map(subject => world.registry.freshlyHeld(subject, world.clock.now));
+      const claimed = subjects.map(subject => world.registry.claimFresh(subject, world.clock.now));
+
+      // Assert
+      should(held).deepEqual([false, false, false, false]);
+      should(claimed).deepEqual([false, false, false, false]);
+    });
+
+    it('P2 should refuse an expired proof', async () => {
+      // Arrange
+      const world = await provedOnce();
+
+      // Act
+      world.clock.now += 121_000;
+
+      // Assert
+      should(world.registry.freshlyHeld(phone, world.clock.now)).equal(false);
+      should(world.registry.claimFresh(phone, world.clock.now)).equal(false);
+    });
+  });
+
   it('P2 should refuse a passkey registration from a caller that is not a device, and one with no challenge issued', async () => {
     // Arrange
     const world = machine();
