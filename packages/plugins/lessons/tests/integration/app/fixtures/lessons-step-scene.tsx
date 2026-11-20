@@ -2,6 +2,7 @@
  * The browser entry for the first-run Lessons page (r11 O8), over a fake daemon: every answer is a fixed fake. No network.
  *
  *   ?view=page    the page as the setup flow draws it, inside the real StepPageFrame (neither card chosen)
+ *   ?slow=1       the PATCH answers only when the test calls `window.__release()` (a slow daemon)
  *   ?theme=<family>-<mode>
  *
  * The frame's Next runs the page's registered `commit` the way the shell does, and counts every PATCH on
@@ -20,15 +21,21 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 declare global {
   interface Window {
     __patches: unknown[];
+    __release: () => void;
   }
 }
 window.__patches = [];
+let release: () => void = () => undefined;
+window.__release = () => release();
 
 const connection: LessonsConnection = {
   key: 'fake',
   client: {
     call: async <Value,>(route: string, init: { readonly body?: unknown } = {}): Promise<Value> => {
-      if (route === 'PATCH /v1/lessons/config') window.__patches.push(init.body);
+      if (route === 'PATCH /v1/lessons/config') {
+        window.__patches.push(init.body);
+        if (params.get('slow') === '1') await new Promise<void>(resolve => (release = resolve));
+      }
       return {
         enabled: true,
         agent: 'claude-default',

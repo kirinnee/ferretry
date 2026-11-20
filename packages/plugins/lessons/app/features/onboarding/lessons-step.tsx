@@ -14,6 +14,8 @@
  *   - A pick only REGISTERS the write (`host.commit`, contract rule 8): nothing is written by a click or an arrow key. The
  *     footer's Next runs it under its own "Saving…" and records the step when the daemon accepted it; a refusal is said in
  *     the footer line by the shell and Next stays ready to try again. The page has no Save / Use / Keep button.
+ *   - While that write is in flight the cards are locked: the footer already captured the pick it is saving, so a later
+ *     click would change the card and the picture but not what is written. A refusal unlocks them again.
  *   - The picture on the right (`StepDemo`) follows the card on screen: a rule filed on the Lessons shelf, or nothing filed.
  */
 
@@ -38,6 +40,8 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
   const [read, setRead] = useState(false);
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  // True from the moment Next starts the write until the daemon answers: the pick the footer captured is the one saved.
+  const [saving, setSaving] = useState(false);
   // The loading cover lifts once, however many times the read is retried.
   const lifted = useRef(false);
   // The host is read through a ref, so a shell that hands a new host object each render never re-reads the setting.
@@ -71,10 +75,13 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
       const chosen: Answer = next === 'on' ? 'on' : 'off';
       setAnswer(chosen);
       host.current?.commit(async () => {
+        setSaving(true);
         try {
           await patchLessonsConfig(connection, { passiveDefault: chosen === 'on' });
         } catch (reason: unknown) {
           throw new Error(lessonsErrorMessage(reason));
+        } finally {
+          setSaving(false);
         }
       });
     },
@@ -89,6 +96,7 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
           layout="stack"
           value={answer}
           onChange={choose}
+          disabled={saving}
           options={[
             { id: 'on', title: 'Learn', line: 'Corrections become rules.' },
             { id: 'off', title: 'Don’t learn', line: 'No rules. Change it in Settings.' },

@@ -69,7 +69,7 @@ afterAll(async () => {
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
-const open = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 'dark') => {
+const open = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 'dark', extra = '') => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     colorScheme: mode,
@@ -81,11 +81,21 @@ const open = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 'dark'
     new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
   );
   const tab = await context.newPage();
-  await tab.goto(`${origin}/?view=page&theme=studio-${mode}`);
+  await tab.goto(`${origin}/?view=page&theme=studio-${mode}${extra}`);
   await tab.waitForSelector('[data-scene="ready"]');
   await tab.waitForSelector('[data-choice="on"]');
   return { context, tab };
 };
+
+/** The words in the step's two regions: the body and the demo portaled into its sibling `[data-step-demo]`. */
+const regionText = (tab: Awaited<ReturnType<typeof open>>['tab']) =>
+  tab.evaluate(() => ({
+    body: (document.querySelector('.fy-spf__body') as HTMLElement).innerText,
+    demo: (document.querySelector('[data-step-demo]') as HTMLElement).textContent ?? '',
+    demoLabels: [...document.querySelectorAll('[data-step-demo] [aria-label], [data-step-demo] [title]')]
+      .map(node => `${node.getAttribute('aria-label') ?? ''} ${node.getAttribute('title') ?? ''}`)
+      .join(' '),
+  }));
 
 describe('r11 O8: the first-run Lessons page', () => {
   for (const viewport of VIEWPORTS)
@@ -142,6 +152,17 @@ describe('r11 O8: the first-run Lessons page', () => {
         }
         // The owner's words: no bun, short, nothing to press on the page itself.
         expect(m.bodyText.toLowerCase()).not.toContain('bun');
+        // ...in the demo too (it is a sibling of the body, so the body text alone cannot see it), whichever card is picked.
+        for (const pick of [null, 'on', 'off'] as const) {
+          if (pick !== null) {
+            await tab.locator(`[data-choice="${pick}"]`).click();
+            await tab.waitForSelector(`[data-choice="${pick}"][data-selected="true"]`);
+          }
+          const regions = await regionText(tab);
+          expect(regions.demo.trim().length).toBeGreaterThan(0);
+          for (const text of [regions.body, regions.demo, regions.demoLabels])
+            expect(text.toLowerCase()).not.toContain('bun');
+        }
         expect(m.bodyText.length).toBeLessThanOrEqual(160);
         expect(m.bodyButtons).toBe(0);
         expect(m.clipped).toEqual([]);
@@ -194,6 +215,33 @@ describe('r11 O8: the first-run Lessons page', () => {
         await context.close();
       }, 60_000);
     }
+
+  it('locks the cards while Next saves, so a slow answer cannot change the pick after it was captured', async () => {
+    const { context, tab } = await open(VIEWPORTS[0], 'light', '&slow=1');
+    await tab.locator('[data-choice="on"]').click();
+    await tab.waitForSelector('[data-choice="on"][data-selected="true"]');
+    await tab.locator('[data-step-next]').click();
+    await tab.waitForFunction(() => window.__patches.length > 0);
+    // The write is in flight (the fake daemon has not answered): both radios are locked.
+    const locked = await tab.evaluate(() =>
+      [...document.querySelectorAll('input[type="radio"]')].map(radio => (radio as HTMLInputElement).disabled),
+    );
+    expect(locked).toEqual([true, true]);
+    // A click that gets through anyway (forced) and the arrow keys change nothing: the pick and the picture stay Learn.
+    await tab.locator('[data-choice="off"]').click({ force: true });
+    await tab.keyboard.press('ArrowDown');
+    await tab.keyboard.press('Space');
+    expect(await tab.locator('[data-choice="on"][data-selected="true"]').count()).toBe(1);
+    expect(await tab.locator('[data-choice="off"][data-selected="true"]').count()).toBe(0);
+    expect(await tab.locator('[data-step-demo] [data-lessons-demo][data-kept="true"]').count()).toBe(1);
+    await tab.evaluate(() => window.__release());
+    // The daemon answered: the cards are open again, and exactly the captured pick was written.
+    await tab.waitForFunction(() =>
+      [...document.querySelectorAll('input[type="radio"]')].every(radio => !(radio as HTMLInputElement).disabled),
+    );
+    expect(await tab.evaluate(() => window.__patches)).toEqual([{ passiveDefault: true }]);
+    await context.close();
+  }, 60_000);
 
   it('plays no picture animation when the person turned motion off', async () => {
     const { context, tab } = await open(VIEWPORTS[0], 'light');
