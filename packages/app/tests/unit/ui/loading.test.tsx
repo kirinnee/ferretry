@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { useState } from 'react';
 import { Loading, LoadingBarHost, useBackgroundLoad, useHeldLoading } from '../../../src/ui/loading.tsx';
+import { Spinner } from '../../../src/ui/spinner.tsx';
 import { interact, type Mounted, mount } from '../../support/dom.ts';
 
 /**
  * THE LOADER NEVER FLASHES OR BLINKS: a wait shorter than the delay mounts nothing that is ever seen; a wait that outlasts
  * it stays at least the minimum; a wait that restarts while held is the same loader. Times are shrunk (20 / 60 ms) so the
- * suite is quick; the shipped constants (180 / 300 ms) only change the numbers.
+ * suite is quick; the shipped constants (300 / 300 ms) only change the numbers.
  */
 const GATE = { delay: 20, min: 60, fade: 0 };
 const pause = (ms: number): Promise<void> => interact(() => new Promise(resolve => setTimeout(resolve, ms)));
@@ -131,5 +132,24 @@ describe('Loading', () => {
     expect(view.container.querySelector('[data-loading="page"]')?.classList.contains('fy-loading--compact')).toBe(
       false,
     );
+  });
+});
+
+describe('Spinner wait', () => {
+  test('a spinner that stands for a wait is wrapped in the gate; an action spinner is not', async () => {
+    view = await mount(
+      <>
+        <Spinner wait />
+        <Spinner delayMs={120} />
+        <Spinner />
+      </>,
+    );
+    const gates = [...view.container.querySelectorAll<HTMLElement>('.fy-wait-gate')];
+    expect(gates.length).toBe(2);
+    expect(gates[0]?.style.getPropertyValue('--loading-delay')).toBe('300ms');
+    expect(gates[1]?.style.getPropertyValue('--loading-delay')).toBe('120ms');
+    expect(view.container.querySelectorAll('.fy-spinner').length).toBe(3);
+    expect(view.container.querySelector('.fy-spinner')?.parentElement?.classList.contains('fy-wait-gate')).toBe(true);
+    expect(view.container.lastElementChild?.classList.contains('fy-spinner')).toBe(true);
   });
 });

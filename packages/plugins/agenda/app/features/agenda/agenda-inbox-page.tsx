@@ -1824,7 +1824,7 @@ export function AgendaInboxPage({
         </h1>
       )}
       {updating ? (
-        <span className="fy-attn-inbox__updating" data-agenda-updating="" role="status">
+        <span className="fy-attn-inbox__updating fy-wait-gate" data-agenda-updating="" role="status">
           <Spinner size={12} />
           <span className="fy-attn-inbox__updating-text">Updating</span>
         </span>
@@ -1948,7 +1948,7 @@ export function AgendaInboxPage({
         {phone ? (
           updating ? (
             // The phone has no back row to carry it; the status only takes room while boards are read.
-            <span className="fy-attn-inbox__updating" data-agenda-updating="" role="status">
+            <span className="fy-attn-inbox__updating fy-wait-gate" data-agenda-updating="" role="status">
               <Spinner size={12} />
               <span className="fy-attn-inbox__updating-text">Updating</span>
             </span>
@@ -1966,7 +1966,7 @@ export function AgendaInboxPage({
               <AgendaCountBadge count={count} />
             </button>
             {updating ? (
-              <span className="fy-attn-inbox__updating" data-agenda-updating="" role="status">
+              <span className="fy-attn-inbox__updating fy-wait-gate" data-agenda-updating="" role="status">
                 <Spinner size={12} />
                 <span className="fy-attn-inbox__updating-text">Updating</span>
               </span>

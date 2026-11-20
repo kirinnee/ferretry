@@ -1,7 +1,8 @@
 /* ═══ THE ONE LOADING SYSTEM (ui/loading.tsx) ═══════════════════════════════════════════════════
    page: a full-area orb (two rings breathing out from the busy mark) over a shimmering label.
    bar:  a 3px strip across the top of the window with a soft run travelling along it.
-   Both stay invisible for --loading-delay, so a read that answers quickly paints nothing (no flash).
+   Both stay invisible for --loading-delay (300 ms, loading-gate.ts), so a read that answers quickly paints nothing (no
+   flash). Any other element that stands for a wait wears .fy-wait-gate for the same threshold.
    Colour is the theme's: --accent for the mark, --fg-soft/--muted for the words. Reduced motion (OS or
    Settings › Appearance › Motion) keeps them shown and still. */
 
@@ -14,9 +15,25 @@
   }
 }
 
+/* THE GATE for anything else that stands for a wait (a status pill, a spinner with `wait`): invisible for the threshold,
+   then faded in. Its space is held from the first frame, so showing it moves nothing. */
+.fy-wait-gate {
+  animation: fy-loading-in var(--loading-fade, 160ms) ease-out var(--loading-delay, 300ms) both;
+}
+/* A loader that was on screen when its owner answered keeps its minimum as a still copy (loading-hold.ts): fully there
+   from its first frame, over the beat that remains. Specificity beats the gate rules and the reduced-motion restatement. */
+.fy-loading-ghost.fy-loading-ghost.fy-loading-ghost.fy-loading-ghost.fy-loading-ghost {
+  animation: none !important;
+  opacity: 1 !important;
+}
+.fy-spinner-wait {
+  display: inline-flex;
+  line-height: 0;
+}
+
 .fy-loading--page {
   align-items: center;
-  animation: fy-loading-in var(--loading-fade, 160ms) ease-out var(--loading-delay, 180ms) both;
+  animation: fy-loading-in var(--loading-fade, 160ms) ease-out var(--loading-delay, 300ms) both;
   color: var(--fg-soft);
   display: flex;
   flex: 1 1 auto;
@@ -97,7 +114,7 @@
 
 /* The bar: fixed to the top of the window, above the frame, never in flow, so showing it moves nothing. */
 .fy-loading-bar {
-  animation: fy-loading-in var(--loading-fade, 160ms) ease-out var(--loading-delay, 180ms) both;
+  animation: fy-loading-in var(--loading-fade, 160ms) ease-out var(--loading-delay, 300ms) both;
   background: color-mix(in srgb, var(--accent) 30%, transparent);
   box-shadow: 0 1px 6px color-mix(in srgb, var(--accent) 45%, transparent);
   height: 3px;
@@ -182,4 +199,14 @@
     color-mix(in srgb, var(--accent) 80%, var(--bg)) 100%
   );
   box-shadow: 0 0 10px color-mix(in srgb, var(--fg) 70%, transparent);
+}
+
+/* THE THRESHOLD SURVIVES REDUCED MOTION. Settings › Motion › Reduced stills EVERY animation with `animation: none
+   !important` (index.css), which would also drop the fade's delay and show every loader at once, the opposite of a
+   threshold. These restate the gate as a near-instant fade that still starts after the delay; the extra specificity beats
+   the global rule, and only the movement is still. */
+:root[data-motion='reduced'] .fy-loading--page.fy-loading--page,
+:root[data-motion='reduced'] .fy-loading-bar.fy-loading-bar,
+:root[data-motion='reduced'] .fy-wait-gate.fy-wait-gate {
+  animation: fy-loading-in 1ms linear var(--loading-delay, 300ms) both !important;
 }

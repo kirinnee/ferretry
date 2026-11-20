@@ -341,7 +341,7 @@ export function ComposerAutocompletePopover({
             id={listboxId}
           >
             {status === 'loading' ? (
-              <div className="fy-ac-state" role="status">
+              <div className="fy-ac-state fy-wait-gate" role="status">
                 <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
                 Searching…
               </div>

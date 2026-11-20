@@ -14,16 +14,28 @@
  * Reduced motion turns the spin into a pulse rather than stopping it — a frozen spinner reads as a
  * hung one. It is decoration: the words beside it carry the status, so it is hidden from assistive
  * technology.
+ *
+ * A spinner that stands for a WAIT (a read the person is held on) says so with `wait`: it is then invisible for the
+ * one loader threshold (300 ms, `loading-gate.ts`) and fades in, so a fast answer never flashes it. The space is
+ * reserved from the first frame, so nothing moves when it appears. A spinner that is feedback for an action or a
+ * running activity (a running tool, Send) stays immediate.
  */
+import { type ReactNode, useRef } from 'react';
+import { LOADING_GATE_CLASS, loadingGateStyle } from './loading-gate.ts';
+import { useLoadingHold } from './loading-hold.ts';
 
 export interface SpinnerProps {
   /** Rendered size in CSS pixels; the stroke scales with it. */
   readonly size?: number;
   readonly className?: string;
+  /** This spinner stands for a wait: hold it back for the loader threshold (`delayMs`, default 300). */
+  readonly wait?: boolean;
+  /** How long to hold it back, in ms; giving it means `wait`. */
+  readonly delayMs?: number;
 }
 
-export function Spinner({ size = 14, className }: SpinnerProps) {
-  return (
+export function Spinner({ size = 14, className, wait = false, delayMs }: SpinnerProps) {
+  const mark = (
     <svg
       aria-hidden="true"
       className={className === undefined ? 'fy-spinner' : `fy-spinner ${className}`}
@@ -36,5 +48,18 @@ export function Spinner({ size = 14, className }: SpinnerProps) {
       <circle className="fy-spinner-track" cx="8" cy="8" fill="none" r="6" />
       <circle className="fy-spinner-arc" cx="8" cy="8" fill="none" pathLength="100" r="6" />
     </svg>
+  );
+  if (!wait && delayMs === undefined) return mark;
+  return <WaitingSpinner delayMs={delayMs}>{mark}</WaitingSpinner>;
+}
+
+/** The gate around a spinner that stands for a wait; it keeps its minimum on screen once shown (loading-hold.ts). */
+function WaitingSpinner({ delayMs, children }: { readonly delayMs: number | undefined; readonly children: ReactNode }) {
+  const root = useRef<HTMLSpanElement>(null);
+  useLoadingHold(root, { delayMs });
+  return (
+    <span className={`${LOADING_GATE_CLASS} fy-spinner-wait`} ref={root} style={loadingGateStyle(delayMs)}>
+      {children}
+    </span>
   );
 }

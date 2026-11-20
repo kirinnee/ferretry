@@ -7,20 +7,16 @@
  *    a poll, a panel's own read). A view says it is busy with {@link useBackgroundLoad}; the shell draws ONE bar
  *    ({@link LoadingBarHost}) however many views are busy, so ten panels reading at once are one bar, not ten lines.
  *
- * Both wait a beat before they show (`loading.css`): a read that answers inside that beat paints nothing, which is
- * what stops a fast load from flashing. Reduced motion (the OS setting or Settings › Appearance › Motion) keeps both
+ * Both wait the one 300 ms threshold (`loading-gate.ts`, drawn by `loading.css`) before they show: a read that answers
+ * inside it paints nothing, which is what stops a fast load from flashing. Reduced motion (the OS setting or Settings › Appearance › Motion) keeps both
  * visible and stills the movement. The mark and the bar read colour from the theme's tokens, light and dark alike.
  */
-import { type CSSProperties, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { LOADING_DELAY_MS, LOADING_FADE_MS, LOADING_MIN_MS, loadingGateStyle } from './loading-gate.ts';
+import { useLoadingHold } from './loading-hold.ts';
 import { Spinner } from './spinner.tsx';
 
-/** A loader stays invisible this long: a read that answers inside it paints nothing (no flash for a fast load). */
-export const LOADING_DELAY_MS = 180;
-/** Once a loader has become visible it stays at least this long, so a slow-then-fast read never blinks it. */
-export const LOADING_MIN_MS = 300;
-
-/** How long a loader takes to fade in once it is due; the minimum display time starts when it is FULLY there. */
-export const LOADING_FADE_MS = 160;
+export { LOADING_DELAY_MS, LOADING_FADE_MS, LOADING_MIN_MS };
 
 export interface LoadingGate {
   readonly delay?: number;
@@ -70,10 +66,7 @@ export function useHeldLoading(active: boolean, gate: LoadingGate = {}): boolean
   return active || held;
 }
 
-const delayStyle = {
-  '--loading-delay': `${LOADING_DELAY_MS}ms`,
-  '--loading-fade': `${LOADING_FADE_MS}ms`,
-} as CSSProperties;
+const delayStyle = loadingGateStyle();
 
 export interface LoadingProps {
   /**
@@ -95,12 +88,20 @@ export interface LoadingProps {
 
 export function Loading({ kind, label, className, compact = false, marks }: LoadingProps) {
   if (kind === 'bar') return <BackgroundLoading label={label} marks={marks} />;
+  return <PageLoading className={className} compact={compact} label={label} marks={marks} />;
+}
+
+function PageLoading({ label, className, compact, marks }: Omit<LoadingProps, 'kind'> & { readonly compact: boolean }) {
+  const root = useRef<HTMLDivElement>(null);
+  // Mounted straight off a read, it would vanish the moment the read answers: keep it for its minimum (loading-hold.ts).
+  useLoadingHold(root, { cover: true });
   const extra = (compact ? ' fy-loading--compact' : '') + (className === undefined ? '' : ` ${className}`);
   return (
     <div
       aria-live="polite"
       className={`fy-loading fy-loading--page${extra}`}
       data-loading="page"
+      ref={root}
       role="status"
       style={delayStyle}
       {...marks}
