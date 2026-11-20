@@ -199,3 +199,11 @@
   width: 3.5rem;
   text-align: right;
 }
+
+/* A MID-WIDTH WINDOW (768–1099px): the drawer is leaner (240px, as `fitWidthsToViewport` assumes) so the settings panel keeps
+   its room beside it. A width the person dragged it to still wins (`--fy-w-drawer`). */
+@media (min-width: 768px) and (max-width: 1099.98px) {
+  .fy-drawer:not(.fy-drawer--rail) {
+    width: var(--fy-w-drawer, calc(var(--fy-text-scale, 1) * 240px));
+  }
+}

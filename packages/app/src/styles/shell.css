@@ -498,11 +498,12 @@
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
-  background:
+  --fy-scroll-cue:
     linear-gradient(var(--bg) 30%, transparent) top / 100% 24px no-repeat local,
     linear-gradient(transparent, var(--bg) 70%) bottom / 100% 24px no-repeat local,
     linear-gradient(color-mix(in srgb, var(--fg) 14%, transparent), transparent) top / 100% 10px no-repeat scroll,
     linear-gradient(transparent, color-mix(in srgb, var(--fg) 14%, transparent)) bottom / 100% 10px no-repeat scroll;
+  background: var(--fy-scroll-cue);
 }
 .fy-tabs--grouped {
   flex-direction: column;
@@ -765,4 +766,40 @@
 .fy-settings-nav .fy-tab--active .fy-icon,
 .fy-settings-nav .fy-tab[aria-current='page'] .fy-icon {
   color: var(--fg);
+}
+
+/* A MID-WIDTH WINDOW (768–1099px): the drawer, the settings list AND the panel cannot all fit (at 768 the panel was ~212px
+   wide, between two sidebars). The list gives its column up and stands ABOVE the panel as a short scrolling list (the same
+   scroll cue as beside it, the same links, still in the tab order) and the panel takes the whole row. The number is
+   `SETTINGS_STACKED_BELOW` in shell/panel-widths.ts, which fits saved widths to the same rule. */
+@media (min-width: 768px) and (max-width: 1099.98px) {
+  .fy-settings-body {
+    display: block;
+  }
+  /* The two blocks (this device / the machine) stand side by side and each scrolls ON ITS OWN, so a short block is never
+     left as an empty column beside a long one; the cue and the keyboard behave as they do in the column. */
+  .fy-settings-nav {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    align-items: start;
+    column-gap: 24px;
+    max-height: none;
+    overflow: visible;
+    margin-bottom: 16px;
+    padding-bottom: 4px;
+    border-bottom: var(--border-width, 1px) solid var(--border);
+    background: none;
+  }
+  .fy-settings-block {
+    max-height: min(240px, 34vh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    background: var(--fy-scroll-cue);
+  }
+  .fy-settings-block + .fy-settings-block {
+    margin-top: 0;
+  }
 }

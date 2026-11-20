@@ -174,22 +174,26 @@ describe('fitWidthsToViewport (the settings pane keeps room on a narrow window)'
     expect(fitWidthsToViewport({}, 768)).toEqual({});
   });
 
-  test('768px: both saved widths shrink toward their minimums so the pane keeps its room', () => {
+  test('768px: the list is above the pane, so only the drawer counts and shrinks to leave the pane 480px', () => {
+    // budget 768 - 32 - 480 = 256: a saved 400px drawer gives up its 144px excess; the list takes no column and is not fitted.
     const fitted = fitWidthsToViewport({ drawer: 400, 'settings-nav': 320 }, 768);
-    expect(fitted).toEqual({ drawer: PANEL_RANGES.drawer.min, 'settings-nav': PANEL_RANGES['settings-nav'].min });
+    expect(fitted).toEqual({ drawer: 256, 'settings-nav': 320 });
+    expect(768 - 32 - (fitted.drawer ?? 0)).toBe(480);
   });
 
-  test('a partial squeeze shrinks each saved panel in proportion to how far it is above its minimum', () => {
-    // 900px: budget 900 - 56 - 320 = 524; 400 + 320 = 720 → 196 over; room 180 + 140 = 320 → share 0.6125.
-    const fitted = fitWidthsToViewport({ drawer: 400, 'settings-nav': 320 }, 900);
-    expect(fitted.drawer).toBe(290);
-    expect(fitted['settings-nav']).toBe(234);
-    expect(400 - (fitted.drawer ?? 0) + (320 - (fitted['settings-nav'] ?? 0))).toBe(196);
+  test('a stacked window leaves a drawer that fits, and below its minimum room the minimum remains', () => {
+    expect(fitWidthsToViewport({ drawer: 300 }, 1_000)).toEqual({ drawer: 300 });
+    expect(fitWidthsToViewport({ drawer: 400 }, 700)).toEqual({ drawer: PANEL_RANGES.drawer.min });
+  });
+
+  test('beside the list (1100px and up) the two panels at their maximums still leave the pane 320px', () => {
+    const saved = { drawer: 400, 'settings-nav': 320 } as const;
+    expect(fitWidthsToViewport(saved, 1_100)).toBe(saved);
   });
 
   test('an unsaved panel counts at its stylesheet width and is never given a value', () => {
     const fitted = fitWidthsToViewport({ drawer: 400 }, 768);
-    expect(fitted).toEqual({ drawer: PANEL_RANGES.drawer.min });
+    expect(fitted).toEqual({ drawer: 256 });
     expect('settings-nav' in fitted).toBe(false);
   });
 
@@ -198,8 +202,7 @@ describe('fitWidthsToViewport (the settings pane keeps room on a narrow window)'
       panelWidths.set('drawer', 400);
       panelWidths.set('settings-nav', 320);
       view = await mount(<Harness edge="end" />);
-      expect(root.style.getPropertyValue('--fy-w-drawer')).toBe('220px');
-      expect(root.style.getPropertyValue('--fy-w-settings-nav')).toBe('180px');
+      expect(root.style.getPropertyValue('--fy-w-drawer')).toBe('256px');
       expect(stored()).toEqual({ format: 1, value: { drawer: 400, 'settings-nav': 320 } });
     });
   });

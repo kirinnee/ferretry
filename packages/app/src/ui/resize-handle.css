@@ -63,3 +63,9 @@ html[data-panel-resizing] {
     transition: none;
   }
 }
+/* The settings list is above the panel in a mid-width window (shell.css): there is no column edge to drag. */
+@media (min-width: 768px) and (max-width: 1099.98px) {
+  .fy-resize--settings-nav {
+    display: none;
+  }
+}

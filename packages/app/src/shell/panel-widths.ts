@@ -165,28 +165,44 @@ export function measurePanel(panel: PanelId): number | undefined {
   return width === undefined || width <= 0 ? undefined : width;
 }
 
+/**
+ * Below this window width the settings list no longer stands BESIDE the settings panel: it sits above it (`shell.css`, the
+ * same number in its media query). Beside the drawer, a list and a panel need about 1040px; at 768px that left the panel
+ * ~212px wide, so the list gives its column up and the panel gets the window.
+ */
+const SETTINGS_STACKED_BELOW = 1100;
+/** The settings panel keeps at least this much room once the list is above it (a settings pane is unusable below it). */
+const STACKED_MIN_PANE = 480;
 /** The page beside the drawer and the settings list keeps at least this much room (a settings pane is unusable below it). */
 const MIN_PANE = 320;
 /** What the settings page spends besides the two panels and its pane: the page's side padding and the gap before the pane. */
 const PANE_OVERHEAD = 56;
-/** What the stylesheet gives a panel nobody resized (screen pixels at text scale 1). */
+/** The same with the list stacked: only the page's side padding (no list column, no gap). */
+const STACKED_OVERHEAD = 32;
+/** What the stylesheet gives a panel nobody resized (screen pixels at text scale 1): the drawer is leaner while the list is stacked. */
 const DEFAULT_WIDTH: Readonly<Record<'drawer' | 'settings-nav', number>> = { drawer: 280, 'settings-nav': 220 };
+const STACKED_DRAWER_WIDTH = 240;
 
 /**
  * THE SAVED WIDTHS, FITTED TO THIS SCREEN. A width saved on a wide screen (or one dragged to its maximum on a small one) must
  * not push the settings pane off a narrow window (768px: drawer 400 + list 320 left it 0 wide). When the drawer and the list
  * together leave the pane less than `MIN_PANE`, the SAVED ones shrink in proportion to how far each is above its own minimum,
- * never below it; an unsaved panel keeps the stylesheet's width and counts toward the sum. Below a window where even both
- * minimums leave the pane under `MIN_PANE` the minimums are what remain. The stored value is untouched: widening the window
- * brings the chosen width back. Pure; `viewport` is the window's inner width.
+ * never below it; an unsaved panel keeps the stylesheet's width and counts toward the sum. Below `SETTINGS_STACKED_BELOW` the
+ * list is above the pane and takes no column, so only the drawer counts and the pane is kept `STACKED_MIN_PANE` wide. Below a
+ * window where even the minimums leave the pane short the minimums are what remain. The stored value is untouched: widening the
+ * window brings the chosen width back. Pure; `viewport` is the window's inner width.
  */
 export function fitWidthsToViewport(widths: Widths, viewport: number): Widths {
-  const panels = ['drawer', 'settings-nav'] as const;
-  const budget = viewport - PANE_OVERHEAD - MIN_PANE;
-  const used = (panel: (typeof panels)[number]): number => widths[panel] ?? DEFAULT_WIDTH[panel];
+  const stacked = viewport < SETTINGS_STACKED_BELOW;
+  const panels = stacked ? (['drawer'] as const) : (['drawer', 'settings-nav'] as const);
+  type Fitted = (typeof panels)[number];
+  const budget = viewport - (stacked ? STACKED_OVERHEAD : PANE_OVERHEAD) - (stacked ? STACKED_MIN_PANE : MIN_PANE);
+  const unsaved = (panel: Fitted): number =>
+    stacked && panel === 'drawer' ? STACKED_DRAWER_WIDTH : DEFAULT_WIDTH[panel];
+  const used = (panel: Fitted): number => widths[panel] ?? unsaved(panel);
   const excess = panels.reduce((sum, panel) => sum + used(panel), 0) - budget;
   if (excess <= 0) return widths;
-  const room = (panel: (typeof panels)[number]): number =>
+  const room = (panel: Fitted): number =>
     widths[panel] === undefined ? 0 : Math.max(0, used(panel) - PANEL_RANGES[panel].min);
   const total = panels.reduce((sum, panel) => sum + room(panel), 0);
   if (total === 0) return widths;
