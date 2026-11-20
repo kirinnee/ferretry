@@ -65,22 +65,38 @@ afterAll(async () => {
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
+interface Box {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 interface Sample {
   readonly firstVisible: number | null;
   readonly lastVisible: number | null;
   readonly frames: number;
+  readonly loaderBox: Box | null;
+  readonly ghostFirst: Box | null;
+  readonly ghostLast: Box | null;
 }
 
 /** Runs one fake read of `ms` and returns what a person would have seen, frame by frame. */
 const run = async (
   scene: string,
   ms: number,
-  options: { readonly theme?: string; readonly motion?: 'reduced'; readonly shot?: boolean } = {},
+  options: {
+    readonly theme?: string;
+    readonly motion?: 'reduced';
+    readonly shot?: boolean;
+    readonly width?: number;
+  } = {},
 ): Promise<Sample> => {
   const theme = options.theme ?? 'studio-light';
   const context = await browser.newContext({
-    viewport: { width: 1_280, height: 800 },
+    viewport: { width: options.width ?? 1_280, height: 800 },
     colorScheme: theme.endsWith('dark') ? 'dark' : 'light',
+    ...((options.width ?? 1_280) < 600 ? { deviceScaleFactor: 2, hasTouch: true, isMobile: true } : {}),
   });
   const origin = server?.url.origin ?? '';
   await context.route('**/*', async route =>
@@ -149,13 +165,37 @@ describe('a wait that outlasts 300 ms shows from about 300 ms and, once shown, s
   }
 });
 
+describe('a held loader stays exactly where the loader was, under ANY ancestor (the real sheet transforms its panel)', () => {
+  // 350 ms: the loader is due at 300 and is replaced at 350, so the hold leaves a ghost for the rest of its minimum.
+  for (const scene of ['page', 'sheet'] as const) {
+    for (const width of [1_280, 390] as const) {
+      it(`${scene} at ${width}: the ghost's box equals the loader's box within 1 px`, async () => {
+        const seen = await run(scene, 350, { theme: 'studio-dark', width });
+        const loader = seen.loaderBox as Box;
+        expect(loader).not.toBeNull();
+        expect(loader.width).toBeGreaterThan(0);
+        for (const ghost of [seen.ghostFirst, seen.ghostLast] as const) {
+          expect(ghost).not.toBeNull();
+          const at = ghost as Box;
+          if (shotsDir !== '')
+            console.log(`position ${scene}@${width}: loader=${JSON.stringify(loader)} ghost=${JSON.stringify(at)}`);
+          for (const key of ['left', 'top', 'width', 'height'] as const)
+            expect(Math.abs(at[key] - loader[key])).toBeLessThanOrEqual(1);
+        }
+        // and it is on screen, not shoved past the viewport
+        expect((seen.ghostFirst as Box).top).toBeLessThan(800);
+      });
+    }
+  }
+});
+
 describe.skipIf(shotsDir === '')('the loader before and after the threshold (kept shots)', () => {
   for (const [width, height, phone] of [
     [1_280, 800, false],
     [390, 800, true],
   ] as const) {
     for (const mode of ['light', 'dark'] as const) {
-      for (const scene of ['page', 'cache', 'spinner'] as const) {
+      for (const scene of ['page', 'cache', 'spinner', 'sheet-held'] as const) {
         it(`${width}-${mode}-${scene}`, async () => {
           const context = await browser.newContext({
             viewport: { width, height },
@@ -170,10 +210,12 @@ describe.skipIf(shotsDir === '')('the loader before and after the threshold (kep
           );
           const tab = await context.newPage();
           try {
-            await tab.goto(`${origin}/?theme=studio-${mode}&scene=${scene}&ms=1500`);
+            // sheet-held: the read answers at 350 ms inside the real sheet, so the 500 ms shot is the HELD ghost (not the loader).
+            const held = scene === 'sheet-held';
+            await tab.goto(`${origin}/?theme=studio-${mode}&scene=${held ? 'sheet' : scene}&ms=${held ? 350 : 1500}`);
             await tab.waitForTimeout(150);
             await tab.screenshot({ path: join(shotsDir, `${width}-${mode}-${scene}-before.png`) });
-            await tab.waitForTimeout(400);
+            await tab.waitForTimeout(held ? 350 : 400);
             await tab.screenshot({ path: join(shotsDir, `${width}-${mode}-${scene}-after.png`) });
           } finally {
             await context.close();

@@ -45,6 +45,22 @@ function surfaceBehind(node: HTMLElement): string | null {
   return null;
 }
 
+/**
+ * `position: fixed` is relative to the viewport only when no ancestor has a transform, filter, perspective, contain or
+ * will-change that makes it the containing block (a sheet's panel does: its `translateY` makes the fixed ghost's offset
+ * count from the panel, so the ghost lands a panel-offset away from the loader, off screen). Whatever the ancestor
+ * does, the ghost is drawn where it actually landed, so measure it and move it by the miss: after this it covers the
+ * loader's old box (within a sub-pixel) under any containing block.
+ */
+function pinToViewportBox(ghost: HTMLElement, want: DOMRect): void {
+  const got = ghost.getBoundingClientRect();
+  const dx = want.left - got.left;
+  const dy = want.top - got.top;
+  if (dx === 0 && dy === 0) return;
+  ghost.style.left = `${want.left + dx}px`;
+  ghost.style.top = `${want.top + dy}px`;
+}
+
 function leaveGhost(node: HTMLElement, mounted: number, hold: LoadingHold): void {
   const delay = hold.delayMs ?? LOADING_DELAY_MS;
   const age = performance.now() - mounted;
@@ -79,6 +95,7 @@ function leaveGhost(node: HTMLElement, mounted: number, hold: LoadingHold): void
   queueMicrotask(() => {
     if (!parent.isConnected) return;
     parent.appendChild(ghost);
+    pinToViewportBox(ghost, rect);
     setTimeout(() => ghost.remove(), remaining);
   });
 }
