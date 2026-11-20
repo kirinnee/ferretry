@@ -2,8 +2,10 @@
  * The five "choose what to import" pages (settings, models, AGENTS.md, skills, MCP servers), one component for all of them.
  * Each shows what the scan found of its ONE kind as a checklist with what each thing becomes, and says nothing else.
  *
- * It skips itself (`not-needed`) unless the person chose what to import at `import-choice` (and then it reads nothing), and when
- * the scan found nothing of its kind. Nothing is written here: what is left unticked is the segment memory (`review.<kind>`),
+ * It follows the CURRENT `importMode`, never a choice that can still change: when the person did not choose what to import at
+ * `import-choice` it reads nothing and says why (`NotChoosing`; Next answers it), because a page that skipped itself would be
+ * gone for the rest of the run and Back -> Customize could not reach it. It skips itself (`not-needed`) only when the scan found
+ * nothing of its kind, which no choice here changes. Nothing is written here: what is left unticked is the segment memory (`review.<kind>`),
  * and the one import happens once, at `import-run`. A scan that wants the passkey waits for the person's own press; a scan that
  * failed says so and offers a retry, so a page never hangs under its loading cover.
  */
@@ -23,12 +25,30 @@ const LEAD: Readonly<Record<ImportKind, string>> = {
   mcp: 'The MCP servers your Codex is set up with.',
 };
 
-/** Not importing (everything, or fresh): the page has nothing to ask and reads nothing. */
-function NotImporting({ step }: { readonly step: StepHost }) {
+/**
+ * Not choosing (everything, or fresh): the page has nothing to ask and reads nothing. It is shown (never skipped, which would
+ * persist and drop it for the run) so a later Back -> Customize finds it again; Next records the defaults as done.
+ */
+function NotChoosing({ step, kind }: { readonly step: StepHost; readonly kind: ImportKind }) {
+  const everything = importingMode(step.segment) === 'everything';
   useEffect(() => {
-    step.skip('not-needed');
+    step.ready();
   }, [step]);
-  return null;
+  return (
+    <section
+      aria-label={`Import Codex ${KIND_WORDS[kind]}`}
+      className="flex max-w-xl flex-col gap-3"
+      data-codex-step={STEP_OF_KIND[kind]}
+      data-import-kind={kind}
+      data-import-not-choosing={everything ? 'everything' : 'fresh'}
+    >
+      <p className="m-0 text-cell text-muted">
+        {everything
+          ? 'Included by Import everything. There is nothing to choose here.'
+          : `Nothing comes over: you chose to start fresh. Go back to choose ${KIND_WORDS[kind]}.`}
+      </p>
+    </section>
+  );
 }
 
 export function KindPage({
@@ -43,7 +63,7 @@ export function KindPage({
   return importingMode(step.segment) === 'choose' ? (
     <KindBody client={client} step={step} kind={kind} />
   ) : (
-    <NotImporting step={step} />
+    <NotChoosing step={step} kind={kind} />
   );
 }
 

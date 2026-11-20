@@ -125,6 +125,17 @@ export function refusal(edge: ImportEdge): string | undefined {
   )
     return undefined;
 
+  // SECOND EXEMPTION: a step page's behaviour (a skip is recorded on the machine and drops the page for the run; Back, Later and
+  // busy live in the frame) exists only in Onboarding's setup flow, so the Codex import pages' tests drive the real flow screen.
+  // Only Codex's tests may reach Onboarding's app half and its manifest, and only for that.
+  if (
+    from === 'tests' &&
+    edge.fromPkg.name === '@ferretry/plugin-codex' &&
+    toPkg.name === '@ferretry/plugin-onboarding' &&
+    (to === 'app' || to === 'manifest')
+  )
+    return undefined;
+
   // Another package.
   switch (to) {
     case 'kernel-contract':

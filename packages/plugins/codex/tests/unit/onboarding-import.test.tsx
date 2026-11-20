@@ -149,11 +149,13 @@ describe('a kind page (choose what to import)', () => {
   });
 
   for (const importMode of ['everything', 'fresh'] as const)
-    test(`${importMode}: it skips itself and reads nothing`, async () => {
+    test(`${importMode}: it is shown, never skipped (a skip would outlive a change of mind), and reads nothing`, async () => {
       const harness = stepHarness({ segment: { importMode } });
       const { container, calls } = await mount('import-mcp', harness, machine(FULL));
-      expect(harness.skippedWhy).toBe('not-needed');
-      expect(container.textContent).toBe('');
+      expect(harness.decision).toBe('shown');
+      expect(harness.count('skip')).toBe(0);
+      expect(container.querySelector(`[data-import-not-choosing="${importMode}"]`)).not.toBeNull();
+      expect(container.querySelector('[data-found-item]')).toBeNull();
       expect(calls).toEqual([]);
     });
 
@@ -303,11 +305,11 @@ describe('import-run', () => {
       }
     ).change;
 
-  test('everything: one page, nothing left out, the change names no hooks, and Next is held until it is brought over', async () => {
+  test('everything: one page, nothing left out, the change names no hooks, and Next is held only while it is being brought over', async () => {
     const harness = stepHarness({ segment: { importMode: 'everything' } });
     const { container, calls } = await mount('import-run', harness, machine(FULL));
     expect(harness.decision).toBe('shown');
-    expect(busyLabels(harness)).toEqual(['Bring it over to carry on']);
+    expect(busyLabels(harness)).toEqual([]);
     expect(container.querySelector('[data-import-summary]')?.textContent).toContain('Everything your Codex holds');
     expect(calls.some(call => call.route === 'POST /v1/runtimes/proposals')).toBe(false);
     await press(container, '[data-import-run]');
@@ -316,7 +318,7 @@ describe('import-run', () => {
     expect(JSON.stringify(change)).not.toMatch(/hook/iu);
     const apply = calls.find(call => call.route === APPLY);
     expect(apply).toBeDefined();
-    expect(busyLabels(harness)).toEqual(['Bring it over to carry on', 'Importing…', null]);
+    expect(busyLabels(harness)).toEqual(['Importing…', null]);
     expect(harness.count('done')).toBe(1);
     expect(container.querySelector('[data-import-results]')?.textContent).toContain('mcp/notes.yaml');
     void CHANGE_ID;
@@ -360,10 +362,12 @@ describe('import-run', () => {
     expect((proposal(calls) as { tickedEnv?: string[] }).tickedEnv).toEqual(['GH_TOKEN']);
   });
 
-  test('starting fresh skips it and reads nothing', async () => {
+  test('starting fresh is shown (never skipped) and reads nothing', async () => {
     const harness = stepHarness({ segment: { importMode: 'fresh' } });
-    const { calls } = await mount('import-run', harness, machine(FULL));
-    expect(harness.skippedWhy).toBe('not-needed');
+    const { container, calls } = await mount('import-run', harness, machine(FULL));
+    expect(harness.decision).toBe('shown');
+    expect(harness.count('skip')).toBe(0);
+    expect(container.querySelector('[data-import-fresh]')).not.toBeNull();
     expect(calls).toEqual([]);
   });
 
@@ -406,7 +410,7 @@ describe('import-run', () => {
     expect(calls.some(call => call.route === 'POST /v1/runtimes/proposals')).toBe(false);
   });
 
-  test('a refusal is said in the daemon’s words, Next stays held, and the person can press again', async () => {
+  test('a refusal is said in the daemon’s words, nothing stays held, and the person can press again', async () => {
     const harness = stepHarness({ segment: { importMode: 'everything' } });
     let refuse = true;
     const { container } = await mount(
@@ -424,7 +428,7 @@ describe('import-run', () => {
     );
     await press(container, '[data-import-run]');
     expect(container.querySelector('[data-import-refusal]')?.textContent).toContain('close it and try again');
-    expect(busyLabels(harness).at(-1)).toBe('Bring it over to carry on');
+    expect(busyLabels(harness)).toEqual(['Importing…', null]);
     expect(harness.count('done')).toBe(0);
     refuse = false;
     await press(container, '[data-import-run]');

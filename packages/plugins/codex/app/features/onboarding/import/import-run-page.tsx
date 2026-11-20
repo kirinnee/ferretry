@@ -1,22 +1,23 @@
 /**
- * Step `import-run`: the ONE import, applied once for Codex (never once per page), under `busy("Importing…")`. It skips when the
- * person is starting fresh (and then reads nothing), when Codex is not on this machine, and when nothing is left to bring over.
+ * Step `import-run`: the ONE import, applied once for Codex (never once per page), under `busy("Importing…")` for exactly as long
+ * as the request is in flight (a refusal releases it, so Back, Later and a retry all work). It skips itself only when Codex is not
+ * on this machine or has nothing to bring in any mode; starting fresh (reads nothing) and everything unticked are SHOWN, never
+ * skipped, because a skip is persisted and drops the page for the run, and both follow a choice the person can still change by
+ * going Back.
  * Everything the person chose on the kind pages is one `setup.import` change built by the kit; nothing is brought over until the
- * person presses the button, and Next is held until it has been.
+ * person presses the button.
  *
  * It lists what will come over (counts, by kind), names any kind that was never reviewed in this run (those are left out, and the
  * page says so), asks for the runtime's name (prefilled; none when Codex already has a runtime here), and afterwards shows each
  * file written or refused in the daemon's own words. The machine may ask for the passkey; that is the carrier's prompt.
  */
 import { Button } from '@ferretry/app';
-import { IMPORT_KINDS, ImportResultList, useApplyImport } from '@ferretry/plugin-runtimes/import-kit';
+import { IMPORT_KINDS, ImportResultList, kindItemIds, useApplyImport } from '@ferretry/plugin-runtimes/import-kit';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { OnboardingClient, StepHost } from '../onboarding-api.ts';
 import { importingMode, importPlan, KIND_WORDS, nameProblem, type ImportMode } from './import-memory.ts';
 import { ScanProblem } from './scan-problem.tsx';
 import { useRunScan } from './use-run-scan.ts';
-
-const HOLD = 'Bring it over to carry on';
 
 const sentenceOf = (taken: Readonly<Record<string, number>>, everything: boolean): string => {
   if (everything) return 'Everything your Codex holds: settings, models, AGENTS.md, skills and servers.';
@@ -26,12 +27,18 @@ const sentenceOf = (taken: Readonly<Record<string, number>>, everything: boolean
   return parts.length === 0 ? 'Nothing.' : `${parts.join(', ')}.`;
 };
 
-/** Starting fresh: nothing to bring, and nothing is read. */
+/** Starting fresh: nothing to bring, and nothing is read. Shown (not skipped) so Back -> another choice still finds the import. */
 function NotImporting({ step }: { readonly step: StepHost }) {
   useEffect(() => {
-    step.skip('not-needed');
+    step.ready();
   }, [step]);
-  return null;
+  return (
+    <section aria-label="Bring Codex over" className="flex max-w-xl flex-col gap-3" data-codex-step="import-run">
+      <p className="m-0 text-ui text-fg" data-import-fresh="">
+        Nothing comes over: you chose to start fresh. Go back to choose otherwise.
+      </p>
+    </section>
+  );
 }
 
 export function ImportRunPage({ client, step }: { readonly client: OnboardingClient; readonly step: StepHost }) {
@@ -53,16 +60,18 @@ function RunBody({
   const { model } = scan;
   const [name, setName] = useState<string | null>(null);
   const told = useRef<'none' | 'ready' | 'skipped'>('none');
-  const held = useRef(false);
 
   const typed = name ?? model?.suggestedName ?? '';
   const plan = useMemo(
     () => (model === null ? null : importPlan(model, mode, step.segment, typed)),
     [model, mode, step, typed],
   );
+  // A scan with nothing to bring in ANY mode (stable: no choice here changes it), so skipping it is never undone by going Back.
+  const nothingFound =
+    model !== null &&
+    IMPORT_KINDS.every(kind => kindItemIds(model, kind).length === 0) &&
+    importPlan(model, 'everything', step.segment, typed).updates === 0;
   const total = plan === null ? 0 : IMPORT_KINDS.reduce((sum, kind) => sum + plan.taken[kind], 0);
-  const nothingToDo =
-    model !== null && plan !== null && total === 0 && plan.updates === 0 && plan.unreviewed.length === 0;
 
   useEffect(() => {
     if (told.current === 'skipped') return;
@@ -73,7 +82,7 @@ function RunBody({
       }
       return;
     }
-    if (!model.installed || nothingToDo) {
+    if (!model.installed || nothingFound) {
       told.current = 'skipped';
       step.skip('not-needed');
       return;
@@ -82,25 +91,15 @@ function RunBody({
       told.current = 'ready';
       step.ready();
     }
-    // Next waits for the import; with nothing to bring over (every kind unreviewed) it holds nobody.
-    if (!held.current && (total > 0 || plan.updates > 0)) {
-      held.current = true;
-      step.busy(HOLD);
-    }
-  }, [scan.read.kind, model, plan, nothingToDo, total, step]);
+  }, [scan.read.kind, model, plan, nothingFound, step]);
 
   const problem = model !== null && model.duplicateOf === null ? nameProblem(typed) : null;
 
   const run = async (): Promise<void> => {
     if (model === null || plan === null || problem !== null) return;
     step.busy('Importing…');
-    const result = await apply(plan.change, 'Codex');
-    if (result === null) {
-      step.busy(HOLD);
-      return;
-    }
-    step.busy(null);
-    step.done();
+    const result = await apply(plan.change, 'Codex').finally(() => step.busy(null));
+    if (result !== null) step.done();
   };
 
   return (

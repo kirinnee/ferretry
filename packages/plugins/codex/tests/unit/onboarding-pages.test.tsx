@@ -648,7 +648,8 @@ describe('import steps after a reload', () => {
     const harness = stepHarness({ segment: { importMode: 'everything' } });
     const { container } = await mount('import-mcp', harness, () => ({}));
     expect(container.querySelector('[data-codex-step="import-choice"]')).toBeNull();
-    expect(harness.skippedWhy).toBe('not-needed');
+    expect(harness.count('skip')).toBe(0);
+    expect(container.querySelector('[data-import-not-choosing="everything"]')).not.toBeNull();
   });
 
   test('conversations is asked in both modes, so it does not wait for the choice (it reads its answer back from the file)', async () => {
@@ -679,7 +680,7 @@ describe('no step is recorded as done without its page', () => {
     });
   }
 
-  test('with everything chosen and Codex missing, only the pages that have something to ask are shown', async () => {
+  test('with everything chosen and Codex missing, no import page skips itself (a skip outlives a change of mind), so the choice follows the person', async () => {
     const shown: string[] = [];
     for (const id of ALL) {
       const harness = stepHarness({ segment: { importMode: 'everything' } });
@@ -694,6 +695,18 @@ describe('no step is recorded as done without its page', () => {
       );
       if (harness.decision === 'shown') shown.push(id);
     }
-    expect(shown).toEqual(['installed', 'sign-in', 'import-choice', 'conversations', 'permission']);
+    // The five kind pages say they are included by the choice; the run page (Codex missing) is the one that skips.
+    expect(shown).toEqual([
+      'installed',
+      'sign-in',
+      'import-choice',
+      'import-settings',
+      'import-model-set',
+      'import-instructions',
+      'import-skills',
+      'import-mcp',
+      'conversations',
+      'permission',
+    ]);
   });
 });
