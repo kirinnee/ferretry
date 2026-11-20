@@ -601,9 +601,12 @@ describe('LoginSignIn with a Codex link', () => {
           started += 1;
           return started === 1 ? claudeFlow('awaiting-code') : { ...claudeFlow('awaiting-code'), flowId: 'flow-2' };
         },
-        [FLOW_GET]: () => {
+        // Only the first flow fails: the new one must stay awaiting-code however fast the poll reads it.
+        [FLOW_GET]: (call: Call) => {
           reads += 1;
-          return claudeFlow('failed');
+          return call.params?.flowId === 'flow-2'
+            ? { ...claudeFlow('awaiting-code'), flowId: 'flow-2' }
+            : claudeFlow('failed');
         },
       },
       { pollMs: 5 },
@@ -613,7 +616,8 @@ describe('LoginSignIn with a Codex link', () => {
       must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'the code field'),
       'fake-unsent-code',
     );
-    await wait(30);
+    // Waits for the failure to show rather than for a fixed time, so a slow machine cannot outrun it.
+    for (let slice = 0; slice < 300 && state(view.container) !== 'failed'; slice += 1) await wait(10);
     expect(reads).toBeGreaterThan(0);
     expect(state(view.container)).toBe('failed');
     await click(button(view.container, 'Start a new sign-in'), 'Start a new sign-in');
