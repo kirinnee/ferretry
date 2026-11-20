@@ -61,6 +61,7 @@ afterAll(async () => {
 
 const VARIANTS = [
   { name: '390-light', width: 390, height: 844, phone: true, scheme: 'light' },
+  { name: '390-dark', width: 390, height: 844, phone: true, scheme: 'dark' },
   { name: '768-light', width: 768, height: 900, phone: false, scheme: 'light' },
   { name: '768-dark', width: 768, height: 900, phone: false, scheme: 'dark' },
   { name: '1280-light', width: 1_280, height: 900, phone: false, scheme: 'light' },

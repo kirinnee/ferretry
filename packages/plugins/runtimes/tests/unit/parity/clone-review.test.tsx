@@ -104,7 +104,7 @@ const toReview = async (answer: CloneReview): Promise<{ root: HTMLElement; calls
   const view = await mount(<Harness client={target} reaches={[reach(source)]} />);
   mounted.push(view);
   const root = view.container;
-  await click(root, 'input[name="copy-source"]');
+  await click(root, '[data-copy-source] input[type="radio"]');
   await click(root, '[data-copy-read]');
   await settleUntil(
     () => root.querySelector('[data-copy-review]') !== null,
