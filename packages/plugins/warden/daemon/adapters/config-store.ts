@@ -6,7 +6,7 @@ import {
   effectiveWardenConfig,
   type WardenFile,
 } from '../../contract/index.ts';
-import type { WardenConfig, WardenConfigPatch, WardenConfigStore } from '../lib/index.ts';
+import type { WardenConfig, WardenConfigPatch, WardenConfigStore, WardenSaveOptions } from '../lib/index.ts';
 import { WARDEN_CONFIG_SECTIONS } from '../lib/protocol.ts';
 
 /** The kernel refused the edit of `warden.yaml` (its sentences never quote a value). */
@@ -123,10 +123,24 @@ export class ConfigWardenConfigStore implements WardenConfigStore {
     );
   }
 
-  async write(config: WardenConfig, patch: WardenConfigPatch): Promise<readonly string[]> {
-    if (this.config.fileState(WARDEN_CONFIG).state === 'held') return await this.#writeBesideHeld(config, patch);
+  /**
+   * With `nameJevKey` the SAME write also names the Jev key, so a first save that must name it is ONE write of the file
+   * (through `writeAsCaller`, the owner's own act, held for anyone else) and never leaves a file that names the key but
+   * not the answer, or the answer but not the key.
+   */
+  async write(config: WardenConfig, patch: WardenConfigPatch, options?: WardenSaveOptions): Promise<readonly string[]> {
+    const naming = options?.nameJevKey === true;
+    if (this.config.fileState(WARDEN_CONFIG).state === 'held')
+      return await this.#writeBesideHeld(config, patch, naming);
     const inEffect = (this.config.file(WARDEN_CONFIG) ?? {}) as WardenFile;
-    return outcomeOf(await this.config.write(WARDEN_CONFIG, undefined, { patch: wholeSettings(config, inEffect) }));
+    const edit = {
+      patch: { ...wholeSettings(config, inEffect), ...(naming ? { jev: { key: WARDEN_JEV_KEY_REFERENCE } } : {}) },
+    };
+    return outcomeOf(
+      naming
+        ? await this.config.writeAsCaller(WARDEN_CONFIG, undefined, edit)
+        : await this.config.write(WARDEN_CONFIG, undefined, edit),
+    );
   }
 
   /**
@@ -136,7 +150,7 @@ export class ConfigWardenConfigStore implements WardenConfigStore {
    * the patch names, the section named in `within` so the kernel merges them one level deep into each version and the
    * held version keeps its own sub-keys.
    */
-  async #writeBesideHeld(config: WardenConfig, patch: WardenConfigPatch): Promise<readonly string[]> {
+  async #writeBesideHeld(config: WardenConfig, patch: WardenConfigPatch, naming: boolean): Promise<readonly string[]> {
     const named = patch as Record<string, unknown>;
     const keys = Object.keys(named).filter(key => named[key] !== undefined);
     // A save naming no key has nothing to make to either version; it is refused as before, writing nothing.
@@ -152,7 +166,7 @@ export class ConfigWardenConfigStore implements WardenConfigStore {
     );
     return outcomeOf(
       await this.config.writeAsOwner(WARDEN_CONFIG, undefined, {
-        patch: ownerPatch,
+        patch: naming ? { ...ownerPatch, jev: { key: WARDEN_JEV_KEY_REFERENCE } } : ownerPatch,
         ...(within.length === 0 ? {} : { within }),
       }),
     );

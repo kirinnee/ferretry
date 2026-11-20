@@ -117,6 +117,12 @@ export class FakeDaemon {
   /** The machine name the page saved, if any. */
   named: string | undefined;
   readonly writes: { route: string; body: unknown }[] = [];
+  /** The secrets this machine's vault holds (name -> value; never answered, only compared). */
+  readonly vault = new Map<string, string>();
+  /** Whether `warden.yaml` names the Jev key. */
+  jevNamed = false;
+  /** The Warden's layers in effect: a new machine has both off. */
+  layers = { jev: false, llm: false };
 
   constructor(readonly machine: FakeMachine) {}
 

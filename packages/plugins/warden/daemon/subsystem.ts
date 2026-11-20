@@ -62,6 +62,7 @@ import {
   ownerHoldReason,
   WARDEN_SWEEP_ORIGIN,
   EMPTY_AUTO_MOVE_MEMORY,
+  type WardenSaveOptions,
   parseAutoMoveMemory,
   waitingFerrets,
   WardenAutoMoveService,
@@ -129,7 +130,8 @@ export interface WardenSubsystem {
   report(reportPath: string): Promise<string | undefined>;
   run(spawn: boolean): Promise<WardenRunView>;
   config(): ReturnType<WardenSweepService['view']>;
-  updateConfig(patch: unknown): ReturnType<WardenSweepService['updateConfig']>;
+  /** `nameJevKey`: the same write also names the Jev key, so a save that must name it is ONE write of `warden.yaml`. */
+  updateConfig(patch: unknown, options?: WardenSaveOptions): ReturnType<WardenSweepService['updateConfig']>;
   /** The owner's act of naming the Jev key in `warden.yaml`; held for the owner unless the kernel finds the caller is. */
   nameJevKey(): ReturnType<WardenSweepService['view']>;
   agenda(scope?: WardenReadScope): Promise<WardenAgendaView>;
@@ -594,7 +596,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { rea
     report: async reportPath => await reader.readReportAt(posix.join(REPORTS_DIRECTORY, posix.basename(reportPath))),
     run: async spawn => await loop.run(spawn),
     config: async () => naming(await service.view()),
-    updateConfig: async patch => naming(await service.updateConfig(parseWardenConfigPatch(patch))),
+    updateConfig: async (patch, options) => naming(await service.updateConfig(parseWardenConfigPatch(patch), options)),
     nameJevKey: async () => {
       const held = await configStore.nameJevKey();
       const view = naming(await service.view());

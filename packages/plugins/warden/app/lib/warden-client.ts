@@ -38,7 +38,7 @@ export interface WardenClient {
   leave(request: WardenLeaveRequest): Promise<WardenLeaveView>;
   config(): Promise<WardenConfigView>;
   /** The effective settings, and the sentences of any edit held for the owner (`held`). */
-  updateConfig(patch: WardenConfigPatch): Promise<WardenConfigView>;
+  updateConfig(patch: WardenConfigPatch, options?: { readonly nameJevKey?: boolean }): Promise<WardenConfigView>;
   /** Names the Jev key in `warden.yaml` (the owner's act; held for the owner otherwise, as `held`). Never a value. */
   nameJevKey(): Promise<WardenConfigView>;
   /** The screens Ferretry clears by itself, the ones the owner taught it, and the proposals waiting for a yes. */
@@ -57,8 +57,12 @@ export const wardenClientOf = (client: PluginClient): WardenClient => ({
   investigate: request => client.call<WardenInvestigateView>('POST /v1/warden/investigate', { body: request }),
   leave: request => client.call<WardenLeaveView>('POST /v1/warden/leave', { body: request }),
   config: () => client.call<WardenConfigView>('GET /v1/warden/config'),
-  updateConfig: async patch =>
-    WardenConfigViewSchema.parse(await client.call<unknown>('PATCH /v1/warden/config', { body: patch })),
+  updateConfig: async (patch, options) =>
+    WardenConfigViewSchema.parse(
+      await client.call<unknown>('PATCH /v1/warden/config', {
+        body: options?.nameJevKey === true ? { ...patch, nameJevKey: true } : patch,
+      }),
+    ),
   nameJevKey: async () => WardenConfigViewSchema.parse(await client.call<unknown>('POST /v1/warden/jev-key')),
   dialogRules: async () => DialogRulesViewSchema.parse(await client.call<unknown>('GET /v1/warden/dialog/rules')),
   learnDialog: async request =>

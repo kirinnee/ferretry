@@ -2,6 +2,7 @@ import { forSubject } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { voiceSurfaces } from './surfaces.tsx';
+import { speedupKeyPanel } from './features/speedups/key-row.tsx';
 
 /**
  * Voice's app half (§2.3): the Voice and Speed-ups settings tabs, the composer's dictation control, "Read aloud" in an
@@ -28,6 +29,7 @@ export default implementApp(manifest, {
         dictation: DictationPanel,
         'read-aloud': ReadAloudPanel,
         'auto-read': AutoReadPanel,
+        'speedup-key': speedupKeyPanel(client),
         'onboarding-speedups': forSubject('voice.speedups', SpeedupsStepPanel),
         'onboarding-voice': forSubject('voice.voice', VoiceStepPanel),
       },

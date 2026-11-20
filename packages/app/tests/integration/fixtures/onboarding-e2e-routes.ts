@@ -141,10 +141,56 @@ export const extraRoutes = (fake: FakeDaemon) => {
         outcome: 'applied',
       };
     },
+    // The Jev key lives in the fake machine's vault: absent until the person's Save, named in warden.yaml only by a save
+    // that asks for it (`nameJevKey`, ONE write with the answer). The value is held here only to be compared, never answered.
+    'GET /v1/speedups': () => {
+      const base = answerFor({ method: 'GET', path: '/v1/speedups' })?.body as {
+        providers: { provider: string; set: boolean; lastTest?: unknown }[];
+      };
+      return {
+        ...base,
+        providers: base.providers.map(provider =>
+          provider.provider === 'jev'
+            ? { ...provider, set: fake.vault.has('JEV_API_KEY'), lastTest: undefined }
+            : provider,
+        ),
+      };
+    },
+    'POST /v1/secrets': (request: TransportRequest) => {
+      const body = request.body as { name?: string; value?: string };
+      fake.writes.push({ route: 'POST /v1/secrets', body });
+      fake.vault.set(String(body.name), String(body.value));
+      return { name: body.name, set: true };
+    },
+    'POST /v1/speedups/jev/test': () => ({
+      provider: 'jev',
+      secretName: 'JEV_API_KEY',
+      ok: true,
+      code: 'ok',
+      message: 'The key works.',
+      latencyMs: 120,
+      at: new Date().toISOString(),
+    }),
+    // A first run: the layers are what a new machine carries (both off, rules only) until a write turns one on.
+    'GET /v1/warden/config': () => {
+      const base = answerFor({ method: 'GET', path: '/v1/warden/config' })?.body as { config: object };
+      return {
+        ...base,
+        config: { ...base.config, layers: fake.layers },
+        jevKey: fake.jevNamed ? 'named' : 'not_named',
+      };
+    },
     'PATCH /v1/warden/config': (request: TransportRequest) => {
       fake.writes.push({ route: 'PATCH /v1/warden/config', body: request.body });
-      const base = answerFor({ method: 'GET', path: '/v1/warden/config' })?.body as object;
-      return { ...base, ...(request.body as object) };
+      const { nameJevKey, ...patch } = (request.body ?? {}) as { nameJevKey?: boolean; layers?: typeof fake.layers };
+      if (nameJevKey === true) fake.jevNamed = true;
+      if (patch.layers !== undefined) fake.layers = patch.layers;
+      const base = answerFor({ method: 'GET', path: '/v1/warden/config' })?.body as { config: object };
+      return {
+        ...base,
+        config: { ...base.config, ...patch, layers: fake.layers },
+        jevKey: fake.jevNamed ? 'named' : 'not_named',
+      };
     },
   });
   return (request: TransportRequest): TransportAnswer | undefined => answer(request);

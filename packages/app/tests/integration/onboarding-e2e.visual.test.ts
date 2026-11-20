@@ -248,8 +248,9 @@ const inspect = async (tab: Page, variant: Variant, key: string, opts: { first?:
     expect(button.h, `${key}: ${button.label} is a 44px target`).toBeGreaterThanOrEqual(43.5);
   }
   // Item 3: the title sits right over the page (no dead band between them), and Later is a real button in the footer row
-  // (Back · Later · Next), never a link floating in the page.
-  const gap = await gapUnderTitle(tab, '.fy-spf__head', '.fy-spf__body');
+  // (Back · Later · Next), never a link floating in the page. Measured from `.fy-spf__main` (demo + body): on a phone the
+  // populated demo panel is drawn ABOVE the body, so the body alone would count the demo's height as dead space.
+  const gap = await gapUnderTitle(tab, '.fy-spf__head', '.fy-spf__main');
   expect(gap.gap, `${key}: something is drawn under the title (first: ${gap.first})`).toBeGreaterThanOrEqual(0);
   expect(gap.gap, `${key}: no dead gap between the title and the page (first thing: ${gap.first})`).toBeLessThanOrEqual(
     40,
@@ -459,6 +460,8 @@ describe('the first run, end to end', () => {
       const tab = await context.newPage();
       tab.setDefaultTimeout(20_000);
       tab.on('pageerror', error => seen.pageErrors.push(error.message));
+      const consoleLines: string[] = [];
+      tab.on('console', message => consoleLines.push(message.text()));
       const A = MACHINE_A.id;
       const B = MACHINE_B.id;
       const theme = `studio-${variant.dark ? 'dark' : 'light'}`;
@@ -686,17 +689,84 @@ describe('the first run, end to end', () => {
       walked.push('warden.warden');
       await inspect(tab, variant, 'warden.warden');
       await shot(tab, variant, 'warden.warden');
-      await tab.locator('[data-flow-page="warden.warden"] label[data-choice="jev"]').click();
-      await tab.waitForFunction(
-        id =>
-          (window as unknown as { __fake: { daemon: (id: string) => { writes: { route: string }[] } } }).__fake
-            .daemon(id)
-            .writes.some(write => write.route === 'PATCH /v1/warden/config'),
-        A,
-        { timeout: 8_000 },
+      // r11 O7 (the Jev key is set up ON this page): the REAL Warden page over the REAL registered Voice key row, the machine
+      // faked at the daemon boundary. A card pick writes nothing; the key row is Voice's own `speedup-key` panel; Save is one
+      // vault write; the key is then in no DOM, storage or console line; Next is ONE write of warden.yaml (naming the key).
+      const wardenPage = tab.locator('[data-flow-page="warden.warden"]');
+      const writesOf = async (route: string) => (await daemonOf(tab, A)).writes.filter(write => write.route === route);
+      expect(await wardenPage.locator('input[type=password]').count(), 'Rules only draws no key field').toBe(0);
+      await wardenPage.locator('label[data-choice="jev"]').click();
+      const field = wardenPage.locator('[data-warden-key-row] input[type=password]');
+      await field.waitFor({ state: 'visible' });
+      expect((await writesOf('PATCH /v1/warden/config')).length, 'a pick writes nothing').toBe(0);
+      expect(await wardenPage.locator('a[href*="speedups"]').count(), 'no road into Settings').toBe(0);
+      expect(
+        await wardenPage.locator('[data-warden-key-row] [data-panel="voice.speedup-key"]').count(),
+        'the key row is the registered Voice panel',
+      ).toBe(1);
+      await tab.waitForTimeout(1_800);
+      const budget = await wardenPage.evaluate(page => {
+        const flat = (value: string) => value.replace(/\s+/g, ' ').trim();
+        const body = page.querySelector('.wd-step') as HTMLElement;
+        const row = body.querySelector('[data-warden-key-row]') as HTMLElement;
+        return { all: flat(body.innerText), row: flat(row.innerText) };
+      });
+      console.log(
+        `warden page text with the key row (${budget.all.length} chars): ${budget.all} | key row alone (${budget.row.length} chars)`,
       );
+      expect(budget.all, 'no raw URL anywhere on the page, key row included').not.toMatch(/https?:|www\.|\.com|\.test/);
+      expect(budget.all.length, 'the stated 160-character budget, key row and card titles counted').toBeLessThanOrEqual(
+        160,
+      );
+      await shot(tab, variant, 'warden.warden-jev-empty');
+      const FAKE_KEY = 'jev-fake-key-0123456789abcdef';
+      await field.fill(FAKE_KEY);
+      await wardenPage.getByRole('button', { name: 'Save' }).click();
+      await wardenPage.locator('[data-speedup-set]').waitFor({ state: 'visible' });
+      expect(await writesOf('POST /v1/secrets'), 'the exact vault write, once').toEqual([
+        { route: 'POST /v1/secrets', body: { name: 'JEV_API_KEY', value: FAKE_KEY } },
+      ]);
+      const where = await tab.evaluate(key => {
+        const stores = [localStorage, sessionStorage].map(store => JSON.stringify({ ...store }));
+        return {
+          html: document.documentElement.outerHTML.includes(key),
+          text: document.body.innerText.includes(key),
+          stores: stores.some(store => store.includes(key)),
+          fields: [...document.querySelectorAll('input,textarea')].some(el =>
+            (el as HTMLInputElement).value.includes(key),
+          ),
+        };
+      }, FAKE_KEY);
+      expect(where, 'the key is in no DOM, field or storage').toEqual({
+        html: false,
+        text: false,
+        stores: false,
+        fields: false,
+      });
+      expect(
+        consoleLines.some(line => line.includes(FAKE_KEY)),
+        'the key is in no console line',
+      ).toBe(false);
+      await shot(tab, variant, 'warden.warden-jev-saved');
+      await wardenPage.getByRole('button', { name: 'Test the Jev key' }).click();
+      await wardenPage.locator('[data-speedup-last-test]').waitFor({ state: 'visible' });
+      expect(
+        (await daemonOf(tab, A)).mutations.filter(m => m.route === 'POST /v1/speedups/jev/test').length,
+        'Test is one provider call',
+      ).toBe(1);
       await tab.waitForFunction(() => !(document.querySelector('[data-step-next]') as HTMLButtonElement).disabled);
       await next(tab, 'lessons.lessons');
+      expect(await writesOf('PATCH /v1/warden/config'), 'Next is ONE write of warden.yaml, naming the key').toEqual([
+        {
+          route: 'PATCH /v1/warden/config',
+          body: { enabled: true, layers: { jev: true, llm: false }, nameJevKey: true },
+        },
+      ]);
+      expect((await daemonOf(tab, A)).mutations.filter(m => m.route === 'POST /v1/warden/jev-key').length).toBe(0);
+      expect(
+        consoleLines.some(line => line.includes(FAKE_KEY)),
+        'the key is in no console line after Next either',
+      ).toBe(false);
       expect(await recorded(tab, A, 'warden.warden')).toBe('done');
       await answerWithNext(tab, variant, A, 'lessons.lessons', 'onboarding.appearance', { before: 'warden.warden' });
       // Shells is never on screen: nix is found, so the page skipped itself and the machine recorded it.

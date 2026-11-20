@@ -271,6 +271,7 @@ import {
   wardenMayStop,
 } from './state.ts';
 import { scannedAfter, sweptField } from './scanned.ts';
+import { changedFields, type WardenSaveOptions } from './save-options.ts';
 import { DEFAULT_TICK_SECONDS } from './sus.ts';
 import { instantMs } from './time.ts';
 import {
@@ -395,7 +396,7 @@ export interface WardenConfigStore {
    * Answers the sentences of THIS edit when it was held for the owner (empty when it is in effect): the answer belongs
    * to this write, never to whichever write finished last.
    */
-  write(config: WardenConfig, patch: WardenConfigPatch): Promise<readonly string[]>;
+  write(config: WardenConfig, patch: WardenConfigPatch, options?: WardenSaveOptions): Promise<readonly string[]>;
 }
 
 /** Accounts actually installed on this host, by the NAME an operator types (`claude-default`), never by the
@@ -884,19 +885,17 @@ export class WardenSweepService {
   /**
    * Apply an operator patch and persist it.
    *
-   * The patch merges onto what is STORED rather than onto the defaults, so two
-   * successive single-field patches compose. A stored document that did not parse
-   * merges onto the defaults instead — which is the same fallback the loader
-   * makes, so a PATCH can repair a broken document rather than being blocked by
-   * it.
+   * The patch merges onto what is STORED rather than onto the defaults, so two successive single-field patches compose.
+   * A stored document that did not parse merges onto the defaults instead — the same fallback the loader makes, so a
+   * PATCH can repair a broken document rather than being blocked by it.
    */
-  async updateConfig(patch: WardenConfigPatch): Promise<WardenConfigView> {
+  async updateConfig(patch: WardenConfigPatch, options?: WardenSaveOptions): Promise<WardenConfigView> {
     const stored = await this.storedConfig();
     const next = applyWardenConfigPatch(stored.config, patch);
-    const held = await this.ports.config.write(next, patch);
+    const held = await this.ports.config.write(next, patch, options);
     // A write the kernel held is NOT in effect: answer the settings that are, say what waits, and journal no change.
     if (held.length > 0) return { ...(await this.view()), held: [...held] };
-    this.ports.journal.record('fleet.warden_config_changed', { fields: Object.keys(patch) });
+    this.ports.journal.record('fleet.warden_config_changed', { fields: changedFields(patch, options) });
     // Answered from a re-read of the settings in effect, never from `next`, so the answer cannot disagree with them.
     return await this.view();
   }

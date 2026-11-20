@@ -9,7 +9,7 @@ import should from 'should';
 import type { Log } from '@ferretry/kernel/contract';
 import { config, state } from '@ferretry/kernel/host';
 import { fixedClock } from '@ferretry/kernel/testing';
-import { WARDEN_CONFIG, WARDEN_JEV_KEY_REFERENCE } from '../../contract/index.ts';
+import { DEFAULT_WARDEN_CONFIG, WARDEN_CONFIG, WARDEN_JEV_KEY_REFERENCE } from '../../contract/index.ts';
 import { ConfigWardenConfigStore } from '../../daemon/adapters/config-store.ts';
 
 const HOME = '/home/fy';
@@ -60,5 +60,34 @@ describe('the Jev key reference in warden.yaml, through the real kernel writer',
     for (const edit of files.held()) should(await files.confirm(edit.id)).equal(true);
 
     should(store.jevKeyNamed()).equal(true);
+  });
+
+  it('should write the answer AND name the key in ONE write when asked (r11 O7), holding the whole of it for a non-owner', async () => {
+    const { fs, files, store } = await world();
+    const config = { ...DEFAULT_WARDEN_CONFIG, layers: { jev: true, llm: false } };
+    const patch = { enabled: true, layers: { jev: true, llm: false } };
+
+    const waiting = await store.write(config, patch, { nameJevKey: true });
+
+    // the naming and the loosening wait TOGETHER as one edit: no earlier write put half of it into effect
+    should(waiting.length).be.greaterThan(0);
+    should(store.jevKeyNamed()).equal(false);
+    should(files.held().length).equal(1);
+    const text = String(fs.snapshot().get(PATH) ?? '');
+    should(text).match(/layers:/u);
+    should(text).match(/\$\{secret:JEV_API_KEY\}/u);
+    for (const edit of files.held()) should(await files.confirm(edit.id)).equal(true);
+    should(store.jevKeyNamed()).equal(true);
+    should(((await store.read()) as { layers: { jev: boolean } }).layers.jev).equal(true);
+  });
+
+  it('should not name the key when not asked: the settings write leaves jev.key alone', async () => {
+    const { store } = await world();
+    const waiting = await store.write(
+      { ...DEFAULT_WARDEN_CONFIG, layers: { jev: false, llm: false } },
+      { enabled: true, layers: { jev: false, llm: false } },
+    );
+    should(waiting).eql([]);
+    should(store.jevKeyNamed()).equal(false);
   });
 });

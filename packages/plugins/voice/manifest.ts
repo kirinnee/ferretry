@@ -101,6 +101,8 @@ export default definePlugin({
       // First-run steps (Onboarding's steps screen offers this slot): this device's two client steps, Voice then Speed-ups.
       panel('onboarding.step', { id: 'onboarding-voice', order: 3 }),
       panel('onboarding.step', { id: 'onboarding-speedups', order: 4 }),
+      // One provider's key row (subject = the provider): a page that is not Settings (the Warden's first run) mounts the Jev one.
+      panel('settings', { id: 'speedup-key', order: 80 }),
     ],
     settings: [
       // Split by where it is kept (r10 S5): Voice holds what THIS BROWSER does (dictation, engine, shortcut, auto-read, device keys);
