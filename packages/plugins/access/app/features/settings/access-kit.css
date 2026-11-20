@@ -58,6 +58,16 @@
   gap: 8px;
 }
 
+/* ---- the confirm step of a revoke ---- */
+.fy-acc-confirm {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
 /* ---- a labelled switch ---- */
 .fy-acc-axis {
   align-items: center;

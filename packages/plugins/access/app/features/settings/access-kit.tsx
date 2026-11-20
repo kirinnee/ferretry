@@ -13,7 +13,7 @@
  */
 
 import { SettingSwitch } from '@ferretry/app';
-import { type HTMLAttributes, type ReactNode, useId } from 'react';
+import { type HTMLAttributes, type ReactNode, useEffect, useId, useRef } from 'react';
 import { cn } from '../../shell-pairing.ts';
 import './access-kit.css';
 
@@ -54,6 +54,8 @@ export interface LabelledSwitchProps {
   readonly label: string;
   /** The whole name a screen reader hears ("Files — Use"), with the reason it cannot be pressed when there is one. */
   readonly accessibleName: string;
+  /** The id of the text that explains the switch (a refusal, a limit), so it is heard with the switch. */
+  readonly describedBy?: string;
   readonly checked: boolean;
   readonly disabled?: boolean;
   /** `false` when the row beside the switch already names it. */
@@ -66,6 +68,7 @@ export interface LabelledSwitchProps {
 export function LabelledSwitch({
   label,
   accessibleName,
+  describedBy,
   checked,
   disabled = false,
   showLabel = true,
@@ -83,7 +86,13 @@ export function LabelledSwitch({
       <span id={id} className="sr-only">
         {accessibleName}
       </span>
-      <SettingSwitch checked={checked} disabled={disabled} labelledBy={id} onChange={onChange} />
+      <SettingSwitch
+        checked={checked}
+        disabled={disabled}
+        labelledBy={id}
+        describedBy={describedBy}
+        onChange={onChange}
+      />
     </span>
   );
 }
@@ -114,5 +123,63 @@ export function StateBlock({ title, label, role = 'status', icon, children, mark
         {children}
       </section>
     </AccessTab>
+  );
+}
+
+export interface ConfirmStripProps {
+  /** The question, short: "Revoke Pixel 8?" */
+  readonly question: string;
+  /** What happens if the person goes ahead, said whole. */
+  readonly consequence: string;
+  readonly confirmLabel: string;
+  readonly busy?: boolean;
+  readonly onConfirm: () => void;
+  readonly onCancel: () => void;
+  /** `data-*` marks on the strip, its confirm button and its cancel button. */
+  readonly marks?: Readonly<Record<`data-${string}`, string>>;
+  readonly confirmMarks?: Readonly<Record<`data-${string}`, string>>;
+  readonly cancelMarks?: Readonly<Record<`data-${string}`, string>>;
+}
+
+/**
+ * THE SECOND STEP OF AN ACT THAT ENDS ACCESS: what will happen, a button that does it, and Cancel.
+ *
+ * A revoke is not undone by pressing it again, so the first press sends nothing: it opens this strip. Focus lands on Cancel, so
+ * a keyboard press that was a slip is one more Enter away from harmless, not from done.
+ */
+export function ConfirmStrip({
+  question,
+  consequence,
+  confirmLabel,
+  busy = false,
+  onConfirm,
+  onCancel,
+  marks,
+  confirmMarks,
+  cancelMarks,
+}: ConfirmStripProps) {
+  const cancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => cancel.current?.focus(), []);
+  return (
+    <fieldset aria-label={question} className="fy-acc-confirm" {...marks}>
+      <Notice tone="warn">
+        <strong>{question}</strong> {consequence}
+      </Notice>
+      <ActionRow>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onConfirm}
+          className="kt-btn min-h-[44px] disabled:cursor-not-allowed disabled:opacity-60"
+          data-variant="danger"
+          {...confirmMarks}
+        >
+          {confirmLabel}
+        </button>
+        <button type="button" ref={cancel} onClick={onCancel} className="kt-btn min-h-[44px]" {...cancelMarks}>
+          Cancel
+        </button>
+      </ActionRow>
+    </fieldset>
   );
 }

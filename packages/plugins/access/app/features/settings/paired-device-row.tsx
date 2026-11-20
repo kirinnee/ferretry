@@ -23,7 +23,7 @@ import {
   SELF_NARROW_NOTE,
 } from '../../lib/pairing-invite.ts';
 import type { PairingFailure } from './add-device-api.ts';
-import { LabelledSwitch, Notice } from './access-kit.tsx';
+import { ConfirmStrip, LabelledSwitch, Notice } from './access-kit.tsx';
 import { FailureNotice } from './invite-panel.tsx';
 
 /** One axis of one capability on one device: a switch, or a statement with its remedy. */
@@ -91,6 +91,7 @@ export function PairedDeviceRow({
   const mine = isThisDevice(device, view);
   const describedBy = useId();
   const [open, setOpen] = useState(initiallyOpen);
+  const [confirming, setConfirming] = useState(false);
   const held = CAPABILITY_NAMES.filter(capability => CAPABILITY_AXES.some(axis => device.grants[capability][axis]));
   return (
     <SettingRow
@@ -108,8 +109,9 @@ export function PairedDeviceRow({
           type="button"
           disabled={busy}
           aria-describedby={describedBy}
+          aria-expanded={confirming}
           data-pair-revoke-device={device.id}
-          onClick={onRevoke}
+          onClick={() => setConfirming(true)}
           className="kt-btn min-h-[44px] shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
           data-variant="danger"
         >
@@ -121,11 +123,27 @@ export function PairedDeviceRow({
       <div className="fy-acc-body">
         {/* When it arrived and was last seen: whole, never cut to one line (a device somebody may revoke). */}
         <p className="fy-acc-fine">{pairedDeviceSummary(device)}</p>
-        <p className="fy-acc-fine" id={describedBy}>
+        <p className="fy-acc-fine" id={describedBy} hidden={confirming}>
           <MonitorSmartphone size={13} className="mr-1 inline" aria-hidden="true" />
           {revokeConsequence(device, view)}
         </p>
         {note}
+        {confirming ? (
+          <ConfirmStrip
+            question={mine ? 'Revoke this browser?' : `Revoke ${device.name}?`}
+            consequence={revokeConsequence(device, view)}
+            confirmLabel={mine ? `Revoke and sign out here` : `Yes, revoke ${device.name}`}
+            busy={busy}
+            onConfirm={() => {
+              setConfirming(false);
+              onRevoke();
+            }}
+            onCancel={() => setConfirming(false)}
+            marks={{ 'data-pair-revoke-device-confirming': device.id }}
+            confirmMarks={{ 'data-pair-revoke-device-confirm': device.id }}
+            cancelMarks={{ 'data-pair-revoke-device-cancel': device.id }}
+          />
+        ) : null}
         <details
           open={open}
           onToggle={event => setOpen(event.currentTarget.open)}

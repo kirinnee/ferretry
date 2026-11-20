@@ -99,6 +99,8 @@ function AxisControl({
       }
     : axisGuidance(entry, axis, changeable);
   const whole = !reason.offersStepUp && reason.tone === 'fault';
+  // The sentence the short badge stands for is what the switch is described by (a screen reader hears it with the switch).
+  const reasonId = useId();
 
   return (
     <div className="fy-acc-grant__axis">
@@ -110,6 +112,7 @@ function AxisControl({
         label={axisLabel(axis)}
         showLabel={false}
         accessibleName={`${capabilityLabel(entry.capability)} — ${axisLabel(axis)}`}
+        describedBy={reasonId}
         checked={recorded}
         disabled={disabled}
         onChange={onChange}
@@ -123,6 +126,7 @@ function AxisControl({
           so it is shown whole. */}
       <Notice
         tone={TONE[reason.tone]}
+        id={reasonId}
         className="fy-acc-grant__badge"
         marks={{ 'data-grant-axis-reason': `${entry.capability}.${axis}` }}
       >

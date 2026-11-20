@@ -164,8 +164,7 @@ export function AddDeviceCard({
           {devices.length === 0 ? (
             <SettingRow
               name="No devices are paired to this machine"
-              hint="Adding a device is how that changes."
-              explanation="No paired device can reach this daemon yet. Adding a device is how that changes, and every device you add appears here with its own revoke."
+              hint="No paired device can reach this daemon yet. Adding a device is how that changes, and every device you add appears here with its own revoke."
             />
           ) : (
             devices.map(device => (

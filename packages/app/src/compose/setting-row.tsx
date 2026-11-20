@@ -201,16 +201,19 @@ export interface SettingSwitchProps {
   readonly checked: boolean;
   readonly onChange: (next: boolean) => void;
   readonly labelledBy: string;
+  /** The id of the text that says why the switch is as it is, so a screen reader hears it with the switch. */
+  readonly describedBy?: string;
   readonly disabled?: boolean;
 }
 
-export function SettingSwitch({ checked, onChange, labelledBy, disabled = false }: SettingSwitchProps) {
+export function SettingSwitch({ checked, onChange, labelledBy, describedBy, disabled = false }: SettingSwitchProps) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       aria-labelledby={labelledBy}
+      aria-describedby={describedBy}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control border-0 bg-transparent p-0 disabled:cursor-not-allowed disabled:opacity-60"

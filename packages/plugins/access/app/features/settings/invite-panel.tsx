@@ -9,7 +9,7 @@
  * A refusal or a local-only link is a `Notice`, never a box.
  */
 
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { CircleAlert, Check, Trash2 } from 'lucide-react';
 import { localQr, QrEncodeError, type QrMatrix } from '@ferretry/app';
 import {
@@ -28,7 +28,7 @@ import {
   pairingCodeDisclosure,
   type pairingCountdown,
 } from '../../lib/pairing-invite.ts';
-import { ActionRow, Notice } from './access-kit.tsx';
+import { ActionRow, ConfirmStrip, Notice } from './access-kit.tsx';
 
 /** The QR, or a stated reason there is none (a link too long to encode is a daemon problem, said out loud). */
 function InviteSymbol({ pairUrl }: { readonly pairUrl: string }) {
@@ -140,6 +140,7 @@ export interface InvitePanelProps {
 
 /** The live code under the "Add a device" row: headline and countdown, the offer, then what each button does. */
 export function InvitePanel({ invite, countdown, busy, onRevokeCode, onDiscardInvite }: InvitePanelProps): ReactNode {
+  const [confirming, setConfirming] = useState(false);
   const outcome = pairingMintOutcome(invite);
   return (
     <section className="fy-acc-body fy-acc-invite" aria-label="Pairing code" data-pair-invite="">
@@ -170,7 +171,8 @@ export function InvitePanel({ invite, countdown, busy, onRevokeCode, onDiscardIn
           type="button"
           disabled={busy}
           data-pair-revoke-code=""
-          onClick={onRevokeCode}
+          aria-expanded={confirming}
+          onClick={() => setConfirming(true)}
           className="kt-btn min-h-[44px] disabled:cursor-not-allowed disabled:opacity-60"
           data-variant="danger"
         >
@@ -182,6 +184,22 @@ export function InvitePanel({ invite, countdown, busy, onRevokeCode, onDiscardIn
           Done
         </button>
       </ActionRow>
+      {confirming ? (
+        <ConfirmStrip
+          question="Revoke this code now?"
+          consequence="The code stops working on the machine straight away, so nothing can redeem it. A new one can be made any time."
+          confirmLabel="Yes, revoke the code"
+          busy={busy}
+          onConfirm={() => {
+            setConfirming(false);
+            onRevokeCode();
+          }}
+          onCancel={() => setConfirming(false)}
+          marks={{ 'data-pair-revoke-code-confirming': '' }}
+          confirmMarks={{ 'data-pair-revoke-code-confirm': '' }}
+          cancelMarks={{ 'data-pair-revoke-code-cancel': '' }}
+        />
+      ) : null}
       <p className="fy-acc-fine fy-acc-faint">
         Revoke now ends the code on the machine, so nothing can redeem it. Done only clears it from this screen — the
         code keeps working until it runs out.

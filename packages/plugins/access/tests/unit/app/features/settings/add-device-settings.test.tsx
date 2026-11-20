@@ -324,6 +324,7 @@ describe('AddDeviceCard', () => {
 
     // Act
     run(() => marked(renderer, 'data-pair-revoke-code')[0]?.props.onClick());
+    run(() => marked(renderer, 'data-pair-revoke-code-confirm')[0]?.props.onClick());
     run(() => marked(renderer, 'data-pair-discard')[0]?.props.onClick());
 
     // Assert
@@ -366,6 +367,7 @@ describe('AddDeviceCard', () => {
 
     // Act
     run(() => marked(renderer, 'data-pair-revoke-device', OTHER_DEVICE_ID)[0]?.props.onClick());
+    run(() => marked(renderer, 'data-pair-revoke-device-confirm', OTHER_DEVICE_ID)[0]?.props.onClick());
 
     // Assert
     should(asked).deepEqual([OTHER_DEVICE_ID]);
@@ -702,6 +704,9 @@ describe('AddDeviceSurface device note slot', () => {
     await runAsync(async () =>
       marked(renderer as ReactTestRenderer, 'data-pair-revoke-device', DEVICE_ID)[0]?.props.onClick(),
     );
+    await runAsync(async () =>
+      marked(renderer as ReactTestRenderer, 'data-pair-revoke-device-confirm', DEVICE_ID)[0]?.props.onClick(),
+    );
 
     // Assert
     should(marked(renderer as ReactTestRenderer, 'data-slot')).be.empty();
@@ -740,6 +745,7 @@ describe('AddDeviceSurface', () => {
     await runAsync(async () => marked(surface, 'data-pair-mint')[0]?.props.onClick());
     const showed = marked(surface, 'data-pair-code').length;
     await runAsync(async () => marked(surface, 'data-pair-revoke-code')[0]?.props.onClick());
+    await runAsync(async () => marked(surface, 'data-pair-revoke-code-confirm')[0]?.props.onClick());
 
     // Assert — and the code is gone from the screen once the machine has ended it.
     should(showed).equal(1);
@@ -765,6 +771,7 @@ describe('AddDeviceSurface', () => {
     // Act
     await runAsync(async () => marked(surface, 'data-pair-mint')[0]?.props.onClick());
     await runAsync(async () => marked(surface, 'data-pair-revoke-code')[0]?.props.onClick());
+    await runAsync(async () => marked(surface, 'data-pair-revoke-code-confirm')[0]?.props.onClick());
 
     // Assert
     should(marked(surface, 'data-pair-code')).have.length(1);
@@ -854,10 +861,60 @@ describe('AddDeviceSurface', () => {
 
     // Act
     await runAsync(async () => marked(surface, 'data-pair-revoke-device', DEVICE_ID)[0]?.props.onClick());
+    await runAsync(async () => marked(surface, 'data-pair-revoke-device-confirm', DEVICE_ID)[0]?.props.onClick());
 
     // Assert
     should(calls).containEql(`DELETE /v1/pair/devices/${DEVICE_ID}`);
     should(marked(surface, 'data-paired-device')).be.empty();
+  });
+
+  it('sends no request on the first press of a revoke, says what happens, and Cancel leaves the device alone', async () => {
+    // Arrange
+    const calls: string[] = [];
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(<AddDeviceSurface connection={connection()} createClient={fakeClient({ calls })} />);
+    });
+    const surface = renderer as ReactTestRenderer;
+    const before = calls.length;
+
+    // Act
+    await runAsync(async () => marked(surface, 'data-pair-revoke-device', DEVICE_ID)[0]?.props.onClick());
+
+    // Assert — the press opened a question; nothing was sent.
+    should(calls.length).equal(before);
+    should(marked(surface, 'data-pair-revoke-device-confirming', DEVICE_ID)).have.length(1);
+    expect(text(surface)).toContain('signs this browser out of this machine');
+
+    // Act — Cancel closes it and still sends nothing.
+    await runAsync(async () => marked(surface, 'data-pair-revoke-device-cancel', DEVICE_ID)[0]?.props.onClick());
+    should(marked(surface, 'data-pair-revoke-device-confirming')).be.empty();
+    should(calls.length).equal(before);
+    should(marked(surface, 'data-paired-device')).have.length(1);
+  });
+
+  it('sends no request on the first press of Revoke now, and Cancel keeps the code live', async () => {
+    // Arrange
+    const calls: string[] = [];
+    let renderer: ReactTestRenderer | undefined;
+    await runAsync(async () => {
+      renderer = render(
+        <AddDeviceSurface connection={connection()} createClient={fakeClient({ calls })} now={() => NOW} />,
+      );
+    });
+    const surface = renderer as ReactTestRenderer;
+    await runAsync(async () => marked(surface, 'data-pair-mint')[0]?.props.onClick());
+    const before = calls.length;
+
+    // Act
+    await runAsync(async () => marked(surface, 'data-pair-revoke-code')[0]?.props.onClick());
+
+    // Assert
+    should(calls.length).equal(before);
+    should(marked(surface, 'data-pair-revoke-code-confirming')).have.length(1);
+    await runAsync(async () => marked(surface, 'data-pair-revoke-code-cancel')[0]?.props.onClick());
+    should(calls.length).equal(before);
+    should(marked(surface, 'data-pair-code')).have.length(1);
   });
 
   it('keeps a device listed when its revoke failed, because it can still reach the machine', async () => {
@@ -878,6 +935,7 @@ describe('AddDeviceSurface', () => {
 
     // Act
     await runAsync(async () => marked(surface, 'data-pair-revoke-device', DEVICE_ID)[0]?.props.onClick());
+    await runAsync(async () => marked(surface, 'data-pair-revoke-device-confirm', DEVICE_ID)[0]?.props.onClick());
 
     // Assert
     should(marked(surface, 'data-paired-device')).have.length(1);

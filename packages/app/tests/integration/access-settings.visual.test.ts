@@ -1,5 +1,5 @@
 /**
- * ACCESS SETTINGS in the REAL Settings shell (`fixtures/access-settings-scene.tsx`: the real `App`, the real nav, the real
+ * ACCESS SETTINGS in the REAL Settings shell (`fixtures/access-settings-register.ts` over `fixtures/settings-shell-scene.tsx`: the real `App`, the real nav, the real
  * panel width) over one fake machine. Checked at 768 (where the real panel is about 212px wide), 1280 and 390, light and dark:
  *  - the layout answers to the SETTINGS PANEL's width, never the window: `.fy-acc` is a size container, and the pairing code's
  *    QR sits beside its facts only when the panel is wide enough (so at a 768px window it is stacked);
@@ -27,17 +27,18 @@ let server: ReturnType<typeof Bun.serve> | undefined;
 beforeAll(async () => {
   browser = await sharedChromium();
   directory = await mkdtemp(join(tmpdir(), 'ferretry-access-settings-'));
-  const child = Bun.spawn(
-    [
-      process.execPath,
-      sceneBuilder,
-      '--out',
-      directory,
-      '--entry',
-      resolve(packageRoot, 'fixtures/access-settings-scene.tsx'),
-    ],
-    { cwd: packageRoot, stderr: 'pipe', stdout: 'pipe' },
+  // The entry is generated: the register module puts Access's fake answers on the shell scene, THEN the scene is imported (it reads
+  // the registration once; a plain side-effect import would be dropped by `sideEffects: false`).
+  const entry = join(directory, 'entry.tsx');
+  await Bun.write(
+    entry,
+    `import { registerAccessSettings } from ${JSON.stringify(resolve(packageRoot, 'fixtures/access-settings-register.ts'))};\nregisterAccessSettings();\nawait import(${JSON.stringify(resolve(packageRoot, 'fixtures/settings-shell-scene.tsx'))});\n`,
   );
+  const child = Bun.spawn([process.execPath, sceneBuilder, '--out', directory, '--entry', entry], {
+    cwd: packageRoot,
+    stderr: 'pipe',
+    stdout: 'pipe',
+  });
   const [stdout, stderr, code] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
@@ -267,6 +268,49 @@ describe('Access settings, in the real Settings shell, over a fake machine', () 
         await context.close();
       }
     });
+  }
+
+  for (const viewport of [VIEWPORTS[1], VIEWPORTS[2]]) {
+    for (const theme of THEMES) {
+      it(`devices: a revoke asks first, in the panel's own layout (${viewport.name}, ${theme})`, async () => {
+        const { page, context, problems } = await open(viewport, theme, 'devices');
+        try {
+          await page.locator('[data-pair-mint]').click();
+          await page.locator('[data-pair-invite]').waitFor();
+          // The first press of either revoke opens a question and sends nothing; the strip is the panel's, not a box in a box.
+          await page.locator('[data-pair-revoke-code]').click();
+          await page.locator('[data-pair-revoke-code-confirming]').waitFor();
+          const row = page.locator('[data-paired-device]').first();
+          await row.locator('[data-pair-revoke-device]').click();
+          await row.locator('[data-pair-revoke-device-confirming]').waitFor();
+          // This browser's own row says it will sign you out here.
+          const own = page.locator('[data-paired-device]', { has: page.locator('[data-paired-device-self]') });
+          await own.locator('[data-pair-revoke-device]').click();
+          await own.locator('[data-pair-revoke-device-confirming]').waitFor();
+          expect(await own.innerText()).toContain('Revoke and sign out here');
+          // Focus lands on Cancel (the safe key), not on the destructive button.
+          expect(
+            await page.evaluate(() => document.activeElement?.hasAttribute('data-pair-revoke-device-cancel')),
+          ).toBe(true);
+          await page.setViewportSize({ width: viewport.width, height: viewport.phone ? 3_000 : 2_000 });
+          const m = await measure(page);
+          expect(problems).toEqual([]);
+          expect(m.pageScroll).toBeLessThanOrEqual(0);
+          expect(m.tabScroll).toBeLessThanOrEqual(0);
+          expect(m.wide).toEqual([]);
+          expect(m.nested).toEqual([]);
+          expect(m.clipped).toEqual([]);
+          expect(m.small).toEqual([]);
+          if (shotsDir !== '')
+            await page.screenshot({ path: join(shotsDir, `revoke-confirm-${viewport.name}-${theme}.png`) });
+          for (let left = 2; left > 0; left -= 1)
+            await page.locator('[data-pair-revoke-device-cancel]').first().click();
+          expect(await page.locator('[data-pair-revoke-device-confirming]').count()).toBe(0);
+        } finally {
+          await context.close();
+        }
+      });
+    }
   }
 
   it('empty and refused states stay in the same layout (1280)', async () => {

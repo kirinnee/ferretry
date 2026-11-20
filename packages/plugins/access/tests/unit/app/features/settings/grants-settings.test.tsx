@@ -264,6 +264,24 @@ describe('GrantsCard', () => {
     expect(marked(renderer, 'data-grant-axis-reason')).toHaveLength(4);
   });
 
+  it('describes every switch by its own guidance, so a screen reader hears why it is as it is', () => {
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({ capabilities: [entry({ capability: 'fleet' }), entry({ capability: 'terminal' })] })}
+        onChange={() => {}}
+      />,
+    );
+    for (const id of ['fleet.use', 'fleet.configure', 'terminal.use', 'terminal.configure']) {
+      const describedBy = axisSwitch(renderer, id)?.props['aria-describedby'];
+      expect(typeof describedBy).toBe('string');
+      const reason = marked(renderer, 'data-grant-axis-reason').find(
+        node => node.props['data-grant-axis-reason'] === id,
+      );
+      expect(reason?.props.id).toBe(describedBy);
+    }
+  });
+
   it('explains an allowed-but-immovable axis, and disables it for a governed caller without configure', () => {
     const renderer = render(
       <GrantsCard

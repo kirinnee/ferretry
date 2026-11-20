@@ -36,15 +36,36 @@ const sceneBodies: ReadonlyMap<string, () => ReactNode> =
   (globalThis as { __FY_SCENE_SETTINGS_BODIES__?: Map<string, () => ReactNode> }).__FY_SCENE_SETTINGS_BODIES__ ??
   new Map();
 
+/**
+ * REAL PLUGINS OVER FAKE ANSWERS: a plugin whose real app half reads the daemon (Access: its devices, grants, passkeys) is
+ * registered the same way, on `globalThis.__FY_SCENE__`, from the test's generated entry (a global for the same reason as above):
+ *   real       plugin ids whose REAL surface replaces the fake one here (a core id such as `gate` replaces its stand-in)
+ *   answer     the fake machine's answer to a request, asked BEFORE the defaults below; `undefined` falls through to them
+ *   deviceId   the id this browser is paired under on the fake machine
+ */
+interface SceneRegistration {
+  readonly real?: readonly string[];
+  readonly answer?: (request: TransportRequest) => TransportAnswer | undefined;
+  readonly deviceId?: string;
+}
+const registration = (globalThis as { __FY_SCENE__?: SceneRegistration }).__FY_SCENE__ ?? {};
+const realIds = new Set(registration.real ?? []);
+
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 
 const root = document.getElementById('root');
-// The real tab declarations of every shipped plugin, with a fake body each.
+// The real tab declarations of every shipped plugin, with a fake body each; the ones a test registers as real are whole.
 const surfaces: SurfaceEntry[] = [
-  ...CORE,
+  ...CORE.filter(core => !realIds.has(core.id)),
+  ...generated.surfaces.filter(entry => realIds.has(entry.id)),
   ...generated.surfaces
-    .filter(entry => (entry.manifest.ui?.settings ?? []).length > 0 && !CORE.some(core => core.id === entry.id))
+    .filter(
+      entry =>
+        (entry.manifest.ui?.settings ?? []).length > 0 &&
+        !CORE.some(core => core.id === entry.id) &&
+        !realIds.has(entry.id),
+    )
     .map(entry => {
       if (entry.id === 'agenda' && params.get('real') === 'agenda') return entry;
       const settings = entry.manifest.ui?.settings ?? [];
@@ -101,6 +122,8 @@ const grants = {
   steppedUp: false,
 };
 const transport = new FakeTransport((request: TransportRequest): TransportAnswer => {
+  const registered = registration.answer?.(request);
+  if (registered !== undefined) return registered;
   if (request.path === '/v1/plugins') return json(inventoryOf(surfaces));
   if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
   if (request.path === '/v1/grants') return json(grants);
@@ -116,7 +139,12 @@ const handler: PasskeyHandler = {
 };
 const provision = { handler, Prompts: () => null } as unknown as PasskeyProvision;
 const list = new DaemonList({ storage: memoryStore(), now: () => 1 });
-list.add({ daemon: 'ws', machine: 'workshop-host', deviceId: 'dev', address: 'http://127.0.0.1:40245' });
+list.add({
+  daemon: 'ws',
+  machine: 'workshop-host',
+  deviceId: registration.deviceId ?? 'dev',
+  address: 'http://127.0.0.1:40245',
+});
 const runtime = new ShellRuntime({
   appVersion: '5.0.0',
   surfaces,
