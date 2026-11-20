@@ -117,6 +117,12 @@ export function AgendaItemMenu({ open, onOpenChange, label = 'Item options', chi
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (!open || sheet || event.key !== 'Escape') return;
+    // A key from the version picker's open list is the LIST's: it is drawn on the page body (outside this wrapper and the
+    // popover) but React still bubbles its events here through the portal. Ownership is by DOM, so that Esc is left to the
+    // select box, which closes just the list and puts the focus back on Version, with this menu still open.
+    const from = event.target;
+    if (!(from instanceof Node) || (root.current?.contains(from) !== true && panel.current?.contains(from) !== true))
+      return;
     // Esc closes the menu, not the item it sits on.
     event.preventDefault();
     event.stopPropagation();

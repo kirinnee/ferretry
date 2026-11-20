@@ -8,6 +8,11 @@
  *   thing a native select did (the menu says which version it is showing; the compare reads the picked version); and a press
  *   inside the picker's list does NOT count as a press outside the ⋯ menu (the menu stays open under it).
  *
+ * Also asserted: Esc on the open version list closes ONLY the list (the ⋯ menu stays open, Version has the focus; a second Esc
+ * closes the menu), and with 9 versions (past the select box's search threshold) the picker is OPEN, TYPE, PICK: the typed
+ * text narrows the options, the pick writes the same thing (the menu shows that version; the compare requests exactly the
+ * versions it should).
+ *
  * Set `FY_AGENDA_SELECT_SHOTS_DIR` to keep `<viewport>-<theme>-<case>.png`.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
@@ -68,6 +73,7 @@ const openScene = async (
   scene: 'menu' | 'diff',
   viewport: (typeof VIEWPORTS)[number],
   theme: (typeof THEMES)[number],
+  versions?: number,
 ) => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
@@ -81,7 +87,9 @@ const openScene = async (
     new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
   );
   const tab = await context.newPage();
-  await tab.goto(`${origin}/?scene=${scene}&theme=studio-${theme}`);
+  await tab.goto(
+    `${origin}/?scene=${scene}&theme=studio-${theme}${versions === undefined ? '' : `&versions=${String(versions)}`}`,
+  );
   return { context, tab };
 };
 
@@ -136,6 +144,115 @@ describe('the agenda picks from lists with the app’s select box', () => {
           await tab.locator('[role="option"]', { hasText: 'v1 of 2' }).click();
           await tab.waitForSelector('[data-agenda-shown-version]');
           expect(await tab.textContent('[data-agenda-shown-version]')).toBe('Showing v1');
+        } finally {
+          await context.close();
+        }
+      });
+
+  for (const theme of THEMES)
+    it(`Esc on the open version list closes only the list: the ⋯ menu stays open and Version has the focus (1280, ${theme})`, async () => {
+      const { context, tab } = await openScene('menu', VIEWPORTS[0], theme);
+      try {
+        await tab.waitForSelector('.fy-item-view__bar [data-agenda-menu-toggle]:visible', { timeout: 8_000 });
+        await tab.click('.fy-item-view__bar [data-agenda-menu-toggle]:visible');
+        const picker = '[data-agenda-menu] [data-agenda-version-picker] [role="combobox"]';
+        await tab.click(picker);
+        await tab.waitForSelector('[role="option"]');
+        await tab.keyboard.press('Escape');
+        await tab.waitForFunction(() => document.querySelector('[role="option"]') === null);
+        const after = await tab.evaluate(() => ({
+          menuOpen: document.querySelectorAll('[data-agenda-menu="popover"]').length,
+          focusIsVersion:
+            document.activeElement?.getAttribute('role') === 'combobox' &&
+            document.activeElement.closest('[data-agenda-version-picker]') !== null,
+        }));
+        expect(after.menuOpen, 'the ⋯ menu is still open after Esc on the list').toBe(1);
+        expect(after.focusIsVersion, 'Version has the focus again').toBe(true);
+        // A second Esc, now on the menu itself, closes the menu and gives ⋯ the focus.
+        await tab.keyboard.press('Escape');
+        await tab.waitForFunction(() => document.querySelector('[data-agenda-menu="popover"]') === null);
+        expect(
+          await tab.evaluate(() => document.activeElement?.hasAttribute('data-agenda-menu-toggle')),
+          '⋯ has the focus once the menu closes',
+        ).toBe(true);
+      } finally {
+        await context.close();
+      }
+    });
+
+  for (const viewport of VIEWPORTS)
+    for (const theme of THEMES)
+      it(`the ⋯ menu's version picker with 9 versions: open, type, pick shows that version (${viewport.name}, ${theme})`, async () => {
+        const { context, tab } = await openScene('menu', viewport, theme, 9);
+        try {
+          await tab.waitForSelector('.fy-item-view__bar [data-agenda-menu-toggle]:visible', { timeout: 8_000 });
+          await tab.click('.fy-item-view__bar [data-agenda-menu-toggle]:visible');
+          const picker = '[data-agenda-menu] [data-agenda-version-picker] [role="combobox"]';
+          await tab.click(picker);
+          await tab.waitForSelector('[role="option"]');
+          const full = await listing(tab);
+          expect(full.options.length, 'all nine versions before typing').toBe(9);
+          expect(await tab.locator('input[type="search"]').count(), 'the list carries a search field').toBe(1);
+          if (shotsDir !== '') await tab.waitForTimeout(450);
+          if (shotsDir !== '')
+            await tab.screenshot({
+              animations: 'disabled',
+              path: join(shotsDir, `${viewport.name}-${theme}-menu-search-open.png`),
+            });
+          // Every version is reachable: the last row (v1) scrolls into the list's box, whether or not the list is capped.
+          const reach = await tab.evaluate(() => {
+            const rows = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+            const last = rows.at(-1);
+            if (last === undefined) return null;
+            last.scrollIntoView({ block: 'nearest' });
+            const box = last.closest<HTMLElement>('[role="listbox"]')?.getBoundingClientRect();
+            const row = last.getBoundingClientRect();
+            return {
+              label: last.querySelector('[data-label]')?.textContent ?? '',
+              inside: box !== undefined && row.top >= box.top - 1 && row.bottom <= box.bottom + 1,
+            };
+          });
+          expect(reach?.label, 'the last row is v1').toMatch(/^v1 of 9/u);
+          expect(reach?.inside, 'v1 is inside the list box once scrolled to').toBe(true);
+          if (shotsDir !== '')
+            await tab.screenshot({
+              animations: 'disabled',
+              path: join(shotsDir, `${viewport.name}-${theme}-menu-search-open-end.png`),
+            });
+          await tab.keyboard.type('v3 of');
+          await tab.waitForFunction(() => document.querySelectorAll('[role="option"]').length === 1);
+          const narrowed = await listing(tab);
+          expect(narrowed.options.length).toBe(1);
+          expect(narrowed.options[0]).toMatch(/^v3 of 9/u);
+          await tab.locator('[role="option"]').click();
+          await tab.waitForSelector('[data-agenda-shown-version]');
+          expect(await tab.textContent('[data-agenda-shown-version]')).toBe('Showing v3');
+        } finally {
+          await context.close();
+        }
+      });
+
+  for (const viewport of VIEWPORTS)
+    for (const theme of THEMES)
+      it(`the compare's From with 9 versions: open, type, pick requests exactly the versions picked (${viewport.name}, ${theme})`, async () => {
+        const { context, tab } = await openScene('diff', viewport, theme, 9);
+        try {
+          await tab.waitForSelector('[data-agenda-diff-from] [role="combobox"]');
+          expect(await tab.textContent('[data-agenda-diff-basis]')).toContain('v1 to v9');
+          await tab.click('[data-agenda-diff-from] [role="combobox"]');
+          await tab.waitForSelector('[role="option"]');
+          expect((await listing(tab)).options.length, 'all nine versions before typing').toBe(9);
+          await tab.keyboard.type('v3');
+          await tab.waitForFunction(() => document.querySelectorAll('[role="option"]').length === 1);
+          const narrowed = await listing(tab);
+          expect(narrowed.options[0]).toMatch(/^v3 ·/u);
+          await tab.locator('[role="option"]').click();
+          await tab.waitForFunction(
+            () => document.querySelector('[data-agenda-diff-basis]')?.textContent === 'v3 to v9',
+          );
+          const loads = await tab.evaluate(() => (window as unknown as { __loads: number[] }).__loads);
+          // The default pair (v1, v9), then the picked pair (v3, v9): no other version is ever requested.
+          expect([...new Set(loads)].sort((a, b) => a - b)).toEqual([1, 3, 9]);
         } finally {
           await context.close();
         }

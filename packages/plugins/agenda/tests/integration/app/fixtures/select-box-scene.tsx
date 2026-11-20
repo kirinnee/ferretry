@@ -4,6 +4,8 @@
  *   ?scene=menu   the REAL inbox page opened on an item that has been edited, so its ⋯ menu carries the version picker
  *   ?scene=diff   the REAL version-compare panel (From / To) over three fake versions
  *   &theme=<family>-<mode>
+ *   &versions=<n>  how many versions the item has (default: 2 in the menu scene, 3 in the diff scene); 8 or more is past
+ *                  the select box's search threshold, so its list carries a search field
  *
  * The scene counts `onShow`-style writes on `window.__picked` so a test can assert the same write as before.
  */
@@ -27,13 +29,24 @@ const machine = daemonId('ws');
 const seen = window as unknown as { __loads: number[] };
 seen.__loads = [];
 
+/** `?versions=` (0 = not given): a count past the select box's 7-option search threshold gives the list a search field. */
+const asked = Number(params.get('versions') ?? '0');
+const editsOf = (count: number): NonNullable<AgendaItem['revisions']> =>
+  Array.from({ length: count - 1 }, (_, at) => ({
+    at: new Date(NOW - (count - at) * 3_600_000).toISOString(),
+    by: 'agent' as const,
+    changed: ['subject' as const],
+    previous: { subject: `Which fix? (${String(at + 1)})` },
+  }));
+
 const edited = agendaItem('A1', {
   subject: 'Which fix should I apply?',
   ask: choices('Patch the parser', 'Rewrite the test'),
   premise: 'The parser drops the last row; the test also asserts the old behaviour.',
-  revisions: [
-    { at: '2026-08-01T11:57:00.000Z', by: 'agent', changed: ['subject'], previous: { subject: 'Which fix?' } },
-  ],
+  revisions:
+    asked > 0
+      ? editsOf(asked)
+      : [{ at: '2026-08-01T11:57:00.000Z', by: 'agent', changed: ['subject'], previous: { subject: 'Which fix?' } }],
 } as Partial<AgendaItem>);
 
 const fake = fakeInbox();
@@ -56,7 +69,7 @@ const versions = (count: number): AgendaVersionList =>
   }) as AgendaVersionList;
 
 const diffView: AgendaVersionsView = {
-  list: versions(3),
+  list: versions(asked > 0 ? asked : 3),
   load: async version => {
     seen.__loads.push(version);
     return agendaItem('A5', { subject: 'Queue choice', whereWeAre: `Version ${String(version)} of the plan.` });
