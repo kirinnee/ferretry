@@ -13,7 +13,8 @@
  *   - SIZE      the whole first download in bytes (`modelDownloadBytes`: the model's files plus its runtime). More is
  *               longer on the bar, and the megabytes are always written beside it, so "full" never means "good".
  *
- * An engine with no measurement (the browser's own) says "not measured" instead of drawing a number it does not have.
+ * An engine with no measurement (the browser's own) draws no bars at all: its card says so in a sentence instead of
+ * drawing empty tracks for numbers it does not have.
  */
 
 import { modelDownloadBytes, type OnDeviceModel, type OnDeviceModelId } from '../../lib/stt/model-catalog.ts';
@@ -58,10 +59,10 @@ export const ENGINE_LINES: Readonly<Record<OnDeviceModelId, string>> = {
   parakeet: 'Most accurate. Wants a laptop.',
 };
 
-/** One bar: its label, how long it is (0–1, or `null` when nothing was measured), and the words beside it. */
+/** One bar: its label, how long it is (0–1), and the words beside it. */
 export interface EngineBar {
   readonly label: 'Speed' | 'Accuracy' | 'Size';
-  readonly value: number | null;
+  readonly value: number;
   /** The value in words ("0.4 s", "52%", "86 MB"); also the bar's text equivalent. */
   readonly text: string;
 }
@@ -94,16 +95,9 @@ export function engineBars(model: OnDeviceModel): readonly EngineBar[] {
   ];
 }
 
-/** The browser's own recognition: words come live and nothing downloads, but nobody measured how well it hears. */
-export const BROWSER_BARS: readonly EngineBar[] = [
-  { label: 'Speed', value: null, text: 'Live' },
-  { label: 'Accuracy', value: null, text: 'Unrated' },
-  { label: 'Size', value: 0, text: 'None' },
-];
-
 /** A bar group's text equivalent for a screen reader: "Speed 0.4 s. Accuracy 52%. Size 86 MB." */
 export const barsText = (bars: readonly EngineBar[]): string => bars.map(bar => `${bar.label} ${bar.text}.`).join(' ');
 
-/** The bars as the shared `OptionBars` takes them: nothing measured draws an empty track, the words say why. */
+/** The bars as the shared `OptionBars` takes them. */
 export const optionBarsOf = (bars: readonly EngineBar[]): readonly { label: string; value: number; text: string }[] =>
-  bars.map(bar => ({ label: bar.label, value: bar.value ?? 0, text: bar.text }));
+  bars.map(bar => ({ label: bar.label, value: bar.value, text: bar.text }));

@@ -38,8 +38,10 @@ export interface EngineCardProps {
   readonly name: string;
   /** The one line under the name. */
   readonly line: string;
-  /** Three bars, or `null` for a card with nothing to compare (Off). */
+  /** Three bars, or `null` for a card with nothing measured to compare (Off, the browser's own). */
   readonly bars: readonly EngineBar[] | null;
+  /** What a card with no bars says in their place; the first paragraph of `details` when left out. */
+  readonly note?: string;
   readonly chips: readonly string[];
   /** The paragraphs behind the "i" disclosure. */
   readonly details: readonly string[];
@@ -131,6 +133,7 @@ export function EngineCard({
   name,
   line,
   bars,
+  note,
   chips,
   details,
   selected,
@@ -206,7 +209,7 @@ export function EngineCard({
           </p>
         )}
         {bars === null ? (
-          <p className="fy-engine-none">{details[0]}</p>
+          <p className="fy-engine-none">{note ?? details[0]}</p>
         ) : (
           <OptionBars bars={optionBarsOf(bars)} className="fy-engine-bars min-w-0" />
         )}

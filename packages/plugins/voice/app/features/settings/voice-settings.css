@@ -12,6 +12,10 @@
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
 }
 
+.fy-vs .fy-engine-grid[data-count='4'] {
+  grid-template-columns: repeat(auto-fit, minmax(max(min(100%, 220px), calc((100% - var(--fy-engine-gap)) / 2)), 1fr));
+}
+
 /* A control row inside a setting: an input that stops growing at 28rem, then its buttons, all one height and aligned to
    the same line. It wraps under the input when the panel is narrower than the whole row. */
 .fy-vs-field {

@@ -11,6 +11,10 @@
   min-width: 0;
   padding: 0;
 }
+/* Four cards are two rows of two, not three and a lone one: the same width rule, over half the row. */
+.fy-engine-grid[data-count='4'] {
+  grid-template-columns: repeat(auto-fit, minmax(max(240px, calc((100% - var(--fy-engine-gap)) / 2)), 1fr));
+}
 .fy-engine-card {
   --fy-engine-height: 186px;
   background: var(--surface-2);

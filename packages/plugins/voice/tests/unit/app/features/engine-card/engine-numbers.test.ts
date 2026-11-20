@@ -6,7 +6,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
   accuracyValue,
-  BROWSER_BARS,
   barsText,
   ENGINE_LINES,
   ENGINE_MEASURES,
@@ -74,7 +73,7 @@ describe('the bar lengths', () => {
       const bars = engineBars(model);
       expect(bars.map(bar => bar.label)).toEqual(['Speed', 'Accuracy', 'Size']);
       for (const bar of bars) {
-        expect(bar.value).not.toBeNull();
+        expect(bar.value).toBeGreaterThan(0);
         expect(bar.value as number).toBeGreaterThanOrEqual(MIN_BAR);
         expect(bar.value as number).toBeLessThanOrEqual(1);
       }
@@ -88,11 +87,6 @@ describe('the bar lengths', () => {
     const parakeet = engineBars(modelOf('parakeet'));
     expect(zipformer[0]?.value as number).toBeGreaterThan(whisperBase[0]?.value as number);
     expect(parakeet[2]?.value as number).toBeGreaterThan(zipformer[2]?.value as number);
-  });
-
-  it('says what the browser voice did not measure instead of drawing a number for it', () => {
-    expect(BROWSER_BARS.find(bar => bar.label === 'Accuracy')?.value).toBeNull();
-    expect(barsText(BROWSER_BARS)).toBe('Speed Live. Accuracy Unrated. Size None.');
   });
 
   it('writes the bars as one sentence for a screen reader', () => {

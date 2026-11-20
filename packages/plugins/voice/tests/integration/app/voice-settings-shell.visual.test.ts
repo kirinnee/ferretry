@@ -154,6 +154,37 @@ describe('Voice settings in the real Settings shell', () => {
           await page.waitForSelector('.fy-engine-card');
           // The list is short (the device's default, two more, the browser); every engine is one press away.
           expect(await page.locator('.fy-engine-card').count()).toBe(4);
+          // The browser's own voice has nothing measured: no bars at all (not three empty tracks), a plain sentence instead.
+          expect(await page.locator('.fy-engine-card[data-engine="browser"] [data-option-bar]').count()).toBe(0);
+          expect(await page.locator('.fy-engine-card[data-engine="browser"] .fy-engine-none').innerText()).toContain(
+            'Not measured',
+          );
+          // Every bar that is drawn has a fill: an empty track is a bug.
+          expect(
+            await page.evaluate(() =>
+              [...document.querySelectorAll<HTMLElement>('.fy-engine-card [data-option-bar]')]
+                .filter(
+                  bar =>
+                    (bar.querySelector<HTMLElement>('[data-option-bar-fill]')?.getBoundingClientRect().width ?? 0) < 1,
+                )
+                .map(bar => bar.textContent),
+            ),
+            'no empty bar',
+          ).toEqual([]);
+          // The four cards fill the grid evenly: rows are all the same width, so no hole is left at the end of the last one.
+          const rows = await page.evaluate(() => {
+            const byTop = new Map<number, number[]>();
+            for (const node of document.querySelectorAll<HTMLElement>('.fy-engine-card')) {
+              const r = node.getBoundingClientRect();
+              byTop.set(Math.round(r.top), [...(byTop.get(Math.round(r.top)) ?? []), Math.round(r.width)]);
+            }
+            return [...byTop.entries()].sort((a, b) => a[0] - b[0]).map(([, widths]) => widths);
+          });
+          expect(
+            new Set(rows.map(row => row.length)).size,
+            `every row holds the same number of cards: ${JSON.stringify(rows)}`,
+          ).toBe(1);
+          expect(rows.length * (rows[0]?.length ?? 0)).toBe(4);
           await shoot(page, viewport, scheme, 'voice');
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
           await page.locator('[data-engine-show-all]').click();
