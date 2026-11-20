@@ -12,7 +12,7 @@
   container-type: inline-size;
   display: grid;
   gap: var(--flow-4);
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   min-width: 0;
   padding: var(--flow-4);
 }

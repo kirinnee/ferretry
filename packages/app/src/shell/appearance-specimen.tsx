@@ -18,8 +18,8 @@ import { type Look, lookAttributes } from './appearance-pickers.tsx';
 import './appearance-specimen.css';
 
 export interface AppearanceSpecimenProps {
-  /** The look this specimen shows. It decides when the specimen replays; with `scoped` it is also what is drawn. */
-  readonly look: Look & { readonly textScale?: string };
+  /** The look this specimen shows. It decides when the specimen replays (`modePreference`, Auto / Light / Dark, too: Auto -> Light while the system is light is still a pick); with `scoped` it is also what is drawn. */
+  readonly look: Look & { readonly textScale?: string; readonly modePreference?: string };
   /** Draw `look` itself rather than whatever the page is in. */
   readonly scoped?: boolean;
 }
@@ -63,7 +63,9 @@ function Section({ title, children }: { readonly title: string; readonly childre
 }
 
 export function AppearanceSpecimen({ look, scoped = false }: AppearanceSpecimenProps) {
-  const replays = useReplay(`${look.style}|${look.palette}|${look.mode}|${look.textScale ?? ''}`);
+  const replays = useReplay(
+    `${look.style}|${look.palette}|${look.mode}|${look.modePreference ?? ''}|${look.textScale ?? ''}`,
+  );
   const play = replays > 0;
   return (
     <div

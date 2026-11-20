@@ -5,7 +5,7 @@
  * person already has, and a chip shows that palette's real background and accent in the style they already have.
  */
 import { type KeyboardEvent, useId, useRef } from 'react';
-import { ChoiceCards } from '../compose/choice-cards.tsx';
+import { ChoiceCards, revealChoice } from '../compose/choice-cards.tsx';
 import type { PaletteEntry, PaletteId, StyleEntry, StyleId } from '../theme/catalog.ts';
 import type { ResolvedMode } from '../theme/preferences.ts';
 import './appearance-pickers.css';
@@ -118,7 +118,7 @@ export function PalettePicker({
     const target = palettes[next];
     if (target === undefined) return;
     onChange(target.id);
-    ref.current?.querySelector<HTMLInputElement>(`input[value="${target.id}"]`)?.focus({ preventScroll: true });
+    revealChoice(ref.current?.querySelector<HTMLInputElement>(`input[value="${target.id}"]`));
   };
   return (
     <div

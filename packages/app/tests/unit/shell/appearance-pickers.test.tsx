@@ -61,6 +61,22 @@ describe('PalettePicker', () => {
     expect(log).toEqual(['mission', 'neo', 'mission', PALETTES[PALETTES.length - 1]?.id as PaletteId, 'studio']);
   });
 
+  it('should bring the VISIBLE chip into view after a keyboard move, not only focus its hidden radio', async () => {
+    mounted = await mount(<Palettes log={[]} />);
+    const revealed: (string | null)[] = [];
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, arg?: boolean | ScrollIntoViewOptions) {
+      revealed.push(`${this.getAttribute('data-palette-chip')}:${typeof arg === 'object' ? arg.block : ''}`);
+    };
+    try {
+      const group = must(mounted.container.querySelector('[role="radiogroup"][aria-label="Palette"]'), 'the group');
+      await key('End')(group);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
+    expect(revealed[0]).toBe(`${PALETTES[PALETTES.length - 1]?.id}:nearest`);
+  });
+
   it('should draw each half of each chip in the style it was given', async () => {
     mounted = await mount(<Palettes log={[]} />);
     const halves = [...mounted.container.querySelectorAll('[data-palette-chip] [data-swatch]')];
@@ -108,6 +124,12 @@ describe('AppearanceSpecimen', () => {
     expect(mounted.container.querySelectorAll('[data-spec-play]').length).toBeGreaterThan(0);
     await mounted.render(<AppearanceSpecimen look={{ ...look, palette: 'ma' }} />);
     expect(read()).toBe('1');
+  });
+
+  it('should replay when only the colour-mode CHOICE changes (Auto -> Light while the system is light)', async () => {
+    mounted = await mount(<AppearanceSpecimen look={{ ...look, modePreference: 'system' }} />);
+    await mounted.render(<AppearanceSpecimen look={{ ...look, modePreference: 'light' }} />);
+    expect(mounted.container.querySelector('[data-specimen]')?.getAttribute('data-spec-replays')).toBe('1');
   });
 
   it('should hold still with motion reduced', async () => {

@@ -1657,6 +1657,26 @@ body {
   box-shadow: none;
   overflow: visible;
 }
+/* A setting row lays out by the width of the PANEL it sits in, not the window's: a 768px window with the drawer and the Settings list
+   open leaves a panel of 212px, where a wide control (a segmented one, 288px) and the (i) beside the name cannot share a line. Below
+   520px a wide control takes its own line; below 360px every control and the (i) keep their own size and wrap rather than shrink to 0. */
+.fy-setting-row {
+  container-type: inline-size;
+}
+@container (max-width: 519.98px) {
+  .fy-setting-row [data-setting-controls][data-wide] {
+    flex-basis: 100%;
+  }
+}
+@container (max-width: 359.98px) {
+  .fy-setting-row [data-setting-controls]:not([data-wide]) {
+    flex: none;
+  }
+  /* The (i) drops under a wide control instead of squeezing it (a segmented control's labels never shrink). */
+  .fy-setting-row [data-setting-controls][data-wide] {
+    flex-wrap: wrap;
+  }
+}
 /* A real border on the row's list item, not a pseudo-element: it is the separation a divided list
    promises, and the Machines geometry gate reads it as one. */
 .kt-groupcard > li + li {

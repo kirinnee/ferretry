@@ -34,7 +34,7 @@ const MOTION_HINT: Readonly<Record<MotionPreference, string>> = {
 
 /** One width for every control in the Look group, so the three sit in one aligned column at 1280; a phone gives each the full row. */
 function EqualWidth({ children }: { readonly children: ReactNode }) {
-  return <div className="w-full md:w-72">{children}</div>;
+  return <div className="w-full md:w-72 md:max-w-full">{children}</div>;
 }
 
 /** The Look group. Draws nothing outside an app shell (no device theme to change). */
@@ -49,6 +49,7 @@ export function DeviceAppearance() {
     style: preference.style,
     palette: preference.palette,
     mode: resolved,
+    modePreference: preference.mode,
     textScale: preference.textScale,
   };
   return (
