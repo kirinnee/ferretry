@@ -203,7 +203,7 @@ export default definePlugin({
   },
 
   // Asked on this device only, and skipped once this device has answered it, whichever daemon it was setting up.
-  onboarding: [{ id: 'layout', title: 'Layout', order: 2, side: 'client' }],
+  onboarding: [{ id: 'layout', title: 'Layout', order: 2, side: 'client', stepHost: true }],
 
   data: {
     config: [LAYOUTS_SELECTION, LAYOUTS_ITEMS, LAYOUTS_THEMES],

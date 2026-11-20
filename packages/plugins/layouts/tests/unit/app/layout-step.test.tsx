@@ -190,7 +190,7 @@ describe('the Layout step', () => {
 
 describe('the Layout step in the plugin', () => {
   test('the manifest declares one client step, layouts.layout, at order 2, with one panel in the slot', () => {
-    expect(manifest.onboarding).toEqual([{ id: 'layout', title: 'Layout', order: 2, side: 'client' }]);
+    expect(manifest.onboarding).toEqual([{ id: 'layout', title: 'Layout', order: 2, side: 'client', stepHost: true }]);
     const placed = (manifest.ui?.panels ?? []).filter(panel => panel.slot === 'onboarding.step');
     expect(placed.map(panel => panel.id)).toEqual(['onboarding-step']);
   });
