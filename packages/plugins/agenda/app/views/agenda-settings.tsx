@@ -18,6 +18,7 @@ export function createAgendaSettings(runtime: AgendaRuntime) {
     return (
       <AgendaClientContext.Provider value={runtime.client}>
         <div className="flex max-w-[1100px] flex-col gap-4">
+          <h3 className="m-0 text-row font-semibold text-fg">Agenda</h3>
           <NotificationFilterSettingsView
             preferences={preferences}
             onCategoryChange={(category, next) => store.set({ categories: { [category]: next } })}

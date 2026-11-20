@@ -150,6 +150,28 @@ describe('TerminalSlotsSettings', () => {
     await second.unmount();
   });
 
+  it('says an unreadable answer in one plain sentence (no schema dump) and reads again on Try again', async () => {
+    // Arrange: the first read fails the way a schema parse does, the second answers.
+    const dump = '[ { "expected": "number", "code": "invalid_type", "path": [ "limit" ] } ]';
+    const flaky = machine([new Error(dump), { limit: 24, open: 1, holders: [live] }], new Error('unreachable'));
+
+    // Act
+    const shown = await mount(<TerminalSlotsSettings connection={alpha} createClient={flaky.createClient} />);
+    await settled(shown.container, '[data-terminal-slots-failed]');
+    const sentence = shown.container.textContent ?? '';
+    await interact(() =>
+      must(shown.container.querySelector<HTMLButtonElement>('[data-terminal-slots-retry]'), 'retry').click(),
+    );
+    await settled(shown.container, '[data-terminal-slots]');
+
+    // Assert
+    expect(sentence).toContain('could not read');
+    expect(sentence).not.toContain('invalid_type');
+    expect(sentence).not.toContain('"code"');
+    expect(flaky.calls).toEqual(['GET /v1/terminals', 'GET /v1/terminals']);
+    await shown.unmount();
+  });
+
   it('says so when a non-error is thrown, and when closing fails', async () => {
     // Arrange
     const closing = machine([{ limit: 24, open: 6, holders: [finished] }], new Error('tmux is gone'));

@@ -61,18 +61,21 @@ export function McpSettings({ client, now = Date.now, origin }: McpSettingsProps
 
   return (
     <section aria-label="MCP servers" className="flex min-w-0 flex-col gap-sm" data-settings="mcp">
+      <h3 className="m-0 text-row font-semibold text-fg">MCP servers</h3>
       <p className="m-0 text-cell leading-base text-muted">
         An MCP server gives a ferret more tools. These are the servers any runtime on this machine sees; Check connects
         to one the way a ferret would and lists its tools.
       </p>
-      <ContextFilterBar
-        searchLabel={MCP_SEARCH_LABEL}
-        query={query}
-        onQueryChange={setQuery}
-        chips={chips}
-        chip={chip}
-        onChipChange={setChip}
-      />
+      <div className="min-w-0 max-w-[28rem]">
+        <ContextFilterBar
+          searchLabel={MCP_SEARCH_LABEL}
+          query={query}
+          onQueryChange={setQuery}
+          chips={chips}
+          chip={chip}
+          onChipChange={setChip}
+        />
+      </div>
       {load.value.problems.map(problem => (
         <p key={problem.source} className="m-0 break-words text-meta text-warn" data-context-mcp-problem="">
           {problem.message}

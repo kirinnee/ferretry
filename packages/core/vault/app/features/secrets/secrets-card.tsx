@@ -16,6 +16,7 @@
  * the true statement is that agents USE them without holding one, and that this is not a defence against an agent
  * deliberately trying to leak one.
  */
+import './vault.css';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { MIN_SECRET_VALUE_LENGTH, type SecretList, SecretNameSchema } from '../../../contract/index.ts';
 import { AlertTriangle, KeyRound, Plus, RefreshCw, Trash2 } from '../../shell.tsx';
@@ -95,7 +96,7 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
 
   return (
     <section
-      className="kt-panel flex flex-col gap-3 p-panel"
+      className="fy-vault kt-panel flex flex-col gap-3 p-panel"
       aria-labelledby="secrets-heading"
       data-testid="secrets-card"
     >
@@ -111,11 +112,7 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
       <p className="m-0 text-meta leading-base text-faint">{SECRET_LIMIT}</p>
 
       {list.health === 'damaged' ? (
-        <div
-          role="alert"
-          className="flex gap-2 rounded-control border border-warn bg-warn/10 p-3"
-          data-testid="secrets-damaged"
-        >
+        <div role="alert" className="flex gap-2 border-l-2 border-warn pl-3" data-testid="secrets-damaged">
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
           <div className="min-w-0">
             <p className="m-0 text-ui font-semibold text-fg">This daemon cannot read its secret store</p>
@@ -131,11 +128,11 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
           No secrets on this daemon yet.
         </p>
       ) : (
-        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Stored secrets">
+        <ul className="m-0 list-none p-0 [&>li+li]:border-t [&>li+li]:border-border" aria-label="Stored secrets">
           {list.secrets.map(secret => (
             <li
               key={secret.name}
-              className="flex flex-wrap items-center gap-2 rounded-control border border-border-strong bg-surface-2 px-3 py-2"
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2"
               data-secret={secret.name}
             >
               <span className="mono min-w-0 truncate text-ui font-medium text-fg">{secret.name}</span>
@@ -150,32 +147,34 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
               <span className="text-meta text-faint">
                 {secret.updatedAt === secret.createdAt ? 'set' : 'changed'} {secret.updatedAt.slice(0, 10)}
               </span>
-              <button
-                type="button"
-                className="kt-btn ml-auto min-h-[44px]"
-                disabled={busy !== null}
-                onClick={() => setName(secret.name)}
-                aria-label={`Replace ${secret.name}`}
-              >
-                <RefreshCw size={14} aria-hidden="true" /> Replace
-              </button>
-              <button
-                type="button"
-                className="kt-btn min-h-[44px]"
-                data-variant="danger"
-                disabled={busy !== null}
-                onClick={() => void onRemove(secret.name)}
-                aria-label={`Delete ${secret.name}`}
-              >
-                <Trash2 size={14} aria-hidden="true" /> Delete
-              </button>
+              <span className="ml-auto flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="kt-btn min-h-[44px]"
+                  disabled={busy !== null}
+                  onClick={() => setName(secret.name)}
+                  aria-label={`Replace ${secret.name}`}
+                >
+                  <RefreshCw size={14} aria-hidden="true" /> Replace
+                </button>
+                <button
+                  type="button"
+                  className="kt-btn min-h-[44px]"
+                  data-variant="danger"
+                  disabled={busy !== null}
+                  onClick={() => void onRemove(secret.name)}
+                  aria-label={`Delete ${secret.name}`}
+                >
+                  <Trash2 size={14} aria-hidden="true" /> Delete
+                </button>
+              </span>
             </li>
           ))}
         </ul>
       )}
 
       {unresolved.length > 0 && (
-        <div className="rounded-control border border-warn bg-warn/10 p-3" data-testid="secrets-unresolved">
+        <div className="border-l-2 border-warn pl-3" data-testid="secrets-unresolved">
           <p className="m-0 text-ui font-semibold text-fg">Configuration names a secret this daemon does not hold</p>
           <ul className="m-0 mt-1 flex list-none flex-col gap-1 p-0">
             {unresolved.map(reference => (
@@ -192,9 +191,13 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
 
       <WriteFailure error={error} />
 
-      <form className="flex min-w-0 flex-col gap-2" onSubmit={submit} aria-label="Add or replace a secret">
-        <div className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-end">
-          <label className="flex min-w-0 flex-1 flex-col gap-1 text-cell font-medium text-fg" htmlFor={nameId}>
+      <form
+        className="flex min-w-0 flex-col gap-2 border-t border-border pt-4"
+        onSubmit={submit}
+        aria-label="Add or replace a secret"
+      >
+        <div className="fy-vault-fields">
+          <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg" htmlFor={nameId}>
             Name
             <input
               id={nameId}
@@ -205,7 +208,7 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
               onChange={event => setName(event.target.value.toUpperCase())}
             />
           </label>
-          <label className="flex min-w-0 flex-1 flex-col gap-1 text-cell font-medium text-fg" htmlFor={valueId}>
+          <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg" htmlFor={valueId}>
             Value
             <input
               id={valueId}

@@ -5,12 +5,14 @@
  * It is the machine's inventory (`GET /v1/skills`, docs/skills-inventory.md), not one ferret's: a skill another one of the
  * same name hides (`shadowedBy`) is still listed here, because a person may open it on purpose.
  */
+import { SettingGroup } from '@ferretry/app';
 import { Button, ContextFailure, Loading, type ReadPress, useContextRead } from '@ferretry/app/ui';
 import type { AppComponent, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useState } from 'react';
 import type { SkillEntry } from '../../contract/index.ts';
 import { readMachineSkills, readSkillFile } from '../lib/client.ts';
 import { SKILL_SCOPE_LABEL, skillOverride, sortedSkills } from '../lib/skills-model.ts';
+import './skills-settings.css';
 import { SkillFileSheet } from './skill-file-sheet.tsx';
 
 const MACHINE = 'This machine';
@@ -25,32 +27,45 @@ function Group({
   readonly onOpen: (skill: SkillEntry) => void;
 }) {
   return (
-    <section className="flex min-w-0 flex-col gap-xs" aria-label={title} data-skills-group={title}>
-      <h3 className="m-0 break-words text-cell font-semibold text-fg">{title}</h3>
-      {skills.length === 0 ? (
-        <p className="m-0 text-meta text-muted">No skills here.</p>
-      ) : (
-        <ul className="m-0 flex list-none flex-col gap-xs p-0">
-          {sortedSkills(skills).map(skill => (
-            <li key={skill.path} className="flex min-w-0 flex-col gap-0.5" data-skills-row={skill.path}>
-              <div className="flex min-w-0 flex-wrap items-center gap-xs">
-                <span className="min-w-0 break-words font-mono text-row text-fg">{skill.name}</span>
-                <span className="fy-info-chip" data-tone="muted">
-                  {SKILL_SCOPE_LABEL[skill.scope]}
-                </span>
-                <Button type="button" size="sm" onClick={() => onOpen(skill)} data-skills-open="">
-                  Open<span className="sr-only"> {skill.name}</span>
-                </Button>
-              </div>
-              <p className="m-0 break-words text-meta text-muted">{skill.description}</p>
-              {skillOverride(skill) === undefined ? null : (
-                <p className="m-0 text-meta text-faint">{skillOverride(skill)}</p>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+    <div className="min-w-0" data-skills-group={title}>
+      <SettingGroup label={title}>
+        {skills.length === 0 ? (
+          <li className="py-3 pl-panel pr-1 text-meta text-muted">No skills here.</li>
+        ) : (
+          <li className="min-w-0">
+            <ul className="fy-sk-list">
+              {sortedSkills(skills).map(skill => (
+                <li
+                  key={skill.path}
+                  className="flex min-w-0 flex-col gap-0.5 py-2 pl-panel pr-1"
+                  data-skills-row={skill.path}
+                >
+                  <div className="flex min-h-[44px] min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="min-w-0 break-words font-mono text-row text-fg">{skill.name}</span>
+                    <span className="fy-info-chip" data-tone="muted">
+                      {SKILL_SCOPE_LABEL[skill.scope]}
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="ml-auto"
+                      onClick={() => onOpen(skill)}
+                      data-skills-open=""
+                    >
+                      Open<span className="sr-only"> {skill.name}</span>
+                    </Button>
+                  </div>
+                  <p className="m-0 break-words text-meta text-muted">{skill.description}</p>
+                  {skillOverride(skill) === undefined ? null : (
+                    <p className="m-0 text-meta text-faint">{skillOverride(skill)}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </li>
+        )}
+      </SettingGroup>
+    </div>
   );
 }
 
@@ -77,8 +92,9 @@ export function createSkillsSettings(client: Pick<PluginClient, 'call'>): AppCom
     if (read.load.kind !== 'ready') return <Loading kind="page" label="Reading skills…" />;
     const inventory = read.load.value;
     return (
-      <section className="flex min-w-0 flex-col gap-sm" aria-label="Skills" data-settings="skills">
-        <p className="m-0 text-meta text-muted">
+      <section className="fy-sk flex min-w-0 flex-col" aria-label="Skills" data-settings="skills">
+        <h3 className="m-0 mb-1 text-row font-semibold text-fg">Skills</h3>
+        <p className="m-0 mb-6 text-meta text-muted">
           Every skill on this machine, by runtime account and by project. Open reads a skill’s SKILL.md.
         </p>
         {inventory.homes.map(home => (

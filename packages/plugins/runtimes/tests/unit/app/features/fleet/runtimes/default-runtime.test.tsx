@@ -144,7 +144,7 @@ const machineChanges = (calls: readonly Call[]): unknown[] =>
   calls.filter(call => call.route === PROPOSE).map(call => (call.body as { change: unknown }).change);
 
 describe('Default for new agents on the Runtimes tab', () => {
-  it('is one labelled row: a select of the agent runtimes, each with its state in words, and the hint', async () => {
+  it('is one labelled row: a select of the agent runtimes, each by name, the picked one’s state as a badge, and the hint', async () => {
     const view = await open();
 
     const control = must(view.container.querySelector('[data-default-runtime]'), 'control');
@@ -153,12 +153,7 @@ describe('Default for new agents on the Runtimes tab', () => {
     expect(control.querySelector('[data-default-runtime-hint]')?.textContent).toBe(
       'Used when a start names no runtime.',
     );
-    expect(optionTexts(view.container)).toEqual([
-      'claude-default · ready',
-      'claude-work · needs sign-in',
-      'claude-atomi · switched off until 4 Nov 2026',
-      'codex-kirin · ready',
-    ]);
+    expect(optionTexts(view.container)).toEqual(['claude-default', 'claude-work', 'claude-atomi', 'codex-kirin']);
     expect(select(view.container).value).toBe('claude-default');
     expect(view.container.querySelector('[data-change-apply]')).toBeNull();
   });
@@ -174,9 +169,10 @@ describe('Default for new agents on the Runtimes tab', () => {
     expect(select(held.container).value).toBe('claude-atomi');
   });
 
-  it('names a CLI that is not installed', async () => {
+  it('names a CLI that is not installed, in the picked runtime’s badge and not in its option', async () => {
     const view = await open({
       machine: machine({
+        defaultRuntime: 'codex-kirin',
         tools: [
           { harness: 'claude-code', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' },
           { harness: 'codex', label: 'Codex', installed: false },
@@ -184,7 +180,8 @@ describe('Default for new agents on the Runtimes tab', () => {
       }),
     });
 
-    expect(optionTexts(view.container)).toContain('codex-kirin · Codex not installed');
+    expect(optionTexts(view.container)).toContain('codex-kirin');
+    expect(view.container.querySelector('[data-default-runtime-state]')?.textContent).toBe('Codex not installed');
   });
 
   it('says there is no agent runtime yet when none of the runtimes is one', async () => {

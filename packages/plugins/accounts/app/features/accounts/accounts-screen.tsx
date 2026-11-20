@@ -28,9 +28,10 @@ import {
 } from '../../lib/accounts-screen.ts';
 import type { AccountsClient as InputClient } from './accounts-api.ts';
 import { handleFromLabel, parseDomains, passwordLengthProblem } from '../../lib/login-form.ts';
+import { SettingGroup } from '@ferretry/app';
 import { SecretInput, useSecretField } from '@ferretry/app/ui';
 import { AccountDetail, type AccountTab } from './account-detail.tsx';
-import { type AccountOps, INPUT, Refusal } from './accounts-parts.tsx';
+import { type AccountOps, INPUT as FULL_INPUT, Refusal } from './accounts-parts.tsx';
 import { SiteDetail, type SiteTab } from './site-detail.tsx';
 import type { RulesBinding } from './use-sign-in-rules.ts';
 
@@ -157,7 +158,7 @@ function ListView({
   const damaged = list.health === 'damaged';
 
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-accounts-screen="">
+    <div className="flex min-w-0 max-w-[48rem] flex-col gap-3" data-accounts-screen="">
       {damaged ? (
         <p className="m-0 text-ui text-err" data-accounts-damaged="" role="alert">
           {list.diagnosis ?? 'The account store could not be read cleanly.'} What is listed here may not be everything
@@ -173,65 +174,51 @@ function ListView({
         </p>
       ) : null}
       {groups.map(group => (
-        <section
-          key={group.key}
-          aria-label={group.key}
-          className="flex min-w-0 flex-col gap-1"
-          data-accounts-site-group={group.key}
-        >
-          <h3 className="m-0 break-words text-cell font-semibold text-muted">{group.key}</h3>
-          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+        <div key={group.key} data-accounts-site-group={group.key}>
+          <SettingGroup label={group.key}>
             {group.rows.map(({ signIn, account }) => (
-              <li
-                key={signIn.id}
-                className="flex min-w-0 items-center gap-2 rounded-control border border-border bg-surface px-2"
-                data-accounts-row={account.id}
-              >
-                <button
-                  aria-label={`Open ${accountTitle(account)}`}
-                  className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2 border-0 bg-transparent p-0 text-left text-fg"
-                  onClick={() => onOpen({ kind: 'account', id: account.id, tab: 'details' })}
-                  type="button"
-                >
-                  <AccountLine account={account} method={signInMethodWords(signIn)} />
-                  <ChevronRight aria-hidden="true" className="shrink-0 text-faint" size={16} />
-                </button>
-              </li>
+              <AccountRow key={signIn.id} account={account} method={signInMethodWords(signIn)} onOpen={onOpen} />
             ))}
-          </ul>
-        </section>
+          </SettingGroup>
+        </div>
       ))}
       {unplaced.length === 0 ? null : (
-        <section
-          aria-label="Not signed in anywhere yet"
-          className="flex min-w-0 flex-col gap-1"
-          data-accounts-unplaced=""
-        >
-          <h3 className="m-0 text-cell font-semibold text-muted">No site yet</h3>
-          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+        <div data-accounts-unplaced="">
+          <SettingGroup label="No site yet">
             {unplaced.map(account => (
-              <li
-                key={account.id}
-                className="flex min-w-0 items-center gap-2 rounded-control border border-border bg-surface px-2"
-                data-accounts-row={account.id}
-              >
-                <button
-                  aria-label={`Open ${accountTitle(account)}`}
-                  className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2 border-0 bg-transparent p-0 text-left text-fg"
-                  onClick={() => onOpen({ kind: 'account', id: account.id, tab: 'details' })}
-                  type="button"
-                >
-                  <AccountLine account={account} method={undefined} />
-                  <ChevronRight aria-hidden="true" className="shrink-0 text-faint" size={16} />
-                </button>
-              </li>
+              <AccountRow key={account.id} account={account} method={undefined} onOpen={onOpen} />
             ))}
-          </ul>
-        </section>
+          </SettingGroup>
+        </div>
       )}
       <Refusal error={error} />
       <AddAccountForm accounts={list.accounts} busy={busy} ops={ops} onOpen={onOpen} />
     </div>
+  );
+}
+
+/** One saved account: a hairline row that opens it, its chevron beside the words, not at the far edge of the panel. */
+function AccountRow({
+  account,
+  method,
+  onOpen,
+}: {
+  readonly account: AccountSummary;
+  readonly method: string | undefined;
+  readonly onOpen: (view: AccountsView) => void;
+}): ReactNode {
+  return (
+    <li className="min-w-0" data-accounts-row={account.id}>
+      <button
+        aria-label={`Open ${accountTitle(account)}`}
+        className="flex min-h-[52px] w-full min-w-0 items-center gap-2 border-0 bg-transparent py-1 pl-panel pr-3 text-left text-fg"
+        onClick={() => onOpen({ kind: 'account', id: account.id, tab: 'details' })}
+        type="button"
+      >
+        <AccountLine account={account} method={method} />
+        <ChevronRight aria-hidden="true" className="shrink-0 text-faint" size={16} />
+      </button>
+    </li>
   );
 }
 
@@ -255,6 +242,9 @@ function AccountLine({
 }
 
 // ── Look-alikes ──────────────────────────────────────────────────────────────────────────────────────
+
+/** A field in this tab's forms: one text input never runs the width of a wide panel. */
+const INPUT = `${FULL_INPUT} max-w-[28rem]`;
 
 function LookAlikeBanner({
   accounts,
@@ -384,7 +374,7 @@ function AddAccountForm({
 
   if (!open)
     return (
-      <div>
+      <div className="mt-2">
         <button className="kt-btn min-h-[44px]" data-accounts-add-open="" onClick={() => setOpen(true)} type="button">
           <Plus aria-hidden="true" size={14} /> Add an account
         </button>
@@ -409,7 +399,7 @@ function AddAccountForm({
   return (
     <form
       aria-label="Add an account"
-      className="flex min-w-0 flex-col gap-3 rounded-control border border-border p-3"
+      className="flex min-w-0 flex-col gap-3 border-t border-border pt-4"
       data-accounts-add=""
       onSubmit={event => void submit(event)}
     >

@@ -10,7 +10,7 @@
 
 import type { MachineView, RuntimeView } from '../../../../contract/index.ts';
 import { useId } from 'react';
-import { Button } from '../../../ui.ts';
+import { Badge, Button } from '../../../ui.ts';
 import { machineSettings } from '../machine/machine-settings.ts';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { Block, FleetGroup } from '../shell/fleet-group.tsx';
@@ -21,6 +21,7 @@ import {
   DEFAULT_RUNTIME_LABEL,
   defaultOptionLabel,
   keepDefaultLabel,
+  runtimeStateWords,
 } from './default-runtime-model.ts';
 
 export interface DefaultRuntimeControlProps {
@@ -49,6 +50,8 @@ export function DefaultRuntimeControl({
   const current = machine.defaultRuntime;
   const shown = picked ?? current ?? '';
   const pending = picked !== null && picked !== current;
+  const shownRuntime = candidates.find(runtime => runtime.name === shown);
+  const stateWords = shownRuntime === undefined ? null : runtimeStateWords(shownRuntime, machine);
   const save = (): void => {
     if (picked === null) return;
     void changes.apply(machineSettings(machine, { defaultRuntime: picked })).then(result => {
@@ -69,31 +72,47 @@ export function DefaultRuntimeControl({
     <div data-default-runtime="">
       <FleetGroup label={DEFAULT_RUNTIME_LABEL} name="default-runtime">
         <Block>
-          {/* The select is as wide as its longest option up to 24rem, and never wider than the panel it sits in. */}
-          <select
-            id={id}
-            aria-label={DEFAULT_RUNTIME_LABEL}
-            aria-describedby={`${id}-hint`}
-            className="kt-input min-w-0 w-full max-w-sm"
-            data-default-runtime-select=""
-            value={shown}
-            onChange={event => {
-              changes.clear();
-              const value = event.target.value;
-              onPick(value === '' || value === current ? null : value);
-            }}
-          >
-            {current === null ? <option value="">{AUTOMATIC_DEFAULT}</option> : null}
-            {candidates.map(runtime => (
-              <option
-                key={runtime.name}
-                value={runtime.name}
-                disabled={runtime.disabled !== undefined && runtime.name !== shown}
+          {/* The select is as wide as its longest option up to 24rem, and never wider than the panel it sits in; the picked runtime's state is a badge beside it, never part of an option's name. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+            <select
+              id={id}
+              aria-label={DEFAULT_RUNTIME_LABEL}
+              aria-describedby={`${id}-hint`}
+              className="kt-input min-w-0 w-full max-w-sm"
+              data-default-runtime-select=""
+              value={shown}
+              onChange={event => {
+                changes.clear();
+                const value = event.target.value;
+                onPick(value === '' || value === current ? null : value);
+              }}
+            >
+              {current === null ? <option value="">{AUTOMATIC_DEFAULT}</option> : null}
+              {candidates.map(runtime => (
+                <option
+                  key={runtime.name}
+                  value={runtime.name}
+                  disabled={runtime.disabled !== undefined && runtime.name !== shown}
+                >
+                  {defaultOptionLabel(runtime)}
+                </option>
+              ))}
+            </select>
+            {stateWords === null ? null : (
+              <Badge
+                tone={
+                  stateWords === 'ready'
+                    ? 'ok'
+                    : stateWords === 'checking' || stateWords === 'refresh due'
+                      ? 'pend'
+                      : 'warn'
+                }
+                data-default-runtime-state=""
               >
-                {defaultOptionLabel(runtime, machine)}
-              </option>
-            ))}
-          </select>
+                {stateWords}
+              </Badge>
+            )}
+          </div>
           <p className="m-0 text-meta leading-base text-muted" data-default-runtime-hint="" id={`${id}-hint`}>
             {DEFAULT_RUNTIME_HINT}
           </p>

@@ -91,7 +91,7 @@ export function MachineRuleStage({
   }, [highlighted]);
   return (
     <article
-      className={`flex min-w-0 flex-col gap-2 rounded-control border bg-surface-2 p-3 ${highlighted ? 'border-transparent ring-2 ring-accent' : 'border-border'}`}
+      className={`flex min-w-0 flex-col gap-2 border-t border-border py-3 ${highlighted ? 'ring-2 ring-accent' : ''}`}
       data-rule-stage={staged.stage}
       ref={ref}
       {...(highlighted ? { 'data-highlighted': '' } : {})}

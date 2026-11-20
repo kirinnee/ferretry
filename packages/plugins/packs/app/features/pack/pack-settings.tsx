@@ -21,6 +21,7 @@ import {
 import type { PacksClient } from '../../lib/client.ts';
 import type { ConfigFiles } from '../../lib/pack-config.ts';
 import type { PackConfigPatch } from '../../lib/pack/pack-files.ts';
+import { ChoiceCards, SettingGroup, SettingRow } from '@ferretry/app';
 import { Button, cn, Loading } from '../../ui.ts';
 import { RoutingPromptCard } from './routing-prompt-card.tsx';
 import { type MachinePack, type PackSave, useMachinePack } from './use-machine-pack.ts';
@@ -117,6 +118,17 @@ const valid = (setting: NumberSetting, value: number): boolean =>
 const SWITCH_CLASS =
   'flex min-h-[44px] shrink-0 items-center gap-2 rounded-control border px-3 text-ui font-semibold disabled:opacity-60';
 
+/**
+ * The numbers' rows lay out by the width of the PANEL they sit in (a Settings panel is ~212px wide at a 768px window,
+ * ~724px at 1280), never the window's: one column below 640px, two to a line from there. The container is the `li`, the
+ * grid is inside it, because a container cannot query itself.
+ */
+const FIT = 'min-w-0 [container-type:inline-size]';
+const ROWS =
+  'm-0 grid min-w-0 list-none grid-cols-1 p-0 [&>li+li]:border-t [&>li+li]:border-border ' +
+  '[@container(min-width:640px)]:grid-cols-2 [@container(min-width:640px)]:gap-x-8 ' +
+  '[@container(min-width:640px)]:[&>li:nth-child(2)]:border-t-0';
+
 /** The numbers, edited together and saved with one button: every save rewrites a file on the machine. */
 function NumbersForm({
   config,
@@ -144,41 +156,47 @@ function NumbersForm({
     onSave(patch);
   };
   return (
-    <fieldset className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0">
-      <legend className="mb-2 p-0 text-ui font-semibold">{title}</legend>
-      {settings.map(setting => {
-        const id = `${base}-${setting.key}`;
-        const bad = draft[setting.key] !== undefined && !valid(setting, Number(text(setting)));
-        return (
-          <div key={setting.key} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-            <div className="min-w-0 flex-1 basis-[220px]">
-              <label htmlFor={id} className="block text-ui">
-                {setting.label}
-              </label>
-              <span id={`${id}-hint`} className="block text-meta leading-base text-muted">
-                {setting.hint}
-                {bad ? ` Between ${setting.min} and ${setting.max}.` : ''}
-              </span>
-            </div>
-            <input
-              id={id}
-              type="number"
-              inputMode={setting.step === undefined ? 'numeric' : 'decimal'}
-              className={cn('kt-input min-h-[44px] w-28', bad && '!border-err')}
-              min={setting.min}
-              max={setting.max}
-              step={setting.step ?? 1}
-              aria-describedby={`${id}-hint`}
-              aria-invalid={bad || undefined}
-              disabled={busy}
-              value={text(setting)}
-              data-pack-number={setting.key}
-              onChange={event => setDraft({ ...draft, [setting.key]: event.currentTarget.value })}
-            />
-          </div>
-        );
-      })}
-      <div className="flex flex-wrap gap-2">
+    <SettingGroup label={title}>
+      <li className={FIT}>
+        <ul className={ROWS}>
+          {settings.map(setting => {
+            const id = `${base}-${setting.key}`;
+            const bad = draft[setting.key] !== undefined && !valid(setting, Number(text(setting)));
+            return (
+              <li
+                key={setting.key}
+                className="flex min-h-[52px] min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-1 pl-panel pr-1"
+              >
+                <div className="min-w-0 flex-1 basis-[160px]">
+                  <label htmlFor={id} className="block text-ui font-semibold">
+                    {setting.label}
+                  </label>
+                  <span id={`${id}-hint`} className="block text-meta leading-tight text-muted">
+                    {setting.hint}
+                    {bad ? ` Between ${setting.min} and ${setting.max}.` : ''}
+                  </span>
+                </div>
+                <input
+                  id={id}
+                  type="number"
+                  inputMode={setting.step === undefined ? 'numeric' : 'decimal'}
+                  className={cn('kt-input min-h-[44px] w-28 shrink-0', bad && '!border-err')}
+                  min={setting.min}
+                  max={setting.max}
+                  step={setting.step ?? 1}
+                  aria-describedby={`${id}-hint`}
+                  aria-invalid={bad || undefined}
+                  disabled={busy}
+                  value={text(setting)}
+                  data-pack-number={setting.key}
+                  onChange={event => setDraft({ ...draft, [setting.key]: event.currentTarget.value })}
+                />
+              </li>
+            );
+          })}
+        </ul>
+      </li>
+      <li className="flex flex-wrap gap-2 py-2 pl-panel pr-1">
         <Button className="min-h-[44px]" disabled={busy || edited.length === 0 || !allValid} onClick={save}>
           Save {title.toLocaleLowerCase()}
         </Button>
@@ -187,8 +205,8 @@ function NumbersForm({
             Discard
           </Button>
         ) : null}
-      </div>
-    </fieldset>
+      </li>
+    </SettingGroup>
   );
 }
 
@@ -196,113 +214,104 @@ function PackPanel({ view, state }: { readonly view: PackView; readonly state: M
   const { config } = view;
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<PackSave | null>(null);
-  const switchTitle = useId();
-  const decisionTitle = useId();
+  /** The card the owner has picked but not applied: arrow keys move through the cards, so a pick alone saves nothing. */
+  const [pick, setPick] = useState<PackDecisionMode | null>(null);
   const commit = (patch: PackConfigPatch): void => {
     setBusy(true);
     setOutcome(null);
     void state.saveConfig(patch).then(result => {
       setOutcome(result);
       setBusy(false);
+      if ('decision' in patch) setPick(null);
     });
   };
   const on = config.enabled;
+  const chosen = pick ?? config.decision;
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-pack-settings="">
-      <section className="kt-panel flex flex-col gap-2 p-4" aria-labelledby={switchTitle}>
-        <div className="flex flex-wrap items-start gap-3">
-          <div className="min-w-0 flex-1">
-            <h3 id={switchTitle} className="m-0 text-ui font-semibold">
-              Pack mode on this machine
-            </h3>
-            <p className="m-0 mt-1 text-meta leading-base text-muted">
-              Ferrets may start helpers for parts of their work and pick the model each one runs on. Off: no ferret is
-              told about it, and <span className="mono">fy new</span> refuses.
-            </p>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={on}
-            aria-labelledby={switchTitle}
-            disabled={busy}
-            onClick={() => commit({ enabled: !on })}
-            data-pack-switch=""
-            className={cn(
-              SWITCH_CLASS,
-              on ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-muted',
-            )}
-          >
-            <span
-              aria-hidden="true"
-              className={cn('relative h-5 w-9 rounded-full transition-colors', on ? 'bg-accent' : 'bg-surface-3')}
-            >
-              <span
-                className={cn(
-                  'absolute top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-[left]',
-                  on ? 'left-[18px]' : 'left-0.5',
-                )}
-              />
-            </span>
-            {on ? 'On' : 'Off'}
-          </button>
-        </div>
-        <p className="m-0 text-meta text-faint">
-          Each ferret also has its own switch beside it; a change there takes effect at its next launch.
-        </p>
-      </section>
-
-      <section className="kt-panel flex flex-col gap-2 p-4" aria-labelledby={decisionTitle}>
-        <h3 id={decisionTitle} className="m-0 text-ui font-semibold">
-          Who picks the model
-        </h3>
-        <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-          <legend className="sr-only">Who picks the model</legend>
-          {DECISIONS.map(option => (
-            <label
-              key={option.id}
+    <div className="flex min-w-0 flex-col" data-pack-settings="">
+      <SettingGroup label="Pack mode">
+        <SettingRow
+          name="Pack mode on this machine"
+          hint="Ferrets may start helpers for parts of their work and pick the model each one runs on."
+          explanation={
+            <>
+              Off: no ferret is told about it, and <span className="mono">fy new</span> refuses. Each ferret also has
+              its own switch beside it; a change there takes effect at its next launch.
+            </>
+          }
+          control={labelId => (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={on}
+              aria-labelledby={labelId}
+              disabled={busy}
+              onClick={() => commit({ enabled: !on })}
+              data-pack-switch=""
               className={cn(
-                'flex min-h-[44px] cursor-pointer items-start gap-3 rounded-control border px-control-x py-2',
-                config.decision === option.id ? 'border-accent bg-accent-soft' : 'border-border-strong bg-surface-2',
+                SWITCH_CLASS,
+                on ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-muted',
               )}
             >
-              <input
-                type="radio"
-                name="pack-decision"
-                className="mt-1"
-                checked={config.decision === option.id}
-                disabled={busy}
-                onChange={() => commit({ decision: option.id })}
-              />
-              <span className="flex min-w-0 flex-col">
-                <span className="text-ui font-semibold">{option.label}</span>
-                <span className="text-meta leading-base text-muted">{option.hint}</span>
-                {option.id === 'jev' ? (
-                  <span className="text-meta leading-base text-warn" data-pack-jev-cap="">
-                    Daily cap: ${config.jev.usdPerDay.toFixed(2)} (default $
-                    {DEFAULT_PACK_CONFIG.jev.usdPerDay.toFixed(2)})
-                  </span>
-                ) : null}
+              <span
+                aria-hidden="true"
+                className={cn('relative h-5 w-9 rounded-full transition-colors', on ? 'bg-accent' : 'bg-surface-3')}
+              >
+                <span
+                  className={cn(
+                    'absolute top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-[left]',
+                    on ? 'left-[18px]' : 'left-0.5',
+                  )}
+                />
               </span>
-            </label>
-          ))}
-        </fieldset>
-        {config.decision === 'jev' ? (
-          <NumbersForm config={config} settings={[JEV_CAP]} title="Jev cap" busy={busy} onSave={commit} />
-        ) : null}
-      </section>
+              {on ? 'On' : 'Off'}
+            </button>
+          )}
+        />
+      </SettingGroup>
 
-      <section className="kt-panel flex flex-col gap-4 p-4">
-        <NumbersForm config={config} settings={LIMITS} title="Limits" busy={busy} onSave={commit} />
-        <NumbersForm config={config} settings={PROBE} title="Probe" busy={busy} onSave={commit} />
-      </section>
+      <SettingGroup label="Who picks the model">
+        <li className="flex min-w-0 flex-col gap-3 py-3 pl-panel pr-1">
+          <ChoiceCards
+            label="Who picks the model"
+            value={chosen}
+            disabled={busy}
+            onChange={next => setPick(next === config.decision ? null : (next as PackDecisionMode))}
+            options={DECISIONS.map(option => ({ id: option.id, title: option.label, line: option.hint }))}
+          />
+          <span className="text-meta leading-base text-warn" data-pack-jev-cap="">
+            Daily cap: ${config.jev.usdPerDay.toFixed(2)} (default ${DEFAULT_PACK_CONFIG.jev.usdPerDay.toFixed(2)})
+          </span>
+          {pick === null ? null : (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="primary"
+                className="min-h-[44px]"
+                disabled={busy}
+                onClick={() => commit({ decision: pick })}
+              >
+                Apply
+              </Button>
+              <Button variant="ghost" className="min-h-[44px]" disabled={busy} onClick={() => setPick(null)}>
+                Discard
+              </Button>
+            </div>
+          )}
+        </li>
+      </SettingGroup>
+      {config.decision === 'jev' ? (
+        <NumbersForm config={config} settings={[JEV_CAP]} title="Jev cap" busy={busy} onSave={commit} />
+      ) : null}
+
+      <NumbersForm config={config} settings={LIMITS} title="Limits" busy={busy} onSave={commit} />
+      <NumbersForm config={config} settings={PROBE} title="Probe" busy={busy} onSave={commit} />
 
       {outcome !== null && outcome.kind !== 'applied' ? (
         <p
           role="status"
           data-pack-outcome={outcome.kind}
           className={cn(
-            'm-0 rounded-control border px-3 py-2 text-meta leading-base',
+            'mx-0 mb-8 mt-0 rounded-control border px-3 py-2 text-meta leading-base',
             outcome.kind === 'refused'
               ? 'border-err-border bg-err-bg text-err'
               : 'border-warn-border bg-warn-bg text-warn',

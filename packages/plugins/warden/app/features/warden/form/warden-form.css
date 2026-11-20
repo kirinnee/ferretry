@@ -4,6 +4,7 @@
  * `.fy-page label { display: block; margin: 8px 0 }` rule can never turn a flex label back into a block.
  */
 .fy-wf {
+  container-type: inline-size;
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -49,7 +50,7 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
-@media (min-width: 720px) {
+@container (min-width: 640px) {
   .fy-wf-layers {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -231,7 +232,7 @@ label.fy-wf-slider.fy-wf-slider {
   font-weight: 500;
   color: var(--fg);
 }
-@media (min-width: 720px) {
+@container (min-width: 640px) {
   label.fy-wf-slider.fy-wf-slider {
     grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem);
   }
@@ -282,7 +283,7 @@ label.fy-wf-slider.fy-wf-slider {
 }
 
 /* From 720px a number field's input sits in the same control column as the sliders. */
-@media (min-width: 720px) {
+@container (min-width: 640px) {
   label.fy-wf-num.fy-wf-num {
     max-width: none;
     grid-template-columns: minmax(0, 1fr) minmax(12rem, 18rem);

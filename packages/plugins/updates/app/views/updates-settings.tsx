@@ -115,7 +115,10 @@ export function UpdatesView({ view, note, readError, onStart, onAutoInstall }: U
   const badge = statusBadge(view);
   const latest = knownLatestRelease(view.check);
   return (
-    <section aria-label="Updates" className="flex flex-col gap-4">
+    <section
+      aria-label="Updates"
+      className="flex min-w-0 flex-col [&_[data-setting-hint]]:overflow-visible [&_[data-setting-hint]]:whitespace-normal [&_[data-setting-hint]]:[text-overflow:clip]"
+    >
       <SettingGroup label="This machine">
         <SettingRow
           name="Version"
@@ -143,7 +146,7 @@ export function UpdatesView({ view, note, readError, onStart, onAutoInstall }: U
             }
             wide
             control={() => (
-              <span className="flex flex-wrap gap-2 max-md:[&>button]:w-full">
+              <span className="flex min-w-0 max-w-full flex-wrap gap-2 max-md:[&>button]:w-full [&>button]:h-auto [&>button]:max-w-full [&>button]:whitespace-normal">
                 <Button variant="primary" onClick={() => onStart(offer.target, 'now')}>
                   Update to {offer.target}
                 </Button>
@@ -170,25 +173,27 @@ export function UpdatesView({ view, note, readError, onStart, onAutoInstall }: U
         <SettingRow
           name="Install updates automatically"
           hint="Only when no ferret is mid-turn"
-          explanation={
-            view.plan.kind === 'self'
-              ? view.plan.rollback === 'automatic'
-                ? 'If the new version does not come up, the old one is put back.'
-                : 'This install method keeps no previous version, so a failed update cannot be undone on its own.'
-              : 'This install is updated by hand, so there is nothing to install automatically.'
-          }
           control={labelId => (
             <SettingSwitch checked={view.autoInstall} labelledBy={labelId} onChange={onAutoInstall} />
           )}
-        />
+        >
+          {/* Said under the row, not behind an (i) at the far edge: the switch sits beside its name with no dead gap. */}
+          <p className="m-0 pb-3 pl-panel pr-1 text-cell leading-base text-muted">
+            {view.plan.kind === 'self'
+              ? view.plan.rollback === 'automatic'
+                ? 'If the new version does not come up, the old one is put back.'
+                : 'This install method keeps no previous version, so a failed update cannot be undone on its own.'
+              : 'This install is updated by hand, so there is nothing to install automatically.'}
+          </p>
+        </SettingRow>
       </SettingGroup>
       {note === null ? null : (
-        <p className="m-0 text-ui text-fg" role="status">
+        <p className="m-0 px-1 text-ui text-fg" role="status">
           {note}
         </p>
       )}
       {readError === null ? null : (
-        <p className="m-0 text-ui text-fg" role="status">
+        <p className="m-0 px-1 text-ui text-fg" role="status">
           {readError}
         </p>
       )}

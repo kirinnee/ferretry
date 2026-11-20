@@ -55,10 +55,10 @@ export function TaskPlansCard({ plans, busy, error, onRevoke }: TaskPlansCardPro
           No live sign-in plans. Every sign-in and paste asks you.
         </p>
       ) : (
-        <ul className="m-0 mt-3 flex list-none flex-col gap-3 p-0">
+        <ul className="m-0 mt-3 list-none p-0 [&>li+li]:border-t [&>li+li]:border-border">
           {live.map(plan => (
             <li
-              className="flex min-w-0 flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
+              className="flex min-w-0 flex-col gap-2 py-3"
               data-task-plans-plan={plan.id}
               key={`${plan.sessionId}/${plan.id}`}
             >

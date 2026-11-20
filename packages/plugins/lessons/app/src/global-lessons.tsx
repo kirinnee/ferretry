@@ -6,7 +6,8 @@
  */
 
 import type { LessonsGlobalDocument } from '../../contract/index.ts';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { SettingGroup } from '@ferretry/app';
 import { Button } from '@ferretry/app/ui';
 import type { LessonsConnection } from './api.ts';
 import { fetchGlobalLessons, lessonsErrorMessage, putGlobalLessons } from './api.ts';
@@ -17,7 +18,6 @@ export function GlobalLessonsEditor({ connection }: { readonly connection: Lesso
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
-  const title = useId();
 
   const load = (current: () => boolean) =>
     fetchGlobalLessons(connection).then(
@@ -60,43 +60,44 @@ export function GlobalLessonsEditor({ connection }: { readonly connection: Lesso
   };
 
   return (
-    <section className="kt-panel flex flex-col gap-2 p-4" aria-labelledby={title} data-global-lessons="">
-      <h3 id={title} className="m-0 text-ui font-semibold">
-        Global lessons
-      </h3>
-      <p className="m-0 text-meta leading-base text-muted">
-        Every ferret reads these rules at its next launch. Reword a rule or delete its line to change or remove an
-        applied Global lesson.
-      </p>
-      <textarea
-        aria-labelledby={title}
-        className="min-h-[160px] w-full rounded-control border border-border bg-surface-2 p-2 font-mono text-meta"
-        disabled={document === null || saving}
-        value={draft}
-        onChange={event => {
-          setDraft(event.target.value);
-          setSaved(false);
-        }}
-      />
-      <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          disabled={document === null || saving || draft === document.text}
-          onClick={() => void save()}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
-        {saved && (
-          <span role="status" className="text-meta text-muted">
-            Saved. New ferrets read it at their next launch.
-          </span>
-        )}
-      </div>
-      {error !== null && (
-        <p role="alert" className="m-0 text-meta text-err">
-          {error}
-        </p>
-      )}
-    </section>
+    <div className="min-w-0" data-global-lessons="">
+      <SettingGroup label="Global lessons">
+        <li className="flex min-w-0 flex-col gap-2 py-3 pl-panel pr-1">
+          <p className="m-0 text-meta leading-base text-muted">
+            Every ferret reads these rules at its next launch. Reword a rule or delete its line to change or remove an
+            applied Global lesson.
+          </p>
+          <textarea
+            aria-label="Global lessons"
+            className="min-h-[160px] w-full rounded-control border border-border bg-surface-2 p-2 font-mono text-meta"
+            disabled={document === null || saving}
+            value={draft}
+            onChange={event => {
+              setDraft(event.target.value);
+              setSaved(false);
+            }}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              disabled={document === null || saving || draft === document.text}
+              onClick={() => void save()}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
+            {saved && (
+              <span role="status" className="text-meta text-muted">
+                Saved. New ferrets read it at their next launch.
+              </span>
+            )}
+          </div>
+          {error !== null && (
+            <p role="alert" className="m-0 text-meta text-err">
+              {error}
+            </p>
+          )}
+        </li>
+      </SettingGroup>
+    </div>
   );
 }

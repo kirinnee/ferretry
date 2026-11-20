@@ -19,6 +19,12 @@ export const AGENT_PERMISSION_SEGMENTS: Readonly<Record<AgentPermissions, string
   skip: 'Skip all checks',
 };
 
+/** One plain line under each card of the permissions pick, so a card says what it does before it is chosen. */
+export const AGENT_PERMISSION_LINES: Readonly<Record<AgentPermissions, string>> = {
+  auto: 'Asks before anything risky',
+  skip: 'Never asks; can change any file and run any command',
+};
+
 export const agentPermissionDetail = (draft: AgentPermissions, machineName: string): string =>
   draft === 'auto'
     ? 'Agents work on their own and stop to ask before anything that looks risky.'

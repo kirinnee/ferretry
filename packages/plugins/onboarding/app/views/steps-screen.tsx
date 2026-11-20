@@ -4,7 +4,7 @@
  * which is the way back to it for a machine that still has steps to look at.
  */
 
-import { daemonOfClient, daemonSettingsHref, useOptionalRouter } from '@ferretry/app';
+import { daemonOfClient, daemonSettingsHref, SettingGroup, SettingRow, useOptionalRouter } from '@ferretry/app';
 import { Button, Loading, type ReadPress, readPress } from '@ferretry/app/ui';
 import type { PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { type MouseEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -190,17 +190,24 @@ export function createSetupTab(client: PluginClient) {
       );
     const waiting = reading.view.steps.filter(step => sideOf(step) === 'daemon' && step.state === 'pending').length;
     return (
-      <section className="flex flex-col items-start gap-2" data-onboarding-setup-tab={waiting}>
-        <p className="m-0 text-cell text-muted">
-          {waiting === 0
-            ? 'Every setup step on this machine has an answer.'
-            : waiting === 1
-              ? '1 setup step on this machine has not been looked at yet.'
-              : `${waiting} setup steps on this machine have not been looked at yet.`}
-        </p>
-        <RouterLink href={stepsHref(daemon)} data-onboarding-open-steps="">
-          {waiting === 0 ? 'Review the setup steps' : 'Open the setup steps'}
-        </RouterLink>
+      <section className="min-w-0" data-onboarding-setup-tab={waiting}>
+        <SettingGroup label="Setup steps">
+          <SettingRow
+            name="This machine"
+            hint={
+              waiting === 0
+                ? 'Every setup step on this machine has an answer.'
+                : waiting === 1
+                  ? '1 setup step on this machine has not been looked at yet.'
+                  : `${waiting} setup steps on this machine have not been looked at yet.`
+            }
+            control={() => (
+              <RouterLink href={stepsHref(daemon)} data-onboarding-open-steps="">
+                {waiting === 0 ? 'Review the setup steps' : 'Open the setup steps'}
+              </RouterLink>
+            )}
+          />
+        </SettingGroup>
       </section>
     );
   };

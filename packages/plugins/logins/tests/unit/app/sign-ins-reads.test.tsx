@@ -83,7 +83,7 @@ describe('the Sign-ins list', () => {
   it('groups logins by tool, with status, use, badges and the usage bars', async () => {
     const view = await open([personal, work, codex]);
     const c = view.container;
-    expect(text(c, '[data-logins-tab] > div > p')).toBe('3 logins on box');
+    expect(text(c, '[data-logins-heading] > div:last-child > p')).toBe('3 logins on box');
     const claude = must(c.querySelector('[data-logins-group="claude-code"]'), 'the Claude group');
     expect(claude.querySelector('h4')?.textContent).toBe('Claude Code');
     expect(
@@ -172,7 +172,7 @@ describe('the Sign-ins list', () => {
   it('explains the labels when a login says it needs one, even before two share an email', async () => {
     const view = await open([login({ id: 'claude-a', email: 'a@example.com', needsLabel: true })]);
     expect(view.container.querySelector('[data-logins-labels-hint]')).not.toBeNull();
-    expect(text(view.container, '[data-logins-tab] > div > p')).toBe('1 login on box');
+    expect(text(view.container, '[data-logins-heading] > div:last-child > p')).toBe('1 login on box');
     await view.unmount();
   });
 

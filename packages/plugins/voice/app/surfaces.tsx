@@ -102,6 +102,7 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
     return (
       <>
         <div className="fy-vs">
+          <h3 className="m-0 mb-4 text-row font-semibold text-fg">Voice</h3>
           <DictationSettings {...dictation} />
           <SpeedupKeysSettings />
           <SettingGroup label="Privacy and debugging">
@@ -122,6 +123,7 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
   const VoiceCleanupTab = () => (
     <Boundary>
       <div className="fy-vs">
+        <h3 className="m-0 mb-4 text-row font-semibold text-fg">Voice clean-up</h3>
         <VoiceCleanupSettings daemon={THIS_DAEMON} />
       </div>
     </Boundary>

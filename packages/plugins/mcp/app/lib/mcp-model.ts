@@ -65,6 +65,41 @@ const NOT_APPROVED =
 const DISABLED = 'Somebody turned this server off for this project, so the ferret never starts it.';
 
 /**
+ * A server Ferretry starts with every ferret. It is built in, and when it signs in its sign-in state is on the row too:
+ * a built-in server that needs a sign-in must not read like one that is ready.
+ */
+function builtInStatus(server: McpInventoryServer, nowMs: number): McpRowStatus {
+  const ready: McpRowStatus = {
+    label: 'Built in',
+    tone: 'ok',
+    detail: 'Started with every ferret.',
+    canCheck: false,
+    attention: false,
+  };
+  if (server.connection === undefined) return ready;
+  const signedIn = mcpSignInStatus(server.connection, nowMs);
+  if (signedIn.tone !== 'warn')
+    return {
+      ...ready,
+      label: `Built in · ${signedIn.title}`,
+      ...(signedIn.detail === undefined ? {} : { detail: signedIn.detail }),
+    };
+  const unsupported = server.signIn?.unsupported;
+  return {
+    label: `Built in · ${signedIn.title}`,
+    tone: 'warn',
+    ...(signedIn.detail === undefined ? {} : { detail: signedIn.detail }),
+    canCheck: false,
+    ...(server.signIn === undefined
+      ? {}
+      : unsupported === undefined
+        ? { signIn: signedIn.signedInBefore ? ('Sign in again' as const) : ('Sign in' as const) }
+        : { signInUnsupported: unsupported }),
+    attention: true,
+  };
+}
+
+/**
  * Where one server stands: the last check when there is one (it is the freshest fact), else what the
  * listing knows — its approval, its sign-in, whether another scope overrides it.
  */
@@ -73,8 +108,7 @@ export function mcpRowStatus(
   check: McpCheckResult | undefined,
   nowMs: number,
 ): McpRowStatus {
-  if (server.scope === 'ferretry')
-    return { label: 'Built in', tone: 'ok', detail: 'Started with every ferret.', canCheck: false, attention: false };
+  if (server.scope === 'ferretry') return builtInStatus(server, nowMs);
 
   const approval = approvalOf(server);
   const unsupported = server.signIn?.unsupported;

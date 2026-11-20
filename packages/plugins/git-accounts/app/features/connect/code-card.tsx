@@ -40,7 +40,7 @@ export function CodeCard({ flow, slow, needsStepUp, onConfirmStepUp, onCancel, n
 
   return (
     <section
-      className="flex flex-col gap-3 rounded-control border border-border-strong bg-surface-2 p-3"
+      className="flex flex-col gap-3 border-t border-border pt-4"
       aria-labelledby="git-code-heading"
       data-testid="git-code-card"
     >

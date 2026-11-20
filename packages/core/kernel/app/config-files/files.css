@@ -1,0 +1,14 @@
+/* A file row's and a held edit's controls (state, Edit as YAML, copy; Confirm, Review) lay out by the width of the PANEL, not the
+   window's: a 768px window leaves the Settings panel about 212px, too little for the label column and the controls to share a line.
+   Below 600px the controls take their own line under the name and may wrap, and the empty (i) slot is dropped. */
+@container (max-width: 599.98px) {
+  [data-config-file] [data-setting-controls],
+  [data-config-pending] [data-setting-controls] {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  [data-config-file] [data-setting-controls] > [aria-hidden='true'],
+  [data-config-pending] [data-setting-controls] > [aria-hidden='true'] {
+    display: none;
+  }
+}

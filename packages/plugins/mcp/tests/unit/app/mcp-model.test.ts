@@ -35,6 +35,25 @@ describe('mcpRowStatus', () => {
     });
   });
 
+  it('shows a built-in server that still needs a sign-in as needing it, with Sign in on the row', () => {
+    const status = mcpRowStatus(
+      mcpServer({
+        name: 'tracker',
+        scope: 'ferretry',
+        signIn: { subject: 'tracker', required: true },
+        connection: { component: 'tracker', state: 'needs-sign-in', renewable: false, secrets: [] },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(status).toMatchObject({
+      label: 'Built in · Needs sign-in',
+      tone: 'warn',
+      signIn: 'Sign in',
+      attention: true,
+    });
+  });
+
   it('says a server another scope overrides is not the one in use', () => {
     const status = mcpRowStatus(mcpServer({ name: 'docs', scope: 'user', shadowedBy: 'local' }), undefined, NOW);
     expect(status.label).toBe('Overridden by Local');

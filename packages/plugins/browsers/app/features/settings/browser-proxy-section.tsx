@@ -229,56 +229,61 @@ export function BrowserProxySection({
         <span className="font-semibold">Now: </span>
         {now}
       </p>
-      <div className="flex min-w-0 flex-col gap-1">
-        <label htmlFor={`${ids}-url`} className="text-ui font-semibold text-fg">
-          Proxy address
-        </label>
-        <input
-          id={`${ids}-url`}
-          className="kt-input min-w-0 font-mono"
-          autoComplete="off"
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-          placeholder="http://proxy.example:8080 or socks5://proxy.example:1080"
-          value={draft.url}
-          data-browser-proxy-url=""
-          onChange={event => edit({ url: event.target.value })}
-        />
+      {/* A field is never wider than 28rem; username and password sit side by side when the PANEL (not the window) has room. */}
+      <div className="min-w-0 [container-type:inline-size]">
+        <div className="grid min-w-0 grid-cols-1 gap-3 [@container(min-width:640px)]:grid-cols-2 [@container(min-width:640px)]:gap-x-8">
+          <div className="flex min-w-0 max-w-[28rem] flex-col gap-1 [@container(min-width:640px)]:col-span-2">
+            <label htmlFor={`${ids}-url`} className="text-ui font-semibold text-fg">
+              Proxy address
+            </label>
+            <input
+              id={`${ids}-url`}
+              className="kt-input min-w-0 font-mono"
+              autoComplete="off"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="http://proxy.example:8080 or socks5://proxy.example:1080"
+              value={draft.url}
+              data-browser-proxy-url=""
+              onChange={event => edit({ url: event.target.value })}
+            />
+          </div>
+          <div className="flex min-w-0 max-w-[28rem] flex-col gap-1 [@container(min-width:640px)]:col-span-2">
+            <label htmlFor={`${ids}-bypass`} className="text-ui font-semibold text-fg">
+              Skip the proxy for (optional)
+            </label>
+            <textarea
+              id={`${ids}-bypass`}
+              className="kt-input min-h-16 min-w-0 font-mono"
+              autoComplete="off"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder={'*.internal.example\n10.0.0.0/8'}
+              value={draft.bypass}
+              data-browser-proxy-bypass=""
+              onChange={event => edit({ bypass: event.target.value })}
+            />
+          </div>
+          <BrowserProxyCredential
+            what="Username"
+            stored={isStored(draft.usernameSecret, savedNames.usernameSecret)}
+            field={pendingFields.username}
+            problem={problems.username}
+            onChanged={() => typedInto('username')}
+            onRemove={() => removeCredential('username')}
+          />
+          <BrowserProxyCredential
+            what="Password"
+            stored={isStored(draft.passwordSecret, savedNames.passwordSecret)}
+            field={pendingFields.password}
+            problem={problems.password}
+            onChanged={() => typedInto('password')}
+            onRemove={() => removeCredential('password')}
+          />
+        </div>
       </div>
-      <div className="flex min-w-0 flex-col gap-1">
-        <label htmlFor={`${ids}-bypass`} className="text-ui font-semibold text-fg">
-          Skip the proxy for (optional)
-        </label>
-        <textarea
-          id={`${ids}-bypass`}
-          className="kt-input min-h-16 min-w-0 font-mono"
-          autoComplete="off"
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-          placeholder={'*.internal.example\n10.0.0.0/8'}
-          value={draft.bypass}
-          data-browser-proxy-bypass=""
-          onChange={event => edit({ bypass: event.target.value })}
-        />
-      </div>
-      <BrowserProxyCredential
-        what="Username"
-        stored={isStored(draft.usernameSecret, savedNames.usernameSecret)}
-        field={pendingFields.username}
-        problem={problems.username}
-        onChanged={() => typedInto('username')}
-        onRemove={() => removeCredential('username')}
-      />
-      <BrowserProxyCredential
-        what="Password"
-        stored={isStored(draft.passwordSecret, savedNames.passwordSecret)}
-        field={pendingFields.password}
-        problem={problems.password}
-        onChanged={() => typedInto('password')}
-        onRemove={() => removeCredential('password')}
-      />
       <div className="flex min-w-0 flex-col gap-2">
         <button
           type="button"
@@ -291,7 +296,7 @@ export function BrowserProxySection({
         </button>
         {expert ? (
           <>
-            <div className="flex min-w-0 flex-col gap-1">
+            <div className="flex min-w-0 max-w-[28rem] flex-col gap-1">
               <label htmlFor={`${ids}-username`} className="text-ui font-semibold text-fg">
                 Username secret name
               </label>
@@ -308,7 +313,7 @@ export function BrowserProxySection({
                 onChange={event => edit({ usernameSecret: event.target.value })}
               />
             </div>
-            <div className="flex min-w-0 flex-col gap-1">
+            <div className="flex min-w-0 max-w-[28rem] flex-col gap-1">
               <label htmlFor={`${ids}-password`} className="text-ui font-semibold text-fg">
                 Password secret name
               </label>

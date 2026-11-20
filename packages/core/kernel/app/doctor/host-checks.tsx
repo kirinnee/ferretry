@@ -10,7 +10,7 @@
  * pairing (the daemon list), which an app half is not handed, so this tab shows the fingerprint the client is bound to
  * and says where the pairing is managed.
  */
-import { daemonOfClient } from '@ferretry/app';
+import { daemonOfClient, SettingGroup, SettingRow } from '@ferretry/app';
 import { PanelPath } from '@ferretry/app/ui';
 import { LoaderCircle, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -100,59 +100,75 @@ export function HostChecksView({
 }) {
   const Icon = value === 'reachable' ? Wifi : value === 'unreachable' ? WifiOff : LoaderCircle;
   return (
-    <section className="kt-panel p-panel" aria-labelledby="settings-host-checks-heading" data-daemon-host-checks="">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 id="settings-host-checks-heading" className="m-0 text-row font-semibold text-fg">
-            Host checks
-          </h3>
-          <p className="mb-0 mt-1 text-cell leading-base text-muted">Reachability of this daemon, right now.</p>
-        </div>
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span
-            role="status"
-            data-daemon-reachability={value}
-            className={`inline-flex min-h-[28px] items-center gap-1.5 rounded-full border px-2 text-meta font-semibold ${TONES[value]}`}
-          >
-            <Icon
-              size={13}
-              aria-hidden="true"
-              className={value === 'checking' ? 'animate-spin motion-reduce:animate-none' : undefined}
-            />
-            {LABELS[value]}
-            {refreshing && value !== 'checking' ? <span className="sr-only">, checking again</span> : null}
-          </span>
-          <button
-            type="button"
-            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-control text-muted hover:bg-surface-3 hover:text-fg focus-visible:outline-focus focus-visible:outline-offset-focus"
-            aria-label="Check reachability again"
-            onClick={refresh}
-          >
-            <RefreshCw
-              size={14}
-              aria-hidden="true"
-              className={refreshing ? 'animate-spin motion-reduce:animate-none' : undefined}
-            />
-          </button>
-        </div>
+    <section
+      className="flex min-w-0 flex-col"
+      aria-labelledby="settings-host-checks-heading"
+      data-daemon-host-checks=""
+    >
+      <div className="mb-6 min-w-0">
+        <h3 id="settings-host-checks-heading" className="m-0 text-row font-semibold text-fg">
+          Host checks
+        </h3>
+        <p className="mb-0 mt-1 text-cell leading-base text-muted">Reachability of this daemon, right now.</p>
       </div>
-      {/* `border-strong`, not `border-soft`: this box sits on `surface-2`, where the soft hairline is invisible. */}
-      <details className="mt-3 rounded-control border border-border-strong bg-surface-2 px-control-x">
-        <summary className="flex min-h-control cursor-pointer items-center text-cell font-semibold text-muted hover:text-fg focus-visible:outline-focus focus-visible:outline-offset-focus">
-          Technical identity
-        </summary>
-        {/* An id and a version are single tokens: each scrolls in its own box rather than tearing at a column. */}
-        <div className="border-t border-border-strong py-3 text-meta leading-base text-muted">
-          <p className="m-0">Daemon version</p>
-          <p className="mb-0 mt-1 text-fg" data-daemon-version="">
-            {version === undefined ? 'unknown' : version}
-            {protocol === undefined ? '' : ` · session protocol ${String(protocol)}`}
-          </p>
-          <p className="mb-0 mt-3">Daemon fingerprint</p>
-          <PanelPath value={fingerprint ?? 'unknown'} className="mt-1 block text-fg" label="Daemon fingerprint" />
-        </div>
-      </details>
-      <p className="mb-0 mt-3 text-meta leading-base text-faint">
+      <SettingGroup label="Reachability">
+        <SettingRow
+          name="This daemon"
+          hint="Asked again every 30 seconds."
+          control={() => (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span
+                role="status"
+                data-daemon-reachability={value}
+                className={`inline-flex min-h-[28px] items-center gap-1.5 rounded-full border px-2 text-meta font-semibold ${TONES[value]}`}
+              >
+                <Icon
+                  size={13}
+                  aria-hidden="true"
+                  className={value === 'checking' ? 'animate-spin motion-reduce:animate-none' : undefined}
+                />
+                {LABELS[value]}
+                {refreshing && value !== 'checking' ? <span className="sr-only">, checking again</span> : null}
+              </span>
+              <button
+                type="button"
+                className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-control text-muted hover:bg-surface-3 hover:text-fg focus-visible:outline-focus focus-visible:outline-offset-focus"
+                aria-label="Check reachability again"
+                onClick={refresh}
+              >
+                <RefreshCw
+                  size={14}
+                  aria-hidden="true"
+                  className={refreshing ? 'animate-spin motion-reduce:animate-none' : undefined}
+                />
+              </button>
+            </span>
+          )}
+        />
+      </SettingGroup>
+      <SettingGroup label="Technical identity">
+        <SettingRow
+          name="Daemon version"
+          control={() => (
+            <span className="min-w-0 break-words text-ui text-fg" data-daemon-version="">
+              {version === undefined ? 'unknown' : version}
+              {protocol === undefined ? '' : ` · session protocol ${String(protocol)}`}
+            </span>
+          )}
+        />
+        <SettingRow
+          name="Daemon fingerprint"
+          // An id is one unbreakable token: it scrolls in its own box rather than tearing at a column.
+          control={() => (
+            <PanelPath
+              value={fingerprint ?? 'unknown'}
+              className="min-w-0 text-ui text-fg"
+              label="Daemon fingerprint"
+            />
+          )}
+        />
+      </SettingGroup>
+      <p className="m-0 text-meta leading-base text-faint">
         This browser’s pairing with this daemon — its name and removing it — is managed from the daemon list.
       </p>
     </section>

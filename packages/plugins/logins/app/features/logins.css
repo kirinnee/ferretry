@@ -34,6 +34,15 @@
   .fy-lg-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  /* A lone card takes the whole row (up to 48rem), never half of it with the other half empty. */
+  .fy-lg-cards > li:only-child {
+    grid-column: 1 / -1;
+    max-width: 48rem;
+  }
+}
+/* On one column a lone card is also capped at 48rem, so it never stretches across a wide single-column panel. */
+.fy-lg-cards > li:only-child {
+  max-width: 48rem;
 }
 
 /* A form of label + control rows: the label above the control on a narrow panel, beside it from 520px, the control never
@@ -116,4 +125,19 @@
   border-top: 1px solid var(--border);
   padding-top: 12px;
   min-width: 0;
+}
+
+/* Usage meters: label, bar and words share one line only when the PANEL is 480px wide; narrower, the bar drops under the words. */
+@container (min-width: 480px) {
+  .fy-lg .fy-lg-meter {
+    flex-wrap: nowrap;
+  }
+  .fy-lg .fy-lg-meter__bar {
+    order: 0;
+    flex-basis: 0;
+  }
+  .fy-lg .fy-lg-meter__words {
+    flex: none;
+    width: 12rem;
+  }
 }

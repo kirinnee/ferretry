@@ -72,7 +72,7 @@ export function ConnectPanel({ client, onConnected, pollDelay, now, connected, i
       <div>
         <button
           type="button"
-          className="kt-btn min-h-[44px]"
+          className="kt-btn h-auto min-h-[44px] max-w-full whitespace-normal py-2"
           {...(connected === 0 || state.step !== 'idle' ? { 'data-variant': 'primary' } : {})}
           onClick={ask}
         >

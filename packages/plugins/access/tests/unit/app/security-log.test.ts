@@ -97,7 +97,30 @@ describe('security log words', () => {
       actor: { kind: 'host' },
     } as unknown as Parameters<typeof auditDetailWords>[0];
     expect(auditDetailWords(base)).toBe('');
-    expect(auditDetailWords({ ...base, detail: { count: 3, carrier: 'relay' } })).toBe('carrier: relay · count: 3');
+    expect(auditDetailWords({ ...base, detail: { count: 3, carrier: 'relay' } })).toBe(
+      'reached over the relay · 3 times',
+    );
+  });
+
+  it('says every detail in plain words: never a key beside its value, never an internal id', () => {
+    const at = (detail: Record<string, string | number | boolean>) =>
+      auditDetailWords({
+        at: ago(0),
+        event: 'x',
+        outcome: 'succeeded',
+        actor: { kind: 'host' },
+        detail,
+      } as unknown as Parameters<typeof auditDetailWords>[0]);
+    expect(at({ pairedOver: 'relay' })).toBe('paired over the relay');
+    expect(at({ pairedOver: 'direct' })).toBe('paired on the local network');
+    expect(at({ ferret: 'zoe' })).toBe('for ferret zoe');
+    expect(at({ by: 'zoe' })).toBe('for zoe');
+    expect(at({ capabilities: 'fleet.use', kept: false })).toBe('agent fleet (use) · not kept');
+    expect(at({ action: 'account-rename' })).toBe('account rename');
+    expect(at({ memberLabel: 'Old iPad', keyId: 'k1', shareId: 's1' })).toBe('for “Old iPad”');
+    expect(at({ reason: 'duplicate-name', memberId: 'm1' })).toBe('because duplicate name');
+    expect(at({ somethingNew: 'abc' })).toBe('something new abc');
+    expect(at({ somethingNew: 'abc' })).not.toContain(':');
   });
 
   it('badges only what was refused or failed', () => {

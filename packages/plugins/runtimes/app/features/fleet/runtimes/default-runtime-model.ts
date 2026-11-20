@@ -39,9 +39,8 @@ export const runtimeStateWords = (runtime: RuntimeView, machine: MachineView | n
   return LOGIN_WORDS[runtime.credential.status ?? 'checking'];
 };
 
-/** An option of the select: "claude-default · ready". */
-export const defaultOptionLabel = (runtime: RuntimeView, machine: MachineView | null): string =>
-  `${runtime.name} · ${runtimeStateWords(runtime, machine)}`;
+/** An option of the select: the name only ("claude-default"); its state is the badge beside the select. */
+export const defaultOptionLabel = (runtime: RuntimeView): string => runtime.name;
 
 /** Whether this runtime is the machine's default for new agents. */
 export const isDefaultRuntime = (machine: MachineView | null, runtime: RuntimeView): boolean =>

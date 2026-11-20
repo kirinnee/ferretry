@@ -11,17 +11,13 @@ const issueLocation = (issue: ConfigIssue): string =>
 /** Each issue located, with its plain fix. An error keeps the file's last good version in effect; a warning does not. */
 export function ConfigIssueList({ issues }: { readonly issues: readonly ConfigIssue[] }) {
   return (
-    <ul className="m-0 flex list-none flex-col gap-2 p-0" data-config-issues="">
+    <ul className="m-0 list-none p-0 [&>li+li]:border-t [&>li+li]:border-border" data-config-issues="">
       {issues.map((issue, index) => (
         <li
           // Issues have no id; a list is replaced whole on every read, so position is stable.
           key={`${issueLocation(issue)}-${String(index)}`}
           data-config-issue={issue.severity}
-          className={
-            issue.severity === 'error'
-              ? 'flex min-w-0 items-start gap-2 rounded-control border border-err-border bg-err-bg px-3 py-2'
-              : 'flex min-w-0 items-start gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2'
-          }
+          className="flex min-w-0 items-start gap-2 py-2"
         >
           {issue.severity === 'error' ? (
             <CircleAlert size={14} aria-hidden="true" className="mt-1 shrink-0 text-err" />

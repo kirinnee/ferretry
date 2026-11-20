@@ -125,15 +125,122 @@ export function deviceLabel(device: PairedDevice): string {
   return `“${device.name}” (${auditShortId(device.id)})`;
 }
 
+type DetailValue = string | number | boolean;
+
+/** `reason-given` / `keyId` as quiet lower-case words: "reason given", "key id". */
+const tidyWords = (text: string): string =>
+  text
+    .replace(/([a-z0-9])([A-Z])/gu, '$1 $2')
+    .replace(/[-_.]+/gu, ' ')
+    .trim()
+    .toLowerCase();
+
+const CARRIER_PHRASE: Readonly<Record<string, string>> = {
+  direct: 'on the local network',
+  relay: 'over the relay',
+};
+
+/** What a `scope` / `mode` / `by` value says, where the daemon's own short names are known. */
+const SCOPE_PHRASE: Readonly<Record<string, string>> = {
+  device: 'for one device',
+  project: 'for a project',
+  runtime: 'for a runtime',
+};
+const MODE_PHRASE: Readonly<Record<string, string>> = {
+  'process-stop': 'stopped a process',
+  permission: 'answered a permission prompt',
+  dialog: 'answered a dialog',
+  composer: 'typed into a message box',
+};
+const BY_PHRASE: Readonly<Record<string, string>> = {
+  agent: 'done by an agent',
+  member: 'done by a person who reads shared catalogs',
+};
+
+const isCapabilityName = (name: string): name is keyof typeof CAPABILITY_WORDS => Object.hasOwn(CAPABILITY_WORDS, name);
+const CAPABILITY_WORDS = {
+  fleet: 'agent fleet',
+  terminal: 'session terminals',
+  browser: 'browser',
+  filesystem: 'project filesystem',
+  warden: 'fleet supervision',
+  pairing: 'device pairing',
+  secrets: 'secrets',
+  sharing: 'sharing',
+} as const;
+
+/** `fleet.use,terminal.configure` → "agent fleet (use), session terminals (configure)". */
+function capabilityPhrase(value: string): string {
+  return value
+    .split(',')
+    .map(entry => entry.trim())
+    .filter(entry => entry !== '')
+    .map(entry => {
+      const [name = '', axis] = entry.split('.');
+      const noun = isCapabilityName(name) ? CAPABILITY_WORDS[name] : tidyWords(name);
+      return axis === undefined ? noun : `${noun} (${tidyWords(axis)})`;
+    })
+    .join(', ');
+}
+
+/** The ids and counters inside a record: a person cannot read them, and a stranger's id says nothing. */
+const INTERNAL_KEY = /(?:Id|Ids|Length|Offset)$|^(?:sequence|subjects|proposal|session|signIn)$/u;
+
+/** One fact as a short phrase, or `null` when there is nothing a person could use. */
+function detailPhrase(key: string, value: DetailValue): string | null {
+  if (INTERNAL_KEY.test(key)) return null;
+  const text = String(value);
+  switch (key) {
+    case 'carrier':
+    case 'pairedOver':
+      return `${key === 'carrier' ? 'reached' : 'paired'} ${CARRIER_PHRASE[text] ?? tidyWords(text)}`;
+    case 'count':
+      return typeof value === 'number' ? `${String(value)} time${value === 1 ? '' : 's'}` : null;
+    case 'repeats':
+      return typeof value === 'number' ? `repeated ${String(value)} time${value === 1 ? '' : 's'}` : null;
+    case 'action':
+      return tidyWords(text);
+    case 'scope':
+      return SCOPE_PHRASE[text] ?? `for ${tidyWords(text)}`;
+    case 'mode':
+      return MODE_PHRASE[text] ?? tidyWords(text);
+    case 'by':
+      return BY_PHRASE[text] ?? `for ${text}`;
+    case 'ferret':
+      return `for ferret ${text}`;
+    case 'reason':
+      return `because ${tidyWords(text)}`;
+    case 'proof':
+      return `proved with a ${tidyWords(text)}`;
+    case 'capabilities':
+      return capabilityPhrase(text);
+    case 'memberLabel':
+      return `for “${text}”`;
+    case 'clientName':
+      return `from “${text}”`;
+    case 'keptAllowanceSpent':
+      return value === true ? 'the daily allowance for this kind of record ran out' : null;
+    default:
+      // A key this build has no words for: its own words, tidied — never `key: value`.
+      if (typeof value === 'boolean') return value ? tidyWords(key) : `not ${tidyWords(key)}`;
+      return `${tidyWords(key)} ${text}`;
+  }
+}
+
 /**
- * A record's short facts as words: the carrier, how many times, which action. Sorted by key so the
- * same record always reads the same way; empty when there are none.
+ * A record's short facts as plain words ("paired over the relay · 3 times · agent fleet (use)"): the
+ * carrier, how many times, which action. Sorted by key so the same record always reads the same way; a
+ * key this build has no words for is tidied, never printed as `key: value`; empty when there are none.
  */
 export function auditDetailWords(record: AuditRecord): string {
   const detail = record.detail ?? {};
   return Object.keys(detail)
     .toSorted()
-    .map(key => `${key}: ${String(detail[key])}`)
+    .flatMap(key => {
+      const value = detail[key];
+      const phrase = value === undefined ? null : detailPhrase(key, value);
+      return phrase === null || phrase === '' ? [] : [phrase];
+    })
     .join(' · ');
 }
 

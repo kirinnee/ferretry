@@ -64,7 +64,7 @@ export function SignInRuleCard({
 
   return (
     <article
-      className="flex min-w-0 flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
+      className="flex min-w-0 flex-col gap-2 border-t border-border py-3"
       data-rule={rule.id}
       data-rule-status={rule.status}
     >

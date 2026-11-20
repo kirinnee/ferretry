@@ -68,11 +68,11 @@ function breakAtAt(email: string) {
 
 /** The columns every meter on a login shares, so the bars start and end in the same place. */
 const METER_LABEL = 'w-12 shrink-0 whitespace-nowrap text-muted';
-// On a phone the words sit beside the label and the bar takes the full width below them; from `sm` all three share a row.
-const METER_ROW = 'flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta sm:flex-nowrap';
-const METER_BAR = 'order-last basis-full sm:order-none sm:basis-0';
+// On a narrow panel the words sit beside the label and the bar takes the full width below them; from a 480px panel (container query in logins.css, never the window) all three share a row.
+const METER_ROW = 'fy-lg-meter flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta';
+const METER_BAR = 'fy-lg-meter__bar order-last basis-full';
 // `basis-0` keeps the words on the label's line on a phone (they wrap inside their share) rather than dropping to a line of their own.
-const METER_WORDS = 'min-w-0 flex-1 basis-0 text-right text-muted sm:flex-none sm:basis-auto sm:w-48 sm:shrink-0';
+const METER_WORDS = 'fy-lg-meter__words min-w-0 flex-1 basis-0 text-right text-muted';
 
 function UsageBars({ login, now }: { readonly login: LoginView; readonly now: number }) {
   const bars = usageBars(login, now);
@@ -612,13 +612,21 @@ function SignInsBody({ client, now = () => globalThis.Date.now(), pollMs, browse
         </div>
       ) : (
         <>
-          <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-            <p className="m-0 text-cell text-muted">
-              {plural(list.logins.length, 'login')} on {list.machine}
-            </p>
-            <Button type="button" variant="primary" data-add-login="" onClick={() => setAdding(true)}>
-              Add a login
-            </Button>
+          <div className="fy-lg-group" data-logins-heading="">
+            <div className="flex min-w-0 flex-col gap-1">
+              <h3 className="m-0 text-row font-semibold text-fg">Logins</h3>
+              <p className="m-0 text-cell leading-base text-muted">
+                Each login is one sign-in or key to Claude Code or Codex, and belongs to this machine.
+              </p>
+            </div>
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+              <p className="m-0 text-cell text-muted">
+                {plural(list.logins.length, 'login')} on {list.machine}
+              </p>
+              <Button type="button" variant="primary" data-add-login="" onClick={() => setAdding(true)}>
+                Add a login
+              </Button>
+            </div>
           </div>
           {loginGroups(list).map(group => (
             <div key={group.scope} className="fy-lg-group" data-logins-group={group.scope}>

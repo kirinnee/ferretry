@@ -77,11 +77,15 @@ export const createBoardSettings = (client: PluginClient): AppComponent<Settings
     };
 
     return (
-      <section aria-label="Board" className="flex flex-col gap-4" data-settings="board">
-        <p className="m-0 text-ui text-muted">
-          The board shows the work you asked for as tasks in lanes. Ferretry watches the pull requests a task links
-          through GitHub and moves the task when one is opened, passes, merges or ships.
-        </p>
+      <section aria-label="Board" className="min-w-0" data-settings="board">
+        <SettingGroup label="About the board">
+          <li className="py-3 pl-panel pr-1">
+            <p className="m-0 text-ui text-muted">
+              The board shows the work you asked for as tasks in lanes. Ferretry watches the pull requests a task links
+              through GitHub and moves the task when one is opened, passes, merges or ships.
+            </p>
+          </li>
+        </SettingGroup>
         <SettingGroup label="GitHub">
           <SettingRow
             settingId="board-github-watch"
@@ -106,7 +110,10 @@ export const createBoardSettings = (client: PluginClient): AppComponent<Settings
           />
         </SettingGroup>
         {note === null ? null : (
-          <p className={note === HELD_CHANGE_SENTENCE ? 'm-0 text-ui text-warn' : 'm-0 text-ui text-err'} role="alert">
+          <p
+            className={note === HELD_CHANGE_SENTENCE ? 'm-0 px-1 text-ui text-warn' : 'm-0 px-1 text-ui text-err'}
+            role="alert"
+          >
             {note}
           </p>
         )}

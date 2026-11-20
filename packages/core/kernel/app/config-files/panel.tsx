@@ -14,6 +14,8 @@
  *
  * NO SECRET IS EVER ON THIS SCREEN: a file holds `${secret:NAME}` references and the daemon never returns a value.
  */
+import { SettingGroup, SettingRow } from '@ferretry/app';
+import './files.css';
 import {
   Badge,
   type BadgeTone,
@@ -95,25 +97,27 @@ function PendingRow({
   readonly onReview: () => void;
 }) {
   return (
-    <li
-      className="flex min-w-0 flex-col gap-2 border-t border-border py-3 first:border-t-0 first:pt-0 last:pb-0"
-      data-config-pending={pending.path}
+    <SettingRow
+      name={pending.path}
+      wide
+      dataAttributes={{ 'data-config-pending': pending.path }}
+      control={() => (
+        <span className="flex min-w-0 flex-wrap items-center gap-2">
+          <ConfirmButton state={state} onConfirm={onConfirm} name={pending.path} />
+          <Button type="button" className="min-h-[44px]" data-config-review={pending.path} onClick={onReview}>
+            Review
+          </Button>
+        </span>
+      )}
     >
-      <PanelPath value={pending.path} className="text-ui font-semibold text-fg" />
-      <ul className="m-0 flex list-disc flex-col gap-0.5 pl-5">
+      <ul className="m-0 flex list-disc flex-col gap-0.5 pb-3 pl-8 pr-panel">
         {pending.changes.map(change => (
           <li key={change} className="break-words text-ui leading-base text-fg">
             {change}
           </li>
         ))}
       </ul>
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <ConfirmButton state={state} onConfirm={onConfirm} name={pending.path} />
-        <Button type="button" className="min-h-[44px]" data-config-review={pending.path} onClick={onReview}>
-          Review
-        </Button>
-      </div>
-    </li>
+    </SettingRow>
   );
 }
 
@@ -131,34 +135,29 @@ function FileRow({
   const chip = STATE_CHIPS[file.state];
   const absolute = absoluteConfigPath(directory, file.path);
   return (
-    <li
-      className="flex min-w-0 flex-col gap-1 border-t border-border py-2 first:border-t-0 first:pt-0 last:pb-0"
-      data-config-file={file.path}
-    >
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <PanelPath value={file.path} className="min-w-0 text-ui font-semibold text-fg" />
-        <Badge tone={chip.tone} data-config-file-state={file.state}>
-          {chip.label}
-        </Badge>
-      </div>
-      <div className="flex min-w-0 items-center gap-1">
-        {/* One line cut with an ellipsis rather than a box that scrolls: the whole path is in the title, the copy button and the DOM text, so a screen reader reads it all
-         */}
-        <code
-          className="min-w-0 flex-1 truncate font-mono text-meta text-muted"
-          title={absolute}
-          data-config-file-path=""
-        >
+    <SettingRow
+      name={file.path}
+      wide
+      dataAttributes={{ 'data-config-file': file.path }}
+      // One line cut with an ellipsis rather than a box that scrolls: the whole path is in the title, the copy button
+      // and the DOM text, so a screen reader reads it all.
+      hint={
+        <code className="block truncate font-mono" title={absolute} data-config-file-path="">
           {absolute}
         </code>
-        <CopyButton text={absolute} label={`Copy the full path of ${file.path}`} write={write} />
-      </div>
-      <div>
-        <Button type="button" size="sm" data-config-edit={file.path} onClick={onEdit}>
-          Edit as YAML
-        </Button>
-      </div>
-    </li>
+      }
+      control={() => (
+        <span className="flex min-w-0 flex-wrap items-center gap-2">
+          <Badge className="max-w-full whitespace-normal" tone={chip.tone} data-config-file-state={file.state}>
+            {chip.label}
+          </Badge>
+          <Button type="button" size="sm" className="min-h-[44px]" data-config-edit={file.path} onClick={onEdit}>
+            Edit as YAML
+          </Button>
+          <CopyButton text={absolute} label={`Copy the full path of ${file.path}`} write={write} />
+        </span>
+      )}
+    />
   );
 }
 
@@ -182,12 +181,8 @@ export function ConfigFilesPanel({
   );
   const groups = kinds.map(kind => ({ kind, files: view.files.filter(file => file.kind === kind) }));
   return (
-    <section
-      className="kt-panel flex min-w-0 flex-col gap-3 p-panel"
-      aria-labelledby="config-files-heading"
-      data-config-files-panel=""
-    >
-      <div className="flex min-w-0 flex-col gap-1">
+    <section className="flex min-w-0 flex-col" aria-labelledby="config-files-heading" data-config-files-panel="">
+      <div className="mb-6 flex min-w-0 flex-col gap-1">
         <h3 id="config-files-heading" className="m-0 flex items-center gap-2 text-row font-semibold text-fg">
           <FileCode2 size={16} aria-hidden="true" className="shrink-0 text-accent" />
           {CONFIG_HEADLINE}
@@ -202,12 +197,11 @@ export function ConfigFilesPanel({
       </div>
 
       {view.pending.length > 0 ? (
-        <div className="flex min-w-0 flex-col gap-2" data-config-section="pending">
-          <h4 className="m-0 text-ui font-semibold text-fg">Waiting for you</h4>
-          <p className="m-0 text-cell leading-base text-muted">
-            These edits loosen what this machine allows, so the earlier version stays in effect until you confirm.
-          </p>
-          <ul className="m-0 list-none p-0">
+        <div data-config-section="pending">
+          <SettingGroup label="Waiting for you">
+            <li className="px-panel py-2 text-cell leading-base text-muted">
+              These edits loosen what this machine allows, so the earlier version stays in effect until you confirm.
+            </li>
             {view.pending.map(pending => (
               <PendingRow
                 key={pending.path}
@@ -217,27 +211,29 @@ export function ConfigFilesPanel({
                 onReview={() => onEdit(pending.path)}
               />
             ))}
-          </ul>
+          </SettingGroup>
         </div>
       ) : null}
 
       {view.issues.length > 0 ? (
-        <div className="flex min-w-0 flex-col gap-2" data-config-section="issues">
-          <h4 className="m-0 text-ui font-semibold text-fg">Problems</h4>
-          <ConfigIssueList issues={view.issues} />
+        <div data-config-section="issues">
+          <SettingGroup label="Problems">
+            <li className="min-w-0 px-panel">
+              <ConfigIssueList issues={view.issues} />
+            </li>
+          </SettingGroup>
         </div>
       ) : null}
 
-      <div className="flex min-w-0 flex-col gap-3" data-config-section="files">
+      <div data-config-section="files">
         {groups.length === 0 ? (
           <p className="m-0 text-cell leading-base text-muted" data-config-files-empty="">
             No configuration files yet. A file appears here once this machine is set up.
           </p>
         ) : (
           groups.map(group => (
-            <div key={group.kind} className="flex min-w-0 flex-col gap-1" data-config-group={group.kind}>
-              <h4 className="m-0 text-ui font-semibold text-fg">{groupWords(group.kind)}</h4>
-              <ul className="m-0 list-none p-0">
+            <div key={group.kind} data-config-group={group.kind}>
+              <SettingGroup label={groupWords(group.kind)}>
                 {group.files.map(file => (
                   <FileRow
                     key={file.path}
@@ -247,7 +243,7 @@ export function ConfigFilesPanel({
                     onEdit={() => onEdit(file.path)}
                   />
                 ))}
-              </ul>
+              </SettingGroup>
             </div>
           ))
         )}

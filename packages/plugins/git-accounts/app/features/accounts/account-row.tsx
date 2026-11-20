@@ -15,7 +15,7 @@ export interface AccountRowProps {
 function Chip({ on, label }: { readonly on: boolean; readonly label: string }) {
   return (
     <span
-      className={`rounded-control border px-2 py-0.5 text-meta font-medium ${on ? 'border-ok text-ok' : 'border-border-strong text-muted'}`}
+      className={`rounded-control px-2 py-0.5 text-meta font-medium ${on ? 'bg-ok-bg text-ok' : 'bg-surface-3 text-muted'}`}
       data-key-chip={label}
       data-on={on ? 'yes' : 'no'}
     >
@@ -27,14 +27,11 @@ function Chip({ on, label }: { readonly on: boolean; readonly label: string }) {
 export function AccountRow({ account, busy, onRemove }: AccountRowProps) {
   const [asking, setAsking] = useState(false);
   return (
-    <li
-      className="flex flex-col gap-2 rounded-control border border-border-strong bg-surface-2 p-3"
-      data-account={account.id}
-    >
+    <li className="flex flex-col gap-2 py-3" data-account={account.id}>
       <div className="flex min-w-0 items-center gap-3">
         <span
           aria-hidden="true"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-accent bg-surface text-ui font-semibold uppercase text-accent"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-soft text-ui font-semibold uppercase text-accent"
         >
           {account.login.slice(0, 1)}
         </span>
@@ -66,10 +63,7 @@ export function AccountRow({ account, busy, onRemove }: AccountRowProps) {
         <Chip on={account.keys.signing !== undefined} label="Signing key" />
       </div>
       {asking ? (
-        <section
-          className="flex flex-col gap-2 rounded-control border border-warn bg-warn/10 p-3"
-          aria-label={`Remove @${account.login}?`}
-        >
+        <section className="flex flex-col gap-2 border-l-2 border-warn pl-3" aria-label={`Remove @${account.login}?`}>
           <p className="m-0 text-cell leading-base text-muted">
             This deletes the keys Ferretry registered on @{account.login} at GitHub, then forgets its token on this
             machine. To fully revoke the app, open github.com/settings/applications afterwards.
