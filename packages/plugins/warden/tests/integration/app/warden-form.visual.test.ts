@@ -58,6 +58,7 @@ afterAll(async () => {
 
 const VIEWPORTS = [
   { name: '1280', width: 1_280, height: 1_000, phone: false },
+  { name: '768', width: 768, height: 1_000, phone: false },
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 const THEMES = ['studio-light', 'studio-dark'] as const;
@@ -142,6 +143,24 @@ describe('the Warden settings form, over a fake config', () => {
               if (stacked) expect(new Set(group.map(input => input.right)).size).toBe(1);
             }
 
+            // A number field's words and its input are one pair with a clear gap (24px+) between them, never touching.
+            const gaps = await tab.evaluate(() =>
+              [...document.querySelectorAll<HTMLElement>('label.fy-wf-num')].map(label => {
+                const range = document.createRange();
+                range.selectNodeContents(label.firstChild as Node);
+                const input = label.querySelector('input')?.getBoundingClientRect();
+                return Math.round((input?.left ?? 0) - range.getBoundingClientRect().right);
+              }),
+            );
+            if (state === 'all') expect(gaps.length).toBeGreaterThan(0);
+            if (!viewport.phone)
+              for (const gap of gaps)
+                expect(gap, 'the label words sit clear of their input').toBeGreaterThanOrEqual(24);
+
+            // The Rules card says out loud that rules run only while the Warden is on.
+            expect(await tab.locator('[data-warden-layer="Rules"]').innerText()).toContain(
+              'Rules run only while Warden is on',
+            );
             if (shotsDir !== '')
               await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-${state}.png`), fullPage: true });
           } finally {

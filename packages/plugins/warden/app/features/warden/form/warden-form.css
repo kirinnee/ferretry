@@ -203,7 +203,7 @@ label.fy-wf-num.fy-wf-num {
   margin: 0;
   grid-template-columns: minmax(0, auto) 6rem;
   align-items: center;
-  gap: 4px 16px;
+  gap: 4px 24px;
   font-size: var(--text-cell, 13px);
   font-weight: 500;
   color: var(--fg);
