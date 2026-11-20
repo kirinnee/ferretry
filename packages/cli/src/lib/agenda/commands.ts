@@ -33,6 +33,10 @@ export const AGENDA_BODY_RULE = `THE TABS ARE THE LIVE DOCUMENT; the conversatio
   rewrite every part that is out of date — premise, context, the ask (what you need from the
   owner), its options and how to reply, still-open and each tab — so the item always holds the
   whole current state, and write it back in one go: agenda patch <id> --file f.yaml.
+  EVERY ASK AND ANSWER ON A TOPIC STACKS ON THE SAME ITEM, and an open ask is never dropped: every
+  unresolved ask stays floated in "where we are" (premise, context) and in "what I need from you"
+  (the ask). An answered question moves to a "History" tab, oldest first, each marked answered
+  with its answer. Open a new item only for a clearly separate topic.
   Tabs hold ANY kind of content — status, to-dos, steps, instructions, explainers, results,
   decisions, risks. There is no main type: "Where we are now" (--where-file, or --where points)
   is simply the tab that opens first: where things stand, what is decided, what is still open —
