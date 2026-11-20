@@ -25,8 +25,19 @@ describe('S14 forSubject', () => {
 /** The plugins that declare a first-run step: each must contribute a panel to the slot for every step it declares. */
 const contributors = generated.surfaces.filter(entry => (entry.manifest.onboarding ?? []).length > 0);
 
+/** Steps declared ahead of their page (r10 O7b builds Claude's import pages 23-29): they may draw nowhere yet, never twice. */
+const awaitingPage = new Set([
+  'claude-code.import-settings',
+  'claude-code.import-model-set',
+  'claude-code.import-instructions',
+  'claude-code.import-skills',
+  'claude-code.import-mcp',
+  'claude-code.conversations',
+  'claude-code.import-run',
+]);
+
 describe('S14 every plugin that declares a first-run step contributes its panels', () => {
-  test('S14 the contributors are the eleven that declare a step (Onboarding’s own two pages included)', () => {
+  test('S14 the contributors are the ten that declare a step (Onboarding’s own two pages included)', () => {
     expect(contributors.map(entry => entry.id).toSorted()).toEqual(
       [
         'access',
@@ -34,7 +45,6 @@ describe('S14 every plugin that declares a first-run step contributes its panels
         'codex',
         'layouts',
         'lessons',
-        'logins',
         'onboarding',
         'runtimes',
         'shells',
@@ -45,10 +55,8 @@ describe('S14 every plugin that declares a first-run step contributes its panels
   });
 
   for (const entry of contributors) {
-    test(`S14 ${entry.id} offers one panel per declared step in onboarding.step and each is silent for other steps`, () => {
+    test(`S14 ${entry.id} draws every declared step in exactly one onboarding.step panel and each is silent for other steps`, () => {
       const placed = (entry.manifest.ui?.panels ?? []).filter(panel => panel.slot === 'onboarding.step');
-      // One panel for each step the plugin declares: a plugin with two steps places two panels, one apiece.
-      expect(placed).toHaveLength((entry.manifest.onboarding ?? []).length);
       const built = entry.app?.build?.({ manifest: entry.manifest, client: { call: async () => ({}) } as never });
       const panels = placed.map(
         item => (built?.panels as Record<string, AppComponent<PanelProps>> | undefined)?.[item.id],
@@ -71,7 +79,8 @@ describe('S14 every plugin that declares a first-run step contributes its panels
           }
           return result !== null && result !== undefined;
         });
-        expect(drew).toHaveLength(1);
+        if (awaitingPage.has(`${entry.id}.${step.id}`)) expect(drew.length).toBeLessThanOrEqual(1);
+        else expect(drew).toHaveLength(1);
       }
     });
   }

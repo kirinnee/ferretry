@@ -8,6 +8,8 @@ import { PRESET_ENV_NAMES } from './contract/preset-env-names.ts';
 import {
   ADD_RUNTIME_LOGIN_SLOT,
   ADD_RUNTIME_SIGN_IN_SLOT,
+  CLAUDE_CODE_SIGN_IN_SLOT,
+  CODEX_SIGN_IN_SLOT,
   ENDPOINTS_CONFIG,
   LOGIN_KINDS,
   LOGINS_AUDIT,
@@ -319,8 +321,9 @@ export default definePlugin({
       panel('settings', { id: 'codex-login', order: 13 }),
       panel('settings', { id: 'local-models', order: 14 }),
       panel('daemon.status', { id: 'quota-readout', order: 30 }),
-      // The first-run step's body (Onboarding's steps screen offers this slot): the sign-ins view.
-      panel('onboarding.step', { id: 'onboarding-step', order: 30 }),
+      // A harness's own first-run "Sign in" page offers one slot each (r10 O7/O10); the sign-in drawn there is Logins'.
+      panel(CLAUDE_CODE_SIGN_IN_SLOT, { id: 'claude-code-sign-in', order: 10 }),
+      panel(CODEX_SIGN_IN_SLOT, { id: 'codex-sign-in', order: 10 }),
       // Runtimes' Add runtime page offers these two (its contract/slots.ts): a login is added and signed in right there.
       panel(ADD_RUNTIME_LOGIN_SLOT, { id: 'add-runtime-login', order: 10 }),
       panel(ADD_RUNTIME_SIGN_IN_SLOT, { id: 'add-runtime-sign-in', order: 10 }),
@@ -345,7 +348,6 @@ export default definePlugin({
     offers: [{ hook: LoginsUsedBy }, { hook: LoginsBudget }, { hook: LoginsQuota }],
   },
 
-  onboarding: [{ id: 'login', title: 'Sign in', order: 30 }],
   doctor: ['logins-store'],
   // The free usage read of a sign-in runs on this thread: its code reads, parses and uses the token, and only facts come
   // back. The kernel's grant service on main serves the file read and the request, so the blob and the Bearer header

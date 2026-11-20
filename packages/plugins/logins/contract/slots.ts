@@ -35,3 +35,16 @@ export interface LoginMeterSlotProps {
   /** The machine's name, which the spend is said to be on ("Spent on <machine> only"). */
   readonly machineName: string;
 }
+
+/**
+ * THE TWO SLOTS LOGINS FILLS IN A HARNESS'S FIRST-RUN SEGMENT (r10 O7/O10).
+ *
+ * Claude Code and Codex each offer one (`claude-code.sign-in`, `codex.sign-in`) on their own "Sign in" onboarding page;
+ * Logins draws the sign-in there, because the sign-in is Logins'. Neither harness is imported here (they need Logins'
+ * words, not the other way round), so the names are literals and each harness's own suite pins the same literal. The
+ * props are plain: `{ onSignedIn() }` and nothing comes back but "signed in" — no token, code or address ever reaches
+ * the page that mounts the panel.
+ */
+export const CLAUDE_CODE_SIGN_IN_SLOT = 'claude-code.sign-in' as const;
+export const CODEX_SIGN_IN_SLOT = 'codex.sign-in' as const;
+export const HARNESS_SIGN_IN_SLOTS = [CLAUDE_CODE_SIGN_IN_SLOT, CODEX_SIGN_IN_SLOT] as const;
