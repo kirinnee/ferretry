@@ -89,6 +89,11 @@ const DEVICE_FACES: readonly string[] = [
   'Trebuchet MS',
   'Verdana',
   'Lucida Console',
+  // Raw Brutalism draws with the device's own serif and monospace on purpose (r10 T11).
+  'Courier',
+  'Times',
+  'Times New Roman',
+  'Liberation Serif',
 ];
 
 /**
