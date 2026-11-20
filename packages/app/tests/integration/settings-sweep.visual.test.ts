@@ -8,7 +8,11 @@
  *  - the panel has exactly ONE visible h1/h2 heading and it IS the tab's title (the shell draws it for every tab; a tab draws none),
  *    and the title is drawn once: no other visible text in the panel (a heading of any level, a lone line) says the same words.
  *  - no text is cut off (an ellipsis or a hidden overflow) without its full text in a `title`;
- *  - no placeholder syntax (`<field>`) in visible text.
+ *  - no placeholder syntax (`<field>`) in visible text;
+ *  - (gate run 3) the page is viewed from America/Los_Angeles: every time a person sees is on THAT clock with a zone label (PST/PDT), so
+ *    no "UTC", no ISO instant, no time without a zone label; no literal backtick; no "Always on" / "Free" strip that is not a control;
+ *    no second heading that repeats the shell's title; no value that scrolls inside a clipped box (it wraps); layer cards of one row
+ *    are one height.
  * Set `FY_SETTINGS_SWEEP_SHOTS_DIR` to keep `<viewport>-<plugin>-<tab>.png`, and `FY_SETTINGS_SWEEP_REPORT` for the JSON report.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
@@ -26,6 +30,16 @@ const shotsDir = process.env.FY_SETTINGS_SWEEP_SHOTS_DIR ?? '';
 const reportPath = process.env.FY_SETTINGS_SWEEP_REPORT ?? '';
 /** `FY_SETTINGS_SWEEP_SCHEME=light` runs the same sweep in the light theme (dark is the default). */
 const scheme = process.env.FY_SETTINGS_SWEEP_SCHEME === 'light' ? 'light' : 'dark';
+/** The tabs that show a time: each must show at least one, on the viewer's clock with its zone named (the sweep scene feeds each one). */
+const TIMED_TABS = [
+  'access/devices',
+  'accounts/secure-copy',
+  'claude-code/claude-code',
+  'codex/codex',
+  'updates/updates',
+  'usage/model-pricing',
+  'voice/speedups',
+];
 const only = (process.env.FY_SETTINGS_SWEEP_ONLY ?? '').split(',').filter(Boolean);
 
 let browser: Browser;
@@ -258,6 +272,7 @@ const measure = (allowed: string) => {
   // text is in a `title` (on it or on what holds it).
   const truncated: string[] = [];
   const placeholders: string[] = [];
+  const scrolled: string[] = [];
   if (root !== null) {
     for (const el of root.querySelectorAll('*')) {
       if (!visible(el) || el.closest('svg') !== null) continue;
@@ -271,10 +286,75 @@ const measure = (allowed: string) => {
         (style.textOverflow === 'ellipsis' || el.children.length === 0);
       if (cut && !el.matches('.sr-only') && el.closest('[title], .sr-only') === null) truncated.push(describe(el));
     }
+    // A value in a box that scrolls sideways inside itself: a person cannot read it (it must wrap).
+    for (const el of root.querySelectorAll('code, span, p, dd, a')) {
+      if (!visible(el) || el.closest('pre, textarea, svg') !== null) continue;
+      const style = getComputedStyle(el);
+      if (['auto', 'scroll'].includes(style.overflowX) && el.scrollWidth > el.clientWidth + 1)
+        scrolled.push(describe(el));
+    }
     // Placeholder syntax (`<field> <value>`) shown as if it were a real command.
     for (const match of (root.innerText ?? '').matchAll(/<[A-Za-z][\w -]*>/gu)) placeholders.push(match[0]);
   }
+  // Times, words and strings a person must never read (gate run 3): measured on the text as a person reads it.
+  const read = (root?.innerText ?? '').replace(/\s+/gu, ' ');
+  // A tab that THREW while drawing shows the error boundary's words, not its content: that is a failure, never a pass.
+  const crashed =
+    /stopped working on this screen/u.test(read) ||
+    (root?.querySelector('[role=alert]')?.textContent ?? '').includes('stopped working');
+  const utc = [...read.matchAll(/\bUTC\b|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}|\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?Z\b/gu)].map(
+    match => read.slice(Math.max(0, match.index - 30), match.index + 24),
+  );
+  const zoneless = [...read.matchAll(/(?<![\w:.-])\d{1,2}:\d{2}(?::\d{2})?(?![\d:])(?: ?[AP]M)?/gu)]
+    .filter(match => !/^ ?(?:PST|PDT)\b/u.test(read.slice(match.index + match[0].length)))
+    .map(match => read.slice(Math.max(0, match.index - 30), match.index + match[0].length + 12));
+  const zoned = [...read.matchAll(/\b\d{1,2}:\d{2}(?: ?[AP]M)? P[SD]T\b/gu)].length;
+  const backticks = [...read.matchAll(/`/gu)].map(match => read.slice(Math.max(0, match.index - 30), match.index + 30));
+  const alwaysOn = [...read.matchAll(/\bAlways on\b|\bAlways\b[^.]{0,12}\bfree\b/giu)].map(match => match[0]);
+  // Any OTHER visible heading of any level that is the tab's title with only an article added ("The Warden" under "Warden").
+  const echoes: string[] = [];
+  const shellTitle = (document.querySelector('.fy-settings-title')?.textContent ?? '').trim().toLowerCase();
+  if (root !== null && shellTitle !== '')
+    for (const el of root.querySelectorAll('h1, h2, h3, h4, h5, h6, [role=heading]')) {
+      if (el.matches('.fy-settings-title') || !visible(el)) continue;
+      const words = (el.textContent ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/^(the|your|my) /u, '');
+      if (words === shellTitle) echoes.push(describe(el));
+    }
+  // The cards of one row are one height (a card that is shorter than its neighbour reads as a half-state).
+  const uneven: string[] = [];
+  const rows = new Map<number, number[]>();
+  for (const card of document.querySelectorAll('.fy-wf-layers [data-warden-layer]')) {
+    const box = card.getBoundingClientRect();
+    rows.set(Math.round(box.top), [...(rows.get(Math.round(box.top)) ?? []), Math.round(box.height)]);
+  }
+  for (const [top, heights] of rows)
+    if (heights.length > 1 && new Set(heights).size > 1) uneven.push(`row at ${top}: ${heights.join('/')}`);
+  // What the gate's items need PROVEN present (not merely absent): the code a sentence names, a long key shown whole, the layer cards.
+  const codeTexts = root === null ? [] : Array.from(root.querySelectorAll('code'), el => (el.textContent ?? '').trim());
+  const wrappedPaths =
+    root === null
+      ? []
+      : Array.from(root.querySelectorAll('[data-wrapped-path]'), el => ({
+          text: (el.textContent ?? '').trim(),
+          fits: el.scrollWidth <= el.clientWidth + 1 && el.getBoundingClientRect().right <= window.innerWidth,
+        }));
   return {
+    full: read.slice(0, 60_000),
+    codeTexts,
+    wrappedPaths,
+    layerCount: document.querySelectorAll('.fy-wf-layers [data-warden-layer]').length,
+    crashed,
+    zoned,
+    utc: utc.slice(0, 6),
+    zoneless: zoneless.slice(0, 6),
+    backticks: backticks.slice(0, 6),
+    alwaysOn: alwaysOn.slice(0, 6),
+    echoes: echoes.slice(0, 6),
+    uneven,
+    scrolled: scrolled.slice(0, 6),
     truncated: truncated.slice(0, 6),
     placeholders: placeholders.slice(0, 6),
     text: (root?.innerText ?? '').replace(/\s+/g, ' ').slice(0, 160),
@@ -305,6 +385,9 @@ describe('Settings sweep: every tab, real app half, real shell', () => {
           hasTouch: viewport.phone,
           isMobile: viewport.phone,
           colorScheme: scheme,
+          // The viewer is in Pacific time, as the owner is: every time they see is on this clock, with PST/PDT said.
+          timezoneId: 'America/Los_Angeles',
+          locale: 'en-US',
         });
         const origin = server?.url.origin ?? '';
         await context.route('**/*', async route =>
@@ -313,6 +396,10 @@ describe('Settings sweep: every tab, real app half, real shell', () => {
         const page = await context.newPage();
         const problems: string[] = [];
         page.on('pageerror', error => problems.push(error.message));
+        const logged: string[] = [];
+        page.on('console', message => {
+          if (message.type() === 'error') logged.push(message.text().slice(0, 300));
+        });
         try {
           await page.goto(`${origin}/d/ws/settings/${plugin}/${tab}?theme=studio-${scheme}`);
           await page.waitForSelector('.fy-settings-page', { timeout: 20_000 });
@@ -323,8 +410,19 @@ describe('Settings sweep: every tab, real app half, real shell', () => {
             ...new Set((globalThis as { __fyRequests?: string[] }).__fyRequests ?? []),
           ]);
           if (shotsDir !== '')
-            await page.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${plugin}-${tab}.png`) });
-          report[`${viewport.name} ${plugin}/${tab}`] = { ...measured, requests, problems };
+            await page.screenshot({
+              path: join(shotsDir, `${viewport.name}-${scheme}-${plugin}-${tab}.png`),
+              fullPage: true,
+            });
+          // The shell scrolls inside itself, so a page shot cannot reach a long page's lower rows: keep the pricing key's own row.
+          if (shotsDir !== '' && plugin === 'usage' && tab === 'model-pricing')
+            await page
+              .locator('[data-pricing-row]')
+              .filter({ hasText: 'anthropic:claude-fake-1' })
+              .first()
+              .screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${plugin}-${tab}-key.png`) });
+          const { full, ...kept } = measured;
+          report[`${viewport.name} ${plugin}/${tab}`] = { ...kept, requests, problems, logged };
           expect(measured.sideways, 'scrolls sideways').toBeLessThanOrEqual(0);
           expect(measured.headings, `the visible h1/h2 of ${plugin}/${tab}: exactly one, the tab's title`).toEqual([
             label,
@@ -339,6 +437,48 @@ describe('Settings sweep: every tab, real app half, real shell', () => {
           // Logins and Runtimes carry a visible word on every switch, arrow and menu button (g3-set-b item 2).
           if (LABELLED_TABS.includes(`${plugin}/${tab}`))
             expect(measured.unlabelled, 'a control with no visible word').toEqual([]);
+          expect(
+            measured.crashed,
+            `${plugin}/${tab}: the tab crashed while drawing (error boundary shown): ${JSON.stringify(logged)}`,
+          ).toBe(false);
+          if (TIMED_TABS.includes(`${plugin}/${tab}`))
+            expect(
+              measured.zoned,
+              `${plugin}/${tab}: shows its times on the viewer's clock with PST/PDT said`,
+            ).toBeGreaterThan(0);
+          if (`${plugin}/${tab}` === 'usage/budgets')
+            expect(full, 'the budget zone is said as a short label and the zone').toContain(
+              'counted in your zone (PST, America/Los_Angeles)',
+            );
+          if (`${plugin}/${tab}` === 'access/grants')
+            expect(measured.codeTexts, 'the command is drawn as code, not as backticks').toContain(
+              'fy daemon config set',
+            );
+          if (`${plugin}/${tab}` === 'usage/model-pricing') {
+            const keys = measured.wrappedPaths.filter(path => path.text.startsWith('anthropic:claude-fake-1'));
+            expect(keys.length, 'the long pricing key is on the page').toBeGreaterThan(0);
+            expect(
+              keys.filter(path => !path.fits),
+              'the long pricing key is shown whole (wrapped), never clipped',
+            ).toEqual([]);
+          }
+          if (`${plugin}/${tab}` === 'warden/warden') {
+            expect(measured.layerCount, 'the three layer cards').toBe(3);
+            expect(full, 'the Warden has no second title of its own').not.toContain('The Warden A supervisor');
+          }
+          expect(
+            measured.utc,
+            `${plugin}/${tab}: UTC or an ISO instant a person should see on their own clock`,
+          ).toEqual([]);
+          expect(measured.zoneless, `${plugin}/${tab}: a time with no zone label`).toEqual([]);
+          expect(measured.backticks, `${plugin}/${tab}: a literal backtick in visible text`).toEqual([]);
+          expect(measured.alwaysOn, `${plugin}/${tab}: an "Always on / free" statement with no control`).toEqual([]);
+          expect(measured.echoes, `${plugin}/${tab}: a heading that says the tab's title again`).toEqual([]);
+          expect(measured.uneven, `${plugin}/${tab}: layer cards of one row differ in height`).toEqual([]);
+          expect(
+            measured.scrolled,
+            `${plugin}/${tab}: a value that scrolls inside a clipped box instead of wrapping`,
+          ).toEqual([]);
           expect(problems, 'page errors').toEqual([]);
         } finally {
           await context.close();

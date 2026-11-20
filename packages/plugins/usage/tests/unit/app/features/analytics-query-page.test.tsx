@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { viewerClock } from '@ferretry/app';
 import type { AnalyticsResponse } from '../../../../contract/index.ts';
 import type { ReactElement } from 'react';
 import { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -95,7 +96,7 @@ describe('AnalyticsQueryPage', () => {
     await submit(renderer);
     expect(calls).toEqual([ANALYTICS_QUERY_DEFAULT]);
     expect(seen).toEqual([ANALYTICS_QUERY_DEFAULT]);
-    expect(text(renderer)).toContain('Ran at 12:34 UTC');
+    expect(text(renderer)).toContain(`Ran at ${viewerClock(Date.parse('2026-10-16T12:34:00Z'))}`);
     expect(text(renderer)).toContain('claude-opus-5-5');
     expect(text(renderer)).toContain('$12.34');
     expect(renderer.root.findAllByType('table').length).toBeGreaterThan(0);

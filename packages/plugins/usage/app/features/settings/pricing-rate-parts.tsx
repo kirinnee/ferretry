@@ -3,7 +3,7 @@
  * what can be done to it. Each is a plain block with no border of its own, so a rate sits as ONE row in a group
  * (see `pricing-ledger.tsx`) and is never a card inside a card.
  */
-import { Badge, Button, cn, PanelPath } from '@ferretry/app/ui';
+import { Badge, Button, cn } from '@ferretry/app/ui';
 import {
   ANALYTICS_PRICING_RATE_SLOTS,
   type AnalyticsPricingRate,
@@ -11,6 +11,31 @@ import {
   analyticsPricingRateUnit,
 } from '../../../contract/index.ts';
 import { formatInstant, formatUsdMicros, RATE_LABELS, UNIT_LABELS } from './pricing-model.ts';
+
+/**
+ * A machine-spelled value (a key, a source URL) drawn so every character can be read: it wraps wherever it must, never
+ * scrolls inside a clipped box, and keeps the full text in its `title`, so it can also be selected and copied whole.
+ */
+function WrappedPath({
+  value,
+  className = '',
+  label,
+}: {
+  readonly value: string;
+  readonly className?: string;
+  readonly label?: string;
+}) {
+  return (
+    <code
+      className={cn('block min-w-0 max-w-full break-all font-mono text-meta leading-base', className)}
+      title={value}
+      data-wrapped-path=""
+      {...(label === undefined ? {} : { 'aria-label': `${label}: ${value}` })}
+    >
+      {value}
+    </code>
+  );
+}
 
 export function DateValue({
   value,
@@ -73,7 +98,7 @@ export function Provenance({ rate }: { readonly rate: AnalyticsPricingRate }) {
         <div>
           <Badge>Model catalog · {rate.source.catalog}</Badge>
         </div>
-        <PanelPath value={rate.source.sourceUrl} className="block text-meta leading-base text-muted" label="Source" />
+        <WrappedPath value={rate.source.sourceUrl} className="text-muted" label="Source" />
         <p className="m-0 text-meta text-faint">
           Verified: <DateValue value={rate.verifiedAt} />
         </p>
@@ -84,7 +109,7 @@ export function Provenance({ rate }: { readonly rate: AnalyticsPricingRate }) {
       <div>
         <Badge tone="ok">Provider sync · {rate.source.provider}</Badge>
       </div>
-      <PanelPath value={rate.source.sourceUrl} className="block text-meta leading-base text-muted" label="Source" />
+      <WrappedPath value={rate.source.sourceUrl} className="text-muted" label="Source" />
       <p className="m-0 text-meta text-faint">
         Last sync: <DateValue value={rate.lastSyncedAt} fallback="Not recorded" />
       </p>
@@ -100,8 +125,8 @@ export function Identity({ rate }: { readonly rate: AnalyticsPricingRate }) {
       <p className="mb-0 mt-1 break-words text-meta leading-base text-faint">
         Aliases: {rate.aliases.length === 0 ? 'None' : rate.aliases.join(', ')}
       </p>
-      <p className="mb-0 mt-1 flex min-w-0 gap-1 text-meta text-faint">
-        Key: <PanelPath value={rate.pricingKey} className="text-faint" />
+      <p className="mb-0 mt-1 min-w-0 text-meta leading-base text-faint">
+        Key: <WrappedPath value={rate.pricingKey} className="text-faint" />
       </p>
     </div>
   );

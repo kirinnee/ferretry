@@ -17,6 +17,7 @@
 import type { CleanupTrace, CleanupTraceAttempt } from '../../contract/index.ts';
 import { Bug, Check, ChevronDown, ChevronRight, Copy, TriangleAlert, X } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
+import { viewerTime } from '@ferretry/app';
 import { browserClipboardWriter, type ClipboardWriter } from '../shell-voice.ts';
 import { cn } from '../shell-voice.ts';
 import type { DictationDebugRecord } from '../lib/stt/dictation-debug.ts';
@@ -36,7 +37,7 @@ const PRE =
 
 const milliseconds = (value: number): string => `${String(Math.round(value))} ms`;
 
-const utc = (epoch: number): string => `${new Date(epoch).toISOString().slice(0, 19).replace('T', ' ')} UTC`;
+const utc = (epoch: number): string => viewerTime(epoch);
 
 const attemptLabel = (trace: CleanupTrace, index: number): string =>
   trace.attempts.length === 1

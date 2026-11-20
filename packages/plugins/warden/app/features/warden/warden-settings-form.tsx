@@ -93,10 +93,9 @@ export function WardenSettingsForm({
   return (
     <div className="fy-wf" data-warden-form="">
       <section className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="m-0 text-row font-semibold text-fg">The Warden</h3>
-          <p className="fy-wf-note">A supervisor that watches every ferret and steps in when one is stuck.</p>
-        </div>
+        <p className="fy-wf-note min-w-0" data-warden-intro="">
+          A supervisor that watches every ferret and steps in when one is stuck.
+        </p>
         <Switch on={value.enabled} label="Warden on" onToggle={enabled => onChange({ ...value, enabled })} />
       </section>
 

@@ -9,7 +9,7 @@
 import { type StepUpRefusal, stepUpRefusalCode } from '@ferretry/core-gate/contract';
 import { HOSTED_APP_ORIGIN } from '../../contract/index.ts';
 import { FyHttpError } from '../shell-grants.ts';
-import { PasskeyCeremonyError, passkeySentence } from '@ferretry/app';
+import { PasskeyCeremonyError, passkeySentence, viewerClock } from '@ferretry/app';
 
 /** What changing a setting costs, said where a person decides to add a passkey (docs/design/zero-trust.md B2). */
 export const PASSKEY_COST_SENTENCE =
@@ -87,7 +87,7 @@ export function registrationClosesSentence(closesAt: string | undefined): string
   if (closesAt === undefined) return null;
   const closes = new Date(closesAt);
   if (Number.isNaN(closes.getTime())) return null;
-  return `You can add a passkey until ${closes.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}.`;
+  return `You can add a passkey until ${viewerClock(closes)}.`;
 }
 
 /**

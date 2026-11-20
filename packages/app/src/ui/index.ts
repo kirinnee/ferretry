@@ -78,3 +78,4 @@ export * from './use-motion-allowed.ts';
 export * from './lib/sortable-order.ts';
 export * from './living-background.tsx';
 export * from './read-press.ts';
+export * from './inline-code.tsx';

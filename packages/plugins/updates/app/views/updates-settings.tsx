@@ -4,7 +4,7 @@
  * the daemon answers `202` with the sentence and the switch stays off until then.
  */
 
-import { Badge, Button, SettingGroup, SettingRow, SettingSwitch } from '@ferretry/app';
+import { Badge, Button, SettingGroup, SettingRow, SettingSwitch, viewerTime } from '@ferretry/app';
 import { Loading } from '@ferretry/app/ui';
 import type { AppComponent, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import { useEffect, useState } from 'react';
@@ -104,8 +104,7 @@ function statusBadge(view: DaemonUpdateView): { readonly tone: 'ok' | 'warn' | '
 /** When the last check ran, in the reader's own clock; a daemon that has never checked says so. */
 function lastCheckedWords(check: DaemonUpdateView['check']): string {
   if (check.state === 'never') return 'Not checked yet';
-  const when = new Date(check.checkedAt);
-  const stamp = Number.isNaN(when.getTime()) ? check.checkedAt : when.toLocaleString();
+  const stamp = viewerTime(check.checkedAt);
   return check.state === 'failed' ? `${stamp} — the check failed` : stamp;
 }
 

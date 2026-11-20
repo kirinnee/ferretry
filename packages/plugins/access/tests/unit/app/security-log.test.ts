@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { viewerTime } from '@ferretry/app';
 import { AUDIT_KIND_NAMES, FULL_DEVICE_GRANTS } from '@ferretry/core-gate/contract';
 import type { Instant } from '@ferretry/std';
 import type { PairedDevice, PairedDevicesView } from '../../../contract/index.ts';
@@ -183,7 +184,8 @@ describe('security log words', () => {
   });
 
   it('gives the exact instant, or the raw text when it is unreadable', () => {
-    expect(absoluteWords(ago(0))).toBe(new Date(NOW).toLocaleString());
+    expect(absoluteWords(ago(0))).toBe(viewerTime(new Date(NOW)));
+    expect(absoluteWords(ago(0))).toMatch(/ [A-Z]{2,5}$|GMT[+-]\d+$/u);
     expect(absoluteWords('garbled')).toBe('garbled');
   });
 });

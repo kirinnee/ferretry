@@ -13,7 +13,13 @@ const budget = (over: Partial<LoginBudget>): LoginBudget => ({
 
 describe('budgetZoneWords', () => {
   it('should say whose zone the days are counted in once there is no budget yet', () => {
-    expect(budgetZoneWords(undefined, 'Europe/London')).toContain('counted in your zone (Europe/London) once you save');
+    expect(budgetZoneWords(undefined, 'Europe/London')).toMatch(
+      /counted in your zone \((?:GMT|BST|GMT\+1), Europe\/London\) once you save/u,
+    );
+    expect(budgetZoneWords(undefined, 'America/Los_Angeles')).toMatch(
+      /counted in your zone \(P[SD]T, America\/Los_Angeles\) once you save/u,
+    );
+    expect(budgetZoneWords(undefined, 'UTC')).toContain('counted in your zone (UTC) once you save');
   });
 
   it('should say the zone usage.yaml names when the file sets one', () => {
@@ -23,8 +29,8 @@ describe('budgetZoneWords', () => {
   });
 
   it('should say it is the machine’s own zone, and what saving here would write, when the file sets none', () => {
-    expect(budgetZoneWords(budget({ timeZoneSet: false }), 'Europe/London')).toBe(
-      'Days reset at midnight, weeks on Monday, in Asia/Singapore — this machine’s own zone. Saving here writes yours (Europe/London).',
+    expect(budgetZoneWords(budget({ timeZoneSet: false }), 'Europe/London')).toMatch(
+      /^Days reset at midnight, weeks on Monday, in Asia\/Singapore — this machine’s own zone\. Saving here writes yours \((?:GMT|BST|GMT\+1), Europe\/London\)\.$/u,
     );
   });
 });

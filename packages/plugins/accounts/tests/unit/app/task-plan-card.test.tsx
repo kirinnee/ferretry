@@ -388,7 +388,9 @@ describe('a selection staged at the machine', () => {
         NO_HISTORY_WORDS,
       );
       expect(q(mounted.container, '[data-task-plan-still-asked]', 'still asked')).not.toBeNull();
-      expect(q(mounted.container, '[data-task-plan-expiry]', 'expiry').textContent).not.toContain('UTC');
+      expect(q(mounted.container, '[data-task-plan-expiry]', 'expiry').textContent).toMatch(
+        /until [A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2} [AP]M \S+\.$/u,
+      );
       expect(mounted.container.querySelectorAll('[data-task-plan-line]')).toHaveLength(2);
       expect(mounted.container.textContent).toContain('says: “Restart the build agent”');
     } finally {

@@ -1,5 +1,5 @@
 /** The current Agent CLIs panel, narrowed to Codex and bound to the plugin client. */
-import { Badge, Button, SettingGroup, SettingRow } from '@ferretry/app';
+import { Badge, Button, SettingGroup, SettingRow, viewerTime } from '@ferretry/app';
 import { cn, Loading } from '@ferretry/app/ui';
 import { useEffect, useState } from 'react';
 import type { HarnessCliView } from '../contract/index.ts';
@@ -18,8 +18,7 @@ import {
 
 /** When the last check ran, in the reader's own clock (the raw instant when it cannot be read). */
 const checkedWords = (instant: string): string => {
-  const when = new Date(instant);
-  return Number.isNaN(when.getTime()) ? instant : when.toLocaleString();
+  return viewerTime(instant);
 };
 
 type Loaded = { kind: 'loading' } | { kind: 'view'; view: HarnessCliView } | { kind: 'failed'; reason: string };

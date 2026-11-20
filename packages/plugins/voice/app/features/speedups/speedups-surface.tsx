@@ -24,6 +24,7 @@ import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
 import type { DaemonConnection } from '../../shell-voice.ts';
 import { useConfigChangeEffect, useDaemonClient } from '../../lib/voice-store.tsx';
 import { putSecret } from '../../shell-voice.ts';
+import { viewerTime } from '@ferretry/app';
 import { ConfirmToSee, isStepUpRefusal, Loading } from '@ferretry/app/ui';
 import { readSpeedups, type SpeedupClient, testSpeedup } from './speedups-api.ts';
 import '../settings/voice-settings.css';
@@ -36,8 +37,6 @@ export const SPEEDUPS_INTRO =
 export const SPEEDUPS_FALLBACK =
   'Without them nothing breaks: the Warden investigates every flag with its own model, and dictation uses on-device word correction.';
 
-const formatInstant = (at: string): string => `${at.slice(0, 10)} ${at.slice(11, 16)}`;
-
 /** One line about the last Test, or nothing when there was none. */
 export function lastTestLine(status: SpeedupStatus): string | undefined {
   const last = status.lastTest;
@@ -45,7 +44,7 @@ export function lastTestLine(status: SpeedupStatus): string | undefined {
   const timing = last.latencyMs === undefined ? '' : ` · ${Math.round(last.latencyMs)} ms`;
   const verdict = last.ok ? 'Worked' : 'Failed';
   const stale = status.testStale ? ' The key has changed since — test again.' : '';
-  return `${verdict} ${formatInstant(last.at)}${timing}. ${last.message}${stale}`;
+  return `${verdict} ${viewerTime(last.at)}${timing}. ${last.message}${stale}`;
 }
 
 /** Why a pasted key cannot be saved yet, or nothing. */

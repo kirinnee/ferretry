@@ -5,7 +5,14 @@
  */
 
 import type { LoginBudget, LoginBudgetLevel, LoginBudgetPeriodView } from '@ferretry/plugin-logins/contract';
+import { viewerZoneLabel } from '@ferretry/app';
 import { usdWords } from '../../contract/index.ts';
+
+/** A zone as a person reads it: the short label first ("PST, America/Los_Angeles"), the label alone when it is the name. */
+const zoneWords = (zone: string): string => {
+  const label = viewerZoneLabel({ timeZone: zone });
+  return label === '' || label === zone ? zone : `${label}, ${zone}`;
+};
 
 const plural = (count: number, one: string, many = `${one}s`): string => `${String(count)} ${count === 1 ? one : many}`;
 
@@ -104,10 +111,10 @@ export const budgetScopeNote = (budget: LoginBudget, machineName: string): strin
  */
 export const budgetZoneWords = (budget: LoginBudget | undefined, deviceZone: string): string => {
   if (budget === undefined)
-    return `Days reset at midnight, weeks on Monday — counted in your zone (${deviceZone}) once you save; it is written to usage.yaml.`;
+    return `Days reset at midnight, weeks on Monday — counted in your zone (${zoneWords(deviceZone)}) once you save; it is written to usage.yaml.`;
   return budget.timeZoneSet
     ? `Days reset at midnight, weeks on Monday, in ${budget.timeZone} (written in usage.yaml).`
-    : `Days reset at midnight, weeks on Monday, in ${budget.timeZone} — this machine’s own zone. Saving here writes yours (${deviceZone}).`;
+    : `Days reset at midnight, weeks on Monday, in ${budget.timeZone} — this machine’s own zone. Saving here writes yours (${zoneWords(deviceZone)}).`;
 };
 
 /** One level of the editor: the text of a dollar amount, empty for no limit. */
