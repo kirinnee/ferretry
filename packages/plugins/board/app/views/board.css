@@ -233,7 +233,7 @@
   color: var(--fg);
   font-size: var(--text-xs);
 }
-.fy-board-filters__select[data-set] {
+.fy-board-filters__select.is-set {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -847,6 +847,8 @@
   flex-direction: column;
   gap: var(--gap-sm);
   overflow-y: auto;
+  /* Room for a control's focus ring, which this scroller would otherwise clip to a hairline on the sides. */
+  padding: 3px;
 }
 .fy-board-filter-sheet__fields .fy-board-filters__select,
 .fy-board-filter-sheet__fields .fy-board-filters__date {
@@ -1421,4 +1423,19 @@
 .fy-board-cards__pager {
   display: flex;
   align-items: center;
+}
+
+/* A filter is a SelectBox (the app's drawn select): the trigger keeps the compact chip size and the tint of a filter that is on. */
+.fy-board-filters__select.fy-sb__trigger {
+  display: inline-flex;
+  width: auto;
+  min-width: 0;
+  gap: var(--gap-xs);
+}
+.fy-board-filters__select.is-set .fy-sb__chev {
+  color: var(--accent);
+}
+.fy-board-filter-sheet__fields .fy-board-filters__select.fy-sb__trigger {
+  display: flex;
+  width: 100%;
 }

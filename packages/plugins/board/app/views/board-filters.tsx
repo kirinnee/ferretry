@@ -19,7 +19,7 @@ import { useId, useState } from 'react';
 import { type BoardDateRange, type BoardFilters, NO_BOARD_FILTERS, NO_DATE_RANGE } from '../lib/board-model.ts';
 import type { DaemonId } from '../lib/machine.ts';
 import { activeFilterCount } from '../lib/board-view.ts';
-import { BottomSheet } from '@ferretry/app/ui';
+import { BottomSheet, SelectBox } from '@ferretry/app/ui';
 
 export interface BoardFilterChoices {
   readonly projects: readonly { readonly id: BoardProjectId; readonly name: string }[];
@@ -124,23 +124,20 @@ interface SelectProps {
   readonly onPick: (value: string | null) => void;
 }
 
+/** A filter is a SelectBox: its own drawn list (a search field once it is long), a centred dialog on a phone. `is-set` tints a filter that is on. */
+const filterClass = (set: boolean): string => (set ? 'fy-board-filters__select is-set' : 'fy-board-filters__select');
+
 function FilterSelect({ name, title, value, any, options, onPick }: SelectProps) {
   return (
-    <select
-      aria-label={title}
-      className="fy-board-filters__select"
-      data-filter={name}
-      data-set={value === '' ? undefined : ''}
-      onChange={event => onPick(event.target.value === '' ? null : event.target.value)}
-      value={value}
-    >
-      <option value="">{any}</option>
-      {options.map(option => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+    <span className="contents" data-filter={name}>
+      <SelectBox
+        className={filterClass(value !== '')}
+        label={title}
+        onChange={next => onPick(next === '' ? null : next)}
+        options={[{ value: '', label: any }, ...options]}
+        value={value}
+      />
+    </span>
   );
 }
 
@@ -163,32 +160,31 @@ function DateRangeField({ name, title, range, onChange }: RangeProps) {
   const value = range.preset ?? (custom ? 'custom' : '');
   return (
     <span className="fy-board-filters__range" data-filter={name}>
-      <select
-        aria-label={title}
-        className="fy-board-filters__select"
-        data-filter={`${name}-preset`}
-        data-set={value === '' ? undefined : ''}
-        onChange={event => {
-          const next = event.target.value;
-          if (next === 'custom') {
-            setCustom(true);
-            onChange(NO_DATE_RANGE);
-            return;
-          }
-          setCustom(false);
-          const preset = PRESETS.find(candidate => candidate.value === next);
-          onChange(preset === undefined ? NO_DATE_RANGE : { preset: preset.value, from: null, to: null });
-        }}
-        value={value}
-      >
-        <option value="">{title}: any</option>
-        {PRESETS.map(preset => (
-          <option key={preset.value} value={preset.value}>
-            {title}: {preset.label.toLocaleLowerCase()}
-          </option>
-        ))}
-        <option value="custom">{title}: custom…</option>
-      </select>
+      <span className="contents" data-filter={`${name}-preset`}>
+        <SelectBox
+          className={filterClass(value !== '')}
+          label={title}
+          onChange={next => {
+            if (next === 'custom') {
+              setCustom(true);
+              onChange(NO_DATE_RANGE);
+              return;
+            }
+            setCustom(false);
+            const preset = PRESETS.find(candidate => candidate.value === next);
+            onChange(preset === undefined ? NO_DATE_RANGE : { preset: preset.value, from: null, to: null });
+          }}
+          options={[
+            { value: '', label: `${title}: any` },
+            ...PRESETS.map(preset => ({
+              value: preset.value,
+              label: `${title}: ${preset.label.toLocaleLowerCase()}`,
+            })),
+            { value: 'custom', label: `${title}: custom…` },
+          ]}
+          value={value}
+        />
+      </span>
       {custom && range.preset === null ? (
         <span className="fy-board-filters__dates">
           <input
@@ -281,24 +277,23 @@ function BoardFilterFields({ filters, onChange, choices, archive }: FieldsProps)
         title="Activity"
         value={filters.activity ?? ''}
       />
-      <select
-        aria-label="State"
-        className="fy-board-filters__select"
-        data-filter="state"
-        data-set={filters.state === NO_BOARD_FILTERS.state ? undefined : ''}
-        onChange={event => set({ state: BoardStateFilterSchema.parse(event.target.value) })}
-        value={filters.state}
-      >
-        {BoardStateFilterSchema.options
-          .filter(state => !archive || state !== 'all')
-          .map(state => (
-            <option key={state} value={state}>
-              {archive && state === 'open'
-                ? 'Closed + dropped'
-                : `State: ${label(STATE_LABEL, state).toLocaleLowerCase()}`}
-            </option>
-          ))}
-      </select>
+      <span className="contents" data-filter="state">
+        <SelectBox
+          className={filterClass(filters.state !== NO_BOARD_FILTERS.state)}
+          label="State"
+          onChange={next => set({ state: BoardStateFilterSchema.parse(next) })}
+          options={BoardStateFilterSchema.options
+            .filter(state => !archive || state !== 'all')
+            .map(state => ({
+              value: state,
+              label:
+                archive && state === 'open'
+                  ? 'Closed + dropped'
+                  : `State: ${label(STATE_LABEL, state).toLocaleLowerCase()}`,
+            }))}
+          value={filters.state}
+        />
+      </span>
       <FilterSelect
         any="All lanes"
         name="lane"

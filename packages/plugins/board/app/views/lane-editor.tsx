@@ -13,7 +13,7 @@ import {
   MAX_GATE_OPTIONS,
   type Workflow,
 } from '../../contract/index.ts';
-import { Loading, readPress } from '@ferretry/app/ui';
+import { Loading, readPress, SelectBox } from '@ferretry/app/ui';
 import { ArrowDown, ArrowLeft, ArrowUp, Check, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useBoardActions, useBoardProjects } from '../hooks/use-board.ts';
@@ -164,27 +164,22 @@ function GateOptions({
               <span className="hidden text-muted sm:inline" aria-hidden="true">
                 →
               </span>
-              <select
+              <SelectBox
                 className={`${fieldClass} w-full`}
-                aria-label={`Outcome of ${ordinal}`}
+                label={`Outcome of ${ordinal}`}
                 value={value}
                 disabled={busy}
-                onChange={event => {
-                  const outcome = outcomeFromValue(event.currentTarget.value);
+                onChange={next => {
+                  const outcome = outcomeFromValue(next);
                   if (outcome !== null) onChange(setGateOptionOutcome(draft, laneId, option.id, outcome));
                 }}
-              >
-                <option value="next">{OUTCOME_LABELS.next}</option>
-                {others.map(entry => (
-                  <option key={entry.id} value={`lane:${entry.id}`}>
-                    Go to {entry.name}
-                  </option>
-                ))}
-                <option value="reopen" disabled={reopenTaken(lane, option.id)}>
-                  {OUTCOME_LABELS['reopen-with-ask']}
-                </option>
-                <option value="close">{OUTCOME_LABELS.close}</option>
-              </select>
+                options={[
+                  { value: 'next', label: OUTCOME_LABELS.next },
+                  ...others.map(entry => ({ value: `lane:${entry.id}`, label: `Go to ${entry.name}` })),
+                  { value: 'reopen', label: OUTCOME_LABELS['reopen-with-ask'], disabled: reopenTaken(lane, option.id) },
+                  { value: 'close', label: OUTCOME_LABELS.close },
+                ]}
+              />
               <button
                 className="kt-btn kt-btn--sm absolute right-1 top-1"
                 type="button"
@@ -306,19 +301,14 @@ function LaneRow({
           disabled={busy}
           onChange={event => onChange(renameLane(draft, lane.id, event.currentTarget.value))}
         />
-        <select
-          className={fieldClass}
-          aria-label={`Category of ${lane.name}`}
+        <SelectBox
+          className={`${fieldClass} !w-48`}
+          label={`Category of ${lane.name}`}
           value={lane.category}
           disabled={busy}
-          onChange={event => onChange(setLaneCategory(draft, lane.id, event.currentTarget.value as LaneCategory))}
-        >
-          {LANE_CATEGORIES.map(category => (
-            <option key={category} value={category}>
-              {CATEGORY_LABELS[category]}
-            </option>
-          ))}
-        </select>
+          onChange={next => onChange(setLaneCategory(draft, lane.id, next as LaneCategory))}
+          options={LANE_CATEGORIES.map(category => ({ value: category, label: CATEGORY_LABELS[category] }))}
+        />
         {canSwitchStage(lane) ? (
           <StageSwitch
             laneId={lane.id}
@@ -440,19 +430,16 @@ function DeletePrompt({
       data-lane-delete={laneId}
     >
       <span className="text-ui text-fg">Delete “{lane?.name ?? laneId}”. Its tasks go to</span>
-      <select
-        className={fieldClass}
-        aria-label="Where its tasks go"
+      <SelectBox
+        className={`${fieldClass} !w-56 !max-w-full`}
+        label="Where its tasks go"
         value={target}
-        onChange={event => setTarget(event.currentTarget.value)}
-      >
-        <option value="">Choose a lane…</option>
-        {others.map(entry => (
-          <option key={entry.id} value={entry.id}>
-            {entry.name}
-          </option>
-        ))}
-      </select>
+        onChange={setTarget}
+        options={[
+          { value: '', label: 'Choose a lane…' },
+          ...others.map(entry => ({ value: entry.id, label: entry.name })),
+        ]}
+      />
       <button
         className="kt-btn kt-btn--sm"
         data-variant="danger"
