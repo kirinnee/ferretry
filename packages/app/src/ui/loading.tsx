@@ -13,6 +13,7 @@
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { LOADING_DELAY_MS, LOADING_FADE_MS, LOADING_MIN_MS, loadingGateStyle } from './loading-gate.ts';
+import { useLoadingHold } from './loading-hold.ts';
 import { Spinner } from './spinner.tsx';
 
 export { LOADING_DELAY_MS, LOADING_FADE_MS, LOADING_MIN_MS };
@@ -87,12 +88,20 @@ export interface LoadingProps {
 
 export function Loading({ kind, label, className, compact = false, marks }: LoadingProps) {
   if (kind === 'bar') return <BackgroundLoading label={label} marks={marks} />;
+  return <PageLoading className={className} compact={compact} label={label} marks={marks} />;
+}
+
+function PageLoading({ label, className, compact, marks }: Omit<LoadingProps, 'kind'> & { readonly compact: boolean }) {
+  const root = useRef<HTMLDivElement>(null);
+  // Mounted straight off a read, it would vanish the moment the read answers: keep it for its minimum (loading-hold.ts).
+  useLoadingHold(root, { cover: true });
   const extra = (compact ? ' fy-loading--compact' : '') + (className === undefined ? '' : ` ${className}`);
   return (
     <div
       aria-live="polite"
       className={`fy-loading fy-loading--page${extra}`}
       data-loading="page"
+      ref={root}
       role="status"
       style={delayStyle}
       {...marks}

@@ -32,3 +32,12 @@ describe('the loader threshold', () => {
     expect(css).toContain(`.${LOADING_GATE_CLASS} {`);
   });
 });
+
+describe('the minimum display time', () => {
+  test('a ghost of a loader that was shown is drawn at once, over the gate and the reduced-motion restatement', () => {
+    expect(css).toContain('.fy-loading-ghost');
+    expect(css).toMatch(
+      /\.fy-loading-ghost(\.fy-loading-ghost){4,}\s*{[^}]*animation: none !important;[^}]*opacity: 1 !important;/,
+    );
+  });
+});

@@ -70,7 +70,7 @@ export function FolderExplorer(props: FolderExplorerProps) {
     return (
       <div className="grid gap-sm" data-explorer-state={error === null ? 'loading' : 'failed'} aria-busy={loading}>
         {error === null ? (
-          <p className="m-0 flex items-center gap-xs text-meta text-muted" role="status">
+          <p className="fy-wait-gate m-0 flex items-center gap-xs text-meta text-muted" role="status">
             <LoaderCircle className="animate-spin motion-reduce:animate-none" size={14} aria-hidden="true" />
             Reading your home folder…
           </p>

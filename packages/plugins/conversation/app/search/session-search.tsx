@@ -767,7 +767,9 @@ export function SessionSearchControl({
         data-search-trailing=""
       >
         {loading ? (
-          <LoaderCircle aria-hidden="true" className="animate-spin" size={13} data-search-indexing="" />
+          <span className="fy-wait-gate inline-flex">
+            <LoaderCircle aria-hidden="true" className="animate-spin" size={13} data-search-indexing="" />
+          </span>
         ) : null}
       </span>
       {/* Announced, never drawn: the popup below is visible, and a sighted
@@ -781,7 +783,7 @@ export function SessionSearchControl({
           data-session-search-popup=""
         >
           {loading && (
-            <p className="m-0 flex items-center gap-2 px-3 py-2 text-ui text-muted" role="status">
+            <p className="fy-wait-gate m-0 flex items-center gap-2 px-3 py-2 text-ui text-muted" role="status">
               <LoaderCircle className="animate-spin" size={14} />
               {indexingCopy(search.taskState, search.fileState)}
             </p>

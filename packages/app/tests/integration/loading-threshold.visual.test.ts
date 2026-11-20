@@ -108,7 +108,7 @@ const run = async (
   }
 };
 
-const SCENES = ['page', 'bar', 'cache', 'spinner'] as const;
+const SCENES = ['page', 'held', 'bar', 'cache', 'spinner'] as const;
 
 describe('a wait that answers inside 300 ms paints no loader', () => {
   for (const scene of SCENES) {
@@ -122,16 +122,21 @@ describe('a wait that answers inside 300 ms paints no loader', () => {
   }
 });
 
-describe('a wait that outlasts 300 ms shows from about 300 ms and does not blink', () => {
-  for (const scene of ['page', 'bar'] as const) {
-    for (const motion of [undefined, 'reduced'] as const) {
-      it(`${scene}${motion === undefined ? '' : ' (reduced motion)'}: 600 ms → visible from ~300 ms, held ≥ 300 ms`, async () => {
-        const seen = await run(scene, 600, { motion, theme: 'studio-dark' });
-        expect(seen.firstVisible).not.toBeNull();
-        expect(seen.firstVisible as number).toBeGreaterThanOrEqual(295);
-        expect(seen.firstVisible as number).toBeLessThanOrEqual(420);
-        expect((seen.lastVisible as number) - (seen.firstVisible as number)).toBeGreaterThanOrEqual(300);
-      });
+describe('a wait that outlasts 300 ms shows from about 300 ms and, once shown, stays 300 ms (the owner mounts it off its read)', () => {
+  for (const scene of ['page', 'held', 'bar', 'cache', 'spinner'] as const) {
+    // 350 ms: answers 50 ms after the loader is due (it was ~33 ms on screen before the hold); 600 ms: the other measured case.
+    for (const ms of [350, 600] as const) {
+      for (const motion of scene === 'page' || scene === 'bar'
+        ? ([undefined, 'reduced'] as const)
+        : ([undefined] as const)) {
+        it(`${scene}${motion === undefined ? '' : ' (reduced motion)'}: ${ms} ms read → visible from ~300 ms, held ≥ 300 ms`, async () => {
+          const seen = await run(scene, ms, { motion, theme: 'studio-dark' });
+          expect(seen.firstVisible).not.toBeNull();
+          expect(seen.firstVisible as number).toBeGreaterThanOrEqual(295);
+          expect(seen.firstVisible as number).toBeLessThanOrEqual(420);
+          expect((seen.lastVisible as number) - (seen.firstVisible as number)).toBeGreaterThanOrEqual(300);
+        });
+      }
     }
   }
   for (const scene of ['cache', 'spinner'] as const) {
