@@ -4,6 +4,10 @@
  * first written; every other sheet (settings, the side-pane tab switcher, the
  * rename and pin flows) composes this exact primitive instead of growing a
  * second, subtly different modal.
+ *
+ * Scrolling (the `.kt-sheet` block of `design-system.css` owns it): a bar shows only when the content needs one. The
+ * panel scrolls as the last resort; a body that is `min-h-0 flex-1 overflow-y-auto` keeps scrolling itself, so exactly one
+ * element scrolls. Never a sideways bar.
  */
 
 import {
@@ -258,24 +262,26 @@ export function BottomSheet({
         {/* The handle is both the visible dismissal affordance and the ONLY
             swipe surface. Its own touch-action prevents gesture arbitration;
             the content scroller below never sees these pointer handlers. */}
-        <button
-          type="button"
-          aria-label={closeLabel}
-          data-sheet-swipe="supported"
-          disabled={!open}
-          onClick={clickHandle}
-          onPointerDown={beginSwipe}
-          onPointerMove={moveSwipe}
-          onPointerUp={event => endSwipe(event, false)}
-          onPointerCancel={event => endSwipe(event, true)}
-          className="group mx-auto flex min-h-[44px] w-20 shrink-0 touch-none cursor-grab items-center justify-center py-3 active:cursor-grabbing"
-          title="Close, or swipe down"
-        >
-          <span
-            className="block h-1 w-12 rounded-full bg-border-strong transition-colors group-hover:bg-fg-soft"
-            aria-hidden="true"
-          />
-        </button>
+        <div className="kt-sheet__grip">
+          <button
+            type="button"
+            aria-label={closeLabel}
+            data-sheet-swipe="supported"
+            disabled={!open}
+            onClick={clickHandle}
+            onPointerDown={beginSwipe}
+            onPointerMove={moveSwipe}
+            onPointerUp={event => endSwipe(event, false)}
+            onPointerCancel={event => endSwipe(event, true)}
+            className="group mx-auto flex min-h-[44px] w-20 shrink-0 touch-none cursor-grab items-center justify-center py-3 active:cursor-grabbing"
+            title="Close, or swipe down"
+          >
+            <span
+              className="block h-1 w-12 rounded-full bg-border-strong transition-colors group-hover:bg-fg-soft"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
         {children}
       </div>
     </div>

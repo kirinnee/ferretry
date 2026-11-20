@@ -2378,10 +2378,47 @@ body {
   border-bottom: 0;
 }
 
-/* ---- bottom sheet (SessionDetails) ---- */
+/* ---- bottom sheet (SessionDetails) ----------------------------------------
+   A sheet shows a scroll bar ONLY when its content needs one, and never a sideways one.
+   - The panel is the ONE scroller of last resort: `overflow-y: auto` (never `scroll`), so a sheet whose content
+     has no scroller of its own (a chooser, a notice) still reaches its end instead of being cut off at the cap.
+   - A caller that gives its body `min-h-0 flex-1 overflow-y-auto` keeps scrolling THERE: that body shrinks to fit
+     the panel, so the panel itself has nothing to scroll and exactly one bar shows.
+   - The drag handle's row (`.kt-sheet__grip`) stays put (sticky) while the panel scrolls.
+   - `overflow-x: hidden` on the panel and on every direct child / body scroller: an `overflow-y: auto` box whose
+     x is `visible` computes x to `auto`, and that is where the stray horizontal bar came from. Content must wrap
+     (`min-width: 0`); what cannot is clipped, not scrolled. */
 .kt-sheet {
   border-radius: var(--radius-panel) var(--radius-panel) 0 0;
   border-bottom: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* The grip row is the sheet's top spacing, so the panel takes no top padding of its own: a sticky row pins below a
+   scroller's top padding, which would leave a strip above the handle where scrolled content shows. */
+.kt-sheet.kt-sheet {
+  padding-block-start: 0;
+}
+.kt-sheet__grip {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex: none;
+  justify-content: center;
+  /* A full-width row, so scrolled content never shows beside the handle. */
+  background: inherit;
+}
+/* A direct child that scrolls sideways ON PURPOSE (`overflow-auto` / `overflow-x-auto`, e.g. the Markdown table's full-screen
+   pan box) keeps its own scroller: clipping it would leave its rightmost columns unreachable. */
+.kt-sheet > :where(:not(.kt-sheet__grip, .overflow-auto, .overflow-x-auto, .overflow-x-scroll, .overflow-scroll)) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+}
+.kt-sheet :where(.overflow-y-auto) {
+  overflow-x: hidden;
 }
 
 /* ---- status dot + meter ------------------------------------------------- */
