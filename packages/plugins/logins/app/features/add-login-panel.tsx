@@ -18,6 +18,7 @@ import { readLogins, readPresets } from '../lib/logins-api.ts';
 import { HARNESS_NAMES, HARNESSES, type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
 import { type Prefill, withheldSentence } from '../lib/paste-model.ts';
 import { Button, ChangeApplyPanel } from '../ui.ts';
+import { HarnessChoice } from './harness-choice.tsx';
 import { PasteVariables } from './paste-variables.tsx';
 import { ProviderGrid, usableHarnesses } from './provider-grid.tsx';
 import { QuickKeyForm, quickKeyVariable } from './quick-key-form.tsx';
@@ -93,7 +94,7 @@ function PresetForm({
   };
 
   return (
-    <div className="flex flex-col gap-2" data-add-login-form={preset.id}>
+    <div className="flex flex-col gap-4" data-add-login-form={preset.id}>
       {pastedSecrets.length === 0 ? null : (
         <p role="status" className="m-0 text-cell leading-base text-muted" data-paste-secrets="">
           Your pasted {pastedSecrets.join(', ')} {pastedSecrets.length === 1 ? 'is' : 'are'} in the secret store, and
@@ -106,52 +107,46 @@ function PresetForm({
         </p>
       )}
       {harnesses.length > 1 ? (
-        <label className="flex flex-col gap-1 text-cell text-fg">
-          Listed under
-          <select
-            className="kt-input"
-            value={harness}
-            onChange={event => setHarness(event.target.value as HarnessKind)}
-          >
-            {harnesses.map(name => (
-              <option key={name} value={name}>
-                {HARNESS_NAMES[name]}
-              </option>
-            ))}
-          </select>
-        </label>
+        <HarnessChoice label="Listed under" harnesses={harnesses} value={harness} onChange={setHarness} />
       ) : null}
-      {preset.variables.map(variable => (
-        <label key={variable.name} className="flex flex-col gap-1 text-cell text-fg">
-          <span className="font-mono">{variable.name}</span>
+      <div className="fy-lg-fields">
+        {preset.variables.map(variable => (
+          <label key={variable.name} className="fy-lg-field text-cell text-fg">
+            <span className="font-mono">{variable.name}</span>
+            <input
+              className="kt-input"
+              autoComplete="off"
+              value={env[variable.name] ?? ''}
+              onChange={event => setEnv({ ...env, [variable.name]: event.target.value })}
+            />
+            <span className="fy-lg-field__hint text-meta leading-base text-muted">
+              {variable.kind === 'secret'
+                ? `A secret: write the NAME it is stored under as \${secret:NAME}, never the key itself.`
+                : (variable.description ?? (variable.required ? 'Needed.' : 'Optional.'))}
+            </span>
+          </label>
+        ))}
+        {preset.cloudCredential === undefined ? null : (
+          <label className="fy-lg-field text-cell text-fg">
+            <span>Cloud credential ({preset.cloudCredential.kinds.join(' or ')})</span>
+            <input
+              className="kt-input"
+              autoComplete="off"
+              value={cloud}
+              onChange={event => setCloud(event.target.value)}
+            />
+          </label>
+        )}
+        <label className="fy-lg-field text-cell text-fg">
+          <span>Label (optional)</span>
           <input
             className="kt-input"
             autoComplete="off"
-            value={env[variable.name] ?? ''}
-            onChange={event => setEnv({ ...env, [variable.name]: event.target.value })}
-          />
-          <span className="text-meta leading-base text-muted">
-            {variable.kind === 'secret'
-              ? `A secret: write the NAME it is stored under as \${secret:NAME}, never the key itself.`
-              : (variable.description ?? (variable.required ? 'Needed.' : 'Optional.'))}
-          </span>
-        </label>
-      ))}
-      {preset.cloudCredential === undefined ? null : (
-        <label className="flex flex-col gap-1 text-cell text-fg">
-          Cloud credential ({preset.cloudCredential.kinds.join(' or ')})
-          <input
-            className="kt-input"
-            autoComplete="off"
-            value={cloud}
-            onChange={event => setCloud(event.target.value)}
+            value={label}
+            onChange={event => setLabel(event.target.value)}
           />
         </label>
-      )}
-      <label className="flex flex-col gap-1 text-cell text-fg">
-        Label (optional)
-        <input className="kt-input" autoComplete="off" value={label} onChange={event => setLabel(event.target.value)} />
-      </label>
+      </div>
       <ChangeApplyPanel
         machineName="this machine"
         authority={changes.authority}
@@ -194,31 +189,24 @@ function SignInForm({ client, onAdded }: { readonly client: LoginsClient; readon
   };
 
   return (
-    <div className="kt-panel flex flex-col gap-2 p-panel" data-add-login-sign-in="">
+    <div className="fy-lg-group" data-add-login-sign-in="">
       <p className="m-0 text-row font-semibold text-fg">Sign in to a tool</p>
-      <label className="flex flex-col gap-1 text-cell text-fg">
-        Tool
-        <select className="kt-input" value={harness} onChange={event => setHarness(event.target.value as HarnessKind)}>
-          {HARNESSES.map(name => (
-            <option key={name} value={name}>
-              {HARNESS_NAMES[name]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex flex-col gap-1 text-cell text-fg">
-        Label (optional)
-        <input
-          className="kt-input"
-          autoComplete="off"
-          value={label}
-          placeholder="e.g. personal or work"
-          onChange={event => setLabel(event.target.value)}
-        />
-      </label>
-      <p className="m-0 text-meta leading-base text-muted">
-        It starts as an empty login that needs sign-in; you sign it in next.
-      </p>
+      <HarnessChoice label="Tool" harnesses={HARNESSES} value={harness} onChange={setHarness} />
+      <div className="fy-lg-fields">
+        <label className="fy-lg-field text-cell text-fg">
+          <span>Label (optional)</span>
+          <input
+            className="kt-input"
+            autoComplete="off"
+            value={label}
+            placeholder="e.g. personal or work"
+            onChange={event => setLabel(event.target.value)}
+          />
+          <span className="fy-lg-field__hint text-meta leading-base text-muted">
+            It starts as an empty login that needs sign-in; you sign it in next.
+          </span>
+        </label>
+      </div>
       <ChangeApplyPanel
         machineName="this machine"
         authority={changes.authority}
@@ -297,7 +285,7 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
       more === picked.id || (held !== undefined && held.presetId === picked.id) ? undefined : quickKeyVariable(picked);
     return (
       <section className="flex min-w-0 flex-col gap-3" data-add-login="">
-        <div className="kt-panel flex flex-col gap-1 p-panel" data-add-login-preset={picked.id}>
+        <div className="fy-lg-group" data-add-login-preset={picked.id}>
           <span className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="text-row font-semibold text-fg">{picked.label}</span>
             <LoginScopeChip harnesses={usableHarnesses(picked)} />
@@ -327,7 +315,7 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
   }
 
   return (
-    <section className="flex min-w-0 flex-col gap-3" data-add-login="">
+    <section className="fy-lg-groups min-w-0" data-add-login="">
       {added === null ? null : (
         <p role="status" className="m-0 text-cell leading-base text-ok" data-add-login-done="">
           Added {added}.

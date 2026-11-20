@@ -110,11 +110,19 @@ describe('changing a login from its page', () => {
     };
     const view = await openPage(routes, calls);
     await type(view.container.querySelector('#login-disable-reason-claude-you'), 'over budget');
-    const select = must(view.container.querySelector<HTMLSelectElement>('[data-login-disable] select'), 'the wait');
-    await interact(() => {
-      select.value = '1d';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const wait = must(
+      view.container.querySelector<HTMLElement>('[data-login-disable] [role="radiogroup"][aria-label="For how long"]'),
+      'the wait',
+    );
+    const choices = Array.from(wait.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
+    expect(choices.map(radio => radio.value)).toEqual(['until-on', '1h', '1d', '1w']);
+    expect(Array.from(wait.querySelectorAll('label')).map(label => label.textContent)).toEqual([
+      'Until on',
+      '1 hour',
+      '1 day',
+      '1 week',
+    ]);
+    await interact(() => must(choices[2] ?? null, 'a day').click());
     await click(view.container.querySelector('[data-login-disable="on"] [data-change-submit]'), 'Switch off');
     await until(() => calls.some(call => call.route === STAGE), 'the stage');
     expect(calls.find(call => call.route === STAGE)?.body).toEqual({

@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react';
 import { changeRefusalExplanation, cn } from '../ui.ts';
 import type { LoginChangeView, LoginView } from '../../contract/index.ts';
 import type { LoginChanges } from '../lib/login-changes.ts';
-import { Button, ChangeApplyPanel } from '../ui.ts';
+import { Button, ChangeApplyPanel, Segmented } from '../ui.ts';
 import { HARNESS_NAMES } from '../lib/logins-view.ts';
 
 const SIGN_OUT_VERSUS_REMOVE = 'Sign out keeps the login but it needs sign-in again. Remove deletes it.';
@@ -37,21 +37,23 @@ export function LabelEditor({ login, machineName, changes, reload }: PanelProps)
     if (result.kind === 'applied') await reload();
   };
   return (
-    <div className="flex flex-col gap-2" data-login-label="">
-      <label htmlFor={`login-label-${login.id}`} className="text-ui font-semibold text-fg">
-        Label
-      </label>
-      <input
-        id={`login-label-${login.id}`}
-        className="kt-input"
-        autoComplete="off"
-        value={label}
-        placeholder="e.g. personal or work"
-        onChange={event => setLabel(event.target.value)}
-      />
-      <span className="text-meta leading-base text-muted">
-        Only you see this. It tells logins with the same email apart.
-      </span>
+    <div className="flex flex-col gap-3" data-login-label="">
+      <div className="fy-lg-field">
+        <label htmlFor={`login-label-${login.id}`} className="text-ui font-semibold text-fg">
+          Label
+        </label>
+        <input
+          id={`login-label-${login.id}`}
+          className="kt-input"
+          autoComplete="off"
+          value={label}
+          placeholder="e.g. personal or work"
+          onChange={event => setLabel(event.target.value)}
+        />
+        <span className="fy-lg-field__hint text-meta leading-base text-muted">
+          Only you see this. It tells logins with the same email apart.
+        </span>
+      </div>
       {login.needsLabel ? (
         <span className="text-meta leading-base text-warn" data-login-needs-label="">
           Another {HARNESS_NAMES[login.harness]} login here has the same email. Give each a different label.
@@ -71,11 +73,16 @@ export function LabelEditor({ login, machineName, changes, reload }: PanelProps)
   );
 }
 
-const WAITS: readonly { readonly id: string; readonly label: string; readonly ms: number | null }[] = [
-  { id: 'until-on', label: 'Until I switch it back on', ms: null },
-  { id: '1h', label: 'For an hour', ms: 3_600_000 },
-  { id: '1d', label: 'For a day', ms: 86_400_000 },
-  { id: '1w', label: 'For a week', ms: 604_800_000 },
+const WAITS: readonly {
+  readonly id: string;
+  readonly label: string;
+  readonly short: string;
+  readonly ms: number | null;
+}[] = [
+  { id: 'until-on', label: 'Until I switch it back on', short: 'Until on', ms: null },
+  { id: '1h', label: 'For an hour', short: '1 hour', ms: 3_600_000 },
+  { id: '1d', label: 'For a day', short: '1 day', ms: 86_400_000 },
+  { id: '1w', label: 'For a week', short: '1 week', ms: 604_800_000 },
 ];
 
 /** Switch the login off without deleting it, or back on. Nothing running is stopped. */
@@ -115,7 +122,7 @@ export function DisableControl({
     }
   };
   return (
-    <div className="flex flex-col gap-2" data-login-disable={off ? 'off' : 'on'}>
+    <div className="flex flex-col gap-3" data-login-disable={off ? 'off' : 'on'}>
       {off ? (
         <p className="m-0 text-cell leading-base text-warn" data-login-disabled-note="">
           Switched off{login.disabled?.reason === undefined ? '' : `: ${login.disabled.reason}`}. Nothing new starts on
@@ -123,29 +130,32 @@ export function DisableControl({
         </p>
       ) : (
         <>
-          <label htmlFor={`login-disable-reason-${login.id}`} className="text-ui font-semibold text-fg">
-            Switch off
-          </label>
-          <input
-            id={`login-disable-reason-${login.id}`}
-            className="kt-input"
-            autoComplete="off"
-            value={reason}
-            placeholder="Why (optional)"
-            onChange={event => setReason(event.target.value)}
-          />
-          <select
-            className="kt-input"
-            value={wait}
-            aria-label="For how long"
-            onChange={event => setWait(event.target.value)}
-          >
-            {WAITS.map(entry => (
-              <option key={entry.id} value={entry.id}>
-                {entry.label}
-              </option>
-            ))}
-          </select>
+          <div className="fy-lg-field">
+            <label htmlFor={`login-disable-reason-${login.id}`} className="text-ui font-semibold text-fg">
+              Switch off
+            </label>
+            <input
+              id={`login-disable-reason-${login.id}`}
+              className="kt-input"
+              autoComplete="off"
+              value={reason}
+              placeholder="Why (optional)"
+              onChange={event => setReason(event.target.value)}
+            />
+          </div>
+          <div className="fy-lg-field">
+            <span id={`login-disable-wait-${login.id}`} className="text-ui font-semibold text-fg">
+              For how long
+            </span>
+            <span className="fy-lg-control">
+              <Segmented
+                label="For how long"
+                value={wait}
+                options={WAITS.map(entry => ({ id: entry.id, label: entry.short }))}
+                onChange={setWait}
+              />
+            </span>
+          </div>
         </>
       )}
       <ChangeApplyPanel
@@ -173,7 +183,7 @@ export function SignOutZone({ login, machineName, changes, reload }: PanelProps)
     }
   };
   return asking ? (
-    <div role="alert" className="kt-panel flex flex-col gap-3 p-panel" data-login-sign-out="">
+    <div role="alert" className="fy-lg-open flex flex-col gap-3" data-login-sign-out="">
       <p className="m-0 text-row font-semibold text-fg">{login.signOut.sentence}</p>
       <ChangeApplyPanel
         machineName={machineName}
@@ -194,8 +204,7 @@ export function SignOutZone({ login, machineName, changes, reload }: PanelProps)
     <div>
       <Button
         type="button"
-        variant="ghost"
-        className="kt-btn--flush-start"
+        size="sm"
         data-login-sign-out-ask=""
         onClick={() => {
           changes.clear();
@@ -246,7 +255,7 @@ export function RemoveZone({
     }
   };
   return (
-    <div className="flex flex-col items-start gap-2 border-t border-border pt-3" data-login-remove-zone="">
+    <div className="fy-lg-open flex flex-col items-start gap-2" data-login-remove-zone="">
       <p className="m-0 text-meta leading-base text-muted" data-login-remove-hint="">
         {SIGN_OUT_VERSUS_REMOVE}
       </p>
@@ -284,7 +293,7 @@ export function RemoveZone({
           )}
         </>
       ) : (
-        <div role="alert" className="kt-panel flex w-full flex-col gap-3 p-panel" data-login-remove="">
+        <div role="alert" className="flex w-full flex-col gap-3" data-login-remove="">
           <p className="m-0 text-row font-semibold text-fg">{staged.summary}</p>
           <ul className="m-0 flex list-none flex-col gap-1 p-0 text-cell leading-base text-muted">
             {staged.consequences.map(sentence => (

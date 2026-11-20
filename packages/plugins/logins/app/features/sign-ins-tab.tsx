@@ -152,10 +152,10 @@ function Quota({
       <UsageBars login={login} now={now} />
     ) : null;
   return (
-    <>
+    <div className="flex min-w-0 max-w-xl flex-col gap-2">
       {quota}
       <BudgetMeter login={login} daemon={daemon} machineName={machineName} />
-    </>
+    </div>
   );
 }
 
@@ -231,13 +231,13 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
   };
 
   return (
-    <section className="flex min-w-0 flex-col gap-4" data-login-page={login.id}>
-      <div>
+    <section className="fy-lg-groups min-w-0" data-login-page={login.id}>
+      <div className="fy-lg-group">
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="kt-btn--flush-start"
+          className="kt-btn--flush-start self-start"
           data-page-back=""
           onClick={onBack}
         >
@@ -256,7 +256,7 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
         </div>
       </div>
 
-      <div className="kt-panel flex flex-col gap-2 p-panel" data-login-status={word}>
+      <div className="fy-lg-group" data-login-status={word}>
         <AccountStatus word={word} showLabel className="text-row font-semibold text-fg" />
         <p className="m-0 text-cell leading-base text-muted">
           {checking ? (
@@ -289,7 +289,7 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
       )}
 
       {signedInFor === null ? null : (
-        <div className="kt-panel flex flex-col gap-2 p-panel" role="status" data-login-signed-in="">
+        <div className="flex flex-col gap-2" role="status" data-login-signed-in="">
           <p className="m-0 text-row font-semibold text-ok">{signedInSentence(signedInFor.length)}</p>
         </div>
       )}
@@ -306,7 +306,7 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
           }}
         />
       ) : (
-        <div className="flex flex-col gap-3 border-t border-border pt-3" data-login-actions="">
+        <div className="flex flex-col gap-3" data-login-actions="">
           {login.checkNow.available ? (
             <ChangeApplyPanel
               machineName={machineName}
@@ -324,15 +324,17 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
         </div>
       )}
 
-      <LabelEditor login={login} machineName={machineName} changes={changes} reload={reload} />
-      <DisableControl login={login} machineName={machineName} changes={changes} reload={reload} now={clock} />
+      <div className="fy-lg-group">
+        <LabelEditor login={login} machineName={machineName} changes={changes} reload={reload} />
+        <DisableControl login={login} machineName={machineName} changes={changes} reload={reload} now={clock} />
+      </div>
 
-      <div>
+      <div className="fy-lg-group">
         <h4 className="m-0 text-meta font-semibold uppercase text-muted">Used by</h4>
         {login.usedBy.length === 0 ? (
           <p className="mb-0 mt-1 text-cell text-muted">No runtime uses this login yet.</p>
         ) : (
-          <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0">
+          <ul className="m-0 flex list-none flex-col gap-1 p-0">
             {login.usedBy.map(name => (
               <li key={name} className="flex items-center gap-2 text-cell" data-login-runtime={name}>
                 <AccountStatus word={login.status.word} />
@@ -343,16 +345,18 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
         )}
       </div>
 
-      {needsSignIn ? null : <SignOutZone login={login} machineName={machineName} changes={changes} reload={reload} />}
-      <RemoveZone
-        login={login}
-        machineName={machineName}
-        changes={changes}
-        onRemoved={() => {
-          onBack();
-          void reload();
-        }}
-      />
+      <div className="fy-lg-group">
+        {needsSignIn ? null : <SignOutZone login={login} machineName={machineName} changes={changes} reload={reload} />}
+        <RemoveZone
+          login={login}
+          machineName={machineName}
+          changes={changes}
+          onRemoved={() => {
+            onBack();
+            void reload();
+          }}
+        />
+      </div>
     </section>
   );
 }
@@ -397,7 +401,7 @@ function LoginRow({
   const refusal = authorityRefusal(changes);
   return (
     <div className="kt-panel flex min-w-0 flex-col gap-3 p-panel" data-login-card-wrap={login.id}>
-      <div className="flex min-w-0 items-start gap-3">
+      <div className="relative flex min-w-0 items-start gap-3">
         <button
           type="button"
           className="flex min-w-0 flex-1 items-start gap-3 bg-transparent p-0 text-left"
@@ -407,7 +411,7 @@ function LoginRow({
         >
           <AccountStatus word={login.status.word} className="mt-1" />
           <span className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="break-words font-mono text-row text-fg sm:truncate">
+            <span className="block min-h-9 break-words pr-24 font-mono text-row text-fg sm:truncate">
               {login.store === 'environment' ? login.id : breakAtAt(loginEmail(login))}
             </span>
             <LoginBadges login={login} />
@@ -417,23 +421,25 @@ function LoginRow({
             <Quota login={login} now={now} daemon={daemon} machineName={machineName} />
           </span>
         </button>
-        <CardSwitch
-          login={login}
-          changes={changes}
-          reload={reload}
-          blocked={elsewhere || open === 'remove'}
-          asking={open === 'disable'}
-          onAsk={asking => onAct(asking ? 'disable' : null)}
-          onRefused={setRefused}
-        />
-        <button
-          type="button"
-          className="mt-1 shrink-0 border-0 bg-transparent p-0 text-muted"
-          aria-label={`Open ${login.id}`}
-          onClick={onOpen}
-        >
-          <ChevronRight size={16} aria-hidden="true" />
-        </button>
+        <span className="absolute right-0 top-0 z-10 flex items-center gap-2" data-login-card-controls="">
+          <CardSwitch
+            login={login}
+            changes={changes}
+            reload={reload}
+            blocked={elsewhere || open === 'remove'}
+            asking={open === 'disable'}
+            onAsk={asking => onAct(asking ? 'disable' : null)}
+            onRefused={setRefused}
+          />
+          <button
+            type="button"
+            className="inline-flex min-h-[44px] min-w-[28px] shrink-0 items-center justify-center border-0 bg-transparent p-0 text-muted"
+            aria-label={`Open ${login.id}`}
+            onClick={onOpen}
+          >
+            <ChevronRight size={16} aria-hidden="true" />
+          </button>
+        </span>
       </div>
       {refused === null ? null : (
         <p role="alert" className="m-0 text-cell leading-base text-err" data-login-switch-refused="">
@@ -463,7 +469,7 @@ function LoginRow({
           }}
         />
       ) : (
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {refusal === null ? null : (
             <span className="min-w-0 flex-1 text-meta leading-base text-muted" data-login-card-locked="">
               Remove is off here: {refusal}
@@ -471,8 +477,9 @@ function LoginRow({
           )}
           <Button
             type="button"
-            variant="danger"
+            variant="ghost"
             size="sm"
+            className="text-err"
             data-login-card-remove={login.id}
             aria-label={`Remove ${login.id}`}
             title={refusal ?? undefined}
@@ -505,7 +512,16 @@ type ReadState =
   | { readonly kind: 'failed'; readonly sentence: string }
   | { readonly kind: 'ready'; readonly list: Awaited<ReturnType<typeof readLogins>> };
 
-export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs, browser }: SignInsTabProps) {
+/** The tab, in the container its columns are measured against (the Settings panel's width, never the window's). */
+export function SignInsTab(props: SignInsTabProps) {
+  return (
+    <div className="fy-lg">
+      <SignInsBody {...props} />
+    </div>
+  );
+}
+
+function SignInsBody({ client, now = () => globalThis.Date.now(), pollMs, browser }: SignInsTabProps) {
   const [state, setState] = useState<ReadState>({ kind: 'loading' });
   const [adding, setAdding] = useState(false);
   // The page the address names, and the way the tab opens one: a link from another tab (Runtimes'
@@ -555,12 +571,12 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs, 
 
   if (adding)
     return (
-      <section className="flex min-w-0 flex-col gap-3" data-logins-adding="">
+      <section className="fy-lg-group" data-logins-adding="">
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="kt-btn--flush-start"
+          className="kt-btn--flush-start self-start"
           onClick={() => setAdding(false)}
         >
           <ChevronLeft size={16} aria-hidden="true" />
@@ -578,14 +594,14 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs, 
     );
 
   return (
-    <section className="flex min-w-0 flex-col gap-4" data-logins-tab="">
+    <section className="fy-lg-groups min-w-0" data-logins-tab="">
       {detail === null ? null : (
         <p role="status" className="m-0 text-cell text-warn" data-login-missing="">
           There is no login {detail} on {list.machine} any more.
         </p>
       )}
       {list.logins.length === 0 ? (
-        <div className="kt-panel flex flex-col items-start gap-2 p-panel" data-logins-empty="">
+        <div className="flex max-w-xl flex-col items-start gap-2 py-4" data-logins-empty="">
           <h3 className="m-0 text-row font-semibold text-fg">No logins on {list.machine}</h3>
           <p className="m-0 text-cell leading-base text-muted">
             A login is one sign-in or key to Claude Code or Codex. It belongs to this machine.
@@ -596,7 +612,7 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs, 
         </div>
       ) : (
         <>
-          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
             <p className="m-0 text-cell text-muted">
               {plural(list.logins.length, 'login')} on {list.machine}
             </p>
@@ -605,11 +621,11 @@ export function SignInsTab({ client, now = () => globalThis.Date.now(), pollMs, 
             </Button>
           </div>
           {loginGroups(list).map(group => (
-            <div key={group.scope} data-logins-group={group.scope}>
-              <h4 className="m-0 text-meta font-semibold uppercase text-muted">{group.title}</h4>
-              <ul className="m-0 mt-2 flex list-none flex-col gap-2 p-0">
+            <div key={group.scope} className="fy-lg-group" data-logins-group={group.scope}>
+              <h4 className="m-0 text-meta font-semibold uppercase tracking-wide text-muted">{group.title}</h4>
+              <ul className="fy-lg-cards">
                 {group.logins.map(item => (
-                  <li key={item.id}>
+                  <li key={item.id} className="min-w-0">
                     <LoginRow
                       login={item}
                       daemon={daemonOfClient(client)}

@@ -16,9 +16,10 @@ import type { ProviderPresetView } from '../../contract/index.ts';
 import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { useLoginChanges } from '../lib/login-changes.ts';
 import { readLogins } from '../lib/logins-api.ts';
-import { HARNESS_NAMES, type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
+import { type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
 import { heldSecretNames, saveSecret } from '../lib/secrets-api.ts';
 import { Button, ChangeApplyPanel, SecretInput, useSecretField } from '../ui.ts';
+import { HarnessChoice } from './harness-choice.tsx';
 import { usableHarnesses } from './provider-grid.tsx';
 
 type PresetVariable = ProviderPresetView['variables'][number];
@@ -180,24 +181,17 @@ export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMo
   };
 
   return (
-    <div className="flex flex-col gap-2" data-quick-key-form={preset.id}>
+    <div className="flex flex-col gap-4" data-quick-key-form={preset.id}>
       {several ? (
-        <label className="flex flex-col gap-1 text-cell text-fg">
-          Use it with
-          <select
-            className="kt-input"
+        <div data-quick-key-harness="">
+          <HarnessChoice
+            label="Use it with"
+            harnesses={harnesses}
             value={harness}
             disabled={filed || asking || saving}
-            data-quick-key-harness=""
-            onChange={event => setChosen(event.target.value as HarnessKind)}
-          >
-            {harnesses.map(name => (
-              <option key={name} value={name}>
-                {HARNESS_NAMES[name]}
-              </option>
-            ))}
-          </select>
-        </label>
+            onChange={setChosen}
+          />
+        </div>
       ) : null}
       {filed ? (
         <p role="status" className="m-0 text-cell leading-base text-muted" data-quick-key-filed="">
@@ -205,7 +199,7 @@ export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMo
           {`\${secret:${name}}`}.
         </p>
       ) : (
-        <label htmlFor={inputId} className="flex flex-col gap-1 text-cell text-fg">
+        <label htmlFor={inputId} className="fy-lg-field text-cell text-fg">
           <span>{variable.description ?? `${preset.label} key`}</span>
           <SecretInput
             field={field}
@@ -214,7 +208,7 @@ export function QuickKeyForm({ client, preset, variable, onAdded, onCancel, onMo
             disabled={asking || saving}
             data-quick-key-input=""
           />
-          <span className="text-meta leading-base text-muted">
+          <span className="fy-lg-field__hint text-meta leading-base text-muted">
             Goes straight to the secret store as <span className="font-mono">{name}</span>; the login only holds its
             name.
           </span>

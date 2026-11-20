@@ -188,9 +188,9 @@ export function EnvironmentEditor({
   };
 
   return (
-    <div className="flex min-w-0 flex-col gap-2" data-login-env-editor={loginId}>
+    <div className="flex min-w-0 flex-col gap-4" data-login-env-editor={loginId}>
       {rows.map((row, index) => (
-        <div key={row.key} className="flex min-w-0 flex-col gap-1" data-env-row={row.name}>
+        <div key={row.key} className="fy-lg-field" data-env-row={row.name}>
           {row.kind === 'new' ? (
             <input
               className="kt-input font-mono"
@@ -228,10 +228,15 @@ export function EnvironmentEditor({
             />
           )}
           {row.kind === 'secret' || row.kind === 'hidden' ? (
-            <span className="text-meta leading-base text-muted">{KEPT[row.kind]}</span>
+            <span className="fy-lg-field__hint text-meta leading-base text-muted">{KEPT[row.kind]}</span>
           ) : null}
-          <div>
-            <Button type="button" data-env-remove={row.name} onClick={() => patch(index, { removed: !row.removed })}>
+          <div className="fy-lg-field__hint">
+            <Button
+              type="button"
+              size="sm"
+              data-env-remove={row.name}
+              onClick={() => patch(index, { removed: !row.removed })}
+            >
               {row.removed ? 'Keep it' : 'Remove'}
             </Button>
           </div>
