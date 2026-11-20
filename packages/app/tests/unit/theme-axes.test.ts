@@ -137,6 +137,12 @@ describe('the catalogue, the files and themes.css agree', () => {
     for (const palette of PALETTES) expect(STYLE_IDS).toContain(palette.suggestedStyle);
   });
 
+  it('names no style after a trademark and bundles no font for Lucid', () => {
+    expect(STYLES.map(entry => `${entry.id} ${entry.label}`.toLowerCase()).join(' ')).not.toContain('aqua');
+    const css = readStyleFile('style/lucid.css');
+    expect(css).not.toMatch(/\bInter\b|JetBrains/u);
+  });
+
   it('lets a style declare it fights the readability rules, and only a style', () => {
     for (const style of STYLES) expect(['undefined', 'boolean']).toContain(typeof style.loud);
     // None of today's five is loud; the flag is for the styles that will be.
