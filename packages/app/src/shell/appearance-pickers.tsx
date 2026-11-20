@@ -27,16 +27,26 @@ export function lookAttributes(look: Look): Readonly<Record<string, string>> {
   };
 }
 
-/** A tiny scene drawn in a style: a heading, a button (radius, stroke, press shadow) and a card corner with its shadow. */
+/**
+ * A tiny scene drawn in a style, so two close styles differ at a glance: a display "Ag" (the display face, weight and
+ * tracking), a body word (the body face) and a label (the label face, case and tracking) on top; a button (radius,
+ * stroke, press shadow) and a card (radius, stroke, shadow, and the style's own blur over a colour blob) below.
+ * Only the faces the style's own tokens name are drawn: no mini asks for a file a style card did not already load.
+ */
 function StyleMini({ look }: { readonly look: Look }) {
   return (
     <span className="fy-ap-mini" {...lookAttributes(look)}>
-      <span className="fy-ap-mini__text">
-        <b className="fy-ap-mini__type">Aa</b>
-        <em className="fy-ap-mini__label">Label</em>
+      <span className="fy-ap-mini__top">
+        <b className="fy-ap-mini__type">Ag</b>
+        <span className="fy-ap-mini__text">
+          <span className="fy-ap-mini__body">Quick fox</span>
+          <em className="fy-ap-mini__label">Label</em>
+        </span>
       </span>
-      <i className="fy-ap-mini__button" />
-      <i className="fy-ap-mini__card" />
+      <span className="fy-ap-mini__bottom">
+        <i className="fy-ap-mini__button" />
+        <i className="fy-ap-mini__card" />
+      </span>
     </span>
   );
 }

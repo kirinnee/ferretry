@@ -13,6 +13,9 @@
 [data-swatch][data-style='glass'] {
   /* ═══ structural token layer ═══ */
   --font-ui: var(--font-body);
+  /* The blur a floating glass surface draws; a swatch preview reads it to show the frost. */
+  --surface-blur: blur(10px) saturate(1.5);
+  --surface-field: 0.55;
   --text-display: 1.25rem;
   --weight-normal: 400;
   --weight-medium: 450;

@@ -89,6 +89,9 @@
   --body-wash: none;
   --panel-texture: none;
   --panel-texture-size: auto;
+  /* The blur a floating surface draws and how strong its colour field is; a swatch preview reads both. Only a frosted style sets them. */
+  --surface-blur: none;
+  --surface-field: 0;
   /* ---- accessibility ---- */
   --focus-shadow: none;
   --outline-always: none;

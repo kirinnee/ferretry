@@ -12,7 +12,7 @@
  * design language for free — which is exactly why they are not allowed opinions.
  */
 
-import type { ComponentPropsWithRef } from 'react';
+import { Children, type ComponentPropsWithRef } from 'react';
 import { cn } from './lib/class-names.ts';
 
 type ButtonVariant = 'primary' | 'ghost' | 'outline' | 'danger';
@@ -46,8 +46,27 @@ export interface BadgeProps extends ComponentPropsWithRef<'span'> {
  * badges pills or hard-edged blocks without this component growing a geometry
  * opinion.
  */
-export function Badge({ className, tone = 'pend', ...rest }: BadgeProps) {
-  return <span data-tone={tone} className={cn('kt-badge', className)} {...rest} />;
+export function Badge({ className, tone = 'pend', children, title, ...rest }: BadgeProps) {
+  // A label is whatever the person typed, so it may be longer than the line: each text child sits in its own
+  // `kt-badge__text` (the part that shortens with an ellipsis; an icon beside it never does), and when the whole
+  // label is one string it is also the tooltip, so the full text stays reachable.
+  const only = Children.count(children) === 1 ? children : undefined;
+  return (
+    <span
+      data-tone={tone}
+      className={cn('kt-badge', className)}
+      title={title ?? (typeof only === 'string' ? only : undefined)}
+      {...rest}
+    >
+      {Children.map(children, child =>
+        typeof child === 'string' || typeof child === 'number' ? (
+          <span className="kt-badge__text">{child}</span>
+        ) : (
+          child
+        ),
+      )}
+    </span>
+  );
 }
 
 /**
