@@ -285,7 +285,7 @@ export function FlagLayers(props: FlagLayersProps) {
         <div className="fy-wf-layers">
           <LayerCard
             title="Rules"
-            line="Checks that cost nothing flag a stuck, idle or broken ferret for you. They run whenever the Warden is on."
+            line="Checks that cost nothing flag a stuck, idle or broken ferret for you. Rules run only while Warden is on."
           />
           <LayerCard
             title="Jev"

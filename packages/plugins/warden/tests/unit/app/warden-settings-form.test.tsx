@@ -101,7 +101,7 @@ describe('WardenSettingsForm', () => {
     // Assert
     const json = text(renderer);
     expect(json).toContain('What leaves this machine: nothing. The rules send nothing anywhere.');
-    expect(json).toContain('They run whenever the Warden is on.');
+    expect(json).toContain('Rules run only while Warden is on.');
     expect(json).not.toContain('Always on');
     expect(json).not.toContain('The Warden');
     expect(json).not.toContain('Investigation (the assigned warden)');
