@@ -1,0 +1,213 @@
+/* The sign-in storyboard (sign-in-demo.tsx): three frames crossfade on one 9 s loop; each frame is on for a third of it.
+   Stand-in bars only, drawn from the app's own tokens so every theme and both colour modes keep it legible. */
+.fy-sd {
+  position: relative;
+  inline-size: 100%;
+  max-inline-size: 260px;
+  aspect-ratio: 8 / 5;
+  margin: 0;
+}
+.fy-sd__frame {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  opacity: 0;
+  animation: fy-sd-frame 9s ease-in-out infinite;
+}
+.fy-sd__frame[data-frame='2'] {
+  animation-delay: 3s;
+}
+.fy-sd__frame[data-frame='3'] {
+  animation-delay: 6s;
+}
+.fy-sd figcaption {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted, currentColor);
+  text-align: center;
+}
+.fy-sd__window {
+  border: 1px solid var(--border, currentColor);
+  border-radius: 8px;
+  background: var(--surface, transparent);
+  overflow: hidden;
+}
+.fy-sd__bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-block-end: 1px solid var(--border, currentColor);
+  background: var(--surface-2, transparent);
+}
+.fy-sd__bar i {
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: var(--border, currentColor);
+}
+.fy-sd__address {
+  flex: 1;
+  block-size: 10px;
+  margin-inline-start: 6px;
+  border-radius: 5px;
+  background: var(--bg, transparent);
+  border: 1px solid var(--border, currentColor);
+}
+.fy-sd__body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 64px;
+  padding: 10px;
+}
+.fy-sd__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 76px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--accent, currentColor);
+  color: var(--accent-fg, var(--bg, #fff));
+}
+.fy-sd__button--ok {
+  align-self: center;
+}
+.fy-sd__lines,
+.fy-sd__code {
+  display: block;
+  inline-size: 70%;
+}
+.fy-sd__lines b {
+  display: block;
+  block-size: 6px;
+  margin-block: 5px;
+  border-radius: 3px;
+  background: var(--border, currentColor);
+}
+.fy-sd__lines b + b {
+  inline-size: 60%;
+}
+.fy-sd__code {
+  block-size: 16px;
+  border-radius: 4px;
+  border: 1px dashed var(--accent, currentColor);
+  background: var(--accent-soft, transparent);
+}
+/* What the frame asks the eye to find pulses: the address bar (Codex), the code (Claude), the button (open). */
+.fy-sd__address[data-hot],
+.fy-sd__code[data-hot] {
+  animation: fy-sd-pulse 1.5s ease-in-out infinite;
+  border-color: var(--accent, currentColor);
+}
+.fy-sd__field {
+  position: relative;
+  block-size: 30px;
+  padding: 6px 8px;
+  border: 1px solid var(--border, currentColor);
+  border-radius: 6px;
+  background: var(--bg, transparent);
+}
+.fy-sd__typed {
+  display: block;
+  block-size: 100%;
+  inline-size: 0;
+  border-inline-end: 2px solid var(--accent, currentColor);
+  border-radius: 2px;
+  background: var(--accent-soft, var(--border, currentColor));
+  animation: fy-sd-type 9s steps(12, end) infinite;
+}
+@keyframes fy-sd-frame {
+  0% {
+    opacity: 0;
+  }
+  4%,
+  30% {
+    opacity: 1;
+  }
+  34%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes fy-sd-pulse {
+  50% {
+    box-shadow: 0 0 0 3px var(--accent-soft, transparent);
+  }
+}
+/* Aligned to the third frame's 6 s delay: empty while the frame fades in, filled by its end. */
+@keyframes fy-sd-type {
+  0%,
+  69% {
+    inline-size: 0;
+  }
+  86%,
+  100% {
+    inline-size: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-sd {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    max-inline-size: 420px;
+    aspect-ratio: auto;
+  }
+  .fy-sd__frame,
+  .fy-sd__address[data-hot],
+  .fy-sd__code[data-hot],
+  .fy-sd__typed {
+    animation: none;
+  }
+  .fy-sd__frame {
+    position: static;
+    opacity: 1;
+  }
+  .fy-sd__typed {
+    inline-size: 100%;
+  }
+}
+
+/* A panel that has the room draws its steps and the picture side by side; a narrow one stacks them. */
+.fy-sd-layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+}
+.fy-sd-host {
+  container-type: inline-size;
+  min-inline-size: 0;
+}
+@container (min-width: 560px) {
+  .fy-sd-layout {
+    grid-template-columns: minmax(0, 1fr) 240px;
+    align-items: start;
+  }
+  .fy-sd-layout > .fy-sd {
+    position: sticky;
+    top: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  @container (min-width: 560px) {
+    .fy-sd-layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+}
+.fy-sd-layout > .fy-sd {
+  margin-inline: auto;
+}
+@container (min-width: 560px) {
+  .fy-sd-layout > .fy-sd {
+    margin-inline: 0;
+  }
+}

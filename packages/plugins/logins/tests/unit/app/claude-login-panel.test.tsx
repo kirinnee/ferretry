@@ -119,7 +119,7 @@ describe('ClaudeLoginPanel', () => {
   });
 
   it('says the code is kept nowhere, where the code is typed', () => {
-    expect(texts(mount({ flow: claudeFlow('awaiting-code') }))).toContain('kept nowhere');
+    expect(texts(mount({ flow: claudeFlow('awaiting-code') }))).toContain('Kept nowhere');
   });
 
   it('names the way back on a failure, and offers a fresh start', () => {

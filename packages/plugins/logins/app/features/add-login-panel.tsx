@@ -6,6 +6,10 @@
  * block of variables (Paste variables…) is recognised in this browser and fills a preset's plain values; a pasted
  * key is named only, and pasted into the secret store itself. A tile whose preset asks for nothing but a key opens
  * the key-only quick form first (`quick-key-form.tsx`); **More fields…** there opens the full form below.
+ *
+ * A page that is already ABOUT one tool (Codex's first-run "Sign in" page) mounts the panel with `harness`: the panel is
+ * then locked to that tool — no "Tool" picker, no other tool's providers — and is that tool's own one-press sign-in
+ * (`HarnessSignInEmbed`: it makes the login and starts signing it in), so a Codex page never offers Claude Code (r11 O6).
  */
 
 import { Loading } from '@ferretry/app/ui';
@@ -20,14 +24,17 @@ import { type Prefill, withheldSentence } from '../lib/paste-model.ts';
 import { isSecretReference, nonReferenceSlots, SECRET_VALUE_SENTENCE } from '../lib/secret-slot.ts';
 import { Button, ChangeApplyPanel } from '../ui.ts';
 import { HarnessChoice } from './harness-choice.tsx';
+import { HarnessSignInEmbed } from './harness-sign-in-embed.tsx';
 import { PasteVariables } from './paste-variables.tsx';
 import { ProviderGrid, usableHarnesses } from './provider-grid.tsx';
 import { QuickKeyForm, quickKeyVariable } from './quick-key-form.tsx';
 
 export interface AddLoginPanelProps {
   readonly client: LoginsClient;
-  /** Told the new login's id once it is added, so a screen can open it. */
+  /** Told the new login's id once it is added, so a screen can open it. Not used when the panel is locked to a `harness`. */
   readonly onAdded?: (id: string) => void;
+  /** Lock the panel to this one tool: its one-press sign-in, with no picker and no other provider (see above). */
+  readonly harness?: HarnessKind;
 }
 
 const secretReference = (variable: ProviderPresetView['variables'][number]): string =>
@@ -238,7 +245,12 @@ function SignInForm({ client, onAdded }: { readonly client: LoginsClient; readon
   );
 }
 
-export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
+export function AddLoginPanel({ client, onAdded, harness }: AddLoginPanelProps) {
+  if (harness !== undefined) return <HarnessSignInEmbed client={client} harness={harness} />;
+  return <AddAnyLogin client={client} {...(onAdded === undefined ? {} : { onAdded })} />;
+}
+
+function AddAnyLogin({ client, onAdded }: Omit<AddLoginPanelProps, 'harness'>) {
   const [catalog, setCatalog] = useState<ProviderPresetCatalog | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [choosing, setChoosing] = useState<string | null>(null);

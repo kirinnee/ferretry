@@ -36,6 +36,7 @@ import type { FormEvent } from 'react';
 import { cn } from '../ui.ts';
 import { Button, SecretTextarea, useSecretTextarea } from '../ui.ts';
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../ui.ts';
+import { SignInDemo } from './sign-in-demo.tsx';
 import { ResumedNote, StartOverButton } from './sign-in-restart.tsx';
 import type { LoginPanelWording } from '../lib/harness-login-model.ts';
 
@@ -177,8 +178,8 @@ export function CodexLoginPanel({
           <div className="space-y-3">
             <p className="m-0 text-ui leading-base text-muted">
               {linked
-                ? 'Codex signs in with a link. Start here, open the link on any device, sign in, then paste back the address the browser ends on.'
-                : 'Codex signs in with a device code. Start here, then open the link on any device and type the code it gives you at the provider’s page. Nothing comes back to this screen.'}
+                ? 'Open the link, sign in, then paste back the address the browser ends on.'
+                : 'Open the link and type the code at the provider’s page. Nothing comes back here.'}
             </p>
             <Button type="button" variant="primary" onClick={onStart} disabled={busy || state === 'starting'}>
               <Link2 size={16} aria-hidden="true" />
@@ -234,60 +235,64 @@ export function CodexLoginPanel({
         ) : null}
 
         {flow?.state === 'awaiting-callback' ? (
-          <div className="space-y-4">
-            {flow.deviceCode === 'unavailable' ? (
-              <p
-                data-codex-login-device-unavailable=""
-                className="m-0 flex items-start gap-2 rounded-control border border-border bg-surface-2 px-3 py-2 text-ui leading-base text-fg"
-              >
-                <TriangleAlert size={17} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
-                This account doesn’t allow device codes, so Codex will sign in with a link instead.
-              </p>
-            ) : null}
-            <div className="rounded-control border border-accent/40 bg-accent-soft p-3">
-              <p className="m-0 text-meta font-semibold text-accent">1 · Open this link and sign in</p>
-              <div className="mt-2 flex min-w-0 items-start gap-2">
-                <code className="min-w-0 flex-1 break-all rounded-control border border-border bg-surface px-2 py-2 font-mono text-meta leading-base text-fg">
-                  {flow.verificationUrl}
-                </code>
-                <CopyButton text={flow.verificationUrl} label="Copy the Codex sign-in link" write={copy} />
+          <div className="fy-sd-host" data-codex-login-callback="">
+            <div className="fy-sd-layout">
+              <div className="space-y-4">
+                {flow.deviceCode === 'unavailable' ? (
+                  <p
+                    data-codex-login-device-unavailable=""
+                    className="m-0 flex items-start gap-2 rounded-control border border-border bg-surface-2 px-3 py-2 text-ui leading-base text-fg"
+                  >
+                    <TriangleAlert size={17} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
+                    This account doesn’t allow device codes, so Codex will sign in with a link instead.
+                  </p>
+                ) : null}
+                <div className="rounded-control border border-accent/40 bg-accent-soft p-3">
+                  <p className="m-0 text-meta font-semibold text-accent">1 · Open this link and sign in</p>
+                  <div className="mt-2 flex min-w-0 items-start gap-2">
+                    <code className="min-w-0 flex-1 break-all rounded-control border border-border bg-surface px-2 py-2 font-mono text-meta leading-base text-fg">
+                      {flow.verificationUrl}
+                    </code>
+                    <CopyButton text={flow.verificationUrl} label="Copy the Codex sign-in link" write={copy} />
+                  </div>
+                </div>
+                <div className="rounded-control border border-border bg-surface-2 p-3">
+                  <p className="m-0 text-meta font-semibold text-fg">
+                    2 · Copy the address of the page that won’t load
+                  </p>
+                  <p className="m-0 mt-2 text-ui leading-base text-muted">
+                    It starts with <code className="font-mono text-meta">http://localhost</code> — that’s expected.
+                  </p>
+                </div>
+                <form className="space-y-2" onSubmit={submit}>
+                  <label htmlFor={`codex-login-address-${loginId}`} className="block text-ui font-semibold text-fg">
+                    3 · Paste that address here
+                  </label>
+                  <SecretTextarea
+                    field={address}
+                    id={`codex-login-address-${loginId}`}
+                    className="kt-input min-h-24 w-full resize-y font-mono text-meta"
+                    placeholder="http://localhost:1455/auth/callback?code=…"
+                    disabled={busy}
+                    required
+                  />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button type="submit" variant="primary" disabled={busy || !address.filled}>
+                      <ShieldCheck size={16} aria-hidden="true" />
+                      {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
+                    </Button>
+                    <StartOverButton onStartOver={onStartOver} busy={busy} />
+                    <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+                      Cancel
+                    </Button>
+                  </div>
+                  <p className="m-0 text-meta leading-base text-faint">
+                    Goes straight to Codex on this machine. Kept nowhere, never shown back.
+                  </p>
+                </form>
               </div>
+              <SignInDemo kind="address" />
             </div>
-            <div className="rounded-control border border-border bg-surface-2 p-3">
-              <p className="m-0 text-meta font-semibold text-muted">2 · Copy the address of the page that won’t load</p>
-              <p className="m-0 mt-2 text-ui leading-base text-fg">
-                After you sign in, the browser goes to a page that won’t load. Its address starts with{' '}
-                <code className="font-mono text-meta">http://localhost</code>. That’s expected — copy the whole address
-                from the address bar.
-              </p>
-            </div>
-            <form className="space-y-2" onSubmit={submit}>
-              <label htmlFor={`codex-login-address-${loginId}`} className="block text-ui font-semibold text-fg">
-                3 · Paste that address here
-              </label>
-              <SecretTextarea
-                field={address}
-                id={`codex-login-address-${loginId}`}
-                className="kt-input min-h-24 w-full resize-y font-mono text-meta"
-                placeholder="http://localhost:1455/auth/callback?code=…"
-                disabled={busy}
-                required
-              />
-              <div className="flex flex-wrap items-center gap-3">
-                <Button type="submit" variant="primary" disabled={busy || !address.filled}>
-                  <ShieldCheck size={16} aria-hidden="true" />
-                  {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
-                </Button>
-                <StartOverButton onStartOver={onStartOver} busy={busy} />
-                <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
-                  Cancel
-                </Button>
-              </div>
-              <p className="m-0 text-meta leading-base text-faint">
-                The address goes straight to Codex on the machine and is kept nowhere — not here, not in a log, not in
-                this daemon. It is never shown back to you.
-              </p>
-            </form>
           </div>
         ) : null}
 

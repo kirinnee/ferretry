@@ -64,11 +64,11 @@ const buttonNamed = (view: ReactTestRenderer, name: string): Node => {
 };
 
 describe('CodexLoginPanel', () => {
-  it('says up front that nothing comes back to this screen', () => {
+  it('says up front that nothing comes back here', () => {
     const view = mount();
 
     expect(view.root.findByProps({ 'data-codex-login': 'idle' })).toBeDefined();
-    expect(texts(view)).toContain('Nothing comes back to this screen');
+    expect(texts(view)).toContain('Nothing comes back here');
     expect(texts(view)).toContain('Sign in to Codex');
   });
 
@@ -249,7 +249,9 @@ describe('CodexLoginPanel with a link', () => {
   });
 
   it('starts as a link sign-in in words, when the link was chosen', () => {
-    expect(texts(mount({ flow: codexFlow('starting'), linked: true }))).toContain('Codex signs in with a link');
+    expect(texts(mount({ flow: codexFlow('starting'), linked: true }))).toContain(
+      'Open the link, sign in, then paste back the address',
+    );
   });
 
   const failedWith = (lastCode: 'expired' | 'rejected'): CodexLoginFlow => ({

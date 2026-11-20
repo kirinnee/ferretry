@@ -16,7 +16,14 @@ export default implementApp(manifest, {
     settings: { logins: () => createElement(SignInsTab, { client }) },
     panels: {
       'sign-ins': () => createElement(SignInsTab, { client }),
-      'add-login': () => createElement(AddLoginPanel, { client }),
+      // `harness` (when a page names one) locks the panel to that tool: Codex's own page never offers Claude Code.
+      'add-login': props => {
+        const harness = ({ ...props } as Readonly<Record<string, unknown>>)['harness'];
+        return createElement(AddLoginPanel, {
+          client,
+          ...(harness === 'claude-code' || harness === 'codex' ? { harness } : {}),
+        });
+      },
       'claude-code-login': ({ subject }) =>
         createElement(LoginSignInPanel, {
           client,
