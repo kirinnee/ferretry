@@ -197,7 +197,7 @@ describe('the Warden half, bound to the shell', () => {
     expect(client.calls).toContain('GET /v1/speedups');
     expect(client.calls).toContain('GET /v1/runtimes');
     expect(view.container.textContent).toContain('No Jev key yet.');
-    expect(view.container.querySelector('select[id$="-model"]')).not.toBeNull();
+    expect(view.container.querySelector('[role="combobox"][id$="-model"]')).not.toBeNull();
     await view.unmount();
   });
 
@@ -233,7 +233,7 @@ describe('the Warden half, bound to the shell', () => {
 
   it('hides the model list when Runtimes is off: the model field is a plain text box', async () => {
     const view = await settingsTab({ ...WARDEN, ...LAYERS_ON, ...OPTIONAL_ON, 'GET /v1/runtimes': PAUSED });
-    expect(view.container.querySelector('select[id$="-model"]')).toBeNull();
+    expect(view.container.querySelector('[role="combobox"][id$="-model"]')).toBeNull();
     expect(view.container.querySelector('input[placeholder="the login’s default"]')).not.toBeNull();
     expect(view.container.textContent).toContain('No Jev key yet.');
     await view.unmount();

@@ -41,11 +41,23 @@ function Host({ customIds, initial = '', seen }: { customIds: boolean; initial?:
   );
 }
 
-const choose = (select: HTMLSelectElement, value: string) =>
-  interact(() => {
-    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+/** The select box is a combobox button; its list opens in the document body, so the options are read from the document. */
+const opened = async (container: HTMLElement): Promise<HTMLElement> => {
+  const box = must(container.querySelector<HTMLElement>('[role="combobox"]'), 'the select box');
+  await interact(() => box.click());
+  return box;
+};
+const options = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+const labelOf = (option: HTMLElement): string | null | undefined => option.querySelector('[data-label]')?.textContent;
+const hintOf = (option: HTMLElement): string | null | undefined => option.querySelector('.fy-sb__hint')?.textContent;
+const choose = async (container: HTMLElement, label: string): Promise<void> => {
+  await opened(container);
+  const option = must(
+    options().find(candidate => labelOf(candidate) === label),
+    `the option "${label}"`,
+  );
+  await interact(() => option.click());
+};
 const typeInto = (field: HTMLInputElement, value: string) =>
   interact(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, value);
@@ -55,32 +67,35 @@ const typeInto = (field: HTMLInputElement, value: string) =>
 describe('ModelSelect', () => {
   test('lists the catalog by tier, names the default first, and disables what the login cannot use', async () => {
     const screen = await mount(<Host customIds={false} seen={[]} />);
-    const select = must(screen.container.querySelector('select'), 'the select');
-    expect([...select.querySelectorAll('optgroup')].map(group => group.label)).toEqual([
+    await opened(screen.container);
+    expect([...document.querySelectorAll('[role="group"]')].map(group => group.getAttribute('aria-label'))).toEqual([
       'Most capable',
       'Balanced',
       'Fast',
     ]);
-    expect(select.options[0]?.textContent).toBe('Login default (GLM-5.3)');
-    expect(select.options[1]?.textContent).toBe('GLM-5.3 · default · 1M context');
-    expect([...select.options].find(option => option.value === 'glm-old')?.disabled).toBe(true);
-    expect([...select.options].find(option => option.value === 'glm-old')?.textContent).toBe(
-      'GLM old · not on this login',
+    const listed = options();
+    expect(labelOf(listed[0] as HTMLElement)).toBe('Login default (GLM-5.3)');
+    expect(labelOf(listed[1] as HTMLElement)).toBe('GLM-5.3');
+    expect(hintOf(listed[1] as HTMLElement)).toBe('default · 1M context');
+    const old = must(
+      listed.find(option => labelOf(option) === 'GLM old'),
+      'the old model',
     );
-    expect([...select.options].some(option => option.textContent === 'Custom id…')).toBe(false);
+    expect(old.getAttribute('aria-disabled')).toBe('true');
+    expect(hintOf(old)).toBe('not on this login');
+    expect(listed.some(option => labelOf(option) === 'Custom id…')).toBe(false);
     await screen.unmount();
   });
 
   test('offers a custom id box for a provider that takes any id, and goes back to the list', async () => {
     const seen: string[] = [];
     const screen = await mount(<Host customIds={true} seen={seen} />);
-    const select = must(screen.container.querySelector('select'), 'the select');
-    await choose(select, ' custom');
+    await choose(screen.container, 'Custom id…');
     const field = must(screen.container.querySelector<HTMLInputElement>('input'), 'the custom box');
     await typeInto(field, 'bad id');
     expect(screen.container.textContent).toContain('One word');
     await typeInto(field, 'glm-next');
-    await choose(select, 'glm-5.3-flash');
+    await choose(screen.container, 'GLM-5.3-Flash');
     expect(screen.container.querySelector('input')).toBeNull();
     expect(seen).toEqual(['', 'bad id', 'glm-next', 'glm-5.3-flash']);
     await screen.unmount();
@@ -100,9 +115,29 @@ describe('ModelSelect', () => {
         value=""
       />,
     );
-    expect(flat.container.querySelectorAll('optgroup')).toHaveLength(0);
-    expect(must(flat.container.querySelector('select'), 'select').options[0]?.textContent).toBe('Login default');
+    await opened(flat.container);
+    expect(document.querySelectorAll('[role="group"]')).toHaveLength(0);
+    expect(labelOf(options()[0] as HTMLElement)).toBe('Login default');
     await flat.unmount();
+  });
+
+  test('takes the caller’s id and name, so a visible label points at the box, and can be disabled', async () => {
+    const screen = await mount(
+      <ModelSelect
+        customIds={false}
+        defaultModel={null}
+        disabled
+        id="model-field"
+        label="Investigation model"
+        models={MODELS}
+        onChange={() => undefined}
+        value=""
+      />,
+    );
+    const box = must(screen.container.querySelector<HTMLButtonElement>('#model-field'), 'the select box');
+    expect(box.getAttribute('aria-label')).toBe('Investigation model');
+    expect(box.disabled).toBe(true);
+    await screen.unmount();
   });
 });
 
@@ -124,14 +159,14 @@ describe('ModelSelect · models installed on this machine', () => {
         value=""
       />,
     );
-    const select = must(screen.container.querySelector('select'), 'select');
-    expect([...select.options].map(option => option.textContent)).toEqual([
-      'Login default (gpt-oss:20b)',
-      'gpt-oss:20b · default · installed here',
-      'qwen3-coder:30b · installed here',
-      'Custom id…',
+    const box = await opened(screen.container);
+    expect(options().map(option => [labelOf(option), hintOf(option) ?? null])).toEqual([
+      ['Login default (gpt-oss:20b)', null],
+      ['gpt-oss:20b', 'default · installed here'],
+      ['qwen3-coder:30b', 'installed here'],
+      ['Custom id…', null],
     ]);
-    expect(select.getAttribute('aria-describedby')).toBeNull();
+    expect(box.getAttribute('aria-describedby')).toBeNull();
     expect(screen.container.querySelector('[data-local-models-note]')).toBeNull();
     await screen.unmount();
   });
@@ -150,9 +185,9 @@ describe('ModelSelect · models installed on this machine', () => {
         write={async () => undefined}
       />,
     );
-    const select = must(screen.container.querySelector('select'), 'select');
+    const box = must(screen.container.querySelector('[role="combobox"]'), 'the select box');
     const note = must(screen.container.querySelector('[data-local-models-note="not-running"]'), 'the note');
-    expect(select.getAttribute('aria-describedby')).toBe(`hint ${note.id}`);
+    expect(box.getAttribute('aria-describedby')).toBe(`hint ${note.id}`);
     expect(note.textContent).toContain('Ollama is not running');
     expect(note.querySelector('[data-local-models-command]')?.textContent).toBe(PULL);
     await screen.unmount();

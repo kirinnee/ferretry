@@ -541,10 +541,13 @@ describe('WardenSettingsForm, when the owner chose no login', () => {
       />,
     );
 
-    // Assert — the model is a select of the catalog, and medium is not offered
-    const select = renderer.root.find(node => node.type === 'select' && String(node.props.id).endsWith('-model'));
+    // Assert — the model is a select box of the catalog (`SelectBox`: its props are the list and the write), and medium is not offered
+    const select = renderer.root.find(
+      node =>
+        typeof node.type !== 'string' && String(node.props.id).endsWith('-model') && Array.isArray(node.props.options),
+    );
     expect(() => option(renderer, 'medium')).toThrow();
-    run(() => select.props.onChange({ target: { value: 'glm-5.3-flash' } }));
+    run(() => select.props.onChange('glm-5.3-flash'));
     expect(last(changes).accounts[0]).toEqual({ agent: 'claude-glm', model: 'glm-5.3-flash' });
     expect(text(renderer)).toContain('takes no reasoning effort, so the investigation');
     run(() => renderer.unmount());

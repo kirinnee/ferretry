@@ -1,0 +1,112 @@
+/* ═══ THE DIALOG (ui/dialog.tsx) ═══════════════════════════════════════════════════════════════
+   The app's ONE centred modal. The panel is the shared panel (`kt-panel`), so every style draws its
+   own surface, edge and shadow; this file owns only the geometry:
+
+     - centred on both axes inside the visible box (`kt-overlay` follows the keyboard), never wider
+       than 92 vw or taller than 70 dvh;
+     - height by content: a short body makes a short dialog;
+     - ONE scroll container, the body, and a scroll bar only when its content overflows
+       (`overflow-y: auto`, never `scroll`); never a sideways one (`overflow-x: hidden`).
+   A body that holds its own scroller (a search box above a long list) takes `data-scroller="content"`:
+   the body then clips and the child scrolls, so there is still exactly one. */
+
+.fy-dialog {
+  position: fixed;
+  inset-inline: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* The scrim is a sibling button that fills this box; the panel sits above it. */
+  isolation: isolate;
+}
+.fy-dialog__scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: var(--scrim, rgb(0 0 0 / 0.4));
+  cursor: default;
+  touch-action: none;
+}
+.fy-dialog__panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(92vw, var(--dialog-width, 30rem));
+  max-height: min(70dvh, calc(var(--app-h, 100dvh) - 16px));
+  min-height: 0;
+  overflow: hidden;
+  font-family: var(--font-ui, inherit);
+  /* A body that is a scroller must not chain to the page behind. */
+  overscroll-behavior: contain;
+}
+.fy-dialog__panel:focus {
+  outline: none;
+}
+.fy-dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  flex: none;
+  padding: var(--pad-row-y) var(--pad-panel);
+  border-bottom: var(--divider-width) solid var(--divider-color);
+}
+.fy-dialog__title {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--fg);
+}
+.fy-dialog__close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--target-floor, 32px);
+  min-height: var(--target-floor, 32px);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--fg-soft);
+}
+.fy-dialog__close:hover {
+  background: var(--menu-item-hover);
+  color: var(--fg);
+}
+.fy-dialog__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--pad-panel);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fy-dialog__body[data-scroller='content'] {
+  overflow-y: hidden;
+  padding: 0;
+}
+.fy-dialog__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gap-sm);
+  flex: none;
+  padding: var(--pad-row-y) var(--pad-panel);
+  border-top: var(--divider-width) solid var(--divider-color);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-dialog__panel {
+    animation: fy-dialog-in 120ms ease-out;
+  }
+  @keyframes fy-dialog-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+}
