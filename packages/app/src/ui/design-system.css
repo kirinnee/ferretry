@@ -1329,9 +1329,6 @@ body {
 .kt-btn--sm.kt-btn--flush-start {
   margin-inline-start: calc(-1 * (var(--pad-control-x) * 0.8 + var(--stroke-control)));
 }
-:root[data-style='contrast'] .kt-btn--flush-start[data-variant='ghost'] {
-  margin-inline-start: 0;
-}
 
 /* ---- badge --------------------------------------------------------------- */
 .kt-badge {
@@ -2507,18 +2504,6 @@ body {
   bottom: -1px;
   border-right: var(--stroke-heavy) solid var(--accent);
   border-bottom: var(--stroke-heavy) solid var(--accent);
-}
-
-/* ---- High Contrast: nothing may be invisible --------------------------
-   A ghost button with no resting border is a legibility failure in the family
-   whose entire purpose is redundant explicit affordance, so the ghost variant
-   gets its edge back. Links are underlined at rest, not on hover. */
-:root[data-style='contrast'] .kt-btn[data-variant='ghost'] {
-  border-color: var(--border-strong);
-}
-:root[data-style='contrast'] a,
-:root[data-style='contrast'] .md a {
-  text-decoration-line: var(--underline-links);
 }
 
 /* ---- Minimal Swiss: one crisp ring on every field -----------------------

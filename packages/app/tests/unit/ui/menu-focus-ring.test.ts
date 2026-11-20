@@ -66,10 +66,4 @@ describe('the shared menu row', () => {
     expect(picker).toContain('[--menu-item-h:44px]');
     expect(picker).toContain('[--menu-item-align:flex-start]');
   });
-
-  it('every compact palette names its own focus ring and a >=3:1 control edge (the baseline is Studio LIGHT)', () => {
-    const block = themes.match(/\n:root\[data-palette='phosphor'\],[^{]*\{[^}]*--border-strong:[^}]*\}/u)?.[0] ?? '';
-    expect(block).toContain('--focus-color: var(--accent);');
-    expect(block).toContain('--border-strong: color-mix(in srgb, var(--fg) 58%, var(--surface));');
-  });
 });

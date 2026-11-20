@@ -6,6 +6,7 @@
  *
  *   /settings   Settings › This device
  *   ?theme=<family>-<mode>
+ *   ?seed=<json>  a stored theme value to start from
  */
 
 import { createRoot } from 'react-dom/client';
@@ -18,7 +19,7 @@ import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
-import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
+import { THEME_PREFERENCES_KEY, ThemePreferenceStore } from '../../../src/theme/preferences.ts';
 import { CORE, FakeTransport, inventoryOf, json } from '../../unit/client/fixtures.ts';
 
 const params = new URLSearchParams(window.location.search);
@@ -70,7 +71,11 @@ const runtime = new ShellRuntime({
     location: () => window.location.href,
   },
 });
-const storage = memoryStore();
+// `?seed=<json>` is a stored theme value (`fy:app:theme`), so a test starts from a device that already chose something.
+const seed = params.get('seed');
+const storage = memoryStore(
+  seed === null ? {} : { [THEME_PREFERENCES_KEY]: JSON.stringify({ format: 1, value: JSON.parse(seed) }) },
+);
 
 const root = document.getElementById('root');
 if (root !== null)

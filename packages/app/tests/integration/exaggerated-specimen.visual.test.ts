@@ -66,7 +66,7 @@ const WIDTHS = [
   { width: 1_280, height: 900, phone: false },
   { width: 390, height: 1_840, phone: true },
 ] as const;
-const PALETTES = ['studio', 'neo', 'phosphor'] as const;
+const PALETTES = ['studio', 'neo', 'hacker'] as const;
 const MODES = ['light', 'dark'] as const;
 
 describe('the Exaggerated Minimalism specimen', () => {

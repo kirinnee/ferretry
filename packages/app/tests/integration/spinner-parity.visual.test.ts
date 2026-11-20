@@ -36,7 +36,6 @@ const HAND = {
   },
   neo: { stroke: '3.25px', cap: 'square', sweep: '28px, 100px', speed: '0.8s', timing: 'linear', dash: 'none' },
   geist: { stroke: '1.5px', cap: 'round', sweep: '25px, 100px', speed: '0.75s', timing: 'linear', dash: 'none' },
-  contrast: { stroke: '2.75px', cap: 'butt', sweep: '30px, 100px', speed: '0.9s', timing: 'linear', dash: 'none' },
 } as const;
 
 const read = (page: Page, style: string, mode: string) =>

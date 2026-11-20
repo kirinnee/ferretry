@@ -1,14 +1,12 @@
 /**
- * THE SPLIT CHANGED NO PIXEL. Before `styles/themes.css` was split into styles, palettes and a mode, each of the eleven
- * families was ONE block per mode and a theme was `data-theme="<family>-<mode>"`. The captured resolution of every custom
- * property under that arrangement (`fixtures/theme-parity-snapshot.json`, taken from `themes.css` at 536f48bc9f, in
- * Chromium, at 1280 and at 390 wide) is the reference. Each old family is now `style = the same name` (the five real
- * styles) or `style = its suggested style` (the six compact ones) + `palette = the family`; this suite resolves the new
- * stylesheet in the real engine and requires:
+ * THE SPLIT CHANGED NO PIXEL. Before `styles/themes.css` was split into styles, palettes and a mode, each family was ONE
+ * block per mode and a theme was `data-theme="<family>-<mode>"`. The captured resolution of every custom property under
+ * that arrangement (`fixtures/theme-parity-snapshot.json`, taken from `themes.css` at 536f48bc9f, in Chromium, at 1280 and
+ * at 390 wide) is the reference. r11 T1 retired the rows of the families that no longer exist (the six compact palettes
+ * and the `contrast` style, now a palette) and keeps the four that do: Studio, Mission, Neo and Geist, each now
+ * `style = the same name` + `palette = the family`; this suite resolves the new stylesheet in the real engine and requires:
  *
- *  - the five real styles × their own palette × both modes × both widths: EVERY token identical;
- *  - the six compact palettes × both modes: EVERY colour token identical (their structure was folded into pairings, on
- *    purpose, so only their colours are held to the capture);
+ *  - those styles × their own palette × both modes × both widths: EVERY token identical;
  *  - the three shadow tokens, the panel texture and Mission Control's ruled page field (`--body-wash`), which are now
  *    assembled from a style's geometry and a palette's colours, drawn identically (compared as the browser serialises
  *    them, ignoring a fully transparent layer).
@@ -19,7 +17,7 @@ import { join } from 'node:path';
 import type { Page } from 'playwright-core';
 import { sharedChromium } from '../support/browser/index.ts';
 import { readStyleFile, readThemeCss } from '../../src/testing/theme-css.ts';
-import { PALETTES, STYLE_IDS } from '../../src/theme/catalog.ts';
+import { STYLE_IDS } from '../../src/theme/catalog.ts';
 
 setDefaultTimeout(60_000);
 
@@ -31,7 +29,6 @@ const snapshot = JSON.parse(
 const ASSEMBLED = ['--shadow-sm', '--shadow-md', '--shadow-lg'] as const;
 const TEXTURE = '--panel-texture';
 const FIELD = '--body-wash';
-const suggested = new Map(PALETTES.map(palette => [palette.id as string, palette.suggestedStyle as string]));
 
 /** A fully transparent shadow layer draws nothing; the new styles carry some where the old blocks had fewer layers. */
 const drawn = (value: string): string =>
@@ -59,7 +56,7 @@ const resolved = async (page: Page, family: string, mode: string, width: number,
       for (const name of tokens as readonly string[]) out[name] = computed.getPropertyValue(name).trim();
       return out;
     },
-    [suggested.get(family) ?? family, family, mode, names] as const,
+    [family, family, mode, names] as const,
   );
 };
 
@@ -102,30 +99,6 @@ const drawnNow = async (page: Page) =>
   });
 
 let page: Page;
-const palettePart = (names: readonly string[]) => {
-  const own = new Set(
-    [
-      ...readStyleFile('tokens/base-palette.css')
-        .replace(/\/\*[\s\S]*?\*\//gu, '')
-        .matchAll(/(--[\w-]+)\s*:/gu),
-    ].map(match => match[1] as string),
-  );
-  for (const added of [
-    '--shadow-sm-1',
-    '--shadow-sm-2',
-    '--shadow-sm-3',
-    '--shadow-md-1',
-    '--shadow-md-2',
-    '--shadow-md-3',
-    '--shadow-lg-1',
-    '--shadow-lg-2',
-    '--shadow-lg-3',
-    '--texture-ink',
-  ])
-    own.delete(added);
-  return names.filter(name => own.has(name));
-};
-
 beforeAll(async () => {
   const browser = await sharedChromium();
   const context = await browser.newContext();
@@ -171,13 +144,6 @@ describe('every old family-mode resolves to the same tokens on the three axes', 
       expect(drawn(after[FIELD] ?? '')).toBe(drawn(before[FIELD] ?? ''));
     });
   }
-
-  it('the colour part of the capture is a real subset of the palette tokens', () => {
-    // The assembled tokens (`--body-wash`, built from a style's geometry and a palette's inks) are not palette tokens.
-    const sample = Object.keys(snapshot['1280:ma-dark'] ?? {}).filter(name => name !== FIELD);
-    expect(sample.length).toBeGreaterThan(60);
-    expect(palettePart(sample)).toEqual(sample);
-  });
 });
 
 describe('the ruled page field is the Mission style’s geometry and a palette’s inks', () => {
@@ -210,7 +176,7 @@ describe('the ruled page field is the Mission style’s geometry and a palette�
   });
 
   it('Mission palette under another style draws no grid at all', async () => {
-    for (const style of ['studio', 'neo', 'geist', 'contrast']) expect(await field(style, 'mission')).toBe('none');
+    for (const style of ['studio', 'neo', 'geist']) expect(await field(style, 'mission')).toBe('none');
   });
 
   it('the swapped pair and the original pair differ only in the inks', async () => {

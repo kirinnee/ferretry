@@ -61,7 +61,7 @@ describe('Settings › This device', () => {
     }
   });
 
-  test('picking a style changes only the style, and picking a palette changes only the palette', async () => {
+  test('picking a style brings its default palette, and picking a palette changes only the palette', async () => {
     await boot();
     const root = document.documentElement;
     const geist = page().querySelector<HTMLInputElement>('[data-choice="geist"] input');
@@ -69,12 +69,12 @@ describe('Settings › This device', () => {
     await settle();
     expect(geist?.checked).toBe(true);
     expect(root.dataset.style).toBe('geist');
-    expect(root.dataset.palette).toBe('studio');
-    const phosphor = page().querySelector<HTMLInputElement>('[data-palette-chip="phosphor"] input');
-    await interact(() => phosphor?.click());
+    expect(root.dataset.palette).toBe('geist');
+    const hacker = page().querySelector<HTMLInputElement>('[data-palette-chip="hacker"] input');
+    await interact(() => hacker?.click());
     await settle();
-    expect(phosphor?.checked).toBe(true);
-    expect(root.dataset.palette).toBe('phosphor');
+    expect(hacker?.checked).toBe(true);
+    expect(root.dataset.palette).toBe('hacker');
     expect(root.dataset.style).toBe('geist');
     // The chips now show their palettes in the style that is in force.
     const half = page().querySelector('[data-palette-chip="neo"] [data-swatch]');

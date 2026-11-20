@@ -26,11 +26,10 @@ describe('the preload table', () => {
     }
   });
 
-  it('a style that names a bundled face in its stacks has a table row; Contrast uses the device’s own', () => {
+  it('a style that names a bundled face in its stacks has a table row', () => {
     for (const style of STYLE_IDS) {
       const stack = readStyleFile(`style/${style}.css`).match(/--font-(?:body|display|ui):\s*([^;]+);/u)?.[1] ?? '';
-      if (style === 'contrast') expect(STYLE_FONT_FILES[style]).toBeUndefined();
-      else if (/Inter|Public Sans|Geist|Archivo|Cascadia|Nunito|Orbitron|Hanken|Pixelify|Poppins/u.test(stack))
+      if (/Inter|Public Sans|Geist|Archivo|Cascadia|Nunito|Orbitron|Hanken|Pixelify|Poppins/u.test(stack))
         expect(STYLE_FONT_FILES[style]).toBeDefined();
     }
   });

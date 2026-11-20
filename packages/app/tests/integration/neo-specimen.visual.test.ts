@@ -67,7 +67,7 @@ const WIDTHS = [
   { width: 1_280, height: 900, phone: false },
   { width: 390, height: 1_840, phone: true },
 ] as const;
-const PALETTES = ['neo', 'studio', 'phosphor'] as const;
+const PALETTES = ['neo', 'studio', 'hacker'] as const;
 const MODES = ['light', 'dark'] as const;
 
 const open = async (width: (typeof WIDTHS)[number], palette: string, mode: string, query = '') => {
@@ -158,7 +158,7 @@ describe('the Neo-brutalism specimen', () => {
  * Every control that takes focus draws a hard ring of at least 2px that is at least 3:1 against what is behind it (WCAG 1.4.11),
  * on SEVERAL palettes (not only Neo's own: every style takes every palette), and a press moves the block into its shadow.
  */
-const FOCUS_PALETTES = ['neo', 'studio', 'phosphor', 'contrast', 'wayfinding', 'ledger'] as const;
+const FOCUS_PALETTES = ['neo', 'studio', 'hacker', 'contrast', 'geist', 'vintage'] as const;
 describe('the Neo-brutalism specimen states', () => {
   const FOCUSABLE = [
     '[data-part="btn-outline"]',

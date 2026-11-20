@@ -193,7 +193,7 @@ describe('the Pixel art specimen', () => {
  * Every control that takes focus draws a hard ring of at least 2px that is at least 3:1 against what is behind it (WCAG 1.4.11),
  * on SEVERAL palettes (not only the pixel look's own: every style takes every palette), and a press moves the block into its shadow.
  */
-const FOCUS_PALETTES = ['studio', 'hacker', 'vaporwave', 'contrast', 'wayfinding', 'ledger'] as const;
+const FOCUS_PALETTES = ['studio', 'hacker', 'vaporwave', 'contrast', 'geist', 'vintage'] as const;
 describe('the Pixel art specimen states', () => {
   const FOCUSABLE = [
     '[data-part="btn-outline"]',

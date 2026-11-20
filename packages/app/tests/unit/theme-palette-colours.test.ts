@@ -1,18 +1,19 @@
 /**
- * THE SIX COLOUR-LED PALETTES (r10 T12: Vaporwave, Cyberpunk, Hacker, Vintage analog, Gradient mesh, Retro futurism).
+ * THE THREE SELF-CONTAINED COLOUR PALETTES (Magenta, Green and Rust: ids vaporwave, hacker, vintage; r11 T1 removed the
+ * rest of the r10 set: Cyberpunk, Gradient mesh, Retro futurism, Briefing).
  * Each is a complete, self-contained colour file in BOTH modes, so these checks read the CSS itself, with no browser:
  *   - every role a theme needs is declared, so nothing falls back to Studio LIGHT in a dark mode (the bug the compact
- *     palettes had before `tokens/derived.css`);
+ *     compact palettes had before they were removed);
  *   - the readability pairs clear WCAG (text 4.5:1, control edge and focus ring 3:1), so a style that draws these
  *     colours inherits a readable page;
- *   - only Gradient mesh draws a `--surface-mesh`, and every palette names a suggested style that exists.
+ *   - no palette draws a `--surface-mesh` (a gradient background), and every one is the default of some style.
  * The cross-style matrix (T3) renders them; this is the part that needs no renderer.
  */
 import { describe, expect, it } from 'bun:test';
-import { PALETTES, STYLE_IDS } from '../../src/theme/catalog.ts';
+import { PALETTES, STYLES } from '../../src/theme/catalog.ts';
 import { readStyleFile } from '../../src/testing/theme-css.ts';
 
-const NEW_PALETTES = ['vaporwave', 'cyberpunk', 'hacker', 'vintage', 'mesh', 'retrofuture', 'briefing'] as const;
+const NEW_PALETTES = ['vaporwave', 'hacker', 'vintage'] as const;
 const MODES = ['light', 'dark'] as const;
 
 const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//gu, '');
@@ -123,12 +124,14 @@ const ROLES = [
   'step-seg-now',
 ] as const;
 
-describe('the six colour-led palettes are in the catalogue', () => {
-  it('lists each once, with a suggested style that exists', () => {
+describe('the self-contained palettes are in the catalogue', () => {
+  it('lists each once, as the default palette of a style', () => {
     for (const id of NEW_PALETTES) {
-      const entries = PALETTES.filter(palette => palette.id === id);
-      expect(entries.length, id).toBe(1);
-      expect(STYLE_IDS as readonly string[]).toContain(entries[0]?.suggestedStyle ?? '');
+      expect(PALETTES.filter(palette => palette.id === id).length, id).toBe(1);
+      expect(
+        STYLES.some(style => style.defaultPalette === id),
+        id,
+      ).toBe(true);
     }
   });
 });
@@ -182,13 +185,12 @@ for (const id of NEW_PALETTES)
           expect(ratio(hexOf(`tool-${tool}`), hexOf('surface')), `tool ${tool}`).toBeGreaterThanOrEqual(3);
       });
 
-      it('sets the mesh only when it is Gradient mesh', () => {
-        if (id === 'mesh') expect(tokens['--surface-mesh']).toContain('radial-gradient');
-        else expect(tokens['--surface-mesh']).toBeUndefined();
+      it('draws no gradient mesh (no gradient on a background)', () => {
+        expect(tokens['--surface-mesh']).toBeUndefined();
       });
     });
 
-describe('the mesh sits under the page wash and is `none` by default', () => {
+describe('the mesh token stays `none` (index.css still paints it under the page wash until the background contract replaces it)', () => {
   it('has a baseline of none, and the body paints the wash over the mesh', () => {
     expect(withoutComments(readStyleFile('tokens/base-palette.css'))).toContain('--surface-mesh: none;');
     expect(withoutComments(readStyleFile('index.css'))).toContain(
