@@ -207,6 +207,11 @@ const buttonText = (label: string): HTMLElement | undefined =>
     button => button.textContent?.trim() === label,
   );
 const click = (label: string) => interact(() => buttonText(label)?.click());
+/** Every key and value a storage holds, sorted, so two moments can be compared whatever else the process wrote. */
+const snapshotStorage = (area: Storage): readonly (readonly [string, string | null])[] =>
+  Object.keys(area)
+    .sort()
+    .map(key => [key, area.getItem(key)] as const);
 
 describe('the setup flow', () => {
   it('draws one page at a time, the machine first, and goes on and back', async () => {
@@ -248,6 +253,8 @@ describe('the setup flow', () => {
   });
 
   it('keeps the segment memory in memory only: no storage write carries it', async () => {
+    // Another test file in the same process may have left entries: what is asserted is that THIS run added or changed none.
+    const before = [snapshotStorage(window.localStorage), snapshotStorage(window.sessionStorage)];
     const run = setup({});
     view = await mount(run.tree);
     await settle();
@@ -257,8 +264,7 @@ describe('the setup flow', () => {
     await settle();
     expect(run.writes.filter(key => key !== CLIENT_LEDGER_KEY && key !== CLIENT_LATER_KEY)).toEqual([]);
     expect([...run.store.values()].join('')).not.toContain('everything');
-    expect(window.localStorage.length).toBe(0);
-    expect(window.sessionStorage.length).toBe(0);
+    expect([snapshotStorage(window.localStorage), snapshotStorage(window.sessionStorage)]).toEqual(before);
   });
 
   it('records a daemon step on the machine when Next follows its answer, and Later records later', async () => {
