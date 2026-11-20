@@ -69,6 +69,7 @@ export function GlobalLessonsEditor({ connection }: { readonly connection: Lesso
           </p>
           <textarea
             aria-label="Global lessons"
+            rows={8}
             className="min-h-[160px] w-full rounded-control border border-border bg-surface-2 p-2 font-mono text-meta"
             disabled={document === null || saving}
             value={draft}

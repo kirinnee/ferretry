@@ -137,6 +137,67 @@ describe('Settings › Files, Doctor and Host checks', () => {
               });
               expect(path.title).toContain('/home/demo/.ferretry/config/');
               expect(path.fits, 'a long path wraps, it is not cut').toBe(true);
+              // Every row's "Edit as YAML" starts at one x (the state chip has a fixed slot), so the column is straight.
+              const edits = await tab.evaluate(() =>
+                [...document.querySelectorAll<HTMLElement>('[data-config-edit]')].map(button =>
+                  Math.round(button.getBoundingClientRect().left),
+                ),
+              );
+              expect(edits.length).toBeGreaterThan(3);
+              expect(new Set(edits).size, `Edit as YAML buttons start at one x (${edits.join(', ')})`).toBe(1);
+              // Each state chip shows its whole words (no ellipsis) and sits inside the window.
+              const chips = await tab.evaluate(() =>
+                [...document.querySelectorAll<HTMLElement>('[data-config-file-state]')].map(chip => {
+                  const text = chip.querySelector<HTMLElement>('.kt-badge__text') ?? chip;
+                  const box = chip.getBoundingClientRect();
+                  return {
+                    state: chip.dataset.configFileState,
+                    cut: text.scrollWidth > text.clientWidth,
+                    inside: box.left >= 0 && box.right <= window.innerWidth,
+                  };
+                }),
+              );
+              expect(chips.length).toBeGreaterThan(3);
+              expect(
+                chips.filter(chip => chip.cut || !chip.inside),
+                'no state chip is cut or off screen',
+              ).toEqual([]);
+              // Every copy button names what it copies: an accessible name and a tooltip saying the same.
+              const copies = await tab.evaluate(() =>
+                [...document.querySelectorAll<HTMLElement>('[data-onboarding-copy]')].map(button => ({
+                  name: button.getAttribute('aria-label') ?? '',
+                  tip: button.parentElement?.title ?? '',
+                })),
+              );
+              expect(copies.length).toBeGreaterThan(3);
+              for (const copy of copies) {
+                expect(copy.name).toMatch(/^Copy the /);
+                expect(copy.tip, 'the tooltip names what is copied').toBe(copy.name);
+              }
+              // A path wraps after a "/", never in the middle of a name: every visual line break falls just after a slash.
+              const breaks = await tab.evaluate(() => {
+                const bad: string[] = [];
+                for (const code of document.querySelectorAll<HTMLElement>('[data-config-file-path]')) {
+                  const nodes: Text[] = [];
+                  const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+                  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) nodes.push(node as Text);
+                  const chars = nodes.flatMap(node => [...node.data].map((char, index) => ({ node, char, index })));
+                  const range = document.createRange();
+                  const tops = chars.map(({ node, index }) => {
+                    range.setStart(node, index);
+                    range.setEnd(node, index + 1);
+                    return Math.round(range.getBoundingClientRect().top);
+                  });
+                  const text = chars.map(({ char }) => char).join('');
+                  // A single name longer than the line may still break inside itself: only judge paths whose names fit.
+                  if (Math.max(...text.split('/').map(part => part.length)) > 28) continue;
+                  for (let at = 1; at < chars.length; at += 1)
+                    if (tops[at] !== tops[at - 1] && chars[at - 1]?.char !== '/')
+                      bad.push(`${text} breaks before "${text.slice(at, at + 8)}"`);
+                }
+                return bad;
+              });
+              expect(breaks, 'paths break only after a slash').toEqual([]);
             }
             if (view === 'editor') {
               // The sheet has finished rising, and Cancel and Save are whole inside the window.
@@ -161,6 +222,9 @@ describe('Settings › Files, Doctor and Host checks', () => {
               () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
             );
             expect(overflow, 'the page does not scroll sideways').toBeLessThanOrEqual(0);
+            // The kept picture of Files starts at the file rows, which is what the rules above are about.
+            if (view === 'files')
+              await tab.evaluate(() => document.querySelector('[data-config-section="files"]')?.scrollIntoView());
             if (shotsDir !== '')
               await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${view}.png`) });
           } finally {

@@ -170,11 +170,14 @@ export function LessonsSettingsSurface({ connection, ferrets = null }: LessonsSe
                 {...(cwd === undefined ? {} : { hint: basename(cwd) })}
                 dataAttributes={{ 'data-lessons-ferret': entry.ferretId }}
                 control={() => (
-                  <span className="flex flex-wrap items-center gap-2">
-                    <Badge tone={entry.passive ? 'ok' : 'pend'}>{entry.passive ? 'On' : 'Off'}</Badge>
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    {/* Fixed widths: "On"/"Off" and "Turn on"/"Turn off" differ, so without them each row's button sits at its own x. */}
+                    <Badge className="w-[50px] justify-center" tone={entry.passive ? 'ok' : 'pend'}>
+                      {entry.passive ? 'On' : 'Off'}
+                    </Badge>
                     <Button
                       size="sm"
-                      className="min-h-[44px]"
+                      className="min-h-[44px] w-[70px] justify-center"
                       disabled={switching !== null}
                       onClick={() => void toggleFerret(entry.ferretId, !entry.passive)}
                     >

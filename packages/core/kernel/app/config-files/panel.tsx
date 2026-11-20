@@ -82,6 +82,23 @@ export const configSummaryWords = (view: ConfigStatusView): string => {
   return `${plural(view.files.length, 'file')} · ${String(broken)} with errors · ${String(view.pending.length)} waiting for you`;
 };
 
+/** A path as words a browser may break after: a line ends at a `/` (the `<wbr>`), never in the middle of a name. */
+function BreakablePath({ path }: { readonly path: string }) {
+  const parts = path.split('/');
+  return (
+    <>
+      {parts.map((part, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: a path's parts are positional and never reordered
+        <span key={index}>
+          {index === 0 ? '' : '/'}
+          {index === 0 ? null : <wbr />}
+          {part}
+        </span>
+      ))}
+    </>
+  );
+}
+
 /** Joins a file's path onto the config directory, for "Open file path". */
 const absoluteConfigPath = (directory: string, path: string): string => `${directory.replace(/\/+$/u, '')}/${path}`;
 
@@ -139,22 +156,25 @@ function FileRow({
       name={file.path}
       wide
       dataAttributes={{ 'data-config-file': file.path }}
-      // The whole path, wrapped at any character (a path has no spaces) rather than cut: it stays selectable, and it is in
-      // the title and beside the copy button too.
+      // The whole path, wrapped at its `/` separators rather than cut or broken inside a name (only a single name longer
+      // than the line breaks within it): it stays selectable, and it is in the title and beside the copy button too.
       hint={
-        <code className="block break-all font-mono" title={absolute} data-config-file-path="">
-          {absolute}
+        <code className="block break-words font-mono" title={absolute} data-config-file-path="">
+          <BreakablePath path={absolute} />
         </code>
       }
       control={() => (
         <span className="flex min-w-0 flex-wrap items-center gap-2">
-          <Badge className="max-w-full whitespace-normal" tone={chip.tone} data-config-file-state={file.state}>
-            {chip.label}
-          </Badge>
           <Button type="button" size="sm" className="min-h-[44px]" data-config-edit={file.path} onClick={onEdit}>
             Edit as YAML
           </Button>
-          <CopyButton text={absolute} label={`Copy the full path of ${file.path}`} write={write} />
+          <span title={`Copy the full path of ${file.path}`} className="inline-flex">
+            <CopyButton text={absolute} label={`Copy the full path of ${file.path}`} write={write} />
+          </span>
+          {/* After the buttons, so "Edit as YAML" and copy start at one x on every row whatever the state's words. */}
+          <Badge className="max-w-full whitespace-normal" tone={chip.tone} data-config-file-state={file.state}>
+            {chip.label}
+          </Badge>
         </span>
       )}
     />
@@ -189,7 +209,9 @@ export function ConfigFilesPanel({
         </h3>
         <div className="flex min-w-0 items-center gap-1">
           <PanelPath value={view.directory} className="min-w-0 text-cell text-fg" label="Configuration directory" />
-          <CopyButton text={view.directory} label="Copy the configuration directory" write={write} />
+          <span title="Copy the configuration directory" className="inline-flex">
+            <CopyButton text={view.directory} label="Copy the configuration directory" write={write} />
+          </span>
         </div>
         <p className="m-0 text-cell leading-base text-muted" data-config-summary="">
           {configSummaryWords(view)}
