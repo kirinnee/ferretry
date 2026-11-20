@@ -10,6 +10,7 @@ import { ActiveCarrierCard } from './features/carrier/active-carrier-card.tsx';
 import { CarrierInUse } from './features/carrier/carrier-in-use.tsx';
 import { DeviceConnectionPanel } from './features/carrier/device-connection-panel.tsx';
 import { CarrierDropLog, browserCarrierDropEnvironment } from './lib/carrier-drops.ts';
+import { carrierEscapeView } from './features/carrier/carrier-escape.tsx';
 import { relayFallbackView } from './features/carrier/relay-fallback-notice.tsx';
 import { CarrierPreferenceSelector, tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
 import { CarrierPreferenceStore, settingOf } from './lib/carrier-preference.ts';
@@ -200,16 +201,20 @@ export function buildConnectionsApp(
    */
   const published = (() => {
     let latest: PublishedCarriers = [];
+    let heard = false;
     let stop: (() => void) | undefined;
     const listeners = new Set<() => void>();
     return {
       snapshot: (): PublishedCarriers => latest,
+      /** Whether the daemon has answered yet: before it has, an empty set is "not known", not "no tunnel". */
+      heard: (): boolean => heard,
       subscribe: (listener: () => void): (() => void) => {
         listeners.add(listener);
         stop ??= watchCarriers({
           client: ctx.client,
           onAnswer: carriers => {
             latest = carriers;
+            heard = true;
             for (const each of [...listeners]) each();
           },
         });
@@ -266,6 +271,7 @@ export function buildConnectionsApp(
           // says so.
           webrtc: webrtc !== undefined,
           tunnelNote: carriers.some(c => c.kind === 'tunnel') ? undefined : 'This machine has no tunnel yet.',
+          tunnelPublished: published.heard() ? carriers.some(c => c.kind === 'tunnel') : undefined,
           tunnel:
             tunnelSwitch === undefined
               ? undefined
@@ -374,6 +380,14 @@ function DeviceConnection() {
 
 export default provideToShell(implementApp(manifest, { build: ctx => buildConnectionsApp(ctx) }), {
   deviceSettings: { connection: DeviceConnection },
+  // The way out of a carrier this device cannot reach a machine over: it clears the choice, needing no machine.
+  device: {
+    'carrier-escape': carrierEscapeView(() =>
+      connect === undefined
+        ? undefined
+        : { preferences: connect.preferences, health: connect.health, daemons: connect.daemons },
+    ),
+  },
   background: {
     'relay-fallback': relayFallbackView(() => connect?.router),
     'carrier-set': carrierWriteBackView(

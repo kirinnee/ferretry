@@ -57,6 +57,12 @@ export interface CarrierPreferenceAvailability {
    * machine has no tunnel yet." — or `undefined` when there is a tunnel to dial, or it is not known yet.
    */
   readonly tunnelNote?: string | undefined;
+  /**
+   * Whether the machine PUBLISHES a tunnel right now. `false` makes "Tunnel only" something this device cannot save: it
+   * would leave the device with no way to reach the machine at all, so it is greyed with the reason. `undefined` is
+   * "not known", which refuses nothing. A device already on "Tunnel only" keeps it ticked (and can change it).
+   */
+  readonly tunnelPublished?: boolean | undefined;
   /** What the machine says about its own tunnel switch, once it has said anything. */
   readonly tunnel?: TunnelSwitchOffer | undefined;
 }
@@ -120,6 +126,23 @@ export interface CarrierPreferenceSelectorProps {
   /** Visually hide the legend where a heading already names the group. */
   readonly legendHidden?: boolean;
 }
+
+/**
+ * Why this preference cannot be SAVED right now, or `undefined` when it can: "Tunnel only" while the machine publishes
+ * no tunnel carries nothing, and a device that saved it could not even reach the machine to change it back.
+ */
+const refusalFor = (preference: CarrierSetting, availability: CarrierPreferenceAvailability): string | undefined => {
+  if (preference !== 'tunnel' || availability.tunnelPublished !== false) return undefined;
+  return availability.tunnel?.off === true
+    ? TUNNEL_ONLY_OFF_REFUSAL
+    : (availability.tunnelNote ?? TUNNEL_ONLY_NONE_REFUSAL);
+};
+
+/** Said under the greyed "Tunnel only" when the machine’s tunnel is switched off. */
+const TUNNEL_ONLY_OFF_REFUSAL = 'Off for this machine — tunnels are opt-in. Choose Auto to turn one on.';
+
+/** Said under the greyed "Tunnel only" when the machine publishes no tunnel. */
+const TUNNEL_ONLY_NONE_REFUSAL = 'This machine has no tunnel yet.';
 
 const noteFor = (preference: CarrierSetting, availability: CarrierPreferenceAvailability): string | undefined => {
   if (preference === 'webrtc' && !availability.webrtc) return WEBRTC_UNAVAILABLE_NOTE;
@@ -255,17 +278,21 @@ export function CarrierPreferenceSelector({
         <div className="fy-cp__grid">
           {CARRIER_SETTINGS.map(preference => {
             const checked = preference === value;
-            const note = noteFor(preference, availability);
+            // Refused (greyed) only while it is not the ticked one: a device already on it can still see it and leave it.
+            const refused = checked ? undefined : refusalFor(preference, availability);
+            const note = refused ?? noteFor(preference, availability);
             const noteId = `${name}-${preference}-note`;
             return (
               <label
                 key={preference}
                 data-carrier-preference-option={preference}
+                data-carrier-preference-refused={refused === undefined ? undefined : ''}
                 className={cn(
-                  'flex min-h-[52px] min-w-0 cursor-pointer flex-col items-start justify-center gap-0.5 rounded-control border px-control-x py-2 text-left transition-colors has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus',
-                  checked
-                    ? 'border-accent bg-accent-soft text-accent'
-                    : 'border-border bg-surface-2 text-fg hover:border-accent',
+                  'flex min-h-[52px] min-w-0 flex-col items-start justify-center gap-0.5 rounded-control border px-control-x py-2 text-left transition-colors has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus',
+                  refused !== undefined && 'cursor-not-allowed',
+                  refused === undefined && 'cursor-pointer',
+                  checked ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-fg',
+                  !checked && refused === undefined && 'hover:border-accent',
                 )}
               >
                 <input
@@ -273,15 +300,23 @@ export function CarrierPreferenceSelector({
                   name={name}
                   value={preference}
                   checked={checked}
-                  onChange={() => onChange(preference)}
+                  disabled={refused !== undefined}
+                  onChange={() => (refused === undefined ? onChange(preference) : undefined)}
                   className="sr-only"
                   {...(note === undefined ? {} : { 'aria-describedby': noteId })}
                 />
-                <span className="flex w-full items-center gap-2 text-ui font-semibold">
+                <span
+                  className={cn(
+                    'flex w-full items-center gap-2 text-ui font-semibold',
+                    refused !== undefined && 'opacity-60',
+                  )}
+                >
                   {preference === 'default' ? DEFAULT_SETTING_LABEL : CARRIER_PREFERENCE_LABEL[preference]}
                   {checked ? <Check size={14} className="ml-auto shrink-0" aria-hidden="true" /> : null}
                 </span>
-                <span className="text-meta leading-tight text-muted">{CARRIER_PREFERENCE_DESCRIPTION[preference]}</span>
+                <span className={cn('text-meta leading-tight text-muted', refused !== undefined && 'opacity-60')}>
+                  {CARRIER_PREFERENCE_DESCRIPTION[preference]}
+                </span>
                 {note === undefined ? null : (
                   <span id={noteId} className="text-meta leading-tight text-warn" data-carrier-preference-note="">
                     {note}
