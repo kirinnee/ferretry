@@ -244,7 +244,14 @@ export default definePlugin({
 
   // One daemon-side page; its group is the plugin title. The id stays `warden` so an answer recorded before r10 still counts.
   onboarding: [
-    { id: 'warden', title: 'Let the Warden watch your ferrets?', order: 60, side: 'daemon', group: 'Warden' },
+    {
+      id: 'warden',
+      title: 'Let the Warden watch your ferrets?',
+      order: 60,
+      side: 'daemon',
+      group: 'Warden',
+      stepHost: true,
+    },
   ],
   doctor: ['warden-sweep'],
   // It reads reports and the Jev guard model over the network; it starts wardens (ferrets) through Ferrets, not a process.
