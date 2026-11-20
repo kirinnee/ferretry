@@ -10,13 +10,17 @@
  *                 page behind inert and unscrolled, the list scrolling inside it, a scroll bar only when needed.
  *   Dialog        height by content, ONE scroll container, a scroll bar only when the content overflows, never a
  *                 horizontal one; Esc, focus trap, focus back.
- *   ARIA          the structure a screen reader needs, asserted from the DOM (there is no axe-core in this repo).
+ *   Container     a 500px component container (CSS `container-type`) inside a 1280px window gets the dialog too: the width
+ *                 that decides is the container's, alongside a coarse pointer.
+ *   ARIA          the structure a screen reader needs, asserted from the DOM, and axe-core (a pinned dev dependency) run
+ *                 on the open scenes, light and dark, desktop and phone, with the empty-filter state included.
  *
  * Set `FY_SELECT_BOX_SHOTS_DIR` to keep `<viewport>-<theme>-<case>.png` (1280 and 390, light and dark).
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
@@ -24,6 +28,7 @@ import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
 setDefaultTimeout(60_000);
 
 const packageRoot = import.meta.dir;
+const axeSource = await readFile(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
 const shotsDir = process.env.FY_SELECT_BOX_SHOTS_DIR ?? '';
 
 let browser: Browser;
@@ -137,6 +142,44 @@ const optionLabels = async (tab: Page): Promise<string[]> =>
     options.map(option => option.querySelector('[data-label]')?.textContent ?? ''),
   );
 const focusedId = async (tab: Page): Promise<string> => await tab.evaluate(() => document.activeElement?.id ?? '');
+
+interface AxeResult {
+  readonly violations: readonly {
+    readonly id: string;
+    readonly nodes: readonly { readonly target: unknown; readonly any: readonly { readonly message: string }[] }[];
+  }[];
+}
+declare global {
+  interface Window {
+    axe: { run: (context: Document, options: object) => Promise<AxeResult> };
+  }
+}
+/** Page-level rules a three-line fixture page cannot satisfy and a component cannot own; every component rule stays on. */
+const PAGE_RULES = ['region', 'document-title', 'html-has-lang', 'landmark-one-main', 'page-has-heading-one'];
+/** axe-core over the page as it is now: a list of `rule: message @ target` lines, empty when clean. */
+const axeViolations = async (tab: Page): Promise<string[]> => {
+  if (!(await tab.evaluate(() => typeof window.axe !== 'undefined'))) await tab.addScriptTag({ content: axeSource });
+  const result = await tab.evaluate(
+    async rules =>
+      await window.axe.run(document, {
+        runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice'] },
+        rules: Object.fromEntries(rules.map(id => [id, { enabled: false }])),
+      }),
+    PAGE_RULES,
+  );
+  return result.violations.flatMap(violation =>
+    violation.nodes.map(node => `${violation.id}: ${node.any[0]?.message ?? ''} @ ${JSON.stringify(node.target)}`),
+  );
+};
+/** Every `aria-controls` on the page names an element that exists. */
+const dangling = async (tab: Page): Promise<string[]> =>
+  await tab.evaluate(() =>
+    [...document.querySelectorAll('[aria-controls]')].flatMap(element =>
+      (element.getAttribute('aria-controls') ?? '')
+        .split(/\s+/)
+        .filter(id => id !== '' && document.getElementById(id) === null),
+    ),
+  );
 
 declare global {
   interface Window {
@@ -364,6 +407,53 @@ for (const variant of [DESKTOP, DESKTOP_DARK]) {
         await close();
       }
     });
+
+    it('should pass axe-core with the list open (the active hint included) and with the empty filter, and leave no aria-controls dangling', async () => {
+      const { tab, close } = await open(variant, '&n=8');
+      try {
+        expect(await axeViolations(tab)).toEqual([]);
+        await press(tab, variant);
+        await tab.waitForSelector('[role=listbox]');
+        expect(await tab.$('[role=option][data-active=true] .fy-sb__hint')).not.toBeNull();
+        expect(await axeViolations(tab)).toEqual([]);
+        await tab.keyboard.type('zzz');
+        await tab.waitForSelector('[data-select-empty]');
+        expect(await tab.$('[role=listbox]')).toBeNull();
+        expect(await dangling(tab)).toEqual([]);
+        expect(await axeViolations(tab)).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+
+    it('should open the DIALOG in a 500px component container, and the popover in a 700px one, in the same 1280px window', async () => {
+      const narrow = await open(variant, '&n=8&pane=500');
+      try {
+        await press(narrow.tab, variant);
+        await narrow.tab.waitForSelector('[role=listbox]');
+        const dialog = await box(narrow.tab, '[role=dialog]');
+        const measure = await narrow.tab.evaluate(() => ({
+          container: document.querySelector<HTMLElement>('[data-pane]')?.getBoundingClientRect().width ?? 0,
+          window: window.innerWidth,
+          popovers: document.querySelectorAll('[data-select-popover]').length,
+        }));
+        expect(measure).toEqual({ container: 500, window: 1_280, popovers: 0 });
+        if (dialog === null) throw new Error('a 500px container did not open the dialog');
+        expect(Math.abs(dialog.left + dialog.width / 2 - variant.width / 2)).toBeLessThanOrEqual(8);
+        expect(Math.abs(dialog.top + dialog.height / 2 - variant.height / 2)).toBeLessThanOrEqual(8);
+        await shotOf(narrow.tab, variant, 'pane-500-dialog');
+      } finally {
+        await narrow.close();
+      }
+      const wide = await open(variant, '&n=8&pane=700');
+      try {
+        await press(wide.tab, variant);
+        await wide.tab.waitForSelector('[data-select-popover]');
+        expect(await wide.tab.$('[role=dialog]')).toBeNull();
+      } finally {
+        await wide.close();
+      }
+    });
   });
 }
 
@@ -431,13 +521,25 @@ for (const variant of [PHONE, PHONE_DARK, NARROW]) {
                 element.scrollHeight > element.clientHeight + 1 && getComputedStyle(element).overflowY !== 'visible',
             );
             const list = document.querySelector<HTMLElement>('[role=listbox]');
+            const body = dialog?.querySelector<HTMLElement>('[data-dialog-body]');
+            // A touch scroll bar overlays and takes no width, so the gutter proves nothing there: the COMPUTED overflow mode
+            // is what says "a bar only when needed" (`auto`), and a list forced to `scroll` fails it.
             return {
               scrollers: scrollers.length,
               listFits: list !== null && list.scrollHeight <= list.clientHeight,
               bar: list === null ? -1 : list.offsetWidth - list.clientWidth,
+              listOverflow:
+                list === null ? '' : `${getComputedStyle(list).overflowY}/${getComputedStyle(list).overflowX}`,
+              bodyOverflow: body === null || body === undefined ? '' : getComputedStyle(body).overflowY,
             };
           });
-        expect(await measure(few.tab)).toEqual({ scrollers: 0, listFits: true, bar: 0 });
+        expect(await measure(few.tab)).toEqual({
+          scrollers: 0,
+          listFits: true,
+          bar: 0,
+          listOverflow: 'auto/hidden',
+          bodyOverflow: expect.stringMatching(/^(auto|hidden)$/),
+        });
         await shotOf(few.tab, variant, 'dialog-few');
       } finally {
         await few.close();
@@ -496,6 +598,22 @@ for (const variant of [PHONE, PHONE_DARK, NARROW]) {
           };
         });
         expect(state).toEqual({ modal: 'true', name: 'Default for new agents', selected: ['Automatic'] });
+      } finally {
+        await close();
+      }
+    });
+
+    it('should pass axe-core in the open dialog (the active hint included) and with the empty filter', async () => {
+      const { tab, close } = await open(variant, '&n=8');
+      try {
+        await press(tab, variant);
+        await tab.waitForSelector('[role=dialog]');
+        expect(await tab.$('[role=option][data-active=true] .fy-sb__hint')).not.toBeNull();
+        expect(await axeViolations(tab)).toEqual([]);
+        await tab.keyboard.type('zzz');
+        await tab.waitForSelector('[data-select-empty]');
+        expect(await dangling(tab)).toEqual([]);
+        expect(await axeViolations(tab)).toEqual([]);
       } finally {
         await close();
       }

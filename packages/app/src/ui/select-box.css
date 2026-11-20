@@ -120,6 +120,11 @@
   background: var(--menu-item-active);
   color: var(--fg);
 }
+/* The hint is `--muted` on the page and on a resting row; on the cursor's fill that grey falls under 4.5:1 (4.04 to 4.49 measured),
+   so the row under the cursor reads in the body's own contrast pair. */
+.fy-sb__opt[data-active='true'] .fy-sb__hint {
+  color: var(--fg-soft);
+}
 .fy-sb__opt[aria-selected='true'] .fy-sb__label {
   color: var(--fg);
   font-weight: 600;

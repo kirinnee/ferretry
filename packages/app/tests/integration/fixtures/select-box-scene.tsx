@@ -5,6 +5,7 @@
  *   ?n=<1..120>                how many options the list has (default 5; the first 8 are named, the rest are "Option 9"...)
  *   ?searchable=auto|always|never
  *   ?edge=bottom               the box sits at the foot of the window (the popover must flip up)
+ *   ?pane=<px>                 the box sits in a component container (CSS `container-type: inline-size`) of that width
  *   ?dialog=1                  the bare Dialog instead: a sheet of `lines` lines of text (default 3) with a Close button
  *   ?lines=<n>
  *
@@ -44,9 +45,11 @@ window.__picks = [];
 
 const searchable = (params.get('searchable') ?? 'auto') as 'auto' | 'always' | 'never';
 
+const pane = Number(params.get('pane') ?? '0');
+
 const Box = () => {
   const [value, setValue] = useState('automatic');
-  return (
+  const field = (
     <div
       style={params.get('edge') === 'bottom' ? { position: 'fixed', left: 16, right: 16, bottom: 16 } : { padding: 16 }}
     >
@@ -71,6 +74,13 @@ const Box = () => {
         After
       </button>
     </div>
+  );
+  return pane > 0 ? (
+    <div data-pane="" style={{ containerType: 'inline-size', width: pane }}>
+      {field}
+    </div>
+  ) : (
+    field
   );
 };
 

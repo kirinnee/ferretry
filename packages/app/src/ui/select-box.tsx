@@ -1,13 +1,15 @@
 /**
- * THE SELECT BOX: a drop-in for `<select>` that is drawn by the app, so every theme styles it and a phone is not handed the
+ * THE SELECT BOX: a drop-in for the browser's own select element, drawn by the app, so every theme styles it and a phone is not handed the
  * browser's wheel. One value (a string), a list of options, and a label that is required: a visible `<label htmlFor>` should
  * carry the same words as `label` (the picker's rule), and `label` is what the dialog is titled.
  *
  *   A MOUSE      a button with the chosen option and a chevron. It opens a popover listbox under the button (flipped above
  *                it when the room below is short), with a search field on top once the list is long (`searchable="auto"`:
  *                more than 7 options). The popover is drawn in `document.body`, so no card's `overflow` clips it.
- *   A PHONE      (a window under 600px, or a coarse primary pointer) the same panel in a centred `Dialog`: search focused,
- *                the list scrolling inside it, a Cancel button, the page behind inert.
+ *   A PHONE      (a container under 600px, or a coarse primary pointer) the same panel in a centred `Dialog`: search focused,
+ *                the list scrolling inside it, a Cancel button, the page behind inert. "Container" is the button's nearest
+ *                ancestor that is a CSS container (`container-type`), else the window, so a narrow pane in a wide window
+ *                gets the dialog too.
  *
  * The keyboard is ARIA 1.2's combobox over a listbox: the button is the one tab stop; opening moves the focus to the search
  * field (or to the list when there is none) and the cursor travels by `aria-activedescendant`, never by moving focus row to
@@ -67,8 +69,9 @@ export interface SelectBoxProps {
   readonly 'aria-describedby'?: string;
 }
 
-/** A window narrower than this, or a coarse primary pointer, gets the centred dialog. */
-const DIALOG_QUERY = '(max-width: 599.98px), (pointer: coarse)';
+/** A container narrower than this (the window when the button sits in none), or a coarse primary pointer, gets the centred dialog. */
+const DIALOG_WIDTH = 600;
+const DIALOG_QUERY = `(max-width: ${DIALOG_WIDTH - 0.02}px), (pointer: coarse)`;
 /** The tallest the popover grows before its list scrolls. */
 const POPOVER_MAX_HEIGHT = 320;
 const POPOVER_MIN_WIDTH = 220;
@@ -84,8 +87,38 @@ const subscribeDialogMode = (notify: () => void): (() => void) => {
 const readDialogMode = (): boolean =>
   typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(DIALOG_QUERY).matches;
 
-/** Whether a pick is shown in a centred dialog (a phone) rather than a popover (a mouse). */
-const useDialogMode = (): boolean => useSyncExternalStore(subscribeDialogMode, readDialogMode, () => false);
+/** The nearest ancestor that is a CSS container (`container-type` other than `normal`), or null. */
+const containerOf = (element: HTMLElement): HTMLElement | null => {
+  for (let at = element.parentElement; at !== null; at = at.parentElement) {
+    const type = getComputedStyle(at).containerType;
+    if (type !== '' && type !== 'normal') return at;
+  }
+  return null;
+};
+
+/** Whether the button sits in a container narrower than the dialog threshold, kept live as the container resizes. */
+const useNarrowContainer = (anchor: { readonly current: HTMLElement | null }): boolean => {
+  const [narrow, setNarrow] = useState(false);
+  useLayoutEffect(() => {
+    const button = anchor.current;
+    if (button === null) return;
+    const container = containerOf(button);
+    if (container === null) return setNarrow(false);
+    const measure = (): void => setNarrow(container.getBoundingClientRect().width < DIALOG_WIDTH);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [anchor]);
+  return narrow;
+};
+
+/** Whether a pick is shown in a centred dialog (a phone, a narrow pane) rather than a popover (a mouse). */
+const useDialogMode = (anchor: { readonly current: HTMLElement | null }): boolean => {
+  const byWindow = useSyncExternalStore(subscribeDialogMode, readDialogMode, () => false);
+  return useNarrowContainer(anchor) || byWindow;
+};
 
 interface PanelProps {
   /** The listbox element's id, which the button's `aria-controls` names. */
@@ -167,7 +200,7 @@ function SelectPanel({ listId, label, options, value, search, seed, onPick, onTa
           <input
             aria-activedescendant={activeId}
             aria-autocomplete="list"
-            aria-controls={hasResults ? listId : undefined}
+            aria-controls={listId}
             aria-label={`Search ${label}`}
             autoCapitalize="off"
             autoComplete="off"
@@ -242,7 +275,9 @@ function SelectPanel({ listId, label, options, value, search, seed, onPick, onTa
           })}
         </div>
       ) : (
-        <div className="fy-sb__empty" data-select-empty="" role="status">
+        // The empty filter removes the listbox, so the result region takes its id: the open button's `aria-controls` (which a combobox
+        // must carry while expanded) always names an element that exists.
+        <div className="fy-sb__empty" data-select-empty="" id={listId} role="status">
           <SearchX aria-hidden="true" size={16} />
           <span>No match for “{query}”</span>
         </div>
@@ -350,7 +385,7 @@ export function SelectBox({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
   const [seed, setSeed] = useState('');
-  const asDialog = useDialogMode();
+  const asDialog = useDialogMode(triggerRef);
   const giveFocusBack = useRef(false);
   const search = isSearchable(searchable, options.length);
   const chosen = options.find(option => option.value === value);
