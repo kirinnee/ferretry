@@ -1,8 +1,9 @@
 /**
  * The Warden's first-run page over fake data, drawn the way the setup flow draws a page: inside the shared `StepPageFrame`,
  * with a host whose `commit` the footer's Next runs (contract rule 8). Voice's Jev key row is a STAND-IN here (a package
- * reaches another only through its contract): same markup classes, same write-only field (`SecretInput`), the same vault
- * route and Test route as Voice's own, which has its own tests. The daemon is fake and records what reached it on
+ * reaches another only through its contract), so THIS scene proves the page's own layout and its commit (one write), not
+ * the key row: the REAL Warden page over the REAL registered Voice row, in one Chromium flow, is
+ * `packages/app/tests/integration/onboarding-e2e.visual.test.ts` (the Warden segment). The daemon is fake and records what reached it on
  * `window.__fake` (never the key's text).
  *
  *   ?theme=<family>-<mode>   ?key=missing|set|off  (what the machine holds before the page opens)
@@ -24,7 +25,9 @@ const failFirstSave = params.get('save') === 'fail';
 interface Fake {
   puts: { name: string; length: number }[];
   tests: string[];
-  writes: { enabled: boolean; jev: boolean; llm: boolean }[];
+  /** Every write of warden.yaml the page asked for; `named`: the SAME write also names the Jev key (never a second one). */
+  writes: { enabled: boolean; jev: boolean; llm: boolean; named: boolean }[];
+  /** Calls of the separate naming route: the page must make none. */
   names: number;
   done: number;
   advanced: boolean;
@@ -67,7 +70,10 @@ const speedups = () => ({
 const deps: WardenStepDeps = {
   client: {
     config: async () => view(),
-    updateConfig: async (patch: { enabled?: boolean; layers?: { jev: boolean; llm: boolean } }) => {
+    updateConfig: async (
+      patch: { enabled?: boolean; layers?: { jev: boolean; llm: boolean } },
+      options?: { nameJevKey?: boolean },
+    ) => {
       if (refused) {
         refused = false;
         throw new Error('The machine refused the write.');
@@ -76,7 +82,9 @@ const deps: WardenStepDeps = {
         enabled: patch.enabled === true,
         jev: patch.layers?.jev === true,
         llm: patch.layers?.llm === true,
+        named: options?.nameJevKey === true,
       });
+      if (options?.nameJevKey === true) named = true;
       return view();
     },
     nameJevKey: async () => {

@@ -21,17 +21,17 @@ export const WARDEN_CHOICES: readonly WardenChoiceCopy[] = [
   {
     id: 'rules',
     title: 'Rules only',
-    line: 'Free. Flags stuck or dead ferrets.',
+    line: 'Free. Flags stuck ferrets.',
   },
   {
     id: 'jev',
     title: '+ Jev',
-    line: 'A cheap AI check clears false alarms. Up to $0.50 a day.',
+    line: 'Cheap AI check. $0.50 a day.',
   },
   {
     id: 'llm',
     title: '+ LLM investigation',
-    line: 'A read-only AI look at the rest. Up to $2 a day more.',
+    line: 'AI look at the rest. $2 a day.',
   },
 ];
 

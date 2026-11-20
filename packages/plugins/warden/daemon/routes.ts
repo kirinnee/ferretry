@@ -9,7 +9,7 @@ import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
 import { ferretOf, isFerretCall, OWNER_ONLY_CODE } from '@ferretry/core-gate/contract';
 import {
   DialogLearnRequestSchema,
-  WardenSettingsPatchSchema,
+  WardenSettingsSaveSchema,
   WardenInvestigateRequestSchema,
   WardenLeaveRequestSchema,
   WardenRunRequestSchema,
@@ -150,7 +150,8 @@ export function wardenRoutes(
     'GET /v1/warden/config': guarded(async () => jsonResponse(await subsystem.config())),
     'PATCH /v1/warden/config': guarded(async call => {
       // The held sentences come back with THIS change's view, so two changes in flight never answer each other's.
-      return jsonResponse(await subsystem.updateConfig(await parseBody(call.request, WardenSettingsPatchSchema)));
+      const { nameJevKey, ...patch } = await parseBody(call.request, WardenSettingsSaveSchema);
+      return jsonResponse(await subsystem.updateConfig(patch, { nameJevKey: nameJevKey === true }));
     }),
     // Names the one reference `warden.yaml` needs before the kernel spends the stored Jev key. No body: nothing a caller
     // sends is read, and the answer is the settings view, which says whether it is named — never the key.

@@ -395,7 +395,13 @@ export interface WardenConfigStore {
    * Answers the sentences of THIS edit when it was held for the owner (empty when it is in effect): the answer belongs
    * to this write, never to whichever write finished last.
    */
-  write(config: WardenConfig, patch: WardenConfigPatch): Promise<readonly string[]>;
+  write(config: WardenConfig, patch: WardenConfigPatch, options?: WardenSaveOptions): Promise<readonly string[]>;
+}
+
+/** What else one save of the settings may do in the same write of `warden.yaml`. */
+export interface WardenSaveOptions {
+  /** Also name the Jev key (`jev.key`): the owner's act, in effect only when the caller is the owner, else held. */
+  readonly nameJevKey?: boolean;
 }
 
 /** Accounts actually installed on this host, by the NAME an operator types (`claude-default`), never by the
@@ -890,13 +896,15 @@ export class WardenSweepService {
    * makes, so a PATCH can repair a broken document rather than being blocked by
    * it.
    */
-  async updateConfig(patch: WardenConfigPatch): Promise<WardenConfigView> {
+  async updateConfig(patch: WardenConfigPatch, options?: WardenSaveOptions): Promise<WardenConfigView> {
     const stored = await this.storedConfig();
     const next = applyWardenConfigPatch(stored.config, patch);
-    const held = await this.ports.config.write(next, patch);
+    const held = await this.ports.config.write(next, patch, options);
     // A write the kernel held is NOT in effect: answer the settings that are, say what waits, and journal no change.
     if (held.length > 0) return { ...(await this.view()), held: [...held] };
-    this.ports.journal.record('fleet.warden_config_changed', { fields: Object.keys(patch) });
+    this.ports.journal.record('fleet.warden_config_changed', {
+      fields: options?.nameJevKey === true ? [...Object.keys(patch), 'jev'] : Object.keys(patch),
+    });
     // Answered from a re-read of the settings in effect, never from `next`, so the answer cannot disagree with them.
     return await this.view();
   }

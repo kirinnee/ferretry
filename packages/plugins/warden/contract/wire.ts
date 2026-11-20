@@ -174,6 +174,11 @@ export type WardenFile = z.infer<typeof WardenFileSchema>;
  */
 export const WardenSettingsPatchSchema = WardenFileSchema.omit({ jev: true });
 export type WardenSettingsPatch = z.infer<typeof WardenSettingsPatchSchema>;
+/**
+ * A settings save as the route reads it: the patch, and optionally `nameJevKey`, which asks the SAME write to also
+ * name the Jev key (`jev.key`), so a first save that must name it is one write of `warden.yaml`, never two.
+ */
+export const WardenSettingsSaveSchema = WardenSettingsPatchSchema.extend({ nameJevKey: z.boolean().optional() });
 
 /**
  * ON, AND FREE: the sweep runs every two minutes and its rules flag what they find, but both triage layers are off, so

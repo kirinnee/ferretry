@@ -61,11 +61,14 @@ interface Scene {
   readonly unreadable?: boolean;
   readonly held?: readonly string[];
   readonly refuse?: string;
+  /** What the slot under the cards holds; `null` = no key row is placed (Voice off). */
+  readonly keyRow?: null;
 }
 
 const open = async (scene: Scene = {}) => {
   const patches: WardenConfigPatch[] = [];
   let named = 0;
+  let writes = 0;
   let key: SpeedupsView | 'off' = scene.key ?? speedups(false);
   let nameable: WardenConfigView['jevKey'] = 'not_named';
   let config = wardenConfig();
@@ -78,9 +81,15 @@ const open = async (scene: Scene = {}) => {
   const deps: WardenStepDeps = {
     client: fakeWardenClient({
       config: async () => view({ jevKey: nameable }),
-      updateConfig: async patch => {
+      updateConfig: async (patch, options) => {
         if (scene.refuse !== undefined) throw new Error(scene.refuse);
         patches.push(patch);
+        writes += 1;
+        // Naming rides the same write as the answer: it is counted, and the key is then named.
+        if (options?.nameJevKey === true) {
+          named += 1;
+          nameable = 'named';
+        }
         config = {
           ...config,
           layers: { ...config.layers, ...(patch.layers ?? {}) },
@@ -88,9 +97,7 @@ const open = async (scene: Scene = {}) => {
         return view({ ...(scene.held === undefined ? {} : { held: [...scene.held] }), jevKey: nameable });
       },
       nameJevKey: async () => {
-        named += 1;
-        nameable = 'named';
-        return view({ jevKey: 'named' });
+        throw new Error('the page must name the key in the same write, not in a second one');
       },
     }),
     readFile: async () => {
@@ -101,14 +108,18 @@ const open = async (scene: Scene = {}) => {
   };
   const run = recordedStep();
   const page = await mount(
-    <WardenStepPage deps={deps} step={run.host} keyRow={<input type="password" data-fake-key-row="" />} />,
+    <WardenStepPage
+      deps={deps}
+      step={run.host}
+      keyRow={scene.keyRow === null ? null : <input type="password" data-fake-key-row="" />}
+    />,
   );
   mounted.push(page);
   await settle();
   const setKey = (next: SpeedupsView | 'off'): void => {
     key = next;
   };
-  return { page, run, patches, named: () => named, setKey };
+  return { page, run, patches, named: () => named, writes: () => writes, setKey };
 };
 
 const pick = async (page: Mounted, id: string): Promise<void> => {
@@ -180,12 +191,30 @@ describe('the Warden step page', () => {
     expect(page.container.textContent).not.toContain('Waiting for the Jev key');
   });
 
-  it('names a stored key in warden.yaml when Next is pressed, after writing the layers', async () => {
-    const { page, run, patches, named } = await open({ key: speedups(true) });
+  it('names a stored key in the SAME write as the answer: one call, never a second write of warden.yaml', async () => {
+    const { page, run, patches, named, writes } = await open({ key: speedups(true) });
     await pick(page, 'jev');
     await interact(() => run.runCommit());
     expect(patches).toEqual([{ enabled: true, layers: { jev: true, llm: false } }]);
     expect(named()).toBe(1);
+    expect(writes()).toBe(1);
+  });
+
+  it('says what the kernel HELD for the owner in the footer line, once, and the next Next goes on without writing again', async () => {
+    const { page, run, writes } = await open({ key: speedups(true), held: ['the Jev key is named.'] });
+    await pick(page, 'jev');
+    await expect(interact(() => run.runCommit())).rejects.toThrow('Waiting for your approval: the Jev key is named.');
+    expect(writes()).toBe(1);
+    await interact(() => run.runCommit());
+    expect(writes()).toBe(1);
+  });
+
+  it('a refused combined write leaves nothing half-saved: one attempt, the error shown, and Next tries the write again', async () => {
+    const { page, run, writes } = await open({ key: speedups(true), refuse: 'The machine refused the write.' });
+    await pick(page, 'jev');
+    await expect(interact(() => run.runCommit())).rejects.toThrow('refused the write');
+    await expect(interact(() => run.runCommit())).rejects.toThrow('refused the write');
+    expect(writes()).toBe(0);
   });
 
   it('writes and names nothing for the free answer even when a key is stored', async () => {
@@ -214,6 +243,14 @@ describe('the Warden step page', () => {
     await interact(() => run.runCommit());
     expect(patches).toEqual([{ enabled: true, layers: { jev: true, llm: false } }]);
     expect(named()).toBe(1);
+  });
+
+  it('does not point at a key row that is not drawn when the question is asked', async () => {
+    const { run, page } = await open({ key: speedups(false), keyRow: null });
+    await pick(page, 'jev');
+    const asking = interact(() => run.runCommit());
+    await expect(asking).rejects.toThrow('Go on without one? Press Next to say yes.');
+    await expect(interact(() => run.runCommit())).resolves.toBeUndefined();
   });
 
   it('does not ask when Voice is off (no place to add a key)', async () => {

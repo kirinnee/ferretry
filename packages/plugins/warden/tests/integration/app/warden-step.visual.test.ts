@@ -4,11 +4,12 @@
  *
  * The ASSERT, on computed geometry, the DOM and the fake daemon (never a snapshot):
  *   1280 — the three cards share x and width and stack (y increases); the demo sits right of them (> 32 px gap) and its
- *   top is within 8 px of the first card's; choosing "+ Jev" puts a password field on THIS page, with no link into
- *   Settings and none of the old words; a typed key + Save reaches the fake vault route once, and the key's text is then
- *   absent from the DOM, both storages and the console; Next writes `warden.yaml` once (and names the stored key once);
- *   with no key saved Next asks once in the footer and the second Next says yes; the page text is <= 160 characters with
- *   no URL. 390 — no sideways scroll, the three footer buttons are inside the viewport.
+ *   top is within 8 px of the first card's; Next writes `warden.yaml` ONCE and that same write names a stored key (the
+ *   naming route is never called); with no key saved Next asks once in the footer and the second Next says yes; a refused
+ *   write keeps the page. 390 — no sideways scroll, the footer buttons are inside the viewport.
+ * The Voice key row here is a STAND-IN. The REAL Warden page over the REAL registered Voice row (password field on this
+ * page, exact vault write, key in no DOM, storage or console, the 160-character budget, one write) is proven in one flow by
+ * `packages/app/tests/integration/onboarding-e2e.visual.test.ts` (the Warden segment).
  *
  * Set `FY_WARDEN_STEP_SHOTS_DIR` to keep the pictures.
  */
@@ -195,44 +196,19 @@ describe('the Warden first-run page: the Jev key is set up here', () => {
           await tab.locator('[data-step-next]').click();
           await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
           const after = (await fakeOf(tab)) as {
-            writes: { enabled: boolean; jev: boolean; llm: boolean }[];
+            writes: { enabled: boolean; jev: boolean; llm: boolean; named: boolean }[];
             names: number;
             done: number;
           };
-          expect(after.writes).toEqual([{ enabled: true, jev: true, llm: false }]);
-          expect(after.names).toBe(1);
+          // ONE write of warden.yaml, and that same write names the stored key: the separate naming route is never called.
+          expect(after.writes).toEqual([{ enabled: true, jev: true, llm: false, named: true }]);
+          expect(after.names).toBe(0);
         } finally {
           await close();
         }
       });
     }
   }
-
-  it('the page says little: <= 160 characters beside the key row (<= 60), no URL (1280)', async () => {
-    const { tab, close } = await open(VIEWPORTS[0], 'studio-light');
-    try {
-      await tab.locator('[data-choice="jev"]').click();
-      await tab.locator('input[type=password]').waitFor({ state: 'visible' });
-      const measured = await tab.evaluate(() => {
-        const body = document.querySelector('.wd-step') as HTMLElement;
-        const row = body.querySelector('[data-warden-key-row]') as HTMLElement;
-        const flat = (value: string) => value.replace(/\s+/g, ' ').trim();
-        let text = body.innerText;
-        for (const title of [...document.querySelectorAll('.fy-cc__title')].map(el => el.textContent ?? ''))
-          text = text.replace(title, '');
-        // The key row is Voice's control (label, Save, Test, link): measured on its own.
-        return { text: flat(text.replace(row.innerText, '')), row: flat(row.innerText) };
-      });
-      console.log(
-        `warden page text (${measured.text.length} chars): ${measured.text} | key row (${measured.row.length} chars): ${measured.row}`,
-      );
-      expect(measured.row.length).toBeLessThanOrEqual(60);
-      expect(measured.text.length).toBeLessThanOrEqual(160);
-      expect(measured.text).not.toMatch(/https?:|www\.|\.com|\.test/);
-    } finally {
-      await close();
-    }
-  });
 
   it('Jev with no key: Next asks once, the second Next goes on (1280)', async () => {
     const { tab, close } = await open(VIEWPORTS[0], 'studio-light');
@@ -244,7 +220,9 @@ describe('the Warden first-run page: the Jev key is set up here', () => {
       expect(((await fakeOf(tab)) as { writes: unknown[] }).writes.length).toBe(0);
       await tab.locator('[data-step-next]').click();
       await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
-      expect(((await fakeOf(tab)) as { writes: unknown[] }).writes).toEqual([{ enabled: true, jev: true, llm: true }]);
+      expect(((await fakeOf(tab)) as { writes: unknown[] }).writes).toEqual([
+        { enabled: true, jev: true, llm: true, named: false },
+      ]);
     } finally {
       await close();
     }
