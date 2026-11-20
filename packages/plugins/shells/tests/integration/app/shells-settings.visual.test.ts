@@ -179,6 +179,33 @@ describe('The Shells Settings tab', () => {
           // The same state change a native select made: the row is now a flake reference, with its Floating switch.
           await page.getByText('Flake reference', { exact: true }).first().waitFor();
           expect(await page.getByText('Floating', { exact: true }).count()).toBe(1);
+
+          // The adoption proof: submit the flake through Resolve and Add and read what the fake client was sent.
+          const sent = async (route: string) =>
+            page.evaluate(
+              wanted =>
+                (window as unknown as { __calls: { route: string; body?: unknown }[] }).__calls.filter(
+                  call => call.route === wanted,
+                ),
+              route,
+            );
+          expect(await sent('POST /v1/shells/preview'), 'nothing is resolved before the owner asks').toHaveLength(0);
+          await page.getByRole('textbox', { name: 'Name', exact: true }).fill('my-flake');
+          await page.getByRole('textbox', { name: 'Flake reference', exact: true }).fill('github:me/shells/abc#web');
+          await page.getByRole('switch', { name: 'Floating' }).click();
+          await page.getByRole('button', { name: 'Resolve and look' }).click();
+          await page.locator('[data-testid="shells-preview"]').waitFor();
+          const expected = { name: 'my-flake', item: { flake: 'github:me/shells/abc#web', floating: true } };
+          expect(await sent('POST /v1/shells/preview'), 'Resolve sent the flake the owner picked and typed').toEqual([
+            { route: 'POST /v1/shells/preview', body: expected },
+          ]);
+          expect(await sent('POST /v1/shells'), 'resolving adds nothing').toHaveLength(0);
+          await page.getByRole('button', { name: 'Add it' }).click();
+          await page.locator('[data-testid="shells-note"]').waitFor();
+          expect(await sent('POST /v1/shells'), 'Add sent the same flake request').toEqual([
+            { route: 'POST /v1/shells', body: expected },
+          ]);
+          expect(await page.locator('[data-testid="shells-note"]').innerText()).toContain('Added my-flake.');
         } finally {
           await context.close();
         }

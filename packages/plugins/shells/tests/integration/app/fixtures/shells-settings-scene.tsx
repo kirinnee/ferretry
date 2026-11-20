@@ -33,8 +33,26 @@ const answers: Readonly<Record<string, unknown>> = {
   },
 };
 
+/** Every call the tab made, with its body, so a test can read what the tab really sent (`window.__calls`). */
+const calls: { route: string; body?: unknown }[] = [];
+(window as unknown as { __calls: typeof calls }).__calls = calls;
+
+/** What resolving a flake locks to: the same lock for the preview and for the add, built from the request it was sent. */
+const lockOf = (body: { name: string; item: { flake?: string; floating?: boolean } }) => ({
+  format: 1,
+  name: body.name,
+  source: { kind: 'flake', ref: body.item.flake ?? '', rev: 'b'.repeat(40), narHash: HASH },
+  resolvedAt: '2026-11-20T12:00:00Z',
+  floating: body.item.floating ?? false,
+});
+
 const client = {
-  call: async (route: string) => {
+  call: async (route: string, options?: { body?: unknown }) => {
+    calls.push({ route, body: options?.body });
+    if (route === 'POST /v1/shells/preview' || route === 'POST /v1/shells') {
+      const body = options?.body as { name: string; item: { flake?: string; floating?: boolean } };
+      return { name: body.name, lock: lockOf(body) };
+    }
     if (!(route in answers)) throw new Error(`no answer for ${route}`);
     return answers[route];
   },
