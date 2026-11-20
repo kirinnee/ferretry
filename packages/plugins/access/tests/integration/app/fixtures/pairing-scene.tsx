@@ -8,6 +8,7 @@
  *   &offer=open                the machine says the first-passkey window is open (7 minutes left): the success screen offers
  *                              "Add a passkey now" and waits for "Not now"
  *   &scan=camera               a browser that can scan (an idle camera), so the cold page shows all three ways in
+ *   &back=1                    the host gave the page a way back (Back), as `/pair` does when reached from Settings or the first run
  *   &motion=reduced             the app's own Motion = Reduced (`<html data-motion="reduced">`)
  */
 
@@ -62,6 +63,9 @@ createRoot(root).render(
           passkeyOffer: { now: () => OFFER_NOW, supported: () => true, origin: () => 'https://ferretry.example' },
           onContinue: () => {},
         }
+      : {})}
+    {...(params.get('back') === '1'
+      ? { onClose: () => document.documentElement.setAttribute('data-went-back', '') }
       : {})}
     onRemove={() => {}}
     onSelect={() => {}}

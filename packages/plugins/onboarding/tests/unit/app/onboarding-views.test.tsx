@@ -194,6 +194,9 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     );
     const open = view.container.querySelector<HTMLElement>('[data-onboarding-open-pair]');
     expect(open).not.toBeNull();
+    // G2: auto width (not stretched across the row) and at least 44px tall, like the footer buttons.
+    expect(open?.className).toContain('self-start');
+    expect(open?.className).toContain('min-h-[44px]');
     await interact(() => {
       open?.click();
     });

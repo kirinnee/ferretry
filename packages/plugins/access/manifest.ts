@@ -255,7 +255,8 @@ export default definePlugin({
 
   ui: {
     // Daemon-less on purpose: the page a pairing link opens on a device that has no daemon yet (first contact is direct).
-    screens: [screen('pair', { path: '/pair', daemonless: true })],
+    // `chrome: 'none'`: drawn alone like the first run it is reached from (no drawer, bars or side column); the page carries its own Back.
+    screens: [screen('pair', { path: '/pair', daemonless: true, chrome: 'none' })],
     settings: [
       settingsTab('devices', { icon: 'smartphone', group: 'devices-access', label: 'Devices', order: 20 }),
       // v4's order: Devices, then the limits that explain a refused control, then passkeys, then the log.

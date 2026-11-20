@@ -290,6 +290,27 @@ describe('The pair page: mascot and night sky', () => {
     });
   }
 
+  // G2: the pairing page draws no shell chrome, so it has its own Back; and its buttons are auto width, 44px tall.
+  for (const variant of VARIANTS) {
+    it(`${variant.name}: has a 44px Back, and the confirm and paste buttons are auto width and 44px tall`, async () => {
+      const { tab, problems, close } = await open(variant, '&back=1');
+      try {
+        const back = must(await tab.locator('[data-pairing-close]').boundingBox(), 'Back');
+        expect(back.height, 'Back is at least 44 px tall').toBeGreaterThanOrEqual(44);
+        const confirm = must(await tab.locator('[data-pair-confirm]').boundingBox(), 'Pair this device');
+        expect(confirm.height, 'at least 44 px tall').toBeGreaterThanOrEqual(43.5);
+        expect(confirm.width, 'not the row wide').toBeLessThan(variant.width * 0.7);
+        await shot(tab, variant, 'back-confirm');
+        await tab.locator('[data-pairing-close]').click();
+        expect(await tab.evaluate(() => document.documentElement.hasAttribute('data-went-back'))).toBe(true);
+        expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+  }
+
   for (const variant of VARIANTS) {
     it(`${variant.name}: a cold open offers scan, upload and paste as three equal cards, none a full-width bar`, async () => {
       const { tab, problems, close } = await open(variant, '&arrival=cold&scan=camera');

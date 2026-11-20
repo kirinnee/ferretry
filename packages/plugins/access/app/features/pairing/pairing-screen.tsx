@@ -53,6 +53,7 @@ import {
 } from './first-passkey-offer.tsx';
 import type { DaemonConnection } from '../../shell-grants.ts';
 import { PairedNext } from './paired-next.tsx';
+import { PairingBack } from './pairing-back.tsx';
 import { PairingSky } from './pairing-sky.tsx';
 
 /** What the exchange learned, so the screen can say how it got there. Both parts are optional: a host may know neither. */
@@ -145,6 +146,8 @@ export interface PairingScreenProps {
    * words and inside the same centred column, so it never competes with the mascot. Absent: nothing is drawn.
    */
   readonly afterPaired?: ReactNode;
+  /** The way back out of this chrome-less page (`pairing-back.tsx`); absent, embedded, or on the success screen: none. */
+  readonly onClose?: () => void;
 }
 
 /**
@@ -223,6 +226,7 @@ export function PairingScreen({
   onContinue,
   sameMachine = pageIsLocal(),
   afterPaired,
+  onClose,
 }: PairingScreenProps) {
   const [stage, setStage] = useState<Stage>(() => initialStage(arrival));
   const statedFailure = stage.kind === 'failed' && stage.cause === 'stated';
@@ -316,13 +320,14 @@ export function PairingScreen({
         passkeyOffer={passkeyOffer}
         onContinue={onContinue}
         afterPaired={afterPaired}
+        onClose={onClose}
       />
     );
   }
 
   const first = connections.length === 0;
   return (
-    <PairingFrame embedded={embedded} stage="browse">
+    <PairingFrame embedded={embedded} stage="browse" onClose={onClose}>
       {!embedded && (
         <header className="min-w-0 text-center">
           <div className="flex items-center justify-center gap-2 text-accent">
@@ -467,6 +472,8 @@ interface PairingFrameProps {
    * region that is mounted together with its text is often not announced at all.
    */
   readonly announce?: string;
+  /** Where the Back control goes; none is drawn when absent, embedded, or on the success screen. */
+  readonly onClose?: (() => void) | undefined;
   readonly children: ReactNode;
 }
 
@@ -529,7 +536,7 @@ function FailureMessage({ message, cause }: { readonly message: string; readonly
 }
 
 /** The housing, and the only thing the embedded seam actually changes. */
-function PairingFrame({ embedded, stage, announce = '', children }: PairingFrameProps) {
+function PairingFrame({ embedded, stage, announce = '', onClose, children }: PairingFrameProps) {
   const status = (
     <p className="sr-only" role="status">
       {announce}
@@ -548,6 +555,7 @@ function PairingFrame({ embedded, stage, announce = '', children }: PairingFrame
     <div className="fy-pair-scene flex flex-col">
       <PairingSky celebrating={stage === 'paired'} />
       <main className={SHELL} aria-labelledby="pairing-title" data-pairing-stage={stage}>
+        {onClose !== undefined && stage !== 'paired' && <PairingBack onClose={onClose} />}
         {pose !== undefined && (
           <div className="fy-pair-hero">
             <FerretMascot pose={pose} />
@@ -614,6 +622,7 @@ interface PairingFocusProps {
   readonly passkeyOffer: PairingScreenProps['passkeyOffer'];
   readonly onContinue: (() => void) | undefined;
   readonly afterPaired?: ReactNode;
+  readonly onClose: (() => void) | undefined;
 }
 
 /**
@@ -638,6 +647,7 @@ function PairingFocus({
   passkeyOffer,
   onContinue,
   afterPaired,
+  onClose,
 }: PairingFocusProps) {
   // Whether the name is being edited. Above every early return: hooks run in the same order each render.
   const [renaming, setRenaming] = useState(false);
@@ -691,7 +701,7 @@ function PairingFocus({
 
   if (stage.kind === 'failed') {
     return (
-      <PairingFrame embedded={embedded} stage="failed">
+      <PairingFrame embedded={embedded} stage="failed" onClose={onClose}>
         <Title id="pairing-title" className={titleClass}>
           Pairing failed
         </Title>
@@ -719,7 +729,7 @@ function PairingFocus({
         )}
         <button
           type="button"
-          className="kt-btn min-h-[56px] w-full text-title"
+          className="kt-btn min-h-[44px] self-center px-6 py-3"
           data-variant="primary"
           onClick={onCancel}
         >
@@ -737,6 +747,7 @@ function PairingFocus({
     <PairingFrame
       embedded={embedded}
       stage={stage.kind}
+      onClose={onClose}
       announce={busy ? 'Exchanging the one-time code with this daemon…' : ''}
     >
       <header className={embedded ? 'min-w-0' : 'min-w-0 text-center'}>
@@ -822,7 +833,7 @@ function PairingFocus({
       */}
       <button
         type="button"
-        className="kt-btn min-h-[64px] w-full text-title"
+        className="kt-btn min-h-[44px] self-center px-6 py-3"
         data-variant="primary"
         data-pair-confirm=""
         onClick={() => {

@@ -147,6 +147,9 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
     );
     // Where the success screen goes on to: set by the exchange, read when the offer is settled or declined.
     const landing = useRef<string | undefined>(undefined);
+    const backTo =
+      returnPathOf(location()) ??
+      (snapshot.selected === null ? undefined : daemonHomeHref(String(daemonId(snapshot.selected))));
     const refused = refusedBy === null ? undefined : snapshot.daemons.find(entry => entry.daemon === refusedBy);
     if (link === null && fragment.arrival > 0)
       return (
@@ -172,6 +175,9 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
           {...(environment.defaultName === undefined ? {} : { defaultName: environment.defaultName })}
           passkeyClient={passkeyClient}
           {...(environment.passkeyOffer === undefined ? {} : { passkeyOffer: environment.passkeyOffer })}
+          // The page draws no shell chrome, so it carries its own way back: where it was asked to return to (the first run,
+          // a Settings link), else the machine this tab works on. A cold first visit has neither, and draws no Back.
+          {...(backTo === undefined ? {} : { onClose: () => navigate(backTo) })}
           onContinue={() => {
             if (landing.current !== undefined) navigate(landing.current);
           }}
