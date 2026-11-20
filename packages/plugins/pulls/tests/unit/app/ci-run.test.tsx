@@ -5,6 +5,7 @@ import type { CiRun } from '../../../contract/wire.ts';
 import { RUN_ROUTE, RUNS_ROUTE, type CiClient } from '../../../app/features/ci-run/ci-api.ts';
 import { CiRunPage } from '../../../app/features/ci-run/ci-run-page.tsx';
 import { CiTab } from '../../../app/features/ci-run/ci-runs-list.tsx';
+import { CANCELLED_RUN } from '../../fixtures/flame-runs.ts';
 import { checkRun, failedRun, NOW, passingRun, runningRun } from '../../fixtures/ci-run-views.ts';
 
 const PROJECT = '11111111-1111-4111-8111-111111111111';
@@ -138,6 +139,21 @@ describe('CiRunPage', () => {
     expect(early.container.querySelector('[data-ci-slowest-line]')).toBeNull();
     expect(job(early, 'deploy preview').querySelector('a')).toBeNull();
     expect(job(early, 'lint').querySelector('a')).not.toBeNull();
+  });
+
+  test('a step the data calls running inside a cancelled job does not spin: it reads as cancelled (e-spinner)', async () => {
+    const mounted = await mount(page(client({ [RUN_ROUTE]: CANCELLED_RUN })));
+    await shown(mounted, '[data-ci-run-page]');
+    const section = job(mounted, 'test');
+    expect(section.getAttribute('data-ci-job-status')).toBe('cancelled');
+    await click(must(section.querySelector('button'), 'the job button'));
+    const step = must(section.querySelector('[data-ci-step="2"]'), 'the stopped step');
+    expect(step.textContent).toContain('Cancelled');
+    expect(step.textContent).not.toContain('Running');
+    expect(step.querySelector('.animate-spin')).toBeNull();
+    expect(step.querySelector('.animate-pulse')).toBeNull();
+    expect(step.querySelector('[data-ci-duration]')?.getAttribute('data-ci-duration')).toBe('done');
+    expect(section.querySelector('.animate-spin')).toBeNull();
   });
 
   test('a CI with no jobs says so instead of drawing an empty list', async () => {

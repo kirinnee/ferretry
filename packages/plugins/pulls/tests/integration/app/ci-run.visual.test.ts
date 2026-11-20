@@ -154,6 +154,9 @@ describe('the CI run page', () => {
         // The chevron turns over a moment; shoot it once it has.
         await page.waitForTimeout(400);
         expect(await page.locator('[data-ci-step="2"] [data-ci-duration]').textContent()).toBe('9s');
+        // The step the data still calls running is over with its job: no spinner, and it says cancelled.
+        expect(await page.locator('[data-ci-job="8"] .animate-spin').count()).toBe(0);
+        expect(await page.locator('[data-ci-step="2"]').textContent()).toContain('Cancelled');
         await noSidewaysScroll(page);
         await shot(page, variant, 'stopped');
         expect(problems).toEqual([]);

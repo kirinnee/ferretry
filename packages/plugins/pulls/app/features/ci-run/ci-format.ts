@@ -125,6 +125,20 @@ export function drawnSpan(span: { readonly left: number; readonly width: number 
   return { left: Math.min(span.left, 100 - width), width };
 }
 
+/** A job that has stopped for good: nothing inside it is still going. */
+const SETTLED_JOB: ReadonlySet<CiStatus> = new Set<CiStatus>(['passed', 'failed', 'cancelled', 'skipped']);
+
+/** Is this job over? Then no step inside it can still be running, whatever its own data says. */
+export const jobSettled = (job: CiJob): boolean => SETTLED_JOB.has(job.status);
+
+/**
+ * The status a step is DRAWN with. A step the data still calls `running` inside a job that is over (a cancelled run
+ * leaves such a step behind) never spins: it was stopped, so it reads as cancelled. Every other step shows as it is.
+ */
+export function shownStepStatus(step: CiStep, job: CiJob): CiStatus {
+  return step.status === 'running' && jobSettled(job) ? 'cancelled' : step.status;
+}
+
 /** The runs, failing first then running then the rest, each group newest first. A stable, total order. */
 export function orderRuns(runs: readonly CiRun[]): readonly CiRun[] {
   const rank = (run: CiRun): number => (run.status === 'failed' ? 0 : run.status === 'running' ? 1 : 2);
