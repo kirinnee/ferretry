@@ -49,7 +49,6 @@ import {
   type OnboardingStepId,
   onboardingStepIndex,
   presumedTarget,
-  questionBehindDoer,
   questionBehindRoute,
   type SetupTargetId,
 } from './onboarding-model.ts';
@@ -69,14 +68,6 @@ export interface OnboardingTargeting {
   readonly format: typeof ONBOARDING_PROGRESS_FORMAT;
   readonly stage: 'target';
   readonly route: OnboardingDaemonRouteId;
-}
-
-/** WHO INSTALLS IT — asked on every daemon journey, with the machine already known. */
-export interface OnboardingChoosingDoer {
-  readonly format: typeof ONBOARDING_PROGRESS_FORMAT;
-  readonly stage: 'doer';
-  readonly route: OnboardingDaemonRouteId;
-  readonly target: SetupTargetId;
 }
 
 /**
@@ -102,7 +93,7 @@ export type OnboardingWalking = {
  * and every reader of them has to decide what a disagreement means. A closed
  * union cannot be in that state, so nothing downstream has to handle it.
  */
-export type OnboardingProgress = OnboardingAsking | OnboardingTargeting | OnboardingChoosingDoer | OnboardingWalking;
+export type OnboardingProgress = OnboardingAsking | OnboardingTargeting | OnboardingWalking;
 
 export const FRESH_ONBOARDING_PROGRESS: OnboardingAsking = Object.freeze({
   format: ONBOARDING_PROGRESS_FORMAT,
@@ -118,26 +109,19 @@ export const targetQuestion = (route: OnboardingDaemonRouteId): OnboardingTarget
   route,
 });
 
-/** The doer question, which every daemon journey reaches with its machine settled. */
-export const doerQuestion = (route: OnboardingDaemonRouteId, target: SetupTargetId): OnboardingChoosingDoer => ({
-  format: ONBOARDING_PROGRESS_FORMAT,
-  stage: 'doer',
-  route,
-  target,
-});
-
 /**
  * WHERE ANSWERING THE ENTRY QUESTION LANDS, which is not always a journey.
  *
  * The pairing entry has nothing left to ask, so it opens its steps immediately. A
- * daemon entry asks who installs it always, and asks which computer first only
- * when this device has not already settled that — a phone never can, and a
- * computer setting up for the first time is assumed to mean itself.
+ * daemon entry asks which computer only when this device has not already settled
+ * that — a phone never can, and a computer setting up for the first time is
+ * assumed to mean itself — and otherwise opens the install commands (who installs
+ * it is a link on that page, not a question).
  */
 export const enterOnboardingRoute = (route: OnboardingRouteId, device: DeviceKind): OnboardingProgress => {
   if (!isDaemonRouteId(route)) return walk({ route }, device);
   const target = presumedTarget(route, device);
-  return target === undefined ? targetQuestion(route) : doerQuestion(route, target);
+  return target === undefined ? targetQuestion(route) : walk({ route, target, doer: 'self' }, device);
 };
 
 /** Opening a journey on its own first step, with nothing remembered from any other. */
@@ -149,12 +133,7 @@ export const walk = (journey: OnboardingJourney, device: DeviceKind): Onboarding
 /** Opening a journey AT A KNOWN PLACE, which is what a hand-off link asks for. */
 export const resumeOnboardingRoute = (handoff: SetupHandoff, device: DeviceKind): OnboardingProgress => {
   const landing = landSetupHandoff(handoff, device);
-  if (landing.kind === 'ask') {
-    return landing.question === 'target'
-      ? targetQuestion(landing.route)
-      : /* The `doer` landing always carries the target it settled; the type says so. */
-        doerQuestion(landing.route, landing.target ?? 'other');
-  }
+  if (landing.kind === 'ask') return targetQuestion(landing.route);
   return {
     format: ONBOARDING_PROGRESS_FORMAT,
     stage: 'walk',
@@ -191,21 +170,16 @@ export const parseOnboardingProgress = (raw: string | null | undefined, device: 
   if (fields.format !== ONBOARDING_PROGRESS_FORMAT) return fresh();
   if (fields.stage === 'entry') return fresh();
   if (fields.stage === 'target') return parseQuestion(fields, device);
-  if (fields.stage === 'doer') return parseQuestion(fields, device);
   if (fields.stage !== 'walk') return fresh();
   return parseWalk(fields, device);
 };
 
-/** A stored question, which is only a place if this device would ask it at all. */
+/** A stored target question, which is only a place if this device would ask it at all. */
 const parseQuestion = (fields: Record<string, unknown>, device: DeviceKind): OnboardingProgress => {
-  const { route, target } = fields;
+  const { route } = fields;
   if (!isOnboardingRouteId(route) || !isDaemonRouteId(route)) return fresh();
-  if (fields.stage === 'target') {
-    /* A device that settles the target itself would never have shown this screen. */
-    return presumedTarget(route, device) === undefined ? targetQuestion(route) : enterOnboardingRoute(route, device);
-  }
-  if (!isSetupTargetId(target) || !isTargetPossible(target, device)) return fresh();
-  return doerQuestion(route, target);
+  /* A device that settles the target itself would never have shown this screen. */
+  return presumedTarget(route, device) === undefined ? targetQuestion(route) : enterOnboardingRoute(route, device);
 };
 
 /** A stored journey, refused unless every answer on it is one this device could hold. */
@@ -236,22 +210,6 @@ const parseJourney = (
   if (!isSetupTargetId(target) || !isTargetPossible(target, device)) return undefined;
   if (!isOnboardingDoerId(doer)) return undefined;
   return { route, target, doer };
-};
-
-/**
- * Setup is only over if something is actually paired.
- *
- * Progress is a hint about where the reader was, never evidence of what they
- * achieved: the pairing registry is the authority on that. So a stored document
- * that claims the arc reached its end, read by a browser holding no daemon at
- * all, is inconsistent across the two stores — a cleared registry, a different
- * profile, a half-finished attempt — and the honest reading is the first question.
- * The benign one would greet somebody with "You are set up" beside a panel
- * explaining that nothing is paired.
- */
-export const reconcileOnboardingProgress = (progress: OnboardingProgress, paired: boolean): OnboardingProgress => {
-  if (paired || progress.stage !== 'walk') return progress;
-  return progress.current === 'done' || progress.furthest === 'done' ? fresh() : progress;
 };
 
 export interface OnboardingProgressStorage {
@@ -346,16 +304,6 @@ export interface OnboardingProgressStoreOptions {
    * here must not overwrite a place this device might still want.
    */
   readonly handoff?: SetupHandoff | undefined;
-  /**
-   * Whether this browser holds a pairing at the moment the store hydrates.
-   *
-   * Defaults to `false`, which is the fail-closed reading: a caller that cannot
-   * say loses a stale "finished" rather than asserting one. Read ONCE, on
-   * hydration — a daemon forgotten later, while the last stage is already on the
-   * glass, is answered by that stage's own honest fallback instead of by yanking
-   * the screen out from under the reader.
-   */
-  readonly paired?: boolean;
 }
 
 /**
@@ -366,7 +314,6 @@ export class OnboardingProgressStore {
   readonly #storage: OnboardingProgressStorage | undefined;
   readonly #entry: SetupHandoff | undefined;
   readonly #handoff: SetupHandoff | undefined;
-  readonly #paired: boolean;
   readonly #device: DeviceKind;
   readonly #listeners = new Set<() => void>();
   #snapshot: OnboardingProgress | null = null;
@@ -375,7 +322,6 @@ export class OnboardingProgressStore {
     this.#storage = 'storage' in options ? options.storage : browserOnboardingStorage();
     this.#entry = options.entry;
     this.#handoff = options.handoff;
-    this.#paired = options.paired ?? false;
     this.#device = options.device ?? 'desktop';
   }
 
@@ -419,14 +365,7 @@ export class OnboardingProgressStore {
     const at = this.snapshot();
     const on = route ?? routeOf(at);
     if (on === undefined || !isTargetPossible(target, this.#device)) return at;
-    return this.#commit(doerQuestion(on, target));
-  }
-
-  /** Answers WHO INSTALLS IT, which is the last thing any daemon journey needs. */
-  chooseDoer(doer: OnboardingDoerId): OnboardingProgress {
-    const at = this.snapshot();
-    if (at.stage !== 'doer') return at;
-    return this.#commit(walk({ route: at.route, target: at.target, doer }, this.#device));
+    return this.#commit(walk({ route: on, target, doer: 'self' }, this.#device));
   }
 
   /**
@@ -445,24 +384,35 @@ export class OnboardingProgressStore {
   /**
    * Back out of a journey, to WHICHEVER QUESTION OPENED IT.
    *
-   * Keeping the answers behind that question, because they are still true: a
-   * reader backing out of the install steps is changing who installs it, not
-   * which computer. Landing on the question they actually answered is what keeps
-   * two questions from feeling like a maze.
+   * The agent's prompt was reached from the install page's link, so Back from it lands on the install page again (the
+   * same machine, commands by hand), not on a question. From the first page of the commands it is the target question
+   * when one was asked, and the start screen otherwise.
    */
   leaveRoute(): OnboardingProgress {
     const at = this.snapshot();
     if (at.stage !== 'walk') return at;
-    if (questionBehindRoute(at.route) === 'entry' || at.route === 'add-client') return this.#commit(fresh());
-    return this.#commit(doerQuestion(at.route, at.target));
+    if (at.route !== 'add-client' && at.doer === 'agent') {
+      return this.#commit(walk({ route: at.route, target: at.target, doer: 'self' }, this.#device));
+    }
+    if (at.route !== 'add-client' && questionBehindRoute(at.route, this.#device) === 'target') {
+      return this.#commit(targetQuestion(at.route));
+    }
+    return this.#commit(fresh());
   }
 
-  /** Back from a question to the one before it, which depends on what was asked. */
+  /** Back from the target question to the start screen. */
   back(): OnboardingProgress {
     const at = this.snapshot();
-    if (at.stage === 'target') return this.#commit(fresh());
-    if (at.stage !== 'doer') return at;
-    return this.#commit(questionBehindDoer(at.route, this.#device) === 'target' ? targetQuestion(at.route) : fresh());
+    return at.stage === 'target' ? this.#commit(fresh()) : at;
+  }
+
+  /**
+   * The daemonless half is over: the person is on their way into the setup flow. Forgets the place ON DISK ONLY, so a later
+   * visit to /onboarding (to add another daemon) starts at the start screen and never on a journey that already ended, while
+   * the screen being left is not redrawn (no frame of the start screen between the two pages).
+   */
+  finish(): void {
+    this.#save(fresh());
   }
 
   /**
@@ -514,18 +464,13 @@ export class OnboardingProgressStore {
    * only ever a memory of where somebody was.
    */
   #load(): OnboardingProgress {
-    const stored = reconcileOnboardingProgress(this.#read(), this.#paired);
+    const stored = this.#read();
     const handoff = this.#handoff;
     if (handoff !== undefined) return resumeOnboardingRoute(handoff, this.#device);
     const entry = this.#entry;
     if (entry === undefined) return stored;
-    /*
-     * Already walking the journey the arrival proves, and not finished with it? Keep the place; do
-     * not restart it. A FINISHED walk is not a place to keep: a link arriving at a browser whose last
-     * pairing is "done" is a NEW pairing — a second machine, or this one again after a revoke — and
-     * keeping "done" landed it on "You are set up" with the link silently ignored.
-     */
-    if (stored.stage === 'walk' && stored.route === entry.route && stored.current !== 'done') return stored;
+    /* Already walking the journey the arrival proves? Keep the place; do not restart it. (A finished journey is forgotten by `finish()`.) */
+    if (stored.stage === 'walk' && stored.route === entry.route) return stored;
     return resumeOnboardingRoute(entry, this.#device);
   }
 

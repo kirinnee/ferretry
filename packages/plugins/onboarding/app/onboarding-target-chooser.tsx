@@ -18,26 +18,25 @@
  *   reader owns several machines and has a real choice between two of them, and
  *   guessing for somebody who already knows the vocabulary is the rude case.
  *
- * IT IS A REAL LIST OF REAL BUTTONS, for the same reasons as every other chooser
- * here, and it has a Back because there is a question behind it.
+ * IT IS A CHOICE, THEN A BUTTON, for the same reasons as every other chooser here: the cards are `ChoiceCards` (the arrow
+ * keys move the selection, so selecting never acts) and **Continue** starts the journey. It has a Back because there is a
+ * question behind it.
  */
 
-import { ArrowLeft, ChevronRight, Laptop, Network } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ChoiceCards, type ChoiceOption } from '@ferretry/app';
+import { Button } from '@ferretry/app/ui';
+import { Laptop, Network } from 'lucide-react';
+import { useState } from 'react';
 
-import { SETUP_TARGETS, type SetupTargetId } from './onboarding-model.ts';
+import { isSetupTargetId, SETUP_TARGETS, type SetupTargetId } from './onboarding-model.ts';
 
-/**
- * One glyph per answer: the machine on the desk, and a machine across a network.
- * Hidden from assistive technology — the title beside each says the same thing.
- */
-const ICON: Readonly<Record<SetupTargetId, ReactNode>> = {
-  this: <Laptop size={22} aria-hidden="true" />,
-  other: <Network size={22} aria-hidden="true" />,
-};
-
-const ROW =
-  'flex w-full min-w-0 items-center gap-3 rounded-control border border-border bg-surface-2 px-3 py-3 text-left transition-colors hover:border-accent hover:bg-accent-soft focus-visible:outline-focus focus-visible:outline-offset-focus';
+/** One glyph per answer: the machine on the desk, and a machine across a network. */
+const OPTIONS: readonly ChoiceOption[] = SETUP_TARGETS.map(target => ({
+  id: target.id,
+  title: target.title,
+  line: target.answer,
+  icon: target.id === 'this' ? <Laptop size={20} /> : <Network size={20} />,
+}));
 
 export interface OnboardingTargetChooserProps {
   readonly onChoose: (target: SetupTargetId) => void;
@@ -46,8 +45,9 @@ export interface OnboardingTargetChooserProps {
 }
 
 export function OnboardingTargetChooser({ onChoose, onBack }: OnboardingTargetChooserProps) {
+  const [picked, setPicked] = useState<SetupTargetId | null>(null);
   return (
-    <section className="flex min-w-0 flex-col gap-2" aria-labelledby="onboarding-target-title">
+    <section className="flex min-w-0 flex-1 flex-col gap-3" aria-labelledby="onboarding-target-title">
       <div className="min-w-0">
         <h2 id="onboarding-target-title" className="m-0 font-display text-title font-bold tracking-display text-fg">
           Which computer runs the daemon?
@@ -57,41 +57,30 @@ export function OnboardingTargetChooser({ onChoose, onBack }: OnboardingTargetCh
         </p>
       </div>
 
-      <ul className="m-0 flex list-none flex-col gap-2 p-0">
-        {SETUP_TARGETS.map(target => (
-          <li key={target.id} className="min-w-0">
-            <button
-              type="button"
-              className={ROW}
-              onClick={() => onChoose(target.id)}
-              data-onboarding-target={target.id}
-            >
-              <span className="shrink-0 text-accent">{ICON[target.id]}</span>
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="font-display text-title font-bold tracking-display text-fg">{target.title}</span>
-                <span className="text-meta leading-base text-muted">{target.answer}</span>
-              </span>
-              <ChevronRight size={18} aria-hidden="true" className="shrink-0 text-faint" />
-            </button>
-          </li>
-        ))}
-      </ul>
+      <ChoiceCards
+        label="Which computer runs the daemon?"
+        options={OPTIONS}
+        value={picked}
+        onChange={id => {
+          if (isSetupTargetId(id)) setPicked(id);
+        }}
+      />
 
-      {/*
-        Quiet, and after the answers: it is a way out rather than a way on, and
-        the one loud control per screen rule belongs to the answers themselves.
-      */}
-      <div className="flex min-w-0">
-        <button
-          type="button"
-          className="kt-btn min-h-[44px]"
-          data-variant="ghost"
-          onClick={onBack}
-          data-onboarding-back="entry"
-        >
-          <ArrowLeft size={16} aria-hidden="true" />
+      <div className="fy-ob-actions fy-ob-sticky" data-onboarding-actions="">
+        <Button type="button" variant="ghost" onClick={onBack} data-onboarding-back="entry">
           Back
-        </button>
+        </Button>
+        <Button
+          type="button"
+          variant="primary"
+          disabled={picked === null}
+          onClick={() => {
+            if (picked !== null) onChoose(picked);
+          }}
+          data-onboarding-continue=""
+        >
+          Continue
+        </Button>
       </div>
     </section>
   );

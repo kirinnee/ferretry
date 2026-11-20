@@ -14,7 +14,6 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
-  AGENT_HARNESSES,
   agentSetupPrompt,
   DAEMON_SERVING_OUTPUT,
   DAEMON_STATUS_COMMAND,
@@ -24,13 +23,10 @@ import {
 } from '../../../app/onboarding-model.ts';
 import {
   AgentPairStage,
-  AgentsStage,
   BriefStage,
   DaemonStage,
-  DoneStage,
   ElsewhereStage,
   InstallStage,
-  PairStage,
   ScanStage,
 } from '../../../app/onboarding-stages.tsx';
 import { interact, mount, must } from '../support/dom.ts';
@@ -65,10 +61,12 @@ describe('the install stage', () => {
     const aside = asideOf(view.container);
     expect(aside.open).toBe(false);
     expect(aside.textContent).toContain(VERIFY_COMMAND);
-    // Who installs it is a QUESTION now, so this step offers a way to change the
-    // answer rather than a second copy of the prompt that answer hands over.
-    expect(view.container.querySelectorAll('details')).toHaveLength(2);
-    expect(view.container.querySelector('[data-onboarding-aside="Rather have an agent do it?"]')).not.toBeNull();
+    // Who installs it is no question (r10 O5): the step offers a quiet link to change the answer, not a second copy of the
+    // prompt that answer hands over, and not a full-width bar.
+    expect(view.container.querySelectorAll('details')).toHaveLength(1);
+    const link = must(view.container.querySelector('[data-onboarding-agent-instead]'), 'the agent link');
+    expect(link.textContent).toBe('Let an agent do it');
+    expect(link.className).not.toContain('w-full');
     expect(view.container.querySelector('[data-onboarding-copy="Copy setup prompt"]')).toBeNull();
     // No escape from an assumption nobody made: this reader chose the machine.
     expect(view.container.querySelector('[data-onboarding-other-machine]')).toBeNull();
@@ -129,61 +127,6 @@ describe('the install stage', () => {
     await click(must(toolbar.querySelector('[data-onboarding-channel="dnf"]'), 'the dnf route'));
     expect(visibleCommand(view.container)).toContain('sudo dnf install fy');
     expect(visibleCommand(view.container)).not.toContain('brew install');
-    await view.unmount();
-  });
-});
-
-describe('the agents stage', () => {
-  it('offers both harnesses and says one is enough', async () => {
-    // Ferretry RUNS Claude Code and Codex; it is not either of them. Two commands
-    // with no qualifier read as two requirements, so the bar is in words.
-    const view = await mount(<AgentsStage write={async () => {}} />);
-
-    const blocks = [...view.container.querySelectorAll('[data-onboarding-harness]')];
-    expect(blocks.map(node => node.getAttribute('data-onboarding-harness'))).toEqual(['claude', 'codex']);
-    for (const harness of AGENT_HARNESSES) {
-      expect(
-        must(
-          blocks.find(node => node.textContent?.includes(harness.label)),
-          harness.label,
-        ).textContent,
-      ).toContain(harness.command);
-    }
-    expect(view.container.textContent).toContain('at least one');
-    expect(view.container.textContent).toContain('one is enough');
-    await view.unmount();
-  });
-
-  it('describes the check as what it proves, and no more', async () => {
-    // A version on stdout means the executable exists. It does not mean the reader
-    // is signed in, and a page that implied otherwise would be doing the
-    // damaged-state-as-empty-state thing with somebody's account.
-    const view = await mount(<AgentsStage write={async () => {}} />);
-    const asides = [...view.container.querySelectorAll<HTMLDetailsElement>('details')];
-
-    expect(asides).toHaveLength(2);
-    for (const aside of asides) expect(aside.open).toBe(false);
-    const check = must(
-      view.container.querySelector('[data-onboarding-aside="Check one of them is there"]'),
-      'the check disclosure',
-    );
-    for (const harness of AGENT_HARNESSES) expect(check.textContent).toContain(harness.check);
-    expect(check.textContent).toContain('It does not mean you are signed in');
-    expect(check.textContent).toContain('Ferretry cannot do that for you');
-    await view.unmount();
-  });
-
-  it('names the vendors as the authority, because this repo cannot pin their commands', async () => {
-    // Unlike `INSTALL_CHANNELS`, which is asserted character-for-character against
-    // `INSTALLATION.md`, nothing here can prove a third-party command still works.
-    const view = await mount(<AgentsStage write={async () => {}} />);
-    const disclosure = must(
-      view.container.querySelector('[data-onboarding-aside="These are not ours"]'),
-      'the provenance disclosure',
-    );
-
-    expect(disclosure.textContent).toContain('their own documentation is the authority');
-    expect(disclosure.textContent).toContain('believe them over this page');
     await view.unmount();
   });
 });
@@ -279,7 +222,9 @@ describe('the elsewhere stage', () => {
     // The recursion: that computer walks the same subflow answering "this one", so
     // installation is taught in exactly one place and always about the machine the
     // reader is sitting at.
-    const view = await mount(<ElsewhereStage handoff={<p>the hand-off panel</p>} onAddAsClient={() => {}} />);
+    const view = await mount(
+      <ElsewhereStage handoff={<p>the hand-off panel</p>} onAddAsClient={() => {}} onAgentInstead={() => {}} />,
+    );
 
     expect(view.container.textContent).toContain('Open this page on the computer that will run your agents');
     expect(view.container.querySelector('pre')).toBeNull();
@@ -290,12 +235,30 @@ describe('the elsewhere stage', () => {
   it('offers the other thing the reader may have meant, one tap away', async () => {
     const switched: string[] = [];
     const view = await mount(
-      <ElsewhereStage handoff={<p>the hand-off panel</p>} onAddAsClient={() => switched.push('add-client')} />,
+      <ElsewhereStage
+        handoff={<p>the hand-off panel</p>}
+        onAddAsClient={() => switched.push('add-client')}
+        onAgentInstead={() => switched.push('agent')}
+      />,
     );
 
     expect(asideOf(view.container).open).toBe(false);
     await click(must(view.container.querySelector('[data-onboarding-add-client]'), 'the client control'));
     expect(switched).toEqual(['add-client']);
+    await view.unmount();
+  });
+
+  it('keeps "let an agent do it" one tap away, since the doer question is gone', async () => {
+    const switched: string[] = [];
+    const view = await mount(
+      <ElsewhereStage
+        handoff={<p>the hand-off panel</p>}
+        onAddAsClient={() => {}}
+        onAgentInstead={() => switched.push('agent')}
+      />,
+    );
+    await click(must(view.container.querySelector('[data-onboarding-agent-instead]'), 'the agent link'));
+    expect(switched).toEqual(['agent']);
     await view.unmount();
   });
 });
@@ -350,60 +313,6 @@ describe('the daemon stage', () => {
     expect(aside.open).toBe(false);
     expect(aside.textContent).toContain(DAEMON_STATUS_COMMAND);
     expect(aside.textContent).toContain(DAEMON_SERVING_OUTPUT);
-    await view.unmount();
-  });
-});
-
-describe('the pair stage', () => {
-  it('only asks the computer to make a code; scanning is the next stage', async () => {
-    const view = await mount(<PairStage write={async () => {}} />);
-
-    expect(view.container.querySelector('details')).toBeNull();
-    expect(view.container.textContent).toContain('computer where the daemon is running');
-    expect(view.container.querySelector('[data-onboarding-pairing]')).toBeNull();
-    await view.unmount();
-  });
-});
-
-describe('the done stage', () => {
-  it('offers the fleet when there is one', async () => {
-    const opened: string[] = [];
-    const view = await mount(
-      <DoneStage
-        fleetReady
-        connectionStatus="Direct"
-        onOpenFleet={() => opened.push('fleet')}
-        onBackToPairing={() => opened.push('pair')}
-      />,
-    );
-
-    expect(must(view.container.querySelector('[role="status"]'), 'the carrier indicator').textContent).toContain(
-      'Connection in use: Direct',
-    );
-    await click(must(view.container.querySelector('[data-onboarding-open-fleet]'), 'the final action'));
-    expect(opened).toEqual(['fleet']);
-    await view.unmount();
-  });
-
-  it('refuses to pretend when this browser is paired with nothing', async () => {
-    const opened: string[] = [];
-    const view = await mount(
-      <DoneStage
-        fleetReady={false}
-        connectionStatus={null}
-        onOpenFleet={() => opened.push('fleet')}
-        onBackToPairing={() => opened.push('pair')}
-      />,
-    );
-    const action = must(view.container.querySelector('[data-onboarding-open-fleet]'), 'the final action');
-
-    // Damaged state is not empty state: the button says what it can actually do.
-    expect(must(view.container.querySelector('[role="status"]'), 'the warning').textContent).toContain(
-      'Nothing is paired',
-    );
-    expect(action.textContent).toBe('Back to pairing');
-    await click(action);
-    expect(opened).toEqual(['pair']);
     await view.unmount();
   });
 });

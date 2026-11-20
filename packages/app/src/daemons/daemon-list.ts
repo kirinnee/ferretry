@@ -260,6 +260,20 @@ export class DaemonList {
     return record;
   }
 
+  /**
+   * ANOTHER TAB CHANGED THE LIST (a pairing made in the tab `fy pair --open` opened): take the stored list on without writing
+   * it back, so this tab's screens see the new pairing. A list that reads the same keeps the snapshot's identity.
+   */
+  adopt(): void {
+    const next = parseList(readRecord(this.#storage, APP_STORAGE.daemons, ListSchema));
+    const same =
+      next.selected === this.#snapshot.selected &&
+      JSON.stringify(next.daemons) === JSON.stringify(this.#snapshot.daemons);
+    if (same) return;
+    this.#snapshot = next;
+    for (const listener of this.#listeners) listener();
+  }
+
   remove(daemon: string): void {
     if (this.get(daemon) === undefined) return;
     const daemons = this.#snapshot.daemons.filter(entry => entry.daemon !== daemon);

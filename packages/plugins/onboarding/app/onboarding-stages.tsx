@@ -12,29 +12,27 @@
  * daemon's output and the two-minute expiry are all still on the page — they are
  * simply no longer competing with the instruction. What was cut is restatement.
  *
- * WHO INSTALLS IT IS A QUESTION, NOT A DISCLOSURE ON THIS STEP. For one release
- * the agent path was folded in here, on the argument that an agent is just a way
- * of PERFORMING the install. That was wrong: an agent doing the setup means no
- * platform picker, no commands here and no `fy pair` by hand. What survives on the
- * install step is a one-tap way to CHANGE EITHER ANSWER — the doer, and the machine
- * these commands are addressed to — but never a second copy of the prompt, because
- * two copies of the thing that answer exists to hand over is two things to keep
- * true.
+ * WHO INSTALLS IT IS NOT A QUESTION ANY MORE (r10 O5, decision D1). The page opens on the commands, and a quiet
+ * "Let an agent do it" link, here and on the other-computer page, switches the journey to the agent's own pages (the
+ * prompt, then pairing). What the install step offers is a one-tap way to CHANGE EITHER ANSWER — the doer, and the
+ * machine these commands are addressed to — but never a second copy of the prompt, because two copies of the thing that
+ * answer exists to hand over is two things to keep true.
+ *
+ * THE CLAUDE CODE / CODEX INSTALL IS NOT HERE EITHER. These stages stand the daemon up and pair; the setup flow that
+ * follows pairing owns installing and signing in to each agent (the Claude and Codex steps), so there is no "install an
+ * agent" stage and no "you are set up" page: pairing is the last thing this half does, and the page hands over then.
  *
  * EVERY STAGE HERE IS REUSED BY EVERY JOURNEY THAT NEEDS IT, including "add
  * another daemon" — a second copy of the daemon instructions is a second copy to
  * keep true, and one of the two would be wrong within a release.
  */
 
-import { ExternalLink, Share2 } from 'lucide-react';
+import { Share2 } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 
 import { CommandBlock } from './command-block.tsx';
 import { type ClipboardWriter, CopyButton } from '@ferretry/app/ui';
-import type { CarrierDisclosure } from './connection-disclosure.ts';
 import {
-  AGENT_HARNESSES,
-  agentHarness,
   agentSetupPrompt,
   DAEMON_INSTALL_COMMAND,
   DAEMON_SERVING_OUTPUT,
@@ -78,6 +76,28 @@ function Aside({ summary, children }: { readonly summary: string; readonly child
       </summary>
       <div className="mt-2 flex min-w-0 flex-col gap-2 pb-1">{children}</div>
     </details>
+  );
+}
+
+/**
+ * THE QUIET WAY TO HAND THE INSTALL TO AN AGENT: one line and a ghost button, on the install page and on the other
+ * computer's page. It is a link, not a question: most readers type the commands, and the ones who have Claude or Codex
+ * open in another window recognise it at once. Auto width (never stretched), 44px tall.
+ */
+function AgentInstead({ onAgentInstead }: { readonly onAgentInstead: () => void }) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2" data-onboarding-agent-link="">
+      <p className="m-0 min-w-0 text-meta leading-base text-muted">Have Claude or Codex open?</p>
+      <button
+        type="button"
+        className="kt-btn min-h-[44px]"
+        data-variant="ghost"
+        onClick={onAgentInstead}
+        data-onboarding-agent-instead=""
+      >
+        Let an agent do it
+      </button>
+    </div>
   );
 }
 
@@ -154,21 +174,7 @@ export function InstallStage({ write, channel, onAgentInstead, onOtherMachine }:
         on the agent route's own step, where it is the whole screen rather than
         thirty lines folded under a caret.
       */}
-      <Aside summary="Rather have an agent do it?">
-        <p className="m-0 text-meta leading-base text-muted">
-          If you already have Claude or Codex on that machine, it can install Ferretry, start the daemon and pair with
-          this browser. You copy one prompt and nothing else.
-        </p>
-        <button
-          type="button"
-          className="kt-btn min-h-[44px] w-full"
-          data-variant="ghost"
-          onClick={onAgentInstead}
-          data-onboarding-agent-instead=""
-        >
-          Let an agent do it
-        </button>
-      </Aside>
+      <AgentInstead onAgentInstead={onAgentInstead} />
 
       {/*
         THE SECOND PLACE THE ASSUMPTION CAN BE ESCAPED, and the one that catches
@@ -185,7 +191,7 @@ export function InstallStage({ write, channel, onAgentInstead, onOtherMachine }:
           </p>
           <button
             type="button"
-            className="kt-btn min-h-[44px] w-full"
+            className="kt-btn min-h-[44px] self-start"
             data-variant="ghost"
             onClick={onOtherMachine}
             data-onboarding-other-machine=""
@@ -194,71 +200,6 @@ export function InstallStage({ write, channel, onAgentInstead, onOtherMachine }:
           </button>
         </Aside>
       )}
-    </div>
-  );
-}
-
-/**
- * THE STEP THAT MAKES THE DAEMON WORTH STARTING.
- *
- * Ferretry runs Claude Code and Codex; it is not either of them. Everything before
- * and after this step is about a daemon, and a daemon with neither harness
- * installed starts perfectly and can run nothing at all — so a reader who finished
- * without this had a paired app, a green shield, and no way to open a session.
- *
- * AT LEAST ONE IS THE BAR, said in words rather than left to be inferred from two
- * commands sitting side by side. Two blocks with no qualifier read as two
- * requirements.
- *
- * AND BEING ON `PATH` IS NOT BEING SIGNED IN. This page cannot see a terminal, let
- * alone somebody's account, so the check command is described as what it actually
- * proves and the sign-in is named as a separate thing that happens on first run.
- * The alternative — "you are ready" — is the benign reading of no evidence, which
- * is the failure this whole flow is built to avoid.
- */
-export function AgentsStage({ write }: { readonly write: ClipboardWriter }) {
-  return (
-    <div className={STAGE}>
-      {/*
-        AND IT SAYS SO TO SOMEBODY WHO ALREADY HAS ONE. A developer who uses Claude
-        Code daily is the likeliest reader of this page, and a step that only knows
-        how to say "install this" invites them to reinstall something they have. The
-        check below is the whole task for them, and this line points at it.
-      */}
-      <p className="m-0 text-meta leading-base text-muted">
-        Ferretry runs your agents; it is not one. Install{' '}
-        <strong className="font-semibold text-fg">at least one</strong> of these on this machine — both is fine, one is
-        enough. Already have one? Check it below and move on.
-      </p>
-      {AGENT_HARNESSES.map(harness => (
-        <div key={harness.id} className="flex min-w-0 flex-col gap-1" data-onboarding-harness={harness.id}>
-          <p className="m-0 text-meta font-semibold text-fg">{harness.label}</p>
-          <CommandBlock command={harness.command} copyLabel={`Copy ${harness.label} install command`} write={write} />
-        </div>
-      ))}
-      <Aside summary="Check one of them is there">
-        {AGENT_HARNESSES.map(harness => (
-          <CommandBlock
-            key={harness.id}
-            command={harness.check}
-            copyLabel={`Copy ${harness.label} check`}
-            write={write}
-          />
-        ))}
-        <p className="m-0 text-meta leading-base text-muted">
-          A version means the command is installed. It does not mean you are signed in — the first time you run{' '}
-          <code className="font-mono text-syn-string">{agentHarness('claude').id}</code> or{' '}
-          <code className="font-mono text-syn-string">{agentHarness('codex').id}</code> it will ask you to log in, and
-          Ferretry cannot do that for you.
-        </p>
-      </Aside>
-      <Aside summary="These are not ours">
-        <p className="m-0 text-meta leading-base text-muted">
-          Claude Code and Codex are other people&apos;s products, so their own documentation is the authority on
-          installing them. These are the commands each one documents; if either has moved on, believe them over this
-          page.
-        </p>
-      </Aside>
     </div>
   );
 }
@@ -350,7 +291,7 @@ export function BriefStage({ write, target, plainUrl, share }: BriefStageProps) 
           {share === undefined ? null : (
             <button
               type="button"
-              className="kt-btn min-h-[44px] w-full"
+              className="kt-btn min-h-[44px] self-start"
               data-variant="ghost"
               onClick={() => {
                 /*
@@ -492,6 +433,8 @@ export interface ElsewhereStageProps {
   readonly handoff: ReactNode;
   /** Switch to adding this browser as a client of a daemon that already exists. */
   readonly onAddAsClient: () => void;
+  /** Hand the install on that computer to an agent instead (the prompt to send it, then pairing). */
+  readonly onAgentInstead: () => void;
 }
 
 /**
@@ -514,7 +457,7 @@ export interface ElsewhereStageProps {
  * the reader may have meant — a daemon that already exists, which this browser
  * only wants to watch — is one tap away rather than "go and read the docs".
  */
-export function ElsewhereStage({ handoff, onAddAsClient }: ElsewhereStageProps) {
+export function ElsewhereStage({ handoff, onAddAsClient, onAgentInstead }: ElsewhereStageProps) {
   return (
     <div className={STAGE}>
       <p className="m-0 text-meta leading-base text-muted">
@@ -522,13 +465,14 @@ export function ElsewhereStage({ handoff, onAddAsClient }: ElsewhereStageProps) 
         machine — then come back here to pair this device.
       </p>
       {handoff}
+      <AgentInstead onAgentInstead={onAgentInstead} />
       <Aside summary="A daemon already exists?">
         <p className="m-0 text-meta leading-base text-muted">
           Then nothing needs installing. Add this device as a client of it instead.
         </p>
         <button
           type="button"
-          className="kt-btn min-h-[44px] w-full"
+          className="kt-btn min-h-[44px] self-start"
           data-variant="ghost"
           onClick={onAddAsClient}
           data-onboarding-add-client=""
@@ -536,36 +480,6 @@ export function ElsewhereStage({ handoff, onAddAsClient }: ElsewhereStageProps) 
           Add this as a client
         </button>
       </Aside>
-    </div>
-  );
-}
-
-/**
- * THE OTHER DIRECTION: the computer is done, and the phone is offered the same view.
- *
- * This is what makes first-time setup more than the other two answers in
- * sequence. It is OPTIONAL and says so — the reader is already finished, `Next`
- * skips it, and nothing here is a step they owe anybody.
- */
-export function HandoffStage({ handoff }: { readonly handoff: ReactNode }) {
-  return (
-    <div className={STAGE}>
-      <p className="m-0 text-meta leading-base text-muted">
-        Your daemon is running and this browser is connected. Your phone can watch the same fleet — it needs the pairing
-        code your computer is about to print.
-      </p>
-      {handoff}
-    </div>
-  );
-}
-
-export function PairStage({ write }: { readonly write: ClipboardWriter }) {
-  return (
-    <div className={STAGE}>
-      <CommandBlock command={PAIR_COMMAND} copyLabel="Copy pair command" write={write} />
-      <p className="m-0 text-meta leading-base text-muted">
-        Run this on the computer where the daemon is running. Keep the QR code or link it prints on that screen.
-      </p>
     </div>
   );
 }
@@ -591,77 +505,6 @@ export function ScanStage({ pairing, stated = false }: { readonly pairing: React
           link.
         </p>
       )}
-    </div>
-  );
-}
-
-export interface DoneStageProps {
-  readonly fleetReady: boolean;
-  readonly connectionStatus: string | null;
-  /**
-   * What the hosted relay would be able to see, if it ever carried this connection.
-   *
-   * Restated here, where the connection becomes real, because the daemon step
-   * that first said it may be several screens — and possibly several days — back.
-   */
-  readonly fallbackDisclosure?: CarrierDisclosure | null;
-  readonly onOpenFleet: () => void;
-  readonly onBackToPairing: () => void;
-}
-
-export function DoneStage({
-  fleetReady,
-  connectionStatus,
-  fallbackDisclosure = null,
-  onOpenFleet,
-  onBackToPairing,
-}: DoneStageProps) {
-  return (
-    <div className={STAGE}>
-      <ul className="m-0 flex list-none flex-col gap-1 p-0 text-meta leading-base text-muted">
-        <li>This browser remembers the pairing.</li>
-        <li>Pair another machine later — each keeps its own data.</li>
-      </ul>
-      {connectionStatus === null ? null : (
-        <p className="m-0 text-2xs leading-base text-faint" role="status">
-          Connection in use: {connectionStatus}
-        </p>
-      )}
-      {fallbackDisclosure === null || fallbackDisclosure.fallbackWouldSee.length === 0 ? null : (
-        <Aside summary={`What ${fallbackDisclosure.fallbackName} would see`}>
-          <ul
-            className="m-0 flex list-none flex-col gap-1 p-0 text-meta leading-base text-muted"
-            data-onboarding-fallback-disclosure=""
-          >
-            {fallbackDisclosure.fallbackWouldSee.map(line => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-          <p className="m-0 text-2xs leading-base text-faint">
-            It is the fallback, not the carrier: it only ever carries the connection when the direct path cannot.
-          </p>
-        </Aside>
-      )}
-      {/*
-        DAMAGED STATE IS NOT EMPTY STATE. A stored "finished" with nothing paired
-        in this browser is not a fleet to open; it is a step that has to be done
-        again, and the button says so rather than opening onto nothing.
-      */}
-      {fleetReady ? null : (
-        <p className="m-0 text-meta leading-base text-warn" role="status">
-          Nothing is paired in this browser yet.
-        </p>
-      )}
-      <button
-        type="button"
-        className="kt-btn min-h-[44px] w-full"
-        data-variant="primary"
-        onClick={fleetReady ? onOpenFleet : onBackToPairing}
-        data-onboarding-open-fleet=""
-      >
-        {fleetReady ? 'Open my fleet' : 'Back to pairing'}
-        {fleetReady ? <ExternalLink size={16} aria-hidden="true" /> : null}
-      </button>
     </div>
   );
 }

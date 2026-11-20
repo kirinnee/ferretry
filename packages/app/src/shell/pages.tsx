@@ -88,6 +88,17 @@ export function DaemonListPage() {
           <Link to={routes.href(pair, {})}>Pair another daemon, or forget one</Link>
         </p>
       )}
+      {/* The two repeat journeys, from inside the app: Onboarding's own page opens on them (`?journey=`), skipping its start screen. */}
+      {onboarding === undefined ? null : (
+        <p className="fy-onboarding-entries">
+          <Link to={`${routes.href(onboarding, {})}?journey=pair`} className="kt-btn">
+            Pair a device
+          </Link>{' '}
+          <Link to={`${routes.href(onboarding, {})}?journey=add-daemon`} className="kt-btn">
+            Set up a new daemon
+          </Link>
+        </p>
+      )}
     </section>
   );
 }

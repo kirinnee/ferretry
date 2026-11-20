@@ -130,11 +130,9 @@ const runtime = new ShellRuntime({
 const themes = new ThemePreferenceStore(storage);
 const install = createBrowserInstallPrompt(window); // before React: Chromium fires beforeinstallprompt once, early (S13)
 const layouts = new DeviceLayoutStore(storage);
-// Another tab changed the theme or this device's layout: take it on without writing it back.
-window.addEventListener('storage', () => {
-  themes.adopt();
-  layouts.adopt();
-});
+// Another tab changed the theme, this device's layout or its pairings (`fy pair --open`): take it on without writing it back.
+const shared = [themes, layouts, daemons];
+window.addEventListener('storage', () => shared.forEach(store => void store.adopt()));
 preloadThemeFonts(themes.snapshot().style);
 installPortraitLock(window, document); // a phone held sideways gets today's portrait gate
 themes.subscribe(() => preloadThemeFonts(themes.snapshot().style));

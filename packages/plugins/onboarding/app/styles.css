@@ -11,3 +11,37 @@
 [data-first-run-stepper] {
   overflow: hidden;
 }
+
+/* The first-run page lays itself out by ITS OWN width (a container), never the window's: the pages are drawn inside the
+   shell's scroller beside nothing, but the same markup is also what a narrow pane shows. */
+[data-onboarding='setup'] {
+  container-type: inline-size;
+}
+
+/* The footer of every daemon-less page: auto-width buttons, at least 44px tall with 12px above and below, right aligned
+   (the setup flow's page frame, `compose/step-page-frame.css`, reads the same). Below 600px of the page's own width it is
+   sticky at the bottom, above the safe area, so the way on is always in reach. */
+.fy-ob-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: auto;
+  padding-block: 12px;
+}
+.fy-ob-actions .kt-btn {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding-block: 12px;
+  width: auto;
+}
+@container (max-width: 599.98px) {
+  .fy-ob-sticky {
+    background: var(--bg);
+    bottom: 0;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    position: sticky;
+    z-index: 1;
+  }
+}

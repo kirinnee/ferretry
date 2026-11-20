@@ -19,7 +19,7 @@ const click = async (target: Element): Promise<void> => {
   await interact(() => target.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 };
 
-/** The longest journey there is: a daemon standing up here, installed by hand. */
+/** The longest journey there is: a daemon standing up here, installed by hand (install, daemon, open: pairing is the last step). */
 const DESKTOP: OnboardingPath = { route: 'first-time', target: 'this', doer: 'self', device: 'desktop' };
 
 describe('the step track', () => {
@@ -28,20 +28,20 @@ describe('the step track', () => {
     const list = must(view.container.querySelector('ol'), 'the track');
 
     expect(list.getAttribute('aria-label')).toBe('Setup steps');
-    expect(list.querySelectorAll('li')).toHaveLength(6);
+    expect(list.querySelectorAll('li')).toHaveLength(3);
     expect(must(list.querySelector('[aria-current="step"]'), 'the current step').textContent).toContain('Daemon');
     await view.unmount();
   });
 
   it('spells every state out for a reader who hears the list', async () => {
-    const view = await mount(<OnboardingTrack path={DESKTOP} current="daemon" furthest="local" onJump={() => {}} />);
+    const view = await mount(<OnboardingTrack path={DESKTOP} current="daemon" furthest="daemon" onJump={() => {}} />);
     const text = must(view.container.querySelector('ol'), 'the track').textContent ?? '';
 
     expect(text).toContain('current step');
     expect(text).toContain('completed, go back to it');
     expect(text).toContain('not reached yet');
     // A finished step swaps its number for a tick: state by shape, not by tone.
-    expect(view.container.querySelectorAll('svg.lucide-check')).toHaveLength(3);
+    expect(view.container.querySelectorAll('svg.lucide-check')).toHaveLength(1);
     // An unreached one is dashed for the same reason.
     expect(view.container.innerHTML).toContain('border-dashed');
     await view.unmount();
@@ -52,17 +52,17 @@ describe('the step track', () => {
     const view = await mount(
       <OnboardingTrack
         path={DESKTOP}
-        current="local"
-        furthest="local"
+        current="daemon"
+        furthest="daemon"
         onJump={id => {
           jumped.push(id);
         }}
       />,
     );
 
-    // `done` is ahead of them, so it is not a control at all.
-    expect(view.container.querySelectorAll('[data-onboarding-jump]')).toHaveLength(3);
-    expect(view.container.querySelector('[data-onboarding-jump="done"]')).toBeNull();
+    // `local` is ahead of them, so it is not a control at all.
+    expect(view.container.querySelectorAll('[data-onboarding-jump]')).toHaveLength(1);
+    expect(view.container.querySelector('[data-onboarding-jump="local"]')).toBeNull();
 
     await click(must(view.container.querySelector('[data-onboarding-jump="install"]'), 'the install step'));
     expect(jumped).toEqual(['install']);
