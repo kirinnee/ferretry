@@ -165,20 +165,16 @@ function FileRow({
       }
       control={() => (
         <span className="flex min-w-0 flex-wrap items-center gap-2">
-          {/* One fixed width for the state, so "Edit as YAML" and the copy button start at the same x on every row. */}
-          <Badge
-            className="w-[5.5rem] max-w-full justify-center whitespace-normal text-center"
-            tone={chip.tone}
-            data-config-file-state={file.state}
-          >
-            {chip.label}
-          </Badge>
           <Button type="button" size="sm" className="min-h-[44px]" data-config-edit={file.path} onClick={onEdit}>
             Edit as YAML
           </Button>
           <span title={`Copy the full path of ${file.path}`} className="inline-flex">
             <CopyButton text={absolute} label={`Copy the full path of ${file.path}`} write={write} />
           </span>
+          {/* After the buttons, so "Edit as YAML" and copy start at one x on every row whatever the state's words. */}
+          <Badge className="max-w-full whitespace-normal" tone={chip.tone} data-config-file-state={file.state}>
+            {chip.label}
+          </Badge>
         </span>
       )}
     />

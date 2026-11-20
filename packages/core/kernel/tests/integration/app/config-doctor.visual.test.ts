@@ -145,6 +145,23 @@ describe('Settings › Files, Doctor and Host checks', () => {
               );
               expect(edits.length).toBeGreaterThan(3);
               expect(new Set(edits).size, `Edit as YAML buttons start at one x (${edits.join(', ')})`).toBe(1);
+              // Each state chip shows its whole words (no ellipsis) and sits inside the window.
+              const chips = await tab.evaluate(() =>
+                [...document.querySelectorAll<HTMLElement>('[data-config-file-state]')].map(chip => {
+                  const text = chip.querySelector<HTMLElement>('.kt-badge__text') ?? chip;
+                  const box = chip.getBoundingClientRect();
+                  return {
+                    state: chip.dataset.configFileState,
+                    cut: text.scrollWidth > text.clientWidth,
+                    inside: box.left >= 0 && box.right <= window.innerWidth,
+                  };
+                }),
+              );
+              expect(chips.length).toBeGreaterThan(3);
+              expect(
+                chips.filter(chip => chip.cut || !chip.inside),
+                'no state chip is cut or off screen',
+              ).toEqual([]);
               // Every copy button names what it copies: an accessible name and a tooltip saying the same.
               const copies = await tab.evaluate(() =>
                 [...document.querySelectorAll<HTMLElement>('[data-onboarding-copy]')].map(button => ({
@@ -205,6 +222,9 @@ describe('Settings › Files, Doctor and Host checks', () => {
               () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
             );
             expect(overflow, 'the page does not scroll sideways').toBeLessThanOrEqual(0);
+            // The kept picture of Files starts at the file rows, which is what the rules above are about.
+            if (view === 'files')
+              await tab.evaluate(() => document.querySelector('[data-config-section="files"]')?.scrollIntoView());
             if (shotsDir !== '')
               await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${view}.png`) });
           } finally {
