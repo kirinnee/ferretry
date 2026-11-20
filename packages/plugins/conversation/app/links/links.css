@@ -48,19 +48,10 @@
 .fy-convo-item + .fy-convo-item {
   border-top: var(--divider-width) solid var(--fy-row-rule);
 }
-/* The open (Continue) or kept (import) row: an accent wash and a bar on its leading edge. */
+/* The open (Continue) or kept (import) row reads by an accent wash alone (the title is already 600); no bar on its edge. */
 .fy-convo-item[data-open],
 .fy-convo-item[data-selected] {
   background-color: color-mix(in oklab, var(--accent) 9%, var(--surface));
-}
-.fy-convo-item[data-open]::before,
-.fy-convo-item[data-selected]::before {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-start: 0;
-  width: 3px;
-  background: var(--accent);
-  content: '';
 }
 .fy-convo-main {
   display: flex;

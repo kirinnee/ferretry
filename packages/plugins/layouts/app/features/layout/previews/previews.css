@@ -222,7 +222,6 @@
 }
 .fy-ls-col[data-lit] {
   background: var(--accent-soft);
-  border-left-color: var(--accent);
 }
 .fy-ls-col[data-lit] > span {
   background: color-mix(in srgb, var(--accent) 45%, var(--surface));

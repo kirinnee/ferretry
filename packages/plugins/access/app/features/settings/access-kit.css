@@ -12,14 +12,13 @@
   overflow-wrap: anywhere;
 }
 
-/* ---- a sentence to read: tinted, a 3px bar on the edge, no box ---- */
+/* ---- a sentence to read: tinted, a small tone dot before it, no box ---- */
 .fy-acc-notice {
   --tone: var(--muted);
   --tone-bg: var(--surface-2);
   align-items: flex-start;
   background: var(--tone-bg);
-  border-inline-start: 3px solid var(--tone);
-  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  border-radius: var(--radius-control);
   color: var(--fg);
   display: flex;
   font-size: var(--text-xs);
@@ -39,6 +38,19 @@
 .fy-acc-notice[data-tone='ok'] {
   --tone: var(--ok);
   --tone-bg: var(--ok-bg);
+}
+/* The tone, spent once as a small dot before the sentence (an icon, when given, carries it instead). */
+.fy-acc-notice::before {
+  background: var(--tone);
+  border-radius: 50%;
+  content: '';
+  flex: none;
+  height: 8px;
+  margin-top: 0.45em;
+  width: 8px;
+}
+.fy-acc-notice:has(.fy-acc-notice__icon)::before {
+  display: none;
 }
 .fy-acc-notice__icon {
   color: var(--tone);

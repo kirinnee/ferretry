@@ -131,9 +131,12 @@ describe('the stylesheet’s label and nav rules', () => {
     expect(rule('.fy-page form > label:not([class])')).toContain('display: block');
   });
 
-  test('nav text is the body colour, never the link accent; the current item gets the bar', () => {
+  test('nav text is the body colour, never the link accent; the current item reads by fill and weight, never a side bar', () => {
     expect(rule('.fy-settings-nav .fy-tab')).toContain('color: var(--fg)');
-    expect(css).toMatch(/\.fy-settings-nav \.fy-tab--active,[^{]*\{[^}]*inset 3px 0 0 var\(--accent\)/);
+    const current = rule(".fy-settings-nav .fy-tab[aria-current='page']");
+    expect(current).toContain('background: var(--accent-soft)');
+    expect(current).toContain('font-weight: 600');
+    expect(current).not.toContain('inset');
   });
 
   test('groups stand 32px apart and the content is at most 1,100px wide', () => {
