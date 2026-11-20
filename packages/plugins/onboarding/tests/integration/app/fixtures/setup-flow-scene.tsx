@@ -48,6 +48,7 @@ const PROGRESS = {
   current: 'fake-pack',
   step: 2,
   of: 3,
+  fills: true as const,
 };
 
 function Choice({ host }: { readonly host: StepHost }): ReactNode {
@@ -130,9 +131,9 @@ function Scene(): ReactNode {
               ]
         }
         summary={[
-          { plugin: 'onboarding', id: 'name', title: 'Name this machine', state: 'done' },
-          { plugin: 'fake-pack', id: 'choose', title: 'How should it import?', state: 'done' },
-          { plugin: 'warden', id: 'warden', title: 'Warden', state: 'later' },
+          { plugin: 'onboarding', group: 'Machine', id: 'name', title: 'Name this machine', state: 'done' },
+          { plugin: 'fake-pack', group: 'Fake Pack', id: 'choose', title: 'How should it import?', state: 'done' },
+          { plugin: 'warden', group: 'Warden', id: 'warden', title: 'Warden', state: 'later' },
         ]}
       />
     );

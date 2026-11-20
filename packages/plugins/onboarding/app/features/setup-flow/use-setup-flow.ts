@@ -43,6 +43,7 @@ import {
   recordClientStep,
 } from '../../lib/index.ts';
 import { onboardingScreen } from '../../onboarding-screen.ts';
+import type { SummaryStep } from '../../views/steps-screen.tsx';
 import { readLater, rememberLater } from './client-later.ts';
 import {
   advance,
@@ -142,12 +143,7 @@ export interface SetupFlow {
   readonly later: (step: FlowStep, visit: number) => void;
   readonly retry: () => void;
   /** The machine's own steps and where each ended: what the closing summary lists (a page that skipped itself is not in it). */
-  readonly summary: readonly {
-    readonly plugin: string;
-    readonly id: string;
-    readonly title: string;
-    readonly state: StepState;
-  }[];
+  readonly summary: readonly SummaryStep[];
   /** Tries every unsaved answer again. */
   readonly retrySave: () => void;
   /** Tries one step's unsaved answer again. */
@@ -439,15 +435,17 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     summary:
       ready === undefined
         ? []
-        : ready.flow.daemon
-            .flatMap(segment => segment.steps)
-            .filter(step => !hidden.has(step.key))
-            .map(step => ({
-              plugin: step.plugin,
-              id: step.id,
-              title: step.title,
-              state: outcomes[step.key] ?? step.state ?? 'pending',
-            })),
+        : ready.flow.daemon.flatMap(segment =>
+            segment.steps
+              .filter(step => !hidden.has(step.key))
+              .map(step => ({
+                plugin: step.plugin,
+                id: step.id,
+                title: step.title,
+                group: segment.group,
+                state: outcomes[step.key] ?? step.state ?? 'pending',
+              })),
+          ),
     retrySave,
     retryStep,
   };

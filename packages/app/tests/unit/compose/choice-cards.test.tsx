@@ -200,6 +200,16 @@ describe('StepProgress', () => {
     expect(mounted.container.querySelector('.fy-sp-progress__text')?.textContent).toBe('Claude Code · 3 of 7');
   });
 
+  it('should fill the current segment n of m only when the counter is its own pages', async () => {
+    mounted = await mount(<StepProgress segments={SEGMENTS} current="claude" step={3} of={4} fills />);
+    const current = must(mounted.container.querySelector('[data-state="current"]'), 'current segment');
+    expect(current.hasAttribute('data-fills')).toBe(true);
+    expect((current as HTMLElement).style.getPropertyValue('--fy-sp-fill')).toBe('0.75');
+    await mounted.unmount();
+    mounted = await mount(<StepProgress segments={SEGMENTS} current="claude" step={3} of={4} />);
+    expect(mounted.container.querySelector('[data-fills]')).toBeNull();
+  });
+
   it('should read an unknown segment as just the count', () => {
     expect(stepProgressText(SEGMENTS, 'nope', 2, 5)).toBe('2 of 5');
   });

@@ -407,8 +407,11 @@ describe('the setup flow', () => {
     await next(); // appearance
     await next(); // look
     await settle();
-    expect(view.container.querySelector('[data-onboarding-summary-set]')?.textContent).toContain('Name this machine');
-    expect(view.container.querySelector('[data-onboarding-later-link="fake-pack.welcome"]')?.getAttribute('href')).toBe(
+    // It names the plugin (the progress bar's own name for it), never a page title.
+    const summary = view.container.querySelector('[data-onboarding-summary-set]')?.textContent ?? '';
+    expect(summary).toMatch(/^Set up on this machine: Onboarding/u);
+    expect(summary).not.toContain('Name this machine');
+    expect(view.container.querySelector('[data-onboarding-later-link="fake-pack"]')?.getAttribute('href')).toBe(
       '/d/fy_daemon_a/settings/fake-pack',
     );
   });

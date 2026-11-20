@@ -136,6 +136,14 @@
 .fy-sp-progress__segment[data-state='done'] {
   opacity: 0.55;
 }
+/* A segment that counts its own pages (`fills`): the lit part is the pages reached so far, the rest is the pages still ahead. */
+.fy-sp-progress__segment[data-state='current'][data-fills] {
+  background: linear-gradient(
+    to right,
+    var(--accent) calc(var(--fy-sp-fill) * 100%),
+    color-mix(in srgb, var(--accent) 30%, var(--border)) 0
+  );
+}
 /* The words are the one text line under the bar; the per-segment labels are for a screen reader only. */
 .fy-sp-progress__label {
   border: 0;

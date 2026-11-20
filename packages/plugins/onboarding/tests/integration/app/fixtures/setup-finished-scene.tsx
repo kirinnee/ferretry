@@ -17,16 +17,16 @@ const view = params.get('view') ?? 'finished';
 const steps =
   view === 'finished'
     ? [
-        { plugin: 'runtimes', id: 'start', title: 'Start from…', state: 'done' as const },
-        { plugin: 'logins', id: 'login', title: 'Sign in', state: 'found' as const },
-        { plugin: 'runtimes', id: 'runtimes', title: 'Name your runtimes', state: 'done' as const },
-        { plugin: 'voice', id: 'voice', title: 'Voice', state: 'later' as const },
-        { plugin: 'warden', id: 'warden', title: 'Warden', state: 'skipped' as const },
-        { plugin: 'lessons', id: 'lessons', title: 'Lessons', state: 'later' as const },
+        { plugin: 'runtimes', group: 'Runtimes', id: 'start', title: 'Start from…', state: 'done' as const },
+        { plugin: 'logins', group: 'Logins', id: 'login', title: 'Sign in', state: 'found' as const },
+        { plugin: 'runtimes', group: 'Runtimes', id: 'runtimes', title: 'Name your runtimes', state: 'done' as const },
+        { plugin: 'voice', group: 'Voice', id: 'voice', title: 'Voice', state: 'later' as const },
+        { plugin: 'warden', group: 'Warden', id: 'warden', title: 'Warden', state: 'skipped' as const },
+        { plugin: 'lessons', group: 'Lessons', id: 'lessons', title: 'Lessons', state: 'later' as const },
       ]
     : [
-        { plugin: 'runtimes', id: 'start', title: 'Start from…', state: 'done' as const },
-        { plugin: 'logins', id: 'login', title: 'Sign in', state: 'pending' as const },
+        { plugin: 'runtimes', group: 'Runtimes', id: 'start', title: 'Start from…', state: 'done' as const },
+        { plugin: 'logins', group: 'Logins', id: 'login', title: 'Sign in', state: 'pending' as const },
       ];
 
 const root = document.getElementById('root') as HTMLElement;
