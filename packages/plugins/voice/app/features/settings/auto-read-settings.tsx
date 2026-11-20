@@ -18,7 +18,6 @@
 import { useEffect, useState } from 'react';
 import { useDeviceVoiceSettingsStore, useLiveVoiceSettings } from '../../hooks/use-live-voice-settings.ts';
 import { useReadAloudController } from '../../hooks/use-read-aloud.ts';
-import { cn } from '../../shell-voice.ts';
 import {
   type LiveVoiceSettings,
   type LiveVoiceSettingsPatch,
@@ -30,7 +29,8 @@ import {
 import type { SpeakerVoice } from '../../lib/voice-chat/ports.ts';
 import type { ReadAloudController } from '../../lib/voice-chat/read-aloud.ts';
 import { voiceNote } from '../../lib/voice-chat/voice-choice.ts';
-import { Badge, Button } from '../../shell-voice.ts';
+import { Button, ChoiceCards, SettingGroup, SettingRow, SettingSwitch } from '../../shell-voice.ts';
+import './voice-settings.css';
 import { VoicePicker } from './voice-picker.tsx';
 
 const AUTO_READ_EXPLANATION =
@@ -83,12 +83,13 @@ export function AutoReadSettings({ store: given, olderMachine = false, startOpen
   const controller = useReadAloudController();
   if (!controller.supported) {
     return (
-      <section aria-label="Read replies aloud" className="flex flex-col gap-2" data-auto-read-settings="">
-        <Header />
-        <p className="rounded-control border border-border bg-surface-2 p-3 text-meta leading-base text-faint">
-          This browser has no built-in voice, so replies cannot be read aloud here.
-        </p>
-      </section>
+      <div data-auto-read-settings="">
+        <SettingGroup label="Read replies aloud">
+          <li className="fy-vs-body">
+            <p className="fy-vs-note">This browser has no built-in voice, so replies cannot be read aloud here.</p>
+          </li>
+        </SettingGroup>
+      </div>
     );
   }
   return (
@@ -100,15 +101,6 @@ export function AutoReadSettings({ store: given, olderMachine = false, startOpen
       settings={settings}
       update={update}
     />
-  );
-}
-
-function Header() {
-  return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <h4 className="m-0 text-ui font-semibold">Read replies aloud</h4>
-      <Badge tone="pend">This device</Badge>
-    </div>
   );
 }
 
@@ -162,163 +154,144 @@ function Supported({
   );
 
   return (
-    <section aria-label="Read replies aloud" className="fy-ar flex flex-col gap-4" data-auto-read-settings="">
-      <Header />
-      <p className="text-meta leading-base text-muted">{READ_ALOUD_PRIVACY_NOTE}</p>
-
-      {/* ---- the switch ---- */}
-      <div className="flex flex-col gap-2">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={settings.autoRead}
-          aria-describedby="auto-read-explanation"
-          onClick={() => update({ autoRead: !settings.autoRead })}
-          className="fy-ar-switch fy-ar-target"
+    <div data-auto-read-settings="">
+      <SettingGroup label="Read replies aloud">
+        <SettingRow
+          settingId="auto-read"
+          name="Auto-read replies"
+          hint="This device speaks a finished reply"
+          explanation={
+            <div className="flex flex-col gap-2" id="auto-read-explanation">
+              <p className="m-0">{settings.autoRead ? AUTO_READ_EXPLANATION : AUTO_READ_OFF_EXPLANATION}</p>
+              <p className="m-0">{READ_ALOUD_PRIVACY_NOTE}</p>
+            </div>
+          }
+          control={labelId => (
+            <SettingSwitch
+              checked={settings.autoRead}
+              labelledBy={labelId}
+              onChange={autoRead => update({ autoRead })}
+            />
+          )}
         >
-          <span className="fy-ar-switch-name">Auto-read replies</span>
-          <span className="fy-ar-switch-state">
-            <span className="fy-ar-switch-word">{settings.autoRead ? 'On' : 'Off'}</span>
-            <span aria-hidden="true" className="fy-ar-track">
-              <span className="fy-ar-thumb" />
+          {olderMachine ? (
+            <div className="fy-vs-body">
+              <p className="fy-vs-note" data-tone="warn" data-auto-read-needs-update="" role="status">
+                {OLDER_MACHINE_NOTE}
+              </p>
+            </div>
+          ) : null}
+        </SettingRow>
+
+        <SettingRow
+          name="Voice"
+          hint="Which voice on this device reads"
+          control={() => (
+            <Button className="fy-ar-target px-4" data-preview="" onClick={preview} type="button">
+              {previewing ? 'Stop preview' : 'Preview voice'}
+            </Button>
+          )}
+        >
+          <div className="fy-vs-body">
+            <span id="auto-read-voice-label" className="sr-only">
+              Voice
             </span>
-          </span>
-        </button>
-        <p id="auto-read-explanation" className="text-meta leading-base text-muted">
-          {settings.autoRead ? AUTO_READ_EXPLANATION : AUTO_READ_OFF_EXPLANATION}
-        </p>
-        {olderMachine ? (
-          <p className="text-meta leading-base text-warn" data-auto-read-needs-update="" role="status">
-            {OLDER_MACHINE_NOTE}
-          </p>
-        ) : null}
-      </div>
+            <VoicePicker
+              chosen={chosen}
+              defaultOpen={startOpen}
+              onChoose={voiceId => update({ voiceId })}
+              voices={voices}
+            />
+            {voices.length === 0 ? (
+              <p className="fy-vs-note" role="status">
+                This device has not listed its voices yet. The best voice is used until it does.
+              </p>
+            ) : null}
+            {chosen !== null && !chosen.local ? (
+              <p className="fy-vs-note" data-tone="warn" role="status">
+                {voiceNote(chosen)}
+              </p>
+            ) : null}
+            {missing ? (
+              <p className="fy-vs-note" role="status">
+                The voice you chose is not on this device any more, so the best voice is used.
+              </p>
+            ) : null}
+          </div>
+        </SettingRow>
 
-      {/* ---- the voice, with a preview ---- */}
-      <div className="flex flex-col gap-2">
-        <span id="auto-read-voice-label" className="text-ui font-semibold">
-          Voice
-        </span>
-        <VoicePicker
-          chosen={chosen}
-          defaultOpen={startOpen}
-          onChoose={voiceId => update({ voiceId })}
-          voices={voices}
+        <SettingRow
+          name="Speed"
+          hint="Slower to faster"
+          wide
+          control={labelId => (
+            <div className="fy-vs-field fy-vs-wide">
+              <input
+                aria-labelledby={labelId}
+                id="auto-read-rate"
+                type="range"
+                min={0.8}
+                max={2}
+                step={0.1}
+                value={settings.rate}
+                aria-valuetext={`${rateText} normal speed`}
+                className="fy-ar-range min-w-0 flex-1"
+                onChange={event => update({ rate: Number(event.target.value) })}
+              />
+              <output htmlFor="auto-read-rate" className="w-10 shrink-0 text-ui tabular-nums">
+                {rateText}
+              </output>
+            </div>
+          )}
         />
-        <Button
-          className="fy-ar-target w-full px-4 sm:w-auto sm:self-start"
-          data-preview=""
-          onClick={preview}
-          type="button"
-        >
-          {previewing ? 'Stop preview' : 'Preview voice'}
-        </Button>
-        {voices.length === 0 ? (
-          <p className="text-meta leading-base text-faint" role="status">
-            This device has not listed its voices yet. The best voice is used until it does.
-          </p>
-        ) : null}
-        {chosen !== null && !chosen.local ? (
-          <p className="text-md leading-base text-warn" role="status">
-            {voiceNote(chosen)}
-          </p>
-        ) : null}
-        {missing ? (
-          <p className="text-meta leading-base text-faint" role="status">
-            The voice you chose is not on this device any more, so the best voice is used.
-          </p>
-        ) : null}
-      </div>
 
-      {/* ---- speed ---- */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-baseline justify-between gap-3">
-          <label htmlFor="auto-read-rate" className="text-ui font-semibold">
-            Speed
-          </label>
-          <output htmlFor="auto-read-rate" className="text-ui tabular-nums">
-            {rateText}
-          </output>
-        </div>
-        <input
-          id="auto-read-rate"
-          type="range"
-          min={0.8}
-          max={2}
-          step={0.1}
-          value={settings.rate}
-          aria-valuetext={`${rateText} normal speed`}
-          className="fy-ar-range"
-          onChange={event => update({ rate: Number(event.target.value) })}
+        <SettingRow
+          name="Longest reading"
+          hint="A longer reply stops at this length"
+          wide
+          explanation="A longer reply stops at this length and says “There’s more on screen.” Faster speech fits more words in the same time."
+          control={labelId => (
+            <select
+              aria-labelledby={labelId}
+              id="auto-read-length"
+              className="kt-input fy-ar-target fy-vs-wide"
+              value={settings.maxSeconds === null ? 'none' : String(settings.maxSeconds)}
+              onChange={event =>
+                update({ maxSeconds: event.target.value === 'none' ? null : Number(event.target.value) })
+              }
+            >
+              {READING_LENGTH_OPTIONS.map(option => (
+                <option key={String(option.seconds)} value={option.seconds === null ? 'none' : String(option.seconds)}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          )}
         />
-        <div className="flex justify-between text-meta text-faint">
-          <span>Slower</span>
-          <span>Faster</span>
-        </div>
-      </div>
 
-      {/* ---- how long one reading may run ---- */}
-      <div className="flex flex-col gap-2">
-        <label htmlFor="auto-read-length" className="text-ui font-semibold">
-          Longest reading
-        </label>
-        <select
-          id="auto-read-length"
-          className="kt-input fy-ar-target"
-          value={settings.maxSeconds === null ? 'none' : String(settings.maxSeconds)}
-          onChange={event => update({ maxSeconds: event.target.value === 'none' ? null : Number(event.target.value) })}
-        >
-          {READING_LENGTH_OPTIONS.map(option => (
-            <option key={String(option.seconds)} value={option.seconds === null ? 'none' : String(option.seconds)}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <p className="text-meta leading-base text-muted">
-          A longer reply stops at this length and says “There’s more on screen.” Faster speech fits more words in the
-          same time.
-        </p>
-      </div>
+        <SettingRow name="What to read" hint="The last message, or more">
+          <div className="fy-vs-body">
+            <ChoiceCards
+              label="What to read"
+              value={settings.whatToRead}
+              onChange={id => update({ whatToRead: id as LiveVoiceSettings['whatToRead'] })}
+              options={WHAT_TO_READ_OPTIONS.map(option => ({
+                id: option.id,
+                title: option.label,
+                line: option.description,
+              }))}
+            />
+          </div>
+        </SettingRow>
 
-      {/* ---- what to read ---- */}
-      <div className="flex flex-col gap-2">
-        <span id="auto-read-what" className="text-ui font-semibold">
-          What to read
-        </span>
-        <div role="radiogroup" aria-labelledby="auto-read-what" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {WHAT_TO_READ_OPTIONS.map(option => {
-            const checked = settings.whatToRead === option.id;
-            return (
-              <label
-                key={option.id}
-                className={cn(
-                  'fy-ar-target flex min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
-                  'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
-                  checked
-                    ? 'border-accent bg-accent-soft text-accent'
-                    : 'border-border bg-surface-2 text-fg hover:border-accent',
-                )}
-              >
-                <input
-                  type="radio"
-                  name="auto-read-what"
-                  className="sr-only"
-                  checked={checked}
-                  onChange={() => update({ whatToRead: option.id })}
-                />
-                <span className="text-ui font-semibold">{option.label}</span>
-                <span className="text-meta leading-base text-muted">{option.description}</span>
-              </label>
-            );
-          })}
-        </div>
-      </div>
-
-      {!persisted && (
-        <p className="text-meta leading-base text-warn" role="status">
-          These choices could not be saved — this browser is refusing storage — so they will reset when you reload.
-        </p>
-      )}
-    </section>
+        {!persisted && (
+          <li className="fy-vs-body">
+            <p className="fy-vs-note" data-tone="warn" role="status">
+              These choices could not be saved — this browser is refusing storage — so they will reset when you reload.
+            </p>
+          </li>
+        )}
+      </SettingGroup>
+    </div>
   );
 }

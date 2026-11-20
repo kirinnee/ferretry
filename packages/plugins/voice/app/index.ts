@@ -10,12 +10,20 @@ import { voiceSurfaces } from './surfaces.tsx';
  */
 export default implementApp(manifest, {
   build: ({ client }) => {
-    const { VoiceTab, SpeedupsTab, DictationPanel, ReadAloudPanel, AutoReadPanel, VoiceStepPanel, SpeedupsStepPanel } =
-      voiceSurfaces(client, {
-        loadSpeechAssets: async () => (await import('./speech-assets.ts')).speechAssets,
-      });
+    const {
+      VoiceTab,
+      VoiceCleanupTab,
+      SpeedupsTab,
+      DictationPanel,
+      ReadAloudPanel,
+      AutoReadPanel,
+      VoiceStepPanel,
+      SpeedupsStepPanel,
+    } = voiceSurfaces(client, {
+      loadSpeechAssets: async () => (await import('./speech-assets.ts')).speechAssets,
+    });
     return {
-      settings: { voice: VoiceTab, speedups: SpeedupsTab },
+      settings: { voice: VoiceTab, 'voice-cleanup': VoiceCleanupTab, speedups: SpeedupsTab },
       panels: {
         dictation: DictationPanel,
         'read-aloud': ReadAloudPanel,

@@ -68,21 +68,25 @@ const NEEDS_UPDATE =
 
 const trigger = (root: HTMLElement) => byId<HTMLButtonElement>(root, 'auto-read-voice');
 const radios = (root: HTMLElement) => [...root.querySelectorAll<HTMLInputElement>('.fy-ar-list input[type="radio"]')];
+/** Opens every (i): a setting's long text is behind it (r10 S5). */
+const reveal = async (root: HTMLElement) => {
+  for (const info of root.querySelectorAll<HTMLButtonElement>('[data-setting-info]'))
+    if (info.getAttribute('aria-expanded') !== 'true') await interact(() => info.click());
+};
 const openList = async (root: HTMLElement) => interact(() => trigger(root).click());
 
 describe('<AutoReadSettings>', () => {
-  test('the section is badged "This device" and starts OFF, saying so in words', async () => {
+  test('the section starts OFF, saying so in words, with its long text behind the (i)', async () => {
     const root = await show(rig());
-    expect(root.querySelector('h4')?.textContent).toBe('Read replies aloud');
-    expect(root.textContent).toContain('This device');
+    expect(root.querySelector('[data-setting-group="Read replies aloud"] h3')?.textContent).toBe('Read replies aloud');
+    await reveal(root);
     const toggle = must(root.querySelector<HTMLElement>('[role="switch"]'), 'the switch');
     expect(toggle.getAttribute('aria-checked')).toBe('false');
-    expect(toggle.textContent).toContain('Auto-read replies');
-    expect(toggle.textContent).toContain('Off');
+    expect(document.getElementById(toggle.getAttribute('aria-labelledby') ?? '')?.textContent).toBe(
+      'Auto-read replies',
+    );
     expect(root.textContent).toContain('Off by default.');
     expect(root.textContent).toContain('Replies are spoken with the voices built into this device.');
-    // The switch is a real one: a track and a thumb drawn beside the state said in words.
-    expect(toggle.querySelector('.fy-ar-track .fy-ar-thumb')).not.toBeNull();
     // A computer that is not known to be old gets no note, and no mention of a daemon anywhere on screen.
     expect(root.querySelector('[data-auto-read-needs-update]')).toBeNull();
     expect(root.textContent?.toLowerCase()).not.toContain('daemon');
@@ -108,7 +112,7 @@ describe('<AutoReadSettings>', () => {
     });
     const toggle = must(root.querySelector<HTMLElement>('[role="switch"]'), 'switch');
     expect(toggle.getAttribute('aria-checked')).toBe('true');
-    expect(toggle.textContent).toContain('On');
+    await reveal(root);
     expect(root.textContent).toContain('Tap anywhere or press a key to stop.');
     expect(root.textContent).toContain('The microphone is never used.');
     expect(root.textContent).not.toContain('3 seconds');
@@ -243,7 +247,9 @@ describe('<AutoReadSettings>', () => {
   test('what to read: last message by default, every message by choice', async () => {
     const r = rig();
     const root = await show(r);
-    const choices = [...root.querySelectorAll<HTMLInputElement>('input[name="auto-read-what"]')];
+    const choices = [
+      ...root.querySelectorAll<HTMLInputElement>('[role="radiogroup"][aria-label="What to read"] input[type="radio"]'),
+    ];
     expect(choices.map(radio => radio.checked)).toEqual([true, false]);
     expect(root.textContent).toContain('Last message of the turn');
     await interact(() => choices[1]?.click());

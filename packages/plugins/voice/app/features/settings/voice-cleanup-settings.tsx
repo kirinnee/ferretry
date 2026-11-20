@@ -12,7 +12,7 @@
 
 import { useState } from 'react';
 import { useKeptDraft } from '../../hooks/use-kept-draft.ts';
-import { cn } from '../../shell-voice.ts';
+import { ChoiceCards, cn, SettingGroup, SettingRow, SettingSwitch } from '../../shell-voice.ts';
 import type { DaemonConnection } from '../../shell-voice.ts';
 import {
   DEFAULT_VOICE_CLEANUP_PROMPTS,
@@ -24,6 +24,7 @@ import {
 } from '../../lib/stt/voice-cleanup.ts';
 import { Textarea } from '../../shell-voice.ts';
 import { ChangedElsewhereNote } from './changed-elsewhere.tsx';
+import './voice-settings.css';
 import {
   type MachineVoiceCleanup,
   useMachineVoiceCleanup,
@@ -42,11 +43,14 @@ export const CLEANUP_GUARD_EXPLANATION =
 export const CONVERSATION_CONTEXT_EXPLANATION =
   'Sends the latest messages of this conversation to the provider as read-only reference, so names and terms are spelled the way the conversation spells them. They are never added to your dictation.';
 
+/** Shown before Apply, so choosing a hosted style is never also the act of sending text to a provider. */
+export const CLEANUP_HOSTED_ON_EXPLANATION =
+  'Applying this turns hosted clean-up ON for every device paired to this machine: after each dictation the text you dictated (and, if conversation context is on, the latest messages) is sent to the provider you chose under Dictation › Correction provider. Text that has been sent cannot be unsent.';
+
+const CLEANUP_STYLE_STAGED_EXPLANATION = 'Not saved yet: nothing changes on this machine until you press Apply.';
+
 export const CLEANUP_OFF_EXPLANATION =
   'Hosted clean-up is off: dictation is inserted as transcribed and nothing is sent.';
-
-const SWITCH_CLASS =
-  'flex min-h-[44px] items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors';
 
 /** A prompt is saved trimmed, so a trailing newline the machine dropped is not an edit still open. */
 const samePrompt = (a: string, b: string): boolean => a.trim() === b.trim();
@@ -65,14 +69,14 @@ function MessageCountField({ saved, onSave }: { readonly saved: number; onSave(p
     else count.reload();
   };
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-3">
-        <label htmlFor="stt-cleanup-messages" className="text-ui font-semibold">
-          Latest messages to include
-        </label>
+    <SettingRow
+      name="Latest messages to include"
+      hint="How much of the conversation to send"
+      control={labelId => (
         <input
           id="stt-cleanup-messages"
-          className="kt-input min-h-[44px] w-20"
+          aria-labelledby={labelId}
+          className="kt-input fy-vs-num"
           type="number"
           min={1}
           max={MAX_CONVERSATION_MESSAGES}
@@ -84,9 +88,14 @@ function MessageCountField({ saved, onSave }: { readonly saved: number; onSave(p
             if (event.key === 'Enter') commit();
           }}
         />
-      </div>
-      {count.changedElsewhere ? <ChangedElsewhereNote field="voice-messages" onReload={count.reload} /> : null}
-    </div>
+      )}
+    >
+      {count.changedElsewhere ? (
+        <div className="fy-vs-body">
+          <ChangedElsewhereNote field="voice-messages" onReload={count.reload} />
+        </div>
+      ) : null}
+    </SettingRow>
   );
 }
 
@@ -109,7 +118,7 @@ function PromptEditor({
   const edited = saved !== fallback;
   const id = `stt-cleanup-prompt-${style}`;
   return (
-    <div className="flex flex-col gap-2">
+    <li className="fy-vs-body" data-setting-row="Prompt">
       <div className="flex items-center justify-between gap-2">
         <label htmlFor={id} className="text-ui font-semibold">
           Prompt
@@ -120,7 +129,7 @@ function PromptEditor({
       </div>
       <Textarea
         id={id}
-        className="min-h-[44px]"
+        className="min-h-[44px] w-full max-w-[44rem]"
         rows={5}
         spellCheck
         maxLength={MAX_VOICE_PROMPT_CHARS}
@@ -130,12 +139,12 @@ function PromptEditor({
       {prompt.changedElsewhere ? (
         <ChangedElsewhereNote field={`voice-prompt-${style}`} onReload={prompt.reload} />
       ) : null}
-      <div className="flex flex-wrap gap-2">
+      <div className="fy-vs-field">
         <button
           type="button"
           disabled={busy || draft.trim() === saved || draft.trim() === ''}
           onClick={() => onSave({ prompts: { [style]: draft } })}
-          className="min-h-[44px] rounded-control border border-accent bg-accent-soft px-control-x text-ui font-semibold text-accent disabled:opacity-50"
+          className="min-h-[44px] rounded-control border border-accent bg-accent-soft px-control-x text-ui font-semibold text-accent disabled:border-border disabled:bg-surface-2 disabled:text-muted disabled:opacity-60"
         >
           Save prompt
         </button>
@@ -146,12 +155,12 @@ function PromptEditor({
             prompt.set(fallback);
             if (edited) onSave({ prompts: { [style]: null } });
           }}
-          className="min-h-[44px] rounded-control border border-border-strong bg-surface-2 px-control-x text-ui text-fg disabled:opacity-50"
+          className="min-h-[44px] rounded-control border border-border-strong bg-surface-2 px-control-x text-ui text-fg disabled:text-muted disabled:opacity-60"
         >
           Reset to default
         </button>
       </div>
-    </div>
+    </li>
   );
 }
 
@@ -167,62 +176,88 @@ function VoiceCleanupView({ state }: { readonly state: MachineVoiceCleanup }) {
     });
   };
   const style = cleanup.style;
+  // The choice is STAGED: the cards' arrow keys move AND select, so a write per selection would let a stray key
+  // press turn hosted clean-up on for every device. Only an explicit Apply writes.
+  const [staged, setStaged] = useState<typeof style | null>(null);
+  const pending = staged !== null && staged !== style ? staged : null;
+  const applyStyle = (next: typeof style): void => {
+    setBusy(true);
+    void save({ style: next }).then(result => {
+      setOutcome(result);
+      setBusy(false);
+      if (result.kind === 'applied') setStaged(null);
+    });
+  };
   return (
-    <div className="flex flex-col gap-3" data-voice-cleanup="">
-      <h3 className="m-0 text-ui font-semibold">Cleanup style</h3>
-      <p className="text-meta leading-base text-muted">
-        Prompts are saved on this machine (<code>voice.yaml</code>) and shared by every device paired to it.
-      </p>
-      <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-        <legend className="sr-only">Cleanup style</legend>
-        {CLEANUP_STYLES.map(option => (
-          <label
-            key={option.id}
-            className={cn(
-              'flex min-h-[44px] cursor-pointer items-start gap-3 rounded-control border px-control-x py-2',
-              style === option.id ? 'border-accent bg-accent-soft' : 'border-border-strong bg-surface-2',
-            )}
-          >
-            <input
-              type="radio"
-              name="stt-cleanup-style"
-              className="mt-1"
-              checked={style === option.id}
-              disabled={busy}
-              onChange={() => commit({ style: option.id })}
+    <div data-voice-cleanup="">
+      <SettingGroup label="Clean-up style">
+        <li className="fy-vs-body" data-setting-row="Clean-up style">
+          <p className="fy-vs-note">
+            Prompts are saved on this machine (<code>voice.yaml</code>) and shared by every device paired to it.
+          </p>
+          <ChoiceCards
+            label="Cleanup style"
+            value={pending ?? style}
+            disabled={busy}
+            onChange={id => setStaged(id as typeof style)}
+            options={CLEANUP_STYLES.map(option => ({ id: option.id, title: option.label, line: option.hint }))}
+          />
+          {pending !== null && (
+            <div className="fy-vs-field" data-cleanup-staged="">
+              <p className="fy-vs-note" role="status">
+                {CLEANUP_STYLE_STAGED_EXPLANATION}{' '}
+                {style === 'off' && pending !== 'off' ? CLEANUP_HOSTED_ON_EXPLANATION : null}
+              </p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => applyStyle(pending)}
+                className="min-h-[44px] rounded-control border border-accent bg-accent-soft px-control-x text-ui font-semibold text-accent disabled:border-border disabled:bg-surface-2 disabled:text-muted disabled:opacity-60"
+              >
+                Apply
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setStaged(null)}
+                className="min-h-[44px] rounded-control border border-border-strong bg-surface-2 px-control-x text-ui text-fg disabled:text-muted disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </li>
+        {style === 'off' ? (
+          <li className="fy-vs-body">
+            <p className="fy-vs-note">{CLEANUP_OFF_EXPLANATION}</p>
+          </li>
+        ) : (
+          <>
+            <PromptEditor key={style} style={style} saved={promptFor(cleanup, style)} busy={busy} onSave={commit} />
+            <SettingRow
+              name="Always on, whatever the prompt says"
+              hint="Only your dictated text is corrected"
+              explanation={CLEANUP_GUARD_EXPLANATION}
             />
-            <span className="flex flex-col">
-              <span className="text-ui font-semibold">{option.label}</span>
-              <span className="text-meta leading-base text-muted">{option.hint}</span>
-            </span>
-          </label>
-        ))}
-      </fieldset>
-      {style === 'off' ? (
-        <p className="text-meta leading-base text-muted">{CLEANUP_OFF_EXPLANATION}</p>
-      ) : (
-        <PromptEditor key={style} style={style} saved={promptFor(cleanup, style)} busy={busy} onSave={commit} />
-      )}
-      <p className="text-meta leading-base text-muted">{CLEANUP_GUARD_EXPLANATION}</p>
-
-      <button
-        type="button"
-        role="switch"
-        aria-checked={cleanup.useConversation}
-        disabled={busy}
-        onClick={() => commit({ useConversation: !cleanup.useConversation })}
-        className={cn(
-          SWITCH_CLASS,
-          cleanup.useConversation
-            ? 'border-accent bg-accent-soft text-accent'
-            : 'border-border-strong bg-surface-2 text-fg',
+          </>
         )}
-      >
-        <span className="text-ui font-semibold">Use the conversation for context</span>
-        <span className="text-meta">{cleanup.useConversation ? 'On' : 'Off'}</span>
-      </button>
-      <p className="text-meta leading-base text-muted">{CONVERSATION_CONTEXT_EXPLANATION}</p>
-      {cleanup.useConversation && <MessageCountField saved={cleanup.conversationMessages} onSave={commit} />}
+      </SettingGroup>
+      <SettingGroup label="Conversation context">
+        <SettingRow
+          name="Use the conversation for context"
+          hint="Spell names the way the conversation does"
+          explanation={CONVERSATION_CONTEXT_EXPLANATION}
+          control={labelId => (
+            <SettingSwitch
+              checked={cleanup.useConversation}
+              disabled={busy}
+              labelledBy={labelId}
+              onChange={next => commit({ useConversation: next })}
+            />
+          )}
+        />
+        {cleanup.useConversation && <MessageCountField saved={cleanup.conversationMessages} onSave={commit} />}
+      </SettingGroup>
       {outcome !== null && outcome.kind !== 'applied' && (
         <p
           role="status"

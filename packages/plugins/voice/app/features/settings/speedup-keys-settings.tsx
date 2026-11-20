@@ -16,11 +16,11 @@
 import { CLEANUP_PROVIDERS } from '../../../contract/index.ts';
 import { Check, ExternalLink, FlaskConical, KeyRound, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
-import { cn, SecretInput, useSecretField } from '../../shell-voice.ts';
+import { SecretInput, SettingGroup, SettingRow, useSecretField } from '../../shell-voice.ts';
 import { useSpeedupKeys } from '../../lib/voice-store.tsx';
 import { type DeviceKeyTest, testDeviceKey } from '../../lib/stt/device-cleanup.ts';
 import type { DeviceSpeedupKeys, SpeedupKeyProvider, SpeedupKeyStatus } from '../../lib/stt/speedup-keys.ts';
-import { SettingRow } from './setting-row.tsx';
+import './voice-settings.css';
 
 export const SPEEDUP_KEYS_INTRO =
   'Paste a Groq or Cerebras key and dictation clean-up calls that provider straight from this browser — no round trip through a machine, so it is faster.';
@@ -75,7 +75,6 @@ export interface DeviceKeyCardProps {
 
 export function DeviceKeyCard({ provider, status, busy, test, error, onSave, onTest, onRemove }: DeviceKeyCardProps) {
   const fieldId = useId();
-  const headingId = useId();
   // The key lives only in the field's own value (read on Save); state knows how long it is, never what it says.
   const key = useSecretField(typed => typed.trim().length);
   const label = CLEANUP_PROVIDERS[provider].label;
@@ -93,69 +92,54 @@ export function DeviceKeyCard({ provider, status, busy, test, error, onSave, onT
   };
 
   return (
-    <section
-      className="kt-panel flex min-w-0 flex-col gap-2 p-panel"
-      aria-labelledby={headingId}
-      data-device-key={provider}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 id={headingId} className="m-0 text-row font-semibold text-fg">
-          {label}
-        </h3>
-        {saved ? (
-          <span
-            className="inline-flex items-center gap-1 rounded-control bg-accent-soft px-2 py-0.5 text-meta font-medium text-ok"
-            data-device-key-saved=""
-          >
+    <SettingRow
+      name={label}
+      hint={
+        saved ? (
+          <span className="inline-flex items-center gap-1 text-ok" data-device-key-saved="">
             <Check size={12} aria-hidden="true" /> {line}
           </span>
+        ) : status === undefined ? (
+          'Checking…'
         ) : (
-          <span className="rounded-control bg-surface-2 px-2 py-0.5 text-meta font-medium text-faint">
-            {status === undefined ? 'Checking…' : 'Not saved'}
-          </span>
+          'Not saved'
+        )
+      }
+      wide
+      dataAttributes={{ 'data-device-key': provider }}
+      explanation={
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="m-0">{copy.privacy}</p>
+          <p className="m-0">{SPEEDUP_KEYS_STORAGE}</p>
+        </div>
+      }
+    >
+      <form
+        className="fy-vs-body"
+        onSubmit={submit}
+        aria-label={`Save a ${label} key on this device`}
+        data-device-key-form={provider}
+      >
+        {status?.kind === 'unreadable' && (
+          <p role="alert" className="fy-vs-note" data-tone="warn">
+            {status.message}
+          </p>
         )}
-      </div>
-      <p className="m-0 text-meta leading-base text-muted">{copy.privacy}</p>
-      <p className="m-0 flex min-w-0 flex-wrap items-center gap-1 text-meta leading-base text-muted">
-        <span>Get a key:</span>
-        <a
-          href={copy.keyUrl}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="inline-flex min-w-0 items-center gap-1 break-all text-accent underline"
-        >
-          {copy.keyUrl}
-          <ExternalLink size={12} aria-hidden="true" className="shrink-0" />
-        </a>
-      </p>
-      {status?.kind === 'unreadable' && (
-        <p role="alert" className="m-0 text-meta leading-base text-warn">
-          {status.message}
-        </p>
-      )}
-
-      <form className="flex min-w-0 flex-col gap-1" onSubmit={submit} aria-label={`Save a ${label} key on this device`}>
-        <label className="text-cell font-medium text-fg" htmlFor={fieldId}>
-          {held ? `Replace the ${label} key` : `${label} key`}
-        </label>
-        <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+        {/* ONE row: the key, then Save, Test and Remove, all one height; it wraps under the key when the panel is narrow. */}
+        <div className="fy-vs-field">
           <SecretInput
             id={fieldId}
             field={key}
-            className="kt-input min-h-[44px] w-full min-w-0 flex-1 rounded-control border border-border bg-surface-2 px-2 text-fg"
+            aria-label={held ? `Replace the ${label} key` : `${label} key`}
+            className="kt-input fy-vs-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
             placeholder="paste it here — it is never shown again"
           />
-          <button type="submit" className="kt-btn min-h-[44px] justify-center" data-variant="primary" disabled={!ready}>
+          <button type="submit" className="kt-btn" data-variant="primary" disabled={!ready}>
             <KeyRound size={14} aria-hidden="true" /> {busy === 'saving' ? 'Saving…' : 'Save'}
           </button>
-        </div>
-      </form>
-
-      <div className="flex min-w-0 flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            className="kt-btn min-h-[44px]"
+            className="kt-btn"
             disabled={!saved || !idle}
             onClick={() => void onTest()}
             aria-label={`Test the ${label} key`}
@@ -164,32 +148,34 @@ export function DeviceKeyCard({ provider, status, busy, test, error, onSave, onT
           </button>
           <button
             type="button"
-            className="kt-btn min-h-[44px]"
+            className="kt-btn"
             disabled={!held || !idle}
             onClick={() => void onRemove()}
             aria-label={`Remove the ${label} key from this device`}
           >
             <Trash2 size={14} aria-hidden="true" /> {busy === 'removing' ? 'Removing…' : 'Remove'}
           </button>
-          <span className="text-meta leading-base text-faint">Test lists the models your key can use. It is free.</span>
         </div>
+        <p className="fy-vs-note">
+          Get a key:{' '}
+          <a href={copy.keyUrl} target="_blank" rel="noreferrer noopener" className="break-all text-accent underline">
+            {copy.keyUrl}
+            <ExternalLink size={12} aria-hidden="true" className="ml-1 inline align-baseline" />
+          </a>
+          . Test lists the models your key can use. It is free.
+        </p>
         {test !== null && (
-          <p
-            className={cn('m-0 text-meta leading-base', test.ok ? 'text-ok' : 'text-warn')}
-            role="status"
-            data-device-key-test=""
-          >
+          <p className="fy-vs-note" data-tone={test.ok ? 'ok' : 'warn'} role="status" data-device-key-test="">
             {keyTestLine(test)}
           </p>
         )}
-      </div>
-
-      {error !== null && (
-        <p role="alert" className="m-0 text-ui text-err">
-          {error}
-        </p>
-      )}
-    </section>
+        {error !== null && (
+          <p role="alert" className="fy-vs-note" data-tone="warn">
+            {error}
+          </p>
+        )}
+      </form>
+    </SettingRow>
   );
 }
 
@@ -214,7 +200,6 @@ export interface SpeedupKeysSettingsProps {
 export function SpeedupKeysSettings({ keys: injected, onSaved }: SpeedupKeysSettingsProps) {
   const ambient = useSpeedupKeys();
   const keys = injected === undefined ? ambient : injected;
-  const panelId = useId();
   const [cards, setCards] = useState<Readonly<Record<SpeedupKeyProvider, CardState>>>({ groq: IDLE, cerebras: IDLE });
 
   const patch = useCallback((provider: SpeedupKeyProvider, next: Partial<CardState>) => {
@@ -253,63 +238,48 @@ export function SpeedupKeysSettings({ keys: injected, onSaved }: SpeedupKeysSett
     [keys, onSaved, patch, refresh],
   );
 
-  const [open, setOpen] = useState(false);
-
   return (
-    <SettingRow
-      settingId="speedup-keys"
-      wide
-      name="Speed-up key"
-      hint="Groq or Cerebras, kept encrypted in this browser"
-      explanation={
-        <div className="flex min-w-0 flex-col gap-1">
-          <p className="m-0">{SPEEDUP_KEYS_INTRO}</p>
-          <p className="m-0">{SPEEDUP_KEYS_STORAGE}</p>
-          <p className="m-0 text-faint">{SPEEDUP_KEYS_FALLBACK}</p>
-        </div>
-      }
-      control={() => (
-        <button
-          type="button"
-          className="kt-btn kt-btn--sm max-md:min-h-[44px]"
-          aria-expanded={open}
-          aria-controls={panelId}
-          onClick={() => setOpen(value => !value)}
-        >
-          {open ? 'Done' : 'Add key'}
-        </button>
-      )}
-    >
-      {open ? (
-        <div id={panelId} className="flex min-w-0 flex-col gap-3 px-panel pb-3" data-testid="speedup-keys-settings">
-          {keys === null ? (
-            <p role="status" className="m-0 text-cell leading-base text-muted">
+    <div data-testid="speedup-keys-settings" id="settings-speedup-keys" data-setting-id="speedup-keys" tabIndex={-1}>
+      <SettingGroup label="Speed-up keys">
+        <SettingRow
+          name="Speed-up keys"
+          hint="Cleaner dictation, straight from this browser"
+          explanation={
+            <div className="flex flex-col gap-2">
+              <p className="m-0">{SPEEDUP_KEYS_INTRO}</p>
+              <p className="m-0">{SPEEDUP_KEYS_FALLBACK}</p>
+            </div>
+          }
+        />
+        {keys === null ? (
+          <li className="fy-vs-body">
+            <p role="status" className="fy-vs-note">
               This page was opened without its key store, so no key can be saved here.
             </p>
-          ) : (
-            SPEEDUP_KEY_PROVIDERS.map(provider => {
-              const card = cards[provider];
-              return (
-                <DeviceKeyCard
-                  key={provider}
-                  provider={provider}
-                  status={card.status}
-                  busy={card.busy}
-                  test={card.test}
-                  error={card.error}
-                  onSave={value => act(provider, 'saving', async vault => await vault.save(provider, value))}
-                  onRemove={() => act(provider, 'removing', async vault => await vault.remove(provider))}
-                  onTest={() =>
-                    act(provider, 'testing', async vault =>
-                      patch(provider, { test: await testDeviceKey(vault, provider) }),
-                    )
-                  }
-                />
-              );
-            })
-          )}
-        </div>
-      ) : null}
-    </SettingRow>
+          </li>
+        ) : (
+          SPEEDUP_KEY_PROVIDERS.map(provider => {
+            const card = cards[provider];
+            return (
+              <DeviceKeyCard
+                key={provider}
+                provider={provider}
+                status={card.status}
+                busy={card.busy}
+                test={card.test}
+                error={card.error}
+                onSave={value => act(provider, 'saving', async vault => await vault.save(provider, value))}
+                onRemove={() => act(provider, 'removing', async vault => await vault.remove(provider))}
+                onTest={() =>
+                  act(provider, 'testing', async vault =>
+                    patch(provider, { test: await testDeviceKey(vault, provider) }),
+                  )
+                }
+              />
+            );
+          })
+        )}
+      </SettingGroup>
+    </div>
   );
 }

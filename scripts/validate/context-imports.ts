@@ -83,14 +83,19 @@ export function refusal(edge: ImportEdge): string | undefined {
 
   // The app shell's public API (lead decision 10, `packages/app/README.md`): an app half imports `@ferretry/app`,
   // `@ferretry/app/ui` and `@ferretry/app/worker`; its tests may also import the test support in `/testing`, the real-browser
-  // support in `/testing/browser` (one shared Chromium per test process) and the test router in `/testing/router`.
+  // support in `/testing/browser` (one shared Chromium per test process) and the test router in `/testing/router` and the real Settings shell for a plugin's browser scene in `/testing/settings-shell`.
   if (toPkg.kind === 'shell' && toPkg.name === '@ferretry/app' && edge.specifier.startsWith('@ferretry/app')) {
     const subpath = edge.specifier.slice('@ferretry/app'.length);
-    if (from === 'tests' && ['', '/ui', '/worker', '/testing', '/testing/browser', '/testing/router'].includes(subpath))
+    if (
+      from === 'tests' &&
+      ['', '/ui', '/worker', '/testing', '/testing/browser', '/testing/router', '/testing/settings-shell'].includes(
+        subpath,
+      )
+    )
       return undefined;
     if (from === 'app' && ['', '/ui', '/worker'].includes(subpath)) return undefined;
     if (from === 'tests')
-      return `${edge.specifier} is not the app shell's public API: tests import @ferretry/app, /ui, /worker, /testing, /testing/browser and /testing/router only`;
+      return `${edge.specifier} is not the app shell's public API: tests import @ferretry/app, /ui, /worker, /testing, /testing/browser, /testing/router and /testing/settings-shell only`;
     return `${edge.specifier} is imported only by app halves (and @ferretry/app/testing only by tests)`;
   }
 

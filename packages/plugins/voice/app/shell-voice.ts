@@ -9,7 +9,7 @@
  * today's code does OUTSIDE the app store (no client, no prompt).
  *
  * Where each lives today, and where it comes from:
- *   - cn, Button, Textarea, Badge, BottomSheet, useDocumentVisible, isKeyboardCaptured,
+ *   - cn, Button, Textarea, BottomSheet, useDocumentVisible, isKeyboardCaptured,
  *     trustedWorkerUrl, isSpeechWorkerScriptUrl, createTrustedTypes, isWorkerScriptUrl
  *         ........ pwa shell primitives / hooks / trusted types ...... `@ferretry/app/ui` (app-shell-fill)
  *   - findReferences, parseReferenceToken, Reference
@@ -29,7 +29,6 @@ import { createContext, createElement, type ReactNode, useContext } from 'react'
 import { z } from 'zod';
 
 export {
-  Badge,
   BottomSheet,
   Button,
   cn,
@@ -43,7 +42,16 @@ export {
   useDocumentVisible,
   useSecretField,
 } from '@ferretry/app/ui';
-export { findReferences, OptionBars, parseReferenceToken, type Reference } from '@ferretry/app';
+export {
+  ChoiceCards,
+  findReferences,
+  OptionBars,
+  parseReferenceToken,
+  SettingGroup,
+  SettingRow,
+  SettingSwitch,
+  type Reference,
+} from '@ferretry/app';
 
 // ─── the daemon this half talks to ────────────────────────────────────────────────────────────────────────────────
 

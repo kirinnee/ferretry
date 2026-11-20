@@ -173,10 +173,6 @@ describe('<VoiceStep> over the real voice store', () => {
 });
 
 describe('<SpeedupsStep> over a real vault', () => {
-  const openKeys = async (container: HTMLElement): Promise<void> => {
-    const add = [...container.querySelectorAll('button')].find(each => each.textContent?.trim() === 'Add key');
-    await interact(() => must(add, 'Add key').click());
-  };
   const draw = (store: VoiceStore, host: StepHost) => (
     <StoreProvider store={store}>
       <SpeedupsStepContainer step={host} />
@@ -190,10 +186,9 @@ describe('<SpeedupsStep> over a real vault', () => {
     const { calls, host } = fakeHost();
     const view = await mount(draw(store, host));
     await settle();
-    await openKeys(view.container);
     expect(calls).toEqual(['ready']);
 
-    const groq = must(view.container.querySelector<HTMLElement>('section[data-device-key="groq"]'), 'groq');
+    const groq = must(view.container.querySelector<HTMLElement>('li[data-device-key="groq"]'), 'groq');
     await typeInto(groq.querySelector('input'), 'not a key');
     await submit(groq.querySelector('form'));
     await settle();
@@ -215,7 +210,6 @@ describe('<SpeedupsStep> over a real vault', () => {
     const { calls, host } = fakeHost();
     const view = await mount(draw(store, host));
     await settle();
-    await openKeys(view.container);
     expect(view.container.textContent).toContain('Saved · ends with ••XY');
     expect(calls).toEqual(['ready']);
     const remove = must(

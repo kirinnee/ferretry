@@ -165,6 +165,12 @@ describe('SpeedupCard', () => {
     const renderer = render(
       <SpeedupCard status={status()} vaultReadable busy={null} error={null} onSave={noop} onTest={noop} />,
     );
+    // Cost and privacy sit behind the (i) (r10 S5): open it, then read them.
+    run(() =>
+      renderer.root
+        .find(node => node.type === 'button' && node.props['data-setting-info'] !== undefined)
+        .props.onClick(),
+    );
     const rendered = text(renderer.toJSON());
     for (const copy of [
       'Cleans up dictated text.',
@@ -302,7 +308,7 @@ describe('SpeedupCard', () => {
       />,
     );
     const line = good.root.find(node => node.props['data-speedup-last-test'] === '');
-    expect(line.props.className).toContain('text-ok');
+    expect(line.props['data-tone']).toBe('ok');
 
     const stale = render(
       <SpeedupCard
@@ -314,7 +320,7 @@ describe('SpeedupCard', () => {
         onTest={noop}
       />,
     );
-    expect(stale.root.find(node => node.props['data-speedup-last-test'] === '').props.className).toContain('text-warn');
+    expect(stale.root.find(node => node.props['data-speedup-last-test'] === '').props['data-tone']).toBe('warn');
   });
 });
 
@@ -323,6 +329,12 @@ describe('SpeedupsPanel', () => {
     const renderer = render(
       <SpeedupsPanel view={view({ vault: 'damaged' })} busy={null} errors={{}} onSave={noop} onTest={noop} />,
     );
+    run(() => {
+      for (const info of renderer.root.findAll(
+        node => node.type === 'button' && node.props['data-setting-info'] !== undefined,
+      ))
+        info.props.onClick();
+    });
     const rendered = text(renderer.toJSON());
     expect(rendered).toContain(SPEEDUPS_INTRO);
     expect(rendered).toContain(SPEEDUPS_FALLBACK);

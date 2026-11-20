@@ -7,7 +7,7 @@
  *
  * WHAT CHANGED FROM kteam (`ui/src/components/DictationSettings.tsx`), and WHY.
  *
- *   1. ENGINES CHOSEN PER DEVICE (`engine-catalog-list.tsx`). Every on-device
+ *   1. ENGINES CHOSEN PER DEVICE (`engine-section.tsx`, the O15 cards). Every on-device
  *      model in the catalog (`lib/stt/model-catalog.ts`) runs in this browser
  *      after a one-time, explicit download, pinned and hashed; phone/browser
  *      voice is the browser's own recognition. None is a fallback for another,
@@ -30,10 +30,8 @@
  * enhancer rather than about where audio goes.
  */
 
-import { useMemo } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { useMachineIsOlder } from '../../shell-voice.ts';
-import { cn } from '../../shell-voice.ts';
-import type { DaemonConnection } from '../../shell-voice.ts';
 import { useOnDeviceVoices, useOptionalAppStore, useParakeetVoice } from '../../lib/voice-store.tsx';
 import {
   type BrowserRecognitionProvider,
@@ -55,7 +53,6 @@ import {
   AFTER_DICTATION_OPTIONS,
   DEFAULT_ENHANCEMENT_MODELS,
   DEFAULT_GROQ_ENHANCEMENT_MODEL,
-  type DictationEngineId,
   ENHANCEMENT_PROVIDERS,
   type EnhancementProviderId,
   GROQ_FASTER_ENHANCEMENT_MODEL,
@@ -66,13 +63,12 @@ import {
   type SttSettingsPatch,
   sttDictionary,
 } from '../../lib/stt/stt-settings.ts';
-import { Badge, Textarea } from '../../shell-voice.ts';
+import { ChoiceCards, SettingGroup, SettingRow, SettingSwitch, Textarea } from '../../shell-voice.ts';
 import { AutoReadSettings } from './auto-read-settings.tsx';
 import { DictationShortcutPicker } from './dictation-shortcut-picker.tsx';
-import { EngineCatalogList, type TrialClock } from './engine-catalog-list.tsx';
+import { EngineSection, type TrialClock } from './engine-section.tsx';
 import { SpeedLine } from './speed-line.tsx';
-import type { MachineVoiceCleanup } from './use-machine-voice-cleanup.ts';
-import { VoiceCleanupSettings } from './voice-cleanup-settings.tsx';
+import './voice-settings.css';
 
 export const DICTATION_SAFETY_NOTE =
   'Ferretry never sends microphone audio to your daemon. Stop settles the browser transcript, corrects it once, and inserts it at your current caret. Nothing is ever sent for you.';
@@ -124,6 +120,10 @@ export const CEREBRAS_ENHANCEMENT_EXPLANATION =
   'Cerebras runs only after dictation stops, with the same instructions as Groq: keep your wording, fix recognition errors, spelling, capitalization and punctuation. The daemon holds the Cerebras API key and sends Cerebras the raw transcript, your dictionary and bounded context; the key is never stored in this browser. A timeout or provider error keeps your raw words.';
 
 /** Where the hosted providers' keys are set, said next to the choice that needs one. */
+/** Where the hosted clean-up's PROMPTS are edited: they are the machine's, not this browser's (r10 S5 tab split). */
+export const CLEANUP_PROMPTS_POINTER =
+  'What hosted clean-up is told to do (its prompt and conversation context) is kept on the machine, for every device: Settings › Voice clean-up.';
+
 export const SPEEDUP_KEY_HINT =
   'The key lives on the machine, not in this browser: paste it under Settings › This machine › Speed-ups, where Test checks it works. Only the recognised text is sent for clean-up, never audio.';
 
@@ -138,6 +138,10 @@ const REMOTE_EXPLANATIONS: Readonly<Record<'groq' | 'cerebras', string>> = {
   groq: GROQ_ENHANCEMENT_EXPLANATION,
   cerebras: CEREBRAS_ENHANCEMENT_EXPLANATION,
 };
+
+/** Shown before Apply: picking a hosted provider is never also the act of sending text to it. */
+const HOSTED_PROVIDER_APPLY_EXPLANATION =
+  'Not saved yet. Applying this sends the recognised text of every dictation to the provider you chose (once its key is on the machine). Text that has been sent cannot be unsent.';
 
 /**
  * The patch a provider choice makes. Switching to a hosted provider resets the model to THAT
@@ -175,12 +179,15 @@ export interface DictationSettingsProps {
   readonly trialClock?: TrialClock;
   /** Phone or computer, for the default engine. Read from the page when omitted. */
   readonly deviceClass?: DeviceClass;
-  /** The machine whose `voice.yaml` holds the cleanup prompts; the section is absent without one. */
-  readonly daemon?: DaemonConnection;
-  /** Test and harness seam: the machine's cleanup settings, instead of reading them through the app. */
-  readonly voiceCleanup?: MachineVoiceCleanup;
+  /** True only when the connected machine is known to run an older Ferretry (the auto-read note). */
+  readonly olderMachine?: boolean;
   /** Test and harness seam: the speed planner, instead of the page's own. */
   readonly speedPlanner?: SpeedPlanner;
+}
+
+/** A free-text field in a setting's body: its name is the row's, so a screen reader reads the same word the eye does. */
+function TextBody({ children }: { readonly children: ReactNode }) {
+  return <div className="fy-vs-body">{children}</div>;
 }
 
 export function DictationSettings({
@@ -193,11 +200,11 @@ export function DictationSettings({
   voices,
   trialClock,
   deviceClass,
-  daemon,
-  voiceCleanup,
+  olderMachine: olderMachineOverride,
   speedPlanner,
 }: DictationSettingsProps) {
-  const olderMachine = useMachineIsOlder(useOptionalAppStore(), daemon);
+  const machineIsOlder = useMachineIsOlder(useOptionalAppStore(), undefined);
+  const olderMachine = olderMachineOverride ?? machineIsOlder;
   const detectedProvider = useMemo(() => browserRecognitionProvider(), []);
   const pageDeviceClass = useMemo(() => deviceClassOf(globalThis as DeviceClassGlobalLike), []);
   const provider = recognitionProvider ?? detectedProvider;
@@ -207,7 +214,7 @@ export function DictationSettings({
   const contextVoices = useOnDeviceVoices();
   const allVoices = voices === undefined ? contextVoices : voices;
   const parakeet = voice !== undefined ? voice : allVoices === null ? contextVoice : undefined;
-  const choose = (engine: DictationEngineId): void => update({ engine });
+  const device = deviceClass ?? pageDeviceClass;
   const dictionary = useMemo(() => sttDictionary(settings), [settings]);
   /**
    * A live echo of what the context field actually yields, so a reader can see
@@ -215,255 +222,281 @@ export function DictationSettings({
    * dictating a test sentence.
    */
   const userVocabulary = useMemo(() => userContextVocabulary(settings.userContext), [settings.userContext]);
+  const remote = isRemoteEnhancementProvider(settings.enhancementProvider);
+  // A hosted provider is STAGED until Apply: a select changes on an arrow key alone, and a write per change would
+  // start sending text to a provider from a stray key press. Going back to on-device only ever reduces exposure.
+  const [stagedProvider, setStagedProvider] = useState<string | null>(null);
+  const stagedPatch = stagedProvider === null ? null : providerChoicePatch(settings, stagedProvider);
+  const staged =
+    stagedPatch !== null &&
+    isRemoteEnhancementProvider(stagedPatch.enhancementProvider ?? 'local') &&
+    stagedPatch.enhancementProvider !== settings.enhancementProvider
+      ? stagedPatch
+      : null;
+  const chooseProvider = (chosen: string): void => {
+    const patch = providerChoicePatch(settings, chosen);
+    if (
+      isRemoteEnhancementProvider(patch.enhancementProvider ?? 'local') &&
+      patch.enhancementProvider !== settings.enhancementProvider
+    ) {
+      setStagedProvider(chosen);
+      return;
+    }
+    setStagedProvider(null);
+    update(patch);
+  };
 
   return (
-    <div className="flex flex-col gap-5">
-      <p className="text-meta leading-base text-muted">{DICTATION_SAFETY_NOTE}</p>
-
-      <section aria-label="Dictation availability" className="flex flex-col gap-2">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={settings.enabled}
-          onClick={() => update({ enabled: !settings.enabled })}
-          className={cn(
-            'flex min-h-[44px] items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
-            settings.enabled ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-fg',
+    <div data-voice-settings="">
+      <SettingGroup label="Dictation">
+        <SettingRow
+          settingId="dictation"
+          name="Dictation"
+          hint="Talk instead of type on this device"
+          explanation={`${DICTATION_SAFETY_NOTE} ${DICTATION_DISABLED_EXPLANATION}`}
+          control={labelId => (
+            <SettingSwitch checked={settings.enabled} labelledBy={labelId} onChange={enabled => update({ enabled })} />
           )}
-        >
-          <span className="text-ui font-semibold">Dictation</span>
-          <span className="text-meta">{settings.enabled ? 'On' : 'Off'}</span>
-        </button>
-        <p className="text-meta leading-base text-muted">{DICTATION_DISABLED_EXPLANATION}</p>
-      </section>
+        />
+        {settings.enabled ? (
+          <>
+            {onDeviceModel(settings.engine)?.nearLive === true && (
+              <SettingRow
+                name="Live words (experimental)"
+                hint="Show words while you speak"
+                explanation={LIVE_WORDS_EXPLANATION}
+                control={labelId => (
+                  <SettingSwitch
+                    checked={settings.liveWordsOptIn}
+                    labelledBy={labelId}
+                    onChange={liveWordsOptIn => update({ liveWordsOptIn })}
+                  />
+                )}
+              />
+            )}
+            <SettingRow
+              name="After dictating"
+              hint="What happens when the text is ready"
+              explanation={AFTER_DICTATION_EXPLANATION}
+            >
+              <div className="fy-vs-body" data-after-dictating="">
+                <ChoiceCards
+                  label="After dictating"
+                  value={settings.afterDictation}
+                  onChange={id => update({ afterDictation: id as SttSettings['afterDictation'] })}
+                  options={AFTER_DICTATION_OPTIONS.map(option => ({
+                    id: option.id,
+                    title: option.label,
+                    line: option.description,
+                  }))}
+                />
+              </div>
+            </SettingRow>
+            <DictationShortcutPicker binding={settings.shortcut} onChange={shortcut => update({ shortcut })} />
+          </>
+        ) : (
+          <li className="fy-vs-body">
+            <p className="fy-vs-note">
+              Dictation is disabled. Turn it on above whenever you want the microphone available again.
+            </p>
+          </li>
+        )}
+      </SettingGroup>
 
       {settings.enabled ? (
         <>
-          {/* ---- which engine, and Parakeet's install ---- */}
-          <section aria-label="Voice engine" className="flex flex-col gap-2">
-            <EngineCatalogList
-              value={settings.engine}
-              onChange={choose}
-              voices={allVoices}
-              {...(parakeet === undefined ? {} : { parakeet })}
-              browserSupport={support}
-              browserProvider={provider}
-              {...(trialClock === undefined ? {} : { clock: trialClock })}
-              deviceClass={deviceClass ?? pageDeviceClass}
-            />
-          </section>
-
-          {/* ---- which execution path the engine runs on, chosen by the device ---- */}
-          <SpeedLine
-            engine={settings.engine ?? DEFAULT_ON_DEVICE_ENGINE[deviceClass ?? pageDeviceClass]}
-            {...(speedPlanner === undefined ? {} : { planner: speedPlanner })}
+          <EngineSection
+            value={settings.engine}
+            onChange={engine => update({ engine })}
+            voices={allVoices}
+            {...(parakeet === undefined ? {} : { parakeet })}
+            browserSupport={support}
+            browserProvider={provider}
+            {...(trialClock === undefined ? {} : { clock: trialClock })}
+            deviceClass={device}
           />
+          {/* ---- which execution path the engine runs on, chosen by the device ---- */}
+          <div className="fy-vs-body -mt-6 mb-8">
+            <SpeedLine
+              engine={settings.engine ?? DEFAULT_ON_DEVICE_ENGINE[device]}
+              {...(speedPlanner === undefined ? {} : { planner: speedPlanner })}
+            />
+          </div>
 
-          {/* ---- near-live words, for a model that re-reads a window (Parakeet) ---- */}
-          {onDeviceModel(settings.engine)?.nearLive === true && (
-            <section aria-label="Live words (experimental)" className="flex flex-col gap-2">
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settings.liveWordsOptIn}
-                onClick={() => update({ liveWordsOptIn: !settings.liveWordsOptIn })}
-                className={cn(
-                  'flex min-h-[44px] items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
-                  settings.liveWordsOptIn
-                    ? 'border-accent bg-accent-soft text-accent'
-                    : 'border-border bg-surface-2 text-fg',
-                )}
-              >
-                <span className="text-ui font-semibold">Live words (experimental)</span>
-                <span className="text-meta">{settings.liveWordsOptIn ? 'On' : 'Off'}</span>
-              </button>
-              <p className="text-meta leading-base text-muted">{LIVE_WORDS_EXPLANATION}</p>
-            </section>
-          )}
-
-          {/* ---- what happens when the text is ready ---- */}
-          <section aria-label="After dictating" className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span id="stt-after-dictation" className="text-ui font-semibold">
-                After dictating
-              </span>
-              <Badge tone="pend">This device</Badge>
-            </div>
-            <div
-              role="radiogroup"
-              aria-labelledby="stt-after-dictation"
-              className="grid grid-cols-1 gap-2 sm:grid-cols-2"
-            >
-              {AFTER_DICTATION_OPTIONS.map(option => {
-                const checked = settings.afterDictation === option.id;
-                return (
-                  <label
-                    key={option.id}
-                    className={cn(
-                      'flex min-h-[44px] min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
-                      'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
-                      checked
-                        ? 'border-accent bg-accent-soft text-accent'
-                        : 'border-border bg-surface-2 text-fg hover:border-accent',
-                    )}
-                  >
-                    <input
-                      type="radio"
-                      name="stt-after-dictation"
-                      value={option.id}
-                      checked={checked}
-                      onChange={() => update({ afterDictation: option.id })}
-                      className="sr-only"
-                    />
-                    <span className="text-ui font-semibold">{option.label}</span>
-                    <span className="text-meta leading-tight text-muted">{option.description}</span>
-                  </label>
-                );
-              })}
-            </div>
-            <p className="text-meta leading-base text-muted">{AFTER_DICTATION_EXPLANATION}</p>
-          </section>
-
-          {/* ---- push-to-talk shortcut ---- */}
-          <DictationShortcutPicker binding={settings.shortcut} onChange={shortcut => update({ shortcut })} />
-
-          {/* ---- enhancement ---- */}
-          <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={settings.enhancement}
-              onClick={() => update({ enhancement: !settings.enhancement })}
-              className={cn(
-                'flex min-h-[44px] items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
-                settings.enhancement
-                  ? 'border-accent bg-accent-soft text-accent'
-                  : 'border-border bg-surface-2 text-fg',
+          <SettingGroup label="Names and jargon">
+            <SettingRow
+              name="Fix names and jargon"
+              hint="Swap a misheard word for one you use"
+              explanation={ENHANCEMENT_TOGGLE_EXPLANATION}
+              control={labelId => (
+                <SettingSwitch
+                  checked={settings.enhancement}
+                  labelledBy={labelId}
+                  onChange={enhancement => update({ enhancement })}
+                />
               )}
-            >
-              <span className="text-ui font-semibold">Fix names and jargon</span>
-              <span className="text-meta">{settings.enhancement ? 'On' : 'Off'}</span>
-            </button>
-            <p className="text-meta leading-base text-muted">{ENHANCEMENT_TOGGLE_EXPLANATION}</p>
+            />
             {settings.enhancement && (
-              <div className="flex flex-col gap-2 rounded-control border border-border bg-surface-2 p-3">
-                <label htmlFor="stt-enhancement-provider" className="text-ui font-semibold">
-                  Correction provider
-                </label>
-                <select
-                  id="stt-enhancement-provider"
-                  className="kt-input min-h-[44px]"
-                  value={settings.enhancementProvider}
-                  onChange={event => update(providerChoicePatch(settings, event.target.value))}
-                >
-                  {ENHANCEMENT_PROVIDERS.map(provider => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.label}
-                    </option>
-                  ))}
-                  <option value="login" disabled>
-                    {LOGIN_CLEANUP_UNAVAILABLE}
-                  </option>
-                </select>
-                {isRemoteEnhancementProvider(settings.enhancementProvider) ? (
-                  <>
-                    <label htmlFor="stt-enhancement-model" className="text-ui font-semibold">
-                      {settings.enhancementProvider === 'groq' ? 'Groq' : 'Cerebras'} model
-                    </label>
-                    <input
-                      id="stt-enhancement-model"
-                      className="kt-input min-h-[44px]"
-                      type="text"
-                      spellCheck={false}
-                      list={settings.enhancementProvider === 'groq' ? 'stt-groq-models' : undefined}
-                      maxLength={MAX_ENHANCEMENT_MODEL_CHARS}
-                      value={settings.enhancementModel}
-                      placeholder={DEFAULT_ENHANCEMENT_MODELS[settings.enhancementProvider]}
-                      onChange={event => update({ enhancementModel: event.target.value })}
-                    />
-                    {settings.enhancementProvider === 'groq' && (
-                      <datalist id="stt-groq-models">
-                        <option value={DEFAULT_GROQ_ENHANCEMENT_MODEL}>Default</option>
-                        <option value={GROQ_FASTER_ENHANCEMENT_MODEL}>Faster</option>
-                      </datalist>
-                    )}
-                    <p className="text-meta leading-base text-muted">
-                      {REMOTE_EXPLANATIONS[settings.enhancementProvider]}
+              <>
+                <SettingRow
+                  name="Correction provider"
+                  hint={remote ? 'Hosted: the text goes to its provider' : 'On this device, instantly'}
+                  wide
+                  explanation={
+                    <div className="flex flex-col gap-2">
+                      {remote ? (
+                        <>
+                          <p className="m-0">
+                            {REMOTE_EXPLANATIONS[settings.enhancementProvider as 'groq' | 'cerebras']}
+                          </p>
+                          <p className="m-0 text-faint">{SPEEDUP_KEY_HINT}</p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="m-0">{ENHANCEMENT_EXPLANATION}</p>
+                          <p className="m-0">{ENHANCEMENT_SOURCES_EXPLANATION}</p>
+                          <p className="m-0 text-faint">{LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE}</p>
+                        </>
+                      )}
+                    </div>
+                  }
+                  control={labelId => (
+                    <select
+                      id="stt-enhancement-provider"
+                      aria-labelledby={labelId}
+                      className="kt-input fy-vs-wide min-h-[44px]"
+                      value={staged?.enhancementProvider ?? settings.enhancementProvider}
+                      onChange={event => chooseProvider(event.target.value)}
+                    >
+                      {ENHANCEMENT_PROVIDERS.map(entry => (
+                        <option key={entry.id} value={entry.id}>
+                          {entry.label}
+                        </option>
+                      ))}
+                      <option value="login" disabled>
+                        {LOGIN_CLEANUP_UNAVAILABLE}
+                      </option>
+                    </select>
+                  )}
+                />
+                {staged !== null && (
+                  <li className="fy-vs-body" data-provider-staged="">
+                    <p className="fy-vs-note" role="status">
+                      {HOSTED_PROVIDER_APPLY_EXPLANATION}
                     </p>
-                    <p className="text-meta leading-base text-faint">{SPEEDUP_KEY_HINT}</p>
-                    <VoiceCleanupSettings daemon={daemon} state={voiceCleanup} />
-                  </>
-                ) : (
-                  <>
-                    <p className="text-meta leading-base text-muted">{ENHANCEMENT_EXPLANATION}</p>
-                    <p className="text-meta leading-base text-muted">{ENHANCEMENT_SOURCES_EXPLANATION}</p>
-                    <p className="text-meta leading-base text-faint">{LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE}</p>
-                  </>
+                    <div className="fy-vs-field">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStagedProvider(null);
+                          update(staged);
+                        }}
+                        className="min-h-[44px] rounded-control border border-accent bg-accent-soft px-control-x text-ui font-semibold text-accent"
+                      >
+                        Apply
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStagedProvider(null)}
+                        className="min-h-[44px] rounded-control border border-border-strong bg-surface-2 px-control-x text-ui text-fg"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </li>
                 )}
-              </div>
+                {remote && (
+                  <SettingRow
+                    name={`${settings.enhancementProvider === 'groq' ? 'Groq' : 'Cerebras'} model`}
+                    hint="Leave as it is unless you know a better one"
+                    wide
+                    control={labelId => (
+                      <>
+                        <input
+                          id="stt-enhancement-model"
+                          aria-labelledby={labelId}
+                          className="kt-input fy-vs-wide min-h-[44px]"
+                          type="text"
+                          spellCheck={false}
+                          list={settings.enhancementProvider === 'groq' ? 'stt-groq-models' : undefined}
+                          maxLength={MAX_ENHANCEMENT_MODEL_CHARS}
+                          value={settings.enhancementModel}
+                          placeholder={DEFAULT_ENHANCEMENT_MODELS[settings.enhancementProvider as 'groq' | 'cerebras']}
+                          onChange={event => update({ enhancementModel: event.target.value })}
+                        />
+                        {settings.enhancementProvider === 'groq' && (
+                          <datalist id="stt-groq-models">
+                            <option value={DEFAULT_GROQ_ENHANCEMENT_MODEL}>Default</option>
+                            <option value={GROQ_FASTER_ENHANCEMENT_MODEL}>Faster</option>
+                          </datalist>
+                        )}
+                      </>
+                    )}
+                  />
+                )}
+                {remote && (
+                  <li className="fy-vs-body">
+                    <p className="fy-vs-note">{CLEANUP_PROMPTS_POINTER}</p>
+                  </li>
+                )}
+              </>
             )}
-          </div>
+          </SettingGroup>
 
-          {/* ---- dictionary ---- */}
-          <div className="flex flex-col gap-2">
-            <label htmlFor="stt-dictionary" className="text-ui font-semibold">
-              Your words
-            </label>
-            <p className="text-meta leading-base text-muted">
-              One per line. Add alternatives after an “=”, separated by commas — <code>ferretry = ferretree</code>.
-              Single words only: dictation never joins or splits what you said.
-            </p>
-            <Textarea
-              id="stt-dictionary"
-              className="min-h-[44px]"
-              rows={5}
-              spellCheck={false}
-              value={settings.dictionary.join('\n')}
-              onChange={event => update({ dictionary: event.target.value.split('\n') })}
-              placeholder={'ferretry = ferretree\ntmux\nParakeet = paraquet'}
-            />
-            <p className="text-meta text-faint">
-              {dictionary.entries.length} term{dictionary.entries.length === 1 ? '' : 's'}.
-            </p>
-            {dictionary.problems.length > 0 && (
-              <ul className="flex list-disc flex-col gap-1 pl-5 text-meta leading-base text-warn">
-                {dictionary.problems.map(problem => (
-                  <li key={problem}>{problem}</li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {/* ---- free-text context ---- */}
-          <div className="flex flex-col gap-2">
-            <label htmlFor="stt-user-context" className="text-ui font-semibold">
-              Your context
-            </label>
-            <p className="text-meta leading-base text-muted">{USER_CONTEXT_EXPLANATION}</p>
-            <Textarea
-              id="stt-user-context"
-              className="min-h-[44px]"
-              rows={4}
-              spellCheck={false}
-              maxLength={MAX_USER_CONTEXT_CHARS}
-              value={settings.userContext}
-              onChange={event => update({ userContext: event.target.value })}
-              placeholder={'I work on ferretry and the daemon fleet.\nOur services: nitroso, diene, alcohol.'}
-            />
-            <p className="text-meta text-faint">
-              {userVocabulary.length} word{userVocabulary.length === 1 ? '' : 's'} picked out
-              {userVocabulary.length > 0
-                ? ` — ${userVocabulary.slice(0, 8).join(', ')}${userVocabulary.length > 8 ? ', …' : ''}`
-                : ''}
-              .
-            </p>
-          </div>
+          <SettingGroup label="Your vocabulary">
+            <SettingRow
+              name="Your words"
+              hint="One per line; add alternatives after “=”"
+              explanation="One per line. Add alternatives after an “=”, separated by commas — ferretry = ferretree. Single words only: dictation never joins or splits what you said."
+            >
+              <TextBody>
+                <Textarea
+                  id="stt-dictionary"
+                  aria-label="Your words"
+                  className="min-h-[44px] w-full max-w-[44rem]"
+                  rows={5}
+                  spellCheck={false}
+                  value={settings.dictionary.join('\n')}
+                  onChange={event => update({ dictionary: event.target.value.split('\n') })}
+                  placeholder={'ferretry = ferretree\ntmux\nParakeet = paraquet'}
+                />
+                <p className="fy-vs-note">
+                  {dictionary.entries.length} term{dictionary.entries.length === 1 ? '' : 's'}.
+                </p>
+                {dictionary.problems.length > 0 && (
+                  <ul className="flex list-disc flex-col gap-1 pl-5 text-meta leading-base text-warn">
+                    {dictionary.problems.map(problem => (
+                      <li key={problem}>{problem}</li>
+                    ))}
+                  </ul>
+                )}
+              </TextBody>
+            </SettingRow>
+            <SettingRow name="Your context" hint="Names, projects, a glossary" explanation={USER_CONTEXT_EXPLANATION}>
+              <TextBody>
+                <Textarea
+                  id="stt-user-context"
+                  aria-label="Your context"
+                  className="min-h-[44px] w-full max-w-[44rem]"
+                  rows={4}
+                  spellCheck={false}
+                  maxLength={MAX_USER_CONTEXT_CHARS}
+                  value={settings.userContext}
+                  onChange={event => update({ userContext: event.target.value })}
+                  placeholder={'I work on ferretry and the daemon fleet.\nOur services: nitroso, diene, alcohol.'}
+                />
+                <p className="fy-vs-note">
+                  {userVocabulary.length} word{userVocabulary.length === 1 ? '' : 's'} picked out
+                  {userVocabulary.length > 0
+                    ? ` — ${userVocabulary.slice(0, 8).join(', ')}${userVocabulary.length > 8 ? ', …' : ''}`
+                    : ''}
+                  .
+                </p>
+              </TextBody>
+            </SettingRow>
+          </SettingGroup>
         </>
-      ) : (
-        <p className="rounded-control border border-border bg-surface-2 p-3 text-meta leading-base text-faint">
-          Dictation is disabled. Turn it on above whenever you want the microphone available again.
-        </p>
-      )}
+      ) : null}
 
       {/* ---- hearing a reply: independent of dictation, so it stays whether dictation is on or off ---- */}
       <AutoReadSettings olderMachine={olderMachine} />

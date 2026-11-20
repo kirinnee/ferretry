@@ -17,16 +17,16 @@
  * renders as a stated refusal, and a damaged vault says so rather than showing every key unset.
  */
 
-import { MIN_SECRET_VALUE_LENGTH, SecretInput, useSecretField } from '../../shell-voice.ts';
+import { MIN_SECRET_VALUE_LENGTH, SecretInput, SettingGroup, SettingRow, useSecretField } from '../../shell-voice.ts';
 import type { SpeedupStatus, SpeedupsView, SpeedupTestResult } from '../../../contract/index.ts';
-import { AlertTriangle, Check, ExternalLink, FlaskConical, KeyRound, Zap } from 'lucide-react';
+import { AlertTriangle, Check, ExternalLink, FlaskConical, KeyRound } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
-import { cn } from '../../shell-voice.ts';
 import type { DaemonConnection } from '../../shell-voice.ts';
 import { useConfigChangeEffect, useDaemonClient } from '../../lib/voice-store.tsx';
 import { putSecret } from '../../shell-voice.ts';
 import { ConfirmToSee, isStepUpRefusal, Loading } from '@ferretry/app/ui';
 import { readSpeedups, type SpeedupClient, testSpeedup } from './speedups-api.ts';
+import '../settings/voice-settings.css';
 
 export type SpeedupClientFactory = (connection: DaemonConnection) => Promise<SpeedupClient>;
 
@@ -89,7 +89,6 @@ function StatusChip({ status, vaultReadable }: { readonly status: SpeedupStatus;
 
 export function SpeedupCard({ status, vaultReadable, busy, locked = false, error, onSave, onTest }: SpeedupCardProps) {
   const fieldId = useId();
-  const headingId = useId();
   // The key lives only in the field's own value (read on Save); state knows how long it is, never what it says.
   const key = useSecretField(typed => typed.trim().length);
   const [replacing, setReplacing] = useState(false);
@@ -109,115 +108,99 @@ export function SpeedupCard({ status, vaultReadable, busy, locked = false, error
   };
 
   return (
-    <section
-      className="kt-panel flex min-w-0 flex-col gap-2 p-panel"
-      aria-labelledby={headingId}
-      data-speedup={status.provider}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 id={headingId} className="m-0 text-row font-semibold text-fg">
-          {status.label}
-        </h3>
-        <StatusChip status={status} vaultReadable={vaultReadable} />
-      </div>
-      <p className="m-0 text-cell leading-base text-fg">{status.purpose}</p>
-      <p className="m-0 text-meta leading-base text-muted">{status.costNote}</p>
-      <p className="m-0 text-meta leading-base text-muted">{status.privacyNote}</p>
-      <p className="m-0 flex min-w-0 flex-wrap items-center gap-1 text-meta leading-base text-muted">
-        <span>Get a key:</span>
-        <a
-          href={status.keyUrl}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="inline-flex min-w-0 items-center gap-1 break-all text-accent underline"
-        >
-          {status.keyUrl}
-          <ExternalLink size={12} aria-hidden="true" className="shrink-0" />
-        </a>
-      </p>
-
-      {showField ? (
-        <form className="flex min-w-0 flex-col gap-1" onSubmit={submit} aria-label={`Save the ${status.label} key`}>
-          <label className="text-cell font-medium text-fg" htmlFor={fieldId}>
-            {status.label} key <span className="mono text-meta font-normal text-faint">({status.secretName})</span>
-          </label>
-          <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-            <SecretInput
-              id={fieldId}
-              field={key}
-              className="kt-input min-h-[44px] w-full min-w-0 flex-1 rounded-control border border-border bg-surface-2 px-2 text-fg"
-              placeholder="paste it here — it is never shown again"
-            />
-            <button
-              type="submit"
-              className="kt-btn min-h-[44px] justify-center"
-              data-variant="primary"
-              disabled={!ready}
-            >
-              <KeyRound size={14} aria-hidden="true" /> {busy === 'saving' ? 'Saving…' : 'Save'}
-            </button>
-            {status.set && (
-              <button
-                type="button"
-                className="kt-btn min-h-[44px] justify-center"
-                onClick={() => {
-                  key.clear();
-                  setReplacing(false);
-                }}
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-          {problem !== undefined && <p className="m-0 text-meta text-err">{problem}</p>}
-        </form>
-      ) : (
-        <div>
-          <button
-            type="button"
-            className="kt-btn min-h-[44px]"
-            disabled={!idle}
-            onClick={() => setReplacing(true)}
-            aria-label={`Replace the ${status.label} key`}
-          >
-            <KeyRound size={14} aria-hidden="true" /> Replace key
-          </button>
+    <SettingRow
+      name={status.label}
+      hint={<StatusChip status={status} vaultReadable={vaultReadable} />}
+      wide
+      dataAttributes={{ 'data-speedup': status.provider }}
+      explanation={
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="m-0">{status.costNote}</p>
+          <p className="m-0">{status.privacyNote}</p>
         </div>
-      )}
-
-      <div className="flex min-w-0 flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-2">
+      }
+    >
+      <form className="fy-vs-body" onSubmit={submit} aria-label={`Save the ${status.label} key`}>
+        <p className="fy-vs-note text-fg">{status.purpose}</p>
+        {/* ONE row (shot 09): the key (36rem at most), Save and Test, all one height, on one line; it wraps under the key
+            when the panel is narrower than the whole row. */}
+        <div className="fy-vs-field">
+          {showField ? (
+            <>
+              <SecretInput
+                id={fieldId}
+                field={key}
+                aria-label={`${status.label} key (${status.secretName})`}
+                className="kt-input fy-vs-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
+                placeholder="paste it here — it is never shown again"
+              />
+              <button type="submit" className="kt-btn" data-variant="primary" disabled={!ready}>
+                <KeyRound size={14} aria-hidden="true" /> {busy === 'saving' ? 'Saving…' : 'Save'}
+              </button>
+              {status.set && (
+                <button
+                  type="button"
+                  className="kt-btn"
+                  onClick={() => {
+                    key.clear();
+                    setReplacing(false);
+                  }}
+                >
+                  Cancel
+                </button>
+              )}
+            </>
+          ) : (
+            <button
+              type="button"
+              className="kt-btn"
+              disabled={!idle}
+              onClick={() => setReplacing(true)}
+              aria-label={`Replace the ${status.label} key`}
+            >
+              <KeyRound size={14} aria-hidden="true" /> Replace key
+            </button>
+          )}
           <button
             type="button"
-            className="kt-btn min-h-[44px]"
+            className="kt-btn"
             disabled={!status.set || !idle}
             onClick={() => void onTest()}
             aria-label={`Test the ${status.label} key`}
           >
             <FlaskConical size={14} aria-hidden="true" /> {busy === 'testing' ? 'Testing…' : 'Test'}
           </button>
-          <span className="text-meta leading-base text-faint">{status.testNote}</span>
         </div>
+        {problem !== undefined && (
+          <p className="fy-vs-note" data-tone="warn">
+            {problem}
+          </p>
+        )}
+        <p className="fy-vs-note">
+          Get a key:{' '}
+          <a href={status.keyUrl} target="_blank" rel="noreferrer noopener" className="break-all text-accent underline">
+            {status.keyUrl}
+            <ExternalLink size={12} aria-hidden="true" className="ml-1 inline align-baseline" />
+          </a>
+          . {status.testNote} Saved as <code>{status.secretName}</code>.
+        </p>
         {line !== undefined && (
           <p
-            className={cn(
-              'm-0 text-meta leading-base',
-              status.lastTest?.ok === true && !status.testStale ? 'text-ok' : 'text-warn',
-            )}
+            className="fy-vs-note"
+            data-tone={status.lastTest?.ok === true && !status.testStale ? 'ok' : 'warn'}
             role="status"
             data-speedup-last-test=""
           >
             {line}
           </p>
         )}
-      </div>
-
-      {error !== null && (
-        <p role="alert" className="m-0 text-ui text-err">
-          {error}
-        </p>
-      )}
-    </section>
+        {error !== null && (
+          <p role="alert" className="fy-vs-note" data-tone="warn">
+            {error}
+          </p>
+        )}
+      </form>
+    </SettingRow>
   );
 }
 
@@ -232,36 +215,42 @@ export interface SpeedupsPanelProps {
 export function SpeedupsPanel({ view, busy, errors, onSave, onTest }: SpeedupsPanelProps) {
   const vaultReadable = view.vault === 'ok';
   return (
-    <div className="flex min-w-0 flex-col gap-3" data-testid="speedups-panel">
-      <section className="kt-panel flex flex-col gap-2 p-panel" aria-labelledby="speedups-heading">
-        <h2 id="speedups-heading" className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
-          <Zap size={16} className="text-accent" aria-hidden="true" />
-          Speed-ups
-        </h2>
-        <p className="m-0 text-cell leading-base text-muted">{SPEEDUPS_INTRO}</p>
-        <p className="m-0 text-meta leading-base text-faint">{SPEEDUPS_FALLBACK}</p>
-        {!vaultReadable && (
-          <div role="alert" className="flex gap-2 rounded-control border border-warn bg-warn/10 p-3">
-            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
-            <p className="m-0 text-cell leading-base text-muted">
-              This machine cannot read its secret store, so it cannot tell which keys are set. Fix the store in Secrets
-              before pasting a key again, or you may write over one that is still there.
-            </p>
-          </div>
-        )}
-      </section>
-      {view.providers.map(status => (
-        <SpeedupCard
-          key={status.provider}
-          status={status}
-          vaultReadable={vaultReadable}
-          busy={busy?.provider === status.provider ? busy.kind : null}
-          locked={busy !== null && busy.provider !== status.provider}
-          error={errors[status.provider] ?? null}
-          onSave={value => onSave(status, value)}
-          onTest={() => onTest(status)}
+    <div className="fy-vs" data-testid="speedups-panel">
+      <SettingGroup label="Speed-ups">
+        <SettingRow
+          name="What speed-up keys do"
+          hint="Optional: faster or cheaper, never required"
+          explanation={
+            <div className="flex flex-col gap-2">
+              <p className="m-0">{SPEEDUPS_INTRO}</p>
+              <p className="m-0">{SPEEDUPS_FALLBACK}</p>
+            </div>
+          }
         />
-      ))}
+        {!vaultReadable && (
+          <li className="fy-vs-body">
+            <div role="alert" className="flex gap-2 rounded-control border border-warn bg-warn/10 p-3">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
+              <p className="m-0 text-cell leading-base text-muted">
+                This machine cannot read its secret store, so it cannot tell which keys are set. Fix the store in
+                Secrets before pasting a key again, or you may write over one that is still there.
+              </p>
+            </div>
+          </li>
+        )}
+        {view.providers.map(status => (
+          <SpeedupCard
+            key={status.provider}
+            status={status}
+            vaultReadable={vaultReadable}
+            busy={busy?.provider === status.provider ? busy.kind : null}
+            locked={busy !== null && busy.provider !== status.provider}
+            error={errors[status.provider] ?? null}
+            onSave={value => onSave(status, value)}
+            onTest={() => onTest(status)}
+          />
+        ))}
+      </SettingGroup>
     </div>
   );
 }

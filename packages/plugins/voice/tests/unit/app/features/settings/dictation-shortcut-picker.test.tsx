@@ -22,16 +22,32 @@ describe('DictationShortcutPicker', () => {
     const tree = JSON.stringify(page.toJSON());
 
     expect(tree).toContain('Alt (either side)');
-    expect(tree).toContain('Hold to record and release to finish');
-    expect(tree).toContain('tap once to latch');
-    expect(tree).toContain('On a phone, use the mic button');
-    expect(tree).toContain('On an iPad keyboard, Option is Alt');
-    expect(tree).toContain('never sends the message');
+    // The long gesture text is behind the (i) (r10 S5); the one-line hint stays on the row.
+    expect(tree).toContain('Hold to record, release to finish');
+    expect(tree).toContain('More about Push to talk');
     expect(tree).toContain('min-h-[44px]');
     expect(tree).toContain(BARE_ALT_WARNING);
     expect(page.root.findAllByType('input')).toHaveLength(0);
     expect(page.root.findAllByType('textarea')).toHaveLength(0);
     run(() => page.unmount());
+  });
+
+  it('keeps the long gesture text one press away, behind the (i)', async () => {
+    const view = await mount(
+      <DictationShortcutPicker binding={DEFAULT_DICTATION_SHORTCUT} onChange={() => undefined} />,
+    );
+    expect(view.container.textContent).not.toContain('tap once to latch');
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-setting-info]'), 'the (i)').click(),
+    );
+    for (const copy of [
+      'tap once to latch',
+      'On a phone, use the mic button',
+      'On an iPad keyboard, Option is Alt',
+      'never sends the message',
+    ])
+      expect(view.container.textContent).toContain(copy);
+    await view.unmount();
   });
 
   describe('on a WebKit page where tapping the button never focuses it', () => {
@@ -198,7 +214,10 @@ describe('DictationShortcutPicker', () => {
         onChange={binding => changes.push(binding)}
       />,
     );
-    const reset = page.root.findAllByType('button').find(button => button.props['aria-pressed'] === undefined)!;
+    const reset = must(
+      page.root.findAllByType('button').find(button => button.props['aria-pressed'] === undefined) ?? null,
+      'the reset button',
+    );
 
     run(() => reset.props.onClick());
     expect(changes).toEqual([{ code: 'Alt', key: 'Alt', modifiers: [] }]);

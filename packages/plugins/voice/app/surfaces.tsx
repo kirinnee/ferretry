@@ -12,6 +12,7 @@ import { ReadAloudControl } from './components/read-aloud.tsx';
 import { DictationDebugSettings } from './features/settings/dictation-debug-settings.tsx';
 import { DictationSettings } from './features/settings/dictation-settings.tsx';
 import { SpeedupKeysSettings } from './features/settings/speedup-keys-settings.tsx';
+import { VoiceCleanupSettings } from './features/settings/voice-cleanup-settings.tsx';
 import { TranscriptionLogSettings } from './features/settings/transcription-log-settings.tsx';
 import { SpeedupsStepContainer, VoiceStepContainer } from './features/onboarding/step-panels.tsx';
 import { SpeedupsSurface } from './features/speedups/speedups-surface.tsx';
@@ -21,7 +22,7 @@ import { needsInputOf } from './lib/voice-chat/reply-picker.ts';
 import type { SpeechAssets } from './lib/stt/on-device-voices.ts';
 import { createVoiceStore, StoreProvider, useSttSettingsStore, type VoiceStore } from './lib/voice-store.tsx';
 import { useComposerDraft } from '@ferretry/app';
-import { daemonConnection, VoiceClientProvider } from './shell-voice.ts';
+import { daemonConnection, SettingGroup, VoiceClientProvider } from './shell-voice.ts';
 
 /** The daemon every call goes to is the one the shell's client is for; the connection only carries an identity. */
 const THIS_DAEMON = daemonConnection({
@@ -100,10 +101,14 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
     const dictation = useSttSettings(sttStore);
     return (
       <>
-        <DictationSettings {...dictation} daemon={THIS_DAEMON} />
-        <SpeedupKeysSettings />
-        <TranscriptionLogSettings />
-        <DictationDebugSettings />
+        <div className="fy-vs">
+          <DictationSettings {...dictation} />
+          <SpeedupKeysSettings />
+          <SettingGroup label="Privacy and debugging">
+            <TranscriptionLogSettings />
+            <DictationDebugSettings />
+          </SettingGroup>
+        </div>
       </>
     );
   }
@@ -111,6 +116,14 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
   const VoiceTab = () => (
     <Boundary>
       <VoiceSettingsBody />
+    </Boundary>
+  );
+
+  const VoiceCleanupTab = () => (
+    <Boundary>
+      <div className="fy-vs">
+        <VoiceCleanupSettings daemon={THIS_DAEMON} />
+      </div>
     </Boundary>
   );
 
@@ -222,5 +235,14 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
       </Boundary>
     );
 
-  return { VoiceTab, SpeedupsTab, DictationPanel, ReadAloudPanel, AutoReadPanel, VoiceStepPanel, SpeedupsStepPanel };
+  return {
+    VoiceTab,
+    VoiceCleanupTab,
+    SpeedupsTab,
+    DictationPanel,
+    ReadAloudPanel,
+    AutoReadPanel,
+    VoiceStepPanel,
+    SpeedupsStepPanel,
+  };
 }
