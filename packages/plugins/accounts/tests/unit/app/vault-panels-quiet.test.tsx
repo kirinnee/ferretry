@@ -17,6 +17,7 @@ import { CONFIRM_TO_SEE_WORDS } from '../../../app/lib/step-up-refusal.ts';
 import { list as accountList, SI_GITHUB } from '../../support/app/accounts-fixtures.ts';
 import { mount, type Mounted, must } from '../../support/app/dom.ts';
 import { click, settle } from '../../support/app/dom-form.ts';
+import { boxNamed } from '../../support/app/select-box.ts';
 import { codesSlot, savedPrimary, settledSlot } from '../../support/app/input-card-fixtures.ts';
 import { suggestion } from '../../support/app/sign-in-rule-fixtures.ts';
 import { mixedPlan, PLAN_ID, SESSION } from '../../support/app/task-plan-fixtures.ts';
@@ -68,12 +69,12 @@ describe('the Vault slot panels read quietly on mount', () => {
     await settle();
     expect(seen).toEqual([{ route: 'GET /v1/accounts', quiet: true }]);
     expect(view.container.textContent).toContain(CONFIRM_TO_SEE_WORDS);
-    expect(view.container.querySelector('[data-codes-account]')).toBeNull();
+    expect(boxNamed(view.container, 'Which account is this key for?')).toBeNull();
     await click(confirm(view.container));
     await settle();
     expect(seen.at(-1)).toEqual({ route: 'GET /v1/accounts', quiet: false });
     expect(view.container.querySelector(CONFIRM)).toBeNull();
-    expect(view.container.querySelector('[data-codes-account]')).not.toBeNull();
+    expect(boxNamed(view.container, 'Which account is this key for?')).not.toBeNull();
   });
 
   it('always use: the mount read is quiet, shows no data and holds nothing, and the press reads for real', async () => {

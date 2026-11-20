@@ -16,11 +16,11 @@ import {
   withTicked,
 } from '../../../app/lib/task-plan.ts';
 import { interact, mount, must } from '../../support/app/dom.ts';
+import { pickOption } from '../../support/app/select-box.ts';
 import {
   approvedPlan,
   cannotLine,
   codesLine,
-  GITHUB_HOME,
   GITHUB_WORK,
   mixedPlan,
   passwordOnlyLine,
@@ -31,6 +31,9 @@ import {
 } from '../../support/app/task-plan-fixtures.ts';
 
 const noop = (): void => undefined;
+const PICKER = 'Account for line 1';
+const ACCOUNT_WORK = 'github work · kirin@atomi.cloud';
+const ACCOUNT_HOME = 'github home · kirinnee';
 
 const card = (plan = mixedPlan(), approve: (approval: ReturnType<typeof approvalOf>) => void = noop) => (
   <TaskPlanCard
@@ -97,11 +100,7 @@ describe('the card, drawn', () => {
       const tick = q<HTMLInputElement>(mounted.container, '[data-task-plan-tick="0"]', 'tick');
       expect(tick.disabled).toBe(true);
       expect(mounted.container.textContent).toContain(PICK_FIRST_WORDS);
-      const pick = q<HTMLSelectElement>(mounted.container, '[data-task-plan-pick="0"]', 'picker');
-      await interact(() => {
-        pick.value = GITHUB_WORK;
-        pick.dispatchEvent(new Event('change', { bubbles: true }));
-      });
+      await pickOption(document.body, PICKER, ACCOUNT_WORK);
       expect(q<HTMLInputElement>(mounted.container, '[data-task-plan-tick="0"]', 'tick').disabled).toBe(false);
     } finally {
       await mounted.unmount();
@@ -222,17 +221,9 @@ describe('the ticking card, in more states', () => {
     try {
       expect(mounted.container.querySelector('[data-task-plan-code-tick]')).toBeNull();
       expect(mounted.container.textContent).not.toContain(TOTP_IMPOSSIBLE_WORDS);
-      const pick = q<HTMLSelectElement>(mounted.container, '[data-task-plan-pick="0"]', 'picker');
-      await interact(() => {
-        pick.value = GITHUB_HOME;
-        pick.dispatchEvent(new Event('change', { bubbles: true }));
-      });
+      await pickOption(document.body, PICKER, ACCOUNT_HOME);
       expect(mounted.container.textContent).toContain(TOTP_IMPOSSIBLE_WORDS);
-      const again = q<HTMLSelectElement>(mounted.container, '[data-task-plan-pick="0"]', 'picker again');
-      await interact(() => {
-        again.value = '';
-        again.dispatchEvent(new Event('change', { bubbles: true }));
-      });
+      await pickOption(document.body, PICKER, 'Choose an account…');
       expect(mounted.container.textContent).not.toContain(TOTP_IMPOSSIBLE_WORDS);
     } finally {
       await mounted.unmount();

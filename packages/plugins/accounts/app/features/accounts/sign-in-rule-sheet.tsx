@@ -6,7 +6,7 @@
  * opened the sheet NOTHING is ticked, and the code needs its own red acknowledgement.
  */
 
-import { Loading } from '@ferretry/app/ui';
+import { Loading, SelectBox } from '@ferretry/app/ui';
 import type {
   Place,
   SignInRuleEligibility,
@@ -284,21 +284,18 @@ export function SignInRuleSheet(props: SignInRuleSheetProps) {
 
           <label className="flex min-w-0 flex-col gap-1 text-meta text-muted" htmlFor={`${id}-days`}>
             How long
-            <select
-              className="kt-input min-h-[44px] min-w-0"
-              data-rule-days=""
+            <SelectBox
+              className="min-h-[44px] w-full min-w-0"
               disabled={working}
               id={`${id}-days`}
-              onChange={event => set({ days: Number(event.currentTarget.value) })}
-              value={ticks.days}
-            >
-              {lifetimeDaysOptions(surface).map(days => (
-                <option key={days} value={days}>
-                  {daysWords(days)}
-                  {days === defaultDays(surface) ? ' (usual)' : ''}
-                </option>
-              ))}
-            </select>
+              label="How long"
+              onChange={next => set({ days: Number(next) })}
+              options={lifetimeDaysOptions(surface).map(days => ({
+                value: String(days),
+                label: `${daysWords(days)}${days === defaultDays(surface) ? ' (usual)' : ''}`,
+              }))}
+              value={String(ticks.days)}
+            />
           </label>
 
           <label className="flex min-w-0 flex-col gap-1 text-meta text-muted" htmlFor={`${id}-uses`}>
@@ -323,23 +320,18 @@ export function SignInRuleSheet(props: SignInRuleSheetProps) {
           {scopes.length > 1 ? (
             <label className="flex min-w-0 flex-col gap-1 text-meta text-muted" htmlFor={`${id}-scope`}>
               Who may use it
-              <select
-                className="kt-input min-h-[44px] min-w-0"
-                data-rule-scope=""
+              <SelectBox
+                className="min-h-[44px] w-full min-w-0"
                 disabled={working}
                 id={`${id}-scope`}
-                onChange={event => {
-                  const next = scopes.find(scope => scopeKey(scope) === event.currentTarget.value);
+                label="Who may use it"
+                onChange={key => {
+                  const next = scopes.find(scope => scopeKey(scope) === key);
                   if (next !== undefined) set({ scope: next });
                 }}
+                options={scopes.map(scope => ({ value: scopeKey(scope), label: scopeWords(scope) }))}
                 value={scopeKey(ticks.scope)}
-              >
-                {scopes.map(scope => (
-                  <option key={scopeKey(scope)} value={scopeKey(scope)}>
-                    {scopeWords(scope)}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
           ) : null}
           <RuleStillAsked />

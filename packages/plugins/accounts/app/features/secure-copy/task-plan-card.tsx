@@ -8,6 +8,8 @@
 
 import type { TaskPlan, TaskPlanCandidate, TaskPlanLine } from '../../../contract/routes/index.ts';
 import { ShieldCheck, TriangleAlert } from '../../shell.tsx';
+import { SelectBox } from '@ferretry/app/ui';
+import { SelectField } from '../accounts/accounts-parts.tsx';
 import { useId, useMemo, useState } from 'react';
 import {
   type ApprovalProgress,
@@ -304,23 +306,22 @@ function LineRow({ plan, line, ticks, agentName, disabled, canUsePasskey, onTick
       </div>
 
       {signIn !== undefined && waiting && signIn.candidates.length > 1 ? (
-        <label className="flex min-w-0 flex-col gap-1 text-meta text-muted">
-          Account
-          <select
-            className="kt-input min-h-[44px] min-w-0"
-            data-task-plan-pick={line.line}
-            disabled={disabled}
-            onChange={event => onPick(event.currentTarget.value === '' ? undefined : event.currentTarget.value)}
-            value={tick?.signIn ?? ''}
-          >
-            <option value="">Choose an account…</option>
-            {signIn.candidates.map(candidate => (
-              <option key={candidate.signIn} value={candidate.signIn}>
-                {candidateName(candidate)}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SelectField className="flex min-w-0 flex-col gap-1 text-meta text-muted" label="Account">
+          {id => (
+            <SelectBox
+              id={id}
+              className="min-h-[44px] w-full min-w-0"
+              disabled={disabled}
+              label={`Account for line ${String(line.line + 1)}`}
+              onChange={next => onPick(next === '' ? undefined : next)}
+              options={[
+                { value: '', label: 'Choose an account…' },
+                ...signIn.candidates.map(candidate => ({ value: candidate.signIn, label: candidateName(candidate) })),
+              ]}
+              value={tick?.signIn ?? ''}
+            />
+          )}
+        </SelectField>
       ) : null}
       {waiting && signIn !== undefined && picked === undefined && signIn.candidates.length > 0 ? (
         <span className="text-meta text-muted" data-task-plan-pick-first="">

@@ -10,7 +10,7 @@ import type {
   SignInId,
   TwoFactorId,
 } from '../../../contract/routes/index.ts';
-import type { ReactNode } from 'react';
+import { type ReactNode, useId } from 'react';
 
 /** A write reports whether the daemon took it, so a form clears only then. */
 type Took = Promise<boolean>;
@@ -73,5 +73,27 @@ export function Refusal({ error }: { readonly error: string | null }): ReactNode
     <p className="m-0 text-ui text-err" data-accounts-error="" role="alert">
       {error}
     </p>
+  );
+}
+
+/**
+ * A visible label tied to a select box by id: a label that WRAPS a button is not a labelled control to a screen reader or the
+ * linter, so the label and the box are siblings and `children` receives the id the box takes.
+ */
+export function SelectField({
+  label,
+  className,
+  children,
+}: {
+  readonly label: string;
+  readonly className: string;
+  readonly children: (id: string) => ReactNode;
+}): ReactNode {
+  const id = useId();
+  return (
+    <div className={className}>
+      <label htmlFor={id}>{label}</label>
+      {children(id)}
+    </div>
   );
 }

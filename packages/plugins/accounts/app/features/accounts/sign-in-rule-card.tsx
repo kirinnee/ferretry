@@ -6,6 +6,7 @@
  */
 
 import type { SignInRuleNarrow, SignInRuleView } from '../../../contract/routes/index.ts';
+import { SelectBox } from '@ferretry/app/ui';
 import { useId, useState } from 'react';
 import {
   canRenew,
@@ -123,16 +124,18 @@ export function SignInRuleCard({
             <label className="sr-only" htmlFor={`${id}-unit`}>
               Days or hours
             </label>
-            <select
-              className="kt-input min-h-[44px]"
-              data-rule-end-unit=""
+            <SelectBox
+              className="min-h-[44px]"
               id={`${id}-unit`}
-              onChange={event => setEndUnit(event.currentTarget.value === 'hours' ? 'hours' : 'days')}
+              label="Days or hours"
+              onChange={next => setEndUnit(next === 'hours' ? 'hours' : 'days')}
+              options={[
+                { value: 'days', label: 'days' },
+                { value: 'hours', label: 'hours' },
+              ]}
+              searchable="never"
               value={endUnit}
-            >
-              <option value="days">days</option>
-              <option value="hours">hours</option>
-            </select>
+            />
           </div>
           <label className="flex min-w-0 flex-col gap-1 text-meta text-muted" htmlFor={`${id}-cap`}>
             Most uses{rule.remaining === undefined ? '' : ` (fewer than ${String(rule.remaining)})`}

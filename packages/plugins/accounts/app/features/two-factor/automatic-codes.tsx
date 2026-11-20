@@ -14,7 +14,8 @@
 
 import { LOGIN_TOTP_WARNING, padInputValue, type TwoFactorStageId } from '../../../contract/routes/index.ts';
 import { type ReactNode, useId, useState } from 'react';
-import { SecretInput, useSecretField } from '@ferretry/app/ui';
+import { SecretInput, SelectBox, useSecretField } from '@ferretry/app/ui';
+import { SelectField } from '../accounts/accounts-parts.tsx';
 import {
   accountWords,
   addKeyActWords,
@@ -160,26 +161,28 @@ export function AutomaticCodesPanel({
         ) : (
           <>
             {accounts.length > 1 ? (
-              <label className="flex min-w-0 flex-col gap-1 text-meta text-muted">
-                Which account is this key for?
-                <select
-                  className="kt-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
-                  data-codes-account=""
-                  disabled={busy}
-                  onChange={event => {
-                    setAccountId(accounts.find(each => each.id === event.target.value)?.id);
-                    setMismatchTick(false);
-                  }}
-                  value={accountId ?? ''}
-                >
-                  <option value="">Pick one</option>
-                  {accounts.map(each => (
-                    <option key={each.id} value={each.id}>
-                      {accountWords(each)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SelectField
+                className="flex min-w-0 flex-col gap-1 text-meta text-muted"
+                label="Which account is this key for?"
+              >
+                {id => (
+                  <SelectBox
+                    id={id}
+                    className="min-h-[44px] w-full min-w-0 rounded-control border border-border bg-surface-2 px-2 text-fg"
+                    disabled={busy}
+                    label="Which account is this key for?"
+                    onChange={next => {
+                      setAccountId(accounts.find(each => each.id === next)?.id);
+                      setMismatchTick(false);
+                    }}
+                    options={[
+                      { value: '', label: 'Pick one' },
+                      ...accounts.map(each => ({ value: each.id, label: accountWords(each) })),
+                    ]}
+                    value={accountId ?? ''}
+                  />
+                )}
+              </SelectField>
             ) : null}
 
             <label className="flex min-w-0 flex-col gap-1 text-meta text-muted" htmlFor={seedId}>

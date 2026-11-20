@@ -29,9 +29,9 @@ import {
 import type { AccountsClient as InputClient } from './accounts-api.ts';
 import { handleFromLabel, parseDomains, passwordLengthProblem } from '../../lib/login-form.ts';
 import { SettingGroup } from '@ferretry/app';
-import { SecretInput, useSecretField } from '@ferretry/app/ui';
+import { SecretInput, SelectBox, useSecretField } from '@ferretry/app/ui';
 import { AccountDetail, type AccountTab } from './account-detail.tsx';
-import { type AccountOps, INPUT as FULL_INPUT, Refusal } from './accounts-parts.tsx';
+import { type AccountOps, INPUT as FULL_INPUT, Refusal, SelectField } from './accounts-parts.tsx';
 import { SiteDetail, type SiteTab } from './site-detail.tsx';
 import type { RulesBinding } from './use-sign-in-rules.ts';
 
@@ -281,22 +281,19 @@ function LookAlikeBanner({
       </p>
       {merging ? (
         <div className="flex min-w-0 flex-col gap-2">
-          <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-            Keep which one
-            <select
-              className={INPUT}
-              data-accounts-merge-keep=""
-              disabled={busy}
-              onChange={event => setKeep(event.target.value)}
-              value={keep}
-            >
-              {accounts.map(each => (
-                <option key={each.id} value={each.id}>
-                  {accountTitle(each)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <SelectField className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg" label="Keep which one">
+            {id => (
+              <SelectBox
+                id={id}
+                className={INPUT}
+                disabled={busy}
+                label="Keep which one"
+                onChange={setKeep}
+                options={accounts.map(each => ({ value: each.id, label: accountTitle(each) }))}
+                value={keep}
+              />
+            )}
+          </SelectField>
           <p className="m-0 text-meta text-muted">The others' sites and 2FA keys move onto it, and they are removed.</p>
           <div className="flex flex-wrap gap-2">
             <button

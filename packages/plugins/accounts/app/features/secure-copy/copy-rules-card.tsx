@@ -22,6 +22,7 @@ import {
 } from '../../../contract/routes/index.ts';
 import './secure-copy.css';
 import { Plus, ShieldCheck, Trash2, TriangleAlert } from '../../shell.tsx';
+import { SelectBox } from '@ferretry/app/ui';
 import { type FormEvent, type ReactNode, useId, useState } from 'react';
 import { localizeUtcStamps } from '../../lib/local-time.ts';
 import { WrapAtUrlSeparators } from './url-wrap.tsx';
@@ -143,19 +144,14 @@ function AddRuleForm({
       <div className="fy-sc-pair">
         <Field label="From">
           {id => (
-            <select
+            <SelectBox
               id={id}
               className={INPUT}
+              label="From"
               value={fromKind}
-              data-copy-rule-from-kind=""
-              onChange={event => setFromKind(event.target.value as CopyRouteFrom['kind'])}
-            >
-              {FROM_KINDS.map(kind => (
-                <option key={kind.value} value={kind.value}>
-                  {kind.label}
-                </option>
-              ))}
-            </select>
+              onChange={next => setFromKind(next as CopyRouteFrom['kind'])}
+              options={FROM_KINDS.map(kind => ({ value: kind.value, label: kind.label }))}
+            />
           )}
         </Field>
         <Field label={fromKind === 'command' ? 'Program' : 'Page origin'}>
@@ -177,19 +173,14 @@ function AddRuleForm({
       <div className="fy-sc-pair">
         <Field label="Into">
           {id => (
-            <select
+            <SelectBox
               id={id}
               className={INPUT}
+              label="Into"
               value={toKind}
-              data-copy-rule-to-kind=""
-              onChange={event => setToKind(event.target.value as CopyRouteTo['kind'])}
-            >
-              {TO_KINDS.map(kind => (
-                <option key={kind.value} value={kind.value}>
-                  {kind.label}
-                </option>
-              ))}
-            </select>
+              onChange={next => setToKind(next as CopyRouteTo['kind'])}
+              options={TO_KINDS.map(kind => ({ value: kind.value, label: kind.label }))}
+            />
           )}
         </Field>
         <Field
