@@ -120,16 +120,14 @@ const SWITCH_CLASS =
 
 /**
  * The numbers' rows lay out by the width of the PANEL they sit in (a Settings panel is ~212px wide at a 768px window,
- * ~724px at 1280), never the window's: one column below 640px, two to a line from there. The container is the `li`, the
+ * ~724px at 1280), never the window's: one column below 640px, two to a line from there; a lone last row keeps the first column, so its input lines up with the input above it. The container is the `li`, the
  * grid is inside it, because a container cannot query itself.
  */
 const FIT = 'min-w-0 [container-type:inline-size]';
 const ROWS =
   'm-0 grid min-w-0 list-none grid-cols-1 p-0 [&>li+li]:border-t [&>li+li]:border-border ' +
   '[@container(min-width:640px)]:grid-cols-2 [@container(min-width:640px)]:gap-x-8 ' +
-  '[@container(min-width:640px)]:[&>li:nth-child(2)]:border-t-0 ' +
-  '[@container(min-width:640px)]:[&>li:last-child:nth-child(odd)]:col-span-2 ' +
-  '[@container(min-width:640px)]:[&>li:last-child:nth-child(odd)>div]:max-w-[28rem]';
+  '[@container(min-width:640px)]:[&>li:nth-child(2)]:border-t-0';
 
 /** The numbers, edited together and saved with one button: every save rewrites a file on the machine. */
 function NumbersForm({
