@@ -1207,6 +1207,34 @@ describe('a staged 2FA seed card', () => {
   });
 });
 
+describe('a ferret’s recipe proposal card', () => {
+  test('is offered to the item view only for the daemon’s own proposal reference, not for words that copy its title', () => {
+    const REF = { signIn: `si_${'a'.repeat(16)}`, proposal: `rp_${'b'.repeat(16)}` };
+    const referenced = mount({
+      snapshot: board([
+        item('A1', {
+          kind: 'task',
+          raisedBy: 'daemon',
+          subject: 'Recipe change on github.com',
+          recipeProposal: REF,
+        } as Partial<AgendaItem>),
+      ]),
+      focus: { target: 'A1' as AgendaId, seq: 1 },
+    });
+    expect(referenced.root.findByType(AgendaItemView).props.planForm).toBeDefined();
+    run(() => referenced.unmount());
+
+    const copied = mount({
+      snapshot: board([
+        item('A1', { kind: 'task', raisedBy: 'agent', subject: 'Recipe change on github.com' } as Partial<AgendaItem>),
+      ]),
+      focus: { target: 'A1' as AgendaId, seq: 1 },
+    });
+    expect(copied.root.findByType(AgendaItemView).props.planForm).toBeUndefined();
+    run(() => copied.unmount());
+  });
+});
+
 describe('a sign-in rule suggestion card', () => {
   const offered = (extra: Partial<AgendaItem>) => {
     const view = mount({

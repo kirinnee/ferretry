@@ -166,6 +166,7 @@ export const handsOnRaise = (request: RaiseAgendaRequest, actor: AgendaActor): b
     request.taskPlan !== undefined ||
     request.signInRuleSuggestion !== undefined ||
     request.twoFactorSeed !== undefined ||
+    request.recipeProposal !== undefined ||
     request.confirms !== undefined);
 
 /** Whether a daemon's resolve-by-source is about a hands-on card (only the cause is known there). */
@@ -182,4 +183,5 @@ export const handsOnItem = (item: AgendaItem): boolean =>
   item.signInRuleSuggestion !== undefined ||
   item.signInRuleSuspended !== undefined ||
   item.twoFactorSeed !== undefined ||
+  item.recipeProposal !== undefined ||
   item.confirms !== undefined;

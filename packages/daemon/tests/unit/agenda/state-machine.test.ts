@@ -217,6 +217,21 @@ describe('Agenda state machine', () => {
     should(kindResult.error.code).equal('invalid');
   });
 
+  it('should let only the daemon point a card at a recipe proposal', () => {
+    // Arrange: the card's form approves a ferret's recipe through the owner's route, so a ferret may never draw one.
+    const recipeProposal = { signIn: 'si_0123456789abcdef', proposal: 'rp_0123456789abcdef' } as const;
+    const forged = raiseCommand(AGENT, { recipeProposal });
+    const daemon = raiseCommand(DAEMON, { source: 'question', sourceRef: recipeProposal.proposal, recipeProposal });
+
+    // Act
+    const forgedResult = failed(applyAgendaCommandToSession(null, SESSION_ID, forged));
+    const daemonResult = succeeded(applyAgendaCommandToSession(null, SESSION_ID, daemon));
+
+    // Assert
+    should(forgedResult.error.code).equal('forbidden');
+    should(activeEntry(daemonResult.ledger).item.recipeProposal).deepEqual(recipeProposal);
+  });
+
   it('should allow daemon-derived plain requests and reject sourceSeq on the wrong source', () => {
     // Arrange
     const plain = raiseCommand(DAEMON, { source: 'task', sourceRef: 'F12', ask: undefined });

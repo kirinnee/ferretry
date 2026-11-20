@@ -27,6 +27,7 @@ export const isPlainThread = (item: AgendaItem): boolean =>
   item.copyPlan === undefined &&
   item.signInRuleSuggestion === undefined &&
   item.twoFactorSeed === undefined &&
+  item.recipeProposal === undefined &&
   item.phoneApproval === undefined;
 
 /**

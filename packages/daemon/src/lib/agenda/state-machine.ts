@@ -25,6 +25,7 @@ import {
   AgendaItemSchema,
   type AgendaKind,
   type AgendaPhoneApprovalRef,
+  type AgendaRecipeProposalRef,
   type AgendaResponse,
   type AgendaResting,
   type AgendaRevisableField,
@@ -234,6 +235,8 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly signInRuleSuggestion?: AgendaSignInRuleSuggestionRef;
   /** The staged 2FA seed a card asks the owner to save with a passkey (`AgendaTwoFactorSeedRef`); only the daemon raises one. */
   readonly twoFactorSeed?: AgendaTwoFactorSeedRef;
+  /** The ferret's proposed sign-in recipe a card presents (`AgendaRecipeProposalRef`); only the daemon raises one. */
+  readonly recipeProposal?: AgendaRecipeProposalRef;
   /** The approve-on-phone card an `info` item presents (`AgendaPhoneApprovalRef`); only the daemon raises one. */
   readonly phoneApproval?: AgendaPhoneApprovalRef;
   /** The board cards a machine notice lists, each with Open, Start and Close (`AgendaCardRow`); only the daemon raises them. */
@@ -1537,6 +1540,10 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   if (request.carried !== undefined && actor.kind !== 'daemon') {
     return failure('forbidden', 'only the daemon carries an item over to another ferret\u2019s agenda');
   }
+  // The recipe card's form approves a ferret's recipe through the owner's route: only the daemon points a card at one.
+  if (request.recipeProposal !== undefined && actor.kind !== 'daemon') {
+    return failure('forbidden', 'only the daemon raises a recipe proposal card');
+  }
   const noticeProblem = agendaNoticeProblems(request)[0];
   if (noticeProblem !== undefined) return failure('invalid', noticeProblem);
   const offerCloseProblem = agendaOfferCloseProblems(request)[0];
@@ -1639,6 +1646,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.taskPlan === undefined ? {} : { taskPlan: request.taskPlan }),
       ...(request.signInRuleSuggestion === undefined ? {} : { signInRuleSuggestion: request.signInRuleSuggestion }),
       ...(request.twoFactorSeed === undefined ? {} : { twoFactorSeed: request.twoFactorSeed }),
+      ...(request.recipeProposal === undefined ? {} : { recipeProposal: request.recipeProposal }),
       ...(request.phoneApproval === undefined ? {} : { phoneApproval: request.phoneApproval }),
       ...(request.cards === undefined ? {} : { cards: request.cards }),
       ...(request.offerClose === true ? { offerClose: true as const } : {}),
@@ -2885,6 +2893,7 @@ function plainThread(item: AgendaItem): boolean {
     item.copyPlan === undefined &&
     item.signInRuleSuggestion === undefined &&
     item.twoFactorSeed === undefined &&
+    item.recipeProposal === undefined &&
     item.phoneApproval === undefined
   );
 }

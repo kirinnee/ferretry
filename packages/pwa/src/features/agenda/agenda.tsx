@@ -58,6 +58,7 @@ import { useOptionalRouter } from '../../lib/router.tsx';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
+import { RecipeProposalHost } from '../input-request/recipe-proposal-host.tsx';
 import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
@@ -656,6 +657,9 @@ export const useAgenda = ({
             : {})}
           {...(cardItem.twoFactorSeed !== undefined
             ? { planForm: <TwoFactorSeedHost connection={connection} item={cardItem} /> }
+            : {})}
+          {...(cardItem.recipeProposal !== undefined
+            ? { planForm: <RecipeProposalHost connection={connection} item={cardItem} /> }
             : {})}
           {...(cardItem.kind === 'input'
             ? {
