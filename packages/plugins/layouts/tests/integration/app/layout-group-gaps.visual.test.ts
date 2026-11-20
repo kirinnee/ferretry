@@ -65,6 +65,7 @@ afterAll(async () => {
 });
 
 const VARIANTS = [
+  { name: '390-light', width: 390, phone: true, scheme: 'light' },
   { name: '390-dark', width: 390, phone: true, scheme: 'dark' },
   { name: '768-dark', width: 768, phone: false, scheme: 'dark' },
   { name: '1280-dark', width: 1_280, phone: false, scheme: 'dark' },
@@ -95,6 +96,70 @@ describe('the layout page groups', () => {
           await tab.setViewportSize({ width: variant.width, height: 1_100 });
           await tab.screenshot({ path: join(shotsDir, `${variant.name}-layout.png`) });
         }
+      } finally {
+        await context.close();
+      }
+    });
+  }
+
+  // r11 S3a: the layout and theme choosers are the app's SelectBox, not the browser's select.
+  for (const variant of VARIANTS) {
+    it(`${variant.name}: the Layout chooser is a SelectBox (no native select; ${variant.phone ? 'a centred dialog' : 'a listbox under it'}), pick sends the same write as before`, async () => {
+      const context = await browser.newContext({
+        viewport: { width: variant.width, height: 900 },
+        colorScheme: variant.scheme,
+        ...(variant.phone ? { hasTouch: true, isMobile: true } : {}),
+      });
+      const tab = await context.newPage();
+      tab.setDefaultTimeout(8_000);
+      try {
+        await tab.goto(`${server?.url.origin}/?theme=studio-${variant.scheme}`);
+        await tab.locator('[data-layout-settings]').waitFor();
+        expect(await tab.locator('[data-layout-settings] select').count()).toBe(0);
+        const box = tab.locator('[role="combobox"][aria-label="Layout"]');
+        await box.scrollIntoViewIfNeeded();
+        await box.click();
+        await tab.waitForTimeout(600);
+        const open = await tab.evaluate(() => {
+          const panel = document.querySelector('[role="dialog"], [data-select-popover]') as HTMLElement | null;
+          const list = panel?.getBoundingClientRect();
+          const button = document.querySelector('[role="combobox"][aria-label="Layout"]')?.getBoundingClientRect();
+          return list === undefined || button === undefined || panel === null
+            ? null
+            : {
+                dialog: panel.getAttribute('role') === 'dialog',
+                gap: list.top - button.bottom,
+                dx: Math.abs(list.left + list.width / 2 - innerWidth / 2),
+                dy: Math.abs(list.top + list.height / 2 - innerHeight / 2),
+              };
+        });
+        expect(open?.dialog).toBe(variant.phone);
+        if (variant.phone) {
+          expect(open?.dx, 'the dialog is centred across').toBeLessThanOrEqual(8);
+          expect(open?.dy, 'the dialog is centred down').toBeLessThanOrEqual(8);
+        } else {
+          expect(open?.gap, 'the list opens right under the button').toBeGreaterThanOrEqual(0);
+          expect(open?.gap).toBeLessThanOrEqual(12);
+        }
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${variant.name}-layout-chooser-open.png`) });
+        // Eight layouts: above the auto-search threshold, so the list has a search field; typing narrows it, picking sends one write.
+        const search = tab.locator('[aria-label="Search Layout"]');
+        expect(await search.count(), 'the long list has a search field').toBe(1);
+        const before = await tab.locator('[role="option"]').count();
+        expect(before, 'every fake layout is offered before typing').toBe(8);
+        await search.fill('compact');
+        await tab.waitForFunction(() => document.querySelectorAll('[role="option"]').length === 1);
+        const after = await tab.locator('[role="option"]').allTextContents();
+        expect(after, 'non-matching options disappear').toEqual(['compact']);
+        if (shotsDir !== '')
+          await tab.screenshot({ path: join(shotsDir, `${variant.name}-layout-chooser-filtered.png`) });
+        await tab.locator('[role="option"]', { hasText: 'compact' }).click();
+        await tab.waitForFunction(() =>
+          (window as unknown as { __fyCalls: string[] }).__fyCalls.includes('use compact'),
+        );
+        expect(await tab.evaluate(() => (window as unknown as { __fyCalls: string[] }).__fyCalls)).toEqual([
+          'use compact',
+        ]);
       } finally {
         await context.close();
       }

@@ -12,7 +12,8 @@ import type { BoardActions } from '../../../app/lib/board-actions.ts';
 import { ferretNamer } from '../../../app/lib/board-present.ts';
 import { DaemonBoardStore } from '../../../app/lib/board-store.ts';
 import { LaneEditor, LaneEditorPage } from '../../../app/views/lane-editor.tsx';
-import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { ensureDom, interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { choose, labelOf, openBox, optionsOpen, shownBy } from '../../support/select-box.ts';
 import { fakeEnvironment, fakePort, laneSetFor, laptop, PROJECT } from './board-support.ts';
 
 type Actions = Pick<BoardActions, 'acceptLanes' | 'saveLanes' | 'adoptTemplate'>;
@@ -74,20 +75,13 @@ const click = async (element: Element): Promise<void> => {
   });
 };
 
+ensureDom();
 const nativeInput = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-const nativeSelect = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
 
 const type = async (input: Element, text: string): Promise<void> => {
   await interact(() => {
     nativeInput?.call(input, text);
     input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-};
-
-const choose = async (select: Element, value: string): Promise<void> => {
-  await interact(() => {
-    nativeSelect?.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
   });
 };
 
@@ -197,7 +191,7 @@ describe('editing the lanes', () => {
     const row = must(view.container.querySelector('[data-lane-row="implement"]'), 'the implement row');
 
     // Act
-    await choose(byLabel(view, 'Category of Implement'), 'review');
+    await choose(byLabel(view, 'Category of Implement'), 'In review');
     const triggers = must(row.querySelector('[data-lane-triggers]'), 'the trigger list');
     const trigger = [...triggers.querySelectorAll('button')].find(node => node.textContent === 'a PR opens');
     await click(must(trigger, 'the PR opens trigger'));
@@ -249,9 +243,8 @@ describe('editing the lanes', () => {
     const view = await show(editor(laneSetFor()));
 
     // Act
-    const options = [...byLabel(view, 'Category of Implement').querySelectorAll('option')].map(
-      node => node.textContent,
-    );
+    await openBox(byLabel(view, 'Category of Implement'));
+    const options = optionsOpen().map(labelOf);
     const closedGate = must(
       view.container.querySelector('[data-lane-row="closed"] label[title]'),
       'the closed lane gate label',
@@ -386,9 +379,9 @@ describe('the stage of a lane', () => {
     // Assert
     const tested = gatePanel(view, 'tested');
     const labels = [...tested.querySelectorAll<HTMLInputElement>('input')].map(input => input.value);
-    const outcomes = [...tested.querySelectorAll<HTMLSelectElement>('select')].map(select => select.value);
+    const outcomes = [...tested.querySelectorAll<HTMLElement>('[role="combobox"]')].map(shownBy);
     expect(labels).toEqual(['Done', 'Not good']);
-    expect(outcomes).toEqual(['close', 'reopen']);
+    expect(outcomes).toEqual(['Close', 'Not good (reopen and talk)']);
     expect(view.container.querySelector('[data-lane-gate="implement"]')).toBeNull();
   });
 
@@ -434,7 +427,7 @@ describe('the stage of a lane', () => {
     await click(stageButton(view, 'Implement', 'gate'));
     await click(add());
     await type(byLabel(view, 'Label of option 2 of Implement'), 'Try again');
-    await choose(byLabel(view, 'Outcome of option 2 of Implement'), 'lane:todo');
+    await choose(byLabel(view, 'Outcome of option 2 of Implement'), 'Go to Todo');
     await click(buttonSaying(view, 'Save lanes'));
 
     // Assert
@@ -460,8 +453,16 @@ describe('the stage of a lane', () => {
 
     // Assert: To test already reopens on its second option, so its first cannot.
     expect(byLabel(view, 'Remove option 1 of Plan/Design').hasAttribute('disabled')).toBe(true);
-    const reopen = (label: string) =>
-      must(byLabel(view, label).querySelector<HTMLOptionElement>('option[value="reopen"]'), 'the reopen choice');
+    const reopenDisabled = async (label: string): Promise<boolean> => {
+      await openBox(byLabel(view, label));
+      const choice = must(
+        optionsOpen().find(option => labelOf(option) === 'Not good (reopen and talk)'),
+        'the reopen choice',
+      );
+      const disabled = choice.getAttribute('aria-disabled') === 'true';
+      await interact(() => byLabel(view, label).click()); // the trigger toggles it shut
+      return disabled;
+    };
     await click(stageButton(view, 'Implement', 'gate'));
     await click(
       must(
@@ -471,11 +472,11 @@ describe('the stage of a lane', () => {
         'the Add option button',
       ),
     );
-    expect(reopen('Outcome of option 2 of Implement').disabled).toBe(false);
-    expect(reopen('Outcome of option 1 of To test').disabled).toBe(true);
-    expect(reopen('Outcome of option 2 of To test').disabled).toBe(false);
-    await choose(byLabel(view, 'Outcome of option 2 of Implement'), 'reopen');
-    expect(reopen('Outcome of option 1 of Implement').disabled).toBe(true);
+    expect(await reopenDisabled('Outcome of option 2 of Implement')).toBe(false);
+    expect(await reopenDisabled('Outcome of option 1 of To test')).toBe(true);
+    expect(await reopenDisabled('Outcome of option 2 of To test')).toBe(false);
+    await choose(byLabel(view, 'Outcome of option 2 of Implement'), 'Not good (reopen and talk)');
+    expect(await reopenDisabled('Outcome of option 1 of Implement')).toBe(true);
   });
 
   it('offers the next lane, any other lane, Not good and Close, and never the gate’s own lane', async () => {
@@ -483,16 +484,13 @@ describe('the stage of a lane', () => {
     const view = await show(editor(laneSetFor()));
 
     // Assert
-    const choices = [...byLabel(view, 'Outcome of option 1 of Plan/Design').querySelectorAll('option')].map(node => [
-      node.value,
-      node.textContent,
-    ]);
-    expect(choices[0]).toEqual(['next', 'Next lane']);
-    expect(choices.at(-2)).toEqual(['reopen', 'Not good (reopen and talk)']);
-    expect(choices.at(-1)).toEqual(['close', 'Close']);
-    expect(choices.map(([value]) => value)).toContain('lane:implement');
-    expect(choices.map(([value]) => value)).not.toContain('lane:plan');
-    expect(choices.find(([value]) => value === 'lane:implement')?.[1]).toBe('Go to Implement');
+    await openBox(byLabel(view, 'Outcome of option 1 of Plan/Design'));
+    const choices = optionsOpen().map(labelOf);
+    expect(choices[0]).toBe('Next lane');
+    expect(choices.at(-2)).toBe('Not good (reopen and talk)');
+    expect(choices.at(-1)).toBe('Close');
+    expect(choices).toContain('Go to Implement');
+    expect(choices).not.toContain('Go to Plan/Design');
   });
 
   it('names a blank option label and blocks saving until it is fixed', async () => {
@@ -542,7 +540,7 @@ describe('the stage of a lane', () => {
     const view = await show(editor(laneSetFor()));
     const group = must(view.container.querySelector('[data-lane-gate="tested"] [data-gate-option]'), 'an option');
     expect(group.querySelector('input[aria-label^="Label of option 1"]')).not.toBeNull();
-    expect(group.querySelector('select[aria-label^="Outcome of option 1"]')).not.toBeNull();
+    expect(group.querySelector('[role="combobox"][aria-label^="Outcome of option 1"]')).not.toBeNull();
     expect(group.querySelector('button[aria-label^="Remove option 1"]')).not.toBeNull();
     expect(group.textContent).toContain('→');
   });
@@ -616,11 +614,13 @@ describe('deleting a lane', () => {
       'the delete button',
     );
     expect(confirm.disabled).toBe(true);
-    const targets = [...prompt.querySelectorAll('option')].map(option => option.value);
-    expect(targets).not.toContain('implement');
-    expect(targets).toContain('review');
+    expect(shownBy(byLabel(view, 'Where its tasks go'))).toBe('Choose a lane…');
+    await openBox(byLabel(view, 'Where its tasks go'));
+    const targets = optionsOpen().map(labelOf);
+    expect(targets).not.toContain('Implement');
+    expect(targets).toContain('Review/CI');
 
-    await choose(byLabel(view, 'Where its tasks go'), 'review');
+    await choose(byLabel(view, 'Where its tasks go'), 'Review/CI');
     expect(confirm.disabled).toBe(false);
   });
 
@@ -629,7 +629,7 @@ describe('deleting a lane', () => {
     const actions = recorder();
     const view = await show(editor(laneSetFor(), actions));
     await click(byLabel(view, 'Delete Implement'));
-    await choose(byLabel(view, 'Where its tasks go'), 'review');
+    await choose(byLabel(view, 'Where its tasks go'), 'Review/CI');
 
     // Act
     await click(buttonSaying(view, 'Delete lane'));

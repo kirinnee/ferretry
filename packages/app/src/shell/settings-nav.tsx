@@ -2,6 +2,7 @@ import { ChevronRight } from 'lucide-react';
 import { useId, useLayoutEffect, useRef } from 'react';
 import { daemonSettingsHref, DEVICE_SETTINGS_HREF } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
+import { SelectBox, type SelectOption } from '../ui/select-box.tsx';
 import { Icon } from './icons.tsx';
 import { Link } from './link.tsx';
 import {
@@ -84,38 +85,35 @@ export function SettingsNav({
     ));
   const hrefOf = (tab: NavTab): string => daemonSettingsHref(daemon, tab.plugin, tab.id);
   /** The mid-width picker: every page of both blocks, in the same titled groups, as one grouped select that is always fully visible. */
-  const optgroups = (blockTitle: string, list: readonly NavTab[], first?: React.ReactNode) =>
-    groupSettingsTabs(list).map((group, index) => (
-      <optgroup key={`${blockTitle}-${group.id}`} label={`${blockTitle} · ${group.label}`}>
-        {index === 0 ? first : null}
-        {group.tabs.map(candidate => (
-          <option key={`${candidate.plugin}.${candidate.id}`} value={hrefOf(candidate)}>
-            {candidate.label}
-          </option>
-        ))}
-      </optgroup>
-    ));
+  const optionsOf = (blockTitle: string, list: readonly NavTab[], first?: SelectOption): SelectOption[] => {
+    const grouped = groupSettingsTabs(list).flatMap((group, index): SelectOption[] => [
+      ...(index === 0 && first !== undefined ? [{ ...first, group: `${blockTitle} · ${group.label}` }] : []),
+      ...group.tabs.map(candidate => ({
+        value: hrefOf(candidate),
+        label: candidate.label,
+        group: `${blockTitle} · ${group.label}`,
+      })),
+    ]);
+    return grouped.length === 0 && first !== undefined ? [{ ...first, group: blockTitle }] : grouped;
+  };
+  const pickerOptions = [
+    ...optionsOf(DEVICE_BLOCK_HEADING, device, { value: DEVICE_SETTINGS_HREF, label: 'This device' }),
+    ...optionsOf(`${machine} · every device`, machineTabs),
+  ];
   return (
     <nav ref={listRef} className="fy-tabs fy-tabs--grouped fy-settings-nav" aria-label="Plugin settings">
       <div className="fy-settings-picker" data-settings-picker="">
         <label className="fy-settings-picker__label" htmlFor={pickerId}>
           Settings page
         </label>
-        <select
+        <SelectBox
           id={pickerId}
           className="fy-settings-picker__select"
+          label="Settings page"
+          onChange={href => router.navigate(href)}
+          options={pickerOptions}
           value={active === undefined ? DEVICE_SETTINGS_HREF : hrefOf(active)}
-          onChange={event => router.navigate(event.target.value)}
-        >
-          {optgroups(
-            DEVICE_BLOCK_HEADING,
-            device,
-            <option key="this-device" value={DEVICE_SETTINGS_HREF}>
-              This device
-            </option>,
-          )}
-          {optgroups(`${machine} · every device`, machineTabs)}
-        </select>
+        />
       </div>
       <section aria-labelledby="fy-settings-block-device" className="fy-settings-block">
         <p className="fy-settings-block__title" id="fy-settings-block-device">
