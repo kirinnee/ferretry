@@ -287,6 +287,18 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # The browser's own `<select>` stays out of the app: every list choice is a SelectBox (drawn by the app, searchable, a
+    # centred dialog on a phone). Reports while the r11 S3a-S3f adoption PRs land, then fails; see
+    # scripts/validate/no-native-select.sh.
+    a-no-native-select = {
+      enable = true;
+      name = "No native select in product code";
+      entry = validator "scripts/validate/no-native-select.sh";
+      files = "^(packages/(app/src|core/[^/]+/app|plugins/[^/]+/app)/.*\\.tsx|scripts/validate/no-native-select\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # Daemon code holds exactly the synchronous file calls its ledger declares. The daemon's main thread
     # answers every client, and on 2026-11-05 it stalled up to 61.9 s while swap saturated the disk; a sync
     # call holds every client for as long as the disk takes. See scripts/validate/no-sync-io.sh and

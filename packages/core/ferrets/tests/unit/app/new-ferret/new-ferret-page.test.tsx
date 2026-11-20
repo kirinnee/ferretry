@@ -372,18 +372,22 @@ describe('NewFerretPage › the offered runtime slot', () => {
     expect(input(harness.view, 'fy-new-ferret-model').props.placeholder).toBe('');
   });
 
-  it("lists a catalog login's models in a select, and starts on the one chosen", async () => {
+  it("lists a catalog login's models in a select box, and starts on the one chosen", async () => {
     const catalog: ChosenFerretAccount = { ...CLAUDE, modelCatalog: { id: 'zai', label: 'Z.ai', customIds: false } };
     const harness = page({ panel: slot => <StubPicker account={catalog} slot={slot} /> });
     run(() => harness.view.root.findByProps({ 'data-stub-runtime': 'claude-a' }).props.onClick());
-    const select = harness.view.root.findByType('select');
-    expect(select.findAllByType('option').map(option => option.props.value)).toEqual([
+    // The model field is the app's own select box (`SelectBox`): its props are the list and the write.
+    const select = harness.view.root.find(
+      node =>
+        typeof node.type !== 'string' && node.props.id === 'fy-new-ferret-model' && Array.isArray(node.props.options),
+    );
+    expect(select.props.options.map((option: { value: string }) => option.value)).toEqual([
       '',
       'opus',
       'haiku',
       'sonnet-old',
     ]);
-    run(() => select.props.onChange({ target: { value: 'haiku' } }));
+    run(() => select.props.onChange('haiku'));
     change(harness.view, 'fy-new-ferret-folder', '/work/x');
     change(harness.view, 'fy-new-ferret-prompt', 'Go');
     await runAsync(async () => button(harness.view, 'Create ferret').props.onClick());

@@ -2,16 +2,18 @@
  * THE MODEL FIELD every form shares (docs/model-catalog.md): the new-session form, Settings › Warden's
  * investigation model and a lessons scan's model. It lists exactly the chosen login's catalog, grouped
  * by tier with the default marked, and offers "Custom id…" for a provider that takes ids beyond its
- * catalog. A native `<select>`, so a phone gets its own wheel and a screen reader its own list.
+ * catalog. A `SelectBox` (the app's own select: a popover under a mouse, a centred dialog on a phone, a search box once the
+ * list is long), so every theme draws it and a screen reader reads a listbox.
  *
  * The live session pickers (the composer's chip and Info › Runtime) are menus instead, because choosing
  * there is an action sent to a running harness; they group by the same tiers (`./model-tiers.ts`).
  */
 import type { LocalModelsSnapshot } from './local-models-note.tsx';
-import { useId, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import type { ClipboardWriter } from './copy-button.tsx';
 import { CUSTOM_MODEL_ID, contextWords, groupByTier, type ModelTier } from './model-tiers.ts';
 import { LocalModelsNote, localNote } from './local-models-note.tsx';
+import { SelectBox, type SelectOption } from './select-box.tsx';
 
 /** The option that reveals the custom id box. Not a model id: the grammar has no leading space. */
 const CUSTOM = ' custom';
@@ -34,6 +36,8 @@ export interface ModelChoice {
 
 export interface ModelSelectProps {
   readonly id: string;
+  /** The field's name, for a screen reader and the phone dialog's title; the caller's visible `<label htmlFor>` carries the same words. */
+  readonly label?: string;
   readonly models: readonly ModelChoice[];
   /** The model chosen; `""` means the login's default. */
   readonly value: string;
@@ -55,17 +59,45 @@ export interface ModelSelectProps {
 const nameOf = (models: readonly ModelChoice[], id: string | null): string | undefined =>
   id === null ? undefined : (models.find(model => model.id === id)?.label ?? id);
 
-/** One option's words: its name, then what a reader weighs it by. */
-const optionText = (model: ModelChoice, defaultModel: string | null): string =>
+/** What a reader weighs an option by, after its name. */
+const optionHint = (model: ModelChoice, defaultModel: string | null): string | undefined =>
   [
-    model.label ?? model.id,
     model.id === defaultModel ? 'default' : undefined,
     model.local === true ? 'installed here' : undefined,
     contextWords(model.context),
     model.available ? undefined : 'not on this login',
   ]
     .filter(part => part !== undefined)
-    .join(' · ');
+    .join(' · ') || undefined;
+
+/** The catalog as a select's options: the login's default first, each tier a heading, "Custom id…" last when the provider takes any id. */
+function optionsFor(
+  models: readonly ModelChoice[],
+  defaultModel: string | null,
+  defaultLabel: string,
+  customIds: boolean,
+): readonly SelectOption[] {
+  const defaultName = nameOf(models, defaultModel);
+  const hintOf = (model: ModelChoice): { readonly hint?: string } => {
+    const hint = optionHint(model, defaultModel);
+    return hint === undefined ? {} : { hint };
+  };
+  return [
+    { value: '', label: defaultName === undefined ? defaultLabel : `${defaultLabel} (${defaultName})` },
+    ...groupByTier(models).flatMap(group =>
+      group.items.map(
+        (model): SelectOption => ({
+          value: model.id,
+          label: model.label ?? model.id,
+          ...hintOf(model),
+          ...(group.heading === undefined ? {} : { group: group.heading }),
+          ...(model.available ? {} : { disabled: true }),
+        }),
+      ),
+    ),
+    ...(customIds ? [{ value: CUSTOM, label: 'Custom id…' }] : []),
+  ];
+}
 
 export function ModelSelect({
   customIds,
@@ -73,6 +105,7 @@ export function ModelSelect({
   defaultModel,
   disabled = false,
   id,
+  label = 'Model',
   models,
   local,
   onChange,
@@ -89,16 +122,18 @@ export function ModelSelect({
     .join(' ');
   const typed = value.trim();
   const problem = custom && typed.length > 0 && !CUSTOM_MODEL_ID.test(typed);
-  const defaultName = nameOf(models, defaultModel);
+  const options = useMemo(
+    () => optionsFor(models, defaultModel, defaultLabel, customIds),
+    [models, defaultModel, defaultLabel, customIds],
+  );
   return (
     <>
-      <select
+      <SelectBox
         aria-describedby={described === '' ? undefined : described}
-        className="kt-input w-full"
         disabled={disabled}
         id={id}
-        onChange={event => {
-          const next = event.target.value;
+        label={label}
+        onChange={next => {
           if (next === CUSTOM) {
             setCustom(true);
             onChange('');
@@ -107,28 +142,9 @@ export function ModelSelect({
           setCustom(false);
           onChange(next);
         }}
+        options={options}
         value={custom ? CUSTOM : value}
-      >
-        <option value="">{defaultName === undefined ? defaultLabel : `${defaultLabel} (${defaultName})`}</option>
-        {groupByTier(models).map(group =>
-          group.heading === undefined ? (
-            group.items.map(model => (
-              <option disabled={!model.available} key={model.id} value={model.id}>
-                {optionText(model, defaultModel)}
-              </option>
-            ))
-          ) : (
-            <optgroup key={group.heading} label={group.heading}>
-              {group.items.map(model => (
-                <option disabled={!model.available} key={model.id} value={model.id}>
-                  {optionText(model, defaultModel)}
-                </option>
-              ))}
-            </optgroup>
-          ),
-        )}
-        {customIds ? <option value={CUSTOM}>Custom id…</option> : null}
-      </select>
+      />
       <LocalModelsNote id={noteId} local={local} {...(write === undefined ? {} : { write })} />
       {custom ? (
         <>
