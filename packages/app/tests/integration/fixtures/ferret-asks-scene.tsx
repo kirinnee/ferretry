@@ -70,6 +70,32 @@ const board = {
   updatedAt: AT,
 };
 
+/** What runs under the fake ferret (the Processes panel reads it): made-up commands, one of each look. */
+const secondsAgo = (seconds: number): string => new Date(Date.parse(AT) - seconds * 1000).toISOString();
+const fakeProcess = (id: number, command: string, kind: string, state: string, age: number, parentId?: number) => ({
+  id: `${id}.${id}`,
+  pid: id,
+  ...(parentId === undefined ? {} : { parentId: `${parentId}.${parentId}` }),
+  command,
+  commandTruncated: false,
+  kind,
+  state,
+  startedAt: secondsAgo(age),
+  output: { source: 'file' },
+  stoppable: true,
+});
+const processes = {
+  sessionId: 'zoe',
+  observedAt: AT,
+  available: true,
+  processes: [
+    fakeProcess(100, 'bun test --watch', 'command', 'running', 134),
+    fakeProcess(200, 'bun run dev', 'background', 'sleeping', 3_900),
+    fakeProcess(201, 'vite --port 5173', 'server', 'sleeping', 3_899, 200),
+    fakeProcess(300, 'sleep 600', 'background', 'running', 20),
+  ],
+};
+
 const grants = {
   capabilities: ['fleet', 'terminal', 'browser', 'filesystem', 'warden', 'pairing', 'secrets'].map(capability => ({
     capability,
@@ -102,6 +128,7 @@ const transport = new FakeTransport((request: TransportRequest): TransportAnswer
     });
   if (path === '/v1/ferrets/zoe/agenda') return json(board);
   if (path === '/v1/agenda/open') return json({ sessions: [{ sessionId: 'zoe', items: board.items }] });
+  if (path === '/v1/ferrets/zoe/processes') return json(processes);
   if (path === '/v1/ferrets/zoe/log-page')
     return json({ v: 1, ferret: 'zoe', log: '', start: 0, file: 'zoe.jsonl', offsets: [] });
   (window as unknown as { __unanswered: string[] }).__unanswered.push(`${request.method} ${path}`);

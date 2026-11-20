@@ -716,7 +716,6 @@
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
         "@types/react-test-renderer": "^19.0.0",
-        "react-dom": "^19.0.0",
         "react-test-renderer": "^19.0.0",
         "should": "^13.2.3",
       },
