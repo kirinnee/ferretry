@@ -432,8 +432,9 @@ function RouteFlow({
         />
       </section>
 
+      {/* The note is the page's own line, not the footer's: the sticky footer is one row of buttons, never a tall block that covers the page. */}
+      {stated ? null : <p className="m-0 pt-2 text-2xs leading-base text-faint">{ADVANCE_NOTE[at.current]}</p>}
       <div className="fy-ob-sticky mt-auto flex min-w-0 flex-col gap-1 pt-2">
-        {stated ? null : <p className="m-0 text-2xs leading-base text-faint">{ADVANCE_NOTE[at.current]}</p>}
         <div className="fy-ob-actions" data-onboarding-actions="">
           {/*
             BACK ALWAYS GOES SOMEWHERE, AND SAYS WHERE. On the first step of a journey the place behind it is the question

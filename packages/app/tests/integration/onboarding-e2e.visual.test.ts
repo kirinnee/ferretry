@@ -27,6 +27,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright-core';
 import { sceneServer, sharedChromium } from '../support/browser/index.ts';
+import { clippedBoxes, footerButtons, gapUnderTitle, underFooter } from '../support/browser/stepper-layout.ts';
 import { FAKE_CODE, MACHINE_A, MACHINE_B, pairLinkOf } from './fixtures/onboarding-e2e-daemon.ts';
 
 setDefaultTimeout(280_000);
@@ -199,8 +200,8 @@ const inspect = async (tab: Page, variant: Variant, key: string, opts: { first?:
   }, CHROME);
   // ONE counter meaning on every page: "<segment> · n of m" says what the bar draws (one lit segment, the ones before it
   // done, the current one filled n of m), and n is never past m.
-  const said = /^(.*) · (\d+) of (\d+)$/u.exec(read.counter.text);
-  expect(said, `${key}: the counter reads '<stage> · n of m' (read '${read.counter.text}')`).not.toBeNull();
+  const said = /^(.*) · page (\d+) of (\d+)$/u.exec(read.counter.text);
+  expect(said, `${key}: the counter reads '<segment> · page n of m' (read '${read.counter.text}')`).not.toBeNull();
   const [, , saidN = '', saidM = ''] = said ?? [];
   expect([Number(saidN), Number(saidM)], `${key}: the counter and the progress bar say the same numbers`).toEqual([
     read.counter.now,
@@ -247,6 +248,70 @@ const inspect = async (tab: Page, variant: Variant, key: string, opts: { first?:
     );
     expect(button.h, `${key}: ${button.label} is a 44px target`).toBeGreaterThanOrEqual(43.5);
   }
+  // Item 3: the title sits right over the page (no dead band between them), and Later is a real button in the footer row
+  // (Back · Later · Next), never a link floating in the page.
+  const gap = await gapUnderTitle(tab, '.fy-spf__head', '.fy-spf__body');
+  expect(gap.gap, `${key}: something is drawn under the title (first: ${gap.first})`).toBeGreaterThanOrEqual(0);
+  expect(gap.gap, `${key}: no dead gap between the title and the page (first thing: ${gap.first})`).toBeLessThanOrEqual(
+    40,
+  );
+  const row = await footerButtons(tab);
+  expect(
+    row.map(button => button.label),
+    `${key}: the footer row is Back · Later · Next`,
+  ).toEqual(opts.first === true ? ['Later', 'Next'] : ['Back', 'Later', 'Next']);
+  expect(
+    Math.max(...row.map(button => button.y)) - Math.min(...row.map(button => button.y)),
+    `${key}: one row`,
+  ).toBeLessThan(2);
+  expect(row.find(button => button.label === 'Later')?.mark, `${key}: Later is the frame's own button`).toContain(
+    'data-step-later',
+  );
+  expect(await tab.locator('.fy-spf__page [data-flow-later]').count(), `${key}: no Later link inside the page`).toBe(0);
+  // Item 5: at the end of the scroll nothing the page draws sits under the sticky footer (every element measured, not one marker).
+  expect(
+    await underFooter(tab, '[data-step-footer]'),
+    `${key}: nothing is under the footer at the end of the scroll`,
+  ).toEqual([]);
+};
+
+/** The get-started pages (install, daemon, open): 44px choices and buttons, the command fully on screen, nothing under the footer. */
+const stagePage = async (tab: Page, variant: Variant, key: string): Promise<void> => {
+  // The proof picture: the page scrolled to its very end (the first-screen shot cannot show what the footer covers).
+  if (shotsDir !== '') {
+    await tab.evaluate(() => {
+      const bar = document.querySelector('.fy-ob-sticky');
+      for (let el: Element | null = bar?.parentElement ?? null; el !== null; el = el.parentElement)
+        if (el.scrollHeight > el.clientHeight + 1) el.scrollTop = el.scrollHeight;
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    });
+    await tab.waitForTimeout(150);
+    await tab.screenshot({ path: join(shotsDir, `${variant.name}-${key}-scrolled-to-end.png`) });
+    await tab.evaluate(() => {
+      const bar = document.querySelector('.fy-ob-sticky');
+      for (let el: Element | null = bar?.parentElement ?? null; el !== null; el = el.parentElement) el.scrollTop = 0;
+      window.scrollTo(0, 0);
+    });
+  }
+  expect(
+    await underFooter(tab, '.fy-ob-sticky'),
+    `${key}: nothing is under the footer at the end of the scroll`,
+  ).toEqual([]);
+  expect(await clippedBoxes(tab, '[data-onboarding]'), `${key}: no box hides what it holds`).toEqual([]);
+  const heights = await tab
+    .locator('[data-onboarding-channel], [data-onboarding-actions] button, [data-onboarding-agent-instead]')
+    .evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().height * 10) / 10));
+  // A button that offers something (Let an agent do it, the OS choices) has a border: never a plain text line in a sentence.
+  for (const borderless of await tab
+    .locator('[data-onboarding-channel], [data-onboarding-agent-instead]')
+    .evaluateAll(nodes =>
+      nodes
+        .filter(node => Number.parseFloat(getComputedStyle(node).borderTopWidth) === 0)
+        .map(node => (node.textContent ?? '').trim()),
+    ))
+    expect(borderless, `${key}: a choice or offer without a border`).toBe('');
+  for (const height of heights)
+    expect(height, `${key}: every choice and footer button is 44px tall`).toBeGreaterThanOrEqual(43.5);
 };
 
 /** Collects a button that is the row wide or under 44px tall (read by the gap below, not asserted here). */
@@ -310,6 +375,66 @@ const answerWithNext = async (
   expect(await recorded(tab, daemon, key), `${key}: the machine recorded the answer`).toBe('done');
 };
 
+const counterOf = async (tab: Page): Promise<string> =>
+  (await tab.locator('.fy-sp-progress__text').textContent()) ?? '';
+
+/** The counters one variant printed so far, as `{ key, n, of, bar }` (see `inspect`). */
+const countersOf = (variant: Variant): { key: string; n: number; of: number; bar: number }[] =>
+  seen.counters
+    .filter(line => line.startsWith(`${variant.name}:`))
+    .map(line => {
+      const read = /^[^:]+:(\S+): .* · page (\d+) of (\d+) \[(\d+) segments\]$/u.exec(line);
+      return { key: read?.[1] ?? '', n: Number(read?.[2]), of: Number(read?.[3]), bar: Number(read?.[4]) };
+    });
+
+/** The ending: ONE primary 44px button (the footer's "Open this machine"), the rest real secondary buttons, a summary, nothing under the footer. */
+const endPage = async (tab: Page, variant: Variant, key: string): Promise<void> => {
+  const row = await footerButtons(tab);
+  expect(
+    row.map(button => button.label),
+    `${key}: the footer is Back · Open this machine`,
+  ).toEqual(['Back', 'Open this machine']);
+  expect(
+    await tab.locator('[data-variant="primary"]:visible').count(),
+    `${key}: exactly one primary button on the page`,
+  ).toBe(1);
+  expect(
+    await tab.locator('[data-step-footer] [data-variant="primary"]').innerText(),
+    `${key}: the one primary is Open this machine`,
+  ).toBe('Open this machine');
+  // Every button and every link on the ending is a real, bordered 44px button: a bare text link would fail the border and underline reads.
+  for (const button of await tab
+    .locator('[data-flow-end] button, [data-flow-end] a, [data-onboarding-summary] button, [data-onboarding-summary] a')
+    .all()) {
+    const read = await button.evaluate(node => {
+      const style = getComputedStyle(node);
+      const box = node.getBoundingClientRect();
+      return {
+        label: (node.textContent ?? '').trim(),
+        h: box.height,
+        w: box.width,
+        border: Number.parseFloat(style.borderTopWidth),
+        variant: node.getAttribute('data-variant'),
+        underline: style.textDecorationLine,
+      };
+    });
+    expect(read.h, `${key}: ${read.label} is a 44px target`).toBeGreaterThanOrEqual(43.5);
+    expect(read.w, `${key}: ${read.label} is not full width`).toBeLessThan(
+      (variant.width < 600 ? 0.9 : 0.5) * variant.width,
+    );
+    expect(read.border, `${key}: ${read.label} is a real (bordered) secondary button`).toBeGreaterThan(0);
+    expect(read.variant, `${key}: ${read.label} is not a ghost or text button`).not.toBe('ghost');
+    expect(read.underline, `${key}: ${read.label} is not underlined text`).toBe('none');
+  }
+  expect(await tab.locator('[data-onboarding-summary]').count(), `${key}: a summary of what was set up`).toBe(1);
+  expect(
+    await underFooter(tab, '[data-step-footer]'),
+    `${key}: nothing is under the footer at the end of the scroll`,
+  ).toEqual([]);
+  const gap = await gapUnderTitle(tab, '.fy-spf__head', '.fy-spf__body');
+  expect(gap.gap, `${key}: no dead gap under the title`).toBeLessThanOrEqual(40);
+};
+
 // ─── the journey ────────────────────────────────────────────────────────────────────────────────────────────────────
 describe('the first run, end to end', () => {
   for (const variant of VARIANTS)
@@ -358,12 +483,15 @@ describe('the first run, end to end', () => {
       await tab.waitForSelector('[data-onboarding-next]');
       expect(await tab.locator(CHROME).count(), 'the install page has no app chrome').toBe(0);
       await shot(tab, variant, 'install');
+      await stagePage(tab, variant, 'install');
       await tab.locator('[data-onboarding-next]').click();
       await tab.waitForSelector('[data-onboarding-next]');
       await shot(tab, variant, 'daemon');
+      await stagePage(tab, variant, 'daemon');
       await tab.locator('[data-onboarding-next]').click();
       await tab.waitForSelector('[data-onboarding-back]');
       await shot(tab, variant, 'open');
+      await stagePage(tab, variant, 'open');
 
       // ── pair: the pairing page, a pasted link with the FIXED FAKE code, confirm ──────────────────────────────────
       await tab.getByText('It did not open a browser').click();
@@ -376,6 +504,24 @@ describe('the first run, end to end', () => {
       await tab.locator('[data-pair-confirm]').waitFor();
       await shot(tab, variant, 'pair-confirm');
       await measureButton(tab, variant, 'Pair this device', '[data-pair-confirm]');
+      // Item 4: "Not now" is a real, bordered 44px button, not an underlined text link.
+      const notNow = await tab.getByRole('button', { name: 'Not now' }).evaluate(node => {
+        const style = getComputedStyle(node);
+        return {
+          h: node.getBoundingClientRect().height,
+          border: Number.parseFloat(style.borderTopWidth),
+          underline: style.textDecorationLine,
+          button: node.tagName,
+          real: node.classList.contains('kt-btn'),
+        };
+      });
+      expect(notNow, 'pair-confirm: Not now is a real button, 44px, no underline').toMatchObject({
+        button: 'BUTTON',
+        real: true,
+        underline: 'none',
+      });
+      expect(notNow.h, 'pair-confirm: Not now is 44px tall').toBeGreaterThanOrEqual(43.5);
+      expect(notNow.border, 'pair-confirm: Not now has a border like a button').toBeGreaterThan(0);
       await tab.locator('[data-pair-confirm]').click();
 
       // ── the setup flow opens on the machine that answered ───────────────────────────────────────────────────────
@@ -404,6 +550,10 @@ describe('the first run, end to end', () => {
       // ── Claude: installed and signed in are never asked; Choose what to import ──────────────────────────────────
       walked.push('claude-code.import-choice');
       await inspect(tab, variant, 'claude-code.import-choice');
+      // Item 1: the count is known from the answer BEFORE the next page: Import everything (the default) will show 4 pages, not 9.
+      expect(await counterOf(tab), 'Claude: Import everything counts the pages it will show').toBe(
+        'Claude Code · page 1 of 4',
+      );
       await shot(tab, variant, 'claude-code.import-choice');
       await backAndForth(tab, 'onboarding.name', 'claude-code.import-choice');
       // An arrow key moves the selection and writes nothing: no request, no answer, nothing on the device ledger.
@@ -418,6 +568,10 @@ describe('the first run, end to end', () => {
       expect(JSON.stringify(await ledgerOf(tab)), 'an arrow key wrote nothing on this device').toBe(ledgerBefore);
       expect(await tab.locator('label[data-choice="choose"]').getAttribute('data-selected'), 'the arrow moved it').toBe(
         'true',
+      );
+      // Item 1 (continued): the arrow key picked Choose, so the count is already 9 on this very page, not a page later.
+      expect(await counterOf(tab), 'Claude: Choose counts all of its pages as soon as it is picked').toBe(
+        'Claude Code · page 1 of 9',
       );
       await tab.locator('label[data-choice="choose"]').click();
       await shot(tab, variant, 'claude-code.import-choice-chosen');
@@ -584,6 +738,45 @@ describe('the first run, end to end', () => {
       await next(tab, 'end');
       expect(Object.keys(await ledgerOf(tab))).toContain('voice.voice');
 
+      // ── ONE counter model for the whole run (item 1) ──
+      const run = countersOf(variant);
+      expect(
+        new Set(run.map(counter => counter.bar)).size,
+        `the bar has the same number of segments on every page (${run.map(counter => counter.bar).join(',')})`,
+      ).toBe(1);
+      for (const plugin of ['codex', 'warden', 'lessons'])
+        expect(
+          new Set(run.filter(counter => counter.key.startsWith(`${plugin}.`)).map(counter => counter.of)).size,
+          `${plugin}: n never changes while its answers stand`,
+        ).toBe(1);
+      expect(
+        run.filter(counter => counter.key.startsWith('codex.')).map(counter => [counter.n, counter.of]),
+        'Codex: Import everything reads page 1 of 4 on its first page and walks 1, 2, 3, 4',
+      ).toEqual([
+        [1, 4],
+        [2, 4],
+        [3, 4],
+        [4, 4],
+      ]);
+      expect(
+        new Set(
+          run
+            .filter(counter => counter.key.startsWith('claude-code.') && counter.key !== 'claude-code.import-choice')
+            .map(counter => counter.of),
+        ).size,
+        'Claude: after Choose is picked n stays 9 on every later page',
+      ).toBe(1);
+      expect(
+        run
+          .filter(counter => ['onboarding.appearance', 'layouts.layout', 'voice.voice'].includes(counter.key))
+          .map(counter => [counter.n, counter.of]),
+        'This device: pages 1, 2, 3 of 3',
+      ).toEqual([
+        [1, 3],
+        [2, 3],
+        [3, 3],
+      ]);
+
       // ── the end page ────────────────────────────────────────────────────────────────────────────────────────────
       expect(await tab.locator(CHROME).count(), 'the end page has no app chrome').toBe(0);
       expect(await tab.locator('[data-flow-unsaved]').count(), 'the end page lists no unsaved answer').toBe(0);
@@ -592,15 +785,17 @@ describe('the first run, end to end', () => {
       expect(summary, 'the end page says what was set up').toMatch(/^Set up on this machine: /u);
       for (const raw of ['What to bring over', 'Bring it over', 'import-choice', 'claude-code.', 'Conversations'])
         expect(summary, `the end page does not list the page title '${raw}'`).not.toContain(raw);
-      expect(summary.split('\n').length, 'the end page summary is a few lines, not a list of every page').toBeLessThan(
-        8,
-      );
+      expect(
+        summary.split('\n').filter(line => line.trim() !== '').length,
+        'the end page summary is a few lines, not a list of every page',
+      ).toBeLessThan(8);
       expect(summary, 'the end page says what was skipped').toMatch(/Nothing was skipped|Skipped for now/u);
       for (const height of await tab
         .locator('[data-flow-end] button')
         .evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().height)))
         expect(height, 'the end page buttons are 44px tall').toBeGreaterThanOrEqual(43.5);
       expect(await tab.locator('[data-flow-end]').count()).toBe(1);
+      await endPage(tab, variant, 'end');
       await shot(tab, variant, 'end');
       // Every machine step ended up answered, each exactly once.
       const done = await daemonOf(tab, A);
@@ -671,6 +866,14 @@ describe('the first run, end to end', () => {
         B,
       ]);
       await shot(tab, variant, 'end-pair');
+      await endPage(tab, variant, 'end-pair');
+      // The Pair journey's ending has the same summary: what this device now holds, and where to change it.
+      const pairSummary = await tab.locator('[data-onboarding-summary]').innerText();
+      expect(pairSummary, 'end-pair: the summary says what was set up on this device').toMatch(
+        /Set up on this device: /u,
+      );
+      expect(pairSummary, 'end-pair: the summary names the Passkey page').toContain('Passkey');
+      expect(pairSummary, 'end-pair: the summary says where to change it').toMatch(/Settings/u);
       const second = await daemonOf(tab, B);
       expect(second.answers, 'a Pair journey answers nothing on the new machine (it is not being set up)').toEqual([]);
       expect(

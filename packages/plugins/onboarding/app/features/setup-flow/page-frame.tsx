@@ -9,7 +9,7 @@
  *   3. `busy(label)` locks the whole footer (Next, Back, Later) and says what is happening; `done()` is recorded once;
  *   4. a step that does not declare `stepHost` is a LEGACY page (it never calls `ready()`): it is drawn with no cover, Next
  *      enabled and done recorded on Next, so a page not yet written against StepHost is never trapped behind a cover.
- * Next, Back and Later are the shell's, so every page has the same footer.
+ * Next, Back and Later are the shell's and live in the frame's footer row (Back · Later · Next), so every page has the same footer.
  */
 import { PanelSlot, StepPageFrame, useSlotPanels } from '@ferretry/app';
 import { Badge, Button, Loading, useMotionAllowed } from '@ferretry/app/ui';
@@ -158,6 +158,16 @@ export function FlowPage(props: FlowPageProps): ReactNode {
       {...(progress === undefined ? {} : { progress })}
       {...(canBack ? { back: { onClick: props.onBack, disabled: busy !== null } } : {})}
       next={{ label: 'Next', disabled: locked, busy: busy !== null, onClick: props.onNext }}
+      {...(ready
+        ? {
+            later: {
+              title: 'Come back to this from Settings',
+              disabled: busy !== null,
+              onClick: props.onLater,
+              marks: { 'data-flow-later': '' },
+            },
+          }
+        : {})}
     >
       <div
         className="fy-sf-page"
@@ -202,19 +212,6 @@ export function FlowPage(props: FlowPageProps): ReactNode {
             </Button>
           </div>
         )}
-        {ready ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="fy-sf-later"
-            title="Come back to this from Settings"
-            disabled={busy !== null}
-            onClick={props.onLater}
-            data-flow-later=""
-          >
-            Later
-          </Button>
-        ) : null}
       </div>
     </StepPageFrame>
   );

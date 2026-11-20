@@ -1,8 +1,9 @@
 /**
- * THE LAST PAGE: the flow is over, and the next move is a project (primary) or a conversation without one. The two
- * buttons and the sentence about working projectless are the Home card's (`../stepper/project-action.ts`), so the
- * words never differ between the two places. Either one missing (its plugin is paused) leaves the other; both missing
- * leaves the way to the machine's Home.
+ * THE LAST PAGE: a real ending. A short summary of what was set up and what was skipped (each skipped thing a button to
+ * its Settings), ONE primary button (the footer's "Open this machine"), and the two ways to start work as secondary buttons:
+ * a project, or a conversation without one. Those two buttons and the sentence about working projectless are the Home
+ * card's (`../stepper/project-action.ts`), so the words never differ between the two places. Either one missing (its plugin
+ * is paused) leaves the other; both missing leaves just the way to the machine's Home.
  */
 import { daemonHomeHref, StepPageFrame, useOptionalRouter, useScreenHref } from '@ferretry/app';
 import { Button } from '@ferretry/app/ui';
@@ -39,9 +40,9 @@ export function EndPage({
   return (
     <StepPageFrame
       title="You're set up"
-      line="Your machine is ready. Pick a first project, or start a conversation."
+      line="Here is what was set up, and what is left for later."
       {...(onBack === undefined ? {} : { back: { onClick: onBack } })}
-      next={{ label: action?.label ?? 'Open this machine', onClick: action?.run ?? home }}
+      next={{ label: 'Open this machine', onClick: home }}
     >
       <div className="fy-sf-end" data-flow-end="">
         {unsaved.length === 0 ? null : (
@@ -62,18 +63,21 @@ export function EndPage({
           </div>
         )}
         <SetupSummary daemon={daemon} steps={summary} />
-        {action?.alternative === undefined ? null : (
-          <div className="fy-sf-end__actions">
-            <Button onClick={action.alternative.run} data-flow-end-alternative="">
-              {action.alternative.label}
-            </Button>
-          </div>
-        )}
-        {action?.note === undefined ? null : <p className="fy-sf-note">{action.note}</p>}
         {action === undefined ? null : (
-          <Button variant="ghost" size="sm" onClick={home} data-flow-end-home="">
-            Open this machine
-          </Button>
+          <section className="fy-sf-end__start" data-flow-end-start="">
+            <p className="fy-sf-end__lead">Or start with:</p>
+            <div className="fy-sf-end__actions">
+              <Button onClick={action.run} data-flow-end-project="">
+                {action.label}
+              </Button>
+              {action.alternative === undefined ? null : (
+                <Button onClick={action.alternative.run} data-flow-end-alternative="">
+                  {action.alternative.label}
+                </Button>
+              )}
+            </div>
+            {action.note === undefined ? null : <p className="fy-sf-note">{action.note}</p>}
+          </section>
         )}
       </div>
     </StepPageFrame>

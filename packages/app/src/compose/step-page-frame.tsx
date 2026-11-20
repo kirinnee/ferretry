@@ -8,7 +8,7 @@
  *   </StepPageFrame>
  *
  * The title, one line, the body, and a demo box on the right at >= 900px (above the body, <= 120px tall, on a phone).
- * The footer holds Back (ghost) and Next (primary): auto width, min-height 44px, 12-16px vertical padding, right
+ * The footer holds Back (ghost), an optional Later (secondary) and Next (primary), in that order: auto width, min-height 44px, 12-16px vertical padding, right
  * aligned, and sticky at the bottom of the screen on a phone. `next.busy` locks Next and shows the spinner.
  * Layout and motion live in `step-page-frame.css`; this file chooses no colour.
  */
@@ -37,6 +37,16 @@ export interface StepPageNext {
   readonly onClick?: () => void;
 }
 
+export interface StepPageLater {
+  /** Defaults to "Later". */
+  readonly label?: string;
+  readonly disabled?: boolean;
+  readonly title?: string;
+  readonly onClick?: () => void;
+  /** Extra `data-*` marks for the caller's own tests and styles. */
+  readonly marks?: Readonly<Record<`data-${string}`, string>>;
+}
+
 export interface StepPageFrameProps {
   readonly title: string;
   readonly line?: string;
@@ -45,10 +55,12 @@ export interface StepPageFrameProps {
   readonly children: ReactNode;
   readonly back?: StepPageBack;
   readonly next: StepPageNext;
+  /** "Come back to this later": a real secondary button in the footer row, never a link in the page. */
+  readonly later?: StepPageLater;
   readonly progress?: StepProgressProps;
 }
 
-export function StepPageFrame({ title, line, demo, children, back, next, progress }: StepPageFrameProps) {
+export function StepPageFrame({ title, line, demo, children, back, next, later, progress }: StepPageFrameProps) {
   const locked = next.disabled === true || next.busy === true;
   return (
     <section className="fy-spf" data-step-page="" aria-busy={next.busy === true || undefined}>
@@ -78,6 +90,19 @@ export function StepPageFrame({ title, line, demo, children, back, next, progres
               data-step-back=""
             >
               {back.label ?? 'Back'}
+            </Button>
+          )}
+          {later === undefined ? null : (
+            <Button
+              variant="outline"
+              className="fy-spf__button"
+              disabled={later.disabled === true}
+              onClick={later.onClick}
+              {...(later.title === undefined ? {} : { title: later.title })}
+              {...later.marks}
+              data-step-later=""
+            >
+              {later.label ?? 'Later'}
             </Button>
           )}
           <Button

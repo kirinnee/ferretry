@@ -847,12 +847,7 @@ function PairingFocus({
         {busy ? 'Pairing…' : 'Pair this device'}
       </button>
       {busy && <p className="m-0 text-center text-ui text-muted">Exchanging the one-time code with this daemon…</p>}
-      <button
-        type="button"
-        className="min-h-[44px] self-center text-ui font-medium text-muted underline hover:text-accent focus-visible:outline-focus focus-visible:outline-offset-focus"
-        onClick={onCancel}
-        disabled={busy}
-      >
+      <button type="button" className="kt-btn min-h-[44px] self-center px-6 py-3" onClick={onCancel} disabled={busy}>
         Not now
       </button>
     </PairingFrame>

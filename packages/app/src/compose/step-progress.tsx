@@ -29,15 +29,26 @@ export interface StepProgressProps {
   readonly fills?: true;
 }
 
-/** The words under the bar: "Claude Code · 3 of 7". */
-export function stepProgressText(segments: readonly StepSegment[], current: string, step: number, of: number): string {
+/**
+ * The words under the bar: "Claude Code · 3 of 7", or "Claude Code · page 3 of 7" when the counter is the segment's own
+ * pages (`pages`, the setup flow): the word says what is counted, so the bar's segments (stages) and the count (pages)
+ * are never read as the same thing.
+ */
+export function stepProgressText(
+  segments: readonly StepSegment[],
+  current: string,
+  step: number,
+  of: number,
+  pages?: true,
+): string {
   const label = segments.find(segment => segment.id === current)?.label ?? '';
-  return label === '' ? `${step} of ${of}` : `${label} · ${step} of ${of}`;
+  const count = pages === true ? `page ${step} of ${of}` : `${step} of ${of}`;
+  return label === '' ? count : `${label} · ${count}`;
 }
 
 export function StepProgress({ segments, current, step, of, fills }: StepProgressProps) {
   const at = segments.findIndex(segment => segment.id === current);
-  const text = stepProgressText(segments, current, step, of);
+  const text = stepProgressText(segments, current, step, of, fills);
   return (
     <div className="fy-sp-progress" data-step-progress="">
       <div
