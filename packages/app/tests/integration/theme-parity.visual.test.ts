@@ -220,7 +220,7 @@ describe('the ruled page field is the Mission styleâ€™s geometry and a paletteâ€
   });
 });
 
-describe('the shell page heading takes its weight from the style, and only Briefing moves it', () => {
+describe('the shell page heading takes its weight from the style, and only Briefing and Neumorphism move it', () => {
   // `.fy-page h1` used to set no weight, so every style drew the initial 400 (Tailwind's reset makes an h1 inherit it).
   const headingWeight = async (style: string) =>
     await page.evaluate(
@@ -243,12 +243,16 @@ describe('the shell page heading takes its weight from the style, and only Brief
     });
   });
 
-  for (const style of STYLE_IDS.filter(id => id !== 'briefing'))
+  for (const style of STYLE_IDS.filter(id => id !== 'briefing' && id !== 'neumorphism'))
     it(`${style} keeps the heading weight it always had (400)`, async () => {
       expect(await headingWeight(style)).toBe('400');
     });
 
   it('Briefing draws it in its display weight (600), not the 400 that falls to the 300 face', async () => {
     expect(await headingWeight('briefing')).toBe('600');
+  });
+
+  it('Neumorphism draws it heavy and round (800), its signature weight', async () => {
+    expect(await headingWeight('neumorphism')).toBe('800');
   });
 });
