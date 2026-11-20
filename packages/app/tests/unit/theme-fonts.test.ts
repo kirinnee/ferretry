@@ -30,7 +30,8 @@ describe('the preload table', () => {
     for (const style of STYLE_IDS) {
       const stack = readStyleFile(`style/${style}.css`).match(/--font-(?:body|display|ui):\s*([^;]+);/u)?.[1] ?? '';
       if (style === 'contrast') expect(STYLE_FONT_FILES[style]).toBeUndefined();
-      else if (/Inter|Public Sans|Geist|Archivo|Cascadia/u.test(stack)) expect(STYLE_FONT_FILES[style]).toBeDefined();
+      else if (/Inter|Public Sans|Geist|Archivo|Cascadia|Nunito/u.test(stack))
+        expect(STYLE_FONT_FILES[style]).toBeDefined();
     }
   });
 });

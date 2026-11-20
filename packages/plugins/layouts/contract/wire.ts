@@ -88,7 +88,7 @@ export type Layout = z.infer<typeof LayoutSchema>;
  * pre-paint script restates the ids, pinned by `pre-paint.test.ts`). A look is a STYLE (how things are drawn) and a
  * PALETTE (which colours); light/dark is a third axis, the MODE.
  */
-export const STYLE_IDS = ['studio', 'mission', 'neo', 'geist', 'contrast', 'glass'] as const;
+export const STYLE_IDS = ['studio', 'mission', 'neo', 'geist', 'contrast', 'glass', 'neumorphism'] as const;
 export type StyleId = (typeof STYLE_IDS)[number];
 export const PALETTE_IDS = [
   'studio',

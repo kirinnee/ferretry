@@ -24,6 +24,7 @@ import ibmPlexMono700 from '../assets/fonts/ibm-plex-mono-latin-700-normal.woff2
 import inter from '../assets/fonts/inter-latin-wght-normal.woff2';
 import jetBrainsMono400 from '../assets/fonts/jetbrains-mono-latin-400-normal.woff2';
 import jetBrainsMono700 from '../assets/fonts/jetbrains-mono-latin-700-normal.woff2';
+import nunito from '../assets/fonts/nunito-latin-wght-normal.woff2';
 import publicSans from '../assets/fonts/public-sans-latin-wght-normal.woff2';
 import type { StyleId } from './catalog.ts';
 
@@ -49,6 +50,7 @@ export const STYLE_FONT_FILES: Readonly<Partial<Record<StyleId, ThemeFontFiles>>
   neo: { text: [archivoBlack], code: ibmPlexMono },
   geist: { text: [geist], code: [geistMono] },
   glass: { text: [inter], code: jetBrainsMono },
+  neumorphism: { text: [nunito], code: jetBrainsMono },
 });
 
 /** The scope of the document a preload is added to — injected so a test can stand in for the page. */
