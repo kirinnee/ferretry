@@ -6,7 +6,7 @@
  * draws a second one. The explorer picks folders, so it is only ever handed folders (the daemon also lists files).
  */
 import { File, Folder, FolderGit2 } from 'lucide-react';
-import { forwardRef } from 'react';
+import { forwardRef, useEffect } from 'react';
 import { cn } from '@ferretry/app/ui';
 import type { FolderEntry } from '../../../contract/index.ts';
 import type { ExplorerView } from './explorer-model.ts';
@@ -50,6 +50,17 @@ export const ExplorerEntries = forwardRef<HTMLDivElement, ExplorerEntriesProps>(
 ) {
   const card = view === 'card';
   const active = entries.find(entry => entry.kind === 'folder' && entry.name === highlightedName);
+  // The sheet around the list scrolls, so the keyboard's highlight is kept in view as it moves. A sticky footer (the
+  // stepper's Back / Next) covers the foot of that scroller, so the row is kept clear of it, not just inside the box.
+  const activeId = active === undefined ? null : idFor(active);
+  useEffect(() => {
+    const row = activeId === null ? null : document.getElementById(activeId);
+    if (row === null) return;
+    const footer = row.closest('.fy-spf')?.querySelector<HTMLElement>('.fy-spf__footer') ?? null;
+    const covers = footer !== null && globalThis.getComputedStyle?.(footer).position === 'sticky';
+    row.style.scrollMarginBottom = covers ? `${footer.offsetHeight}px` : '';
+    row.scrollIntoView?.({ block: 'nearest' });
+  }, [activeId]);
   return (
     <div
       ref={ref}
@@ -59,7 +70,7 @@ export const ExplorerEntries = forwardRef<HTMLDivElement, ExplorerEntriesProps>(
       aria-activedescendant={active === undefined ? undefined : idFor(active)}
       data-explorer-view={view}
       className={cn(
-        'max-h-[min(45dvh,20rem)] min-h-0 overflow-y-auto rounded-control focus-visible:outline-focus focus-visible:outline-offset-focus',
+        'rounded-control focus-visible:outline-focus focus-visible:outline-offset-focus',
         card
           ? 'grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] content-start gap-xs'
           : 'grid content-start gap-0.5',

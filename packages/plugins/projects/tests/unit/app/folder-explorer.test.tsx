@@ -308,3 +308,55 @@ describe('FolderExplorer', () => {
     await mounted.unmount();
   });
 });
+
+describe('FolderExplorer path box', () => {
+  const pathInput = (mounted: Mounted): HTMLInputElement =>
+    must(mounted.container.querySelector<HTMLInputElement>('[data-explorer-path-box] input'), 'the path box');
+  const submit = (mounted: Mounted) =>
+    interact(() =>
+      must(mounted.container.querySelector('[data-explorer-path-box]'), 'the path form').dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      ),
+    );
+  const type = (mounted: Mounted, value: string) => interact(() => typeInto(pathInput(mounted), value));
+
+  it('shows the open folder as ~, types a path through to the daemon and follows the listing', async () => {
+    const calls: Call[] = [];
+    // Like the daemon, expand `~` to the home folder.
+    const mounted = await open(calls, {
+      [LIST]: (call: Call) =>
+        call.query?.path === undefined
+          ? listingFor(call)
+          : listingFor({ ...call, query: { ...call.query, path: call.query.path.replace(/^~/, '/home/k') } }),
+    });
+    expect(pathInput(mounted).value).toBe('~');
+    await type(mounted, '~/work');
+    await submit(mounted);
+    await settled(mounted, c => c.querySelector('[data-explorer-entry="scratch"]') !== null, 'work opened');
+    expect(calls.at(-1)?.query?.path).toBe('~/work');
+    expect(crumbs(mounted)).toEqual(['/home/k', '/home/k/work']);
+    expect(pathInput(mounted).value).toBe('~/work');
+    await mounted.unmount();
+  });
+
+  it("states the daemon's refusal under the box, keeps the old listing, and Escape restores", async () => {
+    const calls: Call[] = [];
+    const sentence = 'that folder is not there, or cannot be listed';
+    const mounted = await open(calls, {
+      [LIST]: (call: Call) => {
+        if (call.query?.path === '/etc') throw refusal(403, sentence, 'folder_refused');
+        return listingFor(call);
+      },
+    });
+    await type(mounted, '/etc');
+    await submit(mounted);
+    await settled(mounted, c => c.querySelector('[data-explorer-path-error]') !== null, 'the refusal');
+    expect(mounted.container.querySelector('[data-explorer-path-error]')?.textContent).toBe(sentence);
+    expect(names(mounted)).toEqual(['work']);
+    expect(crumbs(mounted)).toEqual(['/home/k']);
+    await interact(() => pressKey(pathInput(mounted), 'Escape'));
+    await settled(mounted, c => c.querySelector('[data-explorer-path-error]') === null, 'the refusal cleared');
+    expect(pathInput(mounted).value).toBe('~');
+    await mounted.unmount();
+  });
+});

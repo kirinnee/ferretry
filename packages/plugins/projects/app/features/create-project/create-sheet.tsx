@@ -3,6 +3,10 @@
  *
  * It only holds the dialog contract (Escape, focus in and back, Tab trap, a click on the scrim closes) and a Close button
  * above the stepper; the steps draw themselves in `StepPageFrame`.
+ *
+ * ONE SCROLL BOX. The sheet is as tall as its step needs, up to 94 dvh; the Close row stays put and the step body below
+ * it is the only thing that scrolls, and only when it is longer than the room. Nothing inside it scrolls on its own
+ * (the folder list is plain flow), and the frame's `min-height: 100%` is lifted so a short step does not stretch. The step's footer (Back / Next) sticks to the foot of the sheet, so a long folder list never pushes it out of reach.
  */
 import { useDialogFocus, useLayoutMode, useScrimDismiss } from '@ferretry/app/ui';
 import { X } from 'lucide-react';
@@ -40,8 +44,8 @@ export function CreateSheet({ onClose, children }: CreateSheetProps) {
         onKeyDown={onKeyDown}
         className={
           phone
-            ? 'relative z-10 flex min-h-0 w-full flex-col overflow-y-auto bg-bg outline-none focus:outline-none focus-visible:outline-none'
-            : 'kt-panel relative z-10 flex h-[min(840px,94dvh)] w-full max-w-[920px] flex-col overflow-y-auto outline-none focus:outline-none focus-visible:outline-none'
+            ? 'relative z-10 flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-bg outline-none focus:outline-none focus-visible:outline-none'
+            : 'kt-panel relative z-10 flex max-h-[94dvh] min-h-0 w-full max-w-[920px] flex-col overflow-hidden outline-none focus:outline-none focus-visible:outline-none'
         }
       >
         <div className="flex shrink-0 justify-end px-2 pt-2">
@@ -50,7 +54,12 @@ export function CreateSheet({ onClose, children }: CreateSheetProps) {
             Close
           </button>
         </div>
-        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+        <div
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden [&_.fy-spf]:min-h-0 [&_.fy-spf__footer]:sticky [&_.fy-spf__footer]:bottom-0 [&_.fy-spf__footer]:z-10"
+          data-create-body=""
+        >
+          {children}
+        </div>
       </div>
     </div>
   );

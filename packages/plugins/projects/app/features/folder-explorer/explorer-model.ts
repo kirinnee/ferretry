@@ -53,3 +53,10 @@ export const truncationSentence = (listing: FolderListing): string | null =>
   listing.truncated
     ? 'This folder has more entries than can be listed here. Open a subfolder to narrow it down.'
     : null;
+
+/** A listing's own path the way the path box shows it: `~` for the home folder, `~/x/y` below it. */
+export const displayPath = (listing: FolderListing): string => {
+  const home = listing.crumbs[0]?.path;
+  if (home === undefined || listing.path === home) return home === undefined ? listing.path : '~';
+  return listing.path.startsWith(`${home}/`) ? `~${listing.path.slice(home.length)}` : listing.path;
+};
