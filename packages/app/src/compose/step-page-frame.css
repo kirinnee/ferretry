@@ -1,12 +1,17 @@
 /* ============================================================================
    StepPageFrame + StepProgress (compose/step-page-frame.tsx, step-progress.tsx): the one page of a stepper.
-   Body max 880px, centred. A demo box sits on the right at >= 900px of the frame's own width and above the body (<=
-   120px tall) below it. The footer's buttons are AUTO width (never stretched), min-height 44px with 12-16px of
-   vertical padding, right aligned; on a phone (< 600px of the frame) the footer is sticky at the bottom, above the
-   safe area. Theme tokens only.
+   r11 O2 layout. At >= 900px of the frame's own width: two columns, the choices 44% (360..480px) and the demo the
+   rest (>= 320px, sticky to the top), 40px apart, on a page up to 1080px wide. A page with no demo draws no column and
+   keeps the 880px page. Below 900px the demo sits above the body, <= 140px tall.
+   Buttons are FIXED: the footer's Back / Later / Next are each 8.5rem (136px) wide, 44px tall, 12px apart, right
+   aligned; on a phone (< 600px of the frame) the three are equal thirds of a sticky row above the safe area. Any
+   Button inside the body is the same size and 12px from its neighbour (one rule here, so no plugin page edits).
+   Theme tokens only.
    ========================================================================== */
 
 .fy-spf {
+  --spf-button-w: 8.5rem;
+  --spf-button-h: 44px;
   container-type: inline-size;
   display: flex;
   flex-direction: column;
@@ -37,10 +42,17 @@
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
+/* One line: balanced, clamped to 2. */
 .fy-spf__line {
+  -webkit-box-orient: vertical;
   color: var(--muted);
+  display: -webkit-box;
   font-size: var(--font-size-base);
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   line-height: 1.4;
+  overflow: hidden;
+  text-wrap: balance;
 }
 .fy-spf__main {
   display: flex;
@@ -51,7 +63,16 @@
 .fy-spf__body {
   min-width: 0;
 }
-/* On a phone the demo comes first and is short. */
+/* A row of Buttons anywhere in the body is the same fixed size and 12px apart. */
+.fy-spf__body .kt-btn {
+  height: auto;
+  min-height: var(--spf-button-h);
+  min-inline-size: var(--spf-button-w);
+}
+.fy-spf__body :has(> .kt-btn + .kt-btn) {
+  gap: 12px;
+}
+/* On a phone the demo comes first and is short; a column with nothing in it is not drawn. */
 .fy-spf__demo {
   align-items: center;
   background: var(--surface-2);
@@ -59,25 +80,40 @@
   border-radius: var(--radius-panel);
   display: flex;
   justify-content: center;
-  max-height: 120px;
+  max-height: 140px;
   min-width: 0;
   order: -1;
   overflow: hidden;
 }
+.fy-spf__demo:empty {
+  display: none;
+}
 @container (min-width: 900px) {
+  .fy-spf__page:has(.fy-spf__demo:not(:empty)) {
+    max-width: 1080px;
+  }
   .fy-spf__main {
     align-items: flex-start;
     flex-direction: row;
-    gap: 32px;
+    gap: 40px;
   }
   .fy-spf__body {
     flex: 1 1 0;
   }
+  .fy-spf__main:has(> .fy-spf__demo:not(:empty)) > .fy-spf__body {
+    flex: 0 1 44%;
+    max-inline-size: 480px;
+    min-inline-size: 360px;
+  }
   .fy-spf__demo {
-    flex: 0 0 280px;
+    align-self: flex-start;
+    flex: 1 1 0;
+    inset-block-start: 16px;
     max-height: none;
     min-height: 160px;
+    min-inline-size: 320px;
     order: 0;
+    position: sticky;
   }
 }
 
@@ -103,13 +139,20 @@
   max-width: 880px;
   padding: 12px 16px;
 }
-/* Auto width, never stretched; 44px tall minimum with 12-16px vertical padding. */
+@container (min-width: 900px) {
+  /* The actions end where the (wider) page's content ends. */
+  .fy-spf:has(.fy-spf__demo:not(:empty)) .fy-spf__actions {
+    max-width: 1080px;
+  }
+}
+/* Fixed width, never stretched or shrunk to the label; 44px tall. */
 .fy-spf__footer .fy-spf__button {
   flex: 0 0 auto;
   height: auto;
-  min-height: 44px;
+  inline-size: var(--spf-button-w);
+  min-height: var(--spf-button-h);
   padding-block: 12px;
-  width: auto;
+  padding-inline: 8px;
 }
 @container (max-width: 599.98px) {
   .fy-spf__footer {
@@ -117,6 +160,30 @@
     padding-bottom: env(safe-area-inset-bottom, 0px);
     position: sticky;
     z-index: 1;
+  }
+  /* Three equal thirds: Back, Later, Next. */
+  .fy-spf__actions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .fy-spf__footer [data-step-back] {
+    grid-column: 1;
+  }
+  .fy-spf__footer [data-step-later] {
+    grid-column: 2;
+  }
+  .fy-spf__footer [data-step-next] {
+    grid-column: 3;
+  }
+  .fy-spf__footer .fy-spf__button {
+    inline-size: auto;
+    min-inline-size: 0;
+    /* A third is narrow: a long label ("Open this machine") wraps inside its button instead of running out of it. */
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+    padding-inline: 4px;
+    text-align: center;
+    white-space: normal;
   }
 }
 
@@ -172,4 +239,9 @@
 /* A ghost Back locked while the page is working must read as locked next to the busy Next (the global fade is too faint on a ghost). */
 .fy-spf__button[data-variant='ghost']:disabled {
   opacity: 0.4;
+}
+
+/* The footer's three buttons read as equal: a ghost Back keeps a hairline edge so its fixed width is visible. */
+.fy-spf__footer .fy-spf__button[data-variant='ghost'] {
+  border-color: var(--border);
 }
