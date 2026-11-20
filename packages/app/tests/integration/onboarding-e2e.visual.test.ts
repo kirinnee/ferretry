@@ -15,8 +15,9 @@
  * goes to the page the person came from, Next returns), the footer buttons are auto width and 44px tall, and (daemon side)
  * the step really records on the machine, exactly once. An arrow key moves a card's selection and writes nothing.
  *
- * KNOWN GAPS the run found are `it.failing` below, one per gap: each is red the day the product is fixed (delete the
- * `.failing` then), so the gate does not forget them and a green CI does not hide them.
+ * KNOWN GAPS the first run found were `it.failing`; every one is fixed and is now a plain `it` (see the last describe), so a
+ * regression is red. Also asserted: the choice-card select animation really runs (and both reduced-motion switches stop it),
+ * and on a phone no content sits under the sticky footer.
  *
  *   FY_ONBOARDING_E2E_VARIANTS   comma list of `<width>-<light|dark>` (default `1280-light,390-dark`)
  *   FY_ONBOARDING_E2E_SHOTS_DIR  keep `<variant>-<nn>-<page>.png` of every page (fake data only)
@@ -58,7 +59,7 @@ afterAll(() => {
   server?.kill();
 });
 
-// ─── what the run saw (read by the `it.failing` gaps below) ────────────────────────────────────────────────────────
+// ─── what the run saw (read by the gap checks below) ────────────────────────────────────────────────────────
 interface Observed {
   /** `[data-name-machine]` forms on screen on the Machine name page. */
   nameForms: number;
@@ -72,6 +73,8 @@ interface Observed {
   badButtons: string[];
   /** Codex import kind pages walked in Import everything mode (the gate says that mode is ONE page). */
   codexKindPagesInEverything: number;
+  /** `<variant>:<page>` of every 390 page whose content ends under the sticky footer. */
+  underFooter: string[];
   /** Requests the fake machines had no answer for. */
   unanswered: string[];
   pageErrors: string[];
@@ -85,6 +88,7 @@ const seen: Observed = {
   footerOffScreen: [],
   badButtons: [],
   codexKindPagesInEverything: -1,
+  underFooter: [],
   unanswered: [],
   pageErrors: [],
   counters: [],
@@ -228,6 +232,43 @@ const inspect = async (tab: Page, variant: Variant, key: string, opts: { first?:
       `${key}: ${read.counter.text} [${read.counter.states.length} segments]\n`,
     );
   seen.counters.push(`${variant.name}:${key}: ${read.counter.text} [${read.counter.states.length} segments]`);
+
+  if (variant.width < 600) {
+    const overlap = await tab.evaluate(async () => {
+      const footer = document.querySelector('[data-step-footer]');
+      const page = document.querySelector('[data-flow-page]');
+      if (footer === null || page === null) return { px: 0, who: '' };
+      // Scroll to the very end: the document AND every scrolling ancestor of the footer (the page may scroll inside a pane).
+      const scrollers: Element[] = [document.documentElement];
+      for (let up = footer.parentElement; up !== null; up = up.parentElement) {
+        const overflow = getComputedStyle(up).overflowY;
+        if ((overflow === 'auto' || overflow === 'scroll') && up.scrollHeight > up.clientHeight) scrollers.push(up);
+      }
+      for (const scroller of scrollers) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'instant' });
+      await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+      const f = footer.getBoundingClientRect();
+      let worst = 0;
+      let who = '';
+      for (const el of page.querySelectorAll('*')) {
+        if (footer.contains(el) || el.contains(footer)) continue;
+        const r = el.getBoundingClientRect();
+        if (r.height === 0 || r.width === 0) continue;
+        const position = getComputedStyle(el).position;
+        if (position === 'fixed' || position === 'sticky') continue;
+        // Content that sits UNDER the footer: it overlaps the footer's box on both axes (a thing wholly above or wholly
+        // below it is not covered).
+        const v = Math.min(r.bottom, f.bottom) - Math.max(r.top, f.top);
+        const h = Math.min(r.right, f.right) - Math.max(r.left, f.left);
+        if (v > 1 && h > 1 && v > worst) {
+          worst = v;
+          who = `${el.tagName.toLowerCase()}.${String(el.getAttribute('class') ?? '').slice(0, 40)}`;
+        }
+      }
+      for (const scroller of scrollers) scroller.scrollTo({ top: 0, behavior: 'instant' });
+      return { px: worst, who };
+    });
+    if (overlap.px > 1) seen.underFooter.push(`${variant.name}:${key} (${Math.round(overlap.px)}px, ${overlap.who})`);
+  }
   expect(read.chrome, `${key}: no sidebar or app chrome`).toBe(0);
   expect(read.unsaved, `${key}: no "answer was not saved" notice`).toBe(0);
   expect(read.overflow, `${key}: no sideways scroll`).toBeLessThanOrEqual(0);
@@ -321,6 +362,49 @@ const measureButton = async (tab: Page, variant: Variant, label: string, selecto
   const limit = (variant.width < 600 ? 0.7 : 0.5) * variant.width;
   if (box.width >= limit || box.height < 43.5)
     seen.badButtons.push(`${variant.name}:${label} (${Math.round(box.width)}x${Math.round(box.height)})`);
+};
+
+/** Clicks a choice card in the page (one click, no Next) and reads what the card is doing two frames later. */
+const pick = async (tab: Page, choice: string) =>
+  await tab.evaluate(async id => {
+    const label = document.querySelector(`label[data-choice="${id}"]`) as HTMLElement;
+    label.click();
+    await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+    const card = label.closest('.fy-cc__card') ?? label;
+    const style = getComputedStyle(card);
+    return {
+      selected: card.getAttribute('data-selected'),
+      animations: card
+        .getAnimations()
+        .map(a => (a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty),
+      animationName: style.animationName,
+      transitionDuration: style.transitionDuration,
+    };
+  }, choice);
+
+/** The select animation REALLY runs (a pop animation on the picked card, a border/fill transition), and both the OS
+ *  reduced-motion query and Settings > Motion = reduced turn it off. Leaves the page as it found it. */
+const selectAnimation = async (tab: Page): Promise<void> => {
+  const on = await pick(tab, 'everything');
+  expect(on.selected, 'the card was selected').toBe('true');
+  expect(on.animationName, 'the picked card has the pop animation applied').toBe('fy-cc-pop');
+  expect(on.animations, 'the pop animation is RUNNING two frames after the pick').toContain('fy-cc-pop');
+  expect(on.transitionDuration, 'the border/fill fade is applied').not.toBe('0s');
+  await tab.emulateMedia({ reducedMotion: 'reduce' });
+  const os = await pick(tab, 'choose');
+  expect(os.animations, 'OS reduced motion: nothing runs on the picked card').toEqual([]);
+  expect(os.animationName, 'OS reduced motion: no animation applied').toBe('none');
+  expect(Number.parseFloat(os.transitionDuration), 'OS reduced motion: no transition').toBeLessThanOrEqual(0.001);
+  await tab.emulateMedia({ reducedMotion: 'no-preference' });
+  await tab.evaluate(() => document.documentElement.setAttribute('data-motion', 'reduced'));
+  const app = await pick(tab, 'everything');
+  expect(app.animations, 'Settings Motion=reduced: nothing runs on the picked card').toEqual([]);
+  expect(app.animationName, 'Settings Motion=reduced: no animation applied').toBe('none');
+  expect(Number.parseFloat(app.transitionDuration), 'Settings Motion=reduced: no transition').toBeLessThanOrEqual(
+    0.001,
+  );
+  await tab.evaluate(() => document.documentElement.removeAttribute('data-motion'));
+  await pick(tab, 'choose');
 };
 
 /** Presses Next and waits for `to` (a page key, or `end`). */
@@ -580,6 +664,7 @@ describe('the first run, end to end', () => {
       expect(await counterOf(tab), 'Claude: Choose counts all of its pages as soon as it is picked').toBe(
         'Claude Code · page 1 of 9',
       );
+      await selectAnimation(tab);
       await tab.locator('label[data-choice="choose"]').click();
       await shot(tab, variant, 'claude-code.import-choice-chosen');
       await next(tab, 'claude-code.import-settings');
@@ -865,6 +950,7 @@ describe('the first run, end to end', () => {
       // This machine has no passkey and its first window is open, so the pairing page offers one before it returns.
       await tab.locator('[data-first-passkey-offer]').waitFor();
       seen.pairConnectedChrome = await tab.locator(CHROME).count();
+      await tab.waitForTimeout(1_000); // the page's entrance settles before it is shot
       await shot(tab, variant, 'pair-connected-passkey-offer');
       await tab.getByRole('button', { name: 'Not now' }).click();
       await tab.waitForURL(/\/onboarding\/setup\?phase=client&journey=pair/u);
@@ -906,35 +992,38 @@ describe('the first run, end to end', () => {
     });
 });
 
-// ─── what the run found and is not fixed here (each is `it.failing`: red the day it is fixed) ───────────────────────
-describe('known gaps the gate found', () => {
+// ─── what the first run found, now fixed (each was an `it.failing`; a plain `it` now, so a regression is red) ───────
+describe('gaps the first gate run found, now fixed', () => {
   it('no page threw', () => {
     expect(seen.pageErrors).toEqual([]);
   });
   it('only the expected routes went unanswered (a gap in the fake, not in the product)', () => {
     expect([...new Set(seen.unanswered)].sort()).toEqual(['GET /v1/layouts/current']);
   });
-  it.failing('the Machine name page draws ONE name form (the shell strip draws a second above the flow)', () => {
+  it('the Machine name page draws ONE name form (the shell strip draws a second above the flow)', () => {
     expect(seen.nameForms).toBe(1);
   });
   // Only a desktop height shows it (a phone's footer is sticky), so it is asserted only when a desktop variant ran.
-  (VARIANTS.some(variant => variant.width >= 600) ? it.failing : it.skip)(
+  (VARIANTS.some(variant => variant.width >= 600) ? it : it.skip)(
     'every page keeps its Back/Next footer on the first screen (no scrolling to reach Next)',
     () => {
       expect(seen.footerOffScreen).toEqual([]);
     },
   );
-  it.failing('the pairing page buttons are auto width and 44px tall', () => {
+  it('the pairing page buttons are auto width and 44px tall', () => {
     expect(seen.badButtons).toEqual([]);
   });
-  it.failing('the pairing page reached from the first run has no sidebar or app chrome', () => {
+  it('the pairing page reached from the first run has no sidebar or app chrome', () => {
     expect(seen.pairPageChrome).toBe(0);
   });
-  it.failing('the pairing page Connected screen has no sidebar or app chrome', () => {
+  it('the pairing page Connected screen has no sidebar or app chrome', () => {
     expect(seen.pairConnectedChrome).toBe(0);
   });
-  it('Import everything is ONE page for Codex (the kind pages are passed over, not drawn)', () => {
+  it('Import everything is ONE page for Codex (the kind pages are not needed)', () => {
     expect(seen.codexKindPagesInEverything).toBe(0);
+  });
+  it('on a phone nothing sits under the sticky footer on any flow page', () => {
+    expect(seen.underFooter).toEqual([]);
   });
   it('the fixed fake code is the only code used', () => {
     expect(FAKE_CODE).toBe('ABCD-EFGH');
