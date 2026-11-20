@@ -215,7 +215,9 @@ export function Frame() {
             {/* Every plugin's background views, once per paired daemon where it may run (S5): watchers and overlays. */}
             <BackgroundViews />
             {/* A machine a pairing just made, and that has no name of the owner's, offers to be named (skippable). */}
-            {daemon !== undefined && runtime.daemons.namePending(daemon) ? (
+            {/* Not on a chrome-less screen: first-run setup owns the whole frame and draws its own Machine-name page,
+      so the strip would be a second name form above it, pushing Back/Next off screen. */}
+            {daemon !== undefined && !bare && runtime.daemons.namePending(daemon) ? (
               <NameThisMachine key={daemon} daemon={daemon} />
             ) : null}
           </div>

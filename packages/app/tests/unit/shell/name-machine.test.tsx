@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { implementApp, type Manifest } from '@ferretry/kernel/manifest';
 import type { TransportAnswer, TransportRequest } from '../../../src/client/transport.ts';
 import { type DaemonlessPorts, registeredDaemonless } from '../../../src/connect/provides.ts';
 import { DaemonList, type PairingInput } from '../../../src/daemons/daemon-list.ts';
@@ -24,7 +25,39 @@ import { CORE, FakeTransport, inventoryOf, json } from '../client/fixtures.ts';
 const HOST = 'ip-10-0-0-7';
 const kernel = generated.surfaces.find(entry => entry.id === 'kernel');
 if (kernel === undefined) throw new Error('the generated registry has no kernel');
-const surfaces: SurfaceEntry[] = [kernel, ...CORE.filter(entry => entry.id !== 'kernel')];
+// A plugin with one machine screen that is chrome-less (first-run setup, which draws its own Machine-name page) and one that is not.
+const setupManifest = {
+  id: 'setup',
+  title: 'Setup',
+  version: '5.0.0',
+  api: 5,
+  core: false,
+  kinds: ['view'],
+  ui: {
+    screens: [
+      { id: 'flow', path: 'flow', chrome: 'none' },
+      { id: 'plain', path: 'plain' },
+    ],
+  },
+} as unknown as Manifest;
+const setupApp = implementApp(setupManifest, {
+  build: () => ({
+    screens: {
+      flow: () => <p data-testid="flow">the flow</p>,
+      plain: () => <p data-testid="plain">a plain page</p>,
+    },
+  }),
+});
+const setup: SurfaceEntry = {
+  id: 'setup',
+  title: 'Setup',
+  core: false,
+  contract: 'h-setup',
+  consumes: [],
+  manifest: setupManifest,
+  app: setupApp,
+};
+const surfaces: SurfaceEntry[] = [kernel, ...CORE.filter(entry => entry.id !== 'kernel'), setup];
 
 const browser: ShellWindow = {
   matchMedia: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
@@ -259,6 +292,16 @@ describe('Name this machine', () => {
     open = await boot({ pairing: { askName: true, chosenName: 'Studio\u200Bbox' } });
     expect(open.writes()).toEqual([]);
     expect(open.step()?.textContent).toContain('invisible');
+  });
+
+  test('a chrome-less setup screen draws no second name form; an ordinary screen still draws the strip', async () => {
+    open = await boot({ path: '/d/ws/flow', pairing: { askName: true } });
+    expect(open.view.container.querySelector('[data-testid="flow"]')).not.toBeNull();
+    expect(open.view.container.querySelectorAll('[data-name-machine]')).toHaveLength(0);
+    await open.view.unmount();
+    open = await boot({ path: '/d/ws/plain', pairing: { askName: true } });
+    expect(open.view.container.querySelector('[data-testid="plain"]')).not.toBeNull();
+    expect(open.view.container.querySelectorAll('[data-name-machine]')).toHaveLength(1);
   });
 
   test('a machine that already has a name of the owner’s is not asked', async () => {
