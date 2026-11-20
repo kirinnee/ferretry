@@ -73,7 +73,9 @@ const VIEWS = [
   { view: 'editor', words: ['Edit as YAML', 'Never paste a key here'] },
   {
     view: 'doctor',
-    words: ['Doctor', 'Required dependencies are present.', 'alternative', 'is all this report proves'],
+    // The tab's title "Doctor" is the Settings shell's one heading (the sweep proves it in the real shell); the body is the
+    // report, so it is read by its own words.
+    words: ['Host dependency checks', 'Required dependencies are present.', 'alternative', 'is all this report proves'],
   },
   {
     view: 'doctor-missing',
@@ -125,6 +127,16 @@ describe('Settings › Files, Doctor and Host checks', () => {
               expect(text.split('Host checks').length - 1, 'the Doctor tab is not headed like the tab beside it').toBe(
                 0,
               );
+              // The body draws no title of its own (the shell draws "Doctor" once above it) but is still named for assistive tech.
+              const body = await tab.evaluate(() => {
+                const section = document.querySelector('[data-doctor-report]');
+                return {
+                  label: section?.getAttribute('aria-label') ?? '',
+                  headings: section?.querySelectorAll('h1, h2').length ?? -1,
+                };
+              });
+              expect(body.label).toBe('Doctor');
+              expect(body.headings, 'the shell owns the tab title; the body draws no h1/h2').toBe(0);
             }
             if (view === 'files') {
               // A file's full path wraps (it is whole on screen, selectable, and in the title).
