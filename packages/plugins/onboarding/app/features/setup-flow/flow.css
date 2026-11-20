@@ -175,3 +175,8 @@
 .fy-sf-cover .fy-loading--page {
   animation-delay: 0s;
 }
+
+/* r11 O1: a save Next could not make says so in the error colour (the theme's --err, light and dark). */
+.fy-sf-note[data-flow-commit-error] {
+  color: var(--err);
+}

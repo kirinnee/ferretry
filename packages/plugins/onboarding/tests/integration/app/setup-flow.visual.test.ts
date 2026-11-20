@@ -319,6 +319,11 @@ describe('r11 O1: Next saves the choice and the loader waits 300 ms', () => {
           expect(await tab.textContent('[data-flow-commit-error]')).toContain('Could not reach the machine.');
           expect(await title(tab), 'still on the same page').toBe('How should it import?');
           expect(await saves(tab)).toBe(1);
+          if (shotsDir !== '')
+            await tab.screenshot({
+              path: join(shotsDir, `${viewport.name}-${scheme}-commit-failed.png`),
+              fullPage: true,
+            });
           expect(
             await tab.$eval('[data-step-next]', next => (next as HTMLButtonElement).disabled),
             'Next is enabled to try again',
