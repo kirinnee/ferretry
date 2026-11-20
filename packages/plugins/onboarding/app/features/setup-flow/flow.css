@@ -169,3 +169,15 @@
 .fy-sf-slot > .fy-slot {
   gap: 0;
 }
+
+/* r11 O1: the STEP cover (`data-flow-cover`) itself waits (page-frame.tsx mounts the loader only after the 300 ms threshold), so
+   the loader it draws fades in at once instead of waiting a second time. The machine-discovery cover (`data-flow-loading`,
+   setup-flow.tsx) mounts its loader immediately and keeps the shared threshold, so it is NOT matched here. */
+.fy-sf-cover[data-flow-cover] .fy-loading--page {
+  animation-delay: 0s;
+}
+
+/* r11 O1: a save Next could not make says so in the error colour (the theme's --err, light and dark). */
+.fy-sf-note[data-flow-commit-error] {
+  color: var(--err);
+}

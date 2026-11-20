@@ -39,6 +39,7 @@ export function recordingHost(phase: StepHost['phase'] = 'daemon'): RecordingHos
     ready: () => void calls.push({ kind: 'ready' }),
     skip: why => void calls.push({ kind: 'skip', why }),
     notNeeded: () => void calls.push({ kind: 'notNeeded' }),
+    commit: () => undefined,
     done: () => void calls.push({ kind: 'done' }),
     busy: label => void calls.push({ kind: 'busy', label }),
     next: () => void calls.push({ kind: 'next' }),

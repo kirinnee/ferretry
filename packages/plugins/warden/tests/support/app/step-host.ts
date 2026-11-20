@@ -21,6 +21,7 @@ export function recordedStep(): RecordedStep {
     ready: () => void events.push('ready'),
     skip: why => void events.push(`skip:${why}`),
     notNeeded: () => void events.push('notNeeded'),
+    commit: () => undefined,
     done: () => void events.push('done'),
     busy: label => void events.push(`busy:${label}`),
     next: () => void events.push('next'),

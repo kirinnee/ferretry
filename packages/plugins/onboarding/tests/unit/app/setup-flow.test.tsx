@@ -65,6 +65,37 @@ function SlowSavePage({ step }: { readonly step: StepHost }): ReactNode {
   }, [step]);
   return <p>saving</p>;
 }
+/** r11 O1: a page that registers a save for Next; the test says how each run of it ends (`rejectWith` makes it reject once). */
+const saves: {
+  runs: number;
+  rejectWith: string | undefined;
+  throwWith: string | undefined;
+  gate: Promise<void> | undefined;
+} = {
+  runs: 0,
+  rejectWith: undefined,
+  throwWith: undefined,
+  gate: undefined,
+};
+function SavePage({ step }: { readonly step: StepHost }): ReactNode {
+  useEffect(() => {
+    step.ready();
+    const run = async (): Promise<void> => {
+      await saves.gate;
+      const why = saves.rejectWith;
+      saves.rejectWith = undefined;
+      if (why !== undefined) throw new Error(why);
+    };
+    step.commit((): Promise<void> => {
+      saves.runs += 1;
+      const thrown = saves.throwWith;
+      saves.throwWith = undefined;
+      if (thrown !== undefined) throw new Error(thrown);
+      return run();
+    });
+  }, [step]);
+  return <p>pick something</p>;
+}
 /** A page that keeps its host and calls it late, after the person has moved on. */
 const stale: { host: StepHost | undefined } = { host: undefined };
 function StalePage({ step }: { readonly step: StepHost }): ReactNode {
@@ -140,6 +171,7 @@ const PAGES: Readonly<Record<string, (step: StepHost) => ReactNode>> = {
   'fake-pack.busy': step => <BusyPage step={step} />,
   'fake-pack.slowsave': step => <SlowSavePage step={step} />,
   'fake-pack.stale': step => <StalePage step={step} />,
+  'fake-pack.save': step => <SavePage step={step} />,
   'fake-pack.after': step => <ReadyPage step={step} />,
   'fake-pack.legacy': () => <p>an old page that never calls ready</p>,
   'fake-pack.forgot': step => <ReadyPage step={step} />,
@@ -919,5 +951,130 @@ describe('a page that is not needed for this run (contract rule 7)', () => {
     await settle();
     expect(pageKey()).toBe('fake-pack.run');
     expect(run.answers.map(answer => `${answer.step}:${answer.state}`)).toEqual(['alpha:done']);
+  });
+});
+
+describe('Next saves the choice (contract rule 8, r11 O1)', () => {
+  const steps = (...ids: string[]) =>
+    setup({
+      machines: [
+        {
+          id: A,
+          name: 'Studio',
+          steps: ids.map((id, index) => ({
+            plugin: 'fake-pack',
+            id,
+            title: id,
+            order: index + 1,
+            side: 'daemon' as const,
+            stepHost: true as const,
+            state: 'pending' as const,
+          })),
+        },
+      ],
+    });
+  const errorText = (): string | null | undefined =>
+    view?.container.querySelector('[data-flow-commit-error]')?.textContent;
+
+  it('runs the registered save once on Next, records done once and moves on', async () => {
+    saves.runs = 0;
+    const run = steps('save', 'after');
+    view = await mount(run.tree);
+    await settle();
+    expect(saves.runs).toBe(0);
+    await next();
+    await settle();
+    expect(saves.runs).toBe(1);
+    expect(pageKey()).toBe('fake-pack.after');
+    expect(run.answers.map(answer => `${answer.step}:${answer.state}`)).toEqual(['save:done']);
+  });
+
+  it('a rejected save keeps the page, shows the error, records nothing, and Next runs the save again', async () => {
+    saves.runs = 0;
+    saves.rejectWith = 'The machine said no.';
+    const run = steps('save', 'after');
+    view = await mount(run.tree);
+    await settle();
+    await next();
+    await settle();
+    expect(saves.runs).toBe(1);
+    expect(pageKey()).toBe('fake-pack.save');
+    expect(errorText()).toBe('The machine said no.');
+    expect(view.container.querySelector<HTMLButtonElement>('[data-step-next]')?.disabled).toBe(false);
+    expect(run.answers).toEqual([]);
+    await next();
+    await settle();
+    expect(saves.runs).toBe(2);
+    expect(pageKey()).toBe('fake-pack.after');
+    expect(errorText()).toBeUndefined();
+    expect(run.answers.map(answer => `${answer.step}:${answer.state}`)).toEqual(['save:done']);
+  });
+
+  it('a save that throws while it is being prepared is a failed save: message, Next ready, retry runs it', async () => {
+    saves.runs = 0;
+    saves.throwWith = 'Could not prepare the request.';
+    const run = steps('save', 'after');
+    view = await mount(run.tree);
+    await settle();
+    await next();
+    await settle();
+    expect(saves.runs).toBe(1);
+    expect(pageKey()).toBe('fake-pack.save');
+    expect(errorText()).toBe('Could not prepare the request.');
+    expect(view.container.querySelector('[data-flow-busy]')).toBeNull();
+    expect(view.container.querySelector<HTMLButtonElement>('[data-step-next]')?.disabled).toBe(false);
+    await next();
+    await settle();
+    expect(saves.runs).toBe(2);
+    expect(pageKey()).toBe('fake-pack.after');
+  });
+
+  it('Next is locked and says Saving… while the save runs, and a second press does not run it twice', async () => {
+    saves.runs = 0;
+    let release: () => void = () => undefined;
+    saves.gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const run = steps('save', 'after');
+    view = await mount(run.tree);
+    await settle();
+    await next();
+    await settle();
+    expect(view.container.querySelector('[data-flow-busy]')?.textContent).toBe('Saving…');
+    expect(view.container.querySelector<HTMLButtonElement>('[data-step-next]')?.disabled).toBe(true);
+    await next();
+    expect(saves.runs).toBe(1);
+    expect(pageKey()).toBe('fake-pack.save');
+    await interact(() => release());
+    await settle();
+    expect(saves.runs).toBe(1);
+    expect(pageKey()).toBe('fake-pack.after');
+    saves.gate = undefined;
+  });
+
+  it('Later never runs the save and records later', async () => {
+    saves.runs = 0;
+    const run = steps('save', 'after');
+    view = await mount(run.tree);
+    await settle();
+    await press('[data-flow-later]');
+    await settle();
+    expect(saves.runs).toBe(0);
+    expect(pageKey()).toBe('fake-pack.after');
+    expect(run.answers.map(answer => `${answer.step}:${answer.state}`)).toEqual(['save:later']);
+  });
+
+  it('Back drops the save: nothing runs by leaving the page', async () => {
+    saves.runs = 0;
+    const run = steps('after', 'save');
+    view = await mount(run.tree);
+    await settle();
+    await next();
+    await settle();
+    expect(pageKey()).toBe('fake-pack.save');
+    await press('[data-step-back]');
+    await settle();
+    expect(pageKey()).toBe('fake-pack.after');
+    expect(saves.runs).toBe(0);
   });
 });

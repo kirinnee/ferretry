@@ -71,6 +71,7 @@ function Scene() {
       ready: () => {},
       skip: () => {},
       notNeeded: () => {},
+      commit: () => undefined,
       done: () => {},
       busy: label => setBusy(label !== null),
       next: () => {

@@ -22,6 +22,7 @@ function stepHarness() {
     ready: () => void calls.push({ kind: 'ready' }),
     skip: why => void calls.push({ kind: 'skip', why }),
     notNeeded: () => void calls.push({ kind: 'notNeeded' }),
+    commit: () => undefined,
     done: () => void calls.push({ kind: 'done' }),
     busy: () => void calls.push({ kind: 'busy' }),
     next: () => void calls.push({ kind: 'next' }),
