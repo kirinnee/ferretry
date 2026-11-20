@@ -192,6 +192,7 @@ const SCALAR_PATHS: ReadonlySet<string> = new Set([
   'density',
   'phone.nav.side',
   'phone.nav.style',
+  'phone.nav.labels',
   'phone.side.show',
   'phone.side.holds',
   'phone.side.at',

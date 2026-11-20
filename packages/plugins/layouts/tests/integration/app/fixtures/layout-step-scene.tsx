@@ -3,11 +3,13 @@
  * device that saves into memory through the real override rules.
  *
  *   ?theme=<family>-<mode>   ?motion=reduced  sets Settings › Motion to Reduced
+ *   ?phoneLabels=words  the layout in force sets phone.nav.labels=words, drawn for a phone
  */
 import {
   applyOverrides,
   DEFAULT_LAYOUT,
   type DeviceLayout,
+  type Layout,
   type LayoutOverrides,
   setDeviceOverride,
 } from '@ferretry/app';
@@ -20,6 +22,10 @@ import { LayoutStep } from '../../../../app/features/onboarding/layout-step.tsx'
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 if (params.get('motion') === 'reduced') document.documentElement.dataset.motion = 'reduced';
+
+const phoneLabels = params.get('phoneLabels');
+const BASE: Layout =
+  phoneLabels === 'words' ? { ...DEFAULT_LAYOUT, phone: { nav: { labels: 'words' } } } : DEFAULT_LAYOUT;
 
 const host: StepHost = {
   phase: 'client',
@@ -41,10 +47,10 @@ function Scene() {
   const latest = useRef<LayoutOverrides>(overrides);
   const device: DeviceLayout = {
     overrides,
-    base: DEFAULT_LAYOUT,
-    inForce: applyOverrides(DEFAULT_LAYOUT, overrides) ?? DEFAULT_LAYOUT,
+    base: BASE,
+    inForce: applyOverrides(BASE, overrides) ?? BASE,
     set: (path, value) => {
-      const edited = setDeviceOverride(DEFAULT_LAYOUT, latest.current, path, value);
+      const edited = setDeviceOverride(BASE, latest.current, path, value);
       if (!edited.ok) return edited.error;
       latest.current = edited.overrides;
       setOverrides(edited.overrides);
@@ -69,7 +75,7 @@ function Scene() {
           of: 3,
         }}
       >
-        <LayoutStep step={host} device={device} viewport="wide" />
+        <LayoutStep step={host} device={device} viewport={phoneLabels === null ? 'wide' : 'phone'} />
       </StepPageFrame>
     </div>
   );

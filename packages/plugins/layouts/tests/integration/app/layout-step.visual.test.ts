@@ -167,6 +167,21 @@ describe('the layout step', () => {
     });
   }
 
+  it('390: Icons takes effect on a phone whose layout sets phone.nav.labels=words (the phone key is written where it wins)', async () => {
+    const phone = VARIANTS[2];
+    const { tab, close } = await open(phone, '&phoneLabels=words');
+    try {
+      const nav = (value: string) => tab.locator(`[aria-label="Navigation"] input[value="${value}"]`);
+      expect(await nav('words').isChecked(), 'the phone starts on the Words its layout set').toBe(true);
+      await tab.locator('[data-choice="icons"]').click();
+      expect(await nav('icons').isChecked(), 'the EFFECTIVE phone choice is now Icons').toBe(true);
+      expect(await nav('words').isChecked()).toBe(false);
+      await shot(tab, phone, 'phone-label-override');
+    } finally {
+      await close();
+    }
+  });
+
   it('with motion off nothing plays at all', async () => {
     const { tab, close } = await open(VARIANTS[0], '&motion=reduced');
     try {

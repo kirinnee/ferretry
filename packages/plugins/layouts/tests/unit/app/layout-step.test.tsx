@@ -134,13 +134,17 @@ describe('the Layout step', () => {
     await view.unmount();
   });
 
-  test('keysFor adds the phone key only when the layout in force sets one (density); the labels are always the one key', () => {
+  test('keysFor adds the phone key only when the layout in force sets one, for density and for the labels', () => {
     const [nav, density] = LAYOUT_QUESTIONS;
     expect(keysFor({ ...DEFAULT_LAYOUT, phone: { density: 'compact' } }, density!)).toEqual([
       'density',
       'phone.density',
     ]);
-    expect(keysFor({ ...DEFAULT_LAYOUT, phone: { nav: { labels: 'words' } } }, nav!)).toEqual(['nav.labels']);
+    expect(keysFor({ ...DEFAULT_LAYOUT, phone: { nav: { labels: 'words' } } }, nav!)).toEqual([
+      'nav.labels',
+      'phone.nav.labels',
+    ]);
+    expect(keysFor({ ...DEFAULT_LAYOUT, phone: { density: 'compact' } }, nav!)).toEqual(['nav.labels']);
     expect(keysFor(DEFAULT_LAYOUT, nav!)).toEqual(['nav.labels']);
     expect(keysFor({ ...DEFAULT_LAYOUT, phone: undefined }, density!)).toEqual(['density']);
   });

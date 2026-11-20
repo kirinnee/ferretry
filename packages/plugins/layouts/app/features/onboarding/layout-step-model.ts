@@ -61,10 +61,11 @@ export function answerOf(layout: Layout, question: LayoutQuestion, viewport: Vie
 }
 
 /**
- * Every key one answer is written to: the wide key, and the phone key when the layout in force sets one. The labels
- * have no phone key a device can write, so they are always the one key.
+ * Every key one answer is written to: the wide key, and the phone key when the layout in force sets one (the phone key
+ * wins on a phone, so leaving it would hide the answer there).
  */
 export function keysFor(layout: Layout, question: LayoutQuestion): readonly string[] {
-  if (question.path === 'nav.labels') return [question.path];
-  return layout.phone?.density === undefined ? [question.path] : [question.path, `phone.${question.path}`];
+  const phoneSet =
+    question.path === 'nav.labels' ? layout.phone?.nav?.labels !== undefined : layout.phone?.density !== undefined;
+  return phoneSet ? [question.path, `phone.${question.path}`] : [question.path];
 }
