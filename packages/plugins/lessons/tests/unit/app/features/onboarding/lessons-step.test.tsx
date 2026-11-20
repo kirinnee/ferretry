@@ -1,6 +1,6 @@
 /**
- * The first-run Lessons page against a fake daemon and the real `StepHarness`: what it tells the shell (`ready`, `busy`,
- * `done`) and what it writes (`passiveDefault`), including the refusals.
+ * The first-run Lessons page against a fake daemon and a recording `StepHost` (r11 O8): what it tells the shell (`ready`,
+ * `commit`), what Next writes (`passiveDefault`, once), and that the page itself writes nothing and draws no button.
  */
 import { describe, expect, it } from 'bun:test';
 import { recordingHost as stepHarness } from '../../../../support/app/step-host.ts';
@@ -8,7 +8,7 @@ import { LessonsStep } from '../../../../../app/features/onboarding/lessons-step
 import { lessonsStepPanel } from '../../../../../app/features/onboarding/step-panel.tsx';
 import { click, textOf, waitFor, waitForText } from '../../../../support/app/dom-helpers.ts';
 import { mount, must } from '../../../../support/app/dom.ts';
-import { config, fakeLessonsDaemon } from '../../../../support/app/lessons.ts';
+import { fakeLessonsDaemon } from '../../../../support/app/lessons.ts';
 
 const card = (root: ParentNode, id: string): HTMLElement =>
   must(root.querySelector<HTMLElement>(`[data-choice="${id}"]`), `${id} card`);
@@ -17,54 +17,85 @@ const patches = (daemon: ReturnType<typeof fakeLessonsDaemon>) =>
 const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
 describe('first-run › Lessons step', () => {
-  it('reads the machine setting, then shows two cards with neither chosen and lifts the cover once', async () => {
+  it('reads the machine setting, then shows two stacked cards with neither chosen and lifts the cover once', async () => {
     const daemon = fakeLessonsDaemon();
     const harness = stepHarness();
     const view = await mount(<LessonsStep connection={daemon.connection} step={harness.host} />);
     await waitFor(() => harness.decision === 'shown', 'the page lifts its cover');
-    // The shell's frame owns the title and the footer; the page draws neither.
+    // The shell's frame owns the title and the footer; the page draws neither, and no button of its own.
     expect(view.container.querySelector('h1, h2, h3, header, footer, [data-step-page], [data-step-footer]')).toBeNull();
     expect(view.container.querySelector('button')).toBeNull();
+    expect(view.container.querySelector('[data-choice-cards]')?.getAttribute('data-layout')).toBe('stack');
     expect(view.container.querySelectorAll('[data-choice]').length).toBe(2);
     expect(view.container.querySelectorAll('[data-selected="true"]').length).toBe(0);
-    expect(view.container.querySelector('[data-lessons-now]')?.textContent).toBe('Right now: on for new ferrets.');
     expect(harness.count('ready')).toBe(1);
     expect(harness.count('done')).toBe(0);
+    expect(harness.hasCommit).toBe(false);
     expect(patches(daemon)).toEqual([]);
     await view.unmount();
   });
 
-  it('writes Off, keeps Next busy while it saves, and answers the step', async () => {
+  it('says one line and no tool names: the words stay short and never mention bun', async () => {
+    const daemon = fakeLessonsDaemon();
+    const view = await mount(<LessonsStep connection={daemon.connection} />);
+    await waitFor(() => view.container.querySelectorAll('[data-choice]').length === 2, 'cards');
+    const text = textOf(view.container);
+    expect(text).toContain('Rules are kept in Lessons, where you read each one before it is used.');
+    expect(text.toLowerCase()).not.toContain('bun');
+    // The page's words (the demo column is drawn apart, by the frame) stay under 160 characters.
+    const words = [...view.container.querySelectorAll('.fy-lessons-step-line, .fy-cc__title, .fy-cc__line')]
+      .map(node => node.textContent ?? '')
+      .join(' ');
+    expect(words.length).toBeLessThanOrEqual(160);
+    await view.unmount();
+  });
+
+  it('a pick only registers the save: nothing is written, busy, or answered until Next runs it', async () => {
     const daemon = fakeLessonsDaemon();
     const harness = stepHarness();
     const view = await mount(<LessonsStep connection={daemon.connection} step={harness.host} />);
     await waitFor(() => harness.decision === 'shown', 'ready');
     await click(card(view.container, 'off'));
-    await waitFor(() => harness.count('done') === 1, 'done');
+    await waitFor(() => card(view.container, 'off').dataset.selected === 'true', 'selected');
+    expect(harness.hasCommit).toBe(true);
+    expect(patches(daemon)).toEqual([]);
+    expect(harness.count('busy')).toBe(0);
+    expect(harness.count('done')).toBe(0);
+    // Next: exactly one write, of the card on screen.
+    await harness.runCommit();
     expect(patches(daemon)).toEqual([{ passiveDefault: false }]);
-    expect(harness.calls.filter(call => call.kind === 'busy')).toEqual([
-      { kind: 'busy', label: 'Saving…' },
-      { kind: 'busy', label: null },
-    ]);
-    expect(card(view.container, 'off').dataset.selected).toBe('true');
-    // The current-setting line is for before the answer; once answered the card says it.
-    expect(view.container.querySelector('[data-lessons-now]')).toBeNull();
     await view.unmount();
   });
 
-  it('writes On when the machine had it off', async () => {
+  it('changing the pick replaces the registered save: Next writes the last card, once', async () => {
     const daemon = fakeLessonsDaemon();
-    daemon.state.config = config({ passiveDefault: false });
     const harness = stepHarness();
     const view = await mount(<LessonsStep connection={daemon.connection} step={harness.host} />);
-    await waitForText(view.container, 'Right now: off for new ferrets.');
+    await waitFor(() => harness.decision === 'shown', 'ready');
+    await click(card(view.container, 'off'));
     await click(card(view.container, 'on'));
-    await waitFor(() => harness.count('done') === 1, 'done');
+    await waitFor(() => card(view.container, 'on').dataset.selected === 'true', 'on selected');
+    await harness.runCommit();
     expect(patches(daemon)).toEqual([{ passiveDefault: true }]);
     await view.unmount();
   });
 
-  it('says a refusal, puts the card back and does not answer the step', async () => {
+  it('the picture follows the card: a rule is filed for Learn and nothing for Don’t learn', async () => {
+    const daemon = fakeLessonsDaemon();
+    const view = await mount(<LessonsStep connection={daemon.connection} />);
+    await waitFor(() => view.container.querySelectorAll('[data-choice]').length === 2, 'cards');
+    // Outside a frame the demo draws inline; at rest it shows the filed rule.
+    expect(view.container.querySelector('[data-lessons-demo]')?.getAttribute('data-kept')).toBe('true');
+    await click(card(view.container, 'off'));
+    await waitFor(
+      () => view.container.querySelector('[data-lessons-demo]')?.getAttribute('data-kept') === 'false',
+      'off',
+    );
+    expect(view.container.querySelector('[data-lessons-rule]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('a refused save rejects with the daemon’s sentence, so the shell can show it and Next can try again', async () => {
     const daemon = fakeLessonsDaemon();
     daemon.once('PATCH /v1/lessons/config', {
       refuse: { status: 403, code: 'grant_refused', message: 'fleet.configure is closed' },
@@ -72,99 +103,17 @@ describe('first-run › Lessons step', () => {
     const harness = stepHarness();
     const view = await mount(<LessonsStep connection={daemon.connection} step={harness.host} />);
     await waitFor(() => harness.decision === 'shown', 'ready');
-    await click(card(view.container, 'off'));
-    await waitForText(view.container, 'fleet.configure is closed');
-    expect(view.container.querySelectorAll('[data-selected="true"]').length).toBe(0);
-    expect(harness.count('done')).toBe(0);
-    expect(harness.calls.at(-1)).toEqual({ kind: 'busy', label: null });
-    await view.unmount();
-  });
-
-  it('locks both cards while a save is pending, so one write is in flight and done follows the chosen card', async () => {
-    const daemon = fakeLessonsDaemon();
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    daemon.once('PATCH /v1/lessons/config', async () => {
-      await gate;
-      return { body: config({ passiveDefault: true }) };
-    });
-    const harness = stepHarness();
-    const view = await mount(<LessonsStep connection={daemon.connection} step={harness.host} />);
-    await waitFor(() => harness.decision === 'shown', 'ready');
     await click(card(view.container, 'on'));
-    await waitFor(() => patches(daemon).length === 1, 'the first write is sent');
-    // Both cards are locked while it is in flight, and a tap on the other card does nothing.
-    const radios = [...view.container.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
-    expect(radios.length).toBe(2);
-    expect(radios.every(radio => radio.disabled)).toBe(true);
-    await click(card(view.container, 'off'));
-    await flush();
-    expect(patches(daemon)).toEqual([{ passiveDefault: true }]);
-    expect(harness.count('done')).toBe(0);
+    await waitFor(() => harness.hasCommit, 'registered');
+    let message = '';
+    await harness.runCommit().catch((reason: unknown) => {
+      message = reason instanceof Error ? reason.message : String(reason);
+    });
+    expect(message).toContain('fleet.configure is closed');
+    // The pick stays, and the same Next runs the save again.
     expect(card(view.container, 'on').dataset.selected).toBe('true');
-    release();
-    await waitFor(() => harness.count('done') === 1, 'done after the accepted write');
-    await flush();
-    expect(patches(daemon)).toEqual([{ passiveDefault: true }]);
-    expect(card(view.container, 'on').dataset.selected).toBe('true');
-    expect(daemon.state.config.passiveDefault).toBe(true);
-    expect(harness.calls.at(-1)).toEqual({ kind: 'done' });
-    expect(radios.every(radio => !radio.disabled)).toBe(true);
-    await view.unmount();
-  });
-
-  it('keeps the step unanswered and unlocks the cards when a delayed save is refused', async () => {
-    const daemon = fakeLessonsDaemon();
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    daemon.once('PATCH /v1/lessons/config', async () => {
-      await gate;
-      return { refuse: { status: 403, code: 'grant_refused', message: 'fleet.configure is closed' } };
-    });
-    const harness = stepHarness();
-    const view = await mount(<LessonsStep connection={daemon.connection} step={harness.host} />);
-    await waitFor(() => harness.decision === 'shown', 'ready');
-    await click(card(view.container, 'on'));
-    await waitFor(() => patches(daemon).length === 1, 'sent');
-    release();
-    await waitForText(view.container, 'fleet.configure is closed');
-    expect(harness.count('done')).toBe(0);
-    expect(view.container.querySelectorAll('[data-selected="true"]').length).toBe(0);
-    // Free again: the person can answer the other way.
-    await click(card(view.container, 'off'));
-    await waitFor(() => harness.count('done') === 1, 'done');
-    expect(patches(daemon)).toEqual([{ passiveDefault: true }, { passiveDefault: false }]);
-    await view.unmount();
-  });
-
-  it('only promises what the setting does: automatic suggestions from new ferrets', async () => {
-    const daemon = fakeLessonsDaemon();
-    const view = await mount(<LessonsStep connection={daemon.connection} />);
-    await waitFor(() => view.container.querySelectorAll('[data-choice]').length === 2, 'cards');
-    const text = textOf(view.container);
-    expect(text).toContain('New ferrets won’t suggest rules.');
-    expect(text).toContain('No suggestion');
-    expect(text).toContain('Rule suggested');
-    expect(text).not.toContain('No rules are filed');
-    expect(text).not.toContain('Nothing kept');
-    await view.unmount();
-  });
-
-  it('names what waits for the owner when the write was held, and still answers', async () => {
-    const daemon = fakeLessonsDaemon();
-    daemon.once('PATCH /v1/lessons/config', {
-      body: { ...config({ passiveDefault: true }), held: ['lesson mining may now spend on ferrets'] },
-    });
-    const harness = stepHarness();
-    const view = await mount(<LessonsStep connection={daemon.connection} step={harness.host} />);
-    await waitFor(() => harness.decision === 'shown', 'ready');
-    await click(card(view.container, 'on'));
-    await waitForText(view.container, 'Waiting for your approval: lesson mining may now spend on ferrets');
-    expect(harness.count('done')).toBe(1);
+    await harness.runCommit();
+    expect(patches(daemon)).toEqual([{ passiveDefault: true }, { passiveDefault: true }]);
     await view.unmount();
   });
 
@@ -206,6 +155,7 @@ describe('first-run › Lessons step', () => {
     await waitFor(() => view.container.querySelectorAll('[data-choice]').length === 2, 'cards');
     await click(card(view.container, 'off'));
     await waitFor(() => card(view.container, 'off').dataset.selected === 'true', 'selected');
+    expect(patches(daemon)).toEqual([]);
     await view.unmount();
   });
 
@@ -221,7 +171,7 @@ describe('first-run › Lessons step', () => {
       const view = await mount(<LessonsStep connection={daemon.connection} step={harness.host} />);
       await waitFor(() => harness.decision === 'shown', 'ready');
       await click(card(view.container, 'on'));
-      await waitFor(() => harness.count('done') === 1, 'done');
+      await harness.runCommit();
       await view.unmount();
     } finally {
       Storage.prototype.setItem = original;

@@ -1,5 +1,5 @@
 /**
- * FIRST RUN › THIS MACHINE › "Learn rules from your ferrets?" — one daemon step, two cards.
+ * FIRST RUN › THIS MACHINE › "Learn rules from your ferrets?" — one daemon step, two stacked cards, the demo on the right.
  *
  * This is the step's BODY only: the shell wraps it in the step frame (title from the manifest, progress, Back / Next,
  * Later, the loading cover), so the page draws no title or footer of its own and talks to the footer through the host.
@@ -10,24 +10,21 @@
  *
  *   - The page reads the machine's current setting first, then lifts the shell's loading cover (`ready()`), so there is
  *     one draw and no pop-in. A read that fails still lifts the cover and says why, with a way to try again.
- *   - Neither card is chosen on arrival, even though the machine already has a default: the person answers, and only an
- *     answer records the step (`done()`).
- *   - A choice writes `passiveDefault` at once. Both cards are locked and Next waits while it saves (`busy`), so only one
- *     write is ever in flight and the step is recorded (`done()`) only once the daemon accepted the write that matches the
- *     card on screen; a refusal is said in a sentence and the card goes back to what it was, and the step is NOT recorded
- *     as answered.
+ *   - Neither card is chosen on arrival, even though the machine already has a default: the person answers.
+ *   - A pick only REGISTERS the write (`host.commit`, contract rule 8): nothing is written by a click or an arrow key. The
+ *     footer's Next runs it under its own "Saving…" and records the step when the daemon accepted it; a refusal is said in
+ *     the footer line by the shell and Next stays ready to try again. The page has no Save / Use / Keep button.
+ *   - The picture on the right (`StepDemo`) follows the card on screen: a rule filed on the Lessons shelf, or nothing filed.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChoiceCards } from '@ferretry/app';
+import { ChoiceCards, StepDemo } from '@ferretry/app';
 import type { StepHost } from '@ferretry/kernel/contract';
-import type { LessonsConfig } from '../../../contract/index.ts';
 import { fetchLessonsConfig, type LessonsConnection, lessonsErrorMessage, patchLessonsConfig } from '../../src/api.ts';
 import { LessonDemo } from './lessons-step-demo.tsx';
 import './lessons-step.css';
 
-const LESSONS_STEP_LINE =
-  'When you correct a ferret, Ferretry can keep the correction as a rule for every ferret after. You read each rule and decide before it is used.';
+const LESSONS_STEP_LINE = 'Rules are kept in Lessons, where you read each one before it is used.';
 
 type Answer = 'on' | 'off';
 
@@ -38,13 +35,9 @@ export interface LessonsStepProps {
 }
 
 export function LessonsStep({ connection, step }: LessonsStepProps) {
-  const [config, setConfig] = useState<LessonsConfig | null>(null);
+  const [read, setRead] = useState(false);
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [held, setHeld] = useState<readonly string[]>([]);
-  const [saving, setSaving] = useState(false);
-  // Set synchronously, so a second tap in the same frame cannot start a second write before the cards lock.
-  const writing = useRef(false);
   // The loading cover lifts once, however many times the read is retried.
   const lifted = useRef(false);
   // The host is read through a ref, so a shell that hands a new host object each render never re-reads the setting.
@@ -59,8 +52,8 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
       host.current?.ready();
     };
     fetchLessonsConfig(connection).then(
-      next => {
-        setConfig(next);
+      () => {
+        setRead(true);
         setProblem(null);
         lift();
       },
@@ -72,86 +65,54 @@ export function LessonsStep({ connection, step }: LessonsStepProps) {
   }, [connection]);
   useEffect(load, [load]);
 
+  // A pick registers what Next writes; it never writes by itself.
   const choose = useCallback(
     (next: string) => {
-      if (writing.current) return;
-      writing.current = true;
-      setSaving(true);
-      const before = answer;
       const chosen: Answer = next === 'on' ? 'on' : 'off';
       setAnswer(chosen);
-      setProblem(null);
-      setHeld([]);
-      host.current?.busy('Saving…');
-      patchLessonsConfig(connection, { passiveDefault: chosen === 'on' }).then(
-        ({ held: waiting = [], ...inEffect }) => {
-          writing.current = false;
-          setSaving(false);
-          host.current?.busy(null);
-          setConfig(inEffect);
-          setHeld(waiting);
-          host.current?.done();
-        },
-        (reason: unknown) => {
-          writing.current = false;
-          setSaving(false);
-          host.current?.busy(null);
-          setAnswer(before);
-          setProblem(lessonsErrorMessage(reason));
-        },
-      );
+      host.current?.commit(async () => {
+        try {
+          await patchLessonsConfig(connection, { passiveDefault: chosen === 'on' });
+        } catch (reason: unknown) {
+          throw new Error(lessonsErrorMessage(reason));
+        }
+      });
     },
-    [answer, connection],
+    [connection],
   );
 
-  const unread = config === null;
   return (
     <div className="fy-lessons-step" data-lessons-step="">
-      <p className="fy-lessons-step-line">{LESSONS_STEP_LINE}</p>
-      {unread ? null : (
+      {read ? (
         <ChoiceCards
           label="Learn from my corrections"
+          layout="stack"
           value={answer}
           onChange={choose}
-          disabled={saving}
           options={[
-            {
-              id: 'on',
-              title: 'Learn',
-              line: 'New ferrets are told to file a rule when you correct them.',
-              demo: <LessonDemo kept />,
-            },
-            {
-              id: 'off',
-              title: 'Don’t learn',
-              line: 'New ferrets won’t suggest rules. Switch it on later in Settings › Lessons.',
-              demo: <LessonDemo kept={false} />,
-            },
+            { id: 'on', title: 'Learn', line: 'Corrections become rules.' },
+            { id: 'off', title: 'Don’t learn', line: 'No rules. Change it in Settings.' },
           ]}
         />
-      )}
-      {unread || answer !== null ? null : (
-        <p className="fy-lessons-step-note" data-lessons-now="">
-          Right now: {config.passiveDefault ? 'on' : 'off'} for new ferrets.
-        </p>
-      )}
-      {held.map(sentence => (
-        <p key={sentence} role="status" className="fy-lessons-step-note" data-lessons-held="">
-          Waiting for your approval: {sentence}
-        </p>
-      ))}
+      ) : null}
+      <p className="fy-lessons-step-line">{LESSONS_STEP_LINE}</p>
+      {read ? (
+        <StepDemo>
+          <LessonDemo kept={answer !== 'off'} />
+        </StepDemo>
+      ) : null}
       {problem === null ? null : (
         <p role="alert" className="fy-lessons-step-problem" data-lessons-problem="">
           {problem}
         </p>
       )}
-      {unread && problem !== null ? (
+      {read || problem === null ? null : (
         <div>
           <button type="button" className="fy-lessons-step-retry" onClick={load}>
             Try again
           </button>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

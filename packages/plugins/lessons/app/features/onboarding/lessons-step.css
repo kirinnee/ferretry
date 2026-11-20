@@ -1,4 +1,5 @@
-/* The first-run Lessons page body: one line, the two cards. The shell owns the page frame (width, footer). */
+/* The first-run Lessons page body: one line, the stacked cards. The shell owns the page frame (columns, footer); the
+   scene on the right is drawn into the frame's demo column by StepDemo. */
 .fy-lessons-step {
   display: flex;
   flex-direction: column;
@@ -6,16 +7,6 @@
   min-width: 0;
 }
 .fy-lessons-step-line {
-  color: var(--muted);
-  font-size: var(--text-md);
-  margin: 0;
-  max-width: min(100%, 652px); /* the width of the two cards and the gap between them */
-}
-/* The cards sit a clear step below the line above them: 12px of gap plus 8px. */
-.fy-lessons-step [data-choice-cards] {
-  margin-block-start: 8px;
-}
-.fy-lessons-step-note {
   color: var(--muted);
   font-size: var(--text-md);
   margin: 0;
@@ -32,33 +23,53 @@
   color: var(--fg);
   cursor: pointer;
   min-height: 44px;
+  min-inline-size: 8.5rem;
   padding: 0 16px;
 }
 
-/* A correction becomes a rule: two chips and an arrow, 48px tall so both cards stay the same height. */
+/* A correction becomes a rule on the Lessons shelf: the chip you typed, and the shelf under it. */
 .fy-lsd {
-  align-items: center;
   display: flex;
-  gap: 8px;
-  height: 48px;
+  flex-direction: column;
+  background: var(--surface-2);
+  border: var(--stroke-panel) solid var(--border);
+  border-radius: var(--radius-panel, var(--radius-control));
+  box-sizing: border-box;
+  gap: 6px;
+  inline-size: 100%;
+  max-inline-size: 440px;
   min-width: 0;
+  padding: 10px;
 }
 .fy-lsd__said,
-.fy-lsd__rule {
+.fy-lsd__rule,
+.fy-lsd__empty {
   border-radius: var(--radius-control);
-  font-size: calc(var(--font-size-base) - 2px);
-  line-height: 1.2;
-  overflow: hidden;
-  padding: 6px 8px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: var(--text-md);
+  line-height: 1.3;
+  min-width: 0;
+  padding: 6px 10px;
 }
 .fy-lsd__said {
   background: var(--surface-3);
   color: var(--fg);
+  max-inline-size: 100%;
 }
-.fy-lsd__arrow {
+.fy-lsd__shelf {
+  background: var(--bg);
+  border: var(--stroke-panel) solid var(--border);
+  border-radius: var(--radius-panel, var(--radius-control));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 8px 6px;
+}
+.fy-lsd__shelf-name {
   color: var(--muted);
+  font-size: calc(var(--font-size-base) - 2px);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 .fy-lsd__rule {
   background: var(--accent-soft);
@@ -66,33 +77,63 @@
   color: var(--accent);
   font-weight: 600;
 }
-/* Off: nothing becomes a rule, so the second chip is dashed and quiet. */
-.fy-lsd[data-kept='false'] .fy-lsd__rule {
-  background: transparent;
+.fy-lsd__empty {
   border: 1px dashed var(--border);
   color: var(--muted);
-  font-weight: 400;
 }
 
-@keyframes fy-lsd-in {
+@keyframes fy-lsd-said {
   from {
     opacity: 0;
-    transform: translateX(-6px);
+    transform: translateY(-8px);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateY(0);
   }
 }
-/* Plays once, when the card BECOMES selected; at rest (or never selected) it shows the finished scene. */
+/* The rule starts level with the chip you typed (it sits one chip + gap above its place on the shelf) and settles. */
+@keyframes fy-lsd-fly {
+  0% {
+    opacity: 0;
+    transform: translateY(-44px) scale(0.96);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
 @media (prefers-reduced-motion: no-preference) {
-  :root:not([data-motion='reduced']) .fy-cc__card[data-selected='true'] .fy-lsd__said {
-    animation: fy-lsd-in 280ms ease-out backwards;
+  :root:not([data-motion='reduced']) .fy-lsd__said {
+    animation: fy-lsd-said 260ms ease-out backwards;
   }
-  :root:not([data-motion='reduced']) .fy-cc__card[data-selected='true'] .fy-lsd__arrow {
-    animation: fy-lsd-in 280ms 200ms ease-out backwards;
+  :root:not([data-motion='reduced']) .fy-lsd[data-kept='true'] .fy-lsd__rule {
+    animation: fy-lsd-fly 700ms 300ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
   }
-  :root:not([data-motion='reduced']) .fy-cc__card[data-selected='true'] .fy-lsd__rule {
-    animation: fy-lsd-in 280ms 400ms ease-out backwards;
+  :root:not([data-motion='reduced']) .fy-lsd[data-kept='false'] .fy-lsd__empty {
+    animation: fy-lsd-said 260ms 200ms ease-out backwards;
+  }
+}
+
+/* On a wide page the demo column is generous, so the scene fills it and reads at the size of the cards beside it. */
+@media (min-width: 900px) {
+  .fy-lsd {
+    gap: 16px;
+    max-inline-size: none;
+    padding: 24px;
+  }
+  .fy-lsd__said,
+  .fy-lsd__rule,
+  .fy-lsd__empty {
+    font-size: calc(var(--text-md) + 2px);
+    padding: 10px 14px;
+  }
+  .fy-lsd__shelf {
+    gap: 10px;
+    min-block-size: 112px;
+    padding: 12px 14px 16px;
   }
 }

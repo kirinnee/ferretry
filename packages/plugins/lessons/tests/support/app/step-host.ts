@@ -11,6 +11,7 @@ type HostCall =
   | { readonly kind: 'notNeeded' }
   | { readonly kind: 'done' }
   | { readonly kind: 'busy'; readonly label: string | null }
+  | { readonly kind: 'commit'; readonly registered: boolean }
   | { readonly kind: 'remember'; readonly patch: StepSegmentMemory }
   | { readonly kind: 'next' }
   | { readonly kind: 'back' };
@@ -21,11 +22,16 @@ export interface RecordingHost {
   count(kind: HostCall['kind']): number;
   /** Shown (`ready`), not shown (`skip`), or nothing yet (still under the loading cover). */
   readonly decision: 'shown' | 'skipped' | 'undecided';
+  /** Whether a save is registered for Next (contract rule 8). */
+  readonly hasCommit: boolean;
+  /** What the shell's Next does: runs the registered save (resolves at once when none is registered). */
+  runCommit(): Promise<void>;
 }
 
 export function recordingHost(phase: StepHost['phase'] = 'daemon'): RecordingHost {
   const calls: HostCall[] = [];
   let segment: StepSegmentMemory = {};
+  let commit: (() => Promise<void>) | null = null;
   const host: StepHost = {
     phase,
     appliesTo: [],
@@ -39,7 +45,10 @@ export function recordingHost(phase: StepHost['phase'] = 'daemon'): RecordingHos
     ready: () => void calls.push({ kind: 'ready' }),
     skip: why => void calls.push({ kind: 'skip', why }),
     notNeeded: () => void calls.push({ kind: 'notNeeded' }),
-    commit: () => undefined,
+    commit: save => {
+      commit = save;
+      calls.push({ kind: 'commit', registered: save !== null });
+    },
     done: () => void calls.push({ kind: 'done' }),
     busy: label => void calls.push({ kind: 'busy', label }),
     next: () => void calls.push({ kind: 'next' }),
@@ -49,6 +58,12 @@ export function recordingHost(phase: StepHost['phase'] = 'daemon'): RecordingHos
     host,
     calls,
     count: kind => calls.filter(call => call.kind === kind).length,
+    get hasCommit() {
+      return commit !== null;
+    },
+    runCommit: async () => {
+      await commit?.();
+    },
     get decision() {
       if (calls.some(call => call.kind === 'skip')) return 'skipped';
       return calls.some(call => call.kind === 'ready') ? 'shown' : 'undecided';
