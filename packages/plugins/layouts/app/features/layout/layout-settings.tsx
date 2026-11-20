@@ -8,7 +8,7 @@
  */
 import type { DeviceLayout, NavCatalogItem } from '@ferretry/app';
 import { Button } from '@ferretry/app';
-import { Loading } from '@ferretry/app/ui';
+import { Loading, SelectBox } from '@ferretry/app/ui';
 import { type ReactNode, useCallback, useId, useState } from 'react';
 import type { Apply } from './choice-row.tsx';
 import { LayoutKeys } from './layout-keys.tsx';
@@ -36,19 +36,14 @@ function Choose({
   readonly onChoose: (id: string) => void;
 }) {
   return (
-    <select
-      aria-label={label}
-      className={`${INPUT_CLASS} max-w-[16rem]`}
-      value={value}
+    <SelectBox
+      className="max-w-[16rem]"
       disabled={busy}
-      onChange={event => onChoose(event.target.value)}
-    >
-      {ids.map(item => (
-        <option key={item.id} value={item.id}>
-          {item.origin === 'saved' ? `${item.id} (saved)` : item.id}
-        </option>
-      ))}
-    </select>
+      label={label}
+      onChange={onChoose}
+      options={ids.map(item => ({ value: item.id, label: item.origin === 'saved' ? `${item.id} (saved)` : item.id }))}
+      value={value}
+    />
   );
 }
 

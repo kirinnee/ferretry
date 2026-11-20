@@ -18,12 +18,16 @@ const type = async (input: HTMLInputElement, text: string): Promise<void> => {
   });
 };
 
-const choose = async (select: HTMLSelectElement, value: string): Promise<void> => {
-  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-  await interact(() => {
-    setter?.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+/** Picks a row of a select box the way a person does: open the combobox, then press the option (its list is drawn in the document body). */
+const choose = async (box: HTMLElement, label: string): Promise<void> => {
+  await interact(() => box.click());
+  const option = must(
+    [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+      candidate => candidate.querySelector('[data-label]')?.textContent === label,
+    ),
+    `the option "${label}"`,
+  );
+  await interact(() => option.click());
 };
 
 const press = (root: HTMLElement, name: string): HTMLButtonElement =>
@@ -313,20 +317,31 @@ describe('the Layout tab', () => {
   });
 
   test('switching layout and theme are the verbs `fy layout use` and `fy theme use`', async () => {
-    const script = scriptedLayouts();
+    const script = scriptedLayouts(
+      readOf(
+        {},
+        listOf({
+          themes: [
+            { id: 'default', origin: 'built-in' },
+            { id: 'studio', origin: 'saved' },
+          ],
+        }),
+      ),
+    );
     const view = await mount(<LayoutSettings client={script.client} />);
     await settle();
+    expect(view.container.querySelector('select')).toBeNull();
     await choose(
-      must(view.container.querySelector<HTMLSelectElement>('select[aria-label="Layout"]'), 'layout'),
+      must(view.container.querySelector<HTMLElement>('[role="combobox"][aria-label="Layout"]'), 'layout'),
       'compact',
     );
     await settle();
     await choose(
-      must(view.container.querySelector<HTMLSelectElement>('select[aria-label="Theme"]'), 'theme'),
-      'default',
+      must(view.container.querySelector<HTMLElement>('[role="combobox"][aria-label="Theme"]'), 'theme'),
+      'studio (saved)',
     );
     await settle();
-    expect(script.calls).toEqual(['use compact', 'theme default']);
+    expect(script.calls).toEqual(['use compact', 'theme studio']);
     await view.unmount();
   });
 
