@@ -1,0 +1,180 @@
+/* ============================================================================
+   THE LAST PAGE ("You're set up", end-page.tsx + setup-summary.tsx). Nothing here is a box: no border, no card, no
+   gradient; only spacing. A small mascot slot, then two checklists (this machine, this device) side by side from 720px
+   of the frame's own width (stacked under it), one row per segment, then the way on: the two ways to start and the
+   footer's "Open this machine" share ONE width on a desktop (--fy-end-action) and fill the row on a phone.
+   Theme tokens only; no colour chosen here.
+   ========================================================================== */
+
+/* The footer's Open this machine is outside .fy-end but takes the same width, so the token sits on the frame. */
+.fy-spf:has(.fy-end) {
+  --fy-end-action: 15rem;
+}
+.fy-end {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* The mascot's place: the waving ferret takes it when the access plugin exports it. */
+.fy-end__mascot {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  border-radius: 999px;
+  color: var(--accent);
+  display: flex;
+  flex: 0 0 auto;
+  height: 56px;
+  justify-content: center;
+  width: 56px;
+}
+
+.fy-end__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fy-end__lists {
+  align-items: start;
+  display: grid;
+  gap: 24px;
+  grid-template-columns: minmax(0, 1fr);
+}
+@container (min-width: 720px) {
+  .fy-end__lists[data-lists='two'] {
+    gap: 48px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.fy-end__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.fy-end__heading {
+  color: var(--muted);
+  font-size: var(--text-xs, 0.8125rem);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+.fy-end__rows {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fy-end__row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  min-block-size: 52px;
+  padding-block: 4px;
+}
+.fy-end__mark {
+  align-items: center;
+  background: var(--accent);
+  border-radius: 999px;
+  color: var(--accent-fg, var(--bg));
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+.fy-end__mark[data-mark='none'] {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.fy-end__name {
+  color: var(--fg);
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  font-size: var(--font-size-base);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fy-end__row[data-end-state='later'] .fy-end__name {
+  color: var(--muted);
+}
+.fy-end__note {
+  color: var(--muted);
+  font-size: var(--text-xs, 0.8125rem);
+}
+/* The finish-later link is quiet: small text, a 44px target, no box. */
+.fy-end__row a {
+  color: var(--fg);
+  flex: 0 0 auto;
+  font-size: var(--text-xs, 0.8125rem);
+  padding-inline: 4px;
+  text-decoration: underline;
+}
+.fy-end__where {
+  margin: 0;
+}
+.fy-end__where a {
+  color: var(--muted);
+  font-size: var(--text-xs, 0.8125rem);
+  text-decoration: underline;
+}
+
+/* The way on: the two ways to start and the footer's Open this machine are one width on a desktop, the row on a phone. */
+.fy-end__start {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fy-end__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fy-end__actions button {
+  inline-size: 100%;
+  min-block-size: 44px;
+}
+@container (min-width: 720px) {
+  .fy-end__actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .fy-end__actions button {
+    flex: 0 0 auto;
+    inline-size: var(--fy-end-action);
+  }
+  .fy-spf:has(.fy-end) .fy-spf__footer [data-step-next] {
+    inline-size: var(--fy-end-action);
+  }
+}
+/* On a phone the footer's primary fills what Back leaves, like the two buttons above it fill their row. */
+@container (max-width: 719.98px) {
+  .fy-spf:has(.fy-end) .fy-spf__footer [data-step-next] {
+    flex: 1 1 auto;
+  }
+}
+/* The shared words about working without a project stay whole, but behind one line (the page says little). */
+.fy-end__more summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.875rem;
+  min-block-size: 44px;
+  padding-block: 12px;
+}
+.fy-end__more[open] summary {
+  min-block-size: 0;
+  padding-block: 4px 8px;
+}
+.fy-end__more .fy-end__note {
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  margin: 0;
+}
+/* The retry buttons of an answer the machine did not take are 44px targets like the rest. */
+.fy-end .fy-sf-unsaved button {
+  min-block-size: 44px;
+}

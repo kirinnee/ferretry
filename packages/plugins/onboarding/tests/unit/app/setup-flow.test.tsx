@@ -429,7 +429,7 @@ describe('the setup flow', () => {
     expect(view.container.querySelector('[data-flow-unsaved]')?.textContent).toContain('That answer was not saved');
   });
 
-  it('closes with what was set up, and a Settings link for each page left for later', async () => {
+  it('closes with what was set up, and a quiet Settings link for each segment left for later', async () => {
     view = await mount(setup({}).tree);
     await settle();
     await next(); // name: done
@@ -441,12 +441,14 @@ describe('the setup flow', () => {
     await settle();
     // It names the plugin (the progress bar's own name for it), never a page title.
     const summary = view.container.querySelector('[data-onboarding-summary-set]')?.textContent ?? '';
-    expect(summary).toMatch(/^Set up on this machine: Fake Pack/u);
+    expect(summary).toMatch(/^This machineFake Pack/u);
     expect(summary).not.toContain('Name this machine');
     expect(summary).not.toContain('Onboarding');
     // This device's own pages are in the summary too, named by their title, and the skipped one is a real button-link to Settings.
-    expect(summary).toMatch(/Set up on this device: /u);
-    expect(view.container.querySelector('[data-onboarding-later-link="fake-pack"]')?.className).toContain('kt-btn');
+    expect(summary).toMatch(/This device\w/u);
+    expect(view.container.querySelector('[data-onboarding-later-link="fake-pack"]')?.textContent).toMatch(
+      /Set up|Finish/u,
+    );
     expect(view.container.querySelector('[data-onboarding-later-link="fake-pack"]')?.getAttribute('href')).toBe(
       '/d/fy_daemon_a/settings/fake-pack',
     );

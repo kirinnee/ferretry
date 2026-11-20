@@ -15,8 +15,7 @@
  * goes to the page the person came from, Next returns), the footer buttons are auto width and 44px tall, and (daemon side)
  * the step really records on the machine, exactly once. An arrow key moves a card's selection and writes nothing.
  *
- * KNOWN GAPS the run found are `it.failing` below, one per gap: each is red the day the product is fixed (delete the
- * `.failing` then), so the gate does not forget them and a green CI does not hide them.
+ * The GAPS the run found are one plain test each below (they were `it.failing` until the product was fixed).
  *
  *   FY_ONBOARDING_E2E_VARIANTS   comma list of `<width>-<light|dark>` (default `1280-light,390-dark`)
  *   FY_ONBOARDING_E2E_SHOTS_DIR  keep `<variant>-<nn>-<page>.png` of every page (fake data only)
@@ -58,7 +57,7 @@ afterAll(() => {
   server?.kill();
 });
 
-// ─── what the run saw (read by the `it.failing` gaps below) ────────────────────────────────────────────────────────
+// ─── what the run saw (read by the gap tests below) ────────────────────────────────────────────────────────
 interface Observed {
   /** `[data-name-machine]` forms on screen on the Machine name page. */
   nameForms: number;
@@ -402,10 +401,12 @@ const endPage = async (tab: Page, variant: Variant, key: string): Promise<void> 
     await tab.locator('[data-step-footer] [data-variant="primary"]').innerText(),
     `${key}: the one primary is Open this machine`,
   ).toBe('Open this machine');
-  // Every button and every link on the ending is a real, bordered 44px button: a bare text link would fail the border and underline reads.
-  for (const button of await tab
-    .locator('[data-flow-end] button, [data-flow-end] a, [data-onboarding-summary] button, [data-onboarding-summary] a')
-    .all()) {
+  // The summary's finish-later links are quiet text links (a 44px target, no box); every BUTTON on the ending is a real, bordered 44px one.
+  for (const link of await tab.locator('[data-onboarding-summary] a').all())
+    expect((await link.boundingBox())?.height ?? 0, `${key}: a summary link is a 44px target`).toBeGreaterThanOrEqual(
+      43.5,
+    );
+  for (const button of await tab.locator('[data-flow-end] button, [data-onboarding-summary] button').all()) {
     const read = await button.evaluate(node => {
       const style = getComputedStyle(node);
       const box = node.getBoundingClientRect();
@@ -419,9 +420,10 @@ const endPage = async (tab: Page, variant: Variant, key: string): Promise<void> 
       };
     });
     expect(read.h, `${key}: ${read.label} is a 44px target`).toBeGreaterThanOrEqual(43.5);
-    expect(read.w, `${key}: ${read.label} is not full width`).toBeLessThan(
-      (variant.width < 600 ? 0.9 : 0.5) * variant.width,
-    );
+    // A phone's two ways to start fill their row on purpose (the owner asked for fixed, even widths); a desktop's never do.
+    expect(read.w, `${key}: ${read.label} fits the screen`).toBeLessThanOrEqual(variant.width);
+    if (variant.width >= 600)
+      expect(read.w, `${key}: ${read.label} is not full width`).toBeLessThan(0.5 * variant.width);
     expect(read.border, `${key}: ${read.label} is a real (bordered) secondary button`).toBeGreaterThan(0);
     expect(read.variant, `${key}: ${read.label} is not a ghost or text button`).not.toBe('ghost');
     expect(read.underline, `${key}: ${read.label} is not underlined text`).toBe('none');
@@ -529,6 +531,13 @@ describe('the first run, end to end', () => {
       await reach(tab, 'onboarding.name');
       walked.push('onboarding.name');
       seen.nameForms = await tab.locator('[data-name-machine]').count();
+      // The flow's page title is "Name this machine"; the form under it draws no second heading with the same words.
+      expect(
+        await tab
+          .locator('h1:visible, h2:visible, h3:visible')
+          .evaluateAll(nodes => nodes.filter(node => (node.textContent ?? '').trim() === 'Name this machine').length),
+        'Machine name: "Name this machine" is a heading once, not twice',
+      ).toBe(1);
       await inspect(tab, variant, 'onboarding.name', { first: true });
       // The name form's own buttons are the 44px, auto width buttons of the footer (not a 28px row of small ones).
       for (const button of await tab.locator('[data-flow-page="onboarding.name"] form button').all()) {
@@ -798,14 +807,23 @@ describe('the first run, end to end', () => {
       expect(await tab.locator('[data-flow-unsaved]').count(), 'the end page lists no unsaved answer').toBe(0);
       // The end page says what was set up in a sentence: no raw dump of page titles or ids.
       const summary = await tab.locator('[data-onboarding-summary]').innerText();
-      expect(summary, 'the end page says what was set up').toMatch(/^Set up on this machine: /u);
+      expect(summary, 'the end page has the machine checklist').toMatch(/^this machine\s/iu); // innerText reads the heading's small caps as capitals;
       for (const raw of ['What to bring over', 'Bring it over', 'import-choice', 'claude-code.', 'Conversations'])
         expect(summary, `the end page does not list the page title '${raw}'`).not.toContain(raw);
+      // One row per segment, each with a drawn mark; a segment left for later says so quietly and links to its Settings.
+      const rows = await tab.locator('[data-onboarding-summary] [data-end-row]').count();
+      expect(rows, 'the end page has one row per segment').toBeGreaterThanOrEqual(2);
+      expect(await tab.locator('[data-onboarding-summary] [data-end-row] svg').count(), 'every row has a mark').toBe(
+        rows,
+      );
       expect(
-        summary.split('\n').filter(line => line.trim() !== '').length,
-        'the end page summary is a few lines, not a list of every page',
-      ).toBeLessThan(8);
-      expect(summary, 'the end page says what was skipped').toMatch(/Nothing was skipped|Skipped for now/u);
+        await tab.locator('[data-onboarding-summary] [data-end-state="later"]').count(),
+        'every skipped row has a link to finish it',
+      ).toBe(
+        await tab.locator('[data-onboarding-summary] [data-end-state="later"] [data-onboarding-later-link]').count(),
+      );
+      expect(summary, 'the end page does not say "(some pages skipped)"').not.toContain('some pages skipped');
+      expect(summary.length, 'the end page summary is short').toBeLessThanOrEqual(300);
       for (const height of await tab
         .locator('[data-flow-end] button')
         .evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().height)))
@@ -885,9 +903,7 @@ describe('the first run, end to end', () => {
       await endPage(tab, variant, 'end-pair');
       // The Pair journey's ending has the same summary: what this device now holds, and where to change it.
       const pairSummary = await tab.locator('[data-onboarding-summary]').innerText();
-      expect(pairSummary, 'end-pair: the summary says what was set up on this device').toMatch(
-        /Set up on this device: /u,
-      );
+      expect(pairSummary, 'end-pair: the summary says what was set up on this device').toMatch(/this device\s/iu);
       expect(pairSummary, 'end-pair: the summary names the Passkey page').toContain('Passkey');
       expect(pairSummary, 'end-pair: the summary says where to change it').toMatch(/Settings/u);
       const second = await daemonOf(tab, B);
@@ -906,31 +922,31 @@ describe('the first run, end to end', () => {
     });
 });
 
-// ─── what the run found and is not fixed here (each is `it.failing`: red the day it is fixed) ───────────────────────
-describe('known gaps the gate found', () => {
+// ─── what the run found (each gap was `it.failing` until it was fixed; now each is a plain test) ───────────────────────
+describe('the gaps the gate found, now closed', () => {
   it('no page threw', () => {
     expect(seen.pageErrors).toEqual([]);
   });
   it('only the expected routes went unanswered (a gap in the fake, not in the product)', () => {
     expect([...new Set(seen.unanswered)].sort()).toEqual(['GET /v1/layouts/current']);
   });
-  it.failing('the Machine name page draws ONE name form (the shell strip draws a second above the flow)', () => {
+  it('the Machine name page draws ONE name form (the shell strip draws a second above the flow)', () => {
     expect(seen.nameForms).toBe(1);
   });
   // Only a desktop height shows it (a phone's footer is sticky), so it is asserted only when a desktop variant ran.
-  (VARIANTS.some(variant => variant.width >= 600) ? it.failing : it.skip)(
+  (VARIANTS.some(variant => variant.width >= 600) ? it : it.skip)(
     'every page keeps its Back/Next footer on the first screen (no scrolling to reach Next)',
     () => {
       expect(seen.footerOffScreen).toEqual([]);
     },
   );
-  it.failing('the pairing page buttons are auto width and 44px tall', () => {
+  it('the pairing page buttons are auto width and 44px tall', () => {
     expect(seen.badButtons).toEqual([]);
   });
-  it.failing('the pairing page reached from the first run has no sidebar or app chrome', () => {
+  it('the pairing page reached from the first run has no sidebar or app chrome', () => {
     expect(seen.pairPageChrome).toBe(0);
   });
-  it.failing('the pairing page Connected screen has no sidebar or app chrome', () => {
+  it('the pairing page Connected screen has no sidebar or app chrome', () => {
     expect(seen.pairConnectedChrome).toBe(0);
   });
   it('Import everything is ONE page for Codex (the kind pages are passed over, not drawn)', () => {

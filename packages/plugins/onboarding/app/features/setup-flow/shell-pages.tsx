@@ -30,9 +30,9 @@ export function NamePage({
     (decision: NameDecision): void => (step === undefined ? undefined : routeNameDecision(step, decision)),
     [step],
   );
-  // A save in flight holds the footer: Next, Back and Later wait, so the page cannot be left under it.
+  // The flow's own page title is "Name this machine", so the form draws no second one. A save in flight holds the footer: Next, Back and Later wait, so the page cannot be left under it.
   const working = useCallback((busy: boolean): void => step?.busy(busy ? 'Saving the name…' : null), [step]);
-  return <NameThisMachine daemon={daemon} onDecided={decided} onBusy={working} />;
+  return <NameThisMachine daemon={daemon} onDecided={decided} onBusy={working} heading={false} />;
 }
 
 /** Mode and theme tiles, the same component Settings › Appearance draws. */

@@ -35,20 +35,36 @@ interface NameThisMachineViewProps {
   readonly problem?: string;
   readonly onSave: (name: string) => void;
   readonly onSkip: () => void;
+  /** False when the host already shows "Name this machine" as its own page heading (a flow page): the form then draws none. */
+  readonly heading?: boolean;
 }
 
 /** The step, drawn from plain values so every state can be rendered without a daemon. */
-function NameThisMachineView({ initial, busy, refusal, problem, onSave, onSkip }: NameThisMachineViewProps) {
+function NameThisMachineView({
+  initial,
+  busy,
+  refusal,
+  problem,
+  onSave,
+  onSkip,
+  heading = true,
+}: NameThisMachineViewProps) {
   const [value, setValue] = useState(initial);
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (refusal === undefined) field.current?.focus();
   }, [refusal]);
   return (
-    <section className="kt-panel p-panel m-3" aria-labelledby="name-machine-heading" data-name-machine="">
-      <h3 id="name-machine-heading" className="m-0 text-row font-semibold text-fg">
-        Name this machine
-      </h3>
+    <section
+      className="kt-panel p-panel m-3"
+      {...(heading ? { 'aria-labelledby': 'name-machine-heading' } : { 'aria-label': 'Name this machine' })}
+      data-name-machine=""
+    >
+      {heading ? (
+        <h3 id="name-machine-heading" className="m-0 text-row font-semibold text-fg" data-name-machine-heading="">
+          Name this machine
+        </h3>
+      ) : null}
       {refusal === undefined ? (
         <form
           className="mt-2 flex flex-col gap-2"
@@ -120,11 +136,14 @@ export function NameThisMachine({
   daemon,
   onDecided,
   onBusy,
+  heading,
 }: {
   readonly daemon: string;
   readonly onDecided?: (decision: NameDecision) => void;
   /** A host that draws the step as one page of a flow learns when a save is running (so it can lock its own footer). */
   readonly onBusy?: (busy: boolean) => void;
+  /** See {@link NameThisMachineViewProps.heading}. */
+  readonly heading?: boolean;
 }) {
   const { runtime } = useShell();
   useRuntimeVersion(runtime);
@@ -206,6 +225,7 @@ export function NameThisMachine({
       {...(problem === undefined && chosen?.problem === undefined ? {} : { problem: problem ?? chosen?.problem })}
       onSave={name => void save(name)}
       onSkip={settle}
+      {...(heading === undefined ? {} : { heading })}
     />
   );
 }

@@ -1,15 +1,19 @@
 /**
- * THE LAST PAGE: a real ending. A short summary of what was set up and what was skipped (each skipped thing a button to
- * its Settings), ONE primary button (the footer's "Open this machine"), and the two ways to start work as secondary buttons:
- * a project, or a conversation without one. Those two buttons and the sentence about working projectless are the Home
- * card's (`../stepper/project-action.ts`), so the words never differ between the two places. Either one missing (its plugin
- * is paused) leaves the other; both missing leaves just the way to the machine's Home.
+ * THE LAST PAGE: a real ending, not a box. A small mascot slot (the waving ferret takes its place when access exports it),
+ * two borderless checklists side by side on a desktop (this machine, this device; `setup-summary.tsx`), then the way on:
+ * ONE primary button (the footer's "Open this machine") and the two ways to start work as secondary buttons, all three
+ * ONE width (`end-page.css`): a project, or a conversation without one. Those two buttons and the sentence about working
+ * projectless are the Home card's (`../stepper/project-action.ts`), so the words never differ between the two places.
+ * Either one missing (its plugin is paused) leaves the other; both missing leaves just the way to the machine's Home.
  */
 import { daemonHomeHref, StepPageFrame, useOptionalRouter, useScreenHref } from '@ferretry/app';
 import { Button } from '@ferretry/app/ui';
+import { PartyPopper } from 'lucide-react';
+import './end-page.css';
 import type { Unsaved } from './use-setup-flow.ts';
 import { type ReactNode, useMemo } from 'react';
-import { SetupSummary, type SummaryStep } from '../../views/steps-screen.tsx';
+import type { SummaryStep } from '../../views/steps-screen.tsx';
+import { SetupSummary } from './setup-summary.tsx';
 import { addProjectHref, projectAction } from '../stepper/project-action.ts';
 
 export function EndPage({
@@ -40,11 +44,11 @@ export function EndPage({
   return (
     <StepPageFrame
       title="You're set up"
-      line="Here is what was set up, and what is left for later."
+      line="Your machine is ready."
       {...(onBack === undefined ? {} : { back: { onClick: onBack } })}
       next={{ label: 'Open this machine', onClick: home }}
     >
-      <div className="fy-sf-end" data-flow-end="">
+      <div className="fy-end" data-flow-end="">
         {unsaved.length === 0 ? null : (
           <div className="fy-sf-unsaved fy-sf-unsaved--end" data-flow-unsaved="">
             <p role="alert" className="fy-sf-note">
@@ -62,11 +66,13 @@ export function EndPage({
             </ul>
           </div>
         )}
+        <div className="fy-end__mascot" data-end-mascot="" aria-hidden="true">
+          <PartyPopper size={28} strokeWidth={1.75} />
+        </div>
         <SetupSummary daemon={daemon} steps={summary} />
         {action === undefined ? null : (
-          <section className="fy-sf-end__start" data-flow-end-start="">
-            <p className="fy-sf-end__lead">Or start with:</p>
-            <div className="fy-sf-end__actions">
+          <section className="fy-end__start" data-flow-end-start="" aria-label="Start with">
+            <div className="fy-end__actions">
               <Button onClick={action.run} data-flow-end-project="">
                 {action.label}
               </Button>
@@ -76,7 +82,12 @@ export function EndPage({
                 </Button>
               )}
             </div>
-            {action.note === undefined ? null : <p className="fy-sf-note">{action.note}</p>}
+            {action.note === undefined ? null : (
+              <details className="fy-end__more" data-flow-end-note="">
+                <summary>Without a project?</summary>
+                <p className="fy-end__note">{action.note}</p>
+              </details>
+            )}
           </section>
         )}
       </div>

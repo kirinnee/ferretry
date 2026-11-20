@@ -4,14 +4,7 @@
  * which is the way back to it for a machine that still has steps to look at.
  */
 
-import {
-  DEVICE_SETTINGS_HREF,
-  daemonOfClient,
-  daemonSettingsHref,
-  SettingGroup,
-  SettingRow,
-  useOptionalRouter,
-} from '@ferretry/app';
+import { daemonOfClient, SettingGroup, SettingRow, useOptionalRouter } from '@ferretry/app';
 import { Button, Loading, type ReadPress, readPress } from '@ferretry/app/ui';
 import type { PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { type MouseEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -57,7 +50,7 @@ function useOnboardingView(client: PluginClient): { readonly reading: Reading; r
 }
 
 /** A link that moves with the router (no page load) where there is one, and is a plain link elsewhere. */
-function RouterLink({
+export function RouterLink({
   href,
   children,
   button,
@@ -67,7 +60,7 @@ function RouterLink({
   readonly children: ReactNode;
   /** Drawn as a real button (the app's bordered 44px one): a link that goes to a place, looking like what it is for. */
   readonly button?: true;
-  readonly [mark: `data-${string}`]: string;
+  readonly [mark: `data-${string}` | `aria-${string}`]: string;
 }): ReactNode {
   const router = useOptionalRouter();
   const go = (event: MouseEvent<HTMLAnchorElement>): void => {
@@ -98,125 +91,6 @@ export interface SummaryStep {
   readonly state: StepState;
   /** A machine step is set up ON the machine; a client step is this device's own (named by its title: "Passkey"). */
   readonly phase?: 'daemon' | 'client';
-}
-
-/** The plugin whose setup page names the machine itself. */
-const MACHINE_PLUGIN = 'onboarding';
-
-/** "A", "A and B", "A, B and C". */
-const listOf = (names: readonly string[]): string =>
-  names.length < 2 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
-
-interface SummaryGroup {
-  /** The Settings tab that holds it. */
-  readonly plugin: string;
-  readonly name: string;
-  readonly phase: 'daemon' | 'client';
-  readonly set: number;
-  readonly left: number;
-}
-
-/**
- * One entry per plugin on the machine (in the order the flow met them) and one per page of this device (a device page
- * is named by its own title): how many of its pages were set up and how many were not.
- */
-const groupsOf = (steps: readonly SummaryStep[]): readonly SummaryGroup[] => {
-  const groups = new Map<string, SummaryGroup>();
-  for (const step of steps) {
-    const phase = step.phase ?? 'daemon';
-    const id = phase === 'client' ? `client:${step.plugin}.${step.id}` : `daemon:${step.plugin}`;
-    const before = groups.get(id) ?? {
-      plugin: step.plugin,
-      name: phase === 'client' ? step.title : step.group,
-      phase,
-      set: 0,
-      left: 0,
-    };
-    const wasSet = step.state === 'done' || step.state === 'found';
-    groups.set(id, { ...before, set: before.set + (wasSet ? 1 : 0), left: before.left + (wasSet ? 0 : 1) });
-  }
-  return [...groups.values()];
-};
-
-/**
- * The close of the setup, once no step waits for an answer: what was set up (on the machine, and on this device), and what
- * was skipped, each skipped thing with a button to its Settings so nothing left undone is lost, and where to change
- * the rest. It names plugins ("Claude Code") and device pages ("Passkey"), never the pages inside a plugin.
- */
-export function SetupSummary({
-  daemon,
-  steps,
-}: {
-  readonly daemon: string;
-  readonly steps: readonly SummaryStep[];
-}): ReactNode {
-  if (steps.length === 0 || steps.some(step => step.state === 'pending')) return null;
-  const groups = groupsOf(steps);
-  const left = groups.filter(group => group.left > 0);
-  const named = (phase: SummaryGroup['phase']): readonly string[] => {
-    const set = groups.filter(group => group.phase === phase && group.set > 0);
-    // The machine's own page (its name) is not a thing to list: the sentence is about what was brought in.
-    const listed =
-      phase === 'daemon' && set.some(group => group.plugin !== MACHINE_PLUGIN)
-        ? set.filter(group => group.plugin !== MACHINE_PLUGIN)
-        : set;
-    return listed.map(group => group.name);
-  };
-  const onMachine = named('daemon');
-  const onDevice = named('client');
-  const sentences = [
-    onMachine.length === 0 ? null : `Set up on this machine: ${listOf(onMachine)}.`,
-    onDevice.length === 0 ? null : `Set up on this device: ${listOf(onDevice)}.`,
-  ].filter((line): line is string => line !== null);
-  return (
-    <section className="kt-panel flex flex-col gap-3 p-4" data-onboarding-summary="">
-      <div className="flex flex-col gap-1" data-onboarding-summary-set="">
-        {sentences.length === 0 ? (
-          <p className="m-0 text-row leading-base text-fg">Nothing was set up this time.</p>
-        ) : (
-          sentences.map(line => (
-            <p key={line} className="m-0 text-row leading-base text-fg">
-              {line}
-            </p>
-          ))
-        )}
-        {left.length === 0 ? <p className="m-0 text-row leading-base text-muted">Nothing was skipped.</p> : null}
-      </div>
-      {left.length === 0 ? null : (
-        <div className="flex flex-col gap-2" data-onboarding-summary-later="">
-          <p className="m-0 text-row leading-base text-muted">Skipped for now. Finish any of these when you like:</p>
-          <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
-            {left.map(group => (
-              <li key={`${group.phase}:${group.plugin}:${group.name}`} className="flex items-center gap-2">
-                <RouterLink
-                  button
-                  href={group.phase === 'client' ? DEVICE_SETTINGS_HREF : daemonSettingsHref(daemon, group.plugin)}
-                  data-onboarding-later-link={group.plugin}
-                >
-                  {group.name}
-                </RouterLink>
-                {group.set > 0 ? <span className="text-meta text-muted">(some pages skipped)</span> : null}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <div className="flex flex-col items-start gap-2" data-onboarding-summary-where="">
-        <p className="m-0 text-row leading-base text-muted">
-          {onDevice.length > 0 && onMachine.length === 0
-            ? 'You can change any of this later in the Settings for this device.'
-            : 'You can change any of this later in this machine\u2019s Settings.'}
-        </p>
-        <RouterLink
-          button
-          href={onDevice.length > 0 && onMachine.length === 0 ? DEVICE_SETTINGS_HREF : daemonSettingsHref(daemon)}
-          data-onboarding-open-settings=""
-        >
-          Open Settings
-        </RouterLink>
-      </div>
-    </section>
-  );
 }
 
 /** Where a machine's setup is: the flow, which resumes at the first page still to answer. */
