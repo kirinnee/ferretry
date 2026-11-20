@@ -13,6 +13,7 @@ import {
   startRun,
 } from '../../../app/features/setup-flow/flow-model.ts';
 import { readFlowAddress, setupFlowHref } from '../../../app/features/setup-flow/flow-href.ts';
+import { foreseenPassedOver } from '../../../app/features/setup-flow/foresight.ts';
 import { fakeDaemon } from '../../fixtures/fake-steps/index.ts';
 
 const A = 'fy_daemon_a';
@@ -118,7 +119,7 @@ describe('the progress bar', () => {
   const none = new Set<string>();
 
   test('one segment per plugin with pages left, then "This device"; n of m counts inside the current segment', () => {
-    const read = progressOf(flow, pages, none, none, 'fake-pack.choose');
+    const read = progressOf(flow, pages, none, none, none, 'fake-pack.choose');
     expect(read?.segments.map(segment => segment.label)).toEqual(['Onboarding', 'Fake Pack', 'This device']);
     expect(read?.current).toBe('fake-pack');
     expect([read?.step, read?.of]).toEqual([2, 3]);
@@ -128,19 +129,87 @@ describe('the progress bar', () => {
 
   test('a skipped page never counts: the total shrinks, it never grows backwards', () => {
     const gone = new Set(['fake-pack.choose']);
-    const read = progressOf(flow, pages, none, gone, 'fake-pack.finish');
+    const read = progressOf(flow, pages, none, gone, none, 'fake-pack.finish');
     expect([read?.step, read?.of]).toEqual([2, 2]);
   });
 
   test('the client pages are one segment, whichever plugin they belong to', () => {
-    const read = progressOf(flow, pages, none, none, 'fake-pack.look');
+    const read = progressOf(flow, pages, none, none, none, 'fake-pack.look');
     expect(read?.current).toBe('device');
     expect([read?.step, read?.of]).toEqual([2, 2]);
   });
 
+  test('the bar is the segments of the run and never changes while the run goes: a segment whose pages all pass over stays', () => {
+    const all = progressOf(flow, pages, none, none, none, 'onboarding.name');
+    const passed = new Set(['fake-pack.welcome', 'fake-pack.choose', 'fake-pack.finish']);
+    const later = progressOf(flow, pages, none, passed, none, 'fake-pack.look');
+    expect(later?.segments).toEqual(all?.segments);
+    expect(all?.segments.map(segment => segment.id)).toEqual(['onboarding', 'fake-pack', 'device']);
+  });
+
+  test('n counts the pages that will be shown: a page the answers foresee passing over is not counted before it is reached', () => {
+    const foreseen = new Set(['fake-pack.choose']);
+    // On the first page of the segment, before the passed-over page is ever mounted: the count is already 2, not 3.
+    expect(progressOf(flow, pages, none, none, foreseen, 'fake-pack.welcome')).toMatchObject({ step: 1, of: 2 });
+    expect(progressOf(flow, pages, none, none, none, 'fake-pack.welcome')).toMatchObject({ step: 1, of: 3 });
+    // ... and it is the same count on every page of the segment (it never changes backwards while the answers stand).
+    expect(progressOf(flow, pages, none, new Set(foreseen), foreseen, 'fake-pack.finish')).toMatchObject({
+      step: 2,
+      of: 2,
+    });
+  });
+
+  test('the page on screen always counts, even when it was foreseen to pass over', () => {
+    const foreseen = new Set(['fake-pack.choose']);
+    expect(progressOf(flow, pages, none, none, foreseen, 'fake-pack.choose')).toMatchObject({ step: 2, of: 3 });
+  });
+
   test('answered-before pages leave the bar', () => {
-    const read = progressOf(flow, pages, new Set(['onboarding.name']), none, 'fake-pack.welcome');
+    const read = progressOf(flow, pages, new Set(['onboarding.name']), none, none, 'fake-pack.welcome');
     expect(read?.segments.map(segment => segment.id)).toEqual(['fake-pack', 'device']);
+  });
+});
+
+describe('the pages the answers given so far pass over', () => {
+  const claude = (...ids: string[]) =>
+    ids.map(id => ({ key: `claude-code.${id}`, plugin: 'claude-code', id, phase: 'daemon' as const })) as never;
+  const ids = [
+    'import-choice',
+    'import-settings',
+    'import-model-set',
+    'import-instructions',
+    'import-skills',
+    'import-mcp',
+    'conversations',
+    'import-run',
+    'permission',
+  ];
+  const named = (mode: string | undefined) => (plugin: string) =>
+    plugin === 'claude-code' && mode !== undefined ? { importMode: mode } : {};
+
+  test('Import everything passes over the five checklist pages and keeps the run page', () => {
+    expect([...foreseenPassedOver(claude(...ids), named('everything'))]).toEqual([
+      'claude-code.import-settings',
+      'claude-code.import-model-set',
+      'claude-code.import-instructions',
+      'claude-code.import-skills',
+      'claude-code.import-mcp',
+    ]);
+  });
+
+  test('Start fresh passes over the checklist pages and the run page', () => {
+    expect(foreseenPassedOver(claude(...ids), named('fresh')).size).toBe(6);
+  });
+
+  test('Choose what to import, or no answer yet (a reload), passes over nothing', () => {
+    expect(foreseenPassedOver(claude(...ids), named('choose')).size).toBe(0);
+    expect(foreseenPassedOver(claude(...ids), named(undefined)).size).toBe(0);
+  });
+
+  test('another plugin that says nothing about an import mode is never touched, and a client page never is', () => {
+    expect(foreseenPassedOver(claude(...ids), () => ({ importMode: 'everything' })).size).toBe(5);
+    const client = [{ key: 'voice.voice', plugin: 'voice', id: 'import-skills', phase: 'client' }] as never;
+    expect(foreseenPassedOver(client, () => ({ importMode: 'everything' })).size).toBe(0);
   });
 });
 
@@ -195,7 +264,7 @@ describe('a page that is not needed for this run', () => {
     );
     const flow = flowOf();
     expect(
-      progressOf(flow, pages, none, new Set([...state.gone, ...state.notNeeded]), 'fake-pack.finish'),
+      progressOf(flow, pages, none, new Set([...state.gone, ...state.notNeeded]), none, 'fake-pack.finish'),
     ).toMatchObject({
       step: 2,
       of: 2,

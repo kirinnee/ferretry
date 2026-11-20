@@ -51,7 +51,7 @@ import type { SetupSharePort } from './setup-handoff-panel.tsx';
 const STAGE = 'flex min-w-0 flex-col gap-2';
 
 const CHOICE =
-  'min-h-[36px] rounded-control border px-2 text-meta focus-visible:outline-focus focus-visible:outline-offset-focus';
+  'min-h-[44px] rounded-control border px-2 text-meta focus-visible:outline-focus focus-visible:outline-offset-focus';
 
 const CHOICE_TONE = {
   on: 'border-accent bg-accent-soft font-semibold text-fg',
@@ -81,20 +81,14 @@ function Aside({ summary, children }: { readonly summary: string; readonly child
 
 /**
  * THE QUIET WAY TO HAND THE INSTALL TO AN AGENT: one line and a ghost button, on the install page and on the other
- * computer's page. It is a link, not a question: most readers type the commands, and the ones who have Claude or Codex
- * open in another window recognise it at once. Auto width (never stretched), 44px tall.
+ * computer's page. It is a quiet offer, not a question: most readers type the commands, and the ones who have Claude or Codex
+ * open in another window recognise it at once. A real (bordered) button, auto width (never stretched), 44px tall.
  */
 function AgentInstead({ onAgentInstead }: { readonly onAgentInstead: () => void }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2" data-onboarding-agent-link="">
       <p className="m-0 min-w-0 text-meta leading-base text-muted">Have Claude or Codex open?</p>
-      <button
-        type="button"
-        className="kt-btn min-h-[44px]"
-        data-variant="ghost"
-        onClick={onAgentInstead}
-        data-onboarding-agent-instead=""
-      >
+      <button type="button" className="kt-btn min-h-[44px]" onClick={onAgentInstead} data-onboarding-agent-instead="">
         Let an agent do it
       </button>
     </div>

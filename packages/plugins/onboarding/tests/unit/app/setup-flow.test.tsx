@@ -279,7 +279,7 @@ describe('the setup flow', () => {
     expect(view.container.querySelector('[data-step-back]')).toBeNull();
     await next();
     expect(pageKey()).toBe('fake-pack.welcome');
-    expect(progressText()).toBe('Fake Pack · 1 of 3');
+    expect(progressText()).toBe('Fake Pack · page 1 of 3');
     await next();
     expect(pageKey()).toBe('fake-pack.choose');
     await press('[data-step-back]');
@@ -302,7 +302,7 @@ describe('the setup flow', () => {
     await next(); // welcome -> choose, which sees mode "everything" and skips
     await settle();
     expect(pageKey()).toBe('fake-pack.finish');
-    expect(progressText()).toBe('Fake Pack · 2 of 2');
+    expect(progressText()).toBe('Fake Pack · page 2 of 2');
     // Back never lands on the skipped page.
     await press('[data-step-back]');
     expect(pageKey()).toBe('fake-pack.welcome');
@@ -362,7 +362,7 @@ describe('the setup flow', () => {
     view = await mount(setup({ search: '?phase=client', storage: store }).tree);
     await settle();
     expect(pageKey()).toBe('fake-pack.look');
-    expect(progressText()).toBe('This device · 1 of 1');
+    expect(progressText()).toBe('This device · page 1 of 1');
   });
 
   it('resumes at the first page the machine has no answer for', async () => {
@@ -412,6 +412,9 @@ describe('the setup flow', () => {
     expect(summary).toMatch(/^Set up on this machine: Fake Pack/u);
     expect(summary).not.toContain('Name this machine');
     expect(summary).not.toContain('Onboarding');
+    // This device's own pages are in the summary too, named by their title, and the skipped one is a real button-link to Settings.
+    expect(summary).toMatch(/Set up on this device: /u);
+    expect(view.container.querySelector('[data-onboarding-later-link="fake-pack"]')?.className).toContain('kt-btn');
     expect(view.container.querySelector('[data-onboarding-later-link="fake-pack"]')?.getAttribute('href')).toBe(
       '/d/fy_daemon_a/settings/fake-pack',
     );
@@ -795,7 +798,7 @@ describe('a page that is not needed for this run (contract rule 7)', () => {
     await next();
     await settle();
     expect(pageKey()).toBe('fake-pack.run');
-    expect(progressText()).toBe('Fake Pack · 2 of 2');
+    expect(progressText()).toBe('Fake Pack · page 2 of 2');
     // Back goes to the last page actually shown: not alpha or beta, which drew nothing.
     await press('[data-step-back]');
     expect(pageKey()).toBe('fake-pack.pick');
@@ -871,7 +874,7 @@ describe('a page that is not needed for this run (contract rule 7)', () => {
     await settle();
     expect(pageKey()).toBe('fake-pack.alpha');
     expect(textOf()).toContain('Alpha checklist');
-    expect(progressText()).toBe('Fake Pack · 2 of 4');
+    expect(progressText()).toBe('Fake Pack · page 2 of 4');
     await next();
     expect(pageKey()).toBe('fake-pack.beta');
     await next();

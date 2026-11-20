@@ -155,59 +155,59 @@ export function clearNotNeeded(state: RunState, pages: readonly FlowStep[], plug
   return stays.size === state.notNeeded.size ? state : { ...state, notNeeded: stays };
 }
 
-/** The pages that still count: not answered before the run, not gone. */
-const livePages = (
-  pages: readonly FlowStep[],
-  answered: ReadonlySet<string>,
-  gone: ReadonlySet<string>,
-): readonly FlowStep[] => pages.filter(page => !answered.has(page.key) && !gone.has(page.key));
-
 /** The progress bar's one segment for the whole client phase (every plugin's client pages read as "This device"). */
 const DEVICE_SEGMENT = { id: 'device', label: 'This device' } as const;
 
 export interface ProgressRead {
   readonly segments: readonly { readonly id: string; readonly label: string }[];
   readonly current: string;
+  /** The place of the page on screen among the segment's pages that will be SHOWN. */
   readonly step: number;
+  /** The segment's pages that will be shown (see `progressOf`). */
   readonly of: number;
   /** The counter is the current segment's own pages, so the bar fills that segment `step` of `of` (see `StepProgress`). */
   readonly fills: true;
 }
 
 /**
- * The bar for the page on screen: one segment per plugin that still has a page to ask on the machine, then one for this
- * device. "n of m" has ONE meaning on every page: the pages of the current segment this run has shown plus the ones still to
- * show (`m`), and the place of the page on screen among them (`n`). A page passed over or answered before the run never
- * counts, so `m` can shrink once a page says it is not needed and never grows; the bar fills the current segment `n` of `m`.
+ * The bar for the page on screen, in ONE model for the whole run:
+ *   - THE BAR is the run's segments: one per plugin that has a page this run does not already hold an answer for, then one
+ *     for this device. Its count never changes while the run goes (a segment whose pages all pass over stays in it).
+ *   - THE WORDS are "<segment> · page i of n": n counts the segment's pages that WILL BE SHOWN, i is the page on screen's place
+ *     among them. A page passed over (it said so, or gave up), a page answered before the run, and a page the answers already
+ *     given foresee passing over (`foreseen`, see foresight.ts) are never counted, so n shrinks only when a page learns it is
+ *     not needed and grows back only when an answer changes. The page on screen always counts.
  */
 export function progressOf(
   flow: Flow,
   pages: readonly FlowStep[],
   answered: ReadonlySet<string>,
-  gone: ReadonlySet<string>,
+  passed: ReadonlySet<string>,
+  foreseen: ReadonlySet<string>,
   at: string,
 ): ProgressRead | undefined {
-  const live = livePages(pages, answered, gone);
   const here = pages.find(page => page.key === at);
   if (here === undefined) return undefined;
+  const asked = pages.filter(page => !answered.has(page.key));
   const segmentOf = (step: FlowStep): string => (step.phase === 'client' ? DEVICE_SEGMENT.id : step.plugin);
   const labels = new Map<string, string>();
   for (const segment of flow.daemon) labels.set(segment.plugin, segment.group);
   const segments: { id: string; label: string }[] = [];
-  for (const page of live) {
+  for (const page of asked) {
     const id = segmentOf(page);
     if (!segments.some(segment => segment.id === id))
       segments.push({ id, label: id === DEVICE_SEGMENT.id ? DEVICE_SEGMENT.label : (labels.get(id) ?? id) });
   }
   const id = segmentOf(here);
-  const inSegment = live.filter(page => segmentOf(page) === id);
-  const place = inSegment.findIndex(page => page.key === at);
-  // The page on screen is live while it is shown; a page that just answered itself keeps its place.
+  const shown = asked.filter(
+    page => segmentOf(page) === id && (page.key === at || !(passed.has(page.key) || foreseen.has(page.key))),
+  );
+  const place = shown.findIndex(page => page.key === at);
   return {
     segments,
     current: id,
     step: Math.max(1, place + 1),
-    of: Math.max(1, inSegment.length),
+    of: Math.max(1, shown.length),
     fills: true,
   };
 }

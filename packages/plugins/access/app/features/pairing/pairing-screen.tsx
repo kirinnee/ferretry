@@ -849,7 +849,9 @@ function PairingFocus({
       {busy && <p className="m-0 text-center text-ui text-muted">Exchanging the one-time code with this daemon…</p>}
       <button
         type="button"
-        className="min-h-[44px] self-center text-ui font-medium text-muted underline hover:text-accent focus-visible:outline-focus focus-visible:outline-offset-focus"
+        className="kt-btn min-h-[44px] self-center px-6 py-3"
+        style={{ height: 'auto' }}
+        data-pair-cancel=""
         onClick={onCancel}
         disabled={busy}
       >

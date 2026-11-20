@@ -61,6 +61,7 @@ import {
   retreat,
   startRun,
 } from './flow-model.ts';
+import { foreseenPassedOver } from './foresight.ts';
 import { readFlowAddress } from './flow-href.ts';
 
 /** What the flow needs from its surroundings; the defaults are the browser's. Tests hand in fakes. */
@@ -185,6 +186,8 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   /** The run as the last render saw it (for guards that must not wait for the next render). */
   const runNow = useRef<RunState | undefined>(undefined);
   const [attempt, setAttempt] = useState(0);
+  /** Bumped when a segment's memory changes, so the page counter (which reads it) is drawn again. */
+  const [, setMemoryRead] = useState(0);
   /** How each machine step ended during this run, for the closing summary. */
   const [outcomes, setOutcomes] = useState<Readonly<Record<string, StepState>>>({});
   /** Segment memory: per plugin, this run only, never stored. */
@@ -318,6 +321,8 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
       if (how === 'later') rememberLater(env.current.storage(), step.key, env.current.now());
       else if (how === 'done' || how === 'found')
         recordClientStep(env.current.storage(), step.plugin, step.id, daemon, env.current.now());
+      // This device's own answers reach the closing summary from here (a machine step's come back from the machine).
+      setOutcomes(known => ({ ...known, [step.key]: how }));
     },
     [sendDaemon, target],
   );
@@ -404,7 +409,16 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   const page = pages.find(candidate => candidate.key === run.at);
   const hidden = passedOver(run);
   const progress =
-    ready === undefined || page === undefined ? undefined : progressOf(ready.flow, pages, answered, hidden, page.key);
+    ready === undefined || page === undefined
+      ? undefined
+      : progressOf(
+          ready.flow,
+          pages,
+          answered,
+          hidden,
+          foreseenPassedOver(pages, plugin => memory.current.get(plugin) ?? {}),
+          page.key,
+        );
   return {
     loading: loading.kind,
     flow: ready?.flow,
@@ -422,8 +436,10 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
       const before = memory.current.get(plugin) ?? {};
       memory.current.set(plugin, { ...before, ...patch });
       // An answer that CHANGED may change what its plugin's other pages need, so they are asked again.
-      if (Object.entries(patch).some(([key, value]) => before[key] !== value))
+      if (Object.entries(patch).some(([key, value]) => before[key] !== value)) {
         setRun(state => clearNotNeeded(state, pages, plugin));
+        setMemoryRead(count => count + 1);
+      }
     },
     done,
     skip,
@@ -435,17 +451,35 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     summary:
       ready === undefined
         ? []
-        : ready.flow.daemon.flatMap(segment =>
-            segment.steps
-              .filter(step => !hidden.has(step.key))
-              .map(step => ({
-                plugin: step.plugin,
-                id: step.id,
-                title: step.title,
-                group: segment.group,
-                state: outcomes[step.key] ?? step.state ?? 'pending',
-              })),
-          ),
+        : [
+            ...ready.flow.daemon.flatMap(segment =>
+              segment.steps
+                .filter(step => !hidden.has(step.key))
+                .map(step => ({
+                  plugin: step.plugin,
+                  id: step.id,
+                  title: step.title,
+                  group: segment.group,
+                  phase: 'daemon' as const,
+                  state: outcomes[step.key] ?? step.state ?? 'pending',
+                })),
+            ),
+            // This device's own pages: set during this run, found on the device ledger, or left for later.
+            ...ready.flow.client.flatMap(segment =>
+              segment.steps
+                .filter(step => !hidden.has(step.key))
+                .map(step => ({
+                  plugin: step.plugin,
+                  id: step.id,
+                  title: step.title,
+                  group: segment.group,
+                  phase: 'client' as const,
+                  state:
+                    outcomes[step.key] ??
+                    (step.skip === 'already-set' ? 'found' : answered.has(step.key) ? 'later' : 'pending'),
+                })),
+            ),
+          ],
     retrySave,
     retryStep,
   };
