@@ -21,7 +21,7 @@ import type { OnDeviceInstallSnapshot, OnDeviceVoice } from '../../lib/stt/on-de
 import type { OnDeviceVoices } from '../../lib/stt/on-device-voices.ts';
 import type { DictationEngineId } from '../../lib/stt/stt-settings.ts';
 import { EngineCard, type InstallView } from './engine-card.tsx';
-import { BROWSER_BARS, ENGINE_LINES, engineBars } from './engine-numbers.ts';
+import { ENGINE_LINES, engineBars } from './engine-numbers.ts';
 import './engine-card.css';
 
 /** What a card can choose: an engine, or `off` (dictation is switched off on this device). */
@@ -228,10 +228,12 @@ export function EngineCardGrid({
     setChosen(choice);
     onChoose(choice);
   };
+  // Four cards sit two by two, never three and one; the stylesheet reads the count.
+  const count = models.length + (browser ? 1 : 0) + (off ? 1 : 0);
   const voiceFor = (model: OnDeviceModel): OnDeviceVoice | null =>
     model.id === 'parakeet' && parakeet !== undefined ? parakeet : (voices?.get(model.id) ?? null);
   return (
-    <div role="radiogroup" aria-label={label} className={cn('fy-engine-grid', className)}>
+    <div role="radiogroup" aria-label={label} data-count={count} className={cn('fy-engine-grid', className)}>
       {models.map(model => (
         <OnDeviceCard
           key={model.id}
@@ -250,7 +252,8 @@ export function EngineCardGrid({
           id="browser"
           name="Browser voice"
           line="Your browser's own. Words appear live."
-          bars={BROWSER_BARS}
+          bars={null}
+          note="Not measured. Nothing to download."
           chips={['Live words', 'Not on device']}
           details={[
             'The browser’s own speech recognition. Nothing downloads, but most browsers send the audio to their maker to be turned into text, so choose an on-device engine when that matters.',

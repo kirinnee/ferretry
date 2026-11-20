@@ -232,6 +232,24 @@ describe('<EngineCardGrid>', () => {
     await view.unmount();
   });
 
+  it('draws no bars on the browser voice (nothing measured) and says so, while every on-device card keeps three', async () => {
+    const view = await mount(<EngineCardGrid {...gridProps()} />);
+    const browser = card(view.container, 'browser');
+    expect(browser.querySelector('[data-option-bars]')).toBeNull();
+    expect(browser.querySelector('[data-option-bar]')).toBeNull();
+    expect(browser.querySelector('.fy-engine-none')?.textContent).toBe('Not measured. Nothing to download.');
+    for (const id of ['parakeet', 'sherpa-zipformer-en'])
+      expect(card(view.container, id).querySelectorAll('[data-option-bar]')).toHaveLength(3);
+    await view.unmount();
+  });
+
+  it('tells the stylesheet how many cards it holds, so four sit two by two', async () => {
+    const four = await mount(<EngineCardGrid {...gridProps({ models: [ZIPFORMER, PARAKEET_CATALOG_MODEL] })} />);
+    expect(must(four.container.querySelector('.fy-engine-grid'), 'grid').getAttribute('data-count')).toBe('4');
+    await four.unmount();
+    expect(CSS).toMatch(/\.fy-engine-grid\[data-count='4'\]/);
+  });
+
   it('marks the engine a device dictates with by default, per device class', async () => {
     const phone = await mount(<EngineCardGrid {...gridProps({ deviceClass: 'phone' })} />);
     expect(card(phone.container, 'parakeet-tdt-110m').textContent).toContain('Default');
