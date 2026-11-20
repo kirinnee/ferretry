@@ -169,3 +169,9 @@
 .fy-sf-slot > .fy-slot {
   gap: 0;
 }
+
+/* r11 O1: the cover itself waits (page-frame.tsx mounts the loader only after the 300 ms threshold), so the loader it draws
+   fades in at once instead of waiting a second time. */
+.fy-sf-cover .fy-loading--page {
+  animation-delay: 0s;
+}

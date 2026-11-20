@@ -84,6 +84,12 @@ export interface StepHost {
   notNeeded(): void;
   done(): void;
   busy(label: string | null): void;
+  /**
+   * Registers what the footer's Next must SAVE before it moves on (null clears it). On Next the shell runs it under
+   * busy('Saving…'): resolved → done() is recorded and the flow moves on; rejected with an Error → the page stays, the
+   * error's message shows on the page, Next stays enabled to try again. A page calls it whenever its pick changes.
+   */
+  commit(save: (() => Promise<void>) | null): void;
   next(): void;
   back(): void;
 }

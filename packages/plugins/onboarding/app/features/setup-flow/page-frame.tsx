@@ -7,12 +7,16 @@
  *      and the page never show together, so nothing pops in;
  *   2. after STEP_SILENCE_MS of silence the cover adds "Skip this step": a page that never answers never blocks;
  *   3. `busy(label)` locks the whole footer (Next, Back, Later) and says what is happening; `done()` is recorded once;
- *   4. a step that does not declare `stepHost` is a LEGACY page (it never calls `ready()`): it is drawn with no cover, Next
+ *   4. (r11 O1) the cover draws NOTHING for its first LOADING_DELAY_MS (300 ms): it keeps the page's height and then shows the
+ *      loader, so a page that answers inside that beat never flashes one;
+ *   5. (r11 O1) a page that registered `commit` is SAVED by Next (contract rule 8): the footer is busy 'Saving…', and a save that
+ *      rejects keeps the page, shows the error and leaves Next ready to run it again;
+ *   6. a step that does not declare `stepHost` is a LEGACY page (it never calls `ready()`): it is drawn with no cover, Next
  *      enabled and done recorded on Next, so a page not yet written against StepHost is never trapped behind a cover.
  * Next, Back and Later are the shell's and live in the frame's footer row (Back · Later · Next), so every page has the same footer.
  */
 import { PanelSlot, StepPageFrame, useSlotPanels } from '@ferretry/app';
-import { Badge, Button, Loading, useMotionAllowed } from '@ferretry/app/ui';
+import { Badge, Button, LOADING_DELAY_MS, Loading, useMotionAllowed } from '@ferretry/app/ui';
 import type { StepHost } from '@ferretry/kernel/contract';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ONBOARDING_STEP_SLOT } from '../../../contract/index.ts';
@@ -45,6 +49,9 @@ export interface FlowPageProps {
   /** What draws the page. The default is the plugin's own panel in the `onboarding.step` slot; a scene or test hands its own. */
   readonly render?: (host: StepHost) => ReactNode;
 }
+
+/** The cover is blank this long (owner item 4: a loader needs a 300 ms threshold); the shared delay may only be longer. */
+const COVER_DELAY_MS = Math.max(LOADING_DELAY_MS, 300);
 
 /** The default report: a console warning, development builds only. */
 const devReport = (message: string): void => {
@@ -88,6 +95,19 @@ export function FlowPage(props: FlowPageProps): ReactNode {
   const [ready, setReady] = useState(!step.stepHost);
   const [busy, setBusy] = useState<string | null>(null);
   const [silent, setSilent] = useState(false);
+  // The loader is drawn only once the cover has waited COVER_DELAY_MS; before that the cover only holds the page's room.
+  const [loaderDue, setLoaderDue] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // What Next must save (contract rule 8), the act in flight, and whether the page is still on screen.
+  const commit = useRef<(() => Promise<void>) | null>(null);
+  const saving = useRef(false);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   // The host is made once per page: its calls reach the latest callbacks through this ref.
   const latest = useRef(props);
   latest.current = props;
@@ -136,6 +156,10 @@ export function FlowPage(props: FlowPageProps): ReactNode {
         flagless('done');
         latest.current.onDone();
       },
+      commit: save => {
+        flagless('commit');
+        commit.current = save;
+      },
       busy: label => {
         flagless('busy');
         if (label !== null) shown.current = true;
@@ -147,17 +171,54 @@ export function FlowPage(props: FlowPageProps): ReactNode {
   }, [step]);
   useEffect(() => {
     if (ready) return;
+    const timer = setTimeout(() => setLoaderDue(true), COVER_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [ready]);
+  useEffect(() => {
+    if (ready) return;
     const timer = setTimeout(() => setSilent(true), props.silenceMs ?? STEP_SILENCE_MS);
     return () => clearTimeout(timer);
   }, [ready, props.silenceMs]);
   const missing = useCallback(() => latest.current.onSkip('not-needed'), []);
   const locked = !ready || busy !== null;
+  /** Next: a page with a save registered is saved first (rule 8); one without just moves on. Back and Later never save. */
+  const pressNext = useCallback((): void => {
+    const save = commit.current;
+    if (save === null) {
+      latest.current.onNext();
+      return;
+    }
+    if (saving.current) return;
+    saving.current = true;
+    shown.current = true;
+    setSaveError(null);
+    setBusy('Saving…');
+    save()
+      .then(
+        () => {
+          if (!alive.current) return;
+          latest.current.onDone();
+          latest.current.onNext();
+        },
+        (error: unknown) => {
+          if (alive.current) setSaveError(error instanceof Error ? error.message : 'That could not be saved.');
+        },
+      )
+      .finally(() => {
+        saving.current = false;
+        if (alive.current) setBusy(now => (now === 'Saving…' ? null : now));
+      });
+  }, []);
+  const pressBack = useCallback((): void => {
+    commit.current = null;
+    latest.current.onBack();
+  }, []);
   return (
     <StepPageFrame
       title={step.title}
       {...(progress === undefined ? {} : { progress })}
-      {...(canBack ? { back: { onClick: props.onBack, disabled: busy !== null } } : {})}
-      next={{ label: 'Next', disabled: locked, busy: busy !== null, onClick: props.onNext }}
+      {...(canBack ? { back: { onClick: pressBack, disabled: busy !== null } } : {})}
+      next={{ label: 'Next', disabled: locked, busy: busy !== null, onClick: pressNext }}
       {...(ready
         ? {
             later: {
@@ -179,7 +240,7 @@ export function FlowPage(props: FlowPageProps): ReactNode {
         {ready ? <OnlyOnChip names={step.onlyOn} /> : null}
         {ready ? null : (
           <div className="fy-sf-cover" data-flow-cover="">
-            <Loading kind="page" label="Checking what this step needs…" />
+            {loaderDue ? <Loading kind="page" label="Checking what this step needs…" /> : null}
             {silent ? (
               <div className="fy-sf-silent" data-flow-silent="">
                 <p className="fy-sf-note">Still checking…</p>
@@ -200,6 +261,11 @@ export function FlowPage(props: FlowPageProps): ReactNode {
         {busy === null ? null : (
           <p role="status" className="fy-sf-note" data-flow-busy="">
             {busy}
+          </p>
+        )}
+        {saveError === null ? null : (
+          <p role="alert" className="fy-sf-note" data-flow-commit-error="">
+            {saveError}
           </p>
         )}
         {unsaved === undefined ? null : (

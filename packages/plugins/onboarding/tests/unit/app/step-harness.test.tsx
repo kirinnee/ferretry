@@ -69,4 +69,18 @@ describe('StepHarness with the fake plugin pages', () => {
   it('a page that has said nothing is undecided: the shell keeps its loading cover', () => {
     expect(stepHarness().decision).toBe('undecided');
   });
+
+  it('a page that registers a save is recorded, and runCommit runs what Next would run (rule 8)', async () => {
+    const harness = stepHarness();
+    const saved: string[] = [];
+    expect(harness.hasCommit).toBe(false);
+    await harness.runCommit();
+    harness.host.commit(async () => void saved.push('saved'));
+    expect(harness.calls).toEqual([{ kind: 'commit' }]);
+    expect(harness.hasCommit).toBe(true);
+    await harness.runCommit();
+    expect(saved).toEqual(['saved']);
+    harness.host.commit(null);
+    expect(harness.hasCommit).toBe(false);
+  });
 });

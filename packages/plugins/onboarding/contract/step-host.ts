@@ -45,6 +45,12 @@
  *      from the answer. A page whose need rests on an answer the run no longer holds (the plugin's memory is empty after a
  *      reload) does not ask it again inside itself: it draws its ordinary page with every default ticked, and Next answers it
  *      like any other. "Not needed" therefore only ever follows an answer given earlier in the SAME unbroken run.
+ *   8. NEXT SAVES THE CHOICE (r11 O1): a page that writes registers what Next must save with `commit(save)` (again whenever its
+ *      pick changes; `commit(null)` clears it) INSTEAD of drawing its own Save / Use / Keep button. The shell's Next runs it
+ *      under `busy('Saving…')`: resolved → `done()` is recorded and the flow moves on; rejected with an Error → the page
+ *      stays, the error's message is shown on it, and Next stays enabled so pressing it again runs the save again. A page never
+ *      calls `busy()` just to hold Next for a pending pick (rule 5: only `ready()` and an act in flight lock it). `Later`
+ *      never runs the commit, and Back drops it: nothing is saved by leaving a page. A page with no commit behaves as before.
  */
 export type { StepHost, StepSegmentMemory } from '@ferretry/kernel/contract';
 
@@ -61,6 +67,7 @@ export type StepCall =
   | { readonly kind: 'notNeeded' }
   | { readonly kind: 'done' }
   | { readonly kind: 'busy'; readonly label: string | null }
+  | { readonly kind: 'commit' }
   | { readonly kind: 'remember'; readonly patch: Readonly<Record<string, string | number | boolean | undefined>> }
   | { readonly kind: 'next' }
   | { readonly kind: 'back' };

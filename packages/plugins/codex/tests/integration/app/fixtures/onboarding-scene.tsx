@@ -128,6 +128,7 @@ const step: StepHost = {
   ready: () => undefined,
   skip: () => undefined,
   notNeeded: () => undefined,
+  commit: () => undefined,
   done: () => undefined,
   busy: () => undefined,
   next: () => undefined,

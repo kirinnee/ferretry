@@ -249,3 +249,126 @@ describe('the page frame in the shell scroll box', () => {
           }
         });
 });
+
+// ─── r11 O1: Next saves the choice, and the loading cover waits 300 ms (owner items 4 and 5) ────────────────────────────
+// The proof of the owner's lines is in the browser, on the real `FlowPage`: (a) a page that registers `commit` is saved by
+// Next, once, and only then does the next page come up; a save that rejects keeps the page, says why, and runs again on the
+// next press; (b) a page that answers inside 300 ms never has a loader drawn (sampled every frame, opacity AND size), and one
+// that answers later has it from 300 ms on.
+const LOADER_SAMPLER = `
+  window.__loader = { first: -1, last: -1, frames: 0 };
+  const visible = (el) => {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return false;
+    for (let n = el; n; n = n.parentElement) {
+      const s = getComputedStyle(n);
+      if (s.display === 'none' || s.visibility === 'hidden' || Number(s.opacity) <= 0.01) return false;
+    }
+    return true;
+  };
+  const tick = () => {
+    const now = performance.now();
+    const hit = [...document.querySelectorAll('[data-loading], .fy-spinner')].some(visible);
+    if (hit) {
+      if (window.__loader.first < 0) window.__loader.first = now;
+      window.__loader.last = now;
+      window.__loader.frames += 1;
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+`;
+
+describe('r11 O1: Next saves the choice and the loader waits 300 ms', () => {
+  const open = async (scheme: 'light' | 'dark', width: number, height: number) => {
+    const context = await browser.newContext({ viewport: { width, height }, colorScheme: scheme });
+    const origin = server?.url.origin ?? '';
+    await context.route('**/*', async route =>
+      new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+    );
+    return { context, origin, tab: await context.newPage() };
+  };
+  const title = (tab: import('playwright-core').Page) => tab.textContent('.fy-spf__title');
+  const saves = (tab: import('playwright-core').Page) =>
+    tab.evaluate(() => (window as unknown as { __saves?: number }).__saves ?? 0);
+
+  for (const scheme of ['light', 'dark'] as const)
+    for (const viewport of VIEWPORTS) {
+      it(`Next runs the registered save once, then shows the next page (${viewport.name}, ${scheme})`, async () => {
+        const { context, origin, tab } = await open(scheme, viewport.width, viewport.height);
+        try {
+          await tab.goto(`${origin}/?theme=studio-${scheme}&case=commit`);
+          await tab.waitForSelector('[data-flow-page="fake-pack.choose"]:not([hidden])');
+          expect(await saves(tab), 'nothing is saved before Next').toBe(0);
+          await tab.click('[data-step-next]');
+          await tab.waitForFunction(() => document.querySelector('.fy-spf__title')?.textContent === 'Second page');
+          expect(await saves(tab), 'the save ran exactly once').toBe(1);
+          await tab.waitForTimeout(200);
+          expect(await saves(tab), 'and not again').toBe(1);
+        } finally {
+          await context.close();
+        }
+      });
+      it(`a rejected save keeps the page, shows the message and runs again on the next Next (${viewport.name}, ${scheme})`, async () => {
+        const { context, origin, tab } = await open(scheme, viewport.width, viewport.height);
+        try {
+          await tab.goto(`${origin}/?theme=studio-${scheme}&case=commit-fail`);
+          await tab.waitForSelector('[data-flow-page="fake-pack.choose"]:not([hidden])');
+          await tab.click('[data-step-next]');
+          await tab.waitForSelector('[data-flow-commit-error]');
+          expect(await tab.textContent('[data-flow-commit-error]')).toContain('Could not reach the machine.');
+          expect(await title(tab), 'still on the same page').toBe('How should it import?');
+          expect(await saves(tab)).toBe(1);
+          expect(
+            await tab.$eval('[data-step-next]', next => (next as HTMLButtonElement).disabled),
+            'Next is enabled to try again',
+          ).toBe(false);
+          await tab.click('[data-step-next]');
+          await tab.waitForFunction(() => document.querySelector('.fy-spf__title')?.textContent === 'Second page');
+          expect(await saves(tab), 'the save ran again on the second Next').toBe(2);
+          expect(await tab.$('[data-flow-commit-error]'), 'the message is gone with the page').toBeNull();
+        } finally {
+          await context.close();
+        }
+      });
+    }
+
+  for (const scheme of ['light', 'dark'] as const) {
+    it(`a page that answers in 250 ms never has a loader visible (${scheme})`, async () => {
+      const { context, origin, tab } = await open(scheme, 1_280, 800);
+      try {
+        await tab.addInitScript(LOADER_SAMPLER);
+        await tab.goto(`${origin}/?theme=studio-${scheme}&case=late&ms=250`);
+        await tab.waitForFunction(() => (window as unknown as { __readyAt?: number }).__readyAt !== undefined);
+        await tab.waitForTimeout(700);
+        const seen = await tab.evaluate(() => (window as unknown as { __loader: { frames: number } }).__loader);
+        expect(seen.frames, 'no frame had a visible loader (checked every frame for 700 ms)').toBe(0);
+        expect(await tab.$('[data-flow-cover]'), 'the cover is gone once the page is ready').toBeNull();
+      } finally {
+        await context.close();
+      }
+    });
+    it(`a page that answers in 600 ms has the loader from 300 ms on, not before (${scheme})`, async () => {
+      const { context, origin, tab } = await open(scheme, 1_280, 800);
+      try {
+        await tab.addInitScript(LOADER_SAMPLER);
+        await tab.goto(`${origin}/?theme=studio-${scheme}&case=late&ms=600`);
+        await tab.waitForFunction(() => (window as unknown as { __readyAt?: number }).__readyAt !== undefined);
+        const seen = await tab.evaluate(() => {
+          const w = window as unknown as {
+            __loader: { first: number; last: number; frames: number };
+            __pageMountedAt: number;
+          };
+          return { ...w.__loader, mounted: w.__pageMountedAt };
+        });
+        expect(seen.frames, 'the loader was drawn').toBeGreaterThan(0);
+        const from = seen.first - seen.mounted;
+        console.info(`loader first visible ${from.toFixed(0)} ms after the page mounted (${scheme})`);
+        expect(from, `the loader first shows at ${from.toFixed(0)} ms: not before 300`).toBeGreaterThanOrEqual(295);
+        expect(from, `and soon after 300 (${from.toFixed(0)} ms)`).toBeLessThanOrEqual(420);
+      } finally {
+        await context.close();
+      }
+    });
+  }
+});

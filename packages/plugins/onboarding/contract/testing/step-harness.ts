@@ -26,11 +26,16 @@ export interface StepHarness {
   readonly skippedWhy: StepSkipWhy | undefined;
   /** The segment memory as the page left it. */
   readonly segment: StepSegmentMemory;
+  /** Whether the page has a save registered for Next (rule 8). */
+  readonly hasCommit: boolean;
+  /** What the shell's Next does with it: runs the registered save (resolves at once when the page registered none). */
+  runCommit(): Promise<void>;
 }
 
 export function stepHarness(options: StepHarnessOptions = {}): StepHarness {
   const calls: StepCall[] = [];
   let segment: StepSegmentMemory = { ...options.segment };
+  let commit: (() => Promise<void>) | null = null;
   const host: StepHost = {
     phase: options.phase ?? 'daemon',
     appliesTo: options.appliesTo ?? [],
@@ -46,6 +51,10 @@ export function stepHarness(options: StepHarnessOptions = {}): StepHarness {
     notNeeded: () => void calls.push({ kind: 'notNeeded' }),
     done: () => void calls.push({ kind: 'done' }),
     busy: label => void calls.push({ kind: 'busy', label }),
+    commit: save => {
+      commit = save;
+      calls.push({ kind: 'commit' });
+    },
     next: () => void calls.push({ kind: 'next' }),
     back: () => void calls.push({ kind: 'back' }),
   };
@@ -68,6 +77,12 @@ export function stepHarness(options: StepHarnessOptions = {}): StepHarness {
     },
     get segment() {
       return segment;
+    },
+    get hasCommit() {
+      return commit !== null;
+    },
+    runCommit: async () => {
+      await commit?.();
     },
   };
 }
