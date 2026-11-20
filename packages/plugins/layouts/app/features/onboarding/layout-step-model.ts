@@ -35,8 +35,8 @@ export const LAYOUT_QUESTIONS: readonly LayoutQuestion[] = [
     name: 'Navigation',
     path: 'nav.labels',
     answers: [
-      { id: 'icons', title: 'Icons', line: 'A row of small icons at the foot of the side bar.' },
-      { id: 'words', title: 'Words', line: 'Each place is named, in two columns at the foot of the side bar.' },
+      { id: 'icons', title: 'Icons', line: 'Small icons at the side bar’s foot.' },
+      { id: 'words', title: 'Words', line: 'Each place named, at the foot.' },
     ],
   },
   {
@@ -45,7 +45,7 @@ export const LAYOUT_QUESTIONS: readonly LayoutQuestion[] = [
     path: 'density',
     answers: [
       { id: 'comfortable', title: 'Comfortable', line: 'Room between rows.' },
-      { id: 'compact', title: 'Compact', line: 'Rows close together, to see more at once.' },
+      { id: 'compact', title: 'Compact', line: 'More rows on screen.' },
     ],
   },
 ];
