@@ -290,8 +290,8 @@ describe('the Browser tab', () => {
       node => node.textContent,
     );
     expect(explanations).toEqual([
-      'The operator of this machine switched off the agent fleet for paired devices, this browser included. It is turned back on at the machine with \`fy\`.',
-      'The operator of this machine switched off the agent fleet for paired devices, this browser included. It is turned back on at the machine with \`fy\`.',
+      'The operator of this machine switched off the agent fleet for paired devices, this browser included. It is turned back on at the machine with fy.',
+      'The operator of this machine switched off the agent fleet for paired devices, this browser included. It is turned back on at the machine with fy.',
     ]);
     for (const selector of [
       '[data-browser-mode-save-panel] [data-change-submit]',
