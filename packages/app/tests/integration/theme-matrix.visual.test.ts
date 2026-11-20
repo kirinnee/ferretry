@@ -85,6 +85,10 @@ const DEVICE_FACES: readonly string[] = [
   'Menlo',
   'Consolas',
   'Liberation Mono',
+  'Tahoma',
+  'Trebuchet MS',
+  'Verdana',
+  'Lucida Console',
 ];
 
 /**
