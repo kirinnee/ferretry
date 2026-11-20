@@ -98,6 +98,14 @@
   --select-pop: 1.14;
 }
 
+/* A SWATCH (the Look picker's mini scene, drawn while another style is active) must stay cheap: it draws its title in
+   Bagel Fat One (one 24 KB face) and everything else in the device's own sans, so the 41 KB Bricolage body face is fetched
+   only when Gen Z is the ACTIVE style. A font file downloads only when text is drawn with it. */
+[data-swatch][data-style='genz']:not(:root) {
+  --font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-ui: var(--font-body);
+}
+
 /* ---- component touches: stickers, springs and the stacked shadows. Colour only from roles. ---- */
 
 /* A text field draws the real ring the keyboard needs (its own `outline: none` would hide it): see the ring rule below. */
