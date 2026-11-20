@@ -78,7 +78,7 @@ export function RuntimeActionButtons({
         onClick={onRename}
       >
         <Pencil size={14} aria-hidden="true" />
-        <span className="hidden sm:inline">Rename</span>
+        <span className="fy-wide-inline">Rename</span>
       </Button>
       <Button
         type="button"
@@ -91,7 +91,7 @@ export function RuntimeActionButtons({
         onClick={onRemove}
       >
         <Trash2 size={14} aria-hidden="true" />
-        <span className="hidden sm:inline">Remove</span>
+        <span className="fy-wide-inline">Remove</span>
       </Button>
     </span>
   );

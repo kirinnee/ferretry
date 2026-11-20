@@ -7,6 +7,7 @@
  *   /settings                         Settings › This device, with its way back to the daemon's settings
  *   ?theme=<family>-<mode>
  *   ?real=agenda                      the Agenda surface is the plugin's REAL app half (its real Settings tab body), in the real shell
+ *   ?real=runtimes                    the Runtimes surface is REAL too, over the fake reads in runtimes-reads.json (r10 S11)
  */
 
 import { implementApp, type Manifest } from '@ferretry/kernel/manifest';
@@ -25,6 +26,7 @@ import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
 import { CORE, FakeTransport, inventoryOf, json } from '../../unit/client/fixtures.ts';
+import fleetReads from './runtimes-reads.json';
 
 /**
  * REAL BODIES FOR THIS SCENE: a plugin's integration test that must measure its real page INSIDE the real shell (the drawer, the
@@ -68,6 +70,8 @@ const surfaces: SurfaceEntry[] = [
     )
     .map(entry => {
       if (entry.id === 'agenda' && params.get('real') === 'agenda') return entry;
+      // The Runtimes tabs also read the Logins list, so its REAL manifest (the routes it declares) stays too.
+      if ((entry.id === 'runtimes' || entry.id === 'logins') && params.get('real') === 'runtimes') return entry;
       const settings = entry.manifest.ui?.settings ?? [];
       const manifest = {
         id: entry.id,
@@ -127,6 +131,8 @@ const transport = new FakeTransport((request: TransportRequest): TransportAnswer
   if (request.path === '/v1/plugins') return json(inventoryOf(surfaces));
   if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
   if (request.path === '/v1/grants') return json(grants);
+  const scripted = (fleetReads as Record<string, unknown>)[`${request.method} ${request.path}`];
+  if (scripted !== undefined && params.get('real') === 'runtimes') return json(scripted);
   return json({ ok: true });
 });
 const handler: PasskeyHandler = {

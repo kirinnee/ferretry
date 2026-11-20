@@ -332,7 +332,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
           <span>Change the contents so it can be saved.</span>
         </CatalogNote>
       )}
-      <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div className="fy-split min-w-0">
         <LibraryPanel
           items={library}
           contents={contents}
@@ -353,7 +353,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
         />
         <section className="kt-panel flex min-w-0 flex-col" aria-label={`Contents of ${label}`} data-profile-box="">
           <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-border px-panel py-2">
-            <p className="m-0 w-full min-w-0 text-cell text-fg md:w-auto md:flex-1">
+            <p className="fy-wide-grow m-0 min-w-0 text-cell text-fg">
               <span className="font-semibold">{label}</span>{' '}
               <span className="text-muted">
                 {counted(contents.length, 'item')} · later overrides earlier
@@ -379,7 +379,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
               type="button"
               size="sm"
               variant="primary"
-              className="md:hidden"
+              className="fy-narrow-only"
               data-profile-pick=""
               onClick={() => {
                 setRefusal(null);

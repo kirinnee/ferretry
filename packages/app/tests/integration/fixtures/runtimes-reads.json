@@ -1,0 +1,743 @@
+{
+  "GET /v1/logins": {
+    "format": 1,
+    "machine": "studio-mac",
+    "logins": [
+      {
+        "id": "claude-personal",
+        "harness": "claude-code",
+        "harnesses": ["claude-code"],
+        "store": "host",
+        "email": "you@example.com",
+        "label": "personal",
+        "needsLabel": false,
+        "sharedWithTerminal": true,
+        "status": {
+          "word": "ready",
+          "label": "Ready",
+          "reason": "provider_accepted",
+          "explanation": "Ready. Checked a few minutes ago.",
+          "lastCheckInconclusive": false
+        },
+        "usage": {
+          "fiveHour": {
+            "usedPercent": 38,
+            "resetsAt": "2026-10-13T10:10:00.000Z"
+          },
+          "weekly": {
+            "usedPercent": 83,
+            "resetsAt": "2026-10-16T08:00:00.000Z"
+          },
+          "source": "anthropic-usage",
+          "at": "2026-10-13T07:58:00.000Z"
+        },
+        "usedBy": ["claude-default", "claude-agent", "claude-review"],
+        "signIn": {
+          "available": true
+        },
+        "checkNow": {
+          "available": true
+        },
+        "signOut": {
+          "available": true,
+          "sentence": "Sign out of you@example.com (personal)? This also signs out claude in your terminal on studio-mac. 3 runtimes will need sign-in.",
+          "runtimesAffected": 3,
+          "signsOutTerminal": true
+        }
+      },
+      {
+        "id": "codex",
+        "harness": "codex",
+        "harnesses": ["codex"],
+        "store": "host",
+        "email": "you@example.com",
+        "needsLabel": false,
+        "sharedWithTerminal": true,
+        "status": {
+          "word": "ready",
+          "label": "Ready",
+          "reason": "provider_accepted",
+          "explanation": "Ready. Checked a few minutes ago.",
+          "lastCheckInconclusive": false
+        },
+        "usage": {
+          "fiveHour": {},
+          "weekly": {}
+        },
+        "usedBy": ["codex-default"],
+        "signIn": {
+          "available": true
+        },
+        "checkNow": {
+          "available": true
+        },
+        "signOut": {
+          "available": true,
+          "sentence": "Sign out of you@example.com? No runtime uses it.",
+          "runtimesAffected": 0,
+          "signsOutTerminal": false
+        }
+      },
+      {
+        "id": "claude-work",
+        "harness": "claude-code",
+        "harnesses": ["claude-code"],
+        "store": "ferretry",
+        "email": "you@example.com",
+        "label": "work",
+        "needsLabel": false,
+        "sharedWithTerminal": false,
+        "status": {
+          "word": "refresh_due",
+          "label": "Refresh due",
+          "reason": "access_expired_refreshable",
+          "explanation": "Refresh due. Ferretry renews it the next time a runtime uses it.",
+          "lastCheckInconclusive": false
+        },
+        "usage": {
+          "fiveHour": {
+            "usedPercent": 38,
+            "resetsAt": "2026-10-13T10:10:00.000Z"
+          },
+          "weekly": {
+            "usedPercent": 83,
+            "resetsAt": "2026-10-16T08:00:00.000Z"
+          },
+          "source": "anthropic-usage",
+          "at": "2026-10-13T07:58:00.000Z"
+        },
+        "usedBy": ["claude-work"],
+        "signIn": {
+          "available": true
+        },
+        "checkNow": {
+          "available": true
+        },
+        "signOut": {
+          "available": true,
+          "sentence": "Sign out of you@example.com? No runtime uses it.",
+          "runtimesAffected": 0,
+          "signsOutTerminal": false
+        }
+      }
+    ]
+  },
+  "GET /v1/runtimes": {
+    "format": "present",
+    "runtimes": [
+      {
+        "id": "rt-claude-default",
+        "name": "claude-default",
+        "wrapper": "claude-default",
+        "harness": "claude-code",
+        "credential": {
+          "id": "claude-personal",
+          "store": "host",
+          "label": "personal",
+          "status": "ready"
+        },
+        "profile": "Default",
+        "agent": false,
+        "stack": {
+          "harness": "claude-code",
+          "available": {
+            "available": true
+          },
+          "applied": ["instructions/Main instructions", "modelSets/Claude models"],
+          "skipped": [],
+          "conflicts": [],
+          "partial": []
+        },
+        "modelSet": {
+          "source": "model-set",
+          "name": "Claude models",
+          "models": [
+            {
+              "id": "Opus 5.5",
+              "available": true
+            },
+            {
+              "id": "Sonnet 5.5",
+              "available": true
+            }
+          ],
+          "declaredDefault": "Sonnet 5.5",
+          "default": "Sonnet 5.5"
+        },
+        "launch": {
+          "available": true
+        },
+        "sameAs": []
+      },
+      {
+        "id": "rt-codex-default",
+        "name": "codex-default",
+        "wrapper": "codex-default",
+        "harness": "codex",
+        "credential": {
+          "id": "codex",
+          "store": "host",
+          "status": "ready"
+        },
+        "profile": "Default",
+        "agent": false,
+        "stack": {
+          "harness": "codex",
+          "available": {
+            "available": true
+          },
+          "applied": ["instructions/Main instructions", "modelSets/Claude models"],
+          "skipped": [
+            {
+              "reference": "settings/Claude settings",
+              "sentence": "Claude settings are skipped on Codex."
+            }
+          ],
+          "conflicts": [],
+          "partial": []
+        },
+        "modelSet": {
+          "source": "model-set",
+          "name": "Claude models",
+          "models": [
+            {
+              "id": "GPT-6",
+              "available": true
+            },
+            {
+              "id": "Opus 5.5",
+              "available": false
+            }
+          ],
+          "declaredDefault": "Opus 5.5",
+          "default": "GPT-6"
+        },
+        "launch": {
+          "available": true
+        },
+        "sameAs": []
+      },
+      {
+        "id": "rt-claude-agent",
+        "name": "claude-agent",
+        "wrapper": "claude-agent",
+        "harness": "claude-code",
+        "credential": {
+          "id": "claude-personal",
+          "store": "host",
+          "label": "personal",
+          "status": "ready"
+        },
+        "profile": "Agent work",
+        "agent": true,
+        "stack": {
+          "harness": "claude-code",
+          "available": {
+            "available": true
+          },
+          "applied": ["instructions/Main instructions", "modelSets/Claude models"],
+          "skipped": [],
+          "conflicts": [],
+          "partial": []
+        },
+        "modelSet": {
+          "source": "model-set",
+          "name": "Claude models",
+          "models": [
+            {
+              "id": "Opus 5.5",
+              "available": true
+            },
+            {
+              "id": "Sonnet 5.5",
+              "available": true
+            }
+          ],
+          "declaredDefault": "Sonnet 5.5",
+          "default": "Sonnet 5.5"
+        },
+        "fixedLayer": {
+          "agentPermissions": "auto",
+          "entries": [
+            {
+              "key": "permissions.defaultMode",
+              "value": "auto"
+            },
+            {
+              "key": "trust prompt",
+              "value": "off"
+            }
+          ],
+          "overridden": [
+            {
+              "key": "permissions.defaultMode",
+              "value": "acceptEdits",
+              "from": "Agent settings",
+              "sentence": "From your Agent settings · Overridden for agents by Ferretry"
+            }
+          ]
+        },
+        "launch": {
+          "available": true
+        },
+        "sameAs": []
+      },
+      {
+        "id": "rt-claude-review",
+        "name": "claude-review",
+        "wrapper": "claude-review",
+        "harness": "claude-code",
+        "credential": {
+          "id": "claude-personal",
+          "store": "host",
+          "label": "personal",
+          "status": "ready"
+        },
+        "profile": "Review",
+        "agent": false,
+        "stack": {
+          "harness": "claude-code",
+          "available": {
+            "available": true
+          },
+          "applied": ["instructions/Main instructions", "modelSets/Claude models"],
+          "skipped": [],
+          "conflicts": [],
+          "partial": []
+        },
+        "modelSet": {
+          "source": "harness-default"
+        },
+        "launch": {
+          "available": true
+        },
+        "sameAs": []
+      },
+      {
+        "id": "rt-claude-work",
+        "name": "claude-work",
+        "wrapper": "claude-work",
+        "harness": "claude-code",
+        "credential": {
+          "id": "claude-work",
+          "store": "ferretry",
+          "label": "work",
+          "status": "refresh_due"
+        },
+        "profile": "Default",
+        "agent": false,
+        "stack": {
+          "harness": "claude-code",
+          "available": {
+            "available": true
+          },
+          "applied": ["instructions/Main instructions", "modelSets/Claude models"],
+          "skipped": [],
+          "conflicts": [],
+          "partial": []
+        },
+        "modelSet": {
+          "source": "model-set",
+          "name": "Claude models",
+          "models": [
+            {
+              "id": "Opus 5.5",
+              "available": true
+            },
+            {
+              "id": "Sonnet 5.5",
+              "available": true
+            }
+          ],
+          "declaredDefault": "Sonnet 5.5",
+          "default": "Sonnet 5.5"
+        },
+        "launch": {
+          "available": true
+        },
+        "sameAs": []
+      }
+    ]
+  },
+  "GET /v1/runtimes/profiles": {
+    "format": "present",
+    "profiles": [
+      {
+        "name": "Default",
+        "layers": [
+          "instructions/Main instructions",
+          "skills/My skills",
+          "settings/Claude settings",
+          "modelSets/Claude models"
+        ],
+        "usedBy": ["claude-default", "codex-default", "claude-work"],
+        "baseFor": [],
+        "wouldIncludeItself": [],
+        "scope": {
+          "kind": "scoped",
+          "scope": "generic"
+        },
+        "harnesses": [
+          {
+            "harness": "claude-code",
+            "available": {
+              "available": true
+            },
+            "applied": ["instructions/Main instructions", "modelSets/Claude models"],
+            "skipped": [],
+            "conflicts": [],
+            "partial": []
+          },
+          {
+            "harness": "codex",
+            "available": {
+              "available": true
+            },
+            "applied": ["instructions/Main instructions", "modelSets/Claude models"],
+            "skipped": [
+              {
+                "reference": "settings/Claude settings",
+                "sentence": "Claude settings are skipped on Codex."
+              }
+            ],
+            "conflicts": [],
+            "partial": [
+              {
+                "reference": "skills/My skills",
+                "reason": "release-notes limits which tools it may use."
+              }
+            ]
+          }
+        ],
+        "remove": {
+          "available": true
+        }
+      },
+      {
+        "name": "Claude hooks",
+        "layers": ["hooks/Format on save"],
+        "usedBy": [],
+        "baseFor": [],
+        "wouldIncludeItself": [],
+        "scope": {
+          "kind": "scoped",
+          "scope": "generic"
+        },
+        "harnesses": [
+          {
+            "harness": "claude-code",
+            "available": {
+              "available": true
+            },
+            "applied": ["hooks/Format on save"],
+            "skipped": [],
+            "conflicts": [],
+            "partial": []
+          },
+          {
+            "harness": "codex",
+            "available": {
+              "available": false,
+              "reason": "Only Claude settings. Nothing here applies on Codex."
+            },
+            "applied": [],
+            "skipped": [
+              {
+                "reference": "hooks/Format on save",
+                "sentence": "Claude hooks are skipped on Codex."
+              }
+            ],
+            "conflicts": [],
+            "partial": []
+          }
+        ],
+        "remove": {
+          "available": true
+        }
+      },
+      {
+        "name": "Agent work",
+        "layers": ["profile/Default", "settings/Agent settings"],
+        "usedBy": ["claude-agent"],
+        "baseFor": [],
+        "wouldIncludeItself": [],
+        "scope": {
+          "kind": "scoped",
+          "scope": "generic"
+        },
+        "harnesses": [
+          {
+            "harness": "claude-code",
+            "available": {
+              "available": true
+            },
+            "applied": ["instructions/Main instructions", "modelSets/Claude models"],
+            "skipped": [],
+            "conflicts": [],
+            "partial": []
+          },
+          {
+            "harness": "codex",
+            "available": {
+              "available": true
+            },
+            "applied": ["instructions/Main instructions", "modelSets/Claude models"],
+            "skipped": [],
+            "conflicts": [],
+            "partial": []
+          }
+        ],
+        "remove": {
+          "available": true
+        }
+      },
+      {
+        "name": "Review",
+        "layers": ["profile/Default"],
+        "usedBy": ["claude-review"],
+        "baseFor": [],
+        "wouldIncludeItself": [],
+        "scope": {
+          "kind": "scoped",
+          "scope": "generic"
+        },
+        "harnesses": [
+          {
+            "harness": "claude-code",
+            "available": {
+              "available": true
+            },
+            "applied": ["instructions/Main instructions", "modelSets/Claude models"],
+            "skipped": [],
+            "conflicts": [],
+            "partial": []
+          },
+          {
+            "harness": "codex",
+            "available": {
+              "available": true
+            },
+            "applied": ["instructions/Main instructions", "modelSets/Claude models"],
+            "skipped": [],
+            "conflicts": [],
+            "partial": []
+          }
+        ],
+        "remove": {
+          "available": true
+        }
+      }
+    ]
+  },
+  "GET /v1/runtimes/components": {
+    "format": "present",
+    "kinds": [
+      {
+        "kind": "instructions",
+        "label": "Instructions",
+        "description": "What every session reads first.",
+        "components": [
+          {
+            "reference": "instructions/Main instructions",
+            "kind": "instructions",
+            "name": "Main instructions",
+            "scope": "generic",
+            "detail": {
+              "kind": "instructions",
+              "file": "components/instructions/main.md"
+            },
+            "partial": [],
+            "warnings": [],
+            "usedBy": {
+              "profiles": [],
+              "runtimes": []
+            },
+            "editNote": "Saving changes it everywhere.",
+            "remove": {
+              "available": true
+            }
+          }
+        ]
+      },
+      {
+        "kind": "skills",
+        "label": "Skills",
+        "description": "Named abilities.",
+        "components": [
+          {
+            "reference": "skills/My skills",
+            "kind": "skills",
+            "name": "My skills",
+            "scope": "generic",
+            "detail": {
+              "kind": "skills",
+              "items": ["release-notes"]
+            },
+            "partial": [
+              {
+                "harness": "codex",
+                "reason": "release-notes limits which tools it may use."
+              }
+            ],
+            "warnings": [],
+            "usedBy": {
+              "profiles": [],
+              "runtimes": []
+            },
+            "editNote": "Saving changes it everywhere.",
+            "remove": {
+              "available": true
+            }
+          }
+        ]
+      },
+      {
+        "kind": "settings",
+        "label": "Settings",
+        "description": "Flags and environment.",
+        "components": [
+          {
+            "reference": "settings/Claude settings",
+            "kind": "settings",
+            "name": "Claude settings",
+            "harness": "claude-code",
+            "scope": "claude-code",
+            "detail": {
+              "kind": "settings",
+              "env": []
+            },
+            "partial": [],
+            "warnings": [],
+            "usedBy": {
+              "profiles": [],
+              "runtimes": []
+            },
+            "editNote": "Saving changes it everywhere.",
+            "remove": {
+              "available": true
+            }
+          },
+          {
+            "reference": "settings/Agent settings",
+            "kind": "settings",
+            "name": "Agent settings",
+            "harness": "claude-code",
+            "scope": "claude-code",
+            "detail": {
+              "kind": "settings",
+              "env": []
+            },
+            "partial": [],
+            "warnings": [],
+            "usedBy": {
+              "profiles": [],
+              "runtimes": []
+            },
+            "editNote": "Saving changes it everywhere.",
+            "remove": {
+              "available": true
+            }
+          }
+        ]
+      },
+      {
+        "kind": "hooks",
+        "label": "Hooks",
+        "description": "Commands on events.",
+        "components": [
+          {
+            "reference": "hooks/Format on save",
+            "kind": "hooks",
+            "name": "Format on save",
+            "harness": "claude-code",
+            "scope": "claude-code",
+            "detail": {
+              "kind": "hooks",
+              "file": "components/hooks/fmt.json"
+            },
+            "partial": [],
+            "warnings": ["Command not found: fmt-hook"],
+            "usedBy": {
+              "profiles": [],
+              "runtimes": []
+            },
+            "editNote": "Saving changes it everywhere.",
+            "remove": {
+              "available": true
+            }
+          }
+        ]
+      },
+      {
+        "kind": "modelSets",
+        "label": "Model sets",
+        "description": "Named models and a default.",
+        "components": [
+          {
+            "reference": "modelSets/Claude models",
+            "kind": "modelSets",
+            "name": "Claude models",
+            "scope": "generic",
+            "detail": {
+              "kind": "modelSets",
+              "models": ["Opus 5.5", "Sonnet 5.5"],
+              "default": "Sonnet 5.5"
+            },
+            "partial": [],
+            "warnings": [],
+            "usedBy": {
+              "profiles": [],
+              "runtimes": []
+            },
+            "editNote": "Saving changes it everywhere.",
+            "remove": {
+              "available": true
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "GET /v1/runtimes/machine": {
+    "name": "studio-mac",
+    "format": "present",
+    "setUp": true,
+    "agentPermissions": "auto",
+    "defaultRuntime": "claude-default",
+    "agentControl": {
+      "terminals": true,
+      "browsers": true,
+      "files": true,
+      "ferretrySettings": false,
+      "pageScripts": false
+    },
+    "browserMode": "headless",
+    "browserProxy": null,
+    "browserPorts": "random",
+    "browserFirewallFailure": "warn",
+    "autoResume": true,
+    "agendaMode": false,
+    "publicUsageFeed": false,
+    "lastAutoResume": null,
+    "tools": [
+      {
+        "harness": "claude-code",
+        "label": "Claude Code",
+        "installed": true,
+        "command": "/usr/local/bin/claude"
+      },
+      {
+        "harness": "codex",
+        "label": "Codex",
+        "installed": true,
+        "command": "/usr/local/bin/codex"
+      }
+    ],
+    "runtimeCount": 5,
+    "runningSessions": 0,
+    "authority": {
+      "mayApply": true,
+      "applyRefusal": "granted"
+    }
+  }
+}

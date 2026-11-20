@@ -438,10 +438,10 @@ function RuntimeRow({
         >
           {({ toggle, details }) => (
             <>
-              <div className="flex min-w-0 items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2">
                 <a
                   href={machineDetailHash(machineName, 'runtimes', runtime.name)}
-                  className="flex min-h-control min-w-0 flex-1 items-start gap-2 py-1 text-left no-underline after:absolute after:inset-0 after:content-[''] hover:no-underline"
+                  className="flex min-h-control min-w-[min(11rem,100%)] flex-1 items-start gap-2 py-1 text-left no-underline after:absolute after:inset-0 after:content-[''] hover:no-underline"
                   data-runtime-row={runtime.name}
                 >
                   <AccountStatus
@@ -470,17 +470,19 @@ function RuntimeRow({
                     )}
                   </span>
                 </a>
-                {toggle}
-                <RuntimeActionsMenu
-                  runtime={runtime}
-                  refusal={refusal}
-                  onRename={() => onAct({ kind: 'rename', name: runtime.name })}
-                  onRemove={() => onAct({ kind: 'remove', name: runtime.name })}
-                  {...(showMakeDefault ? { onMakeDefault: () => onMakeDefault(runtime.name) } : {})}
-                />
+                <span className="ml-auto flex items-center gap-2">
+                  {toggle}
+                  <RuntimeActionsMenu
+                    runtime={runtime}
+                    refusal={refusal}
+                    onRename={() => onAct({ kind: 'rename', name: runtime.name })}
+                    onRemove={() => onAct({ kind: 'remove', name: runtime.name })}
+                    {...(showMakeDefault ? { onMakeDefault: () => onMakeDefault(runtime.name) } : {})}
+                  />
+                </span>
               </div>
               <span
-                className={`${ROW_INDENT} truncate text-cell text-muted`}
+                className={`${ROW_INDENT} text-cell text-muted [overflow-wrap:anywhere]`}
                 title={detailsLine}
                 data-runtime-details=""
               >
@@ -671,7 +673,7 @@ export function RuntimesTab({
       ) : (
         <>
           {machine === null ? null : (
-            <div ref={defaultRef} className="scroll-mt-4 border-b border-border-soft pb-4">
+            <div ref={defaultRef} className="scroll-mt-4">
               <DefaultRuntimeControl
                 machine={machine}
                 machineName={machineName}

@@ -13,8 +13,8 @@ import type { ComponentBadge } from './component-model.ts';
 
 export function Section({ title, children, spot }: { title: string; children: ReactNode; spot?: string }) {
   return (
-    <section className="flex min-w-0 flex-col gap-2" data-catalog-section={spot ?? title}>
-      <h4 className="kt-label m-0">{title}</h4>
+    <section className="flex min-w-0 flex-col gap-2 pt-4" data-catalog-section={spot ?? title}>
+      <h4 className="m-0 px-1 text-meta font-semibold uppercase tracking-wide text-muted">{title}</h4>
       {children}
     </section>
   );
@@ -67,7 +67,7 @@ export function Prose({ children }: { children: ReactNode }) {
 /** A list of rows inside one panel. */
 export function RowList({ children, label }: { children: ReactNode; label?: string }) {
   return (
-    <ul aria-label={label} className="kt-panel m-0 flex min-w-0 list-none flex-col divide-y divide-border p-0">
+    <ul aria-label={label} className="kt-groupcard kt-groupcard--flat m-0 min-w-0 list-none p-0">
       {children}
     </ul>
   );
@@ -100,8 +100,11 @@ export function OpenRow({
     <li className="min-w-0">
       <button type="button" className={cn(ROW, 'transition-colors hover:bg-surface-2')} onClick={onOpen} {...data}>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className={cn('break-words text-row font-semibold text-fg', mono && 'font-mono')}>{title}</span>
-          {badges}
+          {/* The name and its badges share a line while the panel has room and wrap under it when it has not. */}
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <span className={cn('break-words text-row font-semibold text-fg', mono && 'font-mono')}>{title}</span>
+            {badges}
+          </span>
           {sub === undefined ? null : <span className="break-words text-cell text-muted">{sub}</span>}
         </span>
         {aside}

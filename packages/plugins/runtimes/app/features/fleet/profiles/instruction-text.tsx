@@ -97,8 +97,9 @@ export function InstructionTexts({
     <Section title="Instructions text" spot="instruction-text">
       <Hint>
         What a ferret on this profile is told, read only, in the order it reads them. To change it, edit the
-        instructions item (<code className="whitespace-nowrap font-mono">fy component edit instructions/‹name›</code>);
-        the change is previewed first, behind the same step-up as every other change.
+        instructions item (
+        <code className="font-mono [overflow-wrap:anywhere]">fy component edit instructions/‹name›</code>); the change
+        is previewed first, behind the same step-up as every other change.
       </Hint>
       {held === undefined ? (
         <Hint>

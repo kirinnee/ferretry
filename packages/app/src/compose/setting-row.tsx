@@ -166,8 +166,8 @@ export function SettingRow({
         <span
           className={cn(
             // With a preview the control and the preview stay together beside the label; without one the (i) sits at the end.
-            'flex min-w-0 items-center gap-1',
-            hasPreview ? 'min-[900px]:flex-none' : 'flex-1',
+            'flex items-center gap-1',
+            hasPreview ? 'min-w-0 min-[900px]:flex-none' : 'min-w-fit flex-1',
             !wide && 'max-md:shrink-0 max-md:flex-none',
             // `wide` fills the phone's width under the name; the (i) stays beside it.
             wide && 'max-md:basis-full',

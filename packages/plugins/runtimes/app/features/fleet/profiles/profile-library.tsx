@@ -234,7 +234,7 @@ export function LibraryPanel(
     <section
       aria-label="Component library"
       className={cn(
-        'kt-panel hidden min-w-0 flex-col md:flex',
+        'kt-panel fy-wide-only min-w-0 flex-col',
         removing && 'outline-dashed outline-2 outline-offset-[-2px] outline-[var(--err)]',
       )}
       data-profile-library=""
@@ -252,7 +252,7 @@ export function LibraryPanel(
         <h4 className="kt-label m-0">Library</h4>
         <FilterBar filter={filter} onFilter={onFilter} />
       </div>
-      <ul className="m-0 flex min-w-0 list-none flex-col gap-1 px-panel py-2 md:max-h-[32rem] md:overflow-y-auto">
+      <ul className="m-0 flex min-w-0 list-none flex-col gap-1 px-panel py-2 fy-wide-scroll">
         <LibraryRows {...props} items={shown} addedLabel="In profile" />
       </ul>
       <p className="m-0 px-panel pb-2 text-meta text-muted">

@@ -148,7 +148,8 @@ describe('Default for new agents on the Runtimes tab', () => {
     const view = await open();
 
     const control = must(view.container.querySelector('[data-default-runtime]'), 'control');
-    expect(control.querySelector('label')?.textContent).toBe('Default for new agents');
+    expect(control.querySelector('h3')?.textContent).toBe('Default for new agents');
+    expect(select(view.container).getAttribute('aria-label')).toBe('Default for new agents');
     expect(control.querySelector('[data-default-runtime-hint]')?.textContent).toBe(
       'Used when a start names no runtime.',
     );
@@ -330,9 +331,10 @@ describe('The Default badge and Make default on the runtimes list', () => {
       expect(name.className).not.toContain('ellipsis');
     }
     expect(card('claude-default').querySelector('[data-runtime-default-badge]')?.className).toContain('shrink-0');
-    // The details are one truncated line, whole in its tooltip.
+    // The details wrap inside the panel (never cut, never wider than it), and stay whole in their tooltip.
     const details = must(card('claude-default').querySelector<HTMLElement>('[data-runtime-details]'), 'details');
-    expect(details.className).toContain('truncate');
+    expect(details.className).toContain('[overflow-wrap:anywhere]');
+    expect(details.className).not.toContain('truncate');
     expect(details.getAttribute('title')).toBe(details.textContent ?? '');
     // The off note appears only for a switched-off runtime.
     expect(card('claude-work').querySelector('[data-disable-note]')).toBeNull();

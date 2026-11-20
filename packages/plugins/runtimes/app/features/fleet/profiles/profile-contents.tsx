@@ -43,7 +43,7 @@ export function ContentsList(props: ContentsListProps) {
   const { items, chips, dropBefore, onMove, onRemove, onDragStart, onDragEnd, onDragOver, onDrop } = props;
   return (
     <ol
-      className="m-0 flex min-h-[6rem] min-w-0 list-none flex-col gap-1 px-panel py-2 md:pb-8"
+      className="m-0 flex min-h-[6rem] min-w-0 list-none flex-col gap-1 px-panel pb-8 pt-2"
       aria-label="Contents, later items override earlier ones"
       data-profile-contents=""
       onDragOver={event => onDragOver(event, items.length)}
@@ -51,8 +51,8 @@ export function ContentsList(props: ContentsListProps) {
     >
       {items.length === 0 ? (
         <li className="px-2 py-4 text-center text-cell text-muted" data-profile-contents-empty="">
-          <span className="md:hidden">Tap Add to put components in.</span>
-          <span className="hidden md:inline">Drop components here, or use Add in the library.</span>
+          <span className="fy-narrow-only">Tap Add to put components in.</span>
+          <span className="fy-wide-inline">Drop components here, or use Add in the library.</span>
         </li>
       ) : null}
       {items.map((item, index) => (
@@ -60,7 +60,7 @@ export function ContentsList(props: ContentsListProps) {
           key={item.reference}
           className={cn(
             ITEM_ROW,
-            'md:cursor-grab',
+            'fy-wide-grab',
             dropBefore === index && 'shadow-[0_calc(-1*var(--border-width-heavy))_0_0_var(--accent)]',
           )}
           draggable
@@ -75,7 +75,7 @@ export function ContentsList(props: ContentsListProps) {
           <ItemBody>
             <ItemLine>
               <span className="w-5 shrink-0 text-right font-mono text-meta text-muted">{index + 1}</span>
-              <GripVertical size={14} aria-hidden="true" className="hidden shrink-0 text-muted md:inline" />
+              <GripVertical size={14} aria-hidden="true" className="fy-wide-inline shrink-0 text-muted" />
               <KindTag kind={item.kind} />
               <ItemName name={item.name} />
             </ItemLine>
@@ -145,7 +145,7 @@ const keyWords = (entry: ResolvedEntry): string =>
     : `${RESOLVED_FIELD_WORDS[entry.field]} · ${entry.key}`;
 
 /** One Resolved row: stacked on a phone, three columns from `md` up. */
-const RESOLVED_COLUMNS = 'min-w-0 gap-x-3 gap-y-0.5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.8fr)]';
+const RESOLVED_COLUMNS = 'fy-resolved-cols min-w-0 gap-x-3 gap-y-0.5';
 
 /** Each row with a key unique among them: a flag can repeat, so a repeat counts itself. */
 function keyedRows(rows: readonly ResolvedEntry[]): readonly { entry: ResolvedEntry; id: string }[] {
@@ -202,7 +202,7 @@ export function ResolvedTable({
         <div className="flex min-w-0 flex-col">
           <div
             aria-hidden="true"
-            className={cn(RESOLVED_COLUMNS, 'hidden border-b border-border py-1 text-meta text-muted md:grid')}
+            className={cn(RESOLVED_COLUMNS, 'fy-wide-grid border-b border-border py-1 text-meta text-muted')}
           >
             <span>Key</span>
             <span>Value</span>
@@ -215,9 +215,7 @@ export function ResolvedTable({
                 className={cn(RESOLVED_COLUMNS, 'grid border-b border-border py-1.5')}
                 data-resolved-row={entry.key}
               >
-                <span className="font-mono text-meta text-muted [overflow-wrap:anywhere] md:text-cell md:text-fg">
-                  {keyWords(entry)}
-                </span>
+                <span className="font-mono text-cell text-fg [overflow-wrap:anywhere]">{keyWords(entry)}</span>
                 <span className="flex min-w-0 flex-col font-mono text-cell [overflow-wrap:anywhere]">
                   <span className={entry.hidden ? 'text-muted' : 'text-fg'}>{entry.value}</span>
                   {entry.overridden.map(beaten => (
@@ -229,7 +227,7 @@ export function ResolvedTable({
                 </span>
                 <span className="flex min-w-0 flex-col text-cell [overflow-wrap:anywhere]">
                   <span className="text-fg">
-                    <span className="text-muted md:hidden">from </span>
+                    <span className="fy-narrow-only text-muted">from </span>
                     {itemName(entry.from)}
                   </span>
                   {entry.overridden.map(beaten => (
