@@ -5,10 +5,10 @@
  */
 import { createRoot } from 'react-dom/client';
 import { useSyncExternalStore } from 'react';
-import { CarrierEscapeLines } from '../../../../app/features/carrier/carrier-escape.tsx';
+import { carrierEscapeView } from '../../../../app/features/carrier/carrier-escape.tsx';
 import { CarrierPreferenceSelector } from '../../../../app/features/carrier/carrier-preference-selector.tsx';
 import { CarrierPreferenceStore, settingOf } from '../../../../app/lib/carrier-preference.ts';
-import type { ConnectionHealthState } from '../../../../app/lib/connection-health.ts';
+import { browserConnectionHealthEnvironment, DaemonConnectionHealth } from '../../../../app/lib/connection-health.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-dark';
@@ -41,38 +41,48 @@ function SelectBody({ store }: { readonly store: CarrierPreferenceStore }) {
   );
 }
 
-const reconnecting: ConnectionHealthState = {
-  kind: 'reconnecting',
-  since: 0,
-  attempt: 3,
-  nextAttemptAt: null,
-  failures: [],
-  cause: 'daemon-unreachable',
-  stalled: true,
-};
-
+/**
+ * THE SHELL'S REAL SHAPE: the view is a device view, drawn with NO shell around it as `WithoutShell` draws it (the shell's own list of paired
+ * machines answers nothing there), and the outage is the one the router reports on a COLD START with "Tunnel only" and no
+ * tunnel known — zero legs dialled, so zero failures — through the real connection-health model.
+ */
 function Stuck() {
   const store = new CarrierPreferenceStore(
     memory({ 'fy-carrier-preference-v1': JSON.stringify({ [DAEMON]: 'tunnel' }) }),
   );
   (window as unknown as { __store: CarrierPreferenceStore }).__store = store;
-  const daemon = {
-    daemon: DAEMON,
-    machine: 'Studio laptop',
-    deviceId: 'device-1',
-    address: 'http://127.0.0.1:1',
-    carriers: [],
-    pairedAt: 1,
-    lastSelectedAt: 1,
+  const health = new DaemonConnectionHealth(
+    browserConnectionHealthEnvironment({
+      now: Date.now,
+      schedule: (run, delay) => {
+        const handle = setTimeout(run, delay);
+        return () => clearTimeout(handle);
+      },
+    }),
+    () => new Promise(() => undefined),
+  );
+  health.outage(DAEMON, { failures: [], daemonAbsent: false, relaysNeverOpened: false });
+  const held = {
+    daemons: [
+      {
+        daemon: DAEMON,
+        machine: 'Studio laptop',
+        deviceId: 'device-1',
+        address: 'http://127.0.0.1:1',
+        carriers: [],
+        pairedAt: 1,
+        lastSelectedAt: 1,
+      },
+    ],
+    selected: DAEMON,
   };
+  const daemons = { snapshot: () => held, subscribe: () => () => undefined } as never;
+  const Escape = carrierEscapeView(() => ({ preferences: store, health, daemons }));
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16 }}>
       {/* What the shell draws in place of a machine it cannot reach, and the strip above it where device views draw. */}
       <div data-slot="status">
-        <CarrierEscapeLines
-          daemons={[daemon]}
-          ports={{ preferences: store, health: { state: () => reconnecting, subscribe: () => () => undefined } }}
-        />
+        <Escape />
       </div>
       <p className="fy-shell-line" data-whole-daemon="">
         This device cannot reach this daemon yet.

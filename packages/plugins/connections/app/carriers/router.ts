@@ -819,7 +819,9 @@ export class CarrierRouter {
           entry.fellBack = [...entry.live].some(live => live.standsIn);
           this.#announce();
         }
-        if (failures.length > 0) this.deps.health?.outage(daemonId, carrierOutage(failures));
+        // Nothing carried: an outage even when no leg was dialled (a choice that leaves the walk no carrier, such as
+        // "Tunnel only" with no tunnel known) — that device is cut off, and the way out must be offered.
+        this.deps.health?.outage(daemonId, carrierOutage(failures));
         const last = failures[failures.length - 1];
         return { code: last?.code ?? RELAY_CLOSE_CODES.daemonAbsent, reason: chosen.reason };
       },

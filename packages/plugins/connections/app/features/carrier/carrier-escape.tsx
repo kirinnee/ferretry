@@ -9,7 +9,7 @@
  * which forgets the choice and sends nothing to the machine.
  */
 
-import { type PairedDaemon, usePairedDaemons } from '@ferretry/app';
+import type { DaemonList, PairedDaemon } from '@ferretry/app';
 import { createElement, useSyncExternalStore } from 'react';
 import {
   CARRIER_PREFERENCE_LABEL,
@@ -78,7 +78,7 @@ function EscapeFor({ daemon, ports }: { readonly daemon: PairedDaemon; readonly 
 }
 
 /** One line per machine that is stuck, and nothing at all when none is. */
-export function CarrierEscapeLines({
+function CarrierEscapeLines({
   daemons,
   ports,
 }: {
@@ -98,11 +98,27 @@ export function CarrierEscapeLines({
   );
 }
 
+/**
+ * The document's own list of paired machines. A device view is drawn under `WithoutShell`, where `usePairedDaemons`
+ * answers nothing, so the view reads the list Connections already holds (`connect.daemons`), never the shell's.
+ */
+export type PairedMachines = Pick<DaemonList, 'snapshot' | 'subscribe'>;
+
 /** The device view the frame mounts once, over the machines this device is paired with. */
-export function carrierEscapeView(ports: () => CarrierEscapePorts | undefined) {
+export function carrierEscapeView(
+  ports: () => (CarrierEscapePorts & { readonly daemons: PairedMachines }) | undefined,
+) {
   return function CarrierEscape() {
-    const daemons = usePairedDaemons();
     const held = ports();
-    return held === undefined ? null : createElement(CarrierEscapeLines, { daemons, ports: held });
+    return held === undefined ? null : createElement(PairedEscape, { held });
   };
+}
+
+function PairedEscape({ held }: { readonly held: CarrierEscapePorts & { readonly daemons: PairedMachines } }) {
+  const snapshot = useSyncExternalStore(
+    listener => held.daemons.subscribe(listener),
+    () => held.daemons.snapshot(),
+    () => held.daemons.snapshot(),
+  );
+  return createElement(CarrierEscapeLines, { daemons: snapshot.daemons, ports: held });
 }
