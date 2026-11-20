@@ -19,9 +19,15 @@ export interface PathBoxProps {
 
 export function PathBox({ current, refusal, onGo, onRestore }: PathBoxProps) {
   const errorId = useId();
-  // An edit belongs to the folder it was typed in: once another folder is open the box shows that one instead.
-  const [edit, setEdit] = useState<{ readonly base: string; readonly text: string } | null>(null);
-  const text = edit !== null && edit.base === current ? edit.text : current;
+  // An edit belongs to the folder it was typed in: the moment another folder is open (a committed navigation) the edit
+  // is dropped for good, so coming back to the first folder shows that folder, not the old typing.
+  const [seen, setSeen] = useState(current);
+  const [edit, setEdit] = useState<string | null>(null);
+  if (seen !== current) {
+    setSeen(current);
+    setEdit(null);
+  }
+  const text = edit ?? current;
 
   return (
     <form
@@ -46,7 +52,7 @@ export function PathBox({ current, refusal, onGo, onRestore }: PathBoxProps) {
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
-          onChange={event => setEdit({ base: current, text: event.target.value })}
+          onChange={event => setEdit(event.target.value)}
           onKeyDown={event => {
             if (event.key !== 'Escape') return;
             // Escape inside a dialog closes it; here it only undoes the typing.

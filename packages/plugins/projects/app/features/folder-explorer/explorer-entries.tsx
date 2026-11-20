@@ -50,10 +50,16 @@ export const ExplorerEntries = forwardRef<HTMLDivElement, ExplorerEntriesProps>(
 ) {
   const card = view === 'card';
   const active = entries.find(entry => entry.kind === 'folder' && entry.name === highlightedName);
-  // The sheet around the list scrolls, so the keyboard's highlight is kept in view as it moves.
+  // The sheet around the list scrolls, so the keyboard's highlight is kept in view as it moves. A sticky footer (the
+  // stepper's Back / Next) covers the foot of that scroller, so the row is kept clear of it, not just inside the box.
   const activeId = active === undefined ? null : idFor(active);
   useEffect(() => {
-    if (activeId !== null) document.getElementById(activeId)?.scrollIntoView?.({ block: 'nearest' });
+    const row = activeId === null ? null : document.getElementById(activeId);
+    if (row === null) return;
+    const footer = row.closest('.fy-spf')?.querySelector<HTMLElement>('.fy-spf__footer') ?? null;
+    const covers = footer !== null && globalThis.getComputedStyle?.(footer).position === 'sticky';
+    row.style.scrollMarginBottom = covers ? `${footer.offsetHeight}px` : '';
+    row.scrollIntoView?.({ block: 'nearest' });
   }, [activeId]);
   return (
     <div

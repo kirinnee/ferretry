@@ -61,24 +61,46 @@ const VIEWPORTS = [
 
 const PATH_BOX = '[data-explorer-path-box] input';
 
-/** Elements under `[role=dialog]` (and the dialog) that have a scroll bar: content longer or wider than the box. */
+/**
+ * What draws a bar, or hides content, under `[role=dialog]` (and the dialog itself):
+ * - `forced`: a box whose overflow is FORCED to `scroll` (a bar is drawn even when nothing overflows);
+ * - `vertical` / `horizontal`: a box that scrolls (`auto`/`scroll`) AND whose content overflows that way;
+ * - `clipped`: content wider than a box that hides it (`hidden`/`clip`), i.e. horizontal content cut off.
+ * A single-line ellipsis (`text-overflow: ellipsis`) and a visually-hidden 1px label are deliberate, not clipped layout.
+ * The one box that scrolls is named `body` when it is the create sheet's body.
+ */
 const scrollers = (tab: Page) =>
   tab.evaluate(() => {
     const dialog = document.querySelector('[role="dialog"]');
     if (dialog === null) return { error: 'no dialog' };
-    const out: { vertical: string[]; horizontal: string[] } = { vertical: [], horizontal: [] };
+    const out: { forced: string[]; vertical: string[]; horizontal: string[]; clipped: string[] } = {
+      forced: [],
+      vertical: [],
+      horizontal: [],
+      clipped: [],
+    };
     for (const node of [dialog, ...dialog.querySelectorAll('*')]) {
       const element = node as HTMLElement;
       const style = getComputedStyle(element);
-      const name = `${element.tagName.toLowerCase()}.${String(element.className).slice(0, 48)}`;
-      // A bar is drawn when the box scrolls AND its content overflows; `hidden` and `visible` draw none.
+      const name = element.hasAttribute('data-create-body')
+        ? 'body'
+        : `${element.tagName.toLowerCase()}.${String(element.className).slice(0, 48)}`;
       const scrollsY = style.overflowY === 'auto' || style.overflowY === 'scroll';
       const scrollsX = style.overflowX === 'auto' || style.overflowX === 'scroll';
+      if (style.overflowY === 'scroll' || style.overflowX === 'scroll') out.forced.push(name);
       if (scrollsY && element.scrollHeight > element.clientHeight + 1) out.vertical.push(name);
       if (scrollsX && element.scrollWidth > element.clientWidth + 1) out.horizontal.push(name);
+      const cuts = style.overflowX === 'hidden' || style.overflowX === 'clip';
+      // A 1px box is the visually-hidden pattern (a screen-reader label), not a layout that cuts content off.
+      const drawn = element.clientWidth > 2 && element.clientHeight > 2;
+      if (cuts && drawn && style.textOverflow !== 'ellipsis' && element.scrollWidth > element.clientWidth + 1)
+        out.clipped.push(name);
     }
     return out;
   });
+
+type Scrollers = { forced: string[]; vertical: string[]; horizontal: string[]; clipped: string[] };
+const NONE: Scrollers = { forced: [], vertical: [], horizontal: [], clipped: [] };
 
 type Viewport = (typeof VIEWPORTS)[number];
 
@@ -124,9 +146,26 @@ describe('create sheet scroll bars', () => {
           // TWO folders: the sheet fits, so NO element in it has a bar, vertical or horizontal.
           await open('folders=2');
           await shot('two-folders');
-          expect(await scrollers(tab), 'a sheet that fits draws no scroll bar').toEqual({
-            vertical: [],
-            horizontal: [],
+          expect(await scrollers(tab), 'a sheet that fits draws no scroll bar and clips nothing').toEqual(NONE);
+
+          // The detector itself: a forced `overflow: scroll` on a short sheet, and a wide child cut off by
+          // `overflow-x: hidden`, are both reported (so the line above cannot pass for the wrong reason).
+          await tab.evaluate(() => {
+            const body = document.querySelector('[data-create-body]') as HTMLElement;
+            body.style.overflowY = 'scroll';
+            const clip = document.createElement('div');
+            clip.id = 'probe-clip';
+            clip.style.cssText = 'overflow-x:hidden;width:50px';
+            clip.innerHTML = '<div style="width:400px;height:4px"></div>';
+            body.append(clip);
+          });
+          const probed = (await scrollers(tab)) as Scrollers;
+          expect(probed.forced, 'a forced overflow:scroll is reported').toContain('body');
+          expect(probed.clipped.length, 'horizontal content cut by overflow-x:hidden is reported').toBeGreaterThan(0);
+          await tab.evaluate(() => {
+            const body = document.querySelector('[data-create-body]') as HTMLElement;
+            body.style.overflowY = '';
+            document.getElementById('probe-clip')?.remove();
           });
 
           // The path box and its Go button are one row, one height.
@@ -140,18 +179,60 @@ describe('create sheet scroll bars', () => {
           // SIXTY folders: exactly ONE element scrolls (the sheet's body), and nothing scrolls sideways.
           await open('folders=60');
           await shot('sixty-folders');
-          const long = (await scrollers(tab)) as { vertical: string[]; horizontal: string[] };
+          const long = (await scrollers(tab)) as Scrollers;
           expect(long.horizontal, 'no sideways bar').toEqual([]);
+          expect(long.clipped, 'no horizontal content cut off').toEqual([]);
+          expect(long.forced, 'no forced scroll box').toEqual([]);
           // The footer (Next) stays inside the sheet and on screen however long the list is.
           const next = await tab.getByRole('button', { name: 'Next' }).boundingBox();
           expect(next !== null && next.y >= 0 && next.y + next.height <= viewport.height, 'Next is on screen').toBe(
             true,
           );
-          expect(long.vertical.length, `exactly one element scrolls, got ${long.vertical.join(' | ')}`).toBe(1);
+          expect(long.vertical, 'exactly one element scrolls, and it is the sheet body').toEqual(['body']);
+
+          // Keyboard: walk the highlight 35 rows down; the row must stay in view ABOVE the sticky footer.
+          await tab.locator('[role="listbox"]').focus();
+          for (let press = 0; press < 35; press += 1) await tab.keyboard.press('ArrowDown');
+          const geometry = await tab.evaluate(() => {
+            const row = document.querySelector('[data-explorer-highlighted="true"]')?.getBoundingClientRect();
+            const footer = document.querySelector('.fy-spf__footer')?.getBoundingClientRect();
+            const body = document.querySelector('[data-create-body]')?.getBoundingClientRect();
+            return row && footer && body
+              ? { rowTop: row.top, rowBottom: row.bottom, footerTop: footer.top, bodyTop: body.top }
+              : null;
+          });
+          expect(geometry, 'a highlighted row, the footer and the body are measured').not.toBeNull();
+          const at = geometry as NonNullable<typeof geometry>;
+          console.info(
+            `[s4] ${viewport.name} ${scheme}: row ${at.rowTop.toFixed(1)}..${at.rowBottom.toFixed(1)}, footer top ${at.footerTop.toFixed(1)}`,
+          );
+          expect(at.rowBottom, 'the highlighted row ends above the footer').toBeLessThanOrEqual(at.footerTop + 0.5);
+          expect(at.rowTop, 'the highlighted row starts below the top of the body').toBeGreaterThanOrEqual(
+            at.bodyTop - 0.5,
+          );
+          await shot('keyboard-highlight');
         }));
 });
 
 describe('folder path box', () => {
+  for (const viewport of VIEWPORTS)
+    it(`drops a typed path once another folder is open (${viewport.name})`, () =>
+      withTab(viewport, 'light', async (tab, open) => {
+        await open('folders=2');
+        const box = tab.locator(PATH_BOX);
+        await box.fill('~/project1');
+        await box.press('Enter');
+        await tab.waitForSelector('[data-explorer-crumb="/home/sam/project1"]');
+        // Up goes back to the folder the text was typed in: the box shows THAT folder, not the old edit.
+        await tab.locator('[data-explorer-up]').click();
+        await tab.waitForFunction(() => document.querySelectorAll('[data-explorer-crumb]').length === 1);
+        expect(await box.inputValue(), 'the box shows the open folder after Up').toBe('~');
+        // The round trip the other way: Up, then into the folder again: it shows the folder, not a stale edit.
+        await tab.locator('[data-explorer-entry="project1"]').click();
+        await tab.waitForSelector('[data-explorer-crumb="/home/sam/project1"]');
+        expect(await box.inputValue()).toBe('~/project1');
+      }));
+
   for (const viewport of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const)
       it(`opens a typed path and refuses a fenced one (${viewport.name}, ${scheme})`, () =>
