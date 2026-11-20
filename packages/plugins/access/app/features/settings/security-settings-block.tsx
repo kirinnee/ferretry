@@ -104,7 +104,11 @@ function NumberRow({ field, view, draft, busy, onDraft, onSave }: NumberRowProps
   const blocked = widens && !withPasskey;
   const note =
     outOfBounds ??
-    (blocked ? widenAtMachineSentence(view.widenCommand) : withPasskey ? WIDEN_WITH_PASSKEY_SENTENCE : null);
+    (blocked && parsed !== null
+      ? widenAtMachineSentence(view.widenCommand, { field, value: parsed })
+      : withPasskey
+        ? WIDEN_WITH_PASSKEY_SENTENCE
+        : null);
   const shown = draft ?? String(current);
   const presets = SECURITY_SETTING_PRESETS[field] ?? [];
   const onPreset = presets.some(value => String(value) === shown);
@@ -217,7 +221,7 @@ function SwitchRow({ field, view, busy, onSave }: SwitchRowProps) {
           <LabelledSwitch
             label={on ? 'On' : 'Off'}
             showLabel={false}
-            accessibleName={`${copy.label}${dead ? `. ${widenAtMachineSentence(view.widenCommand)}` : ''}`}
+            accessibleName={`${copy.label}${dead ? `. ${widenAtMachineSentence(view.widenCommand, { field, value: false })}` : ''}`}
             checked={on}
             disabled={busy || dead}
             onChange={next => onSave(next)}
@@ -229,7 +233,7 @@ function SwitchRow({ field, view, busy, onSave }: SwitchRowProps) {
       {dead ? (
         <div className="fy-acc-body">
           <Notice tone="info" marks={{ 'data-security-note': field }}>
-            {widenAtMachineSentence(view.widenCommand)}
+            {widenAtMachineSentence(view.widenCommand, { field, value: false })}
           </Notice>
         </div>
       ) : null}
@@ -319,7 +323,8 @@ export function SecuritySettingsBlock({ connection, createClient }: SecuritySett
           .join(' '),
       );
     } catch (reason) {
-      setFailure(securityFailureSentence(reason, view.widenCommand));
+      const asked = (patch as Readonly<Record<string, string | number | boolean>>)[field];
+      setFailure(securityFailureSentence(reason, view.widenCommand, { field, value: asked ?? '' }));
     }
     setBusy(false);
   };

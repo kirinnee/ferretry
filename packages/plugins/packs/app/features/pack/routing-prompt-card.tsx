@@ -245,10 +245,7 @@ export function RoutingPromptCard({ view, state, pollMs = CLEAN_UP_POLL_MS, time
         </p>
       </div>
       {nudge ? (
-        <div
-          className="flex min-w-0 flex-col gap-3 rounded-control border border-dashed border-border-strong bg-surface-2 p-4"
-          data-routing-nudge=""
-        >
+        <div className="flex min-w-0 flex-col gap-3 rounded-control bg-surface-2 p-4" data-routing-nudge="">
           <p className="m-0 text-ui font-semibold">Not written yet</p>
           <p className="m-0 text-meta leading-base text-muted">
             Ferrets are using a default built from the model catalogs. Tell a short-lived ferret what you want, in your
@@ -332,10 +329,7 @@ export function RoutingPromptCard({ view, state, pollMs = CLEAN_UP_POLL_MS, time
               <span className="sr-only"> characters</span>
             </span>
           </div>
-          <div
-            className="flex min-w-0 flex-col gap-2 rounded-control border border-border-soft bg-surface-2 p-3"
-            data-routing-write=""
-          >
+          <div className="flex min-w-0 flex-col gap-2 rounded-control bg-surface-2 p-3" data-routing-write="">
             <IdeaField
               id={`${id}-idea`}
               value={idea}

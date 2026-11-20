@@ -95,7 +95,11 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
   };
 
   return (
-    <section className="fy-vault kt-panel flex flex-col gap-3 p-panel" aria-label="Secrets" data-testid="secrets-card">
+    <section
+      className="fy-vault kt-panel kt-panel--flat flex flex-col gap-3 py-panel"
+      aria-label="Secrets"
+      data-testid="secrets-card"
+    >
       <div className="flex flex-wrap items-center gap-2">
         {/* The tab's title ("Secrets") is the Settings shell's one heading for this panel; the card draws none of its own. */}
         <KeyRound size={16} className="text-accent" aria-hidden="true" />

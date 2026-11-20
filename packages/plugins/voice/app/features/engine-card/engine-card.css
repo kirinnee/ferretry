@@ -12,7 +12,7 @@
   padding: 0;
 }
 .fy-engine-card {
-  --fy-engine-height: 168px;
+  --fy-engine-height: 186px;
   background: var(--surface-2);
   border: var(--stroke-control, 1px) solid var(--border);
   border-radius: var(--radius-control);
@@ -101,9 +101,7 @@
   font-size: var(--text-md);
   font-weight: var(--weight-strong, 600);
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .fy-engine-badge {
   border: 1px solid var(--accent);
@@ -118,12 +116,11 @@
   color: var(--muted);
   flex: none;
   font-size: var(--text-sm);
-  height: 18px;
+  /* Two lines are kept for every card, so the bars below start at the same height across a row; the text wraps, it is never cut. */
   line-height: 18px;
   margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-height: 36px;
+  overflow-wrap: anywhere;
 }
 .fy-engine-bars[data-option-bars] {
   height: 44px;

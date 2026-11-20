@@ -26,6 +26,7 @@ import {
   UNLOCK_STAYS_FALLBACK,
   unlockStaysSentence,
   widenAtMachineSentence,
+  widenCommandFor,
 } from '../../../app/lib/security-settings-client.ts';
 
 const SETTINGS = {
@@ -118,9 +119,15 @@ describe('what a setting says', () => {
     should(UNLOCK_STAYS_FALLBACK).equal('It stays unlocked on this device for a few hours, as this machine is set.');
   });
 
-  it('should name the command at the machine in the one loosening sentence', () => {
-    should(widenAtMachineSentence('fy daemon security set idleExpiryDays 60')).equal(
+  it('should name the whole command at the machine in the one loosening sentence', () => {
+    should(widenAtMachineSentence('fy daemon security set', { field: 'idleExpiryDays', value: 60 })).equal(
       'Loosening this can only be done at the machine: run fy daemon security set idleExpiryDays 60.',
+    );
+  });
+
+  it('should drop placeholder syntax from the verb, so no template is ever shown', () => {
+    should(widenCommandFor('fy daemon security set <field> <value>', { field: 'unlockOnOpen', value: false })).equal(
+      'fy daemon security set unlockOnOpen false',
     );
   });
 
@@ -156,28 +163,32 @@ describe('a typed number', () => {
 });
 
 describe('the sentence for a failed change', () => {
-  const command = 'fy daemon security set <field> <value>';
+  const command = 'fy daemon security set';
+  const change = { field: 'idleExpiryDays', value: 60 } as const;
 
   it('should name the command for a remote widen', () => {
     const refusal = new FyHttpError('refused', 403, SECURITY_WIDEN_REFUSED_CODE);
-    should(securityFailureSentence(refusal, command)).equal(widenAtMachineSentence(command));
+    should(securityFailureSentence(refusal, command, change)).equal(widenAtMachineSentence(command, change));
+    should(securityFailureSentence(refusal, command, change)).containEql('fy daemon security set idleExpiryDays 60');
   });
 
   it('should say a dismissed passkey prompt changed nothing', () => {
     const refusal = new FyHttpError('refused', 403, STEP_UP_REQUIRED_CODE);
-    should(securityFailureSentence(refusal, command)).containEql('Nothing was changed');
+    should(securityFailureSentence(refusal, command, change)).containEql('Nothing was changed');
   });
 
   it('should say the machine cannot read its settings on a 503, and not accept a value on a 400', () => {
-    should(securityFailureSentence(new FyHttpError('x', 503, 'security_unavailable'), command)).containEql(
+    should(securityFailureSentence(new FyHttpError('x', 503, 'security_unavailable'), command, change)).containEql(
       'could not read its security settings',
     );
-    should(securityFailureSentence(new FyHttpError('x', 400, undefined), command)).containEql('does not accept');
+    should(securityFailureSentence(new FyHttpError('x', 400, undefined), command, change)).containEql(
+      'does not accept',
+    );
   });
 
   it('should fall back to one sentence and never print a code or an error name', () => {
     for (const reason of [new FyHttpError('x', 500, 'weird_code'), new Error('boom'), 'raw', undefined]) {
-      const sentence = securityFailureSentence(reason, command);
+      const sentence = securityFailureSentence(reason, command, change);
       should(sentence).equal('The setting was not changed. Try again.');
     }
   });

@@ -10,6 +10,12 @@
    settles by 100%. Every keyframe set ENDS on the piece's resting style: nothing repeats, and the frame rests.
    ========================================================================== */
 
+/* A scene draws its own boxes (the message box, the page), so the preview behind them has no filled panel: one shape, not a box on a box. */
+.fy-sp:has(.fy-cvp),
+.fy-sp:has(.fy-cvp) .fy-sp__layer {
+  /* The layers must stay opaque (the cross-fade covers `before` with `after`), so they take the page's own colour. */
+  background: var(--bg);
+}
 .fy-cvp {
   font-family: var(--font-body);
   font-size: 9px;

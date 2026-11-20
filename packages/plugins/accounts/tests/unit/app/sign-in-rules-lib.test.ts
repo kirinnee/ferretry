@@ -1,5 +1,6 @@
 /** The words, flags and approval flow behind standing sign-in rules: warnings from structured fields, never from text. */
 
+import { localTimeWords } from '../../../app/lib/local-time.ts';
 import { describe, expect, it } from 'bun:test';
 import { fakeClient } from '../../support/app/fake-client.ts';
 import {
@@ -278,7 +279,7 @@ describe('the words the sheet and the card draw', () => {
   it('says what is left and who approved it on a listed rule', () => {
     const words = ruleWordsOf(codeRule());
     expect(words.rows.find(row => row.label === 'Uses')?.value).toBe(
-      '4 of 5 uses left · used 1×, last 2026-10-31 09:00 UTC',
+      `4 of 5 uses left · used 1×, last ${localTimeWords('2026-10-31T09:00:00Z')}`,
     );
     expect(ruleWordsOf(pageRule()).rows.find(row => row.label === 'Uses')?.value).toBe('No limit · not used yet');
     expect(words.rows.at(-1)).toEqual({ label: 'Approved with', value: 'Kirin’s phone' });

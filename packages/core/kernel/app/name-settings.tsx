@@ -47,6 +47,20 @@ const retryLabel = (cause: unknown): string => {
   return 'Try again';
 };
 
+/**
+ * The line under the field. A machine that did not report its name (the inventory's `daemonName` is optional, and the app
+ * reads it before the daemon has answered) is told in words, never as "Shown now: ." with nothing after it.
+ */
+export function noteOf(source: 'owner' | 'hostname', current: string): string {
+  if (source === 'owner')
+    return current === ''
+      ? 'No name is showing yet: this machine has not reported one. Leave the field empty to go back to the host name.'
+      : `Shown now: ${current}. Leave it empty to go back to the host name.`;
+  return current === ''
+    ? 'This machine is using its host name. Type a name to replace it.'
+    : `Using the host name (${current}). Type a name to replace it.`;
+}
+
 /** The tab, drawn from plain values so every state can be rendered without a daemon. */
 export function NameSettingsView({
   current,
@@ -74,7 +88,7 @@ export function NameSettingsView({
   readonly retry?: { readonly label: string; readonly onPress: () => void };
 }) {
   return (
-    <section className="kt-panel p-panel" aria-label="Name" data-machine-name="">
+    <section className="kt-panel kt-panel--flat py-panel" aria-label="Name" data-machine-name="">
       <p className="m-0 text-cell leading-base text-muted">
         What this machine is called on every device: the pair screen, the machine list and notifications.
       </p>
@@ -93,7 +107,7 @@ export function NameSettingsView({
           className="min-h-[44px] w-full max-w-[28rem] rounded-control border border-border-strong bg-surface-2 px-control-x text-row text-fg focus-visible:outline-focus focus-visible:outline-offset-focus"
           value={value}
           maxLength={100}
-          placeholder={source === 'hostname' ? current : 'Leave empty to use the host name'}
+          placeholder={source === 'hostname' && current !== '' ? current : 'Leave empty to use the host name'}
           autoComplete="off"
           spellCheck={false}
           aria-invalid={problem === undefined ? undefined : true}
@@ -101,9 +115,7 @@ export function NameSettingsView({
           onChange={event => onChange(event.target.value)}
         />
         <p id="settings-machine-name-note" className="m-0 text-meta leading-base text-faint">
-          {source === 'owner'
-            ? `Shown now: ${current}. Leave it empty to go back to the host name.`
-            : `Using the host name (${current}). Type a name to replace it.`}
+          {noteOf(source, current)}
         </p>
         {problem === undefined ? null : (
           <p role="alert" className="m-0 text-meta font-semibold text-err">

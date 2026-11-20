@@ -2064,6 +2064,15 @@ body {
   background-size: var(--panel-texture-size);
   box-shadow: var(--shadow-panel), var(--rule-inset);
 }
+/* A panel that holds fields on a Settings page: no box (so a field is never a bordered thing in a bordered card), only the
+   hairlines above and below it, like a `SettingGroup`. */
+.kt-panel--flat {
+  background: none;
+  border-width: 0;
+  border-block: var(--divider-width) solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
+}
 .kt-panel__header {
   display: flex;
   align-items: center;

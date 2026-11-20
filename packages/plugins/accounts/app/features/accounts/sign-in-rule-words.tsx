@@ -6,6 +6,7 @@
  */
 
 import { TriangleAlert } from '../../shell.tsx';
+import { localizeUtcStamps } from '../../lib/local-time.ts';
 import { checkedWords, flagSentences, type RuleFlag, type RuleRow } from '../../lib/sign-in-rules.ts';
 
 export interface SignInRuleWordsProps {
@@ -29,7 +30,7 @@ export function SignInRuleWords({ does, rows, flags, note }: SignInRuleWordsProp
         {rows.map(row => (
           <div className="contents" data-rule-row={row.label} key={`${row.label}\n${row.value}`}>
             <dt className="text-muted">{row.label}</dt>
-            <dd className="m-0 min-w-0 break-words text-fg">{row.value}</dd>
+            <dd className="m-0 min-w-0 break-words text-fg">{localizeUtcStamps(row.value)}</dd>
           </div>
         ))}
       </dl>

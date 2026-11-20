@@ -26,7 +26,7 @@ const connection = daemonConnection({
   deviceId: 'alpha-token',
 });
 
-const COMMAND = 'fy daemon security set <field> <value>';
+const COMMAND = 'fy daemon security set';
 const SETTINGS: SecuritySettings = {
   stepUpWindowMinutes: 15,
   deviceKeyRotationDays: 30,
@@ -296,7 +296,7 @@ describe('SecuritySettingsBlock loosening', () => {
 
     // Assert
     should(saveButton(block, 'idleExpiryDays')?.props.disabled).equal(true);
-    expect(text(block)).toContain(`Loosening this can only be done at the machine: run ${COMMAND}.`);
+    expect(text(block)).toContain(`Loosening this can only be done at the machine: run ${COMMAND} idleExpiryDays 60.`);
     should(ledger.patches).be.empty();
     run(() => block.unmount());
   });
@@ -310,7 +310,10 @@ describe('SecuritySettingsBlock loosening', () => {
       should(switchIn(marked(block, 'data-security-switch', field)[0])?.props.disabled).equal(true);
     should(marked(block, 'data-security-note', 'unlockOnOpen')).have.length(1);
     should(marked(block, 'data-security-note', 'stepUpOnActions')).have.length(1);
-    expect(text(block)).toContain(`Loosening this can only be done at the machine: run ${COMMAND}.`);
+    expect(text(block)).toContain(`Loosening this can only be done at the machine: run ${COMMAND} unlockOnOpen false.`);
+    expect(text(block)).toContain(
+      `Loosening this can only be done at the machine: run ${COMMAND} stepUpOnActions false.`,
+    );
     run(() => block.unmount());
   });
 
@@ -442,8 +445,11 @@ describe('SecuritySettingsBlock refusals', () => {
     await press(block, 'data-security-save', 'stepUpWindowMinutes');
 
     // Assert
-    expect(text(block)).toContain(`Loosening this can only be done at the machine: run ${COMMAND}.`);
+    expect(text(block)).toContain(
+      `Loosening this can only be done at the machine: run ${COMMAND} stepUpWindowMinutes 5.`,
+    );
     expect(text(block)).not.toContain(SECURITY_WIDEN_REFUSED_CODE);
+    expect(text(block)).not.toMatch(/<[a-z]+>/u);
     should(saveButton(block, 'stepUpWindowMinutes')).not.be.undefined();
     should(marked(block, 'data-security-notice')).be.empty();
     run(() => block.unmount());

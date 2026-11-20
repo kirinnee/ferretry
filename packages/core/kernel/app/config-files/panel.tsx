@@ -139,10 +139,10 @@ function FileRow({
       name={file.path}
       wide
       dataAttributes={{ 'data-config-file': file.path }}
-      // One line cut with an ellipsis rather than a box that scrolls: the whole path is in the title, the copy button
-      // and the DOM text, so a screen reader reads it all.
+      // The whole path, wrapped at any character (a path has no spaces) rather than cut: it stays selectable, and it is in
+      // the title and beside the copy button too.
       hint={
-        <code className="block truncate font-mono" title={absolute} data-config-file-path="">
+        <code className="block break-all font-mono" title={absolute} data-config-file-path="">
           {absolute}
         </code>
       }

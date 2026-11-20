@@ -399,10 +399,15 @@ describe('the Layout tab', () => {
     // The label is the owner's; the caption under it says honestly where "all" reaches: this computer's daemon.
     const caption = view.container.querySelector('[data-layout-scope] [data-layout-caption]')?.textContent;
     expect(caption).toBe('Saved on this computer — every phone or browser that opens it gets this layout.');
+    // The page says what the switch is for, and a chip says where the change lands now: it follows the switch.
+    const chip = () => view.container.querySelector('[data-layout-scope-chip]')?.textContent;
+    expect(view.container.querySelector('.fy-lr-scope-title')?.textContent).toBe('Where a change is saved');
+    expect(chip()).toBe('This machine · every device');
     // One set of rows in either scope: a key is never drawn twice.
     expect(view.container.querySelectorAll('[role="radiogroup"][aria-label="Navigation side"]')).toHaveLength(1);
     await pickScope(view.container, 'device');
     expect(view.container.querySelectorAll('[role="radiogroup"][aria-label="Navigation side"]')).toHaveLength(1);
+    expect(chip()).toBe('Only this browser');
     expect(view.container.textContent).not.toContain('Layout — this device only');
     expect(view.container.querySelectorAll('h1,h2')).toHaveLength(0);
     await view.unmount();

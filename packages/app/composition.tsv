@@ -1,5 +1,6 @@
 kind	path	limit	expires	reason
 oversize	public/pre-paint.js	150	2026-12-31	the pre-paint copy of the style list gains one id per r10 style (churn, not size); generate it after r10
+oversize	src/compose/setting-row.tsx	450	2026-12-31	every settings sweep line edits the shared row (churn, not size); split the row by variant after r10
 composition	src/index.ts	-	-	the app shell public API
 oversize	src/index.ts	600	2026-12-31	r10 setup steps export shell pieces; split exports by feature after r10
 oversize	src/session/session-client.ts	1815	2026-12-16	one session client class; split by concern when next touched

@@ -142,9 +142,25 @@ export const SECURITY_SETTING_PRESETS: Readonly<Partial<Record<NumericSecuritySe
   unlockValidityHours: [1, 8, 24, 72, 168],
 };
 
+/** The change a person was refused: the field and the value they asked for. */
+export interface RefusedChange {
+  readonly field: SecuritySettingField;
+  readonly value: string | number | boolean;
+}
+
+/**
+ * The command that makes ONE change at the machine, whole: the daemon's `widenCommand` is the verb (`fy daemon security set`), and
+ * the row's own field and the value asked for complete it. Anything after the verb that is placeholder syntax (`<field> <value>`)
+ * is dropped, so a person never reads a template they would have to fill in.
+ */
+export function widenCommandFor(widenCommand: string, change: RefusedChange): string {
+  const verb = widenCommand.replace(/\s*<.*$/u, '').trim();
+  return `${verb} ${change.field} ${change.value}`;
+}
+
 /** The one sentence for a change the caller may not make from here. */
-export function widenAtMachineSentence(widenCommand: string): string {
-  return `Loosening this can only be done at the machine: run ${widenCommand}.`;
+export function widenAtMachineSentence(widenCommand: string, change: RefusedChange): string {
+  return `Loosening this can only be done at the machine: run ${widenCommandFor(widenCommand, change)}.`;
 }
 
 /** The one sentence for a loosening this device may make, with a passkey proved for it. */
@@ -178,9 +194,9 @@ export function parseSettingDraft(field: NumericSecuritySetting, draft: string):
 }
 
 /** The one sentence for a change that did not happen. */
-export function securityFailureSentence(reason: unknown, widenCommand: string): string {
+export function securityFailureSentence(reason: unknown, widenCommand: string, change: RefusedChange): string {
   if (reason instanceof FyHttpError) {
-    if (reason.code === SECURITY_WIDEN_REFUSED_CODE) return widenAtMachineSentence(widenCommand);
+    if (reason.code === SECURITY_WIDEN_REFUSED_CODE) return widenAtMachineSentence(widenCommand, change);
     if (reason.code === STEP_UP_REQUIRED_CODE)
       return 'This change needs your passkey, and it was not confirmed. Nothing was changed.';
     if (reason.status === 503)

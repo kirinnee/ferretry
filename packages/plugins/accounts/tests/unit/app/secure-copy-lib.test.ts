@@ -9,6 +9,7 @@ import {
   ruleLimits,
   toWords,
 } from '../../../app/lib/secure-copy.ts';
+import { localTimeWords } from '../../../app/lib/local-time.ts';
 import { fakeClient } from '../../support/app/fake-client.ts';
 
 const RULE: PasteRule = {
@@ -49,7 +50,7 @@ describe('secure copy words', () => {
   it('says what a rule still allows, for whom and until when', () => {
     expect(ruleLimits(RULE)).toBe('any number of pastes · any ferret · no end · used 2');
     expect(ruleLimits({ ...RULE, remaining: 1, sessionId: 's1', expiresAt: '2026-08-06T09:30:00.000Z' })).toBe(
-      '1 more · one ferret · until 2026-08-06 09:30 UTC · used 2',
+      `1 more · one ferret · until ${localTimeWords('2026-08-06T09:30:00.000Z')} · used 2`,
     );
   });
 });

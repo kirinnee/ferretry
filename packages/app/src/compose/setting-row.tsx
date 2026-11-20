@@ -81,7 +81,7 @@ export interface SettingRowProps {
   /** The setting this row is, which makes it a deep-link target. */
   readonly settingId?: SettingId;
   readonly name: string;
-  /** One short, true line under the name. */
+  /** One short, true line under the name; it wraps when it is long. */
   readonly hint?: ReactNode;
   /** The long text behind the (i). */
   readonly explanation?: ReactNode;
@@ -151,9 +151,9 @@ export function SettingRow({
             {name}
           </span>
           {hint === undefined ? null : (
-            // One line on a desktop (the rest is behind the (i)); a phone wraps it, so no text is out of reach.
+            // The hint wraps, on a desktop too: no text is ever cut off with an ellipsis and out of reach.
             <span
-              className="text-meta leading-tight text-muted min-[900px]:truncate"
+              className="break-words text-meta leading-tight text-muted"
               data-setting-hint=""
               {...(typeof hint === 'string' ? { title: hint } : {})}
             >

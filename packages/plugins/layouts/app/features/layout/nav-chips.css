@@ -71,9 +71,9 @@
 .fy-chip-name {
   font-size: var(--text-ui, 0.875rem);
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* A long name wraps inside its chip (the chip grows with it) rather than being cut with an ellipsis. */
+  overflow-wrap: anywhere;
+  padding-block: 4px;
 }
 
 /* Earlier, Later and the eye: foreground ink, not the faint muted one, so they read in the dark themes too. */

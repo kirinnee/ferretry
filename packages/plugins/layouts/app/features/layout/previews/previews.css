@@ -16,8 +16,13 @@
   --ls-gap: 4px;
 }
 
+/* The scene draws its own frame (`.fy-ls-frame`), so the preview behind it has no filled panel: one shape, not a box on a box. */
+.fy-sp:has(.fy-ls-scene),
+.fy-sp:has(.fy-ls-scene) .fy-sp__layer {
+  /* The layers must stay opaque (the cross-fade covers `before` with `after`), so they take the page's own colour. */
+  background: var(--bg);
+}
 .fy-ls-scene {
-  background: var(--surface-2);
   inset: 0;
   position: absolute;
 }
