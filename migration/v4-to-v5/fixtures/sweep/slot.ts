@@ -23,6 +23,9 @@
  *   bun slot.ts real-claude <1..9> on <login> [--binary <abs path>] | off [--force]
  *                                      the ONE exception to "no real model": a persisted slot's 5.0 side runs the REAL claude for ONE
  *                                      ferretry-managed login (the owner signs in on the 5.0 Logins screen); every other caller keeps the fake
+ *   bun slot.ts real-codex <1..9> on <login> [--binary <abs path>] | off [--force]
+ *                                      the same for Codex: the REAL codex for ONE ferretry-managed Codex login (sign-in = CODEX_HOME is that
+ *                                      login's store; a ferret = its home's auth.json links to that store); every other caller keeps the fake
  *   bun slot.ts reset-v5 <1..9> --empty <libexec-dir> [--keep-real-claude]
  *                                      a PERSISTED slot's 5.0 side back to an EMPTY first-run home (new identity, nothing from the fixture, only the port pin written): only the 5.0
  *                                      daemon and its tmux server stop; the old home is MOVED (never copied, packed or deleted) into <slot>/kept/<stamp>; the port
@@ -95,9 +98,9 @@ import {
   wrapperText,
 } from './persist.ts';
 import {
-  FAKE_NAME,
+  CLAUDE_TOOL,
+  CODEX_TOOL,
   Refusal,
-  RECORD_FILE,
   disableReal,
   enableReal,
   isShim,
@@ -106,6 +109,7 @@ import {
   runtimesUsing,
   statusLine,
   type RealPaths,
+  type RealTool,
 } from './real-claude.ts';
 import {
   ResetRefusal,
@@ -956,6 +960,11 @@ async function upInner(slot: Slot, reuse: boolean): Promise<void> {
       `refusing: slot ${String(slot.n)} has real claude switched on (${recordPathOf(realPathsOf(slot))}); "up" would wipe the shim and the login. Run "slot.ts real-claude ${String(slot.n)} off" first`,
       99,
     );
+  if ((await readRecord(realPathsOf(slot), CODEX_TOOL)) !== undefined)
+    die(
+      `refusing: slot ${String(slot.n)} has real codex switched on (${recordPathOf(realPathsOf(slot), CODEX_TOOL)}); "up" would wipe the shim and the login. Run "slot.ts real-codex ${String(slot.n)} off" first`,
+      99,
+    );
   if ((await pidsHolding(slot.v4.lock)).length + (await pidsHolding(slot.v5.lock)).length > 0)
     die(`slot ${String(slot.n)} is already up; run sweep-down.sh ${String(slot.n)} first (or use it as it is)`);
   // A unit or scope under this slot's name that is not this slot's refuses the whole up before anything is removed or started.
@@ -1365,6 +1374,7 @@ async function status(slot: Slot): Promise<void> {
   );
   for (const which of ['v4', 'v5'] as const) await statusServices(slot, which);
   console.log(`  ${await realClaudeLine(slot)}`);
+  console.log(`  ${await realCodexLine(slot)}`);
   if (slot.persisted) {
     const names = [serviceOf(slot, 'v4'), serviceOf(slot, 'v5'), terminalsOf(slot, 'v4'), terminalsOf(slot, 'v5')];
     const enabled = await Promise.all(
@@ -1675,6 +1685,7 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
     );
     // A 5.0 build that changes how claude is found would skip the shim: say where real claude stands after every upgrade.
     console.log(`  ${await realClaudeLine(slot)}`);
+    console.log(`  ${await realCodexLine(slot)}`);
     return;
   }
 
@@ -2249,34 +2260,42 @@ async function wrappers(slot: Slot, flags: readonly string[] = []): Promise<void
 
 const realPathsOf = (slot: Slot): RealPaths => ({ v5Dir: slot.v5.dir, fyHome: slot.v5.home, harness: slot.v5.harness });
 
-/** The `real claude:` line of `status` / `upgrade-v5`: off, on (with the shim checked), never anything from inside a store. */
-async function realClaudeLine(slot: Slot): Promise<string> {
-  const record = await readRecord(realPathsOf(slot));
-  if (record === undefined) return statusLine(undefined);
-  const claude = await readFile(join(slot.v5.harness, 'claude'), 'utf8').catch(() => '');
-  return statusLine(record, isShim(claude) ? 'ok' : 'shim-missing');
+/** The `real claude:` / `real codex:` line of `status` / `upgrade-v5`: off, on (with the shim checked), never anything from inside a store. */
+async function realToolLine(slot: Slot, tool: RealTool): Promise<string> {
+  const record = await readRecord(realPathsOf(slot), tool);
+  if (record === undefined) return statusLine(undefined, 'ok', tool);
+  const text = await readFile(join(slot.v5.harness, tool.name), 'utf8').catch(() => '');
+  return statusLine(record, isShim(text, tool) ? 'ok' : 'shim-missing', tool);
 }
 
-/** The real claude on the caller's PATH, skipping every sweep harness-bin folder (those hold the fakes and the shim). */
-async function findRealClaude(slot: Slot): Promise<string | undefined> {
+const realClaudeLine = async (slot: Slot): Promise<string> => await realToolLine(slot, CLAUDE_TOOL);
+const realCodexLine = async (slot: Slot): Promise<string> => await realToolLine(slot, CODEX_TOOL);
+
+/** The real `tool` on the caller's PATH, skipping every sweep harness-bin folder (those hold the fakes and the shim). */
+async function findRealTool(slot: Slot, tool: RealTool): Promise<string | undefined> {
   for (const folder of (process.env.PATH ?? '').split(':')) {
     if (folder === '' || !isAbsolute(folder)) continue;
     if (folder.startsWith(`${SWEEP_ROOT}/`) || folder.startsWith(`${slot.real}/`)) continue;
-    const candidate = join(folder, 'claude');
+    const candidate = join(folder, tool.name);
     const real = await realpath(candidate).catch(() => undefined);
     if (real !== undefined) return real;
   }
   return undefined;
 }
 
-async function realClaude(slot: Slot, rest: readonly string[]): Promise<void> {
+const realClaude = async (slot: Slot, rest: readonly string[]): Promise<void> =>
+  await realTool(slot, CLAUDE_TOOL, rest);
+const realCodex = async (slot: Slot, rest: readonly string[]): Promise<void> => await realTool(slot, CODEX_TOOL, rest);
+
+async function realTool(slot: Slot, tool: RealTool, rest: readonly string[]): Promise<void> {
   const n = String(slot.n);
-  const usage = 'usage: slot.ts real-claude <1..9> on <login> [--binary <abs path>] | off [--force]';
+  const verb = `real-${tool.name}`;
+  const usage = `usage: slot.ts ${verb} <1..9> on <login> [--binary <abs path>] | off [--force]`;
   const [action, ...args] = rest;
   if (action !== 'on' && action !== 'off') die(usage, 64);
   if (!slot.persisted)
     die(
-      `refusing: slot ${n} is not persisted; real claude is only for a persisted slot (its folder and units survive a reboot). Run persist ${n} first`,
+      `refusing: slot ${n} is not persisted; real ${tool.name} is only for a persisted slot (its folder and units survive a reboot). Run persist ${n} first`,
       99,
     );
   await assertSlotPath(slot);
@@ -2288,34 +2307,40 @@ async function realClaude(slot: Slot, rest: readonly string[]): Promise<void> {
       const given = flag >= 0 ? args[flag + 1] : undefined;
       if (flag >= 0 && given === undefined) die(usage, 64);
       const login = args.filter((_, i) => flag < 0 || (i !== flag && i !== flag + 1))[0];
-      const binary = given ?? (await findRealClaude(slot));
+      const binary = given ?? (await findRealTool(slot, tool));
       if (binary === undefined)
-        die('no real claude on PATH (outside the sweep folders); pass its absolute path with --binary <path>');
+        die(`no real ${tool.name} on PATH (outside the sweep folders); pass its absolute path with --binary <path>`);
       const folder = join(slot.real, GCROOTS);
-      const { record, notes } = await enableReal(paths, login, binary, {
-        root: async path => {
-          const root = storeRootOf(path);
-          if (root === undefined)
-            return { link: undefined, note: `${path} is not a nix store path: it is NOT rooted against a GC` };
-          const nixStore = Bun.which('nix-store');
-          await mkdir(folder, { recursive: true, mode: 0o700 });
-          const { rooted, failed } = await addStoreRoots(
-            { nixStore: nixStore === null ? undefined : async a => await run(nixStore, [...a], baseEnvironment()) },
-            folder,
-            [root],
-          );
-          if (rooted.length === 1) return { link: join(folder, root.slice('/nix/store/'.length)) };
-          return {
-            link: undefined,
-            note: `WARNING: ${root} is NOT rooted (${failed[0]?.why ?? 'unknown'}); a nix GC could remove the real claude`,
-          };
+      const { record, notes } = await enableReal(
+        paths,
+        login,
+        binary,
+        {
+          root: async path => {
+            const root = storeRootOf(path);
+            if (root === undefined)
+              return { link: undefined, note: `${path} is not a nix store path: it is NOT rooted against a GC` };
+            const nixStore = Bun.which('nix-store');
+            await mkdir(folder, { recursive: true, mode: 0o700 });
+            const { rooted, failed } = await addStoreRoots(
+              { nixStore: nixStore === null ? undefined : async a => await run(nixStore, [...a], baseEnvironment()) },
+              folder,
+              [root],
+            );
+            if (rooted.length === 1) return { link: join(folder, root.slice('/nix/store/'.length)) };
+            return {
+              link: undefined,
+              note: `WARNING: ${root} is NOT rooted (${failed[0]?.why ?? 'unknown'}); a nix GC could remove the real ${tool.name}`,
+            };
+          },
         },
-      });
-      console.log(`slot ${n}: real claude is ON for login ${record.login}`);
+        tool,
+      );
+      console.log(`slot ${n}: real ${tool.name} is ON for login ${record.login}`);
       console.log(`  real binary: ${record.binary}`);
       console.log(`  store matched exactly: ${record.store}`);
       console.log(
-        `  every other caller (every other login, store: host) still gets the fake: ${join(slot.v5.harness, FAKE_NAME)}`,
+        `  every other caller (every other login, store: host) still gets the fake: ${join(slot.v5.harness, tool.fakeName)}`,
       );
       for (const note of notes) console.log(`  ${note}`);
       console.log(
@@ -2326,11 +2351,12 @@ async function realClaude(slot: Slot, rest: readonly string[]): Promise<void> {
         paths,
         { liveFerrets: login => liveFerretsOn(slot, login) },
         { force: args.includes('--force') },
+        tool,
       );
       console.log(
         was === undefined
-          ? `slot ${n}: real claude was already off (${RECORD_FILE} not present); nothing changed`
-          : `slot ${n}: real claude is OFF; the fake claude is back and ${RECORD_FILE} is gone. Login ${was.login} and its store were not touched (remove them on the Logins screen)`,
+          ? `slot ${n}: real ${tool.name} was already off (${tool.recordFile} not present); nothing changed`
+          : `slot ${n}: real ${tool.name} is OFF; the fake ${tool.name} is back and ${tool.recordFile} is gone. Login ${was.login} and its store were not touched (remove them on the Logins screen)`,
       );
     }
   } catch (error) {
@@ -2570,6 +2596,9 @@ try {
     case 'real-claude':
       await realClaude(await healedSlot(slotArg), rest);
       break;
+    case 'real-codex':
+      await realCodex(await healedSlot(slotArg), rest);
+      break;
     case 'reset-v5':
       await resetV5Verb(await healedSlot(slotArg), rest);
       break;
@@ -2581,7 +2610,7 @@ try {
       break;
     default:
       die(
-        'usage: slot.ts <up|down|status|cli|pair|upgrade-v5|persist|unpersist|wrappers|real-claude|reset-v5|restore-v5|stamp-v5> <slot 1..9> …',
+        'usage: slot.ts <up|down|status|cli|pair|upgrade-v5|persist|unpersist|wrappers|real-claude|real-codex|reset-v5|restore-v5|stamp-v5> <slot 1..9> …',
         64,
       );
   }

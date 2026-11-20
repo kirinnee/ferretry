@@ -70,6 +70,38 @@ Do these on the paired 5.0 app (the `fy5` preview).
 `migration/v4-to-v5/tests/unit/sweep-real-claude.test.ts` runs the shim in a real `sh` against a **stub** "real" binary and drives
 `on` / `off` on a scratch folder. No real claude, no login and no network is ever used.
 
+## Real Codex, the same way (`slot.ts real-codex`)
+
+```
+bun slot.ts real-codex <1..9> on <login> [--binary <abs path>]
+bun slot.ts real-codex <1..9> off [--force]
+bun slot.ts status <1..9>            # prints a "real codex:" line next to "real claude:" (also after upgrade-v5)
+```
+
+Prepared for the owner's yes (r11 choice b); **nothing runs it on slot 8 until the owner says so, and for one login they name.**
+Everything above holds with `codex` for `claude`: the same guards (persisted slot, slot path, guard v5, live-ferret check on `off`,
+nix GC root), one real login at a time per tool, the fake kept as `codex.fake`, the record `<slot>/v5/real-codex.json`. `claude` and
+`codex` can be on at the same time (separate records, shims and fakes). The login file must say `harness: codex` + `store: ferretry`.
+The code is one path: `real-claude.ts` takes a tool descriptor, and claude is its default, so claude's shim text and messages are unchanged.
+
+How the codex shim picks the login (paths only; **no `auth.json` is ever opened**). 5.0 starts Codex two ways:
+
+- **Sign-in** (and the daemon's token refresh): `CODEX_HOME` is the login's store, `<FY_HOME>/state/logins/credentials/<login>`.
+  The shim matches that string **exactly**.
+- **A ferret**: `CODEX_HOME` is the ferret's own home under `state/codex/agent-homes/<ferret>`, whose `auth.json` is a **link** to
+  `<store>/auth.json` (the runtime wrapper makes it). The shim runs the real codex when `readlink` of that link is exactly that path.
+
+Every other caller (another login's ferret, a home with no link or a plain `auth.json`, no `CODEX_HOME`) gets `codex.fake`.
+`--version` / `-V` always go to the real binary. Codex has no autoupdater switch, so none is set; `up` and `reset-v5` refuse while
+real codex is on (a reset removes the login with the old home; run `real-codex <n> off` first).
+
+Owner steps: add the Codex login on Logins (**Add login**, Codex, **Ferretry-managed**), tell the agent to run `real-codex 8 on <login>`,
+press **Sign in** (Codex's device code), add a runtime on it, start one ferret. Undo: stop the ferret, `real-codex 8 off`, remove the
+login and runtime on the 5.0 screen. It spends the real Codex quota; the agent runs as your user and the isolation is only where the
+credential is stored.
+
+Tests: `migration/v4-to-v5/tests/unit/sweep-real-codex.test.ts` (stub binaries, temp folders, no login, no network).
+
 ## The hosted app moves with the slot (`upgrade-v5`, `reset-v5`)
 
 The 5.0 preview app (https://ferretry-v5.pages.dev) is deployed only when the ref `rebuild/preview` is pushed; a merge to 5.0 deploys

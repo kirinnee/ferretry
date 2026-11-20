@@ -22,6 +22,43 @@ export const FAKE_NAME = 'claude.fake';
 /** The second line of every shim this kit writes: how `on` / `off` tell a shim from a fake. */
 export const SHIM_MARKER = '# fy-sweep real-claude shim';
 
+/**
+ * What differs between the two real tools. Everything else (the record, the login checks, `on` / `off`) is one code path:
+ * `claude` is the default of every function below, so its behaviour and its text are exactly what they were before `codex` existed.
+ *
+ * - claude: the harness is handed its login store as `CLAUDE_SECURESTORAGE_CONFIG_DIR`.
+ * - codex: a sign-in is run with `CODEX_HOME` = the login's store folder; a ferret is run with `CODEX_HOME` = its OWN home under
+ *   `state/codex/agent-homes/<ferret>`, whose `auth.json` is a LINK to `<store>/auth.json` (the runtime wrapper makes it). So the
+ *   codex shim matches the store exactly, or else that link's target (`readlink`, a path: the file is never opened).
+ */
+export interface RealTool {
+  readonly name: 'claude' | 'codex';
+  readonly recordFile: string;
+  readonly fakeName: string;
+  readonly marker: string;
+  /** What a login file's `harness:` says for this tool. */
+  readonly harnessValue: string;
+}
+
+export const CLAUDE_TOOL: RealTool = {
+  name: 'claude',
+  recordFile: RECORD_FILE,
+  fakeName: FAKE_NAME,
+  marker: SHIM_MARKER,
+  harnessValue: 'claude-code',
+};
+
+export const CODEX_TOOL: RealTool = {
+  name: 'codex',
+  recordFile: 'real-codex.json',
+  fakeName: 'codex.fake',
+  marker: '# fy-sweep real-codex shim',
+  harnessValue: 'codex',
+};
+
+/** The file Codex keeps its sign-in in, inside its home. Named here as a PATH to compare; never opened. */
+const CODEX_AUTH_FILE = 'auth.json';
+
 export interface RealClaudeRecord {
   readonly login: string;
   /** The exact string the shim compares CLAUDE_SECURESTORAGE_CONFIG_DIR with. */
@@ -33,8 +70,8 @@ export interface RealClaudeRecord {
 }
 
 /** A login id as 5.0 spells it in a file name: no slash, no dot-dot, no leading dash. */
-export function loginNameProblem(login: string | undefined): string | undefined {
-  if (login === undefined || login === '') return 'name the login: slot.ts real-claude <n> on <login>';
+export function loginNameProblem(login: string | undefined, tool: RealTool = CLAUDE_TOOL): string | undefined {
+  if (login === undefined || login === '') return `name the login: slot.ts real-${tool.name} <n> on <login>`;
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(login) || login.includes('..'))
     return `"${login}" is not a login name (letters, digits, dot, dash and underscore only; no slash)`;
   return undefined;
@@ -52,11 +89,15 @@ export const loginFileOf = (fyHome: string, login: string): string => join(fyHom
  * and `-v` always go to the real binary (5.0 picks launch settings by the probed version); the real binary gets
  * DISABLE_AUTOUPDATER=1; everything else execs the fake.
  */
-export function shimText(spec: { readonly fake: string; readonly real: string; readonly store: string }): string {
+export function shimText(
+  spec: { readonly fake: string; readonly real: string; readonly store: string },
+  tool: RealTool = CLAUDE_TOOL,
+): string {
   for (const path of [spec.fake, spec.real, spec.store])
     if (!isAbsolute(path) || /[\n\r\0]/u.test(path))
       throw new Error(`shim paths must be absolute single-line paths: ${path}`);
   const real = shellQuote(spec.real);
+  if (tool.name === 'codex') return codexShimText(spec, real, tool);
   return [
     '#!/bin/sh',
     SHIM_MARKER,
@@ -72,7 +113,39 @@ export function shimText(spec: { readonly fake: string; readonly real: string; r
   ].join('\n');
 }
 
-export const isShim = (text: string): boolean => text.split('\n')[1] === SHIM_MARKER;
+/**
+ * The codex shim: the real codex for (1) `--version` / `-V`, (2) a CODEX_HOME that is exactly the login's store (the sign-in, and
+ * the daemon's own token refresh), (3) a CODEX_HOME whose `auth.json` is a link whose target is exactly `<store>/auth.json` (a ferret
+ * on a runtime of that login). Every other caller gets the fake. `readlink` prints the link's target path only; no file is opened.
+ */
+function codexShimText(
+  spec: { readonly fake: string; readonly real: string; readonly store: string },
+  real: string,
+  tool: RealTool,
+): string {
+  const store = shellQuote(spec.store);
+  const target = shellQuote(join(spec.store, CODEX_AUTH_FILE));
+  return [
+    '#!/bin/sh',
+    tool.marker,
+    '# Real codex ONLY for the one login store below; every other caller gets the fake. Written by `slot.ts real-codex`.',
+    'case "${1-}" in',
+    `  --version|-V) exec ${real} "$@" ;;`,
+    'esac',
+    'case "${CODEX_HOME-}" in',
+    `  ${store}) exec ${real} "$@" ;;`,
+    'esac',
+    'if [ -n "${CODEX_HOME-}" ] && [ -L "$CODEX_HOME/auth.json" ]; then',
+    '  case "$(readlink "$CODEX_HOME/auth.json" 2>/dev/null)" in',
+    `    ${target}) exec ${real} "$@" ;;`,
+    '  esac',
+    'fi',
+    `exec ${shellQuote(spec.fake)} "$@"`,
+    '',
+  ].join('\n');
+}
+
+export const isShim = (text: string, tool: RealTool = CLAUDE_TOOL): boolean => text.split('\n')[1] === tool.marker;
 
 export function recordText(record: RealClaudeRecord): string {
   return `${JSON.stringify(record, null, 2)}\n`;
@@ -106,10 +179,11 @@ export function topLevelValue(yaml: string, key: string): string | undefined {
 }
 
 /** Why a login file is not one this verb may switch on, or undefined when it is `harness: claude-code` + `store: ferretry`. */
-export function loginFileProblem(login: string, yaml: string): string | undefined {
+export function loginFileProblem(login: string, yaml: string, tool: RealTool = CLAUDE_TOOL): string | undefined {
   const harness = topLevelValue(yaml, 'harness');
   const store = topLevelValue(yaml, 'store');
-  if (harness !== 'claude-code') return `login ${login} is "harness: ${harness ?? '(none)'}", not claude-code`;
+  if (harness !== tool.harnessValue)
+    return `login ${login} is "harness: ${harness ?? '(none)'}", not ${tool.harnessValue}`;
   if (store !== 'ferretry')
     return `login ${login} is "store: ${store ?? '(none)'}", not ferretry (a host login uses your own terminal's sign-in and is never touched here)`;
   return undefined;
@@ -124,12 +198,16 @@ export function runtimesUsing(login: string, files: ReadonlyMap<string, string>)
 }
 
 /** The `real claude:` line `status` and `upgrade-v5` print. */
-export function statusLine(record: RealClaudeRecord | undefined, state: 'ok' | 'shim-missing' = 'ok'): string {
-  if (record === undefined) return 'real claude: off (every claude is the fake)';
-  const base = `real claude: on for login ${record.login} (${record.binary})`;
+export function statusLine(
+  record: RealClaudeRecord | undefined,
+  state: 'ok' | 'shim-missing' = 'ok',
+  tool: RealTool = CLAUDE_TOOL,
+): string {
+  if (record === undefined) return `real ${tool.name}: off (every ${tool.name} is the fake)`;
+  const base = `real ${tool.name}: on for login ${record.login} (${record.binary})`;
   return state === 'ok'
     ? base
-    : `${base}  WARNING: harness-bin/claude is not the shim any more; run real-claude on again`;
+    : `${base}  WARNING: harness-bin/${tool.name} is not the shim any more; run real-${tool.name} on again`;
 }
 
 // ─── on / off, with their folders and ports as arguments ─────────────────────────────────────────────────────────────
@@ -143,10 +221,14 @@ export interface RealPaths {
   readonly harness: string;
 }
 
-export const recordPathOf = (paths: RealPaths): string => join(paths.v5Dir, RECORD_FILE);
+export const recordPathOf = (paths: RealPaths, tool: RealTool = CLAUDE_TOOL): string =>
+  join(paths.v5Dir, tool.recordFile);
 
-export async function readRecord(paths: RealPaths): Promise<RealClaudeRecord | undefined> {
-  const text = await readFile(recordPathOf(paths), 'utf8').catch(() => undefined);
+export async function readRecord(
+  paths: RealPaths,
+  tool: RealTool = CLAUDE_TOOL,
+): Promise<RealClaudeRecord | undefined> {
+  const text = await readFile(recordPathOf(paths, tool), 'utf8').catch(() => undefined);
   return text === undefined ? undefined : parseRecord(text);
 }
 
@@ -193,14 +275,15 @@ export async function enableReal(
   login: string | undefined,
   binary: string,
   ports: EnablePorts,
+  tool: RealTool = CLAUDE_TOOL,
 ): Promise<{ readonly record: RealClaudeRecord; readonly notes: string[] }> {
-  const bad = loginNameProblem(login);
+  const bad = loginNameProblem(login, tool);
   if (bad !== undefined || login === undefined) return refuse(bad ?? 'name the login');
   const notes: string[] = [];
-  const existing = await readRecord(paths);
+  const existing = await readRecord(paths, tool);
   if (existing !== undefined && existing.login !== login)
     refuse(
-      `real claude is already on for login ${existing.login}; one real login at a time. Run "real-claude <n> off" first (it never deletes that login)`,
+      `real ${tool.name} is already on for login ${existing.login}; one real login at a time. Run "real-${tool.name} <n> off" first (it never deletes that login)`,
     );
 
   // The login: its file exists and is claude-code + ferretry; its store, when it exists, is a real folder (a link is refused, nothing
@@ -208,46 +291,48 @@ export async function enableReal(
   const yaml = await readFile(loginFileOf(paths.fyHome, login), 'utf8').catch(() => undefined);
   if (yaml === undefined)
     return refuse(
-      `login ${login} does not exist (${loginFileOf(paths.fyHome, login)} is missing). Add it first on the 5.0 Logins screen: Add login, Claude Code, Ferretry-managed`,
+      `login ${login} does not exist (${loginFileOf(paths.fyHome, login)} is missing). Add it first on the 5.0 Logins screen: Add login, ${tool.name === 'codex' ? 'Codex' : 'Claude Code'}, Ferretry-managed`,
     );
-  const problem = loginFileProblem(login, yaml);
+  const problem = loginFileProblem(login, yaml, tool);
   if (problem !== undefined) return refuse(problem);
   const store = storePathOf(paths.fyHome, login);
   const found = await lstat(store).catch(() => undefined);
   if (found?.isSymbolicLink() === true)
-    return refuse(`${store} is a symbolic link; refusing to point the real claude at it`);
+    return refuse(`${store} is a symbolic link; refusing to point the real ${tool.name} at it`);
   if (found !== undefined && !found.isDirectory()) return refuse(`${store} is not a folder`);
 
   // The real binary: an absolute, executable file that is neither a shim nor inside the slot's harness folder.
   if (!isAbsolute(binary) || resolve(binary) !== binary)
-    return refuse(`the real claude must be an absolute path, not "${binary}"`);
+    return refuse(`the real ${tool.name} must be an absolute path, not "${binary}"`);
   const real = await realpath(binary).catch(() => undefined);
-  if (real === undefined) return refuse(`the real claude ${binary} does not exist`);
+  if (real === undefined) return refuse(`the real ${tool.name} ${binary} does not exist`);
   const info = await stat(real);
   if (!info.isFile() || (info.mode & 0o111) === 0) return refuse(`${real} is not an executable file`);
   // Compare with the harness folder's REAL path: `real` is realpath'd, and a persisted slot's logical path may go through a link.
   const harnessReal = await realpath(paths.harness).catch(() => resolve(paths.harness));
   const inside = relative(harnessReal, real);
   if (!inside.startsWith('..') && !isAbsolute(inside))
-    return refuse(`${real} is inside the slot's harness-bin: that is the fake, not a real claude`);
-  if ((await headOf(real, HEAD_BYTES)).includes(SHIM_MARKER))
-    return refuse(`${real} is a real-claude shim, not a real claude`);
+    return refuse(`${real} is inside the slot's harness-bin: that is the fake, not a real ${tool.name}`);
+  if ((await headOf(real, HEAD_BYTES)).includes(tool.marker))
+    return refuse(`${real} is a real-${tool.name} shim, not a real ${tool.name}`);
 
   // An existing folder is made private to its owner (a mode change only; its content is not opened). A missing one is left for
   // 5.0 to create at sign-in, already 0700.
   if (found !== undefined) await chmod(store, 0o700);
 
   // The shim goes in. The fake is kept as claude.fake and never overwritten by a shim.
-  const claude = join(paths.harness, 'claude');
-  const fake = join(paths.harness, FAKE_NAME);
+  const claude = join(paths.harness, tool.name);
+  const fake = join(paths.harness, tool.fakeName);
   const current = await readFile(claude, 'utf8').then(
     text => text,
     () => undefined,
   );
   if (current === undefined && (await lstat(fake).catch(() => undefined)) === undefined)
-    return refuse(`${claude} is missing: this slot has no fake claude to keep (run it through sweep-up.sh first)`);
+    return refuse(
+      `${claude} is missing: this slot has no fake ${tool.name} to keep (run it through sweep-up.sh first)`,
+    );
   const fakeThere = (await lstat(fake).catch(() => undefined)) !== undefined;
-  if (current !== undefined && !isShim(current)) {
+  if (current !== undefined && !isShim(current, tool)) {
     if (fakeThere)
       return refuse(
         `both ${claude} and ${fake} are fakes; refusing to overwrite one. Look at them and remove the stale one`,
@@ -257,11 +342,11 @@ export async function enableReal(
   }
   const linked = await ports.root(real);
   if (linked.note !== undefined) notes.push(linked.note);
-  await writeExecutable(claude, shimText({ fake, real, store }));
+  await writeExecutable(claude, shimText({ fake, real, store }, tool));
   const record: RealClaudeRecord = { login, store, binary: real, rootedAt: linked.link ?? null };
-  const temp = `${recordPathOf(paths)}.tmp-${String(process.pid)}`;
+  const temp = `${recordPathOf(paths, tool)}.tmp-${String(process.pid)}`;
   await writeFile(temp, recordText(record), { mode: 0o644 });
-  await rename(temp, recordPathOf(paths));
+  await rename(temp, recordPathOf(paths, tool));
   return { record, notes };
 }
 
@@ -274,13 +359,14 @@ export async function disableReal(
   paths: RealPaths,
   ports: DisablePorts,
   options: { readonly force: boolean },
+  tool: RealTool = CLAUDE_TOOL,
 ): Promise<{ readonly was: RealClaudeRecord | undefined }> {
-  const record = await readRecord(paths);
+  const record = await readRecord(paths, tool);
   if (record === undefined) {
-    const claude = await readFile(join(paths.harness, 'claude'), 'utf8').catch(() => '');
-    if (isShim(claude))
+    const claude = await readFile(join(paths.harness, tool.name), 'utf8').catch(() => '');
+    if (isShim(claude, tool))
       return refuse(
-        `harness-bin/claude is a shim but there is no ${RECORD_FILE}; refusing to guess. Restore it by hand: mv ${join(paths.harness, FAKE_NAME)} ${join(paths.harness, 'claude')}`,
+        `harness-bin/${tool.name} is a shim but there is no ${tool.recordFile}; refusing to guess. Restore it by hand: mv ${join(paths.harness, tool.fakeName)} ${join(paths.harness, tool.name)}`,
       );
     return { was: undefined };
   }
@@ -288,12 +374,12 @@ export async function disableReal(
     const live = await ports.liveFerrets(record.login);
     if (live !== undefined) return refuse(live);
   }
-  const fake = join(paths.harness, FAKE_NAME);
+  const fake = join(paths.harness, tool.fakeName);
   if ((await lstat(fake).catch(() => undefined)) === undefined)
-    return refuse(`${fake} is missing, so the fake claude cannot be put back; nothing was changed`);
+    return refuse(`${fake} is missing, so the fake ${tool.name} cannot be put back; nothing was changed`);
   // Atomic: the fake takes the shim's place in one rename. The login and its store are not touched.
-  await rename(fake, join(paths.harness, 'claude'));
-  await rm(recordPathOf(paths), { force: true });
+  await rename(fake, join(paths.harness, tool.name));
+  await rm(recordPathOf(paths, tool), { force: true });
   if (record.rootedAt !== null) {
     const link = await lstat(record.rootedAt).catch(() => undefined);
     if (

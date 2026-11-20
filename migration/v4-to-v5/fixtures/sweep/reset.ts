@@ -26,6 +26,7 @@ import { constants } from 'node:fs';
 import { link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, rmdir, stat } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import {
+  CODEX_TOOL,
   FAKE_NAME,
   isShim,
   readRecord,
@@ -578,6 +579,23 @@ export async function homeFiles(home: string): Promise<string[]> {
   return out.sort();
 }
 
+/**
+ * Real codex has no `--keep`: a reset removes the login and its sign-in with the old home, so a slot with real codex on refuses until
+ * `real-codex <n> off` (which never deletes the login). Names and paths only; nothing inside a store is opened.
+ */
+export async function realCodexPreflight(paths: RealPaths): Promise<void> {
+  const record = await readRecord(paths, CODEX_TOOL);
+  if (record !== undefined)
+    return refuse(
+      `real codex is on for login ${record.login}; a reset removes that login and its sign-in with the old home. Run "real-codex <n> off" first (it never deletes that login)`,
+    );
+  const codex = await readFile(join(paths.harness, 'codex'), 'utf8').catch(() => '');
+  if (isShim(codex, CODEX_TOOL))
+    return refuse(
+      `${join(paths.harness, 'codex')} is a real-codex shim but there is no ${CODEX_TOOL.recordFile}; refusing to guess`,
+    );
+}
+
 // ─── real claude: re-point, never sign in ──────────────────────────────────────────────────────────────────────────
 
 /**
@@ -665,6 +683,7 @@ export async function resetV5(
   if (homeInfo === undefined || !homeInfo.isDirectory() || homeInfo.isSymbolicLink())
     return refuse(`${paths.home} is missing or not a plain folder; there is no 5.0 home to reset`);
   const keep = await realClaudePreflight(real, options.keepRealClaude);
+  await realCodexPreflight(real);
 
   await actions.stop();
   await assertResetTree(paths);
