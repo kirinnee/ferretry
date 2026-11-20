@@ -124,7 +124,7 @@ The owner then asked for the body to be split by content type (&F946: _"split by
 The owner's board-and-agenda teaching (&C48, 2026-11-04) then added five rules and paid for them inside the 8 KB:
 
 - **Board** (757 → 814, cap 760 → 820): the board runs itself (_"TASK no longer have user interactivity anymore! agenda
-  tracks all those"_: a card never asks; answers, tests and Done ride its agenda, which moves it), public = the owner's
+  tracks all those"_: a card never asks; only an agenda item asks, and its answer moves the card — 2026-11-06, &B165, at 817), public = the owner's
   asks and private = the ferret's sub-cards, planning is a phase, the title and summary read as a sitrep, and the card's
   status (`--status-{now,done,next}`), and **read → edit** (the owner: _"we need to read to know what needs to be
   updated, else there might be many segments that might be outdated!"_: `fy task show` whole, then edit every stale

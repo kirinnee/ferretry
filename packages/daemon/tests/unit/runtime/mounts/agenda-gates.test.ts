@@ -221,7 +221,7 @@ describe('a gate answer on the agenda route', () => {
     // Assert
     should(response).eql({
       status: 400,
-      body: { error: 'files can only come with the answer to a card ask', code: 'invalid' },
+      body: { error: 'files can only come with the answer to a try-it or an approval', code: 'invalid' },
     });
   });
 

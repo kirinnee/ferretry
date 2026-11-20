@@ -50,4 +50,38 @@ describe('the run’s arrow-key hints', () => {
   test('count a review’s Request changes, which the open card always draws beside Approve', () => {
     expect(words(agendaRunKeys(inboxCard(review))).map(each => each.word)).toEqual(['Request changes', 'Approve']);
   });
+
+  // &B165 round 3: a try-it answered with the box under it has ONE button, Good; the keys say the same.
+  test('say Good for a try-it, and no ← when the box takes the words', () => {
+    const gate = {
+      cardId: 'F12',
+      laneId: 'tested',
+      laneName: 'To test',
+      entry: 1,
+      projectId: 'p1',
+      cardTitle: 'Badge colour',
+      options: [
+        { id: 'done', label: 'Done', outcome: 'close' },
+        { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    };
+    const tryIt = agendaItem('A404', {
+      kind: 'reply',
+      ask: { kind: 'open-question' },
+      subject: 'Try it: Badge colour',
+      raisedBy: 'daemon',
+      gateAttached: gate,
+      cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z', howToTest: '1. Look.' }],
+    } as unknown as Partial<AgendaItem>);
+    expect(words(agendaRunKeys(inboxCard(tryIt), false, true))).toEqual([{ key: '→', word: 'Good' }]);
+    // No composer drawn under it: the buttons are the ask's own Not good / Done, and the keys say the same.
+    expect(words(agendaRunKeys(inboxCard(tryIt)))).toEqual([
+      { key: '←', word: 'Not good' },
+      { key: '→', word: 'Done' },
+    ]);
+    // An older machine's item mirrors the ask in gateAttached only: nothing is typed there, so no key says Good.
+    const { cardAsks: _asks, ...mirrored } = tryIt as AgendaItem & { cardAsks?: unknown };
+    const mirror = agendaItem('A405', mirrored as unknown as Partial<AgendaItem>);
+    expect(words(agendaRunKeys(inboxCard(mirror), false, true)).map(each => each.word)).not.toContain('Good');
+  });
 });

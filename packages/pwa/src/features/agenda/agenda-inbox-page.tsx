@@ -36,7 +36,16 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
-import { type AgendaId, type AgendaItem, agendaAnswerText, formatTaskRef, isMachineAgendaId } from '@ferretry/protocol';
+import {
+  type AgendaId,
+  type AgendaItem,
+  agendaAnswerText,
+  cardAskReference,
+  formatTaskRef,
+  gateTypedLabel,
+  gateTypedPlaceholder,
+  isMachineAgendaId,
+} from '@ferretry/protocol';
 import {
   AlarmClockOff,
   ArrowLeft,
@@ -68,12 +77,14 @@ import { DaemonTaskReferences } from '../../components/daemon-task-references.ts
 import { Spinner } from '../../components/spinner.tsx';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { useDoneClose } from '../../hooks/use-done-close.ts';
-import { CLEAR_ACTION, kindWord, swipeTargets } from '../../lib/agenda-answers.ts';
+import { CLEAR_ACTION, kindWord } from '../../lib/agenda-answers.ts';
 import { answerRowLayout, cardModel } from '../../lib/agenda-card-model.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
 import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
+import { STALE_ASK_COPY, type TypedAnswerTarget, typedGateAnswer } from '../../lib/agenda-gate-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
+import { itemAskWord, itemSwipeTargets, ownQuestionAnswered, typedCardAsk } from '../../lib/agenda-item-sections.ts';
 import {
   actionSentence,
   agendaConversationPath,
@@ -125,6 +136,7 @@ import {
 import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
 import { daemonAgendaPath, daemonBoardCardPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
+import { typedApproval } from '../../lib/reply-approval.ts';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { filterToTest, type ToTestCard } from '../../lib/to-test-inbox.ts';
 import { AgendaCountBadge } from '../../shell/app-bar.tsx';
@@ -226,7 +238,7 @@ const renderInboxCard = (
         : {})}
       origin={inboxCardOrigin(card, onNavigate)}
       swipeHints={false}
-      {...inputFormFor(inbox, card, onNavigate)}
+      {...inputFormFor(inbox, card, onNavigate, act)}
       {...(now === undefined ? {} : { now })}
     />
   </DaemonTaskReferences>
@@ -240,10 +252,21 @@ const inputFormFor = (
   inbox: AgendaInbox,
   card: InboxCard,
   onNavigate: (to: string) => void,
+  act: (action: InboxAction) => void,
 ): { readonly inputForm?: ReactNode; readonly planForm?: ReactNode; readonly cardsForm?: ReactNode } => {
   const connection = inbox.connectionFor(card.daemonId);
   if (connection !== undefined && card.item.cards !== undefined)
-    return { cardsForm: <AgendaCardsHost cards={card.item.cards} connection={connection} onNavigate={onNavigate} /> };
+    return {
+      // ONE form is the notice's answer: its Send does every card's pick, then answers the notice as Got it.
+      cardsForm: (
+        <AgendaCardsHost
+          cards={card.item.cards}
+          connection={connection}
+          onNavigate={onNavigate}
+          onSent={() => act(CLEAR_ACTION)}
+        />
+      ),
+    };
   if (connection !== undefined && card.item.taskPlan !== undefined)
     return {
       planForm: (
@@ -315,6 +338,49 @@ const scopeOf = (card: InboxCard) => daemonSessionScope({ daemonId: card.daemonI
  * Answers the open item: what is typed in the item's own composer rides as the answer's note (the chat's own rule,
  * `withComposerNote`), and the composer is emptied once it is spent.
  */
+/** What the composer under a card's own agenda does with typed words: answer the card, and say what to type. */
+export interface TypedAnswer extends TypedAnswerTarget {
+  readonly placeholder: string;
+}
+
+/**
+ * The typed answer of an open item, when it has one (`typedCardAsk`, the rule the item view draws by): an item whose whole
+ * ask is ONE card ask — the card's own agenda, or any thread whose own ask line only repeats it — so the words typed
+ * under it are that ask's other answer, never a chat message about the item.
+ */
+const typedAnswerFor = (
+  host: Pick<CardHostProps, 'inbox' | 'onNavigate'>,
+  card: InboxCard,
+): TypedAnswer | undefined => {
+  const ask = typedCardAsk(card.item, cardId => host.inbox.howToTestFor?.(card.daemonId, cardId));
+  if (ask === undefined || gateTypedLabel(ask.gate) === undefined) return undefined;
+  return {
+    // The ask's own name: a Send pressed for this ask answers only it, even if it finally runs after another replaced it.
+    key: cardAskReference(ask),
+    placeholder: gateTypedPlaceholder(ask.gate),
+    // Clear approval ("works now") is an ordinary reply, never a Not good with those words.
+    approves: words => typedApproval(ask.gate, words) !== null,
+    send: send => {
+      // The card already has an answer held or being sent (Good tapped, or answered elsewhere): these words are too late.
+      if (host.inbox.deferred.hiddenKeys().has(card.key)) throw new Error(STALE_ASK_COPY);
+      const answer = typedGateAnswer(ask, send, card.view.config.id);
+      if (answer.kind === 'refused') throw new Error(answer.message);
+      answerCard(host, card, answer.action);
+    },
+  };
+};
+
+/**
+ * Whether the Inbox draws a composer under this open item: the host gave one, and the item is a ferret's own — not a machine
+ * notice, a gate item or a rule suggestion, which take no words.
+ */
+const composerDrawn = (card: InboxCard, renderComposer: AgendaInboxPageProps['renderComposer']): boolean =>
+  renderComposer !== undefined &&
+  !isMachineAgendaId(card.view.config.id) &&
+  !isGateItem(card.item) &&
+  // A ferret's rule suggestion takes no words: anything the owner writes there, the ferret reads (C2).
+  card.item.signInRuleSuggestion === undefined;
+
 const answerWithDraft = (host: Pick<CardHostProps, 'inbox' | 'onNavigate'>, card: InboxCard, action: InboxAction) => {
   const composer = composerQuoteTarget(scopeOf(card));
   const draft = composer?.draft() ?? '';
@@ -391,6 +457,7 @@ function OpenItem({
   place,
   canSnooze,
   askTap,
+  typedAnswer,
 }: {
   readonly host: CardHostProps;
   readonly card: InboxCard;
@@ -400,6 +467,8 @@ function OpenItem({
   readonly canSnooze: boolean;
   /** A tapped notification opened it: it opens at its ask, and each tap is a new number. */
   readonly askTap?: number;
+  /** The words typed under this item answer its one card ask: the page draws that composer, so the card draws Good alone. */
+  readonly typedAnswer: boolean;
 }) {
   const conversation = useItemConversation(card, readConversation);
   const entries = conversation.entries;
@@ -465,11 +534,12 @@ function OpenItem({
           {...(canSnooze ? { onSnooze: (until: string) => act(snoozeAction(until)) } : {})}
           position={{ index: place.index, total: place.total }}
           quoteScope={scopeOf(card)}
-          {...inputFormFor(inbox, card, onNavigate)}
+          {...inputFormFor(inbox, card, onNavigate, act)}
           renderProse={agendaProse(copyWriter)}
           // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
           // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.
           swipeable={place.swipeable}
+          {...(typedAnswer ? { typedAnswer } : {})}
           {...(now === undefined ? {} : { now })}
           {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
         />
@@ -1136,7 +1206,12 @@ export interface AgendaInboxPageProps {
    * The open item's ferret's REAL composer, bound to that conversation: what is typed goes to its chat about the
    * item. The host draws it (it holds the clients); absent, the open item has no composer.
    */
-  readonly renderComposer?: (card: InboxCard, answerForm: (() => void) | undefined) => ReactNode;
+  readonly renderComposer?: (
+    card: InboxCard,
+    answerForm: (() => void) | undefined,
+    /** A card's own agenda: what is typed answers the card (Not good, with the words); see `typedAnswerFor`. */
+    typed: TypedAnswer | undefined,
+  ) => ReactNode;
   /** How "Clear all from agent ferrets" reaches the machines. Absent: the Agents filter has no such button. */
   readonly clearPort?: ClearPort;
   /** How the "Ready to test" items move their cards (the Board's own verbs). Absent: they list, and refuse to move. */
@@ -1208,7 +1283,7 @@ function ItemRow({
         {ask === null ? null : <span className="fy-inbox-row__ask">{ask}</span>}
         <span className="fy-inbox-row__meta">
           {status === null || status.tone === 'needs-you' ? null : <AgendaStatusPill status={status} />}
-          <span>{kindWord(card.item)}</span>
+          <span>{itemAskWord(card.item) ?? kindWord(card.item)}</span>
           <span aria-hidden="true">·</span>
           <span>{agendaReference(card.item.id)}</span>
           {itemCard === null || itemCard === group.card ? null : (
@@ -1429,11 +1504,16 @@ const RUN_MOVES: readonly RunKey[] = [
  * row the open card draws (`answerRowLayout`): the deck's open item always has a composer, so a review's Request
  * changes is on it, and "Done · closes" is on it when the item offers one (`doneClose`).
  */
-export const agendaRunKeys = (card: InboxCard, doneClose = false): readonly RunKey[] => {
-  const targets = swipeTargets(card.item);
+export const agendaRunKeys = (card: InboxCard, doneClose = false, typedHost = false): readonly RunKey[] => {
+  const targets = itemSwipeTargets(card.item, typedHost);
   const { slots } = answerRowLayout(cardModel(card.item), { requestChanges: true, doneClose });
+  // A try-it answered with the box under it has ONE button, Good: ← would only open a words prompt for the Not good the
+  // box already sends, so the line says no ← (the footer lists what the buttons offer).
+  const typedAsk = typedHost && typedCardAsk(card.item) !== undefined;
   return [
-    ...(targets.left === undefined ? [] : [{ key: '←', word: agendaAnswerText(targets.left.label, slots) }]),
+    ...(targets.left === undefined || typedAsk
+      ? []
+      : [{ key: '←', word: agendaAnswerText(targets.left.label, slots) }]),
     ...(targets.up === undefined ? [] : [{ key: '↑', word: agendaAnswerText(targets.up.label, slots) }]),
     ...(targets.right === undefined ? [] : [{ key: '→', word: agendaAnswerText(targets.right.label, slots) }]),
     ...RUN_MOVES,
@@ -1441,9 +1521,9 @@ export const agendaRunKeys = (card: InboxCard, doneClose = false): readonly RunK
 };
 
 /** The run's keys for the open agenda card, counting its "Done · closes" as its row does. */
-function AgendaRunKeysHint({ card }: { readonly card: InboxCard }) {
+function AgendaRunKeysHint({ card, typed }: { readonly card: InboxCard; readonly typed: boolean }) {
   const doneClose = useDoneClose(card.daemonId, card.item) !== undefined;
-  return <RunKeysHint keys={agendaRunKeys(card, doneClose)} />;
+  return <RunKeysHint keys={agendaRunKeys(card, doneClose, typed)} />;
 }
 
 /** A task card's two answers by arrow, then Skip. */
@@ -2052,6 +2132,7 @@ export function AgendaInboxPage({
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open" data-agenda-deck-host="">
             <AgendaSwipeDeck
               cards={deck}
+              typedHost={card => composerDrawn(card, renderComposer) && typedAnswerFor(host, card) !== undefined}
               canSnooze={card => snoozable(card)}
               onAct={(card, action) => answerWithDraft(host, card, action)}
               onDismiss={card => answerCard(host, card, DISMISS_ACTION)}
@@ -2076,6 +2157,7 @@ export function AgendaInboxPage({
                     canSnooze={snoozable(card)}
                     card={card}
                     host={host}
+                    typedAnswer={composerDrawn(card, renderComposer) && typedAnswerFor(host, card) !== undefined}
                     place={{
                       index: Math.max(0, index),
                       total: runOrder.length,
@@ -2121,10 +2203,7 @@ export function AgendaInboxPage({
                 />
               ) : deck[0] === undefined ||
                 renderComposer === undefined ||
-                isMachineAgendaId(deck[0].view.config.id) ||
-                isGateItem(deck[0].item) ||
-                // A ferret's rule suggestion takes no words: anything the owner writes there, the ferret reads (C2).
-                deck[0].item.signInRuleSuggestion !== undefined ? null : (
+                !composerDrawn(deck[0], renderComposer) ? null : (
                 // biome-ignore lint/a11y/noStaticElementInteractions: the keydown only routes an unclaimed Esc in the composer back to the Inbox list
                 <div
                   className="fy-inbox-composer"
@@ -2135,11 +2214,19 @@ export function AgendaInboxPage({
                   <FocusHandoff key={deck[0].key} flag={composerHandoff} root={composerRoot} />
                   {renderComposer(
                     deck[0],
-                    deck[0].item.kind === 'form' ? () => answerForm(host, deck[0] as InboxCard) : undefined,
+                    deck[0].item.kind === 'form' && !ownQuestionAnswered(deck[0].item)
+                      ? () => answerForm(host, deck[0] as InboxCard)
+                      : undefined,
+                    typedAnswerFor(host, deck[0]),
                   )}
                 </div>
               )}
-              {phone || deck[0] === undefined ? null : <AgendaRunKeysHint card={deck[0]} />}
+              {phone || deck[0] === undefined ? null : (
+                <AgendaRunKeysHint
+                  card={deck[0]}
+                  typed={composerDrawn(deck[0], renderComposer) && typedAnswerFor(host, deck[0]) !== undefined}
+                />
+              )}
             </div>
           </div>
         )}
@@ -2219,6 +2306,10 @@ export interface AgendaNeedsYouProps {
  * buttons into the same undo window, and "See all N" into the inbox. Nothing open, nothing drawn —
  * except the undo toast, which outlives the last card it took.
  */
+/** Whether this answer must carry words (a Not good) and carries none yet. */
+const needsWords = (item: AgendaItem, action: InboxAction): boolean =>
+  gateWordsFor(item, action) === 'required' && !('note' in action && (action.note ?? '').trim() !== '');
+
 export function AgendaNeedsYou({ inbox, daemonId, onNavigate, now, clock }: AgendaNeedsYouProps) {
   const headingId = useId();
   const toast = <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />;
@@ -2244,7 +2335,15 @@ export function AgendaNeedsYou({ inbox, daemonId, onNavigate, now, clock }: Agen
       </header>
       <ul className="fy-attn-needs__cards" data-count={shown.length}>
         {shown.map(card => (
-          <li key={card.key}>{renderInboxCard(host, card, action => answerCard(host, card, action))}</li>
+          <li key={card.key}>
+            {renderInboxCard(host, card, action =>
+              // An answer that needs words (a Not good) has nowhere to take them on this compact card: it opens the
+              // item in its conversation, where the message box's words go with the same answer.
+              needsWords(card.item, action)
+                ? onNavigate(inboxCardOrigin(card, onNavigate).href)
+                : answerCard(host, card, action),
+            )}
+          </li>
         ))}
       </ul>
       {toast}

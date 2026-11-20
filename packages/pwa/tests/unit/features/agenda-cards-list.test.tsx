@@ -41,6 +41,8 @@ const draw = async (
 ) => {
   const calls: string[] = [];
   const actions = {
+    cardPath: (id: BoardTaskId) => `/board/${id}`,
+    chatPath: (sessionId: string) => `/session/${sessionId}`,
     open: (id: BoardTaskId) => {
       calls.push(`open:${id}`);
     },
@@ -57,85 +59,94 @@ const draw = async (
     },
     ...over,
   };
-  const view = await mount(<AgendaCardsList actions={actions} cards={cards} />);
+  let sent = 0;
+  const view = await mount(<AgendaCardsList actions={actions} cards={cards} onSent={() => (sent += 1)} />);
   mounted.push(view);
   const row = (id: string) => view.container.querySelector<HTMLElement>(`[data-agenda-card-row="${id}"]`);
   const q = (id: string, selector: string) => row(id)?.querySelector<HTMLElement>(selector) ?? null;
-  return { calls, row, q, view };
+  const pick = async (id: string, value: 'start' | 'close' | 'leave') =>
+    click(q(id, `[data-agenda-card-pick="${value}"]`));
+  const send = async () => {
+    await click(view.container.querySelector<HTMLElement>('[data-agenda-cards-send]'));
+    await settle();
+  };
+  return { calls, row, q, view, pick, send, sent: () => sent };
 };
 
-describe('the cards of a notice', () => {
-  it('draws one row per card, each with Open, Start a ferret and Close, named in full for a screen reader', async () => {
+describe('the cards of a notice, answered as ONE form (&B165)', () => {
+  it('draws one row per card — its line, a link to it, a pick — and ONE Send for them all, no per-card buttons', async () => {
     const list = await draw(THREE);
-
     for (const id of ['B1', 'B2', 'B3']) {
-      const open = list.q(id, '[data-agenda-card-open]');
-      const start = list.q(id, '[data-agenda-card-start]');
-      const close = list.q(id, '[data-agenda-card-close]');
-      expect(open?.textContent).toBe('Open');
-      expect(open?.getAttribute('aria-label')).toBe(`Open card &${id}`);
-      expect(start?.textContent).toBe('Start a ferret');
-      expect(start?.getAttribute('aria-label')).toBe(`Start a ferret on &${id}`);
-      expect(close?.textContent).toBe('Close');
-      expect(close?.getAttribute('aria-label')).toBe(`Close card &${id}`);
+      expect(list.q(id, '[data-agenda-card-open]')?.textContent).toBe(`Open &${id}`);
+      expect(list.q(id, '[data-agenda-card-open]')?.tagName).toBe('A');
+      const picks = [...(list.row(id)?.querySelectorAll('[data-agenda-card-pick]') ?? [])].map(input =>
+        input.getAttribute('data-agenda-card-pick'),
+      );
+      expect(picks).toEqual(['start', 'close', 'leave']);
+      expect((list.q(id, '[data-agenda-card-pick="leave"]') as HTMLInputElement).checked).toBe(true);
+      expect(list.row(id)?.querySelectorAll('button')).toHaveLength(0);
     }
-    expect(list.q('B2', '[data-agenda-card-line]')?.textContent).toContain(
-      '&B2 Fix the login page is waiting in Implement',
-    );
+    expect(list.view.container.querySelectorAll('button')).toHaveLength(1);
+    expect(list.view.container.querySelector('[data-agenda-cards-send]')?.textContent).toBe('Send');
+    // One compact line: the card and where it waits (the place is hidden on a phone by CSS, never cut from the text).
+    expect(list.q('B2', '[data-agenda-card-line]')?.textContent).toBe('&B2 Fix the login page · in Implement');
   });
 
-  it('keeps a card’s three buttons on one row, which does not wrap', async () => {
-    const list = await draw(ONE);
-    const buttons = list.q('B1', '[data-agenda-card-buttons]');
-
-    expect(buttons?.className).toContain('flex');
-    expect(buttons?.className).not.toContain('flex-wrap');
-    expect(buttons?.querySelectorAll('button')).toHaveLength(3);
-  });
-
-  it('shows the line of a lone card too: the notice no longer says it above the list', async () => {
-    const list = await draw(ONE);
-
-    expect(list.q('B1', '[data-agenda-card-line]')?.textContent).toBe(ONE[0]?.line);
-    expect(list.q('B1', '[data-agenda-card-open]')?.textContent).toBe('Open');
-  });
-
-  it('opens only the card whose button was pressed', async () => {
+  it('opens only the card whose link was pressed', async () => {
     const list = await draw(THREE);
-
     await click(list.q('B2', '[data-agenda-card-open]'));
-
     expect(list.calls).toEqual(['open:B2']);
   });
 
-  it('starts a ferret on that card and says so, without touching the others', async () => {
+  it('does nothing until Send, then each pick at once, and answers the notice when every pick took', async () => {
     const list = await draw(THREE);
-
-    await click(list.q('B3', '[data-agenda-card-start]'));
-    await settle();
-
-    expect(list.calls).toEqual(['start:B3']);
+    await list.pick('B1', 'close');
+    await list.pick('B3', 'start');
+    expect(list.calls).toEqual([]);
+    await list.send();
+    expect(list.calls).toEqual([`close:B1:${CLOSE_CARD_REASON}`, 'start:B3']);
+    expect(list.q('B1', '[data-agenda-card-done]')?.textContent).toBe('Closed.');
     expect(list.q('B3', '[data-agenda-card-done]')?.textContent).toBe('Started.');
-    expect(list.q('B1', '[data-agenda-card-start]')).not.toBeNull();
+    expect(list.sent()).toBe(1);
   });
 
-  it('offers Open its chat in place of Start when a live ferret already holds the card, and opens that ferret', async () => {
+  it('with every card left, Send is Got it: nothing is moved', async () => {
+    const list = await draw(THREE);
+    await list.send();
+    expect(list.calls).toEqual([]);
+    expect(list.sent()).toBe(1);
+  });
+
+  it('says what Close does before Send, and closes with the reason the owner typed', async () => {
+    const list = await draw(ONE);
+    await list.pick('B1', 'close');
+    expect(list.q('B1', '[data-agenda-card-close-note]')?.textContent).toContain('It leaves the board');
+    expect((list.q('B1', '[data-agenda-card-reason]') as HTMLTextAreaElement).value).toBe(CLOSE_CARD_REASON);
+    await typeInto(list.q('B1', '[data-agenda-card-reason]'), 'Duplicate of B2', 'textarea');
+    await list.send();
+    expect(list.calls).toEqual(['close:B1:Duplicate of B2']);
+  });
+
+  it('closes with the reason offered when the owner emptied it', async () => {
+    const list = await draw(ONE);
+    await list.pick('B1', 'close');
+    await typeInto(list.q('B1', '[data-agenda-card-reason]'), '   ', 'textarea');
+    await list.send();
+    expect(list.calls).toEqual([`close:B1:${CLOSE_CARD_REASON}`]);
+  });
+
+  it('offers its ferret’s chat when a live ferret already holds the card', async () => {
     const list = await draw(ONE, {
       start: async () => ({ ok: true, ferret: 'worker', note: 'A ferret is already working on this card.' }),
     });
-
-    await click(list.q('B1', '[data-agenda-card-start]'));
-    await settle();
-
-    expect(list.q('B1', '[data-agenda-card-start]')).toBeNull();
-    expect(list.q('B1', '[data-agenda-card-held]')).toBeNull();
+    await list.pick('B1', 'start');
+    await list.send();
     const line = list.q('B1', '[data-agenda-card-line]');
     expect(line?.textContent).toBe('&B1 Fix simcha Loge 502 — a ferret has picked it up.');
-    expect(line?.textContent).not.toContain('no ferret is assigned');
     expect(line?.getAttribute('role')).toBe('status');
+    expect(list.q('B1', '[data-agenda-card-picks]')).toBeNull();
     const chat = list.q('B1', '[data-agenda-card-chat]');
-    expect(chat?.textContent).toBe('Open its chat');
-    expect(chat?.getAttribute('aria-label')).toBe('Open the chat of the ferret on &B1');
+    expect(chat?.getAttribute('href')).toBe('/session/worker');
     await click(chat);
     expect(list.calls).toEqual(['chat:worker']);
   });
@@ -144,65 +155,36 @@ describe('the cards of a notice', () => {
     const list = await draw([{ task: { id: 'B9' as BoardTaskId }, line: 'Something else entirely.' }], {
       start: async () => ({ ok: true, ferret: 'worker', note: 'A ferret is already working on this card.' }),
     });
-
-    await click(list.q('B9', '[data-agenda-card-start]'));
-    await settle();
-
+    await list.pick('B9', 'start');
+    await list.send();
     expect(list.q('B9', '[data-agenda-card-line]')?.textContent).toBe('&B9 — a ferret has picked it up.');
   });
 
-  it('shows the daemon’s refusal on the row and keeps the buttons', async () => {
-    const list = await draw(ONE, {
-      start: async () => ({ ok: false, message: '&B1’s ferret is no longer on this machine.' }),
+  it('shows a refusal on its row, keeps the notice open, and the next Send redoes only what did not take', async () => {
+    let refuse = true;
+    const list = await draw(THREE, {
+      start: async (id: BoardTaskId) => {
+        list_calls.push(`start:${id}`);
+        return refuse
+          ? { ok: false, message: '&B1’s ferret is no longer on this machine.' }
+          : { ok: true, note: 'Started.' };
+      },
     });
-
-    await click(list.q('B1', '[data-agenda-card-start]'));
-    await settle();
-
+    const list_calls = list.calls;
+    await list.pick('B1', 'start');
+    await list.pick('B2', 'close');
+    await list.send();
     expect(list.q('B1', '[data-agenda-card-problem]')?.textContent).toBe('&B1’s ferret is no longer on this machine.');
-    expect(list.q('B1', '[data-agenda-card-start]')).not.toBeNull();
-  });
-
-  it('asks before closing, and closes nothing when the owner keeps the card', async () => {
-    const list = await draw(ONE);
-
-    await click(list.q('B1', '[data-agenda-card-close]'));
-    expect(list.q('B1', '[data-agenda-card-confirm]')).not.toBeNull();
-    expect(list.calls).toEqual([]);
-    await click(list.q('B1', '[data-agenda-card-keep]'));
-
-    expect(list.calls).toEqual([]);
-    expect(list.q('B1', '[data-agenda-card-confirm]')).toBeNull();
-    expect(list.q('B1', '[data-agenda-card-close]')).not.toBeNull();
-  });
-
-  it('closes with the reason offered, and with the one the owner typed instead', async () => {
-    const list = await draw(THREE);
-
-    await click(list.q('B1', '[data-agenda-card-close]'));
-    expect((list.q('B1', '[data-agenda-card-reason]') as HTMLInputElement).value).toBe(CLOSE_CARD_REASON);
-    await click(list.q('B1', '[data-agenda-card-confirm-close]'));
-    await settle();
-    await click(list.q('B2', '[data-agenda-card-close]'));
-    await typeInto(list.q('B2', '[data-agenda-card-reason]'), 'Duplicate of B1');
-    await click(list.q('B2', '[data-agenda-card-confirm-close]'));
-    await settle();
-
-    expect(list.calls).toEqual([`close:B1:${CLOSE_CARD_REASON}`, 'close:B2:Duplicate of B1']);
-    expect(list.q('B1', '[data-agenda-card-done]')?.textContent).toBe('Closed.');
-  });
-
-  it('will not close with the reason emptied', async () => {
-    const list = await draw(ONE);
-
-    await click(list.q('B1', '[data-agenda-card-close]'));
-    await typeInto(list.q('B1', '[data-agenda-card-reason]'), '   ');
-
-    expect((list.q('B1', '[data-agenda-card-confirm-close]') as HTMLButtonElement).disabled).toBe(true);
+    expect((list.q('B1', '[data-agenda-card-pick="start"]') as HTMLInputElement).checked).toBe(true);
+    expect(list.sent()).toBe(0);
+    refuse = false;
+    await list.send();
+    expect(list.calls).toEqual(['start:B1', `close:B2:${CLOSE_CARD_REASON}`, 'start:B1']);
+    expect(list.sent()).toBe(1);
   });
 });
 
-describe('the buttons as the board’s own writes', () => {
+describe('each pick as the board’s own write', () => {
   const board = (refuse: boolean, held = false) => {
     const sent: string[] = [];
     return {
@@ -294,5 +276,30 @@ describe('the buttons as the board’s own writes', () => {
 
     expect(await actions.start('B1' as BoardTaskId)).toEqual({ ok: false, message: 'only the owner may do that' });
     expect(await actions.close('B1' as BoardTaskId, 'x')).toEqual({ ok: false, message: 'only the owner may do that' });
+  });
+});
+
+describe('the Close reason box shows its whole text (&B165 round 2)', () => {
+  it('is a box that grows to its lines, not a one-line field that cuts the text at the edge', async () => {
+    const list = await draw(ONE);
+    await list.pick('B1', 'close');
+    const box = list.q('B1', '[data-agenda-card-reason]');
+    expect(box?.tagName).toBe('TEXTAREA');
+    expect(box?.getAttribute('rows')).toBe('1');
+    expect(box?.className).not.toContain('truncate');
+  });
+
+  it('sends the form on Enter, as the one-line field did; Shift+Enter is a new line, not a Send', async () => {
+    const list = await draw(ONE);
+    await list.pick('B1', 'close');
+    const box = list.q('B1', '[data-agenda-card-reason]') as HTMLTextAreaElement;
+    const press = async (shiftKey: boolean) => {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey, bubbles: true, cancelable: true }));
+      await settle();
+    };
+    await press(true);
+    expect(list.calls).toEqual([]);
+    await press(false);
+    expect(list.calls).toEqual([`close:B1:${CLOSE_CARD_REASON}`]);
   });
 });

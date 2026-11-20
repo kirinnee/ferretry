@@ -916,7 +916,7 @@ describe('BOARD_INSTRUCTION', () => {
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — the owner (&C48): "TASK no longer have user interactivity anymore! agenda tracks all those".
-    should(text).containEql('Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it.');
+    should(text).containEql('Cards (&F412) never ask: only an agenda item asks, and its answer moves the card.');
     should(text).containEql('One outcome, no umbrellas; add to a related card.');
   });
 

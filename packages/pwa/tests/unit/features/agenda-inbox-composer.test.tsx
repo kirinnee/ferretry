@@ -5,6 +5,8 @@ import { DictationControl } from '../../../src/components/dictation-control.tsx'
 import { LiveMarkdownEditor } from '../../../src/components/live-markdown-editor.tsx';
 import { AgendaInboxComposer } from '../../../src/features/agenda/agenda-inbox-composer.tsx';
 import { agendaForms } from '../../../src/lib/agenda-form-state.ts';
+import { STALE_ASK_COPY } from '../../../src/lib/agenda-gate-send.ts';
+import { referencesOf } from '../../../src/lib/answer-chip.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { DEFAULT_STT_SETTINGS } from '../../../src/lib/stt/stt-settings.ts';
 import '../../support/dom.ts';
@@ -100,6 +102,146 @@ describe('the open Inbox item’s composer', () => {
     expect(answered).toBe(1);
     expect(sent).toEqual([]);
     run(() => view.unmount());
+  });
+
+  test('on a card’s own agenda Send answers the card with the typed words, never the chat, and says what to type', async () => {
+    const sent: string[] = [];
+    const answered: string[] = [];
+    const replied: string[] = [];
+    const api = {
+      send: async (_sessionId: string, request: { message: string }) => {
+        sent.push(request.message);
+        return {} as never;
+      },
+    };
+    const view = render(
+      <AgendaInboxComposer
+        answerTyped={{
+          key: 'gate:F12:tested:3',
+          send: words => void answered.push(words.message),
+          approves: words => words === 'works now',
+        }}
+        clientFor={async () => api}
+        compact
+        connection={daemon}
+        itemId={'A8' as AgendaId}
+        onReplied={reply => replied.push(reply.words)}
+        typedPlaceholder="What is wrong, or what needs changing?"
+        view={sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train' } })}
+      />,
+    );
+    await runAsync(async () => {
+      await Promise.resolve();
+    });
+    const composer = view.root.findByType(Composer);
+    expect(composer.props.placeholder).toBe('What is wrong, or what needs changing?');
+    // An empty box has nothing to say: it is never an answer.
+    expect(composer.props.allowEmptySend).toBe(false);
+    // Send is the gate answer or an error in the box — never the device outbox, which would chat it later.
+    expect(composer.props.directSend).toBe(true);
+    const field = () => view.root.find(node => node.type === 'textarea' || node.type === LiveMarkdownEditor);
+    run(() =>
+      field().props.onChange({ currentTarget: { value: 'the badge is red', selectionStart: 16, selectionEnd: 16 } }),
+    );
+    await runAsync(async () => {
+      view.root.findByType('form').props.onSubmit({ preventDefault() {} });
+    });
+    expect(answered).toEqual(['the badge is red']);
+    expect(sent).toEqual([]);
+    expect(replied).toEqual([]);
+    // Words that plainly approve are a reply about the item, with its reference: the card is not answered, and the
+    // reply overlay is not applied (the ask is still open, so the item stays in the Inbox with its Good).
+    run(() => field().props.onChange({ currentTarget: { value: 'works now', selectionStart: 9, selectionEnd: 9 } }));
+    await runAsync(async () => {
+      view.root.findByType('form').props.onSubmit({ preventDefault() {} });
+    });
+    expect(answered).toEqual(['the badge is red']);
+    expect(sent).toEqual(['!A8 works now']);
+    expect(replied).toEqual([]);
+    run(() => view.unmount());
+  });
+
+  test('a typed answer is the owner’s words exactly: the raw client, never the item’s !A reference prefix', async () => {
+    const api = { send: async () => ({}) as never };
+    const view = render(
+      <AgendaInboxComposer
+        answerTyped={{ key: 'gate:F12:tested:3', send: () => undefined, approves: () => false }}
+        clientFor={async () => api}
+        compact
+        connection={daemon}
+        itemId={'A404' as AgendaId}
+        view={sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train' } })}
+      />,
+    );
+    await runAsync(async () => {
+      await Promise.resolve();
+    });
+    expect(referencesOf(view.root.findByType(Composer).props.api)).toEqual([]);
+    run(() => view.unmount());
+  });
+
+  test('a Send pressed for an ask that was replaced meanwhile answers nothing and shows a plain error line', async () => {
+    const api = { send: async () => ({}) as never };
+    const heard: string[] = [];
+    const draw = (key: string) => (
+      <AgendaInboxComposer
+        answerTyped={{
+          key,
+          send: words => void heard.push(`${key}: ${words.message}`),
+          approves: words => words === 'works now',
+        }}
+        clientFor={async () => api}
+        compact
+        connection={daemon}
+        itemId={'A404' as AgendaId}
+        view={sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train' } })}
+      />
+    );
+    const view = render(draw('gate:F12:tested:3'));
+    await runAsync(async () => {
+      await Promise.resolve();
+    });
+    // The client Send was pressed with: bound to the first ask.
+    const pressed = view.root.findByType(Composer).props.api as { send: (s: string, i: unknown) => unknown };
+    run(() => view.update(draw('gate:F12:tested:4')));
+    expect(() => pressed.send('sess-2', { message: 'The badge is red' })).toThrow(STALE_ASK_COPY);
+    // Even approving words (a reply, not an answer) are not sent from a Send that belonged to a replaced ask.
+    expect(() => pressed.send('sess-2', { message: 'works now' })).toThrow(STALE_ASK_COPY);
+    expect(heard).toEqual([]);
+    // The replacement ask has its own client, which answers it.
+    const fresh = view.root.findByType(Composer).props.api as { send: (s: string, i: unknown) => unknown };
+    await fresh.send('sess-2', { message: 'Now it is blue' });
+    expect(heard).toEqual(['gate:F12:tested:4: Now it is blue']);
+    run(() => view.unmount());
+  });
+
+  test('a Send still awaiting when its composer goes (Good tapped, or the card answered elsewhere) answers nothing', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const heard: string[] = [];
+    const view = render(
+      <AgendaInboxComposer
+        answerTyped={{ key: 'gate:F12:tested:3', send: words => void heard.push(words.message), approves: () => false }}
+        clientFor={async () => ({ send: async () => ({}) as never })}
+        compact
+        connection={daemon}
+        itemId={'A404' as AgendaId}
+        view={sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train' } })}
+      />,
+    );
+    await runAsync(async () => {
+      await Promise.resolve();
+    });
+    const pressed = view.root.findByType(Composer).props.api as { send: (s: string, i: unknown) => unknown };
+    // Send was pressed and is awaiting (the composer awaits before the client's send runs) …
+    const late = gate.then(() => pressed.send('sess-2', { message: 'The badge is red' }));
+    // … the card is answered Good, and its composer goes away, then the Send resumes.
+    run(() => view.unmount());
+    release();
+    await expect(late).rejects.toThrow(STALE_ASK_COPY);
+    expect(heard).toEqual([]);
   });
 
   test('a form’s “nothing to send” line goes once a pick changes', async () => {

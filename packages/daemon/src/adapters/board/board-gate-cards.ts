@@ -21,7 +21,7 @@ export interface GateProjectNames {
 
 export class BoardGateCards implements GateBoard {
   constructor(
-    private readonly board: Pick<BoardService, 'task' | 'sweepBoard' | 'act' | 'audienceOf'>,
+    private readonly board: Pick<BoardService, 'task' | 'sweepBoard' | 'act' | 'audienceOf' | 'closeWhereNothingToTry'>,
     private readonly projects: GateProjectNames,
   ) {}
 
@@ -64,6 +64,10 @@ export class BoardGateCards implements GateBoard {
     await this.board.act(id, request, caller, expect);
   }
 
+  async closeNothingToTry(id: BoardTaskId, expect: GateExpectation, reason: string): Promise<boolean> {
+    return await this.board.closeWhereNothingToTry(id, expect, reason);
+  }
+
   private async gateCard(view: BoardTaskView, laneSet: LaneSet | null): Promise<GateCard> {
     const name = (await this.projects.project(view.projectId).catch(() => undefined))?.name;
     return cardOf(view, laneSet, name, await this.board.audienceOf(view));
@@ -80,5 +84,7 @@ const cardOf = (
   task: view,
   laneSet,
   audience,
+  blockedBy: view.blockedBy,
+  building: view.rollup.byCategory.backlog + view.rollup.byCategory.active + view.rollup.byCategory.review,
   ...(projectName === undefined ? {} : { projectName }),
 });

@@ -482,15 +482,15 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
  * says to record every task was outvoting it. The board moves what a signal moves (a
  * start, a PR, a release); this is the rest, which only the ferret knows. The daemon's turn-end check backs it
  * up on a board that is on (`board/turn-check.ts` in the daemon). The board runs itself (the owner, 2026-11-04: "TASK
- * no longer have user interactivity anymore! agenda tracks all those"): a card never asks — every answer, test and
- * Done rides the card's agenda, which moves the card — and one card is one outcome, never an umbrella (`fy task
+ * no longer have user interactivity anymore! agenda tracks all those"): a card never asks — only an agenda item asks, and
+ * its answer moves the card (docs/agenda.md § One model: the agenda asks, the card shows) — and one card is one outcome, never an umbrella (`fy task
  * create` lists the related cards and refuses a broad one without `--broad`). Public cards are the owner's asks, so
  * the board answers "what's the sitrep?"; planning is a phase, not a reason to skip a card; the title and summary say
  * what the work is doing; and the card's `status` (Now / Done so far / Next) is rewritten whole at each step.
  * docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: opt-in, enforced; overrides other task rules. Card only if \`${fy} board status\` is on, under your card (\`--parent\`), or on the owner's Yes (\`--approval !A<n>\`). Public=the owner's asks ("status of all I asked?"): top-level, never \`--private\`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: \`${fy} task show <id> --yaml\`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then \`${fy} task patch <id> --file f\`. \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\`/\`block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
+  `Board: opt-in, enforced; overrides other task rules. Card only if \`${fy} board status\` is on, under your card (\`--parent\`), or on the owner's Yes (\`--approval !A<n>\`). Public=the owner's asks ("status of all I asked?"): top-level, never \`--private\`; private=your sub-cards. Cards (&F412) never ask: only an agenda item asks, and its answer moves the card. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: \`${fy} task show <id> --yaml\`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then \`${fy} task patch <id> --file f\`. \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\`/\`block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon

@@ -139,7 +139,7 @@ describe('the item view’s ⋯ menu', () => {
     await draw(richItem, { tools: TOOLS });
     await openMenu();
     await interact(() => {
-      one('[data-agenda-description]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      one('[data-agenda-question-line]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     });
     expect(root().querySelector('[data-agenda-menu="popover"]')).toBeNull();
   });
@@ -248,11 +248,14 @@ describe('the v6 layout: title, ONE card — one column', () => {
     expect(root().querySelector('[data-agenda-ask]')).toBeNull();
   });
 
-  test('says the item’s summary on the card under the title, whole — never behind ⋯', async () => {
+  test('says the item’s question ONCE, whole, on the card — in "What I need from you", not repeated under the title, never behind ⋯', async () => {
     await draw(richItem);
-    expect(one('.fy-card [data-agenda-part="head"] [data-agenda-description]').textContent).toBe(
+    // The block leads with the ask, so the head does not say it a second time (&B165).
+    expect(root().querySelector('.fy-card [data-agenda-part="head"] [data-agenda-description]')).toBeNull();
+    expect(one('.fy-card [data-agenda-part="needs"] [data-agenda-question-line]').textContent).toBe(
       'Which database should keep the board’s finished items?',
     );
+    expect(root().textContent?.split('Which database should keep the board’s finished items?')).toHaveLength(2);
     const menu = await openMenu();
     expect(menu.querySelector('[data-agenda-menu-group="about"]')).toBeNull();
   });
@@ -309,7 +312,8 @@ describe('the v6 layout: title, ONE card — one column', () => {
 
   test('teaches nothing: no hint line under the type, and ⋯ is an icon, not a word', async () => {
     await draw(richItem);
-    expect(one('.fy-card__top [data-agenda-type]').textContent).toBe('Question');
+    // The word is the kind's, the same one the Inbox list row says (a choice is a Decision): list and open item agree.
+    expect(one('.fy-card__top [data-agenda-type]').textContent).toBe('Decision');
     const text = root().textContent ?? '';
     expect(text).not.toContain('it is yours to decide');
     expect(text).not.toContain('⋯');

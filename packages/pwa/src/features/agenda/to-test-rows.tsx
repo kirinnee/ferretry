@@ -289,8 +289,20 @@ const useRowSwipe = ({ onLeft, onRight, onSkip, onSnooze }: RowSwipeAnswers, dis
   };
 };
 
-const TRY_WORDS = { left: 'Not good', right: 'Done', what: 'Ready to test', section: 'How to test' } as const;
-const APPROVE_WORDS = { left: 'Send back', right: 'Approve', what: 'Plan to approve', section: 'The plan' } as const;
+const TRY_WORDS = {
+  left: 'Not good',
+  right: 'Done',
+  what: 'Ready to test',
+  section: 'How to test',
+  ask: 'Try it, then tap Done or Not good.',
+} as const;
+const APPROVE_WORDS = {
+  left: 'Send back',
+  right: 'Approve',
+  what: 'Plan to approve',
+  section: 'The plan',
+  ask: 'Read the plan, then tap Approve or Send back.',
+} as const;
 
 /** The words on a row: a card to try is Done or Not good; a plan to approve is Approve or Send back. */
 export const wordsOf = (row: Pick<ToTestCard, 'stage'>) => (row.stage === 'approve' ? APPROVE_WORDS : TRY_WORDS);
@@ -400,7 +412,7 @@ function ToTestRow({
                 />
               }
               {...(pager === undefined ? {} : { pager })}
-              {...(onClose === undefined ? {} : { close: { label: 'Close card', onClick: onClose } })}
+              {...(onClose === undefined ? {} : { close: { label: 'Close', onClick: onClose } })}
             />
             {infoOpen ? (
               <div className="fy-totest__info" data-to-test-info="" id={infoId}>
@@ -456,12 +468,19 @@ function ToTestRow({
               )}
             </CardMetaLine>
           </div>
-          {empty ? null : (
-            <section aria-label={`${words.section} ${title}`} className="fy-totest__how" data-to-test-how="">
-              <h3 className="fy-totest__how-title">{words.section}</h3>
-              <HowToTest renderProse={cardProse} text={row.howToTest} />
-            </section>
-          )}
+          {/* An old daemon raised no agenda item for this card, so the row IS the item: one ask, one answer row (&B165). */}
+          <section aria-label={`What I need from you: ${title}`} className="fy-totest__need" data-to-test-need="">
+            <h3 className="fy-totest__how-title">What I need from you</h3>
+            <p className="fy-totest__ask" data-to-test-ask="">
+              {words.ask}
+            </p>
+            {empty ? null : (
+              <section aria-label={`${words.section} ${title}`} className="fy-totest__how" data-to-test-how="">
+                <h4 className="fy-totest__how-title">{words.section}</h4>
+                <HowToTest renderProse={cardProse} text={row.howToTest} />
+              </section>
+            )}
+          </section>
           {state.error === null ? null : (
             <p className="fy-totest__error" data-to-test-error="" role="alert">
               {state.error}

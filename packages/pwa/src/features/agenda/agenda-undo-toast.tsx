@@ -65,7 +65,7 @@ export function AgendaUndoToast({ inbox, clock = Date.now, inline = false }: Age
   const others = pending.length - 1;
   return (
     <div className={toastClass(inline)} data-agenda-undo="" data-pending={pending.length}>
-      <p className="fy-attn-undo__text" role="status">
+      <p className="fy-attn-undo__text fy-attn-undo__text--clamp" role="status">
         {sentence}
       </p>
       {others > 0 ? (

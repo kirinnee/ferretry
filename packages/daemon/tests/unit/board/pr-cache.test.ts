@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { BoardTask, LaneSet, PrLink, ReleasedIn } from '@ferretry/protocol';
+import type { AgendaGate, BoardTask, LaneSet, PrLink, ReleasedIn } from '@ferretry/protocol';
 import should from 'should';
 import {
   applyPrUpdate,
@@ -11,11 +11,21 @@ import {
   type PrObservation,
   type PrUpdate,
   samePr,
+  tryItVerdict,
 } from '../../../src/lib/board/index.ts';
 import { card, lanes, MemoryBoardStore, NOW, PROJECT, world } from './support.ts';
 
+const TRY_IT: Pick<AgendaGate, 'options'> = {
+  options: [
+    { id: 'done', label: 'Done', outcome: 'close' },
+    { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+  ],
+};
+
 const URL = 'https://github.com/kirinnee/ferretry/pull/940';
 const SHA = 'a'.repeat(40);
+const HEAD = 'b'.repeat(40);
+const PUSHED = 'd'.repeat(40);
 const MERGED_AT = '2026-10-30T09:00:00Z';
 const RELEASE: ReleasedIn = { version: '4.110.0', tag: 'v4.110.0', at: '2026-10-30T09:30:00Z' };
 
@@ -164,6 +174,88 @@ describe('applyPrUpdate', () => {
       ['merged', 'pr.merged', 'PR #940 merged'],
       ['released', 'release.published', 'PR #940 released in 4.110.0'],
     ]);
+  });
+
+  it('should cache what a PR changed at its head, keep it for that same commit, and replace it when a poll can say', () => {
+    const open = withPr({ state: 'open', checks: 'passing', polledAt: NOW }, { laneId: 'review' });
+    const read = apply(open, { observed: [observed({ changes: 'docs-tests', headSha: HEAD })] });
+    should(read.task?.links.prs[0]).match({ changes: 'docs-tests', changesRevision: HEAD });
+    // A poll that could not read the files leaves what the cache has, for the very same head commit.
+    const kept = withPr(
+      { state: 'open', checks: 'passing', polledAt: NOW, changes: 'docs-tests', changesRevision: HEAD },
+      { laneId: 'review' },
+    );
+    should(
+      apply(kept, { observed: [observed({ checks: 'failing', headSha: HEAD })] }).task?.links.prs[0]?.changes,
+    ).equal('docs-tests');
+    // A poll that read them again writes what it saw: more commits can turn docs into code.
+    should(apply(kept, { observed: [observed({ changes: 'code', headSha: PUSHED })] }).task?.links.prs[0]).match({
+      changes: 'code',
+      changesRevision: PUSHED,
+    });
+    // Nothing else changed and nothing was read: the card is not written.
+    should(apply(kept, { observed: [observed({ checks: 'passing', headSha: HEAD })] }).task).be.null();
+    // Learning it alone is a change worth writing.
+    const unread = withPr({ state: 'open', checks: 'passing', polledAt: NOW }, { laneId: 'review' });
+    should(
+      apply(unread, { observed: [observed({ checks: 'passing', changes: 'code', headSha: HEAD })] }).task,
+    ).not.be.null();
+  });
+
+  it('should drop a kept kind when a poll that cannot read the files sees another commit, or no commit at all', () => {
+    const kept = withPr(
+      { state: 'open', checks: 'passing', polledAt: NOW, changes: 'docs-tests', changesRevision: HEAD },
+      { laneId: 'review' },
+    );
+    // Code was pushed: the docs-only reading no longer describes the PR.
+    const pushed = apply(kept, { observed: [observed({ checks: 'passing', headSha: PUSHED })] }).task?.links.prs[0];
+    should(pushed?.changes).be.undefined();
+    should(pushed?.changesRevision).be.undefined();
+    // GitHub named no commit: the kind cannot be tied to one, so it goes.
+    should(apply(kept, { observed: [observed({ checks: 'passing' })] }).task?.links.prs[0]?.changes).be.undefined();
+    // A link cached before commits were kept has a kind bound to nothing: it goes when the files cannot be read.
+    const legacy = withPr(
+      { state: 'open', checks: 'passing', polledAt: NOW, changes: 'docs-tests' },
+      { laneId: 'review' },
+    );
+    should(
+      apply(legacy, { observed: [observed({ checks: 'passing', headSha: HEAD })] }).task?.links.prs[0]?.changes,
+    ).be.undefined();
+  });
+
+  it('should treat docs-only while open, then code added, then merged with unreadable files, as unknown', () => {
+    // Poll 1: open, docs only, at HEAD.
+    const open = withPr({ state: 'open', checks: 'passing', polledAt: NOW }, { laneId: 'review' });
+    const first = apply(open, { observed: [observed({ checks: 'passing', changes: 'docs-tests', headSha: HEAD })] });
+    // Poll 2: code was added; the files could not be read.
+    const second = apply(first.task ?? open, { observed: [observed({ checks: 'passing', headSha: PUSHED })] });
+    // Poll 3: merged; the files still could not be read.
+    const last = apply(second.task ?? open, { observed: [merged({ headSha: PUSHED })] });
+    const link = last.task?.links.prs[0];
+    should(link?.state).equal('merged');
+    should(link?.changes).be.undefined();
+    // Unknown is treated as code: the verdict asks.
+    should(tryItVerdict({ ...(last.task as BoardTask), howToTest: '1. Tap it' }, TRY_IT)).eql({ kind: 'ask' });
+  });
+
+  it('should keep a merged PR’s kind for its merge commit and drop it for another', () => {
+    const readMerged = withPr(
+      {
+        state: 'merged',
+        checks: 'passing',
+        polledAt: NOW,
+        mergedAt: MERGED_AT,
+        mergeSha: SHA,
+        changes: 'docs-tests',
+        changesRevision: SHA,
+      },
+      { laneId: 'merged' },
+    );
+    should(apply(readMerged, { observed: [merged({ checks: 'failing' })] }).task?.links.prs[0]?.changes).equal(
+      'docs-tests',
+    );
+    const other = 'c'.repeat(40);
+    should(apply(readMerged, { observed: [merged({ mergeSha: other })] }).task?.links.prs[0]?.changes).be.undefined();
   });
 
   it('should take every trigger of one poll in the order a PR lives them, whatever order the links are in', () => {

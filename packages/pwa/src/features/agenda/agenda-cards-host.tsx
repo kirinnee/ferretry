@@ -1,6 +1,6 @@
 /**
- * The cards a machine notice is about (`AgendaItem.cards`), with the buttons wired to the board. The rows are the
- * daemon's; the three buttons are the board's own writes (`agendaCardsActions`), so a card is opened, started or
+ * The cards a machine notice is about (`AgendaItem.cards`), as one form wired to the board. The rows are the
+ * daemon's; each pick the one Send does is the board's own write (`agendaCardsActions`), so a card is opened, started or
  * closed here with the same authority, and the same refusals, as on the board page.
  * Outside the app store (a harness) the board is idle: Open still goes to the card, Start and Close are refused.
  */
@@ -18,11 +18,13 @@ export interface AgendaCardsHostProps {
   readonly connection: DaemonConnection;
   readonly cards: readonly AgendaCardRow[];
   readonly onNavigate: (to: string) => void;
+  /** Every card's pick took: the notice is answered. */
+  readonly onSent?: (() => void) | undefined;
 }
 
 const NO_AGENDA = { respond: () => Promise.reject(new Error('this host has no agenda')) };
 
-export function AgendaCardsHost({ connection, cards, onNavigate }: AgendaCardsHostProps) {
+export function AgendaCardsHost({ connection, cards, onNavigate, onSent }: AgendaCardsHostProps) {
   const store = useOptionalAppStore();
   const machines = useMemo(() => [connection], [connection]);
   const board = useBoardActions(store?.board ?? IDLE_STORE, store?.attention ?? NO_AGENDA, machines);
@@ -30,5 +32,5 @@ export function AgendaCardsHost({ connection, cards, onNavigate }: AgendaCardsHo
     () => agendaCardsActions(board, connection.daemonId, onNavigate),
     [board, connection.daemonId, onNavigate],
   );
-  return <AgendaCardsList actions={actions} cards={cards} />;
+  return <AgendaCardsList actions={actions} cards={cards} onSent={onSent} />;
 }

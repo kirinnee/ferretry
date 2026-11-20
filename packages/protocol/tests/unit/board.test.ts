@@ -56,6 +56,7 @@ import {
   MAX_BOARD_STATUS_PART_LENGTH,
   laneEditProblems,
   moveReasonProblem,
+  PrChangeKindSchema,
   PrChecksSchema,
   type PrLink,
   PrLinkSchema,
@@ -275,6 +276,7 @@ const VALID: readonly SchemaCase[] = [
   { name: 'pre-release', schema: ReleasedInSchema, value: { ...RELEASE, version: '4.110.0-rc.1' } },
   { name: 'pr state', schema: PrStateSchema, value: 'merged' },
   { name: 'pr checks', schema: PrChecksSchema, value: 'failing' },
+  { name: 'pr change kind', schema: PrChangeKindSchema, value: 'docs-tests' },
   { name: 'linked pr', schema: PrLinkSchema, value: linkedPr },
   { name: 'merged pr', schema: PrLinkSchema, value: mergedPr },
   {
@@ -282,6 +284,8 @@ const VALID: readonly SchemaCase[] = [
     schema: PrLinkSchema,
     value: { ...linkedPr, state: 'open', draft: true, checks: 'pending', polledAt: INSTANT },
   },
+  { name: 'pr that changed only docs and tests', schema: PrLinkSchema, value: { ...mergedPr, changes: 'docs-tests' } },
+  { name: 'pr that changed code', schema: PrLinkSchema, value: { ...mergedPr, changes: 'code' } },
   { name: 'links', schema: BoardTaskLinksSchema, value: CARD.links },
   { name: 'link field', schema: BoardLinkFieldSchema, value: 'commit' },
   { name: 'editable field', schema: BoardEditableFieldSchema, value: 'terms' },
@@ -410,6 +414,8 @@ const INVALID: readonly SchemaCase[] = [
     value: { ...linkedPr, state: 'closed', polledAt: INSTANT, releasedIn: RELEASE },
   },
   { name: 'short sha', schema: PrLinkSchema, value: { ...mergedPr, mergeSha: 'abc123' } },
+  { name: 'unknown pr change kind', schema: PrChangeKindSchema, value: 'config' },
+  { name: 'unknown change kind', schema: PrLinkSchema, value: { ...mergedPr, changes: 'config' } },
   { name: 'pr linked twice', schema: BoardTaskLinksSchema, value: { ...CARD.links, prs: [linkedPr, linkedPr] } },
   { name: 'unknown event', schema: BoardTaskEventSchema, value: event(1, { type: 'status' }) },
   {

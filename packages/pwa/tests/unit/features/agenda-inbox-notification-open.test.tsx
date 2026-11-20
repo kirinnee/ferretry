@@ -32,14 +32,17 @@ const holdIt = inboxCard(
 
 const withGate = inboxCard(
   agendaItem('A4', {
-    subject: 'Which colour?',
-    ask: choices('Blue', 'Green'),
+    // What an older daemon raised for a card to try: the ask line is the card's own title.
+    subject: 'Try it: Badge colour',
+    kind: 'reply',
+    ask: { kind: 'open-question' },
     gateAttached: {
       cardId: 'F12',
       laneId: 'tested',
       laneName: 'Try it',
       entry: 3,
       projectId: 'p1',
+      cardTitle: 'Badge colour',
       options: [
         { id: 'o0', label: 'Done', outcome: 'close' },
         { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },

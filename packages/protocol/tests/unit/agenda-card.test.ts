@@ -25,6 +25,8 @@ import {
   hasOwnTitle,
   isYesNoAsk,
   kindOfAsk,
+  NOTHING_TO_TRY_PREFIX,
+  nothingToTryLine,
   unswipedChoices,
   YES_NO_ORDER,
   yesNoOrder,
@@ -469,5 +471,18 @@ describe('the kind chip words', () => {
     should(agendaKindLabel({ ask: { kind: 'open-question' } })).equal('Question');
     should(agendaKindLabel({ ask: { kind: 'task' } })).equal('To do');
     should(agendaKindLabel({})).equal('FYI');
+  });
+});
+
+describe('nothingToTryLine', () => {
+  it('reads the daemon’s one line for a card closed with nothing to try, and nothing else', () => {
+    should(nothingToTryLine('&F12: Nothing to try: its PRs change only docs and tests')).equal(
+      '&F12: Nothing to try: its PRs change only docs and tests',
+    );
+    should(nothingToTryLine(undefined)).be.undefined();
+    should(nothingToTryLine('&F12 is at To test: Done or Not good')).be.undefined();
+    should(nothingToTryLine('Nothing to try: no card named')).be.undefined();
+    should(nothingToTryLine('&F12: Nothing to try: ')).be.undefined();
+    should(nothingToTryLine(`${NOTHING_TO_TRY_PREFIX}x`)).be.undefined();
   });
 });

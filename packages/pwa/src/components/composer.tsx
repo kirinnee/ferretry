@@ -263,6 +263,13 @@ export interface ComposerProps {
    * so a failed one throws the sentence the box shows, and its draft is the host's `draftStore`.
    */
   readonly detached?: DetachedComposer;
+  /**
+   * Send is the host's own call and nothing else: no device outbox (a parked send would be sent again later as a chat
+   * message, and a file could wait for the connection and go as one), and the message is exactly what was typed — no
+   * "See the attached files." stand-in, no location block. A card's typed answer (docs/agenda.md § One ask) is this: what
+   * Send does is the gate answer, or the error line shown in the box.
+   */
+  readonly directSend?: boolean;
   /** Focus the field when the composer first appears: a box opened by a press is there to be typed in. */
   readonly autoFocus?: boolean;
 }
@@ -487,6 +494,7 @@ export function Composer({
   compacting,
   onOpenContext,
   detached,
+  directSend = false,
   autoFocus = false,
 }: ComposerProps) {
   const isDetached = detached !== undefined;
@@ -498,8 +506,8 @@ export function Composer({
     [autocompleteFetcher, daemon, scope, uploadAttachment],
   );
   const deviceOutbox = useSendOutbox();
-  // A detached send is the host's own: parked in the device outbox it would be sent again later as a chat message.
-  const outbox = isDetached ? null : deviceOutbox;
+  // A detached or direct send is the host's own: parked in the device outbox it would be sent again later as a chat message.
+  const outbox = isDetached || directSend ? null : deviceOutbox;
   // Beside a device outbox a file can wait for the connection: it goes up with the message, later.
   const attachments = useComposerAttachments(uploader, daemonSessionKey(scope), undefined, outbox !== null);
   // A detached composer that takes no files ignores a paste, a drop and a picked file alike.
@@ -971,11 +979,12 @@ export function Composer({
       const typed = draft.trim();
       // The block is plain text in the message: that is how an agent receives it, and how the sent
       // message redraws it as a chip.
-      const message = isDetached
-        ? typed
-        : location?.kind === 'ready'
-          ? `${typed === '' ? 'Here is where I am.' : typed}\n\n${formatLocationBlock(location.fix)}`
-          : typed || 'See the attached files.';
+      const message =
+        isDetached || directSend
+          ? typed
+          : location?.kind === 'ready'
+            ? `${typed === '' ? 'Here is where I am.' : typed}\n\n${formatLocationBlock(location.fix)}`
+            : typed || 'See the attached files.';
       // The clear the send carries, once this device's last keystroke is answered — a second at most, and
       // nothing at all (the send still goes) if it is not.
       const clear = shared.sendClear(mark);

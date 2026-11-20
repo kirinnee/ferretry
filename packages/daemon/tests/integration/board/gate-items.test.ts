@@ -22,8 +22,8 @@ import { BoardGateCards } from '../../../src/adapters/board/board-gate-cards.ts'
 import { FileBoardStore } from '../../../src/adapters/board/file-board-store.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
-import { AgendaService } from '../../../src/lib/agenda/index.ts';
 import { harnessQuestionRequest } from '../../../src/lib/agenda/harness-prompt.ts';
+import { AgendaService } from '../../../src/lib/agenda/index.ts';
 import type { AuthenticatedCredential } from '../../../src/lib/api/authentication.ts';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { ApiError } from '../../../src/lib/api/error.ts';
@@ -31,9 +31,8 @@ import type { RouteContext } from '../../../src/lib/api/route.ts';
 import { BoardService, GateItems, stageGateLanes } from '../../../src/lib/board/index.ts';
 import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
 import { agendaRoutes } from '../../../src/lib/runtime/index.ts';
-import { request } from '../../unit/api/support.ts';
-import { card, FakeDone, FakeReopen, NOW, world as boardPorts } from '../../unit/board/support.ts';
-import { jsonBody } from '../../unit/api/support.ts';
+import { jsonBody, request } from '../../unit/api/support.ts';
+import { world as boardPorts, card, FakeDone, FakeReopen, NOW } from '../../unit/board/support.ts';
 import { NO_HELD_REPLIES } from '../../unit/runtime/mounts/support.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
@@ -201,7 +200,10 @@ describe('answering a card ask over the agenda route', () => {
     should((await openItems(daemon)).items).have.length(1);
     should(item.sourceRef).equal(cardAgendaReference('F1'));
     should(item.gate).be.undefined();
-    should(item.cardAsks?.[0]).match({ gate: { cardId: 'F1', laneId: 'tested' }, howToTest: '1. Open the Inbox' });
+    should(item.cardAsks?.[0]).match({
+      gate: { cardId: 'F1', laneId: 'tested' },
+      howToTest: 'There is no preview for this one. Try it for real: the steps below say where.\n\n1. Open the Inbox',
+    });
     should(item.gateAttached).match({ cardId: 'F1', laneId: 'tested' });
   });
 
@@ -435,6 +437,8 @@ describe('the board as the gate items read it', () => {
         sweepBoard: async () => await daemon.board.sweepBoard(),
         act: async (id, request, caller) => await daemon.board.act(id, request, caller),
         audienceOf: async card => await daemon.board.audienceOf(card),
+        closeWhereNothingToTry: async (id, expect, reason) =>
+          await daemon.board.closeWhereNothingToTry(id, expect, reason),
       },
       { project: async () => undefined },
     );

@@ -22,6 +22,7 @@ import {
   type BoardTask,
   formatTaskRef,
   type LaneTrigger,
+  type PrChangeKind,
   type PrChecks,
   type PrLink,
   prUrlParts,
@@ -44,6 +45,10 @@ export interface PrObservation {
   readonly checks: PrChecks;
   /** When the PR was opened; `null` or absent when GitHub did not say. */
   readonly createdAt?: string | null;
+  /** What the PR changed; absent when GitHub's file list could not say (the cached one, if any, stays). */
+  readonly changes?: PrChangeKind | undefined;
+  /** The PR's head commit as of this poll; absent when GitHub did not say. A kind is kept only for the same commit. */
+  readonly headSha?: string | undefined;
   /** Set exactly when `state` is `merged`. */
   readonly mergedAt: string | null;
   readonly mergeSha: string | null;
@@ -120,7 +125,35 @@ const factsDiffer = (before: PrLink, after: PrLink): boolean =>
   before.mergedAt !== after.mergedAt ||
   before.mergeSha !== after.mergeSha ||
   (before.createdAt ?? null) !== (after.createdAt ?? null) ||
+  before.changes !== after.changes ||
+  before.changesRevision !== after.changesRevision ||
   before.releasedIn !== after.releasedIn;
+
+const withoutChanges = ({ changes: _kind, changesRevision: _at, ...rest }: PrLink): PrLink => rest;
+
+/** The commit a poll's observation stands on: the merge commit of a merged PR, else its head. */
+const revisionOf = (observed: PrObservation): string | undefined =>
+  observed.state === 'merged' ? (observed.mergeSha ?? undefined) : observed.headSha;
+
+/**
+ * What the link says of the PR's changes after a poll: the kind this poll read, at the commit it read it at. When the
+ * poll could not read the files, the cached kind is kept ONLY for the very same commit (a push, a merge or a close
+ * moves the commit, so the old kind no longer describes the PR); anything else is unknown, and unknown is treated as
+ * code.
+ */
+const changesAfter = (
+  pr: PrLink,
+  observed: PrObservation,
+): { readonly changes?: PrChangeKind; readonly changesRevision?: string } => {
+  const revision = revisionOf(observed);
+  if (observed.changes !== undefined) {
+    return { changes: observed.changes, ...(revision === undefined ? {} : { changesRevision: revision }) };
+  }
+  if (pr.changes !== undefined && revision !== undefined && pr.changesRevision === revision) {
+    return { changes: pr.changes, changesRevision: revision };
+  }
+  return {};
+};
 
 /** One link after this poll, and the changes it saw. */
 const nextLink = (pr: PrLink, update: PrUpdate, now: string): LinkChange => {
@@ -133,13 +166,15 @@ const nextLink = (pr: PrLink, update: PrUpdate, now: string): LinkChange => {
     observed === undefined
       ? { ...pr, releasedIn }
       : {
-          ...pr,
+          // The cached kind is dropped here and put back only by `changesAfter`, for the same commit.
+          ...withoutChanges(pr),
           state: observed.state,
           draft: observed.draft,
           checks: observed.checks,
           ...(observed.createdAt === undefined && pr.createdAt === undefined
             ? {}
             : { createdAt: observed.createdAt ?? pr.createdAt ?? null }),
+          ...changesAfter(pr, observed),
           mergedAt: merged ? observed.mergedAt : null,
           mergeSha: merged ? observed.mergeSha : null,
           releasedIn: merged ? releasedIn : null,

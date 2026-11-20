@@ -324,6 +324,20 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # No string the PWA can show (nor an error, refusal or note the daemon and protocol write for it) makes a card
+    # the one asking: no "Card &F12:" heading, no "your answer for the card", no "card ask" (docs/agenda.md § One
+    # model: the agenda asks, the card shows). The owner restated
+    # the rule eight times while each fix patched one screen; this is what fails when the words come back. See
+    # scripts/validate/owner-surface-words.sh.
+    a-owner-surface-words = {
+      enable = true;
+      name = "Owner-facing strings never make a card the one asking";
+      entry = validator "scripts/validate/owner-surface-words.sh";
+      files = "^(packages/pwa/src/.*\\.tsx?|packages/daemon/src/lib/(agenda|board|runtime/mounts)/.*\\.ts|packages/protocol/src/lib/.*\\.ts|scripts/validate/owner-surface-words\\.(sh|ts))$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-enforce-exec = {
       enable = true;
       name = "Executable shell scripts";

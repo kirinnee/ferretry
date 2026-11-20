@@ -2,11 +2,11 @@ import {
   agendaItemPushTag,
   type AgendaItem,
   type AgendaSnapshot,
-  asksOnlyCardAsks,
   hasOpenCardAsk,
   type PushSubject,
   pushUrgencyFor,
 } from '@ferretry/protocol';
+import { asksOnlyCardAsks } from '../agenda/card-asks.ts';
 import { type AgendaRaisedObserver, ownerTurnItems } from '../agenda/index.ts';
 import {
   agendaAlertLane,

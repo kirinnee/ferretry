@@ -14,6 +14,7 @@ export * from './origin.ts';
 export * from './visibility.ts';
 export * from './ports.ts';
 export * from './pr-cache.ts';
+export * from './pr-changes.ts';
 export * from './query.ts';
 export * from './done-delivery.ts';
 export * from './reopen-delivery.ts';

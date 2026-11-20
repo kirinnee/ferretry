@@ -509,3 +509,17 @@ export const agendaTurn = (item: {
       : item.waitingOn === 'ferret'
         ? 'ferret'
         : 'owner';
+
+/** What a card's history reason and the agenda line both begin with when the daemon closes a card with nothing to try. */
+export const NOTHING_TO_TRY_PREFIX = 'Nothing to try: ';
+
+const NOTHING_TO_TRY_LINE = /^&[A-Z]+[1-9][0-9]*: Nothing to try: \S.*$/u;
+
+/**
+ * The plain line the daemon writes on an agenda item that carried a card it just closed with nothing to try
+ * (`&F12: Nothing to try: its PRs change only docs and tests`), as an ordinary `updated` activity entry's note. An app
+ * shows this note as it is, in place of the generic "<ferret> updated it"; `undefined` for any other note, which stays
+ * the generic line. It asks nothing, and writing it never wakes the item.
+ */
+export const nothingToTryLine = (note: string | undefined): string | undefined =>
+  note !== undefined && NOTHING_TO_TRY_LINE.test(note) ? note : undefined;

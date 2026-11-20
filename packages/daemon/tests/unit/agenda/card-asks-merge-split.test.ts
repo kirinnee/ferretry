@@ -10,7 +10,7 @@ import {
   MAX_AGENDA_CARD_ASKS,
 } from '@ferretry/protocol';
 import should from 'should';
-import { joinCardAsks, leaveCardAsks, withoutCardAsks } from '../../../src/lib/agenda/card-asks.ts';
+import { joinCardAsks, leaveCardAsks, sealCardAsks, withoutCardAsks } from '../../../src/lib/agenda/card-asks.ts';
 import {
   type AgendaActor,
   type AgendaLedger,
@@ -39,6 +39,7 @@ const gate = (cardId: string, entry = 2): AgendaGate => ({
   laneName: 'Ready to try',
   entry,
   projectId: 'p1',
+  cardTitle: 'Badge',
   options: [
     { id: 'o0', label: 'Done', outcome: 'close' },
     { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
@@ -65,7 +66,8 @@ const thread = (extra: Partial<AgendaItem> = {}): AgendaItem =>
     id: 'A1',
     source: 'agent-raised',
     sourceRef: null,
-    subject: 'Can you look at the badge?',
+    // A line that only repeats the card ask (docs/agenda.md § One ask): the card asks are all the thread asks.
+    subject: 'Try it: Badge',
     title: 'Badge',
     why: 'w',
     howToResolve: 'h',
@@ -268,7 +270,7 @@ describe('leaving card asks behind (the pure half)', () => {
       askedAt: minute(-5),
       waitingFor: 'discussion' as const,
     };
-    const item = thread({ waitingSince: minute(1), cardAsks: [ask('F1', 1, { woke })] });
+    const item = sealCardAsks(thread({ waitingSince: minute(1), cardAsks: [ask('F1', 1, { woke })] }));
 
     // Act
     const { left, moved: gone } = leaveCardAsks(item, each => each.gate.cardId === 'F1', minute(10));
@@ -290,7 +292,7 @@ describe('leaving card asks behind (the pure half)', () => {
       waitingSince: minute(1),
       cardAsks: [ask('F1', 1)],
     });
-    const old = thread({ waitingSince: minute(1), cardAsks: [ask('F1', 1)] });
+    const old = sealCardAsks(thread({ waitingSince: minute(1), cardAsks: [ask('F1', 1)] }));
 
     // Act
     const fromCard = leaveCardAsks(card, () => true, minute(10)).left;
@@ -304,7 +306,9 @@ describe('leaving card asks behind (the pure half)', () => {
   it('leaves the state alone when another ask still waits, the thread asked something of its own, or it rests', () => {
     // Arrange
     const two = thread({ waitingSince: minute(1), cardAsks: [ask('F1', 1), ask('F2', 1)] });
-    const own = thread({ waitingSince: minute(5), cardAsks: [ask('F1', 1)] });
+    const own = sealCardAsks(
+      thread({ subject: 'Should keyboard focus change too?', waitingSince: minute(5), cardAsks: [ask('F1', 1)] }),
+    );
     const rested = resting({ cardAsks: [ask('F1', 0)] });
 
     // Act
@@ -361,9 +365,14 @@ const lifecycleOf = (ledger: AgendaLedger, id: string): string =>
   ledger.entries.find(each => each.item.id === id)?.lifecycle ?? 'missing';
 
 /** Two of the ferret's threads, A1 and A2, each carrying the asks the daemon put on it. */
-const twoThreads = (first: readonly AgendaGate[], second: readonly AgendaGate[]): AgendaLedger => {
+const twoThreads = (first: readonly AgendaGate[], second: readonly AgendaGate[], firstLine?: string): AgendaLedger => {
   let ledger = ok(
-    applyAgendaCommandToSession(null, SESSION, { action: 'raise', actor: AGENT, request: request(), at: minute(0) }),
+    applyAgendaCommandToSession(null, SESSION, {
+      action: 'raise',
+      actor: AGENT,
+      request: request(firstLine === undefined ? {} : { subject: firstLine }),
+      at: minute(0),
+    }),
   ).ledger;
   ledger = ok(
     applyAgendaCommand(ledger, {
@@ -535,8 +544,8 @@ describe('a split carries a moved card’s asks', () => {
   });
 
   it('puts the original back where it was when it asked nothing but the asks that moved', () => {
-    // Arrange — A1 rested, then F1's ask woke it
-    let ledger = twoThreads([], []);
+    // Arrange — A1's line only repeats F1's card ask; A1 rested, then F1's ask woke it
+    let ledger = twoThreads([], [], 'Try it: Badge');
     ledger = ok(
       applyAgendaCommand(ledger, { action: 'rest', actor: AGENT, id: 'A1', why: 'checking', at: minute(2) }),
     ).ledger;

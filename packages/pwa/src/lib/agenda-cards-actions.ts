@@ -1,5 +1,5 @@
 /**
- * THE THREE BUTTONS OF A CARD IN A NOTICE (`AgendaItem.cards`), as the board's own writes: Open goes to the
+ * WHAT A NOTICE'S CARDS FORM DOES (`AgendaItem.cards`, one Send for every card's pick), as the board's own writes: Open goes to the
  * card's page, Start a ferret is `POST /v1/board/tasks/:id/start` (a NEW ferret on the card, or the one that already holds it), Close is the board's drop with the
  * reason the owner confirmed. Nothing here is a second path to the daemon: each is the verb the board page uses,
  * so the daemon's authorization applies to it exactly as it does there, and a refusal comes back in its words.
@@ -22,6 +22,8 @@ export const agendaCardsActions = (
   // answers a repeat with the first result), dropped once the daemon has answered, so a later click is new work.
   const pending = new Map<BoardTaskId, string>();
   return {
+    cardPath: id => daemonBoardCardPath(daemonId, id),
+    chatPath: sessionId => daemonSessionPath(daemonId, sessionId),
     open: id => onNavigate(daemonBoardCardPath(daemonId, id)),
     start: async id => {
       const key = pending.get(id) ?? crypto.randomUUID();

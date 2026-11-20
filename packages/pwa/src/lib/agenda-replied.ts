@@ -20,7 +20,7 @@
  * holds the entries and the two ports it needs to take things back.
  */
 
-import type { AgendaItem } from '@ferretry/protocol';
+import { type AgendaItem, openCardAsks } from '@ferretry/protocol';
 import { browserDeferredTimers, type DeferredTimers, type InboxCard, UNDO_WINDOW_MS } from './agenda-inbox.ts';
 import { isGateItem } from './gate-items.ts';
 
@@ -186,8 +186,14 @@ export const withRepliedParked = (parked: readonly InboxCard[], state: RepliedSt
   );
 };
 
-/** An item a reply parks: not a notice (read, never replied to) and not a gate item (only the owner's answer moves it). */
-export const parksOnReply = (item: AgendaItem): boolean => item.notice !== true && !isGateItem(item);
+/**
+ * An item a reply parks: not a notice (read, never replied to), not a gate item (only the owner's answer moves it), and
+ * not one with a card ask still waiting on the owner (a try-it behind a question the owner just answered in words): the
+ * daemon keeps that item in Needs you — the one rule it rests by (`restedOnAnswer`) — so hiding it here would hide the
+ * try-it that is now the ask.
+ */
+export const parksOnReply = (item: AgendaItem): boolean =>
+  item.notice !== true && !isGateItem(item) && !openCardAsks(item).some(ask => ask.notYet === undefined);
 
 export class RepliedAgenda {
   #state: RepliedState = EMPTY;
