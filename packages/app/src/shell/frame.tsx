@@ -178,7 +178,8 @@ export function Frame() {
   const closeBar = useCallback(() => setBar(current => ({ ...current, open: false })), []);
   const findRef = useRef<HTMLButtonElement | null>(null);
   useFindShortcut(findRef, openBar);
-  useDrawerShortcut();
+  // Cmd/Ctrl+B has no drawer to toggle on a chrome-less screen, and must not change the remembered rail setting there.
+  useDrawerShortcut(!bare);
   // The visible height (`--app-h`) and the keyboard-open attribute every screen lays itself out by, as today.
   useAppViewport();
   // The frame root, handed to the shell's own overlays (the machine picker, S10) so they draw above every plugin sheet.

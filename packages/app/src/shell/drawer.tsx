@@ -22,11 +22,16 @@ import { SideBody, useSideHolds } from './side-column.tsx';
  * place chosen or the close button shut it.
  */
 
-/** The cmd/ctrl+B shortcut: toggles the drawer, except while the person is typing in a field (a composer keeps its own keys). */
-export function useDrawerShortcut(): void {
+/**
+ * The cmd/ctrl+B shortcut: toggles the drawer, except while the person is typing in a field (a composer keeps its own keys).
+ * `enabled` is false on a chrome-less screen (no drawer is drawn there): the shortcut then does nothing and never writes the
+ * remembered rail setting.
+ */
+export function useDrawerShortcut(enabled = true): void {
   const { viewport, plan } = useShell();
   const byDefault = plan.nav.style === 'rail';
   useEffect(() => {
+    if (!enabled) return;
     const onKey = (event: KeyboardEvent): void => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'b')
         return;
@@ -38,7 +43,7 @@ export function useDrawerShortcut(): void {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [viewport, byDefault]);
+  }, [viewport, byDefault, enabled]);
 }
 
 export function Drawer({
