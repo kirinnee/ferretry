@@ -10,8 +10,8 @@
  *   ?style=off|fix|polish   the machine's saved clean-up style (default: fix)
  *   ?theme=<family>-<mode>   ?engine=<id>   the chosen engine (default: sherpa-zipformer-en)   ?off=1  dictation off
  *
- * The shell is the real one, so the panel is as wide as a person gets it: about 212 px at a 768 px window, because the
- * drawer, the side column and the settings list take the rest.
+ * The shell is the real one, so the panel is as wide as a person gets it: at a 768 px window the settings list stands
+ * ABOVE the panel and the panel is at least 480 px wide (it was about 212 px when the list sat beside it).
  */
 
 import { useState } from 'react';

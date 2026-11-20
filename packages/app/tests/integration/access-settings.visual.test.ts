@@ -1,6 +1,6 @@
 /**
  * ACCESS SETTINGS in the REAL Settings shell (`fixtures/access-settings-register.ts` over `fixtures/settings-shell-scene.tsx`: the real `App`, the real nav, the real
- * panel width) over one fake machine. Checked at 768 (where the real panel is about 212px wide), 1280 and 390, light and dark:
+ * panel width) over one fake machine. Checked at 768 (where the settings list stands above a panel of at least 480px), 1280 and 390, light and dark:
  *  - the layout answers to the SETTINGS PANEL's width, never the window: `.fy-acc` is a size container, and the pairing code's
  *    QR sits beside its facts only when the panel is wide enough (so at a 768px window it is stacked);
  *  - one level of surface: no bordered box inside another bordered box;
@@ -210,8 +210,8 @@ describe('Access settings, in the real Settings shell, over a fake machine', () 
             expect(m.nested).toEqual([]);
             expect(m.clipped).toEqual([]);
             expect(m.small).toEqual([]);
-            // The real panel is narrow at 768 (nav + side column + drawer take the window) and wide at 1280.
-            if (viewport.name === '768') expect(m.panel).toBeLessThan(400);
+            // At 768 the settings list stands above the panel (not beside it), which is at least 480px; at 1280 it is wider still.
+            if (viewport.name === '768') expect(m.panel).toBeGreaterThanOrEqual(480);
             if (viewport.name === '1280') expect(m.panel).toBeGreaterThan(480);
           } finally {
             await context.close();

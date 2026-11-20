@@ -1,7 +1,7 @@
 /**
  * THE LOOK GROUP inside the REAL Settings shell (`fixtures/settings-shell-scene.tsx`: the real App, its default
  * drawer and its Settings list), measured against the PANEL the shell leaves the page and not against the document (which stays
- * 0 wide when a panel clips). A 768px window with the drawer and the list open leaves the panel 212px, which the standalone
+ * 0 wide when a panel clips). A 768px window stacks the list above the panel, which is at least 480px wide (it was 212px beside the list), a width the standalone
  * scene (`appearance.visual.test.ts`) never reproduces. At 768, 1280 and 390, light and dark: every text and control box is
  * inside the panel, nothing overlaps, and the specimen's input and its focus ring are not cut.
  *
@@ -172,9 +172,9 @@ describe('Settings › This device › Look, inside the real shell', () => {
       const { tab, problems, close } = await open(variant);
       try {
         if (variant.width === 768) {
-          // The case this test exists for: the drawer and the Settings list are both open, so the panel is narrow.
+          // The case this test exists for: the Settings list stands above the panel, and the panel is at least 480px.
           const width = await tab.locator('.fy-settings-page').evaluate(node => node.getBoundingClientRect().width);
-          expect(width, 'the panel is the narrow one a 768 window leaves').toBeLessThan(300);
+          expect(width, 'the panel is the stacked one a 768 window leaves').toBeGreaterThanOrEqual(480);
         }
         await tab.waitForTimeout(400);
         if (shotsDir !== '') {
