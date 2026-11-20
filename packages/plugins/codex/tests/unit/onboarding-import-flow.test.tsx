@@ -67,6 +67,8 @@ function setup(options: {
     if (route in table) return table[route];
     // The one remaining write: a step's answer, `POST /v1/onboarding/:plugin/:stepId`.
     const params = (request as { params?: { stepId?: string }; body?: { state?: string } } | undefined) ?? {};
+    // Any other route (a read this page does not depend on) answers empty and is never an answer to a step.
+    if (params.params?.stepId === undefined) return {};
     written.push({ step: params.params?.stepId ?? '', state: params.body?.state ?? '' });
     return { ...steps[0], state: params.body?.state };
   };
@@ -136,8 +138,26 @@ const arrow = async (key: 'ArrowRight' | 'ArrowLeft' | 'Home' | 'End'): Promise<
   await settle();
 };
 
-/** The explicit Continue of a recovered chooser whose pick has a body to show (the pick alone never hands over). */
-const proceed = () => press('[data-returned-continue]');
+/** An arrow key pressed on the page body (a checklist has no radio group): it must move nothing and write nothing. */
+const arrowOnPage = async (key: 'ArrowRight' | 'ArrowLeft' | 'Home' | 'End'): Promise<void> => {
+  const target = query('[data-flow-page]') ?? view?.container;
+  await interact(
+    () => void target?.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })),
+  );
+  await settle();
+};
+
+/** The checklist a kind page draws: every row's checkbox, and which are ticked. */
+const boxes = (): HTMLInputElement[] => [
+  ...(view?.container.querySelectorAll<HTMLInputElement>('[data-found-item] input[type="checkbox"]') ?? []),
+];
+/** No chooser of any kind is on screen (the recovered chooser is gone for good). */
+const noChooser = (): void => {
+  expect(query('[data-returned]')).toBeNull();
+  expect(query('[data-returned-continue]')).toBeNull();
+  expect(query('[data-codex-step="import-choice"]')).toBeNull();
+  expect(query('[data-choice="everything"], [data-choice="choose"], [data-choice="fresh"]')).toBeNull();
+};
 
 const START_AT_CHOICE = ['installed', 'sign-in'];
 
@@ -174,76 +194,65 @@ describe('the Codex import pages in the setup flow', () => {
     expect(run.written.filter(entry => entry.state === 'skipped')).toEqual([]);
   });
 
-  test('a reload mid-run asks again, then the pages Everything does not need are passed over', async () => {
-    // The run was left after the choice: the choice is answered, the memory of it is gone.
+  test('a reload mid-run shows the Settings checklist as in Customize, every item ticked, never a chooser', async () => {
+    // The run was left after the choice: the choice is answered, the memory of it is gone, Settings is the first pending page.
     const run = setup({ answered: [...START_AT_CHOICE, 'import-choice'] });
     view = await mount(run.tree);
     await settle();
     expect(pageKey()).toBe('codex.import-settings');
-    expect(query('[data-returned]')).not.toBeNull();
-    await choose('everything');
-    // A pick is local: the page that showed the choice stays (Next answers it), the pages after it are passed over.
+    noChooser();
+    expect(boxes().length).toBeGreaterThan(0);
+    expect(boxes().every(box => box.checked)).toBe(true);
+    expect(query('[data-import-run]')).toBeNull();
+    // Arrow keys write nothing and navigate nowhere.
+    await arrowOnPage('ArrowRight');
+    await arrowOnPage('End');
     expect(pageKey()).toBe('codex.import-settings');
-    expect(query('[data-returned]')).not.toBeNull();
     expect(run.written).toEqual([]);
+    // Only the footer Next answers the page, and it records exactly the page that was shown.
     await next();
-    expect(pageKey()).toBe('codex.conversations');
-    expect(query('[data-import-kind]')).toBeNull();
-    await next();
-    expect(pageKey()).toBe('codex.import-run');
-    expect(query('[data-import-run]')).not.toBeNull();
-    expect(run.written.filter(entry => entry.state === 'skipped')).toEqual([]);
+    expect(run.written.find(entry => entry.step === 'import-settings')?.state).toBe('done');
+    expect(pageKey()).toBe('codex.import-model-set');
+    noChooser();
+    expect(boxes().length).toBeGreaterThan(0);
   });
 
-  test('after a reload Everything is one page and Back from Conversations lands on the choice, which can change the answer', async () => {
+  test('after a reload every kind page shows its checklist in turn, and the proposal has no skip nobody chose', async () => {
     const run = setup({ answered: [...START_AT_CHOICE, 'import-choice'] });
     view = await mount(run.tree);
     await settle();
-    expect(pageKey()).toBe('codex.import-settings');
-    await choose('everything');
-    expect(pageKey()).toBe('codex.import-settings');
-    await next();
-    expect(pageKey()).toBe('codex.conversations');
-    // The page that showed the choice is in the Back trail, so Conversations has a Back.
-    expect(query('[data-step-back]')).not.toBeNull();
-    await back();
-    expect(pageKey()).toBe('codex.import-settings');
-    expect(query('[data-returned]')).not.toBeNull();
-    expect(query('[data-choice="everything"] input:checked')).not.toBeNull();
-    // Change the answer here: the checklist takes over this very page.
-    await choose('choose');
-    expect(pageKey()).toBe('codex.import-settings');
-    expect(query('[data-found-item]')).toBeNull();
-    await proceed();
-    expect(query('[data-found-item]')).not.toBeNull();
     for (const id of KIND_STEPS) {
       expect(pageKey()).toBe(`codex.${id}`);
+      expect(query(`[data-codex-step="${id}"] [data-found-item]`)).not.toBeNull();
+      noChooser();
       await next();
     }
     expect(pageKey()).toBe('codex.conversations');
+    await next();
+    expect(pageKey()).toBe('codex.import-run');
+    expect(query('[data-import-unreviewed]')).toBeNull();
+    await press('[data-import-run]');
+    expect(run.proposals).toHaveLength(1);
+    expect(run.proposals[0]?.skip ?? []).toEqual([]);
     expect(run.written.filter(entry => entry.state === 'skipped')).toEqual([]);
   });
 
-  test('selecting a choice, arrow keys included, writes nothing and never leaves the page', async () => {
-    // Only the import steps are still to ask: the case where every page after the choice is passed over.
-    const run = setup({ answered: [...START_AT_CHOICE, 'import-choice', 'conversations', 'permission'] });
+  test('after a reload, Back from Models reaches the Settings checklist again with its picks kept, and no chooser', async () => {
+    const run = setup({ answered: [...START_AT_CHOICE, 'import-choice'] });
     view = await mount(run.tree);
     await settle();
     expect(pageKey()).toBe('codex.import-settings');
-    await choose('fresh');
-    expect(pageKey()).toBe('codex.import-settings');
-    expect(run.written).toEqual([]);
-    await arrow('Home');
-    expect(query('[data-choice="everything"] input:checked')).not.toBeNull();
-    expect(pageKey()).toBe('codex.import-settings');
-    await arrow('End');
-    expect(query('[data-choice="fresh"] input:checked')).not.toBeNull();
-    expect(pageKey()).toBe('codex.import-settings');
-    expect(query('[data-flow-end]')).toBeNull();
-    expect(run.written).toEqual([]);
-    // Only Next moves on and records: the shown page is done, the passed-over ones are told skipped at the end.
+    const first = boxes()[0];
+    const id = first?.closest('[data-found-item]')?.getAttribute('data-found-item');
+    await interact(() => first?.click()); // untick the first row
     await next();
-    expect(run.written.find(entry => entry.step === 'import-settings')?.state).toBe('done');
+    expect(pageKey()).toBe('codex.import-model-set');
+    expect(query('[data-step-back]')).not.toBeNull();
+    await back();
+    expect(pageKey()).toBe('codex.import-settings');
+    noChooser();
+    expect(query(`[data-found-item="${id}"] input`)?.hasAttribute('checked') ?? false).toBe(false);
+    expect((query<HTMLInputElement>(`[data-found-item="${id}"] input`) as HTMLInputElement).checked).toBe(false);
   });
 
   test('the first choice (import-choice) selected by arrow keys writes nothing and stays', async () => {
@@ -256,54 +265,6 @@ describe('the Codex import pages in the setup flow', () => {
     expect(query('[data-choice="fresh"] input:checked')).not.toBeNull();
     expect(pageKey()).toBe('codex.import-choice');
     expect(run.written).toEqual([]);
-  });
-
-  test('the recovered chooser holds on an arrow key in every mode: Customize with an empty kind records nothing', async () => {
-    // import-mcp is the first pending step and the scan holds no MCP servers: the body would record a skip at once.
-    const run = setup({ answered: [...START_AT_CHOICE, 'import-choice', ...KIND_STEPS.slice(0, 4)], noMcp: true });
-    view = await mount(run.tree);
-    await settle();
-    expect(pageKey()).toBe('codex.import-mcp');
-    await arrow('ArrowRight'); // Customize
-    expect(query('[data-choice="choose"] input:checked')).not.toBeNull();
-    expect(query('[data-returned]')).not.toBeNull();
-    expect(pageKey()).toBe('codex.import-mcp');
-    expect(run.written).toEqual([]);
-    // The chooser is still there to change the answer.
-    await arrow('ArrowRight'); // Fresh
-    expect(query('[data-choice="fresh"] input:checked')).not.toBeNull();
-    expect(query('[data-returned]')).not.toBeNull();
-    expect(run.written).toEqual([]);
-    await arrow('Home');
-    expect(query('[data-choice="everything"] input:checked')).not.toBeNull();
-    expect(run.written).toEqual([]);
-  });
-
-  test('a recovered chooser with a non-empty scan keeps the chooser when Customize is picked, until Continue', async () => {
-    const run = setup({ answered: [...START_AT_CHOICE, 'import-choice'] });
-    view = await mount(run.tree);
-    await settle();
-    await arrow('ArrowRight'); // Customize
-    expect(pageKey()).toBe('codex.import-settings');
-    expect(query('[data-returned]')).not.toBeNull();
-    expect(query('[data-found-item]')).toBeNull();
-    await arrow('End'); // the person changes their mind: still possible
-    expect(query('[data-choice="fresh"] input:checked')).not.toBeNull();
-    expect(query('[data-returned-continue]')).toBeNull();
-    expect(run.written).toEqual([]);
-  });
-
-  test('the recovered Everything choice returns on Back after Next', async () => {
-    const run = setup({ answered: [...START_AT_CHOICE, 'import-choice'] });
-    view = await mount(run.tree);
-    await settle();
-    await arrow('Home');
-    expect(query('[data-returned]')).not.toBeNull();
-    expect(run.written).toEqual([]);
-    await next();
-    expect(pageKey()).toBe('codex.conversations');
-    await back();
-    expect(query('[data-returned]')).not.toBeNull();
   });
 
   test('a refused import leaves Back and Later working, and the person can retry', async () => {
@@ -321,9 +282,7 @@ describe('the Codex import pages in the setup flow', () => {
     view = await mount(run.tree);
     await settle();
     expect(pageKey()).toBe('codex.import-run');
-    await choose('everything');
-    expect(query('[data-import-run]')).toBeNull();
-    await proceed();
+    noChooser();
     expect(query('[data-import-run]')).not.toBeNull();
     // Before anything is pressed nothing is held: the person may go Back or choose Later.
     expect(query<HTMLButtonElement>('[data-flow-later]')?.disabled).toBe(false);
@@ -338,17 +297,13 @@ describe('the Codex import pages in the setup flow', () => {
     await act(async () => undefined);
   });
 
-  test('after a reload the run page imports what the CURRENT picks say: an unticked item is in the skip list', async () => {
-    // The run was left after the first four kind pages; the memory of every pick is gone, so the choice is asked again.
+  test('after a reload the run page imports what the shown pages say: an unticked item is in the skip list, nothing else is', async () => {
+    // The run was left after the first four kind pages; the memory of every pick is gone and MCP is the page to show.
     const run = setup({ answered: [...START_AT_CHOICE, 'import-choice', ...KIND_STEPS.slice(0, 4)] });
     view = await mount(run.tree);
     await settle();
     expect(pageKey()).toBe('codex.import-mcp');
-    expect(query('[data-returned]')).not.toBeNull();
-    await choose('choose');
-    expect(pageKey()).toBe('codex.import-mcp');
-    expect(query('[data-found-item]')).toBeNull();
-    await proceed();
+    noChooser();
     const box = query<HTMLInputElement>('[data-found-item="codex:mcp:notes"] input[type="checkbox"]');
     expect(box).not.toBeNull();
     await interact(() => box?.click());
@@ -356,11 +311,37 @@ describe('the Codex import pages in the setup flow', () => {
     expect(pageKey()).toBe('codex.conversations');
     await next();
     expect(pageKey()).toBe('codex.import-run');
-    // The four pages that were answered before the reload are not reviewed again, and the page says so.
-    expect(query('[data-import-unreviewed]')?.textContent).toContain('Settings');
+    // The four pages answered before the reload were never shown again: nobody left them out, so they are not left out.
+    expect(query('[data-import-unreviewed]')).toBeNull();
     await press('[data-import-run]');
     expect(run.proposals).toHaveLength(1);
-    expect(run.proposals[0]?.skip).toContain('codex:mcp:notes');
+    expect(run.proposals[0]?.skip).toEqual(['codex:mcp:notes']);
+  });
+
+  test('after a reload a kind the scan holds nothing of passes itself over, and no chooser is drawn first', async () => {
+    const run = setup({ answered: [...START_AT_CHOICE, 'import-choice', ...KIND_STEPS.slice(0, 4)], noMcp: true });
+    view = await mount(run.tree);
+    await settle();
+    noChooser();
+    expect(pageKey()).toBe('codex.conversations');
+  });
+
+  test('Import everything, Back, Customize: the pages show and Next records them done', async () => {
+    const run = setup({ answered: START_AT_CHOICE });
+    view = await mount(run.tree);
+    await settle();
+    await next(); // everything: the five kind pages are passed over
+    expect(pageKey()).toBe('codex.conversations');
+    await back();
+    expect(pageKey()).toBe('codex.import-choice');
+    await choose('choose');
+    expect(pageKey()).toBe('codex.import-choice');
+    await next();
+    for (const id of KIND_STEPS) {
+      expect(pageKey()).toBe(`codex.${id}`);
+      await next();
+    }
+    for (const id of KIND_STEPS) expect(run.written.find(entry => entry.step === id)?.state).toBe('done');
   });
 
   test('Settings left out and then put back on Back keeps the models: the run page follows the final answers', async () => {

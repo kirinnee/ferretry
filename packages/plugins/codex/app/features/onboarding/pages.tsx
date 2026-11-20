@@ -5,8 +5,8 @@
  * step never hangs the flow under its loading cover. No host (the panel drawn outside the setup flow) draws nothing.
  */
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
-import { createElement, type ReactElement, useEffect, useState } from 'react';
-import { choiceShownOn, type ImportMode, ImportChoicePage, rememberedImportMode } from './import-choice-page.tsx';
+import { createElement, type ReactElement, useEffect } from 'react';
+import { ImportChoicePage } from './import-choice-page.tsx';
 import { IMPORT_PAGES } from './import/index.ts';
 import { InstalledPage } from './installed-page.tsx';
 import type { OnboardingClient, StepHost } from './onboarding-api.ts';
@@ -31,41 +31,6 @@ function NoPageYet({ step }: { readonly step: StepHost }) {
   return null;
 }
 
-/** The steps that act on the person's answer at `import-choice`: every `import-*` step but the choice itself. */
-const readsImportChoice = (id: string): boolean => id.startsWith('import-') && id !== 'import-choice';
-
-/** Whether step `id` draws something for `mode`: the run page for everything and choose, a kind page for choose only. */
-const drawsFor = (id: string, mode: ImportMode): boolean =>
-  id === 'import-run' ? mode !== 'fresh' : mode === 'choose';
-
-/**
- * An import step with no remembered `importMode` (a reload since the choice was answered) brings the choice back before
- * anything else: it neither runs, skips, nor is answered by default until the person has chosen. A pick is local state only
- * (contract rule 7): the page that SHOWED the chooser is never passed over in that visit, and the chooser HOLDS in every mode
- * (Everything, Customize, Fresh) until the person acts: Next answers it and moves on, and where the step has a body to show for
- * the pick, an explicit Continue hands over to it (the pick alone never does, so nothing is read or recorded by an arrow key).
- * Back to a step that showed the chooser draws the chooser again when its body would draw nothing, so the person can change the
- * answer.
- */
-function AfterChoice({
-  id,
-  step,
-  body,
-}: {
-  readonly id: string;
-  readonly step: StepHost;
-  readonly body: () => ReactElement;
-}) {
-  const [swapped, setSwapped] = useState(false);
-  const remembered = rememberedImportMode(step);
-  const [asked] = useState(() => remembered === undefined || (choiceShownOn(step, id) && !drawsFor(id, remembered)));
-  if (!asked || swapped) return body();
-  return createElement(ImportChoicePage, {
-    step,
-    returned: { stepId: id, continues: mode => drawsFor(id, mode), onContinue: () => setSwapped(true) },
-  });
-}
-
 function WithHost({
   step,
   draw,
@@ -82,8 +47,5 @@ export const stepBody =
   ({ step }) =>
     createElement(WithHost, {
       step,
-      draw: host => {
-        const body = (): ReactElement => PAGES[id]?.(client, host) ?? createElement(NoPageYet, { step: host });
-        return readsImportChoice(id) ? createElement(AfterChoice, { id, step: host, body }) : body();
-      },
+      draw: host => PAGES[id]?.(client, host) ?? createElement(NoPageYet, { step: host }),
     });

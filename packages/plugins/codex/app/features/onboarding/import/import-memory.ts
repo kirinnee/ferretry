@@ -3,8 +3,9 @@
  * plugin's SEGMENT memory (`StepHost.segment`): this run only, in memory, never browser storage. Each kind page leaves one
  * entry (`review.<kind>`) saying what the person left out there; the run page reads them all.
  *
- * A kind with no entry was never reviewed in this run (a reload since, or a page that was skipped past): the run page leaves
- * its items OUT, so nothing is brought over that the person did not see. Pure: names and ids only, never a value.
+ * A kind with no entry was never reviewed in this run (a page that was skipped past): in a `choose` run the run page leaves
+ * its items OUT, so nothing is brought over that the person did not see. After a reload (no `importMode`) it is not left out:
+ * only what a shown page unticked is. Pure: names and ids only, never a value.
  */
 import type { StepHost } from '../onboarding-api.ts';
 import { type ImportItemId, ImportItemIdSchema } from '@ferretry/plugin-runtimes/contract';
@@ -71,11 +72,19 @@ export const rememberReview = (step: StepHost, kind: ImportKind, review: Review)
 export const RUN_KEY = 'scanRun';
 export const newRunKey = (): string => `codex-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-export type ImportMode = 'everything' | 'choose';
+/**
+ * How this run imports. `recovered` is a run whose `importMode` is missing (a reload dropped the run's memory): nothing was
+ * chosen in THIS run, so the kind pages show their checklists as in Customize and the run page builds its plan from what
+ * they answered.
+ */
+export type ImportMode = 'everything' | 'choose' | 'recovered';
 
-/** `everything` or `choose` when the person is importing; `undefined` for `fresh` or no answer (nothing is imported then). */
-export const importingMode = (segment: StepHost['segment']): ImportMode | undefined =>
-  segment.importMode === 'everything' || segment.importMode === 'choose' ? segment.importMode : undefined;
+/** The mode when something is imported; `undefined` only for `fresh`, which the person chose in this run. */
+export const importingMode = (segment: StepHost['segment']): ImportMode | undefined => {
+  const said = segment.importMode;
+  if (said === 'fresh') return undefined;
+  return said === 'everything' || said === 'choose' ? said : 'recovered';
+};
 
 export interface ImportPlan {
   /** The one change the run page applies. */
@@ -93,7 +102,8 @@ const SETTINGS_ID = (model: ToolModel): ImportItemId => `${model.harness}:settin
 
 /**
  * The change for what was chosen. `everything` leaves nothing out. `choose` leaves out what each page's person unticked, and
- * everything on a kind that was never reviewed. Leaving the settings out also leaves out the models those settings name (what the
+ * everything on a kind that was never reviewed. `recovered` (a reload dropped the mode) leaves out only what the pages shown
+ * since then had unticked: a kind never shown is not left out, because nobody left it out. Leaving the settings out also leaves out the models those settings name (what the
  * r9 wizard does for the same choice), and only a GitHub-token variable the person ticked is brought, and only while the
  * environment itself is.
  */
@@ -104,10 +114,13 @@ export function importPlan(model: ToolModel, mode: ImportMode, segment: StepHost
   const taken = Object.fromEntries(IMPORT_KINDS.map(kind => [kind, 0])) as Record<ImportKind, number>;
   for (const kind of IMPORT_KINDS) {
     const ids = kindItemIds(model, kind);
-    const review = mode === 'choose' ? reviewOf(segment, kind) : { left: [], env: [] };
+    const review = mode === 'everything' ? { left: [], env: [] } : reviewOf(segment, kind);
     if (review === undefined) {
-      if (ids.length > 0) unreviewed.push(kind);
-      for (const id of ids) skip.add(id);
+      // A kind never shown in a `choose` run is left out; in a recovered run nothing was left out by anybody, so it is not.
+      if (mode === 'choose') {
+        if (ids.length > 0) unreviewed.push(kind);
+        for (const id of ids) skip.add(id);
+      }
       continue;
     }
     for (const id of review.left) if (ids.includes(id)) skip.add(id);

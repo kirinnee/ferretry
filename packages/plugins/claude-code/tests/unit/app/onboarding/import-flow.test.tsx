@@ -220,7 +220,8 @@ describe('the Claude import pages inside the real setup flow', () => {
       answered: ['import-choice', 'import-settings', 'import-model-set', 'import-instructions', 'import-skills'],
     }).then(async ({ wire }) => {
       expect(pageKey()).toBe(pageOf('import-mcp'));
-      expect(root().querySelector('[data-import-lost]')).not.toBeNull();
+      expect(root().querySelector('[data-import-lost]')).toBeNull();
+      expect(root().querySelector('[data-found-item="claude-code:mcp:issues"] input')).not.toBeNull();
       await press('[data-found-item="claude-code:mcp:issues"] input');
       await next(); // conversations
       await next(); // the final page

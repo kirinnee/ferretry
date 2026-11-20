@@ -2,9 +2,11 @@
  * The five "choose what to import" pages (settings, models, AGENTS.md, skills, MCP servers), one component for all of them.
  * Each shows what the scan found of its ONE kind as a checklist with what each thing becomes, and says nothing else.
  *
- * It follows the CURRENT `importMode`, never a choice that can still change: when the person did not choose what to import at
- * `import-choice` it reads nothing, draws nothing and calls `notNeeded()` (contract rule 7), so Import everything is ONE page
- * (the run page) and not five notice pages. It never `skip()`s for that: a skip is recorded and the page would be gone for the
+ * It follows the CURRENT `importMode`, never a choice that can still change: when the person chose Import everything or Start
+ * fresh in this run it reads nothing, draws nothing and calls `notNeeded()` (contract rule 7), so Import everything is ONE page
+ * (the run page) and not five notice pages. A run with no `importMode` at all (a reload dropped the memory) draws the checklist
+ * exactly as Customize does, every item ticked as Import everything would bring it: never a chooser, never a Continue. Every
+ * shown page is answered only by its own footer Next; a tick writes the segment memory and nothing else. It never `skip()`s for that: a skip is recorded and the page would be gone for the
  * rest of the run, so Back -> Customize could not reach it; the `notNeeded` mark is this run's only and is cleared when the
  * mode changes. It skips itself (`not-needed`) only when the scan found
  * nothing of its kind, which no choice here changes. Nothing is written here: what is left unticked is the segment memory (`review.<kind>`),
@@ -28,7 +30,7 @@ const LEAD: Readonly<Record<ImportKind, string>> = {
 };
 
 /**
- * Not choosing (everything, or fresh): the page has nothing to ask and reads nothing. It is passed over for THIS run
+ * Not choosing (everything, or fresh in this run): the page has nothing to ask and reads nothing. It is passed over for THIS run
  * (`notNeeded`, never `skip`, which would persist and drop it for the run), and a later Back -> Customize clears the mark
  * because the mode changed, so the page is there again.
  */
@@ -48,7 +50,8 @@ export function KindPage({
   readonly step: StepHost;
   readonly kind: ImportKind;
 }) {
-  return importingMode(step.segment) === 'choose' ? (
+  const mode = importingMode(step.segment);
+  return mode === 'choose' || mode === 'recovered' ? (
     <KindBody client={client} step={step} kind={kind} />
   ) : (
     <NotChoosing step={step} />

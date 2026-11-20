@@ -71,10 +71,12 @@ describe('each kind page decides for itself', () => {
       expect(view.container.querySelector(`[data-onboarding-step="claude-code.import-${kind}"]`)).not.toBeNull();
     });
 
-    it(`${kind}: after a reload (no memory) it does not skip: it shows the list and says why`, async () => {
+    it(`${kind}: after a reload (no memory) it does not skip: it shows its checklist as in Customize, with no chooser and no extra button`, async () => {
       const { run, view } = await open(PAGES[kind], {});
       expect(run.events).toEqual(['ready']);
-      expect(view.container.querySelector('[data-import-lost]')?.textContent).toContain('reloaded');
+      expect(view.container.querySelector('[data-import-lost]')).toBeNull();
+      expect(view.container.querySelector('[role="radiogroup"], [data-returned]')).toBeNull();
+      expect(view.container.querySelector('[data-found-item] input:not(:checked)')).toBeNull();
     });
   }
 

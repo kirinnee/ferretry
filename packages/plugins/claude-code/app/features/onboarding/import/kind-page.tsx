@@ -10,8 +10,8 @@
  *     is ONE page (the run page), not five notice pages. Nothing is recorded; Back -> Choose what to import clears the
  *     mark (the mode changed), so the pages are there again.
  *   - the model set while its settings are left out: it stays, saying the models come from the settings.
- *   - `importMode` is MISSING (a reload dropped the run's memory): it shows the list so the person chooses again, and
- *     says why.
+ *   - `importMode` is MISSING (a reload dropped the run's memory): it shows its checklist exactly as in Customize, every
+ *     item ticked as Import everything would bring it. No chooser, no extra button: only the footer Next answers it.
  */
 import { Button } from '@ferretry/app';
 import { FoundKindList, type ImportKind, kindFound, useHarnessScan } from '@ferretry/plugin-runtimes/import-kit';
@@ -32,9 +32,6 @@ const LINE: Readonly<Record<ImportKind, string>> = {
 
 const NEEDS_SETTINGS =
   'Not imported: you left your settings out, and the models come from them. Go back to the Settings page to bring them in.';
-
-const LOST =
-  'This page was reloaded, so Ferretry no longer knows what you chose earlier. Pick what to bring over again.';
 
 function KindPage({ client, step, kind }: StepPageProps<ClaudeCodeClient> & { readonly kind: ImportKind }) {
   const { read, model, look } = useHarnessScan(client, HARNESS, SCAN_RUN);
@@ -88,11 +85,6 @@ function KindPage({ client, step, kind }: StepPageProps<ClaudeCodeClient> & { re
           {kind === 'model-set' && settingsLeft ? (
             <p className="cc-step__line" data-needs-settings="">
               {NEEDS_SETTINGS}
-            </p>
-          ) : null}
-          {mode === undefined ? (
-            <p className="cc-step__line" role="note" data-import-lost="">
-              {LOST}
             </p>
           ) : null}
           {kind === 'model-set' && settingsLeft ? null : kindFound(model, kind) ? (

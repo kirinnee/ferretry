@@ -39,10 +39,12 @@
  *      WHEN IT IS HONOURED: `notNeeded()` is honoured ONLY when a page calls it on MOUNT, before it has drawn its own content
  *      (before any `ready()` or `busy(label)` in that visit): the page is passing over. A page that has been SHOWN (it drew a
  *      question or a chooser) can NEVER become not needed in that visit: the shell ignores the call, a selection on such a page
- *      changes local state and the segment memory only, and only Next moves on and records. A page that was shown always enters
- *      the Back trail, and a chooser selection (arrow keys included) never writes and never navigates. A page that asked a
- *      question and must follow the answer keeps drawing (the chooser stays, or its body takes over); it never calls
- *      `notNeeded()` from the answer.
+ *      changes local state and the segment memory only, and only its own footer Next moves on and records. A page that was shown
+ *      always enters the Back trail, and a selection or tick (arrow keys included) never writes and never navigates. A page
+ *      never draws a question only to hide or replace itself from the answer: it keeps drawing, and never calls `notNeeded()`
+ *      from the answer. A page whose need rests on an answer the run no longer holds (the plugin's memory is empty after a
+ *      reload) does not ask it again inside itself: it draws its ordinary page with every default ticked, and Next answers it
+ *      like any other. "Not needed" therefore only ever follows an answer given earlier in the SAME unbroken run.
  */
 export type { StepHost, StepSegmentMemory } from '@ferretry/kernel/contract';
 

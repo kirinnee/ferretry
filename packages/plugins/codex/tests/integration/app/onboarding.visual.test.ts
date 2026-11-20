@@ -26,7 +26,6 @@ const PAGES = [
   'sign-in',
   'sign-in-checking',
   'import-choice',
-  'import-returned',
   'permission',
   'permission-confirm',
   'permission-unknown',
