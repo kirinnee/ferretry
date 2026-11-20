@@ -78,3 +78,15 @@ test('the theme contract refuses unknown names and values outside the app token 
     ).toBe(true);
   }
 });
+
+test('a stored style-only `contrast` theme keeps High contrast: the removed style reads as Studio in the contrast palette', () => {
+  const item = { id: 'dusk', label: 'Dusk' };
+  expect(ThemeSchema.parse({ ...item, style: 'contrast' })).toMatchObject({ style: 'studio', palette: 'contrast' });
+  // a palette the item names itself still wins; a theme with no style is untouched
+  expect(ThemeSchema.parse({ ...item, style: 'contrast', palette: 'neo' })).toMatchObject({
+    style: 'studio',
+    palette: 'neo',
+  });
+  expect(ThemeSchema.parse({ ...item, style: 'neo' }).palette).toBeUndefined();
+  expect(ThemeSchema.parse(item).palette).toBeUndefined();
+});

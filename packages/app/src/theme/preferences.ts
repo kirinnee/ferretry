@@ -13,8 +13,13 @@
  * colour. A theme ITEM (data, `./tokens.ts`) overrides tokens on top of the theme in force.
  *
  * STORAGE. The record stays `{ format: 1, value }` (`storage/records.ts` knows one format); the VALUE moved from
- * `{ family, mode, textScale }` to `{ style, palette, mode, textScale }`. A stored `family` is read through
- * `lookOfFamily` (the same table `public/pre-paint.js` restates) and rewritten in the new shape on the next change.
+ * `{ family, mode, textScale }` to `{ style, palette, mode, textScale }` and gained `keepPalette` (absent reads as
+ * false). A stored `family` is read through the palette it names; a REMOVED palette id and the removed `contrast` style
+ * read through `REMOVED_PALETTE_IDS` / `currentStyleId` (the tables `public/pre-paint.js` restates) and are rewritten
+ * in the current shape on the next change.
+ *
+ * STYLE → PALETTE. Picking a style also sets that style's `defaultPalette`, unless `keepPalette` is on ("Don't change my
+ * colours when I change style"). Picking a palette never touches the style.
  *
  * PRE-PAINT AGREEMENT. `public/pre-paint.js` resolves the same preference before first paint, so there is no flash
  * of the wrong theme. It and this module MUST agree on the key, the record shape, the accepted values and the
@@ -24,13 +29,14 @@ import { z } from 'zod';
 import { APP_STORAGE } from '../storage/names.ts';
 import { type KeyValueStore, readRecord, writeRecord } from '../storage/records.ts';
 import {
+  currentPaletteId,
+  currentStyleId,
   DEFAULT_PALETTE,
   DEFAULT_STYLE,
-  familyOfPalette,
-  isFamilyId,
-  isPaletteId,
-  isStyleId,
+  defaultPaletteOf,
   lookOfFamily,
+  PALETTES,
+  paletteOfFamily,
   type PaletteId,
   type StyleId,
   type ThemeFamilyId,
@@ -59,55 +65,36 @@ export const TEXT_SCALE_FACTORS: Readonly<Record<TextScale, number>> = Object.fr
 
 export interface ThemeFamily {
   readonly id: ThemeFamilyId;
-  /** Picker label. */
+  /** Picker label (a colour name). */
   readonly label: string;
-  /** One line on what the family is FOR, not what colour it is. */
+  /** One line on the colours. */
   readonly blurb: string;
 }
 
 /**
- * The single-pick LOOKS the picker still offers until Appearance shows the axes: each is a palette plus the style it was
- * drawn for (`PaletteEntry.suggestedStyle`). Order is the order shown: the four house looks, the accessibility look,
- * then the six characterful palettes. Choosing one sets the style AND the palette; the axes can then be changed apart.
+ * The single-pick LOOKS the pre-axes picker still offers: one per palette (a family id IS a palette id). Choosing one sets
+ * the palette AND the first style that comes with it (`lookOfFamily`).
  */
-export const THEME_FAMILIES: readonly ThemeFamily[] = Object.freeze([
-  { id: 'studio', label: 'Studio', blurb: 'The house look — indigo on cool zinc.' },
-  { id: 'mission', label: 'Mission Control', blurb: 'A ruled instrument grid, square mono controls, cyan hairlines.' },
-  { id: 'neo', label: 'Neo-Brutalism', blurb: 'Hard rules, flat offset shadows, AA-checked.' },
-  { id: 'geist', label: 'Geist', blurb: 'Hairline rules, small precise type, airy engineered minimalism.' },
-  { id: 'contrast', label: 'High Contrast', blurb: 'Maximum legibility, AAA-targeted, no effects.' },
-  { id: 'phosphor', label: 'Phosphor', blurb: 'A CRT terminal: mono everywhere, square, scanlines, wide caps.' },
-  {
-    id: 'blueprint',
-    label: 'Blueprint',
-    blurb: 'Technical drawing — drafting caps on a hairline grid, plates, not boxes.',
-  },
-  {
-    id: 'broadsheet',
-    label: 'Broadsheet',
-    blurb: 'Newsprint: serif at column density, hairline rules, no boxes at all.',
-  },
-  { id: 'wayfinding', label: 'Wayfinding', blurb: 'Transit signage — heavy grotesque, colour bars, huge targets.' },
-  { id: 'ledger', label: 'Ledger', blurb: 'Green-bar accounting paper: banded rows, tabular figures, restrained ink.' },
-  { id: 'ma', label: 'Ma', blurb: 'Extreme restraint — enormous whitespace, one accent per screen.' },
-] as const);
+export const THEME_FAMILIES: readonly ThemeFamily[] = Object.freeze(
+  PALETTES.map(palette => ({ id: palette.id, label: palette.label, blurb: palette.blurb })),
+);
 
 const THEME_MODES: readonly ThemeMode[] = Object.freeze(['system', 'light', 'dark'] as const);
 const TEXT_SCALES: readonly TextScale[] = Object.freeze(['default', 'large', 'larger'] as const);
 
-/** What is stored: the two look axes, the mode preference and the text scale. */
+/** What is stored: the two look axes, the mode preference, the text scale and whether a style change keeps the colours. */
 export interface StoredThemePreference {
   readonly style: StyleId;
   readonly palette: PaletteId;
+  /** True: picking a style leaves the palette alone. Absent in an older record, which reads as false. */
+  readonly keepPalette: boolean;
   readonly mode: ThemeMode;
   readonly textScale: TextScale;
 }
 
 /**
- * What a reader gets: the stored axes plus `family`, the single-pick look the picker shows as selected for the current
- * PALETTE (`familyOfPalette`: the palette itself while it is one of the original eleven, the default look otherwise, so a
- * palette added later needs no entry in the frozen family list). It is derived, never stored, and exists so the pre-split
- * picker keeps working until Appearance shows the axes.
+ * What a reader gets: the stored axes plus `family`, the single-pick look the picker shows as selected: the current
+ * PALETTE. It is derived, never stored, and exists so the pre-split picker keeps working until Appearance shows the axes.
  */
 export interface ThemePreference extends StoredThemePreference {
   readonly family: ThemeFamilyId;
@@ -115,11 +102,17 @@ export interface ThemePreference extends StoredThemePreference {
 
 const withFamily = (stored: StoredThemePreference): ThemePreference => ({
   ...stored,
-  family: familyOfPalette(stored.palette),
+  family: stored.palette,
 });
 
 export const DEFAULT_THEME_PREFERENCE: ThemePreference = Object.freeze(
-  withFamily({ style: DEFAULT_STYLE, palette: DEFAULT_PALETTE, mode: 'system', textScale: 'default' }),
+  withFamily({
+    style: DEFAULT_STYLE,
+    palette: DEFAULT_PALETTE,
+    keepPalette: false,
+    mode: 'system',
+    textScale: 'default',
+  }),
 );
 
 const isMode = (value: unknown): value is ThemeMode =>
@@ -129,22 +122,28 @@ const isTextScale = (value: unknown): value is TextScale =>
 
 /**
  * The stored preference (inside `{ format: 1, value }`). Each field falls back on its own. A pre-split value carries
- * `family` instead of `style` + `palette`: it is read through the family table, and an explicit `style` / `palette`
- * beside it wins.
+ * `family` instead of `style` + `palette`: it is read through the palette it names, and an explicit `style` / `palette`
+ * beside it wins. A removed palette id reads as its kept one; the removed `contrast` style reads as Studio in the High
+ * contrast palette (always: the style WAS the accessibility choice).
  */
 export const ThemePreferenceSchema = z
   .looseObject({
     family: z.unknown().optional(),
     style: z.unknown().optional(),
     palette: z.unknown().optional(),
+    keepPalette: z.unknown().optional(),
     mode: z.string().transform(value => (isMode(value) ? value : DEFAULT_THEME_PREFERENCE.mode)),
     textScale: z.string().transform(value => (isTextScale(value) ? value : DEFAULT_THEME_PREFERENCE.textScale)),
   })
   .transform((value): StoredThemePreference => {
-    const fromFamily = isFamilyId(value.family) ? lookOfFamily(value.family) : undefined;
+    const fromFamily = paletteOfFamily(value.family);
+    const familyLook = fromFamily === undefined ? undefined : lookOfFamily(fromFamily);
+    const style = currentStyleId(value.style);
+    const palette = style?.palette ?? currentPaletteId(value.palette) ?? familyLook?.palette ?? DEFAULT_PALETTE;
     return {
-      style: isStyleId(value.style) ? value.style : (fromFamily?.style ?? DEFAULT_STYLE),
-      palette: isPaletteId(value.palette) ? value.palette : (fromFamily?.palette ?? DEFAULT_PALETTE),
+      style: style?.style ?? familyLook?.style ?? DEFAULT_STYLE,
+      palette,
+      keepPalette: value.keepPalette === true,
       mode: value.mode,
       textScale: value.textScale,
     };
@@ -260,8 +259,16 @@ export class ThemePreferenceStore {
     return this.#commit(withFamily({ ...this.snapshot(), ...lookOfFamily(family) }), true);
   }
 
+  /** A style, and (unless the device keeps its colours) the palette that comes with it. */
   setStyle(style: StyleId): ThemePreference {
-    return this.#commit(withFamily({ ...this.snapshot(), style }), true);
+    const current = this.snapshot();
+    const palette = current.keepPalette ? current.palette : defaultPaletteOf(style);
+    return this.#commit(withFamily({ ...current, style, palette }), true);
+  }
+
+  /** "Don't change my colours when I change style". */
+  setKeepPalette(keepPalette: boolean): ThemePreference {
+    return this.#commit(withFamily({ ...this.snapshot(), keepPalette }), true);
   }
 
   setPalette(palette: PaletteId): ThemePreference {
@@ -286,6 +293,7 @@ export class ThemePreferenceStore {
     if (
       next.style === current.style &&
       next.palette === current.palette &&
+      next.keepPalette === current.keepPalette &&
       next.mode === current.mode &&
       next.textScale === current.textScale
     ) {
@@ -297,8 +305,8 @@ export class ThemePreferenceStore {
   #commit(next: ThemePreference, persist: boolean): ThemePreference {
     this.#snapshot = next;
     if (persist) {
-      const { style, palette, mode, textScale } = next;
-      writeRecord(this.#storage, THEME_PREFERENCES_KEY, { style, palette, mode, textScale });
+      const { style, palette, keepPalette, mode, textScale } = next;
+      writeRecord(this.#storage, THEME_PREFERENCES_KEY, { style, palette, keepPalette, mode, textScale });
     }
     for (const listener of this.#listeners) listener();
     return next;

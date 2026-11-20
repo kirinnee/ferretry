@@ -200,19 +200,7 @@ for (const size of SIZES)
  * 2.7:1 edge on three light pages. Measured per theme: the edge against the page, row text on the menu, the keyboard ring
  * against the menu AND against a checked row, and a danger row that keeps its red under hover and under the keyboard's ring.
  */
-const FAMILIES = [
-  'studio',
-  'mission',
-  'neo',
-  'geist',
-  'contrast',
-  'phosphor',
-  'blueprint',
-  'broadsheet',
-  'wayfinding',
-  'ledger',
-  'ma',
-] as const;
+const FAMILIES = ['studio', 'mission', 'neo', 'geist', 'contrast', 'hacker', 'vintage', 'vaporwave'] as const;
 const THEMES = FAMILIES.flatMap(family => [`${family}-light`, `${family}-dark`] as const);
 
 const phoneless = { name: '1280', width: 1_280, height: 640, phone: false } as const;
@@ -291,7 +279,7 @@ describe('the shared menu in every theme', () => {
         expect(await channels(tab, await ink()), `${theme}: danger hovered while the ring is on another row`).toEqual(
           err,
         );
-        if (shotsDir !== '' && (theme === 'phosphor-dark' || theme === 'ledger-dark'))
+        if (shotsDir !== '' && (theme === 'hacker-dark' || theme === 'vintage-dark'))
           await tab.screenshot({ path: join(shotsDir, `1280-${theme}-menu-focus-danger-hover.png`) });
       } finally {
         await close();
@@ -300,7 +288,7 @@ describe('the shared menu in every theme', () => {
 });
 
 describe('the picker option list keeps the row sizes the picker asked for', () => {
-  for (const theme of ['studio-light', 'studio-dark', 'phosphor-dark'])
+  for (const theme of ['studio-light', 'studio-dark', 'hacker-dark'])
     it(`${theme}: 44px rows, top-aligned, in the full ink, a disabled row muted`, async () => {
       const { tab, close } = await openTheme(theme, '&picker=1');
       try {

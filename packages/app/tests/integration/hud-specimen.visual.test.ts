@@ -68,8 +68,8 @@ const WIDTHS = [
   { width: 1_280, height: 900, phone: false },
   { width: 390, height: 1_840, phone: true },
 ] as const;
-const PALETTES = ['studio', 'mission', 'neo', 'phosphor', 'cyberpunk', 'broadsheet', 'contrast'] as const;
-const SHOT_PALETTES = new Set<string>(['studio', 'cyberpunk', 'broadsheet']);
+const PALETTES = ['studio', 'mission', 'neo', 'hacker', 'vaporwave', 'vintage', 'contrast'] as const;
+const SHOT_PALETTES = new Set<string>(['studio', 'vaporwave', 'vintage']);
 const MODES = ['light', 'dark'] as const;
 
 const open = async (width: (typeof WIDTHS)[number], palette: string, mode: string, query = '') => {

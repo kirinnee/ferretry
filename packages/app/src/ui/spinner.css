@@ -72,15 +72,6 @@
   --spinner-speed: 0.8s;
   --spinner-timing: steps(8, end);
 }
-/* High Contrast: a wide butt-ended arc on a track you cannot miss, and no easing to lose it in. */
-:root[data-style='contrast'],
-[data-swatch][data-style='contrast'] {
-  --spinner-track: color-mix(in srgb, var(--fg) 38%, transparent);
-  --spinner-stroke: 2.75;
-  --spinner-cap: butt;
-  --spinner-sweep: 30;
-  --spinner-timing: linear;
-}
 
 .fy-spinner {
   animation: fy-spinner-turn var(--spinner-speed) var(--spinner-timing) infinite;

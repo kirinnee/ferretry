@@ -93,7 +93,6 @@ export const STYLE_IDS = [
   'mission',
   'neo',
   'geist',
-  'contrast',
   'glass',
   'neumorphism',
   'retro',
@@ -108,29 +107,48 @@ export const STYLE_IDS = [
   'exaggerated',
 ] as const;
 export type StyleId = (typeof STYLE_IDS)[number];
-export const PALETTE_IDS = [
-  'studio',
-  'mission',
-  'neo',
-  'geist',
-  'contrast',
-  'phosphor',
-  'blueprint',
-  'broadsheet',
-  'wayfinding',
-  'ledger',
-  'ma',
-  'vaporwave',
-  'cyberpunk',
-  'hacker',
-  'vintage',
-  'mesh',
-  'retrofuture',
-  'briefing',
-] as const;
+export const PALETTE_IDS = ['studio', 'geist', 'mission', 'neo', 'hacker', 'vintage', 'vaporwave', 'contrast'] as const;
 export type PaletteId = (typeof PALETTE_IDS)[number];
 
-/** The pre-split single "family" ids: a theme item's legacy `base`, and the stored preference's `family`. */
+/**
+ * A palette id a device or a theme item may still carry, and the kept palette it reads as (r11 T1: 18 palettes became 8).
+ * `public/pre-paint.js` restates this table, pinned by `pre-paint.test.ts`, so a stored removed id paints the mapped one
+ * before React loads. A kept id is not a key here.
+ */
+export const REMOVED_PALETTE_IDS = {
+  blueprint: 'mission',
+  broadsheet: 'vintage',
+  wayfinding: 'geist',
+  phosphor: 'hacker',
+  ledger: 'hacker',
+  ma: 'vaporwave',
+  retrofuture: 'vintage',
+  cyberpunk: 'vaporwave',
+  mesh: 'studio',
+  briefing: 'geist',
+} as const satisfies Record<string, PaletteId>;
+
+/** The kept palette an id reads as: itself when kept, the mapped one when removed, `undefined` for any other value. */
+export function currentPaletteId(value: unknown): PaletteId | undefined {
+  if (typeof value !== 'string') return undefined;
+  if ((PALETTE_IDS as readonly string[]).includes(value)) return value as PaletteId;
+  return Object.hasOwn(REMOVED_PALETTE_IDS, value)
+    ? REMOVED_PALETTE_IDS[value as keyof typeof REMOVED_PALETTE_IDS]
+    : undefined;
+}
+
+/**
+ * The `contrast` STYLE became a palette (High contrast): a stored or themed `style: contrast` is Studio in the High
+ * contrast palette. Returns the style (and, for `contrast`, the palette it brings) a stored style id reads as.
+ */
+export function currentStyleId(value: unknown): { readonly style: StyleId; readonly palette?: PaletteId } | undefined {
+  if (value === 'contrast') return { style: 'studio', palette: 'contrast' };
+  return typeof value === 'string' && (STYLE_IDS as readonly string[]).includes(value)
+    ? { style: value as StyleId }
+    : undefined;
+}
+
+/** The pre-split single "family" ids: a theme item's legacy `base`, and the stored preference's `family`. Frozen: never grows. */
 export const THEME_FAMILY_IDS = [
   'studio',
   'mission',
@@ -235,16 +253,28 @@ export const TokensSchema = z.strictObject(
  * This contract owns the token names and value grammar; both daemon and app refuse names the stylesheet does not
  * read and values that could close a declaration, load a resource, or smuggle an expression.
  */
-export const ThemeSchema = z.strictObject({
+const ThemeObjectSchema = z.strictObject({
   id: ThemeIdSchema,
   label: z.string().min(1).max(60),
   base: z.enum(THEME_FAMILY_IDS).optional(), // legacy spelling, accepted and IGNORED (the shell reads only `style` / `palette`)
-  style: z.enum(STYLE_IDS).optional(),
-  palette: z.enum(PALETTE_IDS).optional(),
+  // A removed id reads as the id the migration names (`currentStyleId` / `currentPaletteId`); anything else stays refused.
+  style: z.preprocess(value => currentStyleId(value)?.style ?? value, z.enum(STYLE_IDS)).optional(),
+  palette: z.preprocess(value => currentPaletteId(value) ?? value, z.enum(PALETTE_IDS)).optional(),
   light: TokensSchema.default({}),
   dark: TokensSchema.default({}),
 });
-export type Theme = z.infer<typeof ThemeSchema>;
+
+/**
+ * A style-only `contrast` item (the removed style) keeps its High contrast choice: with no palette of its own it reads as
+ * Studio in the `contrast` palette. A palette the item names itself wins. Read mapping only; nothing is rewritten.
+ */
+export const ThemeSchema = z.preprocess(value => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  const item = value as Record<string, unknown>;
+  const palette = currentStyleId(item.style)?.palette;
+  return palette !== undefined && item.palette === undefined ? { ...item, palette } : value;
+}, ThemeObjectSchema);
+export type Theme = z.infer<typeof ThemeObjectSchema>;
 
 /**
  * The keys of a layout that `config/layout.yaml` may change, field by field, so `fy layout set nav.side right` stores

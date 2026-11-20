@@ -15,8 +15,34 @@
 (function () {
   var KEY = 'fy:app:theme';
   // biome-ignore format: pre-paint.test.ts pins this exact one-line text, so the formatter must not wrap it
-  var STYLES = ['studio', 'mission', 'neo', 'geist', 'contrast', 'glass', 'neumorphism', 'retro', 'lucid', 'hud', 'raw', 'swiss', 'pixel', 'antiposh', 'briefing', 'genz', 'exaggerated'];
-  var PALETTES = [
+  var STYLES = ['studio', 'mission', 'neo', 'geist', 'glass', 'neumorphism', 'retro', 'lucid', 'hud', 'raw', 'swiss', 'pixel', 'antiposh', 'briefing', 'genz', 'exaggerated'];
+  var PALETTES = ['studio', 'geist', 'mission', 'neo', 'hacker', 'vintage', 'vaporwave', 'contrast'];
+  /* A palette id that no longer exists and the kept palette it reads as (`REMOVED_PALETTE_IDS` in the Layouts contract). */
+  var REMOVED_PALETTES = {
+    blueprint: 'mission',
+    broadsheet: 'vintage',
+    wayfinding: 'geist',
+    phosphor: 'hacker',
+    ledger: 'hacker',
+    ma: 'vaporwave',
+    retrofuture: 'vintage',
+    cyberpunk: 'vaporwave',
+    mesh: 'studio',
+    briefing: 'geist',
+  };
+  /* The first style whose default palette this is (`lookOfPalette` in `catalog.ts`): the style a pre-split "family" read as. */
+  var PALETTE_STYLE = {
+    studio: 'studio',
+    geist: 'geist',
+    mission: 'mission',
+    neo: 'neo',
+    hacker: 'pixel',
+    vintage: 'antiposh',
+    vaporwave: 'genz',
+    contrast: 'studio',
+  };
+  /* The pre-split "family" ids a stored value may still carry (`THEME_FAMILY_IDS`, frozen): each is a palette id. */
+  var FAMILIES = [
     'studio',
     'mission',
     'neo',
@@ -28,29 +54,14 @@
     'wayfinding',
     'ledger',
     'ma',
-    'vaporwave',
-    'cyberpunk',
-    'hacker',
-    'vintage',
-    'mesh',
-    'retrofuture',
-    'briefing',
   ];
-  /* The pre-split "family" a stored value may still carry: a palette id, with the style it was drawn for
-     (`PaletteEntry.suggestedStyle`). */
-  var FAMILY_STYLE = {
-    studio: 'studio',
-    mission: 'mission',
-    neo: 'neo',
-    geist: 'geist',
-    contrast: 'contrast',
-    phosphor: 'mission',
-    blueprint: 'mission',
-    broadsheet: 'geist',
-    wayfinding: 'neo',
-    ledger: 'geist',
-    ma: 'geist',
-  };
+  /* The kept palette an id reads as: itself, the mapped one when removed, otherwise nothing. */
+  function current(id) {
+    if (PALETTES.indexOf(id) >= 0) return id;
+    return typeof id === 'string' && Object.prototype.hasOwnProperty.call(REMOVED_PALETTES, id)
+      ? REMOVED_PALETTES[id]
+      : null;
+  }
   var MODES = ['system', 'light', 'dark'];
   var TEXT_SCALES = { default: 1, large: 1.125, larger: 1.25 };
 
@@ -64,12 +75,19 @@
     var record = raw ? JSON.parse(raw) : null;
     var value = record && record.format === 1 ? record.value : null;
     // Each field falls back on its own, so one bad value never resets the others (as `ThemePreferenceSchema`).
-    if (value && Object.prototype.hasOwnProperty.call(FAMILY_STYLE, value.family)) {
-      style = FAMILY_STYLE[value.family];
-      palette = value.family;
+    var fromFamily = value && FAMILIES.indexOf(value.family) >= 0 ? current(value.family) : null;
+    if (fromFamily) {
+      palette = fromFamily;
+      style = PALETTE_STYLE[fromFamily];
     }
-    if (value && STYLES.indexOf(value.style) >= 0) style = value.style;
-    if (value && PALETTES.indexOf(value.palette) >= 0) palette = value.palette;
+    // The removed `contrast` style is Studio in the High contrast palette; it wins over a stored palette.
+    if (value && value.style === 'contrast') {
+      style = 'studio';
+      palette = 'contrast';
+    } else {
+      if (value && STYLES.indexOf(value.style) >= 0) style = value.style;
+      if (value && current(value.palette)) palette = current(value.palette);
+    }
     if (value && MODES.indexOf(value.mode) >= 0) mode = value.mode;
     if (value && Object.prototype.hasOwnProperty.call(TEXT_SCALES, value.textScale)) textScale = value.textScale;
   } catch (error) {

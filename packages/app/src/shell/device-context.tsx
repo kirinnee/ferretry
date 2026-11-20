@@ -84,6 +84,8 @@ export interface DeviceTheme {
   readonly setPalette: (palette: PaletteId) => void;
   readonly setMode: (mode: ThemeMode) => void;
   readonly setFamily: (family: ThemeFamilyId) => void;
+  /** "Don't change my colours when I change style": on, picking a style leaves the palette alone. */
+  readonly setKeepPalette: (keep: boolean) => void;
   readonly setTextScale: (scale: TextScale) => void;
 }
 
@@ -109,6 +111,7 @@ export function useDeviceTheme(): DeviceTheme | null {
     setPalette: palette => void store.setPalette(palette),
     setMode: mode => void store.setMode(mode),
     setFamily: family => void store.setFamily(family),
+    setKeepPalette: keep => void store.setKeepPalette(keep),
     setTextScale: scale => void store.setTextScale(scale),
   };
 }

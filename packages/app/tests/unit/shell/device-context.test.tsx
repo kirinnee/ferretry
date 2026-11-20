@@ -218,7 +218,7 @@ describe('the page theme switch', () => {
 
   test('opens on the family in force, switches mode and family without closing, and Done closes', async () => {
     const { themes } = await openSwitch();
-    expect(trigger().getAttribute('aria-label')).toBe('Theme: Studio, Auto (light)');
+    expect(trigger().getAttribute('aria-label')).toBe('Theme: Indigo, Auto (light)');
     await click(trigger());
     expect(panel()).not.toBeNull();
     expect((document.activeElement as HTMLInputElement).dataset.pickPalette).toBe('studio');
@@ -226,7 +226,7 @@ describe('the page theme switch', () => {
     await click(view?.container.querySelector('input[data-pick-palette="neo"]'));
     expect(themes.snapshot()).toMatchObject({ family: 'neo', mode: 'dark' });
     expect(panel()).not.toBeNull();
-    expect(trigger().getAttribute('aria-label')).toBe('Theme: Neo-Brutalism, Dark');
+    expect(trigger().getAttribute('aria-label')).toBe('Theme: Pop, Dark');
     await click(view?.container.querySelector('[data-theme-done]'));
     expect(panel()).toBeNull();
     expect(document.activeElement).toBe(trigger());
@@ -244,9 +244,9 @@ describe('the page theme switch', () => {
       await interact(() => list.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
     };
     await press('ArrowDown');
-    expect(themes.snapshot().family).toBe('mission');
+    expect(themes.snapshot().family).toBe('geist');
     await press('ArrowRight');
-    expect(themes.snapshot().family).toBe('neo');
+    expect(themes.snapshot().family).toBe('mission');
     await press('ArrowUp');
     await press('ArrowLeft');
     expect(themes.snapshot().family).toBe('studio');
@@ -265,9 +265,10 @@ describe('the page theme switch', () => {
     const { themes } = await openSwitch();
     await click(trigger());
     await click(view?.container.querySelector('input[data-pick-style="geist"]'));
-    expect(themes.snapshot()).toMatchObject({ style: 'geist', palette: 'studio' });
-    await click(view?.container.querySelector('input[data-pick-palette="phosphor"]'));
-    expect(themes.snapshot()).toMatchObject({ style: 'geist', palette: 'phosphor' });
+    // A style brings its own default palette; the palette can then be changed without touching the style.
+    expect(themes.snapshot()).toMatchObject({ style: 'geist', palette: 'geist' });
+    await click(view?.container.querySelector('input[data-pick-palette="hacker"]'));
+    expect(themes.snapshot()).toMatchObject({ style: 'geist', palette: 'hacker' });
     // Each palette swatch is drawn in the style in force.
     const swatch = view?.container.querySelector('[data-pick-palette-card="neo"] [data-swatch]');
     expect(swatch?.getAttribute('data-style')).toBe('geist');

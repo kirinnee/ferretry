@@ -69,13 +69,14 @@ describe('theme preference', () => {
       family: 'mission',
       style: 'mission',
       palette: 'mission',
+      keepPalette: false,
       mode: 'dark',
       textScale: 'default',
     });
     // Only the axes are stored: `family` is derived on read.
     expect(JSON.parse(store.entries()[APP_STORAGE.theme] ?? '')).toEqual({
       format: 1,
-      value: { style: 'mission', palette: 'mission', mode: 'dark', textScale: 'default' },
+      value: { style: 'mission', palette: 'mission', keepPalette: false, mode: 'dark', textScale: 'default' },
     });
   });
 
@@ -87,6 +88,7 @@ describe('theme preference', () => {
       family: 'studio',
       style: 'studio',
       palette: 'studio',
+      keepPalette: false,
       mode: 'dark',
       textScale: 'large',
     });

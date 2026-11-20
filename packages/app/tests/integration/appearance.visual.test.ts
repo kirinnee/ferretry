@@ -68,8 +68,8 @@ const VIEWPORTS = [
   { name: '1280', width: 1_280, height: 3_200, phone: false },
   { name: '390', width: 390, height: 3_200, phone: true },
 ] as const;
-const STYLES = ['studio', 'mission', 'neo', 'geist', 'contrast'] as const;
-const PALETTES = ['neo', 'phosphor'] as const;
+const STYLES = ['studio', 'mission', 'neo', 'geist', 'hud'] as const;
+const PALETTES = ['neo', 'hacker'] as const;
 const MODES = ['Light', 'Dark'] as const;
 
 const open = async (viewport: (typeof VIEWPORTS)[number]) => {

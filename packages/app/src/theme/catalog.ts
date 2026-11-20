@@ -1,6 +1,6 @@
 /**
- * THE CATALOGUE of the theme axes: which STYLES and PALETTES exist, what they are called, and which style a palette
- * suggests. The ids are `STYLE_IDS` / `PALETTE_IDS` in the Layouts contract (the one list, so a theme item and this app
+ * THE CATALOGUE of the theme axes: which STYLES and PALETTES exist, what they are called, and which palette a style
+ * comes with. The ids are `STYLE_IDS` / `PALETTE_IDS` in the Layouts contract (the one list, so a theme item and this app
  * cannot disagree); this file adds everything a picker needs and nothing a stylesheet decides.
  *
  *   style   HOW things are drawn   `styles/style/<id>.css`    type, radii, strokes, shadow geometry, spacing, motion
@@ -11,6 +11,8 @@
  * `public/pre-paint.js` agree.
  */
 import {
+  currentPaletteId,
+  currentStyleId,
   PALETTE_IDS,
   type PaletteId,
   STYLE_IDS,
@@ -19,8 +21,8 @@ import {
 } from '@ferretry/plugin-layouts/contract';
 
 export { PALETTE_IDS, type PaletteId, STYLE_IDS, type StyleId };
-/** The pre-split single "family" id (what a stored preference and a theme item's `base` used to name). */
-export type ThemeFamilyId = (typeof THEME_FAMILY_IDS)[number];
+/** A single-pick look is a palette (with the style that comes with it): the family ids ARE the palette ids now. */
+export type ThemeFamilyId = PaletteId;
 
 export interface StyleEntry {
   readonly id: StyleId;
@@ -28,6 +30,8 @@ export interface StyleEntry {
   readonly label: string;
   /** One line on how it draws, not what colour it is. */
   readonly blurb: string;
+  /** The palette picking this style brings (unless the device keeps its colours). A style is how things are drawn, not a colour. */
+  readonly defaultPalette: PaletteId;
   /**
    * A style that DELIBERATELY fights the readability rules (owner, 2026-11-19: "its ok some style fights readability
    * rules"). The contrast matrix reports a contrast miss for it as a warning row, not a failure; the focus ring and the
@@ -41,166 +45,155 @@ export interface PaletteEntry {
   readonly label: string;
   /** One line on the colours. */
   readonly blurb: string;
-  /** The style this palette was drawn for, and the one the legacy single-pick "look" list pairs it with. */
-  readonly suggestedStyle: StyleId;
 }
 
 /** Order is the order shown. A style EARNS a row by differing structurally, never by recolouring another. */
 export const STYLES: readonly StyleEntry[] = Object.freeze([
-  { id: 'studio', label: 'Studio', blurb: 'The house look: soft blurred shadows, calm rounded surfaces.' },
-  { id: 'mission', label: 'Mission Control', blurb: 'A ruled instrument grid, square mono controls, hairlines.' },
-  { id: 'neo', label: 'Neo-Brutalism', blurb: 'Hard rules, flat offset shadows, black display weights.' },
-  { id: 'geist', label: 'Geist', blurb: 'Hairline rules, small precise type, airy engineered minimalism.' },
-  { id: 'contrast', label: 'High Contrast', blurb: 'Maximum legibility, 2px edges, no effects.' },
+  {
+    id: 'studio',
+    label: 'Studio',
+    blurb: 'The house look: soft blurred shadows, calm rounded surfaces.',
+    defaultPalette: 'studio',
+  },
+  {
+    id: 'mission',
+    label: 'Mission Control',
+    blurb: 'A ruled instrument grid, square mono controls, hairlines.',
+    defaultPalette: 'mission',
+  },
+  {
+    id: 'neo',
+    label: 'Neo-Brutalism',
+    blurb: 'Hard rules, flat offset shadows, black display weights.',
+    defaultPalette: 'neo',
+  },
+  {
+    id: 'geist',
+    label: 'Geist',
+    blurb: 'Hairline rules, small precise type, airy engineered minimalism.',
+    defaultPalette: 'geist',
+  },
   {
     id: 'glass',
     label: 'Glassmorphism',
     blurb: 'Frosted translucent panels over a soft colour field, big radii, light edges.',
+    defaultPalette: 'studio',
   },
   {
     id: 'neumorphism',
     label: 'Neumorphism',
     blurb: 'Soft forms moulded from one ground: paired light and dark shadows, pressed in when chosen.',
+    defaultPalette: 'studio',
   },
   {
     id: 'retro',
     label: 'Retro Desktop',
     blurb: 'An early-2000s desktop: bevelled buttons, sunken fields, gradient title strips, hard drop shadows.',
+    defaultPalette: 'geist',
   },
   {
     id: 'lucid',
     label: 'Lucid',
     blurb: 'Glossy pill controls, soft deep shadows, a springy halo focus, system fonts.',
+    defaultPalette: 'studio',
   },
   {
     id: 'hud',
     label: 'HUD',
     blurb: 'A sci-fi heads-up display: corner brackets, thin lit rules, a soft signal glow, scan-lines.',
+    defaultPalette: 'mission',
   },
   {
     id: 'raw',
     label: 'Raw Brutalism',
     blurb: 'The unstyled web on purpose: system serif and mono, square boxes, hard rules, no shadows.',
+    defaultPalette: 'neo',
   },
   {
     id: 'swiss',
     label: 'Minimal Swiss',
     blurb: 'Ruled, flat and square: one tight grotesque, space instead of boxes.',
+    defaultPalette: 'geist',
   },
   {
     id: 'pixel',
     label: 'Pixel art',
     blurb: 'Bitmap type, 2px blocks, flat offset shadows, stepped motion.',
+    defaultPalette: 'hacker',
   },
   {
     id: 'antiposh',
     label: 'Anti-posh',
     blurb: 'Photocopied zine: typewriter type, dashed edges, off-register hard shadows. Rough on purpose.',
+    defaultPalette: 'vintage',
     loud: true,
   },
   {
     id: 'briefing',
     label: 'Briefing',
     blurb: 'A calm written report: thin Poppins, mono numbers, pill controls, soft shadows, a hot focus ring.',
+    defaultPalette: 'geist',
   },
   {
     id: 'genz',
     label: 'Gen Z Maximalism',
     blurb: 'Loud on purpose: bubble type, sticker tags, stacked colour shadows, a spring on every pick.',
+    defaultPalette: 'vaporwave',
     loud: true,
   },
   {
     id: 'exaggerated',
     label: 'Exaggerated Minimalism',
     blurb: 'Huge hair-thin titles, vast air, one hairline for everything, no shadows.',
+    defaultPalette: 'studio',
   },
 ] as const);
 
+/**
+ * Order is the order shown. A palette is a COLOUR, so it is named for one (never for a style); the ids stay what they
+ * were so nothing a device stored has to migrate, except the ten removed ones (`REMOVED_PALETTE_IDS`). High contrast is a
+ * palette: it must pass on every style.
+ */
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([
-  { id: 'studio', label: 'Studio', blurb: 'Indigo on cool zinc.', suggestedStyle: 'studio' },
-  {
-    id: 'mission',
-    label: 'Mission Control',
-    blurb: 'Cyan signal on near-black, deep teal on white.',
-    suggestedStyle: 'mission',
-  },
-  { id: 'neo', label: 'Neo-Brutalism', blurb: 'Cream paper, black ink, one electric blue.', suggestedStyle: 'neo' },
-  { id: 'geist', label: 'Geist', blurb: 'Near-absolute black and white, one blue accent.', suggestedStyle: 'geist' },
-  { id: 'contrast', label: 'High Contrast', blurb: 'Pure black and white, AAA-targeted.', suggestedStyle: 'contrast' },
-  { id: 'phosphor', label: 'Phosphor', blurb: 'A green CRT terminal.', suggestedStyle: 'mission' },
-  {
-    id: 'blueprint',
-    label: 'Blueprint',
-    blurb: 'Technical drawing: cyan lines on drafting blue.',
-    suggestedStyle: 'mission',
-  },
-  { id: 'broadsheet', label: 'Broadsheet', blurb: 'Newsprint ink on warm paper.', suggestedStyle: 'geist' },
-  { id: 'wayfinding', label: 'Wayfinding', blurb: 'Transit-signage blue and white.', suggestedStyle: 'neo' },
-  { id: 'ledger', label: 'Ledger', blurb: 'Green-bar accounting paper, restrained ink.', suggestedStyle: 'geist' },
-  { id: 'ma', label: 'Ma', blurb: 'Quiet paper, one rose accent.', suggestedStyle: 'geist' },
-  {
-    id: 'vaporwave',
-    label: 'Vaporwave',
-    blurb: 'Lilac haze, magenta and teal neon, night purple.',
-    suggestedStyle: 'studio',
-  },
-  {
-    id: 'cyberpunk',
-    label: 'Cyberpunk',
-    blurb: 'Neon yellow and hot pink on blue-black asphalt.',
-    suggestedStyle: 'mission',
-  },
-  { id: 'hacker', label: 'Hacker', blurb: 'Matrix green on pure graphite.', suggestedStyle: 'mission' },
-  { id: 'vintage', label: 'Vintage analog', blurb: 'Sepia paper, rust and mustard.', suggestedStyle: 'geist' },
-  {
-    id: 'mesh',
-    label: 'Gradient mesh',
-    blurb: 'Violet, rose and sky glows behind calm panels.',
-    suggestedStyle: 'studio',
-  },
-  {
-    id: 'retrofuture',
-    label: 'Retro futurism',
-    blurb: 'Space-age navy, sunset orange and teal.',
-    suggestedStyle: 'neo',
-  },
-  {
-    id: 'briefing',
-    label: 'Briefing',
-    blurb: 'Lavender-grey page, navy ink, indigo accent, one hot pink.',
-    suggestedStyle: 'briefing',
-  },
+  { id: 'studio', label: 'Indigo', blurb: 'Indigo on cool zinc.' },
+  { id: 'geist', label: 'Blue', blurb: 'Near-absolute black and white, one blue accent.' },
+  { id: 'mission', label: 'Teal', blurb: 'Cyan signal on near-black, deep teal on white.' },
+  { id: 'neo', label: 'Pop', blurb: 'Cream paper, black ink, one electric blue.' },
+  { id: 'hacker', label: 'Green', blurb: 'Matrix green on pure graphite.' },
+  { id: 'vintage', label: 'Rust', blurb: 'Sepia paper, rust and mustard.' },
+  { id: 'vaporwave', label: 'Magenta', blurb: 'Lilac haze, magenta and teal neon, night purple.' },
+  { id: 'contrast', label: 'High contrast', blurb: 'Pure black and white, AAA-targeted.' },
 ] as const);
 
 export const DEFAULT_STYLE: StyleId = 'studio';
 export const DEFAULT_PALETTE: PaletteId = 'studio';
-const DEFAULT_FAMILY: ThemeFamilyId = 'studio';
 
-export const isStyleId = (value: unknown): value is StyleId =>
-  typeof value === 'string' && (STYLE_IDS as readonly string[]).includes(value);
 export const isPaletteId = (value: unknown): value is PaletteId =>
   typeof value === 'string' && (PALETTE_IDS as readonly string[]).includes(value);
 export const isFamilyId = (value: unknown): value is ThemeFamilyId =>
   typeof value === 'string' && (THEME_FAMILY_IDS as readonly string[]).includes(value);
 
-/**
- * The single-pick LOOK the picker shows as selected for a palette. A family id is a palette id only for the eleven
- * ORIGINAL palettes (`THEME_FAMILY_IDS` is frozen at the pre-split list); a palette added later is not a family, so the
- * picker falls back to the default look rather than the type system demanding a new frozen entry. Read-side only.
- */
-export const familyOfPalette = (palette: PaletteId): ThemeFamilyId => (isFamilyId(palette) ? palette : DEFAULT_FAMILY);
+/** A stored `family` (pre-split), read on the new axes: the kept palette it names. `undefined` when it names none. */
+export const paletteOfFamily = (family: unknown): PaletteId | undefined =>
+  isFamilyId(family) ? currentPaletteId(family) : undefined;
+
+/** The stored style id, read on the current axes (the removed `contrast` style is Studio, in the High contrast palette). */
+export { currentPaletteId, currentStyleId };
+
+/** What picking a style brings: its default palette. */
+export const defaultPaletteOf = (style: StyleId): PaletteId =>
+  STYLES.find(entry => entry.id === style)?.defaultPalette ?? DEFAULT_PALETTE;
 
 /**
- * What a single-pick look of a PALETTE is on the three axes: the palette itself and the style it was drawn for. Takes
- * any palette, so a palette added later needs no family entry to be previewed; an id no palette answers to is the
- * default look.
+ * The single-pick LOOK of a PALETTE: the palette and the first style that comes with it, or Studio when none does (High
+ * contrast is a colour, so it is on Studio). An id no palette answers to is the default look.
  */
 export function lookOfPalette(palette: PaletteId): { readonly style: StyleId; readonly palette: PaletteId } {
-  const entry = PALETTES.find(candidate => candidate.id === palette);
-  return { style: entry?.suggestedStyle ?? DEFAULT_STYLE, palette: isPaletteId(palette) ? palette : DEFAULT_PALETTE };
+  if (!isPaletteId(palette)) return { style: DEFAULT_STYLE, palette: DEFAULT_PALETTE };
+  return { style: STYLES.find(entry => entry.defaultPalette === palette)?.id ?? DEFAULT_STYLE, palette };
 }
 
-/** What a pre-split family (a stored `family`, a theme item's `base`) is on the three axes. A family id is a palette id. */
+/** What a single-pick family is on the three axes. A family id is a palette id. */
 export function lookOfFamily(family: ThemeFamilyId): { readonly style: StyleId; readonly palette: PaletteId } {
   return lookOfPalette(family);
 }

@@ -37,7 +37,7 @@ beforeAll(async () => {
   cdp = await context.newCDPSession(page);
   const design = readCssWithImports(join(themeStylesDir, '../ui/design-system.css'));
   await page.setContent(
-    `<!doctype html><html data-style="glass" data-palette="mesh" data-mode="light"><head><style>${readThemeCss()}\n${design}</style></head><body>${MARKUP}</body></html>`,
+    `<!doctype html><html data-style="glass" data-palette="studio" data-mode="light"><head><style>${readThemeCss()}\n${design}</style></head><body>${MARKUP}</body></html>`,
   );
 }, 120_000);
 

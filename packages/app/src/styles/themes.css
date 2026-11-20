@@ -5,16 +5,15 @@
 
        <html data-style="studio" data-palette="geist" data-mode="dark">
 
-   style   ∈ studio | mission | neo | contrast | geist | glass
-           | neumorphism | retro | lucid | hud | raw | swiss | pixel | antiposh | briefing | genz | exaggerated  HOW things are drawn: type, weights, tracking, radii,
+   style   ∈ studio | mission | neo | geist | glass | neumorphism | retro | lucid | hud | raw | swiss | pixel
+           | antiposh | briefing | genz | exaggerated      HOW things are drawn: type, weights, tracking, radii,
                                                             stroke widths, shadow GEOMETRY, spacing, control heights,
                                                             focus width/offset, texture, motion. NO colour value.
-   palette ∈ studio | mission | neo | contrast | geist      WHICH colours: the seed colours, the status/syntax/tool
-           | phosphor | blueprint | broadsheet              hues, shadow COLOURS. NO non-colour token.
-           | wayfinding | ledger | ma
-           | vaporwave | cyberpunk | hacker                (the last six each declare EVERY role in their own
-           | vintage | mesh | retrofuture                  file, so they need nothing from tokens/derived.css)
-           | briefing
+                                                            Each style comes with a DEFAULT palette (catalog.ts).
+   palette ∈ studio | geist | mission | neo | hacker        WHICH colours: the seed colours, the status/syntax/tool
+           | vintage | vaporwave | contrast                hues, shadow COLOURS. NO non-colour token. Labelled by
+                                                            colour (Indigo, Blue, Teal, Pop, Green, Rust, Magenta,
+                                                            High contrast); High contrast is a palette, not a style.
    mode    ∈ light | dark        (already resolved — never "system")
 
    The CATALOGUE — ids, labels, fonts, suggested pairings — is owned by `src/theme/catalog.ts`, not by this
@@ -26,7 +25,6 @@
      tokens/base-palette.css   every palette-owned token's default (== Studio LIGHT)
      style/<id>.css            one style's non-colour tokens (+ the few per-mode ones, e.g. shadow reach in dark)
      palette/<id>.css          one palette's colours, `[data-palette=<id>]` then `[data-palette=<id>][data-mode=…]`
-     tokens/derived.css        the compact palettes' roles, derived from their seed colours
      tokens/floors.css         the touch-target floors; must stay LAST
 
    `[data-swatch]` is in every selector on purpose. A swatch is a nested element and custom properties
@@ -38,7 +36,7 @@
    consumers that only need the MODE or a change signal (tailwind's `dark:` variant, the terminal, illustrations);
    no rule here reads it.
 
-   Literal colours are expected in `palette/*.css`, `tokens/base-palette.css` and `tokens/derived.css` and
+   Literal colours are expected in `palette/*.css` and `tokens/base-palette.css` and
    nowhere else in `src/`, apart from `highlight.css`'s tokenised mapping.
    ============================================================================ */
 @import './tokens/base-style.css';
@@ -47,7 +45,6 @@
 @import './style/studio.css';
 @import './style/mission.css';
 @import './style/neo.css';
-@import './style/contrast.css';
 @import './style/geist.css';
 @import './style/glass.css';
 @import './style/neumorphism.css';
@@ -67,19 +64,8 @@
 @import './palette/neo.css';
 @import './palette/contrast.css';
 @import './palette/geist.css';
-@import './palette/phosphor.css';
-@import './palette/blueprint.css';
-@import './palette/broadsheet.css';
-@import './palette/wayfinding.css';
-@import './palette/ledger.css';
-@import './palette/ma.css';
 @import './palette/vaporwave.css';
-@import './palette/cyberpunk.css';
 @import './palette/hacker.css';
 @import './palette/vintage.css';
-@import './palette/mesh.css';
-@import './palette/retrofuture.css';
-@import './palette/briefing.css';
 
-@import './tokens/derived.css';
 @import './tokens/floors.css';

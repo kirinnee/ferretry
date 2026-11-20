@@ -21,7 +21,7 @@ import {
   MANIFEST_LINK_ID,
   themeColorFromComputedStyle,
 } from '../theme/preferences.ts';
-import { familyOfPalette, type PaletteId } from '../theme/catalog.ts';
+import type { PaletteId } from '../theme/catalog.ts';
 import type { ScrollMemory } from '../scroll/scroll-memory.ts';
 import { applyThemeItem, type ThemeItem } from '../theme/tokens.ts';
 import type { OwnerLayout } from '../layout/daemon-layout.ts';
@@ -122,7 +122,7 @@ export function applyWindowColour(
   const link = document.getElementById?.(MANIFEST_LINK_ID);
   if (link) {
     const current = link.getAttribute('href') ?? '';
-    const next = manifestHrefFor(current, familyOfPalette(palette), resolved);
+    const next = manifestHrefFor(current, palette, resolved);
     // Only on a real change: assigning the same href re-fetches the manifest in some browsers.
     if (next !== current) link.setAttribute('href', next);
   }

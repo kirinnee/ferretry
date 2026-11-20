@@ -88,7 +88,7 @@ const DESKTOP = { width: 1_280, height: 900, phone: false } as const;
 const PHONE = { width: 390, height: 1_840, phone: true } as const;
 const MODES = ['light', 'dark'] as const;
 /** Every palette is checked on the desktop page; the phone page (the overflow risk) on a spread of three. */
-const PHONE_PALETTES = ['neo', 'studio', 'phosphor'] as const;
+const PHONE_PALETTES = ['neo', 'studio', 'hacker'] as const;
 
 const open = async (view: typeof DESKTOP | typeof PHONE, style: string, palette: string, mode: string) => {
   const context = await browser.newContext({
@@ -198,16 +198,7 @@ describe('the Raw Brutalism specimen', () => {
 });
 
 /** Every control that takes focus draws a hard ring of at least 2px and 3:1 against what is behind it, on several palettes. */
-const FOCUS_PALETTES = [
-  'neo',
-  'studio',
-  'phosphor',
-  'contrast',
-  'wayfinding',
-  'ledger',
-  'vaporwave',
-  'hacker',
-] as const;
+const FOCUS_PALETTES = ['neo', 'studio', 'hacker', 'contrast', 'geist', 'vintage', 'vaporwave'] as const;
 describe('the Raw Brutalism specimen focus', () => {
   const FOCUSABLE = [
     '[data-part="btn-outline"]',
