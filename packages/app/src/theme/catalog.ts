@@ -52,6 +52,11 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
   { id: 'neo', label: 'Neo-Brutalism', blurb: 'Hard rules, flat offset shadows, black display weights.' },
   { id: 'geist', label: 'Geist', blurb: 'Hairline rules, small precise type, airy engineered minimalism.' },
   { id: 'contrast', label: 'High Contrast', blurb: 'Maximum legibility, 2px edges, no effects.' },
+  {
+    id: 'glass',
+    label: 'Glassmorphism',
+    blurb: 'Frosted translucent panels over a soft colour field, big radii, light edges.',
+  },
 ] as const);
 
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([

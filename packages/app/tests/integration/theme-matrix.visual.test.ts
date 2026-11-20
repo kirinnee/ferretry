@@ -1,5 +1,5 @@
 /**
- * THE THEME MATRIX: every STYLE x every PALETTE x both MODES x two WIDTHS (5 x 17 x 2 x 2 = 340 combinations today), measured
+ * THE THEME MATRIX: every STYLE x every PALETTE x both MODES x two WIDTHS (6 x 17 x 2 x 2 = 408 combinations today), measured
  * in a real browser on one fixed specimen page (`fixtures/theme-matrix-scene.tsx`). The catalogue is the list (`STYLES`,
  * `PALETTES`), so a style or palette added to it is measured with no edit here, and a new one that cannot be read is a red
  * row the day it lands.
@@ -23,6 +23,7 @@
  * palette, mode, check, what), with no wildcard. The observed miss set is compared with the pinned set both ways: a miss
  * nobody pinned fails, and a pin whose miss is gone fails.
  *
+ * Set `FY_THEME_MATRIX_REDUCED_TRANSPARENCY=1` to emulate `prefers-reduced-transparency: reduce` for the whole run.
  * Set `FY_THEME_MATRIX_REPORT=<file>` to write the table (markdown) and `FY_THEME_MATRIX_SHOTS_DIR=<dir>` to keep one
  * 2x screenshot per style/palette/mode at 1280 and 390.
  */
@@ -50,6 +51,8 @@ setDefaultTimeout(60_000);
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_THEME_MATRIX_SHOTS_DIR ?? '';
 const reportFile = process.env.FY_THEME_MATRIX_REPORT ?? '';
+/** Set to `1` to run the whole matrix with the OS "reduce transparency" setting emulated (every surface must stay readable opaque). */
+const reducedTransparency = process.env.FY_THEME_MATRIX_REDUCED_TRANSPARENCY === '1';
 
 const MODES = ['light', 'dark'] as const;
 const VIEWPORTS = [
@@ -107,7 +110,9 @@ const EVERY_PALETTE = [
   'mesh',
   'retrofuture',
 ] as const;
-const EVERY_STYLE = ['studio', 'mission', 'neo', 'geist', 'contrast'] as const;
+// The five original styles plus Glassmorphism (r10 T5): its only misses are these same shared ones (choice-card edges,
+// Ledger dark inks), pinned by exact identity until unit T3m fixes them for every style.
+const EVERY_STYLE = ['studio', 'mission', 'neo', 'geist', 'contrast', 'glass'] as const;
 const BOTH_WIDTHS = ['1280', '390'] as const;
 
 /**
@@ -490,6 +495,10 @@ const open = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 'dark'
     new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
   );
   const tab = await context.newPage();
+  if (reducedTransparency)
+    await (await context.newCDPSession(tab)).send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }],
+    });
   await tab.goto(`${origin}/`);
   // A colour read mid-transition is neither the old theme nor the new one: measure the settled state.
   await tab.addStyleTag({ content: '*,*::before,*::after{transition:none!important;animation:none!important}' });
