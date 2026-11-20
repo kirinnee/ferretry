@@ -1,0 +1,211 @@
+/* ============================================================================
+   STYLE — HUD / SCI-FI FUI (r10 T10). A heads-up display: thin accent rules, small hard corners, registration brackets on
+   every panel, a soft signal glow instead of a drop shadow, a faint scan-line veil over a fine ruled field, translucent
+   panels, wide-tracked Orbitron for labels and headings over a plain grotesk body. It differs from Mission Control on
+   purpose: Mission is a seated, glow-free instrument on a heavy grid; this one LIGHTS UP (glow, brackets, scan-lines).
+
+   ANY palette wears it. Every inked part reads the palette's accent (`--accent`, `--accent-rgb`, `--texture-ink`,
+   `--grid-ink-*`); this file holds no colour value. Readability stays a hard rule: the body face is Public Sans at normal
+   weight, text sits on opaque panels, and the focus ring is the same 2px outline as every style. The glow is an effect, so
+   `prefers-reduced-motion` / Motion: Reduced switch it off (`styles/index.css` zeroes `--glow-alpha`); the scan-line veil is
+   static and sits under the content, so it needs no switch.
+   No clip-path on controls: a notch would clip the focus ring. A panel that opts in with `.kt-panel--clipped` gets the corner cut.
+   ============================================================================ */
+:root[data-style='hud'],
+[data-swatch][data-style='hud'] {
+  /* ═══ structural token layer ═══ */
+  --font-display: 'Orbitron', 'Public Sans', system-ui, sans-serif;
+  --font-body: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Cascadia Mono', 'Cascadia Code', 'SFMono-Regular', Consolas, 'Liberation Mono', ui-monospace, monospace;
+  --text-display: 1.05rem;
+  --tracking-label: 0.18em;
+  --tracking-display: 0.06em;
+  --label-weight: 600;
+  --label-size: 10px;
+  --display-transform: uppercase;
+  --weight-medium: 500;
+  --weight-strong: 600;
+  --weight-display: 600;
+  --leading-tight: 1.25;
+  --chrome-font-size: 11px;
+  --control-transform: none;
+  /* Small hard corners: an engineered part, not a pill. */
+  --radius-xs: 1px;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 3px;
+  --radius-control: 2px;
+  --radius-panel: 2px;
+  --radius-badge: 1px;
+  --radius-tab: 0px;
+  --radius-input: 2px;
+  --bubble-radius: 2px;
+  --bubble-stroke: 1px;
+  --border-width: 1px;
+  --border-width-heavy: 2px;
+  --stroke-control: 1px;
+  --stroke-panel: 1px;
+  --divider-width: 1px;
+  --divider-color: var(--border);
+  /* The corner cut exists only on an opted-in panel; a control is never clipped, so its focus ring survives. */
+  --notch: 10px;
+  --clip-control: none;
+  --clip-panel: polygon(
+    0 0,
+    calc(100% - var(--notch)) 0,
+    100% var(--notch),
+    100% 100%,
+    var(--notch) 100%,
+    0 calc(100% - var(--notch))
+  );
+  --bracket-size: 12px;
+  --control-h-desktop: 30px;
+  --control-h-sm-desktop: 26px;
+  --row-min-h-desktop: 36px;
+  --pad-control-x: 12px;
+  --pad-panel: 12px;
+  --pad-row-y: 7px;
+  /* A signal, not a shadow: the same glow at three reaches. The palette's accent supplies the colour. */
+  --glow-alpha: 0.32;
+  --shadow-sm: 0 0 0 1px var(--shadow-sm-1);
+  --shadow-md: 0 0 0 1px var(--shadow-md-1), 0 0 14px rgb(var(--accent-rgb) / var(--glow-alpha));
+  --shadow-lg:
+    0 0 0 1px var(--shadow-lg-1), 0 0 26px rgb(var(--accent-rgb) / var(--glow-alpha)), 0 18px 40px var(--shadow-lg-2);
+  --shadow-control: var(--shadow-sm);
+  --shadow-panel: var(--shadow-md);
+  --shadow-popover: var(--shadow-lg);
+  --bubble-shadow: var(--shadow-sm);
+  --nav-sel-shadow: inset 2px 0 0 var(--accent), 0 0 12px rgb(var(--accent-rgb) / var(--glow-alpha));
+  --rule-inset: inset 0 1px 0 rgb(var(--accent-rgb) / 0.18);
+  --focus-shadow: 0 0 12px rgb(var(--accent-rgb) / var(--glow-alpha));
+  /* The field: a fine ruled grid with a soft light from the top edge, and a veil of scan-lines. The veil is part of the
+     FIELD (painted under every panel and every word), never a layer over the page: a film above the text would dim it, and
+     the readability floor (4.5:1 text, measured against what is painted behind it) is a hard rule for this style too. */
+  --body-wash:
+    radial-gradient(ellipse 70% 40% at 50% 0%, rgb(var(--accent-rgb) / 0.12), transparent),
+    repeating-linear-gradient(0deg, rgb(var(--accent-rgb) / 0.07) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, var(--grid-ink-minor) 0 1px, transparent 1px 24px),
+    repeating-linear-gradient(180deg, var(--grid-ink-minor) 0 1px, transparent 1px 24px),
+    linear-gradient(180deg, var(--field-ground-top) 0%, var(--field-ground-bottom) 100%);
+  --panel-bg: var(--surface);
+  --menu-bg: var(--surface-2);
+  --overlay: none;
+  --overlay-opacity: 0;
+  --overlay-blend: normal;
+  /* Quick and exact: a part locks into place rather than bouncing. */
+  --motion-fast: 90ms;
+  --motion-base: 160ms;
+  --motion-slow: 280ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasis: cubic-bezier(0.2, 0, 0, 1);
+  --select-pop: 1.03;
+  --press-translate: 1px;
+  --tab-underline-width: 2px;
+}
+
+@media (max-width: 640px) {
+  :root[data-style='hud'] {
+    --text-2xs: 12.5px;
+    --text-xs: 13.5px;
+    --text-sm: 14.5px;
+    --text-base: 15.5px;
+    --text-md: 16.5px;
+    --text-lg: 18.5px;
+    --text-display: 1.25rem;
+    --label-size: 12px;
+    --tracking-label: 0.12em;
+  }
+}
+
+/* Registration brackets: two accent corner marks on every panel, drawn as pseudo-elements (never clip-path, so a popover
+   or a focus ring is never cut). */
+:root[data-style='hud'] .kt-panel {
+  position: relative;
+}
+:root[data-style='hud'] .kt-panel::before,
+:root[data-style='hud'] .kt-panel::after {
+  content: '';
+  position: absolute;
+  width: var(--bracket-size);
+  height: var(--bracket-size);
+  pointer-events: none;
+}
+:root[data-style='hud'] .kt-panel::before {
+  top: -1px;
+  left: -1px;
+  border-top: var(--border-width-heavy) solid var(--accent);
+  border-left: var(--border-width-heavy) solid var(--accent);
+}
+:root[data-style='hud'] .kt-panel::after {
+  right: -1px;
+  bottom: -1px;
+  border-right: var(--border-width-heavy) solid var(--accent);
+  border-bottom: var(--border-width-heavy) solid var(--accent);
+}
+:root[data-style='hud'] .kt-panel__header {
+  border-bottom-color: var(--accent-border);
+}
+
+/* Controls light up on hover and lock on press. */
+:root[data-style='hud'] .kt-btn {
+  transition:
+    box-shadow var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    translate var(--motion-fast) var(--ease-standard);
+}
+:root[data-style='hud'] .kt-btn:not(:disabled):hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgb(var(--accent-rgb) / var(--glow-alpha));
+}
+:root[data-style='hud'] .kt-btn:not(:disabled):active {
+  translate: var(--press-translate) var(--press-translate);
+}
+/* The field's own `outline: none` (design-system.css) beats the shell's ring, so a field would show a border colour only: draw
+   the ring here, with the HUD glow beside it. */
+:root[data-style='hud'] .kt-input:focus-visible {
+  border-color: var(--accent);
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 1px;
+  box-shadow: var(--focus-shadow);
+}
+
+/* Choice cards: the chosen card is lit with a glow and a locked accent edge, and flashes once as it is chosen. */
+:root[data-style='hud'] .fy-cc__card[data-selected='true'] {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    0 0 16px rgb(var(--accent-rgb) / var(--glow-alpha));
+}
+:root[data-style='hud'] .fy-cc__card:not([aria-disabled='true']):hover {
+  border-color: var(--accent);
+}
+@keyframes fy-hud-lock {
+  from {
+    box-shadow:
+      0 0 0 1px var(--accent),
+      0 0 34px rgb(var(--accent-rgb) / 0.7);
+    transform: scale(var(--select-pop));
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-style='hud']:not([data-motion='reduced']) .fy-cc__card[data-pulse='true'] {
+    animation: fy-hud-lock var(--motion-slow) var(--ease-standard);
+  }
+}
+
+/* Progress: thin lit segments; the current one glows. */
+:root[data-style='hud'] .fy-sp-progress__segment {
+  border-radius: 0;
+  height: 4px;
+}
+:root[data-style='hud'] .fy-sp-progress__segment[data-state='current'] {
+  box-shadow: 0 0 10px rgb(var(--accent-rgb) / var(--glow-alpha));
+}
+
+/* Badges are wide-tracked tags. */
+:root[data-style='hud'] .kt-badge {
+  letter-spacing: var(--tracking-label);
+}

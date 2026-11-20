@@ -72,6 +72,11 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
     label: 'Lucid',
     blurb: 'Glossy pill controls, soft deep shadows, a springy halo focus, system fonts.',
   },
+  {
+    id: 'hud',
+    label: 'HUD',
+    blurb: 'A sci-fi heads-up display: corner brackets, thin lit rules, a soft signal glow, scan-lines.',
+  },
 ] as const);
 
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([

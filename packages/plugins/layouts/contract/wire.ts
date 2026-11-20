@@ -98,6 +98,7 @@ export const STYLE_IDS = [
   'neumorphism',
   'retro',
   'lucid',
+  'hud',
 ] as const;
 export type StyleId = (typeof STYLE_IDS)[number];
 export const PALETTE_IDS = [
