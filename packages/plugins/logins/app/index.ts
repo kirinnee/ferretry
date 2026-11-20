@@ -1,6 +1,7 @@
 import { implementApp } from '@ferretry/kernel/manifest';
 import { createElement } from 'react';
 import manifest from '../manifest.ts';
+import { harnessOfSubject } from './features/add-login-panel.tsx';
 import { harnessSignIn } from './features/harness-sign-in-embed.tsx';
 import { addRuntimeLoginPanel, addRuntimeSignInPanel } from './features/add-runtime-slots.tsx';
 import { AddLoginPanel, LocalModelsSurface, LoginSignInPanel, QuotaReadout, SignInsTab } from './views.tsx';
@@ -16,13 +17,10 @@ export default implementApp(manifest, {
     settings: { logins: () => createElement(SignInsTab, { client }) },
     panels: {
       'sign-ins': () => createElement(SignInsTab, { client }),
-      // `harness` (when a page names one) locks the panel to that tool: Codex's own page never offers Claude Code.
-      'add-login': props => {
-        const harness = ({ ...props } as Readonly<Record<string, unknown>>)['harness'];
-        return createElement(AddLoginPanel, {
-          client,
-          ...(harness === 'claude-code' || harness === 'codex' ? { harness } : {}),
-        });
+      // The subject `harness:codex` / `harness:claude` locks the panel to that tool: Codex's own page never offers Claude Code.
+      'add-login': ({ subject }) => {
+        const harness = harnessOfSubject(subject);
+        return createElement(AddLoginPanel, { client, ...(harness === undefined ? {} : { harness }) });
       },
       'claude-code-login': ({ subject }) =>
         createElement(LoginSignInPanel, {

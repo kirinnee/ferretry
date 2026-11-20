@@ -7,9 +7,11 @@
  * key is named only, and pasted into the secret store itself. A tile whose preset asks for nothing but a key opens
  * the key-only quick form first (`quick-key-form.tsx`); **More fields…** there opens the full form below.
  *
- * A page that is already ABOUT one tool (Codex's first-run "Sign in" page) mounts the panel with `harness`: the panel is
- * then locked to that tool — no "Tool" picker, no other tool's providers — and is that tool's own one-press sign-in
- * (`HarnessSignInEmbed`: it makes the login and starts signing it in), so a Codex page never offers Claude Code (r11 O6).
+ * A page that is already ABOUT one tool (Codex's first-run "Sign in" page) mounts the registered panel with the subject
+ * `harness:codex` or `harness:claude` ({@link harnessOfSubject}): the panel is then locked to that tool — no "Tool"
+ * picker — and is that tool's own one-press sign-in (`HarnessSignInEmbed`: it makes the login and starts signing it in).
+ * The things the one press does not need are FOLDED, closed, not removed: **Name it (optional)** and **Other ways to
+ * sign in** (that tool's providers only, read when first opened), so a Codex page never offers Claude Code (r11 O6).
  */
 
 import { Loading } from '@ferretry/app/ui';
@@ -29,11 +31,21 @@ import { PasteVariables } from './paste-variables.tsx';
 import { ProviderGrid, usableHarnesses } from './provider-grid.tsx';
 import { QuickKeyForm, quickKeyVariable } from './quick-key-form.tsx';
 
+/** The panel subjects that lock the panel to one tool: a page names the tool in the subject it mounts the panel with. */
+const HARNESS_SUBJECTS: Readonly<Record<string, HarnessKind>> = {
+  'harness:codex': 'codex',
+  'harness:claude': 'claude-code',
+};
+
+/** The tool a panel subject locks the panel to; `undefined` for any other subject (Settings has none: the full chooser). */
+export const harnessOfSubject = (subject: string | undefined): HarnessKind | undefined =>
+  subject === undefined ? undefined : HARNESS_SUBJECTS[subject];
+
 export interface AddLoginPanelProps {
   readonly client: LoginsClient;
   /** Told the new login's id once it is added, so a screen can open it. Not used when the panel is locked to a `harness`. */
   readonly onAdded?: (id: string) => void;
-  /** Lock the panel to this one tool: its one-press sign-in, with no picker and no other provider (see above). */
+  /** Lock the panel to this one tool: its one-press sign-in, with no picker; other ways are folded (see above). */
   readonly harness?: HarnessKind;
 }
 
@@ -45,11 +57,14 @@ function PresetForm({
   client,
   preset,
   prefill,
+  lock,
   onAdded,
   onCancel,
 }: {
   readonly client: LoginsClient;
   readonly preset: ProviderPresetView;
+  /** The tool the panel is locked to: the form is for that tool and never asks which. */
+  readonly lock?: HarnessKind;
   /** A paste's plain values, when the form was reached from Paste variables…. */
   readonly prefill?: Prefill;
   readonly onAdded: (id: string) => void;
@@ -57,7 +72,9 @@ function PresetForm({
 }) {
   const changes = useLoginChanges(client);
   const harnesses = usableHarnesses(preset);
-  const [harness, setHarness] = useState<HarnessKind>(harnesses[0] ?? preset.harness);
+  const [harness, setHarness] = useState<HarnessKind>(
+    lock !== undefined && harnesses.includes(lock) ? lock : (harnesses[0] ?? preset.harness),
+  );
   const [label, setLabel] = useState('');
   const [env, setEnv] = useState<Record<string, string>>(() =>
     Object.fromEntries(
@@ -124,7 +141,7 @@ function PresetForm({
           {withheld}
         </p>
       )}
-      {harnesses.length > 1 ? (
+      {harnesses.length > 1 && lock === undefined ? (
         <HarnessChoice label="Listed under" harnesses={harnesses} value={harness} onChange={setHarness} />
       ) : null}
       <div className="fy-lg-fields">
@@ -246,11 +263,61 @@ function SignInForm({ client, onAdded }: { readonly client: LoginsClient; readon
 }
 
 export function AddLoginPanel({ client, onAdded, harness }: AddLoginPanelProps) {
-  if (harness !== undefined) return <HarnessSignInEmbed client={client} harness={harness} />;
+  if (harness !== undefined) return <LockedAddLogin client={client} harness={harness} />;
   return <AddAnyLogin client={client} {...(onAdded === undefined ? {} : { onAdded })} />;
 }
 
-function AddAnyLogin({ client, onAdded }: Omit<AddLoginPanelProps, 'harness'>) {
+/**
+ * One tool's own sign-in: the one press, with the optional name and the other providers folded away (closed). The name
+ * goes on the login the press makes; the other providers are read the first time that fold is opened.
+ */
+function LockedAddLogin({ client, harness }: { readonly client: LoginsClient; readonly harness: HarnessKind }) {
+  const [label, setLabel] = useState('');
+  const [opened, setOpened] = useState(false);
+  return (
+    <div className="flex min-w-0 flex-col gap-4" data-add-login-locked={harness}>
+      <HarnessSignInEmbed
+        client={client}
+        harness={harness}
+        {...(label.trim() === '' ? {} : { label: label.trim() })}
+        beforeMake={
+          <details className="min-w-0" data-add-login-name="">
+            <summary className="cursor-pointer text-cell font-semibold text-fg">Name it (optional)</summary>
+            <label className="fy-lg-field mt-2 text-cell text-fg">
+              <span className="sr-only">Name</span>
+              <input
+                className="kt-input"
+                autoComplete="off"
+                value={label}
+                placeholder="e.g. personal or work"
+                onChange={event => setLabel(event.target.value)}
+              />
+            </label>
+          </details>
+        }
+      />
+      <details
+        className="min-w-0"
+        data-add-login-other-ways=""
+        onToggle={event => {
+          if (event.currentTarget.open) setOpened(true);
+        }}
+      >
+        <summary className="cursor-pointer text-cell font-semibold text-fg">Other ways to sign in</summary>
+        <div className="mt-3">{opened ? <AddAnyLogin client={client} lock={harness} /> : null}</div>
+      </details>
+    </div>
+  );
+}
+
+function AddAnyLogin({
+  client,
+  onAdded,
+  lock,
+}: Omit<AddLoginPanelProps, 'harness'> & {
+  /** Offer only this tool's providers, and make every login for it. */
+  readonly lock?: HarnessKind;
+}) {
   const [catalog, setCatalog] = useState<ProviderPresetCatalog | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [choosing, setChoosing] = useState<string | null>(null);
@@ -264,7 +331,12 @@ function AddAnyLogin({ client, onAdded }: Omit<AddLoginPanelProps, 'harness'>) {
     let alive = true;
     readPresets(client).then(
       read => {
-        if (alive) setCatalog(read);
+        if (alive)
+          setCatalog(
+            lock === undefined
+              ? read
+              : { ...read, presets: read.presets.filter(preset => usableHarnesses(preset).includes(lock)) },
+          );
       },
       (error: unknown) => {
         if (alive) setFailure(refusalSentence(error));
@@ -273,7 +345,7 @@ function AddAnyLogin({ client, onAdded }: Omit<AddLoginPanelProps, 'harness'>) {
     return () => {
       alive = false;
     };
-  }, [client]);
+  }, [client, lock]);
 
   const done = (id: string): void => {
     setAdded(id);
@@ -329,12 +401,14 @@ function AddAnyLogin({ client, onAdded }: Omit<AddLoginPanelProps, 'harness'>) {
               onAdded={done}
               onCancel={close}
               onMore={() => setMore(picked.id)}
+              {...(lock === undefined ? {} : { lock })}
             />
           ) : (
             <PresetForm
               client={client}
               preset={picked}
               {...(held === undefined || held.presetId !== picked.id ? {} : { prefill: held.prefill })}
+              {...(lock === undefined ? {} : { lock })}
               onAdded={done}
               onCancel={close}
             />
@@ -351,7 +425,7 @@ function AddAnyLogin({ client, onAdded }: Omit<AddLoginPanelProps, 'harness'>) {
           Added {added}.
         </p>
       )}
-      <SignInForm client={client} onAdded={done} />
+      {lock === undefined ? <SignInForm client={client} onAdded={done} /> : null}
       {failure === null ? null : (
         <p role="alert" className="m-0 text-cell leading-base text-warn">
           {failure}

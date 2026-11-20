@@ -1,7 +1,8 @@
 /**
  * r11 O6, owner item 6 ("why in codex' segment, it ask you to use claude code?"): an add-login panel mounted with a
- * `harness` is that tool's own sign-in. It draws no Tool picker and no provider grid, never reads the preset catalog,
- * and its one press makes a login of THAT tool only.
+ * `harness` is that tool's own sign-in. It draws no Tool picker, folds (closed, not removed) the optional name and the
+ * other ways to sign in, reads the preset catalog only once that fold is opened, and its one press makes a login of THAT
+ * tool only. The registered panel gets the harness from the subject `harness:codex` / `harness:claude`.
  */
 import { describe, expect, it } from 'bun:test';
 import { AddLoginPanel } from '../../../app/features/add-login-panel.tsx';
@@ -42,8 +43,18 @@ describe('the add-login panel locked to one tool', () => {
       const view = await mount(<AddLoginPanel client={client} harness={harness} />);
       await settle();
       expect(view.container.querySelector('[role="radiogroup"]')).toBeNull();
-      expect(view.container.querySelector('[data-add-login]')).toBeNull();
+      expect(view.container.querySelector('[data-provider-grid]')).toBeNull();
       expect(view.container.textContent).not.toContain(other);
+      // The name and the other ways are folded, closed: present, and not open.
+      const nameFold = must(view.container.querySelector<HTMLDetailsElement>('[data-add-login-name]'), 'the name fold');
+      const ways = must(
+        view.container.querySelector<HTMLDetailsElement>('[data-add-login-other-ways]'),
+        'the other ways fold',
+      );
+      expect(nameFold.open).toBe(false);
+      expect(nameFold.textContent).toContain('Name it (optional)');
+      expect(ways.open).toBe(false);
+      expect(ways.textContent).toContain('Other ways to sign in');
       expect(view.container.textContent).toContain(`Sign in to ${name}`);
       // The catalog of other providers is never even read.
       expect(calls.some(call => call.route === 'GET /v1/logins/presets')).toBe(false);
@@ -53,6 +64,7 @@ describe('the add-login panel locked to one tool', () => {
       await settle();
       const sent = calls.find(call => call.route === 'POST /v1/logins/changes');
       expect(sent?.body).toMatchObject({ kind: 'login.add', harness });
+      expect((sent?.body as { label?: string } | undefined)?.label).toBeUndefined();
       await view.unmount();
     });
   }
@@ -69,13 +81,17 @@ describe('the add-login panel locked to one tool', () => {
     await view.unmount();
   });
 
-  it('the add-login slot panel reads `harness` from its props and ignores anything else', () => {
+  it('the add-login slot panel reads the tool from its SUBJECT (harness:codex, harness:claude) and ignores anything else', () => {
     const built = logins.build?.({ client: scripted({}) } as never) as unknown as {
       panels: Record<string, (props: Record<string, unknown>) => { props: { harness?: string } }>;
     };
     const panel = built.panels['add-login'] as (props: Record<string, unknown>) => { props: { harness?: string } };
-    expect(panel({ harness: 'codex' }).props.harness).toBe('codex');
-    expect(panel({ harness: 'gemini' }).props.harness).toBeUndefined();
+    expect(panel({ subject: 'harness:codex' }).props.harness).toBe('codex');
+    expect(panel({ subject: 'harness:claude' }).props.harness).toBe('claude-code');
+    expect(panel({ subject: 'harness:gemini' }).props.harness).toBeUndefined();
+    expect(panel({ subject: 'codex-studio' }).props.harness).toBeUndefined();
     expect(panel({}).props.harness).toBeUndefined();
+    // The old ad hoc prop is not a way in any more.
+    expect(panel({ harness: 'codex' }).props.harness).toBeUndefined();
   });
 });

@@ -39,6 +39,7 @@ const element = (overrides: Partial<Parameters<typeof CodexLoginPanel>[0]> = {})
     onCancel={() => undefined}
     onUseLink={() => undefined}
     onStartLink={() => undefined}
+    onStartDeviceCode={() => undefined}
     onSubmitAddress={() => undefined}
     linked={false}
     copy={async () => {}}
@@ -277,5 +278,14 @@ describe('CodexLoginPanel with a link', () => {
 
     run(() => buttonNamed(view, 'Sign in with a link instead').props.onClick());
     expect(links).toBe(1);
+  });
+
+  it('offers the device code again after a LINK sign-in failed, and not the link', () => {
+    let codes = 0;
+    const view = mount({ flow: failedWith('rejected'), linked: true, onStartDeviceCode: () => (codes += 1) });
+
+    expect(texts(view)).not.toContain('Sign in with a link instead');
+    run(() => buttonNamed(view, 'Use a device code instead').props.onClick());
+    expect(codes).toBe(1);
   });
 });

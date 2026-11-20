@@ -272,6 +272,10 @@ export function LoginSignIn({
             setMethod('link');
             again('link');
           }}
+          onStartDeviceCode={() => {
+            setMethod('device-code');
+            again('device-code');
+          }}
           onSubmitAddress={address => void submit(address)}
         />
       )}

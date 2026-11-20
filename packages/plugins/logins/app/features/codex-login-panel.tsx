@@ -60,6 +60,8 @@ export interface CodexLoginPanelProps {
   readonly onUseLink: () => void;
   /** Start a fresh sign-in with a link, after a device code failed. */
   readonly onStartLink: () => void;
+  /** Start a fresh sign-in with a device code, after a link failed: the way back from the link-first default. */
+  readonly onStartDeviceCode: () => void;
   /** Hand the address the browser ended on to Codex on the machine. Write-only. */
   readonly onSubmitAddress: (address: string) => void;
   /** This sign-in used the link (so an ending speaks about the link, never about a code). */
@@ -114,6 +116,7 @@ export function CodexLoginPanel({
   onRecheck,
   onUseLink,
   onStartLink,
+  onStartDeviceCode,
   onSubmitAddress,
   linked,
   copy = browserClipboardWriter(),
@@ -237,7 +240,7 @@ export function CodexLoginPanel({
         {flow?.state === 'awaiting-callback' ? (
           <div className="fy-sd-host" data-codex-login-callback="">
             <div className="fy-sd-layout">
-              <div className="space-y-4">
+              <div className="fy-sd-steps space-y-4" data-sign-in-steps="">
                 {flow.deviceCode === 'unavailable' ? (
                   <p
                     data-codex-login-device-unavailable=""
@@ -264,34 +267,34 @@ export function CodexLoginPanel({
                     It starts with <code className="font-mono text-meta">http://localhost</code> — that’s expected.
                   </p>
                 </div>
-                <form className="space-y-2" onSubmit={submit}>
-                  <label htmlFor={`codex-login-address-${loginId}`} className="block text-ui font-semibold text-fg">
-                    3 · Paste that address here
-                  </label>
-                  <SecretTextarea
-                    field={address}
-                    id={`codex-login-address-${loginId}`}
-                    className="kt-input min-h-24 w-full resize-y font-mono text-meta"
-                    placeholder="http://localhost:1455/auth/callback?code=…"
-                    disabled={busy}
-                    required
-                  />
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Button type="submit" variant="primary" disabled={busy || !address.filled}>
-                      <ShieldCheck size={16} aria-hidden="true" />
-                      {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
-                    </Button>
-                    <StartOverButton onStartOver={onStartOver} busy={busy} />
-                    <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
-                      Cancel
-                    </Button>
-                  </div>
-                  <p className="m-0 text-meta leading-base text-faint">
-                    Goes straight to Codex on this machine. Kept nowhere, never shown back.
-                  </p>
-                </form>
               </div>
               <SignInDemo kind="address" />
+              <form className="fy-sd-form space-y-2" onSubmit={submit}>
+                <label htmlFor={`codex-login-address-${loginId}`} className="block text-ui font-semibold text-fg">
+                  3 · Paste that address here
+                </label>
+                <SecretTextarea
+                  field={address}
+                  id={`codex-login-address-${loginId}`}
+                  className="kt-input min-h-24 w-full resize-y font-mono text-meta"
+                  placeholder="http://localhost:1455/auth/callback?code=…"
+                  disabled={busy}
+                  required
+                />
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button type="submit" variant="primary" disabled={busy || !address.filled}>
+                    <ShieldCheck size={16} aria-hidden="true" />
+                    {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
+                  </Button>
+                  <StartOverButton onStartOver={onStartOver} busy={busy} />
+                  <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+                    Cancel
+                  </Button>
+                </div>
+                <p className="m-0 text-meta leading-base text-faint">
+                  Goes straight to Codex on this machine. Kept nowhere, never shown back.
+                </p>
+              </form>
             </div>
           </div>
         ) : null}
@@ -343,7 +346,11 @@ export function CodexLoginPanel({
                 <Link2 size={16} aria-hidden="true" />
                 {ending?.action ?? 'Start a new sign-in'}
               </Button>
-              {linked ? null : (
+              {linked ? (
+                <Button type="button" onClick={onStartDeviceCode} disabled={busy} data-codex-login-use-device-code="">
+                  Use a device code instead
+                </Button>
+              ) : (
                 <Button type="button" onClick={onStartLink} disabled={busy}>
                   Sign in with a link instead
                 </Button>

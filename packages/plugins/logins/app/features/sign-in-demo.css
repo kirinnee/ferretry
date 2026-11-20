@@ -1,5 +1,6 @@
-/* The sign-in storyboard (sign-in-demo.tsx): three frames crossfade on one 9 s loop; each frame is on for a third of it.
-   Stand-in bars only, drawn from the app's own tokens so every theme and both colour modes keep it legible. */
+/* The sign-in storyboard (sign-in-demo.tsx): four frames played ONCE, 3 s each, the last left on screen — open the link,
+   sign in, copy the address bar (or the code), paste it here. Stand-in bars only, drawn from the app's own tokens so
+   every theme and both colour modes keep it legible. Nothing repeats: every animation here has one iteration. */
 .fy-sd {
   position: relative;
   inline-size: 100%;
@@ -16,13 +17,17 @@
   gap: 8px;
   justify-content: center;
   opacity: 0;
-  animation: fy-sd-frame 9s ease-in-out infinite;
+  animation: fy-sd-frame 3s ease-in-out both;
 }
 .fy-sd__frame[data-frame='2'] {
   animation-delay: 3s;
 }
 .fy-sd__frame[data-frame='3'] {
   animation-delay: 6s;
+}
+.fy-sd__frame[data-frame='4'] {
+  animation-name: fy-sd-last;
+  animation-delay: 9s;
 }
 .fy-sd figcaption {
   font-size: 0.75rem;
@@ -52,11 +57,20 @@
 }
 .fy-sd__address {
   flex: 1;
-  block-size: 10px;
+  min-inline-size: 0;
+  min-block-size: 10px;
   margin-inline-start: 6px;
+  padding-inline: 4px;
   border-radius: 5px;
   background: var(--bg, transparent);
   border: 1px solid var(--border, currentColor);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.6875rem;
+  line-height: 1.3;
+  color: var(--fg, currentColor);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .fy-sd__body {
   display: flex;
@@ -95,19 +109,37 @@
 .fy-sd__lines b + b {
   inline-size: 60%;
 }
+.fy-sd__lines .fy-sd__button {
+  display: flex;
+  margin-block-start: 8px;
+  min-inline-size: 0;
+}
 .fy-sd__code {
   block-size: 16px;
   border-radius: 4px;
   border: 1px dashed var(--accent, currentColor);
   background: var(--accent-soft, transparent);
 }
-/* What the frame asks the eye to find pulses: the address bar (Codex), the code (Claude), the button (open). */
+/* What the eye is asked to find is drawn highlighted (a selection: soft fill and an accent edge) and pulses twice, once,
+   as its frame comes in: the address bar's text (Codex) or the code (Claude). */
+.fy-sd__address[data-hot] {
+  border-color: var(--accent, currentColor);
+  background: var(--accent-soft, var(--bg, transparent));
+  font-weight: 600;
+}
 .fy-sd__address[data-hot],
 .fy-sd__code[data-hot] {
-  animation: fy-sd-pulse 1.5s ease-in-out infinite;
   border-color: var(--accent, currentColor);
+  animation: fy-sd-pulse 3s ease-in-out 6s both;
+}
+.fy-sd__paste {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  inline-size: 80%;
 }
 .fy-sd__field {
+  display: block;
   position: relative;
   block-size: 30px;
   padding: 6px 8px;
@@ -122,46 +154,59 @@
   border-inline-end: 2px solid var(--accent, currentColor);
   border-radius: 2px;
   background: var(--accent-soft, var(--border, currentColor));
-  animation: fy-sd-type 9s steps(12, end) infinite;
+  animation: fy-sd-type 1.6s steps(12, end) 9.9s both;
 }
+/* Frames 1-3: in, held, out, and gone (the `both` fill keeps them at 0 before and after). */
 @keyframes fy-sd-frame {
   0% {
     opacity: 0;
   }
-  4%,
-  30% {
+  8%,
+  88% {
     opacity: 1;
   }
-  34%,
   100% {
     opacity: 0;
   }
 }
-@keyframes fy-sd-pulse {
-  50% {
-    box-shadow: 0 0 0 3px var(--accent-soft, transparent);
+/* Frame 4: in, and left there. */
+@keyframes fy-sd-last {
+  0% {
+    opacity: 0;
+  }
+  8%,
+  100% {
+    opacity: 1;
   }
 }
-/* Aligned to the third frame's 6 s delay: empty while the frame fades in, filled by its end. */
+@keyframes fy-sd-pulse {
+  25%,
+  75% {
+    box-shadow: 0 0 0 3px var(--accent-soft, transparent);
+  }
+  50% {
+    box-shadow: none;
+  }
+}
 @keyframes fy-sd-type {
-  0%,
-  69% {
+  from {
     inline-size: 0;
   }
-  86%,
-  100% {
+  to {
     inline-size: 100%;
   }
 }
+/* Reduced motion: the four frames are four stills, two by two, nothing moves. */
 @media (prefers-reduced-motion: reduce) {
   .fy-sd {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 8px;
     max-inline-size: 420px;
     aspect-ratio: auto;
   }
   .fy-sd__frame,
+  .fy-sd__frame[data-frame],
   .fy-sd__address[data-hot],
   .fy-sd__code[data-hot],
   .fy-sd__typed {
@@ -170,17 +215,52 @@
   .fy-sd__frame {
     position: static;
     opacity: 1;
+    /* Tiles in a row share a height, with the picture at the top and the caption at the foot, so the four line up. */
+    justify-content: space-between;
+  }
+  .fy-sd__window {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .fy-sd__body {
+    flex: 1 1 auto;
+  }
+  /* The stills are narrow: drop the window's dots so the whole of `http://localhost…` fits in the address bar. */
+  .fy-sd__bar i {
+    display: none;
+  }
+  .fy-sd__address {
+    margin-inline-start: 0;
   }
   .fy-sd__typed {
     inline-size: 100%;
   }
 }
 
-/* A panel that has the room draws its steps and the picture side by side; a narrow one stacks them. */
+/* The panel's steps, the picture and the paste field are three grid cells: side by side when there is room (the picture
+   beside the steps AND the field), stacked otherwise with the picture BETWEEN the steps and the field, so on a phone the
+   instruction is on screen before the field it explains. */
 .fy-sd-layout {
   display: grid;
   gap: 16px;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    'steps'
+    'demo'
+    'form';
+}
+.fy-sd-layout > .fy-sd-steps {
+  grid-area: steps;
+  min-inline-size: 0;
+}
+.fy-sd-layout > .fy-sd-form {
+  grid-area: form;
+  min-inline-size: 0;
+}
+.fy-sd-layout > .fy-sd {
+  grid-area: demo;
+  margin-inline: auto;
 }
 .fy-sd-host {
   container-type: inline-size;
@@ -189,25 +269,29 @@
 @container (min-width: 560px) {
   .fy-sd-layout {
     grid-template-columns: minmax(0, 1fr) 240px;
-    align-items: start;
+    grid-template-areas:
+      'steps demo'
+      'form demo';
   }
   .fy-sd-layout > .fy-sd {
+    align-self: start;
     position: sticky;
     top: 0;
+    margin-inline: 0;
   }
 }
 @media (prefers-reduced-motion: reduce) {
   @container (min-width: 560px) {
     .fy-sd-layout {
       grid-template-columns: minmax(0, 1fr);
+      grid-template-areas:
+        'steps'
+        'demo'
+        'form';
     }
-  }
-}
-.fy-sd-layout > .fy-sd {
-  margin-inline: auto;
-}
-@container (min-width: 560px) {
-  .fy-sd-layout > .fy-sd {
-    margin-inline: 0;
+    .fy-sd-layout > .fy-sd {
+      position: static;
+      margin-inline: auto;
+    }
   }
 }

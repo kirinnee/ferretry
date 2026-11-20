@@ -177,7 +177,7 @@ export function ClaudeLoginPanel({
         {flow?.state === 'awaiting-code' ? (
           <div className="fy-sd-host" data-claude-login-code="">
             <div className="fy-sd-layout">
-              <div className="space-y-4">
+              <div className="fy-sd-steps space-y-4" data-sign-in-steps="">
                 <div className="rounded-control border border-accent/40 bg-accent-soft p-3">
                   <p className="m-0 text-meta font-semibold text-accent">1 · Open this link anywhere</p>
                   <div className="mt-2 flex min-w-0 items-start gap-2">
@@ -200,39 +200,39 @@ export function ClaudeLoginPanel({
                     </span>
                   </p>
                 ) : null}
-                <form className="space-y-2" onSubmit={submit}>
-                  <label htmlFor={`claude-login-code-${loginId}`} className="block text-ui font-semibold text-fg">
-                    2 · Paste the code Claude showed you
-                  </label>
-                  <textarea
-                    id={`claude-login-code-${loginId}`}
-                    name="claude-login-code"
-                    className="kt-input min-h-24 w-full resize-y font-mono text-meta"
-                    value={code}
-                    onChange={event => setCode(event.target.value)}
-                    autoComplete="off"
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    spellCheck={false}
-                    disabled={busy}
-                    required
-                  />
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Button type="submit" variant="primary" disabled={busy || code.trim() === ''}>
-                      <ShieldCheck size={16} aria-hidden="true" />
-                      {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
-                    </Button>
-                    <StartOverButton onStartOver={onStartOver} busy={busy} />
-                    <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
-                      Cancel
-                    </Button>
-                  </div>
-                  <p className="m-0 text-meta leading-base text-faint">
-                    Goes straight to Claude on this machine. Kept nowhere, never shown back.
-                  </p>
-                </form>
               </div>
               <SignInDemo kind="code" />
+              <form className="fy-sd-form space-y-2" onSubmit={submit}>
+                <label htmlFor={`claude-login-code-${loginId}`} className="block text-ui font-semibold text-fg">
+                  2 · Paste the code Claude showed you
+                </label>
+                <textarea
+                  id={`claude-login-code-${loginId}`}
+                  name="claude-login-code"
+                  className="kt-input min-h-24 w-full resize-y font-mono text-meta"
+                  value={code}
+                  onChange={event => setCode(event.target.value)}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  disabled={busy}
+                  required
+                />
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button type="submit" variant="primary" disabled={busy || code.trim() === ''}>
+                    <ShieldCheck size={16} aria-hidden="true" />
+                    {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
+                  </Button>
+                  <StartOverButton onStartOver={onStartOver} busy={busy} />
+                  <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+                    Cancel
+                  </Button>
+                </div>
+                <p className="m-0 text-meta leading-base text-faint">
+                  Goes straight to Claude on this machine. Kept nowhere, never shown back.
+                </p>
+              </form>
             </div>
           </div>
         ) : null}

@@ -6,7 +6,7 @@
  */
 
 import { Loading } from '@ferretry/app/ui';
-import { createElement, type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
+import { createElement, type ReactElement, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { LoginList } from '../../contract/index.ts';
 import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { useLoginChanges } from '../lib/login-changes.ts';
@@ -24,6 +24,10 @@ export interface HarnessSignInEmbedProps {
   readonly onShown?: () => void;
   /** The first read found a usable login of this harness: the page may skip itself. */
   readonly onAlreadySignedIn?: () => void;
+  /** A name for the login this panel makes (it keeps its id-derived name when absent). */
+  readonly label?: string;
+  /** Drawn above the button that makes the login, only when there is one to make (the add panel's folded name field). */
+  readonly beforeMake?: ReactNode;
 }
 
 /** `refresh_due` is still a login that works: the harness refreshes it on its own. */
@@ -57,6 +61,8 @@ export function HarnessSignInEmbed({
   onSignedIn,
   onShown,
   onAlreadySignedIn,
+  label,
+  beforeMake,
 }: HarnessSignInEmbedProps) {
   const changes = useLoginChanges(client);
   const [list, setList] = useState<LoginList | null>(null);
@@ -156,7 +162,7 @@ export function HarnessSignInEmbed({
 
   const make = async (): Promise<void> => {
     const id = suggestLoginId(harness, undefined, new Set(list.logins.map(item => item.id)));
-    const result = await changes.apply({ kind: 'login.add', id, harness });
+    const result = await changes.apply({ kind: 'login.add', id, harness, ...(label === undefined ? {} : { label }) });
     if (result.kind !== 'applied') return;
     setMade(id);
     await reload();
@@ -175,6 +181,7 @@ export function HarnessSignInEmbed({
           : `None of them can be signed in here.`}{' '}
         This makes one and starts signing it in.
       </p>
+      {beforeMake}
       <ChangeApplyPanel
         machineName={list.machine}
         authority={changes.authority}
