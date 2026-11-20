@@ -7,7 +7,7 @@ import { type AddDraft, addRequestOf, BUILD_TONES, BUILD_WORDS, EMPTY_DRAFT, she
 import { type ShellsClient, shellsClient } from '../lib/shells-client.ts';
 import { Loading } from '@ferretry/app/ui';
 import './shells-settings.css';
-import { Badge, Button, SettingGroup, SettingRow, SettingSwitch } from '../ui.ts';
+import { Badge, Button, SelectBox, SettingGroup, SettingRow, SettingSwitch } from '../ui.ts';
 
 const said = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -169,16 +169,17 @@ function ShellsTab({ shells }: { readonly shells: ShellsClient }) {
             )}
           </FieldRow>
           <FieldRow name="Made from">
-            {labelId => (
-              <select
-                aria-labelledby={labelId}
+            {() => (
+              <SelectBox
                 className={input}
+                label="Made from"
+                onChange={kind => setDraft({ ...draft, kind: kind === 'flake' ? 'flake' : 'packages' })}
+                options={[
+                  { value: 'packages', label: 'A package list' },
+                  { value: 'flake', label: 'A flake reference' },
+                ]}
                 value={draft.kind}
-                onChange={event => setDraft({ ...draft, kind: event.target.value === 'flake' ? 'flake' : 'packages' })}
-              >
-                <option value="packages">A package list</option>
-                <option value="flake">A flake reference</option>
-              </select>
+              />
             )}
           </FieldRow>
           <FieldRow name={draft.kind === 'flake' ? 'Flake reference' : 'Packages'}>
