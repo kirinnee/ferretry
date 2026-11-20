@@ -178,6 +178,12 @@
   .fy-spf__footer .fy-spf__button {
     inline-size: auto;
     min-inline-size: 0;
+    /* A third is narrow: a long label ("Open this machine") wraps inside its button instead of running out of it. */
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+    padding-inline: 4px;
+    text-align: center;
+    white-space: normal;
   }
 }
 

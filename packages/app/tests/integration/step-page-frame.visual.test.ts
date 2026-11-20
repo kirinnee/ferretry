@@ -6,8 +6,11 @@
  *   1280: stacked cards share one x and width with y strictly increasing; the demo sits right of the cards (gap > 32)
  *         with its top within 8px of the first card's top; Back / Later / Next are each 136px wide and >= 44px tall; an
  *         in-body Button is >= 136px wide and 12px from its neighbour.
- *   390:  the demo is above the first card and <= 140px tall; the footer's three buttons are equal thirds inside the
- *         viewport; no horizontal scroll.
+ *   390:  the demo is above the first card, <= 140px tall AND really drawn (nonzero box, hit-testable at its centre); the
+ *         footer's three buttons are equal thirds inside the viewport; the page's own scroller does not scroll sideways.
+ *   320 + 390, the ending's footer (Back + "Open this machine"): every label's text box sits inside its button's box and
+ *         inside the viewport (a long label wraps inside its third).
+ *   pending: a page `hidden` behind a loading cover draws no demo (the portal is gated); the demo appears when the page does.
  *
  * Set `FY_STEP_FRAME_SHOTS_DIR` to keep `<viewport>-<theme>-<case>.png` (1280 and 390, light and dark).
  */
@@ -141,6 +144,25 @@ const measure = async (tab: Page) =>
       footer,
       bodyButtons,
       viewportWidth: window.innerWidth,
+      scroller: (() => {
+        const node = document.querySelector('[data-scroller]') as HTMLElement;
+        return { scrollWidth: node.scrollWidth, clientWidth: node.clientWidth };
+      })(),
+      demoVisible: (() => {
+        const node = document.querySelector('[data-step-demo]');
+        if (node === null) return false;
+        const r = node.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return r.width > 0 && r.height > 0 && getComputedStyle(node).display !== 'none' && node.contains(hit);
+      })(),
+      labels: ['[data-step-back]', '[data-step-later]', '[data-step-next]']
+        .map(selector => document.querySelector(selector))
+        .filter((node): node is Element => node !== null)
+        .map(node => {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          return { button: box(node), text: box(range as unknown as Element), label: node.textContent ?? '' };
+        }),
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       demoInFrame: document.querySelector('[data-step-demo] [data-fake-demo]') !== null,
       stickyTop: getComputedStyle(document.querySelector('[data-step-demo]') as Element).position,
@@ -219,10 +241,76 @@ describe('r11 O2: step page layout, stacked choices left and demo right', () => 
           expect(button.h).toBeGreaterThanOrEqual(44);
         }
         expect(m.overflowX).toBe(false);
+        // The demo is really there: a nonzero box that the page shows at its centre, not only "<= 140".
+        expect(m.demoVisible).toBe(true);
+        expect(m.demo.h).toBeGreaterThanOrEqual(40);
+        expect(m.fake.w).toBeGreaterThan(0);
+        expect(m.fake.h).toBeGreaterThan(0);
+        // The scroller the page really scrolls in (not the document) does not scroll sideways.
+        expect(m.scroller.scrollWidth).toBeLessThanOrEqual(m.scroller.clientWidth);
         await shotOf(tab, variant, 'stack');
         expect(problems).toEqual([]);
         console.info(
-          `[r11-o2] ${variant.name}: demo bottom=${m.demo.bottom} h=${m.demo.h} first card y=${m.cards[0]?.y} | footer w=${m.footer.map(b => b.w).join('/')} right=${m.footer.at(-1)?.right}/${m.viewportWidth}`,
+          `[r11-o2] ${variant.name}: scroller ${m.scroller.scrollWidth}/${m.scroller.clientWidth} demoVisible=${m.demoVisible} fake=${m.fake.w}x${m.fake.h} | demo bottom=${m.demo.bottom} h=${m.demo.h} first card y=${m.cards[0]?.y} | footer w=${m.footer.map(b => b.w).join('/')} right=${m.footer.at(-1)?.right}/${m.viewportWidth}`,
+        );
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  for (const [width, scheme] of [
+    [320, 'light'],
+    [390, 'light'],
+    [390, 'dark'],
+  ] as const) {
+    it(`${width}-${scheme}: a long footer label ("Open this machine") stays inside its button and the viewport`, async () => {
+      const variant: Viewport = { name: `${width}-${scheme}`, width, height: 800, phone: true, scheme };
+      const { tab, problems, close } = await open(variant, 'long');
+      try {
+        const m = await measure(tab);
+        expect(m.labels.map(item => item.label)).toEqual(['Back', 'Open this machine']);
+        for (const { button, text, label } of m.labels) {
+          expect(text.x, `${label} starts inside its button`).toBeGreaterThanOrEqual(button.x - 0.5);
+          expect(text.right, `${label} ends inside its button`).toBeLessThanOrEqual(button.right + 0.5);
+          expect(text.y).toBeGreaterThanOrEqual(button.y - 0.5);
+          expect(text.bottom).toBeLessThanOrEqual(button.bottom + 0.5);
+          expect(text.right, `${label} ends inside the viewport`).toBeLessThanOrEqual(m.viewportWidth);
+          expect(button.right).toBeLessThanOrEqual(m.viewportWidth);
+        }
+        // The three equal columns hold: Back and Next are the same width, Next in the third column.
+        near(m.labels[0]?.button.w ?? 0, m.labels[1]?.button.w ?? 0, 1);
+        expect(m.scroller.scrollWidth).toBeLessThanOrEqual(m.scroller.clientWidth);
+        await shotOf(tab, variant, 'long-label');
+        expect(problems).toEqual([]);
+        const next = m.labels[1];
+        console.info(
+          `[r11-o2] ${variant.name}: Next button x=${next?.button.x}..${next?.button.right} h=${next?.button.h}, label x=${next?.text.x}..${next?.text.right} h=${next?.text.h}, viewport ${m.viewportWidth}`,
+        );
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  for (const variant of [VARIANTS[0], VARIANTS[2]] as readonly Viewport[]) {
+    it(`${variant.name}: a page hidden behind its loading cover draws no demo, and the demo appears when the page does`, async () => {
+      const { tab, problems, close } = await open(variant, 'pending');
+      try {
+        const covered = await measure(tab);
+        expect(await tab.locator('[data-flow-cover]').isVisible()).toBe(true);
+        expect(await tab.locator('[data-fake-demo]').count(), 'no demo node while covered').toBe(0);
+        expect(covered.demoVisible).toBe(false);
+        expect(covered.demo.w).toBe(0);
+        await tab.locator('[data-step-next]').click();
+        await tab.waitForSelector('[data-step-demo] [data-fake-demo]');
+        const ready = await measure(tab);
+        expect(await tab.locator('[data-flow-cover]').count()).toBe(0);
+        expect(ready.demoVisible).toBe(true);
+        expect(ready.fake.w).toBeGreaterThan(0);
+        expect(problems).toEqual([]);
+        console.info(
+          `[r11-o2] ${variant.name}: pending demo w=${covered.demo.w} visible=${covered.demoVisible} -> ready demo w=${ready.demo.w} h=${ready.demo.h} visible=${ready.demoVisible}`,
         );
       } finally {
         await close();

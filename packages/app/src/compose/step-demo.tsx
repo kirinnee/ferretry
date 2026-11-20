@@ -12,7 +12,7 @@
  * (`aria-hidden`, set by the frame's column). The frame owns the context; this file owns the rule.
  */
 
-import { createContext, type ReactNode, useContext } from 'react';
+import { createContext, type ReactNode, useContext, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 /** `undefined`: no frame. `null`: a frame whose demo column has not mounted yet (draw nothing, the next render does). */
@@ -22,8 +22,37 @@ export interface StepDemoProps {
   readonly children: ReactNode;
 }
 
+/** True while `node` or any ancestor up to (not including) `stop` carries the `hidden` attribute: the page is covered. */
+const coveredAbove = (node: Element, stop: Element): boolean => {
+  for (let at: Element | null = node; at !== null && at !== stop; at = at.parentElement)
+    if (at.hasAttribute('hidden')) return true;
+  return false;
+};
+
+/**
+ * The portal escapes the hidden subtree its page is drawn in (a flow keeps a page `hidden` behind its loading cover),
+ * so the demo would play beside the cover. A zero-size mark rides in the page where `<StepDemo>` is written; while the
+ * mark or an ancestor inside the frame's body is `hidden`, the demo is not drawn, and it is drawn when the page shows.
+ */
 export function StepDemo({ children }: StepDemoProps) {
   const slot = useContext(StepDemoSlotContext);
+  const mark = useRef<HTMLSpanElement>(null);
+  const [covered, setCovered] = useState(false);
+  useLayoutEffect(() => {
+    const node = mark.current;
+    if (slot === undefined || slot === null || node === null) return;
+    const body = node.closest('.fy-spf__body') ?? node.ownerDocument.body;
+    const update = (): void => setCovered(coveredAbove(node, body));
+    update();
+    const watch = new MutationObserver(update);
+    watch.observe(body, { attributeFilter: ['hidden'], attributes: true, subtree: true });
+    return () => watch.disconnect();
+  }, [slot]);
   if (slot === undefined) return <div data-step-demo-inline="">{children}</div>;
-  return slot === null ? null : createPortal(children, slot);
+  return (
+    <>
+      <span ref={mark} data-step-demo-mark="" style={{ display: 'none' }} />
+      {slot === null || covered ? null : createPortal(children, slot)}
+    </>
+  );
 }

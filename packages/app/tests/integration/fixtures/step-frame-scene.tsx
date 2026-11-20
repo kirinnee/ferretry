@@ -7,6 +7,8 @@
  *   ?scene=prop    the same page with the old `demo` prop instead of StepDemo
  *   ?scene=none    stacked cards, no demo at all
  *   ?scene=inline  a StepDemo OUTSIDE a frame (renders inline)
+ *   ?scene=long    the ending's footer: Back + a long Next label ("Open this machine"), no Later
+ *   ?scene=pending a FlowPage-shaped page: its slot is `hidden` behind a loading cover until the button is pressed
  */
 
 import { Monitor, PanelLeft, Smartphone } from 'lucide-react';
@@ -48,6 +50,28 @@ const Demo = () => (
   </div>
 );
 
+/** The shape FlowPage draws: a cover while pending, the page's own slot `hidden` until it is ready. */
+const Pending = () => {
+  const [ready, setReady] = useState(false);
+  return (
+    <div style={{ height: '100vh', overflow: 'auto' }} data-scroller="">
+      <StepPageFrame
+        title="Checking"
+        back={{ onClick: () => undefined }}
+        next={{ label: 'Make ready', onClick: () => setReady(true) }}
+      >
+        {ready ? null : <div data-flow-cover="">Checking what this step needs…</div>}
+        <div hidden={!ready} data-flow-slot="">
+          <StepDemo>
+            <Demo />
+          </StepDemo>
+          <p>page body</p>
+        </div>
+      </StepPageFrame>
+    </div>
+  );
+};
+
 const Page = () => {
   const [value, setValue] = useState<string | null>('auto');
   return (
@@ -57,8 +81,8 @@ const Page = () => {
         line="You can change this later in Settings."
         {...(scene === 'prop' ? { demo: <Demo /> } : {})}
         back={{ onClick: () => undefined }}
-        later={{ onClick: () => undefined }}
-        next={{ label: 'Next', onClick: () => undefined }}
+        {...(scene === 'long' ? {} : { later: { onClick: () => undefined } })}
+        next={{ label: scene === 'long' ? 'Open this machine' : 'Next', onClick: () => undefined }}
       >
         <ChoiceCards label="Permission mode" layout="stack" options={OPTIONS} value={value} onChange={setValue} />
         {scene === 'stack' ? (
@@ -84,6 +108,8 @@ if (root !== null)
           <Demo />
         </StepDemo>
       </div>
+    ) : scene === 'pending' ? (
+      <Pending />
     ) : (
       <Page />
     ),
