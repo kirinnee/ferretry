@@ -383,7 +383,9 @@ export default provideToShell(implementApp(manifest, { build: ctx => buildConnec
   // The way out of a carrier this device cannot reach a machine over: it clears the choice, needing no machine.
   device: {
     'carrier-escape': carrierEscapeView(() =>
-      connect === undefined ? undefined : { preferences: connect.preferences, health: connect.health },
+      connect === undefined
+        ? undefined
+        : { preferences: connect.preferences, health: connect.health, daemons: connect.daemons },
     ),
   },
   background: {

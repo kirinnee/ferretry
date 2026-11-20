@@ -53,6 +53,8 @@ interface Scenario {
   readonly now?: () => number;
   /** No half of Connections holds a client for this machine yet. */
   readonly noClient?: boolean;
+  /** Hears what the walk tells the connection model (an outage, an answer). */
+  readonly health?: { answered(daemonId: string): void; outage(daemonId: string, outage: unknown): void };
 }
 
 /** A "Tunnel only" device whose lookups travel the real control lane, and a record of what it asked and learned. */
@@ -79,6 +81,7 @@ async function tunnelOnly(scenario: Scenario) {
       learned: (daemonId, tunnel) => void learned.push({ daemonId, tunnel }),
       tunnelService: async () => scenario.service ?? 'unavailable',
       tunnelSwitchedOff: () => scenario.switchedOff === true,
+      ...(scenario.health === undefined ? {} : { health: scenario.health as never }),
       ...(scenario.now === undefined ? {} : { now: scenario.now }),
     };
   });
@@ -279,6 +282,23 @@ describe('R636 tunnel lookup: one question over an introducer, answered for 30 s
     expect(await t.failure()).toContain(`Tunnel only — ${TUNNEL_NOT_YET}.`);
     expect(t.asked).toEqual([]);
     expect(t.dialledHosts().filter(host => host === TUNNEL_HOST)).toEqual([]);
+    t.r.fx.layer.close();
+  });
+
+  test('a cold start with no tunnel known and nothing to dial is still an OUTAGE, so the way out is offered', async () => {
+    const outages: unknown[] = [];
+    const t = await tunnelOnly({
+      hosts: { [DIRECT_HOST]: { kind: 'carries', carrier: 'direct' } },
+      status: upAt(TUNNEL_URL),
+      service: 'available',
+      noClient: true,
+      health: { answered: () => undefined, outage: (_daemon, outage) => void outages.push(outage) },
+    });
+
+    // Zero legs were dialled: no failure to count, and the connection model still hears that nothing carried.
+    expect(await t.failure()).toContain(`Tunnel only — ${TUNNEL_NOT_YET}.`);
+    expect(t.dialledHosts()).toEqual([]);
+    expect(outages).toEqual([{ failures: [], daemonAbsent: false, relaysNeverOpened: false }]);
     t.r.fx.layer.close();
   });
 });
