@@ -18,7 +18,7 @@
 /* THE GATE for anything else that stands for a wait (a status pill, a spinner with `wait`): invisible for the threshold,
    then faded in. Its space is held from the first frame, so showing it moves nothing. */
 .fy-wait-gate {
-  animation: fy-loading-in var(--loading-fade, 160ms) ease-out var(--loading-delay, 300ms) both;
+  animation: fy-loading-in var(--loading-fade, 160ms) var(--ease-out) var(--loading-delay, 300ms) both;
 }
 /* A loader that was on screen when its owner answered keeps its minimum as a still copy (loading-hold.ts): fully there
    from its first frame, over the beat that remains. Specificity beats the gate rules and the reduced-motion restatement. */
@@ -33,7 +33,7 @@
 
 .fy-loading--page {
   align-items: center;
-  animation: fy-loading-in var(--loading-fade, 160ms) ease-out var(--loading-delay, 300ms) both;
+  animation: fy-loading-in var(--loading-fade, 160ms) var(--ease-out) var(--loading-delay, 300ms) both;
   color: var(--fg-soft);
   display: flex;
   flex: 1 1 auto;
@@ -66,7 +66,7 @@
   width: 76px;
 }
 .fy-loading__ring {
-  animation: fy-loading-ring 2.2s cubic-bezier(0.2, 0.6, 0.35, 1) infinite;
+  animation: fy-loading-ring var(--motion-loading-ring) var(--ease-loading-ring) infinite;
   border: 2px solid var(--accent);
   border-radius: 50%;
   inset: 0;
@@ -74,7 +74,7 @@
   position: absolute;
 }
 .fy-loading__ring--late {
-  animation-delay: 1.1s;
+  animation-delay: calc(var(--motion-loading-ring) / 2);
 }
 @keyframes fy-loading-ring {
   0% {
@@ -88,7 +88,7 @@
 }
 
 .fy-loading__label {
-  animation: fy-loading-shimmer 2.4s ease-in-out infinite;
+  animation: fy-loading-shimmer var(--motion-loading-shimmer) var(--ease-in-out) infinite;
   background: linear-gradient(
     90deg,
     var(--muted) 0%,
@@ -114,7 +114,7 @@
 
 /* The bar: fixed to the top of the window, above the frame, never in flow, so showing it moves nothing. */
 .fy-loading-bar {
-  animation: fy-loading-in var(--loading-fade, 160ms) ease-out var(--loading-delay, 300ms) both;
+  animation: fy-loading-in var(--loading-fade, 160ms) var(--ease-out) var(--loading-delay, 300ms) both;
   background: color-mix(in srgb, var(--accent) 30%, transparent);
   box-shadow: 0 1px 6px color-mix(in srgb, var(--accent) 45%, transparent);
   height: 3px;
@@ -125,7 +125,7 @@
   z-index: 70;
 }
 .fy-loading-bar__run {
-  animation: fy-loading-run 1.3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation: fy-loading-run var(--motion-loading-run) var(--ease-loading-run) infinite;
   background: linear-gradient(90deg, transparent, var(--accent) 45%, var(--accent) 55%, transparent);
   display: block;
   height: 100%;

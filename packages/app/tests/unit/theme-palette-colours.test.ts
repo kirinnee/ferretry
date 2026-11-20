@@ -194,7 +194,7 @@ describe('the mesh token stays `none` (index.css still paints it under the page 
   it('has a baseline of none, and the body paints the wash over the mesh', () => {
     expect(withoutComments(readStyleFile('tokens/base-palette.css'))).toContain('--surface-mesh: none;');
     expect(withoutComments(readStyleFile('index.css'))).toContain(
-      'background-image: var(--body-wash), var(--surface-mesh);',
+      'background-image: var(--bg-pattern), var(--body-wash), var(--surface-mesh);',
     );
   });
 });

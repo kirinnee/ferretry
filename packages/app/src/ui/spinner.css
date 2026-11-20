@@ -82,6 +82,35 @@
   transform-origin: 50% 50%;
   vertical-align: middle;
 }
+/* THE RING and THE PARTS (r11 T2). Studio draws the ring only; a style swaps it for the parts, or draws both. Each part
+   is a square in the 16-unit box, filled with the arc colour, and steps through opacity on `--spinner-parts-speed` in
+   quarter-turn phases so the four read as one moving figure. A style restyles shape/position/animation in its own file. */
+.fy-spinner-ring {
+  display: var(--spinner-ring);
+}
+.fy-spinner [class*='fy-spinner__p'] {
+  animation: fy-spinner-part var(--spinner-parts-speed) var(--spinner-parts-timing) infinite;
+  display: var(--spinner-parts);
+  fill: var(--spinner-arc);
+  opacity: 0.25;
+}
+.fy-spinner__p2 {
+  animation-delay: calc(var(--spinner-parts-speed) * 0.25);
+}
+.fy-spinner__p4 {
+  animation-delay: calc(var(--spinner-parts-speed) * 0.5);
+}
+.fy-spinner__p3 {
+  animation-delay: calc(var(--spinner-parts-speed) * 0.75);
+}
+@keyframes fy-spinner-part {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.25;
+  }
+}
 .fy-spinner-track {
   stroke: var(--spinner-track);
   stroke-dasharray: var(--spinner-track-dash);
@@ -119,6 +148,14 @@
   .fy-spinner .fy-spinner-arc {
     stroke-dasharray: 100 0;
   }
+  .fy-spinner [class*='fy-spinner__p'] {
+    animation: none !important;
+    opacity: 1;
+  }
+}
+:root[data-motion='reduced'] .fy-spinner [class*='fy-spinner__p'] {
+  animation: none !important;
+  opacity: 1;
 }
 :root[data-motion='reduced'] .fy-spinner.fy-spinner {
   animation: fy-spinner-pulse 1.6s ease-in-out infinite !important;

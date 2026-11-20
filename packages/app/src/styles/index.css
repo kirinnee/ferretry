@@ -29,9 +29,15 @@ html {
 body {
   margin: 0;
   background-color: var(--bg);
-  background-image: var(--body-wash), var(--surface-mesh);
+  /* The pattern is the first layer (tiled every `--bg-pattern-size`; `none` in Studio, so it draws nothing); the wash and the mesh
+     keep their own size and no-repeat. The grain is `body::after` below. (r11 T2; tokens in tokens/base-style.css) */
+  background-image: var(--bg-pattern), var(--body-wash), var(--surface-mesh);
+  background-size:
+    var(--bg-pattern-size) var(--bg-pattern-size),
+    auto,
+    auto;
   background-attachment: fixed;
-  background-repeat: no-repeat;
+  background-repeat: repeat, no-repeat, no-repeat;
   color: var(--fg);
   font-family: var(--font-body);
   font-size: var(--font-size-base);
@@ -53,6 +59,30 @@ body::before {
   background-image: var(--overlay);
   opacity: var(--overlay-opacity);
   mix-blend-mode: var(--overlay-blend);
+}
+
+/* THE GRAIN (r11 T2; tokens in tokens/base-style.css): a fixed inert layer over the page (z 19, below the overlay and every
+   modal) at `--grain-alpha`. Studio sets none, so it draws nothing. It is an inline data URI, so it makes no request and
+   needs no CSP source, and it goes away for a reader who asked for less transparency. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 19;
+  pointer-events: none;
+  background-image: var(--grain-image);
+  background-size: calc(160px * var(--grain-scale)) calc(160px * var(--grain-scale));
+  opacity: var(--grain-alpha);
+  mix-blend-mode: var(--grain-blend);
+}
+@media (prefers-reduced-transparency: reduce) {
+  body::after {
+    display: none;
+  }
+  /* The pattern is the other see-through layer: it goes too, and the wash and the mesh keep their own two entries. */
+  body {
+    background-image: none, var(--body-wash), var(--surface-mesh);
+  }
 }
 
 ::selection {
@@ -124,7 +154,7 @@ select:focus {
 
 /* Every theme keeps a visible focus ring — at least 2px, 3px in High Contrast. */
 :focus-visible {
-  outline: var(--focus-width) solid var(--focus-color);
+  outline: var(--focus-width) var(--focus-line) var(--focus-color);
   outline-offset: var(--focus-offset);
 }
 /* A text field's ring hugs its own edge (offset 0) instead of floating beside the border colour it also changes. */

@@ -93,12 +93,12 @@
 @media (prefers-reduced-motion: no-preference) {
   .fy-sp[data-sp-state='playing'] .fy-sp__layer--before,
   .fy-sp[data-sp-state='paused'] .fy-sp__layer--before {
-    animation: fy-sp-before var(--sp-loop) ease-in-out 1;
+    animation: fy-sp-before var(--sp-loop) var(--ease-in-out) 1;
     opacity: 0;
   }
   .fy-sp[data-sp-state='playing'] .fy-sp__layer--after,
   .fy-sp[data-sp-state='paused'] .fy-sp__layer--after {
-    animation: fy-sp-after var(--sp-loop) ease-in-out 1;
+    animation: fy-sp-after var(--sp-loop) var(--ease-in-out) 1;
   }
   /* Hidden tab or scrolled off-screen: held where it is, and costing nothing. */
   .fy-sp[data-sp-state='paused'] .fy-sp__layer,
