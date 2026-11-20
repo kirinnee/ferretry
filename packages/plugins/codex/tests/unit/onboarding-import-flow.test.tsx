@@ -132,11 +132,17 @@ const choose = async (id: 'everything' | 'choose' | 'fresh'): Promise<void> => {
 };
 
 /** An arrow key on the choice's radio group: it moves AND selects, as a radio group does. */
-const arrow = async (key: 'ArrowRight' | 'ArrowLeft' | 'Home' | 'End'): Promise<void> => {
+const arrow = async (key: 'ArrowRight' | 'ArrowLeft' | 'Home' | 'End' | 'Enter'): Promise<void> => {
   const group = query('[role="radiogroup"]');
   expect(group).not.toBeNull();
+  // The key goes to the radio holding the focus (the checked one until an arrow has moved it).
+  const focused = document.activeElement;
+  const holder =
+    focused instanceof HTMLInputElement && group?.contains(focused) === true
+      ? focused
+      : group?.querySelector<HTMLInputElement>('input:checked');
   await interact(
-    () => void group?.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })),
+    () => void holder?.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })),
   );
   await settle();
 };
@@ -265,6 +271,9 @@ describe('the Codex import pages in the setup flow', () => {
     expect(pageKey()).toBe('codex.import-choice');
     await arrow('ArrowRight');
     await arrow('ArrowRight');
+    // The arrows moved the focus only; Enter chooses the card it ended on.
+    expect(query('[data-choice="fresh"] input:checked')).toBeNull();
+    await arrow('Enter');
     expect(query('[data-choice="fresh"] input:checked')).not.toBeNull();
     expect(pageKey()).toBe('codex.import-choice');
     expect(run.written).toEqual([]);

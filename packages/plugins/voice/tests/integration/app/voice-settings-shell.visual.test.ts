@@ -292,7 +292,7 @@ describe('Voice settings in the real Settings shell', () => {
 
   for (const viewport of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const)
-      it(`${viewport.name} ${scheme}: an arrow key off "Off" only stages the clean-up style, and Apply says what it turns on`, async () => {
+      it(`${viewport.name} ${scheme}: choosing a style off "Off" with the keyboard only stages it, and Apply says what it turns on`, async () => {
         const { page, problems, close } = await open(viewport, scheme, 'voice-cleanup', '&style=off');
         try {
           const writes: string[] = [];
@@ -301,6 +301,9 @@ describe('Voice settings in the real Settings shell', () => {
           });
           await page.locator('[data-choice-cards] input[value="off"]').focus();
           await page.keyboard.press('ArrowRight');
+          // The arrow only moved the focus: nothing is staged until Enter chooses the card.
+          expect(await page.locator('[data-cleanup-staged]').count()).toBe(0);
+          await page.keyboard.press('Enter');
           const staged = page.locator('[data-cleanup-staged]');
           await staged.waitFor();
           expect(await staged.innerText()).toContain('turns hosted clean-up ON');
