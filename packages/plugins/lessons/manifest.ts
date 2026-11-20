@@ -366,7 +366,7 @@ export default definePlugin({
     takes: [{ hook: LaunchParts }, { hook: TurnEnded }],
   },
 
-  onboarding: [{ id: 'lessons', title: 'Lessons', order: 70 }],
+  onboarding: [{ id: 'lessons', title: 'Lessons', order: 70, stepHost: true }],
   doctor: ['lessons-board'],
 
   // A scan reads transcripts only through Conversation. Applying a Repo lesson writes the project's instruction file
