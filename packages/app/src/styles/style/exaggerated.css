@@ -142,6 +142,16 @@
   }
 }
 
+/* A 48-80px display title is wider than a phone for one long unbroken word (a project called CustomerNotificationsService).
+   Every display-sized heading may break inside a word, and hyphenate where the language allows, rather than push the page
+   sideways. `anywhere` (not `break-word`) also lowers the title's min-content width, so a flex or grid parent that
+   forgot `min-width: 0` still shrinks it. */
+:root[data-style='exaggerated'] .text-display,
+:root[data-style='exaggerated'] .fy-spec__display {
+  overflow-wrap: anywhere;
+  hyphens: auto;
+}
+
 /* ============================================================================
    COMPONENT TOUCHES. The tokens above reach everything that reads them; these are the pieces that draw a soft fill, a
    pill or a shadow of their own. Colour only from roles.

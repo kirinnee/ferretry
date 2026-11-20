@@ -90,7 +90,7 @@ describe('the Exaggerated Minimalism specimen', () => {
           const problems: string[] = [];
           tab.on('pageerror', error => problems.push(error.message));
           try {
-            await tab.goto(`${origin}/?style=exaggerated&palette=${palette}&mode=${mode}`);
+            await tab.goto(`${origin}/?style=exaggerated&palette=${palette}&mode=${mode}&title=Specimen`);
             await tab.waitForSelector('[data-specimen]');
             await tab.evaluate(async () => await document.fonts.ready);
             // The app shell pins html and body to the viewport (overflow hidden), which would crop a full-page capture to one screen.

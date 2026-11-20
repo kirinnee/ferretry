@@ -5,7 +5,7 @@
  *
  *   /d/ws/ferrets/zoe       a ferret's page     /d/ws/agenda   /d/ws/board   /d/ws/projects   /d/ws/insights
  *   /d/ws/settings[/<plugin>/<tab>]            /settings (this device)      /pair (the pairing page)
- *   ?theme=<family>-<mode>
+ *   ?theme=<family>-<mode>      ?style=<id>&palette=<id>&mode=light|dark (open wearing a look)      ?longProject=1 (one project named by a single long word)
  *
  * `window.__fakeRequests` lists every path the page asked for that the fake daemon has no answer for (a probe aid).
  */
@@ -21,8 +21,8 @@ import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
-import { memoryStore } from '../../../src/storage/records.ts';
-import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
+import { memoryStore, writeRecord } from '../../../src/storage/records.ts';
+import { THEME_PREFERENCES_KEY, ThemePreferenceStore } from '../../../src/theme/preferences.ts';
 import { FakeTransport, inventoryOf, json } from '../../unit/client/fixtures.ts';
 import { answerFor } from './mobile-fake-daemon.ts';
 
@@ -111,7 +111,15 @@ const runtime: ShellRuntime = new ShellRuntime({
   daemonless: { views: registeredDaemonless(surfaces, daemonlessPorts).views, location: () => window.location.href },
   address: window,
 });
+// `?style=<id>&palette=<id>&mode=light|dark`: open the app already wearing that look (the stored preference the picker would write).
 const storage = memoryStore();
+if (params.get('style') !== null)
+  writeRecord(storage, THEME_PREFERENCES_KEY, {
+    style: params.get('style'),
+    palette: params.get('palette') ?? 'studio',
+    mode: params.get('mode') ?? 'light',
+    textScale: 'default',
+  });
 
 const root = document.getElementById('root');
 if (root !== null)
