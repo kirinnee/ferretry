@@ -79,6 +79,10 @@ body::after {
   body::after {
     display: none;
   }
+  /* The pattern is the other see-through layer: it goes too, and the wash and the mesh keep their own two entries. */
+  body {
+    background-image: none, var(--body-wash), var(--surface-mesh);
+  }
 }
 
 ::selection {

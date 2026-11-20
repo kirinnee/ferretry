@@ -585,8 +585,8 @@
     width: 100%;
   }
   [data-md-table-view='cards'] table {
-    border: var(--stroke) solid var(--border);
-    border-radius: var(--radius-sm);
+    border: var(--md-stack-frame);
+    border-radius: var(--md-stack-radius);
     overflow: hidden;
   }
   [data-md-table-view='cards'] thead {
@@ -603,7 +603,7 @@
   }
   [data-md-table-view='cards'] tr {
     padding: var(--flow-1, 4px) 0;
-    border-top: var(--divider-width) solid var(--divider-color);
+    border-top: var(--md-stack-row-rule);
   }
   [data-md-table-view='cards'] tr:first-child {
     border-top: 0;
@@ -622,7 +622,7 @@
     width: 38%;
     padding-right: 0.7em;
     box-sizing: border-box;
-    font-weight: 600;
+    font-weight: var(--md-stack-label-weight);
     color: var(--fg-soft);
     overflow-wrap: anywhere;
     word-break: break-word;
@@ -635,9 +635,11 @@
   [data-md-table-view='cards'] td:not([data-label])::before {
     content: none;
   }
-  /* Zebra is noise once rows are separated records. */
+  /* Zebra is noise once rows are separated records: a stacked row is filled by `--md-stack-row-fill` (clear by default),
+     never by the grid's stripe. */
+  [data-md-table-view='cards'] td,
   [data-md-table-view='cards'] tr:nth-child(even) td {
-    background: transparent;
+    background: var(--md-stack-row-fill);
   }
 
   /* TABLE: the real table, in its own horizontal scroller — the page never scrolls sideways. Columns

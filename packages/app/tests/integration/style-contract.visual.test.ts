@@ -24,6 +24,7 @@ import type { Page } from 'playwright-core';
 import { sharedChromium } from '../support/browser/index.ts';
 import { readCssWithImports, readThemeCss, themeStylesDir } from '../../src/testing/theme-css.ts';
 import { Spinner } from '../../src/ui/spinner.tsx';
+import { Loading, LOADING_DELAY_MS, LOADING_FADE_MS } from '../../src/ui/loading.tsx';
 
 setDefaultTimeout(60_000);
 
@@ -71,6 +72,11 @@ const PROBE_STYLE = `
   --md-link-bg: color-mix(in srgb, var(--accent) 16%, transparent);
   --md-link-pad: 0 0.3em;
   --md-link-radius: 4px;
+  --md-stack-frame: 3px dashed var(--accent);
+  --md-stack-radius: 0px;
+  --md-stack-row-rule: 2px dotted var(--fg);
+  --md-stack-row-fill: color-mix(in srgb, var(--accent) 18%, transparent);
+  --md-stack-label-weight: 900;
   --md-ul-marker: square;
   --md-ol-marker: upper-roman;
   --md-list-marker-color: var(--accent);
@@ -84,6 +90,12 @@ const PROBE_STYLE = `
   --ease-out: cubic-bezier(0.1, 0.9, 0.2, 1);
   --ease-in: cubic-bezier(0.9, 0.1, 0.8, 0.2);
   --ease-spring: cubic-bezier(0.3, 0, 0.2, 1.5);
+  --ease-in-out: cubic-bezier(0.5, 0, 0.5, 1);
+  --motion-loading-ring: 3.3s;
+  --motion-loading-run: 0.9s;
+  --motion-loading-shimmer: 1.7s;
+  --ease-loading-ring: steps(6, end);
+  --ease-loading-run: linear;
   --focus-line: dashed;
   --panel-edge-line: dashed;
 }
@@ -101,6 +113,16 @@ const MARKDOWN = `
 </div>
 <div class="fy-cc__card" data-pulse="true" id="card">choice</div>
 <button class="kt-input-probe" id="focusme">focus</button>
+<div class="fy-loading-bar" id="bar" style="--loading-delay:${LOADING_DELAY_MS}ms;--loading-fade:${LOADING_FADE_MS}ms"><span class="fy-loading-bar__run" id="run"></span></div>
+<div class="fy-sp" data-sp-state="playing" id="sp"><div class="fy-sp__layer fy-sp__layer--before" id="sp-before"></div><div class="fy-sp__layer fy-sp__layer--after" id="sp-after"></div></div>
+`;
+
+/** The phone's default reading of a table, with the REAL wrapper markup (markdown-table.tsx): `.md-table[data-md-table-view=cards]`. */
+const STACKED = `
+<div class="md"><div class="md-table" data-md-table-view="cards"><div class="md-table-scroll scroll-thin">
+<table><thead><tr><th>h</th><th>h2</th></tr></thead>
+<tbody><tr><td data-label="h">a</td><td data-label="h2">b</td></tr><tr><td data-label="h">c</td><td data-label="h2">d</td></tr></tbody></table>
+</div></div></div>
 `;
 
 type Probe = Readonly<Record<string, string>>;
@@ -180,6 +202,7 @@ const measureNew = (page: Page, style: string): Promise<Probe> =>
   }, style);
 
 let page: Page;
+let css: string;
 const requests: string[] = [];
 
 beforeAll(async () => {
@@ -188,16 +211,18 @@ beforeAll(async () => {
   page.on('request', request => {
     if (!request.url().startsWith('data:') && request.url() !== 'about:blank') requests.push(request.url());
   });
-  const css = [
+  css = [
     readThemeCss(),
     readFileSync(join(srcDir, 'ui/design-system.css'), 'utf8'),
     readCssWithImports(join(srcDir, 'ui/spinner.css')),
     readCssWithImports(join(srcDir, 'compose/choice-cards.css')),
+    readCssWithImports(join(srcDir, 'compose/setting-preview.css')),
+    readCssWithImports(join(srcDir, 'ui/loading.css')),
     readFileSync(join(srcDir, 'styles/index.css'), 'utf8').replace(/^@(import|tailwind)[^;]*;\s*$/gmu, ''),
     PROBE_STYLE,
   ].join('\n');
   await page.setContent(
-    `<!doctype html><html><head><style>${css}</style></head><body>${MARKDOWN}${renderToStaticMarkup(createElement(Spinner, {}))}</body></html>`,
+    `<!doctype html><html><head><style>${css}</style></head><body>${MARKDOWN}${renderToStaticMarkup(createElement(Spinner, {}))}${renderToStaticMarkup(createElement(Loading, { kind: 'page' }))}</body></html>`,
   );
 }, 120_000);
 
@@ -264,9 +289,159 @@ describe('r11 T2 · the component style contract', () => {
     expect(probe['#card|animation-timing-function']).toBe('cubic-bezier(0.1, 0.9, 0.2, 1)');
   });
 
+  it("r11 T2 review 2 · the loading system and the setting preview follow the style's motion slots, not their own numbers", async () => {
+    const read = (styleId: string) =>
+      page.evaluate((id: string) => {
+        document.documentElement.setAttribute('data-style', id);
+        document.documentElement.setAttribute('data-palette', 'studio');
+        document.documentElement.setAttribute('data-mode', 'light');
+        const cs = (selector: string) => getComputedStyle(document.querySelector(selector) as Element);
+        const page = cs('.fy-loading--page');
+        const ring = cs('.fy-loading__ring:not(.fy-loading__ring--late)');
+        const late = cs('.fy-loading__ring--late');
+        const shimmer = cs('.fy-loading__label');
+        const run = cs('#run');
+        const bar = cs('#bar');
+        const before = cs('#sp-before');
+        const after = cs('#sp-after');
+        return {
+          ringDuration: ring.animationDuration,
+          ringTiming: ring.animationTimingFunction,
+          lateDelay: late.animationDelay,
+          shimmerDuration: shimmer.animationDuration,
+          shimmerTiming: shimmer.animationTimingFunction,
+          runDuration: run.animationDuration,
+          runTiming: run.animationTimingFunction,
+          revealDuration: page.animationDuration,
+          revealTiming: page.animationTimingFunction,
+          revealDelay: page.animationDelay,
+          barRevealTiming: bar.animationTimingFunction,
+          barRevealDelay: bar.animationDelay,
+          spBeforeTiming: before.animationTimingFunction,
+          spAfterTiming: after.animationTimingFunction,
+        };
+      }, styleId);
+    const studio = await read('studio');
+    const probe = await read('probe');
+    // Studio keeps every number the loader drew before the slots existed.
+    expect(studio).toEqual({
+      ringDuration: '2.2s',
+      ringTiming: 'cubic-bezier(0.2, 0.6, 0.35, 1)',
+      lateDelay: '1.1s',
+      shimmerDuration: '2.4s',
+      shimmerTiming: 'ease-in-out',
+      runDuration: '1.3s',
+      runTiming: 'cubic-bezier(0.4, 0, 0.2, 1)',
+      revealDuration: '0.16s',
+      revealTiming: 'ease-out',
+      revealDelay: '0.18s',
+      barRevealTiming: 'ease-out',
+      barRevealDelay: '0.18s',
+      spBeforeTiming: 'ease-in-out',
+      spAfterTiming: 'ease-in-out',
+    });
+    // A style that fills the slots moves every one of them...
+    expect(probe.ringDuration).toBe('3.3s');
+    expect(probe.ringTiming).toBe('steps(6)');
+    expect(probe.lateDelay).toBe('1.65s');
+    expect(probe.shimmerDuration).toBe('1.7s');
+    expect(probe.shimmerTiming).toBe('cubic-bezier(0.5, 0, 0.5, 1)');
+    expect(probe.runDuration).toBe('0.9s');
+    expect(probe.runTiming).toBe('linear');
+    expect(probe.revealTiming).toBe('cubic-bezier(0.1, 0.9, 0.2, 1)');
+    expect(probe.barRevealTiming).toBe('cubic-bezier(0.1, 0.9, 0.2, 1)');
+    expect(probe.spBeforeTiming).toBe('cubic-bezier(0.5, 0, 0.5, 1)');
+    expect(probe.spAfterTiming).toBe('cubic-bezier(0.5, 0, 0.5, 1)');
+    // ...and none of them touches WHEN the loader appears: the delay and the fade are ui/loading.tsx's, not a style's.
+    expect(probe.revealDelay).toBe(studio.revealDelay);
+    expect(probe.barRevealDelay).toBe(studio.barRevealDelay);
+    expect(probe.revealDuration).toBe(studio.revealDuration);
+    expect(studio.revealDelay).toBe(`${LOADING_DELAY_MS / 1000}s`);
+  });
+
+  it('r11 T2 review 3 · reduced transparency switches off BOTH layers: the pattern and the grain', async () => {
+    const cdp = await page.context().newCDPSession(page);
+    try {
+      const normal = await measure(page, 'probe');
+      expect(normal['body|background-image']).toContain('radial-gradient');
+      expect(normal['body::after|opacity']).toBe('0.08');
+      await cdp.send('Emulation.setEmulatedMedia', {
+        features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }],
+      });
+      const reduced = await measure(page, 'probe');
+      expect(reduced['body|background-image']).toMatch(/^none(, none)*$/u);
+      expect(await page.evaluate(() => getComputedStyle(document.body, '::after').display)).toBe('none');
+    } finally {
+      await cdp.send('Emulation.setEmulatedMedia', { features: [] });
+    }
+    // Back to normal: the pattern is drawn again.
+    expect((await measure(page, 'probe'))['body|background-image']).toContain('radial-gradient');
+  });
+
   it('the grain is an inline data URI: the page made no request', async () => {
     const probe = await measure(page, 'probe');
     expect(probe['body::after|background-image']).toContain('data:image/svg+xml');
     expect(requests).toEqual([]);
+  });
+});
+
+describe("r11 T2 review 1 · the Stacked table (the phone's default) takes its own style slots", () => {
+  it('at 390px a style changes the frame, the row divider and the record fill, with the real wrapper', async () => {
+    const context = await (await sharedChromium()).newContext({ viewport: { width: 390, height: 844 } });
+    const phone = await context.newPage();
+    await phone.setContent(`<!doctype html><html><head><style>${css}</style></head><body>${STACKED}</body></html>`);
+    const read = (styleId: string) =>
+      phone.evaluate((id: string) => {
+        document.documentElement.setAttribute('data-style', id);
+        document.documentElement.setAttribute('data-palette', 'studio');
+        document.documentElement.setAttribute('data-mode', 'light');
+        const cs = (selector: string, pseudo?: string) =>
+          getComputedStyle(document.querySelector(selector) as Element, pseudo);
+        const table = cs('[data-md-table-view="cards"] table');
+        const second = cs('[data-md-table-view="cards"] tbody tr:nth-child(2)');
+        const cell = cs('[data-md-table-view="cards"] tbody tr:nth-child(2) td');
+        const first = cs('[data-md-table-view="cards"] tbody tr:nth-child(1) td');
+        return {
+          view: document.querySelector('.md-table')?.getAttribute('data-md-table-view') ?? '',
+          display: cs('[data-md-table-view="cards"] td').display,
+          frameWidth: table.borderTopWidth,
+          frameStyle: table.borderTopStyle,
+          frameRadius: table.borderTopLeftRadius,
+          dividerWidth: second.borderTopWidth,
+          dividerStyle: second.borderTopStyle,
+          evenFill: cell.backgroundColor,
+          oddFill: first.backgroundColor,
+          labelWeight: cs('[data-md-table-view="cards"] tbody tr:nth-child(1) td', '::before').fontWeight,
+        };
+      }, styleId);
+    try {
+      const studio = await read('studio');
+      const probe = await read('probe');
+      expect(studio.view).toBe('cards');
+      expect(studio.display).toBe('block'); // the stacked rules really apply at 390px
+      // Studio is what the stack drew before the slots (1px frame, 1px hairline, no fill, 600 labels).
+      expect(studio).toMatchObject({
+        frameWidth: '1px',
+        frameStyle: 'solid',
+        dividerWidth: '1px',
+        dividerStyle: 'solid',
+        evenFill: 'rgba(0, 0, 0, 0)',
+        oddFill: 'rgba(0, 0, 0, 0)',
+        labelWeight: '600',
+      });
+      // A style that fills the slots changes every one of them.
+      expect(probe).toMatchObject({
+        frameWidth: '3px',
+        frameStyle: 'dashed',
+        frameRadius: '0px',
+        dividerWidth: '2px',
+        dividerStyle: 'dotted',
+        labelWeight: '900',
+      });
+      expect(probe.evenFill).not.toBe(studio.evenFill);
+      expect(probe.oddFill).not.toBe(studio.oddFill);
+    } finally {
+      await context.close();
+    }
   });
 });

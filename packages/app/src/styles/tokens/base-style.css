@@ -304,6 +304,13 @@
   --md-link-bg: transparent;
   --md-link-pad: 0;
   --md-link-radius: 0px;
+  /* Stacked table (the phone's default reading of a wide table): its OWN slots, so a style shapes the record cards too —
+   the outer frame, the divider between records and the fill of a record. The defaults are what the stack drew before. */
+  --md-stack-frame: var(--stroke) solid var(--border);
+  --md-stack-radius: var(--radius-sm);
+  --md-stack-row-rule: var(--divider-width) solid var(--divider-color);
+  --md-stack-row-fill: transparent;
+  --md-stack-label-weight: 600;
   --md-ul-marker: disc;
   --md-ol-marker: decimal;
   --md-list-marker-color: var(--faint);
@@ -320,6 +327,14 @@
   --motion-pop: 160ms;
   --ease-in: ease-in;
   --ease-out: ease-out;
+  --ease-in-out: ease-in-out;
+  /* The loading system's own motion (ui/loading.css): the orb's ring, the bar's run, the label's shimmer. Durations and
+     curves only — when it appears (`--loading-delay`, `--loading-fade`) is set by ui/loading.tsx and is not a style's. */
+  --motion-loading-ring: 2.2s;
+  --motion-loading-run: 1.3s;
+  --motion-loading-shimmer: 2.4s;
+  --ease-loading-ring: cubic-bezier(0.2, 0.6, 0.35, 1);
+  --ease-loading-run: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-spring: var(--ease-emphasis);
   /* ---- surfaces: the two slots that were missing ---- */
   --focus-line: solid;
