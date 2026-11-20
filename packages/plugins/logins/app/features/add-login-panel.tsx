@@ -17,6 +17,7 @@ import { useLoginChanges } from '../lib/login-changes.ts';
 import { readLogins, readPresets } from '../lib/logins-api.ts';
 import { HARNESS_NAMES, HARNESSES, type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
 import { type Prefill, withheldSentence } from '../lib/paste-model.ts';
+import { isSecretReference, nonReferenceSlots, SECRET_VALUE_SENTENCE } from '../lib/secret-slot.ts';
 import { Button, ChangeApplyPanel } from '../ui.ts';
 import { HarnessChoice } from './harness-choice.tsx';
 import { PasteVariables } from './paste-variables.tsx';
@@ -66,7 +67,17 @@ function PresetForm({
   const pastedSecrets = prefill?.secrets ?? [];
   const withheld = withheldSentence(prefill?.withheld ?? []);
 
+  const secretSlots = preset.variables.filter(variable => variable.kind === 'secret').map(variable => variable.name);
+
   const add = async (): Promise<void> => {
+    // A secret slot holds a reference. Anything else is a key pasted by mistake: it is cleared from the form, named by
+    // slot only, and no request is made — the value is not sent, kept or repeated.
+    const refused = nonReferenceSlots(secretSlots, env);
+    if (refused.length > 0) {
+      setEnv(current => ({ ...current, ...Object.fromEntries(refused.map(name => [name, ''])) }));
+      changes.refuse(`${SECRET_VALUE_SENTENCE} (${refused.join(', ')})`);
+      return;
+    }
     let taken: ReadonlySet<string>;
     try {
       taken = new Set((await readLogins(client)).logins.map(login => login.id));
@@ -116,8 +127,15 @@ function PresetForm({
             <input
               className="kt-input"
               autoComplete="off"
+              spellCheck={false}
+              {...(variable.kind === 'secret' && !isSecretReference(variable.name, env[variable.name] ?? '')
+                ? { type: 'password', 'data-secret-masked': '' }
+                : {})}
               value={env[variable.name] ?? ''}
-              onChange={event => setEnv({ ...env, [variable.name]: event.target.value })}
+              onChange={event => {
+                changes.clear();
+                setEnv({ ...env, [variable.name]: event.target.value });
+              }}
             />
             <span className="fy-lg-field__hint text-meta leading-base text-muted">
               {variable.kind === 'secret'

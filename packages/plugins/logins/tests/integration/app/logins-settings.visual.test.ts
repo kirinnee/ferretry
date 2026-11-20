@@ -12,6 +12,8 @@ import type { Browser, Page } from 'playwright-core';
 setDefaultTimeout(90_000);
 
 const packageRoot = import.meta.dir;
+/** A made-up key, never a real one: it is only ever typed into a field to show the field masks it. */
+const FAKE_PASTED_KEY = 'sk-or-v1-FAKE0000000000000000000000000000';
 const shotsDir = process.env.FY_LOGINS_SETTINGS_SHOTS_DIR ?? '';
 
 let browser: Browser;
@@ -106,6 +108,34 @@ const CASES: readonly Case[] = [
       await tab.locator('[data-add-login]').first().click();
       await tab.locator('[data-provider-tile="zai-glm"]').click();
       await tab.locator('[data-quick-key-form]').waitFor({ state: 'visible' });
+    },
+  },
+  {
+    // A FAKE key pasted into the full form's secret slot: masked (a password field), then refused with its slot cleared.
+    name: 'add-full-pasted-key',
+    view: 'list',
+    ready: '[data-add-login]',
+    act: async tab => {
+      await tab.locator('[data-add-login]').first().click();
+      await tab.locator('[data-provider-tile="zai-glm"]').click();
+      await tab.locator('[data-quick-key-more]').click();
+      await tab.locator('[data-add-login-form="zai-glm"]').waitFor({ state: 'visible' });
+      await tab.locator('[data-add-login-form="zai-glm"] input').first().fill(FAKE_PASTED_KEY);
+      await tab.locator('[data-secret-masked]').waitFor({ state: 'visible' });
+    },
+  },
+  {
+    name: 'add-full-refused-key',
+    view: 'list',
+    ready: '[data-add-login]',
+    act: async tab => {
+      await tab.locator('[data-add-login]').first().click();
+      await tab.locator('[data-provider-tile="zai-glm"]').click();
+      await tab.locator('[data-quick-key-more]').click();
+      await tab.locator('[data-add-login-form="zai-glm"]').waitFor({ state: 'visible' });
+      await tab.locator('[data-add-login-form="zai-glm"] input').first().fill(FAKE_PASTED_KEY);
+      await tab.locator('[data-change-submit]').click();
+      await tab.locator('[data-change-refusal]').waitFor({ state: 'visible' });
     },
   },
 ];
