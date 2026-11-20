@@ -14,6 +14,7 @@ import type { AnalyticsResponse } from '../../../contract/index.ts';
 import { Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
+import { viewerClock } from '@ferretry/app';
 import { Button } from '@ferretry/app/ui';
 import { browserClock, type DaemonConnection, daemonFerretPath, type UsageClient } from '../../shell.ts';
 import { INSIGHTS_COLUMN_CLASS } from '../../shell/insights-frame.tsx';
@@ -196,7 +197,7 @@ function QueryBody({
         submitted.current = shown;
         setSubmittedText(shown);
         setAnswer(fleet);
-        setRanAt(now().toISOString().slice(11, 16));
+        setRanAt(viewerClock(now()));
         onQueryChange?.(shown);
       } catch (reason) {
         if (mine === serial.current) {
@@ -310,7 +311,7 @@ function QueryBody({
               chart
               sessionHref={row => daemonFerretPath(answer.daemonOf(row.id) ?? connection.daemonId, row.id)}
             />
-            {ranAt && <p className="m-0 text-2xs text-faint">Ran at {ranAt} UTC</p>}
+            {ranAt && <p className="m-0 text-2xs text-faint">Ran at {ranAt}</p>}
           </>
         )}
       </div>

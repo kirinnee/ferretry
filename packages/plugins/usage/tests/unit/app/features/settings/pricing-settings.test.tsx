@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { viewerTime } from '@ferretry/app';
 import {
   ANALYTICS_PRICING_RATE_APPLICABILITY,
   type AnalyticsPricingRate,
@@ -495,7 +496,7 @@ describe('PricingSettings', () => {
     expect(marked(renderer, 'data-pricing-preview-id')).toHaveLength(0);
     expect(text(renderer)).toContain('Selected provider changes applied');
     expect(text(renderer)).toContain('Last applied:');
-    expect(text(renderer)).toContain('2026-08-06 12:00:00Z');
+    expect(text(renderer)).toContain(viewerTime('2026-08-06T12:00:00.000Z'));
   });
 
   it('preserves an expired reviewed diff and its selection until an explicit fresh preview', async () => {

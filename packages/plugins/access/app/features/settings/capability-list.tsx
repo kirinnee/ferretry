@@ -29,6 +29,7 @@
 import { CAPABILITY_AXES, CAPABILITY_NAMES } from '@ferretry/core-gate/contract';
 import type { CapabilityAxis } from '@ferretry/kernel/contract';
 import { SettingGroup, SettingRow } from '@ferretry/app';
+import { InlineCode } from '@ferretry/app/ui';
 import { CircleHelp, Wifi } from 'lucide-react';
 
 import type { CapabilityGrantView } from '../../../contract/index.ts';
@@ -271,7 +272,7 @@ export function CapabilityList({ connection, capabilities, governed, rows = true
               </Notice>
               {/* Which way the switches travel from HERE, stated rather than left to be discovered by pressing something. */}
               <p className="fy-acc-fine font-semibold" data-capability-direction={posture}>
-                {REMOTE_ONE_WAY_NOTE}
+                <InlineCode text={REMOTE_ONE_WAY_NOTE} />
               </p>
             </div>
           </SettingRow>

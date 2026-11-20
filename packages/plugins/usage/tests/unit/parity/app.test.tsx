@@ -4,6 +4,7 @@
  * what a person sees. Nothing here ticks the tsv.
  */
 import { describe, expect, it } from 'bun:test';
+import { viewerClock } from '@ferretry/app';
 import { ANALYTICS_PRICING_RATE_APPLICABILITY, type AnalyticsResponse } from '../../../contract/index.ts';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { credentialUsageRows } from '../../../daemon/lib/usage/credential-usage.ts';
@@ -251,7 +252,7 @@ describe('usage parity · Model pricing and the session surface', () => {
       <AnalyticsQueryPage connection={daemonA} client={client} now={() => new Date('2026-10-16T12:34:00Z')} />,
     );
     await submit(view.container);
-    expect(view.container.textContent).toContain('Ran at 12:34 UTC');
+    expect(view.container.textContent).toContain(`Ran at ${viewerClock(Date.parse('2026-10-16T12:34:00Z'))}`);
     expect(view.container.textContent).toContain('claude-opus-5-5');
     expect(client.calls.map(call => call.route)).toEqual([INSIGHTS]);
     await view.unmount();

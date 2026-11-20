@@ -38,7 +38,7 @@ const CLEANUP_STYLES = [
 ] as const;
 
 export const CLEANUP_GUARD_EXPLANATION =
-  'Always on, whatever the prompt says: only the text you dictated is corrected. It is never answered, nothing from the conversation is added to it or merged into it, and if the reply drifts from what you said your raw words are kept instead.';
+  'Whatever the prompt says, only the text you dictated is corrected. It is never answered, nothing from the conversation is added to it or merged into it, and if the reply drifts from what you said your raw words are kept instead.';
 
 export const CONVERSATION_CONTEXT_EXPLANATION =
   'Sends the latest messages of this conversation to the provider as read-only reference, so names and terms are spelled the way the conversation spells them. They are never added to your dictation.';
@@ -234,11 +234,9 @@ function VoiceCleanupView({ state }: { readonly state: MachineVoiceCleanup }) {
         ) : (
           <>
             <PromptEditor key={style} style={style} saved={promptFor(cleanup, style)} busy={busy} onSave={commit} />
-            <SettingRow
-              name="Always on, whatever the prompt says"
-              hint="Only your dictated text is corrected"
-              explanation={CLEANUP_GUARD_EXPLANATION}
-            />
+            <li className="fy-vs-body" data-cleanup-guard="">
+              <p className="fy-vs-note">{CLEANUP_GUARD_EXPLANATION}</p>
+            </li>
           </>
         )}
       </SettingGroup>

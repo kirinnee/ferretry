@@ -11,6 +11,7 @@ import {
   type AnalyticsPricingView,
   ManualAnalyticsPricingRateSchema,
 } from '../../../contract/index.ts';
+import { viewerTime } from '@ferretry/app';
 import { DaemonCallError } from '../../shell.ts';
 
 export type PricingLoadState =
@@ -83,7 +84,8 @@ export const isPreviewConflict = (error: unknown): boolean =>
     'pricing_preview_mismatch',
   );
 
-export const formatInstant = (instant: string): string => instant.replace('T', ' ').replace('.000Z', 'Z');
+/** A rate's date on the viewer's own clock, the zone named (never the daemon's UTC spelling). */
+export const formatInstant = (instant: string): string => viewerTime(instant);
 
 export const formatUsdMicros = (micros: number): string => {
   const whole = Math.floor(micros / 1_000_000);

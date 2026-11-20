@@ -35,7 +35,7 @@ import {
   usageBars,
   usageBarText,
 } from '../lib/logins-view.ts';
-import { Badge, Button, ChangeApplyPanel, cn } from '../ui.ts';
+import { Badge, Button, ChangeApplyPanel, cn, InlineCode } from '../ui.ts';
 import { useSignInsLogin } from '../lib/sign-ins-route.ts';
 import { AddLoginPanel } from './add-login-panel.tsx';
 import {
@@ -473,7 +473,7 @@ function LoginRow({
         <div className="mt-auto flex flex-wrap items-center justify-end gap-2" data-login-card-footer="">
           {refusal === null ? null : (
             <span className="min-w-0 flex-1 text-meta leading-base text-muted" data-login-card-locked="">
-              Remove is off here: {refusal}
+              Remove is off here: <InlineCode text={refusal} />
             </span>
           )}
           <Button

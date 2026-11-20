@@ -1,5 +1,6 @@
 import '../../../../support/app/dom.ts';
 import { describe, expect, it } from 'bun:test';
+import { viewerTime } from '@ferretry/app';
 import type { AuditView } from '@ferretry/core-gate/contract';
 import {
   DEVICES_LOOKED_EVENT,
@@ -107,7 +108,7 @@ describe('Settings › Security log', () => {
     // Only a record with detail carries the detail line.
     expect(rows.map(row => row.querySelector('[data-security-log-detail]') !== null)).toEqual([false, true, false]);
     expect(must(rows[0]?.querySelector('time'), 'time').getAttribute('title')).toBe(
-      new Date(NOW - 5 * 60_000).toLocaleString(),
+      viewerTime(new Date(NOW - 5 * 60_000)),
     );
     expect(shown.container.querySelector('[data-security-log-gaps]')).toBeNull();
     await shown.unmount();

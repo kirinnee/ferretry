@@ -9,7 +9,7 @@
  */
 
 import { useViewPlace } from '@ferretry/app';
-import { changeAuthorityFrom } from '@ferretry/app/ui';
+import { changeAuthorityFrom, InlineCode } from '@ferretry/app/ui';
 import type { AccountChange, AccountChangeView } from '../../../../contract/index.ts';
 import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
 import type { RuntimesClient } from '../../../lib/client.ts';
@@ -158,7 +158,7 @@ export function ChangeApplyPanel({
     <form className="flex flex-col gap-3" onSubmit={submit} data-change-apply={authority?.kind ?? 'reading'}>
       {authority?.kind === 'refused' ? (
         <p role="status" className="m-0 text-cell leading-base text-warn" data-change-grant-refused="">
-          {fleetRefusalExplanation(authority.refusal)}
+          <InlineCode text={fleetRefusalExplanation(authority.refusal)} />
         </p>
       ) : null}
       {authority?.kind === 'step-up' ? (

@@ -389,6 +389,14 @@ export {
   WAITING_STATUSES,
 } from './shared/status-mark.tsx';
 export { absoluteTime, relativeTime, statusLabel } from './shared/time-labels.ts';
+export {
+  viewerClock,
+  type ViewerClock,
+  viewerizeUtcStamps,
+  viewerTime,
+  viewerZoneLabel,
+  viewerZoneName,
+} from './shared/viewer-time.ts';
 
 // ─── mounting other plugins' views, and addressing screens ────────────────────────────────────────────────────────
 export { RendererView } from './shell/renderer-view.tsx';

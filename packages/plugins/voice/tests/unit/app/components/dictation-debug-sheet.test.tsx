@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { viewerTime } from '@ferretry/app';
 import { type CleanupTrace, TRACE_REDACTED } from '../../../../contract/index.ts';
 import { DictationDebugSheet } from '../../../../app/components/dictation-debug-sheet.tsx';
 import type { ClipboardWriter } from '../../../../app/shell-voice.ts';
@@ -168,7 +169,7 @@ describe('<DictationDebugSheet>', () => {
       'api.example.invalid',
       'This browser, with its own key',
       'cleaned',
-      '2026-10-21 09:30:15 UTC',
+      viewerTime(FAKE_AT),
       '412 ms',
       '200',
       '120 ms',

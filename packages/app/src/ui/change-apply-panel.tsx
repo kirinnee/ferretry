@@ -8,6 +8,7 @@
  */
 import { type FormEvent, type ReactNode } from 'react';
 import { Button } from './primitives.tsx';
+import { InlineCode } from './inline-code.tsx';
 import { type ChangeAuthority, changeRefusalExplanation } from './change-authority.ts';
 
 export interface ChangeApplyPanelProps {
@@ -53,7 +54,7 @@ export function ChangeApplyPanel({
     <form className="flex flex-col gap-3" onSubmit={submit} data-change-apply={authority?.kind ?? 'reading'}>
       {authority?.kind === 'refused' ? (
         <p role="status" className="m-0 text-cell leading-base text-warn" data-change-grant-refused="">
-          {changeRefusalExplanation(authority.refusal)}
+          <InlineCode text={changeRefusalExplanation(authority.refusal)} />
         </p>
       ) : null}
       {authority?.kind === 'step-up' ? (

@@ -11,6 +11,7 @@
  * holds a live code is the component's own state, for as long as the modal is open.
  */
 
+import { viewerTime } from '@ferretry/app';
 import type { CapabilityName } from '@ferretry/core-gate/contract';
 import type { CapabilityAxis } from '@ferretry/kernel/contract';
 import type { DeviceGrantsPatch, PairedDevice, PairedDevicesView } from '../../contract/index.ts';
@@ -106,9 +107,9 @@ export const PAIRING_TICK_MS = 1_000;
 export function pairedDeviceSummary(device: PairedDevice): string {
   const added = new Date(device.createdAt);
   const seen = new Date(device.lastSeenAt);
-  const addedLabel = Number.isNaN(added.getTime()) ? 'an unknown time' : added.toLocaleString();
+  const addedLabel = Number.isNaN(added.getTime()) ? 'an unknown time' : viewerTime(added);
   if (Number.isNaN(seen.getTime()) || device.lastSeenAt === device.createdAt) return `Added ${addedLabel}`;
-  return `Added ${addedLabel} · last seen ${seen.toLocaleString()}`;
+  return `Added ${addedLabel} · last seen ${viewerTime(seen)}`;
 }
 
 /**

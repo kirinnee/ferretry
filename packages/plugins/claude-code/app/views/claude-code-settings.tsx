@@ -3,7 +3,7 @@
  * update. The same daemon view `fy harness claude-code status` prints, so a terminal and a phone cannot disagree.
  */
 
-import { Badge, Button, SettingGroup, SettingRow } from '@ferretry/app';
+import { Badge, Button, SettingGroup, SettingRow, viewerTime } from '@ferretry/app';
 import { Loading } from '@ferretry/app/ui';
 import type { AppComponent, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useState } from 'react';
@@ -23,8 +23,7 @@ const METHOD_WORDS: Readonly<Record<string, string>> = {
 
 /** When the last check ran, in the reader's own clock (the raw instant when it cannot be read). */
 const checkedWords = (instant: string): string => {
-  const when = new Date(instant);
-  return Number.isNaN(when.getTime()) ? instant : when.toLocaleString();
+  return viewerTime(instant);
 };
 
 export const createSettings = (client: PluginClient): AppComponent<SettingsProps> =>

@@ -87,8 +87,10 @@ describe('the owner’s words', () => {
   it('says when a staged selection was asked, and which lines', () => {
     expect(machineStageWords({ lines: [0], askedAt: 'not a time' })).toContain('line 1.');
     expect(machineStageWords({ lines: [0, 2, 3], askedAt: '2026-08-05T14:02:00.000Z' })).toContain('lines 1, 3 and 4');
-    expect(clockWords('2026-08-05T14:02:00.000Z')).toMatch(/^\d\d:\d\d$/u);
-    expect(clockWords('2026-08-05T14:02:00.000ZX')).toBe('14:02');
+    expect(clockWords('2026-08-05T14:02:00.000Z')).toMatch(
+      /^\d{1,2}:\d{2} [AP]M [A-Z]{2,5}$|^\d{1,2}:\d{2} [AP]M GMT[+-]\d+$/u,
+    );
+    expect(clockWords('2026-08-05T14:02:00.000ZX')).toBe('2026-08-05T14:02:00.000ZX');
   });
 
   it('takes a staged selection’s lines from the plan, and says a code is in one only when the daemon’s list says so', () => {

@@ -7,6 +7,7 @@ export {
   type ClipboardWriter,
   browserClipboardWriter,
   cn,
+  InlineCode,
   SecretInput,
   SecretTextarea,
   useSecretField,

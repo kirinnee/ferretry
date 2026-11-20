@@ -49,7 +49,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  align-items: start;
+  align-items: stretch;
 }
 .fy-wf-layers + .fy-wf-fields {
   margin-top: 20px;

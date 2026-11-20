@@ -31,6 +31,7 @@ import {
   taskPlanSelection,
 } from '../../contract/routes/index.ts';
 import { z } from 'zod';
+import { viewerClock } from '@ferretry/app';
 import { localTimeWords } from './local-time.ts';
 import { quietInit, type ReadMode } from './step-up-refusal.ts';
 import type { AccountsClient, PasskeyWords } from '../shell.tsx';
@@ -196,13 +197,8 @@ export const usesLeftWords = (left: number, asked: number): string => `${String(
 
 export const timeWords = (instant: string): string => localTimeWords(instant);
 
-/** "14:02" in the owner's own clock. */
-export const clockWords = (instant: string): string => {
-  const at = new Date(instant);
-  return Number.isNaN(at.getTime())
-    ? instant.slice(11, 16)
-    : at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
-};
+/** "2:02 PM PST": the time alone, on the owner's own clock, the zone named. */
+export const clockWords = (instant: string): string => viewerClock(instant);
 
 /** "1", "1 and 3", "1, 3 and 4": lines as the owner counts them, from 1. */
 const lineList = (lines: readonly number[]): string => {

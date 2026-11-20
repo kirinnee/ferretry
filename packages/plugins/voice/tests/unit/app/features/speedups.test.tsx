@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { viewerTime } from '@ferretry/app';
 import { STEP_UP_REFUSAL_CODE } from '@ferretry/app/ui';
 import type { Instant } from '@ferretry/std';
 import type { SpeedupStatus, SpeedupsView, SpeedupTestResult } from '../../../../contract/index.ts';
@@ -135,7 +136,7 @@ describe('speed-ups read mode', () => {
 describe('speed-up helpers', () => {
   it('describes the last test, with timing and staleness', () => {
     expect(lastTestLine(status())).toBeUndefined();
-    expect(lastTestLine(status({ lastTest: result() }))).toBe('Worked 2026-10-16 10:00 · 150 ms. The key works.');
+    expect(lastTestLine(status({ lastTest: result() }))).toBe(`Worked ${viewerTime(AT)} · 150 ms. The key works.`);
     expect(
       lastTestLine(
         status({
@@ -143,7 +144,7 @@ describe('speed-up helpers', () => {
           testStale: true,
         }),
       ),
-    ).toBe('Failed 2026-10-16 10:00. Refused. The key has changed since — test again.');
+    ).toBe(`Failed ${viewerTime(AT)}. Refused. The key has changed since — test again.`);
   });
 
   it('flags a pasted key that is too short, and nothing else', () => {
@@ -463,7 +464,7 @@ describe('SpeedupsSurface', () => {
 
     // Assert
     expect(calls).toEqual(['GET /v1/speedups', 'POST /v1/speedups/groq/test']);
-    expect(text(renderer.toJSON())).toContain('Worked 2026-10-16 10:00');
+    expect(text(renderer.toJSON())).toContain(`Worked ${viewerTime(AT)}`);
   });
 
   it('keeps the view and names the failure when a Test cannot reach the daemon', async () => {

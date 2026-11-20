@@ -10,6 +10,7 @@
  */
 
 import { type AuditActor, type AuditOutcome, type AuditView, auditShortId } from '@ferretry/core-gate/contract';
+import { viewerTime } from '@ferretry/app';
 import type { PairedDevice, PairedDevicesView } from '../../contract/index.ts';
 import type { AuditEvent } from '../shell-grants.ts';
 
@@ -287,8 +288,7 @@ export function relativeWords(at: string, nowMs: number): string {
 
 /** The exact instant, for a title or a tooltip beside the relative phrase. */
 export function absoluteWords(at: string): string {
-  const instant = new Date(at);
-  return Number.isNaN(instant.getTime()) ? at : instant.toLocaleString();
+  return viewerTime(at);
 }
 
 /**

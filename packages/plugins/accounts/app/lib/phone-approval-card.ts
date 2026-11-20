@@ -5,6 +5,7 @@
  * approved" answer, because only the daemon seeing the sign-in move on settles a card.
  */
 
+import { viewerClock } from '@ferretry/app';
 import {
   type PhoneApproval,
   type PhoneApprovalState,
@@ -43,7 +44,7 @@ export interface PhoneApprovalCardModel {
 }
 
 const askedWords = (approval: PhoneApproval): string =>
-  `Asked ${new Date(approval.raisedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} by ${approval.agentName}`;
+  `Asked ${viewerClock(approval.raisedAt)} by ${approval.agentName}`;
 
 /**
  * A number is drawn only while the approval waits, has not expired and was read by the daemon itself: one a ferret
