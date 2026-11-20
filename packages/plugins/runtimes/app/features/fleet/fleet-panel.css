@@ -59,3 +59,18 @@
     cursor: grab;
   }
 }
+
+/* A profile item row (library and contents): a hairline-divided line, not a box in the pane's box. Its move / remove
+   buttons sit under the name, at the right, while the panel is under 400px, so the name never runs into them. */
+.fy-item-row {
+  background: none;
+}
+@container fleet (max-width: 399px) {
+  .fy-item-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .fy-item-row > .fy-item-actions {
+    grid-column: 1;
+    justify-self: end;
+  }
+}

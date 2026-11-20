@@ -215,6 +215,37 @@ describe('Settings shell: the Runtimes pages a row opens (S11)', () => {
             expect(shape.libraryShown, `panel ${shape.panel}px`).toBe(wide);
             expect(shape.sideBySide, `panel ${shape.panel}px`).toBe(wide);
             expect(shape.addShown, `panel ${shape.panel}px`).toBe(!wide);
+            // No item row's text runs under its own move / remove buttons, and no row draws its own box.
+            const rows = await tab.evaluate(() =>
+              [...document.querySelectorAll<HTMLElement>('[data-profile-box] .fy-item-row')].map(row => {
+                const actions = row.querySelector('.fy-item-actions') as HTMLElement;
+                const a = actions.getBoundingClientRect();
+                const text = [...(row.firstElementChild as HTMLElement).querySelectorAll<HTMLElement>('span')].some(
+                  span => {
+                    const r = span.getBoundingClientRect();
+                    return (
+                      span.children.length === 0 &&
+                      r.width > 0 &&
+                      r.left < a.right &&
+                      r.right > a.left &&
+                      r.top < a.bottom &&
+                      r.bottom > a.top
+                    );
+                  },
+                );
+                const style = getComputedStyle(row);
+                return {
+                  name: row.textContent?.slice(0, 20) ?? '',
+                  overlaps: text,
+                  boxed: style.borderLeftWidth !== '0px',
+                };
+              }),
+            );
+            expect(rows.length).toBeGreaterThan(0);
+            for (const row of rows) {
+              expect(row.overlaps, `${row.name} runs under its buttons`).toBe(false);
+              expect(row.boxed, `${row.name} draws a box of its own`).toBe(false);
+            }
           }
         } finally {
           await context.close();

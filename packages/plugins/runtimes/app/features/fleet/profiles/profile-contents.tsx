@@ -43,7 +43,7 @@ export function ContentsList(props: ContentsListProps) {
   const { items, chips, dropBefore, onMove, onRemove, onDragStart, onDragEnd, onDragOver, onDrop } = props;
   return (
     <ol
-      className="m-0 flex min-h-[6rem] min-w-0 list-none flex-col gap-1 px-panel pb-8 pt-2"
+      className="m-0 flex min-h-[6rem] min-w-0 list-none flex-col px-1 pb-8 pt-1"
       aria-label="Contents, later items override earlier ones"
       data-profile-contents=""
       onDragOver={event => onDragOver(event, items.length)}
