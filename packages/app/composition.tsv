@@ -1,6 +1,10 @@
 kind	path	limit	expires	reason
+oversize	public/pre-paint.js	150	2026-12-31	the pre-paint copy of the style list gains one id per r10 style (churn, not size); generate it after r10
 composition	src/index.ts	-	-	the app shell public API
 oversize	src/index.ts	600	2026-12-31	r10 setup steps export shell pieces; split exports by feature after r10
 oversize	src/session/session-client.ts	1815	2026-12-16	one session client class; split by concern when next touched
 oversize	src/shell/frame.tsx	334	2026-12-16	the frame is edited by many parallel lines (churn, not size); the picker, nav targets and chat menu already moved to their own files
 oversize	src/shell/pages.tsx	315	2026-12-16	the daemon list and settings pages are edited by many parallel lines (churn, not size); the settings nav moves to its own file when next touched
+oversize	src/styles/themes.css	150	2026-12-31	imports one stylesheet per r10 style/palette (churn, not size); generate the imports after r10
+oversize	src/theme/catalog.ts	300	2026-12-31	the one style/palette catalogue: every r10 style or palette adds one entry (churn, not size); move to registry entries after r10
+oversize	src/theme/fonts.ts	200	2026-12-31	one font row per r10 style that ships a face (churn, not size)
