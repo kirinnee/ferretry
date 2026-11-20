@@ -81,8 +81,8 @@ describe('the steps screen’s closing summary', () => {
         await tab.goto(`${origin}/?view=finished&theme=studio-${mode}`);
         await tab.waitForSelector('[data-onboarding-summary]');
         const set = await tab.locator('[data-onboarding-summary-set]').innerText();
-        // It names plugins in a sentence, never the pages inside them.
-        expect(set).toBe('Set up on this machine: Runtimes and Logins.');
+        // It names plugins, never the pages inside them.
+        expect(set.split(/\s*\n\s*/u).filter(Boolean)).toEqual(['Set up on this machine', 'Runtimes', 'Logins']);
         expect(await tab.locator('[data-onboarding-later-link]').count()).toBe(3);
         expect(await tab.locator('[data-onboarding-later-link="voice"]').getAttribute('href')).toBe(
           '/d/studio-mac/settings/voice',

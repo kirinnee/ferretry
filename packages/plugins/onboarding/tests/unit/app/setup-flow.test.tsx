@@ -409,11 +409,11 @@ describe('the setup flow', () => {
     await settle();
     // It names the plugin (the progress bar's own name for it), never a page title.
     const summary = view.container.querySelector('[data-onboarding-summary-set]')?.textContent ?? '';
-    expect(summary).toMatch(/^Set up on this machine: Fake Pack/u);
+    expect(summary).toMatch(/^Set up on this machineFake Pack/u);
     expect(summary).not.toContain('Name this machine');
     expect(summary).not.toContain('Onboarding');
     // This device's own pages are in the summary too, named by their title, and the skipped one is a real button-link to Settings.
-    expect(summary).toMatch(/Set up on this device: /u);
+    expect(summary).toMatch(/Set up on this device\w/u);
     expect(view.container.querySelector('[data-onboarding-later-link="fake-pack"]')?.className).toContain('kt-btn');
     expect(view.container.querySelector('[data-onboarding-later-link="fake-pack"]')?.getAttribute('href')).toBe(
       '/d/fy_daemon_a/settings/fake-pack',

@@ -798,7 +798,7 @@ describe('the first run, end to end', () => {
       expect(await tab.locator('[data-flow-unsaved]').count(), 'the end page lists no unsaved answer').toBe(0);
       // The end page says what was set up in a sentence: no raw dump of page titles or ids.
       const summary = await tab.locator('[data-onboarding-summary]').innerText();
-      expect(summary, 'the end page says what was set up').toMatch(/^Set up on this machine: /u);
+      expect(summary, 'the end page says what was set up').toMatch(/^Set up on this machine\s/u);
       for (const raw of ['What to bring over', 'Bring it over', 'import-choice', 'claude-code.', 'Conversations'])
         expect(summary, `the end page does not list the page title '${raw}'`).not.toContain(raw);
       expect(
@@ -886,7 +886,7 @@ describe('the first run, end to end', () => {
       // The Pair journey's ending has the same summary: what this device now holds, and where to change it.
       const pairSummary = await tab.locator('[data-onboarding-summary]').innerText();
       expect(pairSummary, 'end-pair: the summary says what was set up on this device').toMatch(
-        /Set up on this device: /u,
+        /Set up on this device\s/u,
       );
       expect(pairSummary, 'end-pair: the summary names the Passkey page').toContain('Passkey');
       expect(pairSummary, 'end-pair: the summary says where to change it').toMatch(/Settings/u);

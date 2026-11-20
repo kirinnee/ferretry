@@ -100,37 +100,6 @@
   display: none;
 }
 
-.fy-sf-end {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-/* Every button on the last page is a 44px target, like the footer's, and sits at the start of its line (never the row wide). */
-.fy-sf-end button {
-  align-self: flex-start;
-  min-height: 44px;
-}
-.fy-sf-end__start {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.fy-sf-end__lead {
-  color: var(--muted);
-  font-size: var(--font-size-base);
-  margin: 0;
-}
-/* The secondary buttons share one width (never the row wide), so two stacked on a phone read as a pair. */
-.fy-sf-end__actions button {
-  min-width: 14rem;
-}
-.fy-sf-end__actions {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .fy-sf-fail {
   align-items: flex-start;
   display: flex;

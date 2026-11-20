@@ -8,7 +8,7 @@
  */
 
 import { createRoot } from 'react-dom/client';
-import { SetupSummary } from '../../../../app/views/steps-screen.tsx';
+import { SetupSummary } from '../../../../app/features/setup-flow/setup-summary.tsx';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
