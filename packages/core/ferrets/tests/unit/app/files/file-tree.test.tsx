@@ -133,6 +133,29 @@ describe('file tree rows', () => {
     }
   });
 
+  it('e-retry: Retry on a folder that failed lists it again as the person’s press, and the folder loads', async () => {
+    let fixture: FsFixture = { listings: { '': new TypeError('offline') } };
+    const asked: FsCall[] = [];
+    const scope = scopeOf(
+      fsClient(() => fixture, asked),
+      'tree/ferret',
+    );
+    const renderer = render(<FileTree scope={scope} dir="" onEnter={() => {}} onOpenFile={() => {}} />);
+    await runAsync(async () => {
+      for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+    });
+    expect(renderer.root.findAll(node => node.props.role === 'alert')).toHaveLength(1);
+    fixture = { listings: { '': { entries: [{ name: 'a.ts', type: 'file' }] } } };
+    run(() => renderer.root.findByProps({ 'aria-label': 'Retry listing the ferret’s root' }).props.onClick());
+    await runAsync(async () => {
+      for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+    });
+    expect(JSON.stringify(renderer.toJSON())).toContain('a.ts');
+    // The folder's own first read is unmarked; the Retry read is a press, so a passkey prompt can open.
+    expect(asked.map(call => call.quiet)).toEqual([undefined, false]);
+    renderer.unmount();
+  });
+
   it('shows the daemon’s refusal of a listing as that refusal, never as an empty tree', async () => {
     const scope = scopeFor({ listings: { '': refusal(403, 'grant_not_granted', '') } });
     const renderer = render(<FileTree scope={scope} dir="" onEnter={() => {}} onOpenFile={() => {}} />);

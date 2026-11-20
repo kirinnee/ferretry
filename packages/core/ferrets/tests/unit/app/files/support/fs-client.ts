@@ -23,6 +23,8 @@ export interface FsCall {
   readonly route: string;
   readonly ferretId: string | undefined;
   readonly query: Readonly<Record<string, string>>;
+  /** `false` when the read was a person's press (a Retry); absent for a read the page made by itself. */
+  readonly quiet?: false;
 }
 
 export const refusal = (status: number, code: string, message: string): DaemonCallError =>
@@ -32,10 +34,19 @@ export const refusal = (status: number, code: string, message: string): DaemonCa
 export const fsClient = (fixture: () => FsFixture, calls: FsCall[] = []): FerretsClient => ({
   call: async <Answer = unknown>(
     route: string,
-    init?: { readonly params?: Readonly<Record<string, string>>; readonly query?: Readonly<Record<string, string>> },
+    init?: {
+      readonly params?: Readonly<Record<string, string>>;
+      readonly query?: Readonly<Record<string, string>>;
+      readonly quiet?: false;
+    },
   ): Promise<Answer> => {
     const query = init?.query ?? {};
-    calls.push({ route, ferretId: init?.params?.ferretId, query });
+    calls.push({
+      route,
+      ferretId: init?.params?.ferretId,
+      query,
+      ...(init?.quiet === false ? { quiet: false as const } : {}),
+    });
     const path = query.path ?? '';
     const current = fixture();
     const settle = (value: unknown): Answer => {

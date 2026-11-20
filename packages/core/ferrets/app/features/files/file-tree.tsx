@@ -1,5 +1,5 @@
 import { FileText, Folder, Link2Off, Lock, RefreshCw, ChevronRight } from 'lucide-react';
-import { Loading } from '@ferretry/app/ui';
+import { Loading, readPress } from '@ferretry/app/ui';
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import { describeFsError, fsApi, isAbort } from './files-api.ts';
 import { formatBytes } from './files-model.ts';
@@ -158,6 +158,8 @@ export interface FileTreeProps {
 export const FileTree = ({ scope, dir, refreshNonce = 0, hidden, onEnter, onOpenFile }: FileTreeProps) => {
   const [state, setState] = useState(createFileTreeState);
   const inflight = useRef(new Map<string, AbortController>());
+  // Folders whose Retry was pressed: the very next listing of each is the person's press, so a passkey prompt can open.
+  const pressed = useRef(new Set<string>());
   useEffect(() => {
     setState(current => revealTreeDir(current, dir));
   }, [dir]);
@@ -174,7 +176,7 @@ export const FileTree = ({ scope, dir, refreshNonce = 0, hidden, onEnter, onOpen
       inflight.current.set(pendingDir, controller);
       setState(current => markTreeDirLoading(current, pendingDir));
       void fsApi
-        .list(scope, pendingDir, controller.signal)
+        .list(scope, pendingDir, controller.signal, readPress(pressed.current.delete(pendingDir)))
         .then(listing => {
           if (!controller.signal.aborted) setState(current => setTreeDirListing(current, pendingDir, listing));
         })
@@ -203,7 +205,10 @@ export const FileTree = ({ scope, dir, refreshNonce = 0, hidden, onEnter, onOpen
         onToggle={path => setState(current => toggleTreeDir(current, path))}
         onEnter={onEnter}
         onOpenFile={onOpenFile}
-        onRetry={retryDir => setState(current => resetTreeDir(current, retryDir))}
+        onRetry={retryDir => {
+          pressed.current.add(retryDir);
+          setState(current => resetTreeDir(current, retryDir));
+        }}
       />
     </nav>
   );
