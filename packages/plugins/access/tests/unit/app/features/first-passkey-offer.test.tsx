@@ -209,7 +209,9 @@ describe('the passkey offer as a page (A565 shot 01 spacing)', () => {
 
       expect(notNow.parentElement).toBe(add.parentElement);
       expect(notNow.textContent).toBe('Not now');
-      expect(notNow.getAttribute('data-variant')).toBe('ghost');
+      // A real secondary button (bordered), never the borderless ghost that reads as bare text.
+      expect(notNow.getAttribute('data-variant')).toBeNull();
+      expect(notNow.classList.contains('kt-btn')).toBe(true);
       for (const button of [add, notNow]) {
         expect(button.className).toContain('min-h-[44px]');
         expect(button.className).toContain('px-6');
