@@ -3,8 +3,10 @@ import { EMPTY_LEDGER, flattenFlow, type PairedDaemon } from '../../../app/lib/i
 import {
   advance,
   answeredBefore,
+  clearNotNeeded,
   dropPage,
   END,
+  markNotNeeded,
   pagesOf,
   progressOf,
   retreat,
@@ -153,5 +155,101 @@ describe('the flow address', () => {
     expect(readFlowAddress('?phase=client')).toEqual({ phase: 'client', journey: 'pair' });
     expect(readFlowAddress('?phase=daemon&journey=add-daemon')).toEqual({ phase: 'daemon', journey: 'add-daemon' });
     expect(readFlowAddress('?phase=sideways&journey=nowhere')).toEqual({ phase: 'daemon', journey: 'first-time' });
+  });
+});
+
+describe('a page that is not needed for this run', () => {
+  const pages = pagesOf(flowOf());
+  const none = new Set<string>();
+  const at = (state: ReturnType<typeof startRun>, key: string, trail: readonly string[] = []) => ({
+    ...state,
+    at: key,
+    trail,
+  });
+
+  test('the run passes over it going forward, without putting it on the trail, and nothing is gone', () => {
+    const state = markNotNeeded(
+      at(startRun(pages, none), 'fake-pack.choose', ['fake-pack.welcome']),
+      pages,
+      none,
+      'fake-pack.choose',
+    );
+    expect(state.at).toBe('fake-pack.finish');
+    expect(state.trail).toEqual(['fake-pack.welcome']);
+    expect(state.gone.size).toBe(0);
+    expect(state.direction).toBe('forward');
+    // The next move forward from the page before it does not stop on it either, and Back skips nothing it never reached.
+    const before = at(state, 'fake-pack.welcome', ['onboarding.name']);
+    expect(advance(before, pages, none).at).toBe('fake-pack.finish');
+    expect(retreat(state).at).toBe('fake-pack.welcome');
+  });
+
+  test('is not counted by the progress bar, and Back from the page after it lands on the last page actually shown', () => {
+    const state = markNotNeeded(
+      at(startRun(pages, none), 'fake-pack.choose', ['fake-pack.welcome']),
+      pages,
+      none,
+      'fake-pack.choose',
+    );
+    const flow = flowOf();
+    expect(
+      progressOf(flow, pages, none, new Set([...state.gone, ...state.notNeeded]), 'fake-pack.finish'),
+    ).toMatchObject({
+      step: 2,
+      of: 2,
+    });
+  });
+
+  test('a page reached by Back that is no longer needed sends the person on back, or forward when nothing is before it', () => {
+    const back = markNotNeeded(
+      { ...at(startRun(pages, none), 'fake-pack.choose', ['onboarding.name', 'fake-pack.welcome']), direction: 'back' },
+      pages,
+      none,
+      'fake-pack.choose',
+    );
+    expect(back.at).toBe('fake-pack.welcome');
+    expect(back.direction).toBe('back');
+    const first = markNotNeeded(
+      { ...at(startRun(pages, none), 'onboarding.name'), direction: 'back' },
+      pages,
+      none,
+      'onboarding.name',
+    );
+    expect(first.at).toBe('fake-pack.welcome');
+    expect(first.direction).toBe('forward');
+  });
+
+  test('every page marked past the last one ends the run', () => {
+    let state = at(startRun(pages, none), 'fake-pack.finish');
+    state = markNotNeeded(state, pages, none, 'fake-pack.finish');
+    expect(state.at).toBe('onboarding.appearance');
+    state = markNotNeeded(state, pages, none, 'onboarding.appearance');
+    state = markNotNeeded(state, pages, none, 'fake-pack.look');
+    expect(state.at).toBe(END);
+  });
+
+  test('a mark of a page that is not on screen waits quietly and never moves the run', () => {
+    const state = markNotNeeded(at(startRun(pages, none), 'fake-pack.welcome'), pages, none, 'fake-pack.finish');
+    expect(state.at).toBe('fake-pack.welcome');
+    expect(state.notNeeded.has('fake-pack.finish')).toBe(true);
+  });
+
+  test("a change in the plugin's segment memory clears that plugin's marks ahead of the page on screen, and no other plugin's", () => {
+    let state = at(startRun(pages, none), 'fake-pack.choose');
+    state = markNotNeeded(state, pages, none, 'fake-pack.choose');
+    state = markNotNeeded({ ...state, at: 'onboarding.name' }, pages, none, 'onboarding.name');
+    expect([...state.notNeeded].sort()).toEqual(['fake-pack.choose', 'onboarding.name']);
+    // On the first page: the mark ahead of it goes; the other plugin's stays.
+    const fromFirst = { ...state, at: 'fake-pack.welcome' };
+    expect([...clearNotNeeded(fromFirst, pages, 'fake-pack').notNeeded]).toEqual(['onboarding.name']);
+    expect(clearNotNeeded(fromFirst, pages, 'nobody').notNeeded).toBe(state.notNeeded);
+  });
+
+  test('a mark BEHIND the page on screen stays when a later page leaves its own memory (it is already passed)', () => {
+    let state = at(startRun(pages, none), 'fake-pack.choose');
+    state = markNotNeeded(state, pages, none, 'fake-pack.choose');
+    expect(state.at).toBe('fake-pack.finish');
+    expect(clearNotNeeded(state, pages, 'fake-pack').notNeeded).toBe(state.notNeeded);
+    expect(clearNotNeeded({ ...state, at: END }, pages, 'fake-pack').notNeeded).toBe(state.notNeeded);
   });
 });

@@ -18,8 +18,11 @@ export interface StepHarness {
   readonly calls: readonly StepCall[];
   /** How many times the page made this call. */
   count(kind: StepCall['kind']): number;
-  /** What the page decided: shown (`ready`), not shown (`skip`), or nothing yet (still under the loading cover). */
-  readonly decision: 'shown' | 'skipped' | 'undecided';
+  /**
+   * What the page decided: shown (`ready`), not shown for good (`skip`), not shown this run (`notNeeded`), or nothing yet
+   * (still under the loading cover).
+   */
+  readonly decision: 'shown' | 'skipped' | 'passed-over' | 'undecided';
   readonly skippedWhy: StepSkipWhy | undefined;
   /** The segment memory as the page left it. */
   readonly segment: StepSegmentMemory;
@@ -40,6 +43,7 @@ export function stepHarness(options: StepHarnessOptions = {}): StepHarness {
     },
     ready: () => void calls.push({ kind: 'ready' }),
     skip: why => void calls.push({ kind: 'skip', why }),
+    notNeeded: () => void calls.push({ kind: 'notNeeded' }),
     done: () => void calls.push({ kind: 'done' }),
     busy: label => void calls.push({ kind: 'busy', label }),
     next: () => void calls.push({ kind: 'next' }),
@@ -52,6 +56,7 @@ export function stepHarness(options: StepHarnessOptions = {}): StepHarness {
     count: kind => calls.filter(call => call.kind === kind).length,
     get decision() {
       if (skipped() !== undefined) return 'skipped';
+      if (calls.some(call => call.kind === 'notNeeded')) return 'passed-over';
       return calls.some(call => call.kind === 'ready') ? 'shown' : 'undecided';
     },
     get skippedWhy() {

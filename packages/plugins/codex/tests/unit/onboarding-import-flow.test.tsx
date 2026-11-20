@@ -125,20 +125,23 @@ const choose = async (id: 'everything' | 'choose' | 'fresh'): Promise<void> => {
 const START_AT_CHOICE = ['installed', 'sign-in'];
 
 describe('the Codex import pages in the setup flow', () => {
-  test('Everything → … → Conversations → Back → Customize still reaches every checklist', async () => {
+  test('Import everything is ONE page: no kind page is drawn, and Back -> Choose brings every checklist back', async () => {
     const run = setup({ answered: START_AT_CHOICE });
     view = await mount(run.tree);
     await settle();
     expect(pageKey()).toBe('codex.import-choice');
-    await next(); // Import everything (the default) → settings
-    for (const id of KIND_STEPS) {
-      expect(pageKey()).toBe(`codex.${id}`);
-      expect(query('[data-import-not-choosing="everything"]')?.textContent).toContain('Included by Import everything');
-      await next();
-    }
+    await next(); // Import everything (the default): the five kind pages are passed over
     expect(pageKey()).toBe('codex.conversations');
-    for (let step = 0; step < KIND_STEPS.length + 1; step += 1) await back();
+    expect(query('[data-import-kind]')).toBeNull();
+    await next();
+    expect(pageKey()).toBe('codex.import-run'); // the one import page
+    // Back lands on the last page actually shown, never on a page that drew nothing.
+    await back();
+    expect(pageKey()).toBe('codex.conversations');
+    await back();
     expect(pageKey()).toBe('codex.import-choice');
+    // Nothing was recorded for the passed-over pages.
+    expect(run.written.filter(entry => KIND_STEPS.includes(entry.step))).toEqual([]);
     await choose('choose');
     await next();
     for (const id of KIND_STEPS) {
@@ -154,7 +157,7 @@ describe('the Codex import pages in the setup flow', () => {
     expect(run.written.filter(entry => entry.state === 'skipped')).toEqual([]);
   });
 
-  test('a reload mid-run asks again, then every page is reachable, up to the import', async () => {
+  test('a reload mid-run asks again, then the pages Everything does not need are passed over', async () => {
     // The run was left after the choice: the choice is answered, the memory of it is gone.
     const run = setup({ answered: [...START_AT_CHOICE, 'import-choice'] });
     view = await mount(run.tree);
@@ -162,11 +165,10 @@ describe('the Codex import pages in the setup flow', () => {
     expect(pageKey()).toBe('codex.import-settings');
     expect(query('[data-returned]')).not.toBeNull();
     await choose('everything');
-    expect(query('[data-import-not-choosing="everything"]')).not.toBeNull();
-    for (const id of [...KIND_STEPS, 'conversations']) {
-      expect(pageKey()).toBe(`codex.${id}`);
-      await next();
-    }
+    // The choice came back and the pages after it are not needed: straight to Conversations, then the one import page.
+    expect(pageKey()).toBe('codex.conversations');
+    expect(query('[data-import-kind]')).toBeNull();
+    await next();
     expect(pageKey()).toBe('codex.import-run');
     expect(query('[data-import-run]')).not.toBeNull();
     expect(run.written.filter(entry => entry.state === 'skipped')).toEqual([]);

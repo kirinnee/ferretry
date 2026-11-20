@@ -20,8 +20,10 @@ import {
 import type { StepHost } from '@ferretry/kernel/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { Instant } from '@ferretry/std';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { createSetupFlow } from '../../../app/features/setup-flow/setup-flow.tsx';
+import { sideOf } from '../../../contract/index.ts';
+import { isComplete } from '../../../daemon/lib/steps.ts';
 import { CLIENT_LATER_KEY } from '../../../app/features/setup-flow/client-later.ts';
 import { CLIENT_LEDGER_KEY } from '../../../app/lib/client-ledger.ts';
 import { fakeDaemon } from '../../fixtures/fake-steps/index.ts';
@@ -73,7 +75,61 @@ function StalePage({ step }: { readonly step: StepHost }): ReactNode {
   return <p>stale</p>;
 }
 
+/** The first page of an import-shaped run: it remembers the mode the pages after it read. */
+function PickPage({ step }: { readonly step: StepHost }): ReactNode {
+  useEffect(() => step.ready(), [step]);
+  return (
+    <div>
+      <button type="button" onClick={() => step.remember({ mode: 'everything' })}>
+        Pick everything
+      </button>
+      <button type="button" onClick={() => step.remember({ mode: 'choose' })}>
+        Pick choose
+      </button>
+    </div>
+  );
+}
+
+/**
+ * A page like a kind page of an import: with the mode `everything` it has nothing to ask and says `notNeeded()`; with no mode
+ * (a reload dropped the memory) it asks again, and then follows the answer.
+ */
+function KindLikePage({ step, name }: { readonly step: StepHost; readonly name: string }): ReactNode {
+  const [asked, setAsked] = useState(step.segment.mode !== undefined);
+  const notNeeded = asked && step.segment.mode === 'everything';
+  useEffect(() => {
+    if (notNeeded) step.notNeeded();
+    else step.ready();
+  }, [step, notNeeded]);
+  if (!asked)
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          step.remember({ mode: 'everything' });
+          setAsked(true);
+        }}
+      >
+        Ask everything
+      </button>
+    );
+  return notNeeded ? null : <p>{name} checklist</p>;
+}
+
+/** The last page of an import-shaped run: like the real ones it leaves a memory of its own (a scan key) when it opens, which clears the marks behind it. */
+function RunLikePage({ step }: { readonly step: StepHost }): ReactNode {
+  useEffect(() => {
+    step.remember({ scanRun: 'run-1' });
+    step.ready();
+  }, [step]);
+  return <p>run</p>;
+}
+
 const PAGES: Readonly<Record<string, (step: StepHost) => ReactNode>> = {
+  'fake-pack.pick': step => <PickPage step={step} />,
+  'fake-pack.alpha': step => <KindLikePage step={step} name="Alpha" />,
+  'fake-pack.beta': step => <KindLikePage step={step} name="Beta" />,
+  'fake-pack.run': step => <RunLikePage step={step} />,
   'onboarding.name': step => <ReadyPage step={step} />,
   'onboarding.appearance': step => <ReadyPage step={step} />,
   'fake-pack.welcome': step => <WelcomePage step={step} />,
@@ -705,5 +761,151 @@ describe('a flagless page that calls the host', () => {
     view = await mount(setup({ report: message => reports.push(message) }).tree);
     await settle();
     expect(reports).toEqual([]);
+  });
+});
+
+describe('a page that is not needed for this run (contract rule 7)', () => {
+  const importLike = (answered: readonly string[] = []): Machine => ({
+    id: A,
+    name: 'Studio',
+    steps: ['pick', 'alpha', 'beta', 'run'].map((id, index) => ({
+      plugin: 'fake-pack',
+      id,
+      title: id,
+      order: index + 1,
+      side: 'daemon' as const,
+      group: 'Fake Pack',
+      stepHost: true,
+      state: answered.includes(id) ? ('done' as const) : ('pending' as const),
+    })),
+  });
+  const chooseMode = (label: string) => click(label);
+  const textOf = (): string => view?.container.textContent ?? '';
+
+  it('Everything is ONE page: the next page is the run page, and the passed-over pages count for nothing', async () => {
+    const run = setup({ machines: [importLike()] });
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('fake-pack.pick');
+    await chooseMode('Pick everything');
+    await next();
+    await settle();
+    expect(pageKey()).toBe('fake-pack.run');
+    expect(progressText()).toBe('Fake Pack · 2 of 2');
+    // Back goes to the last page actually shown: not alpha or beta, which drew nothing.
+    await press('[data-step-back]');
+    expect(pageKey()).toBe('fake-pack.pick');
+  });
+
+  it('nothing is recorded for a page that is not needed: no answer on the machine, no write on the device', async () => {
+    const run = setup({ machines: [importLike()] });
+    view = await mount(run.tree);
+    await settle();
+    await chooseMode('Pick everything');
+    await next();
+    await settle();
+    expect(pageKey()).toBe('fake-pack.run');
+    expect(run.answers).toEqual([{ daemon: A, plugin: 'fake-pack', step: 'pick', state: 'done' }]);
+    expect(run.arrived).toEqual([{ step: 'pick', state: 'done' }]);
+    expect(run.writes).toEqual([]);
+  });
+
+  it('only when the run ENDS is a page still passed over recorded (skipped), so the machine is not left pending', async () => {
+    const run = setup({ machines: [importLike()] });
+    view = await mount(run.tree);
+    await settle();
+    await chooseMode('Pick everything');
+    await next();
+    await settle();
+    expect(pageKey()).toBe('fake-pack.run');
+    expect(run.arrived).toEqual([{ step: 'pick', state: 'done' }]); // mid-run: nothing for alpha or beta
+    await next(); // the run page: the run ends
+    await settle();
+    expect(pageKey()).toBeUndefined();
+    expect(run.arrived.slice(0, 2)).toEqual([
+      { step: 'pick', state: 'done' },
+      { step: 'run', state: 'done' },
+    ]);
+    expect(run.arrived.slice(2).sort((a, b) => a.step.localeCompare(b.step))).toEqual([
+      { step: 'alpha', state: 'skipped' },
+      { step: 'beta', state: 'skipped' },
+    ]);
+    // The machine now reads as finished, and the step opener (which reopens the run for any pending machine step) stays shut.
+    const after = importLike().steps.map(step => ({
+      ...step,
+      state: (run.answers.findLast(answer => answer.step === step.id)?.state ?? 'pending') as typeof step.state,
+    }));
+    expect(isComplete(after)).toBe(true);
+    expect(after.filter(step => sideOf(step) === 'daemon' && step.state === 'pending')).toEqual([]);
+    // Back from the end -> Choose: the pages are asked again, and a real answer replaces the skip.
+    await press('[data-step-back]');
+    await press('[data-step-back]');
+    expect(pageKey()).toBe('fake-pack.pick');
+    await chooseMode('Pick choose');
+    await next();
+    await settle();
+    expect(pageKey()).toBe('fake-pack.alpha');
+    await next();
+    await settle();
+    expect(run.answers.filter(answer => answer.step === 'alpha').map(answer => answer.state)).toEqual([
+      'skipped',
+      'done',
+    ]);
+  });
+
+  it('Back -> Choose: the answer changed, so the pages are asked again and appear; Back from the run page lands on the last of them', async () => {
+    const run = setup({ machines: [importLike()] });
+    view = await mount(run.tree);
+    await settle();
+    await chooseMode('Pick everything');
+    await next();
+    await settle();
+    expect(pageKey()).toBe('fake-pack.run');
+    await press('[data-step-back]');
+    await chooseMode('Pick choose');
+    await next();
+    await settle();
+    expect(pageKey()).toBe('fake-pack.alpha');
+    expect(textOf()).toContain('Alpha checklist');
+    expect(progressText()).toBe('Fake Pack · 2 of 4');
+    await next();
+    expect(pageKey()).toBe('fake-pack.beta');
+    await next();
+    expect(pageKey()).toBe('fake-pack.run');
+    await press('[data-step-back]');
+    expect(pageKey()).toBe('fake-pack.beta');
+    // Customize BEFORE the end records the real answers on the pages, and never a skip.
+    expect(run.answers.filter(answer => answer.step === 'alpha' || answer.step === 'beta')).toEqual([
+      { daemon: A, plugin: 'fake-pack', step: 'alpha', state: 'done' },
+      { daemon: A, plugin: 'fake-pack', step: 'beta', state: 'done' },
+    ]);
+    // And back to Everything again passes them over again.
+    await press('[data-step-back]');
+    await press('[data-step-back]');
+    expect(pageKey()).toBe('fake-pack.pick');
+    await chooseMode('Pick everything');
+    await next();
+    await settle();
+    expect(pageKey()).toBe('fake-pack.run');
+  });
+
+  it('a reload mid-run starts with no marks: the page asks again, and then the run passes over the rest', async () => {
+    const reloaded = (): ReturnType<typeof setup> => setup({ machines: [importLike(['pick'])] });
+    let run = reloaded();
+    view = await mount(run.tree);
+    await settle();
+    // The choice is answered on the machine but its memory is gone: alpha asks again (no mark survived the reload).
+    expect(pageKey()).toBe('fake-pack.alpha');
+    expect(textOf()).toContain('Ask everything');
+    await view.unmount();
+    run = reloaded();
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('fake-pack.alpha');
+    await chooseMode('Ask everything');
+    await settle();
+    expect(pageKey()).toBe('fake-pack.run');
+    expect(run.arrived).toEqual([]);
+    expect(run.writes).toEqual([]);
   });
 });

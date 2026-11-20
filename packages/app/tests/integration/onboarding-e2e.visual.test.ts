@@ -1,0 +1,628 @@
+/**
+ * THE r10-1 ONBOARDING GATE, END TO END, in a real browser: the REAL app over every shipped plugin's own app half
+ * (`fixtures/onboarding-e2e-scene.tsx`), an empty paired list and TWO stateful fake machines
+ * (`fixtures/onboarding-e2e-daemon.ts`, `…-routes.ts`) that remember what the pages told them. No daemon, no network, no
+ * real home: every name and path is made up, and the pairing code is the fixed fake one (`ABCD-EFGH`), never a real one.
+ *
+ * ONE JOURNEY, in one browser context (so the second part sees what the first left on the device):
+ *
+ *   First time: install skipped -> pair (fake code) -> Machine name -> Claude (installed, signed in, Choose -> settings /
+ *   skills pages -> import -> permission) -> Codex (Import everything) -> Warden -> Lessons -> Shells skipped (nix found)
+ *   -> This device: Appearance, Layout, Voice -> end page.
+ *   Then a SECOND machine: the "Only on <machine>" chip shows, and the Pair journey skips what this device already set.
+ *
+ * AT EVERY PAGE: no sidebar or app chrome, no sideways scroll, the living background is moving, Back and Next work (Back
+ * goes to the page the person came from, Next returns), the footer buttons are auto width and 44px tall, and (daemon side)
+ * the step really records on the machine, exactly once. An arrow key moves a card's selection and writes nothing.
+ *
+ * KNOWN GAPS the run found are `it.failing` below, one per gap: each is red the day the product is fixed (delete the
+ * `.failing` then), so the gate does not forget them and a green CI does not hide them.
+ *
+ *   FY_ONBOARDING_E2E_VARIANTS   comma list of `<width>-<light|dark>` (default `1280-light,390-dark`)
+ *   FY_ONBOARDING_E2E_SHOTS_DIR  keep `<variant>-<nn>-<page>.png` of every page (fake data only)
+ */
+import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { Page } from 'playwright-core';
+import { sceneServer, sharedChromium } from '../support/browser/index.ts';
+import { FAKE_CODE, MACHINE_A, MACHINE_B, pairLinkOf } from './fixtures/onboarding-e2e-daemon.ts';
+
+setDefaultTimeout(280_000);
+
+const scene = new URL('./fixtures/onboarding-e2e-scene.tsx', import.meta.url).pathname;
+const shotsDir = process.env.FY_ONBOARDING_E2E_SHOTS_DIR ?? '';
+const VARIANTS = (process.env.FY_ONBOARDING_E2E_VARIANTS ?? '1280-light,390-dark').split(',').map(name => {
+  const [width = '1280', scheme = 'light'] = name.trim().split('-');
+  return { name: name.trim(), width: Number(width), height: Number(width) < 600 ? 844 : 800, dark: scheme === 'dark' };
+});
+
+let server: ReturnType<typeof Bun.spawn> | undefined;
+let origin = '';
+
+beforeAll(async () => {
+  server = Bun.spawn([process.execPath, sceneServer, '--entry', scene], { stderr: 'inherit', stdout: 'pipe' });
+  const reader = (server.stdout as ReadableStream<Uint8Array>).getReader();
+  const first = await Promise.race([
+    reader.read(),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('the scene server did not start')), 90_000)),
+  ]);
+  origin = (JSON.parse(new TextDecoder().decode(first.value).trim().split('\n')[0] as string) as { origin: string })
+    .origin;
+  if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
+}, 120_000);
+
+afterAll(() => {
+  server?.kill();
+});
+
+// ─── what the run saw (read by the `it.failing` gaps below) ────────────────────────────────────────────────────────
+interface Observed {
+  /** `[data-name-machine]` forms on screen on the Machine name page. */
+  nameForms: number;
+  /** App chrome elements on the pairing page, reached from the first run. */
+  pairPageChrome: number;
+  /** App chrome elements on the pairing page's "Connected" screen. */
+  pairConnectedChrome: number;
+  /** `<variant>:<page>` of every page whose Back/Next footer is below the first screen. */
+  footerOffScreen: string[];
+  /** Action buttons on the pairing pages that are the row wide or under 44px tall. */
+  badButtons: string[];
+  /** Codex import kind pages walked in Import everything mode (the gate says that mode is ONE page). */
+  codexKindPagesInEverything: number;
+  /** Requests the fake machines had no answer for. */
+  unanswered: string[];
+  pageErrors: string[];
+}
+const seen: Observed = {
+  nameForms: -1,
+  pairPageChrome: -1,
+  pairConnectedChrome: -1,
+  footerOffScreen: [],
+  badButtons: [],
+  codexKindPagesInEverything: -1,
+  unanswered: [],
+  pageErrors: [],
+};
+
+// ─── small helpers ───────────────────────────────────────────────────────────────────────────────────────────────
+interface Variant {
+  readonly name: string;
+  readonly width: number;
+  readonly height: number;
+  readonly dark: boolean;
+}
+
+const CHROME = '[data-slot="nav"], [data-slot="bottom"], [data-slot="phone-title"], [data-drawer-find], .fy-drawer';
+
+interface FakeView {
+  answers: { plugin: string; id: string; state: string }[];
+  states: Record<string, string>;
+  mutations: { route: string; body: unknown }[];
+  writes: { route: string; body: unknown }[];
+  unanswered: string[];
+}
+const daemonOf = async (tab: Page, id: string): Promise<FakeView> =>
+  await tab.evaluate(
+    daemon => (window as unknown as { __fake: { daemon: (id: string) => unknown } }).__fake.daemon(daemon) as never,
+    id,
+  );
+const ledgerOf = async (tab: Page): Promise<Record<string, { daemons: string[] }>> =>
+  await tab.evaluate(() => {
+    const raw = window.localStorage.getItem('fy:onboarding:client');
+    return raw === null ? {} : (JSON.parse(raw) as { steps: Record<string, { daemons: string[] }> }).steps;
+  });
+
+const keyOf = async (tab: Page): Promise<string> =>
+  await tab.evaluate(() => {
+    if (document.querySelector('[data-flow-end]') !== null) return 'end';
+    return document.querySelector('[data-flow-page]')?.getAttribute('data-flow-page') ?? '';
+  });
+
+/** Waits until the flow shows `key` (or the end) READY: the cover is down and the page has said so. */
+const reach = async (tab: Page, key: string): Promise<void> => {
+  try {
+    await tab.waitForFunction(
+      wanted => {
+        if (wanted === 'end') return document.querySelector('[data-flow-end]') !== null;
+        const page = document.querySelector('[data-flow-page]');
+        return page?.getAttribute('data-flow-page') === wanted && page.hasAttribute('data-ready');
+      },
+      key,
+      { timeout: 15_000 },
+    );
+  } catch {
+    throw new Error(`expected the flow on ${key} but it is on ${await keyOf(tab)}`);
+  }
+  // The slide-in finishes before anything is measured or shot.
+  await tab.waitForTimeout(350);
+};
+
+/** The flow's pages in the order they were reached (a page the flow dropped is never in it). */
+const walked: string[] = [];
+
+const shotCounter = { n: 0 };
+const shot = async (tab: Page, variant: Variant, name: string): Promise<void> => {
+  shotCounter.n += 1;
+  if (shotsDir === '') return;
+  await tab.screenshot({
+    path: join(shotsDir, `${variant.name}-${String(shotCounter.n).padStart(2, '0')}-${name}.png`),
+    fullPage: true,
+  });
+};
+
+/** What every flow page must satisfy, whatever it is. */
+const inspect = async (tab: Page, variant: Variant, key: string, opts: { first?: boolean } = {}): Promise<void> => {
+  const read = await tab.evaluate(chrome => {
+    const rect = (el: Element) => el.getBoundingClientRect();
+    const footer = [...document.querySelectorAll('[data-step-footer] button')].map(button => ({
+      label: (button.textContent ?? '').trim(),
+      w: rect(button).width,
+      h: rect(button).height,
+    }));
+    const grid = document.querySelector('.fy-lb[data-live] .fy-lb-grid');
+    const streak = document.querySelector('.fy-lb[data-live] .fy-lb-streak');
+    return {
+      chrome: document.querySelectorAll(chrome).length,
+      unsaved: document.querySelectorAll('[data-flow-unsaved]').length,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      livingBackground: document.querySelector('[data-living-background][data-live]') !== null,
+      breathing: grid === null ? 'none' : getComputedStyle(grid).animationName,
+      streaks: document.querySelectorAll('.fy-lb-streak').length,
+      streakMoving: streak === null ? 'none' : getComputedStyle(streak).animationName,
+      footer,
+      footerBottom: document.querySelector('[data-step-footer]')?.getBoundingClientRect().bottom ?? 0,
+      back: document.querySelectorAll('[data-step-back]').length,
+      next: document.querySelectorAll('[data-step-next]').length,
+      nextOff: (document.querySelector('[data-step-next]') as HTMLButtonElement | null)?.disabled ?? true,
+    };
+  }, CHROME);
+  expect(read.chrome, `${key}: no sidebar or app chrome`).toBe(0);
+  expect(read.unsaved, `${key}: no "answer was not saved" notice`).toBe(0);
+  expect(read.overflow, `${key}: no sideways scroll`).toBeLessThanOrEqual(0);
+  expect(read.livingBackground, `${key}: the living background is up`).toBe(true);
+  expect(read.breathing, `${key}: the grid breathes`).toBe('fy-lb-breathe');
+  expect(read.streaks, `${key}: shooting stars`).toBeGreaterThanOrEqual(3);
+  expect(read.streakMoving, `${key}: a shooting star moves`).toBe('fy-lb-shoot');
+  expect(read.next, `${key}: a Next button`).toBe(1);
+  expect(read.nextOff, `${key}: Next is on`).toBe(false);
+  expect(read.back, `${key}: Back ${opts.first === true ? 'is absent on the first page' : 'is there'}`).toBe(
+    opts.first === true ? 0 : 1,
+  );
+  // Collected, not asserted here: the gate found pages whose Back/Next footer sits below the first screen (see the gaps below).
+  if (read.footerBottom > variant.height + 1) seen.footerOffScreen.push(`${variant.name}:${key}`);
+  for (const button of read.footer) {
+    expect(button.w, `${key}: ${button.label} is not full width`).toBeLessThan(
+      (variant.width < 600 ? 0.7 : 0.5) * variant.width,
+    );
+    expect(button.h, `${key}: ${button.label} is a 44px target`).toBeGreaterThanOrEqual(43.5);
+  }
+};
+
+/** Collects a button that is the row wide or under 44px tall (read by the gap below, not asserted here). */
+const measureButton = async (tab: Page, variant: Variant, label: string, selector: string): Promise<void> => {
+  const box = await tab.locator(selector).first().boundingBox();
+  if (box === null) return;
+  const limit = (variant.width < 600 ? 0.7 : 0.5) * variant.width;
+  if (box.width >= limit || box.height < 43.5)
+    seen.badButtons.push(`${variant.name}:${label} (${Math.round(box.width)}x${Math.round(box.height)})`);
+};
+
+/** Presses Next and waits for `to` (a page key, or `end`). */
+const next = async (tab: Page, to: string): Promise<void> => {
+  await tab.locator('[data-step-next]').click();
+  await reach(tab, to);
+};
+
+/** Back then Next: Back lands on the page the person came from and Next comes straight back. */
+const backAndForth = async (tab: Page, from: string, key: string): Promise<void> => {
+  await tab.locator('[data-step-back]').click();
+  await reach(tab, from);
+  await next(tab, key);
+};
+
+/** The daemon has taken an answer for the step (`<plugin>.<step>`), and the page has not been answered twice. */
+const recorded = async (tab: Page, daemon: string, key: string): Promise<string> => {
+  const [plugin = '', id = ''] = key.split('.');
+  await tab.waitForFunction(
+    ([machine, step]) => {
+      const view = (
+        window as unknown as { __fake: { daemon: (id: string) => { states: Record<string, string> } } }
+      ).__fake.daemon(machine as string);
+      return view.states[step as string] !== undefined;
+    },
+    [daemon, key],
+    { timeout: 8_000 },
+  );
+  const view = await daemonOf(tab, daemon);
+  expect(
+    view.answers.filter(answer => answer.plugin === plugin && answer.id === id).length,
+    `${key}: answered on the machine exactly once`,
+  ).toBe(1);
+  return view.states[key] as string;
+};
+
+/** A page that asks something and answers with Next: the daemon holds `done` for it afterwards. */
+const answerWithNext = async (
+  tab: Page,
+  variant: Variant,
+  daemon: string,
+  key: string,
+  to: string,
+  opts: { first?: boolean; before?: string } = {},
+): Promise<void> => {
+  await reach(tab, key);
+  walked.push(key);
+  await inspect(tab, variant, key, opts.first === true ? { first: true } : {});
+  await shot(tab, variant, key);
+  if (opts.first !== true && opts.before !== undefined) await backAndForth(tab, opts.before, key);
+  await next(tab, to);
+  expect(await recorded(tab, daemon, key), `${key}: the machine recorded the answer`).toBe('done');
+};
+
+// ─── the journey ────────────────────────────────────────────────────────────────────────────────────────────────────
+describe('the first run, end to end', () => {
+  for (const variant of VARIANTS)
+    it(`${variant.name}: First time, then a second machine's Pair journey`, async () => {
+      shotCounter.n = 0;
+      walked.length = 0;
+      const browser = await sharedChromium();
+      const phone = variant.width < 600;
+      const context = await browser.newContext({
+        viewport: { width: variant.width, height: variant.height },
+        colorScheme: variant.dark ? 'dark' : 'light',
+        deviceScaleFactor: phone ? 2 : 1,
+        hasTouch: phone,
+        isMobile: phone,
+      });
+      // No network: only the scene's own origin answers.
+      await context.route('**/*', async route =>
+        new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+      );
+      const tab = await context.newPage();
+      tab.setDefaultTimeout(20_000);
+      tab.on('pageerror', error => seen.pageErrors.push(error.message));
+      const A = MACHINE_A.id;
+      const B = MACHINE_B.id;
+      const theme = `studio-${variant.dark ? 'dark' : 'light'}`;
+      const navigate = async (to: string): Promise<void> => {
+        await tab.evaluate(path => {
+          history.pushState(null, '', path);
+          dispatchEvent(new PopStateEvent('popstate'));
+        }, to);
+      };
+      // The scene serves `/pair`; the first run is reached the way the app reaches it, from the empty home.
+      await tab.goto(`${origin}/pair?theme=${theme}`);
+      await tab.waitForSelector('[data-slot="nav"], [data-slot="bottom"], .fy-main');
+      await navigate('/');
+
+      // ── the start screen: three cards, nothing started by a select, no chrome ────────────────────────────────────
+      await tab.waitForSelector('[data-choice-cards]');
+      expect(await tab.locator(CHROME).count(), 'the start screen has no app chrome').toBe(0);
+      await shot(tab, variant, 'start');
+      await tab.locator('label[data-choice="first-time"]').click();
+      expect(await tab.locator('[data-onboarding]').getAttribute('data-onboarding-screen')).toBe('entry');
+      await tab.locator('[data-onboarding-continue]').click();
+
+      // ── install: skipped (the daemon is "already running": Next, Next) ───────────────────────────────────────────
+      await tab.waitForSelector('[data-onboarding-next]');
+      expect(await tab.locator(CHROME).count(), 'the install page has no app chrome').toBe(0);
+      await shot(tab, variant, 'install');
+      await tab.locator('[data-onboarding-next]').click();
+      await tab.waitForSelector('[data-onboarding-next]');
+      await shot(tab, variant, 'daemon');
+      await tab.locator('[data-onboarding-next]').click();
+      await tab.waitForSelector('[data-onboarding-back]');
+      await shot(tab, variant, 'open');
+
+      // ── pair: the pairing page, a pasted link with the FIXED FAKE code, confirm ──────────────────────────────────
+      await tab.getByText('It did not open a browser').click();
+      await tab.locator('[data-onboarding-open-pair]').click();
+      await tab.getByText('Paste a link').click();
+      seen.pairPageChrome = await tab.locator(CHROME).count();
+      await shot(tab, variant, 'pair-paste');
+      await tab.getByLabel('Pairing link').fill(pairLinkOf(MACHINE_A, origin));
+      await tab.getByText('Use this link').click();
+      await tab.locator('[data-pair-confirm]').waitFor();
+      await shot(tab, variant, 'pair-confirm');
+      await measureButton(tab, variant, 'Pair this device', '[data-pair-confirm]');
+      await tab.locator('[data-pair-confirm]').click();
+
+      // ── the setup flow opens on the machine that answered ───────────────────────────────────────────────────────
+      await tab.waitForURL(/\/onboarding\/setup\?phase=daemon&journey=first-time/u);
+      await reach(tab, 'onboarding.name');
+      walked.push('onboarding.name');
+      seen.nameForms = await tab.locator('[data-name-machine]').count();
+      await inspect(tab, variant, 'onboarding.name', { first: true });
+      await shot(tab, variant, 'onboarding.name');
+      // Save the name: the machine takes it through the host file, and the flow goes on by itself.
+      await tab.getByLabel('Machine name').last().fill('studio-mac');
+      await tab.getByRole('button', { name: 'Save name' }).last().click();
+      await reach(tab, 'claude-code.import-choice');
+      expect(
+        (await daemonOf(tab, A)).writes.some(write => write.route === 'PUT /v1/config/file'),
+        'the name went to the machine',
+      ).toBe(true);
+      expect(await recorded(tab, A, 'onboarding.name'), 'Machine name recorded').toMatch(/done|skipped/u);
+
+      // ── Claude: installed and signed in are never asked; Choose what to import ──────────────────────────────────
+      walked.push('claude-code.import-choice');
+      await inspect(tab, variant, 'claude-code.import-choice');
+      await shot(tab, variant, 'claude-code.import-choice');
+      await backAndForth(tab, 'onboarding.name', 'claude-code.import-choice');
+      // An arrow key moves the selection and writes nothing: no request, no answer, nothing on the device ledger.
+      const before = await daemonOf(tab, A);
+      const ledgerBefore = JSON.stringify(await ledgerOf(tab));
+      await tab.locator('input[name]:checked, input[type="radio"]:checked').first().focus();
+      await tab.keyboard.press('ArrowRight');
+      await tab.waitForTimeout(300);
+      const after = await daemonOf(tab, A);
+      expect(after.mutations.length, 'an arrow key sent nothing to the machine').toBe(before.mutations.length);
+      expect(after.answers.length, 'an arrow key recorded no answer').toBe(before.answers.length);
+      expect(JSON.stringify(await ledgerOf(tab)), 'an arrow key wrote nothing on this device').toBe(ledgerBefore);
+      expect(await tab.locator('label[data-choice="choose"]').getAttribute('data-selected'), 'the arrow moved it').toBe(
+        'true',
+      );
+      await tab.locator('label[data-choice="choose"]').click();
+      await shot(tab, variant, 'claude-code.import-choice-chosen');
+      await next(tab, 'claude-code.import-settings');
+      expect(await recorded(tab, A, 'claude-code.import-choice')).toBe('done');
+      for (const [key, to] of [
+        ['claude-code.import-settings', 'claude-code.import-model-set'],
+        ['claude-code.import-model-set', 'claude-code.import-instructions'],
+        ['claude-code.import-instructions', 'claude-code.import-skills'],
+        ['claude-code.import-skills', 'claude-code.import-mcp'],
+        ['claude-code.import-mcp', 'claude-code.conversations'],
+      ] as const) {
+        walked.push(key);
+        await inspect(tab, variant, key);
+        await shot(tab, variant, key);
+        if (key === 'claude-code.import-skills') {
+          // A kind page's tick is the run's memory, not a write: leave one skill out and nothing is sent.
+          const mutations = (await daemonOf(tab, A)).mutations.length;
+          await tab.locator('input[type="checkbox"]').last().uncheck();
+          expect((await daemonOf(tab, A)).mutations.length, 'a tick sent nothing').toBe(mutations);
+        }
+        await next(tab, to);
+        expect(await recorded(tab, A, key)).toBe('done');
+      }
+      await answerWithNext(tab, variant, A, 'claude-code.conversations', 'claude-code.import-run');
+
+      // The import page: name the runtime and import; the machine gets a proposal and applies it.
+      await reach(tab, 'claude-code.import-run');
+      walked.push('claude-code.import-run');
+      await inspect(tab, variant, 'claude-code.import-run');
+      await shot(tab, variant, 'claude-code.import-run');
+      await tab.getByRole('button', { name: 'Import', exact: true }).click();
+      await tab.waitForFunction(
+        id =>
+          (window as unknown as { __fake: { daemon: (id: string) => { mutations: { route: string }[] } } }).__fake
+            .daemon(id)
+            .mutations.some(mutation => /\/v1\/runtimes\/proposals\/[^/]+\/apply$/u.test(mutation.route)),
+        A,
+        { timeout: 10_000 },
+      );
+      await tab.waitForTimeout(500);
+      await shot(tab, variant, 'claude-code.import-run-done');
+      await tab.locator('[data-step-next]').waitFor();
+      await next(tab, 'claude-code.permission');
+      expect(await recorded(tab, A, 'claude-code.import-run')).toBe('done');
+
+      // Permission: an arrow key moves the card and writes nothing; Keep leaves the default.
+      await reach(tab, 'claude-code.permission');
+      walked.push('claude-code.permission');
+      await inspect(tab, variant, 'claude-code.permission');
+      await shot(tab, variant, 'claude-code.permission');
+      const permBefore = (await daemonOf(tab, A)).mutations.length;
+      await tab.locator('input[type="radio"]:checked').first().focus();
+      await tab.keyboard.press('ArrowUp');
+      await tab.waitForTimeout(300);
+      expect((await daemonOf(tab, A)).mutations.length, 'an arrow key on Permissions wrote nothing').toBe(permBefore);
+      await shot(tab, variant, 'claude-code.permission-picked');
+      await tab.getByRole('button', { name: /^Keep / }).click();
+      await tab.waitForTimeout(300);
+      await next(tab, 'codex.import-choice');
+      expect(await recorded(tab, A, 'claude-code.permission')).toBe('done');
+
+      // ── Codex: Import everything ────────────────────────────────────────────────────────────────────────────────
+      await reach(tab, 'codex.import-choice');
+      walked.push('codex.import-choice');
+      await inspect(tab, variant, 'codex.import-choice');
+      await shot(tab, variant, 'codex.import-choice');
+      // Everything is already selected: Next is the answer. Count the pages Codex then walks before the Warden.
+      await tab.locator('[data-step-next]').click();
+      let codexPages = 0;
+      for (;;) {
+        await tab.waitForTimeout(500);
+        const key = await keyOf(tab);
+        if (!key.startsWith('codex.')) break;
+        codexPages += 1;
+        walked.push(key);
+        await inspect(tab, variant, key);
+        await shot(tab, variant, key);
+        await tab.locator('[data-step-next]').click();
+      }
+      seen.codexKindPagesInEverything = walked.filter(key =>
+        /^codex\.import-(settings|model-set|instructions|skills|mcp)$/u.test(key),
+      ).length;
+      expect(codexPages, 'Codex walked at least its own page').toBeGreaterThanOrEqual(1);
+      expect((await daemonOf(tab, A)).states['codex.import-choice'], 'Codex choice recorded').toBe('done');
+
+      // ── Warden, Lessons ─────────────────────────────────────────────────────────────────────────────────────────
+      await reach(tab, 'warden.warden');
+      walked.push('warden.warden');
+      await inspect(tab, variant, 'warden.warden');
+      await shot(tab, variant, 'warden.warden');
+      await tab.locator('[data-flow-page="warden.warden"] label[data-choice="jev"]').click();
+      await tab.waitForFunction(
+        id =>
+          (window as unknown as { __fake: { daemon: (id: string) => { writes: { route: string }[] } } }).__fake
+            .daemon(id)
+            .writes.some(write => write.route === 'PATCH /v1/warden/config'),
+        A,
+        { timeout: 8_000 },
+      );
+      await tab.waitForFunction(() => !(document.querySelector('[data-step-next]') as HTMLButtonElement).disabled);
+      await next(tab, 'lessons.lessons');
+      expect(await recorded(tab, A, 'warden.warden')).toBe('done');
+      await answerWithNext(tab, variant, A, 'lessons.lessons', 'onboarding.appearance', { before: 'warden.warden' });
+      // Shells is never on screen: nix is found, so the page skipped itself and the machine recorded it.
+      expect(walked.includes('shells.nix'), 'Shells is skipped when nix is found').toBe(false);
+      expect(await recorded(tab, A, 'shells.nix'), 'Shells recorded as found or skipped').toMatch(/found|skipped/u);
+
+      // ── This device: Appearance, Layout, Voice ──────────────────────────────────────────────────────────────────
+      await reach(tab, 'onboarding.appearance');
+      walked.push('onboarding.appearance');
+      await inspect(tab, variant, 'onboarding.appearance');
+      await shot(tab, variant, 'onboarding.appearance');
+      const appearanceBefore = (await daemonOf(tab, A)).mutations.length;
+      await tab.locator('input[type="radio"]:checked').first().focus();
+      await tab.keyboard.press('ArrowRight');
+      await tab.waitForTimeout(300);
+      expect((await daemonOf(tab, A)).mutations.length, 'an arrow key on Appearance wrote nothing to the machine').toBe(
+        appearanceBefore,
+      );
+      expect(await ledgerOf(tab), 'nothing is on the device ledger before Next').toEqual({});
+      // Put the style back, so the pages after it are shot in the look the person had.
+      await tab.keyboard.press('ArrowLeft');
+      await tab.waitForTimeout(300);
+      await next(tab, 'layouts.layout');
+      expect(Object.keys(await ledgerOf(tab)), 'Appearance is on the device ledger after Next').toContain(
+        'onboarding.appearance',
+      );
+
+      await reach(tab, 'layouts.layout');
+      walked.push('layouts.layout');
+      await inspect(tab, variant, 'layouts.layout');
+      await shot(tab, variant, 'layouts.layout');
+      await next(tab, 'voice.voice');
+      expect(Object.keys(await ledgerOf(tab))).toContain('layouts.layout');
+
+      await reach(tab, 'voice.voice');
+      walked.push('voice.voice');
+      await inspect(tab, variant, 'voice.voice');
+      await shot(tab, variant, 'voice.voice');
+      await next(tab, 'end');
+      expect(Object.keys(await ledgerOf(tab))).toContain('voice.voice');
+
+      // ── the end page ────────────────────────────────────────────────────────────────────────────────────────────
+      expect(await tab.locator(CHROME).count(), 'the end page has no app chrome').toBe(0);
+      expect(await tab.locator('[data-flow-unsaved]').count(), 'the end page lists no unsaved answer').toBe(0);
+      expect(await tab.locator('[data-flow-end]').count()).toBe(1);
+      await shot(tab, variant, 'end');
+      // Every machine step ended up answered, each exactly once.
+      const done = await daemonOf(tab, A);
+      for (const step of MACHINE_A.steps.filter(candidate => candidate.side === undefined)) {
+        const key = `${step.plugin}.${step.id}`;
+        expect(done.states[key], `${key} was answered on the machine`).toBeDefined();
+        expect(
+          done.answers.filter(answer => answer.plugin === step.plugin && answer.id === step.id).length,
+          `${key} was answered exactly once`,
+        ).toBe(1);
+      }
+      expect(walked, 'the first-run pages, in order').toEqual(
+        expect.arrayContaining([
+          'onboarding.name',
+          'claude-code.import-choice',
+          'claude-code.import-settings',
+          'claude-code.import-skills',
+          'claude-code.import-run',
+          'claude-code.permission',
+          'codex.import-choice',
+          'warden.warden',
+          'lessons.lessons',
+          'onboarding.appearance',
+          'layouts.layout',
+          'voice.voice',
+        ]),
+      );
+      for (const never of [
+        'claude-code.installed',
+        'claude-code.sign-in',
+        'codex.installed',
+        'codex.sign-in',
+        'shells.nix',
+      ])
+        expect(walked.includes(never), `${never} is never drawn on a machine that has it`).toBe(false);
+      // Nothing is "Only on" yet: one machine carries every step.
+      expect(await tab.locator('[data-only-on]').count()).toBe(0);
+
+      // ── a SECOND machine: the Pair journey from inside the app ─────────────────────────────────────────────────
+      await navigate('/onboarding?journey=pair');
+      await tab.waitForSelector('[data-onboarding-open-pair]');
+      await measureButton(tab, variant, 'Open the pairing page', '[data-onboarding-open-pair]');
+      expect(await tab.locator(CHROME).count(), 'the Pair start has no app chrome').toBe(0);
+      await shot(tab, variant, 'pair-journey');
+      await tab.locator('[data-onboarding-open-pair]').click();
+      await tab.getByText('Paste a link').click();
+      await tab.getByLabel('Pairing link').fill(pairLinkOf(MACHINE_B, origin));
+      await tab.getByText('Use this link').click();
+      await tab.locator('[data-pair-confirm]').waitFor();
+      await tab.locator('[data-pair-confirm]').click();
+      // This machine has no passkey and its first window is open, so the pairing page offers one before it returns.
+      await tab.locator('[data-first-passkey-offer]').waitFor();
+      seen.pairConnectedChrome = await tab.locator(CHROME).count();
+      await shot(tab, variant, 'pair-connected-passkey-offer');
+      await tab.getByRole('button', { name: 'Not now' }).click();
+      await tab.waitForURL(/\/onboarding\/setup\?phase=client&journey=pair/u);
+      // What this device already set (Appearance, Layout, Voice) is skipped; what only the new machine carries is asked.
+      await reach(tab, 'access.passkey');
+      walked.push('access.passkey');
+      expect(await tab.locator('[data-only-on]').textContent(), 'the chip names the machine').toBe(
+        `Only on ${MACHINE_B.name}`,
+      );
+      await inspect(tab, variant, 'access.passkey', { first: true });
+      await shot(tab, variant, 'access.passkey-chip');
+      await next(tab, 'end');
+      expect(Object.keys(await ledgerOf(tab))).toContain('access.passkey');
+      expect((await ledgerOf(tab))['access.passkey']?.daemons, 'the passkey answer is for the new machine').toEqual([
+        B,
+      ]);
+      await shot(tab, variant, 'end-pair');
+      const second = await daemonOf(tab, B);
+      expect(second.answers, 'a Pair journey answers nothing on the new machine (it is not being set up)').toEqual([]);
+      expect(
+        walked.filter(key => ['onboarding.appearance', 'layouts.layout', 'voice.voice'].includes(key)),
+      ).toHaveLength(3);
+      // Each client page was asked once in the whole journey: the Pair journey did not ask them again.
+      expect(walked.filter(key => key === 'onboarding.appearance')).toHaveLength(1);
+
+      seen.unanswered = [...(await daemonOf(tab, A)).unanswered, ...(await daemonOf(tab, B)).unanswered];
+      await context.close();
+    });
+});
+
+// ─── what the run found and is not fixed here (each is `it.failing`: red the day it is fixed) ───────────────────────
+describe('known gaps the gate found', () => {
+  it('no page threw', () => {
+    expect(seen.pageErrors).toEqual([]);
+  });
+  it('only the expected routes went unanswered (a gap in the fake, not in the product)', () => {
+    expect([...new Set(seen.unanswered)].sort()).toEqual(['GET /v1/layouts/current']);
+  });
+  it.failing('the Machine name page draws ONE name form (the shell strip draws a second above the flow)', () => {
+    expect(seen.nameForms).toBe(1);
+  });
+  // Only a desktop height shows it (a phone's footer is sticky), so it is asserted only when a desktop variant ran.
+  (VARIANTS.some(variant => variant.width >= 600) ? it.failing : it.skip)(
+    'every page keeps its Back/Next footer on the first screen (no scrolling to reach Next)',
+    () => {
+      expect(seen.footerOffScreen).toEqual([]);
+    },
+  );
+  it.failing('the pairing page buttons are auto width and 44px tall', () => {
+    expect(seen.badButtons).toEqual([]);
+  });
+  it.failing('the pairing page reached from the first run has no sidebar or app chrome', () => {
+    expect(seen.pairPageChrome).toBe(0);
+  });
+  it.failing('the pairing page Connected screen has no sidebar or app chrome', () => {
+    expect(seen.pairConnectedChrome).toBe(0);
+  });
+  it('Import everything is ONE page for Codex (the kind pages are passed over, not drawn)', () => {
+    expect(seen.codexKindPagesInEverything).toBe(0);
+  });
+  it('the fixed fake code is the only code used', () => {
+    expect(FAKE_CODE).toBe('ABCD-EFGH');
+  });
+});

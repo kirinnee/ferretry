@@ -108,6 +108,7 @@ const common = {
   remember: noop,
   onDone: noop,
   onSkip: noop,
+  onNotNeeded: noop,
   onNext: noop,
   onBack: noop,
   onLater: noop,

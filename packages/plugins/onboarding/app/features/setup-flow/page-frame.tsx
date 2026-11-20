@@ -32,6 +32,7 @@ export interface FlowPageProps {
   readonly remember: StepHost['remember'];
   readonly onDone: () => void;
   readonly onSkip: (why: 'not-needed' | 'already-set') => void;
+  readonly onNotNeeded: () => void;
   readonly onNext: () => void;
   readonly onBack: () => void;
   readonly onLater: () => void;
@@ -115,6 +116,10 @@ export function FlowPage(props: FlowPageProps): ReactNode {
       skip: why => {
         flagless('skip');
         latest.current.onSkip(why);
+      },
+      notNeeded: () => {
+        flagless('notNeeded');
+        latest.current.onNotNeeded();
       },
       done: () => {
         flagless('done');

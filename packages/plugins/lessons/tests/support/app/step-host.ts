@@ -8,6 +8,7 @@ import type { StepHost, StepSegmentMemory } from '@ferretry/kernel/contract';
 type HostCall =
   | { readonly kind: 'ready' }
   | { readonly kind: 'skip'; readonly why: 'not-needed' | 'already-set' }
+  | { readonly kind: 'notNeeded' }
   | { readonly kind: 'done' }
   | { readonly kind: 'busy'; readonly label: string | null }
   | { readonly kind: 'remember'; readonly patch: StepSegmentMemory }
@@ -37,6 +38,7 @@ export function recordingHost(phase: StepHost['phase'] = 'daemon'): RecordingHos
     },
     ready: () => void calls.push({ kind: 'ready' }),
     skip: why => void calls.push({ kind: 'skip', why }),
+    notNeeded: () => void calls.push({ kind: 'notNeeded' }),
     done: () => void calls.push({ kind: 'done' }),
     busy: label => void calls.push({ kind: 'busy', label }),
     next: () => void calls.push({ kind: 'next' }),

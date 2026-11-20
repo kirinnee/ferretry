@@ -27,18 +27,15 @@ const sentenceOf = (taken: Readonly<Record<string, number>>, everything: boolean
   return parts.length === 0 ? 'Nothing.' : `${parts.join(', ')}.`;
 };
 
-/** Starting fresh: nothing to bring, and nothing is read. Shown (not skipped) so Back -> another choice still finds the import. */
+/**
+ * Starting fresh: nothing to bring, and nothing is read, so the page has nothing to do. It is passed over for THIS run
+ * (`notNeeded`, not `skip`, which is recorded) so Back -> another choice still finds the import.
+ */
 function NotImporting({ step }: { readonly step: StepHost }) {
   useEffect(() => {
-    step.ready();
+    step.notNeeded();
   }, [step]);
-  return (
-    <section aria-label="Bring Codex over" className="flex max-w-xl flex-col gap-3" data-codex-step="import-run">
-      <p className="m-0 text-ui text-fg" data-import-fresh="">
-        Nothing comes over: you chose to start fresh. Go back to choose otherwise.
-      </p>
-    </section>
-  );
+  return null;
 }
 
 export function ImportRunPage({ client, step }: { readonly client: OnboardingClient; readonly step: StepHost }) {

@@ -4,8 +4,9 @@
  * while that request is in flight, then lists each file written or refused in the daemon's own words. Nothing happens on
  * a card pick or an arrow key: only the Import press.
  *
- *   - `importMode` `fresh`: nothing is imported. The page stays in the run and says so (a skip is irreversible in the
- *     flow, and Back may still change the mode); Next records it done.
+ *   - `importMode` `fresh`: nothing is imported and nothing is read, so the page has nothing to do: it calls `notNeeded()`
+ *     (contract rule 7: this run only, never recorded, cleared when the mode changes), not `skip()`, which would be
+ *     irreversible while Back may still change the mode.
  *   - `everything`: nothing is left out and no GitHub token is taken.
  *   - `choose`: what the pages left out is left out. Leaving Settings out also leaves the model set those settings name
  *     (the r9 wizard's own rule; the daemon derives the models from them).
@@ -32,7 +33,6 @@ import { importModeOf } from '../import-choice-page.tsx';
 import type { StepPageProps } from '../props.ts';
 import { allLeft, HARNESS, SCAN_RUN, tickedEnvOf } from './segment.ts';
 
-const FRESH = 'Not needed for a fresh start. Go back to bring something over.';
 const NEXT_LEAVES = 'Next leaves the import for later. You can import any time from Settings › Runtimes › Import.';
 
 const ASK: readonly ChoiceOption[] = [
@@ -67,7 +67,7 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
     if (decided.current || step === undefined) return;
     if (mode === 'fresh') {
       decided.current = true;
-      step.ready();
+      step.notNeeded();
       return;
     }
     if (read.kind === 'idle' || read.kind === 'reading') return;
@@ -77,14 +77,7 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
     step.ready();
   }, [read.kind, model, mode, step]);
 
-  if (mode === 'fresh')
-    return (
-      <div className="cc-step" data-onboarding-step="claude-code.import-run">
-        <p className="cc-step__line" data-import-fresh="">
-          {FRESH}
-        </p>
-      </div>
-    );
+  if (mode === 'fresh') return null;
   if (read.kind === 'idle' || read.kind === 'reading') return null;
 
   // After a reload the person's one-by-one choices are gone, but the kind pages shown since then remembered theirs: "what was

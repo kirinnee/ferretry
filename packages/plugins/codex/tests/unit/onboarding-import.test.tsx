@@ -149,13 +149,15 @@ describe('a kind page (choose what to import)', () => {
   });
 
   for (const importMode of ['everything', 'fresh'] as const)
-    test(`${importMode}: it is shown, never skipped (a skip would outlive a change of mind), and reads nothing`, async () => {
+    test(`${importMode}: it is passed over for this run (notNeeded, never skip: a skip would outlive a change of mind), draws nothing and reads nothing`, async () => {
       const harness = stepHarness({ segment: { importMode } });
       const { container, calls } = await mount('import-mcp', harness, machine(FULL));
-      expect(harness.decision).toBe('shown');
+      expect(harness.decision).toBe('passed-over');
+      expect(harness.count('notNeeded')).toBe(1);
       expect(harness.count('skip')).toBe(0);
-      expect(container.querySelector(`[data-import-not-choosing="${importMode}"]`)).not.toBeNull();
+      expect(harness.count('done')).toBe(0);
       expect(container.querySelector('[data-found-item]')).toBeNull();
+      expect(container.textContent).toBe('');
       expect(calls).toEqual([]);
     });
 
@@ -362,12 +364,12 @@ describe('import-run', () => {
     expect((proposal(calls) as { tickedEnv?: string[] }).tickedEnv).toEqual(['GH_TOKEN']);
   });
 
-  test('starting fresh is shown (never skipped) and reads nothing', async () => {
+  test('starting fresh is passed over for this run (notNeeded, never skipped) and reads nothing', async () => {
     const harness = stepHarness({ segment: { importMode: 'fresh' } });
     const { container, calls } = await mount('import-run', harness, machine(FULL));
-    expect(harness.decision).toBe('shown');
+    expect(harness.decision).toBe('passed-over');
     expect(harness.count('skip')).toBe(0);
-    expect(container.querySelector('[data-import-fresh]')).not.toBeNull();
+    expect(container.textContent).toBe('');
     expect(calls).toEqual([]);
   });
 

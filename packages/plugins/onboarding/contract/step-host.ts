@@ -23,6 +23,19 @@
  *      page returns ONLY its body (cards, a short list, a form, its own demo) and NEVER renders `StepPageFrame`, a title, a
  *      progress bar or Back/Next/Later buttons itself: a page that does would draw two frames and two footers. A page that
  *      needs the footer's state uses `busy()` / `next()` / `back()` / `skip()` on the host.
+ *   7. `notNeeded()` IS A RUN-ONLY SKIP: "this page is not needed for THIS run, given the answers so far" (the plugin's
+ *      segment memory). Unlike `skip()` it is NOT recorded on the machine while the run is going, it survives nothing (a
+ *      reload starts with no marks and asks again), and the page is neither counted by the progress bar nor landed on. The
+ *      run passes over a marked page in both directions: forward goes to the next page that is not marked, and Back goes to
+ *      the last page actually shown. WHENEVER the plugin's segment memory changes (a `remember()` that alters a value),
+ *      every mark of that plugin on the page on screen and the pages after it is cleared, so those pages are asked again and a
+ *      page that is still not needed calls `notNeeded()` again when it mounts. A mark behind the page on screen stays (the run
+ *      cannot go back to it without a change on an earlier page). That is why a page whose need depends on an answer the
+ *      person can still revise (the import mode) calls `notNeeded()`, never `skip()`: a skip is persisted and final, so
+ *      Back -> change the answer could never bring the page back. `skip()` stays for a fact nothing in the run can change.
+ *      ONE write, at the END of the run: a machine step that was passed over and never asked since is recorded `skipped`
+ *      then (a step left `pending` there reopens the first run on every later visit and keeps the machine incomplete). That
+ *      write does not make the step answered in the run: Back -> change the answer -> Next still records `done` over it.
  */
 export type { StepHost, StepSegmentMemory } from '@ferretry/kernel/contract';
 
@@ -36,6 +49,7 @@ export type StepSkipWhy = 'not-needed' | 'already-set';
 export type StepCall =
   | { readonly kind: 'ready' }
   | { readonly kind: 'skip'; readonly why: StepSkipWhy }
+  | { readonly kind: 'notNeeded' }
   | { readonly kind: 'done' }
   | { readonly kind: 'busy'; readonly label: string | null }
   | { readonly kind: 'remember'; readonly patch: Readonly<Record<string, string | number | boolean | undefined>> }
