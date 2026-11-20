@@ -447,7 +447,8 @@ describe('usage parity · what the manifest declares and the half implements', (
     const view = await mount(asElement(pricingHalf.settings['model-pricing']({})));
     await settle();
     expect(setting('model-pricing')?.label).toBe('Model pricing');
-    expect(view.container.textContent).toContain('Model pricing');
+    // The shell draws the tab's title; the tab is the labelled "Model pricing" region.
+    expect(view.container.querySelector('[aria-label="Model pricing"]')).not.toBeNull();
     await view.unmount();
   });
 

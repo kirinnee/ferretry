@@ -68,7 +68,8 @@ describe('S-0137 Settings › Ferret limits', () => {
     await settled(shown.container, '[data-testid="limits-card"]');
     const root = shown.container;
     expect(calls).toEqual(['GET /v1/cgroups/config']);
-    expect(root.textContent).toContain('Ferret limits');
+    // The tab's title is the Settings shell's one heading; the card is named for assistive tech and draws none.
+    expect(root.querySelector('[data-testid="limits-card"]')?.getAttribute('aria-label')).toBe('Ferret limits');
     expect(root.querySelector('[data-limits-badge]')?.textContent).toBe('enforced');
     expect(
       [...root.querySelectorAll('[data-setting-group="What is in force"] ul ul li')].map(li => li.textContent),
