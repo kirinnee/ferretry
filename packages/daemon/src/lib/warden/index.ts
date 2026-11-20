@@ -31,6 +31,7 @@ export * from './remedy.ts';
 export * from './input-stuck.ts';
 export * from './inbox-stuck.ts';
 export * from './report-overdue.ts';
+export * from './review-blocked.ts';
 export * from './reports.ts';
 export * from './revive.ts';
 export * from './revive-service.ts';

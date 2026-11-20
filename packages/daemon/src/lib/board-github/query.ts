@@ -9,7 +9,7 @@
  * The answer is parsed field by field: one PR the repository no longer has, or one GitHub could not
  * resolve, leaves that PR unobserved and the rest of the answer whole.
  */
-import { type PrChecks, prUrlParts } from '@ferretry/protocol';
+import { type PrChecks, type PrMergeable, prUrlParts } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { PrObservation } from '../board/index.ts';
 
@@ -30,7 +30,7 @@ export interface RepositoryPoll {
 }
 
 const PR_FIELDS =
-  'number url state isDraft createdAt mergedAt mergeCommit { oid } headRefName ' +
+  'number url state isDraft mergeable createdAt mergedAt mergeCommit { oid } headRefName ' +
   'commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }';
 
 /** The `gh` arguments of one repository's poll, or `null` for a repository name that is not `owner/name`. */
@@ -103,6 +103,7 @@ const PrNodeSchema = z.object({
   url: z.string(),
   state: z.enum(['OPEN', 'CLOSED', 'MERGED']),
   isDraft: z.boolean(),
+  mergeable: z.enum(['MERGEABLE', 'CONFLICTING', 'UNKNOWN']).nullable().optional(),
   createdAt: InstantString.nullable().optional(),
   mergedAt: InstantString.nullable(),
   mergeCommit: z.object({ oid: z.string().regex(/^[0-9a-f]{40}$/u) }).nullable(),
@@ -140,6 +141,10 @@ export const checksOf = (rollup: string | null): PrChecks => {
   return 'pending';
 };
 
+/** Whether GitHub says the PR conflicts with its base. `UNKNOWN` is still being worked out: it says nothing, so the cached answer stands. */
+const mergeableOf = (value: string | null | undefined): PrMergeable | undefined =>
+  value === 'MERGEABLE' ? 'mergeable' : value === 'CONFLICTING' ? 'conflicting' : undefined;
+
 /** One PR node, or `null` when it does not parse or claims a merge it cannot name. */
 const polledPr = (node: unknown, repo: string): PolledPr | null => {
   const parsed = PrNodeSchema.safeParse(node);
@@ -150,6 +155,7 @@ const polledPr = (node: unknown, repo: string): PolledPr | null => {
   const merged = pr.state === 'MERGED';
   if (merged && (pr.mergedAt === null || pr.mergeCommit === null)) return null;
   const rollup = pr.commits?.nodes.at(-1)?.commit.statusCheckRollup?.state ?? null;
+  const mergeable = pr.state === 'OPEN' ? mergeableOf(pr.mergeable) : undefined;
   return {
     number: pr.number,
     headRefName: pr.headRefName,
@@ -158,6 +164,7 @@ const polledPr = (node: unknown, repo: string): PolledPr | null => {
       state: merged ? 'merged' : pr.state === 'OPEN' ? 'open' : 'closed',
       draft: pr.isDraft,
       checks: checksOf(rollup),
+      ...(mergeable === undefined ? {} : { mergeable }),
       createdAt: pr.createdAt ?? null,
       mergedAt: merged ? pr.mergedAt : null,
       mergeSha: merged ? (pr.mergeCommit?.oid ?? null) : null,

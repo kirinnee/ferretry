@@ -266,6 +266,19 @@ The Warden reads the board (`board-design.md` §3.4). Its orphaned-card message 
   the spawn fingerprint. The Warden re-checks it once per episode, safely; if that does not move it, the ferret is
   named on the `warden:inbox-stuck` machine item and handed to an investigation whose verdict can only re-check
   again. The whole rule is in [message-delivery.md](message-delivery.md#b148-a-ferret-whose-inbox-is-stuck).
+- **A review whose pull request cannot merge.** A card in a review lane with an open, non-draft linked PR that has a
+  merge conflict or red CI, stood in that state for 30 minutes, while the ferret that answers for the card (its
+  assignee, else its owner) sits idle at its prompt, gets one queued nudge from the Warden naming the card, the PR
+  and what blocks it (`packages/daemon/src/lib/warden/review-blocked.ts`):
+  `The Warden checked &F412: it has sat in review 41m with a pull request that cannot merge — https://github.com/…/pull/930 has a merge conflict. Rebase it onto its base branch and fix any red checks, push, or note on the card why it can wait.`
+  It is the _task_ that is stuck, not the ferret, so there is no flag, no Jev and no investigation: the board's GitHub
+  watcher already reads each PR's state and checks onto the card, and now whether GitHub can merge it
+  ([board.md](board.md#lanes-follow-pr-facts)); a GitHub that said nothing (no `gh`, signed out, a merge state it has
+  not worked out) neither blocks nor unblocks a card. Once per blocking state: the same state is never nudged twice,
+  and a changed one (conflict fixed, CI still red) starts its own 30 minutes. A ferret that is working, in a declared
+  wait, out of quota or gone is not nudged (a gone one is the `orphaned_card` flag's) and nothing is remembered for it,
+  so it is nudged the moment it goes idle. It follows the owner's nudge permission (**the Warden may nudge alone**).
+  The memory is `reviewBlocked` in the Warden's state; each nudge is journalled as `fleet.warden_review_blocked_nudged`.
 - **The card a resumed ferret carries on.** When the Warden starts an auto ferret again — an auto-revive,
   or a verdict's resume or restart — and the ferret has a focus card, its turn names the card: id, title,
   lane, the ask and every clarification verbatim, its links and its last five history lines

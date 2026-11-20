@@ -201,6 +201,10 @@ export type PrState = z.infer<typeof PrStateSchema>;
 export const PrChecksSchema = z.enum(['none', 'pending', 'passing', 'failing']);
 export type PrChecks = z.infer<typeof PrChecksSchema>;
 
+/** Whether GitHub can merge a PR as it stands: a branch with a merge conflict is `conflicting`. */
+export const PrMergeableSchema = z.enum(['mergeable', 'conflicting']);
+export type PrMergeable = z.infer<typeof PrMergeableSchema>;
+
 const PR_URL = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/pull\/([1-9][0-9]*)$/u;
 
 /** The `owner/name` and number a GitHub PR URL names, or `null` when it is not one. */
@@ -230,6 +234,12 @@ export const PrLinkSchema = z
     polledAt: InstantSchema.nullable(),
     /** When the PR was opened on GitHub; absent on a link cached before the watcher read it. */
     createdAt: InstantSchema.nullable().optional(),
+    /**
+     * Whether GitHub can merge the PR into its base: `conflicting` when the branch has a merge conflict. Absent on a
+     * link cached before the watcher read it, and while GitHub has not yet worked it out; never set on a closed or
+     * merged PR.
+     */
+    mergeable: PrMergeableSchema.optional(),
   })
   .superRefine((value, context) => {
     const parts = prUrlParts(value.url);
