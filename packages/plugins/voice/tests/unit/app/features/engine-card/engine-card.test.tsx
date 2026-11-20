@@ -197,7 +197,7 @@ describe('the engine card stylesheet', () => {
     expect(CSS).toContain('--fy-engine-height: 164px;');
     expect(CSS).toMatch(/\.fy-engine-card \{[^}]*height: var\(--fy-engine-height\);[^}]*overflow: hidden;/s);
     expect(CSS).toMatch(/\.fy-engine-name \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
-    expect(CSS).toMatch(/\.fy-engine-line \{[^}]*height: 16px;[^}]*text-overflow: ellipsis;/s);
+    expect(CSS).toMatch(/\.fy-engine-line \{[^}]*height: 18px;[^}]*text-overflow: ellipsis;/s);
   });
 
   it('puts at most three cards in a row, at least 240 px each, and stacks them on a phone', () => {

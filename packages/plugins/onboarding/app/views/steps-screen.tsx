@@ -156,7 +156,7 @@ export function SetupSummary({
                 <RouterLink href={daemonSettingsHref(daemon, group.plugin)} data-onboarding-later-link={group.plugin}>
                   {group.group}
                 </RouterLink>
-                <span className="text-meta text-muted">({group.set > 0 ? 'some pages skipped' : 'skipped'})</span>
+                {group.set > 0 ? <span className="text-meta text-muted">(some pages skipped)</span> : null}
               </li>
             ))}
           </ul>

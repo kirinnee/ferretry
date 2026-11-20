@@ -113,8 +113,8 @@
 .fy-engine-line {
   color: var(--muted);
   font-size: var(--text-sm);
-  height: 16px;
-  line-height: 16px;
+  height: 18px;
+  line-height: 18px;
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -150,12 +150,14 @@
   margin-top: auto;
   min-width: 0;
 }
+/* Chips wrap onto a second row beside a wide Install button rather than being cut off by it. */
 .fy-engine-chips {
+  align-content: center;
   display: flex;
   flex: 1 1 0;
+  flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
-  overflow: hidden;
 }
 .fy-engine-chip {
   border: 1px solid var(--border);
@@ -219,7 +221,7 @@
   font-size: var(--text-xs);
   gap: 4px;
   min-height: 44px;
-  padding: 0 12px;
+  padding: 0 10px;
   pointer-events: auto;
   position: relative;
   white-space: nowrap;

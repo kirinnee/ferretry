@@ -568,7 +568,8 @@ describe('the first run, end to end', () => {
       await tab.getByRole('button', { name: 'Show every engine' }).click();
       // The Off card, on its own, so its whole text can be read in the picture (the page shot scrolls past it).
       const off = tab.locator('.fy-engine-card[data-engine="off"]');
-      await off.scrollIntoViewIfNeeded();
+      // Centred, so the footer bar does not sit over its lower half in the picture.
+      await off.evaluate(node => node.scrollIntoView({ block: 'center' }));
       expect(await off.innerText(), 'Voice: the Off card shows its whole text').toContain('Settings › Voice.');
       if (shotsDir !== '') await off.screenshot({ path: join(shotsDir, `${variant.name}-voice-off-card.png`) });
       const clipped = await tab
