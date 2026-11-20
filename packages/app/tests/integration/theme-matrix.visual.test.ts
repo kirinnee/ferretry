@@ -23,6 +23,17 @@
  * palette, mode, check, what), with no wildcard. The observed miss set is compared with the pinned set both ways: a miss
  * nobody pinned fails, and a pin whose miss is gone fails.
  *
+ * r11 T14 turns the owner's theme line (turn 4247, item 12) into asserts, on the same page and the same 512 combinations:
+ *  1. the High contrast palette is HARD on every style, loud included (text 7:1 body / 4.5:1 muted, edges and rings 3:1);
+ *  2. no gradient background on the page, panels, cards, buttons, fields or menus (Retro's title bar and Glass's frost are the
+ *     two allowed; the body's first layer is the texture pattern, not a wash);
+ *  3. a textarea, code block, table or menu has a corner radius <= 16px, and a two-line textarea does not clip its text;
+ *  4. display text <= 3.25rem at 1280, body text 0.75-1.15rem (the product's dense body is 13.5px = 0.84rem);
+ *  5. each style differs from Studio on >= 6 of 8 component probes, and no two styles share a spinner;
+ *  6. a selected item draws no accent side bar (border, inset shadow or pseudo-element);
+ *  7. a focus ring lies inside every clipping ancestor (r11 S13's measure; the specimen has a tight scroll box).
+ * A style unit (r11 T5-T12) deletes the `KNOWN` rows of its styles as it fixes them; the ledger test fails on a stale pin.
+ *
  * Set `FY_THEME_MATRIX_REDUCED_TRANSPARENCY=1` to emulate `prefers-reduced-transparency: reduce` for the whole run.
  * Set `FY_THEME_MATRIX_REPORT=<file>` to write the table (markdown) and `FY_THEME_MATRIX_SHOTS_DIR=<dir>` to keep one
  * 2x screenshot per style/palette/mode at 1280 and 390.
@@ -35,13 +46,16 @@ import type { Browser, Page } from 'playwright-core';
 import { PALETTES, STYLES } from '../../src/theme/catalog.ts';
 import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
 import {
+  contractMisses,
   contrastRatio,
   type Known,
   luminance,
   type Measured,
   type Miss,
   misses,
+  type Facts,
   pinnedMisses,
+  type Signature,
   stalePins,
   verdictOf,
 } from '../support/theme-matrix.ts';
@@ -56,8 +70,8 @@ const reducedTransparency = process.env.FY_THEME_MATRIX_REDUCED_TRANSPARENCY ===
 
 const MODES = ['light', 'dark'] as const;
 const VIEWPORTS = [
-  { name: '1280', width: 1_280, height: 1_200, phone: false },
-  { name: '390', width: 390, height: 1_200, phone: true },
+  { name: '1280', width: 1_280, height: 2_400, phone: false },
+  { name: '390', width: 390, height: 2_400, phone: true },
 ] as const;
 
 /**
@@ -101,13 +115,378 @@ const DEVICE_FACES: readonly string[] = [
 ];
 
 /**
- * Misses that exist TODAY and are not this test's to fix: EMPTY, every earlier pin (text-field focus ring, unselected choice
- * card edge, Ledger dark status inks) has been fixed in the CSS. A row is the cross product of the lists it names, every list
- * explicit (never `PALETTES.map(...)`: a palette added to the catalogue is in no pin until somebody reads what it misses), and
- * says why; the identity of a miss is (width, style, palette, mode, check, what). The observed misses are compared with these
- * pins both ways, so fixing a cause means deleting its row.
+ * Misses that exist TODAY and are not this test's to fix. r11 T14 (written BEFORE the style units T5-T12) pins every
+ * (style, probe) pair that fails on the base: each style unit DELETES the rows of its own styles as it fixes them, and the
+ * ledger test below fails on a pin whose miss is gone, so the list can only shrink. When the last row is gone the owner's
+ * theme line (turn 4247, item 12) holds on every style. A row is the cross product of the lists it names, every list
+ * explicit (never `PALETTES.map(...)`: a palette added to the catalogue is in no pin until somebody reads what it misses),
+ * and says why; the identity of a miss is (width, style, palette, mode, check, what).
+ *
+ * The rows are by CHECK: gradient (probe 2), radius (3), size (4), distinct and spinner (5, measured on the style's own
+ * default palette, light, at 1280), sidebar (6), ringclip (7), and text on the High contrast palette (probe 1).
  */
-const KNOWN: readonly Known[] = [];
+const WHY = {
+  gradient:
+    "a gradient background (owner: 'most of them should not have gradient background'); the style unit (r11 T5-T12) removes it",
+  radius:
+    'a radius over 16px on a field, code block, table or menu (owner: the super-rounded ones are broken); the style unit caps it',
+  size: 'display text over 3.25rem at 1280 (owner: Exaggerated Minimalism is too large); the style unit caps it',
+  sidebar:
+    "an accent side bar on the selected item (owner: 'this side highlight thing is VERY LLM'); r11 S2 removes the shell/nav ones, the style unit the style ones",
+  ringclip:
+    'a focus ring drawn outside its control is cut by a clipping ancestor; r11 S13 / the style unit draws it inside',
+  spinner: 'this style shares a spinner with another; the style unit (r11 T5-T12) gives it its own',
+  distinct:
+    'this style differs from Studio on fewer than 6 of 8 components; the style unit (r11 T5-T12) designs the rest',
+  text: 'the High contrast palette must pass 7:1 body text hard on this style (no loud exemption); the style unit fixes it',
+} as const;
+
+const BOTH_WIDTHS = ['1280', '390'] as const;
+const BOTH_MODES = ['light', 'dark'] as const;
+/** Explicit, never `PALETTES.map(...)`: a palette added to the catalogue is in no pin until somebody reads what it misses. */
+const EVERY_PALETTE = ['studio', 'geist', 'mission', 'neo', 'hacker', 'vintage', 'vaporwave', 'contrast'] as const;
+
+const KNOWN: readonly Known[] = [
+  {
+    viewports: ['1280'],
+    styles: ['antiposh'],
+    palettes: ['vintage'],
+    modes: ['light'],
+    check: 'distinct',
+    what: 'differs from Studio on fewer than 6 of 8 components',
+    why: WHY.distinct,
+  },
+  {
+    viewports: ['1280'],
+    styles: ['briefing', 'swiss'],
+    palettes: ['geist'],
+    modes: ['light'],
+    check: 'distinct',
+    what: 'differs from Studio on fewer than 6 of 8 components',
+    why: WHY.distinct,
+  },
+  {
+    viewports: ['1280'],
+    styles: ['exaggerated'],
+    palettes: ['studio'],
+    modes: ['light'],
+    check: 'distinct',
+    what: 'differs from Studio on fewer than 6 of 8 components',
+    why: WHY.distinct,
+  },
+  {
+    viewports: ['1280'],
+    styles: ['raw'],
+    palettes: ['neo'],
+    modes: ['light'],
+    check: 'distinct',
+    what: 'differs from Studio on fewer than 6 of 8 components',
+    why: WHY.distinct,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['lucid'],
+    palettes: EVERY_PALETTE,
+    modes: ['light'],
+    check: 'gradient',
+    what: 'Badge background',
+    why: WHY.gradient,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['lucid', 'neumorphism', 'retro'],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'gradient',
+    what: 'Button background',
+    why: WHY.gradient,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['antiposh', 'genz', 'lucid', 'mission', 'neumorphism'],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'gradient',
+    what: 'Card background',
+    why: WHY.gradient,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['antiposh', 'lucid', 'neumorphism'],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'gradient',
+    what: 'Choice card background',
+    why: WHY.gradient,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['lucid', 'neumorphism'],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'gradient',
+    what: 'Field background',
+    why: WHY.gradient,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['genz', 'glass', 'hud', 'lucid', 'mission', 'pixel', 'retro'],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'gradient',
+    what: 'Page background',
+    why: WHY.gradient,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['lucid'],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'gradient',
+    what: 'Panel header background',
+    why: WHY.gradient,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['genz', 'neumorphism'],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'radius',
+    what: 'Code block radius',
+    why: WHY.radius,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['genz', 'neumorphism'],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'radius',
+    what: 'Menu radius',
+    why: WHY.radius,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['briefing', 'neumorphism'],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'radius',
+    what: 'Textarea radius',
+    why: WHY.radius,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: [
+      'antiposh',
+      'briefing',
+      'exaggerated',
+      'geist',
+      'genz',
+      'glass',
+      'hud',
+      'lucid',
+      'mission',
+      'neo',
+      'neumorphism',
+      'pixel',
+      'raw',
+      'retro',
+      'studio',
+      'swiss',
+    ],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'ringclip',
+    what: 'Clipped button ring',
+    why: WHY.ringclip,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: [
+      'antiposh',
+      'briefing',
+      'exaggerated',
+      'geist',
+      'genz',
+      'glass',
+      'hud',
+      'lucid',
+      'mission',
+      'neo',
+      'neumorphism',
+      'pixel',
+      'raw',
+      'retro',
+      'studio',
+      'swiss',
+    ],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'ringclip',
+    what: 'Clipped link ring',
+    why: WHY.ringclip,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: [
+      'antiposh',
+      'briefing',
+      'exaggerated',
+      'geist',
+      'genz',
+      'glass',
+      'hud',
+      'lucid',
+      'mission',
+      'neo',
+      'neumorphism',
+      'pixel',
+      'raw',
+      'retro',
+      'studio',
+      'swiss',
+    ],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'ringclip',
+    what: 'Clipped name ring',
+    why: WHY.ringclip,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['briefing'],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'sidebar',
+    what: 'Selected choice card',
+    why: WHY.sidebar,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: [
+      'antiposh',
+      'briefing',
+      'exaggerated',
+      'geist',
+      'genz',
+      'glass',
+      'hud',
+      'lucid',
+      'mission',
+      'neo',
+      'neumorphism',
+      'pixel',
+      'raw',
+      'retro',
+      'studio',
+      'swiss',
+    ],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'sidebar',
+    what: 'Selected nav item',
+    why: WHY.sidebar,
+  },
+  {
+    viewports: ['1280'],
+    styles: ['exaggerated'],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'size',
+    what: 'display heading',
+    why: WHY.size,
+  },
+  {
+    viewports: ['1280'],
+    styles: ['antiposh'],
+    palettes: ['vintage'],
+    modes: ['light'],
+    check: 'spinner',
+    what: 'spinner shared with another style',
+    why: WHY.spinner,
+  },
+  {
+    viewports: ['1280'],
+    styles: ['briefing', 'retro', 'swiss'],
+    palettes: ['geist'],
+    modes: ['light'],
+    check: 'spinner',
+    what: 'spinner shared with another style',
+    why: WHY.spinner,
+  },
+  {
+    viewports: ['1280'],
+    styles: ['exaggerated', 'glass', 'lucid', 'neumorphism', 'studio'],
+    palettes: ['studio'],
+    modes: ['light'],
+    check: 'spinner',
+    what: 'spinner shared with another style',
+    why: WHY.spinner,
+  },
+  {
+    viewports: ['1280'],
+    styles: ['genz'],
+    palettes: ['vaporwave'],
+    modes: ['light'],
+    check: 'spinner',
+    what: 'spinner shared with another style',
+    why: WHY.spinner,
+  },
+  {
+    viewports: ['1280'],
+    styles: ['hud'],
+    palettes: ['mission'],
+    modes: ['light'],
+    check: 'spinner',
+    what: 'spinner shared with another style',
+    why: WHY.spinner,
+  },
+  {
+    viewports: ['1280'],
+    styles: ['neo', 'raw'],
+    palettes: ['neo'],
+    modes: ['light'],
+    check: 'spinner',
+    what: 'spinner shared with another style',
+    why: WHY.spinner,
+  },
+  {
+    viewports: ['1280'],
+    styles: ['pixel'],
+    palettes: ['hacker'],
+    modes: ['light'],
+    check: 'spinner',
+    what: 'spinner shared with another style',
+    why: WHY.spinner,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['neumorphism'],
+    palettes: ['contrast'],
+    modes: ['light'],
+    check: 'text',
+    what: 'Danger',
+    why: WHY.text,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['neumorphism'],
+    palettes: ['contrast'],
+    modes: ['light'],
+    check: 'text',
+    what: 'Stop ferret',
+    why: WHY.text,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['antiposh'],
+    palettes: ['contrast'],
+    modes: BOTH_MODES,
+    check: 'text',
+    what: 'The menu beside your work',
+    why: WHY.text,
+  },
+];
+
 const pins = pinnedMisses(KNOWN);
 const usedPins = new Set<string>();
 
@@ -195,7 +574,20 @@ const HELPERS = `(() => {
   };
   // A focus indicator lives on the control, except a radio: the native input is sr-only and its card is what the reader sees.
   const indicatorOf = (el) => (el.matches('input[type="radio"]') ? el.closest('label') : el);
-  window.__m = { paint, rgba, ratio, behind, name, indicatorOf };
+  // Splits a computed list ("a(b, c), d") on its top-level commas.
+  const splitTop = (value) => {
+    const out = [];
+    let depth = 0, start = 0;
+    for (let i = 0; i < value.length; i += 1) {
+      const c = value[i];
+      if (c === '(') depth += 1;
+      else if (c === ')') depth -= 1;
+      else if (c === ',' && depth === 0) { out.push(value.slice(start, i).trim()); start = i + 1; }
+    }
+    out.push(value.slice(start).trim());
+    return out.filter((part) => part !== '');
+  };
+  window.__m = { paint, rgba, ratio, behind, name, indicatorOf, splitTop };
 })()`;
 
 /** The elements whose focus ring is read: the tagged ones, the choice cards (through their radios) and every menu row. */
@@ -210,7 +602,7 @@ const PREPARE = `(() => {
   const { name } = window.__m;
   document.activeElement?.blur?.();
   const rest = new Map();
-  const keys = ['outlineStyle', 'outlineWidth', 'outlineColor', 'outlineOffset', 'borderTopStyle', 'borderTopColor', 'borderTopWidth'];
+  const keys = ['outlineStyle', 'outlineWidth', 'outlineColor', 'outlineOffset', 'borderTopStyle', 'borderTopColor', 'borderTopWidth', 'boxShadow'];
   const candidates = [...document.querySelectorAll(${JSON.stringify(FOCUS_SELECTOR)})];
   for (const el of candidates) {
     const cs = getComputedStyle(el);
@@ -224,7 +616,7 @@ const PREPARE = `(() => {
   const seen = new Set();
   const describe = (el, what, text, rects) => {
     const cs = getComputedStyle(el);
-    return { what, text, rects, ink: cs.color, px: Number.parseFloat(cs.fontSize), weight: Number.parseInt(cs.fontWeight, 10) || 400, style: cs.fontStyle, family: cs.fontFamily };
+    return { what, text, rects, muted: el.closest('.text-muted') !== null, ink: cs.color, px: Number.parseFloat(cs.fontSize), weight: Number.parseInt(cs.fontWeight, 10) || 400, style: cs.fontStyle, family: cs.fontFamily };
   };
   for (const root of roots) {
     if (root.tagName === 'INPUT') {
@@ -336,7 +728,7 @@ const STATIC = `(async ({ runs, device }) => {
 
 /** Reads the focused control against its resting style; null when nothing (or the page) holds focus. */
 const FOCUSED = `(() => {
-  const { ratio, paint, behind, name, indicatorOf } = window.__m;
+  const { ratio, paint, behind, name, indicatorOf, splitTop } = window.__m;
   const el = document.activeElement;
   if (!el || el === document.body || el === document.documentElement) return null;
   const mark = indicatorOf(el);
@@ -352,13 +744,134 @@ const FOCUSED = `(() => {
   // A ring drawn outside the border box sits on what is around the control; one drawn inside sits on the control's own fill.
   const inside = outlineChanged && Number.parseFloat(cs.outlineOffset) < 0;
   const back = paint(behind(mark, inside));
+  // r11 T14 probe 7 (S13's measure): the ring box is the border box inflated by what the focused state draws OUTSIDE it (an
+  // outline's offset + width when it is positive, a non-inset box-shadow's spread); it must lie inside the padding box of
+  // every ancestor that clips (overflow other than visible, contain: paint, a clip-path). The page's own scroll is not one.
+  let reach = 0;
+  if (outlineChanged) reach = Math.max(reach, Number.parseFloat(cs.outlineOffset) + Number.parseFloat(cs.outlineWidth));
+  if (cs.boxShadow !== rest.boxShadow && cs.boxShadow !== 'none')
+    for (const part of splitTop(cs.boxShadow)) {
+      if (/inset/.test(part)) continue;
+      const lengths = (part.match(/-?\\d*\\.?\\d+px/g) || []).map(Number.parseFloat);
+      reach = Math.max(reach, lengths[3] || 0);
+    }
+  reach = Math.max(0, reach);
+  mark.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  const box = mark.getBoundingClientRect();
+  const clipped = [];
+  for (let up = mark.parentElement; up && up !== document.body && up !== document.documentElement; up = up.parentElement) {
+    const ucs = getComputedStyle(up);
+    const clips = ucs.overflowX !== 'visible' || ucs.overflowY !== 'visible' || /paint/.test(ucs.contain) || ucs.clipPath !== 'none';
+    if (!clips) continue;
+    const r = up.getBoundingClientRect();
+    const left = r.left + up.clientLeft, top = r.top + up.clientTop;
+    const right = left + up.clientWidth, bottom = top + up.clientHeight;
+    if (box.left - reach < left - 0.5 || box.top - reach < top - 0.5 || box.right + reach > right + 0.5 || box.bottom + reach > bottom + 0.5)
+      clipped.push(up.tagName.toLowerCase() + (up.getAttribute('data-probe') ? '[' + up.getAttribute('data-probe') + ']' : (up.className ? '.' + String(up.className).split(' ')[0] : '')));
+  }
   return {
+    clipped,
     what: name(el) + (borderChanged ? ' (border)' : ''),
     id: name(el),
     visible: el.matches(':focus-visible'),
     drawn,
     width: Number.parseFloat(outlineChanged ? cs.outlineWidth : cs.borderTopWidth) || 0,
     ratio: drawn ? ratio(paint([...behind(mark, inside), colour]), back) : 0,
+  };
+})()`;
+
+/** The r11 T14 style probes, read in the page as plain data (judged by `misses` in tests/support/theme-matrix.ts). */
+const FACTS = `(() => {
+  const { splitTop } = window.__m;
+  const gradients = new Map();
+  const add = (what, layers) => {
+    const found = layers.filter((layer) => /gradient\\(/.test(layer));
+    if (found.length > 0) gradients.set(what, [...(gradients.get(what) ?? []), ...found]);
+  };
+  // The body's FIRST background layer is the texture pattern (a style's grid, dots or lines, drawn in the palette's ink);
+  // the layers after it (the wash and the mesh) are the colour fields the owner does not want.
+  add('Page', splitTop(getComputedStyle(document.body).backgroundImage).slice(1));
+  add('Page overlay', splitTop(getComputedStyle(document.body, '::before').backgroundImage));
+  for (const [selector, what] of [['.kt-panel', 'Card'], ['.kt-panel__header', 'Panel header'], ['.kt-btn', 'Button'], ['.kt-input', 'Field'], ['.fy-cc__card', 'Choice card'], ['.kt-badge', 'Badge'], ['[role="menu"]', 'Menu']])
+    for (const el of document.querySelectorAll(selector)) add(what, splitTop(getComputedStyle(el).backgroundImage));
+  const radius = (el) => {
+    const cs = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    return Math.max(...['TopLeft', 'TopRight', 'BottomLeft', 'BottomRight'].map((corner) => {
+      const value = cs['border' + corner + 'Radius'].split(' ')[0];
+      return value.endsWith('%') ? (Number.parseFloat(value) / 100) * Math.min(r.width, r.height) : Number.parseFloat(value) || 0;
+    }));
+  };
+  const radii = [];
+  for (const [selector, what] of [['[data-probe="textarea"]', 'Textarea radius'], ['.md pre', 'Code block radius'], ['.md table', 'Table radius'], ['[role="menu"]', 'Menu radius']]) {
+    const el = document.querySelector(selector);
+    if (el) radii.push({ what, px: Math.round(radius(el) * 10) / 10 });
+  }
+  const area = document.querySelector('[data-probe="textarea"]');
+  const rem = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+  const probe = document.createElement('span');
+  probe.style.fontSize = 'var(--text-display)';
+  document.body.append(probe);
+  const display = Math.max(Number.parseFloat(getComputedStyle(probe).fontSize), ...[...document.querySelectorAll('[data-specimen] h1, .fy-page h1')].map((h) => Number.parseFloat(getComputedStyle(h).fontSize)));
+  probe.remove();
+  const body = Number.parseFloat(getComputedStyle(document.querySelector('p[data-spec~="text"]')).fontSize);
+  const sideBars = [];
+  const bar = (el, what) => {
+    const cs = getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    const w = (side) => (cs['border' + side + 'Style'] !== 'none' ? Number.parseFloat(cs['border' + side + 'Width']) || 0 : 0);
+    for (const [side, other] of [['Left', 'Right'], ['Right', 'Left']])
+      if (w(side) >= 2 && w(side) > w(other) && w(side) > Math.max(w('Top'), w('Bottom'))) sideBars.push({ what, how: 'border-' + side.toLowerCase() + ' ' + w(side) + 'px' });
+    if (cs.boxShadow !== 'none')
+      for (const part of splitTop(cs.boxShadow)) {
+        const lengths = (part.match(/-?\\d*\\.?\\d+px/g) || []).map(Number.parseFloat);
+        if (/inset/.test(part) && lengths.length >= 2 && lengths[1] === 0 && Math.abs(lengths[0]) >= 2 && (lengths[2] || 0) === 0) sideBars.push({ what, how: 'inset side shadow ' + lengths[0] + 'px' });
+      }
+    for (const pseudo of ['::before', '::after']) {
+      const p = getComputedStyle(el, pseudo);
+      const width = Number.parseFloat(p.width);
+      if (p.content !== 'none' && p.content !== 'normal' && p.position === 'absolute' && width >= 2 && width <= 6 && Number.parseFloat(p.height) >= rect.height * 0.7)
+        sideBars.push({ what, how: pseudo + ' bar ' + width + 'px' });
+    }
+  };
+  for (const [selector, what] of [['.fy-settings-nav .fy-tab--active', 'Selected nav item'], ['.fy-cc__card[data-selected="true"]', 'Selected choice card']]) {
+    const el = document.querySelector(selector);
+    if (el) bar(el, what);
+  }
+  return { gradients: [...gradients].map(([what, layers]) => ({ what, layers })), radii, textareaClipped: area ? area.scrollHeight > area.clientHeight + 1 : false, sizes: { display, body, rem }, sideBars };
+})()`;
+
+/**
+ * One style's COMPONENT SIGNATURES, read in the page: for 8 probes (button, field, card, markdown h1, markdown code block,
+ * spinner, hypermedia slots, background) the computed non-colour properties joined into one string. Colours are stripped, so
+ * two styles that differ only in colour have the same signature (the owner: "alot of the style are color too").
+ */
+const SIGNATURE = `(() => {
+  const plain = (value) => value.replace(/(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\\([^()]*\\)/g, 'C');
+  const read = (el, props, pseudo) => {
+    if (!el) return 'missing';
+    const cs = getComputedStyle(el, pseudo);
+    return props.map((prop) => prop + '=' + plain(String(cs[prop]).split(',')[0].startsWith('"') ? String(cs[prop]).split(',')[0] : String(cs[prop]))).join(';');
+  };
+  const frame = ['borderTopLeftRadius', 'borderTopWidth', 'borderTopStyle', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'boxShadow', 'backgroundImage', 'clipPath', 'backdropFilter'];
+  const q = (selector) => document.querySelector(selector);
+  const root = getComputedStyle(document.documentElement);
+  const spinner = q('[data-probe="spinner"] svg');
+  const parts = spinner ? ['.fy-spinner-ring', '.fy-spinner-track', '.fy-spinner-arc', '.fy-spinner__p1', '.fy-spinner__p2', '.fy-spinner__p3', '.fy-spinner__p4'].map((selector) => {
+    const el = spinner.querySelector(selector) || spinner;
+    const cs = getComputedStyle(el);
+    const box = el.getBoundingClientRect();
+    return selector + ':' + [cs.display, cs.visibility, cs.animationName, cs.animationDuration, cs.animationTimingFunction, cs.animationIterationCount, cs.rx, cs.transform, cs.opacity, cs.strokeDasharray, Math.round(box.width * 10), Math.round(box.height * 10)].join('/');
+  }) : [];
+  return {
+    button: read(q('.kt-btn:not([data-variant])'), [...frame, 'textTransform', 'letterSpacing', 'fontWeight', 'fontFamily', 'fontSize', 'height', 'transitionDuration']),
+    field: read(q('input.kt-input'), [...frame, 'fontFamily', 'height', 'fontSize']),
+    card: read(q('.kt-panel'), [...frame, 'padding']),
+    mdH1: read(q('.md h1'), ['fontSize', 'fontWeight', 'textTransform', 'letterSpacing', 'borderBottomWidth', 'borderBottomStyle', 'fontFamily', 'fontStyle', 'textDecorationLine']),
+    mdCode: read(q('.md pre'), [...frame, 'padding', 'fontFamily', 'fontSize']),
+    spinner: plain((spinner ? getComputedStyle(spinner).animationName + '|' : '') + parts.join('|')),
+    hypermedia: ['shape', 'radius', 'stroke', 'font', 'node-fill-alpha', 'edge', 'header'].map((name) => name + '=' + root.getPropertyValue('--hm-' + name).trim()).join(';'),
+    background: [plain(getComputedStyle(document.body).backgroundImage), root.getPropertyValue('--bg-pattern-size').trim(), read(document.body, ['backgroundSize', 'backgroundAttachment'], '::before'), read(document.body, ['backgroundImage', 'opacity', 'mixBlendMode'], '::after'), read(document.body, ['backgroundImage', 'opacity'], '::before')].join('|'),
   };
 })()`;
 
@@ -377,6 +890,7 @@ interface FocusRead {
   readonly drawn: boolean;
   readonly width: number;
   readonly ratio: number;
+  readonly clipped?: readonly string[];
   readonly unknown?: true;
 }
 
@@ -428,10 +942,12 @@ const walk = async (tab: Page): Promise<readonly FocusRead[]> => {
     last = read;
     return true;
   };
-  for (let step = 0; step < 14; step += 1) {
+  for (let step = 0; step < 24; step += 1) {
     const before: string | null = last === null ? null : (last as FocusRead).id;
     const read = await press(tab, 'Tab', before);
-    if (read === null || read.id === before || !push(read)) break;
+    if (read === null || read.id === before) break;
+    // A stop the matrix does not measure (the textarea, the markdown link, the nav links) is walked past, not the end of the walk.
+    if (!push(read)) continue;
     if (read.id.startsWith('Choice ')) {
       // The checked card is the one tab stop; the arrows move (and select) from there and back.
       for (const key of ['ArrowRight', 'ArrowLeft']) push(await press(tab, key, (last as unknown as FocusRead).id));
@@ -456,7 +972,8 @@ const call = async (tab: Page, name: 'backdrop' | 'scan', arg: unknown): Promise
     [name, arg] as const,
   );
 
-const settle = async (tab: Page, style: string, palette: string, mode: string): Promise<Measured> => {
+/** Points the page at one style x palette x mode and waits until it is painted. */
+const apply = async (tab: Page, style: string, palette: string, mode: string): Promise<void> => {
   await tab.evaluate(
     ([s, p, m]) => {
       const root = document.documentElement;
@@ -472,6 +989,10 @@ const settle = async (tab: Page, style: string, palette: string, mode: string): 
     await document.fonts.ready;
     await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())));
   });
+};
+
+const settle = async (tab: Page, style: string, palette: string, mode: string): Promise<Measured> => {
+  await apply(tab, style, palette, mode);
   const { runs, wanted } = (await tab.evaluate(PREPARE)) as {
     runs: { family: string; weight: number; px: number; style: string; text: string; what: string }[];
     wanted: string[];
@@ -485,12 +1006,13 @@ const settle = async (tab: Page, style: string, palette: string, mode: string): 
     Measured,
     'edge' | 'overflow' | 'fonts'
   >;
+  const facts = (await tab.evaluate(FACTS)) as Facts;
   const reads = await walk(tab);
   const reached = new Set(reads.map(read => read.id));
   const focus: Measured['focus'][number][] = reads.map(read => ({ ...read, reached: true }));
   for (const what of wanted)
     if (!reached.has(what)) focus.push({ what, reached: false, visible: false, drawn: false, width: 0, ratio: 0 });
-  return { text, edge: fixed.edge, overflow: fixed.overflow, fonts: fixed.fonts, focus };
+  return { text, edge: fixed.edge, overflow: fixed.overflow, fonts: fixed.fonts, focus, facts };
 };
 
 interface Row {
@@ -530,8 +1052,9 @@ for (const viewport of VIEWPORTS)
               });
             const where = { viewport: viewport.name, style: style.id, palette: palette.id, mode };
             const hard: Miss[] = [];
-            for (const miss of misses(measured)) {
-              const { verdict, key } = verdictOf(style.loud === true, where, miss, pins);
+            const highContrast = palette.id === 'contrast';
+            for (const miss of misses(measured, { style: style.id, highContrast, wide: !viewport.phone })) {
+              const { verdict, key } = verdictOf(style.loud === true, where, miss, pins, highContrast);
               const row: Row = { ...where, miss };
               if (verdict === 'known') {
                 usedPins.add(key);
@@ -550,10 +1073,75 @@ for (const viewport of VIEWPORTS)
           });
     });
 
+/**
+ * Probe 5, across styles: each style on ITS default palette, light, at 1280 (the signatures carry no colour, so the palette
+ * only has to be the same one the owner gets). Every style differs from Studio on >= 6 of 8 components and owns its spinner.
+ */
+const signatures = new Map<string, Signature>();
+let contractMeasured = 0;
+describe('the style contract at 1280 in light', () => {
+  let session: Awaited<ReturnType<typeof open>>;
+  beforeAll(async () => {
+    session = await open(VIEWPORTS[0], 'light');
+    for (const style of STYLES) {
+      await apply(session.tab, style.id, style.defaultPalette, 'light');
+      signatures.set(style.id, (await session.tab.evaluate(SIGNATURE)) as Signature);
+    }
+  }, 120_000);
+  afterAll(async () => {
+    await session.close();
+  });
+  for (const style of STYLES)
+    it(`${style.id} differs from Studio on its components and has a spinner of its own`, () => {
+      contractMeasured += 1;
+      const where = { viewport: '1280', style: style.id, palette: style.defaultPalette, mode: 'light' };
+      const hard: Miss[] = [];
+      for (const miss of contractMisses(style.id, signatures)) {
+        const { verdict, key } = verdictOf(style.loud === true, where, miss, pins);
+        const row: Row = { ...where, miss };
+        if (verdict === 'known') {
+          usedPins.add(key);
+          known.push(row);
+        } else {
+          failures.push(row);
+          hard.push(miss);
+        }
+        observed.add(key);
+      }
+      expect(
+        hard.map(miss => `${miss.check}: ${miss.what} ${miss.got} (need ${miss.need})`),
+        `${style.id} contract`,
+      ).toEqual([]);
+    });
+});
+
+/**
+ * The positive control for probe 7: the same walk, with every focus ring drawn INSIDE its control (a negative offset as deep as
+ * the ring is thick), reads no clipped ring. Without it a probe that always fails would look like a probe that works.
+ */
+describe('the ring-clip probe can pass', () => {
+  it('a ring drawn inside the control is inside the clipping scroll box', async () => {
+    const session = await open(VIEWPORTS[0], 'light');
+    try {
+      await apply(session.tab, 'studio', 'studio', 'light');
+      await session.tab.addStyleTag({
+        content: ':focus-visible { outline-width: 2px !important; outline-offset: -2px !important; }',
+      });
+      await session.tab.evaluate(PREPARE);
+      const reads = await walk(session.tab);
+      const clip = reads.filter(read => read.id.startsWith('Clipped'));
+      expect(clip.length).toBe(3);
+      expect(clip.flatMap(read => read.clipped ?? [])).toEqual([]);
+    } finally {
+      await session.close();
+    }
+  });
+});
+
 describe('the known-misses ledger', () => {
   it('pins exactly the misses that exist (a pin whose miss is gone must be deleted)', () => {
     // A filtered run (-t) measures only some combinations, so a pin can look unused; only a full run can say.
-    if (measuredCombos < EXPECTED_COMBOS) return;
+    if (measuredCombos < EXPECTED_COMBOS || contractMeasured < STYLES.length) return;
     expect(stalePins(pins, observed)).toEqual([]);
   });
 });

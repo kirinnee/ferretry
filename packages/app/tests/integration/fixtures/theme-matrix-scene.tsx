@@ -8,11 +8,16 @@
  * Every element the test measures says so: `data-spec="text|edge|focus"`. A `text` element is read against the colour it
  * sits on, an `edge` is a control's own border against what is behind it, a `focus` element is reached by the real keyboard (Tab, then the arrow keys in the choice row and the menu) and its ring read; the choice cards and the menu rows are measured too, by their own classes.
  *
+ * r11 T14 adds the elements the style probes read (`data-probe="..."`, never `data-spec`, so the r10 checks are unchanged): a
+ * two-line textarea, a markdown block (h1, link, quote, list, code block, table), the shared Spinner, a settings-nav item
+ * that is the current one, and a scroll box that clips (with a button, a field and a link inside it, tight against its edge).
+ *
  *   ?style=<id>&palette=<id>&mode=<light|dark>      (the test re-sets these in place for every combination)
  */
 import { Check } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
 import { ChoiceCards } from '../../../src/compose/choice-cards.tsx';
+import { Spinner } from '../../../src/ui/spinner.tsx';
 import { Badge, Button, Card, PanelBody, PanelHeader } from '../../../src/ui/primitives.tsx';
 import { ContextMenu } from '../../../src/ui/context-menu.tsx';
 
@@ -94,6 +99,68 @@ createRoot(document.getElementById('root') as HTMLElement).render(
         </div>
       </PanelBody>
     </Card>
+    <textarea
+      aria-label="Notes"
+      className="kt-input"
+      data-probe="textarea"
+      defaultValue={'Two lines of text\nin a two-row field'}
+      rows={2}
+      style={{ maxWidth: '100%', width: 260 }}
+    />
+    <div className="md" data-probe="md" style={{ margin: '12px 0' }}>
+      <h1>Markdown heading</h1>
+      <p>
+        A paragraph with <a href="#md">the markdown anchor</a> and <code>inline code</code>.
+      </p>
+      <ul>
+        <li>First item</li>
+        <li>Second item</li>
+      </ul>
+      <blockquote>
+        <p>A quoted line.</p>
+      </blockquote>
+      <pre>
+        <code>const answer = 42;</code>
+      </pre>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>State</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>one</td>
+            <td>ok</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p data-probe="spinner" style={{ margin: '12px 0' }}>
+      <Spinner size={24} />
+    </p>
+    <nav className="fy-settings-nav" data-probe="nav" style={{ margin: '12px 0', maxWidth: 220 }}>
+      <a aria-current="page" className="fy-tab fy-tab--active" href="#current">
+        Current page
+      </a>
+      <a className="fy-tab" href="#other">
+        Other page
+      </a>
+    </nav>
+    <div data-probe="clip" style={{ overflow: 'auto', padding: 0, width: 'fit-content', maxWidth: '100%' }}>
+      <Button data-spec="focus">Clipped button</Button>
+      <input
+        aria-label="Clipped name"
+        className="kt-input"
+        data-spec="focus"
+        defaultValue="Clipped"
+        style={{ width: 120 }}
+      />
+      <a data-spec="focus" href="#clipped" style={{ display: 'inline-block' }}>
+        Clipped link
+      </a>
+    </div>
     <ChoiceCards label="Menu side" onChange={noop} options={OPTIONS} value="left" />
     <p style={{ marginTop: 12 }}>
       <Check aria-hidden size={16} /> <span data-spec="text">Done</span>
@@ -101,9 +168,9 @@ createRoot(document.getElementById('root') as HTMLElement).render(
     <section className="fy-page" style={{ padding: 0 }}>
       <h1 data-spec="text">Shell page heading</h1>
     </section>
-    {/* Fixed below the content (the matrix opens the page 1200px tall), so on a phone the menu never covers the text. */}
+    {/* Fixed below the content (the matrix opens the page 2400px tall: the r11 T14 probes made the content longer on a phone), so on a phone the menu never covers the text. */}
     <ContextMenu
-      anchor={{ x: 16, y: 840 }}
+      anchor={{ x: 16, y: 1_900 }}
       ariaLabel="Ferret actions"
       items={[
         { key: 'resume', label: 'Resume', onSelect: noop },
