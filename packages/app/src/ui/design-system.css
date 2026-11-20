@@ -1664,7 +1664,6 @@ body {
   border: var(--stroke-panel) var(--panel-edge-line) var(--border-strong);
   border-radius: var(--radius-panel);
   background: var(--surface);
-  box-shadow: var(--nav-sel-shadow, none);
 }
 .kt-grouprow {
   position: relative;

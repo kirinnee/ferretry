@@ -1,0 +1,75 @@
+import { afterEach, describe, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+
+const root = join(import.meta.dir, '../..');
+const GATE = 'scripts/validate/no-accent-side-bar.sh';
+const LEDGER = 'scripts/validate/no-accent-side-bar-allowlist.txt';
+
+const scratch: string[] = [];
+afterEach(() => {
+  for (const dir of scratch.splice(0)) rmSync(dir, { force: true, recursive: true });
+});
+
+/** A throwaway git repo holding the gate, a ledger, and the planted stylesheets; returns the gate's run. */
+const run = (files: Record<string, string>, ledger = ''): { status: number | null; stderr: string; stdout: string } => {
+  const dir = mkdtempSync(join(tmpdir(), 'fy-side-bar-'));
+  scratch.push(dir);
+  mkdirSync(join(dir, 'scripts/validate'), { recursive: true });
+  copyFileSync(join(root, GATE), join(dir, GATE));
+  writeFileSync(join(dir, LEDGER), ledger);
+  for (const [path, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, path)), { recursive: true });
+    writeFileSync(join(dir, path), text);
+  }
+  const git = (...args: string[]) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+  git('init', '-q');
+  git('add', '-A');
+  return spawnSync('bash', [join(dir, GATE)], { cwd: dir, encoding: 'utf8' });
+};
+
+describe('the accent side-bar gate', () => {
+  test('is clean on this repository', () => {
+    const result = spawnSync('bash', [join(root, GATE)], { cwd: root, encoding: 'utf8' });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
+  const BARS: Record<string, string> = {
+    'an inset shadow bar': '.a[aria-current] {\n  box-shadow: inset 3px 0 0 var(--accent);\n}\n',
+    'an inset bar on the trailing edge': '.a[aria-current] {\n  box-shadow: inset -3px 0 0 #123;\n}\n',
+    'an accent left border': '.a[data-open] {\n  border-left: 3px solid var(--accent);\n}\n',
+    'a tone inline-start border': '.a {\n  border-inline-start: 3px solid var(--tone);\n}\n',
+    'an accent left border colour': '.a[data-lit] {\n  border-left-color: var(--accent);\n}\n',
+    'a 3px accent strip': '.a::before {\n  width: 3px;\n  background: var(--accent);\n  content: "";\n}\n',
+  };
+  for (const [name, css] of Object.entries(BARS))
+    test(`refuses ${name}`, () => {
+      const result = run({ 'packages/x/a.css': css });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('packages/x/a.css');
+    });
+
+  test('allows a neutral divider, a hard offset shadow and a round dot', () => {
+    const result = run({
+      'packages/x/a.css': [
+        '.a {\n  border-left: 1px solid var(--border);\n}\n',
+        '.b {\n  box-shadow: 3px 3px 0 var(--shadow-ink);\n}\n',
+        '.c::before {\n  width: 8px;\n  background: var(--tone);\n  border-radius: 50%;\n}\n',
+        '.d::before {\n  width: 3px;\n  background: var(--border);\n}\n',
+      ].join(''),
+    });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
+  test('a ledgered file passes, and a ledgered file with no bar left fails', () => {
+    const bar = '.a {\n  box-shadow: inset 2px 0 0 var(--accent);\n}\n';
+    expect(run({ 'packages/x/hud.css': bar }, 'packages/x/hud.css  # pending\n').status).toBe(0);
+    const stale = run({ 'packages/x/hud.css': '.a {\n  color: red;\n}\n' }, 'packages/x/hud.css  # pending\n');
+    expect(stale.status).toBe(1);
+    expect(stale.stderr).toContain('delete its line');
+  });
+});

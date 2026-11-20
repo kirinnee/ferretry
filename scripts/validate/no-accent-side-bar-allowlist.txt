@@ -1,0 +1,6 @@
+# Stylesheets whose accent side bar is still owned by an open r11 theme unit (the unit that removes the bar deletes its line).
+#
+# Enforced by scripts/validate/no-accent-side-bar.sh, exact both ways: a listed file with no bar left fails too.
+
+packages/app/src/styles/style/hud.css  # `--nav-sel-shadow: inset 2px 0 0 var(--accent)`: the HUD style's unit removes it
+packages/app/src/styles/style/briefing.css  # `.fy-cc__card[data-selected] inset 5px 0 0`: the Briefing style's unit removes it

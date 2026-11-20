@@ -552,7 +552,7 @@
   padding: 0 0 6px 8px;
 }
 /* Every item reads in the body colour (the page paints a link in the accent, and a whole column of accent is noise); the accent is
-   spent once, on the item that is the page on screen: a 3px bar and a soft fill. */
+   spent once, on the item that is the page on screen: a soft fill, the body colour and a 600 weight (no side bar). */
 .fy-settings-nav .fy-tab {
   display: flex;
   align-items: center;
@@ -568,8 +568,8 @@
 .fy-settings-nav .fy-tab--active,
 .fy-settings-nav .fy-tab[aria-current='page'] {
   background: var(--accent-soft);
-  box-shadow: inset 3px 0 0 var(--accent);
   color: var(--fg);
+  font-weight: 600;
   text-decoration: none;
 }
 .fy-settings-nav .fy-settings-device {
