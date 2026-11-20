@@ -671,13 +671,13 @@ export class DaemonBoardStore {
     };
   }
 
-  async refreshProjects(machine: DaemonConnection): Promise<void> {
+  async refreshProjects(machine: DaemonConnection, press: ReadPress = {}): Promise<void> {
     const { daemonId } = machine;
     const generation = this.#generation(daemonId);
     const before = this.projectsState(daemonId);
     if (before.status !== 'ready') this.#setProjects(daemonId, { ...before, status: 'loading', error: null });
     try {
-      const projects = await this.#port.projects(machine);
+      const projects = await this.#port.projects(machine, press);
       if (this.#generation(daemonId) !== generation) return;
       this.#setProjects(daemonId, { status: 'ready', error: null, projects });
     } catch (reason) {
