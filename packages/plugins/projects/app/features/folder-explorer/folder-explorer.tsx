@@ -4,7 +4,7 @@
  * Presentational on purpose: a listing in, callbacks out, so the unit tier and the screenshot harness drive the shipped
  * component. `folder-picker.tsx` is the half bound to a daemon.
  *
- * - Breadcrumbs from the home folder down; each is a link back up, and an Up button goes one level.
+ * - A path box (type a path, Enter) above breadcrumbs from the home folder down; each is a link back up, and an Up button goes one level.
  * - The fence: the explorer never leaves the home folder, and at the home it SAYS so instead of drawing a dead Up.
  * - Card or list, remembered per device (the toggle is a native radio group).
  * - A git badge on repository folders; New folder inline.
@@ -19,6 +19,7 @@ import type { FolderEntry, FolderListing } from '../../../contract/index.ts';
 import { ExplorerEntries } from './explorer-entries.tsx';
 import {
   childPath,
+  displayPath,
   type ExplorerView,
   type ExplorerViewChoice,
   folderEntries,
@@ -28,6 +29,7 @@ import {
   truncationSentence,
 } from './explorer-model.ts';
 import { NewFolderRow } from './new-folder-row.tsx';
+import { PathBox } from './path-box.tsx';
 
 export interface FolderExplorerProps {
   readonly listing: FolderListing | null;
@@ -65,6 +67,8 @@ export function FolderExplorer(props: FolderExplorerProps) {
     name: null,
   });
   const [creating, setCreating] = useState(false);
+  // The folder that was open when a path was typed: a refusal belongs to the typing only while that folder is still open.
+  const [typedIn, setTypedIn] = useState<string | null>(null);
 
   if (listing === null) {
     return (
@@ -84,6 +88,12 @@ export function FolderExplorer(props: FolderExplorerProps) {
     );
   }
 
+  const open = (path: string): void => {
+    setTypedIn(null);
+    onOpen(path);
+  };
+  // The daemon's sentence for a typed path it refused goes under the path box; the old listing stays drawn above it.
+  const pathRefusal = error !== null && typedIn === listing.path ? error : null;
   const folders = folderEntries(listing);
   // The highlight belongs to the folder it was made in: moving on starts clean, with nothing carried over.
   const highlightedName = highlight.path === listing.path ? highlight.name : null;
@@ -105,15 +115,28 @@ export function FolderExplorer(props: FolderExplorerProps) {
       setHighlight({ path: listing.path, name: folders[index]?.name ?? null });
     } else if (event.key === 'Enter' && highlightedIndex >= 0) {
       event.preventDefault();
-      onOpen(childPath(listing, folders[highlightedIndex] as FolderEntry));
+      open(childPath(listing, folders[highlightedIndex] as FolderEntry));
     } else if (event.key === 'Backspace' && up !== null) {
       event.preventDefault();
-      onOpen(up);
+      open(up);
     }
   };
 
   return (
     <div className="grid min-h-0 gap-sm" data-explorer-state="ready" aria-busy={loading}>
+      <PathBox
+        current={displayPath(listing)}
+        refusal={pathRefusal}
+        onGo={typed => {
+          setTypedIn(listing.path);
+          onOpen(typed);
+        }}
+        onRestore={() => {
+          setTypedIn(null);
+          // A refused read left the picker pointing at the refused path: point it back at the open folder.
+          if (pathRefusal !== null) onOpen(listing.path);
+        }}
+      />
       <div className="flex flex-wrap items-center justify-between gap-xs">
         <div className="flex min-w-0 items-center gap-xs">
           {up !== null && (
@@ -122,7 +145,7 @@ export function FolderExplorer(props: FolderExplorerProps) {
               className="kt-btn min-h-control shrink-0"
               aria-label="Up one folder"
               data-explorer-up={up}
-              onClick={() => onOpen(up)}
+              onClick={() => open(up)}
             >
               <ArrowUp size={14} aria-hidden="true" />
               Up
@@ -143,7 +166,7 @@ export function FolderExplorer(props: FolderExplorerProps) {
                       )}
                       aria-current={last ? 'page' : undefined}
                       data-explorer-crumb={crumb.path}
-                      onClick={() => onOpen(crumb.path)}
+                      onClick={() => open(crumb.path)}
                     >
                       {crumb.name}
                     </button>
@@ -227,7 +250,7 @@ export function FolderExplorer(props: FolderExplorerProps) {
         />
       )}
 
-      {error !== null && (
+      {error !== null && pathRefusal === null && (
         <p className="m-0 flex items-start gap-xs text-meta text-err" role="alert">
           <TriangleAlert className="mt-0.5 shrink-0" size={14} aria-hidden="true" />
           Could not refresh this folder: {error}
@@ -250,7 +273,7 @@ export function FolderExplorer(props: FolderExplorerProps) {
           idFor={idFor}
           labelledBy={headingId}
           onKeyDown={onKeyDown}
-          onOpen={entry => onOpen(childPath(listing, entry))}
+          onOpen={entry => open(childPath(listing, entry))}
         />
       )}
       {truncated !== null && (

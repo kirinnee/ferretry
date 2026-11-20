@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { type FolderEntry, FolderListingSchema } from '../../../contract/index.ts';
 import {
   childPath,
+  displayPath,
   folderEntries,
   moveHighlight,
   parentPath,
@@ -75,5 +76,12 @@ describe('explorer model', () => {
     expect(newFolderProblem('.hidden')).toContain('dot');
     expect(newFolderProblem('a/b')).toContain('one level');
     expect(newFolderProblem(' pad')).toContain('space');
+  });
+});
+
+describe('displayPath', () => {
+  it('spells the home folder as ~ and anything below it as ~/…', () => {
+    expect(displayPath(listing('/home/k', ['~']))).toBe('~');
+    expect(displayPath(listing('/home/k/work', ['~', 'work']))).toBe('~/work');
   });
 });

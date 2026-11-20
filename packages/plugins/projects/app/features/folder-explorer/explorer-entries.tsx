@@ -6,7 +6,7 @@
  * draws a second one. The explorer picks folders, so it is only ever handed folders (the daemon also lists files).
  */
 import { File, Folder, FolderGit2 } from 'lucide-react';
-import { forwardRef } from 'react';
+import { forwardRef, useEffect } from 'react';
 import { cn } from '@ferretry/app/ui';
 import type { FolderEntry } from '../../../contract/index.ts';
 import type { ExplorerView } from './explorer-model.ts';
@@ -50,6 +50,11 @@ export const ExplorerEntries = forwardRef<HTMLDivElement, ExplorerEntriesProps>(
 ) {
   const card = view === 'card';
   const active = entries.find(entry => entry.kind === 'folder' && entry.name === highlightedName);
+  // The sheet around the list scrolls, so the keyboard's highlight is kept in view as it moves.
+  const activeId = active === undefined ? null : idFor(active);
+  useEffect(() => {
+    if (activeId !== null) document.getElementById(activeId)?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeId]);
   return (
     <div
       ref={ref}
@@ -59,7 +64,7 @@ export const ExplorerEntries = forwardRef<HTMLDivElement, ExplorerEntriesProps>(
       aria-activedescendant={active === undefined ? undefined : idFor(active)}
       data-explorer-view={view}
       className={cn(
-        'max-h-[min(45dvh,20rem)] min-h-0 overflow-y-auto rounded-control focus-visible:outline-focus focus-visible:outline-offset-focus',
+        'rounded-control focus-visible:outline-focus focus-visible:outline-offset-focus',
         card
           ? 'grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] content-start gap-xs'
           : 'grid content-start gap-0.5',
