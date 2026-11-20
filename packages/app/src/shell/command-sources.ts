@@ -207,7 +207,6 @@ export function deviceLayoutSource(
       ],
       ['list', 'top'],
     );
-    form('bottom', 'Navigation: a bar along the bottom', [['nav.side', 'bottom']], ['bottom', 'bar']);
     set('density', 'compact', 'Use the compact density', ['dense', 'compact']);
     set('density', 'comfortable', 'Use the comfortable density', ['comfortable', 'roomy']);
     entries.push({

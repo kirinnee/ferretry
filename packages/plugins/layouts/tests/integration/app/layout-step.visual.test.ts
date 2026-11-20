@@ -140,10 +140,10 @@ describe('the layout step', () => {
       }
     });
 
-    it(`${variant.name}: choosing Bottom and Compact plays each demo once, and then it rests`, async () => {
+    it(`${variant.name}: choosing Words and Compact plays each demo once, and then it rests`, async () => {
       const { tab, close } = await open(variant);
       try {
-        await tab.locator('[data-choice="bottom"]').click();
+        await tab.locator('[data-choice="words"]').click();
         await tab.locator('[data-choice="compact"]').click();
         await seek(tab, 120);
         await shot(tab, variant, 'mid-animation');
@@ -160,7 +160,7 @@ describe('the layout step', () => {
         const picked = await tab.$$eval('[data-layout-step] input:checked', inputs =>
           inputs.map(input => (input as HTMLInputElement).value),
         );
-        expect(picked).toEqual(['bottom', 'compact']);
+        expect(picked).toEqual(['words', 'compact']);
       } finally {
         await close();
       }
@@ -170,7 +170,7 @@ describe('the layout step', () => {
   it('with motion off nothing plays at all', async () => {
     const { tab, close } = await open(VARIANTS[0], '&motion=reduced');
     try {
-      await tab.locator('[data-choice="bottom"]').click();
+      await tab.locator('[data-choice="words"]').click();
       await tab.locator('[data-choice="compact"]').click();
       const moving = await tab.evaluate(
         () => document.getAnimations().filter(animation => animation.playState === 'running').length,

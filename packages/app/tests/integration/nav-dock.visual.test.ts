@@ -70,6 +70,8 @@ interface Viewport {
 }
 const WIDE: Viewport = { name: '1280', width: 1_280, height: 800, phone: false };
 const PHONE: Viewport = { name: '390', width: 390, height: 844, phone: true };
+/** A mid-width window: below 1100px the drawer is the lean 240px one, the narrowest a desktop draws it. */
+const MID: Viewport = { name: '900', width: 900, height: 800, phone: false };
 
 const open = async (viewport: Viewport, path: string, query: string, mode: 'light' | 'dark' = 'light') => {
   const context = await browser.newContext({
@@ -128,6 +130,9 @@ const measure = async (tab: Page) =>
         overflows: item.scrollWidth > item.clientWidth + 1,
         // A word cut short with an ellipsis: the label's own text is wider than the box it has.
         wordCut: label !== null && label.scrollWidth > label.clientWidth + 1,
+        // The measured numbers behind `wordCut`: the width the word needs and the width its label has.
+        wordNeeds: label?.scrollWidth ?? 0,
+        wordHas: label?.clientWidth ?? 0,
         weight: Number.parseInt(getComputedStyle(item).fontWeight, 10),
         current: item.getAttribute('aria-current') === 'page',
         boxShadow: getComputedStyle(item).boxShadow,
@@ -159,7 +164,16 @@ const keep = async (name: string, seen: Awaited<ReturnType<typeof measure>>): Pr
   await writeFile(
     join(shotsDir, `${name}.json`),
     JSON.stringify(
-      { ...rest, items: items.map(item => ({ name: item.name, box: item.box, weight: item.weight })) },
+      {
+        ...rest,
+        items: items.map(item => ({
+          name: item.name,
+          box: item.box,
+          weight: item.weight,
+          wordNeeds: item.wordNeeds,
+          wordHas: item.wordHas,
+        })),
+      },
       null,
       1,
     ),
@@ -205,29 +219,62 @@ describe('r11 S1: the nav sits at the foot of the sidebar (default layout)', () 
       }
     });
 
-  it('1280: the words form shows each word and every item fits the drawer width', async () => {
-    const { tab, close } = await open(WIDE, '/d/ws/agenda', '&nav=words');
-    try {
-      const seen = await measure(tab);
-      await shotOf(tab, 'r11-s1-1280-words-light');
-      await keep('r11-s1-1280-words-light', seen);
-      expect(seen.items.length).toBeGreaterThanOrEqual(6);
-      for (const item of seen.items) {
-        expect(item.visibleWord.length, `${item.name} shows its word`).toBeGreaterThan(0);
-        expect(item.overflows, `${item.name} fits its cell`).toBe(false);
-        expect(item.wordCut, `${item.name} is whole, not cut short`).toBe(false);
-        expect(item.box.right, `${item.name} is inside the drawer`).toBeLessThanOrEqual((seen.drawer?.right ?? 0) + 1);
+  for (const mode of ['light', 'dark'] as const)
+    it(`1280, ${mode}: the words form shows each word and every item fits the drawer width`, async () => {
+      const { tab, close } = await open(WIDE, '/d/ws/agenda', '&nav=words', mode);
+      try {
+        const seen = await measure(tab);
+        await shotOf(tab, `r11-s1-1280-words-${mode}`);
+        await keep(`r11-s1-1280-words-${mode}`, seen);
+        expect(seen.items.length).toBeGreaterThanOrEqual(6);
+        for (const item of seen.items) {
+          expect(item.visibleWord.length, `${item.name} shows its word`).toBeGreaterThan(0);
+          expect(item.overflows, `${item.name} fits its cell`).toBe(false);
+          expect(item.wordCut, `${item.name} is whole, not cut short`).toBe(false);
+          expect(item.box.right, `${item.name} is inside the drawer`).toBeLessThanOrEqual(
+            (seen.drawer?.right ?? 0) + 1,
+          );
+        }
+        expect(seen.dockOverflows, 'the dock does not overflow').toBe(false);
+        expect(
+          seen.drawer?.bottom && seen.dock && seen.drawer.bottom - seen.dock.bottom,
+          'still at the foot',
+        ).toBeLessThanOrEqual(16);
+        expect(seen.listAtTop).toBe(0);
+      } finally {
+        await close();
       }
-      expect(seen.dockOverflows, 'the dock does not overflow').toBe(false);
-      expect(
-        seen.drawer?.bottom && seen.dock && seen.drawer.bottom - seen.dock.bottom,
-        'still at the foot',
-      ).toBeLessThanOrEqual(16);
-      expect(seen.listAtTop).toBe(0);
-    } finally {
-      await close();
-    }
-  });
+    });
+
+  for (const [mode, path] of [
+    ['light', '/d/ws/agenda'],
+    ['dark', '/d/ws/agenda'],
+    ['light', '/d/ws/links'],
+  ] as const)
+    it(`900, ${mode}, on ${path}: the words form shows every word whole in the lean 240px drawer, "Conversations" included (also when it is the current, bolder place)`, async () => {
+      const { tab, close } = await open(MID, path, '&nav=words', mode);
+      try {
+        const seen = await measure(tab);
+        await shotOf(tab, `r11-s1-900-words-${mode}-${path.split('/').at(-1)}`);
+        await keep(`r11-s1-900-words-${mode}-${path.split('/').at(-1)}`, seen);
+        expect(seen.drawer && seen.drawer.right - seen.drawer.left, 'the default lean drawer').toBeLessThanOrEqual(260);
+        expect(seen.items.map(item => item.name)).toContain('Conversations');
+        for (const item of seen.items) {
+          expect(item.visibleWord.length, `${item.name} shows its word`).toBeGreaterThan(0);
+          expect(
+            item.wordCut,
+            `${item.name} is whole, not cut short with an ellipsis (needs ${item.wordNeeds}px, has ${item.wordHas}px)`,
+          ).toBe(false);
+          expect(item.overflows, `${item.name} fits its cell`).toBe(false);
+          expect(item.box.right, `${item.name} is inside the drawer`).toBeLessThanOrEqual(
+            (seen.drawer?.right ?? 0) + 1,
+          );
+        }
+        expect(seen.dockOverflows, 'the dock does not overflow').toBe(false);
+      } finally {
+        await close();
+      }
+    });
 
   it('1280: the current place reads by fill and weight, with no bar beside it', async () => {
     const { tab, close } = await open(WIDE, '/d/ws/agenda', '');
@@ -306,34 +353,38 @@ describe('r11 S1: phones follow desktop (owner answer C2): the nav is in the dra
           );
           expect(item.box.right - item.box.left, `${item.name} is a touch target`).toBeGreaterThanOrEqual(40);
         }
-        // A place chosen shuts the drawer and goes there.
-        await tab.click('nav[data-nav="dock"] a[title="Board"]');
-        await tab.waitForURL('**/d/ws/board*');
+        // A place chosen shuts the drawer and goes THERE: the test starts on Board and picks another place, so a press that
+        // only closed the drawer (the URL it began on) cannot pass.
+        expect(tab.url(), 'it started on Board').toContain('/d/ws/board');
+        await tab.click('nav[data-nav="dock"] a[title="Conversations"]');
+        await tab.waitForURL('**/d/ws/links*');
+        expect(tab.url(), 'Conversations opened').toContain('/d/ws/links');
         expect(await tab.locator('.fy-drawer').count(), 'the drawer shuts on a place').toBe(0);
       } finally {
         await close();
       }
     });
 
-  it('390: the words form fits the drawer', async () => {
-    const { tab, close } = await open(PHONE, '/d/ws/board', '&nav=words');
-    try {
-      await tab.click('button[aria-label="Menu"]');
-      await tab.waitForSelector('.fy-drawer--overlay');
-      const seen = await measure(tab);
-      await shotOf(tab, 'r11-s1-390-words-light');
-      await keep('r11-s1-390-words-light', seen);
-      for (const item of seen.items) {
-        expect(item.visibleWord.length, `${item.name} shows its word`).toBeGreaterThan(0);
-        expect(item.overflows).toBe(false);
-        expect(item.wordCut, `${item.name} is whole, not cut short`).toBe(false);
-        expect(item.box.right).toBeLessThanOrEqual((seen.drawer?.right ?? 0) + 1);
+  for (const mode of ['light', 'dark'] as const)
+    it(`390, ${mode}: the words form fits the drawer`, async () => {
+      const { tab, close } = await open(PHONE, '/d/ws/board', '&nav=words', mode);
+      try {
+        await tab.click('button[aria-label="Menu"]');
+        await tab.waitForSelector('.fy-drawer--overlay');
+        const seen = await measure(tab);
+        await shotOf(tab, `r11-s1-390-words-${mode}`);
+        await keep(`r11-s1-390-words-${mode}`, seen);
+        for (const item of seen.items) {
+          expect(item.visibleWord.length, `${item.name} shows its word`).toBeGreaterThan(0);
+          expect(item.overflows).toBe(false);
+          expect(item.wordCut, `${item.name} is whole, not cut short`).toBe(false);
+          expect(item.box.right).toBeLessThanOrEqual((seen.drawer?.right ?? 0) + 1);
+        }
+        expect(seen.dockOverflows).toBe(false);
+      } finally {
+        await close();
       }
-      expect(seen.dockOverflows).toBe(false);
-    } finally {
-      await close();
-    }
-  });
+    });
 });
 
 describe('r11 S1: the other forms stay one switch away in Settings › Layout', () => {

@@ -240,12 +240,18 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
   min-height: 36px;
-  padding: 6px 8px;
-  font-size: calc(var(--fy-text-scale, 1) * 0.8125rem);
+  padding: 6px 3px;
+  font-size: calc(var(--fy-text-scale, 1) * 0.75rem);
 }
+.fy-nav--dock-words .fy-nav__icon {
+  width: 14px;
+  height: 14px;
+}
+/* Two columns in the lean 240px drawer leave a cell about 110px: the padding, gap and size above are what let "Conversations", the
+   longest word, show whole even when it is the current place (600 weight, the widest it gets). */
 /* An odd one out takes the whole last row, so no word sits alone beside an empty cell. */
 .fy-nav--dock-words .fy-nav__item:last-child:nth-child(odd) {
   grid-column: 1 / -1;

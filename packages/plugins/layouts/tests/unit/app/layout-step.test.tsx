@@ -67,71 +67,65 @@ describe('the Layout step', () => {
     await view.unmount();
   });
 
-  test('it shows itself once, as two short choice rows holding what this device shows today (the built-in side bar, with the places at its foot)', async () => {
+  test('it shows itself once, as two short choice rows holding what this device shows today (the places at the foot of the side bar, as icons)', async () => {
     const harness = stepRecorder();
     const writes: string[] = [];
     const view = await mount(<StatefulStep step={harness.host} writes={writes} />);
     expect(harness.decision).toBe('shown');
     expect(harness.count('ready')).toBe(1);
     expect(harness.count('done')).toBe(0);
-    expect(checked(view.container, 'Navigation')).toBe('left');
+    expect(checked(view.container, 'Navigation')).toBe('icons');
     expect(checked(view.container, 'Density')).toBe('comfortable');
     expect(view.container.textContent).toContain('Just this device');
     expect(writes).toEqual([]);
     await view.unmount();
   });
 
-  test('answerOf reports what this device shows: the side bar on wide and on a phone, Bottom when asked, and a stored Top or Right as the side bar', () => {
+  test('answerOf reports what this device shows: icons by default on wide and on a phone, words when asked, and density as stored', () => {
     const [nav, density] = LAYOUT_QUESTIONS;
     const compact = { ...DEFAULT_LAYOUT, density: 'compact' as const };
     expect(answerOf(compact, density!, 'wide')).toBe('compact');
-    expect(answerOf(DEFAULT_LAYOUT, nav!, 'wide')).toBe('left');
-    expect(answerOf(DEFAULT_LAYOUT, nav!, 'phone')).toBe('left');
-    expect(answerOf({ ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'bottom' } }, nav!, 'wide')).toBe(
-      'bottom',
+    expect(answerOf(DEFAULT_LAYOUT, nav!, 'wide')).toBe('icons');
+    expect(answerOf(DEFAULT_LAYOUT, nav!, 'phone')).toBe('icons');
+    expect(answerOf({ ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, labels: 'words' } }, nav!, 'wide')).toBe(
+      'words',
     );
-    expect(answerOf({ ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'right' } }, nav!, 'wide')).toBe('left');
-    expect(answerOf({ ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'top' } }, nav!, 'phone')).toBe('left');
   });
 
-  test('on the built-in layout the side bar card starts checked on a desktop and on a phone, and pressing it saves nothing', async () => {
+  test('on the built-in layout the Icons card starts checked on a desktop and on a phone, and pressing it saves nothing', async () => {
     for (const viewport of ['wide', 'phone'] as const) {
       const harness = stepRecorder();
       const writes: string[] = [];
       const view = await mount(<StatefulStep step={harness.host} writes={writes} viewport={viewport} />);
-      expect(checked(view.container, 'Navigation')).toBe('left');
-      await pick(view.container, 'Navigation', 'left');
+      expect(checked(view.container, 'Navigation')).toBe('icons');
+      await pick(view.container, 'Navigation', 'icons');
       expect(writes).toEqual([]);
       expect(harness.count('done')).toBe(0);
       await view.unmount();
     }
   });
 
-  test('on a phone that already holds a Bottom bar, that card shows and pressing it saves nothing', async () => {
-    const harness = stepRecorder();
-    const writes: string[] = [];
-    const view = await mount(
-      <StatefulStep
-        step={harness.host}
-        writes={writes}
-        viewport="phone"
-        start={{ phone: { nav: { side: 'bottom' } } }}
-      />,
-    );
-    expect(checked(view.container, 'Navigation')).toBe('bottom');
-    await pick(view.container, 'Navigation', 'bottom');
-    expect(writes).toEqual([]);
-    expect(harness.count('done')).toBe(0);
-    await view.unmount();
-  });
-
-  test('picking Bottom writes nav.side to this device (the built-in layout sets no phone key) and answers done', async () => {
+  test('no card of the step turns the bottom bar on: the choices are Icons, Words and the two densities, and a write never names nav.side', async () => {
+    const [nav] = LAYOUT_QUESTIONS;
+    expect(nav!.answers.map(answer => answer.id)).toEqual(['icons', 'words']);
     const harness = stepRecorder();
     const writes: string[] = [];
     const view = await mount(<StatefulStep step={harness.host} writes={writes} />);
-    await pick(view.container, 'Navigation', 'bottom');
-    expect(writes).toEqual(['nav.side=bottom']);
-    expect(checked(view.container, 'Navigation')).toBe('bottom');
+    expect(view.container.querySelector('[data-choice="bottom"]')).toBeNull();
+    await pick(view.container, 'Navigation', 'words');
+    await pick(view.container, 'Density', 'compact');
+    expect(writes.join(' ')).not.toContain('bottom');
+    expect(writes.join(' ')).not.toContain('nav.side');
+    await view.unmount();
+  });
+
+  test('picking Words writes nav.labels to this device and answers done', async () => {
+    const harness = stepRecorder();
+    const writes: string[] = [];
+    const view = await mount(<StatefulStep step={harness.host} writes={writes} />);
+    await pick(view.container, 'Navigation', 'words');
+    expect(writes).toEqual(['nav.labels=words']);
+    expect(checked(view.container, 'Navigation')).toBe('words');
     expect(harness.count('done')).toBe(1);
     await pick(view.container, 'Density', 'compact');
     expect(writes.at(-1)).toBe('density=compact');
@@ -140,14 +134,14 @@ describe('the Layout step', () => {
     await view.unmount();
   });
 
-  test('keysFor adds the phone key only when the layout in force sets one', () => {
+  test('keysFor adds the phone key only when the layout in force sets one (density); the labels are always the one key', () => {
     const [nav, density] = LAYOUT_QUESTIONS;
-    expect(keysFor({ ...DEFAULT_LAYOUT, phone: { nav: { side: 'bottom' } } }, nav!)).toEqual([
-      'nav.side',
-      'phone.nav.side',
+    expect(keysFor({ ...DEFAULT_LAYOUT, phone: { density: 'compact' } }, density!)).toEqual([
+      'density',
+      'phone.density',
     ]);
-    expect(keysFor(DEFAULT_LAYOUT, nav!)).toEqual(['nav.side']);
-    expect(keysFor({ ...DEFAULT_LAYOUT, phone: undefined }, nav!)).toEqual(['nav.side']);
+    expect(keysFor({ ...DEFAULT_LAYOUT, phone: { nav: { labels: 'words' } } }, nav!)).toEqual(['nav.labels']);
+    expect(keysFor(DEFAULT_LAYOUT, nav!)).toEqual(['nav.labels']);
     expect(keysFor({ ...DEFAULT_LAYOUT, phone: undefined }, density!)).toEqual(['density']);
   });
 
@@ -172,12 +166,10 @@ describe('the Layout step', () => {
     const harness = stepRecorder();
     const view = await mount(<StatefulStep step={harness.host} writes={[]} />);
     const cards = (word: string) => must(view.container.querySelector<HTMLElement>(`[data-choice="${word}"]`), word);
-    expect(cards('left').dataset.pulse).toBe('false');
-    await pick(view.container, 'Navigation', 'bottom');
-    expect(cards('bottom').dataset.pulse).toBe('true');
-    expect(cards('left').dataset.pulse).toBe('false');
-    expect(cards('bottom').querySelector('[data-moves]')).not.toBeNull();
-    expect(cards('left').querySelector('[data-moves]')).toBeNull();
+    expect(cards('icons').dataset.pulse).toBe('false');
+    await pick(view.container, 'Navigation', 'words');
+    expect(cards('words').dataset.pulse).toBe('true');
+    expect(cards('icons').dataset.pulse).toBe('false');
     await view.unmount();
   });
 
@@ -191,7 +183,7 @@ describe('the Layout step', () => {
     try {
       const harness = stepRecorder();
       const view = await mount(<StatefulStep step={harness.host} writes={[]} />);
-      await pick(view.container, 'Navigation', 'bottom');
+      await pick(view.container, 'Navigation', 'words');
       await pick(view.container, 'Density', 'compact');
       expect(writes).toEqual([]);
       expect(harness.segment).toEqual({});

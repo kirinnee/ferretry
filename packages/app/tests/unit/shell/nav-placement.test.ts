@@ -21,10 +21,17 @@ describe('r11 S1: the command bar sets the navigation form on this device', () =
     const layouts = new DeviceLayoutStore(memoryStore());
     const all = await entries(layouts);
     const ids = all.map(entry => entry.id).filter(id => id.startsWith('layout-nav-'));
-    expect(ids).toEqual(['layout-nav-dock-icons', 'layout-nav-dock-words', 'layout-nav-list', 'layout-nav-bottom']);
+    expect(ids).toEqual(['layout-nav-dock-icons', 'layout-nav-dock-words', 'layout-nav-list']);
     await all.find(entry => entry.id === 'layout-nav-dock-words')?.run();
     expect(layouts.snapshot()).toEqual({ nav: { side: 'left', style: 'dock', labels: 'words' } });
-    await all.find(entry => entry.id === 'layout-nav-bottom')?.run();
-    expect(layouts.snapshot()).toMatchObject({ nav: { side: 'bottom' } });
+  });
+
+  test('no entry turns the bottom bar on: owner answer C2 keeps that a Settings › Layout switch', async () => {
+    for (const entry of await entries(new DeviceLayoutStore(memoryStore()))) {
+      const layouts = new DeviceLayoutStore(memoryStore());
+      const fresh = (await deviceLayoutSource(DEFAULT_LAYOUT, layouts)({} as never)).find(each => each.id === entry.id);
+      await fresh?.run();
+      expect(JSON.stringify(layouts.snapshot()), entry.id).not.toContain('bottom');
+    }
   });
 });
