@@ -97,6 +97,8 @@ const voices = new OnDeviceVoices(
 );
 await voices.refresh();
 
+(window as unknown as { __voiceWrites: unknown[] }).__voiceWrites = [];
+
 const deviceClass: DeviceClass = params.get('device') === 'phone' ? 'phone' : 'computer';
 const AVAILABLE = { available: true, availability: 'available', implementation: 'standard' } as const;
 
@@ -124,7 +126,11 @@ function VoiceBody() {
     <div className="fy-vs">
       <DictationSettings
         settings={settings}
-        update={patch => setSettings(previous => ({ ...previous, ...patch }))}
+        update={patch => {
+          // The scene's write sink: every dictation setting the page saves, in order, for the browser proof to read.
+          (window as unknown as { __voiceWrites: unknown[] }).__voiceWrites.push(patch);
+          setSettings(previous => ({ ...previous, ...patch }));
+        }}
         persisted
         recognitionSupport={AVAILABLE}
         voices={voices}

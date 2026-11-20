@@ -474,12 +474,67 @@ describe('Voice settings in the real Settings shell', () => {
             const near = Math.min(Math.abs(open?.gap ?? 999), Math.abs(open?.above ?? 999));
             expect(near, 'the list opens right at the button').toBeLessThanOrEqual(12);
           }
-          if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-longest-reading-open.png` ) });
+          if (shotsDir !== '')
+            await page.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-longest-reading-open.png`) });
           await page.locator('[role="option"]', { hasText: 'No limit' }).click();
           expect((await box.innerText()).trim()).toBe('No limit');
+          // The PERSISTED choice, not the label: the device store holds "no limit" as a null length.
+          const saved = await page.evaluate(() => {
+            for (let i = 0; i < localStorage.length; i++) {
+              const key = localStorage.key(i) as string;
+              if (/voice/i.test(key) && /maxSeconds/.test(localStorage.getItem(key) ?? ''))
+                return JSON.parse(localStorage.getItem(key) as string) as { maxSeconds: number | null };
+            }
+            return null;
+          });
+          expect(saved?.maxSeconds, 'the device store saved "no limit" as a null length').toBeNull();
           await page.reload();
           await page.waitForSelector('#auto-read-length');
           expect((await page.locator('#auto-read-length').innerText()).trim(), 'the pick was saved').toBe('No limit');
+          expect(problems).toEqual([]);
+        } finally {
+          await close();
+        }
+      });
+    }
+
+  // r11 S3a: the correction provider is the app's SelectBox too; its choice is a write the page saves.
+  for (const viewport of VIEWPORTS.filter(each => each.name !== '768'))
+    for (const scheme of ['light', 'dark'] as const) {
+      it(`${viewport.name} ${scheme}: "Correction provider" is a SelectBox; picking on-device saves it, picking a hosted one stages it until Apply`, async () => {
+        const { page, problems, close } = await open(viewport, scheme, 'voice');
+        try {
+          const box = page.locator('#stt-enhancement-provider');
+          await box.scrollIntoViewIfNeeded();
+          expect(await box.getAttribute('role')).toBe('combobox');
+          expect((await box.innerText()).trim()).toBe('On-device word correction');
+          const writes = async (): Promise<unknown[]> =>
+            await page.evaluate(() => (window as unknown as { __voiceWrites: unknown[] }).__voiceWrites);
+          const before = (await writes()).length;
+          await box.click();
+          await page.waitForTimeout(600);
+          expect(
+            await page.locator('[role="dialog"] [role="option"], [data-select-popover] [role="option"]').count(),
+          ).toBe(4);
+          // A hosted provider is staged: choosing it saves nothing until Apply.
+          await page.locator('[role="option"]', { hasText: 'Groq clean-up' }).click();
+          await page.locator('[data-provider-staged]').waitFor();
+          expect((await writes()).length, 'a hosted choice saves nothing before Apply').toBe(before);
+          await page.locator('[data-provider-staged] button:text-is("Apply")').click();
+          expect((await box.innerText()).trim()).toBe('Groq clean-up');
+          const applied = (await writes()).slice(before);
+          expect(applied.length, 'Apply saves once').toBe(1);
+          expect((applied[0] as { enhancementProvider?: string }).enhancementProvider, 'the saved provider').toBe(
+            'groq',
+          );
+          // And back to on-device saves straight away.
+          await box.click();
+          await page.waitForTimeout(600);
+          await page.locator('[role="option"]', { hasText: 'On-device word correction' }).click();
+          const back = (await writes()).slice(before + 1);
+          expect(back.length, 'on-device saves once, with no Apply').toBe(1);
+          expect((back[0] as { enhancementProvider?: string }).enhancementProvider, 'the saved provider').toBe('local');
+          expect((await box.innerText()).trim()).toBe('On-device word correction');
           expect(problems).toEqual([]);
         } finally {
           await close();
