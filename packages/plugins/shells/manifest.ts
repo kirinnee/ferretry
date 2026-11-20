@@ -149,7 +149,7 @@ export default definePlugin({
 
   ui: {
     settings: [settingsTab('shells', { icon: 'layers', group: 'tools', label: 'Shells', order: 70 })],
-    // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
+    // The first-run step's body (Onboarding's setup flow offers this slot): one page, `app/features/onboarding`.
     panels: [panel('onboarding.step', { id: 'onboarding-step', order: 80 })],
   },
 
@@ -165,8 +165,9 @@ export default definePlugin({
     takes: [{ hook: LaunchParts, order: 40 }],
   },
 
-  // "Without nix on the machine, Shells says so in onboarding and ferrets use the machine's tools" (§4.9).
-  onboarding: [{ id: 'nix', title: 'Shells', order: 80 }],
+  // "Without nix on the machine, Shells says so in onboarding and ferrets use the machine's tools" (§4.9): one daemon
+  // page that skips itself when nix is found.
+  onboarding: [{ id: 'nix', title: 'Shells', order: 80, side: 'daemon', group: 'Shells', stepHost: true }],
   doctor: ['shells-nix'],
 
   // nix fetches flake inputs itself, so no host is reachable through `kernel.fetch`; the build runs under `nix`.
