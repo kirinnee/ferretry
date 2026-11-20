@@ -1,0 +1,19 @@
+/* The import pages' own bits: the runtime-name field. Everything else is the segment's `onboarding.css`. */
+.cc-field {
+  color: var(--fg);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 360px;
+}
+.cc-input {
+  background: var(--surface);
+  border: var(--stroke-control) solid var(--border);
+  border-radius: var(--radius-control);
+  box-sizing: border-box;
+  color: var(--fg);
+  font: inherit;
+  min-height: 44px;
+  padding: 8px 12px;
+  width: 100%;
+}

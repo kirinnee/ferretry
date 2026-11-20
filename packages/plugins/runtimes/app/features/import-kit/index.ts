@@ -11,7 +11,7 @@ export { buildImportChange, type ImportChangeExtras } from './change.ts';
 export { FoundKindList, type FoundKindListProps } from './found-kind-list.tsx';
 export { IMPORT_KINDS, type ImportKind, kindFound, kindGroups, kindItemIds, kindSkips } from './kinds.ts';
 export { HARNESS_LABEL, HOOKS_NOT_IMPORTED, SECRET_KEPT } from './mapping-words.ts';
-export { type FoundGroup, type FoundItem, HARNESSES, type ToolModel } from './model.ts';
+export { type FoundGroup, type FoundItem, HARNESSES, nameProblem, type ToolModel } from './model.ts';
 export { ImportResultList } from './import-results.tsx';
 export { type ApplyImport, type ImportApplied, useApplyImport } from './use-apply-import.ts';
 export {

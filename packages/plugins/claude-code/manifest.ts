@@ -228,10 +228,17 @@ export default definePlugin({
     panels: [
       panel('conversation.above-composer', { id: 'permission-request', order: 20 }),
       panel('conversation.above-composer', { id: 'harness-dialog', order: 30 }),
-      // The Claude segment's first-run pages (r10 O7); each draws only for its own step. The import pages (O7b) add theirs.
+      // The Claude segment's first-run pages (r10 O7); each draws only for its own step. The import pages (O7b) are the seven after the choice.
       panel('onboarding.step', { id: 'onboarding-installed', order: 20 }),
       panel('onboarding.step', { id: 'onboarding-sign-in', order: 21 }),
       panel('onboarding.step', { id: 'onboarding-import-choice', order: 22 }),
+      panel('onboarding.step', { id: 'onboarding-import-settings', order: 23 }),
+      panel('onboarding.step', { id: 'onboarding-import-model-set', order: 24 }),
+      panel('onboarding.step', { id: 'onboarding-import-instructions', order: 25 }),
+      panel('onboarding.step', { id: 'onboarding-import-skills', order: 26 }),
+      panel('onboarding.step', { id: 'onboarding-import-mcp', order: 27 }),
+      panel('onboarding.step', { id: 'onboarding-conversations', order: 28 }),
+      panel('onboarding.step', { id: 'onboarding-import-run', order: 29 }),
       panel('onboarding.step', { id: 'onboarding-permission', order: 30 }),
     ],
     settings: [settingsTab('claude-code', { icon: 'sparkles', group: 'tools', label: 'Claude Code', order: 20 })],
