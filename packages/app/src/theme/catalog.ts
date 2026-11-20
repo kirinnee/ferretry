@@ -103,6 +103,12 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
     label: 'Briefing',
     blurb: 'A calm written report: thin Poppins, mono numbers, pill controls, soft shadows, a hot focus ring.',
   },
+  {
+    id: 'genz',
+    label: 'Gen Z Maximalism',
+    blurb: 'Loud on purpose: bubble type, sticker tags, stacked colour shadows, a spring on every pick.',
+    loud: true,
+  },
 ] as const);
 
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([
