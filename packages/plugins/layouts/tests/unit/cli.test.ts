@@ -51,6 +51,19 @@ describe('fy layout and fy theme', () => {
     expect(JSON.parse(out[0] as string)).toEqual(JSON.parse(JSON.stringify(current)));
   });
 
+  test('layout show names a phone nav override: its side and items, or the same side when it sets none', async () => {
+    const withPhone = (nav: { side?: 'bottom'; items?: string[] }) => ({
+      layout: { ...DEFAULT_LAYOUT, phone: { nav } },
+      theme: DEFAULT_THEME,
+    });
+    const bottom = harness({ 'GET /v1/layouts/current': withPhone({ side: 'bottom', items: ['agenda', 'board'] }) });
+    expect(await bottom.run('layout show')).toBe(0);
+    expect(bottom.out.join('\n')).toContain('phone    nav bottom: agenda, board');
+    const same = harness({ 'GET /v1/layouts/current': withPhone({}) });
+    expect(await same.run('layout show')).toBe(0);
+    expect(same.out.join('\n')).toContain('phone    nav same side: none');
+  });
+
   test('layout list marks the layout and theme in use', async () => {
     const { run, out } = harness({
       'GET /v1/layouts': {
