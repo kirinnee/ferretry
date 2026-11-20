@@ -29,6 +29,8 @@ let directory = '';
 let server: ReturnType<typeof Bun.serve> | undefined;
 /** What the fake route received, newest last. */
 const writes: unknown[] = [];
+/** What the fake sign-in route received (the real Accounts Method form's save), newest last. */
+const signInWrites: unknown[] = [];
 
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), 'ferretry-accounts-select-'));
@@ -54,6 +56,10 @@ beforeAll(async () => {
       if (path === '/app.js') return new Response(js, { headers: { 'content-type': 'text/javascript' } });
       if (path === '/fake/paste-rules' && request.method === 'POST') {
         writes.push(JSON.parse(await request.text()));
+        return new Response('{}', { headers: { 'content-type': 'application/json' } });
+      }
+      if (path === '/fake/sign-ins' && request.method === 'POST') {
+        signInWrites.push(JSON.parse(await request.text()));
         return new Response('{}', { headers: { 'content-type': 'application/json' } });
       }
       if (path === '/') return new Response(page, { headers: { 'content-type': 'text/html' } });
@@ -131,7 +137,10 @@ const optionLabels = async (tab: Page): Promise<string[]> =>
     options.map(option => option.querySelector('[data-label]')?.textContent ?? ''),
   );
 const INTO = '[role=combobox][aria-label="Into"]';
-const VIA = '[role=combobox][aria-label="Through which account"]';
+const VIA = '[data-method-scene] [role=combobox][aria-label="Through which account"]';
+/** The REAL Accounts sign-in form (`SiteDetail`'s Method tab), whose save goes to the fake sign-in route. */
+const FORM = '[data-accounts-panel=method]';
+const FORM_VIA = `${FORM} [role=combobox][aria-label="Through which account"]`;
 
 for (const variant of VARIANTS)
   describe(`Accounts' select boxes (${variant.name})`, () => {
@@ -143,7 +152,14 @@ for (const variant of VARIANTS)
           boxes: [...document.querySelectorAll('[role=combobox]')].map(each => each.getAttribute('aria-label')),
         }));
         expect(counts.natives, 'no native <select> in the accounts scene').toBe(0);
-        expect(counts.boxes).toEqual(['From', 'Into', 'How it signs in', 'Through which account']);
+        expect(counts.boxes).toEqual([
+          'From',
+          'Into',
+          'How it signs in',
+          'Through which account',
+          'How it signs in',
+          'Through which account',
+        ]);
         await shotOf(tab, variant, 'closed');
         expect(problems).toEqual([]);
       } finally {
@@ -227,6 +243,31 @@ for (const variant of VARIANTS)
           from: { kind: 'command', program: 'gh' },
           to: { kind: 'secret', name: 'GH_TOKEN' },
         });
+      } finally {
+        await close();
+      }
+    });
+
+    it('searches an account in the real sign-in form and saves its id', async () => {
+      const { tab, close } = await open(variant);
+      try {
+        signInWrites.length = 0;
+        expect(await tab.isDisabled(`${FORM} [data-accounts-method-save]`), 'nothing changed yet').toBe(true);
+        await hit(tab, variant, FORM_VIA);
+        await tab.waitForSelector('input[aria-label="Search Through which account"]');
+        await settled(tab);
+        await tab.keyboard.type('work');
+        expect(await optionLabels(tab)).toEqual(['Google (work) · me@work.example.test', 'GitHub (work) · octo-work']);
+        // The second match, so a dropped id or the first row's id both fail.
+        await hit(tab, variant, '[role=option]:has-text("GitHub (work)")');
+        await tab.waitForSelector('[role=listbox]', { state: 'detached' });
+        expect(await tab.textContent(FORM_VIA)).toContain('GitHub (work)');
+        await hit(tab, variant, `${FORM} [data-accounts-method-save]`);
+        await tab.waitForTimeout(200);
+        expect(signInWrites, 'one save, with the picked account id').toEqual([
+          { id: 'SIGNIN_1', body: { method: { kind: 'sso', name: 'Google', via: 'ACCOUNT_3' } } },
+        ]);
+        await shotOf(tab, variant, 'sign-in-saved');
       } finally {
         await close();
       }
