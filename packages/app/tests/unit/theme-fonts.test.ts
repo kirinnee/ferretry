@@ -62,3 +62,12 @@ describe('preloadThemeFonts', () => {
     for (const link of page.added) expect(link).toMatchObject({ rel: 'preload', as: 'font', crossOrigin: 'anonymous' });
   });
 });
+
+describe('the Look picker preview stays cheap', () => {
+  it('a Gen Z swatch draws its body in the device face, so Bricolage loads only when Gen Z is the active style', () => {
+    const css = readStyleFile('style/genz.css');
+    const rule = css.match(/\[data-swatch\]\[data-style='genz'\]:not\(:root\)\s*\{([^}]*)\}/u)?.[1] ?? '';
+    expect(rule).toContain('--font-body: system-ui');
+    expect(rule).not.toContain('Bricolage');
+  });
+});
