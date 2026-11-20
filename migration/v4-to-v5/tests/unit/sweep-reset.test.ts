@@ -34,7 +34,11 @@ import {
   type ResetPaths,
 } from '../../fixtures/sweep/reset.ts';
 import {
+  ALL_LOGINS,
+  CLAUDE_TOOL,
+  CODEX_TOOL,
   FAKE_NAME,
+  credentialsRootOf,
   isShim,
   readRecord,
   recordText,
@@ -355,6 +359,106 @@ describe('reset-v5 and real claude', () => {
       await expect(
         resetV5(s.paths, s.real, actionsFor(s.paths).actions, { keepRealClaude: true, now: NOW }),
       ).rejects.toThrow(/no real-claude.json/u);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('reset-v5 --empty and real claude / codex for every login', () => {
+  /** Both tools on in --all mode, written as `on --all` writes them (shim + record), over the scratch slot. */
+  async function withAll(s: Scratch): Promise<{ claude: string; codex: string; root: string }> {
+    const claude = join(s.root, 'stub-claude');
+    const codex = join(s.root, 'stub-codex');
+    await writeFile(claude, '#!/bin/sh\necho REAL-CLAUDE "$@"\n', { mode: 0o755 });
+    await writeFile(codex, '#!/bin/sh\necho REAL-CODEX "$@"\n', { mode: 0o755 });
+    const root = credentialsRootOf(s.real.fyHome);
+    for (const tool of [CLAUDE_TOOL, CODEX_TOOL]) {
+      const real = tool === CLAUDE_TOOL ? claude : codex;
+      await writeFile(join(s.real.harness, tool.fakeName), `#!/bin/sh\necho FAKE-${tool.name}\n`, { mode: 0o755 });
+      await writeFile(
+        join(s.real.harness, tool.name),
+        shimText({ fake: join(s.real.harness, tool.fakeName), real, store: root, all: true }, tool),
+        {
+          mode: 0o755,
+        },
+      );
+      await writeFile(
+        join(s.real.v5Dir, tool.recordFile),
+        recordText({ login: ALL_LOGINS, store: root, binary: real, rootedAt: null, all: true }),
+      );
+    }
+    return { claude, codex, root };
+  }
+  const ran = (s: Scratch, tool: string, env: Record<string, string>): string =>
+    Bun.spawnSync([join(s.real.harness, tool), 'hi'], { env: { PATH: '/usr/bin:/bin', ...env } })
+      .stdout.toString()
+      .trim();
+
+  test('reset-v5 --empty with NO --keep flag keeps --all ON for claude and codex: shims and records survive and match the new home', async () => {
+    const s = await scratch();
+    try {
+      const { claude, codex, root } = await withAll(s);
+      const trace = actionsFor(s.paths);
+      await resetV5(s.paths, s.real, trace.actions, options);
+      expect(trace.steps.length).toBeGreaterThan(0);
+      for (const [tool, binary] of [
+        [CLAUDE_TOOL, claude],
+        [CODEX_TOOL, codex],
+      ] as const) {
+        expect(isShim(await readFile(join(s.real.harness, tool.name), 'utf8'), tool)).toBe(true);
+        expect(await readRecord(s.real, tool)).toEqual({
+          login: ALL_LOGINS,
+          store: root,
+          binary,
+          rootedAt: null,
+          all: true,
+        });
+      }
+      // the login folders are gone with the old home; any new child still gets the real binary, the host store the fake
+      expect(await exists(join(root, 'codex-main'))).toBe(false);
+      expect(ran(s, 'claude', { CLAUDE_SECURESTORAGE_CONFIG_DIR: `${root}/fresh` })).toBe('REAL-CLAUDE hi');
+      expect(ran(s, 'codex', { CODEX_HOME: `${root}/fresh` })).toBe('REAL-CODEX hi');
+      expect(ran(s, 'claude', { CLAUDE_SECURESTORAGE_CONFIG_DIR: '/home/x/.claude' })).toBe('FAKE-claude');
+      expect(ran(s, 'codex', { CODEX_HOME: root })).toBe('FAKE-codex');
+      // the old home, with its login, is whole in the kept folder
+      expect(await exists(join(keptOf(s), 'home', 'state', 'logins', 'credentials', 'codex-main'))).toBe(true);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('--all mode survives a reset with --keep-real-claude too, and a missing real binary or fake refuses before anything is stopped', async () => {
+    const s = await scratch();
+    try {
+      const { codex } = await withAll(s);
+      await resetV5(s.paths, s.real, actionsFor(s.paths).actions, { keepRealClaude: true, now: NOW });
+      expect((await readRecord(s.real))?.all).toBe(true);
+      await rm(codex);
+      const trace = actionsFor(s.paths);
+      await expect(resetV5(s.paths, s.real, trace.actions, { keepRealClaude: false, now: LATER })).rejects.toThrow(
+        /real codex .* is not an executable file/u,
+      );
+      expect(trace.steps).toEqual([]);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  });
+
+  test('a per-login real codex still refuses a reset', async () => {
+    const s = await scratch();
+    try {
+      const codex = join(s.root, 'stub-codex');
+      await writeFile(codex, '#!/bin/sh\n', { mode: 0o755 });
+      await writeFile(
+        join(s.real.v5Dir, CODEX_TOOL.recordFile),
+        recordText({ login: 'one', store: storePathOf(s.real.fyHome, 'one'), binary: codex, rootedAt: null }),
+      );
+      const trace = actionsFor(s.paths);
+      await expect(resetV5(s.paths, s.real, trace.actions, { keepRealClaude: true, now: NOW })).rejects.toThrow(
+        /real codex is on for login one/u,
+      );
+      expect(trace.steps).toEqual([]);
     } finally {
       await rm(s.root, { recursive: true, force: true });
     }

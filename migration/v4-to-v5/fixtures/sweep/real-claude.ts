@@ -11,7 +11,19 @@
  * unit-tested; `enableReal` / `disableReal` take their folders and ports as arguments so a test drives them on a scratch dir
  * with a stub "real" binary. Pure TypeScript with node: imports only, because a persisted slot runs this from its own kit copy.
  */
-import { chmod, copyFile, lstat, open, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  copyFile,
+  lstat,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { shellQuote, storeRootOf } from './persist.ts';
 
@@ -67,7 +79,15 @@ export interface RealClaudeRecord {
   readonly binary: string;
   /** The GC root link that keeps `binary`'s store path alive, or null when it is not a nix store path / could not be rooted. */
   readonly rootedAt: string | null;
+  /** True for `on --all`: `login` is ALL_LOGINS and `store` is the credentials ROOT, whose every direct child login dir gets the real binary. */
+  readonly all?: boolean;
 }
+
+/** The `login` of an `--all` record. No login can be called this (loginNameProblem refuses it), so it never names a real login. */
+export const ALL_LOGINS = '*';
+
+/** Where 5.0 keeps ALL of a home's ferretry-managed login stores: the folder whose direct children are `<login id>`. */
+export const credentialsRootOf = (fyHome: string): string => join(fyHome, 'state', 'logins', 'credentials');
 
 /** A login id as 5.0 spells it in a file name: no slash, no dot-dot, no leading dash. */
 export function loginNameProblem(login: string | undefined, tool: RealTool = CLAUDE_TOOL): string | undefined {
@@ -89,15 +109,59 @@ export const loginFileOf = (fyHome: string, login: string): string => join(fyHom
  * and `-v` always go to the real binary (5.0 picks launch settings by the probed version); the real binary gets
  * DISABLE_AUTOUPDATER=1; everything else execs the fake.
  */
-export function shimText(
-  spec: { readonly fake: string; readonly real: string; readonly store: string; readonly realStore?: string },
-  tool: RealTool = CLAUDE_TOOL,
-): string {
+export interface ShimSpec {
+  readonly fake: string;
+  readonly real: string;
+  /** One login's store, or (with `all`) the credentials root. */
+  readonly store: string;
+  /** The same by its realpath spelling, when that differs. */
+  readonly realStore?: string;
+  /** `--all` mode: `store` / `realStore` are the credentials root and the shim matches any one direct child dir of it. */
+  readonly all?: boolean;
+}
+
+/**
+ * The POSIX sh function the `--all` shims share. `fy_login_dir <path> <root>` succeeds only when <path> is exactly `<root>/<id>`:
+ * a fixed prefix (both quoted, so a glob character in either is literal; nothing is evaluated), then <id> is ONE non-empty segment
+ * that is not '.' or '..' and has no '/' (so a trailing slash, a nested child, a dot-dot and the root itself all fail), and <path>
+ * is not itself a link (a link that leads out of the root gets the fake). No readlink -f, no eval, nothing is opened.
+ */
+const LOGIN_DIR_FUNCTION = [
+  'fy_login_dir() {',
+  '  case "$1" in "$2"/*) ;; *) return 1 ;; esac',
+  '  fy_id=${1#"$2"/}',
+  '  case "$fy_id" in \'\'|.|..|*/*) return 1 ;; esac',
+  '  if [ -L "$1" ]; then return 1; fi',
+  '  return 0',
+  '}',
+];
+
+/** `fy_login_dir "$value" 'root' || fy_login_dir "$value" 'real root'` (one call when both spellings are the same). */
+function underRoots(value: string, spec: ShimSpec): string {
+  const roots = [...new Set([spec.store, spec.realStore ?? spec.store])];
+  return roots.map(root => `fy_login_dir "${value}" ${shellQuote(root)}`).join(' || ');
+}
+
+export function shimText(spec: ShimSpec, tool: RealTool = CLAUDE_TOOL): string {
   for (const path of [spec.fake, spec.real, spec.store, ...(spec.realStore === undefined ? [] : [spec.realStore])])
     if (!isAbsolute(path) || /[\n\r\0]/u.test(path))
       throw new Error(`shim paths must be absolute single-line paths: ${path}`);
   const real = shellQuote(spec.real);
   if (tool.name === 'codex') return codexShimText(spec, real, tool);
+  if (spec.all === true)
+    return [
+      '#!/bin/sh',
+      SHIM_MARKER,
+      '# Real claude ONLY for a login store that is a direct child of the credentials root below; every other caller gets the fake. Written by `slot.ts real-claude --all`.',
+      'case "${1-}" in',
+      `  --version|-v) exec env DISABLE_AUTOUPDATER=1 ${real} "$@" ;;`,
+      'esac',
+      ...LOGIN_DIR_FUNCTION,
+      'fy_dir=${CLAUDE_SECURESTORAGE_CONFIG_DIR-}',
+      `if ${underRoots('$fy_dir', spec)}; then exec env DISABLE_AUTOUPDATER=1 ${real} "$@"; fi`,
+      `exec ${shellQuote(spec.fake)} "$@"`,
+      '',
+    ].join('\n');
   return [
     '#!/bin/sh',
     SHIM_MARKER,
@@ -118,11 +182,30 @@ export function shimText(
  * the daemon's own token refresh), (3) a CODEX_HOME whose `auth.json` is a link whose target is exactly `<store>/auth.json` (logical or real path) (a ferret
  * on a runtime of that login). Every other caller gets the fake. `readlink` prints the link's target path only; no file is opened.
  */
-function codexShimText(
-  spec: { readonly fake: string; readonly real: string; readonly store: string; readonly realStore?: string },
-  real: string,
-  tool: RealTool,
-): string {
+function codexShimText(spec: ShimSpec, real: string, tool: RealTool): string {
+  if (spec.all === true)
+    return [
+      '#!/bin/sh',
+      tool.marker,
+      '# Real codex ONLY for a login store that is a direct child of the credentials root below; every other caller gets the fake. Written by `slot.ts real-codex --all`.',
+      'case "${1-}" in',
+      `  --version|-V) d=$(mktemp -d 2>/dev/null) || d=/nonexistent-fy-sweep-codex-home; CODEX_HOME="$d" ${real} "$@"; rc=$?; rm -rf "$d"; exit "$rc" ;;`,
+      'esac',
+      ...LOGIN_DIR_FUNCTION,
+      'fy_home=${CODEX_HOME-}',
+      `if ${underRoots('$fy_home', spec)}; then exec ${real} "$@"; fi`,
+      // A ferret: its home's auth.json is a link to <root>/<id>/auth.json. The link target is only read as a path, never opened.
+      'if [ -n "$fy_home" ] && [ -L "$fy_home/auth.json" ]; then',
+      '  fy_link=$(readlink "$fy_home/auth.json" 2>/dev/null)',
+      '  case "$fy_link" in',
+      '    */auth.json)',
+      '      fy_dir=${fy_link%/auth.json}',
+      `      if ${underRoots('$fy_dir', spec)}; then exec ${real} "$@"; fi ;;`,
+      '  esac',
+      'fi',
+      `exec ${shellQuote(spec.fake)} "$@"`,
+      '',
+    ].join('\n');
   const store = shellQuote(spec.store);
   // The link's target is the LOGICAL store's auth.json or the same file by its REAL path: a persisted slot's FY_HOME goes through a
   // link, and the 5.0 kernel writes the ferret's link with the real path. Exactly these two strings; never a prefix, glob or readlink -f.
@@ -168,7 +251,13 @@ export function parseRecord(text: string): RealClaudeRecord | undefined {
   const r = value as Record<string, unknown>;
   if (typeof r.login !== 'string' || typeof r.store !== 'string' || typeof r.binary !== 'string') return undefined;
   if (r.rootedAt !== null && typeof r.rootedAt !== 'string') return undefined;
-  return { login: r.login, store: r.store, binary: r.binary, rootedAt: r.rootedAt };
+  return {
+    login: r.login,
+    store: r.store,
+    binary: r.binary,
+    rootedAt: r.rootedAt,
+    ...(r.all === true && r.login === ALL_LOGINS ? { all: true } : {}),
+  };
 }
 
 /** One top-level `key: value` of a login YAML, quotes and a trailing comment removed; undefined when absent. */
@@ -209,7 +298,10 @@ export function statusLine(
   tool: RealTool = CLAUDE_TOOL,
 ): string {
   if (record === undefined) return `real ${tool.name}: off (every ${tool.name} is the fake)`;
-  const base = `real ${tool.name}: on for login ${record.login} (${record.binary})`;
+  const base =
+    record.all === true
+      ? `real ${tool.name}: on for every login (${record.binary})`
+      : `real ${tool.name}: on for login ${record.login} (${record.binary})`;
   return state === 'ok'
     ? base
     : `${base}  WARNING: harness-bin/${tool.name} is not the shim any more; run real-${tool.name} on again`;
@@ -287,10 +379,15 @@ export async function enableReal(
   ports: EnablePorts,
   tool: RealTool = CLAUDE_TOOL,
 ): Promise<{ readonly record: RealClaudeRecord; readonly notes: string[] }> {
-  const bad = loginNameProblem(login, tool);
+  const all = login === ALL_LOGINS;
+  const bad = all ? undefined : loginNameProblem(login, tool);
   if (bad !== undefined || login === undefined) return refuse(bad ?? 'name the login');
   const notes: string[] = [];
   const existing = await readRecord(paths, tool);
+  if (existing !== undefined && (existing.all === true) !== all)
+    refuse(
+      `real ${tool.name} is already on ${existing.all === true ? 'for every login' : `for login ${existing.login}`}; run "real-${tool.name} <n> off" first (it never deletes a login), then switch on the other way`,
+    );
   if (existing !== undefined && existing.login !== login)
     refuse(
       `real ${tool.name} is already on for login ${existing.login}; one real login at a time. Run "real-${tool.name} <n> off" first (it never deletes that login)`,
@@ -298,14 +395,15 @@ export async function enableReal(
 
   // The login: its file exists and is claude-code + ferretry; its store, when it exists, is a real folder (a link is refused, nothing
   // inside it is read). 5.0 creates the store only at sign-in (mode 0700), so a login that was added but not signed in has none yet.
-  const yaml = await readFile(loginFileOf(paths.fyHome, login), 'utf8').catch(() => undefined);
+  // `--all`: no single login to check; the credentials ROOT is what the shim matches under, and it must not be a link.
+  const yaml = all ? '' : await readFile(loginFileOf(paths.fyHome, login), 'utf8').catch(() => undefined);
   if (yaml === undefined)
     return refuse(
       `login ${login} does not exist (${loginFileOf(paths.fyHome, login)} is missing). Add it first on the 5.0 Logins screen: Add login, ${tool.name === 'codex' ? 'Codex' : 'Claude Code'}, Ferretry-managed`,
     );
-  const problem = loginFileProblem(login, yaml, tool);
+  const problem = all ? undefined : loginFileProblem(login, yaml, tool);
   if (problem !== undefined) return refuse(problem);
-  const store = storePathOf(paths.fyHome, login);
+  const store = all ? credentialsRootOf(paths.fyHome) : storePathOf(paths.fyHome, login);
   const found = await lstat(store).catch(() => undefined);
   if (found?.isSymbolicLink() === true)
     return refuse(`${store} is a symbolic link; refusing to point the real ${tool.name} at it`);
@@ -338,6 +436,11 @@ export async function enableReal(
   // An existing folder is made private to its owner (a mode change only; its content is not opened). A missing one is left for
   // 5.0 to create at sign-in, already 0700.
   if (found !== undefined) await chmod(store, 0o700);
+  if (all && found !== undefined)
+    for (const name of await readdir(store).catch(() => [] as string[])) {
+      const child = join(store, name);
+      if ((await lstat(child).catch(() => undefined))?.isDirectory() === true) await chmod(child, 0o700);
+    }
 
   // The shim goes in. The fake is kept as claude.fake and never overwritten by a shim.
   const claude = join(paths.harness, tool.name);
@@ -362,14 +465,21 @@ export async function enableReal(
   // A persisted slot's FY_HOME goes through a link; the codex ferret's auth.json link is written with the REAL path, so the shim also
   // accepts the store spelled by realpath(fyHome). A fyHome that cannot be resolved leaves only the logical spelling.
   const realFyHome = await realpath(paths.fyHome).catch(() => undefined);
-  const realStore = realFyHome === undefined ? undefined : storePathOf(realFyHome, login);
+  const realStore =
+    realFyHome === undefined ? undefined : all ? credentialsRootOf(realFyHome) : storePathOf(realFyHome, login);
   const linked = await ports.root(real);
   if (linked.note !== undefined) notes.push(linked.note);
   await writeExecutable(
     claude,
-    shimText({ fake, real, store, ...(realStore === undefined ? {} : { realStore }) }, tool),
+    shimText({ fake, real, store, ...(realStore === undefined ? {} : { realStore }), ...(all ? { all } : {}) }, tool),
   );
-  const record: RealClaudeRecord = { login, store, binary: real, rootedAt: linked.link ?? null };
+  const record: RealClaudeRecord = {
+    login,
+    store,
+    binary: real,
+    rootedAt: linked.link ?? null,
+    ...(all ? { all } : {}),
+  };
   const temp = `${recordPathOf(paths, tool)}.tmp-${String(process.pid)}`;
   await writeFile(temp, recordText(record), { mode: 0o644 });
   await rename(temp, recordPathOf(paths, tool));

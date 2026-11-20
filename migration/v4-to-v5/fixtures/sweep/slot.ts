@@ -20,10 +20,11 @@
  *                                      (re)write ONLY the wrappers + kit copy of an already persisted slot: stops and restarts nothing.
  *                                      --cli-name records what the owner types for the 5.0 CLI (e.g. fy5): the daemon prints it in its
  *                                      hints (FY_BINARY_NAME), from the next daemon start on; default is the wrapper's name (fy5s<N>)
- *   bun slot.ts real-claude <1..9> on <login> [--binary <abs path>] | off [--force]
+ *   bun slot.ts real-claude <1..9> on <login> | on --all [--binary <abs path>] | off [--force]
  *                                      the ONE exception to "no real model": a persisted slot's 5.0 side runs the REAL claude for ONE
  *                                      ferretry-managed login (the owner signs in on the 5.0 Logins screen); every other caller keeps the fake
- *   bun slot.ts real-codex <1..9> on <login> [--binary <abs path>] | off [--force]
+ *   bun slot.ts real-codex <1..9> on <login> | on --all [--binary <abs path>] | off [--force]
+ *                                      (--all: the real binary for EVERY ferretry-managed login of THIS slot's home, and it survives reset-v5 --empty)
  *                                      the same for Codex: the REAL codex for ONE ferretry-managed Codex login (sign-in = CODEX_HOME is that
  *                                      login's store; a ferret = its home's auth.json links to that store); every other caller keeps the fake
  *   bun slot.ts reset-v5 <1..9> --empty <libexec-dir> [--keep-real-claude]
@@ -100,6 +101,7 @@ import {
 } from './persist.ts';
 import {
   CLAUDE_TOOL,
+  ALL_LOGINS,
   CODEX_TOOL,
   Refusal,
   disableReal,
@@ -107,6 +109,7 @@ import {
   isShim,
   readRecord,
   recordPathOf,
+  loginFileProblem,
   runtimesUsing,
   statusLine,
   type RealPaths,
@@ -2309,7 +2312,7 @@ const realCodex = async (slot: Slot, rest: readonly string[]): Promise<void> => 
 async function realTool(slot: Slot, tool: RealTool, rest: readonly string[]): Promise<void> {
   const n = String(slot.n);
   const verb = `real-${tool.name}`;
-  const usage = `usage: slot.ts ${verb} <1..9> on <login> [--binary <abs path>] | off [--force]`;
+  const usage = `usage: slot.ts ${verb} <1..9> on <login> | on --all [--binary <abs path>] | off [--force]`;
   const [action, ...args] = rest;
   if (action !== 'on' && action !== 'off') die(usage, 64);
   if (!slot.persisted)
@@ -2325,7 +2328,10 @@ async function realTool(slot: Slot, tool: RealTool, rest: readonly string[]): Pr
       const flag = args.indexOf('--binary');
       const given = flag >= 0 ? args[flag + 1] : undefined;
       if (flag >= 0 && given === undefined) die(usage, 64);
-      const login = args.filter((_, i) => flag < 0 || (i !== flag && i !== flag + 1))[0];
+      const everyLogin = args.includes('--all');
+      const rest = args.filter((arg, i) => arg !== '--all' && (flag < 0 || (i !== flag && i !== flag + 1)));
+      if (everyLogin && rest.length > 0) die(usage, 64);
+      const login = everyLogin ? ALL_LOGINS : rest[0];
       const binary = given ?? (await findRealTool(slot, tool));
       if (binary === undefined)
         die(`no real ${tool.name} on PATH (outside the sweep folders); pass its absolute path with --binary <path>`);
@@ -2356,27 +2362,32 @@ async function realTool(slot: Slot, tool: RealTool, rest: readonly string[]): Pr
         },
         tool,
       );
-      console.log(`slot ${n}: real ${tool.name} is ON for login ${record.login}`);
+      const every = record.all === true;
+      console.log(`slot ${n}: real ${tool.name} is ON for ${every ? 'every login' : `login ${record.login}`}`);
       console.log(`  real binary: ${record.binary}`);
-      console.log(`  store matched exactly: ${record.store}`);
       console.log(
-        `  every other caller (every other login, store: host) still gets the fake: ${join(slot.v5.harness, tool.fakeName)}`,
+        every
+          ? `  matched: any ONE direct child login folder of ${record.store} (logical or real-path spelling), nothing nested`
+          : `  store matched exactly: ${record.store}`,
+      );
+      console.log(
+        `  every other caller (${every ? 'the host store, another slot, anything not directly under that folder' : 'every other login, store: host'}) still gets the fake: ${join(slot.v5.harness, tool.fakeName)}`,
       );
       for (const note of notes) console.log(`  ${note}`);
       console.log(
-        `  no daemon was stopped or restarted. Next: the owner presses Sign in on the 5.0 Logins screen for ${record.login}`,
+        `  no daemon was stopped or restarted. Next: the owner presses Sign in on the 5.0 Logins screen for ${every ? 'each login' : record.login}`,
       );
     } else {
       const { was } = await disableReal(
         paths,
-        { liveFerrets: login => liveFerretsOn(slot, login) },
+        { liveFerrets: login => liveFerretsOn(slot, login, tool) },
         { force: args.includes('--force') },
         tool,
       );
       console.log(
         was === undefined
           ? `slot ${n}: real ${tool.name} was already off (${tool.recordFile} not present); nothing changed`
-          : `slot ${n}: real ${tool.name} is OFF; the fake ${tool.name} is back and ${tool.recordFile} is gone. Login ${was.login} and its store were not touched (remove them on the Logins screen)`,
+          : `slot ${n}: real ${tool.name} is OFF; the fake ${tool.name} is back and ${tool.recordFile} is gone. ${was.all === true ? 'No login or store was' : `Login ${was.login} and its store were`} not touched (remove them on the Logins screen)`,
       );
     }
   } catch (error) {
@@ -2390,12 +2401,14 @@ async function realTool(slot: Slot, tool: RealTool, rest: readonly string[]): Pr
  * `fy ps --json` of the slot (when its 5.0 daemon is up); any of those runtime names in it is a live ferret. A daemon that is up
  * but cannot be asked refuses (--force skips this check); a daemon that is down has no live ferret.
  */
-async function liveFerretsOn(slot: Slot, login: string): Promise<string | undefined> {
+async function liveFerretsOn(slot: Slot, login: string, tool: RealTool): Promise<string | undefined> {
   const dir = join(slot.v5.home, 'config', 'runtimes');
   const files = new Map<string, string>();
   for (const name of await readdir(dir).catch(() => [] as string[]))
     if (/\.ya?ml$/u.test(name)) files.set(name, await readFile(join(dir, name), 'utf8').catch(() => ''));
-  const runtimes = runtimesUsing(login, files);
+  // `--all`: a ferret on ANY ferretry-managed login of this tool counts.
+  const logins = login === ALL_LOGINS ? await everyManagedLogin(slot, tool) : [login];
+  const runtimes = [...new Set(logins.flatMap(each => runtimesUsing(each, files)))].sort();
   if (runtimes.length === 0 || (await pidsHolding(slot.v5.lock)).length === 0) return undefined;
   const listed = await cli(slot, 'v5', ['ps', '--json']);
   if (listed.code !== 0)
@@ -2403,7 +2416,20 @@ async function liveFerretsOn(slot: Slot, login: string): Promise<string | undefi
   const busy = runtimes.filter(name => listed.out.includes(`"${name}"`));
   return busy.length === 0
     ? undefined
-    : `a ferret still runs on runtime ${busy.join(', ')} (login ${login}); stop it first, or pass --force`;
+    : `a ferret still runs on runtime ${busy.join(', ')} (${login === ALL_LOGINS ? 'every-login mode' : `login ${login}`}); stop it first, or pass --force`;
+}
+
+/** The ids of this home's login files that are `store: ferretry` and this tool's harness (names only; no store is opened). */
+async function everyManagedLogin(slot: Slot, tool: RealTool): Promise<string[]> {
+  const dir = join(slot.v5.home, 'config', 'logins');
+  const ids: string[] = [];
+  for (const name of await readdir(dir).catch(() => [] as string[])) {
+    const id = name.replace(/\.ya?ml$/u, '');
+    if (id === name) continue;
+    const yaml = await readFile(join(dir, name), 'utf8').catch(() => '');
+    if (loginFileProblem(id, yaml, tool) === undefined) ids.push(id);
+  }
+  return ids;
 }
 
 // ─── reset-v5 / restore-v5: an EMPTY 5.0 home on a persisted slot, and the way back ─────────────────────────────────
@@ -2531,7 +2557,13 @@ async function resetV5Verb(slot: Slot, rest: readonly string[]): Promise<void> {
   console.log(
     `  the old home is kept in ${kept.kept} (moved, nothing deleted); put it back with: bun ${slotScript(slot)} restore-v5 ${n} ${kept.stamp}`,
   );
-  if (keepRealClaude && (await readRecord(realPathsOf(slot))) !== undefined)
+  const everyClaude = (await readRecord(realPathsOf(slot)))?.all === true;
+  const everyCodex = (await readRecord(realPathsOf(slot), CODEX_TOOL))?.all === true;
+  if (everyClaude || everyCodex)
+    console.log(
+      `  real ${[everyClaude ? 'claude' : '', everyCodex ? 'codex' : ''].filter(Boolean).join(' and ')}: still on for every login; add each login again on the 5.0 Logins screen, press Sign in, add the runtime`,
+    );
+  if (keepRealClaude && !everyClaude && (await readRecord(realPathsOf(slot))) !== undefined)
     console.log(
       '  real claude: add the login again on the 5.0 Logins screen (same name), press Sign in, add the runtime; harness-claude-code.yaml (permissionMode: auto) is empty again',
     );

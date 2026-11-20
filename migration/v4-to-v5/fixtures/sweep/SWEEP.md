@@ -105,6 +105,41 @@ credential is stored.
 
 Tests: `migration/v4-to-v5/tests/unit/sweep-real-codex.test.ts` (stub binaries, temp folders, no login, no network).
 
+## Real for EVERY login (`on --all`)
+
+```
+bun slot.ts real-claude <1..9> on --all [--binary <abs path>]
+bun slot.ts real-codex  <1..9> on --all [--binary <abs path>]
+bun slot.ts real-claude <1..9> off [--force]      # same off for either mode
+```
+
+`on <login>` (one login) is unchanged. `on --all` makes the shim run the real binary for ANY ferretry-managed login of THIS slot's home, so
+the owner can add logins on the 5.0 Logins screen and sign in with no further kit step. `status` / `upgrade-v5` say
+`real claude: on for every login (<binary>)`. The record is `{ login: "*", store: <credentials root>, binary, rootedAt, all: true }`; no login can be
+named `*`. `--all` and a single login refuse each other (run `off` first). `off` refuses while a ferret runs on ANY ferretry-managed login of
+that tool (`--force` skips); `up` refuses while either tool is on; `on --all` refuses a credentials root that is a link.
+
+**The exact shim match grammar** (POSIX `sh`, paths only, nothing is opened, no `readlink -f`, no `eval`). Let `ROOT` be
+`<FY_HOME>/state/logins/credentials` and `REAL` the same folder under `realpath(FY_HOME)` (one string when they are the same). A path `P` is
+a login dir when `fy_login_dir P ROOT || fy_login_dir P REAL` succeeds, i.e. when all of:
+
+1. `P` starts with the quoted literal `ROOT/` (a glob character in the root is literal);
+2. the rest, the `<id>`, is non-empty, not `.`, not `..` and contains no `/` (so the root itself, a trailing slash on the root or after an id, a
+   nested child, `..` and `//` tricks all fail);
+3. `P` is not itself a symbolic link (a login dir that leads out of the root gets the fake).
+
+Then: **claude** runs the real binary when `CLAUDE_SECURESTORAGE_CONFIG_DIR` is a login dir. **codex** runs it when `CODEX_HOME` is a login dir
+(the sign-in and the token refresh), or when `CODEX_HOME/auth.json` is a link whose target ends in `/auth.json` and whose remainder (the target
+minus `/auth.json`) is a login dir (a ferret). `--version` / `-v` / `-V` behave as in one-login mode. Everything else (the host store, another
+slot, no variable, a relative link) gets the fake.
+
+**`reset-v5 --empty` keeps `--all` on**, with no flag: the shim matches a folder path that does not change, so a reset only checks that the real
+binary and the fake are still there, then writes the shim and the record again for the new home (the logins are gone with the old home; the owner
+adds them again and signs in). One-login real codex still refuses a reset; one-login real claude still needs `--keep-real-claude`.
+
+Tests: `migration/v4-to-v5/tests/unit/sweep-real-all.test.ts` (shims in a real `sh` against stub binaries; near misses; on/off) and the
+`reset-v5 --empty and real claude / codex for every login` block of `sweep-reset.test.ts`.
+
 ## The hosted app moves with the slot (`upgrade-v5`, `reset-v5`)
 
 The 5.0 preview app (https://ferretry-v5.pages.dev) is deployed only when the ref `rebuild/preview` is pushed; a merge to 5.0 deploys

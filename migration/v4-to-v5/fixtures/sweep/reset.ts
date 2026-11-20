@@ -26,8 +26,10 @@ import { constants } from 'node:fs';
 import { link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, rmdir, stat } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 import {
+  CLAUDE_TOOL,
   CODEX_TOOL,
-  FAKE_NAME,
+  ALL_LOGINS,
+  credentialsRootOf,
   isShim,
   readRecord,
   recordPathOf,
@@ -35,6 +37,7 @@ import {
   shimText,
   storePathOf,
   type RealPaths,
+  type RealTool,
 } from './real-claude.ts';
 
 /** `<persistent slot folder>/kept`: mode 0700, holds one folder per reset or restore, named by its UTC stamp. */
@@ -583,17 +586,40 @@ export async function homeFiles(home: string): Promise<string[]> {
  * Real codex has no `--keep`: a reset removes the login and its sign-in with the old home, so a slot with real codex on refuses until
  * `real-codex <n> off` (which never deletes the login). Names and paths only; nothing inside a store is opened.
  */
-export async function realCodexPreflight(paths: RealPaths): Promise<void> {
+export async function realCodexPreflight(paths: RealPaths): Promise<{ login: string; binary: string } | undefined> {
   const record = await readRecord(paths, CODEX_TOOL);
-  if (record !== undefined)
-    return refuse(
-      `real codex is on for login ${record.login}; a reset removes that login and its sign-in with the old home. Run "real-codex <n> off" first (it never deletes that login)`,
-    );
+  if (record !== undefined) {
+    if (record.all !== true)
+      return refuse(
+        `real codex is on for login ${record.login}; a reset removes that login and its sign-in with the old home. Run "real-codex <n> off" first (it never deletes that login)`,
+      );
+    return await keepAllPreflight(paths, record, CODEX_TOOL);
+  }
   const codex = await readFile(join(paths.harness, 'codex'), 'utf8').catch(() => '');
   if (isShim(codex, CODEX_TOOL))
     return refuse(
       `${join(paths.harness, 'codex')} is a real-codex shim but there is no ${CODEX_TOOL.recordFile}; refusing to guess`,
     );
+  return undefined;
+}
+
+/**
+ * `--all` mode survives a reset with no flag: the shim matches the credentials ROOT of the home (a path that does not change), so the
+ * reset only needs the real binary and the fake to still be there; the shim and record are then written again for the new home.
+ */
+async function keepAllPreflight(
+  paths: RealPaths,
+  record: { readonly login: string; readonly binary: string },
+  tool: RealTool,
+): Promise<{ login: string; binary: string }> {
+  const info = await stat(record.binary).catch(() => undefined);
+  if (info === undefined || !info.isFile() || (info.mode & 0o111) === 0)
+    return refuse(
+      `the real ${tool.name} ${record.binary} is not an executable file any more; run "real-${tool.name} <n> off" first`,
+    );
+  if ((await lstat(join(paths.harness, tool.fakeName)).catch(() => undefined)) === undefined)
+    return refuse(`${join(paths.harness, tool.fakeName)} is missing, so the shim cannot be written again`);
+  return { login: record.login, binary: record.binary };
 }
 
 // ─── real claude: re-point, never sign in ──────────────────────────────────────────────────────────────────────────
@@ -617,6 +643,7 @@ export async function realClaudePreflight(
       );
     return undefined;
   }
+  if (record.all === true) return await keepAllPreflight(paths, record, CLAUDE_TOOL);
   if (!keep)
     return refuse(
       `real claude is on for login ${record.login}; a reset removes that login and its sign-in with the old home. Pass --keep-real-claude to keep the dispatcher for the same login name (you add the login and sign in again), or run "real-claude <n> off" first`,
@@ -626,8 +653,8 @@ export async function realClaudePreflight(
     return refuse(
       `the real claude ${record.binary} is not an executable file any more; run "real-claude <n> off" first`,
     );
-  if ((await lstat(join(paths.harness, FAKE_NAME)).catch(() => undefined)) === undefined)
-    return refuse(`${join(paths.harness, FAKE_NAME)} is missing, so the shim cannot be written again`);
+  if ((await lstat(join(paths.harness, CLAUDE_TOOL.fakeName)).catch(() => undefined)) === undefined)
+    return refuse(`${join(paths.harness, CLAUDE_TOOL.fakeName)} is missing, so the shim cannot be written again`);
   return { login: record.login, binary: record.binary };
 }
 
@@ -637,18 +664,39 @@ export async function realClaudePreflight(
  * before each write, and each file goes through a temp this run creates and a rename (a link at the final name is refused, never followed).
  */
 export async function repointRealClaude(paths: RealPaths, v5Real: string): Promise<{ login: string; store: string }> {
-  const record = await readRecord(paths);
-  if (record === undefined) return refuse('there is no real-claude record to re-point');
-  const store = storePathOf(paths.fyHome, record.login);
+  return await repointReal(paths, v5Real, CLAUDE_TOOL);
+}
+
+/** The same for either tool. An `--all` record is written again for the new home's credentials root (both spellings), same string. */
+export async function repointReal(
+  paths: RealPaths,
+  v5Real: string,
+  tool: RealTool,
+): Promise<{ login: string; store: string }> {
+  const record = await readRecord(paths, tool);
+  if (record === undefined) return refuse(`there is no real-${tool.name} record to re-point`);
+  const all = record.all === true;
+  const store = all ? credentialsRootOf(paths.fyHome) : storePathOf(paths.fyHome, record.login);
+  const realFyHome = all ? await realpath(paths.fyHome).catch(() => undefined) : undefined;
+  const realStore = realFyHome === undefined ? undefined : credentialsRootOf(realFyHome);
   await plainFolder(paths.harness, join(v5Real, 'harness-bin'));
   await writeFileAtomic(
     join(v5Real, 'harness-bin'),
-    'claude',
-    shimText({ fake: join(paths.harness, FAKE_NAME), real: record.binary, store }),
+    tool.name,
+    shimText(
+      {
+        fake: join(paths.harness, tool.fakeName),
+        real: record.binary,
+        store,
+        ...(realStore === undefined ? {} : { realStore }),
+        ...(all ? { all } : {}),
+      },
+      tool,
+    ),
     0o755,
   );
   await plainFolder(paths.v5Dir, v5Real);
-  await writeFileAtomic(v5Real, basename(recordPathOf(paths)), recordText({ ...record, store }), 0o644);
+  await writeFileAtomic(v5Real, basename(recordPathOf(paths, tool)), recordText({ ...record, store }), 0o644);
   return { login: record.login, store };
 }
 
@@ -683,7 +731,7 @@ export async function resetV5(
   if (homeInfo === undefined || !homeInfo.isDirectory() || homeInfo.isSymbolicLink())
     return refuse(`${paths.home} is missing or not a plain folder; there is no 5.0 home to reset`);
   const keep = await realClaudePreflight(real, options.keepRealClaude);
-  await realCodexPreflight(real);
+  const keepCodex = await realCodexPreflight(real);
 
   await actions.stop();
   await assertResetTree(paths);
@@ -706,7 +754,16 @@ export async function resetV5(
     const checked = await assertResetTree(paths);
     const done = await repointRealClaude(real, checked.v5Real);
     actions.say(
-      `  real claude: dispatcher kept for login ${done.login}, pointed at ${done.store} (missing until the owner signs in)`,
+      done.login === ALL_LOGINS
+        ? `  real claude: still on for every login, pointed at ${done.store} (the logins are gone: the owner adds them again and signs in)`
+        : `  real claude: dispatcher kept for login ${done.login}, pointed at ${done.store} (missing until the owner signs in)`,
+    );
+  }
+  if (keepCodex !== undefined) {
+    const checked = await assertResetTree(paths);
+    const done = await repointReal(real, checked.v5Real, CODEX_TOOL);
+    actions.say(
+      `  real codex: still on for every login, pointed at ${done.store} (the logins are gone: the owner adds them again and signs in)`,
     );
   }
   await assertResetTree(paths);
