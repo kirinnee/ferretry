@@ -8,7 +8,13 @@ import { LayoutSchema, ThemeSchema } from './wire.ts';
 /** The built-in default (design §5.3). With Layouts off, the app shell uses its own copy of the same layout. */
 export const DEFAULT_LAYOUT = LayoutSchema.parse({
   id: 'default',
-  nav: { side: 'top', style: 'bar', items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'] },
+  // r11 S1: the places are docked at the foot of the side bar as icons (a phone's drawer too: no bottom bar); Conversations is a default place.
+  nav: {
+    side: 'left',
+    style: 'dock',
+    labels: 'icons',
+    items: ['ferrets', 'conversation.links', 'agenda', 'board', 'projects', 'insights', 'settings'],
+  },
   side: { show: 'wide-only', holds: 'ferrets', at: 'left' },
   top: ['daemon-picker', 'search'],
   'composer.tools': ['attachments', 'dictation', 'runtime-picker', 'composer-quota'],
@@ -34,21 +40,21 @@ export const DEFAULT_LAYOUT = LayoutSchema.parse({
     ],
   },
   density: 'comfortable',
-  // Every place the wide bar offers, so a phone can reach Projects, Insights and Settings too (v4's phone bar did).
-  phone: { nav: { side: 'bottom', items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'] } },
 });
 
 /** A denser layout: `fy layout use compact`. */
 export const COMPACT_LAYOUT = LayoutSchema.parse({
   id: 'compact',
-  nav: { side: 'left', style: 'rail', items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'] },
+  nav: {
+    side: 'left',
+    style: 'rail',
+    items: ['ferrets', 'conversation.links', 'agenda', 'board', 'projects', 'insights', 'settings'],
+  },
   side: { show: 'never', holds: 'panels' },
   top: ['daemon-picker', 'search'],
   'composer.tools': ['attachments', 'dictation', 'runtime-picker', 'composer-quota'],
   panels: { 'ferret.side': ['queue'] },
   density: 'compact',
-  // Every place the wide bar offers, so a phone can reach Projects, Insights and Settings too (v4's phone bar did).
-  phone: { nav: { side: 'bottom', items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'] } },
 });
 
 /** The stock theme names no style, palette or `base`: this device's own axes apply and no token is laid over them. */

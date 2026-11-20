@@ -5,6 +5,7 @@
  * `fy layout set` verb takes, so one row means the same thing in either scope.
  */
 import type { Layout } from '../../contract/index.ts';
+import type { Change } from './list-places.ts';
 
 interface ChoiceOption {
   readonly id: string;
@@ -14,18 +15,41 @@ interface ChoiceOption {
 }
 
 /**
- * ONLY WHAT THE SHELL DRAWS. The menu is always the left side bar (`drawer.tsx`); a side of `right` or `top` and a style of
- * `bar` draw exactly what `left` and `list` draw, so they are not offered. A phone has no navigation style row: its side bar
- * is always the shut overlay drawer, so a style would change nothing there. A layout that still names one (the built-in
- * default says `top` and `bar`; `fy layout set` accepts them) reads as the choice it draws, `unlisted`, with no migration.
+ * ONLY WHAT THE SHELL DRAWS. The menu is always the side bar (`drawer.tsx`); the one question is where its places go:
+ * docked at its foot as icons or as words (the default, r11 S1), as a list at its top, or in a bar along the bottom. That is ONE
+ * choice (`nav.form`) written to up to three layout keys (`nav.side`, `nav.style`, `nav.labels`), so a person never has to know
+ * the keys. A stored side of `right` or `top` and a style of `bar` or `rail` read as the form the shell draws them as, with no
+ * migration. A phone's drawer is the same drawer: its one switch is whether a bottom bar is drawn as well (owner, C2).
  */
-const NAV_SIDE_OPTIONS: readonly ChoiceOption[] = [
-  { id: 'left', label: 'Left', title: 'The menu is a side bar down the left edge.' },
-  { id: 'bottom', label: 'Bottom', title: 'The side bar stays, and a bar of places runs along the bottom.' },
+const NAV_FORM_OPTIONS: readonly ChoiceOption[] = [
+  {
+    id: 'dock-icons',
+    label: 'Sidebar foot (icons)',
+    title: 'The places are a row of icons at the foot of the side bar. Hover one for its name.',
+  },
+  {
+    id: 'dock-words',
+    label: 'Sidebar foot (words)',
+    title: 'The places are icon and name cells at the foot of the side bar.',
+  },
+  { id: 'list', label: 'Side list', title: 'The places are a list at the top of the side bar.' },
+  {
+    id: 'bottom',
+    label: 'Bottom bar',
+    title: 'A bar of places runs along the bottom of the page, and the side bar holds none.',
+  },
 ];
-const NAV_STYLE_OPTIONS: readonly ChoiceOption[] = [
-  { id: 'rail', label: 'Rail', title: 'The side bar starts as a slim strip of icons.' },
-  { id: 'list', label: 'List', title: 'The side bar starts open, each place with its icon and name.' },
+const PHONE_NAV_SIDE_OPTIONS: readonly ChoiceOption[] = [
+  {
+    id: 'left',
+    label: 'In the menu',
+    title: 'The places are at the foot of the menu: one tap to open it, and the page has the whole screen.',
+  },
+  {
+    id: 'bottom',
+    label: 'Bottom bar',
+    title: 'A bar of places runs along the bottom of the screen, always one tap away.',
+  },
 ];
 const SIDE_SHOW_OPTIONS: readonly ChoiceOption[] = [
   { id: 'never', label: 'Never', title: 'No ferret list.' },
@@ -45,14 +69,7 @@ const PHONE_SIDE_SHOW_OPTIONS: readonly ChoiceOption[] = [
 /** A key that takes one word out of a short list. */
 export interface ChoiceSetting {
   readonly kind: 'choice';
-  readonly path:
-    | 'nav.side'
-    | 'nav.style'
-    | 'side.show'
-    | 'density'
-    | 'phone.nav.side'
-    | 'phone.side.show'
-    | 'phone.density';
+  readonly path: 'nav.form' | 'side.show' | 'density' | 'phone.nav.side' | 'phone.side.show' | 'phone.density';
   readonly name: string;
   readonly hint: string;
   readonly options: readonly ChoiceOption[];
@@ -73,19 +90,10 @@ export type LayoutSetting = ChoiceSetting | ListSetting;
 export const LAYOUT_SETTINGS: readonly LayoutSetting[] = [
   {
     kind: 'choice',
-    path: 'nav.side',
-    name: 'Navigation side',
-    hint: 'Where the navigation sits',
-    options: NAV_SIDE_OPTIONS,
-    unlisted: 'left',
-  },
-  {
-    kind: 'choice',
-    path: 'nav.style',
-    name: 'Navigation style',
-    hint: 'How the navigation is drawn',
-    options: NAV_STYLE_OPTIONS,
-    unlisted: 'list',
+    path: 'nav.form',
+    name: 'Navigation',
+    hint: 'Where the places are: at the foot of the side bar as icons or words, a list at its top, or a bar along the bottom',
+    options: NAV_FORM_OPTIONS,
   },
   {
     kind: 'choice',
@@ -125,9 +133,9 @@ export const LAYOUT_SETTINGS: readonly LayoutSetting[] = [
   {
     kind: 'choice',
     path: 'phone.nav.side',
-    name: 'Phone navigation side',
-    hint: 'Where the navigation sits on a narrow screen',
-    options: NAV_SIDE_OPTIONS,
+    name: 'Phone navigation',
+    hint: 'On a narrow screen the places follow the Navigation choice, in the menu; this adds a bottom bar',
+    options: PHONE_NAV_SIDE_OPTIONS,
     unlisted: 'left',
   },
   {
@@ -174,10 +182,8 @@ export function choiceOf(layout: Layout, path: ChoiceSetting['path']): string {
 
 function wordOf(layout: Layout, path: ChoiceSetting['path']): string {
   switch (path) {
-    case 'nav.side':
-      return layout.nav.side;
-    case 'nav.style':
-      return layout.nav.style;
+    case 'nav.form':
+      return navFormOf(layout.nav);
     case 'side.show':
       return layout.side.show;
     case 'density':
@@ -189,6 +195,29 @@ function wordOf(layout: Layout, path: ChoiceSetting['path']): string {
     case 'phone.density':
       return layout.phone?.density ?? layout.density;
   }
+}
+
+/** The one navigation word a layout's `nav` reads as; a stored word the shell draws as another reads as that one. */
+function navFormOf(nav: Layout['nav']): string {
+  if (nav.side === 'bottom') return 'bottom';
+  if (nav.style === 'list' || nav.style === 'rail') return 'list';
+  return nav.labels === 'words' ? 'dock-words' : 'dock-icons';
+}
+
+/** The keys one word of a choice is saved to (`nav.form` is three keys); any other choice is its one key. */
+export function changesFor(path: ChoiceSetting['path'], word: string): readonly Change[] {
+  if (path !== 'nav.form') return [{ path, value: word }];
+  if (word === 'bottom') return [{ path: 'nav.side', value: 'bottom' }];
+  if (word === 'list')
+    return [
+      { path: 'nav.side', value: 'left' },
+      { path: 'nav.style', value: 'list' },
+    ];
+  return [
+    { path: 'nav.side', value: 'left' },
+    { path: 'nav.style', value: 'dock' },
+    { path: 'nav.labels', value: word === 'dock-words' ? 'words' : 'icons' },
+  ];
 }
 
 /** The names a list key currently holds; a phone list the layout does not set follows the wide one. */
@@ -235,7 +264,7 @@ export const LAYOUT_SECTIONS: readonly {
   readonly name: string;
   readonly paths: readonly LayoutSetting['path'][];
 }[] = [
-  { id: 'navigation', name: 'Navigation', paths: ['nav.side', 'nav.style', 'nav.items'] },
+  { id: 'navigation', name: 'Navigation', paths: ['nav.form', 'nav.items'] },
   { id: 'page', name: 'The page', paths: ['side.show', 'density', 'top', 'panels.ferret.side'] },
   {
     id: 'phone',

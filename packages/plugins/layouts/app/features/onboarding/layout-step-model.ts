@@ -32,8 +32,12 @@ export const LAYOUT_QUESTIONS: readonly LayoutQuestion[] = [
     name: 'Navigation',
     path: 'nav.side',
     answers: [
-      { id: 'left', title: 'Left', line: 'The menu is a side bar down the left edge.' },
-      { id: 'bottom', title: 'Bottom', line: 'The side bar stays, and a bar of places runs along the bottom.' },
+      { id: 'left', title: 'Side bar', line: 'A side bar down the left edge, with the places at its foot.' },
+      {
+        id: 'bottom',
+        title: 'Bottom bar',
+        line: 'A bar of places runs along the bottom, and the side bar holds none.',
+      },
     ],
   },
   {

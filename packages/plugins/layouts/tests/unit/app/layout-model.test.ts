@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { COMPACT_LAYOUT, DEFAULT_LAYOUT, LayoutSchema } from '../../../contract/index.ts';
-import { choiceOf, LAYOUT_ID, LAYOUT_SETTINGS, listOf, refusalSentence } from '../../../app/lib/layout-model.ts';
+import {
+  changesFor,
+  choiceOf,
+  LAYOUT_ID,
+  LAYOUT_SETTINGS,
+  listOf,
+  refusalSentence,
+} from '../../../app/lib/layout-model.ts';
 import { DaemonCallError } from '@ferretry/app';
 
 describe('the layout settings', () => {
@@ -12,37 +19,59 @@ describe('the layout settings', () => {
       }
       for (const option of setting.options) {
         const edited = structuredClone(DEFAULT_LAYOUT) as Record<string, unknown>;
-        const keys = setting.path.split('.');
-        let cursor = edited;
-        for (const key of keys.slice(0, -1)) {
-          cursor[key] = { ...(cursor[key] as object) };
-          cursor = cursor[key] as Record<string, unknown>;
+        // A choice may be several keys (`nav.form`): every key it saves is written, as `fy layout set` would.
+        for (const change of changesFor(setting.path, option.id)) {
+          const keys = change.path.split('.');
+          let cursor = edited;
+          for (const key of keys.slice(0, -1)) {
+            cursor[key] = { ...(cursor[key] as object) };
+            cursor = cursor[key] as Record<string, unknown>;
+          }
+          cursor[keys[keys.length - 1] as string] = change.value;
         }
-        cursor[keys[keys.length - 1] as string] = option.id;
         expect(LayoutSchema.safeParse(edited).success).toBe(true);
+        expect(choiceOf(edited as typeof DEFAULT_LAYOUT, setting.path), 'the choice reads back as the word saved').toBe(
+          option.id,
+        );
       }
       expect(setting.options.map(option => option.id)).toContain(choiceOf(DEFAULT_LAYOUT, setting.path));
     }
   });
 
-  test('only what the shell draws is offered: no right or top side, no bar style', () => {
+  test('only what the shell draws is offered: one navigation choice of four forms, and a phone switch for the bottom bar', () => {
     const offered = (path: string): string[] =>
       LAYOUT_SETTINGS.flatMap(setting =>
         setting.kind === 'choice' && setting.path === path ? setting.options.map(o => o.id) : [],
       );
-    for (const path of ['nav.side', 'phone.nav.side']) expect(offered(path)).toEqual(['left', 'bottom']);
-    expect(offered('nav.style')).toEqual(['rail', 'list']);
-    expect(offered('phone.nav.style')).toEqual([]); // a phone's side bar is always the shut drawer: no style to choose
+    expect(offered('nav.form')).toEqual(['dock-icons', 'dock-words', 'list', 'bottom']);
+    expect(offered('phone.nav.side')).toEqual(['left', 'bottom']);
+    expect(offered('nav.side')).toEqual([]); // the side and the style are keys of nav.form, not rows of their own
+    expect(offered('nav.style')).toEqual([]);
   });
 
-  test('a saved word that is no longer offered reads as the choice the shell draws it as', () => {
-    // The built-in default still says `top` and `bar`; the shell draws them as the left side bar, opened.
-    expect(choiceOf(DEFAULT_LAYOUT, 'nav.side')).toBe('left');
-    expect(choiceOf(DEFAULT_LAYOUT, 'nav.style')).toBe('list');
-    const right = { ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'right' as const } };
-    expect(choiceOf(right, 'nav.side')).toBe('left');
-    expect(choiceOf({ ...right, phone: { nav: { side: 'top' } } }, 'phone.nav.side')).toBe('left');
-    expect(choiceOf(COMPACT_LAYOUT, 'nav.style')).toBe('rail');
+  test('nav.form is saved to the keys its word means', () => {
+    expect(changesFor('nav.form', 'dock-icons')).toEqual([
+      { path: 'nav.side', value: 'left' },
+      { path: 'nav.style', value: 'dock' },
+      { path: 'nav.labels', value: 'icons' },
+    ]);
+    expect(changesFor('nav.form', 'dock-words').at(-1)).toEqual({ path: 'nav.labels', value: 'words' });
+    expect(changesFor('nav.form', 'list')).toEqual([
+      { path: 'nav.side', value: 'left' },
+      { path: 'nav.style', value: 'list' },
+    ]);
+    expect(changesFor('nav.form', 'bottom')).toEqual([{ path: 'nav.side', value: 'bottom' }]);
+    expect(changesFor('density', 'compact')).toEqual([{ path: 'density', value: 'compact' }]);
+  });
+
+  test('a saved word that is no longer offered reads as the form the shell draws it as', () => {
+    expect(choiceOf(DEFAULT_LAYOUT, 'nav.form')).toBe('dock-icons');
+    // Stored `right`/`top` sides and the `bar` style draw as the default: the places docked at the side bar's foot.
+    const old = { ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'right' as const, style: 'bar' as const } };
+    expect(choiceOf(old, 'nav.form')).toBe('dock-icons');
+    expect(choiceOf({ ...old, nav: { ...old.nav, labels: 'words' } }, 'nav.form')).toBe('dock-words');
+    expect(choiceOf({ ...old, phone: { nav: { side: 'top' } } }, 'phone.nav.side')).toBe('left');
+    expect(choiceOf(COMPACT_LAYOUT, 'nav.form')).toBe('list'); // a rail is the list on a side bar that starts slim
   });
 
   test('a choice and a list are read from the layout they are asked of', () => {
@@ -51,6 +80,7 @@ describe('the layout settings', () => {
     expect(choiceOf(COMPACT_LAYOUT, 'side.show')).toBe('never');
     expect(listOf(DEFAULT_LAYOUT, 'nav.items')).toEqual([
       'ferrets',
+      'conversation.links',
       'agenda',
       'board',
       'projects',
@@ -69,10 +99,10 @@ describe('the layout settings', () => {
   });
 
   test('a phone key is what the layout sets for a phone, else what the wide layout holds', () => {
-    expect(choiceOf(DEFAULT_LAYOUT, 'phone.nav.side')).toBe('bottom');
-    expect(choiceOf(DEFAULT_LAYOUT, 'nav.side')).toBe('left');
+    expect(choiceOf(DEFAULT_LAYOUT, 'phone.nav.side')).toBe('left'); // a phone follows the wide layout: places in the menu, no bottom bar
     expect(listOf(DEFAULT_LAYOUT, 'phone.nav.items')).toEqual([
       'ferrets',
+      'conversation.links',
       'agenda',
       'board',
       'projects',

@@ -67,60 +67,70 @@ describe('the Layout step', () => {
     await view.unmount();
   });
 
-  test('it shows itself once, as two short choice rows holding what this device shows today (no Left or Bottom on the built-in Top)', async () => {
+  test('it shows itself once, as two short choice rows holding what this device shows today (the built-in side bar, with the places at its foot)', async () => {
     const harness = stepRecorder();
     const writes: string[] = [];
     const view = await mount(<StatefulStep step={harness.host} writes={writes} />);
     expect(harness.decision).toBe('shown');
     expect(harness.count('ready')).toBe(1);
     expect(harness.count('done')).toBe(0);
-    expect(checked(view.container, 'Navigation')).toBe(undefined);
+    expect(checked(view.container, 'Navigation')).toBe('left');
     expect(checked(view.container, 'Density')).toBe('comfortable');
     expect(view.container.textContent).toContain('Just this device');
     expect(writes).toEqual([]);
     await view.unmount();
   });
 
-  test('answerOf reports what this device shows: Top on wide, Bottom on a phone, and an offered word as it is', () => {
+  test('answerOf reports what this device shows: the side bar on wide and on a phone, Bottom when asked, and a stored Top or Right as the side bar', () => {
     const [nav, density] = LAYOUT_QUESTIONS;
     const compact = { ...DEFAULT_LAYOUT, density: 'compact' as const };
     expect(answerOf(compact, density!, 'wide')).toBe('compact');
-    expect(answerOf(DEFAULT_LAYOUT, nav!, 'wide')).toBe('top');
-    expect(answerOf(DEFAULT_LAYOUT, nav!, 'phone')).toBe('bottom');
-    expect(answerOf({ ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'left' } }, nav!, 'wide')).toBe('left');
-    expect(answerOf({ ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'right' } }, nav!, 'wide')).toBe('right');
+    expect(answerOf(DEFAULT_LAYOUT, nav!, 'wide')).toBe('left');
+    expect(answerOf(DEFAULT_LAYOUT, nav!, 'phone')).toBe('left');
+    expect(answerOf({ ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'bottom' } }, nav!, 'wide')).toBe(
+      'bottom',
+    );
+    expect(answerOf({ ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'right' } }, nav!, 'wide')).toBe('left');
+    expect(answerOf({ ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'top' } }, nav!, 'phone')).toBe('left');
   });
 
-  test('on the built-in layout the first Left press saves on a desktop and on a phone, and no card starts checked on a desktop', async () => {
+  test('on the built-in layout the side bar card starts checked on a desktop and on a phone, and pressing it saves nothing', async () => {
     for (const viewport of ['wide', 'phone'] as const) {
       const harness = stepRecorder();
       const writes: string[] = [];
       const view = await mount(<StatefulStep step={harness.host} writes={writes} viewport={viewport} />);
-      expect(checked(view.container, 'Navigation')).toBe(viewport === 'wide' ? undefined : 'bottom');
-      await pick(view.container, 'Navigation', 'left');
-      expect(writes).toEqual(['nav.side=left', 'phone.nav.side=left']);
       expect(checked(view.container, 'Navigation')).toBe('left');
-      expect(harness.count('done')).toBe(1);
+      await pick(view.container, 'Navigation', 'left');
+      expect(writes).toEqual([]);
+      expect(harness.count('done')).toBe(0);
       await view.unmount();
     }
   });
 
-  test('on a phone the card already showing, Bottom, saves nothing when pressed', async () => {
+  test('on a phone that already holds a Bottom bar, that card shows and pressing it saves nothing', async () => {
     const harness = stepRecorder();
     const writes: string[] = [];
-    const view = await mount(<StatefulStep step={harness.host} writes={writes} viewport="phone" />);
+    const view = await mount(
+      <StatefulStep
+        step={harness.host}
+        writes={writes}
+        viewport="phone"
+        start={{ phone: { nav: { side: 'bottom' } } }}
+      />,
+    );
+    expect(checked(view.container, 'Navigation')).toBe('bottom');
     await pick(view.container, 'Navigation', 'bottom');
     expect(writes).toEqual([]);
     expect(harness.count('done')).toBe(0);
     await view.unmount();
   });
 
-  test('picking Bottom writes nav.side to this device, with the phone key since the layout sets one, and answers done', async () => {
+  test('picking Bottom writes nav.side to this device (the built-in layout sets no phone key) and answers done', async () => {
     const harness = stepRecorder();
     const writes: string[] = [];
     const view = await mount(<StatefulStep step={harness.host} writes={writes} />);
     await pick(view.container, 'Navigation', 'bottom');
-    expect(writes).toEqual(['nav.side=bottom', 'phone.nav.side=bottom']);
+    expect(writes).toEqual(['nav.side=bottom']);
     expect(checked(view.container, 'Navigation')).toBe('bottom');
     expect(harness.count('done')).toBe(1);
     await pick(view.container, 'Density', 'compact');
@@ -132,7 +142,11 @@ describe('the Layout step', () => {
 
   test('keysFor adds the phone key only when the layout in force sets one', () => {
     const [nav, density] = LAYOUT_QUESTIONS;
-    expect(keysFor(DEFAULT_LAYOUT, nav!)).toEqual(['nav.side', 'phone.nav.side']);
+    expect(keysFor({ ...DEFAULT_LAYOUT, phone: { nav: { side: 'bottom' } } }, nav!)).toEqual([
+      'nav.side',
+      'phone.nav.side',
+    ]);
+    expect(keysFor(DEFAULT_LAYOUT, nav!)).toEqual(['nav.side']);
     expect(keysFor({ ...DEFAULT_LAYOUT, phone: undefined }, nav!)).toEqual(['nav.side']);
     expect(keysFor({ ...DEFAULT_LAYOUT, phone: undefined }, density!)).toEqual(['density']);
   });

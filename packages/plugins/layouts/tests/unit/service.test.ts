@@ -104,7 +104,7 @@ describe('layouts service', () => {
     expect(saved.nav.side).toBe('bottom');
   });
 
-  test('save reads a navigation word the shell does not draw as the default, and keeps the order', async () => {
+  test('save reads a navigation word the shell does not draw as the default (a bar is the dock), and keeps the order', async () => {
     const items = ['settings', 'agenda', 'ferrets'];
     const { service, tree } = make({
       'layout.yaml': {
@@ -113,16 +113,16 @@ describe('layouts service', () => {
     });
     expect((await service.save('mine')).ok).toBe(true);
     const saved = LayoutSchema.parse(Bun.YAML.parse(tree.calls[0]?.edit as string));
-    expect([saved.nav.side, saved.nav.style, saved.nav.items]).toEqual(['left', 'list', items]);
-    expect([saved.phone?.nav?.side, saved.phone?.nav?.style]).toEqual(['left', 'list']);
+    expect([saved.nav.side, saved.nav.style, saved.nav.items]).toEqual(['left', 'dock', items]);
+    expect([saved.phone?.nav?.side, saved.phone?.nav?.style]).toEqual(['left', 'dock']);
     // The round trip: the saved copy, read back and used, shows the default words with the order intact.
     const again = make({
       'layouts/mine': Bun.YAML.parse(tree.calls[0]?.edit as string) as Record<string, unknown>,
       'layout.yaml': { layout: 'mine' },
     });
     const now = again.service.current().layout;
-    expect([now.nav.side, now.nav.style, now.nav.items]).toEqual(['left', 'list', items]);
-    expect([now.phone?.nav?.side, now.phone?.nav?.style]).toEqual(['left', 'list']);
+    expect([now.nav.side, now.nav.style, now.nav.items]).toEqual(['left', 'dock', items]);
+    expect([now.phone?.nav?.side, now.phone?.nav?.style]).toEqual(['left', 'dock']);
   });
 
   test('save keeps a drawn phone side, a phone with no nav, and a layout with no phone', async () => {

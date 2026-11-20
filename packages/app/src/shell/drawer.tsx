@@ -7,7 +7,7 @@ import { ResizeHandle } from '../ui/resize-handle.tsx';
 import { useShell } from './context.tsx';
 import { drawerState, useDrawerCollapsed, useDrawerOpen } from './drawer-state.ts';
 import { DrawerFind } from './drawer-find.tsx';
-import { DrawerNav } from './drawer-nav.tsx';
+import { DrawerDock, DrawerNav, navPlacement } from './drawer-nav.tsx';
 import { MachineItem } from './machine-switcher.tsx';
 import { useApplyPanelWidths } from './panel-widths.ts';
 import { SideBody, useSideHolds } from './side-column.tsx';
@@ -85,6 +85,7 @@ export function Drawer({
   }, [phone]);
   if (!shown) return null;
   const rail = !phone && collapsed;
+  const placement = navPlacement(plan.nav);
   const Toggle = phone ? X : rail ? PanelLeftOpen : PanelLeftClose;
   const toggleLabel = phone ? 'Close the menu' : rail ? 'Expand the side bar' : 'Collapse the side bar';
   return (
@@ -115,13 +116,15 @@ export function Drawer({
             <Toggle aria-hidden="true" size={18} />
           </button>
         </div>
-        <DrawerNav daemon={navDaemon} rail={rail} />
+        {placement === 'list' ? <DrawerNav daemon={navDaemon} rail={rail} /> : null}
         {/* THE LIST SLOT: the ferret list (its Mine / All / Agents header and rows) is drawn here, whole; the rail has no room for it. */}
         {rail || !listed || plan.side.at !== 'left' || holds === undefined || daemon === undefined ? null : (
           <div className="fy-drawer__list" data-slot="side">
             <SideBody daemon={daemon} holds={holds} />
           </div>
         )}
+        {/* THE DOCK: the places at the foot of the drawer, under the ferret list (r11 S1). */}
+        {placement === 'dock' ? <DrawerDock daemon={navDaemon} rail={rail} /> : null}
       </aside>
       {/* The grab strip on the drawer's edge: wide only, and not on the rail (a rail is one width). */}
       {phone || rail ? null : <ResizeHandle panel="drawer" edge="end" label="side bar" />}

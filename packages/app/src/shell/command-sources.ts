@@ -144,7 +144,10 @@ export function settingsSource(input: SettingsSourceInput): (query: string) => r
 }
 
 /** `layout set --device …` and `layout reset --device`, applied over the layout in force on this device. */
-export function deviceLayoutSource(base: Layout, layouts: DeviceLayoutStore): CommandBarSource {
+export function deviceLayoutSource(
+  base: Layout,
+  layouts: DeviceLayoutStore,
+): (query: string) => readonly CommandBarEntry[] {
   return () => {
     const entries: CommandBarEntry[] = [];
     const set = (path: string, value: string, label: string, keywords: readonly string[]): void => {
@@ -157,9 +160,54 @@ export function deviceLayoutSource(base: Layout, layouts: DeviceLayoutStore): Co
         run: () => void layouts.set(base, path, value),
       });
     };
-    for (const side of ['left', 'right', 'top', 'bottom'] as const) {
-      set('nav.side', side, `Move the navigation to the ${side}`, ['sidebar', 'nav', side]);
-    }
+    // Where the places are (r11 S1): one entry each for the three keys a form is, applied together.
+    const form = (
+      id: string,
+      label: string,
+      keys: readonly (readonly [string, string])[],
+      words: readonly string[],
+    ): void => {
+      entries.push({
+        id: `layout-nav-${id}`,
+        group: 'Layout on this device',
+        label,
+        description: keys.map(([path, value]) => `layout set --device ${path} ${value}`).join(' && '),
+        keywords: ['layout', 'sidebar', 'nav', 'navigation', ...words],
+        run: () => {
+          for (const [path, value] of keys) layouts.set(base, path, value);
+        },
+      });
+    };
+    form(
+      'dock-icons',
+      'Navigation: icons at the foot of the side bar',
+      [
+        ['nav.side', 'left'],
+        ['nav.style', 'dock'],
+        ['nav.labels', 'icons'],
+      ],
+      ['icons', 'dock', 'foot'],
+    );
+    form(
+      'dock-words',
+      'Navigation: words at the foot of the side bar',
+      [
+        ['nav.side', 'left'],
+        ['nav.style', 'dock'],
+        ['nav.labels', 'words'],
+      ],
+      ['words', 'dock', 'foot'],
+    );
+    form(
+      'list',
+      'Navigation: a list at the top of the side bar',
+      [
+        ['nav.side', 'left'],
+        ['nav.style', 'list'],
+      ],
+      ['list', 'top'],
+    );
+    form('bottom', 'Navigation: a bar along the bottom', [['nav.side', 'bottom']], ['bottom', 'bar']);
     set('density', 'compact', 'Use the compact density', ['dense', 'compact']);
     set('density', 'comfortable', 'Use the comfortable density', ['comfortable', 'roomy']);
     entries.push({

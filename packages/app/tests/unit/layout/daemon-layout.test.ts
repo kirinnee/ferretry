@@ -116,7 +116,10 @@ describe('this device’s layout store', () => {
     writeRecord(storage, APP_STORAGE.layout, preV4);
     const store = new DeviceLayoutStore(storage);
     expect(store.snapshot()).toEqual({});
-    expect(drawn(store)).toMatchObject({ nav: { side: 'top', style: 'bar' }, side: { at: 'left', holds: 'ferrets' } });
+    expect(drawn(store)).toMatchObject({
+      nav: { side: 'left', style: 'dock' },
+      side: { at: 'left', holds: 'ferrets' },
+    });
     expect(storage.entries()[APP_STORAGE.layout]).toBeUndefined();
   });
 
@@ -128,7 +131,7 @@ describe('this device’s layout store', () => {
     for (let reload = 0; reload < 2; reload += 1) {
       const again = new DeviceLayoutStore(storage);
       expect(again.snapshot()).toEqual({ side: { at: 'right' } });
-      expect(drawn(again)).toMatchObject({ nav: { side: 'top' }, side: { at: 'right' } });
+      expect(drawn(again)).toMatchObject({ nav: { side: 'left' }, side: { at: 'right' } });
     }
   });
 
@@ -138,6 +141,6 @@ describe('this device’s layout store', () => {
     expect(new DeviceLayoutStore(storage).snapshot()).toEqual({ nav: { side: 'right' } });
     const fresh = new DeviceLayoutStore(memoryStore());
     expect(fresh.snapshot()).toEqual({});
-    expect(drawn(fresh)).toMatchObject({ nav: { side: 'top', style: 'bar' }, side: { at: 'left' } });
+    expect(drawn(fresh)).toMatchObject({ nav: { side: 'left', style: 'dock' }, side: { at: 'left' } });
   });
 });

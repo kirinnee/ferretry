@@ -77,7 +77,7 @@ describe('the left drawer', () => {
     expect(toggle(root).getAttribute('aria-expanded')).toBe('true');
     await interact(() => toggle(root).click());
     expect(root.querySelector('.fy-drawer--rail')).not.toBeNull();
-    expect(root.querySelector('.fy-nav--rail')).not.toBeNull();
+    expect(root.querySelector('.fy-nav--dock-rail')).not.toBeNull();
     expect(find(root).textContent).toBe('');
     expect(window.localStorage.getItem(APP_STORAGE.drawer)).toContain('"collapsed":true');
     // A fresh app on the same device opens collapsed.

@@ -172,6 +172,11 @@ describe('the ferrets page (the screen the side column holds)', () => {
             await tab.locator('[data-ferret-list]').count(),
             'the list is drawn once, not in the page and the column',
           ).toBe(1);
+          // The nav is docked in the drawer (r11 S1): a phone's drawer is shut behind its menu button.
+          if (viewport.phone) {
+            await tab.click('button[aria-label="Menu"]');
+            await tab.waitForSelector('.fy-drawer--overlay');
+          }
           const board = tab.locator('.fy-nav__item', { hasText: 'Board' });
           expect(await board.evaluate(node => node.tagName)).toBe('A');
           expect(await board.getAttribute('href')).toBe('/d/ws/board');
@@ -371,9 +376,12 @@ describe('the drawer and the body stay put while a tall page scrolls', () => {
           } else {
             expect(seen.top.top, 'the body is still at the top of the window').toBeGreaterThanOrEqual(0);
             expect(seen.top.bottom, 'the body is still on screen').toBeLessThanOrEqual(seen.window.height);
-            expect(seen.nav.top, 'the nav starts inside the window').toBeGreaterThanOrEqual(0);
-            expect(seen.nav.bottom, 'the nav is still inside the window').toBeLessThanOrEqual(seen.window.height);
-            expect(seen.nav.right, 'the nav is still in view sideways').toBeGreaterThan(0);
+            // The places are docked in the drawer (r11 S1): on a phone the drawer is shut, so there is no nav on the page at all.
+            if (!Number.isNaN(seen.nav.top)) {
+              expect(seen.nav.top, 'the nav starts inside the window').toBeGreaterThanOrEqual(0);
+              expect(seen.nav.bottom, 'the nav is still inside the window').toBeLessThanOrEqual(seen.window.height);
+              expect(seen.nav.right, 'the nav is still in view sideways').toBeGreaterThan(0);
+            }
           }
           if (shotsDir !== '')
             await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${name}-page-scrolled.png`) });
@@ -527,7 +535,7 @@ describe('the default shell is v4’s: ferret list on the left, a left drawer', 
   for (const viewport of SHELL_VIEWPORTS)
     for (const mode of ['light', 'dark'] as const)
       for (const page of PAGES)
-        it(`${viewport.name}, ${mode}, ${page.name}: ${viewport.phone ? 'bottom bar, no side column' : 'list in the drawer left of the page, no top row'}, nothing overflows`, async () => {
+        it(`${viewport.name}, ${mode}, ${page.name}: ${viewport.phone ? 'no bottom bar (the nav is in the shut drawer), no side column' : 'list in the drawer left of the page with the nav docked under it, no top row'}, nothing overflows`, async () => {
           const { tab, close } = await open(viewport, page.path, page.ready, '&relay=0', `studio-${mode}`);
           try {
             await shotOf(tab, `v5-${viewport.name}-${mode}-${page.name}`);
@@ -540,7 +548,7 @@ describe('the default shell is v4’s: ferret list on the left, a left drawer', 
                 topRow: document.querySelector('.fy-top, .fy-nav--top') !== null,
                 drawerFill: drawer === null ? -1 : drawer.getBoundingClientRect().height,
                 windowHeight: window.innerHeight,
-                navOverflows: nav === null ? true : nav.scrollWidth > nav.clientWidth + 1,
+                navOverflows: nav === null ? false : nav.scrollWidth > nav.clientWidth + 1,
                 side: box('.fy-drawer__list'),
                 main: box('.fy-main'),
                 navPanels: document.querySelectorAll('[data-device-slot="nav"]').length,
@@ -551,10 +559,10 @@ describe('the default shell is v4’s: ferret list on the left, a left drawer', 
             expect(geometry.navOverflows, 'the nav does not overflow').toBe(false);
             expect(geometry.pageOverflows, 'the page does not scroll sideways').toBe(false);
             if (viewport.phone) {
-              expect(geometry.navClass).toContain('fy-nav--bottom');
+              expect(geometry.navClass, 'no bottom bar on a phone (owner, C2): the nav is in the drawer').toBe('');
               expect(geometry.side, 'a phone draws no side column').toBeUndefined();
             } else {
-              expect(geometry.navClass).toContain('fy-nav--drawer');
+              expect(geometry.navClass).toContain('fy-nav--dock');
               expect(geometry.topRow, 'no row of places across the top').toBe(false);
               expect(geometry.drawerFill, 'the drawer runs the full height').toBeGreaterThanOrEqual(
                 geometry.windowHeight - 1,

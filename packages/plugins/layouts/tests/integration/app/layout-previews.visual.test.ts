@@ -155,7 +155,7 @@ const shot = async (locator: Locator, variant: Variant, name: string): Promise<v
   if (shotsDir !== '') await locator.screenshot({ path: join(shotsDir, `${variant.name}-${name}.png`) });
 };
 
-const ROWS = ['Navigation side', 'Navigation style', 'Second column', 'Density', 'Navigation items'] as const;
+const ROWS = ['Navigation', 'Second column', 'Density', 'Navigation items'] as const;
 const LOOP = 1_400;
 
 describe('the layout previews', () => {
@@ -220,7 +220,7 @@ describe('the layout previews', () => {
         expect(await tab.locator('.fy-sp__layer--before').count()).toBe(0);
         const lifted = previewOf(tab, 'Navigation items').first().locator('.fy-ls-nrow[data-role="lift"]');
         expect(await lifted.evaluate(node => getComputedStyle(node).transform)).toBe('none');
-        await shot(previewOf(tab, 'Navigation side').first(), variant, 'reduced-motion');
+        await shot(previewOf(tab, 'Navigation').first(), variant, 'reduced-motion');
       } finally {
         await close();
       }
