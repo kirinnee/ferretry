@@ -334,9 +334,9 @@ describe('r11 T2 · the component style contract', () => {
       runTiming: 'cubic-bezier(0.4, 0, 0.2, 1)',
       revealDuration: '0.16s',
       revealTiming: 'ease-out',
-      revealDelay: '0.18s',
+      revealDelay: '0.3s',
       barRevealTiming: 'ease-out',
-      barRevealDelay: '0.18s',
+      barRevealDelay: '0.3s',
       spBeforeTiming: 'ease-in-out',
       spAfterTiming: 'ease-in-out',
     });
