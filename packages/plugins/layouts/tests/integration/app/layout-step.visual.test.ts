@@ -108,8 +108,49 @@ const seek = async (tab: Page, ms: number): Promise<void> => {
 declare global {
   interface Window {
     __writes: string[];
+    __demoEvents: string[];
   }
 }
+
+/** Record every CSS animation event inside the DEMO column only (the cards' own motion is not the demo's). */
+const watchDemo = async (tab: Page): Promise<void> => {
+  await tab.evaluate(() => {
+    window.__demoEvents = [];
+    for (const type of ['animationstart', 'animationiteration', 'animationend', 'animationcancel'])
+      document.addEventListener(
+        type,
+        event => {
+          const target = event.target as HTMLElement;
+          if (target.closest('[data-step-demo]') === null) return;
+          window.__demoEvents.push(`${type}:${(event as AnimationEvent).animationName}:${target.className}`);
+        },
+        true,
+      );
+  });
+};
+
+/** What the demo column is animating right now (not the cards, not the page). */
+const demoRunning = async (tab: Page): Promise<number> =>
+  await tab.evaluate(
+    () =>
+      (document.querySelector('[data-step-demo]') as Element)
+        .getAnimations({ subtree: true })
+        .filter(animation => animation.playState === 'running').length,
+  );
+
+/** Wait, in real time and without touching a clock, until the demo is at rest; return how long that took. */
+const demoSettles = async (tab: Page): Promise<number> => {
+  const started = Date.now();
+  await tab.waitForFunction(
+    () =>
+      (document.querySelector('[data-step-demo]') as Element)
+        .getAnimations({ subtree: true })
+        .every(animation => animation.playState !== 'running'),
+    undefined,
+    { timeout: 2_000, polling: 'raf' },
+  );
+  return Date.now() - started;
+};
 
 describe('r11 O11: the first-run Layout page', () => {
   for (const variant of VARIANTS) {
@@ -129,11 +170,8 @@ describe('r11 O11: the first-run Layout page', () => {
             allCards: [...document.querySelectorAll('[data-layout-step] [data-choice]')].map(measure),
             demo: measure(document.querySelector('[data-step-demo]')),
             demoScene: document.querySelector('[data-step-demo] [data-layout-demo]') !== null,
-            // The page's words minus the card titles (the plan's measure for "one short line each").
-            bodyText: [...body.querySelectorAll('.fy-cc__title')].reduce(
-              (text, title) => text.replace((title as HTMLElement).innerText, ''),
-              body.innerText,
-            ),
+            // EVERYTHING the page shows, headings and card titles included, whitespace folded (the plan's 160-character limit).
+            bodyText: body.innerText.replace(/\s+/g, ' ').trim(),
             bodyButtons: body.querySelectorAll('button:not([role=radio])').length,
             dockTops: [...document.querySelectorAll('[data-step-demo] .fy-lstep-demo__dock span')].map(
               span => span.getBoundingClientRect().top,
@@ -183,29 +221,93 @@ describe('r11 O11: the first-run Layout page', () => {
       }
     });
 
+    if (shotsDir !== '')
+      it(`${variant.name}: shot the demo mid-move`, async () => {
+        const { tab, close } = await open(variant);
+        try {
+          await tab.locator('[data-choice="words"]').click();
+          await tab.locator('[data-choice="compact"]').click();
+          await seek(tab, 120);
+          await shot(tab, variant, 'mid-animation');
+        } finally {
+          await close();
+        }
+      });
+
     it(`${variant.name}: a pick writes nothing, the demo follows it, and Next writes once`, async () => {
       const { tab, close } = await open(variant);
       try {
         const demo = (name: string, value: string) => `[data-step-demo] [data-layout-demo][data-${name}="${value}"]`;
         expect(await tab.locator(demo('labels', 'icons')).count()).toBe(1);
+        expect(await demoRunning(tab), 'the demo rests before any pick').toBe(0);
+        await watchDemo(tab);
+
+        // Words: the DOCK plays once, by itself (no seek, no finish), and rests.
         await tab.locator('[data-choice="words"]').click();
-        await tab.locator('[data-choice="compact"]').click();
-        await seek(tab, 120);
-        await shot(tab, variant, 'mid-animation');
-        expect(await tab.evaluate(() => document.getAnimations().length), 'something moves on select').toBeGreaterThan(
-          0,
+        const dockRunning = await tab.evaluate(
+          () => (document.querySelector('[data-step-demo] .fy-lstep-demo__dock') as Element).getAnimations().length,
         );
-        await tab.evaluate(() => {
-          for (const animation of document.getAnimations()) animation.finish();
-        });
-        await shot(tab, variant, 'chosen');
-        expect(await tab.locator(demo('labels', 'words')).count(), 'the picture shows Words').toBe(1);
-        expect(await tab.locator(demo('density', 'compact')).count(), 'the picture shows Compact').toBe(1);
-        expect(await tab.evaluate(() => window.__writes), 'a click writes nothing').toEqual([]);
+        expect(dockRunning, 'the dock moves when Words is picked').toBeGreaterThan(0);
+        const dockMs = await demoSettles(tab);
+        await tab.waitForTimeout(700); // longer than any of the demo's own animations: a repeat would show here
+        const dockEvents = await tab.evaluate(() => window.__demoEvents);
         expect(
-          await tab.evaluate(() => document.getAnimations().filter(a => a.playState === 'running').length),
-          'nothing keeps repeating',
-        ).toBe(0);
+          dockEvents.filter(event => event.startsWith('animationstart:fy-lstep-rise')),
+          'the dock starts once',
+        ).toHaveLength(1);
+        expect(
+          dockEvents.filter(event => event.startsWith('animationend:fy-lstep-rise')),
+          'the dock ends once',
+        ).toHaveLength(1);
+        expect(
+          dockEvents.filter(event => /^animation(iteration|cancel)/.test(event)),
+          'nothing repeats or is cut',
+        ).toEqual([]);
+        expect(
+          dockEvents.every(event => event.includes('fy-lstep-demo__dock')),
+          'only the dock moved',
+        ).toBe(true);
+        expect(await demoRunning(tab), 'the dock came to rest on its own').toBe(0);
+        expect(await tab.locator(demo('labels', 'words')).count(), 'the picture shows Words').toBe(1);
+
+        // Compact: the ROWS play once each, by themselves, and rest.
+        await tab.evaluate(() => {
+          window.__demoEvents = [];
+        });
+        await tab.locator('[data-choice="compact"]').click();
+        const rowsRunning = await tab.evaluate(
+          () =>
+            [...document.querySelectorAll('[data-step-demo] .fy-lstep-demo__row')].flatMap(row => row.getAnimations())
+              .length,
+        );
+        expect(rowsRunning, 'the rows move when Compact is picked').toBeGreaterThan(0);
+        const rowsMs = await demoSettles(tab);
+        await tab.waitForTimeout(700);
+        const rowEvents = await tab.evaluate(() => window.__demoEvents);
+        const rowCount = await tab.locator('[data-step-demo] .fy-lstep-demo__row').count();
+        expect(
+          rowEvents.filter(event => event.startsWith('animationstart:fy-lstep-rise')),
+          'each row starts once',
+        ).toHaveLength(rowCount);
+        expect(
+          rowEvents.filter(event => event.startsWith('animationend:fy-lstep-rise')),
+          'each row ends once',
+        ).toHaveLength(rowCount);
+        expect(
+          rowEvents.filter(event => /^animation(iteration|cancel)/.test(event)),
+          'nothing repeats or is cut',
+        ).toEqual([]);
+        expect(
+          rowEvents.every(event => event.includes('fy-lstep-demo__row')),
+          'only the rows moved',
+        ).toBe(true);
+        expect(await demoRunning(tab), 'the rows came to rest on their own').toBe(0);
+        expect(await tab.locator(demo('density', 'compact')).count(), 'the picture shows Compact').toBe(1);
+        console.log(
+          `[O11 ${variant.name}] dock settled in ${dockMs}ms (${dockEvents.length} events), rows settled in ${rowsMs}ms (${rowCount} rows, ${rowEvents.length} events)`,
+        );
+        await shot(tab, variant, 'chosen');
+        expect(await tab.evaluate(() => window.__writes), 'a click writes nothing').toEqual([]);
         await tab.locator('[data-step-next]').click();
         await tab.waitForFunction(() => window.__writes.length >= 2);
         await tab.waitForTimeout(150);
