@@ -1,8 +1,9 @@
 /**
- * THE CLOSE OF THE SETUP, once no step waits for an answer: what was set up (on the machine, and on this device) as one
- * row each with a mark, what was skipped as a short list with a button to its Settings so nothing left undone is lost, and
- * where to change the rest. It names plugins ("Claude Code") and device pages ("Passkey"), never the pages inside a
- * plugin. Every button here is the frame's own 8.5rem wide (never the row wide), in one column on the right of its row.
+ * THE CLOSE OF THE SETUP, once no step waits for an answer: what was set up as two borderless checklists, one for THIS
+ * MACHINE and one for THIS DEVICE, with ONE row per segment (a plugin on the machine, a page of this device). A set-up
+ * segment is a checked row; a segment left for later is a quiet row that says so, with a small link to its Settings so
+ * nothing left undone is lost. It names plugins ("Claude Code") and device pages ("Passkey"), never the pages inside a
+ * plugin. Nothing here is a box: no border, no card, only spacing (`end-page.css`).
  */
 import { DEVICE_SETTINGS_HREF, daemonSettingsHref } from '@ferretry/app';
 import { Check, Minus } from 'lucide-react';
@@ -13,25 +14,34 @@ import './end-page.css';
 /** The plugin whose setup page names the machine itself. */
 const MACHINE_PLUGIN = 'onboarding';
 
-interface SummaryGroup {
+type Phase = 'daemon' | 'client';
+/** done: every page set up · partial: some set up, some left · later: none set up. */
+type SegmentState = 'done' | 'partial' | 'later';
+
+interface Segment {
+  /** `daemon:<plugin>` or `client:<plugin>.<page>`: one per segment. */
+  readonly key: string;
   /** The Settings tab that holds it. */
   readonly plugin: string;
   readonly name: string;
-  readonly phase: 'daemon' | 'client';
-  readonly set: number;
-  readonly left: number;
+  readonly phase: Phase;
+  readonly state: SegmentState;
 }
 
 /**
- * One entry per plugin on the machine (in the order the flow met them) and one per page of this device (a device page
- * is named by its own title): how many of its pages were set up and how many were not.
+ * One segment per plugin on the machine (in the order the flow met them) and one per page of this device (a device page
+ * is named by its own title): how many of its pages were set up decides its state.
  */
-const groupsOf = (steps: readonly SummaryStep[]): readonly SummaryGroup[] => {
-  const groups = new Map<string, SummaryGroup>();
+const segmentsOf = (steps: readonly SummaryStep[]): readonly Segment[] => {
+  const counts = new Map<
+    string,
+    { key: string; plugin: string; name: string; phase: Phase; set: number; left: number }
+  >();
   for (const step of steps) {
-    const phase = step.phase ?? 'daemon';
+    const phase: Phase = step.phase ?? 'daemon';
     const id = phase === 'client' ? `client:${step.plugin}.${step.id}` : `daemon:${step.plugin}`;
-    const before = groups.get(id) ?? {
+    const before = counts.get(id) ?? {
+      key: id,
       plugin: step.plugin,
       name: phase === 'client' ? step.title : step.group,
       phase,
@@ -39,44 +49,65 @@ const groupsOf = (steps: readonly SummaryStep[]): readonly SummaryGroup[] => {
       left: 0,
     };
     const wasSet = step.state === 'done' || step.state === 'found';
-    groups.set(id, { ...before, set: before.set + (wasSet ? 1 : 0), left: before.left + (wasSet ? 0 : 1) });
+    counts.set(id, { ...before, set: before.set + (wasSet ? 1 : 0), left: before.left + (wasSet ? 0 : 1) });
   }
-  return [...groups.values()];
+  return [...counts.values()].map(({ set, left, ...segment }) => ({
+    ...segment,
+    state: left === 0 ? 'done' : set === 0 ? 'later' : 'partial',
+  }));
 };
 
-/** One row of the card: a mark, a label, and what belongs to it. */
-function Row({
-  id,
-  mark = 'done',
-  label,
-  children,
-}: {
-  readonly id: string;
-  readonly mark?: 'done' | 'none';
-  readonly label: string;
-  readonly children?: ReactNode;
-}): ReactNode {
-  const Mark = mark === 'done' ? Check : Minus;
+/** What a row that is not fully set up says, quietly, under its name. */
+const NOTE: Record<Exclude<SegmentState, 'done'>, string> = { later: 'Finish later', partial: 'Partly set up' };
+
+function Row({ daemon, segment }: { readonly daemon: string; readonly segment: Segment }): ReactNode {
+  const done = segment.state === 'done';
+  const Mark = done ? Check : Minus;
   return (
-    <div className="fy-end__row" data-end-row={id}>
-      <span className="fy-end__mark" data-mark={mark} aria-hidden="true">
-        <Mark size={16} strokeWidth={2.5} />
+    <li className="fy-end__row" data-end-row={segment.key} data-end-state={segment.state}>
+      <span className="fy-end__mark" data-mark={done ? 'done' : 'none'} aria-hidden="true">
+        <Mark size={14} strokeWidth={3} />
       </span>
-      <div className="fy-end__what">
-        <p className="fy-end__label">{label}</p>
-        {children}
-      </div>
-    </div>
+      <span className="fy-end__name">
+        {segment.name}
+        {done ? null : <span className="fy-end__note">{NOTE[segment.state]}</span>}
+      </span>
+      {done ? null : (
+        <RouterLink
+          href={segment.phase === 'client' ? DEVICE_SETTINGS_HREF : daemonSettingsHref(daemon, segment.plugin)}
+          aria-label={`Finish ${segment.name}`}
+          data-onboarding-later-link={segment.plugin}
+        >
+          {segment.state === 'later' ? 'Set up' : 'Finish'}
+        </RouterLink>
+      )}
+    </li>
   );
 }
 
-const Names = ({ names }: { readonly names: readonly string[] }): ReactNode => (
-  <ul className="fy-end__names">
-    {names.map(name => (
-      <li key={name}>{name}</li>
-    ))}
-  </ul>
-);
+function Checklist({
+  daemon,
+  which,
+  title,
+  segments,
+}: {
+  readonly daemon: string;
+  readonly which: 'machine' | 'device';
+  readonly title: string;
+  readonly segments: readonly Segment[];
+}): ReactNode {
+  if (segments.length === 0) return null;
+  return (
+    <section className="fy-end__list" data-end-list={which} aria-label={title}>
+      <h2 className="fy-end__heading">{title}</h2>
+      <ul className="fy-end__rows">
+        {segments.map(segment => (
+          <Row key={segment.key} daemon={daemon} segment={segment} />
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 export function SetupSummary({
   daemon,
@@ -86,68 +117,31 @@ export function SetupSummary({
   readonly steps: readonly SummaryStep[];
 }): ReactNode {
   if (steps.length === 0 || steps.some(step => step.state === 'pending')) return null;
-  const groups = groupsOf(steps);
-  const left = groups.filter(group => group.left > 0);
-  const named = (phase: SummaryGroup['phase']): readonly string[] => {
-    const set = groups.filter(group => group.phase === phase && group.set > 0);
-    // The machine's own page (its name) is not a thing to list: the row is about what was brought in.
-    const listed =
-      phase === 'daemon' && set.some(group => group.plugin !== MACHINE_PLUGIN)
-        ? set.filter(group => group.plugin !== MACHINE_PLUGIN)
-        : set;
-    return listed.map(group => group.name);
+  const all = segmentsOf(steps);
+  const of = (phase: Phase): readonly Segment[] => {
+    const mine = all.filter(segment => segment.phase === phase);
+    // The machine's own page (its name) is not a thing to list while anything else was brought in or left.
+    return phase === 'daemon' && mine.length > 1
+      ? mine.filter(segment => segment.plugin !== MACHINE_PLUGIN || segment.state !== 'done')
+      : mine;
   };
-  const onMachine = named('daemon');
-  const onDevice = named('client');
+  const onMachine = of('daemon');
+  const onDevice = of('client');
   const deviceOnly = onDevice.length > 0 && onMachine.length === 0;
-  const settingsHref = deviceOnly ? DEVICE_SETTINGS_HREF : daemonSettingsHref(daemon);
   return (
-    <section className="kt-panel fy-end__card" data-onboarding-summary="">
-      <div className="fy-end__rows" data-onboarding-summary-set="">
-        {onMachine.length === 0 ? null : (
-          <Row id="machine" label="Set up on this machine">
-            <Names names={onMachine} />
-          </Row>
-        )}
-        {onDevice.length === 0 ? null : (
-          <Row id="device" label="Set up on this device">
-            <Names names={onDevice} />
-          </Row>
-        )}
-        {onMachine.length + onDevice.length === 0 ? (
-          <Row id="nothing" mark="none" label="Nothing was set up this time." />
-        ) : null}
-        {left.length === 0 ? <Row id="skipped" label="Nothing was skipped." /> : null}
+    <div className="fy-end__summary" data-onboarding-summary="" data-onboarding-summary-set="">
+      <div className="fy-end__lists" data-lists={onMachine.length > 0 && onDevice.length > 0 ? 'two' : 'one'}>
+        <Checklist daemon={daemon} which="machine" title="This machine" segments={onMachine} />
+        <Checklist daemon={daemon} which="device" title="This device" segments={onDevice} />
       </div>
-      {left.length === 0 ? null : (
-        <div className="fy-end__later" data-onboarding-summary-later="">
-          <h2 className="fy-end__heading">Left for later</h2>
-          <ul className="fy-end__list">
-            {left.map(group => (
-              <li key={`${group.phase}:${group.plugin}:${group.name}`} className="fy-end__item">
-                <span className="fy-end__item-name">
-                  {group.name}
-                  {group.set > 0 ? <span className="fy-end__item-note">Some pages skipped</span> : null}
-                </span>
-                <RouterLink
-                  button
-                  href={group.phase === 'client' ? DEVICE_SETTINGS_HREF : daemonSettingsHref(daemon, group.plugin)}
-                  aria-label={`Finish ${group.name}`}
-                  data-onboarding-later-link={group.plugin}
-                >
-                  Finish
-                </RouterLink>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <div className="fy-end__item fy-end__where" data-onboarding-summary-where="">
-        <span className="fy-end__item-name">Change any of this later in Settings.</span>
-        <RouterLink button href={settingsHref} data-onboarding-open-settings="">
-          Open Settings
+      <p className="fy-end__where" data-onboarding-summary-where="">
+        <RouterLink
+          href={deviceOnly ? DEVICE_SETTINGS_HREF : daemonSettingsHref(daemon)}
+          data-onboarding-open-settings=""
+        >
+          Change any of this later in Settings
         </RouterLink>
-      </div>
-    </section>
+      </p>
+    </div>
   );
 }

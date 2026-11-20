@@ -3,10 +3,13 @@
  * words: "this page looks really bad" and "buttons: proper spacing, proper width". So the asserts are on computed
  * geometry, not a snapshot:
  *
- *   1280  what was set up and the way to start sit SIDE BY SIDE (no empty right half); every row of what was set up has
- *         an icon; the buttons of a group are one width and one left edge; the "left for later" buttons are the
- *         frame's own 136px; nothing is wider than the viewport; the page says little.
- *   390   one column, what was set up first; the same equal widths; every button inside the screen; no sideways scroll.
+ *   both  NO BOX: no ancestor of the summary (up to the page) and nothing inside it draws a border; one row per segment,
+ *         each with a mark, 44px tall; a segment set up in part says "Partly set up" with a link to finish it, a skipped
+ *         one says "Finish later"; no "(some pages skipped)"; the page text is at most 300 characters; exactly one
+ *         primary button; nothing is wider than the screen; no content is under the sticky footer at the end of the scroll.
+ *   1280  the two checklists (this machine, this device) sit SIDE BY SIDE, start together, are one width and fill the body;
+ *         Create a project, Continue a conversation and Open this machine are ONE width (±1px).
+ *   390   the checklists are stacked; the two ways to start fill their row, 8–16px apart.
  *
  * Light and dark. Set `FY_END_PAGE_SHOTS_DIR` to keep a screenshot of each case.
  */
@@ -107,77 +110,171 @@ describe('the last page', () => {
             expect(boxes.length, `${selector} is drawn once`).toBe(1);
             return boxes[0] as Box;
           };
-          const sameWidth = (boxes: readonly Box[], label: string): void => {
-            expect(boxes.length, `${label}: there are buttons`).toBeGreaterThan(0);
-            for (const box of boxes) {
-              expect(Math.abs(box.w - (boxes[0] as Box).w), `${label}: one width`).toBeLessThanOrEqual(1);
-              expect(Math.abs(box.x - (boxes[0] as Box).x), `${label}: one left edge`).toBeLessThanOrEqual(1);
-              expect(box.h, `${label}: a 44px target`).toBeGreaterThanOrEqual(43.5);
-              expect(box.x, `${label}: inside the screen`).toBeGreaterThanOrEqual(0);
-              expect(box.right, `${label}: inside the screen`).toBeLessThanOrEqual(viewport.width);
+
+          // ── no box: nothing that wraps the summary, and nothing inside it, has a visible border ───────────────────
+          const borders = await tab.evaluate(() => {
+            const summary = document.querySelector('[data-onboarding-summary]') as HTMLElement;
+            const page = document.querySelector('[data-flow-end]') as HTMLElement;
+            const visible = (node: Element): boolean => {
+              const style = getComputedStyle(node);
+              return ['Top', 'Right', 'Bottom', 'Left'].some(
+                side =>
+                  Number.parseFloat(style.getPropertyValue(`border-${side.toLowerCase()}-width`)) > 0 &&
+                  style.getPropertyValue(`border-${side.toLowerCase()}-style`) !== 'none',
+              );
+            };
+            const wrapping: string[] = [];
+            for (let node: Element | null = summary; node !== null; node = node.parentElement) {
+              if (visible(node)) wrapping.push(node.className || node.tagName);
+              if (node === page) break;
             }
-          };
+            const inside = [...summary.querySelectorAll('*')]
+              .filter(visible)
+              .map(node => node.className || node.tagName);
+            return { wrapping, inside };
+          });
+          expect(borders.wrapping, 'no ancestor of the summary (up to the page) draws a border').toEqual([]);
+          expect(borders.inside, 'nothing inside the summary draws a border').toEqual([]);
 
-          const summary = await one('[data-onboarding-summary]');
-          const start = await one('[data-flow-end-start]');
-          const later = await all('[data-onboarding-later-link]');
-          const starts = await all('[data-flow-end-start] button');
-          const settings = await all('[data-onboarding-open-settings]');
-          expect(later.length, 'three things left for later, each with its own button').toBe(3);
-          expect(starts.length, 'two ways to start').toBe(2);
-          sameWidth(later, 'later buttons');
-          sameWidth(starts, 'start buttons');
-          expect(
-            starts[1] === undefined ? 0 : starts[1].y - (starts[0] as Box).bottom,
-            'start buttons: 8–16px apart',
-          ).toBeGreaterThanOrEqual(8);
-          expect(starts[1] === undefined ? 99 : starts[1].y - (starts[0] as Box).bottom).toBeLessThanOrEqual(16);
-          sameWidth(settings, 'the Settings button');
-          expect((later[0] as Box).w, 'later buttons are the frame’s 136px').toBeGreaterThanOrEqual(135);
-          expect((later[0] as Box).w).toBeLessThanOrEqual(137);
-          expect((settings[0] as Box).w, 'the Settings button is the same 136px').toBeGreaterThanOrEqual(135);
-          expect((settings[0] as Box).w).toBeLessThanOrEqual(137);
-
-          // Every row of what was set up has an icon (a drawn mark, not a bare sentence).
-          const rows = await all('[data-end-row]');
-          const icons = await all('[data-end-row] svg');
-          expect(rows.length, 'rows of what was set up').toBeGreaterThanOrEqual(2);
-          expect(icons.length, 'one icon per row').toBe(rows.length);
-
+          // ── the checklists: one row per segment, side by side on a desktop, stacked on a phone ────────────────────
+          const machineList = await one('[data-end-list="machine"]');
+          const deviceList = await one('[data-end-list="device"]');
           if (viewport.phone) {
-            expect(start.y, '390: the way to start comes after what was set up').toBeGreaterThanOrEqual(summary.bottom);
+            expect(deviceList.y, '390: the device checklist is under the machine one').toBeGreaterThanOrEqual(
+              machineList.bottom,
+            );
+            expect(Math.abs(deviceList.x - machineList.x), '390: one left edge').toBeLessThanOrEqual(1);
           } else {
-            expect(start.x, '1280: start sits to the right of the summary').toBeGreaterThanOrEqual(summary.right + 16);
-            expect(Math.abs(start.y - summary.y), '1280: the two columns start together').toBeLessThanOrEqual(8);
-            const body = await one('.fy-spf__body');
             expect(
-              (start.right - summary.x) / body.w,
-              '1280: the two columns fill the page body (no empty right half)',
+              Math.abs(deviceList.y - machineList.y),
+              '1280: the two checklists start together',
+            ).toBeLessThanOrEqual(4);
+            expect(deviceList.x, '1280: the device checklist is to the right').toBeGreaterThanOrEqual(
+              machineList.right + 16,
+            );
+            expect(
+              Math.abs(machineList.w - deviceList.w),
+              '1280: the two checklists are the same width',
+            ).toBeLessThanOrEqual(1);
+          }
+          const rows = await all('[data-end-row]');
+          expect(rows.length, 'one row per segment: 6 on the machine, 2 on this device').toBe(8);
+          expect(await all('[data-end-row] svg'), 'every row has its mark').toHaveLength(rows.length);
+          expect(await all('[data-end-state="done"] svg'), 'the set-up rows are checked').toHaveLength(3);
+          for (const row of rows) expect(row.h, 'a row is a 44px target').toBeGreaterThanOrEqual(43.5);
+          const states = await tab
+            .locator('[data-end-row]')
+            .evaluateAll(nodes => nodes.map(node => node.getAttribute('data-end-state')));
+          expect(states.filter(state => state === 'done').length).toBe(3);
+          expect(states.filter(state => state === 'partial').length, 'one segment is set up in part').toBe(1);
+          expect(states.filter(state => state === 'later').length).toBe(4);
+
+          // ── the words of a segment left for later: quiet, honest, never "(some pages skipped)" ────────────────────
+          const partial = await tab.locator('[data-end-state="partial"]').innerText();
+          expect(partial, 'a partly set up segment says so').toContain('Claude Code');
+          expect(partial).toContain('Partly set up');
+          expect(partial, 'and offers to finish it').toContain('Finish');
+          const skipped = await tab.locator('[data-end-state="later"]').first().innerText();
+          expect(skipped).toContain('Finish later');
+          expect(skipped).toContain('Set up');
+          const page = await tab.locator('[data-flow-end]').innerText();
+          expect(page, 'no "(some pages skipped)"').not.toMatch(/some pages skipped/iu);
+          expect(page.length, 'the page says little (300 characters)').toBeLessThanOrEqual(300);
+          const later = await all('[data-onboarding-later-link]');
+          expect(later.length, 'a link for every segment not set up in full').toBe(5);
+          for (const link of later) expect(link.h, 'a quiet link is still a 44px target').toBeGreaterThanOrEqual(43.5);
+          expect((await all('[data-onboarding-open-settings]')).length).toBe(1);
+
+          // ── the way on: ONE primary, and the three actions share one width ─────────────────────────────────────────
+          expect(
+            await tab.locator('[data-variant="primary"]:visible').count(),
+            'exactly one primary button on the page',
+          ).toBe(1);
+          expect(await tab.locator('[data-step-next]').innerText()).toBe('Open this machine');
+          const project = await one('[data-flow-end-project]');
+          const alternative = await one('[data-flow-end-alternative]');
+          const next = await one('[data-step-next]');
+          const body = await one('.fy-spf__body');
+          for (const [label, box] of [
+            ['Create a project', project],
+            ['Continue a conversation', alternative],
+            ['Open this machine', next],
+          ] as const) {
+            expect(box.h, `${label}: a 44px target`).toBeGreaterThanOrEqual(43.5);
+            expect(box.x, `${label}: inside the screen`).toBeGreaterThanOrEqual(0);
+            expect(box.right, `${label}: inside the screen`).toBeLessThanOrEqual(viewport.width);
+          }
+          if (viewport.phone) {
+            for (const box of [project, alternative]) {
+              expect(Math.abs(box.w - body.w), '390: a way to start fills the row').toBeLessThanOrEqual(1);
+              expect(Math.abs(box.x - body.x), '390: it starts at the row’s edge').toBeLessThanOrEqual(1);
+            }
+            expect(Math.abs(project.w - alternative.w), '390: the two share one width').toBeLessThanOrEqual(1);
+            expect(alternative.y - project.bottom, '390: the two are 8–16px apart').toBeGreaterThanOrEqual(8);
+            expect(alternative.y - project.bottom).toBeLessThanOrEqual(16);
+            expect(next.w, '390: Open this machine fills what Back leaves').toBeGreaterThanOrEqual(
+              0.5 * viewport.width,
+            );
+          } else {
+            expect(Math.abs(project.w - alternative.w), '1280: Create / Continue share one width').toBeLessThanOrEqual(
+              1,
+            );
+            expect(Math.abs(project.w - next.w), '1280: Open this machine shares it too').toBeLessThanOrEqual(1);
+            expect(Math.abs(alternative.w - next.w), '1280: all three actions are one width').toBeLessThanOrEqual(1);
+            expect(project.w, '1280: a fixed, sensible width (not the row)').toBeLessThan(0.4 * body.w);
+            expect(Math.abs(project.y - alternative.y), '1280: the two ways to start share a row').toBeLessThanOrEqual(
+              1,
+            );
+            expect(alternative.x - project.right, '1280: 8–16px apart').toBeGreaterThanOrEqual(8);
+            expect(alternative.x - project.right).toBeLessThanOrEqual(16);
+            // The mascot slot sits above the checklists; the two columns fill the body (no empty right half).
+            expect(
+              (deviceList.right - machineList.x) / body.w,
+              '1280: the two checklists fill the page body',
             ).toBeGreaterThanOrEqual(0.95);
           }
-
-          // Few words: what was set up, what is left, and the way on; the page body is not a wall of text.
-          const words = await tab.evaluate(
-            () =>
-              (document.querySelector('.fy-spf__body') as HTMLElement).innerText.split(/\s+/u).filter(Boolean).length,
-          );
-          expect(words, 'the body says little').toBeLessThanOrEqual(50);
+          expect((await one('[data-end-mascot]')).w, 'the mascot slot is drawn').toBeGreaterThan(0);
           expect(
             await tab.locator('[data-flow-end-note]').evaluate(node => (node as HTMLDetailsElement).open),
             'the long words about projects start closed',
           ).toBe(false);
 
+          // ── nothing sideways, nothing under the sticky footer ──────────────────────────────────────────────────────
           expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-          const next = await one('[data-step-next]');
-          expect(next.bottom, 'Open this machine is on screen').toBeLessThanOrEqual(viewport.height + 1);
+          await tab.evaluate(() => (document.querySelector('[data-scene-main]') as HTMLElement).scrollTo(0, 1_000_000));
+          await tab.waitForTimeout(100);
+          const footer = await one('[data-step-footer]');
+          const end = await one('[data-flow-end]');
+          expect(footer.bottom, 'the footer is on screen').toBeLessThanOrEqual(viewport.height + 1);
+          expect(end.bottom, 'at the end of the scroll, no content is under the footer').toBeLessThanOrEqual(
+            footer.y + 1,
+          );
+          for (const selector of [
+            '[data-flow-end-note] summary',
+            '[data-onboarding-open-settings]',
+            '[data-end-row]:last-child',
+          ])
+            for (const box of await all(selector))
+              expect(box.bottom, `${selector} is above the footer at the end of the scroll`).toBeLessThanOrEqual(
+                footer.y + 1,
+              );
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `end-page-${viewport.name}-${mode}-later-end.png`) });
+          await tab.evaluate(() => (document.querySelector('[data-scene-main]') as HTMLElement).scrollTo(0, 0));
           if (shotsDir !== '')
             await tab.screenshot({ path: join(shotsDir, `end-page-${viewport.name}-${mode}-later.png`) });
 
-          // Nothing skipped: no "left for later" list, no empty box for it.
+          // Nothing skipped: every row checked, no link to finish anything.
           await tab.goto(`${origin}/?case=clean&theme=studio-${mode}`);
           await tab.waitForSelector('[data-flow-end]');
           expect(await tab.locator('[data-onboarding-later-link]').count()).toBe(0);
-          expect(await tab.locator('[data-onboarding-summary-later]').count()).toBe(0);
+          expect(await tab.locator('[data-end-state="done"]').count()).toBe(
+            await tab.locator('[data-end-row]').count(),
+          );
+          expect(
+            await tab.locator('[data-end-list="device"]').count(),
+            'no device checklist when nothing is on it',
+          ).toBe(0);
           if (shotsDir !== '')
             await tab.screenshot({ path: join(shotsDir, `end-page-${viewport.name}-${mode}-clean.png`) });
 
@@ -188,16 +285,16 @@ describe('the last page', () => {
             await tab
               .locator('[data-end-row]')
               .evaluateAll(nodes => nodes.map(node => node.getAttribute('data-end-row'))),
-          ).toEqual(['device', 'skipped']);
+          ).toEqual(['client:access.passkey']);
           await tab.goto(`${origin}/?case=bare&theme=studio-${mode}`);
           await tab.waitForSelector('[data-flow-end]');
           expect(await tab.locator('[data-flow-end-start]').count()).toBe(0);
           expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
           if (viewport.phone === false) {
             const only = await one('[data-onboarding-summary]');
-            const body = await one('.fy-spf__body');
+            const bare = await one('.fy-spf__body');
             expect(
-              only.w / body.w,
+              only.w / bare.w,
               '1280: with no start section the summary is the whole body, not a half',
             ).toBeGreaterThanOrEqual(0.95);
           }

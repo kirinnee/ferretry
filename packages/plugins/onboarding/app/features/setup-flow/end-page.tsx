@@ -1,13 +1,14 @@
 /**
- * THE LAST PAGE: a real ending, laid out as one grid (`end-page.css`): what was set up and what was skipped (each skipped
- * thing a button to its Settings) on the left, ONE primary button (the footer's "Open this machine"), and the two ways to
- * start work as secondary buttons in a column on the right:
- * a project, or a conversation without one. Those two buttons and the sentence about working projectless are the Home
- * card's (`../stepper/project-action.ts`), so the words never differ between the two places. Either one missing (its plugin
- * is paused) leaves the other; both missing leaves just the way to the machine's Home.
+ * THE LAST PAGE: a real ending, not a box. A small mascot slot (the waving ferret takes its place when access exports it),
+ * two borderless checklists side by side on a desktop (this machine, this device; `setup-summary.tsx`), then the way on:
+ * ONE primary button (the footer's "Open this machine") and the two ways to start work as secondary buttons, all three
+ * ONE width (`end-page.css`): a project, or a conversation without one. Those two buttons and the sentence about working
+ * projectless are the Home card's (`../stepper/project-action.ts`), so the words never differ between the two places.
+ * Either one missing (its plugin is paused) leaves the other; both missing leaves just the way to the machine's Home.
  */
 import { daemonHomeHref, StepPageFrame, useOptionalRouter, useScreenHref } from '@ferretry/app';
 import { Button } from '@ferretry/app/ui';
+import { PartyPopper } from 'lucide-react';
 import './end-page.css';
 import type { Unsaved } from './use-setup-flow.ts';
 import { type ReactNode, useMemo } from 'react';
@@ -65,30 +66,30 @@ export function EndPage({
             </ul>
           </div>
         )}
-        <div className={action === undefined ? 'fy-end__grid' : 'fy-end__grid fy-end__grid--split'}>
-          <SetupSummary daemon={daemon} steps={summary} />
-          {action === undefined ? null : (
-            <section className="kt-panel fy-end__start" data-flow-end-start="">
-              <h2 className="fy-end__heading">Start with</h2>
-              <div className="fy-end__actions">
-                <Button onClick={action.run} data-flow-end-project="">
-                  {action.label}
-                </Button>
-                {action.alternative === undefined ? null : (
-                  <Button onClick={action.alternative.run} data-flow-end-alternative="">
-                    {action.alternative.label}
-                  </Button>
-                )}
-              </div>
-              {action.note === undefined ? null : (
-                <details className="fy-end__more" data-flow-end-note="">
-                  <summary>Without a project?</summary>
-                  <p className="fy-end__note">{action.note}</p>
-                </details>
-              )}
-            </section>
-          )}
+        <div className="fy-end__mascot" data-end-mascot="" aria-hidden="true">
+          <PartyPopper size={28} strokeWidth={1.75} />
         </div>
+        <SetupSummary daemon={daemon} steps={summary} />
+        {action === undefined ? null : (
+          <section className="fy-end__start" data-flow-end-start="" aria-label="Start with">
+            <div className="fy-end__actions">
+              <Button onClick={action.run} data-flow-end-project="">
+                {action.label}
+              </Button>
+              {action.alternative === undefined ? null : (
+                <Button onClick={action.alternative.run} data-flow-end-alternative="">
+                  {action.alternative.label}
+                </Button>
+              )}
+            </div>
+            {action.note === undefined ? null : (
+              <details className="fy-end__more" data-flow-end-note="">
+                <summary>Without a project?</summary>
+                <p className="fy-end__note">{action.note}</p>
+              </details>
+            )}
+          </section>
+        )}
       </div>
     </StepPageFrame>
   );

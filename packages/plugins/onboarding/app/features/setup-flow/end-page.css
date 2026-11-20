@@ -1,100 +1,56 @@
 /* ============================================================================
-   THE LAST PAGE ("You're set up", end-page.tsx + setup-summary.tsx). One grid: what was set up on the left (a card of
-   rows, each with a mark; then what is left for later; then where to change it) and the way to start on the right (one
-   card). Under 720px of the frame's own width it is one column, summary first. Every button
-   on the page is a 44px target with one width inside its group: the frame's 8.5rem for the small ones, the width of its card for the two ways to start.
-   Theme tokens only; no colour chosen here, no gradient.
+   THE LAST PAGE ("You're set up", end-page.tsx + setup-summary.tsx). Nothing here is a box: no border, no card, no
+   gradient; only spacing. A small mascot slot, then two checklists (this machine, this device) side by side from 720px
+   of the frame's own width (stacked under it), one row per segment, then the way on: the two ways to start and the
+   footer's "Open this machine" share ONE width on a desktop (--fy-end-action) and fill the row on a phone.
+   Theme tokens only; no colour chosen here.
    ========================================================================== */
 
+/* The footer's Open this machine is outside .fy-end but takes the same width, so the token sits on the frame. */
+.fy-spf:has(.fy-end) {
+  --fy-end-action: 15rem;
+}
 .fy-end {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
 }
-.fy-end__grid {
+
+/* The mascot's place: the waving ferret takes it when the access plugin exports it. */
+.fy-end__mascot {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  border-radius: 999px;
+  color: var(--accent);
+  display: flex;
+  flex: 0 0 auto;
+  height: 56px;
+  justify-content: center;
+  width: 56px;
+}
+
+.fy-end__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fy-end__lists {
   align-items: start;
   display: grid;
-  gap: 16px;
+  gap: 24px;
   grid-template-columns: minmax(0, 1fr);
 }
 @container (min-width: 720px) {
-  .fy-end__grid--split {
-    gap: 24px;
-    grid-template-columns: minmax(0, 1fr) 17rem;
+  .fy-end__lists[data-lists='two'] {
+    gap: 48px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
-
-.fy-end__card {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 0;
-}
-.fy-end__rows {
-  display: flex;
-  flex-direction: column;
-}
-.fy-end__row {
-  align-items: flex-start;
-  display: flex;
-  gap: 12px;
-  padding: 16px;
-}
-.fy-end__row + .fy-end__row,
-.fy-end__later,
-.fy-end__where {
-  border-top: 1px solid var(--border);
-}
-.fy-end__mark {
-  align-items: center;
-  background: var(--accent);
-  border-radius: 999px;
-  color: var(--accent-fg, var(--bg));
-  display: inline-flex;
-  flex: 0 0 auto;
-  height: 28px;
-  justify-content: center;
-  width: 28px;
-}
-.fy-end__mark[data-mark='none'] {
-  background: var(--surface-2);
-  color: var(--muted);
-}
-.fy-end__what {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-.fy-end__label {
-  color: var(--fg);
-  font-size: var(--font-size-base);
-  line-height: 28px;
-  margin: 0;
-}
-.fy-end__names {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.fy-end__names li {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  color: var(--fg);
-  font-size: var(--text-xs, 0.8125rem);
-  padding: 4px 10px;
-}
-
-.fy-end__later {
+.fy-end__list {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 16px;
+  min-width: 0;
 }
 .fy-end__heading {
   color: var(--muted);
@@ -104,47 +60,73 @@
   margin: 0;
   text-transform: uppercase;
 }
-.fy-end__list {
+.fy-end__rows {
   display: flex;
   flex-direction: column;
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.fy-end__item {
+.fy-end__row {
   align-items: center;
   display: flex;
   gap: 12px;
-  justify-content: space-between;
-  min-height: 56px;
+  min-block-size: 52px;
+  padding-block: 4px;
 }
-.fy-end__where {
-  padding: 12px 16px;
+.fy-end__mark {
+  align-items: center;
+  background: var(--accent);
+  border-radius: 999px;
+  color: var(--accent-fg, var(--bg));
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
 }
-.fy-end__item-name {
+.fy-end__mark[data-mark='none'] {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.fy-end__name {
   color: var(--fg);
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   font-size: var(--font-size-base);
   min-width: 0;
+  overflow-wrap: anywhere;
 }
-.fy-end__item-note {
+.fy-end__row[data-end-state='later'] .fy-end__name {
+  color: var(--muted);
+}
+.fy-end__note {
   color: var(--muted);
   font-size: var(--text-xs, 0.8125rem);
 }
-/* The small buttons share one width and one right edge, so a column of them reads as a column. */
-.fy-end__item .kt-btn {
+/* The finish-later link is quiet: small text, a 44px target, no box. */
+.fy-end__row a {
+  color: var(--fg);
   flex: 0 0 auto;
-  inline-size: 8.5rem;
-  min-block-size: 44px;
+  font-size: var(--text-xs, 0.8125rem);
+  padding-inline: 4px;
+  text-decoration: underline;
+}
+.fy-end__where {
+  margin: 0;
+}
+.fy-end__where a {
+  color: var(--muted);
+  font-size: var(--text-xs, 0.8125rem);
+  text-decoration: underline;
 }
 
-/* The way to start is a card like the summary, so the two columns weigh the same. */
+/* The way on: the two ways to start and the footer's Open this machine are one width on a desktop, the row on a phone. */
 .fy-end__start {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px;
+  gap: 8px;
 }
 .fy-end__actions {
   display: flex;
@@ -154,6 +136,25 @@
 .fy-end__actions button {
   inline-size: 100%;
   min-block-size: 44px;
+}
+@container (min-width: 720px) {
+  .fy-end__actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .fy-end__actions button {
+    flex: 0 0 auto;
+    inline-size: var(--fy-end-action);
+  }
+  .fy-spf:has(.fy-end) .fy-spf__footer [data-step-next] {
+    inline-size: var(--fy-end-action);
+  }
+}
+/* On a phone the footer's primary fills what Back leaves, like the two buttons above it fill their row. */
+@container (max-width: 719.98px) {
+  .fy-spf:has(.fy-end) .fy-spf__footer [data-step-next] {
+    flex: 1 1 auto;
+  }
 }
 /* The shared words about working without a project stay whole, but behind one line (the page says little). */
 .fy-end__more summary {
@@ -167,7 +168,7 @@
   min-block-size: 0;
   padding-block: 4px 8px;
 }
-.fy-end__note {
+.fy-end__more .fy-end__note {
   color: var(--muted);
   font-size: 0.875rem;
   line-height: 1.5;
