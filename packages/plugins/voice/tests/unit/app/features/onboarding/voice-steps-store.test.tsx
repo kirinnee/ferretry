@@ -124,12 +124,12 @@ describe('<VoiceStep> over the real voice store', () => {
       await settle();
       const before = store.stt.get();
       const defaultCard = must(
-        view.container.querySelector<HTMLElement>('.fy-engine-card[data-engine="parakeet"]'),
+        view.container.querySelector<HTMLElement>('.fy-engine-card[data-engine="parakeet-tdt-110m"]'),
         'the default card',
       );
       expect(defaultCard.textContent).toContain('Not available here');
       expect(defaultCard.dataset.disabled).toBe('true');
-      const input = radio(view.container, 'parakeet');
+      const input = radio(view.container, 'parakeet-tdt-110m');
       expect(input.disabled).toBe(true);
       await interact(() => input.click());
       expect(store.stt.get()).toEqual(before);
