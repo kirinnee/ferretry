@@ -1,14 +1,18 @@
 /**
  * Where a machine's setup moves between machines: **Export settings** (a zip of its configuration files, no secrets) and
  * **Copy settings from another machine**, as a Settings tab; and the same Copy as the first run's "Start from…" step,
- * where the person picks "Start fresh" or "Copy from another machine" (two cards, never full width).
+ * where the person picks "Start fresh" or "Copy from another machine": two stacked cards, the example on the right
+ * (`StepDemo`), one short line each. Neither card writes: a fresh start has nothing to save, and a copy is its own
+ * reviewed change (the Copy panel opens below the cards and marks the step done when it lands).
  */
 
-import { ChoiceCards } from '@ferretry/app';
+import { ChoiceCards, StepDemo } from '@ferretry/app';
+import { Copy, Sparkles } from 'lucide-react';
 import type { AppComponent, PanelProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { useEffect, useState } from 'react';
 import { CopySettings } from '../features/fleet/setup/copy-settings.tsx';
 import { ExportSettings } from '../features/fleet/setup/export-settings.tsx';
+import { StartDemo } from '../features/fleet/setup/start-demo.tsx';
 import { useAccountChanges } from '../features/fleet/shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../features/fleet/shell/machine-tab.ts';
 import type { LiveRuntimesClient } from '../lib/client.ts';
@@ -61,17 +65,22 @@ function StartStep({ client, machineName, machine, step }: MachineTabProps) {
     <div className="flex min-w-0 flex-col gap-4" data-onboarding-step-body="start">
       <ChoiceCards
         label="Start from"
+        layout="stack"
         value={start}
         onChange={id => setStart(id === 'clone' ? 'clone' : 'fresh')}
         options={[
-          { id: 'fresh', title: 'Start fresh', line: 'Walk through each step.' },
+          { id: 'fresh', title: 'Start fresh', icon: <Sparkles size={18} />, line: 'Walk through each step.' },
           {
             id: 'clone',
             title: 'Copy from another machine',
-            line: 'Warden, learning, voice, agent controls, profiles and runtimes. Never secrets or logins.',
+            icon: <Copy size={18} />,
+            line: 'Settings only. Never secrets or logins.',
           },
         ]}
       />
+      <StepDemo>
+        <StartDemo mode={start} />
+      </StepDemo>
       {start === 'clone' ? (
         <CopySettings
           client={client}
