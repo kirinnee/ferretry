@@ -120,8 +120,20 @@
 :root[data-style='neumorphism'] .kt-btn[data-variant='danger'] {
   background: var(--panel-bg);
 }
-:root[data-style='neumorphism'] .kt-btn:hover:not(:disabled) {
+/* Hover lifts a control; holding it presses it IN. The hover rule is more specific than the shared `.kt-btn:active`, so it
+   must step aside while the button is pressed or a held button looks hovered (the press translate is 0 here: the inset
+   shadow IS the press). */
+:root[data-style='neumorphism'] .kt-btn:hover:not(:disabled, :active) {
   box-shadow: var(--shadow-md);
+}
+:root[data-style='neumorphism'] .kt-btn:active:not(:disabled) {
+  box-shadow: var(--shadow-active);
+}
+/* A raised card is cut from the page's own ground, so its fill alone (and the palette's weak `--border`) cannot separate it
+   from the page (1.0-1.1:1). Its edge is the palette's own ink pulled toward the ground, a step stronger than a control's,
+   so the card keeps its soft shadows AND a boundary of at least 3:1 on every palette and mode (the theme matrix measures it). */
+:root[data-style='neumorphism'] .kt-panel {
+  border-color: color-mix(in srgb, var(--fg) 55%, var(--ground));
 }
 :root[data-style='neumorphism'] :is(.kt-input, .kt-composer) {
   background: var(--panel-bg);

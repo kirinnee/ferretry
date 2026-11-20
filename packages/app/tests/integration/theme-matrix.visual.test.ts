@@ -179,7 +179,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: EVERY_STYLE,
+    styles: [...EVERY_STYLE, 'neumorphism'],
     palettes: ['ledger'],
     modes: ['dark'],
     check: 'text',
@@ -188,7 +188,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: EVERY_STYLE,
+    styles: [...EVERY_STYLE, 'neumorphism'],
     palettes: ['ledger'],
     modes: ['dark'],
     check: 'text',
@@ -197,7 +197,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: EVERY_STYLE,
+    styles: [...EVERY_STYLE, 'neumorphism'],
     palettes: ['ledger'],
     modes: ['dark'],
     check: 'text',
@@ -296,6 +296,7 @@ const HELPERS = `(() => {
   const name = (el) => {
     if (el.matches('.fy-cc__card')) return 'Choice ' + el.getAttribute('data-choice');
     if (el.matches('input[type="radio"]')) return 'Choice ' + el.value;
+    if (el.matches('.kt-panel')) return 'Card';
     return (el.getAttribute('aria-label') || el.textContent || el.tagName).trim().slice(0, 28);
   };
   // A focus indicator lives on the control, except a radio: the native input is sr-only and its card is what the reader sees.
@@ -398,7 +399,10 @@ const STATIC = `(async ({ runs, device }) => {
   const { paint, ratio, behind, name } = window.__m;
   const out = { edge: [], overflow: [], fonts: [] };
 
-  for (const el of document.querySelectorAll('[data-spec~="edge"], [role="menu"], .fy-cc__card')) {
+  // A raised Card has no edge of its own in every style (most draw a faint rule and rely on a darker fill), so its edge is a
+  // hard check only where the style promises one: Neumorphism cuts cards from the page's own ground and gives them an edge.
+  const cardEdge = document.documentElement.getAttribute('data-style') === 'neumorphism' ? ', [data-spec~="panel-edge"]' : '';
+  for (const el of document.querySelectorAll('[data-spec~="edge"], [role="menu"], .fy-cc__card' + cardEdge)) {
     const cs = getComputedStyle(el);
     const around = paint(behind(el, false));
     const border = Number.parseFloat(cs.borderTopWidth) > 0 && cs.borderTopStyle !== 'none'
