@@ -1,5 +1,11 @@
 import { useSyncExternalStore } from 'react';
-import { DEFAULT_LAYOUT, type Layout, type LayoutIssue, type LayoutOverrides } from '../layout/layout.ts';
+import {
+  DEFAULT_LAYOUT,
+  type Layout,
+  type LayoutIssue,
+  type LayoutOverrides,
+  type Viewport,
+} from '../layout/layout.ts';
 import { useOptionalShell } from './context.tsx';
 
 /**
@@ -48,3 +54,12 @@ export function useDeviceLayout(): DeviceLayout | undefined {
 const NONE: LayoutOverrides = Object.freeze({});
 const noOverrides = (): LayoutOverrides => NONE;
 const noSubscription = (): (() => void) => () => {};
+
+/**
+ * Which screen width this device's layout is resolved for (`phone` or `wide`), or `undefined` outside a shell. The same
+ * fact the shell draws with, so a plugin that reports what a device shows today reads it here instead of guessing a
+ * width of its own.
+ */
+export function useDeviceViewport(): Viewport | undefined {
+  return useOptionalShell()?.viewport;
+}

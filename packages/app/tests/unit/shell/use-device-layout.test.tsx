@@ -5,7 +5,7 @@ import { DEFAULT_LAYOUT } from '../../../src/layout/layout.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { ShellProvider, type ShellWindow } from '../../../src/shell/context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
-import { type DeviceLayout, useDeviceLayout } from '../../../src/shell/use-device-layout.ts';
+import { type DeviceLayout, useDeviceLayout, useDeviceViewport } from '../../../src/shell/use-device-layout.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
 import { interact, mount } from '../../support/dom.ts';
@@ -85,5 +85,40 @@ describe('useDeviceLayout', () => {
     expect(seen.current?.overrides).toEqual({});
     expect(new DeviceLayoutStore(storage).snapshot()).toEqual({});
     await view.unmount();
+  });
+
+  test('useDeviceViewport reports the width the shell draws for: undefined outside a shell, wide or phone inside', async () => {
+    const seen: { current: string | undefined } = { current: 'untouched' };
+    const Viewport = () => {
+      seen.current = useDeviceViewport();
+      return null;
+    };
+    const outside = await mount(<Viewport />);
+    expect(seen.current).toBeUndefined();
+    await outside.unmount();
+
+    for (const phone of [false, true]) {
+      const parts = shell(memoryStore());
+      const view = await mount(
+        <ShellProvider
+          runtime={parts.runtime}
+          themes={parts.themes}
+          layouts={parts.layouts}
+          browser={{
+            ...browser,
+            matchMedia: query => ({
+              matches: phone && query.includes('max-width'),
+              addEventListener: () => {},
+              removeEventListener: () => {},
+            }),
+          }}
+          scroll={new ScrollMemory(null)}
+        >
+          <Viewport />
+        </ShellProvider>,
+      );
+      expect(seen.current).toBe(phone ? 'phone' : 'wide');
+      await view.unmount();
+    }
   });
 });
