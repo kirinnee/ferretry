@@ -120,16 +120,17 @@ export const createSettings = (client: PluginClient): AppComponent<SettingsProps
             />
           ) : null}
           {view.plan?.kind === 'self' && view.verification === 'unverified' ? (
-            <SettingRow
-              name="Unverified version"
-              hint="Ferretry has not verified the newest version."
-              wide
-              control={() => (
-                <Button disabled={running} onClick={() => void update(true)}>
+            <SettingRow name="Unverified version" hint="Ferretry has not verified the newest version.">
+              <div className="pb-3">
+                <Button
+                  className="h-auto min-h-[44px] max-w-full whitespace-normal py-2 text-left"
+                  disabled={running}
+                  onClick={() => void update(true)}
+                >
                   Update to a version Ferretry has not verified
                 </Button>
-              )}
-            />
+              </div>
+            </SettingRow>
           ) : null}
         </SettingGroup>
         {note === null ? null : (

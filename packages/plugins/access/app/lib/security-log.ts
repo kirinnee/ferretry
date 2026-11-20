@@ -188,8 +188,11 @@ const INTERNAL_KEY = /(?:Id|Ids|Length|Offset)$|^(?:sequence|subjects|proposal|s
 
 /** One fact as a short phrase, or `null` when there is nothing a person could use. */
 function detailPhrase(key: string, value: DetailValue): string | null {
-  if (INTERNAL_KEY.test(key)) return null;
   const text = String(value);
+  // The only target a browser-key or catalogue revocation carries (the row has no subject): kept, under a readable label.
+  if (key === 'keyId') return `Browser key ${auditShortId(text)}`;
+  if (key === 'catalogId') return `Catalogue ${auditShortId(text)}`;
+  if (INTERNAL_KEY.test(key)) return null;
   switch (key) {
     case 'carrier':
     case 'pairedOver':

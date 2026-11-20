@@ -117,10 +117,46 @@ describe('security log words', () => {
     expect(at({ by: 'zoe' })).toBe('for zoe');
     expect(at({ capabilities: 'fleet.use', kept: false })).toBe('agent fleet (use) · not kept');
     expect(at({ action: 'account-rename' })).toBe('account rename');
-    expect(at({ memberLabel: 'Old iPad', keyId: 'k1', shareId: 's1' })).toBe('for “Old iPad”');
+    expect(at({ memberLabel: 'Old iPad', keyId: 'k1', shareId: 's1' })).toBe('Browser key k1 · for “Old iPad”');
+    expect(at({ keyId: 'fy_key_abcdefghijkl' })).toBe('Browser key …ghijkl');
     expect(at({ reason: 'duplicate-name', memberId: 'm1' })).toBe('because duplicate name');
     expect(at({ somethingNew: 'abc' })).toBe('something new abc');
     expect(at({ somethingNew: 'abc' })).not.toContain(':');
+  });
+
+  it('words every detail key it knows, and the revoked browser key or catalogue is named, not dropped', () => {
+    const at = (detail: Record<string, string | number | boolean>) =>
+      auditDetailWords({
+        at: ago(0),
+        event: 'x',
+        outcome: 'succeeded',
+        actor: { kind: 'host' },
+        detail,
+      } as unknown as Parameters<typeof auditDetailWords>[0]);
+    expect(at({ catalogId: 'cat_1' })).toBe('Catalogue cat_1');
+    expect(at({ catalogId: 'catalog_abcdefghij' })).toBe('Catalogue …efghij');
+    expect(at({ carrier: 'tunnel' })).toBe('reached tunnel');
+    expect(at({ count: 1 })).toBe('1 time');
+    expect(at({ count: 'many' })).toBe('');
+    expect(at({ repeats: 1 })).toBe('repeated 1 time');
+    expect(at({ repeats: 4 })).toBe('repeated 4 times');
+    expect(at({ repeats: 'lots' })).toBe('');
+    expect(at({ scope: 'device' })).toBe('for one device');
+    expect(at({ scope: 'team-wide' })).toBe('for team wide');
+    expect(at({ mode: 'dialog' })).toBe('answered a dialog');
+    expect(at({ mode: 'other-mode' })).toBe('other mode');
+    expect(at({ by: 'agent' })).toBe('done by an agent');
+    expect(at({ by: 'member' })).toBe('done by a person who reads shared catalogs');
+    expect(at({ proof: 'passkey-tap' })).toBe('proved with a passkey tap');
+    expect(at({ clientName: 'Pixel 8' })).toBe('from “Pixel 8”');
+    expect(at({ capabilities: 'terminal.configure, mystery.use,filesystem,,' })).toBe(
+      'session terminals (configure), mystery (use), project filesystem',
+    );
+    expect(at({ keptAllowanceSpent: true })).toBe('the daily allowance for this kind of record ran out');
+    expect(at({ keptAllowanceSpent: false })).toBe('');
+    expect(at({ somethingOn: true })).toBe('something on');
+    expect(at({ somethingOff: false })).toBe('not something off');
+    expect(at({ sequence: 4, otherLength: 9 })).toBe('');
   });
 
   it('badges only what was refused or failed', () => {

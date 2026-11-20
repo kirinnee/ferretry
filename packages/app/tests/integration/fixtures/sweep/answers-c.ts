@@ -201,7 +201,7 @@ const harnessView = (
     latest: { version: latest, url: `https://releases.example.test/${harness}/${latest}`, publishedAt: AT },
   },
   verified: { version, url: `https://releases.example.test/${harness}/${version}` },
-  verification: 'verified',
+  verification: harness === 'claude-code' ? 'unverified' : 'verified',
   available: latest !== version,
   job: null,
 });
