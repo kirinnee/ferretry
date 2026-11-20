@@ -10,6 +10,7 @@ import { padInputValue, type TwoFactorStageId } from '../../../contract/routes/i
 import { list } from '../../support/app/accounts-fixtures.ts';
 import { interact, type Mounted, mount } from '../../support/app/dom.ts';
 import { click, settle, typeInto } from '../../support/app/dom-form.ts';
+import { boxNamed, chosenWords, optionWords } from '../../support/app/select-box.ts';
 import { type Call, fakeClient } from '../../support/app/fake-client.ts';
 import { codesSlot, REQUEST_ID, savedPrimary, savedTwo } from '../../support/app/input-card-fixtures.ts';
 
@@ -19,6 +20,7 @@ afterEach(async () => {
 });
 
 // RFC 6238's test key: never a real seed.
+const ACCOUNT_PICKER = 'Which account is this key for?';
 const SEED = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
 const STAGE = `st_${'a'.repeat(24)}`;
 const AT = '2026-10-31T10:00:00.000Z';
@@ -89,10 +91,14 @@ describe('the "Set up automatic codes" panel under a code card', () => {
 
   it('offers only the accounts the daemon matches to the card’s place, the one-tap choice first and already picked', async () => {
     const shown = await draw({ slot: codesSlot({ saved: savedPrimary('GITHUB_WORK') }) });
-    const options = [...shown.view.container.querySelectorAll<HTMLOptionElement>('[data-codes-account] option')];
+    const box = boxNamed(shown.view.container, ACCOUNT_PICKER);
     // Vercel and Google do not sign in at github.com: they are not offered.
-    expect(options.map(each => each.value)).toEqual(['', 'GITHUB_WORK', 'GITHUB']);
-    expect((shown.q('[data-codes-account]') as HTMLSelectElement).value).toBe('GITHUB_WORK');
+    expect(chosenWords(box)).toContain('GitHub (work)');
+    const options = await optionWords(box);
+    expect(options).toHaveLength(3);
+    expect(options[0]).toBe('Pick one');
+    expect(options[1]).toContain('GitHub (work)');
+    expect(options[2]).toBe('GitHub · kirinnee');
     expect(shown.q('[data-codes-heading]')?.textContent).toBe(
       'Set up automatic codes for GitHub (work) · kirin@work.test',
     );
@@ -100,7 +106,7 @@ describe('the "Set up automatic codes" panel under a code card', () => {
 
   it('never guesses: several accounts and no one-tap choice leaves the pick to the owner', async () => {
     const shown = await draw({ slot: codesSlot({ saved: savedTwo() }) });
-    expect((shown.q('[data-codes-account]') as HTMLSelectElement).value).toBe('');
+    expect(chosenWords(boxNamed(shown.view.container, ACCOUNT_PICKER))).toBe('Pick one');
     expect(shown.q('[data-codes-heading]')?.textContent).toBe('Set up automatic codes');
   });
 

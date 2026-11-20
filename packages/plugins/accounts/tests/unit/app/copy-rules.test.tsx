@@ -11,6 +11,7 @@ import { PASTE_RULE_NO_PASSKEY_WORDS } from '../../../app/lib/secure-copy.ts';
 import type { PasskeyWords as StepUpWords } from '../../../app/shell.tsx';
 import { type Mounted, mount, must } from '../../support/app/dom.ts';
 import { click, settle, typeInto } from '../../support/app/dom-form.ts';
+import { pickOption } from '../../support/app/select-box.ts';
 import { type Call, fakeClient } from '../../support/app/fake-client.ts';
 
 const mounted: Mounted[] = [];
@@ -30,14 +31,7 @@ const RULE: PasteRule = {
   plan: 'b'.repeat(32),
 };
 
-const select = async (element: Element | null, value: string): Promise<void> => {
-  const node = must(element as HTMLSelectElement | null, 'a select');
-  const { act } = await import('react');
-  await act(async () => {
-    node.value = value;
-    node.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-};
+const select = (name: string, words: string): Promise<void> => pickOption(document.body, name, words);
 
 const card = async (props: Partial<Parameters<typeof CopyRulesCard>[0]> = {}) => {
   const added: PasteRuleCreate[] = [];
@@ -83,9 +77,9 @@ describe('the pre-approval rules card', () => {
   it('approves a route from the form and closes it', async () => {
     const { q, added } = await card();
     await click(q('[data-copy-rule-add-open]'));
-    await select(q('[data-copy-rule-from-kind]'), 'clipboard');
+    await select('From', 'A page’s clipboard');
     await typeInto(q('[data-copy-rule-from]'), 'https://github.com');
-    await select(q('[data-copy-rule-to-kind]'), 'browser');
+    await select('Into', 'A field on a page');
     await typeInto(q('[data-copy-rule-to]'), 'https://vercel.com');
     await typeInto(q('[data-copy-rule-count]'), '3');
     await typeInto(q('[data-copy-rule-hours]'), '');
@@ -105,7 +99,7 @@ describe('the pre-approval rules card', () => {
   it('says what is wrong, keeps the form when the daemon refuses, and cancels', async () => {
     const { q, added } = await card({ onAdd: () => false, error: 'the daemon said no', busy: false });
     await click(q('[data-copy-rule-add-open]'));
-    await select(q('[data-copy-rule-to-kind]'), 'secret');
+    await select('Into', 'A secret, by name');
     await click(q('[data-copy-rule-form] button[type="submit"]'));
     expect(q('[data-copy-rule-problem]')?.textContent).toBe('Name the program, like gh.');
     await typeInto(q('[data-copy-rule-from]'), 'gh');
@@ -176,7 +170,7 @@ describe('the pre-approval rules card', () => {
       await typeInto(q('[data-copy-rule-to]'), program);
       expect(q('[data-copy-rule-runs-anything]')?.textContent).toContain('runs whatever it reads');
     }
-    await select(q('[data-copy-rule-to-kind]'), 'secret');
+    await select('Into', 'A secret, by name');
     expect(q('[data-copy-rule-runs-anything]')).toBeNull();
   });
 

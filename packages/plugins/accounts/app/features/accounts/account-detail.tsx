@@ -40,9 +40,9 @@ import {
   type SignInDraft,
   signInProblem,
 } from '../../lib/login-form.ts';
-import { SecretInput, useSecretField } from '@ferretry/app/ui';
+import { SecretInput, SelectBox, useSecretField } from '@ferretry/app/ui';
 import { AutomaticCodesPanel } from '../two-factor/automatic-codes.tsx';
-import { type AccountOps, INPUT, Refusal, Tabs } from './accounts-parts.tsx';
+import { type AccountOps, INPUT, Refusal, SelectField, Tabs } from './accounts-parts.tsx';
 import { AccountRulesRevoke } from './account-rules.tsx';
 import { MethodFields } from './method-fields.tsx';
 import type { RulesBinding } from './use-sign-in-rules.ts';
@@ -387,25 +387,22 @@ function AddKeyForm({
       <p className="m-0 text-cell text-muted">
         This only writes down WHICH way the site asks, so a sign-in item can say so. It holds no code and no key.
       </p>
-      <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-        Kind
-        <select
-          className={INPUT}
-          data-accounts-key-kind=""
-          disabled={busy}
-          onChange={event => {
-            setKind(event.target.value as Exclude<TwoFactorKind, 'totp'>);
-            setFact('');
-          }}
-          value={kind}
-        >
-          {KEY_KIND_OPTIONS.map(option => (
-            <option key={option.kind} value={option.kind}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <SelectField className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg" label="Kind">
+        {id => (
+          <SelectBox
+            id={id}
+            className={INPUT}
+            disabled={busy}
+            label="Kind"
+            onChange={next => {
+              setKind(next as Exclude<TwoFactorKind, 'totp'>);
+              setFact('');
+            }}
+            options={KEY_KIND_OPTIONS.map(option => ({ value: option.kind, label: option.label }))}
+            value={kind}
+          />
+        )}
+      </SelectField>
       <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
         Name
         <input
@@ -434,23 +431,22 @@ function AddKeyForm({
         </label>
       ) : null}
       {kind === 'push' ? (
-        <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-          Which app (optional)
-          <select
-            className={INPUT}
-            data-accounts-key-app=""
-            disabled={busy}
-            onChange={event => setApp(event.target.value as PushApp | '')}
-            value={app}
-          >
-            <option value="">Not said</option>
-            {PUSH_APPS.map(each => (
-              <option key={each} value={each}>
-                {PUSH_APP_WORDS[each]}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SelectField className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg" label="Which app (optional)">
+          {id => (
+            <SelectBox
+              id={id}
+              className={INPUT}
+              disabled={busy}
+              label="Which app (optional)"
+              onChange={next => setApp(next as PushApp | '')}
+              options={[
+                { value: '', label: 'Not said' },
+                ...PUSH_APPS.map(each => ({ value: each, label: PUSH_APP_WORDS[each] })),
+              ]}
+              value={app}
+            />
+          )}
+        </SelectField>
       ) : null}
       <div className="flex flex-wrap gap-2">
         <button

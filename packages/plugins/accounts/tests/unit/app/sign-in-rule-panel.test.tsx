@@ -13,11 +13,14 @@ import {
   RULE_DAMAGED_WORDS,
   RULE_DISMISSED_WORDS,
   RULE_NO_ACCOUNTS_DEVICE_WORDS,
+  daysWords,
+  scopeWords,
   suspendWarning,
 } from '../../../app/lib/sign-in-rules.ts';
 import { list as accountList } from '../../support/app/accounts-fixtures.ts';
 import { interact, mount, must } from '../../support/app/dom.ts';
 import { click, settle, typeInto } from '../../support/app/dom-form.ts';
+import { boxNamed, chosenWords, optionWords, pickOption } from '../../support/app/select-box.ts';
 import { type RuleWorld, refused, ruleClient } from '../../support/app/sign-in-rule-client.ts';
 import {
   codeRule,
@@ -54,12 +57,7 @@ const binding = (
 
 const panel = (rules: RulesBinding) => <SignInRulePanel account={account} rules={rules} signIn={signIn} />;
 
-const choose = async (select: HTMLSelectElement, value: string): Promise<void> => {
-  await interact(() => {
-    select.value = value;
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-};
+const choose = (name: string, words: string): Promise<void> => pickOption(document.body, name, words);
 
 describe('reading the rules', () => {
   it('says there is no standing rule when the sign-in has none', async () => {
@@ -411,9 +409,9 @@ describe('the sheet host', () => {
     );
     try {
       await settle();
-      expect(q<HTMLSelectElement>(mounted.container, '[data-rule-scope]').options).toHaveLength(3);
-      await choose(q(mounted.container, '[data-rule-scope]'), `project:${project}`);
-      await choose(q(mounted.container, '[data-rule-days]'), '7');
+      expect(await optionWords(boxNamed(mounted.container, 'Who may use it'))).toHaveLength(3);
+      await choose('Who may use it', scopeWords({ kind: 'project', project }));
+      await choose('How long', daysWords(7));
       await typeInto(q(mounted.container, '[data-rule-uses]'), '4');
       await click(q(mounted.container, '[data-rule-approve]'));
       await settle();
@@ -493,9 +491,12 @@ describe('changing a live rule from the Accounts panel', () => {
       await settle();
       await click(q(mounted.container, '[data-rule-widen]'));
       await settle();
-      const picker = q<HTMLSelectElement>(mounted.container, '[data-rule-scope]');
-      expect(picker.value).toBe(`project:${PROJECT}`);
-      expect([...picker.options].map(option => option.value)).toEqual(['any', `project:${PROJECT}`]);
+      const picker = boxNamed(mounted.container, 'Who may use it');
+      expect(chosenWords(picker)).toBe(scopeWords({ kind: 'project', project: PROJECT }));
+      expect(await optionWords(picker)).toEqual([
+        scopeWords({ kind: 'any' }),
+        scopeWords({ kind: 'project', project: PROJECT }),
+      ]);
     } finally {
       await mounted.unmount();
     }

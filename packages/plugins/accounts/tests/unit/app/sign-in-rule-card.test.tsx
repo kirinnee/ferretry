@@ -10,8 +10,9 @@ import {
 import { SignInRuleCard, type SignInRuleCardProps } from '../../../app/features/accounts/sign-in-rule-card.tsx';
 import { SignInRuleSheet, type SignInRuleSheetProps } from '../../../app/features/accounts/sign-in-rule-sheet.tsx';
 import { RULE_HONEST_LIMIT as SIGN_IN_RULE_HONEST_LIMIT } from '../../../app/lib/sign-in-rules.ts';
-import { interact, mount, must } from '../../support/app/dom.ts';
+import { mount, must } from '../../support/app/dom.ts';
 import { click, typeInto } from '../../support/app/dom-form.ts';
+import { pickOption } from '../../support/app/select-box.ts';
 import {
   codeRule,
   pageRule,
@@ -268,13 +269,7 @@ describe('the page sheet shows its facts as rows', () => {
   });
 });
 
-const pick = async (element: Element | null, value: string): Promise<void> => {
-  const select = must(element, 'a select') as HTMLSelectElement;
-  await interact(() => {
-    select.value = value;
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-};
+const pick = (name: string, words: string): Promise<void> => pickOption(document.body, name, words);
 
 describe('narrowing a rule in hours', () => {
   it('sends the earlier end in whole hours from now', async () => {
@@ -282,7 +277,7 @@ describe('narrowing a rule in hours', () => {
     const mounted = await mount(card(codeRule(), { onNarrow: narrow => narrowed.push(narrow) }));
     try {
       await click(q(mounted.container, '[data-rule-narrow]'));
-      await pick(q(mounted.container, '[data-rule-end-unit]'), 'hours');
+      await pick('Days or hours', 'hours');
       await typeInto(q(mounted.container, '[data-rule-end-days]'), '5');
       expect(mounted.container.querySelector('[role="status"]')).toBeNull();
       await click(q(mounted.container, '[data-rule-narrow-apply]'));
@@ -297,7 +292,7 @@ describe('narrowing a rule in hours', () => {
     const mounted = await mount(card(codeRule()));
     try {
       await click(q(mounted.container, '[data-rule-narrow]'));
-      await pick(q(mounted.container, '[data-rule-end-unit]'), 'hours');
+      await pick('Days or hours', 'hours');
       await typeInto(q(mounted.container, '[data-rule-end-days]'), '0');
       expect(q(mounted.container, '[role="status"]').textContent).toBe(
         'End earlier than it does now, in whole hours (at least 1).',
@@ -322,7 +317,7 @@ describe('a narrowing whose end stops being earlier while the form is open', () 
     );
     try {
       await click(q(mounted.container, '[data-rule-narrow]'));
-      await pick(q(mounted.container, '[data-rule-end-unit]'), 'hours');
+      await pick('Days or hours', 'hours');
       await typeInto(q(mounted.container, '[data-rule-end-days]'), '1');
       await typeInto(q(mounted.container, '[data-rule-cap]'), '2');
       Date.now = () => start + 30_000;

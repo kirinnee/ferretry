@@ -5,9 +5,10 @@ import {
   LOGIN_SSO_NAME_MAX_LENGTH,
   type LoginMethodKind,
 } from '../../../contract/routes/index.ts';
+import { SelectBox } from '@ferretry/app/ui';
 import type { ReactNode } from 'react';
 import { METHOD_OPTIONS, type SignInDraft } from '../../lib/login-form.ts';
-import { INPUT } from './accounts-parts.tsx';
+import { INPUT, SelectField } from './accounts-parts.tsx';
 
 export function MethodFields({
   draft,
@@ -41,22 +42,19 @@ export function MethodFields({
           />
         </label>
       ) : null}
-      <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-        How it signs in
-        <select
-          className={INPUT}
-          data-accounts-method=""
-          disabled={disabled}
-          onChange={event => onChange({ ...draft, method: event.target.value as LoginMethodKind })}
-          value={draft.method}
-        >
-          {METHOD_OPTIONS.map(option => (
-            <option key={option.kind} value={option.kind}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <SelectField className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg" label="How it signs in">
+        {id => (
+          <SelectBox
+            id={id}
+            className={INPUT}
+            disabled={disabled}
+            label="How it signs in"
+            onChange={next => onChange({ ...draft, method: next as LoginMethodKind })}
+            options={METHOD_OPTIONS.map(option => ({ value: option.kind, label: option.label }))}
+            value={draft.method}
+          />
+        )}
+      </SelectField>
       {draft.method === 'sso' ? (
         <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
           SSO provider, as its button says it
@@ -72,23 +70,28 @@ export function MethodFields({
         </label>
       ) : null}
       {draft.method !== 'password' ? (
-        <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-          Through which account
-          <select
-            className={INPUT}
-            data-accounts-via=""
-            disabled={disabled}
-            onChange={event => onChange({ ...draft, via: event.target.value })}
-            value={draft.via}
-          >
-            <option value="">None: sign in by hand</option>
-            {providers.map(provider => (
-              <option key={provider.id} value={provider.id}>
-                {provider.username === undefined ? provider.label : `${provider.label} · ${provider.username}`}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SelectField
+          className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg"
+          label="Through which account"
+        >
+          {id => (
+            <SelectBox
+              id={id}
+              className={INPUT}
+              disabled={disabled}
+              label="Through which account"
+              onChange={next => onChange({ ...draft, via: next })}
+              options={[
+                { value: '', label: 'None: sign in by hand' },
+                ...providers.map(provider => ({
+                  value: provider.id,
+                  label: provider.username === undefined ? provider.label : `${provider.label} · ${provider.username}`,
+                })),
+              ]}
+              value={draft.via}
+            />
+          )}
+        </SelectField>
       ) : null}
     </>
   );

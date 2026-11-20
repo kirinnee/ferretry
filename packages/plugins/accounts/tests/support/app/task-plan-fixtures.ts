@@ -9,7 +9,7 @@ export const EXPIRES = '2026-08-05T11:58:00.000Z';
 export const STAGE = `tps_${'d'.repeat(24)}` as TaskPlanStageId;
 
 export const GITHUB_WORK = 'si_0000000000000001';
-export const GITHUB_HOME = 'si_0000000000000002';
+const GITHUB_HOME = 'si_0000000000000002';
 const SUDO_BOX = 'si_0000000000000003';
 const VERCEL = 'si_0000000000000004';
 
