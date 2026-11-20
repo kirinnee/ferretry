@@ -272,6 +272,30 @@ describe('<EngineCardGrid>', () => {
     await view.unmount();
   });
 
+  it('moves the focus on an arrow key and chooses only on Enter, so arrowing over Browser voice sends nothing', async () => {
+    const chosen: string[] = [];
+    const view = await mount(<EngineCardGrid {...gridProps({ onChoose: choice => chosen.push(choice) })} />);
+    const radios = [...view.container.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    const usable = radios.filter(radio => !radio.disabled);
+    const first = must(usable[0], 'first usable radio');
+    const browser = must(card(view.container, 'browser').querySelector<HTMLInputElement>('input'), 'browser radio');
+    const off = must(card(view.container, 'off').querySelector<HTMLInputElement>('input'), 'off radio');
+    expect(usable.indexOf(browser)).toBe(0);
+    first.focus();
+    await interact(() => pressKey(first, 'ArrowDown'));
+    const second = must(usable[1], 'second usable radio');
+    expect(document.activeElement).toBe(second);
+    await interact(() => pressKey(second, 'End'));
+    expect(document.activeElement).toBe(off);
+    await interact(() => pressKey(off, 'Home'));
+    expect(document.activeElement).toBe(browser);
+    expect(chosen).toEqual([]);
+    expect(radios.some(radio => radio.checked)).toBe(false);
+    await interact(() => pressKey(browser, 'Enter'));
+    expect(chosen).toEqual(['browser']);
+    await view.unmount();
+  });
+
   it('lists only the engines it is given, and leaves out the browser voice and Off when asked', async () => {
     const view = await mount(
       <EngineCardGrid {...gridProps({ models: [PARAKEET_CATALOG_MODEL], browser: false, off: false })} />,

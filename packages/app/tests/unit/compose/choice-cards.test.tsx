@@ -1,13 +1,15 @@
 /**
- * ChoiceCards and OptionBars: a native radio group with one tab stop and arrow-key selection, the select animation
+ * ChoiceCards and OptionBars: a native radio group with one tab stop whose arrow keys move the focus and never choose, the select animation
  * that never plays on mount or under reduced motion, and the bars' text equivalents.
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { useState } from 'react';
-import { ChoiceCards, choiceAfterKey } from '../../../src/compose/choice-cards.tsx';
+import { ChoiceCards } from '../../../src/compose/choice-cards.tsx';
 import { barFill, OptionBars, optionBarsText } from '../../../src/compose/option-bars.tsx';
 import { StepPageFrame, type StepPageBack, type StepPageNext } from '../../../src/compose/step-page-frame.tsx';
+import { Segmented } from '../../../src/compose/setting-row.tsx';
+import { RadioChoices } from '../../../src/ui/setup-ui.tsx';
 import { StepProgress, stepProgressText } from '../../../src/compose/step-progress.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 
@@ -59,17 +61,37 @@ describe('ChoiceCards', () => {
     expect(radios(mounted.container).map(r => r.tabIndex)).toEqual([0, -1, -1, -1]);
   });
 
-  it('should move and select with the arrow keys, skipping a disabled card, and stop at the ends', async () => {
+  it('should move the focus with the arrow keys WITHOUT choosing, skipping a disabled card and stopping at the ends', async () => {
     const log: string[] = [];
     mounted = await mount(<Harness start="b" log={log} />);
     const group = must(mounted.container.querySelector('[role="radiogroup"]'), 'group');
-    await interact(() => pressKey(group, 'ArrowRight'));
-    expect(log).toEqual(['d']);
-    await interact(() => pressKey(group, 'ArrowRight'));
-    expect(log).toEqual(['d']);
-    await interact(() => pressKey(group, 'Home'));
-    expect(log).toEqual(['d', 'a']);
-    expect(radios(mounted.container).map(r => r.tabIndex)).toEqual([0, -1, -1, -1]);
+    const input = (i: number) => must(radios(mounted!.container)[i], `radio ${i}`);
+    input(1).focus();
+    await interact(() => pressKey(input(1), 'ArrowRight'));
+    expect(document.activeElement).toBe(input(3));
+    await interact(() => pressKey(input(3), 'ArrowRight'));
+    expect(document.activeElement).toBe(input(3));
+    await interact(() => pressKey(input(3), 'Home'));
+    expect(document.activeElement).toBe(input(0));
+    await interact(() => pressKey(input(0), 'End'));
+    expect(document.activeElement).toBe(input(3));
+    // Nothing was chosen by any of it: the checked card, the tab stop and the callback are all untouched.
+    expect(log).toEqual([]);
+    expect(cardOf(mounted.container, 'b').getAttribute('data-selected')).toBe('true');
+    expect(radios(mounted.container).map(r => r.tabIndex)).toEqual([-1, 0, -1, -1]);
+    expect(group.getAttribute('aria-label')).toBe('Pick one');
+  });
+
+  it('should choose the focused card on Enter, and on a click, and not before', async () => {
+    const log: string[] = [];
+    mounted = await mount(<Harness start="a" log={log} />);
+    const input = (i: number) => must(radios(mounted!.container)[i], `radio ${i}`);
+    input(0).focus();
+    await interact(() => pressKey(input(0), 'ArrowDown'));
+    expect(log).toEqual([]);
+    await interact(() => pressKey(input(1), 'Enter'));
+    expect(log).toEqual(['b']);
+    expect(cardOf(mounted.container, 'b').getAttribute('data-selected')).toBe('true');
   });
 
   it('should choose by clicking a card and never report the card it already has', async () => {
@@ -104,28 +126,74 @@ describe('ChoiceCards', () => {
     expect(cardOf(mounted.container, 'c').getAttribute('aria-disabled')).toBe('true');
   });
 
-  it('should find the next usable option for a key', () => {
-    expect(choiceAfterKey(OPTIONS, 'a', 'ArrowDown')?.id).toBe('b');
-    expect(choiceAfterKey(OPTIONS, 'b', 'ArrowDown')?.id).toBe('d');
-    expect(choiceAfterKey(OPTIONS, 'd', 'ArrowUp')?.id).toBe('b');
-    expect(choiceAfterKey(OPTIONS, 'a', 'End')?.id).toBe('d');
-    expect(choiceAfterKey(OPTIONS, 'a', 'x')).toBeUndefined();
-  });
-
   it('should move the first arrow to the SECOND card while nothing is chosen (the first holds the tab stop)', async () => {
     const log: string[] = [];
     mounted = await mount(<Harness start={null} log={log} />);
-    const group = must(mounted.container.querySelector('[role="radiogroup"]'), 'group');
-    await interact(() => pressKey(group, 'ArrowRight'));
-    expect(log).toEqual(['b']);
-    expect(choiceAfterKey(OPTIONS, null, 'ArrowDown')?.id).toBe('b');
-    expect(choiceAfterKey(OPTIONS, null, 'End')?.id).toBe('d');
+    const first = must(radios(mounted.container)[0], 'first radio');
+    first.focus();
+    await interact(() => pressKey(first, 'ArrowRight'));
+    expect(document.activeElement).toBe(must(radios(mounted.container)[1], 'second radio'));
+    expect(log).toEqual([]);
   });
 
   it('should tell the grid how many cards it holds, so two never stretch to the page', async () => {
     mounted = await mount(<Harness start="a" log={[]} />);
     const grid = must(mounted.container.querySelector<HTMLElement>('.fy-cc__grid'), 'grid');
     expect(grid.style.getPropertyValue('--cc-n')).toBe('4');
+  });
+});
+
+describe('the other radio groups follow the same key rule', () => {
+  let mounted: Mounted | undefined;
+  afterEach(async () => {
+    await mounted?.unmount();
+    mounted = undefined;
+  });
+  const radiosOf = (c: HTMLElement) => [...c.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+
+  it('should not write a Segmented setting on an arrow, only on Enter', async () => {
+    const log: string[] = [];
+    mounted = await mount(
+      <Segmented
+        label="Mode"
+        value="a"
+        options={[
+          { id: 'a', label: 'A' },
+          { id: 'b', label: 'B' },
+        ]}
+        onChange={next => log.push(next)}
+      />,
+    );
+    const [first, second] = radiosOf(mounted.container);
+    first?.focus();
+    await interact(() => pressKey(must(first, 'first'), 'ArrowRight'));
+    expect(document.activeElement).toBe(must(second, 'second'));
+    expect(log).toEqual([]);
+    await interact(() => pressKey(must(second, 'second'), 'Enter'));
+    expect(log).toEqual(['b']);
+  });
+
+  it('should not choose a setup card (a native radio) on an arrow, only on Enter', async () => {
+    const log: string[] = [];
+    mounted = await mount(
+      <RadioChoices
+        legend="Pick"
+        name="pick"
+        value="a"
+        options={[
+          { id: 'a', title: 'A' },
+          { id: 'b', title: 'B' },
+        ]}
+        onChoose={next => log.push(next)}
+      />,
+    );
+    const [first, second] = radiosOf(mounted.container);
+    first?.focus();
+    await interact(() => pressKey(must(first, 'first'), 'ArrowDown'));
+    expect(document.activeElement).toBe(must(second, 'second'));
+    expect(log).toEqual([]);
+    await interact(() => pressKey(must(second, 'second'), 'Enter'));
+    expect(log).toEqual(['b']);
   });
 });
 

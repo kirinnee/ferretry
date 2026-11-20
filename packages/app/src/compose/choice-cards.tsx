@@ -6,7 +6,8 @@
  *     options={[{ id: 'left', title: 'Left', line: 'The menu beside your work', icon: <PanelLeft size={18} /> }, …]} />
  *
  * Built as a native `role="radiogroup"`: the radios are `sr-only`, the whole card is the label, the checked card is
- * the one tab stop, the arrow keys move AND select (as a radio group does), and Home / End jump. The radio dot is not
+ * the one tab stop, the arrow keys move the focus ONLY (`onRadioGroupKeyDown`: choosing can open a camera or save a
+ * setting), Enter / Space / a click choose, and Home / End jump. The radio dot is not
  * drawn; the selected card carries the accent border, a soft fill and a check badge (`choice-cards.css`).
  *
  * On a NEW selection the card plays a 160ms scale 0.98 -> 1 (`data-pulse`). The value it was given on mount never
@@ -42,26 +43,6 @@ export interface ChoiceCardsProps {
   readonly disabled?: boolean;
 }
 
-/** The option the arrow key lands on: the next/previous one that can be chosen, stopping at the ends. */
-export function choiceAfterKey(
-  options: readonly ChoiceOption[],
-  value: string | null,
-  key: string,
-): ChoiceOption | undefined {
-  const usable = options.filter(option => option.disabled !== true);
-  // With nothing chosen the first usable card holds the tab stop, so it is where the arrow keys start from.
-  const index = Math.max(
-    0,
-    usable.findIndex(option => option.id === value),
-  );
-  const last = usable.length - 1;
-  if (key === 'Home') return usable[0];
-  if (key === 'End') return usable[last];
-  if (key === 'ArrowDown' || key === 'ArrowRight') return usable[Math.min(last, index + 1)];
-  if (key === 'ArrowUp' || key === 'ArrowLeft') return usable[Math.max(0, index - 1)];
-  return undefined;
-}
-
 /**
  * After a keyboard move, show the VISIBLE label: the radio is `sr-only`, so focusing it with `preventScroll` leaves the
  * card below the window. `block: 'nearest'` moves only as far as needed (and not at all when it is already in view).
@@ -79,7 +60,40 @@ export function revealChoice(input: HTMLInputElement | null | undefined): void {
     requestAnimationFrame(() => (reveal(), requestAnimationFrame(reveal)));
 }
 
-const KEYS = ['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'];
+const MOVE_KEYS = ['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'];
+
+/**
+ * THE ONE KEY RULE for every group of radios drawn as cards or pills: the arrow keys, Home and End move the FOCUS only,
+ * stopping at the ends and skipping a disabled radio; nothing is chosen until Enter, Space or a click. A native radio
+ * group chooses (and so fires its change) on every arrow, which is wrong whenever choosing DOES something: opens the
+ * camera, saves a setting, or sends audio to a vendor. Put this on the group's `onKeyDown`; a key from anything but a
+ * radio is left alone. Space already chooses a focused radio on its own; Enter is the one this adds.
+ */
+export function onRadioGroupKeyDown(event: KeyboardEvent<HTMLElement>): void {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || target.type !== 'radio') return;
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    target.click();
+    return;
+  }
+  if (!MOVE_KEYS.includes(event.key)) return;
+  event.preventDefault();
+  const radios = [...event.currentTarget.querySelectorAll<HTMLInputElement>('input[type="radio"]')].filter(
+    radio => radio.name === target.name && !radio.disabled,
+  );
+  const here = radios.indexOf(target);
+  const last = radios.length - 1;
+  const next =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? last
+        : event.key === 'ArrowDown' || event.key === 'ArrowRight'
+          ? Math.min(last, here + 1)
+          : Math.max(0, here - 1);
+  revealChoice(radios[next]);
+}
 
 export function ChoiceCards({ label, options, value, onChange, disabled = false }: ChoiceCardsProps) {
   const group = useId();
@@ -94,20 +108,12 @@ export function ChoiceCards({ label, options, value, onChange, disabled = false 
   const stop = options.some(option => option.id === value && option.disabled !== true)
     ? value
     : (options.find(option => option.disabled !== true)?.id ?? null);
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (disabled || !KEYS.includes(event.key)) return;
-    event.preventDefault();
-    const target = choiceAfterKey(options, value, event.key);
-    if (target === undefined) return;
-    choose(target.id);
-    revealChoice(event.currentTarget.querySelector<HTMLInputElement>(`input[value="${target.id}"]`));
-  };
   return (
     <div className="fy-cc" data-choice-cards="">
       <div
         role="radiogroup"
         aria-label={label}
-        onKeyDown={onKeyDown}
+        onKeyDown={disabled ? undefined : onRadioGroupKeyDown}
         className="fy-cc__grid"
         style={{ '--cc-n': options.length } as CSSProperties}
       >
