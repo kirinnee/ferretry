@@ -614,7 +614,6 @@ function SignInsBody({ client, now = () => globalThis.Date.now(), pollMs, browse
         <>
           <div className="fy-lg-group" data-logins-heading="">
             <div className="flex min-w-0 flex-col gap-1">
-              <h3 className="m-0 text-row font-semibold text-fg">Logins</h3>
               <p className="m-0 text-cell leading-base text-muted">
                 Each login is one sign-in or key to Claude Code or Codex, and belongs to this machine.
               </p>

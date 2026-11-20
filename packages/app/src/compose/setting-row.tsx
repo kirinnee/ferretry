@@ -19,8 +19,9 @@
  */
 
 import { ChevronRight, Info } from 'lucide-react';
-import { type KeyboardEvent, type ReactNode, useId, useState } from 'react';
+import { type KeyboardEvent, type ReactNode, useContext, useId, useState } from 'react';
 import { cn } from '../ui/lib/class-names.ts';
+import { PanelTitleContext } from './panel-title.ts';
 /** A deep-link target id (`#setting-<id>`); each settings tab owns its own ids. */
 type SettingId = string;
 
@@ -33,18 +34,24 @@ export interface SettingGroupProps {
 
 export function SettingGroup({ label, settingId, children }: SettingGroupProps) {
   const headingId = useId();
+  // A group named for the tab it sits in (Codex's "Codex") is that tab: the shell's panel heading already says it once, so
+  // the group keeps its name for assistive tech and draws no second heading.
+  const panelTitle = useContext(PanelTitleContext);
+  const titledByPanel = panelTitle !== undefined && panelTitle.trim().toLowerCase() === label.trim().toLowerCase();
   return (
     <section
-      aria-labelledby={headingId}
+      {...(titledByPanel ? { 'aria-label': label } : { 'aria-labelledby': headingId })}
       className="mb-8 min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-accent"
       data-setting-group={label}
       {...(settingId === undefined
         ? {}
         : { id: `settings-${settingId}`, 'data-setting-id': settingId, tabIndex: -1 as const })}
     >
-      <h3 id={headingId} className="m-0 mb-1 px-1 text-meta font-semibold uppercase tracking-wide text-muted">
-        {label}
-      </h3>
+      {titledByPanel ? null : (
+        <h3 id={headingId} className="m-0 mb-1 px-1 text-meta font-semibold uppercase tracking-wide text-muted">
+          {label}
+        </h3>
+      )}
       <ul className="kt-groupcard kt-groupcard--flat m-0 list-none p-0">{children}</ul>
     </section>
   );

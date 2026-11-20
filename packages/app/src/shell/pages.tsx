@@ -9,6 +9,7 @@ import { DeviceAppearance } from './device-appearance.tsx';
 import { DevicePanels } from './device-panels.tsx';
 import { Link } from './link.tsx';
 import { SettingsNav } from './settings-nav.tsx';
+import { PanelTitleContext } from '../compose/panel-title.ts';
 import { resolveSettingsTab, SCOPE_WORDS, scopeOf } from './settings-tab.ts';
 import { Loading } from '../ui/loading.tsx';
 import { ResizeHandle } from '../ui/resize-handle.tsx';
@@ -209,7 +210,6 @@ export function DaemonSettingsPage({
             )}
           </p>
         )}
-        {active === undefined ? null : <p className="fy-settings-title">{active.label}</p>}
       </header>
       <div className="fy-settings-body">
         <SettingsNav
@@ -226,7 +226,11 @@ export function DaemonSettingsPage({
           <ShellLine>{`There is no settings tab called "${choice.name}" on this daemon. Pick one from the list.`}</ShellLine>
         ) : listOnly ? null : (
           <section ref={pageRef} className="fy-settings-page" aria-label={choice.tab.label} tabIndex={-1}>
-            <PluginView daemon={daemon} plugin={choice.tab.plugin} section="settings" id={choice.tab.id} props={{}} />
+            {/* The shell owns the panel's heading, for EVERY tab at EVERY width: one h2 from the tab's own label (a tab draws none). */}
+            <h2 className="fy-settings-title">{choice.tab.label}</h2>
+            <PanelTitleContext.Provider value={choice.tab.label}>
+              <PluginView daemon={daemon} plugin={choice.tab.plugin} section="settings" id={choice.tab.id} props={{}} />
+            </PanelTitleContext.Provider>
           </section>
         )}
       </div>

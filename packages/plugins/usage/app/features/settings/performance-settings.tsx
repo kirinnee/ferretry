@@ -226,15 +226,8 @@ export function PerformanceSettings({
   }, [recording, write]);
 
   return (
-    <section
-      className="fy-usage-settings flex min-w-0 flex-col gap-8"
-      aria-labelledby="performance-settings-heading"
-      data-performance=""
-    >
+    <section className="fy-usage-settings flex min-w-0 flex-col gap-8" aria-label="Performance" data-performance="">
       <div className="flex min-w-0 flex-col gap-1">
-        <h3 id="performance-settings-heading" className="m-0 text-row font-semibold text-fg">
-          Performance
-        </h3>
         <p className="m-0 text-cell leading-base text-muted">
           A report of where this machine and this app spend their time, to share with whoever is looking into “it’s
           slow”.

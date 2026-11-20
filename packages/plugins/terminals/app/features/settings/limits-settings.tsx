@@ -27,11 +27,9 @@ export const limitsBadge = (view: LimitsPanelView): { readonly text: string; rea
 function LimitsCard({ view }: { readonly view: LimitsPanelView }) {
   const badge = limitsBadge(view);
   return (
-    <section aria-labelledby="limits-heading" className="min-w-0" data-testid="limits-card">
+    <section aria-label="Ferret limits" className="min-w-0" data-testid="limits-card">
       <div className="flex flex-wrap items-center gap-2 px-1">
-        <h3 className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg" id="limits-heading">
-          <ShieldCheck aria-hidden="true" className="text-accent" size={16} /> Ferret limits
-        </h3>
+        <ShieldCheck aria-hidden="true" className="text-accent" size={16} />
         <span
           className={
             badge.good

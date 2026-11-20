@@ -101,14 +101,8 @@ export function AccountsSurface({ client, pollDelay, now }: AccountsSurfaceProps
   if (accounts === null) return <Loading kind="page" label="Reading this daemon’s GitHub accounts…" />;
 
   return (
-    <section
-      className="kt-panel flex flex-col gap-3 p-panel"
-      aria-labelledby="git-accounts-heading"
-      data-testid="git-accounts"
-    >
-      <h2 id="git-accounts-heading" className="m-0 text-row font-semibold text-fg">
-        GitHub accounts
-      </h2>
+    <section className="kt-panel flex flex-col gap-3 p-panel" aria-label="GitHub accounts" data-testid="git-accounts">
+      {/* The tab's title is the Settings shell's one heading for this panel; the card draws none of its own. */}
       <p className="m-0 text-cell leading-base text-muted">
         Connect the GitHub accounts ferrets may act as. Ferretry keeps each token sealed on this machine; a ferret can
         use it through the daemon and can never read it.

@@ -64,7 +64,7 @@ const toDetail = async (root: HTMLElement, reference = 'modelSets/Claude models'
 describe('ModelSetsTab — reading', () => {
   it('lists the model sets with their badges and use, and opens one to its page', async () => {
     const root = await open();
-    expect(text(root, 'h3')).toBe('Model sets');
+    expect(root.querySelector('h3')).toBeNull(); // the tab's own title is the Settings shell's one heading
     expect(root.querySelectorAll('[data-component-row]')).toHaveLength(1);
     expect(text(root, '[data-component-row="modelSets/Claude models"]')).toContain('Used by 0 profiles, 0 runtimes');
     expect(root.textContent).not.toContain('Main instructions');
@@ -81,7 +81,7 @@ describe('ModelSetsTab — reading', () => {
 
   it('says there are none yet, and falls back to its own words for a kind the daemon did not list', async () => {
     const empty = await open(scriptedMachine({ catalog: withModelSets() }));
-    expect(text(empty, 'h3')).toBe('Model sets');
+    expect(empty.querySelector('h3')).toBeNull(); // the tab's own title is the Settings shell's one heading
     expect(empty.textContent).toContain('None saved yet.');
     await mounted?.unmount();
     const unlisted = await open(
@@ -94,7 +94,7 @@ describe('ModelSetsTab — reading', () => {
         }),
       }),
     );
-    expect(text(unlisted, 'h3')).toBe('Model sets');
+    expect(unlisted.querySelector('h3')).toBeNull(); // the tab's own title is the Settings shell's one heading
     expect(unlisted.textContent).toContain('None saved yet.');
     expect(unlisted.querySelector('[data-component-new="modelSets"]')).not.toBeNull();
   });
@@ -177,7 +177,7 @@ describe('ModelSetsTab — delete (E21)', () => {
       { kind: 'component.remove', componentKind: 'modelSets', name: 'Claude models', removeFromProfiles: true },
     ]);
     expect(text(root, '[data-components-saved]')).toBe('Deleted Claude models.');
-    expect(text(root, 'h3')).toBe('Model sets');
+    expect(root.querySelector('h3')).toBeNull(); // the tab's own title is the Settings shell's one heading
   });
 
   it('confirms deleting something nothing uses, and says one runtime in the singular', async () => {

@@ -450,9 +450,14 @@
 .fy-settings-head h1 {
   margin-bottom: 4px;
 }
-.fy-settings-back,
-.fy-settings-title {
+.fy-settings-back {
   display: none;
+}
+/* The panel's one heading, drawn by the shell from the tab's label for every tab at every width (a tab draws none of its own). */
+.fy-settings-title {
+  margin: 0 0 var(--flow-3, 12px);
+  font-size: calc(var(--fy-text-scale, 1) * 1.2rem);
+  font-weight: 600;
 }
 .fy-settings-machine {
   display: flex;
@@ -617,7 +622,7 @@
   .fy-settings[data-settings-open='panel'] .fy-settings-machine__scope {
     display: none;
   }
-  /* The panel's visible title is `.fy-settings-title`, but the page's one real h1 stays in the accessibility tree: visually
+  /* The panel's visible title is the panel's own h2 (`.fy-settings-title`), but the page's one real h1 stays in the accessibility tree: visually
      hidden, never `display:none` (that would leave the panel with no heading, and the title bar's h1-probe would still count it). */
   .fy-settings[data-settings-open='panel'] .fy-settings-head h1 {
     position: absolute;
@@ -634,12 +639,6 @@
     display: inline-flex;
     align-items: center;
     min-height: 44px;
-  }
-  .fy-settings[data-settings-open='panel'] .fy-settings-title {
-    display: block;
-    margin: 4px 0 0;
-    font-size: calc(var(--fy-text-scale, 1) * 1.2rem);
-    font-weight: 600;
   }
 }
 /* Setting groups on a page (a title over a grouped card) stand a whole step apart, so a title belongs to the card under it. */

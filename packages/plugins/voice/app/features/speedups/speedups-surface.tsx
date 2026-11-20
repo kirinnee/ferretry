@@ -373,7 +373,6 @@ export function SpeedupsSurface({
   if (failure !== null && failure.daemonId === connection.daemonId && failure.stepUp)
     return (
       <section className="kt-panel p-panel" role="status" aria-label="Speed-ups need your passkey">
-        <h3 className="m-0 text-row font-semibold text-fg">Speed-ups</h3>
         <div className="mt-2">
           <ConfirmToSee
             line="This machine wants your passkey before it shows which keys it holds."

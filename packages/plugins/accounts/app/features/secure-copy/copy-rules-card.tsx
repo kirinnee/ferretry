@@ -437,10 +437,10 @@ export function CopyRulesCard({
       data-testid="copy-rules-card"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <h2 id="copy-rules-heading" className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
+        <h3 id="copy-rules-heading" className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
           <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
           Paste rules
-        </h2>
+        </h3>
       </div>
       <p className="m-0 text-cell text-muted">Pastes allowed without asking. Every paste is still logged.</p>
       {waiting.length > 0 && onApproveWaiting !== undefined && onDenyWaiting !== undefined && (

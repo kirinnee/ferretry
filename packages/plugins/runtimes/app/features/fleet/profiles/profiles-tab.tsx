@@ -205,7 +205,7 @@ function ListPage({
     );
   return (
     <>
-      <PageHead title="Profiles" sub={counted(profiles.length, 'profile')} />
+      <PageHead root title="Profiles" sub={counted(profiles.length, 'profile')} />
       <div>{create}</div>
       <RowList label="Profiles">
         {profiles.map(profile => {

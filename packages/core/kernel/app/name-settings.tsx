@@ -74,11 +74,8 @@ export function NameSettingsView({
   readonly retry?: { readonly label: string; readonly onPress: () => void };
 }) {
   return (
-    <section className="kt-panel p-panel" aria-labelledby="settings-name-heading" data-machine-name="">
-      <h3 id="settings-name-heading" className="m-0 text-row font-semibold text-fg">
-        Name
-      </h3>
-      <p className="mb-0 mt-1 text-cell leading-base text-muted">
+    <section className="kt-panel p-panel" aria-label="Name" data-machine-name="">
+      <p className="m-0 text-cell leading-base text-muted">
         What this machine is called on every device: the pair screen, the machine list and notifications.
       </p>
       <form

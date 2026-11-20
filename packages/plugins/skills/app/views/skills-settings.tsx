@@ -93,7 +93,6 @@ export function createSkillsSettings(client: Pick<PluginClient, 'call'>): AppCom
     const inventory = read.load.value;
     return (
       <section className="fy-sk flex min-w-0 flex-col" aria-label="Skills" data-settings="skills">
-        <h3 className="m-0 mb-1 text-row font-semibold text-fg">Skills</h3>
         <p className="m-0 mb-6 text-meta text-muted">
           Every skill on this machine, by runtime account and by project. Open reads a skill’s SKILL.md.
         </p>

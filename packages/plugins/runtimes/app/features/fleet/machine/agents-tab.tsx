@@ -368,7 +368,6 @@ export function AgentsTab({ client, machine, machineName, checking, onRetry, onR
   return (
     <div className="flex min-w-0 flex-col" data-agents-tab="">
       <div className="mb-6 flex min-w-0 flex-col gap-1" data-agents-heading="">
-        <h3 className="m-0 text-row font-semibold text-fg">Agents</h3>
         <p className="m-0 text-cell leading-base text-muted">
           How agents behave on {machineName}: what they may do and control, and whether they come back after a restart.
         </p>
