@@ -808,11 +808,16 @@ function PairingFocus({
           />
         </label>
       ) : (
-        <p className="m-0 min-w-0 break-words text-ui leading-base text-muted" data-pair-device-label="">
-          This device will be called <span className="font-semibold text-fg">{deviceName}</span>.{' '}
+        <p
+          className="m-0 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 break-words text-ui leading-base text-muted"
+          data-pair-device-label=""
+        >
+          <span>
+            This device will be called <span className="font-semibold text-fg">{deviceName}</span>.
+          </span>
           <button
             type="button"
-            className="min-h-[44px] bg-transparent p-0 font-medium text-accent underline"
+            className="kt-btn min-h-[44px] px-4 py-3"
             data-pair-device-rename=""
             onClick={() => setRenaming(true)}
             disabled={busy}

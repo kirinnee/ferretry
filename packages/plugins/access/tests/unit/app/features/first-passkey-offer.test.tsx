@@ -190,7 +190,7 @@ describe('the first-passkey offer on the pairing-success screen', () => {
 });
 
 describe('the passkey offer as a page (A565 shot 01 spacing)', () => {
-  it('draws one row of auto-width buttons, each at least 44 px tall with real padding, "Not now" beside the add button', async () => {
+  it('draws one row of fixed-width buttons in no inner card, each at least 44 px tall with real padding, "Not now" beside the add button', async () => {
     const { client } = machine(OPEN);
     let moved = 0;
     const screen = await mount(
@@ -218,8 +218,9 @@ describe('the passkey offer as a page (A565 shot 01 spacing)', () => {
         expect(button.className).toContain('py-3');
         expect(button.className).not.toContain('w-full');
       }
-      expect(offer.className).toContain('px-6');
-      expect(offer.className).toContain('py-5');
+      // No inner card (r11 O10 fix): the offer carries no border, fill or padding of its own.
+      for (const card of ['border', 'bg-surface-2', 'px-6', 'py-5', 'rounded-panel'])
+        expect(offer.className).not.toContain(card);
       // One "Not now" only: the quiet one that stands alone is gone while the offer shows.
       expect(screen.container.querySelectorAll('[data-paired-continue]')).toHaveLength(1);
 

@@ -10,9 +10,12 @@
  *   &scan=camera               a browser that can scan (an idle camera), so the cold page shows all three ways in
  *   &back=1                    the host gave the page a way back (Back), as `/pair` does when reached from Settings or the first run
  *   &motion=reduced             the app's own Motion = Reduced (`<html data-motion="reduced">`)
+ *   &scene=export              ONLY the cheering ferret, imported from the Access app's export (`FerretMascot`, which the
+ *                              onboarding End page uses): proves the export draws the same reacting mascot
  */
 
 import { createRoot } from 'react-dom/client';
+import { FerretMascot } from '../../../../app/index.ts';
 import { PairingScreen } from '../../../../app/features/pairing/pairing-screen.tsx';
 import type { StepUpClient } from '../../../../app/lib/step-up-client.ts';
 import { daemonConnection } from '../../../../app/shell-pairing.ts';
@@ -34,40 +37,47 @@ const offering = params.get('offer') === 'open';
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('the scene page has no #root');
-createRoot(root).render(
-  <PairingScreen
-    connections={[]}
-    selectedDaemonId={null}
-    arrival={arrival === 'cold' ? { kind: 'none' } : { kind: 'seed', seed: SEED }}
-    sameMachine={false}
-    {...(params.get('scan') === 'camera'
-      ? { scanHost: { supported: true, scan: async () => await new Promise<string>(() => {}) } }
-      : {})}
-    defaultName={() => 'Chrome on Linux · 4f2a'}
-    onPair={async () => {
-      await new Promise(resolve => setTimeout(resolve, 300));
-      if (arrival === 'broken') throw new Error('Nothing reached that daemon.');
-      return {
-        machine: 'kirin-workstation',
-        via: 'relay' as const,
-        connection: daemonConnection({
-          daemonId: SEED.daemonId,
-          baseUrl: SEED.daemonUrl,
-          deviceId: 'fy_device_id_fake',
-        }),
-      };
-    }}
-    {...(offering
-      ? {
-          passkeyClient: async () => openWindow,
-          passkeyOffer: { now: () => OFFER_NOW, supported: () => true, origin: () => 'https://ferretry.example' },
-          onContinue: () => {},
-        }
-      : {})}
-    {...(params.get('back') === '1'
-      ? { onClose: () => document.documentElement.setAttribute('data-went-back', '') }
-      : {})}
-    onRemove={() => {}}
-    onSelect={() => {}}
-  />,
-);
+if (params.get('scene') === 'export') {
+  createRoot(root).render(
+    <div data-export-mascot="" style={{ width: 240, margin: '80px auto' }}>
+      <FerretMascot pose="cheer" />
+    </div>,
+  );
+} else
+  createRoot(root).render(
+    <PairingScreen
+      connections={[]}
+      selectedDaemonId={null}
+      arrival={arrival === 'cold' ? { kind: 'none' } : { kind: 'seed', seed: SEED }}
+      sameMachine={false}
+      {...(params.get('scan') === 'camera'
+        ? { scanHost: { supported: true, scan: async () => await new Promise<string>(() => {}) } }
+        : {})}
+      defaultName={() => 'Chrome on Linux · 4f2a'}
+      onPair={async () => {
+        await new Promise(resolve => setTimeout(resolve, 300));
+        if (arrival === 'broken') throw new Error('Nothing reached that daemon.');
+        return {
+          machine: 'kirin-workstation',
+          via: 'relay' as const,
+          connection: daemonConnection({
+            daemonId: SEED.daemonId,
+            baseUrl: SEED.daemonUrl,
+            deviceId: 'fy_device_id_fake',
+          }),
+        };
+      }}
+      {...(offering
+        ? {
+            passkeyClient: async () => openWindow,
+            passkeyOffer: { now: () => OFFER_NOW, supported: () => true, origin: () => 'https://ferretry.example' },
+            onContinue: () => {},
+          }
+        : {})}
+      {...(params.get('back') === '1'
+        ? { onClose: () => document.documentElement.setAttribute('data-went-back', '') }
+        : {})}
+      onRemove={() => {}}
+      onSelect={() => {}}
+    />,
+  );

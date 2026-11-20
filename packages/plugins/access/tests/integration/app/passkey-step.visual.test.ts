@@ -125,6 +125,27 @@ describe('the access.passkey step, in a real browser', () => {
           await tab.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
         ).toBe(true);
 
+        // r11 O10 (item 3): the two answers are STACKED, one fixed width, 12 px apart, both explicit buttons.
+        const add = await box(tab, '[data-passkey-add]');
+        const later2 = await box(tab, '[data-passkey-later]');
+        const flow = await tab
+          .locator('[data-passkey-step] button')
+          .first()
+          .evaluate(node => {
+            const row = node.parentElement as Element;
+            const style = getComputedStyle(row);
+            return { display: style.display, direction: style.flexDirection };
+          });
+        console.log(
+          `${variant.name} passkey step: add ${add.width}x${add.height} @${add.x},${add.y}; not-now ${later2.width}x${later2.height} @${later2.x},${later2.y}; row ${flow.display}/${flow.direction}`,
+        );
+        expect(flow.direction, 'the two buttons sit in a column').toBe('column');
+        expect(later2.x, 'one left edge').toBeCloseTo(add.x, 0);
+        expect(later2.width, 'one width').toBeCloseTo(add.width, 0);
+        expect(add.width, 'fixed width, 136 px or more').toBeGreaterThanOrEqual(136);
+        expect(later2.y, 'Not now is under Add').toBeGreaterThan(add.y + add.height - 1);
+        expect(later2.y - (add.y + add.height), 'the gap is 12 px').toBeCloseTo(12, 0);
+
         // Moving through the page by key starts nothing: no ceremony, no leaving.
         await tab.locator('[data-passkey-add]').focus();
         for (const key of ['ArrowRight', 'ArrowDown', 'Home', 'End']) await tab.keyboard.press(key);

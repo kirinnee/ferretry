@@ -94,7 +94,7 @@ const open = async (variant: Variant, query = '', reducedMotion: 'reduce' | 'no-
   const problems: string[] = [];
   tab.on('pageerror', error => problems.push(error.message));
   await tab.goto(`${origin}/?theme=studio-${variant.scheme}${query}`);
-  await tab.waitForSelector('[data-pairing-stage]');
+  await tab.waitForSelector('[data-pairing-stage], [data-export-mascot]');
   await tab.evaluate(async () => await document.fonts.ready);
   return { tab, problems, close: async () => await context.close() };
 };
@@ -130,7 +130,7 @@ const sink = async (tab: Page): Promise<number> =>
     return matrix.f;
   });
 
-/** The names of the CSS animations running on the mascot now. */
+/** The names of the CSS animations running on the mascot now (finite or not), with the element each one runs on. */
 const ferretAnimations = async (tab: Page): Promise<string[]> =>
   await tab.evaluate(() =>
     document
@@ -140,7 +140,60 @@ const ferretAnimations = async (tab: Page): Promise<string[]> =>
       .map(animation => (animation as CSSAnimation).animationName),
   );
 
+/** The ferret's running animations as `name@marker`, where the marker is the element's own data-mascot-* attribute. */
+const markedAnimations = async (tab: Page): Promise<string[]> =>
+  await tab.evaluate(() =>
+    document
+      .getAnimations()
+      .filter(animation => animation.playState === 'running' && animation instanceof CSSAnimation)
+      .map(animation => ({ animation: animation as CSSAnimation, target: (animation.effect as KeyframeEffect).target }))
+      .filter(({ target }) => target?.closest('.fy-ferret') != null)
+      .map(({ animation, target }) => {
+        const marker = (target as Element).getAttributeNames().find(name => name.startsWith('data-mascot-')) ?? '-';
+        return `${animation.animationName}@${marker}`;
+      }),
+  );
+
+/** Where the pupils are looking: the translation of the eyes' look layer (SVG units), after a transition has finished. */
+const look = async (tab: Page): Promise<{ x: number; y: number }> =>
+  await tab.evaluate(async () => {
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter(animation => animation instanceof CSSTransition)
+        .map(animation => animation.finished),
+    );
+    const node = document.querySelector('[data-mascot-look]');
+    if (node === null) return { x: Number.NaN, y: Number.NaN };
+    const matrix = new DOMMatrixReadOnly(getComputedStyle(node).transform);
+    return { x: matrix.e, y: matrix.f };
+  });
+
+/** Press "Pair this device" and wait for the Connected screen (the ferret cheers). */
+const connect = async (tab: Page): Promise<void> => {
+  await tab.getByRole('button', { name: 'Pair this device' }).click();
+  await tab.waitForSelector('[data-pairing-stage="paired"]');
+  await tab.waitForSelector('.fy-ferret[data-pose="cheer"]');
+};
+
+/** Wait for every finite animation (the arrival: rise, dook, the first wave) to finish, so only a REACTION can run. */
+const settle = async (tab: Page): Promise<void> => {
+  await tab.evaluate(
+    async () =>
+      await Promise.all(
+        document
+          .getAnimations()
+          .filter(
+            animation => animation instanceof CSSAnimation && animation.effect?.getTiming().iterations !== Infinity,
+          )
+          .map(animation => animation.finished),
+      ),
+  );
+};
+
 const MEASURED: string[] = [];
+const LOOK_X_MAX = 3.3;
+const LOOK_Y_MAX = 2.5;
 
 describe('r11 O10: the mascot reacts', () => {
   for (const variant of VARIANTS.filter(item => !item.phone)) {
@@ -196,18 +249,174 @@ describe('r11 O10: the mascot reacts', () => {
     });
   }
 
-  it('reduced motion: the hover still shows (it rises) but nothing moves', async () => {
+  // The Connected screen is where the ferret cheers: it used to be excluded from every reaction (the owner's "it never
+  // reacts"). Hovering it now makes the pupils FOLLOW the pointer (clamped), the arm wave once more and the ferret hop.
+  for (const variant of VARIANTS.filter(item => !item.phone)) {
+    it(`${variant.name}: on Connected the pupils follow the pointer (clamped), the arm waves and the ferret hops`, async () => {
+      const { tab, problems, close } = await open(variant, '&offer=open');
+      try {
+        await connect(tab);
+        await settle(tab);
+        const rest = await look(tab);
+        expect(rest, 'at rest the pupils look straight ahead').toEqual({ x: 0, y: 0 });
+        expect(await markedAnimations(tab), 'nothing but the blink runs at rest').toEqual([
+          'fy-ferret-blink@data-mascot-blink',
+        ]);
+        const box = must(await tab.locator('.fy-ferret').boundingBox(), 'the ferret');
+        const before = Date.now();
+        await tab.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.9);
+        await tab.waitForFunction(
+          () =>
+            document
+              .querySelector('[data-mascot-wave]')
+              ?.getAnimations()
+              .some(a => a.playState === 'running') === true,
+          undefined,
+          { timeout: 400 },
+        );
+        const waveMs = Date.now() - before;
+        const running = await markedAnimations(tab);
+        expect(running, 'the arm waves').toContain('fy-ferret-wave-again@data-mascot-wave');
+        expect(running, 'the ferret hops').toContain('fy-ferret-hop@data-mascot-hop');
+        const right = await look(tab);
+        await tab.mouse.move(box.x + box.width * 0.1, box.y + box.height * 0.1);
+        const left = await look(tab);
+        await tab.mouse.move(box.x - 200, box.y - 200);
+        // Far outside it the ferret has been left: the look is back to straight ahead.
+        const away = await look(tab);
+        MEASURED.push(
+          `${variant.name} connected: wave running after ${waveMs} ms; look right-down ${right.x.toFixed(2)},${right.y.toFixed(2)}; left-up ${left.x.toFixed(2)},${left.y.toFixed(2)}; away ${away.x},${away.y}; animations ${running.join(',')}`,
+        );
+        expect(right.x, 'the right pupils look right').toBeGreaterThan(1);
+        expect(right.y, 'and down').toBeGreaterThan(0.5);
+        expect(left.x, 'the left pupils look left').toBeLessThan(-1);
+        expect(left.y, 'and up').toBeLessThan(-0.5);
+        for (const point of [right, left]) {
+          expect(Math.abs(point.x), 'x is clamped').toBeLessThanOrEqual(LOOK_X_MAX);
+          expect(Math.abs(point.y), 'y is clamped').toBeLessThanOrEqual(LOOK_Y_MAX);
+        }
+        expect(away, 'leaving returns the look').toEqual({ x: 0, y: 0 });
+        await shot(tab, variant, 'connected-hover');
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  for (const variant of VARIANTS.filter(item => item.phone)) {
+    it(`${variant.name}: on Connected a tap makes the pupils look at it and the arm wave, then it settles`, async () => {
+      const { tab, problems, close } = await open(variant, '&offer=open');
+      try {
+        await connect(tab);
+        await settle(tab);
+        const box = must(await tab.locator('.fy-ferret').boundingBox(), 'the ferret');
+        await tab.touchscreen.tap(box.x + box.width * 0.9, box.y + box.height * 0.5);
+        await tab.waitForFunction(
+          () =>
+            document
+              .querySelector('[data-mascot-wave]')
+              ?.getAnimations()
+              .some(a => a.playState === 'running') === true,
+          undefined,
+          { timeout: 400 },
+        );
+        const running = await markedAnimations(tab);
+        const looked = await look(tab);
+        MEASURED.push(
+          `${variant.name} connected tap: look ${looked.x.toFixed(2)},${looked.y.toFixed(2)}; ${running.join(',')}`,
+        );
+        expect(running).toContain('fy-ferret-wave-again@data-mascot-wave');
+        expect(running).toContain('fy-ferret-hop@data-mascot-hop');
+        await shot(tab, variant, 'connected-hover');
+        expect(looked.x, 'the pupils look toward the tap').toBeGreaterThan(1);
+        expect(Math.abs(looked.x)).toBeLessThanOrEqual(LOOK_X_MAX);
+        await tab.waitForFunction(() => document.querySelector('.fy-ferret[data-poke]') === null, undefined, {
+          timeout: 4_000,
+        });
+        expect(await look(tab), 'the pupils settle').toEqual({ x: 0, y: 0 });
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  // Reduced motion: the picture still reacts where it can without moving (the raised ferret on the pre-pair screen), but
+  // the ONLY thing that animates is the blink; nothing transitions (checked at once, not after a wait that hides it).
+  for (const where of ['pre-pair', 'connected'] as const) {
+    it(`reduced motion (${where}): the only animation is the blink, and nothing transitions`, async () => {
+      const variant = VARIANTS[0];
+      const { tab, problems, close } = await open(variant, where === 'connected' ? '&offer=open' : '', 'reduce');
+      try {
+        if (where === 'connected') await connect(tab);
+        const box = must(await tab.locator('.fy-ferret').boundingBox(), 'the ferret');
+        await tab.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.6);
+        await tab.waitForFunction(() => document.querySelector('.fy-ferret')?.matches(':hover') === true);
+        const state = await tab.evaluate(() => {
+          const ferret = document.querySelector('.fy-ferret') as Element;
+          const inside = document.getAnimations().filter(animation => {
+            const target = (animation.effect as KeyframeEffect).target;
+            return target !== null && ferret.contains(target);
+          });
+          const durations = [...ferret.querySelectorAll('*')].map(node => getComputedStyle(node).transitionDuration);
+          const eyes = ferret.querySelector('[data-mascot-blink]') as Element;
+          const transitioning = inside
+            .filter(animation => animation instanceof CSSTransition)
+            .map(
+              animation =>
+                `${(animation as CSSTransition).transitionProperty}@${(animation.effect as KeyframeEffect).target?.getAttribute('class')}`,
+            );
+          return {
+            eyesAnimation: getComputedStyle(eyes).animationName,
+            transitioning,
+            // CSS animations only (a transition at the app's 1 ms floor may be caught mid-flight and is not motion).
+            running: inside
+              .filter(animation => animation instanceof CSSAnimation && animation.playState === 'running')
+              .map(
+                animation =>
+                  `${(animation as CSSAnimation).animationName}@${(animation.effect as KeyframeEffect).target?.getAttribute('data-mascot-blink') === null ? 'other' : 'blink'}`,
+              ),
+            transitions: inside.filter(animation => animation instanceof CSSTransition).length,
+            // The app floors every transition at 1 ms under reduced motion (`design-system.css`): anything longer is motion.
+            slowTransitions: durations.filter(duration =>
+              duration.split(',').some(part => Number.parseFloat(part) > 0.0011),
+            ).length,
+          };
+        });
+        MEASURED.push(
+          `reduced ${where}: eyes animation ${state.eyesAnimation}; transitions on ${state.transitioning.join(',')}; running ${state.running.join(',')}; transitions ${state.transitions}; transitions slower than 1 ms ${state.slowTransitions}`,
+        );
+        expect(state.running, 'only the blink animates').toEqual(['fy-ferret-blink@blink']);
+        expect(state.slowTransitions, 'no element in the ferret has a transition longer than 1 ms').toBe(0);
+        expect(await look(tab), 'the pupils do not move').toEqual({ x: 0, y: 0 });
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+  }
+});
+
+describe('r11 O10: the Access app exports the mascot for the End page', () => {
+  it('a mascot mounted from the app export reacts the same way', async () => {
     const variant = VARIANTS[0];
-    const { tab, problems, close } = await open(variant, '', 'reduce');
+    const { tab, problems, close } = await open(variant, '&scene=export');
     try {
-      const rest = await sink(tab);
-      const box = must(await tab.locator('.fy-ferret').boundingBox(), 'the ferret');
-      await tab.mouse.move(box.x + box.width / 2, box.y + box.height * 0.5);
-      await tab.waitForFunction(() => document.querySelector('.fy-ferret')?.matches(':hover') === true);
-      expect(await sink(tab)).toBeLessThanOrEqual(rest - 12);
-      expect(await ferretAnimations(tab), 'no ferret animation runs under reduced motion').toEqual([]);
-      const running = await tab.evaluate(() => document.querySelector('.fy-ferret-body')?.getAnimations().length ?? -1);
-      expect(running, 'the body has no transition or animation under reduced motion').toBe(0);
+      await tab.waitForSelector('[data-export-mascot] .fy-ferret[data-pose="cheer"]');
+      await settle(tab);
+      const box = must(await tab.locator('[data-export-mascot] .fy-ferret').boundingBox(), 'the exported ferret');
+      await tab.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.9);
+      await tab.waitForFunction(
+        () =>
+          document
+            .querySelector('[data-mascot-wave]')
+            ?.getAnimations()
+            .some(a => a.playState === 'running') === true,
+        undefined,
+        { timeout: 400 },
+      );
+      expect((await look(tab)).x).toBeGreaterThan(1);
       expect(problems).toEqual([]);
     } finally {
       await close();
@@ -227,6 +436,25 @@ describe('r11 O10: the passkey offer buttons are one fixed size', () => {
         MEASURED.push(
           `${variant.name}: add ${add.width}x${add.height} @${add.x},${add.y}; not-now ${later.width}x${later.height} @${later.x},${later.y}`,
         );
+        // No inner card: the offer's own box has no border, no fill and no padding (O10: "no inner box").
+        const card = await tab.locator('[data-first-passkey-offer]').evaluate(node => {
+          const style = getComputedStyle(node);
+          return {
+            border: ['Top', 'Right', 'Bottom', 'Left'].map(side =>
+              Number.parseFloat(style.getPropertyValue(`border-${side.toLowerCase()}-width`)),
+            ),
+            background: style.backgroundColor,
+            padding: ['top', 'right', 'bottom', 'left'].map(side =>
+              Number.parseFloat(style.getPropertyValue(`padding-${side}`)),
+            ),
+          };
+        });
+        MEASURED.push(
+          `${variant.name}: offer box border ${card.border.join('/')} background ${card.background} padding ${card.padding.join('/')}`,
+        );
+        expect(card.border, 'no border').toEqual([0, 0, 0, 0]);
+        expect(card.background, 'no fill').toBe('rgba(0, 0, 0, 0)');
+        expect(card.padding, 'no padding').toEqual([0, 0, 0, 0]);
         expect(add.width, 'Add is 192 px wide').toBeCloseTo(192, 0);
         expect(later.width, 'Not now is the same width').toBeCloseTo(add.width, 0);
         expect(add.height).toBeGreaterThanOrEqual(44);
@@ -263,7 +491,103 @@ describe('r11 O10: the passkey offer buttons are one fixed size', () => {
       }
     });
   }
+});
 
+/** A control reads as a BUTTON, not a link or bare text: a visible border, a fill that is not the page, 44 px tall. */
+const buttonLook = async (tab: Page, selector: string) =>
+  await tab
+    .locator(selector)
+    .first()
+    .evaluate(node => {
+      const style = getComputedStyle(node);
+      const own = style.backgroundColor;
+      let parent: Element | null = node.parentElement;
+      let behind = 'rgba(0, 0, 0, 0)';
+      while (parent !== null && behind === 'rgba(0, 0, 0, 0)') {
+        behind = getComputedStyle(parent).backgroundColor;
+        parent = parent.parentElement;
+      }
+      return {
+        variant: node.getAttribute('data-variant'),
+        border: Number.parseFloat(style.borderTopWidth),
+        underline: style.textDecorationLine,
+        fill: own,
+        behind,
+        height: node.getBoundingClientRect().height,
+      };
+    });
+
+describe('r11 O10: pair-confirm fits above the fold; Rename and Back read as buttons', () => {
+  for (const variant of VARIANTS.filter(item => !item.phone)) {
+    it(`${variant.name}: with the hosted Back control the whole confirm action is above the fold`, async () => {
+      const { tab, problems, close } = await open(variant, '&back=1');
+      try {
+        await tab.waitForSelector('[data-pair-confirm]');
+        const back = must(await tab.locator('[data-pairing-close]').boundingBox(), 'Back');
+        const pair = must(await tab.locator('[data-pair-confirm]').boundingBox(), 'Pair this device');
+        const later = must(await tab.getByRole('button', { name: 'Not now' }).boundingBox(), 'Not now');
+        MEASURED.push(
+          `${variant.name} confirm: back y ${back.y.toFixed(0)}..${(back.y + back.height).toFixed(0)}; pair bottom ${(pair.y + pair.height).toFixed(1)}; not-now bottom ${(later.y + later.height).toFixed(1)} of ${variant.height}`,
+        );
+        expect(back.y, 'Back is on screen').toBeGreaterThanOrEqual(0);
+        expect(pair.y + pair.height, 'Pair this device ends above the fold').toBeLessThanOrEqual(variant.height);
+        expect(later.y + later.height, 'Not now ends above the fold').toBeLessThanOrEqual(variant.height);
+        expect(
+          await tab.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight),
+          'nothing to scroll to reach an answer',
+        ).toBe(true);
+        await shot(tab, variant, 'confirm-fold');
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  for (const variant of VARIANTS) {
+    it(`${variant.name}: "Rename" and "Back" are bordered buttons, not links or bare text`, async () => {
+      const { tab, problems, close } = await open(variant, '&back=1');
+      try {
+        await tab.waitForSelector('[data-pair-device-rename]');
+        for (const [name, selector] of [
+          ['Rename', '[data-pair-device-rename]'],
+          ['Back', '[data-pairing-close]'],
+        ] as const) {
+          const found = await buttonLook(tab, selector);
+          MEASURED.push(
+            `${variant.name}: ${name} variant ${found.variant} border ${found.border} underline ${found.underline} fill ${found.fill} over ${found.behind} height ${found.height}`,
+          );
+          expect(found.variant, `${name} is not the ghost variant`).not.toBe('ghost');
+          expect(found.border, `${name} has a visible border`).toBeGreaterThan(0);
+          expect(found.underline, `${name} is not an underlined link`).toBe('none');
+          expect(found.fill, `${name} has its own fill`).not.toBe('rgba(0, 0, 0, 0)');
+          expect(found.height, `${name} is 44 px or taller`).toBeGreaterThanOrEqual(44);
+        }
+        await shot(tab, variant, 'confirm-buttons');
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+  }
+
+  it('the paste page (a cold open) draws Back as a bordered button too', async () => {
+    const variant = VARIANTS[0];
+    const { tab, problems, close } = await open(variant, '&arrival=cold&back=1');
+    try {
+      const found = await buttonLook(tab, '[data-pairing-close]');
+      MEASURED.push(`paste page: Back variant ${found.variant} border ${found.border} fill ${found.fill}`);
+      expect(found.variant).not.toBe('ghost');
+      expect(found.border).toBeGreaterThan(0);
+      expect(found.fill).not.toBe('rgba(0, 0, 0, 0)');
+      expect(problems).toEqual([]);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('r11 O10: measured numbers', () => {
   it('prints the measured numbers', () => {
     console.log(MEASURED.join('\n'));
   });

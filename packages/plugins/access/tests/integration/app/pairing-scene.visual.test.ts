@@ -226,10 +226,12 @@ describe('The pair page: mascot and night sky', () => {
           how === 'os' ? 'reduce' : 'no-preference',
         );
         try {
-          expect(await runningAnimations(tab), `${how}: before pairing`).toEqual([]);
+          // The blink is the one animation reduced motion keeps (r11 O10; the sky and every pose animation are still).
+          const stilled = async () => (await runningAnimations(tab)).filter(name => name !== 'fy-ferret-blink');
+          expect(await stilled(), `${how}: before pairing`).toEqual([]);
           await pair(tab);
           // The streak element exists, but nothing runs: no animation, and the picture is the finished one.
-          expect(await runningAnimations(tab), `${how}: after pairing`).toEqual([]);
+          expect(await stilled(), `${how}: after pairing`).toEqual([]);
           expect(await tab.locator('svg.fy-ferret').getAttribute('data-pose')).toBe('cheer');
           // Reduced motion does not remove transitions, it shortens them to ~1 ms (the app's own reduced-motion block),
           // so the arm's opacity change from 0 to 1 is still a running CSSTransition for a frame or two after the pose

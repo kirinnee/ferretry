@@ -141,10 +141,7 @@ export function FirstPasskeyOffer({
     );
   const left = registrationMinutesLeft(state.view.registrationClosesAt, now());
   return (
-    <div
-      data-first-passkey-offer=""
-      className="flex w-full max-w-md min-w-0 flex-col items-center gap-4 rounded-panel border border-border-strong bg-surface-2 px-6 py-5"
-    >
+    <div data-first-passkey-offer="" className="flex w-full max-w-md min-w-0 flex-col items-center gap-4">
       <p className="m-0 text-balance text-ui leading-base text-fg">
         You can add a passkey for this device now{left === null ? '' : ` — ${left}`}.
       </p>
