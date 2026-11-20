@@ -129,7 +129,7 @@ export function SettingRow({
         : { id: `settings-${settingId}`, 'data-setting-id': settingId, tabIndex: -1 as const })}
       data-setting-row={name}
       {...dataAttributes}
-      className="min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      className="fy-setting-row min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
       <div className="flex min-h-[52px] min-w-0 flex-wrap items-center gap-x-2 gap-y-1 py-1 pl-panel pr-1">
         {/* The label column: 40 % of the row (never under 220 px), so the control sits beside it, not at the far edge. */}
@@ -173,6 +173,7 @@ export function SettingRow({
             wide && 'max-md:basis-full',
           )}
           data-setting-controls=""
+          data-wide={wide || undefined}
         >
           {control?.(labelId)}
           {/* The (i) is always the last thing on the row, in a slot of its own: a row with no explanation keeps the

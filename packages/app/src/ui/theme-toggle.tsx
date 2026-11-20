@@ -3,12 +3,12 @@
  * device's theme from the device context (`useDeviceTheme`, shell contract S9) instead of a module-wide store, so it
  * works on a daemon-less screen and a per-daemon screen alike and a switch here is what Settings shows.
  *
- * Its trigger opens a popover with the theme families and an explicit Auto / Light / Dark control. IT MUST ALWAYS
+ * Its trigger opens a popover with the theme palettes and an explicit Auto / Light / Dark control. IT MUST ALWAYS
  * CLOSE: the ✕ in its header, Done, Escape, a tap or click on the scrim around it, and the platform Back
- * (`useBackDismiss`). Choosing a family or a mode does NOT close it — those are two choices — Done does.
+ * (`useBackDismiss`). Choosing a palette or a mode does NOT close it — those are two choices — Done does.
  *
- * The family previews are the real thing: each swatch carries `data-swatch="<family>-<mode>"`, and `styles/themes.css`
- * declares that theme's tokens on `[data-swatch=…]`, so a swatch renders in the theme it advertises while the rest of
+ * The palette previews are the real thing: each swatch carries `data-swatch` with a style, palette and mode, and `styles/themes.css`
+ * declares that look's tokens on `[data-swatch]`, so a swatch renders in the palette it advertises (in the style in force) while the rest of
  * the app stays in the current one. Nothing here hardcodes a colour.
  */
 import { Check, Monitor, Moon, Palette, Sun, X } from 'lucide-react';
@@ -23,7 +23,7 @@ import {
   useState,
 } from 'react';
 import { type DeviceTheme, useDeviceTheme } from '../shell/device-context.tsx';
-import { swatchAttributes } from '../theme/catalog.ts';
+import { type Look, lookAttributes } from '../shell/appearance-pickers.tsx';
 import type { ResolvedMode, ThemeMode } from '../theme/preferences.ts';
 import { useBackDismiss } from './hooks/use-back-dismiss.ts';
 import { isTopEscapeLayer, pushEscapeLayer } from './hooks/use-dialog-focus.ts';
@@ -51,16 +51,16 @@ export const MODE_OPTIONS: readonly {
 const THEME_FAMILY_CARD_CLASS =
   'flex w-full shrink-0 flex-col gap-1 rounded-panel border p-panel text-left transition-colors';
 
-/** Reveal one family card inside the picker's own scrollport — never `scrollIntoView()`, which walks the shell too. */
-export function scrollThemeFamilyIntoView(scroller: HTMLElement, target: HTMLElement): void {
+/** Reveal one palette card inside the picker's own scrollport — never `scrollIntoView()`, which walks the shell too. */
+export function scrollThemePaletteIntoView(scroller: HTMLElement, target: HTMLElement): void {
   const viewport = scroller.getBoundingClientRect();
   const card = target.getBoundingClientRect();
   if (card.top < viewport.top) scroller.scrollTop += card.top - viewport.top;
   else if (card.bottom > viewport.bottom) scroller.scrollTop += card.bottom - viewport.bottom;
 }
 
-/** A live, CSS-only preview of one family/mode pair. */
-export function Swatch({ theme, current }: { readonly theme: string; readonly current: boolean }) {
+/** A live, CSS-only preview of one look (a style, a palette and a mode). */
+export function Swatch({ look, current }: { readonly look: Look; readonly current: boolean }) {
   return (
     <span
       className={cn(
@@ -68,7 +68,7 @@ export function Swatch({ theme, current }: { readonly theme: string; readonly cu
         current && 'ring-2 ring-accent ring-offset-1 ring-offset-surface',
       )}
     >
-      <span className="kt-swatch" {...swatchAttributes(theme)} aria-hidden="true">
+      <span className="kt-swatch" {...lookAttributes(look)} aria-hidden="true">
         <span className="kt-swatch-mini">
           <span className="kt-swatch-header">Aa</span>
           <span className="kt-swatch-row">
@@ -92,37 +92,37 @@ function ThemeSettings({
   readonly theme: DeviceTheme;
   readonly listRef: RefObject<HTMLDivElement | null>;
 }) {
-  const { preference, resolved, families, setFamily, setMode } = theme;
-  const { family, mode } = preference;
+  const { preference, resolved, palettes, styles, setPalette, setStyle, setMode } = theme;
+  const { palette, style, mode } = preference;
   // Two pickers can be mounted at once, and two radio groups sharing a `name` would fight over which is checked.
   const group = useId();
 
   // The radio is visually hidden; the CARD around it is what the reader looks for, so the geometry comes from there.
-  const revealFamily = useCallback(
+  const revealPalette = useCallback(
     (control: HTMLElement) => {
-      const card = control.closest<HTMLElement>('[data-family-card]') ?? control;
+      const card = control.closest<HTMLElement>('[data-pick-palette-card]') ?? control;
       const list = listRef.current;
-      if (list) scrollThemeFamilyIntoView(list, card);
+      if (list) scrollThemePaletteIntoView(list, card);
     },
     [listRef],
   );
 
-  // A family change also changes fonts and spacing: recheck on the next frame, once the root theme is published.
+  // A palette change also changes fonts and spacing: recheck on the next frame, once the root theme is published.
   useEffect(() => {
-    const target = listRef.current?.querySelector<HTMLInputElement>(`[data-family="${family}"]`);
+    const target = listRef.current?.querySelector<HTMLInputElement>(`[data-pick-palette="${palette}"]`);
     if (!target || document.activeElement !== target) return;
     const frame = requestAnimationFrame(() => {
-      if (target.isConnected && document.activeElement === target) revealFamily(target);
+      if (target.isConnected && document.activeElement === target) revealPalette(target);
     });
     return () => cancelAnimationFrame(frame);
-  }, [listRef, family, revealFamily]);
+  }, [listRef, palette, revealPalette]);
 
   const onListKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const keys = ['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'];
     if (!keys.includes(event.key)) return;
     event.preventDefault();
-    const index = families.findIndex(option => option.id === family);
-    const last = families.length - 1;
+    const index = palettes.findIndex(option => option.id === palette);
+    const last = palettes.length - 1;
     const next =
       event.key === 'Home'
         ? 0
@@ -131,14 +131,16 @@ function ThemeSettings({
           : event.key === 'ArrowDown' || event.key === 'ArrowRight'
             ? Math.min(last, index + 1)
             : Math.max(0, index - 1);
-    const target = families[next];
+    const target = palettes[next];
     const targetControl =
-      target === undefined ? null : listRef.current?.querySelector<HTMLInputElement>(`[data-family="${target.id}"]`);
+      target === undefined
+        ? null
+        : listRef.current?.querySelector<HTMLInputElement>(`[data-pick-palette="${target.id}"]`);
     if (target === undefined || !targetControl) return;
-    setFamily(target.id);
+    setPalette(target.id);
     // Own the scroll explicitly: `focus()` would scroll engine-dependently and can move the fixed shell.
     targetControl.focus({ preventScroll: true });
-    revealFamily(targetControl);
+    revealPalette(targetControl);
   };
 
   return (
@@ -181,19 +183,45 @@ function ThemeSettings({
           );
         })}
       </div>
+      <div role="radiogroup" aria-label="Style" className="relative mb-2 flex flex-wrap gap-1" data-theme-styles="">
+        {styles.map(option => (
+          <label
+            key={option.id}
+            title={option.blurb}
+            className={cn(
+              'flex min-h-[32px] cursor-pointer items-center rounded-control border px-2 text-meta font-medium transition-colors',
+              'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
+              option.id === style
+                ? 'border-accent bg-accent-soft text-accent'
+                : 'border-border text-muted hover:text-fg',
+            )}
+          >
+            <input
+              type="radio"
+              name={`${group}-style`}
+              data-pick-style={option.id}
+              value={option.id}
+              checked={option.id === style}
+              onChange={() => setStyle(option.id)}
+              className="sr-only"
+            />
+            {option.label}
+          </label>
+        ))}
+      </div>
       <div
         ref={listRef}
         role="radiogroup"
-        aria-label="Theme family"
+        aria-label="Palette"
         onKeyDown={onListKeyDown}
         className="relative flex max-h-[min(60vh,420px)] flex-col gap-1.5 overflow-y-auto scroll-thin"
       >
-        {families.map(option => {
-          const checked = option.id === family;
+        {palettes.map(option => {
+          const checked = option.id === palette;
           return (
             <label
               key={option.id}
-              data-family-card={option.id}
+              data-pick-palette-card={option.id}
               className={cn(
                 THEME_FAMILY_CARD_CLASS,
                 'cursor-pointer has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
@@ -202,13 +230,13 @@ function ThemeSettings({
             >
               <input
                 type="radio"
-                name={`${group}-family`}
-                data-family={option.id}
+                name={`${group}-palette`}
+                data-pick-palette={option.id}
                 value={option.id}
                 checked={checked}
                 aria-label={`${option.label} — ${option.blurb}`}
                 tabIndex={checked ? 0 : -1}
-                onChange={() => setFamily(option.id)}
+                onChange={() => setPalette(option.id)}
                 className="sr-only"
               />
               <span className="flex items-center gap-1">
@@ -218,7 +246,11 @@ function ThemeSettings({
               <span className="text-meta leading-base text-muted">{option.blurb}</span>
               <span className="mt-1 flex items-stretch gap-1.5">
                 {(['light', 'dark'] as readonly ResolvedMode[]).map(variant => (
-                  <Swatch key={variant} theme={`${option.id}-${variant}`} current={checked && resolved === variant} />
+                  <Swatch
+                    key={variant}
+                    look={{ style, palette: option.id, mode: variant }}
+                    current={checked && resolved === variant}
+                  />
                 ))}
               </span>
             </label>
@@ -234,8 +266,8 @@ function ThemeSettings({
 
 /** The trigger (the icon alone, its name the tooltip) and its popover. */
 function ThemeToggle({ theme }: { readonly theme: DeviceTheme }) {
-  const { preference, resolved, families } = theme;
-  const { family, mode } = preference;
+  const { preference, resolved, palettes } = theme;
+  const { palette, mode } = preference;
   const [open, setOpen] = useState(false);
   const keyboardOpen = useKeyboardOpen();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -281,13 +313,13 @@ function ThemeToggle({ theme }: { readonly theme: DeviceTheme }) {
     if (open && keyboardOpen) close(false);
   }, [open, keyboardOpen, close]);
 
-  // Opening puts focus on the family in force, so the popover is usable without a pointer.
+  // Opening puts focus on the palette in force, so the popover is usable without a pointer.
   useEffect(() => {
     if (!open) return;
-    listRef.current?.querySelector<HTMLInputElement>('input[data-family]:checked')?.focus();
+    listRef.current?.querySelector<HTMLInputElement>('input[data-pick-palette]:checked')?.focus();
   }, [open]);
 
-  // TAB CYCLE over the TAB STOPS (the family list is a roving radiogroup), by document order, so focus never leaks
+  // TAB CYCLE over the TAB STOPS (the palette list is a roving radiogroup), by document order, so focus never leaks
   // into the page behind a panel that announces itself as a dialog. No `aria-modal`: the page stays live by pointer.
   const onPanelKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     const panel = panelRef.current;
@@ -323,9 +355,9 @@ function ThemeToggle({ theme }: { readonly theme: DeviceTheme }) {
     if (shift !== 0) panel.style.transform = `translateX(${Math.round(shift)}px)`;
   }, [open]);
 
-  const activeFamily = families.find(option => option.id === family);
+  const activePalette = palettes.find(option => option.id === palette);
   const modeLabel = MODE_OPTIONS.find(option => option.id === mode)?.label ?? 'Auto';
-  const summary = `Theme: ${activeFamily?.label ?? family}, ${modeLabel}${mode === 'system' ? ` (${resolved})` : ''}`;
+  const summary = `Theme: ${activePalette?.label ?? palette}, ${modeLabel}${mode === 'system' ? ` (${resolved})` : ''}`;
 
   return (
     <div ref={rootRef} className="relative shrink-0">

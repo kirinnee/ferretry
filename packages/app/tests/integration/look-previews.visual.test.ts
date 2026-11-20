@@ -159,6 +159,15 @@ describe('the Look previews', () => {
         for (const row of ROWS) expect(await frameOf(tab, row).getAttribute('data-sp-state')).toBe('still');
         await playAll(tab);
         for (const row of ROWS) {
+          // A frame scrolled out of view holds its movement (that is the design), so each is brought into view first.
+          await frameOf(tab, row).scrollIntoViewIfNeeded();
+          await tab.waitForFunction(
+            name =>
+              document
+                .querySelector(`[data-setting-row="${name}"] [data-setting-preview]`)
+                ?.getAttribute('data-sp-state') === 'playing',
+            row,
+          );
           const box = await frameOf(tab, row).boundingBox();
           expect(Math.round(box?.width ?? 0)).toBe(160);
           expect(Math.round(box?.height ?? 0)).toBe(100);

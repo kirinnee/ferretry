@@ -62,6 +62,23 @@ export function choiceAfterKey(
   return undefined;
 }
 
+/**
+ * After a keyboard move, show the VISIBLE label: the radio is `sr-only`, so focusing it with `preventScroll` leaves the
+ * card below the window. `block: 'nearest'` moves only as far as needed (and not at all when it is already in view).
+ * A pick can restyle the page (a Style card changes every type size and radius), which moves the card AFTER this runs, so the
+ * reveal repeats on the next two frames, by when the new look is laid out; each repeat is a no-op once the card is in view.
+ */
+export function revealChoice(input: HTMLInputElement | null | undefined): void {
+  if (input === null || input === undefined) return;
+  input.focus({ preventScroll: true });
+  const reveal = (): void => {
+    if (input.isConnected) (input.closest('label') ?? input).scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  };
+  reveal();
+  if (typeof requestAnimationFrame === 'function')
+    requestAnimationFrame(() => (reveal(), requestAnimationFrame(reveal)));
+}
+
 const KEYS = ['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'];
 
 export function ChoiceCards({ label, options, value, onChange, disabled = false }: ChoiceCardsProps) {
@@ -83,7 +100,7 @@ export function ChoiceCards({ label, options, value, onChange, disabled = false 
     const target = choiceAfterKey(options, value, event.key);
     if (target === undefined) return;
     choose(target.id);
-    event.currentTarget.querySelector<HTMLInputElement>(`input[value="${target.id}"]`)?.focus({ preventScroll: true });
+    revealChoice(event.currentTarget.querySelector<HTMLInputElement>(`input[value="${target.id}"]`));
   };
   return (
     <div className="fy-cc" data-choice-cards="">

@@ -1,0 +1,267 @@
+/* ============================================================================
+   THE SPECIMEN (shell/appearance-specimen.tsx). Theme tokens only. It reads the same tokens the app's own classes read
+   (`kt-btn`, `kt-input`), and draws the two states a pointer cannot hold still (hover, press) and the keyboard focus
+   ring from those tokens too. A replay (`data-spec-play`) plays one animation from the motion tokens, once.
+   ========================================================================== */
+.fy-spec {
+  background: var(--bg);
+  background-image: var(--body-wash);
+  border: var(--stroke-panel) solid var(--border);
+  border-radius: var(--radius-panel);
+  color: var(--fg);
+  container-type: inline-size;
+  display: grid;
+  gap: var(--flow-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  min-width: 0;
+  padding: var(--flow-4);
+}
+.fy-spec__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+.fy-spec__title {
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: var(--label-size);
+  font-weight: var(--label-weight);
+  letter-spacing: var(--tracking-label);
+  margin: 0;
+  text-transform: var(--label-transform);
+}
+.fy-spec p {
+  margin: 0;
+}
+.fy-spec__row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-md);
+}
+
+/* ---- type ---- */
+.fy-spec__display {
+  font-family: var(--font-display);
+  font-size: var(--text-display);
+  font-weight: var(--weight-display);
+  letter-spacing: var(--tracking-display);
+  line-height: var(--leading-tight);
+  text-transform: var(--display-transform);
+}
+.fy-spec__body {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+}
+.fy-spec__mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.fy-spec__label {
+  color: var(--muted);
+  font-size: var(--label-size);
+  font-weight: var(--label-weight);
+  letter-spacing: var(--tracking-label);
+  text-transform: var(--label-transform);
+}
+.fy-spec__weights {
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  gap: var(--gap-md);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* ---- buttons: hover and press drawn from the tokens the real :hover and :active read ---- */
+.fy-spec .kt-btn[data-spec-state='hover'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.fy-spec .kt-btn[data-spec-state='press'] {
+  box-shadow: var(--shadow-active);
+  translate: var(--press-translate) var(--press-translate);
+}
+@keyframes fy-spec-press {
+  from {
+    box-shadow: var(--shadow-control);
+    translate: 0 0;
+  }
+  to {
+    box-shadow: var(--shadow-active);
+    translate: var(--press-translate) var(--press-translate);
+  }
+}
+.fy-spec .kt-btn[data-spec-play] {
+  animation: fy-spec-press var(--motion-base) var(--ease-standard);
+}
+
+/* ---- the input with its real focus ring ---- */
+.fy-spec__input[data-spec-state='focus'] {
+  border-color: var(--focus-color);
+  box-shadow: var(--focus-shadow);
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+
+/* ---- card ---- */
+.fy-spec__card {
+  background: var(--card-bg);
+  border: var(--card-stroke) solid var(--card-border);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  display: flex;
+  flex-direction: column;
+  font-size: var(--text-base);
+  gap: var(--gap-xs);
+  padding: var(--pad-panel);
+}
+.fy-spec__card span {
+  color: var(--muted);
+}
+
+/* ---- shapes ---- */
+.fy-spec__shape {
+  background: var(--surface-2);
+  border: var(--stroke-control) solid var(--border-strong);
+  display: block;
+  height: 32px;
+  width: 44px;
+}
+.fy-spec__shape--control {
+  border-radius: var(--radius-control);
+}
+.fy-spec__shape--panel {
+  border: var(--stroke-panel) solid var(--border-strong);
+  border-radius: var(--radius-panel);
+}
+.fy-spec__shape--badge {
+  border-radius: var(--radius-badge);
+  height: 20px;
+  width: 32px;
+}
+.fy-spec__shape--heavy {
+  border: var(--stroke-heavy) solid var(--fg);
+  border-radius: var(--radius-control);
+}
+
+/* ---- rulers ---- */
+.fy-spec__rulers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fy-spec__rulers li {
+  align-items: center;
+  display: flex;
+  font-size: var(--text-xs);
+  gap: var(--gap-md);
+}
+.fy-spec__rulers i {
+  background: var(--accent);
+  display: block;
+  flex: none;
+  height: 6px;
+}
+.fy-spec__rulers span {
+  color: var(--muted);
+}
+
+/* ---- toggle + selected tile: one play on select, from the motion tokens ---- */
+.fy-spec__toggle {
+  background: var(--accent);
+  border-radius: var(--radius-dot);
+  display: inline-flex;
+  flex: none;
+  height: 22px;
+  padding: 2px;
+  width: 40px;
+}
+.fy-spec__toggle i {
+  background: var(--accent-fg, var(--bg));
+  border-radius: var(--radius-dot);
+  display: block;
+  height: 18px;
+  margin-inline-start: auto;
+  width: 18px;
+}
+@keyframes fy-spec-knob {
+  from {
+    transform: translateX(-18px);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.fy-spec__toggle[data-spec-play] i {
+  animation: fy-spec-knob var(--motion-base) var(--ease-emphasis);
+}
+.fy-spec__tile {
+  background: var(--accent-soft);
+  border: var(--stroke-panel) solid var(--accent);
+  border-radius: var(--radius-control);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+  padding: var(--pad-row-y) var(--pad-control-x);
+}
+@keyframes fy-spec-pop {
+  from {
+    transform: scale(var(--select-pop));
+  }
+  to {
+    transform: scale(1);
+  }
+}
+.fy-spec__tile[data-spec-play] {
+  animation: fy-spec-pop var(--motion-slow) var(--ease-emphasis);
+}
+
+/* ---- list rows at both densities ---- */
+.fy-spec__rows {
+  border: var(--divider-width) solid var(--divider-color);
+  border-radius: var(--radius-control);
+  list-style: none;
+  margin: 0;
+  overflow: hidden;
+  padding: 0;
+}
+.fy-spec__listrow {
+  align-items: center;
+  display: flex;
+  font-size: var(--text-base);
+  justify-content: space-between;
+  padding: var(--pad-row-y) var(--pad-cell-x);
+}
+.fy-spec__listrow + .fy-spec__listrow {
+  border-top: var(--divider-width) solid var(--divider-color);
+}
+.fy-spec__listrow[data-density='pointer'] {
+  min-height: var(--row-min-h-desktop);
+}
+.fy-spec__listrow[data-density='touch'] {
+  min-height: max(var(--row-min-h-desktop), 44px);
+}
+.fy-spec__listrow em {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-style: normal;
+}
+
+/* Motion off, by the operating system OR by Settings: the specimen only ever draws its end state. */
+@media (prefers-reduced-motion: reduce) {
+  .fy-spec [data-spec-play],
+  .fy-spec [data-spec-play] i {
+    animation: none;
+  }
+}
+:root[data-motion='reduced'] .fy-spec [data-spec-play],
+:root[data-motion='reduced'] .fy-spec [data-spec-play] i {
+  animation: none;
+}
