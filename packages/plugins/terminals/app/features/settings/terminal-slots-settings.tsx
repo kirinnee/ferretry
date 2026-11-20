@@ -9,7 +9,7 @@
  */
 
 import type { CloseFinishedTerminalsResponse, TerminalHolder, TerminalHoldersView } from '../../../contract/index.ts';
-import { CircleAlert, SquareTerminal } from 'lucide-react';
+import { CircleAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { Badge, Button, SettingGroup } from '@ferretry/app';
@@ -93,7 +93,6 @@ export function TerminalSlotsSettings({
   if (load.status === 'step-up')
     return (
       <section className="kt-panel p-panel" role="status" aria-label="Terminals need your passkey">
-        <h3 className="m-0 text-row font-semibold text-fg">Terminals</h3>
         <div className="mt-2">
           <ConfirmToSee
             line="This machine wants your passkey before it shows its terminals."
@@ -129,13 +128,7 @@ export function TerminalSlotsSettings({
   const { view } = load;
   const finished = view.holders.filter(isFinished);
   return (
-    <section className="min-w-0" aria-labelledby="terminal-slots-heading" data-terminal-slots="">
-      <div className="flex items-center gap-2 px-1">
-        <SquareTerminal size={17} className="text-accent" aria-hidden="true" />
-        <h3 id="terminal-slots-heading" className="m-0 text-row font-semibold text-fg">
-          Terminals
-        </h3>
-      </div>
+    <section className="min-w-0" aria-label="Terminals" data-terminal-slots="">
       <p className="mb-8 mt-1 px-1 text-cell leading-base text-muted" data-terminal-slots-summary="">
         {terminals(view.open)} open of {view.limit}.
         {finished.length === 0 ? '' : ' Some belong to ferrets that are done; closing them frees the slots.'}

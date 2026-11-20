@@ -95,16 +95,10 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
   };
 
   return (
-    <section
-      className="fy-vault kt-panel flex flex-col gap-3 p-panel"
-      aria-labelledby="secrets-heading"
-      data-testid="secrets-card"
-    >
+    <section className="fy-vault kt-panel flex flex-col gap-3 p-panel" aria-label="Secrets" data-testid="secrets-card">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 id="secrets-heading" className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
-          <KeyRound size={16} className="text-accent" aria-hidden="true" />
-          Secrets
-        </h2>
+        {/* The tab's title ("Secrets") is the Settings shell's one heading for this panel; the card draws none of its own. */}
+        <KeyRound size={16} className="text-accent" aria-hidden="true" />
         <span className="rounded-control bg-surface-2 px-2 py-0.5 text-meta font-medium text-faint">write-only</span>
       </div>
 

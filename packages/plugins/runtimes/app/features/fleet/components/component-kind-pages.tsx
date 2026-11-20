@@ -165,6 +165,7 @@ function ListPage({ kind, catalog, machineName, machineNames, open, onExit }: Sh
   return (
     <>
       <PageHead
+        root={onExit === undefined}
         title={group?.label ?? KIND_PLURAL_TITLE[kind]}
         {...(group ? { sub: group.description } : {})}
         {...(onExit === undefined ? {} : { onBack: onExit })}

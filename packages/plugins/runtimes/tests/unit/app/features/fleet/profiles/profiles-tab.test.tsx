@@ -94,7 +94,7 @@ const q = (root: ParentNode, selector: string): Element => must(root.querySelect
 describe('ProfilesTab — list', () => {
   it('leads each profile with its name, scope badge, size and what runs on it', async () => {
     const root = await open();
-    expect(text(root, 'h3')).toBe('Profiles');
+    expect(root.querySelector('h3')).toBeNull(); // the tab's own title is the Settings shell's one heading
     expect(root.textContent).toContain('3 profiles');
     expect(text(root, '[data-profile-row="Default"] [data-component-badges]')).toBe('Claude only');
     expect(text(root, '[data-profile-row="Default"]')).toContain('4 items · 4 parts · used by 3 runtimes');
@@ -126,7 +126,7 @@ describe('ProfilesTab — list', () => {
     await followHash('#machines/studio-mac/profiles/Default');
     expect(text(root, 'h3')).toBe('Default');
     await followHash('#machines/studio-mac/profiles/Nope');
-    expect(text(root, 'h3')).toBe('Profiles');
+    expect(root.querySelector('h3')).toBeNull(); // the tab's own title is the Settings shell's one heading
   });
 });
 

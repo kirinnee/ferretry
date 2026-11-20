@@ -149,7 +149,7 @@ describe('the Settings frame is v4’s: a machine header, the list beside the pa
     await settle();
     expect(view.container.querySelector('.fy-settings')?.getAttribute('data-settings-open')).toBe('panel');
     expect(view.container.querySelector('.fy-settings-back')?.getAttribute('href')).toBe('/d/d1/settings');
-    expect(view.container.querySelector('.fy-settings-title')?.textContent).toBe('Tab two');
+    expect(view.container.querySelector('.fy-settings-page h2.fy-settings-title')?.textContent).toBe('Tab two');
     expect(view.container.querySelector('.fy-settings-nav [aria-current="page"]')?.textContent).toBe('Tab two');
   });
 });

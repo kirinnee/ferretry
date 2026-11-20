@@ -419,7 +419,7 @@ describe('the Profiles tab', () => {
     // S-0529 and S-0182: the tab, the profiles page on its list.
     expect(q(root, '[data-profiles-page]').getAttribute('data-profiles-page')).toBe('list');
     // S-0140: the list's heading, count, New profile button and one row per profile.
-    expect(text(root, 'h3')).toBe('Profiles');
+    expect(root.querySelector('h3')).toBeNull(); // the tab's own title is the Settings shell's one heading
     expect(root.textContent).toContain('3 profiles');
     expect(text(root, '[data-profile-new]')).toBe('+ New profile');
     expect([...root.querySelectorAll('[data-profile-row]')].map(row => row.getAttribute('data-profile-row'))).toEqual([
@@ -540,7 +540,7 @@ describe('the Model sets tab', () => {
     // S-0063: the tab, the model sets page on its list.
     expect(q(root, '[data-model-sets-tab]').getAttribute('data-components-page')).toBe('list');
     // S-0139: the list's heading, description, New model set button and a row per set with its use.
-    expect(text(root, 'h3')).toBe('Model sets');
+    expect(root.querySelector('h3')).toBeNull(); // the tab's own title is the Settings shell's one heading
     expect(root.textContent).toContain('Model sets description.');
     expect(text(root, '[data-component-new="modelSets"]')).toBe('+ New model set');
     expect(root.querySelectorAll('[data-component-row]')).toHaveLength(1);
@@ -552,7 +552,7 @@ describe('the Model sets tab', () => {
 
   it('S-0139 the Model sets list says none are saved yet when the machine has no model set, and still offers New model set', async () => {
     const root = await drawProfilesTab('model-sets', studio({ catalog: withModelSets() }), '[data-model-sets-tab]');
-    expect(text(root, 'h3')).toBe('Model sets');
+    expect(root.querySelector('h3')).toBeNull(); // the tab's own title is the Settings shell's one heading
     expect(root.textContent).toContain('None saved yet.');
     expect(root.querySelector('[data-component-row]')).toBeNull();
     expect(text(root, '[data-component-new="modelSets"]')).toBe('+ New model set');

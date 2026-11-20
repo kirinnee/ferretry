@@ -260,15 +260,12 @@ export function PricingSettings({
   return (
     <section
       className="fy-usage-settings flex min-w-0 flex-col gap-8"
-      aria-labelledby="model-pricing-heading"
+      aria-label="Model pricing"
       data-pricing-daemon={String(connection.daemonId)}
     >
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="min-w-0 flex-1 basis-72">
-          <h3 id="model-pricing-heading" className="m-0 text-row font-semibold text-fg">
-            Model pricing
-          </h3>
-          <p className="m-0 mt-1 text-cell leading-base text-muted">
+          <p className="m-0 text-cell leading-base text-muted">
             Rates, where each came from, and the feeds this daemon can check. Ferretry never guesses a price for
             unpriced usage.
           </p>

@@ -145,16 +145,21 @@ export function ComponentBadges({ badges }: { badges: readonly ComponentBadge[] 
   );
 }
 
-/** A page inside a tab: ‹ Back, its title and what it is. */
+/**
+ * A page inside a tab: ‹ Back, its title and what it is. A tab's own ROOT page (`root`) is the tab itself, which the Settings
+ * shell already titles, so it draws what it is and no second title.
+ */
 export function PageHead({
   title,
   sub,
   mono = false,
+  root = false,
   onBack,
 }: {
   title: string;
   sub?: string;
   mono?: boolean;
+  root?: boolean;
   onBack?: () => void;
 }) {
   return (
@@ -170,14 +175,16 @@ export function PageHead({
           ‹ Back
         </button>
       )}
-      <h3
-        className={cn(
-          'm-0 break-words font-display text-title font-semibold tracking-display text-fg',
-          mono && 'font-mono',
-        )}
-      >
-        {title}
-      </h3>
+      {root ? null : (
+        <h3
+          className={cn(
+            'm-0 break-words font-display text-title font-semibold tracking-display text-fg',
+            mono && 'font-mono',
+          )}
+        >
+          {title}
+        </h3>
+      )}
       {sub === undefined ? null : <p className="m-0 text-cell text-muted">{sub}</p>}
     </header>
   );

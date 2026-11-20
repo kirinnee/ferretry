@@ -100,16 +100,9 @@ export function HostChecksView({
 }) {
   const Icon = value === 'reachable' ? Wifi : value === 'unreachable' ? WifiOff : LoaderCircle;
   return (
-    <section
-      className="flex min-w-0 flex-col"
-      aria-labelledby="settings-host-checks-heading"
-      data-daemon-host-checks=""
-    >
+    <section className="flex min-w-0 flex-col" aria-label="Host checks" data-daemon-host-checks="">
       <div className="mb-6 min-w-0">
-        <h3 id="settings-host-checks-heading" className="m-0 text-row font-semibold text-fg">
-          Host checks
-        </h3>
-        <p className="mb-0 mt-1 text-cell leading-base text-muted">Reachability of this daemon, right now.</p>
+        <p className="m-0 text-cell leading-base text-muted">Reachability of this daemon, right now.</p>
       </div>
       <SettingGroup label="Reachability">
         <SettingRow

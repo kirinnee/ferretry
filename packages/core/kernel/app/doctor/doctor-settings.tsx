@@ -5,7 +5,7 @@
  * missing evidence is treated as a healthy host. The report never carries a secret and never claims a harness is signed
  * in (its `limitation` says so, last).
  */
-import { CircleAlert, CircleCheck, CircleMinus, Stethoscope } from 'lucide-react';
+import { CircleAlert, CircleCheck, CircleMinus } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type DoctorReport, DoctorReportSchema, notBuiltCheck } from '../../contract/doctor.ts';
 import { SettingGroup, SettingRow } from '@ferretry/app';
@@ -37,14 +37,8 @@ export function DoctorReportView({ report }: { readonly report: DoctorReport }) 
   });
   const checks = report.checks.filter(check => unbuiltName(check) === undefined);
   return (
-    <section className="flex min-w-0 flex-col" aria-labelledby="doctor-settings-heading" data-doctor-report="">
+    <section className="flex min-w-0 flex-col" aria-label="Doctor" data-doctor-report="">
       <div className="mb-6 flex min-w-0 flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <Stethoscope size={17} className="text-accent" aria-hidden="true" />
-          <h3 id="doctor-settings-heading" className="m-0 text-row font-semibold text-fg">
-            Doctor
-          </h3>
-        </div>
         <p className="m-0 text-cell leading-base text-muted" data-doctor-headline="">
           {doctorHeadline(report)}
         </p>

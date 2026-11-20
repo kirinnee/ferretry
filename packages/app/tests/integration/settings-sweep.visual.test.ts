@@ -4,7 +4,9 @@
  * width where the settings panel is only ~212px) each tab is checked against the S1/S2 rules, and its picture is kept:
  *  - nothing scrolls sideways, nothing draws outside the window;
  *  - one level of surface: no bordered box inside another bordered box;
- *  - no single text control stretches across a wide panel (a field row stops at 28rem).
+ *  - no single text control stretches across a wide panel (a field row stops at 28rem);
+ *  - the panel has exactly ONE visible h1/h2 heading and it IS the tab's title (the shell draws it for every tab; a tab draws none),
+ *    and the title is drawn once: no other visible text in the panel (a heading of any level, a lone line) says the same words.
  * Set `FY_SETTINGS_SWEEP_SHOTS_DIR` to keep `<viewport>-<plugin>-<tab>.png`, and `FY_SETTINGS_SWEEP_REPORT` for the JSON report.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
@@ -20,6 +22,8 @@ setDefaultTimeout(60_000);
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_SETTINGS_SWEEP_SHOTS_DIR ?? '';
 const reportPath = process.env.FY_SETTINGS_SWEEP_REPORT ?? '';
+/** `FY_SETTINGS_SWEEP_SCHEME=light` runs the same sweep in the light theme (dark is the default). */
+const scheme = process.env.FY_SETTINGS_SWEEP_SCHEME === 'light' ? 'light' : 'dark';
 const only = (process.env.FY_SETTINGS_SWEEP_ONLY ?? '').split(',').filter(Boolean);
 
 let browser: Browser;
@@ -131,6 +135,33 @@ const measure = () => {
       }
     }
   }
+  // The panel's visible h1/h2 headings (a 1px clipped, hidden or zero-size one is not seen): one, and it is the shell's.
+  const headings: string[] = [];
+  if (root !== null)
+    for (const el of root.querySelectorAll('h1, h2')) {
+      const box = el.getBoundingClientRect();
+      if (box.width > 1 && box.height > 1 && visible(el)) headings.push((el.textContent ?? '').trim());
+    }
+  // The title said twice: any OTHER visible, non-interactive element whose whole text is the tab's title (the shell's h2 is the one).
+  const title = document.querySelector('.fy-settings-title');
+  const said: string[] = [];
+  if (root !== null && title !== null) {
+    const words = (title.textContent ?? '').trim().toLowerCase();
+    for (const el of root.querySelectorAll('*')) {
+      const box = el.getBoundingClientRect();
+      if (
+        el === title ||
+        !visible(el) ||
+        box.width <= 1 ||
+        box.height <= 1 ||
+        el.closest('button, a, [role=tab], option, label, nav, [data-setting-row]') !== null
+      )
+        continue;
+      if (el.children.length > 0 && Array.from(el.children).some(child => (child.textContent ?? '').trim() !== ''))
+        continue;
+      if ((el.textContent ?? '').trim().toLowerCase() === words) said.push(describe(el));
+    }
+  }
   const sideways = document.documentElement.scrollWidth - document.documentElement.clientWidth;
   const rootBox = root?.getBoundingClientRect();
   const clipped: string[] = [];
@@ -145,6 +176,8 @@ const measure = () => {
     panelWidth: Math.round(rootBox?.width ?? 0),
     panelHeight: Math.round(rootBox?.height ?? 0),
     sideways,
+    headings,
+    said,
     nested: nested.slice(0, 6),
     nestedCount: nested.length,
     wide: wide.slice(0, 6),
@@ -155,13 +188,13 @@ const measure = () => {
 describe('Settings sweep: every tab, real app half, real shell', () => {
   for (const viewport of VIEWPORTS) {
     for (const { plugin, tab, label } of TABS) {
-      it(`${viewport.name}-dark: ${plugin}/${tab} (${label})`, async () => {
+      it(`${viewport.name}-${scheme}: ${plugin}/${tab} (${label})`, async () => {
         const context = await browser.newContext({
           viewport: { width: viewport.width, height: viewport.height },
           deviceScaleFactor: viewport.phone ? 2 : 1,
           hasTouch: viewport.phone,
           isMobile: viewport.phone,
-          colorScheme: 'dark',
+          colorScheme: scheme,
         });
         const origin = server?.url.origin ?? '';
         await context.route('**/*', async route =>
@@ -171,7 +204,7 @@ describe('Settings sweep: every tab, real app half, real shell', () => {
         const problems: string[] = [];
         page.on('pageerror', error => problems.push(error.message));
         try {
-          await page.goto(`${origin}/d/ws/settings/${plugin}/${tab}?theme=studio-dark`);
+          await page.goto(`${origin}/d/ws/settings/${plugin}/${tab}?theme=studio-${scheme}`);
           await page.waitForSelector('.fy-settings-page', { timeout: 20_000 });
           // The page draws, its reads settle, then it is measured and kept.
           await page.waitForTimeout(1_200);
@@ -179,9 +212,14 @@ describe('Settings sweep: every tab, real app half, real shell', () => {
           const requests = await page.evaluate(() => [
             ...new Set((globalThis as { __fyRequests?: string[] }).__fyRequests ?? []),
           ]);
-          if (shotsDir !== '') await page.screenshot({ path: join(shotsDir, `${viewport.name}-${plugin}-${tab}.png`) });
+          if (shotsDir !== '')
+            await page.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${plugin}-${tab}.png`) });
           report[`${viewport.name} ${plugin}/${tab}`] = { ...measured, requests, problems };
           expect(measured.sideways, 'scrolls sideways').toBeLessThanOrEqual(0);
+          expect(measured.headings, `the visible h1/h2 of ${plugin}/${tab}: exactly one, the tab's title`).toEqual([
+            label,
+          ]);
+          expect(measured.said, `${plugin}/${tab}: the title is said again by`).toEqual([]);
           expect(problems, 'page errors').toEqual([]);
         } finally {
           await context.close();

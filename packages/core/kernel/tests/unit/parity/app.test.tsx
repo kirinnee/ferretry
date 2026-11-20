@@ -291,8 +291,11 @@ describe('the Kernel app half draws the surfaces today’s Settings had for conf
     );
     const notUsed = view.container.querySelector('[data-doctor-check="launchctl"]')?.textContent ?? '';
     expect(notUsed.split('not used on this operating system').length - 1).toBe(1);
-    // It is headed Doctor, not the name of the tab beside it.
-    expect(view.container.querySelector('#doctor-settings-heading')?.textContent).toBe('Doctor');
+    // It is the Doctor tab's report (named for assistive tech); the Settings shell draws the one visible heading.
+    expect(view.container.querySelector('[data-doctor-report]')?.getAttribute('aria-label')).toBe('Doctor');
+    expect([...view.container.querySelectorAll('h1, h2, h3')].map(heading => heading.textContent)).not.toContain(
+      'Doctor',
+    );
     expect(text).not.toContain('Host checks');
     expect(text.endsWith('Resolving a program is all this report proves.')).toBe(true);
     await view.unmount();
