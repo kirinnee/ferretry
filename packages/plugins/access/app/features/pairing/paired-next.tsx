@@ -56,13 +56,12 @@ export function PairedNext({ connection, createClient, offer, onContinue }: Pair
   );
   // "Not now" is drawn from the first moment, while the machine is still being asked: a machine that is slow to answer
   // must never leave the person on this screen with no way on. Once the offer shows it sits in the offer's own row,
-  // beside the add button, as a ghost button with the same height; before that it stands alone.
+  // beside the add button, as a secondary (bordered) button with the same height; before that it stands alone.
   const notNow = (
     <button
       type="button"
       className="kt-btn min-h-[44px] px-6 py-3"
       style={{ height: 'auto' }}
-      data-variant="ghost"
       data-paired-continue=""
       onClick={move}
     >

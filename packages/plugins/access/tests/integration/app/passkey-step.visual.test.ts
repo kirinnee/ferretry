@@ -110,6 +110,13 @@ describe('the access.passkey step, in a real browser', () => {
           .locator('[data-passkey-step] button')
           .evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().height)));
         expect(sizes.length).toBe(2);
+        // "Not now" is a real secondary button (a visible border), not the borderless ghost that reads as bare text.
+        const later = await tab.locator('[data-passkey-later]').evaluate(node => ({
+          variant: node.getAttribute('data-variant'),
+          border: Number.parseFloat(getComputedStyle(node).borderTopWidth),
+        }));
+        expect(later.variant).not.toBe('ghost');
+        expect(later.border).toBeGreaterThan(0);
         for (const height of sizes) expect(height).toBeGreaterThanOrEqual(44);
         const next = await box(tab, '[data-step-next]');
         expect(next.height).toBeGreaterThanOrEqual(44);

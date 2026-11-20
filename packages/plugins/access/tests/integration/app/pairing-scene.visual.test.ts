@@ -276,6 +276,13 @@ describe('The pair page: mascot and night sky', () => {
             expect(box.height, `${name} is at least 44 px tall`).toBeGreaterThanOrEqual(44);
             expect(box.width, `${name} is not a full-width bar`).toBeLessThan(variant.width * 0.8);
           }
+          // "Not now" is a real secondary button (a visible border, not the borderless ghost that reads as bare text).
+          const notNow = await tab.getByRole('button', { name: 'Not now' }).evaluate(node => ({
+            variant: node.getAttribute('data-variant'),
+            border: Number.parseFloat(getComputedStyle(node).borderTopWidth),
+          }));
+          expect(notNow.variant, 'Not now is not a ghost button').not.toBe('ghost');
+          expect(notNow.border, 'Not now has a border like a button').toBeGreaterThan(0);
           // The offer draws its own surface, so it carries no sky halo around its words.
           expect(await offer.evaluate(node => getComputedStyle(node).textShadow)).toBe('none');
           // It sits inside the viewport on a phone: no horizontal scroll.

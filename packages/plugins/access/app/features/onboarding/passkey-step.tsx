@@ -170,14 +170,7 @@ export function PasskeyStep({
             <Fingerprint size={18} aria-hidden="true" />
             Add a passkey
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            data-passkey-later=""
-            disabled={adding}
-            onClick={notNow}
-            className="min-h-11"
-          >
+          <Button type="button" data-passkey-later="" disabled={adding} onClick={notNow} className="min-h-11">
             Not now
           </Button>
         </div>
