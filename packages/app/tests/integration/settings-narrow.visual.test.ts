@@ -101,23 +101,72 @@ const measure = async (tab: Page) =>
     };
   });
 
+type NavPage = { readonly href: string; readonly label: string };
+
+/** The daemon's tabs (the list is not drawn at this width, but its links are in the document). */
+const navPages = async (tab: Page): Promise<NavPage[]> =>
+  await tab.evaluate(() =>
+    [...document.querySelectorAll<HTMLAnchorElement>('.fy-settings-nav .fy-tab-group__tabs a.fy-tab')].map(link => ({
+      href: link.getAttribute('href') ?? '',
+      label: (link.textContent ?? '').trim(),
+    })),
+  );
+
+/**
+ * The way a person goes, with the filtering PROVED: type the page's name into the open list's search field, assert the field itself removed
+ * the unrelated rows (fewer rows, none of an unrelated page's row left, the match still there), and only then pick the match. A locator
+ * that filters by text on its own would pass even if the field filtered nothing, so the row counts are read BEFORE the pick.
+ */
+const filterThenPick = async (tab: Page, root: string, page: NavPage, how: 'click' | 'tap'): Promise<string[]> => {
+  const failures: string[] = [];
+  const rows = tab.locator(`${root} [role="option"]`);
+  const before = await rows.allInnerTexts();
+  await tab.locator(`${root} input[type="search"]`).fill(page.label);
+  const query = page.label.toLowerCase();
+  await tab.waitForFunction(
+    ([selector, total]) => document.querySelectorAll(selector).length < total,
+    [`${root} [role="option"]`, before.length] as const,
+    { timeout: 5_000 },
+  );
+  const after = await rows.allInnerTexts();
+  if (!after.some(text => text.toLowerCase().includes(query))) failures.push(`${page.label}: the match left the list`);
+  // Every row left must contain what was typed (its label or its hint, both drawn in the row): a row that does not is one the field failed to remove.
+  const stillThere = after.filter(text => !text.toLowerCase().includes(query));
+  if (stillThere.length > 0)
+    failures.push(
+      `${page.label}: typing it left ${stillThere.length} unrelated rows (${after.length} of ${before.length}): ${stillThere.join(' | ')}`,
+    );
+  const match = tab.locator(`${root} [role="option"]`, { hasText: page.label }).first();
+  await (how === 'tap' ? match.tap() : match.click());
+  return failures;
+};
+
 describe('Settings at a mid-width window', () => {
   for (const size of SIZES) {
     it(`${size.name}: the panel is at least ${MIN_PANEL}px wide on every tab, nothing scrolls sideways, every page is reachable from the picker`, async () => {
       const { tab, close } = await open(size.width, size.height, 'light', '/d/ws/settings');
       try {
-        const hrefs = await tab.evaluate(() =>
-          // "This device" is the shell's own page (no daemon panel): the rest are the daemon's tabs.
-          [...document.querySelectorAll<HTMLOptionElement>('.fy-settings-picker__select option')]
-            .filter(option => option.textContent !== 'This device')
-            .map(option => option.value),
-        );
-        expect(hrefs.length).toBeGreaterThan(10);
+        // r11 S3a: the picker is the app's own SelectBox, never the browser's select.
+        expect(await tab.locator('.fy-settings-nav select').count()).toBe(0);
+        // "This device" is the shell's own page, so the open list has one row more than the daemon's tabs.
+        const pages = await navPages(tab);
+        expect(pages.length).toBeGreaterThan(10);
+        const picker = tab.locator('.fy-settings-picker__select');
+        await picker.click();
+        // Every page is a row of the open list (plus "This device"), grouped under titled headings.
+        expect(await tab.locator('[data-select-popover] [role="option"]').count()).toBe(pages.length + 1);
+        expect(await tab.locator('[data-select-popover] [role="group"]').count()).toBeGreaterThan(3);
+        await tab.keyboard.press('Escape');
         const failures: string[] = [];
-        for (const href of hrefs) {
-          // The way a person goes: the picker above the panel.
-          await tab.locator('.fy-settings-picker__select').selectOption(href);
+        for (const page of pages) {
+          // The way a person goes: the picker above the panel, a word typed, the row picked.
+          await picker.click();
+          failures.push(...(await filterThenPick(tab, '[data-select-popover]', page, 'click')));
           await tab.waitForSelector('.fy-settings-page');
+          await tab.waitForFunction(() => document.querySelector('[data-select-popover]') === null);
+          const landed = new URL(tab.url()).pathname;
+          if (landed !== page.href) failures.push(`${page.label}: went to ${landed}, not ${page.href}`);
+          const href = page.href;
           const seen = await measure(tab);
           if (!(seen.panel >= MIN_PANEL)) failures.push(`${href}: panel ${seen.panel}px`);
           if (seen.pageSideways || seen.mainSideways || seen.scrollSideways) failures.push(`${href}: scrolls sideways`);
@@ -135,7 +184,7 @@ describe('Settings at a mid-width window', () => {
         const layout = await tab.evaluate(() => {
           const nav = document.querySelector('.fy-settings-nav') as HTMLElement;
           const page = document.querySelector('.fy-settings-page') as HTMLElement;
-          const select = document.querySelector('.fy-settings-picker__select') as HTMLSelectElement;
+          const select = document.querySelector('.fy-settings-picker__select') as HTMLButtonElement;
           const box = select.getBoundingClientRect();
           // Anything in the list that scrolls inside itself is a window that can slice a row at its edge.
           const scrollers = [nav, ...nav.querySelectorAll<HTMLElement>('*')]
@@ -153,9 +202,9 @@ describe('Settings at a mid-width window', () => {
             navHeight: nav.getBoundingClientRect().height,
             selectInside: box.left >= 0 && box.right <= window.innerWidth && box.width > 150 && box.height >= 28,
             labelShown: (document.querySelector('.fy-settings-picker__label') as HTMLElement).offsetHeight > 0,
-            shown: select.selectedOptions[0]?.textContent,
-            groups: select.querySelectorAll('optgroup').length,
-            groupLabels: [...select.querySelectorAll('optgroup')].every(group => (group.label ?? '').includes(' · ')),
+            shown: select.textContent?.trim(),
+            isCombobox:
+              select.getAttribute('role') === 'combobox' && document.querySelector('.fy-settings-nav select') === null,
             listDrawn: [...document.querySelectorAll('.fy-settings-block, .fy-settings-nav a.fy-tab')].filter(
               el => el.getBoundingClientRect().height > 0,
             ).length,
@@ -167,8 +216,7 @@ describe('Settings at a mid-width window', () => {
         expect(layout.selectInside).toBe(true);
         expect(layout.labelShown).toBe(true);
         expect(layout.shown).toBe('Logins');
-        expect(layout.groups).toBeGreaterThan(3);
-        expect(layout.groupLabels).toBe(true);
+        expect(layout.isCombobox).toBe(true);
         expect(layout.listDrawn, 'the sliceable list is not drawn at this width').toBe(0);
         expect(layout.scrollers, 'nothing in the list scrolls inside itself').toEqual([]);
         // Keyboard: Tab from the top lands on the picker (the list's links are not drawn, so not in the order twice).
@@ -178,9 +226,11 @@ describe('Settings at a mid-width window', () => {
           .catch(() => undefined);
         await tab.locator('.fy-settings-picker__select').focus();
         expect(await tab.evaluate(() => document.activeElement?.className)).toContain('fy-settings-picker__select');
-        // The keyboard changes the page: arrow to the next option and the panel follows.
+        // The keyboard changes the page: open, arrow to the next option, Enter, and the panel follows.
         const before = await tab.locator('.fy-settings-title').textContent();
         await tab.keyboard.press('ArrowDown');
+        await tab.keyboard.press('ArrowDown');
+        await tab.keyboard.press('Enter');
         await tab.waitForFunction(
           previous => document.querySelector('.fy-settings-title')?.textContent !== previous,
           before,
@@ -202,6 +252,66 @@ describe('Settings at a mid-width window', () => {
         } finally {
           await close();
         }
+      }
+    });
+  }
+
+  for (const scheme of ['light', 'dark'] as const) {
+    it(`768 ${scheme}: the open picker is a popover under the button with the page rows grouped (mouse) and a centred dialog (touch)`, async () => {
+      const mouse = await open(768, 1_024, scheme, '/d/ws/settings/logins');
+      try {
+        await mouse.tab.locator('.fy-settings-picker__select').click();
+        const popover = await mouse.tab.evaluate(() => {
+          const box = document.querySelector('[data-select-popover]')?.getBoundingClientRect();
+          const trigger = document.querySelector('.fy-settings-picker__select')?.getBoundingClientRect();
+          return box === undefined || trigger === undefined
+            ? null
+            : { gap: box.top - trigger.bottom, inside: box.right <= innerWidth };
+        });
+        expect(popover?.inside).toBe(true);
+        expect(popover?.gap).toBeGreaterThanOrEqual(0);
+        expect(popover?.gap).toBeLessThanOrEqual(12);
+        await mouse.tab.waitForTimeout(600);
+        if (shotsDir !== '') await mouse.tab.screenshot({ path: join(shotsDir, `768-${scheme}-picker-open.png`) });
+      } finally {
+        await mouse.close();
+      }
+      const context = await browser.newContext({
+        viewport: { width: 768, height: 1_024 },
+        colorScheme: scheme,
+        hasTouch: true,
+        isMobile: true,
+      });
+      try {
+        const origin = server?.url.origin ?? '';
+        const tab = await context.newPage();
+        await tab.goto(`${origin}/d/ws/settings/logins?theme=studio-${scheme}`);
+        await tab.waitForSelector('.fy-settings-picker__select');
+        await tab.locator('.fy-settings-picker__select').tap();
+        await tab.waitForSelector('[role="dialog"]');
+        const centre = await tab.evaluate(() => {
+          const box = (document.querySelector('[role="dialog"]') as HTMLElement).getBoundingClientRect();
+          return {
+            dx: Math.abs(box.left + box.width / 2 - innerWidth / 2),
+            dy: Math.abs(box.top + box.height / 2 - innerHeight / 2),
+            searchFocused: document.activeElement?.getAttribute('type') === 'search',
+          };
+        });
+        expect(centre.dx).toBeLessThanOrEqual(8);
+        expect(centre.dy).toBeLessThanOrEqual(8);
+        expect(centre.searchFocused).toBe(true);
+        await tab.waitForTimeout(600);
+        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `768-${scheme}-picker-dialog.png`) });
+        // Touch picks the way a mouse does: a word typed, the unrelated rows gone, the match tapped, the page followed.
+        const pages = await navPages(tab);
+        const target = pages.find(page => page.label === 'Agenda') ?? pages[1];
+        expect(target, 'a page other than the open one to go to').toBeDefined();
+        if (target === undefined) return;
+        expect(await filterThenPick(tab, '[role="dialog"]', target, 'tap')).toEqual([]);
+        await tab.waitForFunction(() => document.querySelector('[role="dialog"]') === null);
+        expect(new URL(tab.url()).pathname).toBe(target.href);
+      } finally {
+        await context.close();
       }
     });
   }
