@@ -387,4 +387,49 @@ describe('Voice settings in the real Settings shell', () => {
         }
       }
     });
+
+  // r11 S5 review: a device that never chose an engine dictates with its MACHINE's default (voice.yaml). When that names the
+  // browser, the card shown as selected is the browser's (its audio goes to the vendor), never Parakeet 110M; and pressing
+  // 110M then is a real choice that is written, even though 110M is this device's own default.
+  for (const viewport of [VIEWPORTS[1], VIEWPORTS[2]])
+    for (const scheme of ['light', 'dark'] as const)
+      it(`${viewport.name} ${scheme}: an unset device inherits a Browser machine default, and Parakeet 110M can be chosen over it`, async () => {
+        const device = viewport.phone ? 'phone' : 'computer';
+        const { page, problems, close } = await open(
+          viewport,
+          scheme,
+          'voice',
+          `&engine=none&machine=browser&device=${device}`,
+        );
+        try {
+          const checked = async (): Promise<string[]> =>
+            await page.evaluate(() =>
+              [...document.querySelectorAll<HTMLInputElement>('.fy-engine-card input[type="radio"]')]
+                .filter(radio => radio.checked)
+                .map(radio => radio.closest<HTMLElement>('.fy-engine-card')?.dataset['engine'] ?? ''),
+            );
+          await page.waitForSelector('.fy-engine-card');
+          // The machine file is read after the first paint: wait for the browser card to be the selected one.
+          await page.waitForFunction(
+            () =>
+              document.querySelector<HTMLInputElement>('.fy-engine-card[data-engine="browser"] input')?.checked ===
+              true,
+          );
+          expect(await checked(), 'only the Browser card is selected').toEqual(['browser']);
+          expect(await page.locator('[data-engine-section] [role="status"]').innerText()).toContain('its vendor');
+          await shoot(page, viewport, scheme, 'voice-inherited-browser');
+          await page.setViewportSize({ width: viewport.width, height: viewport.height });
+          // Choosing 110M over the inherited Browser is written: the 110M card becomes the only one selected.
+          await page
+            .locator('.fy-engine-card[data-engine="parakeet-tdt-110m"] input[type="radio"]')
+            .check({ force: true });
+          expect(await checked(), 'only the 110M card is selected after the press').toEqual(['parakeet-tdt-110m']);
+          expect(await page.locator('[data-engine-section] [role="status"]').innerText()).toContain(
+            'never leaves this device',
+          );
+          expect(problems).toEqual([]);
+        } finally {
+          await close();
+        }
+      });
 });

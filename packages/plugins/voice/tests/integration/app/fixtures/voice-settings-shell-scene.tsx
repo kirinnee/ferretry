@@ -10,6 +10,7 @@
  *   ?style=off|fix|polish   the machine's saved clean-up style (default: fix)
  *   ?theme=<family>-<mode>   ?engine=<id>|none   the chosen engine (default: sherpa-zipformer-en; none = a fresh device)   ?off=1  dictation off
  *   ?device=phone|computer   the device class the page reports (default: computer)
+ *   ?machine=browser|parakeet   the machine's `voice.yaml` defaultEngine, read through a fake daemon (default: none named)
  *
  * The shell is the real one, so the panel is as wide as a person gets it: at a 768 px window the settings list stands
  * ABOVE the panel and the panel is at least 480 px wide (it was about 212 px when the list sat beside it).
@@ -24,8 +25,8 @@ import { SpeedupKeysSettings } from '../../../../app/features/settings/speedup-k
 import { TranscriptionLogSettings } from '../../../../app/features/settings/transcription-log-settings.tsx';
 import { VoiceCleanupSettings } from '../../../../app/features/settings/voice-cleanup-settings.tsx';
 import { SpeedupsPanel } from '../../../../app/features/speedups/speedups-surface.tsx';
-import { SettingGroup } from '../../../../app/shell-voice.ts';
-import { StoreProvider, createVoiceStore } from '../../../../app/lib/voice-store.tsx';
+import { daemonConnection, SettingGroup } from '../../../../app/shell-voice.ts';
+import { DaemonClientProvider, StoreProvider, createVoiceStore } from '../../../../app/lib/voice-store.tsx';
 import type { DeviceClass } from '../../../../app/lib/stt/engine-defaults.ts';
 import { modelDownloadBytes, ON_DEVICE_MODELS } from '../../../../app/lib/stt/model-catalog.ts';
 import type { ModelInstaller, ModelInstallOptions, ModelStoreStatus } from '../../../../app/lib/stt/model-store.ts';
@@ -44,6 +45,18 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const engineParam = params.get('engine') ?? 'sherpa-zipformer-en';
 const engine = (engineParam === 'none' ? null : engineParam) as DictationEngineId | null;
 const off = params.get('off') === '1';
+const machine = params.get('machine');
+// The machine's default engine, as `voice.yaml` names it, read through the same route the page uses.
+const THIS_DAEMON = daemonConnection({
+  daemonId: 'fake-daemon',
+  baseUrl: 'https://fake-daemon.invalid',
+  deviceId: 'fake-device',
+});
+const fakeClient = {
+  history: async () => [],
+  request: async (_path: string, schema: { parse(value: unknown): unknown }) =>
+    schema.parse({ text: `defaultEngine: ${machine ?? 'null'}\n`, etag: 'fake' }),
+} as never;
 
 class FakeStore implements ModelInstaller {
   readonly totalBytes: number;
@@ -116,6 +129,7 @@ function VoiceBody() {
         recognitionSupport={AVAILABLE}
         voices={voices}
         deviceClass={deviceClass}
+        {...(machine === null ? {} : { daemon: THIS_DAEMON })}
       />
       <SpeedupKeysSettings keys={deviceKeys} />
       <SettingGroup label="Privacy and debugging">
@@ -179,9 +193,11 @@ const noop = (): void => undefined;
 const voiceStore = createVoiceStore({});
 const bodies = {
   voice: () => (
-    <StoreProvider store={voiceStore}>
-      <VoiceBody />
-    </StoreProvider>
+    <DaemonClientProvider client={async () => fakeClient}>
+      <StoreProvider store={voiceStore}>
+        <VoiceBody />
+      </StoreProvider>
+    </DaemonClientProvider>
   ),
   'voice-cleanup': () => (
     <div className="fy-vs">

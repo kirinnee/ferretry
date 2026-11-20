@@ -39,10 +39,10 @@ import {
   browserRecognitionProvider,
 } from '../../lib/stt/browser-recognition.ts';
 import {
-  DEFAULT_ON_DEVICE_ENGINE,
   type DeviceClass,
   type DeviceClassGlobalLike,
   deviceClassOf,
+  effectiveEngine,
 } from '../../lib/stt/engine-defaults.ts';
 import { userContextVocabulary } from '../../lib/stt/enhancement.ts';
 import { onDeviceModel } from '../../lib/stt/model-catalog.ts';
@@ -63,7 +63,15 @@ import {
   type SttSettingsPatch,
   sttDictionary,
 } from '../../lib/stt/stt-settings.ts';
-import { ChoiceCards, SettingGroup, SettingRow, SettingSwitch, Textarea } from '../../shell-voice.ts';
+import { useMachineVoiceEngine } from '../fleet/setup/voice-default.ts';
+import {
+  ChoiceCards,
+  type DaemonConnection,
+  SettingGroup,
+  SettingRow,
+  SettingSwitch,
+  Textarea,
+} from '../../shell-voice.ts';
 import { AutoReadSettings } from './auto-read-settings.tsx';
 import { DictationShortcutPicker } from './dictation-shortcut-picker.tsx';
 import { EngineSection, type TrialClock } from './engine-section.tsx';
@@ -179,6 +187,8 @@ export interface DictationSettingsProps {
   readonly trialClock?: TrialClock;
   /** Phone or computer, for the default engine. Read from the page when omitted. */
   readonly deviceClass?: DeviceClass;
+  /** The paired machine, whose `voice.yaml` default engine an unset device dictates with. Absent: no machine default. */
+  readonly daemon?: DaemonConnection;
   /** True only when the connected machine is known to run an older Ferretry (the auto-read note). */
   readonly olderMachine?: boolean;
   /** Test and harness seam: the speed planner, instead of the page's own. */
@@ -200,6 +210,7 @@ export function DictationSettings({
   voices,
   trialClock,
   deviceClass,
+  daemon,
   olderMachine: olderMachineOverride,
   speedPlanner,
 }: DictationSettingsProps) {
@@ -215,6 +226,8 @@ export function DictationSettings({
   const allVoices = voices === undefined ? contextVoices : voices;
   const parakeet = voice !== undefined ? voice : allVoices === null ? contextVoice : undefined;
   const device = deviceClass ?? pageDeviceClass;
+  // Until it picks one, this device dictates with the machine's default (the same read the microphone makes).
+  const machineEngine = useMachineVoiceEngine(settings.engine === null ? daemon : undefined);
   const dictionary = useMemo(() => sttDictionary(settings), [settings]);
   /**
    * A live echo of what the context field actually yields, so a reader can see
@@ -314,11 +327,12 @@ export function DictationSettings({
             browserProvider={provider}
             {...(trialClock === undefined ? {} : { clock: trialClock })}
             deviceClass={device}
+            machineDefault={machineEngine}
           />
           {/* ---- which execution path the engine runs on, chosen by the device ---- */}
           <div className="fy-vs-body -mt-6 mb-8">
             <SpeedLine
-              engine={settings.engine ?? DEFAULT_ON_DEVICE_ENGINE[device]}
+              engine={effectiveEngine(settings.engine, machineEngine, device)}
               {...(speedPlanner === undefined ? {} : { planner: speedPlanner })}
             />
           </div>

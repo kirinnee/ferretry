@@ -102,7 +102,7 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
     return (
       <>
         <div className="fy-vs">
-          <DictationSettings {...dictation} />
+          <DictationSettings {...dictation} daemon={THIS_DAEMON} />
           <SpeedupKeysSettings />
           <SettingGroup label="Privacy and debugging">
             <TranscriptionLogSettings />
