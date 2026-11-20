@@ -23,6 +23,8 @@ bundling and redistribution, and none of these is sold on its own.
 | Gelasio          | broadsheet, ma (stands in for Georgia)                          | `gelasio-latin-wght-normal` (34 832)                        | [OFL](licenses/gelasio.txt)          | https://github.com/SorkinType/Gelasio        |
 | JetBrains Mono   | code in every Inter family and in retro; phosphor; the terminal | `jetbrains-mono-latin-{400,700}-normal` (21 168 + 21 908)   | [OFL](licenses/jetbrains-mono.txt)   | https://github.com/JetBrains/JetBrainsMono   |
 | Orbitron         | hud (display and labels)                                        | `orbitron-latin-wght-normal` (11 800)                       | [OFL](licenses/orbitron.txt)         | https://github.com/theleagueof/orbitron      |
+| Pixelify Sans    | pixel (display headings)                                        | `pixelify-sans-latin-700-normal` (7 904)                    | [OFL](licenses/pixelify-sans.txt)    | https://github.com/eifetx/Pixelify-Sans      |
+| Press Start 2P   | pixel (short fixed labels)                                      | `press-start-2p-latin-400-normal` (12 512)                  | [OFL](licenses/press-start-2p.txt)   | https://github.com/codeman38/PressStart2P    |
 
 ## Deliberately not bundled
 
