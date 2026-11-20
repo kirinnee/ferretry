@@ -9,7 +9,17 @@ import { ExternalLink, useMotionAllowed } from '@ferretry/app/ui';
 import { ChevronRight, Turtle } from 'lucide-react';
 import { useState } from 'react';
 import type { CiJob, CiStep } from '../../../contract/wire.ts';
-import { barMs, drawnSpan, formatDuration, jobFrame, STATUS_WORD, STEPS_FIRST_PAGE, stepSpan } from './ci-format.ts';
+import {
+  barMs,
+  drawnSpan,
+  formatDuration,
+  jobFrame,
+  jobSettled,
+  shownStepStatus,
+  STATUS_WORD,
+  STEPS_FIRST_PAGE,
+  stepSpan,
+} from './ci-format.ts';
 import { STATUS_FILL, StatusIcon, STATUS_TEXT } from './ci-status.tsx';
 
 /** What a duration cell says for an item: its length (the same number its bar is drawn from), or why it has none. */
@@ -33,7 +43,9 @@ function StepRow({
   readonly runLive: boolean;
   readonly slowest: boolean;
 }) {
-  const ticking = runLive && job.live === true;
+  // A job that is over ticks nothing, and a step in it is drawn stopped, never spinning.
+  const ticking = runLive && job.live === true && !jobSettled(job);
+  const status = shownStepStatus(step, job);
   const span = stepSpan(step, jobFrame(job, nowMs, runLive), nowMs, ticking);
   const drawn = span === undefined ? undefined : drawnSpan(span);
   const live = ticking && step.live === true;
@@ -45,13 +57,13 @@ function StepRow({
       data-ci-slowest={slowest ? 'true' : undefined}
     >
       <span className="flex min-w-0 items-center gap-1.5">
-        <StatusIcon status={step.status} size={14} />
+        <StatusIcon status={status} size={14} />
         <span
           className={`min-w-0 text-cell [overflow-wrap:anywhere] ${step.status === 'skipped' ? 'text-faint' : 'text-fg'}`}
         >
           {step.name}
         </span>
-        <span className="sr-only">, {STATUS_WORD[step.status]}</span>
+        <span className="sr-only">, {STATUS_WORD[status]}</span>
         {slowest && (
           <span className="inline-flex shrink-0 items-center gap-0.5 rounded-control border border-warn-border bg-warn-bg px-1 text-meta font-medium text-warn">
             <Turtle aria-hidden="true" size={12} />
@@ -78,7 +90,7 @@ function StepRow({
       <span aria-hidden="true" className="relative col-span-2 h-1.5 rounded-full bg-border sm:order-2 sm:col-span-1">
         {drawn !== undefined && (
           <span
-            className={`absolute inset-y-0 min-w-[3px] rounded-full ${STATUS_FILL[step.status]}${live && moving ? ' animate-pulse' : ''}`}
+            className={`absolute inset-y-0 min-w-[3px] rounded-full ${STATUS_FILL[status]}${live && moving ? ' animate-pulse' : ''}`}
             style={{ left: `${drawn.left}%`, width: `${drawn.width}%` }}
           />
         )}
