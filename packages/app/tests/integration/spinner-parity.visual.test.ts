@@ -98,11 +98,11 @@ describe('the real spinner under the real stylesheet', () => {
     }
   }
 
-  it('a swapped pair keeps the style’s hand: Neo style on the Ma palette still draws a thick square arc', async () => {
+  it('a swapped pair keeps the style’s hand: Neo style on the Magenta palette still draws a thick square arc', async () => {
     await page.evaluate(() => {
       const root = document.documentElement;
       root.setAttribute('data-style', 'neo');
-      root.setAttribute('data-palette', 'ma');
+      root.setAttribute('data-palette', 'vaporwave');
       root.setAttribute('data-mode', 'dark');
     });
     const arc = await page.evaluate(() => {

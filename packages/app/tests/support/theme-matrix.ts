@@ -11,7 +11,26 @@
  *  - WCAG's 3:1 text floor is for LARGE text only (>= 24px, or >= 18.66px and bold); everything else is 4.5:1.
  */
 
-type Check = 'text' | 'edge' | 'focus' | 'overflow' | 'fonts';
+/**
+ * The checks. The first five are the r10 matrix; the rest are r11 T14's proofs of the owner's theme line (2026-11-20):
+ * `gradient` (no gradient backgrounds), `radius` and `clip` (super-rounded and clipped fields), `size` (display and body
+ * type), `sidebar` (no accent side bar), `ringclip` (a focus ring inside its clipping ancestor, r11 S13's measure),
+ * `distinct` (each style differs from Studio on its components) and `spinner` (no two styles share a spinner).
+ */
+type Check =
+  | 'text'
+  | 'edge'
+  | 'focus'
+  | 'overflow'
+  | 'fonts'
+  | 'gradient'
+  | 'radius'
+  | 'clip'
+  | 'size'
+  | 'sidebar'
+  | 'ringclip'
+  | 'distinct'
+  | 'spinner';
 
 export interface Miss {
   readonly check: Check;
@@ -29,6 +48,8 @@ export interface Measured {
     readonly ratio: number;
     readonly px: number;
     readonly weight: number;
+    /** The run sits in muted text (`.text-muted`): the High contrast palette asks 4.5:1 of it and 7:1 of the rest. */
+    readonly muted?: boolean;
   }[];
   readonly edge: readonly { readonly what: string; readonly ratio: number }[];
   /**
@@ -43,11 +64,55 @@ export interface Measured {
     readonly drawn: boolean;
     readonly width: number;
     readonly ratio: number;
+    /** The clipping ancestors (described) whose padding box the drawn ring pokes out of; empty or absent = inside. */
+    readonly clipped?: readonly string[];
   }[];
   readonly overflow: readonly { readonly what: string; readonly right: number; readonly limit: number }[];
   /** One row per (family, weight, style) a text stack names that is not a device face; `reason` says why it is not loaded. */
   readonly fonts: readonly { readonly what: string; readonly loaded: boolean; readonly reason?: string }[];
+  /** r11 T14 facts, read in the page; absent (an older caller) means "not measured". */
+  readonly facts?: Facts;
 }
+
+/** What the page reports for the style probes: plain data, judged by `misses`. */
+export interface Facts {
+  /** Every painted background that holds at least one gradient layer (the body's pattern layer is not one: it is the texture). `layers` are the gradient layers. */
+  readonly gradients: readonly { readonly what: string; readonly layers: readonly string[] }[];
+  /** The computed corner radius, in px, of every multi-line field, code block, table and menu. */
+  readonly radii: readonly { readonly what: string; readonly px: number }[];
+  /** A two-line textarea whose text does not fit its own box (scroll height over client height). */
+  readonly textareaClipped: boolean;
+  /** Computed sizes in px: the largest display heading, the body text, and the root font size (1rem). */
+  readonly sizes: { readonly display: number; readonly body: number; readonly rem: number };
+  /** One row per selected item that draws an accent bar down one side, and how. */
+  readonly sideBars: readonly { readonly what: string; readonly how: string }[];
+}
+
+/** What a miss is judged against: which style, which palette, and the width (the display cap is a desktop rule). */
+export interface Context {
+  readonly style: string;
+  readonly highContrast: boolean;
+  readonly wide: boolean;
+}
+const DEFAULT_CONTEXT: Context = { style: '', highContrast: false, wide: true };
+
+/**
+ * The only backgrounds a style may keep a gradient on (owner: "most of them should not have gradient background"): a Retro
+ * panel's title bar and Glass's frost highlight (one element each). A `what` the row names exactly.
+ */
+const GRADIENT_ALLOWED: Readonly<Record<string, readonly string[]>> = {
+  retro: ['Panel header'],
+  glass: ['Card'],
+};
+
+/** A corner radius for a field, a code block, a table or a menu: no more than this, in every style. */
+const RADIUS_CAP_PX = 16;
+/** Display text: at most 3.25rem at 1280. Body text: between 0.75rem and 1.15rem (the product's dense 13.5px body is 0.84rem). */
+const DISPLAY_CAP_REM = 3.25;
+const BODY_MIN_REM = 0.75;
+const BODY_MAX_REM = 1.15;
+/** High contrast: 7:1 for body text, 4.5:1 for muted text. */
+const HC_TEXT_FLOOR = 7;
 
 /** WCAG 1.4.3 text (and its large-text relaxation), 1.4.11 non-text (a control's edge, a focus ring), 2.4.13 ring thickness. */
 const TEXT_FLOOR = 4.5;
@@ -73,10 +138,17 @@ export const contrastRatio = (a: number, b: number): number => (Math.max(a, b) +
 const ratioText = (ratio: number): string => `${ratio.toFixed(2)}:1`;
 
 /** Every rule, as a pure function of what was measured. */
-export function misses(measured: Measured): readonly Miss[] {
+export function misses(measured: Measured, context: Context = DEFAULT_CONTEXT): readonly Miss[] {
   const out: Miss[] = [];
   for (const row of measured.text) {
-    const floor = isLargeText(row.px, row.weight) ? LARGE_TEXT_FLOOR : TEXT_FLOOR;
+    // The High contrast palette is stricter than WCAG AA: 7:1 body, 4.5:1 muted, large text included.
+    const floor = context.highContrast
+      ? row.muted === true
+        ? TEXT_FLOOR
+        : HC_TEXT_FLOOR
+      : isLargeText(row.px, row.weight)
+        ? LARGE_TEXT_FLOOR
+        : TEXT_FLOOR;
     if (row.ratio < floor) out.push({ check: 'text', what: row.what, got: ratioText(row.ratio), need: `>=${floor}:1` });
   }
   for (const row of measured.edge)
@@ -96,6 +168,15 @@ export function misses(measured: Measured): readonly Miss[] {
         need: `>=${EDGE_FLOOR}:1`,
       });
   }
+  for (const row of measured.focus)
+    if (row.reached && row.clipped !== undefined && row.clipped.length > 0)
+      out.push({
+        check: 'ringclip',
+        what: `${row.what} ring`,
+        got: `cut by ${row.clipped.join(', ')}`,
+        need: 'inside every clipping ancestor',
+      });
+  out.push(...factMisses(measured.facts, context));
   for (const row of measured.overflow)
     out.push({
       check: 'overflow',
@@ -105,6 +186,92 @@ export function misses(measured: Measured): readonly Miss[] {
     });
   for (const row of measured.fonts)
     if (!row.loaded) out.push({ check: 'fonts', what: row.what, got: row.reason ?? 'not loaded', need: 'loaded' });
+  return out;
+}
+
+/** The r11 T14 rules, as a pure function of the facts the page read. */
+function factMisses(facts: Facts | undefined, context: Context): readonly Miss[] {
+  if (facts === undefined) return [];
+  const out: Miss[] = [];
+  const allowed = GRADIENT_ALLOWED[context.style] ?? [];
+  for (const row of facts.gradients)
+    if (!allowed.includes(row.what))
+      out.push({
+        check: 'gradient',
+        what: `${row.what} background`,
+        got: `${row.layers.length} gradient layer(s)`,
+        need: 'no gradient',
+      });
+  for (const row of facts.radii)
+    if (row.px > RADIUS_CAP_PX)
+      out.push({ check: 'radius', what: row.what, got: `${row.px}px`, need: `<=${RADIUS_CAP_PX}px` });
+  if (facts.textareaClipped)
+    out.push({ check: 'clip', what: 'two-line textarea text', got: 'clipped', need: 'fits its box' });
+  const { display, body, rem } = facts.sizes;
+  if (context.wide && display > DISPLAY_CAP_REM * rem)
+    out.push({
+      check: 'size',
+      what: 'display heading',
+      got: `${display.toFixed(1)}px`,
+      need: `<=${DISPLAY_CAP_REM * rem}px`,
+    });
+  if (body < BODY_MIN_REM * rem || body > BODY_MAX_REM * rem)
+    out.push({
+      check: 'size',
+      what: 'body text',
+      got: `${body.toFixed(1)}px`,
+      need: `${BODY_MIN_REM * rem}-${BODY_MAX_REM * rem}px`,
+    });
+  for (const row of facts.sideBars)
+    out.push({ check: 'sidebar', what: row.what, got: row.how, need: 'no accent side bar' });
+  return out;
+}
+
+/** The eight component probes a style signature is made of. */
+export const COMPONENT_PROBES = [
+  'button',
+  'field',
+  'card',
+  'mdH1',
+  'mdCode',
+  'spinner',
+  'hypermedia',
+  'background',
+] as const;
+export type ComponentProbe = (typeof COMPONENT_PROBES)[number];
+/** One style's colour-free computed-style signature per component probe. */
+export type Signature = Readonly<Record<ComponentProbe, string>>;
+/** Each style must differ from Studio on at least this many of the 8 component probes. */
+const DISTINCT_FLOOR = 6;
+
+/**
+ * The cross-style rules (r11 T14 probe 5): `style` differs from Studio on >= 6 of 8 components (Studio itself is the
+ * baseline and is exempt), and no two styles share a spinner signature (Studio's included). `signatures` is keyed by style id.
+ */
+export function contractMisses(style: string, signatures: ReadonlyMap<string, Signature>): readonly Miss[] {
+  const own = signatures.get(style);
+  const studio = signatures.get('studio');
+  if (own === undefined || studio === undefined) return [];
+  const out: Miss[] = [];
+  if (style !== 'studio') {
+    const same = COMPONENT_PROBES.filter(probe => own[probe] === studio[probe]);
+    const differs = COMPONENT_PROBES.length - same.length;
+    if (differs < DISTINCT_FLOOR)
+      out.push({
+        check: 'distinct',
+        what: `differs from Studio on fewer than ${DISTINCT_FLOOR} of ${COMPONENT_PROBES.length} components`,
+        got: `${differs} of ${COMPONENT_PROBES.length} (same as Studio: ${same.join(', ')})`,
+        need: `>=${DISTINCT_FLOOR} of ${COMPONENT_PROBES.length}`,
+      });
+  }
+  const twins = [...signatures].filter(([id, sig]) => id !== style && sig.spinner === own.spinner).map(([id]) => id);
+  if (twins.length > 0)
+    out.push({
+      check: 'spinner',
+      what: 'spinner shared with another style',
+      got: `same as ${twins.join(', ')}`,
+      need: 'a spinner of its own',
+    });
   return out;
 }
 
@@ -161,10 +328,12 @@ export function verdictOf(
   where: Where,
   miss: Miss,
   pins: ReadonlyMap<string, string>,
+  /** The High contrast palette is hard for every style: a loud style gets no warning exemption on it. */
+  highContrast = false,
 ): { readonly verdict: Verdict; readonly key: string } {
   const key = identity(where, miss);
   if (pins.has(key)) return { verdict: 'known', key };
-  return { verdict: loud && SOFTENABLE.has(miss.check) ? 'warn' : 'fail', key };
+  return { verdict: loud && !highContrast && SOFTENABLE.has(miss.check) ? 'warn' : 'fail', key };
 }
 
 /** The pins whose miss was not observed: they no longer miss, so they must be deleted. */

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  COMPONENT_PROBES,
+  type ComponentProbe,
+  contractMisses,
   contrastRatio,
+  type Facts,
   identity,
   isLargeText,
   type Known,
@@ -9,6 +13,7 @@ import {
   type Miss,
   misses,
   pinnedMisses,
+  type Signature,
   stalePins,
   verdictOf,
   type Where,
@@ -213,5 +218,118 @@ describe('the known-misses ledger', () => {
 
   it('a row that names the same miss twice is refused', () => {
     expect(() => pinnedMisses([...ledger, ...ledger])).toThrow(/twice/u);
+  });
+});
+
+describe('r11 T14: the High contrast palette is hard', () => {
+  const body = { what: 'Body', ratio: 5, px: 16, weight: 400 };
+  it('asks 7:1 of body text (large included) and 4.5:1 of muted text', () => {
+    const found = misses(
+      { ...clean, text: [body, { ...body, what: 'Big', px: 30 }, { ...body, what: 'Muted', muted: true, ratio: 4.4 }] },
+      { style: 'neo', highContrast: true, wide: true },
+    );
+    expect(found.map(miss => `${miss.what} ${miss.need}`)).toEqual(['Body >=7:1', 'Big >=7:1', 'Muted >=4.5:1']);
+  });
+
+  it('a loud style gets no warning on it, and a pin still wins', () => {
+    const miss: Miss = { check: 'text', what: 'Body', got: '5.00:1', need: '>=7:1' };
+    const none = new Map<string, string>();
+    expect(verdictOf(true, where, miss, none, false).verdict).toBe('warn');
+    expect(verdictOf(true, where, miss, none, true).verdict).toBe('fail');
+    expect(verdictOf(true, where, miss, new Map([[identity(where, miss), 'why']]), true).verdict).toBe('known');
+  });
+});
+
+describe('r11 T14: the style probes', () => {
+  const facts = (over: Partial<Facts> = {}): Facts => ({
+    gradients: [],
+    radii: [{ what: 'Textarea radius', px: 16 }],
+    textareaClipped: false,
+    sizes: { display: 52, body: 13.5, rem: 16 },
+    sideBars: [],
+    ...over,
+  });
+  const run = (over: Partial<Facts>, style = 'studio', wide = true) =>
+    misses({ ...clean, facts: facts(over) }, { style, highContrast: false, wide }).map(m => `${m.check}:${m.what}`);
+
+  it('a clean fact set misses nothing, and an unmeasured one is not judged', () => {
+    expect(run({})).toEqual([]);
+    expect(misses(clean)).toEqual([]);
+  });
+
+  it('a gradient background misses, except the two allowed elements', () => {
+    const gradients = [{ what: 'Card', layers: ['linear-gradient(a, b)'] }];
+    expect(run({ gradients })).toEqual(['gradient:Card background']);
+    expect(run({ gradients }, 'glass')).toEqual([]);
+    expect(run({ gradients }, 'retro')).toEqual(['gradient:Card background']);
+    expect(run({ gradients: [{ what: 'Panel header', layers: ['x'] }] }, 'retro')).toEqual([]);
+    expect(run({ gradients: [{ what: 'Panel header', layers: ['x'] }] }, 'glass')).toEqual([
+      'gradient:Panel header background',
+    ]);
+  });
+
+  it('a radius over 16px misses; 16px passes; a clipped two-line textarea misses', () => {
+    expect(run({ radii: [{ what: 'Menu radius', px: 16.1 }] })).toEqual(['radius:Menu radius']);
+    expect(run({ textareaClipped: true })).toEqual(['clip:two-line textarea text']);
+  });
+
+  it('display over 3.25rem misses at 1280 only; body is held to 0.75-1.15rem at every width', () => {
+    expect(run({ sizes: { display: 80, body: 13.5, rem: 16 } })).toEqual(['size:display heading']);
+    expect(run({ sizes: { display: 80, body: 13.5, rem: 16 } }, 'studio', false)).toEqual([]);
+    expect(run({ sizes: { display: 20, body: 18.5, rem: 16 } })).toEqual(['size:body text']);
+    expect(run({ sizes: { display: 20, body: 11.9, rem: 16 } }, 'studio', false)).toEqual(['size:body text']);
+  });
+
+  it('an accent side bar on a selected item misses; so does a focus ring cut by a clipping ancestor', () => {
+    expect(run({ sideBars: [{ what: 'Selected nav item', how: 'inset side shadow 3px' }] })).toEqual([
+      'sidebar:Selected nav item',
+    ]);
+    const clipped = misses(
+      { ...clean, focus: [{ what: 'Primary', ...ring, clipped: ['div[clip]'] }] },
+      { style: 'studio', highContrast: false, wide: true },
+    );
+    expect(clipped.map(m => `${m.check}:${m.what}:${m.got}`)).toEqual(['ringclip:Primary ring:cut by div[clip]']);
+  });
+});
+
+describe('r11 T14: the cross-style contract', () => {
+  const sig = (over: Partial<Record<ComponentProbe, string>> = {}): Signature =>
+    ({
+      ...Object.fromEntries(COMPONENT_PROBES.map(probe => [probe, `studio-${probe}`])),
+      ...over,
+    }) as Signature;
+  const diff = (n: number, spinner = 'own'): Signature =>
+    sig({
+      ...Object.fromEntries(
+        COMPONENT_PROBES.filter(probe => probe !== 'spinner')
+          .slice(0, n)
+          .map(probe => [probe, `x-${probe}`]),
+      ),
+      spinner,
+    });
+
+  it('a style needs >= 6 of 8 probes unlike Studio; Studio is the baseline', () => {
+    const all = new Map([
+      ['studio', sig()],
+      ['swiss', diff(5, 'a')],
+      ['neo', diff(6, 'b')],
+    ]);
+    // diff(5, ..) also changes the spinner, so it differs on 6 of 8: lower the bar to see a miss.
+    expect(contractMisses('swiss', all)).toEqual([]);
+    const weak = new Map([
+      ['studio', sig()],
+      ['swiss', diff(4, 'studio-spinner')],
+    ]);
+    expect(contractMisses('swiss', weak).map(m => m.check)).toEqual(['distinct', 'spinner']);
+    expect(contractMisses('studio', all)).toEqual([]);
+  });
+
+  it('two styles that share a spinner both miss, Studio included', () => {
+    const all = new Map([
+      ['studio', sig()],
+      ['geist', diff(7, 'studio-spinner')],
+    ]);
+    expect(contractMisses('geist', all).map(m => m.got)).toEqual(['same as studio']);
+    expect(contractMisses('studio', all).map(m => m.got)).toEqual(['same as geist']);
   });
 });
