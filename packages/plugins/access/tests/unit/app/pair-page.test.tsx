@@ -440,6 +440,71 @@ describe('the /pair page', () => {
     );
     expect(view.container.querySelector('[data-device-refused]')).toBeNull();
   });
+
+  // G2: the page is drawn without the shell's chrome (manifest.test.ts), so it carries its own way back.
+  describe('has its own way back, because it draws no sidebar or bars', () => {
+    const back = (): HTMLElement | null => view?.container.querySelector<HTMLElement>('[data-pairing-close]') ?? null;
+    const machine = {
+      daemon: DAEMON,
+      machine: 'workstation',
+      deviceId: DEVICE,
+      address: 'https://daemon.example.test',
+      carriers: [],
+      pairedAt: 1,
+      lastSelectedAt: 1,
+    } as PairedDaemon;
+    const idle = async () => {
+      throw new Error('not used');
+    };
+
+    it('goes back to the path it was asked to return to (the first run)', async () => {
+      const { Page } = setup(idle);
+      const moves: Navigation[] = [];
+      view = await mount(<Page {...props(`${PAGE}?return=%2Fonboarding`, moves)} />);
+      await interact(() => must(back(), 'Back').click());
+      expect(moves).toEqual([{ to: '/onboarding', replace: undefined }]);
+    });
+
+    it('goes back to the machine this tab works on when pairing another device from Settings', async () => {
+      const { Page } = setup(idle, [machine]);
+      const moves: Navigation[] = [];
+      view = await mount(<Page {...props(PAGE, moves)} />);
+      expect(must(back(), 'Back').textContent).toBe('Back');
+      await interact(() => must(back(), 'Back').click());
+      expect(moves).toEqual([{ to: `/d/${DAEMON}`, replace: undefined }]);
+    });
+
+    it('is also on the confirm screen, and draws none on a cold first visit with nowhere to go back to', async () => {
+      const cold = setup(idle);
+      view = await mount(<cold.Page {...props(PAGE, [])} />);
+      expect(back()).toBeNull();
+      await view.unmount();
+      const { Page } = setup(idle, [machine]);
+      const shell = shellAt(`/pair${FRAGMENT}`);
+      view = await mount(
+        <shell.Harness place="daemonless" screen="pair">
+          <Page {...props(PAGE, [])} />
+        </shell.Harness>,
+      );
+      expect(back()).not.toBeNull();
+    });
+  });
+
+  it('G2 draws its action buttons auto width and at least 44px tall, never the row wide', async () => {
+    const { Page } = setup(async () => {
+      throw new Error('not used');
+    });
+    const shell = shellAt(`/pair${FRAGMENT}`);
+    view = await mount(
+      <shell.Harness place="daemonless" screen="pair">
+        <Page {...props(PAGE, [])} />
+      </shell.Harness>,
+    );
+    const confirm = must(view.container.querySelector<HTMLElement>('[data-pair-confirm]'), 'Pair this device');
+    expect(confirm.className).toContain('min-h-[44px]');
+    expect(confirm.className).not.toContain('w-full');
+    expect(confirm.className).not.toContain('min-h-[64px]');
+  });
 });
 
 /** The hosted page's first-passkey offer (P-H*): the success screen stays while the offer shows, and moves on as before when it does not. */

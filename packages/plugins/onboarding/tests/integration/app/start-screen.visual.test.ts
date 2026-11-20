@@ -220,6 +220,10 @@ describe('the Pair journey', () => {
         await noOverflow(tab);
         expect(await tab.locator('text=Copy pair command').count()).toBe(0);
         expect(await tab.locator('[data-onboarding="setup"]').getAttribute('data-onboarding-screen')).toBe('scan');
+        // G2: "Open the pairing page" is auto width and 44px tall, never the row wide.
+        const openPair = await tab.locator('[data-onboarding-open-pair]').boundingBox();
+        expect(openPair?.height ?? 0, 'at least 44 px tall').toBeGreaterThanOrEqual(43.5);
+        expect(openPair?.width ?? Infinity, 'not the row wide').toBeLessThan(variant.width * 0.7);
         await shot(tab, variant, 'pair');
       } finally {
         await close();

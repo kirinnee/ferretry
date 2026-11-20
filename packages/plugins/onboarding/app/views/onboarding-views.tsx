@@ -116,6 +116,7 @@ function PairingHandoff({
           navigate(PAIR_AND_RETURN);
         }}
         data-onboarding-open-pair=""
+        className="min-h-[44px] self-start px-6 py-3"
       >
         Open the pairing page
       </Button>

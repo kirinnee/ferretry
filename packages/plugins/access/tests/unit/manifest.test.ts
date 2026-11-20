@@ -6,6 +6,14 @@ const routes = manifest.actions.routes;
 const byKey = new Map(routes.map(route => [route.key, route]));
 
 describe('access manifest', () => {
+  test('draws the /pair screen alone (no drawer, bars or side column), like the first run it is reached from', () => {
+    expect(manifest.ui?.screens?.find(screen => screen.id === 'pair')).toMatchObject({
+      path: '/pair',
+      daemonless: true,
+      chrome: 'none',
+    });
+  });
+
   test("declares today's pairing, passkey, unlock and push routes, and not the daemon-wide grants", () => {
     expect(routes).toHaveLength(20);
     // DECISIONS-1 #4: the seen route is Agenda's; Access keeps push subscriptions.
