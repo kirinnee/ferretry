@@ -19,6 +19,7 @@ export type SettingId =
   | 'chat-width'
   | 'motion'
   | 'open-links-in'
+  | 'map-style'
   | 'message-marks'
   | 'composer-markdown'
   | 'composer-enter-key'
@@ -465,6 +466,13 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     keywords: ['motion', 'animation', 'reduced', 'reduce', 'spinner', 'accessibility', 'vestibular'],
   },
   {
+    id: 'map-style',
+    label: 'Map style',
+    description:
+      'Which service draws the maps in messages. OpenStreetMap is the default. Google Maps shows one place or a plain view only; a map with several markers, a route or a shape stays on OpenStreetMap and says so.',
+    keywords: ['map', 'maps', 'google', 'google maps', 'openstreetmap', 'osm', 'tiles', 'privacy', 'location'],
+  },
+  {
     id: 'open-links-in',
     label: 'Open links in',
     description: 'Cmd/Ctrl-click always opens a new tab.',
@@ -524,6 +532,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
       'group-needs-you',
       'chat-width',
       'open-links-in',
+      'map-style',
       'message-marks',
     ],
   },
@@ -1034,6 +1043,8 @@ export interface SettingsPaletteEntry {
 export interface SettingsPaletteContext {
   /** Current browser-local binding, supplied without making this catalog own dictation storage. */
   readonly dictationShortcutLabel?: string;
+  /** Whether this build carries the Google Maps key. Without it the Map style row does not exist, so search must not offer it. */
+  readonly googleMapsAvailable?: boolean;
 }
 
 /**
@@ -1070,6 +1081,7 @@ export const settingsPaletteEntries = (
   }
 
   for (const definition of SETTINGS_DEFINITIONS) {
+    if (definition.id === 'map-style' && context.googleMapsAvailable !== true) continue;
     const description =
       definition.id === 'dictation' && context.dictationShortcutLabel
         ? `${definition.description} Push-to-talk shortcut: ${context.dictationShortcutLabel}.`

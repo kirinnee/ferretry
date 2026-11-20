@@ -98,6 +98,31 @@ require_in_block '/*' "media-src 'self' blob: https:;"
 require_in_block '/*' "img-src 'self' data: blob: https://tile.openstreetmap.org;"
 refuse_in_block '/*' "img-src[^;]* https:( |;)" 'widened img-src to https:, which makes every Markdown image an automatic request'
 
+# FRAMES: `'self'` (the fy-render sandbox shells and card embeds are same-origin) and ONE third-party path,
+# the Google Maps EMBED API (docs/fy-render.md, "Maps": the opt-in Google map style, which needs the Ferretry
+# key). It is pinned to the origin + `/maps/embed/v1/` prefix that `packages/pwa/src/lib/map-style.ts`
+# exports, and refused if widened to a bare scheme, a wildcard or the whole google.com origin.
+# `default-src` stays 'self', so nothing else on the page can frame anything.
+map_style_source="packages/pwa/src/lib/map-style.ts"
+google_origin="$(sed -n "s/^\(export \)\{0,1\}const GOOGLE_EMBED_ORIGIN = '\(https:\/\/[^']*\)';\$/\2/p" "${map_style_source}")"
+google_path="$(sed -n "s/^\(export \)\{0,1\}const GOOGLE_EMBED_PATH = '\(\/[^']*\)';\$/\2/p" "${map_style_source}")"
+[[ ${google_origin}${google_path} == "https://www.google.com/maps/embed/v1/" ]] || {
+  echo "❌ ${map_style_source} must declare GOOGLE_EMBED_ORIGIN and GOOGLE_EMBED_PATH naming https://www.google.com/maps/embed/v1/ (got '${google_origin}${google_path}')" >&2
+  exit 1
+}
+require_in_block '/*' "media-src 'self' blob: https:; frame-src 'self' ${google_origin}${google_path}; connect-src"
+refuse_in_block '/*' "frame-src[^;]* (https:|\*|https://www\.google\.com/?)( |;)" 'widened frame-src beyond the Google Maps embed path'
+[[ "$(block_of '/*' | rg -o 'frame-src' | wc -l)" -eq 1 ]] || {
+  echo "❌ ${headers}: rule /* must carry exactly one frame-src" >&2
+  exit 1
+}
+# The build key reaches the PWA only as a GitHub *variable* (public by design, restricted by referrer in
+# Google Cloud), never a secret and never written into the repository.
+rg -q 'FY_GOOGLE_MAPS_EMBED_KEY: \$\{\{ vars\.FY_GOOGLE_MAPS_EMBED_KEY \}\}' .github/workflows/pwa-pages.yaml || {
+  echo "❌ .github/workflows/pwa-pages.yaml must pass FY_GOOGLE_MAPS_EMBED_KEY from vars.FY_GOOGLE_MAPS_EMBED_KEY to the PWA build" >&2
+  exit 1
+}
+
 # The shell's CONTENT policy lives in the generated document, not here. Assert the
 # `/*` policy was not widened to accommodate it: the app still frames nothing, and
 # it never gained the `'unsafe-eval'` the sandbox deliberately does without.

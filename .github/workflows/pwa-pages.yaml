@@ -50,6 +50,10 @@ jobs:
           PWA_RELEASE_SEQUENCE: ${{ github.run_number }}
           # A shallow checkout here would publish one catalog version forever; fail instead.
           MODEL_CATALOG_REQUIRE_HISTORY: '1'
+          # Ferretry's ONE Google Maps Embed key: a GitHub *variable*, not a secret. It is public by design
+          # (anyone reading the page sees it) and is restricted by referrer and to the one API in Google
+          # Cloud. Unset or blank, the build simply has no Google Maps option (docs/fy-render.md, "Maps").
+          FY_GOOGLE_MAPS_EMBED_KEY: ${{ vars.FY_GOOGLE_MAPS_EMBED_KEY }}
         run: nix develop .#ci -c ./scripts/ci/build-pwa.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

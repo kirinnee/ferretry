@@ -213,6 +213,8 @@ import { itemSince, readItemConversation } from './lib/item-conversation.ts';
 import { placeLedgerRows } from './lib/ledger-placement.ts';
 import { createLiveActivityHub } from './lib/live-activity-feed.ts';
 import { moveMachine } from './lib/machine-order.ts';
+import { bundledEmbedKey } from './lib/map-style.ts';
+import { MapStyleProvider } from './lib/map-style-context.tsx';
 import type { NotificationCategory, QuietHours } from './lib/notification-filter.ts';
 import type {
   NotificationPermissionState,
@@ -2910,7 +2912,11 @@ export function AppShell() {
   const dictation = useSttSettings(store.stt);
   const pushToTalk = dictationShortcutLabel(dictation.settings.shortcut);
   const paletteSettings = useCallback<PaletteSettingsSource>(
-    (daemon, query) => settingsPaletteEntries(daemon, query, { dictationShortcutLabel: pushToTalk }),
+    (daemon, query) =>
+      settingsPaletteEntries(daemon, query, {
+        dictationShortcutLabel: pushToTalk,
+        googleMapsAvailable: bundledEmbedKey() !== null,
+      }),
     [pushToTalk],
   );
   const { touchAffected } = useInputModality();
@@ -3256,7 +3262,9 @@ export function AppShell() {
           >
             {routeAnnouncement(effectiveRoute)}
           </p>
-          <StoreLinkBehaviour>{content}</StoreLinkBehaviour>
+          <StoreLinkBehaviour>
+            <StoreMapStyle>{content}</StoreMapStyle>
+          </StoreLinkBehaviour>
           {/* One passkey prompt for the whole app: any daemon request refused for want of a step-up raises
           it, and it names which machine is asking. */}
           <StepUpDialog gate={store.stepUp} machineName={promptMachineName} />
@@ -3321,6 +3329,20 @@ function MotionFollower() {
     else delete root.dataset.motion;
   }, [motion]);
   return null;
+}
+
+/**
+ * Binds every `map` block under it to Settings › Appearance › "Map style", read from this device's controls,
+ * together with the Google Maps key this build carries (`lib/map-style.ts`).
+ */
+function StoreMapStyle({ children }: { readonly children: ReactNode }) {
+  const store = useAppStore();
+  const style = useSyncExternalStore(store.controls.subscribe, () => store.controls.snapshot().device.mapStyle);
+  return (
+    <MapStyleProvider embedKey={bundledEmbedKey()} style={style}>
+      {children}
+    </MapStyleProvider>
+  );
 }
 
 /**

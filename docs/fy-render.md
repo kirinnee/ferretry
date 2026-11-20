@@ -186,21 +186,21 @@ Two properties this feature must never change, and does not:
 
 ## Per type, in this build
 
-| Type               | Renders as                                                                              | Why                                                                                                          |
-| ------------------ | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `card`, `board`    | the board's own `BoardCard`, read from the daemon; a `board` is framed, grouped by lane | A pointer, not bytes: nothing an author wrote is drawn — [Cards and boards](#cards-and-boards)               |
-| `svg`              | `<img src="data:image/svg+xml,…">`                                                      | The measured boundary — see below                                                                            |
-| `image` (inline)   | `<img src="data:{mime};base64,…">`                                                      | No script surface exists in a raster decode                                                                  |
-| `html` (no script) | a static fragment in a closed shadow root, sanitized by DOMPurify                       | Nothing runs; [The `html` fragment](#the-html-fragment) says what is stripped and what contains the rest     |
-| `html` (script)    | a live page in its own opaque frame, `/fy-render-html.html`                             | The owner asked for interaction; [The interactive `html` frame](#the-interactive-html-frame) is the boundary |
-| `mermaid`          | `<img src="data:image/svg+xml,…">`                                                      | Compiled to SVG in the sandbox frame in the theme's tokens, then re-admitted through the authored-SVG gate   |
-| `map`              | a Leaflet map in the message, tiles from `tile.openstreetmap.org`                       | The payload is data placed with `textContent`; [Maps](#maps) says what loads and what is refused             |
-| `chart`            | a Chart.js `<canvas>` in the message, with page-text legend and steps                   | The payload is data in a closed language, painted by `fillText`; [Charts](#charts) says why not a frame      |
-| `lottie`           | live player inside the sandbox frame                                                    | An animation has to keep running to animate, so this one stays live                                          |
-| `image` (`src:`)   | `<img src="blob:…">` of admitted bytes                                                  | Workspace or https bytes, checked like inline ones — [Media from `src:`](#media-from-src)                    |
-| `video`            | the browser's native `<video controls>`                                                 | A workspace file as a `blob:`; an https URL directly, which `media-src https:` admits                        |
-| `audio`            | the browser's native `<audio controls>`                                                 | As `video`                                                                                                   |
-| `pdf`              | a file row: workspace Open / Download of a minted `blob:`; https link                   | Measured: Chromium blocks its PDF viewer in a sandboxed frame, and the app policy refuses `blob:` frames     |
+| Type               | Renders as                                                                                       | Why                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `card`, `board`    | the board's own `BoardCard`, read from the daemon; a `board` is framed, grouped by lane          | A pointer, not bytes: nothing an author wrote is drawn — [Cards and boards](#cards-and-boards)               |
+| `svg`              | `<img src="data:image/svg+xml,…">`                                                               | The measured boundary — see below                                                                            |
+| `image` (inline)   | `<img src="data:{mime};base64,…">`                                                               | No script surface exists in a raster decode                                                                  |
+| `html` (no script) | a static fragment in a closed shadow root, sanitized by DOMPurify                                | Nothing runs; [The `html` fragment](#the-html-fragment) says what is stripped and what contains the rest     |
+| `html` (script)    | a live page in its own opaque frame, `/fy-render-html.html`                                      | The owner asked for interaction; [The interactive `html` frame](#the-interactive-html-frame) is the boundary |
+| `mermaid`          | `<img src="data:image/svg+xml,…">`                                                               | Compiled to SVG in the sandbox frame in the theme's tokens, then re-admitted through the authored-SVG gate   |
+| `map`              | a Leaflet map in the message, tiles from `tile.openstreetmap.org` (opt-in: Google's Embed frame) | The payload is data placed with `textContent`; [Maps](#maps) says what loads and what is refused             |
+| `chart`            | a Chart.js `<canvas>` in the message, with page-text legend and steps                            | The payload is data in a closed language, painted by `fillText`; [Charts](#charts) says why not a frame      |
+| `lottie`           | live player inside the sandbox frame                                                             | An animation has to keep running to animate, so this one stays live                                          |
+| `image` (`src:`)   | `<img src="blob:…">` of admitted bytes                                                           | Workspace or https bytes, checked like inline ones — [Media from `src:`](#media-from-src)                    |
+| `video`            | the browser's native `<video controls>`                                                          | A workspace file as a `blob:`; an https URL directly, which `media-src https:` admits                        |
+| `audio`            | the browser's native `<audio controls>`                                                          | As `video`                                                                                                   |
+| `pdf`              | a file row: workspace Open / Download of a minted `blob:`; https link                            | Measured: Chromium blocks its PDF viewer in a sandboxed frame, and the app policy refuses `blob:` frames     |
 
 ### Cards and boards
 
@@ -275,7 +275,9 @@ they reach a style.
   stops matching, so a Leaflet upgrade must be re-audited. `tests/unit/build-contract.test.ts` pins it.
 - **One remote origin.** `img-src` names `https://tile.openstreetmap.org` and nothing else remote
   (`public/_headers`; `scripts/validate/pages-config.sh` pins the line and still refuses a bare `https:`).
-  Markdown `![](url)` images remain requests the policy refuses. No API key exists anywhere in the client.
+  Markdown `![](url)` images remain requests the policy refuses. The OpenStreetMap path needs no key; the opt-in
+  Google style carries one public, referrer-restricted key and one framed origin
+  ([Map style](#map-style-google-maps-opt-in)).
 - **Tile provider and policy.** OpenStreetMap's standard tile layer needs no key and permits light
   interactive use under [its tile usage policy](https://operations.osmfoundation.org/policies/tiles/):
   visible attribution (the component's © OpenStreetMap contributors link), a valid `Referer` (the tile
@@ -295,6 +297,84 @@ they reach a style.
 caps shows the reason and a **coordinates list** (`Point: 51.5, -0.12`, up to 200 lines) taken from
 whatever could be read; the same list appears if the map library cannot load (offline, a blocked chunk).
 Tiles that fail to load leave the pins and lines on a plain background.
+
+#### Map style: Google Maps (opt-in)
+
+**OpenStreetMap stays the default.** A device can switch **Settings › Appearance › Map style** to **Google Maps**,
+which draws a map as Google's [Maps Embed API](https://developers.google.com/maps/documentation/embed/get-started)
+iframe instead of Leaflet. The row says in one line what it costs — _"Google sees which places you open"_ — and the
+choice is per device (`mapStyle` in the stored controls), never sent to a machine. The Embed API has no usage
+charge; it is **not** the paid Maps JavaScript API, and nothing here calls that.
+
+- **No key, no option.** The Google choice exists only in a build that carries Ferretry's one key. A fork, a Nix
+  profile or a local `vite build` has none: the row is not shown, a saved `google` draws as OpenStreetMap, and nothing
+  is an error.
+- **What Google can draw.** One marker (`place` mode) or a plain centred view (`view` mode). Several markers, routes,
+  polygons and `geojson` shapes cannot be drawn by the Embed API, so such a map **stays on OpenStreetMap and says
+  so** under the map (_"Shown with OpenStreetMap: Google Maps can't draw routes or shapes here."_). A lone marker's
+  label and popup are not drawn by Google either; they are printed as one line under the frame. The marker's colour,
+  and dark mode (the Embed API has no dark style), do not carry over.
+- **The frame is locked down as far as an iframe can be.** `credentialless` (no cookies reach Google; see below),
+  `referrerpolicy="origin"` (the page itself sends no Referer, but the key is restricted by it, so this frame alone
+  sends the origin and no path), `sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"`
+  (no top navigation, no forms, no downloads) and no `allow=` features. `allow-popups-to-escape-sandbox` is there so
+  a link the map opens is a normal window: **a window the frame opens is not sandboxed**. The address is built only from validated
+  numbers and the key; nothing the author wrote reaches it except a coordinate.
+- **Cross-origin isolation** (the opt-in "Several cores" mode, [voice-modes](design/voice-modes.md) §6): an isolated
+  page may only embed a frame that opts in, which Google's embed is not known to do. A **`credentialless`** iframe is
+  the exception Chromium makes, so the frame uses it where `HTMLIFrameElement.prototype` has `credentialless`. In an
+  isolated browser that lacks it (Safari, Firefox) the map stays on OpenStreetMap with a note (_"…this browser can't
+  show Google Maps while several cores are on."_). Outside isolation the attribute is still set wherever it is
+  supported, because it also keeps Google's cookies out. **This is unit-tested with a stubbed frame; it has not been
+  proved against Google's live embed in an isolated Chromium build** — nothing here makes a real Google request.
+
+**The one loosening of the page's CSP.** `public/_headers` gains `frame-src 'self' https://www.google.com/maps/embed/v1/`.
+Before it the page had no `frame-src`, so `default-src 'self'` let it frame only itself (the `fy-render` sandbox shells
+and card embeds). `'self'` is kept, and the single added source is the Embed API's **origin plus the `/maps/embed/v1/`
+path prefix** — CSP path matching treats a path ending in `/` as a prefix, so **every endpoint beneath
+`/maps/embed/v1/`** is framable (not only `place` and `view`), but nothing else on `www.google.com` and no other host is,
+**for the initial URL**. CSP ignores paths after a redirect, so a redirect from the embed may land anywhere on an
+allowed scheme and host; only the scheme and host stay constrained. It does not touch `script-src`, `connect-src`, `img-src` or `frame-ancestors`; a framed
+Google page runs under Google's own policy, in an `allow-scripts` sandbox with no access to this page. The string is
+written once, in `src/lib/map-style.ts` (`GOOGLE_EMBED_FRAME_SOURCE`), and `scripts/validate/pages-config.sh` and
+`tests/unit/map-style.test.ts` hold `_headers` to it, refusing a bare `https:`, a wildcard or the whole origin.
+
+**Where the key lives, and why a build value.** The key is a _public_ browser key — anyone who opens the page can read
+it — made safe by being **restricted** (to the app's web addresses and to the Embed API only) in Google Cloud, so it is
+a GitHub **variable**, never a secret and never in the repository. It reaches the app as `FY_GOOGLE_MAPS_EMBED_KEY` at
+**build time** (`.github/workflows/pwa-pages.yaml` passes `vars.FY_GOOGLE_MAPS_EMBED_KEY`; `vite.config.ts` bakes it in
+as `__FY_GOOGLE_MAPS_EMBED_KEY__` after checking its shape). That is a deliberate contrast with the hosted relay's
+runtime advertisement: the relay's address is a fact the _operator_ may withdraw without a release, whereas a
+referrer-restricted key works only from the addresses it was restricted to — so serving it at runtime would hand it to
+apps on addresses where it cannot work, and the build is the only place that knows which address it is for. The cost of
+that choice is real and stated: **rotating or revoking the key is a redeploy** (run the Pages workflow again), not a
+switch. There is one owner of the fact — the build variable — and one reader of it (`readEmbedKey`), and a build with
+nothing there ships no Google option.
+
+**Owner's steps: make the key once** (the value never goes in chat, an issue or a file):
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), pick or create a project for Ferretry. Google may
+   ask you to attach a billing account before it lets you enable any Maps API; the Embed API itself has no usage charge.
+2. **APIs & Services › Library**, search **Maps Embed API**, and **Enable** it. Enable **only** that API.
+3. **APIs & Services › Credentials › Create credentials › API key.** Name it `Ferretry Maps Embed`.
+4. Open the key and set both restrictions, then **Save**:
+   - **Application restrictions › Websites:** add every address the app is served from, each as `https://<address>/*`
+     (the production Pages address, and any custom domain). Leave out localhost.
+   - **API restrictions › Restrict key:** choose **Maps Embed API** only.
+5. Store it as a repository variable. Run this on your machine; `gh` asks for the value, so you paste it at that
+   prompt and not anywhere else:
+
+   ```bash
+   gh variable set FY_GOOGLE_MAPS_EMBED_KEY --repo kirinnee/ferretry
+   ```
+
+6. Deploy so the build picks it up: `gh workflow run pwa-pages.yaml --repo kirinnee/ferretry` (or merge to `main`). Open
+   the app: **Settings › Appearance** now shows **Map style**. To take the option away, delete the variable and deploy
+   again: `gh variable delete FY_GOOGLE_MAPS_EMBED_KEY --repo kirinnee/ferretry`.
+
+If the key is wrong or restricted to a different address, Google's own frame shows its error text inside the map's
+box; the page cannot read into a cross-origin frame to detect that, so the symptom is that frame, and the remedy is
+step 4.
 
 ### Charts
 
@@ -1032,7 +1112,7 @@ Say what the chart says; the reader's theme paints it. `title:` is optional; `y`
 
 JSON/YAML {center: [lat, lng], zoom, markers: [{at, label, popup}], lines: [{points}], polygons, geojson}; real places.
 
-`center` is `[lat, lng]`; omit it to fit the view to everything drawn. `zoom` is 0–18 (with a fit, the closest the fit may zoom). Markers carry `at`, `label` and `popup`; `lines` are routes (`points: [[lat, lng], …]`, `label`); `polygons` need three points a ring; `geojson` takes Point, LineString, Polygon and their `Multi*`/Feature/Collection forms. Colours: `red`, `blue`, `green`, `amber`, `purple` or `#hex`. An interactive map with OpenStreetMap tiles as its one remote load: pan, zoom, tap a marker for its popup. Caps: 32 KiB, 100 markers, 50 lines+polygons, 2,000 vertices; a refusal falls back to a coordinates list.
+`center` is `[lat, lng]`; omit it to fit the view to everything drawn. `zoom` is 0–18 (with a fit, the closest the fit may zoom). Markers carry `at`, `label` and `popup`; `lines` are routes (`points: [[lat, lng], …]`, `label`); `polygons` need three points a ring; `geojson` takes Point, LineString, Polygon and their `Multi*`/Feature/Collection forms. Colours: `red`, `blue`, `green`, `amber`, `purple` or `#hex`. An interactive map with OpenStreetMap tiles as its one remote load: pan, zoom, tap a marker for its popup. A reader who opted into Google Maps (Settings › Appearance) sees a single marker or a plain view drawn by Google instead; several markers, routes and shapes stay on OpenStreetMap, with a note. Caps: 32 KiB, 100 markers, 50 lines+polygons, 2,000 vertices; a refusal falls back to a coordinates list.
 
 ### media
 
@@ -1054,7 +1134,9 @@ A Lottie animation as JSON — the one animated type, with Pause/Play. No expres
 
 What this build knowingly does not do. Each of these is why row 65 is **not** ticked.
 
-0. **`type: map` leans on a third party's tile server.** Tiles come from OpenStreetMap's public servers under its
+0. **`type: map` leans on a third party.** (OpenStreetMap by default; with the opt-in Google style, Google — see
+   [Map style](#map-style-google-maps-opt-in), which names what Google sees and the one CSP loosening.)
+   **`type: map` leans on a third party's tile server.** Tiles come from OpenStreetMap's public servers under its
    usage policy: the tile host sees the reader's IP and the area viewed (and a Referer carrying this app's
    origin), a hosted-provider swap is the answer to heavy use, and an offline or blocked tile host leaves
    pins on a blank background. Polygon holes are dropped (a polygon is its outer ring). Touch pan and

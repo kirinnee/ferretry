@@ -14,6 +14,7 @@ import type { ThemeState } from '../../hooks/use-theme.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonControlsStore, DeviceControls, MotionPreference, OpenLinksIn } from '../../lib/controls.ts';
 import { OPEN_LINKS_IN } from '../../lib/controls.ts';
+import { bundledEmbedKey, GOOGLE_MAPS_PRIVACY_NOTE, type MapStyle } from '../../lib/map-style.ts';
 import type { ChatWidth } from '../../shell/chat-width-control.tsx';
 import { ACTIVE_EXPLANATION, CHAT_WIDTH_OPTIONS } from '../../shell/chat-width-control.tsx';
 import { MODE_OPTIONS, Swatch, scrollThemeFamilyIntoView } from '../../shell/theme-toggle.tsx';
@@ -48,6 +49,11 @@ const OPEN_LINK_LABEL: Readonly<Record<OpenLinksIn, string>> = {
   panel: 'Ferretry side panel',
   computer: "Your computer's default browser",
 };
+
+const MAP_STYLE_OPTIONS: readonly { readonly id: MapStyle; readonly label: string }[] = [
+  { id: 'osm', label: 'OpenStreetMap' },
+  { id: 'google', label: 'Google Maps' },
+];
 
 const COMPUTER_LINKS_NOTE =
   "Your computer's default browser opens links in whichever browser this computer picks, so a link router can choose the profile.";
@@ -183,9 +189,18 @@ export interface AppearanceGroupsProps {
   readonly device: DeviceControls;
   readonly computerAvailable: boolean;
   readonly controls: DaemonControlsStore;
+  /** Whether this build carries the Ferretry Google Maps key. Without it the Map style row is not shown at all. */
+  readonly googleMapsAvailable?: boolean;
 }
 
-export function AppearanceGroups({ theme, densityState, device, computerAvailable, controls }: AppearanceGroupsProps) {
+export function AppearanceGroups({
+  theme,
+  densityState,
+  device,
+  computerAvailable,
+  controls,
+  googleMapsAvailable = bundledEmbedKey() !== null,
+}: AppearanceGroupsProps) {
   const set = (patch: Partial<DeviceControls>): void => {
     controls.setDeviceControls(patch);
   };
@@ -353,6 +368,23 @@ export function AppearanceGroups({ theme, densityState, device, computerAvailabl
             />
           )}
         />
+        {googleMapsAvailable ? (
+          <SettingRow
+            settingId="map-style"
+            name="Map style"
+            hint={GOOGLE_MAPS_PRIVACY_NOTE}
+            explanation={`${described('map-style')} Choosing Google Maps tells Google which places you open (OpenStreetMap's tile server sees the area too, and your IP address, as it always has). Saved on this device only.`}
+            wide
+            control={() => (
+              <Segmented
+                label="Map style"
+                value={device.mapStyle}
+                options={MAP_STYLE_OPTIONS}
+                onChange={mapStyle => set({ mapStyle })}
+              />
+            )}
+          />
+        ) : null}
         <SettingDisclosureRow settingId="message-marks" name="Message marks" hint="What the clock, ticks and ! mean">
           <MessageMarksLegend />
         </SettingDisclosureRow>
