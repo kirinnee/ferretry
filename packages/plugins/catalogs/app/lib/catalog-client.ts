@@ -6,6 +6,7 @@
  */
 
 import type { NoReach } from '@ferretry/app';
+import type { ReadPress } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { z } from 'zod';
 import manifest from '../../manifest.ts';
@@ -15,7 +16,8 @@ export interface CatalogClient {
   request<T>(path: string, schema: z.ZodType<T>, init?: CatalogRequestInit): Promise<T>;
 }
 
-type CatalogRequestInit = Pick<RequestInit, 'method' | 'headers' | 'body'>;
+/** `quiet: false` marks a read a person pressed for (a Try again), so the passkey prompt can open (`readPress`). */
+type CatalogRequestInit = Pick<RequestInit, 'method' | 'headers' | 'body'> & ReadPress;
 
 /** The one read beyond Catalogs' own routes: the NAMES of this machine's secrets, governed by the Vault route's own grant (operator, secrets.use), not by `secretNamePicker`. */
 export const SECRET_NAMES_PATH = '/v1/secrets';
@@ -100,6 +102,7 @@ export function catalogClientOf(client: Pick<PluginClient, 'call'>): CatalogClie
         ...(Object.keys(route.params).length === 0 ? {} : { params: route.params }),
         ...(Object.keys(query).length === 0 ? {} : { query }),
         ...(typeof init.body === 'string' ? { body: JSON.parse(init.body) as unknown } : {}),
+        ...(init.quiet === false ? { quiet: false as const } : {}),
       });
       return schema.parse(answer);
     },
