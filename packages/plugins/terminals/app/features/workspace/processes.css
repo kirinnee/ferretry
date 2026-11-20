@@ -25,7 +25,10 @@
   flex: 1 1 0;
   flex-direction: column;
   min-width: 0;
-  min-height: 0;
+  /* A host that gives the panel no height of its own (a desktop side column stacks every panel at its natural height)
+     would size a zero-basis flex item to nothing: the panel is the list, so it keeps a height the list can scroll in.
+     A phone host is taller than this and fills it. */
+  min-height: 20rem;
   overflow: hidden;
   background: var(--surface);
   color: var(--fg);
