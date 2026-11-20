@@ -1026,6 +1026,22 @@ describe('joinNeed', () => {
     // Act / Assert
     should(joinNeed(share, withPasskey, T0)).equal('proof');
   });
+
+  // Why removing a person's browser is NOT a pure narrowing at the route boundary (grants.md): the same spare invite,
+  // minted before the person joined, needs their passkey while a passkey-bearing browser exists and needs nothing once
+  // the last such browser is gone while another is still inside its registration window.
+  it('should open a spare invite made before the person joined when their last passkey-bearing browser goes inside another’s window', () => {
+    // Arrange
+    const spare = storedShare(1, { memberKind: 'new', uses: { kind: 'single' } });
+    const browserA = storedKey(1);
+    const browserB = storedKey(2, { passkeyCount: 0, passkeyWindowEndsAt: iso(T0 + 1) });
+    const before = storedMember(1, { keys: [browserA, browserB] });
+    const after = storedMember(1, { keys: [browserB] });
+
+    // Act / Assert
+    should(joinNeed(spare, before, T0)).equal('proof');
+    should(joinNeed(spare, after, T0)).equal('first-browser');
+  });
 });
 
 describe('admitJoin: proving the person', () => {

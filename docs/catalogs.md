@@ -1180,7 +1180,9 @@ even though the person exists; the browser then registers its own passkey as usu
   than opened by default. The owner marks the invite, or mints one that does. A second invite for a person who
   has not joined (`memberKind: 'new'`) joins freely **only while a browser of theirs is inside its passkey window**
   (the owner made two invites and the second arrives while the first browser is registering); once no window is
-  open, the person is as good as one who existed and the invite is blocked until the owner marks it.
+  open, the person is as good as one who existed and the invite is blocked until the owner marks it. Removing the person's last passkey-bearing browser
+  while another browser's window is still open makes such a spare original invite join freely again, so that
+  removal asks the generic per-act step-up rather than being a narrowing ([grants.md](grants.md#narrowing-never-asks-again)).
 - **`join-options` tells a holder of a live code three things:** the person's name (which the invite names anyway),
   the credential ids of the passkeys that can answer (ids, never keys), and that the code is live. It is the price of
   letting the browser pick the right passkey, and it needs only the code. It spends nothing and issues at most 16 live
