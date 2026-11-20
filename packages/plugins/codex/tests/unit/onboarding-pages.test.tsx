@@ -143,7 +143,7 @@ describe('installed', () => {
     });
     expect(
       harness.calls.filter(call => call.kind === 'busy').map(call => (call.kind === 'busy' ? call.label : '')),
-    ).toEqual(['Installing Codex…', null]);
+    ).toEqual(['Install Codex to continue', 'Installing Codex…', null, null]);
     expect(harness.count('done')).toBe(1);
     expect(container.textContent).toContain('0.140.0 is installed');
   });
@@ -233,7 +233,8 @@ describe('sign-in', () => {
     const harness = stepHarness();
     const { container } = await mount('sign-in', harness, () => list(codexLogin('needs_sign_in')));
     expect(harness.decision).toBe('shown');
-    expect(container.textContent).toContain('needs you to sign in');
+    expect(container.textContent).toContain('Sign in to your Codex account on this machine');
+    expect(container.textContent).not.toContain('no Codex login');
   });
 
   test('a switched-off ready login is not signed in: the step is shown, never skipped', async () => {
@@ -264,7 +265,6 @@ describe('sign-in', () => {
     );
     expect(harness.decision).toBe('shown');
     expect(container.textContent).toContain('no Codex login');
-    expect(container.textContent).not.toContain('needs you to sign in');
   });
 
   test('the facts pick the signable login among several, and ignore switched-off rows', () => {
@@ -343,6 +343,8 @@ describe('permission', () => {
       route.startsWith('PUT') ? { outcome: 'applied' } : file(text),
     );
     await choose(container, 'auto');
+    expect(putOf(calls)).toBeUndefined();
+    await press(container, '[data-permission-use]');
     expect(putOf(calls)?.options?.body).toEqual({
       path: 'harness-codex.yaml',
       text: 'binary: /opt/codex # mine\nsearchPaths:\n  - ~/bin\npermissionMode: auto\n',
@@ -368,7 +370,7 @@ describe('permission', () => {
       expect(radio(container, 'auto')?.checked).toBe(true);
       expect(container.querySelector('[data-permission-words]')).toBeNull();
       await choose(container, 'skip');
-      await press(container, '[data-permission-confirm]');
+      await press(container, '[data-permission-use]');
       const written = putText(calls);
       const read = readConfigText(written);
       expect(read.ok).toBe(true);
@@ -386,6 +388,7 @@ describe('permission', () => {
         : file('# mine\nbinary: /opt/codex\npermissionMode: skip # keep\n'),
     );
     await choose(container, 'auto');
+    await press(container, '[data-permission-use]');
     expect(putText(calls)).toBe('# mine\nbinary: /opt/codex\npermissionMode: auto # keep\n');
   });
 
@@ -395,7 +398,7 @@ describe('permission', () => {
     expect(radio(container, 'skip')?.checked).toBe(true);
   });
 
-  test('Skip from Auto shows the whole consequence first and writes nothing until it is confirmed', async () => {
+  test('a pick shows the whole consequence and the demo first, and writes nothing until "Use …" is pressed', async () => {
     const harness = stepHarness();
     const { container, calls } = await mount('permission', harness, route =>
       route.startsWith('PUT') ? { outcome: 'applied' } : file('permissionMode: auto\n'),
@@ -410,16 +413,17 @@ describe('permission', () => {
     expect(container.textContent).toContain('including deleting files');
     expect(container.textContent).toContain('no approvals, no sandbox');
     expect(putOf(calls)).toBeUndefined();
-    // Not answerable by default while the confirm is open: the page holds the step busy, so Next cannot record it.
-    expect(busyLabels(harness).at(-1)).toBe('Confirm or cancel Skip permissions');
+    expect(container.querySelector('[data-demo="permission-skip"]')).not.toBeNull();
+    // Not answerable by default while the pick waits: the page holds the step busy, so Next cannot record it.
+    expect(busyLabels(harness).at(-1)).toBe('Press “Use …” or “Keep …” to continue');
     expect(harness.count('done')).toBe(0);
-    await press(container, '[data-permission-confirm]');
+    await press(container, '[data-permission-use]');
     expect(putText(calls)).toBe('permissionMode: skip\n');
     expect(harness.count('done')).toBe(1);
     expect(busyLabels(harness).at(-1)).toBeNull();
   });
 
-  test('cancelling the Skip confirm leaves Auto in place and writes nothing', async () => {
+  test('"Keep …" leaves Auto in place, writes nothing and answers the step', async () => {
     const harness = stepHarness();
     const { container, calls } = await mount('permission', harness, () => file('permissionMode: auto\n'));
     await choose(container, 'skip');
@@ -428,7 +432,7 @@ describe('permission', () => {
     expect(container.querySelector('[data-permission-words]')).toBeNull();
     expect(putOf(calls)).toBeUndefined();
     expect(busyLabels(harness).at(-1)).toBeNull();
-    expect(harness.count('done')).toBe(0);
+    expect(harness.count('done')).toBe(1);
   });
 
   test('picking Auto while the Skip confirm is open drops the confirm', async () => {
@@ -447,7 +451,7 @@ describe('permission', () => {
       route.startsWith('PUT') ? { outcome: 'pending' } : file('permissionMode: auto\n'),
     );
     await choose(container, 'skip');
-    await press(container, '[data-permission-confirm]');
+    await press(container, '[data-permission-use]');
     expect(container.querySelector('[data-permission-note]')?.textContent).toContain('waiting for your confirmation');
     expect(harness.count('done')).toBe(0);
   });
@@ -471,11 +475,10 @@ describe('permission', () => {
       expect(container.querySelector('[data-permission-unknown]')?.textContent).toContain(
         'Change this at the machine: /home/fixture/config/harness-codex.yaml',
       );
-      expect(radio(container, 'skip')?.checked).toBe(false);
-      expect(radio(container, 'auto')?.checked).toBe(false);
-      expect(radio(container, 'auto')?.disabled).toBe(true);
-      await choose(container, 'auto');
-      await choose(container, 'skip');
+      // Nothing is offered to pick when the mode cannot be read (the same as Claude Code's page).
+      expect(radio(container, 'skip')).toBeNull();
+      expect(radio(container, 'auto')).toBeNull();
+      expect(container.querySelector('[data-demo]')).toBeNull();
       expect(putOf(calls)).toBeUndefined();
       expect(container.querySelector('[data-permission-confirm]')).toBeNull();
       expect(harness.count('done')).toBe(0);

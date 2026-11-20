@@ -22,6 +22,7 @@ import {
   ImportResultList,
   IMPORT_KINDS,
   kindItemIds,
+  NEXT_LEAVES,
   nameProblem,
   useApplyImport,
   useHarnessScan,
@@ -32,8 +33,6 @@ import type { ClaudeCodeClient } from '../../../lib/client.ts';
 import { importModeOf } from '../import-choice-page.tsx';
 import type { StepPageProps } from '../props.ts';
 import { allLeft, HARNESS, SCAN_RUN, tickedEnvOf } from './segment.ts';
-
-const NEXT_LEAVES = 'Next leaves the import for later. You can import any time from Settings › Runtimes › Import.';
 
 const ASK: readonly ChoiceOption[] = [
   {

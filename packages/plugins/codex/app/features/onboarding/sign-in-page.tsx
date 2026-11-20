@@ -7,6 +7,7 @@
 import { Button, PanelSlot, daemonOfClient } from '@ferretry/app';
 import type { StepHost } from './onboarding-api.ts';
 import { LoginChanged } from '@ferretry/plugin-logins/contract';
+import { StepActions, StepBody, StepLine } from '@ferretry/plugin-runtimes/import-kit';
 import { useCallback, useEffect, useState } from 'react';
 import { type OnboardingClient, type SignInFacts, readSignIn, refusalWords } from './onboarding-api.ts';
 
@@ -52,41 +53,46 @@ export function SignInPage({ client, step }: { readonly client: OnboardingClient
   }, [client, read]);
 
   if (!shown || view.kind === 'reading') return null;
+  const INTRO = (
+    <StepLine>Sign in to your Codex account on this machine. Ferretry never sees the sign-in: Codex keeps it.</StepLine>
+  );
   if (view.kind === 'failed')
     return (
-      <p role="alert" className="m-0 text-cell text-warn" data-codex-step="sign-in">
-        {view.words}
-      </p>
+      <StepBody step="codex.sign-in" label="Sign in to Codex" data-codex-step="sign-in">
+        {INTRO}
+        <StepLine role="alert">{view.words}</StepLine>
+      </StepBody>
     );
   const { facts } = view;
   if (facts.state === 'signed-in')
     return (
-      <p className="m-0 text-ui text-fg" data-codex-step="sign-in" data-codex-signed-in="">
-        Signed in as {facts.who}.
-      </p>
+      <StepBody step="codex.sign-in" label="Sign in to Codex" data-codex-step="sign-in" data-codex-signed-in="">
+        <StepLine role="status">Signed in as {facts.who}.</StepLine>
+      </StepBody>
     );
   if (facts.state === 'checking')
     return (
-      <section aria-label="Sign in to Codex" className="flex max-w-xl flex-col gap-3" data-codex-step="sign-in">
-        <p className="m-0 text-cell text-muted" data-codex-checking="">
-          Checking whether your Codex login is signed in…
-        </p>
-        <div>
-          <Button type="button" className="min-h-11 py-3" data-codex-retry="" onClick={() => void read(false)}>
+      <StepBody step="codex.sign-in" label="Sign in to Codex" data-codex-step="sign-in">
+        {INTRO}
+        <StepActions>
+          <StepLine data-codex-checking="">Checking whether your Codex login is signed in…</StepLine>
+          <Button data-codex-retry="" onClick={() => void read(false)}>
             Check again
           </Button>
-        </div>
-      </section>
+        </StepActions>
+      </StepBody>
     );
   const daemon = daemonOfClient(client);
   const panel = facts.state === 'needs-sign-in' ? 'codex-login' : 'add-login';
   return (
-    <section aria-label="Sign in to Codex" className="flex max-w-xl flex-col gap-3" data-codex-step="sign-in">
-      <p className="m-0 text-cell text-muted">
-        {facts.state === 'needs-sign-in'
-          ? 'Codex needs you to sign in on this machine. You can do it later in Settings › Logins.'
-          : 'There is no Codex login on this machine that can be signed in yet. Add one here, or later in Settings › Logins.'}
-      </p>
+    <StepBody step="codex.sign-in" label="Sign in to Codex" data-codex-step="sign-in">
+      {INTRO}
+      {facts.state === 'needs-sign-in' ? null : (
+        <StepLine>
+          There is no Codex login on this machine that can be signed in yet. Add one here, or later in Settings ›
+          Logins.
+        </StepLine>
+      )}
       {daemon === undefined ? null : (
         <PanelSlot
           daemon={daemon}
@@ -95,6 +101,6 @@ export function SignInPage({ client, step }: { readonly client: OnboardingClient
           {...(facts.state === 'needs-sign-in' ? { subject: facts.login.id } : {})}
         />
       )}
-    </section>
+    </StepBody>
   );
 }

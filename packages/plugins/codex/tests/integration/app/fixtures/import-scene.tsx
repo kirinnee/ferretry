@@ -5,7 +5,7 @@
  *   ?page=settings|model-set|instructions|skills|mcp|conversations|conversations-pick|run|run-done|run-everything|run-unreviewed
  *   &theme=<family>-<mode>
  *
- * `conversations-pick` is the page after the person chose the other card (Save and Leave it as it is on screen, nothing
+ * `conversations-pick` is the page after the person chose the other card (Use and Keep on screen, nothing
  * written). `run-done` is the run page after the import (the daemon's own sentences). `run-unreviewed` is a reload since
  * the pages were seen: everything is left out and the page says so.
  */

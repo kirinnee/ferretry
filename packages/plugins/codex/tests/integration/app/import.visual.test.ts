@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import { expectKitFrame, factsOf, SAME_AS_CLAUDE } from './fixtures/parity.ts';
 
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_O10B_SHOTS_DIR ?? '';
@@ -20,6 +21,7 @@ const SCENE_CSS = 'html, body, #root { min-height: 100%; margin: 0; }';
 const VIEWPORTS = [
   { name: 'phone-390', width: 390, height: 844, phone: true },
   { name: 'desktop-1280', width: 1_280, height: 800, phone: false },
+  { name: 'tablet-768', width: 768, height: 1_024, phone: false },
 ] as const;
 const PAGES = [
   'settings',
@@ -144,4 +146,48 @@ describe('the Codex import pages', () => {
     expect(await tab.locator('[data-conversations-save]').count()).toBe(1);
     await context.close();
   }, 60_000);
+
+  // ── The same pages as Claude Code's, measured in the browser ──
+  for (const mode of ['light', 'dark'] as const)
+    for (const viewport of VIEWPORTS) {
+      const at = `at ${viewport.name}, ${mode}`;
+      it(`conversations: the kit's frame, two cards, the owner's words; a pick shows Claude Code's buttons, ${at}`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'conversations', mode);
+        const facts = await factsOf(tab);
+        expectKitFrame(facts, 'conversations');
+        expect(facts.cards).toBe(SAME_AS_CLAUDE.conversations.cards);
+        expect(facts.lines).toBeGreaterThanOrEqual(SAME_AS_CLAUDE.conversations.minLines);
+        expect(facts.buttons, 'no button before a pick').toEqual([]);
+        await tab.locator('input[value="off"]').check({ force: true });
+        await tab.waitForSelector('[data-conversations-confirm]');
+        const picked = await factsOf(tab);
+        expect(picked.buttons).toEqual([...SAME_AS_CLAUDE.conversationsPick.buttons]);
+        expectKitFrame(picked, 'conversations (picked)');
+        await context.close();
+      }, 60_000);
+
+      it(`run: the count, what Next does, the kit's name field, and Import + Skip the import like Claude Code, ${at}`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'run', mode);
+        const facts = await factsOf(tab);
+        expectKitFrame(facts, 'run');
+        expect(facts.buttons).toEqual([...SAME_AS_CLAUDE.importRun.buttons]);
+        expect(facts.field, 'the runtime name is the kit field').toBe(true);
+        expect(await tab.locator('[data-import-count]').innerText()).toMatch(
+          /^Bringing \d+ items?(, leaving out \d+)?\. Hooks are never imported\.$/u,
+        );
+        expect(await tab.locator('[data-import-next]').innerText()).toContain('Next leaves the import for later');
+        await context.close();
+      }, 60_000);
+
+      it(`a kind page: the kit's frame and its checklist, ${at}`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'settings', mode);
+        const facts = await factsOf(tab);
+        expectKitFrame(facts, 'settings');
+        expect(await tab.locator('[data-codex-step] input[type="checkbox"]').count()).toBeGreaterThan(0);
+        await context.close();
+      }, 60_000);
+    }
 });

@@ -5,27 +5,31 @@
  * skipped, because a skip is persisted and drops the page for the run, and both follow a choice the person can still change by
  * going Back.
  * Everything the person chose on the kind pages is one `setup.import` change built by the kit; nothing is brought over until the
- * person presses the button.
+ * person presses Import. The same page, words and buttons as Claude Code's: how many items come over and how many are left out,
+ * what Next does, the runtime's name (prefilled; none when Codex already has a runtime here), Import and Skip the import, and
+ * afterwards each file written or refused in the daemon's own words. The machine may ask for the passkey; that is the carrier's prompt.
  *
- * It lists what will come over (counts, by kind), names any kind whose checklist was never shown in this run (those are NOT left out, since nobody
- * left them out, and the page says so), asks for the runtime's name (prefilled; none when Codex already has a runtime here), and afterwards shows each
- * file written or refused in the daemon's own words. The machine may ask for the passkey; that is the carrier's prompt.
+ * It names any kind whose checklist was never shown in this run (those are NOT left out, since nobody left them out).
  */
 import { Button } from '@ferretry/app';
-import { IMPORT_KINDS, ImportResultList, kindItemIds, useApplyImport } from '@ferretry/plugin-runtimes/import-kit';
+import {
+  IMPORT_KINDS,
+  ImportResultList,
+  kindItemIds,
+  NEXT_LEAVES,
+  RuntimeNameField,
+  StepActions,
+  StepBody,
+  StepLine,
+  useApplyImport,
+} from '@ferretry/plugin-runtimes/import-kit';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { OnboardingClient, StepHost } from '../onboarding-api.ts';
 import { importingMode, importPlan, KIND_WORDS, nameProblem, type ImportMode } from './import-memory.ts';
 import { ScanProblem } from './scan-problem.tsx';
 import { useRunScan } from './use-run-scan.ts';
 
-const sentenceOf = (taken: Readonly<Record<string, number>>, everything: boolean): string => {
-  if (everything) return 'Everything your Codex holds: settings, models, AGENTS.md, skills and servers.';
-  const parts = IMPORT_KINDS.filter(kind => (taken[kind] ?? 0) > 0).map(
-    kind => `${KIND_WORDS[kind]} (${String(taken[kind])})`,
-  );
-  return parts.length === 0 ? 'Nothing.' : `${parts.join(', ')}.`;
-};
+const items = (count: number): string => `${String(count)} ${count === 1 ? 'item' : 'items'}`;
 
 /**
  * Starting fresh: nothing to bring, and nothing is read, so the page has nothing to do. It is passed over for THIS run
@@ -56,6 +60,7 @@ function RunBody({
   const { changes, applied, apply } = useApplyImport(client);
   const { model } = scan;
   const [name, setName] = useState<string | null>(null);
+  const [left, setLeft] = useState(false);
   const told = useRef<'none' | 'ready' | 'skipped'>('none');
 
   const typed = name ?? model?.suggestedName ?? '';
@@ -69,6 +74,7 @@ function RunBody({
     IMPORT_KINDS.every(kind => kindItemIds(model, kind).length === 0) &&
     importPlan(model, 'everything', step.segment, typed).updates === 0;
   const total = plan === null ? 0 : IMPORT_KINDS.reduce((sum, kind) => sum + plan.taken[kind], 0);
+  const found = model === null ? 0 : IMPORT_KINDS.reduce((sum, kind) => sum + kindItemIds(model, kind).length, 0);
 
   useEffect(() => {
     if (told.current === 'skipped') return;
@@ -99,76 +105,83 @@ function RunBody({
     if (result !== null) step.done();
   };
 
+  /** Skip the import: nothing is brought over, and the step is answered (what Next would have left for later). */
+  const leave = (): void => {
+    setLeft(true);
+    step.done();
+  };
+
+  const nothingToImport = total === 0 && (plan?.updates ?? 0) === 0;
   return (
-    <section aria-label="Bring Codex over" className="flex max-w-xl flex-col gap-3" data-codex-step="import-run">
+    <StepBody step="codex.import-run" label="Bring Codex over" data-codex-step="import-run">
       <ScanProblem read={scan.read} look={scan.look} />
       {model !== null && plan !== null ? (
-        <>
-          <p className="m-0 text-ui text-fg" data-import-summary="">
-            Coming over: {sentenceOf(plan.taken, mode === 'everything')}
-          </p>
-          {plan.unreviewed.length === 0 ? null : (
-            <p className="m-0 text-cell text-warn" data-import-unreviewed="">
-              You did not look at {plan.unreviewed.map(kind => KIND_WORDS[kind]).join(', ')} this time, so they come
-              over as found. Go back to look at them first.
-            </p>
-          )}
-          <p className="m-0 text-cell text-muted">One way: your Codex files are read and never changed.</p>
-          {total === 0 && plan.updates === 0 ? null : model.duplicateOf === null ? (
-            <label className="flex max-w-sm flex-col gap-1 text-cell text-muted">
-              Name for this Codex runtime
-              <input
-                className="kt-input min-h-11 text-ui"
-                value={typed}
-                maxLength={200}
-                disabled={applied !== null || changes.busy}
-                data-import-name=""
-                onChange={event => setName(event.currentTarget.value)}
-              />
-            </label>
-          ) : (
-            <p className="m-0 text-cell text-muted" data-import-existing="">
-              Codex already has a runtime here ({model.duplicateOf}); this adds to it.
-            </p>
-          )}
-          {problem === null || applied !== null ? null : (
-            <p role="alert" className="m-0 text-cell text-warn" data-import-name-problem="">
-              {problem}
-            </p>
-          )}
-          {changes.authority?.kind === 'step-up' && applied === null ? (
-            <p className="m-0 text-cell text-muted" data-import-step-up="">
-              This machine will ask you to confirm with your passkey when you bring it over.
-            </p>
-          ) : null}
-          {changes.refusal === null ? null : (
-            <p role="alert" className="m-0 text-cell text-err" data-import-refusal="">
-              {changes.refusal}
-            </p>
-          )}
-          {applied !== null ? (
-            <div className="flex flex-col gap-2" data-import-done={applied.kind}>
-              <p className="m-0 text-ui text-fg">
-                {applied.kind === 'already-in' ? 'Nothing new: Codex is already set up.' : 'Codex is brought over.'}
-              </p>
-              <ImportResultList sentences={applied.sentences} />
-            </div>
-          ) : total === 0 && plan.updates === 0 ? null : (
-            <div>
-              <Button
-                type="button"
-                variant="primary"
-                className="min-h-11 py-3"
-                disabled={changes.busy || problem !== null}
-                data-import-run=""
-                onClick={() => void run()}
-              >
-                {changes.busy ? 'Importing…' : 'Bring it over'}
+        applied !== null ? (
+          <div role="status" data-import-done={applied.kind}>
+            <StepLine>
+              {applied.kind === 'already-in'
+                ? 'Nothing new to bring in: it is already set up.'
+                : 'Codex is set up here.'}
+            </StepLine>
+            <ImportResultList sentences={applied.sentences} />
+          </div>
+        ) : left ? (
+          <StepLine data-import-left="">
+            Nothing was imported. You can import later from Settings › Runtimes › Import.
+          </StepLine>
+        ) : (
+          <>
+            <StepLine data-import-count="" data-import-summary="">
+              {`Bringing ${items(total)}${found - total <= 0 ? '' : `, leaving out ${String(found - total)}`}. Hooks are never imported.`}
+            </StepLine>
+            {plan.unreviewed.length === 0 ? null : (
+              <StepLine role="note" data-import-unreviewed="">
+                You did not look at {plan.unreviewed.map(kind => KIND_WORDS[kind]).join(', ')} this time, so they come
+                over as found. Go back to look at them first.
+              </StepLine>
+            )}
+            <StepLine data-import-next="">{NEXT_LEAVES}</StepLine>
+            {nothingToImport ? null : model.duplicateOf === null ? (
+              <RuntimeNameField value={typed} invalid={problem !== null} disabled={changes.busy} onChange={setName} />
+            ) : (
+              <StepLine data-import-existing="">
+                {`A runtime named ${model.duplicateOf} already uses this setup, so no second one is added.`}
+              </StepLine>
+            )}
+            {problem === null ? null : (
+              <StepLine role="alert" data-import-name-problem="">
+                {problem}
+              </StepLine>
+            )}
+            {changes.authority?.kind === 'step-up' ? (
+              <StepLine data-import-step-up="">
+                This machine will ask you to confirm with your passkey when you import.
+              </StepLine>
+            ) : null}
+            {changes.refusal === null ? null : (
+              <StepLine role="alert" data-import-refusal="">
+                {changes.refusal}
+              </StepLine>
+            )}
+            {changes.busy ? <StepLine role="status">Importing…</StepLine> : null}
+            <StepActions>
+              {nothingToImport ? null : (
+                <Button
+                  variant="primary"
+                  disabled={changes.busy || problem !== null}
+                  data-import-run=""
+                  onClick={() => void run()}
+                >
+                  Import
+                </Button>
+              )}
+              <Button disabled={changes.busy} data-import-skip="" onClick={leave}>
+                Skip the import
               </Button>
-            </div>
-          )}
-        </>
+            </StepActions>
+          </>
+        )
       ) : null}
-    </section>
+    </StepBody>
   );
 }

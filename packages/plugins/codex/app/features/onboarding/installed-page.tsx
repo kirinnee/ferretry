@@ -5,7 +5,8 @@
  */
 import type { StepHost } from './onboarding-api.ts';
 import { Button } from '@ferretry/app';
-import { useCallback, useEffect, useState } from 'react';
+import { InstalledDemo, StepActions, StepBody, StepCommand, StepLine } from '@ferretry/plugin-runtimes/import-kit';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   type InstallFacts,
   type OnboardingClient,
@@ -17,6 +18,12 @@ import {
   refusalWords,
 } from './onboarding-api.ts';
 
+/**
+ * While Codex is not installed this page holds `busy`, so the shell's Next stays locked (Later and Skip stay): "not installed yet"
+ * must not be recorded as done. `done()` is called only once Codex is found. The same hold as Claude Code's page.
+ */
+const HOLD = 'Install Codex to continue';
+
 type View =
   | { readonly kind: 'reading' }
   | { readonly kind: 'found'; readonly facts: Extract<InstallFacts, { state: 'found' }> }
@@ -25,6 +32,8 @@ type View =
 export function InstalledPage({ client, step }: { readonly client: OnboardingClient; readonly step: StepHost }) {
   const [view, setView] = useState<View>({ kind: 'reading' });
   const [installing, setInstalling] = useState(false);
+  /** Codex turned up after the page opened (installed here, or by hand): the hold on Next is over. */
+  const installed = useRef(false);
 
   /** Looks at this machine. `first` is the page opening: found means there is nothing to ask, so it is skipped. */
   const look = useCallback(
@@ -37,6 +46,8 @@ export function InstalledPage({ client, step }: { readonly client: OnboardingCli
             return;
           }
           setView({ kind: 'found', facts: found });
+          installed.current = true;
+          step.busy(null);
           step.done();
           return;
         }
@@ -45,7 +56,10 @@ export function InstalledPage({ client, step }: { readonly client: OnboardingCli
         const plan = await readInstallPlan(client);
         setView({ kind: 'missing', facts: { state: 'missing', plan }, note: refusalWords(cause) });
       }
-      if (first) step.ready();
+      if (first) {
+        step.ready();
+        step.busy(HOLD);
+      }
     },
     [client, step],
   );
@@ -77,7 +91,7 @@ export function InstalledPage({ client, step }: { readonly client: OnboardingCli
           : current,
       );
     } finally {
-      step.busy(null);
+      step.busy(installed.current ? null : HOLD);
       setInstalling(false);
     }
   };
@@ -85,60 +99,45 @@ export function InstalledPage({ client, step }: { readonly client: OnboardingCli
   if (view.kind === 'reading') return null;
   if (view.kind === 'found')
     return (
-      <section aria-label="Codex is installed" className="flex flex-col gap-2" data-codex-step="installed">
-        <p className="m-0 text-ui text-fg" data-codex-found="">
+      <StepBody step="codex.installed" label="Codex is installed" data-codex-step="installed">
+        <StepLine role="status" data-codex-found="">
           Codex {view.facts.version === null ? 'is installed.' : `${view.facts.version} is installed.`}
-        </p>
-        {view.facts.path === null ? null : <code className="text-cell text-muted">{view.facts.path}</code>}
-      </section>
+        </StepLine>
+        {view.facts.path === null ? null : <StepCommand>{view.facts.path}</StepCommand>}
+      </StepBody>
     );
   const { plan } = view.facts;
+  // The way out of a manual command: after a refused install, or when there is no package manager to run it.
+  const canCheckAgain = plan.kind !== 'runnable' || view.note !== undefined;
   return (
-    <section aria-label="Install Codex" className="flex max-w-xl flex-col gap-3" data-codex-step="installed">
-      <p className="m-0 text-ui text-fg">Codex is not on this machine yet.</p>
+    <StepBody step="codex.installed" label="Install Codex" data-codex-step="installed">
+      <StepLine>Codex runs the ferrets that use your Codex account. It is not on this machine yet.</StepLine>
       {plan.kind === 'runnable' ? (
-        <p className="m-0 text-cell text-muted">Installing runs this one command, and nothing else:</p>
+        <StepLine>Ferretry will run exactly this, once you press the button:</StepLine>
       ) : (
-        <p className="m-0 text-cell text-muted" data-install-reason="">
-          {plan.reason} Run this yourself, then check again:
-        </p>
+        <StepLine data-install-reason="">{plan.reason} To do it yourself, run:</StepLine>
       )}
-      <code
-        className="block overflow-x-auto rounded-md bg-surface-2 px-3 py-2 text-cell text-fg"
-        data-install-command=""
-      >
-        {plan.command}
-      </code>
-      <div className="flex flex-wrap gap-2">
-        {plan.kind === 'runnable' ? (
-          <Button
-            type="button"
-            variant="primary"
-            disabled={installing}
-            className="min-h-11 py-3"
-            style={{ paddingInline: '1.25rem' }}
-            data-install-run=""
-            onClick={() => void install()}
-          >
-            Install Codex
+      <StepCommand>{plan.command}</StepCommand>
+      {plan.kind === 'runnable' ? (
+        <StepActions>
+          <Button variant="primary" disabled={installing} data-install-run="" onClick={() => void install()}>
+            {installing ? 'Installing…' : 'Install Codex'}
           </Button>
-        ) : null}
-        <Button
-          type="button"
-          className="min-h-11 py-3"
-          style={{ paddingInline: '1.25rem' }}
-          disabled={installing}
-          data-install-recheck=""
-          onClick={() => void look(false)}
-        >
-          Check again
-        </Button>
-      </div>
+        </StepActions>
+      ) : null}
       {view.note === undefined ? null : (
-        <p role="alert" className="m-0 whitespace-pre-wrap text-cell text-warn" data-install-note="">
+        <StepLine role="alert" data-install-note="">
           {view.note}
-        </p>
+        </StepLine>
       )}
-    </section>
+      {canCheckAgain ? (
+        <StepActions>
+          <Button disabled={installing} data-install-recheck="" onClick={() => void look(false)}>
+            {installing ? 'Checking…' : 'Check again'}
+          </Button>
+        </StepActions>
+      ) : null}
+      <InstalledDemo command="codex --version" answer="codex-cli 0.166.0" label="Codex" />
+    </StepBody>
   );
 }

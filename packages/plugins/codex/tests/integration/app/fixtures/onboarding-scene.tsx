@@ -23,7 +23,7 @@ const page = params.get('page') ?? 'installed';
 const COPY: Record<string, { title: string; line: string }> = {
   installed: { title: 'Install Codex', line: 'Codex runs your agents on this machine.' },
   'sign-in': { title: 'Sign in to Codex', line: 'Ferretry never sees the sign-in: Codex keeps it.' },
-  'import-choice': { title: 'Bring over from Codex', line: 'Copy your setup from the Codex on this computer.' },
+  'import-choice': { title: 'What to bring over', line: 'Copy your setup from the Codex on this computer.' },
   permission: { title: 'Permissions', line: 'How Codex asks before it acts.' },
   'permission-auto': { title: 'Permissions', line: 'How Codex asks before it acts.' },
   'permission-confirm': { title: 'Permissions', line: 'How Codex asks before it acts.' },

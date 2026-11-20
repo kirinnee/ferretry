@@ -14,7 +14,7 @@
  * failed says so and offers a retry, so a page never hangs under its loading cover.
  */
 import type { ImportItemId } from '@ferretry/plugin-runtimes/contract';
-import { FoundKindList, type ImportKind, kindFound } from '@ferretry/plugin-runtimes/import-kit';
+import { FoundKindList, type ImportKind, kindFound, StepBody, StepLine } from '@ferretry/plugin-runtimes/import-kit';
 import { useEffect, useRef, useState } from 'react';
 import type { OnboardingClient, StepHost } from '../onboarding-api.ts';
 import { importingMode, KIND_WORDS, rememberReview, reviewOf, STEP_OF_KIND } from './import-memory.ts';
@@ -22,11 +22,11 @@ import { ScanProblem } from './scan-problem.tsx';
 import { useRunScan } from './use-run-scan.ts';
 
 const LEAD: Readonly<Record<ImportKind, string>> = {
-  settings: 'Your Codex settings file. Untick what you would rather set up again here.',
-  'model-set': 'The models your settings name, and each Codex profile.',
-  instructions: 'Your AGENTS.md, the standing instructions every Codex session reads.',
-  skills: 'The skills in your Codex.',
-  mcp: 'The MCP servers your Codex is set up with.',
+  settings: 'Your Codex settings. Hooks are never imported.',
+  'model-set': 'The models your settings name, and each Codex profile, become a model set for this machine.',
+  instructions: 'Your AGENTS.md becomes a Ferretry instruction that every Codex runtime starts with.',
+  skills: 'Skills you wrote become Ferretry skills.',
+  mcp: 'MCP servers you set up become Ferretry MCP servers. Their secrets go to the Vault.',
 };
 
 /**
@@ -112,20 +112,20 @@ function KindBody({
     model !== null &&
     reviewOf(step.segment, 'settings')?.left.includes(`${model.harness}:settings`) === true;
   return (
-    <section
-      aria-label={`Import Codex ${KIND_WORDS[kind]}`}
-      className="flex max-w-xl flex-col gap-3"
+    <StepBody
+      step={`codex.import-${kind}`}
+      label={`Import Codex ${KIND_WORDS[kind]}`}
       data-codex-step={STEP_OF_KIND[kind]}
       data-import-kind={kind}
     >
       <ScanProblem read={read} look={scan.look} />
       {model !== null && found ? (
         <>
-          <p className="m-0 text-cell text-muted">{LEAD[kind]}</p>
+          <StepLine>{LEAD[kind]}</StepLine>
           {settingsLeftOut ? (
-            <p className="m-0 text-cell text-muted" data-import-settings-left="">
+            <StepLine data-import-settings-left="">
               You left Settings out, so the models they name are left out too.
-            </p>
+            </StepLine>
           ) : null}
           <FoundKindList
             model={model}
@@ -147,6 +147,6 @@ function KindBody({
           />
         </>
       ) : null}
-    </section>
+    </StepBody>
   );
 }

@@ -46,7 +46,7 @@ const CLAUDE = [
 const CODEX = [
   ['installed', 'Install Codex', 40],
   ['sign-in', 'Sign in to Codex', 41],
-  ['import-choice', 'Bring over from Codex', 42],
+  ['import-choice', 'What to bring over', 42],
   ['import-settings', 'Settings', 43],
   ['import-model-set', 'Models', 44],
   ['import-instructions', 'AGENTS.md', 45],

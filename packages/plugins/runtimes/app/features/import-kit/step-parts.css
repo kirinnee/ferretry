@@ -1,0 +1,117 @@
+/* The first-run pages every harness segment draws (Claude Code's and Codex's): the page body, a line of words, the actions
+   row, the command block, the runtime-name field and the two small demos. One look for both, so a page of one reads as
+   the same page of the other. Palette and shape come from the shell's tokens. A demo plays ONCE and stays on its last
+   frame; with motion reduced it is simply the last frame. */
+.ob-step {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.ob-step__line {
+  color: var(--muted);
+  font-size: var(--font-size-base);
+  line-height: var(--leading-base);
+  margin: 0;
+  max-width: 60ch;
+}
+.ob-command {
+  background: var(--surface-2);
+  border-radius: var(--radius-control);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.875em;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+.ob-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ob-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.ob-actions button {
+  min-height: 44px;
+  padding: 12px 16px;
+  width: auto;
+}
+.ob-field {
+  color: var(--fg);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 360px;
+}
+.ob-input {
+  background: var(--surface);
+  border: var(--stroke-control) solid var(--border);
+  border-radius: var(--radius-control);
+  box-sizing: border-box;
+  color: var(--fg);
+  font: inherit;
+  min-height: 44px;
+  padding: 8px 12px;
+  width: 100%;
+}
+.ob-demo {
+  background: var(--surface-2);
+  border: var(--stroke-control) solid var(--border);
+  border-radius: var(--card-radius);
+  box-sizing: border-box;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.875em;
+  max-width: 360px;
+  min-height: 84px;
+  padding: 12px 16px;
+}
+.ob-demo__line {
+  margin: 0 0 4px;
+}
+.ob-type {
+  animation: ob-type 1100ms steps(var(--ob-chars, 16), end) both;
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  white-space: nowrap;
+  width: var(--ob-width, 16ch);
+}
+.ob-fade {
+  animation: ob-fade 240ms ease-out 1200ms both;
+}
+.ob-ask {
+  animation: ob-fade 240ms ease-out 200ms both;
+  color: var(--warn, var(--fg));
+}
+.ob-run {
+  animation: ob-fade 240ms ease-out 900ms both;
+}
+@keyframes ob-type {
+  from {
+    width: 0;
+  }
+  to {
+    width: var(--ob-width, 16ch);
+  }
+}
+@keyframes ob-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ob-type,
+  .ob-fade,
+  .ob-ask,
+  .ob-run {
+    animation: none;
+  }
+}

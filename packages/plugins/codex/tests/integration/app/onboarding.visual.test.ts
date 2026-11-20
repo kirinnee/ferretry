@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import { expectDemo, expectKitFrame, factsOf, SAME_AS_CLAUDE } from './fixtures/parity.ts';
 
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_O10_SHOTS_DIR ?? '';
@@ -20,6 +21,7 @@ const SCENE_CSS = 'html, body, #root { min-height: 100%; margin: 0; }';
 const VIEWPORTS = [
   { name: 'phone-390', width: 390, height: 844, phone: true },
   { name: 'desktop-1280', width: 1_280, height: 800, phone: false },
+  { name: 'tablet-768', width: 768, height: 1_024, phone: false },
 ] as const;
 const PAGES = [
   'installed',
@@ -93,8 +95,8 @@ const open = async (context: BrowserContext, page: string, mode: 'light' | 'dark
   await tab.waitForSelector('[data-codex-step]');
   // The confirm shot is the Auto file after the person pressed the Skip card: the warning and its confirm, nothing written.
   if (page === 'permission-confirm') await tab.locator('input[value="skip"]').check({ force: true });
-  // Let the card animation finish: a shot shows the last frame.
-  await tab.waitForTimeout(800);
+  // Let the card animation and the demo (about 1.5 s) finish: a shot shows the last frame.
+  await tab.waitForTimeout((await tab.locator('[data-demo]').count()) > 0 ? 1_700 : 800);
   return tab;
 };
 
@@ -133,4 +135,55 @@ describe('the Codex segment pages', () => {
       await tab.screenshot({ fullPage: true, path: join(shotsDir, 'permission-auto-desktop-1280-light.png') });
     await context.close();
   }, 60_000);
+
+  // ── The same page as Claude Code's, measured in the browser (the gate found Codex without the demo box and with other buttons) ──
+  for (const mode of ['light', 'dark'] as const)
+    for (const viewport of VIEWPORTS) {
+      it(`installed: the kit's frame, the demo box and Claude Code's button set, at ${viewport.name}, ${mode}`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'installed', mode);
+        const facts = await factsOf(tab);
+        expectKitFrame(facts, 'installed');
+        expectDemo(facts, SAME_AS_CLAUDE.installed.demo, 'installed');
+        expect(facts.buttons).toEqual([...SAME_AS_CLAUDE.installed.buttons]);
+        await context.close();
+      }, 60_000);
+
+      it(`import-choice: the kit's frame, an intro line and three cards, at ${viewport.name}, ${mode}`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'import-choice', mode);
+        const facts = await factsOf(tab);
+        expectKitFrame(facts, 'import-choice');
+        expect(facts.lines).toBeGreaterThanOrEqual(SAME_AS_CLAUDE.importChoice.minLines);
+        expect(facts.cards).toBe(SAME_AS_CLAUDE.importChoice.cards);
+        expect(await tab.locator('[data-codex-step] .ob-step__line').first().innerText()).toContain(
+          'Hooks are never imported.',
+        );
+        expect(facts.demo, 'import-choice has no demo, as on Claude Code').toBeNull();
+        await context.close();
+      }, 60_000);
+
+      it(`permission: the demo follows the pick, and a pick shows "Use …" and "Keep …" like Claude Code, at ${viewport.name}, ${mode}`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'permission', mode);
+        let facts = await factsOf(tab);
+        expectKitFrame(facts, 'permission');
+        expect(facts.cards).toBe(SAME_AS_CLAUDE.permission.cards);
+        expectDemo(facts, SAME_AS_CLAUDE.permission.demo, 'permission');
+        expect(facts.buttons, 'no button before a pick').toEqual([]);
+        await tab.locator('input[value="auto"]').check({ force: true });
+        await tab.waitForSelector('[data-permission-confirm]');
+        facts = await factsOf(tab);
+        expectDemo(facts, SAME_AS_CLAUDE.permissionPick.demo, 'permission (picked)');
+        expect(facts.buttons).toEqual([...SAME_AS_CLAUDE.permissionPick.buttons]);
+        expectKitFrame(facts, 'permission (picked)');
+        await tab.waitForTimeout(1_700);
+        if (shotsDir !== '')
+          await tab.screenshot({
+            fullPage: true,
+            path: join(shotsDir, `permission-picked-${viewport.name}-${mode}.png`),
+          });
+        await context.close();
+      }, 60_000);
+    }
 });
