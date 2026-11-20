@@ -7,7 +7,8 @@
  *
  *   no `<select>` on the page; a click opens a listbox with a search field (1280) or a CENTRED dialog (390, touch, even over the
  *   filter bottom sheet); typing narrows the list and Enter picks; the pick is the same write a native select made (the filter
- *   state, the lane draft); a filter that is on keeps its tint.
+ *   state, the lane draft); a filter that is on keeps its tint. On the lanes page the pick is carried through to the write: Save
+ *   lanes sends the fake lanes route the edit request carrying the picked category and outcome (`window.__lanes`).
  *
  * Set `FY_BOARD_SELECT_SHOTS_DIR` to keep `<viewport>-<theme>-<case>.png`.
  */
@@ -107,6 +108,21 @@ const listing = async (tab: Page) =>
     };
   });
 
+type SentLanes = {
+  projectId: string;
+  request: {
+    action: string;
+    version?: number;
+    layout?: {
+      lanes: { id: string; category: string; stage?: { options: { outcome: { kind: string; laneId?: string } }[] } }[];
+    };
+  };
+}[];
+
+/** What the fake lanes route has been sent. */
+const lanesSent = async (tab: Page): Promise<SentLanes> =>
+  await tab.evaluate(() => (window as unknown as { __lanes: SentLanes }).__lanes);
+
 const createdPreset = async (tab: Page) =>
   await tab.evaluate(
     () => (window as unknown as { __filters: { created: { preset: string | null } } | null }).__filters?.created.preset,
@@ -191,60 +207,79 @@ describe('the board picks from lists with the app’s select box', () => {
     });
 
   for (const viewport of VIEWPORTS)
-    it(`the lanes page: category, a gate's outcome and where a deleted lane's tasks go (${viewport.name})`, async () => {
-      const { context, tab } = await openScene('lanes', viewport, 'light');
-      try {
-        await tab.waitForSelector('[data-lane-page] [role="combobox"]');
-        expect(await tab.locator('select').count(), 'no native select on the page').toBe(0);
-        const category = '[role="combobox"][aria-label="Category of Implement"]';
-        // A lane's category is a short word: its box is a fixed, modest width, not the whole row.
-        const width = await tab.evaluate(
-          query => document.querySelector(query)?.getBoundingClientRect().width ?? -1,
-          category,
-        );
-        expect(width, 'the category box keeps a modest width (measured)').toBeGreaterThan(100);
-        expect(width, 'the category box keeps a modest width (measured)').toBeLessThanOrEqual(200);
-        await tab.click(category);
-        await tab.waitForSelector('[role="option"]');
-        const open = await listing(tab);
-        expect(open.options).toEqual(['Backlog', 'Active', 'In review', 'Shipped', 'To test (verify)', 'Closed']);
-        expect(open.hasSearch, 'six options: no search field').toBe(false);
-        expect(open.listScrolls, 'six options: no scroll bar').toBe(false);
-        if (viewport.phone) {
-          expect(open.asDialog).toBe(true);
-          expect(open.centreDx ?? 99).toBeLessThanOrEqual(8);
-          expect(open.centreDy ?? 99).toBeLessThanOrEqual(8);
+    for (const theme of THEMES)
+      it(`the lanes page: category, a gate's outcome and where a deleted lane's tasks go (${viewport.name}, ${theme})`, async () => {
+        const { context, tab } = await openScene('lanes', viewport, theme);
+        try {
+          await tab.waitForSelector('[data-lane-page] [role="combobox"]');
+          expect(await tab.locator('select').count(), 'no native select on the page').toBe(0);
+          const category = '[role="combobox"][aria-label="Category of Implement"]';
+          // A lane's category is a short word: its box is a fixed, modest width, not the whole row.
+          const width = await tab.evaluate(
+            query => document.querySelector(query)?.getBoundingClientRect().width ?? -1,
+            category,
+          );
+          expect(width, 'the category box keeps a modest width (measured)').toBeGreaterThan(100);
+          expect(width, 'the category box keeps a modest width (measured)').toBeLessThanOrEqual(200);
+          await tab.click(category);
+          await tab.waitForSelector('[role="option"]');
+          const open = await listing(tab);
+          expect(open.options).toEqual(['Backlog', 'Active', 'In review', 'Shipped', 'To test (verify)', 'Closed']);
+          expect(open.hasSearch, 'six options: no search field').toBe(false);
+          expect(open.listScrolls, 'six options: no scroll bar').toBe(false);
+          if (viewport.phone) {
+            expect(open.asDialog).toBe(true);
+            expect(open.centreDx ?? 99).toBeLessThanOrEqual(8);
+            expect(open.centreDy ?? 99).toBeLessThanOrEqual(8);
+          }
+          if (shotsDir !== '') await tab.waitForTimeout(450);
+          if (shotsDir !== '')
+            await tab.screenshot({
+              animations: 'disabled',
+              path: join(shotsDir, `${viewport.name}-${theme}-lane-category.png`),
+            });
+          await tab.locator('[role="option"]', { hasText: 'In review' }).click();
+          expect(await tab.textContent(category)).toContain('In review');
+          // A gate's outcome: the lane the option goes to.
+          const outcome = '[role="combobox"][aria-label^="Outcome of option 1 of To test"]';
+          await tab.click(outcome);
+          await tab.locator('[role="option"]', { hasText: 'Go to Todo' }).click();
+          expect(await tab.textContent(outcome)).toContain('Go to Todo');
+          // Save lanes: the two picks above reach the lanes route as the edit it would receive (the write a native select made).
+          expect(await lanesSent(tab), 'nothing is written before Save lanes').toEqual([]);
+          await tab.click('button:has-text("Save lanes")');
+          await tab.waitForFunction(() => (window as unknown as { __lanes: unknown[] }).__lanes.length === 1);
+          const written = await lanesSent(tab);
+          expect(written.length, 'one write').toBe(1);
+          expect(written[0]?.projectId).toBe('00000000-0000-4000-8000-000000000001');
+          expect(written[0]?.request.action).toBe('edit');
+          expect(written[0]?.request.version).toBe(1);
+          const lanes = written[0]?.request.layout?.lanes ?? [];
+          expect(lanes.find(lane => lane.id === 'implement')?.category, 'the picked category is in the payload').toBe(
+            'review',
+          );
+          expect(lanes.find(lane => lane.id === 'tested')?.stage?.options[0]?.outcome, 'the picked outcome').toEqual({
+            kind: 'lane',
+            laneId: 'todo',
+          });
+          await tab.waitForSelector('button[aria-label="Delete Implement"]');
+          // Where a deleted lane's tasks go: Delete stays disabled until a lane is chosen.
+          await tab.click('button[aria-label="Delete Implement"]');
+          const target = '[role="combobox"][aria-label="Where its tasks go"]';
+          await tab.waitForSelector(target);
+          expect(await tab.isDisabled('[data-lane-delete] button[data-variant="danger"]')).toBe(true);
+          await tab.click(target);
+          await tab.locator('[role="option"]', { hasText: 'Review/CI' }).click();
+          expect(await tab.textContent(target)).toContain('Review/CI');
+          expect(await tab.isDisabled('[data-lane-delete] button[data-variant="danger"]')).toBe(false);
+          if (shotsDir !== '') await tab.waitForTimeout(450);
+          if (shotsDir !== '')
+            await tab.screenshot({
+              animations: 'disabled',
+              path: join(shotsDir, `${viewport.name}-${theme}-lane-delete.png`),
+            });
+        } finally {
+          await context.close();
         }
-        if (shotsDir !== '') await tab.waitForTimeout(450);
-        if (shotsDir !== '')
-          await tab.screenshot({
-            animations: 'disabled',
-            path: join(shotsDir, `${viewport.name}-light-lane-category.png`),
-          });
-        await tab.locator('[role="option"]', { hasText: 'In review' }).click();
-        expect(await tab.textContent(category)).toContain('In review');
-        // A gate's outcome: the lane the option goes to.
-        const outcome = '[role="combobox"][aria-label^="Outcome of option 1 of To test"]';
-        await tab.click(outcome);
-        await tab.locator('[role="option"]', { hasText: 'Go to Todo' }).click();
-        expect(await tab.textContent(outcome)).toContain('Go to Todo');
-        // Where a deleted lane's tasks go: Delete stays disabled until a lane is chosen.
-        await tab.click('button[aria-label="Delete Implement"]');
-        const target = '[role="combobox"][aria-label="Where its tasks go"]';
-        await tab.waitForSelector(target);
-        expect(await tab.isDisabled('[data-lane-delete] button[data-variant="danger"]')).toBe(true);
-        await tab.click(target);
-        await tab.locator('[role="option"]', { hasText: 'Review/CI' }).click();
-        expect(await tab.textContent(target)).toContain('Review/CI');
-        expect(await tab.isDisabled('[data-lane-delete] button[data-variant="danger"]')).toBe(false);
-        if (shotsDir !== '') await tab.waitForTimeout(450);
-        if (shotsDir !== '')
-          await tab.screenshot({
-            animations: 'disabled',
-            path: join(shotsDir, `${viewport.name}-light-lane-delete.png`),
-          });
-      } finally {
-        await context.close();
-      }
-    });
+      });
 });

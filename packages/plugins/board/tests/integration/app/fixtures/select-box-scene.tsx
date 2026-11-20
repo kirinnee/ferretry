@@ -2,13 +2,14 @@
  * The browser entry for "the board's choices from a list are the app's own SelectBox" (r11 S3c), over fake data:
  *
  *   ?scene=filters   the REAL filter bar (a bottom sheet of the same fields under 768px), writes recorded on `window.__filters`
- *   ?scene=lanes     the REAL lanes page (category and outcome pickers; a lane's delete prompt)
+ *   ?scene=lanes     the REAL lanes page (category and outcome pickers; a lane's delete prompt), the daemon's lanes route
+ *                    faked: every request it is sent is recorded on `window.__lanes` and answered with the set saved
  *   &theme=<family>-<mode>
  */
 
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { BoardProjectId } from '../../../../contract/index.ts';
+import { type BoardProjectId, boardOk, type LaneSetActionRequestInput } from '../../../../contract/index.ts';
 import { type BoardFilters, NO_BOARD_FILTERS } from '../../../../app/lib/board-model.ts';
 import { DaemonBoardStore } from '../../../../app/lib/board-store.ts';
 import { THIS_MACHINE } from '../../../../app/lib/machine.ts';
@@ -23,6 +24,10 @@ const phone = window.innerWidth < 768;
 
 const seen = window as unknown as { __filters: BoardFilters | null };
 seen.__filters = null;
+
+/** What the fake lanes route was sent, in order (the same body the daemon would receive). */
+const sent = window as unknown as { __lanes: { projectId: string; request: LaneSetActionRequestInput }[] };
+sent.__lanes = [];
 
 const choices = {
   projects: [
@@ -51,6 +56,10 @@ function Filters() {
 const store = new DaemonBoardStore(
   fakePort({
     projects: async () => [{ id: PROJECT, name: 'ferretry', path: '/work/ferretry', laneSet: laneSetFor() }],
+    lanes: async (_daemon, projectId, request) => {
+      sent.__lanes.push({ projectId, request });
+      return boardOk({ laneSet: { ...laneSetFor(), version: 2 }, ask: 'not-needed' });
+    },
   }),
   fakeEnvironment(),
 );
