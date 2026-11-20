@@ -27,7 +27,7 @@
   --weight-normal: 400;
   --weight-medium: 700;
   --weight-strong: 700;
-  --weight-display: 400; /* Impact draws its own weight: a bolder request would only smear it */
+  --weight-display: 800; /* Impact has one weight, so the browser smears it bolder; where Impact is missing the fallback face goes heavy instead */
   --display-transform: uppercase;
   --label-transform: uppercase;
   --label-size: 11px;
@@ -125,13 +125,13 @@
 :root[data-style='antiposh'] .kt-panel,
 :root[data-style='antiposh'] .kt-details {
   border-style: dashed;
-  border-color: var(--border-strong);
+  border-color: var(--fg);
 }
 
 /* A button is a thick "outset" slab, the way a bare default button looked; the press flattens it into its shadow. */
 :root[data-style='antiposh'] .kt-btn {
   border-style: outset;
-  border-color: var(--border-strong);
+  border-color: var(--fg);
   letter-spacing: 0.04em;
 }
 :root[data-style='antiposh'] .kt-btn[data-variant='primary'] {
@@ -145,7 +145,7 @@
 /* A text field is a sunken ruled box, and it draws a real hard ring on keyboard focus (like a button). */
 :root[data-style='antiposh'] .kt-input {
   border-style: inset;
-  border-color: var(--border-strong);
+  border-color: var(--fg);
 }
 :root[data-style='antiposh'] .kt-input:focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
@@ -156,11 +156,14 @@
 /* The chosen choice card is the highlighter swipe, and it pops (stepped) once when picked. */
 :root[data-style='antiposh'] .fy-cc__card {
   border-style: dashed;
+  border-color: var(--fg);
   box-shadow: var(--shadow-control);
 }
 :root[data-style='antiposh'] .fy-cc__card[data-selected='true'] {
   border-style: solid;
-  background: var(--select-fill);
+  background:
+    linear-gradient(transparent 0 55%, color-mix(in srgb, var(--accent) 38%, transparent) 55% 92%, transparent 92%),
+    var(--select-fill);
 }
 :root[data-style='antiposh'] .fy-cc__card:has(:focus-visible) {
   outline: var(--focus-width) solid var(--focus-color);
@@ -188,4 +191,15 @@
 :root[data-style='antiposh'] .kt-tab[aria-selected='true'] {
   background: var(--select-fill);
   border-color: var(--border-strong);
+}
+
+/* Links keep the underline nobody removed, and a ghost button keeps a real ink edge (not a pale one). */
+:root[data-style='antiposh'] a,
+:root[data-style='antiposh'] .md a {
+  text-decoration-line: var(--underline-links);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+:root[data-style='antiposh'] .kt-btn[data-variant='ghost'] {
+  border-color: var(--fg);
 }
