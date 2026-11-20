@@ -6,7 +6,7 @@
  * WHAT IS ON THE CARD, and nothing else: the name, one plain line, three bars (Speed / Accuracy / Size, `engine-numbers.ts`),
  * two chips, and — for an engine that downloads — one Install button. The measured paragraph, licence and languages
  * sit behind the "i" disclosure, which covers the card in place so the card never changes height. The card is a fixed
- * 164 px tall (`engine-card.css`), however long the name.
+ * 168 px tall (`engine-card.css`), however long the name.
  *
  * THE SELECTION IS THE WHOLE CARD. A real radio input is stretched over the card (`.fy-engine-radio`), so the group is
  * one tab stop, the arrow keys move the choice, and a click anywhere on the card chooses it. The Install and "i" buttons

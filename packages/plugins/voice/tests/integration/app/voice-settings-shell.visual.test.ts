@@ -188,7 +188,7 @@ describe('Voice settings in the real Settings shell', () => {
               nodes.map(node => node.getBoundingClientRect()).map(r => [Math.round(r.width), Math.round(r.height)]),
             );
           expect(cards.length).toBe(ON_DEVICE_MODELS.length + 1);
-          expect(new Set(cards.map(card => card[1]))).toEqual(new Set([164]));
+          expect(new Set(cards.map(card => card[1]))).toEqual(new Set([168]));
           for (const [width] of cards) expect(width).toBeLessThanOrEqual(panel.width + 1);
           // Nothing inside a card is clipped by it: every part of a card sits within the card's own edge.
           expect(

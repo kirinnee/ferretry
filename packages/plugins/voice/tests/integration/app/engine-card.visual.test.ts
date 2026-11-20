@@ -1,6 +1,6 @@
 /**
  * THE ENGINE CARDS, in a real browser, over fixed fake engines (`fixtures/engine-card-scene.tsx`): every card is the same
- * 164 px tall whatever it says, two or three sit in a row on a desktop and one per row on a phone, nothing is wider than
+ * 168 px tall whatever it says, two or three sit in a row on a desktop and one per row on a phone, nothing is wider than
  * the screen, the radio group has one tab stop, and the small buttons are a full 44 px to press.
  *
  * Set `FY_ENGINE_CARD_SHOTS_DIR` to keep a screenshot of each case (light and dark, 1280 and 390).
@@ -95,7 +95,7 @@ const shoot = async (tab: Awaited<ReturnType<typeof open>>['tab'], path: string)
 describe('the engine cards', () => {
   for (const viewport of VIEWPORTS)
     for (const mode of ['light', 'dark'] as const) {
-      it(`keeps every card 164 px tall, in rows of up to three, never wider than the screen (${viewport.name}, ${mode})`, async () => {
+      it(`keeps every card 168 px tall, in rows of up to three, never wider than the screen (${viewport.name}, ${mode})`, async () => {
         const { context, tab } = await open('short', viewport, mode);
         await tab.waitForSelector('.fy-engine-card');
         const boxes = await tab.locator('.fy-engine-card').evaluateAll(nodes =>
@@ -110,7 +110,7 @@ describe('the engine cards', () => {
           }),
         );
         expect(boxes.length).toBe(5);
-        for (const box of boxes) expect(box.height).toBe(164);
+        for (const box of boxes) expect(box.height).toBe(168);
         const firstRow = boxes.filter(box => box.top === boxes[0]?.top).length;
         if (viewport.phone) expect(firstRow).toBe(1);
         else {
@@ -171,7 +171,7 @@ describe('the engine cards', () => {
           const heights = await tab
             .locator('.fy-engine-card')
             .evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().height)));
-          expect(new Set(heights)).toEqual(new Set([164]));
+          expect(new Set(heights)).toEqual(new Set([168]));
           if (view === 'all') expect(heights.length).toBe(10);
           if (shotsDir !== '') await shoot(tab, join(shotsDir, `after-${view}-${viewport.name}-${mode}.png`));
           await context.close();
@@ -185,7 +185,7 @@ describe('the engine cards', () => {
     const card = tab.locator('.fy-engine-card[data-engine="parakeet"]');
     await card.getByRole('button', { name: 'About Parakeet 0.6B' }).click();
     expect(await card.locator('.fy-engine-details').count()).toBe(1);
-    expect(Math.round((await card.boundingBox())?.height ?? 0)).toBe(164);
+    expect(Math.round((await card.boundingBox())?.height ?? 0)).toBe(168);
     await tab.keyboard.press('Escape');
     expect(await card.locator('.fy-engine-details').count()).toBe(0);
     await context.close();

@@ -193,8 +193,8 @@ describe('<EngineCard>', () => {
 });
 
 describe('the engine card stylesheet', () => {
-  it('fixes the height at 164 px and clips, so a long name or line cannot make a card taller', () => {
-    expect(CSS).toContain('--fy-engine-height: 164px;');
+  it('fixes the height at 168 px and clips, so a long name or line cannot make a card taller', () => {
+    expect(CSS).toContain('--fy-engine-height: 168px;');
     expect(CSS).toMatch(/\.fy-engine-card \{[^}]*height: var\(--fy-engine-height\);[^}]*overflow: hidden;/s);
     expect(CSS).toMatch(/\.fy-engine-name \{[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
     expect(CSS).toMatch(/\.fy-engine-line \{[^}]*height: 18px;[^}]*text-overflow: ellipsis;/s);
