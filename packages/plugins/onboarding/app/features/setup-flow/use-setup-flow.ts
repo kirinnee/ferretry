@@ -8,6 +8,11 @@
  *   says "That answer was not saved" with Try again. Each failed answer is kept PER STEP until it is saved (one success
  *   never clears another step's failure), so the end page can say which ones failed.
  * - A later answer may become done (Later → Back → Next records done), but the same answer is never written twice.
+ * - Daemon answers go out ONE AT A TIME per step: while one is in flight a newer intent replaces any queued one, so the machine
+ *   (which applies answers in arrival order) always ends on the latest intent, and a retry sends only that latest intent.
+ * - The first page is drawn as soon as the machine being set up has answered. Every other paired machine gets a bounded
+ *   grace to answer (`PEER_WAIT_MS`); one that is still silent (say, parked behind its own passkey unlock) is left out of
+ *   this run, and only the machine being set up is ever asked to unlock.
  * - Every move a page asks for (Next, Back, Later) names the page visit that issued it; a callback from a page the run
  *   has already left is ignored, so a slow page can never advance whichever page is current.
  * - A plugin's segment memory (`StepHost.segment`) lives HERE, in memory, for this run only. Nothing in this file writes
@@ -53,6 +58,19 @@ export interface FlowDeps {
   readonly search?: () => string;
   /** Test seam: how long a page may stay silent under its loading cover. */
   readonly silenceMs?: number;
+  /** Test seam: how long the other paired machines get to answer once the machine being set up has. */
+  readonly peerWaitMs?: number;
+  /** Test seam: where a flagless page's development report goes (the page frame's default is a development console warning). */
+  readonly report?: (message: string) => void;
+}
+
+/** How long the other paired machines get to answer after the machine being set up has: a silent one is left out. */
+const PEER_WAIT_MS = 1500;
+
+/** One step's daemon answers: at most one in flight, and the newest intent waits as the only queued one. */
+interface AnswerLane {
+  inFlight: boolean;
+  queued: Exclude<StepState, 'pending'> | undefined;
 }
 
 const nowInstant = (): Instant => instantFromEpochMs(Date.now());
@@ -98,14 +116,14 @@ export interface SetupFlow {
   readonly progress: ProgressRead | undefined;
   /** Every answer the machine did not take, oldest first; one entry per step. */
   readonly unsaved: readonly Unsaved[];
-  /** The move counter of this run: pass it back with `next`, `back` and `later` so a stale page's call is ignored. */
+  /** The move counter of this run: pass it back with `next`, `back`, `later` and `skip` so a stale page's call is ignored. */
   readonly visit: number;
   /** The machine this run sets up (and where a client page's panel is drawn when no other carries it). */
   readonly target: string | undefined;
   readonly memoryOf: (plugin: string) => StepSegmentMemory;
   readonly remember: (plugin: string, patch: StepSegmentMemory) => void;
   readonly done: (step: FlowStep) => void;
-  readonly skip: (step: FlowStep, why: 'not-needed' | 'already-set') => void;
+  readonly skip: (step: FlowStep, why: 'not-needed' | 'already-set', visit: number) => void;
   readonly next: (key: string, visit: number) => void;
   readonly back: (key: string, visit: number) => void;
   readonly later: (step: FlowStep, visit: number) => void;
@@ -127,8 +145,18 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   const target = daemonOfClient(client);
   const rows = useEveryDaemon();
   // What the flow reads from its surroundings is read when it is needed, so a new object each render restarts nothing.
-  const env = useRef({ storage: deps.storage ?? browserLedgerStorage, now: deps.now ?? nowInstant, rows });
-  env.current = { storage: deps.storage ?? browserLedgerStorage, now: deps.now ?? nowInstant, rows };
+  const env = useRef({
+    storage: deps.storage ?? browserLedgerStorage,
+    now: deps.now ?? nowInstant,
+    rows,
+    peerWaitMs: deps.peerWaitMs ?? PEER_WAIT_MS,
+  });
+  env.current = {
+    storage: deps.storage ?? browserLedgerStorage,
+    now: deps.now ?? nowInstant,
+    rows,
+    peerWaitMs: deps.peerWaitMs ?? PEER_WAIT_MS,
+  };
   // The address is read once: the run does not follow later changes to it.
   const [address] = useState(() =>
     readFlowAddress(deps.search?.() ?? (typeof window === 'undefined' ? '' : window.location.search)),
@@ -136,8 +164,8 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   const [loading, setLoading] = useState<Loading>({ kind: 'loading' });
   const [run, setRun] = useState<RunState>({ at: 'end', trail: [], gone: new Set(), direction: 'forward', visit: 0 });
   const [failed, setFailed] = useState<Readonly<Record<string, Unsaved>>>({});
-  /** The newest daemon answer sent per step: an older one's late reply says nothing about the step any more. */
-  const sent = useRef(new Map<string, number>());
+  /** Each step's answer lane (one write in flight; a newer intent replaces the queued one). Replaced on every read. */
+  const lanes = useRef(new Map<string, AnswerLane>());
   /** The run as the last render saw it (for guards that must not wait for the next render). */
   const runNow = useRef<RunState | undefined>(undefined);
   const [attempt, setAttempt] = useState(0);
@@ -158,23 +186,34 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     if (target === undefined || !targetReady) return;
     let live = true;
     setLoading({ kind: 'loading' });
-    // Try again is the person's own act: its read may raise the passkey prompt a first, quiet read must not.
+    // Try again is the person's own act: its read may raise the passkey prompt a first, quiet read must not. Only the
+    // machine being set up is ever asked that way; the others are read quietly and never hold the run.
     const press = attempt > 0 ? readPress(true) : {};
     const read = async (): Promise<void> => {
-      const daemons: PairedDaemon[] = [];
-      const settled = await Promise.allSettled(
-        env.current.rows.map(async row => ({ row, view: await onboardingScreen(row.client).load(press) })),
-      );
-      for (const outcome of settled) {
-        if (outcome.status === 'fulfilled')
-          daemons.push({
-            id: outcome.value.row.daemon,
-            name: outcome.value.row.machine,
-            steps: outcome.value.view.steps,
+      const landed = new Map<string, PairedDaemon>();
+      const start = (row: (typeof rows)[number]): Promise<void> =>
+        onboardingScreen(row.client)
+          .load(row.daemon === target ? press : {})
+          .then(view => {
+            landed.set(row.daemon, { id: row.daemon, name: row.machine, steps: view.steps });
           });
-      }
-      // The machine being set up must answer: without its steps there is no flow to walk.
-      if (!daemons.some(daemon => daemon.id === target)) throw new Error('target unreadable');
+      const everyRow = env.current.rows;
+      const mine = everyRow.find(row => row.daemon === target);
+      const others = everyRow.filter(row => row.daemon !== target);
+      // Start every read together, then wait for the machine being set up alone: it must answer or there is no flow.
+      const peerReads = others.map(row => start(row).catch(() => undefined));
+      if (mine === undefined) throw new Error('target unreadable');
+      await start(mine);
+      // The others get a bounded grace; whoever has not answered by then is left out of this run (never awaited again).
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        Promise.all(peerReads),
+        new Promise<void>(resolve => {
+          timer = setTimeout(resolve, env.current.peerWaitMs);
+        }),
+      ]);
+      if (timer !== undefined) clearTimeout(timer);
+      const daemons = everyRow.flatMap(row => landed.get(row.daemon) ?? []);
       const flow = flattenFlow({
         journey: address.journey,
         target,
@@ -188,7 +227,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
       setLoading({ kind: 'ready', flow, pages, answered, journey: address.journey });
       setRun(startRun(pages, answered));
       answeredNow.current = new Map();
-      sent.current = new Map();
+      lanes.current = new Map();
       setFailed({});
       setOutcomes({});
     };
@@ -204,26 +243,56 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   const pages = ready?.pages ?? [];
   const answered = ready?.answered ?? new Set<string>();
 
+  /**
+   * Sends one daemon answer for a step: one write in flight per step, and a newer intent replaces any queued one, so the
+   * machine always ends on the latest intent whatever order replies come back in. A newer intent also withdraws the step's
+   * old failure (it is no longer what the person wants), so Try again can only ever resend the latest answer.
+   */
+  const sendDaemon = useCallback(
+    (step: FlowStep, state: Exclude<StepState, 'pending'>): void => {
+      const mine = lanes.current;
+      const lane = mine.get(step.key) ?? { inFlight: false, queued: undefined };
+      mine.set(step.key, lane);
+      lane.queued = state;
+      setFailed(known =>
+        step.key in known ? Object.fromEntries(Object.entries(known).filter(([key]) => key !== step.key)) : known,
+      );
+      if (lane.inFlight) return;
+      const pump = (): void => {
+        const intent = lane.queued;
+        if (intent === undefined) {
+          lane.inFlight = false;
+          return;
+        }
+        lane.queued = undefined;
+        lane.inFlight = true;
+        void onboardingScreen(client)
+          .answer(step.plugin, step.id, { state: intent })
+          .then(
+            () => {
+              if (mine !== lanes.current) return;
+              if (lane.queued === undefined) setOutcomes(known => ({ ...known, [step.key]: intent }));
+            },
+            () => {
+              if (mine !== lanes.current) return;
+              if (lane.queued === undefined) setFailed(known => ({ ...known, [step.key]: { step, state: intent } }));
+            },
+          )
+          .finally(() => {
+            if (mine === lanes.current) pump();
+            else lane.inFlight = false;
+          });
+      };
+      pump();
+    },
+    [client],
+  );
+
   const record = useCallback(
     (step: FlowStep, how: HowAnswered): void => {
       if (target === undefined) return;
       if (step.phase === 'daemon') {
-        const state = how;
-        const mine = (sent.current.get(step.key) ?? 0) + 1;
-        sent.current.set(step.key, mine);
-        const newest = (): boolean => sent.current.get(step.key) === mine;
-        void onboardingScreen(client)
-          .answer(step.plugin, step.id, { state })
-          .then(
-            () => {
-              if (!newest()) return;
-              setOutcomes(known => ({ ...known, [step.key]: state }));
-              setFailed(known => Object.fromEntries(Object.entries(known).filter(([key]) => key !== step.key)));
-            },
-            () => {
-              if (newest()) setFailed(known => ({ ...known, [step.key]: { step, state } }));
-            },
-          );
+        sendDaemon(step, how);
         return;
       }
       const daemon = step.appliesTo[0]?.daemon ?? target;
@@ -231,7 +300,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
       else if (how === 'done' || how === 'found')
         recordClientStep(env.current.storage(), step.plugin, step.id, daemon, env.current.now());
     },
-    [client, target],
+    [sendDaemon, target],
   );
 
   /**
@@ -262,12 +331,13 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     [answer, current, pages, answered],
   );
   const skip = useCallback(
-    (step: FlowStep, why: 'not-needed' | 'already-set'): void => {
+    (step: FlowStep, why: 'not-needed' | 'already-set', visit: number): void => {
+      if (!current(step.key, visit)) return;
       // Already set is a fact worth keeping (found / on the ledger); not needed on a machine is the page's own call.
       answer(step, why === 'already-set' ? 'found' : 'skipped');
       setRun(state => dropPage(state, pages, answered, step.key));
     },
-    [answer, pages, answered],
+    [answer, current, pages, answered],
   );
   const next = useCallback(
     (key: string, visit: number): void => {

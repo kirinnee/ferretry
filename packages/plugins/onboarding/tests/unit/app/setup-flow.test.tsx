@@ -86,6 +86,7 @@ const PAGES: Readonly<Record<string, (step: StepHost) => ReactNode>> = {
   'fake-pack.stale': step => <StalePage step={step} />,
   'fake-pack.after': step => <ReadyPage step={step} />,
   'fake-pack.legacy': () => <p>an old page that never calls ready</p>,
+  'fake-pack.forgot': step => <ReadyPage step={step} />,
 };
 
 const stepPanel = (plugin: string, id: string): PlacedPanel => ({
@@ -108,14 +109,31 @@ function setup(options: {
   readonly failAnswers?: boolean;
   /** Step ids whose answer the machine refuses (a test may empty it to let a retry through). */
   readonly failSteps?: Set<string>;
+  /** Machines whose steps read never answers (parked behind a passkey unlock). */
+  readonly hangReads?: ReadonlySet<string>;
+  /** Machines whose steps read is refused until the set is emptied. */
+  readonly refuseReads?: Set<string>;
+  readonly peerWaitMs?: number;
+  readonly report?: (message: string) => void;
+  /** Holds a daemon answer until the returned promise settles (the test releases it). */
+  readonly gate?: (state: string, step: string) => Promise<void> | undefined;
 }) {
   const machines = options.machines ?? [fakeDaemon(A, 'Studio')];
   const answers: { daemon: string; plugin: string; step: string; state: string }[] = [];
+  const reads: { daemon: string; init: unknown }[] = [];
+  const arrived: { step: string; state: string }[] = [];
   const clients = new Map<string, PluginClient>();
   for (const machine of machines) {
     const client = {
       async call(route: string, request?: { params?: { plugin: string; stepId: string }; body?: { state: string } }) {
-        if (route === 'GET /v1/onboarding') return { steps: machine.steps, complete: false, setUp: false };
+        if (route === 'GET /v1/onboarding') {
+          reads.push({ daemon: machine.id, init: request });
+          if (options.hangReads?.has(machine.id) === true) return new Promise(() => undefined);
+          if (options.refuseReads?.has(machine.id) === true) throw new Error('unreachable');
+          return { steps: machine.steps, complete: false, setUp: false };
+        }
+        arrived.push({ step: request?.params?.stepId ?? '', state: request?.body?.state ?? '' });
+        await options.gate?.(request?.body?.state ?? '', request?.params?.stepId ?? '');
         if (options.failAnswers === true || options.failSteps?.has(request?.params?.stepId ?? '') === true)
           throw new Error('refused');
         answers.push({
@@ -151,6 +169,8 @@ function setup(options: {
     now: () => AT,
     search: () => options.search ?? '',
     ...(options.silenceMs === undefined ? {} : { silenceMs: options.silenceMs }),
+    ...(options.peerWaitMs === undefined ? {} : { peerWaitMs: options.peerWaitMs }),
+    ...(options.report === undefined ? {} : { report: options.report }),
   });
   const slots = {
     'onboarding.step': [
@@ -166,7 +186,7 @@ function setup(options: {
       </WithSlotPanels>
     </harness.Harness>
   );
-  return { tree, answers, writes, store };
+  return { tree, answers, arrived, reads, writes, store };
 }
 
 let view: Mounted | undefined;
@@ -525,6 +545,7 @@ describe('a page that is still working, and a page that has gone', () => {
     expect(pageKey()).toBe('fake-pack.after');
     await interact(() => host?.next()); // the old page's late call: ignored
     await interact(() => host?.back());
+    await interact(() => host?.skip('not-needed'));
     await settle();
     expect(pageKey()).toBe('fake-pack.after');
     expect(view.container.querySelector('[data-flow-end]')).toBeNull();
@@ -566,5 +587,117 @@ describe('a legacy page beside a StepHost page', () => {
     expect(pageKey()).toBe('fake-pack.silent');
     expect(view.container.querySelector('[data-flow-cover]')).not.toBeNull();
     expect(view.container.querySelector<HTMLButtonElement>('[data-step-next]')?.disabled).toBe(true);
+  });
+});
+
+const twoMachines = (): Machine[] => [
+  { ...fakeDaemon(A, 'Studio'), id: A, name: 'Studio' },
+  { ...fakeDaemon(B, 'Laptop'), id: B, name: 'Laptop' },
+];
+
+describe('another paired machine never holds the setup', () => {
+  it('draws the first page once the other machine has had its grace, though its read never answers', async () => {
+    const run = setup({ machines: twoMachines(), hangReads: new Set([B]), peerWaitMs: 30 });
+    view = await mount(run.tree);
+    await settle();
+    await settle();
+    expect(pageKey()).toBe('onboarding.name');
+    expect(run.reads.map(read => read.daemon).sort()).toEqual([A, B]);
+  });
+
+  it('a setup retry asks for the interactive unlock on the machine being set up only', async () => {
+    const refuse = new Set([A]);
+    const run = setup({ machines: twoMachines(), hangReads: new Set([B]), refuseReads: refuse, peerWaitMs: 30 });
+    view = await mount(run.tree);
+    await settle();
+    expect(view.container.querySelector('[data-flow-failed]')).not.toBeNull();
+    refuse.delete(A);
+    await press('[data-flow-retry]');
+    await settle();
+    await settle();
+    expect(pageKey()).toBe('onboarding.name');
+    const retried = run.reads.slice(-2);
+    expect(retried.find(read => read.daemon === A)?.init).toEqual({ quiet: false });
+    expect(retried.find(read => read.daemon === B)?.init).toEqual({});
+  });
+});
+
+describe('answers go out one at a time per step', () => {
+  it('Later → Back → Next sends done only after the later has landed', async () => {
+    const held: (() => void)[] = [];
+    const run = setup({
+      gate: (state, step) =>
+        state === 'later' && step === 'welcome'
+          ? new Promise<void>(resolve => {
+              held.push(resolve);
+            })
+          : undefined,
+    });
+    view = await mount(run.tree);
+    await settle();
+    await next(); // name
+    await settle();
+    await click('Later'); // welcome: later is held in flight
+    await settle();
+    await press('[data-step-back]');
+    await next(); // welcome: done is queued behind it
+    await settle();
+    expect(run.arrived.filter(answer => answer.step === 'welcome')).toEqual([{ step: 'welcome', state: 'later' }]);
+    await interact(() => {
+      for (const release of held) release();
+    });
+    await settle();
+    expect(run.arrived.filter(answer => answer.step === 'welcome').map(answer => answer.state)).toEqual([
+      'later',
+      'done',
+    ]);
+  });
+
+  it('a newer intent replaces the queued one, and a failed later is not resent after a newer done', async () => {
+    const failSteps = new Set(['welcome']);
+    const run = setup({ failSteps });
+    view = await mount(run.tree);
+    await settle();
+    await next(); // name
+    await settle();
+    await click('Later'); // welcome: later is refused
+    await settle();
+    expect(view.container.querySelector('[data-flow-unsaved]')).not.toBeNull();
+    failSteps.delete('welcome');
+    await press('[data-step-back]');
+    await next(); // welcome: done goes out and lands
+    await settle();
+    expect(view.container.querySelector('[data-flow-unsaved]')).toBeNull();
+    // There is nothing left to retry: the failed later was withdrawn by the newer intent.
+    expect(run.answers.filter(answer => answer.step === 'welcome').map(answer => answer.state)).toEqual(['done']);
+  });
+});
+
+describe('a flagless page that calls the host', () => {
+  it('is reported once per kind of call, and still works', async () => {
+    const reports: string[] = [];
+    const run = setup({
+      report: message => reports.push(message),
+      machines: [
+        {
+          id: A,
+          name: 'Studio',
+          steps: [{ plugin: 'fake-pack', id: 'forgot', title: 'Forgot', order: 1, side: 'daemon', state: 'pending' }],
+        },
+      ],
+    });
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('fake-pack.forgot');
+    expect(reports).toEqual([
+      'onboarding: fake-pack.forgot called step.ready() but its manifest entry does not declare stepHost: true',
+    ]);
+  });
+
+  it('a page that declares stepHost is never reported', async () => {
+    const reports: string[] = [];
+    view = await mount(setup({ report: message => reports.push(message) }).tree);
+    await settle();
+    expect(reports).toEqual([]);
   });
 });

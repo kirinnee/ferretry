@@ -61,12 +61,13 @@ export function createSetupFlow(client: PluginClient, deps: FlowDeps = {}) {
           segment={() => flow.memoryOf(page.plugin)}
           remember={patch => flow.remember(page.plugin, patch)}
           onDone={() => flow.done(page)}
-          onSkip={why => flow.skip(page, why)}
+          onSkip={why => flow.skip(page, why, visit)}
           onNext={() => flow.next(page.key, visit)}
           onBack={() => flow.back(page.key, visit)}
           onLater={() => flow.later(page, visit)}
           unsaved={flow.unsaved.length === 0 ? undefined : { count: flow.unsaved.length, retry: flow.retrySave }}
           {...(deps.silenceMs === undefined ? {} : { silenceMs: deps.silenceMs })}
+          {...(deps.report === undefined ? {} : { report: deps.report })}
         />
       );
     })();

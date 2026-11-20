@@ -39,9 +39,16 @@ export interface FlowPageProps {
   readonly unsaved?: { readonly count: number; readonly retry: () => void } | undefined;
   /** Test seam: how long a page may stay silent. */
   readonly silenceMs?: number;
+  /** Where the dev-only "this page never declared `stepHost`" report goes (default: `console.warn` outside production). */
+  readonly report?: (message: string) => void;
   /** What draws the page. The default is the plugin's own panel in the `onboarding.step` slot; a scene or test hands its own. */
   readonly render?: (host: StepHost) => ReactNode;
 }
+
+/** The default report: a console warning, development builds only. */
+const devReport = (message: string): void => {
+  if (import.meta.env.DEV) console.warn(message);
+};
 
 /** The plugin's own page for a step: the panel it placed in the `onboarding.step` slot, drawn for this step's subject. */
 function PluginPage({
@@ -83,23 +90,44 @@ export function FlowPage(props: FlowPageProps): ReactNode {
   // The host is made once per page: its calls reach the latest callbacks through this ref.
   const latest = useRef(props);
   latest.current = props;
-  const host = useMemo<StepHost>(
-    () => ({
+  const host = useMemo<StepHost>(() => {
+    // A legacy (flagless) page is not written against the host. One that calls ready/busy/done/skip anyway forgot its flag:
+    // it is reported (never blocked) so the manifest entry gets `stepHost: true`.
+    const reported = new Set<string>();
+    const flagless = (call: string): void => {
+      if (step.stepHost || reported.has(call)) return;
+      reported.add(call);
+      (latest.current.report ?? devReport)(
+        `onboarding: ${step.key} called step.${call}() but its manifest entry does not declare stepHost: true`,
+      );
+    };
+    return {
       phase: step.phase,
       appliesTo: step.appliesTo,
       get segment() {
         return latest.current.segment();
       },
       remember: patch => latest.current.remember(patch),
-      ready: () => setReady(true),
-      skip: why => latest.current.onSkip(why),
-      done: () => latest.current.onDone(),
-      busy: label => setBusy(label),
+      ready: () => {
+        flagless('ready');
+        setReady(true);
+      },
+      skip: why => {
+        flagless('skip');
+        latest.current.onSkip(why);
+      },
+      done: () => {
+        flagless('done');
+        latest.current.onDone();
+      },
+      busy: label => {
+        flagless('busy');
+        setBusy(label);
+      },
       next: () => latest.current.onNext(),
       back: () => latest.current.onBack(),
-    }),
-    [step],
-  );
+    };
+  }, [step]);
   useEffect(() => {
     if (ready) return;
     const timer = setTimeout(() => setSilent(true), props.silenceMs ?? STEP_SILENCE_MS);
