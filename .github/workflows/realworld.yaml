@@ -14,8 +14,13 @@ name: Realworld
 # `Harness Contract (latest)` (harness-contract-latest.yaml) is the same tier's upstream-drift half: it
 # stays its own workflow, with its own schedule and issue reporter.
 #
+# The `realworld` job (the timing, memory and rate budgets, on a Namespace 8x16) runs ONLY on the nightly
+# schedule and on manual dispatch: ~9.4k runner-minutes a day when it ran on every full pull request and
+# every merge, for an advisory tier nobody waits on (owner's call, 2026-11-06). A pull request or a push to
+# `main` runs the rest of this workflow — the macOS and tmux 3.8 proofs, on free GitHub runners, when their
+# inputs change. To measure a branch's budgets before the night: Actions > Realworld > Run workflow.
 # `push` ignores exactly the paths ci.yaml does (see there for why), the nightly is off the hour, and a
-# pull request runs it only when it touches what this proves: `scripts/validate/macos-relevance.sh`
+# pull request runs the macOS proofs only when it touches what they prove: `scripts/validate/macos-relevance.sh`
 # holds the `paths` below to the inputs of the macOS jobs' scripts.
 on:
   push:
@@ -28,12 +33,12 @@ on:
       - 'packages/cli/package.json'
       - 'packages/daemon/package.json'
   schedule:
-    - cron: '43 3 * * *'
+    # ~09:00 UTC, off the hour; once a day, on the default branch.
+    - cron: '17 9 * * *'
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
     paths:
-      - 'packages/*/tests/realworld/**'
       - 'bunfig*.toml'
       - '.github/workflows/realworld.yaml'
       - '.github/actions/**'
@@ -91,14 +96,16 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
 
 jobs:
-  # The Linux realworld tier: the machine-dependent tests, in one process, on a quiet dedicated VM.
+  # The Linux realworld tier: the machine-dependent tests, in one process, on a quiet dedicated VM. Nightly and
+  # manual dispatch ONLY: on a pull request or a push to `main` this job is skipped (a skipped job counts as
+  # passed, and `report` below still reads the others).
   realworld:
-    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     name: Realworld Tests
     timeout-minutes: 30
     permissions:
       contents: read
-    # Namespace 8x16 on EVERY selected event, `main` and the nightly included: a timing or memory budget is only
+    # Namespace 8x16 on every event that runs it (the nightly and a manual dispatch): a timing or memory budget is only
     # worth measuring on a machine nothing else is using, and a shared runner's noise was the reason
     # these tests left the blocking tier. `vars.CI_RUNNER_POOL == 'github'` is the same escape hatch the
     # other jobs have.

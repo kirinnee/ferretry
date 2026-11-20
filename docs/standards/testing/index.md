@@ -68,8 +68,8 @@ Every `*.test.ts(x)` lives in exactly one of those directories (or in `tests/con
   idle daemon stays under a CPU and memory ceiling, the event loop is never blocked for more than 200 ms
   while the disk is saturated, a daemon stops within its bound, a worker holds under 25 MB. These are
   real and worth defending, and they cannot be deterministic, so they cannot block a merge. They run
-  in their own workflow (`.github/workflows/realworld.yaml`) on a quiet dedicated runner, on every
-  push to `main`, nightly, on demand, and on a `full-ci` pull request that touches them. A failure there files one
+  in their own workflow (`.github/workflows/realworld.yaml`) on a quiet dedicated runner, nightly and
+  on demand (never on a pull request or a push to `main`: a branch's budgets are measured by running the workflow on it). A failure there files one
   issue per failing test (`realworld: <file> > <test>`, label `realworld`); it never fails a pull
   request's required checks and never holds a release (see [CI/CD](../ci-cd/index.md#release-gating)).
   Also part of this tier, and already shaped like it: the daily `harness-contract-latest.yaml`, which
