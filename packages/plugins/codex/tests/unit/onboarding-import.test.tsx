@@ -149,13 +149,15 @@ describe('a kind page (choose what to import)', () => {
   });
 
   for (const importMode of ['everything', 'fresh'] as const)
-    test(`${importMode}: it is shown, never skipped (a skip would outlive a change of mind), and reads nothing`, async () => {
+    test(`${importMode}: it is passed over for this run (notNeeded, never skip: a skip would outlive a change of mind), draws nothing and reads nothing`, async () => {
       const harness = stepHarness({ segment: { importMode } });
       const { container, calls } = await mount('import-mcp', harness, machine(FULL));
-      expect(harness.decision).toBe('shown');
+      expect(harness.decision).toBe('passed-over');
+      expect(harness.count('notNeeded')).toBe(1);
       expect(harness.count('skip')).toBe(0);
-      expect(container.querySelector(`[data-import-not-choosing="${importMode}"]`)).not.toBeNull();
+      expect(harness.count('done')).toBe(0);
       expect(container.querySelector('[data-found-item]')).toBeNull();
+      expect(container.textContent).toBe('');
       expect(calls).toEqual([]);
     });
 
@@ -324,7 +326,7 @@ describe('import-run', () => {
     void CHANGE_ID;
   });
 
-  test('choose: what the pages left out is the skip list; settings out takes the models they name; an unreviewed kind is left out and said', async () => {
+  test('choose: what the pages left out is the skip list; settings out takes the models they name; a kind never shown is not left out, only said', async () => {
     const harness = stepHarness({
       segment: {
         ...CHOOSE,
@@ -335,13 +337,11 @@ describe('import-run', () => {
       },
     });
     const { container, calls } = await mount('import-run', harness, machine(FULL));
-    // The model-set kind was never reviewed (a reload since): its items are left out, and the page says so.
+    // The model-set kind was never shown (a reload since): nobody left its profiles out, so they stay, and the page says so.
     expect(container.querySelector('[data-import-unreviewed]')?.textContent).toContain('Models');
     await press(container, '[data-import-run]');
     const change = proposal(calls);
-    expect([...(change.skip ?? [])].sort()).toEqual(
-      ['codex:settings', 'codex:model-set', 'codex:profile:fast', 'codex:profile:deep', 'codex:skill:deploy'].sort(),
-    );
+    expect([...(change.skip ?? [])].sort()).toEqual(['codex:settings', 'codex:model-set', 'codex:skill:deploy'].sort());
     expect(change.include).toEqual(['codex']);
     expect(JSON.stringify(change)).not.toMatch(/hook/iu);
   });
@@ -362,12 +362,12 @@ describe('import-run', () => {
     expect((proposal(calls) as { tickedEnv?: string[] }).tickedEnv).toEqual(['GH_TOKEN']);
   });
 
-  test('starting fresh is shown (never skipped) and reads nothing', async () => {
+  test('starting fresh is passed over for this run (notNeeded, never skipped) and reads nothing', async () => {
     const harness = stepHarness({ segment: { importMode: 'fresh' } });
     const { container, calls } = await mount('import-run', harness, machine(FULL));
-    expect(harness.decision).toBe('shown');
+    expect(harness.decision).toBe('passed-over');
     expect(harness.count('skip')).toBe(0);
-    expect(container.querySelector('[data-import-fresh]')).not.toBeNull();
+    expect(container.textContent).toBe('');
     expect(calls).toEqual([]);
   });
 
@@ -435,12 +435,12 @@ describe('import-run', () => {
     expect(harness.count('done')).toBe(1);
   });
 
-  test('nothing reviewed after a reload: it imports nothing, says what was left out, and holds nobody', async () => {
+  test('nothing shown after a reload: nothing is left out, the page says what was not looked at, and it holds nobody', async () => {
     const harness = stepHarness({ segment: CHOOSE });
     const { container, calls } = await mount('import-run', harness, machine(FULL));
     expect(container.querySelector('[data-import-unreviewed]')?.textContent).toContain('Settings');
-    expect(container.querySelector('[data-import-run]')).toBeNull();
     expect(busyLabels(harness)).toEqual([]);
-    expect(calls.some(call => call.route === 'POST /v1/runtimes/proposals')).toBe(false);
+    await press(container, '[data-import-run]');
+    expect(proposal(calls).skip ?? []).toEqual([]);
   });
 });

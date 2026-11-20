@@ -28,6 +28,7 @@ const host: StepHost = {
   remember: () => undefined,
   ready: () => undefined,
   skip: () => undefined,
+  notNeeded: () => undefined,
   done: () => undefined,
   busy: () => undefined,
   next: () => undefined,

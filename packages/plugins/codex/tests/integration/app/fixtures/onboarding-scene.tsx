@@ -3,11 +3,10 @@
  * app's own `StepPageFrame` (the frame the setup flow draws every page in). Nothing reads a network. Every name, path
  * and command below is made up.
  *
- *   ?page=installed|sign-in|sign-in-checking|import-choice|import-returned|permission|permission-auto|
+ *   ?page=installed|sign-in|sign-in-checking|import-choice|permission|permission-auto|
  *         permission-confirm|permission-unknown   ?theme=<family>-<mode>
  *
  * `permission-confirm` is the Auto file; the test presses the Skip card, so the warning and its confirm are on screen.
- * `import-returned` is an import step whose memory was lost to a reload: the choice put back, nothing pre-chosen.
  */
 import { StepPageFrame } from '@ferretry/app';
 import { createRoot } from 'react-dom/client';
@@ -30,7 +29,6 @@ const COPY: Record<string, { title: string; line: string }> = {
   'permission-confirm': { title: 'Permissions', line: 'How Codex asks before it acts.' },
   'permission-unknown': { title: 'Permissions', line: 'How Codex asks before it acts.' },
   'sign-in-checking': { title: 'Sign in to Codex', line: 'Ferretry never sees the sign-in: Codex keeps it.' },
-  'import-returned': { title: 'Settings', line: 'Copy your setup from the Codex on this computer.' },
 };
 
 const FILE = 'binary: /fake/bin/codex\npermissionMode: skip\n';
@@ -129,6 +127,7 @@ const step: StepHost = {
   remember: () => undefined,
   ready: () => undefined,
   skip: () => undefined,
+  notNeeded: () => undefined,
   done: () => undefined,
   busy: () => undefined,
   next: () => undefined,
@@ -154,8 +153,6 @@ const slotOutline = (
 const body =
   page === 'installed' ? (
     <InstalledPage client={client} step={step} />
-  ) : page === 'import-returned' ? (
-    <ImportChoicePage step={step} returned={{ onChosen: () => undefined }} />
   ) : page === 'sign-in' || page === 'sign-in-checking' ? (
     <div className="flex flex-col gap-3">
       <SignInPage client={client} step={step} />
@@ -177,7 +174,6 @@ const STEP: Record<string, number> = {
   'permission-confirm': 4,
   'permission-unknown': 4,
   'sign-in-checking': 2,
-  'import-returned': 3,
 };
 createRoot(document.getElementById('root') as HTMLElement).render(
   <StepPageFrame

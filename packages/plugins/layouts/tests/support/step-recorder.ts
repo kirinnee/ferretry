@@ -28,6 +28,7 @@ export function stepRecorder(phase: StepHost['phase'] = 'client'): StepRecorder 
     },
     ready: () => void calls.push('ready'),
     skip: why => void calls.push(`skip:${why}`),
+    notNeeded: () => void calls.push('notNeeded'),
     done: () => void calls.push('done'),
     busy: () => void calls.push('busy'),
     next: () => void calls.push('next'),

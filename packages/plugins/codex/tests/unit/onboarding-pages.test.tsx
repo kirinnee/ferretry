@@ -596,50 +596,36 @@ describe('import steps after a reload', () => {
     'import-run',
   ];
 
-  test('choose, then a reload before the import: the empty memory brings the choice back, and nothing is answered by default', async () => {
-    // 1. The person chooses at import-choice.
-    const first = stepHarness();
-    const choice = await mount('import-choice', first, () => ({}));
-    await act(async () => {
-      choice.container.querySelector<HTMLInputElement>('input[value="fresh"]')?.click();
-    });
-    expect(first.segment.importMode).toBe('fresh');
-    expect(first.count('done')).toBe(0);
-    // 2. A reload: the run memory is gone, the choice step is answered, and the next import step opens.
-    const after = stepHarness();
-    const { container } = await mount('import-settings', after, () => ({}));
-    expect(container.querySelector('[data-codex-step="import-choice"]')).not.toBeNull();
-    expect(container.querySelectorAll('input[type="radio"]').length).toBe(3);
-    expect(container.querySelectorAll('input[type="radio"]:checked').length).toBe(0);
-    expect(after.segment.importMode).toBeUndefined();
-    // Not skipped by choice, not answered by default (busy keeps Next from recording it), nothing remembered for the person.
-    expect(after.decision).toBe('shown');
-    expect(after.count('done')).toBe(0);
-    expect(after.count('remember')).toBe(0);
-    expect(after.calls.filter(call => call.kind === 'busy').at(-1)).toEqual({
-      kind: 'busy',
-      label: 'Choose what to bring over first',
-    });
-    // 3. Resume: the person chooses again, the memory is back, and the step carries on.
-    await act(async () => {
-      container.querySelector<HTMLInputElement>('input[value="choose"]')?.click();
-    });
-    await act(async () => {});
-    expect(after.segment.importMode).toBe('choose');
-    expect(after.calls.filter(call => call.kind === 'busy').at(-1)).toEqual({ kind: 'busy', label: null });
+  test('a reload (the memory is empty) shows the kind page as its checklist: no chooser, nothing remembered, nothing answered', async () => {
+    const harness = stepHarness();
+    const { container } = await mount('import-settings', harness, () => ({}));
     expect(container.querySelector('[data-codex-step="import-choice"]')).toBeNull();
-    expect(after.count('done')).toBe(0);
-    // The step carries on into its own body (the settings page) and is not skipped by the missing choice.
+    expect(container.querySelector('[data-returned], [data-returned-continue]')).toBeNull();
+    expect(container.querySelectorAll('input[type="radio"]').length).toBe(0);
+    expect(harness.segment.importMode).toBeUndefined();
     expect(container.querySelector('[data-codex-step="import-settings"]')).not.toBeNull();
-    expect(after.skippedWhy).toBeUndefined();
+    // The page is shown and answered only by the footer's Next: nothing is done or skipped on its own.
+    expect(harness.decision).toBe('shown');
+    expect(harness.count('done')).toBe(0);
+    expect(harness.skippedWhy).toBeUndefined();
+    expect(harness.calls.some(call => call.kind === 'notNeeded')).toBe(false);
+  });
+
+  test('a fresh choice made in this run still passes the kind pages over, and a reload does not', async () => {
+    const fresh = stepHarness({ segment: { importMode: 'fresh' } });
+    await mount('import-skills', fresh, () => ({}));
+    expect(fresh.decision).toBe('passed-over');
+    const reloaded = stepHarness();
+    await mount('import-skills', reloaded, () => ({}));
+    expect(reloaded.decision).toBe('shown');
   });
 
   for (const id of IMPORT_STEPS) {
-    test(`${id} does not run or skip itself while the choice is missing`, async () => {
+    test(`${id} never draws a chooser and never skips or answers itself because the choice is missing`, async () => {
       const harness = stepHarness();
       const { container } = await mount(id, harness, () => ({}));
-      expect(container.querySelector('[data-codex-step="import-choice"]')).not.toBeNull();
-      expect(harness.skippedWhy).toBeUndefined();
+      expect(container.querySelector('[data-codex-step="import-choice"]')).toBeNull();
+      expect(harness.calls.some(call => call.kind === 'notNeeded')).toBe(false);
       expect(harness.count('done')).toBe(0);
     });
   }
@@ -649,7 +635,7 @@ describe('import steps after a reload', () => {
     const { container } = await mount('import-mcp', harness, () => ({}));
     expect(container.querySelector('[data-codex-step="import-choice"]')).toBeNull();
     expect(harness.count('skip')).toBe(0);
-    expect(container.querySelector('[data-import-not-choosing="everything"]')).not.toBeNull();
+    expect(harness.decision).toBe('passed-over');
   });
 
   test('conversations is asked in both modes, so it does not wait for the choice (it reads its answer back from the file)', async () => {
@@ -695,18 +681,7 @@ describe('no step is recorded as done without its page', () => {
       );
       if (harness.decision === 'shown') shown.push(id);
     }
-    // The five kind pages say they are included by the choice; the run page (Codex missing) is the one that skips.
-    expect(shown).toEqual([
-      'installed',
-      'sign-in',
-      'import-choice',
-      'import-settings',
-      'import-model-set',
-      'import-instructions',
-      'import-skills',
-      'import-mcp',
-      'conversations',
-      'permission',
-    ]);
+    // The five kind pages are passed over by the choice (notNeeded); the run page (Codex missing) is the one that skips.
+    expect(shown).toEqual(['installed', 'sign-in', 'import-choice', 'conversations', 'permission']);
   });
 });

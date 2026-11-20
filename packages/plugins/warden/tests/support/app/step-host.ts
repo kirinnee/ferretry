@@ -20,6 +20,7 @@ export function recordedStep(): RecordedStep {
     remember: patch => void events.push(`remember:${JSON.stringify(patch)}`),
     ready: () => void events.push('ready'),
     skip: why => void events.push(`skip:${why}`),
+    notNeeded: () => void events.push('notNeeded'),
     done: () => void events.push('done'),
     busy: label => void events.push(`busy:${label}`),
     next: () => void events.push('next'),

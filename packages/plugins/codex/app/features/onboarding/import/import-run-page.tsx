@@ -7,8 +7,8 @@
  * Everything the person chose on the kind pages is one `setup.import` change built by the kit; nothing is brought over until the
  * person presses the button.
  *
- * It lists what will come over (counts, by kind), names any kind that was never reviewed in this run (those are left out, and the
- * page says so), asks for the runtime's name (prefilled; none when Codex already has a runtime here), and afterwards shows each
+ * It lists what will come over (counts, by kind), names any kind whose checklist was never shown in this run (those are NOT left out, since nobody
+ * left them out, and the page says so), asks for the runtime's name (prefilled; none when Codex already has a runtime here), and afterwards shows each
  * file written or refused in the daemon's own words. The machine may ask for the passkey; that is the carrier's prompt.
  */
 import { Button } from '@ferretry/app';
@@ -27,18 +27,15 @@ const sentenceOf = (taken: Readonly<Record<string, number>>, everything: boolean
   return parts.length === 0 ? 'Nothing.' : `${parts.join(', ')}.`;
 };
 
-/** Starting fresh: nothing to bring, and nothing is read. Shown (not skipped) so Back -> another choice still finds the import. */
+/**
+ * Starting fresh: nothing to bring, and nothing is read, so the page has nothing to do. It is passed over for THIS run
+ * (`notNeeded`, not `skip`, which is recorded) so Back -> another choice still finds the import.
+ */
 function NotImporting({ step }: { readonly step: StepHost }) {
   useEffect(() => {
-    step.ready();
+    step.notNeeded();
   }, [step]);
-  return (
-    <section aria-label="Bring Codex over" className="flex max-w-xl flex-col gap-3" data-codex-step="import-run">
-      <p className="m-0 text-ui text-fg" data-import-fresh="">
-        Nothing comes over: you chose to start fresh. Go back to choose otherwise.
-      </p>
-    </section>
-  );
+  return null;
 }
 
 export function ImportRunPage({ client, step }: { readonly client: OnboardingClient; readonly step: StepHost }) {
@@ -112,8 +109,8 @@ function RunBody({
           </p>
           {plan.unreviewed.length === 0 ? null : (
             <p className="m-0 text-cell text-warn" data-import-unreviewed="">
-              Left out, because you did not look at {plan.unreviewed.map(kind => KIND_WORDS[kind]).join(', ')} this
-              time. Go back to choose them.
+              You did not look at {plan.unreviewed.map(kind => KIND_WORDS[kind]).join(', ')} this time, so they come
+              over as found. Go back to look at them first.
             </p>
           )}
           <p className="m-0 text-cell text-muted">One way: your Codex files are read and never changed.</p>

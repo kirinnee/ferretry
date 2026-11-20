@@ -7,7 +7,7 @@
 import type { StepHost, StepSegmentMemory } from '@ferretry/kernel/contract';
 
 type StepCall =
-  | { readonly kind: 'ready' | 'done' | 'next' | 'back' }
+  | { readonly kind: 'ready' | 'notNeeded' | 'done' | 'next' | 'back' }
   | { readonly kind: 'skip'; readonly why: 'not-needed' | 'already-set' }
   | { readonly kind: 'busy'; readonly label: string | null }
   | { readonly kind: 'remember'; readonly patch: StepSegmentMemory };
@@ -35,6 +35,7 @@ export function stepHostRecorder(phase: 'daemon' | 'client' = 'client'): StepHos
     },
     ready: () => void calls.push({ kind: 'ready' }),
     skip: why => void calls.push({ kind: 'skip', why }),
+    notNeeded: () => void calls.push({ kind: 'notNeeded' }),
     done: () => void calls.push({ kind: 'done' }),
     busy: label => void calls.push({ kind: 'busy', label }),
     next: () => void calls.push({ kind: 'next' }),

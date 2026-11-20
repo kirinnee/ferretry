@@ -4,9 +4,8 @@
  * to show. Nothing is imported here: that happens once, at `import-run`.
  *
  * The memory lasts only this run (no browser storage), so after a reload the segment has no `importMode` while this step is
- * already answered. A MISSING mode therefore means "ask again": every import step puts this page back in front of itself
- * (`returned`) and does not run, skip-by-choice or answer itself until the person has chosen. In that form nothing is chosen
- * for the person (no default is remembered) and the step is `busy` until they press a card, so Next cannot answer it either.
+ * already answered. The import pages do NOT bring this page back: a kind page then shows its checklist exactly as in Customize
+ * (every item ticked as Import everything would bring it), and the run page proposes what the pages answered.
  */
 import { ChoiceCards } from '@ferretry/app';
 import type { StepHost } from './onboarding-api.ts';
@@ -25,69 +24,13 @@ const OPTIONS = [
   { id: 'fresh', title: 'Start fresh', line: 'Nothing is copied' },
 ] as const;
 
-/** The mode the segment memory holds, or `undefined` when there is none (a fresh run, or a reload). */
-export const rememberedImportMode = (step: StepHost): ImportMode | undefined =>
-  IMPORT_MODES.find(mode => mode === step.segment.importMode);
-
 /** The mode an earlier visit left in the segment memory; `everything` when there is none. */
 const importModeOf = (step: StepHost): ImportMode => {
   const said = step.segment.importMode;
   return IMPORT_MODES.find(mode => mode === said) ?? 'everything';
 };
 
-const ASK_AGAIN = 'Choose what to bring over first';
-
-/** The choice put back in front of an import step whose memory is empty: nothing is pre-chosen, nothing is answered by default. */
-function ReturnedChoice({
-  step,
-  onChosen,
-}: {
-  readonly step: StepHost;
-  readonly onChosen: (mode: ImportMode) => void;
-}) {
-  useEffect(() => {
-    step.ready();
-    step.busy(ASK_AGAIN);
-  }, [step]);
-  return (
-    <section
-      aria-label="Import from Codex"
-      className="flex flex-col gap-3"
-      data-codex-step="import-choice"
-      data-returned=""
-    >
-      <p className="m-0 max-w-xl text-cell text-muted">
-        Your earlier answer was not kept, so choose again what to bring over from Codex.
-      </p>
-      <ChoiceCards
-        label="What to import from your Codex"
-        options={OPTIONS}
-        value={null}
-        onChange={next => {
-          const chosen = IMPORT_MODES.find(candidate => candidate === next);
-          if (chosen === undefined) return;
-          step.remember({ importMode: chosen });
-          step.busy(null);
-          onChosen(chosen);
-        }}
-      />
-    </section>
-  );
-}
-
-export function ImportChoicePage({
-  step,
-  returned,
-}: {
-  readonly step: StepHost;
-  /** Set when an import step shows this page because the memory was empty: the step carries on once a mode is chosen. */
-  readonly returned?: { readonly onChosen: (mode: ImportMode) => void };
-}) {
-  if (returned !== undefined) return <ReturnedChoice step={step} onChosen={returned.onChosen} />;
-  return <FirstChoice step={step} />;
-}
-
-function FirstChoice({ step }: { readonly step: StepHost }) {
+export function ImportChoicePage({ step }: { readonly step: StepHost }) {
   const [mode, setMode] = useState<ImportMode>(() => importModeOf(step));
   const opened = useRef(false);
   useEffect(() => {

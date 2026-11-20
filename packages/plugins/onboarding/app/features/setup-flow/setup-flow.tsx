@@ -62,6 +62,7 @@ export function createSetupFlow(client: PluginClient, deps: FlowDeps = {}) {
           remember={patch => flow.remember(page.plugin, patch)}
           onDone={() => flow.done(page)}
           onSkip={why => flow.skip(page, why, visit)}
+          onNotNeeded={() => flow.notNeeded(page, visit)}
           onNext={() => flow.next(page.key, visit)}
           onBack={() => flow.back(page.key, visit)}
           onLater={() => flow.later(page, visit)}

@@ -76,6 +76,12 @@ export interface StepHost {
   remember(patch: StepSegmentMemory): void;
   ready(): void;
   skip(why: 'not-needed' | 'already-set'): void;
+  /**
+   * "This page is not needed for THIS run, given the answers so far": the run passes over it in both directions. Unlike
+   * `skip`, it is NOT recorded on the machine and survives nothing (run-only, like the segment memory): see rule 7 in the
+   * onboarding contract's `step-host.ts`.
+   */
+  notNeeded(): void;
   done(): void;
   busy(label: string | null): void;
   next(): void;

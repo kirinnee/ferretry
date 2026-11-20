@@ -32,6 +32,7 @@ export interface FlowPageProps {
   readonly remember: StepHost['remember'];
   readonly onDone: () => void;
   readonly onSkip: (why: 'not-needed' | 'already-set') => void;
+  readonly onNotNeeded: () => void;
   readonly onNext: () => void;
   readonly onBack: () => void;
   readonly onLater: () => void;
@@ -90,6 +91,9 @@ export function FlowPage(props: FlowPageProps): ReactNode {
   // The host is made once per page: its calls reach the latest callbacks through this ref.
   const latest = useRef(props);
   latest.current = props;
+  // Whether this visit has drawn its own content (it said `ready()` or put up a `busy` label): contract rule 7 honours
+  // `notNeeded()` only from a page that is still passing over, never from one the person is looking at.
+  const shown = useRef(false);
   const host = useMemo<StepHost>(() => {
     // A legacy (flagless) page is not written against the host. One that calls ready/busy/done/skip anyway forgot its flag:
     // it is reported (never blocked) so the manifest entry gets `stepHost: true`.
@@ -110,11 +114,23 @@ export function FlowPage(props: FlowPageProps): ReactNode {
       remember: patch => latest.current.remember(patch),
       ready: () => {
         flagless('ready');
+        shown.current = true;
         setReady(true);
       },
       skip: why => {
         flagless('skip');
         latest.current.onSkip(why);
+      },
+      notNeeded: () => {
+        flagless('notNeeded');
+        if (shown.current) {
+          // Rule 7: a page that was shown can never become not needed in this visit; only Next moves on and records.
+          (latest.current.report ?? devReport)(
+            `onboarding: ${step.key} called step.notNeeded() after it was shown; ignored (only a page passing over may call it, on mount)`,
+          );
+          return;
+        }
+        latest.current.onNotNeeded();
       },
       done: () => {
         flagless('done');
@@ -122,6 +138,7 @@ export function FlowPage(props: FlowPageProps): ReactNode {
       },
       busy: label => {
         flagless('busy');
+        if (label !== null) shown.current = true;
         setBusy(label);
       },
       next: () => latest.current.onNext(),

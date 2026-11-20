@@ -60,24 +60,23 @@ const writes = (calls: readonly Call[]): Call[] =>
 
 describe('each kind page decides for itself', () => {
   for (const kind of KINDS) {
-    it(`${kind}: on "everything" and on "fresh" it STAYS (a skip is irreversible) and says why; it shows on "choose"`, async () => {
+    it(`${kind}: on "everything" and on "fresh" it is not needed for this run (never a skip, which is irreversible) and draws nothing; it shows on "choose"`, async () => {
       for (const importMode of ['everything', 'fresh']) {
         const { run, view } = await open(PAGES[kind], { importMode });
-        expect(run.events).toEqual(['ready']);
-        expect(view.container.querySelector('[data-import-included]')?.getAttribute('data-import-included')).toBe(
-          importMode,
-        );
-        expect(view.container.querySelector('[data-found-item]')).toBeNull();
+        expect(run.events).toEqual(['notNeeded']);
+        expect(view.container.textContent).toBe('');
       }
       const { run, view } = await open(PAGES[kind], { importMode: 'choose' });
       expect(run.events).toEqual(['ready']);
       expect(view.container.querySelector(`[data-onboarding-step="claude-code.import-${kind}"]`)).not.toBeNull();
     });
 
-    it(`${kind}: after a reload (no memory) it does not skip: it shows the list and says why`, async () => {
+    it(`${kind}: after a reload (no memory) it does not skip: it shows its checklist as in Customize, with no chooser and no extra button`, async () => {
       const { run, view } = await open(PAGES[kind], {});
       expect(run.events).toEqual(['ready']);
-      expect(view.container.querySelector('[data-import-lost]')?.textContent).toContain('reloaded');
+      expect(view.container.querySelector('[data-import-lost]')).toBeNull();
+      expect(view.container.querySelector('[role="radiogroup"], [data-returned]')).toBeNull();
+      expect(view.container.querySelector('[data-found-item] input:not(:checked)')).toBeNull();
     });
   }
 
@@ -188,11 +187,10 @@ describe('the import run', () => {
     expect(JSON.stringify(sent)).not.toContain('hook');
   });
 
-  it('"fresh" stays in the run, says it is not needed, and sends nothing', async () => {
+  it('"fresh" is not needed for this run (never a skip), draws nothing, and sends nothing', async () => {
     const { run, calls, view } = await open(ImportRunPage, { importMode: 'fresh' });
-    expect(run.events).toEqual(['ready']);
-    expect(view.container.querySelector('[data-import-fresh]')).not.toBeNull();
-    expect(view.container.querySelector('.cc-actions button')).toBeNull();
+    expect(run.events).toEqual(['notNeeded']);
+    expect(view.container.textContent).toBe('');
     expect(writes(calls)).toEqual([]);
   });
 

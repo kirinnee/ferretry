@@ -70,6 +70,7 @@ function Scene() {
       remember: () => {},
       ready: () => {},
       skip: () => {},
+      notNeeded: () => {},
       done: () => {},
       busy: label => setBusy(label !== null),
       next: () => {

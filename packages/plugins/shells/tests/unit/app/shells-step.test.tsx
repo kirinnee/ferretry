@@ -10,7 +10,7 @@ ensureDom();
  * A recording `StepHost`: the real contract (`@ferretry/kernel/contract`) with every call kept in order. Onboarding's own
  * `StepHarness` is the same shape; Shells does not depend on another plugin's test helper, so it keeps this small copy.
  */
-type Call = 'ready' | 'skip' | 'done' | 'busy' | 'remember' | 'next' | 'back';
+type Call = 'ready' | 'skip' | 'notNeeded' | 'done' | 'busy' | 'remember' | 'next' | 'back';
 function stepHarness() {
   const calls: { kind: Call; why?: string }[] = [];
   const segment: StepSegmentMemory = {};
@@ -21,6 +21,7 @@ function stepHarness() {
     remember: () => void calls.push({ kind: 'remember' }),
     ready: () => void calls.push({ kind: 'ready' }),
     skip: why => void calls.push({ kind: 'skip', why }),
+    notNeeded: () => void calls.push({ kind: 'notNeeded' }),
     done: () => void calls.push({ kind: 'done' }),
     busy: () => void calls.push({ kind: 'busy' }),
     next: () => void calls.push({ kind: 'next' }),

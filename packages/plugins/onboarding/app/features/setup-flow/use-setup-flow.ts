@@ -17,6 +17,13 @@
  *   has already left is ignored, so a slow page can never advance whichever page is current.
  * - A plugin's segment memory (`StepHost.segment`) lives HERE, in memory, for this run only. Nothing in this file writes
  *   storage except the two device lists above.
+ * - A page that is not needed for this run (`StepHost.notNeeded`, contract rule 7) is a mark in the run state ONLY: nothing is
+ *   answered or recorded for it, a reload starts with none, and any change to its plugin's segment memory clears that
+ *   plugin's marks so its pages are asked again. ONE exception to "nothing recorded": when the run reaches its END, a daemon
+ *   page that is STILL marked not needed (a page that was SHOWN can never be marked: the host ignores `notNeeded()` after
+ *   `ready()`/`busy(label)`, so only a page that was truly passed over is recorded) is recorded `skipped` on the machine, because a step left `pending` there reopens the first run on every
+ *   later visit (steps-opener) and keeps the machine "not set up". That write is final only for the run as it ended: it does
+ *   not mark the page answered in this run, so Back -> change the mode -> Next can still record `done` over it.
  */
 import { daemonOfClient, useEveryDaemon } from '@ferretry/app';
 import { readPress } from '@ferretry/app/ui';
@@ -40,7 +47,11 @@ import { readLater, rememberLater } from './client-later.ts';
 import {
   advance,
   answeredBefore,
+  clearNotNeeded,
   dropPage,
+  END,
+  markNotNeeded,
+  passedOver,
   type Place,
   type ProgressRead,
   type RunState,
@@ -124,6 +135,8 @@ export interface SetupFlow {
   readonly remember: (plugin: string, patch: StepSegmentMemory) => void;
   readonly done: (step: FlowStep) => void;
   readonly skip: (step: FlowStep, why: 'not-needed' | 'already-set', visit: number) => void;
+  /** The page is not needed for THIS run: passed over, nothing recorded (see `StepHost.notNeeded`). */
+  readonly notNeeded: (step: FlowStep, visit: number) => void;
   readonly next: (key: string, visit: number) => void;
   readonly back: (key: string, visit: number) => void;
   readonly later: (step: FlowStep, visit: number) => void;
@@ -162,7 +175,14 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     readFlowAddress(deps.search?.() ?? (typeof window === 'undefined' ? '' : window.location.search)),
   );
   const [loading, setLoading] = useState<Loading>({ kind: 'loading' });
-  const [run, setRun] = useState<RunState>({ at: 'end', trail: [], gone: new Set(), direction: 'forward', visit: 0 });
+  const [run, setRun] = useState<RunState>({
+    at: 'end',
+    trail: [],
+    gone: new Set(),
+    notNeeded: new Set(),
+    direction: 'forward',
+    visit: 0,
+  });
   const [failed, setFailed] = useState<Readonly<Record<string, Unsaved>>>({});
   /** Each step's answer lane (one write in flight; a newer intent replaces the queued one). Replaced on every read. */
   const lanes = useRef(new Map<string, AnswerLane>());
@@ -175,6 +195,8 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   const memory = useRef(new Map<string, StepSegmentMemory>());
   /** How each page was answered during this run (so Next after a `done()` records nothing twice, and Later may become done). */
   const answeredNow = useRef(new Map<string, HowAnswered>());
+  /** The pages the end of the run already told the machine about (a page still marked not needed when the run ends). */
+  const toldAtEnd = useRef(new Set<string>());
   const stage = useRef(loading);
   stage.current = loading;
   runNow.current = run;
@@ -227,6 +249,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
       setLoading({ kind: 'ready', flow, pages, answered, journey: address.journey });
       setRun(startRun(pages, answered));
       answeredNow.current = new Map();
+      toldAtEnd.current = new Set();
       lanes.current = new Map();
       setFailed({});
       setOutcomes({});
@@ -339,6 +362,13 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     },
     [answer, current, pages, answered],
   );
+  const notNeeded = useCallback(
+    (step: FlowStep, visit: number): void => {
+      if (!current(step.key, visit)) return;
+      setRun(state => markNotNeeded(state, pages, answered, step.key));
+    },
+    [current, pages, answered],
+  );
   const next = useCallback(
     (key: string, visit: number): void => {
       if (!current(key, visit)) return;
@@ -364,9 +394,21 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     for (const unsaved of Object.values(failed)) record(unsaved.step, unsaved.state);
   }, [failed, record]);
 
+  // The run ended: what is still passed over will never be asked, so the machine hears it was skipped (see the header).
+  useEffect(() => {
+    if (run.at !== END) return;
+    for (const key of run.notNeeded) {
+      const step = pages.find(candidate => candidate.key === key);
+      if (step?.phase !== 'daemon' || answeredNow.current.has(key) || toldAtEnd.current.has(key)) continue;
+      toldAtEnd.current.add(key);
+      sendDaemon(step, 'skipped');
+    }
+  }, [run.at, run.notNeeded, pages, sendDaemon]);
+
   const page = pages.find(candidate => candidate.key === run.at);
+  const hidden = passedOver(run);
   const progress =
-    ready === undefined || page === undefined ? undefined : progressOf(ready.flow, pages, answered, run.gone, page.key);
+    ready === undefined || page === undefined ? undefined : progressOf(ready.flow, pages, answered, hidden, page.key);
   return {
     loading: loading.kind,
     flow: ready?.flow,
@@ -374,17 +416,22 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     at: run.at,
     direction: run.direction,
     page,
-    canBack: run.trail.some(key => !run.gone.has(key)),
+    canBack: run.trail.some(key => !hidden.has(key)),
     progress,
     unsaved: Object.values(failed),
     visit: run.visit,
     target,
     memoryOf: plugin => memory.current.get(plugin) ?? {},
     remember: (plugin, patch) => {
-      memory.current.set(plugin, { ...memory.current.get(plugin), ...patch });
+      const before = memory.current.get(plugin) ?? {};
+      memory.current.set(plugin, { ...before, ...patch });
+      // An answer that CHANGED may change what its plugin's other pages need, so they are asked again.
+      if (Object.entries(patch).some(([key, value]) => before[key] !== value))
+        setRun(state => clearNotNeeded(state, pages, plugin));
     },
     done,
     skip,
+    notNeeded,
     next,
     back,
     later,
@@ -394,7 +441,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
         ? []
         : ready.flow.daemon
             .flatMap(segment => segment.steps)
-            .filter(step => !run.gone.has(step.key))
+            .filter(step => !hidden.has(step.key))
             .map(step => ({
               plugin: step.plugin,
               id: step.id,

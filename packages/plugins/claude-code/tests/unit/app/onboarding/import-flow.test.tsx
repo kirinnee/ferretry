@@ -150,33 +150,68 @@ const disabled = (selector: string): boolean =>
 const proposals = (wire: readonly Wire[]) => wire.filter(call => call.route === 'POST /v1/runtimes/proposals');
 
 describe('the Claude import pages inside the real setup flow', () => {
-  test('(a) Everything → Conversations → Back → Choose still reaches the one-by-one pages', async () => {
-    await openFlow();
+  test('(a) Import everything is ONE page; Back -> Choose brings the one-by-one pages back; nothing was recorded', async () => {
+    const { wire } = await openFlow();
     expect(pageKey()).toBe(pageOf('import-choice'));
-    await next(); // the default card is "Import everything"
-    for (const id of ['import-settings', 'import-model-set', 'import-instructions', 'import-skills', 'import-mcp']) {
-      expect(pageKey()).toBe(pageOf(id));
-      expect(root().querySelector('[data-import-included="everything"]')).not.toBeNull();
-      await next();
-    }
+    await next(); // the default card is "Import everything": the five kind pages are passed over
     expect(pageKey()).toBe(pageOf('conversations'));
-    for (let step = 0; step < 6; step += 1) await back();
+    expect(root().querySelector('[data-found-item]')).toBeNull();
+    await next();
+    expect(pageKey()).toBe(pageOf('import-run')); // the one import page
+    // Back goes to the last page actually shown, never to a kind page that drew nothing.
+    await back();
+    expect(pageKey()).toBe(pageOf('conversations'));
+    await back();
     expect(pageKey()).toBe(pageOf('import-choice'));
+    // Nothing for the passed-over pages reached the machine (no answer, skipped or otherwise).
+    // Only the two pages that were drawn (the choice, Conversations) were answered, both done: no skip, no kind page.
+    const answered = wire.filter(call => call.route.startsWith('POST /v1/onboarding'));
+    expect(answered.map(call => (call.body as { state: string }).state)).toEqual(['done', 'done']);
     await press('input[value="choose"]');
     await next();
     expect(pageKey()).toBe(pageOf('import-settings'));
     expect(items()).toContain('claude-code:settings');
   });
 
-  test('"Start fresh" keeps the final page in the run, saying it is not needed, so Back can still change it', async () => {
-    await openFlow();
+  test('selecting a choice with the arrow keys writes nothing and never leaves the page', async () => {
+    const { wire } = await openFlow();
+    expect(pageKey()).toBe(pageOf('import-choice'));
+    const group = must(root().querySelector('[role="radiogroup"]'), 'the choice cards');
+    for (const key of ['End', 'Home', 'ArrowRight', 'ArrowRight']) {
+      await interact(
+        () => void group.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })),
+      );
+      await settle();
+      expect(pageKey()).toBe(pageOf('import-choice'));
+    }
+    expect(root().querySelector('input[value="fresh"]:checked')).not.toBeNull();
+    expect(wire.filter(call => call.route.startsWith('POST /v1/onboarding'))).toEqual([]);
+    expect(root().querySelector('[data-flow-end]')).toBeNull();
+  });
+
+  test('"Start fresh" leaves nothing to import: the final page is passed over too, and Back can still change the mode', async () => {
+    const { wire } = await openFlow();
     await press('input[value="fresh"]');
-    for (let step = 0; step < 7; step += 1) await next();
+    await next();
+    expect(pageKey()).toBe(pageOf('conversations'));
+    const before = wire.filter(call => call.route.startsWith('POST /v1/onboarding')).length;
+    await next(); // the import page has nothing to do: the run goes on to the end
+    expect(pageKey()).toBeUndefined();
+    // Only now, at the end, does the machine hear that the six passed-over pages were skipped (none left pending).
+    const states = wire
+      .filter(call => call.route.startsWith('POST /v1/onboarding'))
+      .slice(before)
+      .map(call => (call.body as { state: string }).state);
+    expect(states.sort()).toEqual(['done', 'skipped', 'skipped', 'skipped', 'skipped', 'skipped', 'skipped']);
+    await back();
+    expect(pageKey()).toBe(pageOf('conversations'));
+    await back();
+    expect(pageKey()).toBe(pageOf('import-choice'));
+    await press('input[value="everything"]');
+    await next();
+    await next();
     expect(pageKey()).toBe(pageOf('import-run'));
-    expect(root().querySelector('[data-import-fresh]')).not.toBeNull();
-    await back();
-    await back();
-    expect(pageKey()).toBe(pageOf('import-mcp'));
+    expect(root().querySelector('.cc-actions button')).not.toBeNull();
   });
 
   test('(b) after a reload mid-run, a left-out MCP server is in the skip list the import sends', async () => {
@@ -185,7 +220,8 @@ describe('the Claude import pages inside the real setup flow', () => {
       answered: ['import-choice', 'import-settings', 'import-model-set', 'import-instructions', 'import-skills'],
     }).then(async ({ wire }) => {
       expect(pageKey()).toBe(pageOf('import-mcp'));
-      expect(root().querySelector('[data-import-lost]')).not.toBeNull();
+      expect(root().querySelector('[data-import-lost]')).toBeNull();
+      expect(root().querySelector('[data-found-item="claude-code:mcp:issues"] input')).not.toBeNull();
       await press('[data-found-item="claude-code:mcp:issues"] input');
       await next(); // conversations
       await next(); // the final page

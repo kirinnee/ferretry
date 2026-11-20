@@ -49,6 +49,7 @@ const fakeHost = (): { readonly host: StepHost; readonly told: string[] } => {
     remember: () => undefined,
     ready: () => void told.push('ready'),
     skip: why => void told.push(`skip:${why}`),
+    notNeeded: () => void told.push('notNeeded'),
     done: () => void told.push('done'),
     busy: label => void told.push(`busy:${label}`),
     next: () => void told.push('next'),

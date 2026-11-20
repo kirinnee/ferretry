@@ -30,6 +30,7 @@ const fakeHost = () => {
     remember: () => undefined,
     ready: () => void calls.push('ready'),
     skip: why => void calls.push(`skip:${why}`),
+    notNeeded: () => void calls.push('notNeeded'),
     done: () => void calls.push('done'),
     busy: label => void calls.push(`busy:${label}`),
     next: () => void calls.push('next'),
