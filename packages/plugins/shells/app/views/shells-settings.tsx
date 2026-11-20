@@ -122,7 +122,10 @@ function ShellsTab({ shells }: { readonly shells: ShellsClient }) {
             <li key={shell.name} className="min-w-0" data-setting-row={shell.name} data-shell={shell.name}>
               <div className="fy-sh-row">
                 <span className="fy-sh-text">
-                  <span className="text-ui font-semibold text-fg">{shell.name}</span>
+                  <span className="fy-sh-name">
+                    <span className="text-ui font-semibold text-fg">{shell.name}</span>
+                    <Badge tone={BUILD_TONES[shell.build]}>{BUILD_WORDS[shell.build]}</Badge>
+                  </span>
                   {/* The whole line: it wraps, it is never cut by an ellipsis. */}
                   <span className="break-words text-meta leading-tight text-muted">{shellLine(shell)}</span>
                   {shell.description === undefined ? null : (
@@ -130,7 +133,6 @@ function ShellsTab({ shells }: { readonly shells: ShellsClient }) {
                   )}
                 </span>
                 <span className="fy-sh-acts">
-                  <Badge tone={BUILD_TONES[shell.build]}>{BUILD_WORDS[shell.build]}</Badge>
                   <Button size="sm" disabled={busy !== undefined} onClick={() => void built(shell.name)}>
                     Build
                   </Button>
