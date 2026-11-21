@@ -1,9 +1,8 @@
 {
-  "entry": ["app/surfaces.tsx", "daemon/features/*.feature.ts", "app/hypermedia/durian.ts"],
+  "entry": ["app/surfaces.tsx", "daemon/features/*.feature.ts"],
   "project": ["**/*.{ts,tsx}", "!tests/**"],
   "allowed": {
     "entry:app/surfaces.tsx": "loaded lazily by `import(`./${\"surfaces\"}.tsx`)` in app/index.ts, a template import knip cannot follow.",
-    "entry:daemon/features/*.feature.ts": "a Conversation feature is listed by the generator into the git-ignored daemon/generated/features.ts (scripts/gen/registries.ts), which knip does not read, so each feature file is an entry by its name: a new feature adds one file and edits no list (docs/standards/architecture). Not a pending-port gap.",
-    "entry:app/hypermedia/durian.ts": "r12 H1 lands the pinned Durian dependency and its one host setting (YAML, aliases off) before the renderer that calls it: r12 H2 (HypermediaProse) imports `configureDurian`, and this entry goes then. A seam awaiting its consumer, not a pending-port gap."
+    "entry:daemon/features/*.feature.ts": "a Conversation feature is listed by the generator into the git-ignored daemon/generated/features.ts (scripts/gen/registries.ts), which knip does not read, so each feature file is an entry by its name: a new feature adds one file and edits no list (docs/standards/architecture). Not a pending-port gap."
   }
 }

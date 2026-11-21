@@ -167,7 +167,10 @@ describe('the transcript keeps a settled reply mounted as new messages arrive', 
     for (const entry of survivors) expect(kept.has(entry.id)).toBe(true);
   });
 
-  test('an interactive block keeps its frame through eight new messages in a sliding window', async () => {
+  // r12 H2 draws an assistant message with Durian Hypermedia, which has no `fy-render` host block until r12 H3 (the unit
+  // that re-hosts the 12 `fy-render` types as one Durian block). The transcript has no interactive frame to keep until
+  // then; H3 turns this test back on, unchanged.
+  test.skip('an interactive block keeps its frame through eight new messages in a sliding window', async () => {
     // Arrange
     const entriesAt = (total: number) => transcriptEntriesFromLog(window(total, 10), NOW);
     const view = await mountTracked(inChat(entriesAt(16)));

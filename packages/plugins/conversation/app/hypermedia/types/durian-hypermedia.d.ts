@@ -325,6 +325,23 @@ export interface ParseOptions {
   readonly idPrefix?: string;
   /** Caps (default: Durian's `LIMITS`): only the keys of `Limits` exist. */
   readonly limits?: Readonly<Partial<Limits>>;
+  /** Checks every link and image URL (the parser applies it, and the renderer again). */
+  readonly urlPolicy?: UrlPolicy;
+  /**
+   * A host's own inline tokens in prose, tried BEFORE Markdown's own (`src/markdown.ts`): each match becomes a `ref` node
+   * carrying its raw text. Pass the same array every time (Durian caches the lexer by its identity).
+   */
+  readonly inlines?: readonly InlineDef[];
+}
+
+/** The host's URL hook: the URL to use, or `null` to drop it (the text stays, without a link). */
+export type UrlPolicy = (url: string, kind: 'link' | 'image') => string | null;
+
+/** A host inline token (`src/markdown.ts`): a pattern with no `g`/`y` flag; the React entry adds its `Component`. */
+export interface InlineDef {
+  /** lower case letters, digits and dashes */
+  readonly name: string;
+  readonly match: RegExp;
 }
 
 export declare function parse(text: string, options?: ParseOptions): Document;

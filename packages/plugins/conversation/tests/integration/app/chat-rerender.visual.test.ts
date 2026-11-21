@@ -96,7 +96,9 @@ const framesSettled = async (tab: Page): Promise<void> =>
 const wordsAt = (second: number): string => (second % 2 === 0 ? `question ${second}` : `Here is answer ${second}.`);
 
 describe('what the reader is doing survives new messages', () => {
-  it('keeps the interactive frame, its picked tab and an open tool group through five new messages', async () => {
+  // r12 H2: no `fy-render` frame in a transcript message until r12 H3 re-hosts the block (see the unit twin in
+  // tests/unit/app/chat/chat-rerender-stability.test.tsx). H3 turns this back on, unchanged.
+  it.skip('keeps the interactive frame, its picked tab and an open tool group through five new messages', async () => {
     const context = await browser.newContext({
       viewport: { width: 1_440, height: 900 },
       colorScheme: 'light',
