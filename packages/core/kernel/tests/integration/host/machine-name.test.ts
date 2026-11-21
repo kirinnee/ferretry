@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { type Admission, AdmissionPort } from '../../../contract/bound.ts';
 import { jsonResponse, queryFrom } from '../../../contract/http.ts';
@@ -20,6 +20,7 @@ import { TestClient } from '../../unit/host-session/harness.ts';
 import { relayCrypto } from '../../unit/host-session/identities.ts';
 
 const homes: string[] = [];
+const homeOf = new WeakMap<RunningHost, string>();
 const running: RunningHost[] = [];
 afterEach(async () => {
   for (const host of running.splice(0)) await host.stop();
@@ -233,8 +234,10 @@ describe('a machine name typed while pairing is the machine’s name from the an
     });
     if (outcome.kind !== 'running') throw new Error(outcome.sentence);
     running.push(outcome.host);
+    homeOf.set(outcome.host, home);
     return outcome.host;
   }
+  const hostHome = (host: RunningHost): string => homeOf.get(host) ?? '';
 
   test('the name is saved in host.yaml, answered, and read by the next mint', async () => {
     const host = await bootPairing();
@@ -250,6 +253,28 @@ describe('a machine name typed while pairing is the machine’s name from the an
     await until(async () => (await mintedName(host)) === 'pebox', 'the owner name to be in effect');
     expect((await pairAs(host, 'Studio box'))['daemonName']).toBe('pebox');
     expect(await mintedName(host)).toBe('pebox');
+  });
+
+  test('a host.yaml an owner renamed on disk is never replaced, even before the watcher has seen the rename', async () => {
+    const host = await bootPairing();
+    await mkdir(`${hostHome(host)}/config`, { recursive: true });
+    await writeFile(`${hostHome(host)}/config/host.yaml`, '# the owner’s\nname: "pebox"\n');
+    // No wait: the write must read the disk it would replace, not the version the last reload saw.
+    expect((await pairAs(host, 'Studio box'))['daemonName']).toBe('pebox');
+    expect(await readFile(`${hostHome(host)}/config/host.yaml`, 'utf8')).toBe('# the owner’s\nname: "pebox"\n');
+  });
+
+  test('a malformed host.yaml is preserved byte for byte, and the answer is the name the machine goes by', async () => {
+    const host = await bootPairing();
+    await mkdir(`${hostHome(host)}/config`, { recursive: true });
+    const broken = 'name: [unterminated\nother: 1\n';
+    await writeFile(`${hostHome(host)}/config/host.yaml`, broken);
+    await until(async () => {
+      const status = json(await host.dispatch(request('GET', '/v1/config/status')));
+      return JSON.stringify(status.issues ?? []).includes('host.yaml');
+    }, 'the broken file to be seen');
+    expect((await pairAs(host, 'Studio box'))['daemonName']).toBe(HOSTNAME);
+    expect(await readFile(`${hostHome(host)}/config/host.yaml`, 'utf8')).toBe(broken);
   });
 
   test('a name the daemon’s rule refuses is not saved', async () => {

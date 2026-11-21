@@ -92,14 +92,16 @@ describe('the pairing exchange', () => {
     should(result.daemon).equal(daemonId);
   });
 
-  it('hands the shell the machine name the person typed, to save with the new grant', async () => {
+  it('never queues the typed name for a later write: the daemon kept the owner’s own name, so that write would replace it', async () => {
     const { store, claims, added, base } = harness();
     const ports: PairingPorts = {
       ...base,
-      pairDirect: async input => ({ kind: 'paired', response: await sealedPaired(input, response()) }) as never,
+      pairDirect: async input =>
+        ({ kind: 'paired', response: await sealedPaired(input, { ...response(), daemonName: 'pebox' }) }) as never,
     };
     await exchangePairing({ ports, claims, store }, seed, 'My phone', 'Studio box');
-    should(added[0]).have.property('chosenName', 'Studio box');
+    should(added[0]).have.property('machine', 'pebox');
+    should(added[0]).not.have.property('chosenName');
   });
 
   it('sends the machine name in the pairing, and takes the name the daemon answers with as the machine’s', async () => {

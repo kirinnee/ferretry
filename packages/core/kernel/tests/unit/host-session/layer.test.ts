@@ -1034,8 +1034,21 @@ describe('the session layer: pairing and modes', () => {
     expect(second.last('paired')).toMatchObject({ response: { daemonName: 'host-box' } });
   });
 
-  test('a machine name the host did not take (it already has one) leaves the paired answer as it was', async () => {
-    const fx = await fixture({ nameMachine: async () => undefined });
+  test('a machine name the host answers the owner’s own for (it already has one) puts that name in the answer', async () => {
+    const fx = await fixture({ nameMachine: async () => 'pebox' });
+    const client = TestClient.open(fx, 'direct', { address: '192.0.2.9' });
+    await client.handshake(fx.daemonId);
+    await client.send({ ...(await pairRecord(client)), machineName: 'Studio box' });
+    await client.pump();
+    expect(client.last('paired')).toMatchObject({ response: { daemonName: 'pebox' } });
+  });
+
+  test('a host that cannot answer the name leaves the paired answer as it was', async () => {
+    const fx = await fixture({
+      nameMachine: async () => {
+        throw new Error('the disk');
+      },
+    });
     const client = TestClient.open(fx, 'direct', { address: '192.0.2.9' });
     await client.handshake(fx.daemonId);
     await client.send({ ...(await pairRecord(client)), machineName: 'Studio box' });

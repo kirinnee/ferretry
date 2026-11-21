@@ -89,8 +89,8 @@ export async function exchangePairing(
       carriers: response.carriers,
       // The shell then offers a machine with no name of the owner's a name, once (skippable, governed by the daemon).
       askName: true,
-      // Only a name the daemon did not take (it already had one, or is an older daemon) is left for the shell to try.
-      ...(machineName === undefined || response.daemonName === machineName.trim() ? {} : { chosenName: machineName }),
+      // No `chosenName`: the typed name is never queued for a later write. The daemon answered the name the machine goes
+      // by, and when it already had an owner's name it kept it, so a queued write would replace that name once unlocked.
     });
   } catch (reason) {
     // Only a key `save` wrote can differ from `previous`; before `save` there is nothing to undo.

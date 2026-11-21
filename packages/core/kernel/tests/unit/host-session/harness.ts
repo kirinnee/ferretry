@@ -145,11 +145,7 @@ export interface Fixture {
 }
 
 export async function fixture(
-  options: {
-    lease?: AccessLeasePolicy;
-    crypto?: SessionCrypto;
-    nameMachine?: (name: string) => Promise<string | undefined>;
-  } = {},
+  options: { lease?: AccessLeasePolicy; crypto?: SessionCrypto; nameMachine?: (name: string) => Promise<string> } = {},
 ): Promise<Fixture> {
   const identity = await newDaemonIdentity();
   const clock = new FakeClock();

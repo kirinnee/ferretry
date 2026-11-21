@@ -136,6 +136,7 @@ import {
 } from './limits.ts';
 import { createIdentitySigner, signerFor } from './signer.ts';
 import * as refusal from './refusal-note.ts';
+import { answerWithMachineName } from './pair-name.ts';
 
 /** The kernel's route table, as the one function a session's request needs from it. */
 export type SessionDispatch = (request: ApiRequest) => Promise<ApiResponse>;
@@ -174,9 +175,9 @@ export interface SessionLayerDeps {
   readonly lease?: AccessLeasePolicy;
   /**
    * Keeps the name a person typed on the pair screen as this machine's name, when it has none of its owner's yet, and
-   * answers the name it now goes by (`undefined`: not taken). Asked only after a code was accepted.
+   * answers the name the machine goes by afterwards, whoever set it. Asked only after a code was accepted.
    */
-  readonly nameMachine?: (name: string) => Promise<string | undefined>;
+  readonly nameMachine?: (name: string) => Promise<string>;
   /**
    * Where a session that ends on a record this daemon could not read says so (the kind and the shape of what was
    * wrong, never a value). Absent means silence, as before.
@@ -1070,19 +1071,12 @@ class SealedSession implements CarrierLink {
     if (!this.#live()) return;
     const paired = redeemed !== undefined && redeemed.outcome === 'paired';
     // The name is kept only once the code was accepted, so the answer and the passkey made next already carry it.
-    const response = paired ? await this.#nameMachine(redeemed.fields['response'], request.machineName) : undefined;
+    const response = paired
+      ? await answerWithMachineName(redeemed.fields['response'], request.machineName, this.deps.nameMachine)
+      : undefined;
     if (!this.#live()) return;
     this.#queue(paired ? { t: 'paired', protocol: SESSION_PROTOCOL_ID, response } : refused);
     this.#conclude();
-  }
-
-  /** The paired answer with the machine's new name in it, when the host took the name the person typed. */
-  async #nameMachine(response: unknown, typed: string | undefined): Promise<unknown> {
-    if (typed === undefined || this.deps.nameMachine === undefined) return response;
-    const taken = await this.deps.nameMachine(typed).catch(() => undefined);
-    return taken === undefined || typeof response !== 'object' || response === null
-      ? response
-      : { ...response, daemonName: taken };
   }
 
   /** A share code, redeemed through the `member` mode: one attempt, one PADDED sealed outcome, then `4440`. */
