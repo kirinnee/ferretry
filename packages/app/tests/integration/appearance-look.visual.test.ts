@@ -14,8 +14,11 @@
  *      background + grain swatch that wears the page's own tokens, and a disabled field whose computed look differs from the
  *      enabled one (opacity, colour, cursor).
  *   5. THE MOTION PREVIEW draws the style's own spinner: moving when motion is allowed, no running animation when still.
- *   6. FOCUS (S13): the switch, a palette chip and a style card draw a ring INSIDE their box and inside every clipping
- *      ancestor, >= 2px and >= 3:1 against what is behind it.
+ *      The swatch's GRAIN is asserted on Glass (a grain-bearing style): the `::after` image is the page's own at the style's opacity,
+ *      and the read goes to `none` when the image is removed.
+ *   6. FOCUS (S13): the switch, a palette chip and a style card draw a ring >= 2px, INSIDE the box (outline width + offset <= 0),
+ *      inside every clipping ancestor's padding box on both axes, and >= 3:1 against what is PAINTED behind it (the border and fill
+ *      under the stroke, composited). Gen Z's style card keeps its 3px outline at +5px until r11 T12 lands: pinned as KNOWN.
  *
  * Set `FY_T13_SHOTS_DIR` to keep `<viewport>-<style>-<mode>.png` (the Look group, 4 styles x light/dark x 1280/390).
  * Set `FY_T13_MEASURE=1` to print the measured numbers.
@@ -26,7 +29,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { STYLES as CATALOGUE_STYLES } from '../../src/theme/catalog.ts';
-import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
+import { COLOUR_TOOLS, type ColourTools, sceneBuilder, sharedChromium } from '../support/browser/index.ts';
 
 setDefaultTimeout(120_000);
 
@@ -123,6 +126,157 @@ const threeDots = (tab: Page): Promise<string[]> =>
     }
     return found;
   });
+
+/** What the focus-ring probe reads off the control that holds keyboard focus (all measured in the page). */
+interface FocusRing {
+  readonly style: string;
+  readonly width: number;
+  readonly offset: number;
+  /** How far the ring's outer edge sits outside the control's border box, px (0 = drawn inside it). */
+  readonly reach: number;
+  /** The lowest contrast of the ring colour against anything the ring is painted over: the page outside it, the control's border, the control's fill. */
+  readonly worst: number;
+  readonly behind: readonly { readonly what: string; readonly ratio: number }[];
+  /** Set when the control paints a background-image, which the colour arithmetic cannot read. */
+  readonly gradient: boolean;
+  /** One line per clipping ancestor whose PADDING box the ring's outer rect crosses, on any of the four sides. */
+  readonly clipped: readonly string[];
+}
+
+/**
+ * The page function: the ring of the focused control, measured as the browser painted it. The ring is a band `width` thick whose outer edge
+ * sits `offset + width` outside the border box (negative = inside). Walking inward from the border box edge it overlays, in order, whatever lies
+ * OUTSIDE the box (the page behind it), then the control's BORDER, then its FILL, so the ring is judged against each of those it overlaps.
+ */
+const measureFocusRing = (): FocusRing | null => {
+  const colour = (window as unknown as { __colour: ColourTools }).__colour;
+  const active = document.activeElement as HTMLElement | null;
+  if (active === null || active === document.body) return null;
+  const drawn = (element: Element): boolean => {
+    const css = getComputedStyle(element);
+    return (
+      css.outlineStyle !== 'none' && Number.parseFloat(css.outlineWidth) > 0 && colour.rgba(css.outlineColor)[3] > 0
+    );
+  };
+  // A visually-hidden radio (1px, sr-only) draws a 1px outline of its own that nobody can see: the ring a person sees is the card's or the chip's.
+  const hidden = active.getBoundingClientRect().width <= 2 && active.getBoundingClientRect().height <= 2;
+  let owner: HTMLElement = active;
+  if (hidden || !drawn(owner))
+    for (let node = active.parentElement; node !== null && node !== document.body; node = node.parentElement)
+      if (drawn(node)) {
+        owner = node;
+        break;
+      }
+  const css = getComputedStyle(owner);
+  const width = css.outlineStyle === 'none' ? 0 : Number.parseFloat(css.outlineWidth);
+  const offset = Number.parseFloat(css.outlineOffset) || 0;
+  const reach = Math.max(0, offset + width);
+  const ink = colour.rgba(css.outlineColor);
+  const over = (below: readonly number[]): number => colour.ratio(colour.over(ink, [...below, 1]), below);
+
+  const borders = (['Top', 'Right', 'Bottom', 'Left'] as const).map(side => ({
+    width: Number.parseFloat(css.getPropertyValue(`border-${side.toLowerCase()}-width`)),
+    colour: colour.rgba(css.getPropertyValue(`border-${side.toLowerCase()}-color`)),
+  }));
+  const thin = Math.min(...borders.map(border => border.width));
+  const thick = Math.max(...borders.map(border => border.width));
+  const fill = colour.backdrop(owner);
+  const behind: { what: string; ratio: number }[] = [];
+  // The band, measured inward from the border box edge, runs from -(offset + width) to -offset.
+  const outer = -(offset + width);
+  const inner = -offset;
+  if (outer < 0) behind.push({ what: 'the page outside', ratio: over(colour.backdrop(owner.parentElement ?? owner)) });
+  if (inner > 0 && outer < thick)
+    for (const border of borders)
+      if (border.width > 0 && border.colour[3] > 0)
+        behind.push({ what: 'the border', ratio: over(colour.over(border.colour, [...fill, 1])) });
+  if (inner > thin) behind.push({ what: 'the fill', ratio: over(fill) });
+
+  const clips = (element: Element): boolean => {
+    const style = getComputedStyle(element);
+    return (
+      style.overflowX !== 'visible' ||
+      style.overflowY !== 'visible' ||
+      /paint|content|strict/.test(style.contain) ||
+      style.clipPath !== 'none'
+    );
+  };
+  const rect = owner.getBoundingClientRect();
+  const box = {
+    left: rect.left - reach,
+    top: rect.top - reach,
+    right: rect.right + reach,
+    bottom: rect.bottom + reach,
+  };
+  const clipped: string[] = [];
+  for (let node = owner.parentElement; node !== null && node !== document.documentElement; node = node.parentElement) {
+    if (!clips(node)) continue;
+    const frame = node.getBoundingClientRect();
+    const pad = {
+      left: frame.left + node.clientLeft,
+      top: frame.top + node.clientTop,
+      right: frame.left + node.clientLeft + node.clientWidth,
+      bottom: frame.top + node.clientTop + node.clientHeight,
+    };
+    for (const side of ['left', 'top'] as const)
+      if (box[side] < pad[side] - 0.5)
+        clipped.push(
+          `${node.tagName.toLowerCase()}.${node.className} ${side}: ${(pad[side] - box[side]).toFixed(1)}px`,
+        );
+    for (const side of ['right', 'bottom'] as const)
+      if (box[side] > pad[side] + 0.5)
+        clipped.push(
+          `${node.tagName.toLowerCase()}.${node.className} ${side}: ${(box[side] - pad[side]).toFixed(1)}px`,
+        );
+  }
+  return {
+    style: css.outlineStyle,
+    width,
+    offset,
+    reach,
+    worst: behind.length === 0 ? 0 : Math.min(...behind.map(part => part.ratio)),
+    behind,
+    gradient: css.backgroundImage !== 'none',
+    clipped,
+  };
+};
+
+/** Give the control real keyboard focus (so `:focus-visible` draws) and read its ring. */
+const focusRing = async (tab: Page, control: ReturnType<Page['locator']>): Promise<FocusRing> => {
+  await tab.evaluate(COLOUR_TOOLS);
+  await control.evaluate(element => (element as HTMLElement).focus());
+  await tab.keyboard.press('Shift+Tab');
+  await tab.keyboard.press('Tab');
+  const ring = await tab.evaluate(measureFocusRing);
+  if (ring === null) throw new Error('nothing holds focus');
+  return ring;
+};
+
+const FOCUS_TARGETS = (tab: Page) => [
+  { name: 'switch', locator: tab.getByRole('switch', { name: /Don.t change my colours/ }) },
+  { name: 'palette chip', locator: tab.locator('[data-palette-chip] input:checked') },
+  { name: 'style card', locator: tab.locator('[data-choice] input:checked') },
+];
+
+/** The owner's S13 rule, as numbers: a visible solid ring >= 2px, drawn inside, inside every clipping padding box, >= 3:1 against what it overlays. */
+const judgeRing = (where: string, ring: FocusRing): void => {
+  if (measuring)
+    console.log(
+      `MEASURED ${where}: width ${ring.width} offset ${ring.offset} reach ${ring.reach} worst ${ring.worst.toFixed(2)} (${ring.behind.map(part => `${part.what} ${part.ratio.toFixed(2)}`).join(', ')})`,
+    );
+  expect(ring.style, `${where}: a solid ring`).not.toBe('none');
+  expect(ring.width, `${where}: >= 2px`).toBeGreaterThanOrEqual(2);
+  expect(
+    ring.reach,
+    `${where}: outline width ${ring.width} + offset ${ring.offset} puts it ${ring.reach}px outside`,
+  ).toBe(0);
+  expect(ring.clipped, `${where}: inside every clipping padding box, on both axes`).toEqual([]);
+  expect(ring.gradient, `${where}: the control paints a flat fill the contrast can be read against`).toBe(false);
+  expect(
+    ring.worst,
+    `${where}: contrast against what is painted behind the ring (${ring.behind.map(part => `${part.what} ${part.ratio.toFixed(2)}`).join(', ')})`,
+  ).toBeGreaterThanOrEqual(3);
+};
 
 const pick = async (tab: Page, style: string): Promise<void> => {
   await tab.locator(`[data-choice="${style}"]`).click();
@@ -310,6 +464,54 @@ describe('r11 T13 · the Appearance page', () => {
     }
   });
 
+  for (const scheme of ['light', 'dark'] as const)
+    it(`the specimen swatch draws the grain of a grain-bearing style: Glass shows its image at its opacity, Studio none (${scheme})`, async () => {
+      const { tab, close } = await open(VIEWPORTS[0], { scheme, seed: { ...INDIGO_STUDIO, mode: scheme } });
+      const readGrain = () =>
+        tab.evaluate(() => {
+          const swatch = document.querySelector('[data-spec-backdrop]') as HTMLElement;
+          const after = getComputedStyle(swatch, '::after');
+          const page = getComputedStyle(document.body, '::after');
+          const box = swatch.getBoundingClientRect();
+          return {
+            image: after.backgroundImage,
+            opacity: after.opacity,
+            blend: after.mixBlendMode,
+            display: after.display,
+            position: after.position,
+            swatch: { width: box.width, height: box.height },
+            token: getComputedStyle(document.documentElement).getPropertyValue('--grain-alpha').trim(),
+            pageImage: page.backgroundImage,
+            pageOpacity: page.opacity,
+          };
+        });
+      try {
+        await pick(tab, 'studio');
+        const none = await readGrain();
+        expect(none.image, 'studio has no grain image').toBe('none');
+        await pick(tab, 'glass');
+        await tab.waitForTimeout(600);
+        const grain = await readGrain();
+        if (measuring)
+          console.log(
+            `MEASURED glass ${scheme} grain: ${JSON.stringify({ ...grain, image: grain.image.slice(0, 40) })}`,
+          );
+        expect(grain.image, 'glass: the swatch layer paints the grain image').toMatch(/^url\("?data:image\/svg/);
+        expect(grain.image, 'glass: and it is the page’s own grain image').toBe(grain.pageImage);
+        expect(Number(grain.opacity), 'glass: at its own grain opacity').toBe(scheme === 'light' ? 0.07 : 0.05);
+        expect(grain.opacity, 'glass: the swatch’s opacity is the page’s').toBe(grain.pageOpacity);
+        expect(Number(grain.token), 'glass: --grain-alpha is what the swatch reads').toBe(Number(grain.opacity));
+        expect(grain.position, 'the grain layer covers the swatch').toBe('absolute');
+        expect(grain.display).not.toBe('none');
+        expect(grain.swatch.width, 'the swatch has a size').toBeGreaterThan(40);
+        // Sensitivity: take the image away and this read must say so (the old test passed with the image forced to none).
+        await tab.addStyleTag({ content: '.fy-spec__backdrop::after{background-image:none!important}' });
+        expect((await readGrain()).image, 'with the image removed the probe reads none').toBe('none');
+      } finally {
+        await close();
+      }
+    });
+
   it('the Motion preview draws the style’s own spinner: moving when motion is on, no running animation when still', async () => {
     const { tab, close } = await open(VIEWPORTS[0]);
     try {
@@ -352,93 +554,72 @@ describe('r11 T13 · the Appearance page', () => {
     }
   });
 
-  it('the new controls keep their focus ring inside, inside every clipping ancestor, at >= 3:1 (S13)', async () => {
+  it('the new controls keep their focus ring inside the control, inside every clipping ancestor (both axes) and >= 3:1 against what is painted behind it (S13)', async () => {
     for (const viewport of VIEWPORTS) {
       for (const scheme of ['light', 'dark'] as const) {
         const { tab, close } = await open(viewport, { scheme, seed: { ...INDIGO_STUDIO, mode: scheme } });
         try {
-          const targets = [
-            { name: 'switch', locator: tab.getByRole('switch', { name: /Don.t change my colours/ }) },
-            { name: 'palette chip', locator: tab.locator('[data-palette-chip] input:checked') },
-            { name: 'style card', locator: tab.locator('[data-choice] input:checked') },
-          ];
-          for (const target of targets) {
+          for (const target of FOCUS_TARGETS(tab)) {
             const where = `${viewport.name} ${scheme} ${target.name}`;
-            expect(await target.locator.count(), `${where}: exists`).toBe(1);
-            await target.locator.evaluate(element => (element as HTMLElement).focus());
-            await tab.keyboard.press('Shift+Tab');
-            await tab.keyboard.press('Tab');
-            const ring = await target.locator.evaluate(focused => {
-              const owner = focused.closest<HTMLElement>('label') ?? (focused as HTMLElement);
-              const box = owner.getBoundingClientRect();
-              const target = owner.matches(':focus-visible') ? owner : (owner.querySelector(':focus-visible') ?? owner);
-              const css = getComputedStyle(
-                owner.matches(':has(:focus-visible)') && !owner.matches(':focus-visible')
-                  ? owner
-                  : (target as HTMLElement),
-              );
-              // The colour behind the ring: the first opaque background walking up from the owner.
-              const parse = (value: string): [number, number, number, number] => {
-                const m = value.match(/[\d.]+/g)?.map(Number) ?? [0, 0, 0, 0];
-                if (value.startsWith('color('))
-                  return [(m[0] ?? 0) * 255, (m[1] ?? 0) * 255, (m[2] ?? 0) * 255, m[3] ?? 1];
-                return [m[0] ?? 0, m[1] ?? 0, m[2] ?? 0, m[3] ?? 1];
-              };
-              let behind: [number, number, number, number] = [255, 255, 255, 1];
-              for (let node: Element | null = owner.parentElement; node !== null; node = node.parentElement) {
-                const bg = parse(getComputedStyle(node).backgroundColor);
-                if (bg[3] > 0.99) {
-                  behind = bg;
-                  break;
-                }
-              }
-              const clips: { x: number; y: number; right: number; bottom: number }[] = [];
-              for (let node = owner.parentElement; node !== null; node = node.parentElement) {
-                const style = getComputedStyle(node);
-                if (style.overflowX !== 'visible' || style.overflowY !== 'visible') {
-                  const rect = node.getBoundingClientRect();
-                  clips.push({ x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom });
-                }
-              }
-              return {
-                offset: parseFloat(css.outlineOffset),
-                width: parseFloat(css.outlineWidth),
-                style: css.outlineStyle,
-                colour: parse(css.outlineColor),
-                behind,
-                box: { x: box.x, y: box.y, right: box.right, bottom: box.bottom },
-                clips,
-              };
-            });
-            const luminance = ([r, g, b]: number[]) => {
-              const f = (v: number) => {
-                const s = v / 255;
-                return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-              };
-              return 0.2126 * f(r as number) + 0.7152 * f(g as number) + 0.0722 * f(b as number);
-            };
-            const a = luminance(ring.colour);
-            const b = luminance(ring.behind);
-            const contrast = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-            expect(ring.style, `${where}: a solid ring`).not.toBe('none');
-            expect(ring.width, `${where}: >= 2px`).toBeGreaterThanOrEqual(2);
-            expect(ring.offset, `${where}: drawn inside (offset ${ring.offset})`).toBeLessThanOrEqual(0);
-            expect(contrast, `${where}: ring contrast ${contrast.toFixed(2)}`).toBeGreaterThanOrEqual(3);
-            for (const clip of ring.clips) {
-              expect(ring.box.x, `${where}: inside a clipping ancestor (left)`).toBeGreaterThanOrEqual(clip.x - 0.5);
-              expect(ring.box.right, `${where}: inside a clipping ancestor (right)`).toBeLessThanOrEqual(
-                clip.right + 0.5,
-              );
-            }
-            if (measuring)
-              console.log(
-                `MEASURED ${where}: offset ${ring.offset} width ${ring.width} contrast ${contrast.toFixed(2)}`,
-              );
+            const ring = await focusRing(tab, target.locator);
+            judgeRing(where, ring);
           }
         } finally {
           await close();
         }
       }
+    }
+  });
+
+  // KNOWN (r11 T12 owns it): Gen Z's style cards still draw their own 3px outline at +5px (`genz.css` `.fy-cc__card:has(:focus-visible)`),
+  // outside the card. T13's two css files cannot change that file, so the genz style card is PINNED to exactly that until T12 lands
+  // (this assert then fails on purpose: delete the pin and the genz card is judged like every other control). The switch and the
+  // palette chips are T13's own and are judged in Gen Z like everywhere else.
+  it('in Gen Z the switch and palette chips are judged in full, and the style card is pinned to the known T12 ring', async () => {
+    for (const scheme of ['light', 'dark'] as const) {
+      const { tab, close } = await open(VIEWPORTS[0], { scheme, seed: { ...INDIGO_STUDIO, mode: scheme } });
+      try {
+        await pick(tab, 'genz');
+        for (const target of FOCUS_TARGETS(tab)) {
+          const where = `genz ${scheme} ${target.name}`;
+          const ring = await focusRing(tab, target.locator);
+          if (target.name !== 'style card') {
+            judgeRing(where, ring);
+            continue;
+          }
+          expect(
+            { width: ring.width, offset: ring.offset },
+            `${where}: KNOWN T12 ring (3px at +5px). If this fails, T12 has landed: remove the pin`,
+          ).toEqual({ width: 3, offset: 5 });
+        }
+      } finally {
+        await close();
+      }
+    }
+  });
+
+  it('the focus-ring probe is sensitive: a stroke that reaches outside, or a fill the ring cannot be seen on, is caught', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], { seed: INDIGO_STUDIO });
+    try {
+      const chip = tab.locator('[data-palette-chip] input:checked');
+      const clean = await focusRing(tab, chip);
+      expect(clean.reach, 'a clean chip ring reaches 0px outside').toBe(0);
+      expect(clean.worst, 'and holds >= 3:1').toBeGreaterThanOrEqual(3);
+      // 1px outside: the same ring with its offset 1px further out.
+      await tab.addStyleTag({
+        content: '.fy-ap-chip:has(:focus-visible){outline-offset:calc(-1 * var(--focus-width) + 1px)!important}',
+      });
+      const outside = await focusRing(tab, chip);
+      expect(outside.reach, 'a ring 1px outside reaches 1px').toBe(1);
+      // The fill under the stroke is the ring's own colour (the old test passed this).
+      await tab.addStyleTag({
+        content:
+          '.fy-ap-chip{outline-offset:calc(-1 * var(--focus-width))!important}.fy-ap-chip,.fy-ap-chip[data-selected="true"]{background:var(--focus-color)!important;border-color:var(--focus-color)!important}',
+      });
+      const same = await focusRing(tab, chip);
+      expect(same.worst, 'a ring on its own colour has contrast ~1').toBeLessThan(1.5);
+    } finally {
+      await close();
     }
   });
 

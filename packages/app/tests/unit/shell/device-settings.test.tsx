@@ -36,7 +36,7 @@ describe('Settings › This device', () => {
     expect(page().querySelector('select')).toBeNull();
   });
 
-  test('Style is one card per style, each drawn in its own style and the palette in force', async () => {
+  test("Style is one card per style, each drawn in its own style and in that style's own default palette", async () => {
     await boot();
     const cards = [...page().querySelectorAll('[role="radiogroup"][aria-label="Style"] [data-choice]')];
     expect(cards.map(card => card.getAttribute('data-choice'))).toEqual(STYLES.map(style => style.id));
@@ -44,7 +44,8 @@ describe('Settings › This device', () => {
       const id = card.getAttribute('data-choice');
       const scene = card.querySelector('[data-swatch]');
       expect(scene?.getAttribute('data-style')).toBe(id);
-      expect(scene?.getAttribute('data-palette')).toBe(document.documentElement.dataset.palette ?? 'studio');
+      // r11 T13: a card shows the style as it will look when picked, i.e. in the style's default palette.
+      expect(scene?.getAttribute('data-palette')).toBe(STYLES.find(style => style.id === id)?.defaultPalette);
     }
   });
 
@@ -88,7 +89,20 @@ describe('Settings › This device', () => {
     const sections = [...(specimens[0]?.querySelectorAll('[data-spec-section]') ?? [])].map(node =>
       node.getAttribute('data-spec-section'),
     );
-    expect(sections).toEqual(['Type', 'Buttons', 'Input', 'Panel', 'Shape', 'Spacing', 'Select', 'Rows']);
+    expect(sections).toEqual([
+      'Type',
+      'Buttons',
+      'Input',
+      'Panel',
+      'Shape',
+      'Spacing',
+      'Select',
+      'Markdown',
+      'Hypermedia',
+      'Spinner',
+      'Background',
+      'Rows',
+    ]);
     const states = [...(specimens[0]?.querySelectorAll('.kt-btn[data-spec-state]') ?? [])].map(node =>
       node.getAttribute('data-spec-state'),
     );

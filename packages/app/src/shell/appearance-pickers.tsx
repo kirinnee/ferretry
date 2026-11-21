@@ -79,17 +79,19 @@ export function StylePicker({
   readonly onChange: (style: StyleId) => void;
 }) {
   return (
-    <ChoiceCards
-      label="Style"
-      value={value}
-      onChange={id => onChange(id as StyleId)}
-      options={styles.map(style => ({
-        id: style.id,
-        title: style.label,
-        line: style.blurb,
-        demo: <StyleMini look={{ style: style.id, palette: cardPalette(style, palette, keepPalette), mode }} />,
-      }))}
-    />
+    <div className="fy-ap-styles">
+      <ChoiceCards
+        label="Style"
+        value={value}
+        onChange={id => onChange(id as StyleId)}
+        options={styles.map(style => ({
+          id: style.id,
+          title: style.label,
+          line: style.blurb,
+          demo: <StyleMini look={{ style: style.id, palette: cardPalette(style, palette, keepPalette), mode }} />,
+        }))}
+      />
+    </div>
   );
 }
 
