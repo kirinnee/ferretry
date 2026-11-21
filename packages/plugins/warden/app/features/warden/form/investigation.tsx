@@ -6,7 +6,7 @@
 import type { WardenAccount, WardenConfig, WardenLogin } from '../../../wire.ts';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useId } from 'react';
-import { ModelSelect } from '@ferretry/app/ui';
+import { ModelSelect, SelectBox } from '@ferretry/app/ui';
 import type { PickerAccount } from '../../../lib/account-picker.ts';
 import {
   movedAccount,
@@ -35,6 +35,7 @@ export function InvestigationSection({
   readonly machineDefault: string | undefined;
 }) {
   const name = useId();
+  const loginId = useId();
   const head = value.accounts[0];
   // The login a model is pinned on: the chosen head, else the machine default it stands in for.
   const base = head ?? (machineDefault === undefined ? undefined : { agent: machineDefault });
@@ -70,26 +71,25 @@ export function InvestigationSection({
       </p>
       <Rows>
         <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-            Login
-            <select
+          <div className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+            <label htmlFor={loginId}>Login</label>
+            <SelectBox
               className={fieldClass}
+              id={loginId}
+              label="Login"
               value={head?.agent ?? ''}
-              onChange={event => {
+              onChange={next => {
                 // The empty option hands the choice back to the machine's default runtime.
-                if (event.target.value === '') return onChange({ ...value, accounts: [] });
-                const picked = logins.find(account => account.agent === event.target.value);
+                if (next === '') return onChange({ ...value, accounts: [] });
+                const picked = logins.find(account => account.agent === next);
                 if (picked !== undefined) onChange(withLogin(value, picked));
               }}
-            >
-              <option value="">{unchosen}</option>
-              {logins.map(account => (
-                <option key={account.agent} value={account.agent}>
-                  {loginLabel(account.agent, runtimes)}
-                </option>
-              ))}
-            </select>
-          </label>
+              options={[
+                { value: '', label: unchosen },
+                ...logins.map(account => ({ value: account.agent, label: loginLabel(account.agent, runtimes) })),
+              ]}
+            />
+          </div>
           {runtime?.modelCatalog === undefined ? (
             <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
               Model

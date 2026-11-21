@@ -4,7 +4,7 @@
  * Save / Cancel buttons auto-width on one line. The wording about what a save records is kept whole.
  */
 import { SettingGroup } from '@ferretry/app';
-import { Button } from '@ferretry/app/ui';
+import { Button, SelectBox } from '@ferretry/app/ui';
 import { type FormEvent, type ReactNode, useEffect, useId, useRef } from 'react';
 import {
   ANALYTICS_PRICING_PROVIDERS,
@@ -83,7 +83,7 @@ export function PricingEditor({
     event.preventDefault();
     onSubmit();
   };
-  const inputClass = 'kt-input min-w-0';
+  const inputClass = 'kt-input !min-h-[44px] min-w-0';
 
   return (
     <section
@@ -160,23 +160,20 @@ export function PricingEditor({
               />
             </Field>
             <Field id={`${formId}-provider`} label="Provider" error={errors.provider}>
-              <select
+              <SelectBox
                 id={`${formId}-provider`}
                 className={inputClass}
+                label="Provider"
                 value={draft.provider}
                 disabled={busy}
-                aria-invalid={errors.provider !== undefined}
+                aria-describedby={errors.provider ? `${formId}-provider-error` : undefined}
                 data-pricing-field="provider"
-                onChange={event =>
-                  onChange({ ...draft, provider: event.currentTarget.value as PricingDraft['provider'] })
-                }
-              >
-                {ANALYTICS_PRICING_PROVIDERS.map(provider => (
-                  <option key={provider} value={provider}>
-                    {PROVIDER_LABELS[provider]}
-                  </option>
-                ))}
-              </select>
+                onChange={next => onChange({ ...draft, provider: next as PricingDraft['provider'] })}
+                options={ANALYTICS_PRICING_PROVIDERS.map(provider => ({
+                  value: provider,
+                  label: PROVIDER_LABELS[provider],
+                }))}
+              />
             </Field>
             <Field
               id={`${formId}-valid-from`}

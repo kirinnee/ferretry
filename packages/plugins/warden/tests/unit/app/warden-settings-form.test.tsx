@@ -10,6 +10,7 @@ import {
 } from '../../../app/features/warden/warden-settings-model.ts';
 import type { PickerAccount } from '../../../app/lib/account-picker.ts';
 import { render, run } from '@ferretry/app/testing';
+import { SelectBox } from '@ferretry/app/ui';
 import { wardenConfig } from '../../support/app/warden.ts';
 
 interface HarnessProps {
@@ -66,6 +67,13 @@ const control = (renderer: ReactTestRenderer, label: string, type: string): Reac
   const host = renderer.root.find(node => node.type === 'label' && node.children[0] === label);
   return host.find(node => node.type === type);
 };
+
+/** The Login picker: the app's SelectBox (its props are the list and the write), named by the words it carries. */
+const loginBox = (renderer: ReactTestRenderer): ReactTestInstance =>
+  renderer.root.find(node => node.type === SelectBox && node.props.label === 'Login');
+/** The labels of the Login picker's options, in order. */
+const loginLabels = (renderer: ReactTestRenderer): string[] =>
+  (loginBox(renderer).props.options as readonly { label: string }[]).map(option => option.label);
 
 /** Every string under a node, in order. */
 const flat = (node: ReactTestInstance | string): string =>
@@ -259,14 +267,14 @@ describe('WardenSettingsForm', () => {
     );
 
     // Act + Assert: a login from the options moves to the head of the failover order.
-    run(() => control(renderer, 'Login', 'select').props.onChange({ target: { value: 'codex-auto-c' } }));
+    run(() => loginBox(renderer).props.onChange('codex-auto-c'));
     expect(last(changes).accounts).toEqual([
       { agent: 'codex-auto-c', model: 'gpt' },
       { agent: 'claude-auto-a' },
       { agent: 'claude-auto-b' },
     ]);
     const count = changes.length;
-    run(() => control(renderer, 'Login', 'select').props.onChange({ target: { value: 'nobody' } }));
+    run(() => loginBox(renderer).props.onChange('nobody'));
     expect(changes).toHaveLength(count);
 
     run(() => control(renderer, 'Model', 'input').props.onChange({ target: { value: '  ' } }));
@@ -317,8 +325,10 @@ describe('WardenSettingsForm', () => {
     );
 
     // Act
-    const picker = control(renderer, 'Login', 'select');
-    const options = picker.findAllByType('option').map(node => [node.props.value, flat(node)]);
+    const options = (loginBox(renderer).props.options as readonly { value: string; label: string }[]).map(option => [
+      option.value,
+      option.label,
+    ]);
 
     // Assert: the stored value is the name; the words beside it are for the person choosing.
     expect(options.slice(1)).toEqual([
@@ -509,10 +519,7 @@ describe('wardenPrivacyNote', () => {
 
 describe('WardenSettingsForm, when the owner chose no login', () => {
   const unset = wardenConfig({ ...LLM, accounts: [] });
-  const options = (renderer: ReactTestRenderer): string[] =>
-    control(renderer, 'Login', 'select')
-      .findAllByType('option')
-      .map(node => String(node.children.join('')));
+  const options = (renderer: ReactTestRenderer): string[] => loginLabels(renderer);
 
   it("should list the chosen login's catalog for its model, and offer only the efforts that model takes", () => {
     // Arrange — a GLM login (docs/model-catalog.md): GLM-5.3 takes low and high of the Warden's levels
@@ -610,7 +617,7 @@ describe('WardenSettingsForm, when the owner chose no login', () => {
     );
 
     // Act
-    run(() => control(renderer, 'Login', 'select').props.onChange({ target: { value: '' } }));
+    run(() => loginBox(renderer).props.onChange(''));
 
     // Assert
     expect(last(changes).accounts).toEqual([]);
@@ -638,7 +645,7 @@ describe('WardenSettingsForm, when the owner chose no login', () => {
     // Act / Assert
     expect(chosen.root.findAll(node => node.props['data-warden-unknown-login'] === '')).toHaveLength(1);
     expect(text(chosen)).toContain('legacy-wrapper');
-    expect(control(chosen, 'Login', 'select').props.value).toBe('legacy-wrapper');
+    expect(loginBox(chosen).props.value).toBe('legacy-wrapper');
     expect(standIn.root.findAll(node => node.props['data-warden-unknown-login'] === '')).toHaveLength(1);
     expect(text(standIn)).toContain('gone-runtime');
     for (const renderer of [chosen, standIn]) run(() => renderer.unmount());

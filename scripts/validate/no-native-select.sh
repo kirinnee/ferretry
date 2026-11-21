@@ -8,13 +8,13 @@ set -euo pipefail
 # WHAT IS MATCHED. A JSX `<select` element in a product `.tsx` file: `packages/app/src`, `packages/core/*/app` and
 # `packages/plugins/*/app`. Tests and fixtures are not product code.
 #
-# MODE. `report` (the default while the adoption PRs S3a-S3f land) lists every file that still draws one and exits 0.
-# `fail` makes any hit exit 1. The flip is one word, `MODE` below, and belongs to r11 S3f, the last adoption PR.
+# MODE. `fail` (the default since r11 S3f, the last adoption PR) makes any hit exit 1. `report` lists every file that still
+# draws one and exits 0, for a local look. A line that is only a comment (`*`, `//`, `/*`) may name the element: it draws none.
 # `FY_NO_NATIVE_SELECT=fail|report` overrides it for a local run.
 #
 # Exit codes follow the repo convention: 0 clean (or report mode), 1 a violation in fail mode, 2 a broken gate.
 
-MODE="report"
+MODE="fail"
 MODE="${FY_NO_NATIVE_SELECT:-${MODE}}"
 case "${MODE}" in
 report | fail) ;;
@@ -29,7 +29,7 @@ trap 'rm -f "${hits}"' EXIT
 
 status=0
 git grep -n -E '<select([[:space:]>]|$)' -- \
-  'packages/app/src/**/*.tsx' 'packages/core/*/app/**/*.tsx' 'packages/plugins/*/app/**/*.tsx' >"${hits}" || status=$?
+  'packages/app/src/*.tsx' 'packages/core/*/app/*.tsx' 'packages/plugins/*/app/*.tsx' | grep -v -E ':[0-9]+:[[:space:]]*(\*|//|/\*)' >"${hits}" || status=$?
 [ "${status}" -gt 1 ] && echo "❌ git grep failed (exit ${status}) while searching for native selects" >&2 && exit 2
 
 if [ ! -s "${hits}" ]; then

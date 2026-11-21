@@ -4,7 +4,8 @@ import should from 'should';
 
 import { type DaemonConnection, daemonConnection } from '../../../app/lib/machine.ts';
 import { WardenPage, type WardenSurfaceProps } from '../../../app/lib/warden-page.tsx';
-import { interact, type Mounted, mount } from '@ferretry/app/testing';
+import { type Mounted, mount } from '@ferretry/app/testing';
+import { boxLabelled, choose, openBox, optionLabels, shownBy } from '../../support/app/select-box.ts';
 
 describe('WardenPage', () => {
   it('should mount the daemon-bound overview inside one labelled scroll region', () => {
@@ -46,20 +47,16 @@ describe('WardenPage across daemons', () => {
   );
   const rendered = (view: Mounted) =>
     [...view.container.querySelectorAll('[data-surface="overview"]')].map(node => node.getAttribute('data-machine'));
-  const filter = (view: Mounted) => view.container.querySelector<HTMLSelectElement>('select[aria-label="Daemon"]');
+  const filter = (view: Mounted) => boxLabelled(view.container, 'Daemon');
 
   it('should offer All plus each paired daemon, and show one named overview per daemon under All', async () => {
     const view = await mount(
       <WardenPage connection={ec2} slots={{ Overview }} machines={machines} remembered={null} onRemember={() => {}} />,
     );
     const select = filter(view);
-    expect(select).not.toBeNull();
-    expect([...(select?.options ?? [])].map(option => [option.value, option.textContent])).toEqual([
-      ['', 'All daemons'],
-      ['daemon-ec2', 'Liftoff EC2'],
-      ['daemon-mbp', 'Liftoff MBP'],
-    ]);
-    expect(select?.value).toBe('');
+    await openBox(select);
+    expect(optionLabels()).toEqual(['All daemons', 'Liftoff EC2', 'Liftoff MBP']);
+    expect(shownBy(select)).toBe('All daemons');
     expect(rendered(view)).toEqual(['Liftoff EC2', 'Liftoff MBP']);
     await view.unmount();
   });
@@ -74,7 +71,7 @@ describe('WardenPage across daemons', () => {
         onRemember={() => {}}
       />,
     );
-    expect(filter(view)?.value).toBe('daemon-mbp');
+    expect(shownBy(filter(view))).toBe('Liftoff MBP');
     expect(rendered(view)).toEqual(['Liftoff MBP']);
     await view.unmount();
   });
@@ -90,19 +87,22 @@ describe('WardenPage across daemons', () => {
         onRemember={id => chosen.push(id)}
       />,
     );
-    const select = filter(view);
-    await interact(() => {
-      if (select === null) return;
-      select.value = 'daemon-ec2';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    await interact(() => {
-      if (select === null) return;
-      select.value = '';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    expect(chosen).toEqual(['daemon-ec2', null]);
+    await choose(filter(view), 'Liftoff EC2');
+    expect(chosen).toEqual(['daemon-ec2']);
     await view.unmount();
+    // Picking All from a remembered daemon reports null (picking what is already shown reports nothing, as a native select did not either).
+    const again = await mount(
+      <WardenPage
+        connection={ec2}
+        slots={{ Overview }}
+        machines={machines}
+        remembered="daemon-ec2"
+        onRemember={id => chosen.push(id)}
+      />,
+    );
+    await choose(filter(again), 'All daemons');
+    expect(chosen).toEqual(['daemon-ec2', null]);
+    await again.unmount();
   });
 
   it('should draw the combined totals above the sections under All only', async () => {
@@ -144,7 +144,7 @@ describe('WardenPage across daemons', () => {
         onRemember={() => {}}
       />,
     );
-    expect(filter(view)).toBeNull();
+    expect(view.container.querySelector('[role="combobox"]')).toBeNull();
     expect(rendered(view)).toEqual(['']);
     await view.unmount();
   });

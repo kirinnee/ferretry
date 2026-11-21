@@ -15,6 +15,7 @@ import type { WardenClientFactory } from '../../../app/lib/warden-client-context
 import type { PickerAccount } from '../../../app/lib/account-picker.ts';
 import { daemonConnection } from '../../../app/lib/machine.ts';
 import { render, run, runAsync } from '@ferretry/app/testing';
+import { SelectBox } from '@ferretry/app/ui';
 import { wardenConfig, wardenFailover, wardenStatus } from '../../support/app/warden.ts';
 import { fakeWardenClient } from '../../support/app/clients.ts';
 import { configChangeHarness } from '../../support/app/config-changes.ts';
@@ -46,7 +47,10 @@ const speedups = (set: boolean, vault: SpeedupsView['vault'] = 'ok'): SpeedupsVi
   ],
 });
 
-const json = (renderer: ReactTestRenderer): string => JSON.stringify(renderer.toJSON());
+/** The rendered tree as text, plus the options of every SelectBox: a closed select box draws only its chosen label, and its list is its props. */
+const json = (renderer: ReactTestRenderer): string =>
+  JSON.stringify(renderer.toJSON()) +
+  JSON.stringify(renderer.root.findAllByType(SelectBox).map(box => box.props.options));
 
 const button = (renderer: ReactTestRenderer, label: string) => {
   const found = renderer.root.findAll(node => node.type === 'button' && node.children.join('') === label)[0];

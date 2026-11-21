@@ -9,7 +9,8 @@
 
 import type { WardenStatusView } from '../../wire.ts';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
+import { SelectBox } from '@ferretry/app/ui';
+import { useId, useState } from 'react';
 
 import { cn } from '../../ui.ts';
 import { type FerretView, ferretTitles } from '../../lib/callsign.ts';
@@ -241,6 +242,7 @@ export function RecentTriggers({
 }) {
   const [filters, setFilters] = useState<TriggerFilters>(NO_FILTERS);
   const [pages, setPages] = useState(1);
+  const resultId = useId();
   const all = triggerRows(status, now);
   const rows = filterTriggerRows(all, filters);
   const page = pageTriggerRows(rows, pages);
@@ -256,23 +258,20 @@ export function RecentTriggers({
               setPages(1);
             }}
           />
-          <label className="flex items-center gap-xs text-meta text-faint">
-            Result
-            <select
-              className="kt-input !min-h-8 !w-auto sm:!min-h-0"
+          <div className="flex items-center gap-xs text-meta text-faint">
+            <label htmlFor={resultId}>Result</label>
+            <SelectBox
+              id={resultId}
+              className="!min-h-8 !w-auto sm:!min-h-0"
+              label="Result"
               value={filters.result}
-              onChange={event => {
-                setFilters(current => ({ ...current, result: event.target.value as ResultFilter }));
+              onChange={next => {
+                setFilters(current => ({ ...current, result: next as ResultFilter }));
                 setPages(1);
               }}
-            >
-              {resultFilterOptions(all).map(option => (
-                <option key={option.key} value={option.key}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              options={resultFilterOptions(all).map(option => ({ value: option.key, label: option.label }))}
+            />
+          </div>
         </div>
       </div>
       {all.length === 0 ? (

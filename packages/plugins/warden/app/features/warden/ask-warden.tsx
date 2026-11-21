@@ -12,7 +12,7 @@
  * may control this ferret. The grants are read once per machine and never reused for another one.
  */
 
-import { Loading } from '@ferretry/app/ui';
+import { Loading, SelectBox } from '@ferretry/app/ui';
 import type { WardenInvestigateRequest, WardenInvestigateView, WardenStatusView } from '../../wire.ts';
 import { Shield } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
@@ -101,19 +101,15 @@ export function AskWardenForm({
   return (
     <form className="fy-action-form__body" noValidate onSubmit={event => void submit(event)}>
       <FormField id={`${id}-focus`} label="What should it look at?">
-        <select
-          className="kt-input w-full"
+        <SelectBox
+          className="!min-h-[44px] w-full"
           disabled={submitting}
           id={`${id}-focus`}
-          onChange={event => setFocus(event.target.value as AskWardenFocus)}
+          label="What should it look at?"
+          onChange={next => setFocus(next as AskWardenFocus)}
+          options={ASK_WARDEN_FOCI.map(option => ({ value: option.value, label: option.label }))}
           value={focus}
-        >
-          {ASK_WARDEN_FOCI.map(option => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        />
       </FormField>
       <FormField id={`${id}-notes`} label="Notes for the investigator (optional)">
         <textarea

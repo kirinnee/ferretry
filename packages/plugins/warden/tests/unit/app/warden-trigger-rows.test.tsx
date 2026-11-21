@@ -6,6 +6,7 @@ import type { WardenReportTarget } from '../../../app/features/warden/warden-ove
 import { RecentTriggers } from '../../../app/features/warden/warden-trigger-rows.tsx';
 import { daemonConnection } from '../../../app/lib/machine.ts';
 import { interact, mount, must } from '@ferretry/app/testing';
+import { boxLabelled, openBox } from '../../support/app/select-box.ts';
 import { Screens } from '../../support/app/screens.tsx';
 import { ferretView } from '../../support/app/ferrets.ts';
 import { wardenAction, wardenInvestigation, wardenStatus } from '../../support/app/warden.ts';
@@ -280,16 +281,21 @@ describe('RecentTriggers', () => {
         ),
         `who ${label}`,
       );
-    const select = must(view.container.querySelector<HTMLSelectElement>('select'), 'result select');
+    const select = boxLabelled(view.container, 'Result');
     try {
       // Act
       await interact(() => who('Rule').click());
       const rule = rows(view.container).length;
       await interact(() => who('All').click());
-      await interact(() => {
-        select.value = 'stopped';
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-      });
+      await openBox(select);
+      await interact(() =>
+        must(
+          [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(option =>
+            option.querySelector('[data-label]')?.textContent?.startsWith('Stopped'),
+          ),
+          'the Stopped option',
+        ).click(),
+      );
       const stopped = rows(view.container).length;
       await interact(() => who('Rule').click());
       const none = view.container.textContent ?? '';

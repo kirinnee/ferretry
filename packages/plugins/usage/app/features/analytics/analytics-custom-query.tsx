@@ -19,7 +19,7 @@ import {
 
 import { type ReactNode, useId, useMemo } from 'react';
 
-import { Button, cn, Spinner } from '@ferretry/app/ui';
+import { Button, cn, SelectBox, Spinner } from '@ferretry/app/ui';
 import type { DaemonConnection } from '../../shell.ts';
 import { AnalyticsQueryAutocomplete } from './analytics-query-autocomplete.tsx';
 import { ANALYTICS_RANGE_PRESETS } from './analytics-query-complete.ts';
@@ -63,6 +63,8 @@ export interface AnalyticsQueryEditorProps {
 
 export function AnalyticsQueryEditor({ value, onValueChange, onRun, querying, loadValues }: AnalyticsQueryEditorProps) {
   const queryId = useId();
+  const metricId = useId();
+  const aggregationId = useId();
   const treeIds = useMemo(() => [], []);
   const read = useMemo(() => readAnalyticsQuery(value), [value]);
   const parsed = read.ok ? read.parsed : undefined;
@@ -110,45 +112,45 @@ export function AnalyticsQueryEditor({ value, onValueChange, onRun, querying, lo
 
       <fieldset className="m-0 grid min-w-0 grid-cols-1 gap-2 border-0 p-0 sm:grid-cols-2">
         <legend className="sr-only">Query helpers</legend>
-        <label className="grid min-w-0 gap-xs text-meta text-muted">
-          Metric
-          <select
-            className="kt-input min-h-[44px] w-full"
+        <div className="grid min-w-0 gap-xs text-meta text-muted">
+          <label htmlFor={metricId}>Metric</label>
+          <SelectBox
+            id={metricId}
+            className="!min-h-[44px] w-full"
+            label="Metric"
             disabled={!parsed}
             value={parsed?.metric ?? NO_METRIC}
-            onChange={event => {
-              const next = event.currentTarget.value;
-              onValueChange(withMetric(value, next === NO_METRIC ? undefined : (next as AnalyticsMetric)));
-            }}
-          >
-            <option value={NO_METRIC}>Every measure</option>
-            {AnalyticsMetricSchema.options.map(metric => (
-              <option key={metric} value={metric}>
-                {ANALYTICS_METRIC_LABELS[metric]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid min-w-0 gap-xs text-meta text-muted">
-          Aggregation
-          <select
-            className="kt-input min-h-[44px] w-full"
+            onChange={next =>
+              onValueChange(withMetric(value, next === NO_METRIC ? undefined : (next as AnalyticsMetric)))
+            }
+            options={[
+              { value: NO_METRIC, label: 'Every measure' },
+              ...AnalyticsMetricSchema.options.map(metric => ({
+                value: metric,
+                label: ANALYTICS_METRIC_LABELS[metric],
+              })),
+            ]}
+          />
+        </div>
+        <div className="grid min-w-0 gap-xs text-meta text-muted">
+          <label htmlFor={aggregationId}>Aggregation</label>
+          <SelectBox
+            id={aggregationId}
+            className="!min-h-[44px] w-full"
+            label="Aggregation"
             disabled={!parsed}
             value={parsed?.aggregation ?? ''}
-            onChange={event => onValueChange(withAggregation(value, event.currentTarget.value as AnalyticsAggregation))}
-          >
-            {!parsed?.aggregation && <option value="">Raw sessions</option>}
-            {AnalyticsAggregationSchema.options.map(aggregation => (
-              <option
-                key={aggregation}
-                value={aggregation}
-                disabled={ratio && aggregation !== 'sum' && aggregation !== 'avg'}
-              >
-                {aggregation}
-              </option>
-            ))}
-          </select>
-        </label>
+            onChange={next => onValueChange(withAggregation(value, next as AnalyticsAggregation))}
+            options={[
+              ...(parsed?.aggregation ? [] : [{ value: '', label: 'Raw sessions' }]),
+              ...AnalyticsAggregationSchema.options.map(aggregation => ({
+                value: aggregation,
+                label: aggregation,
+                disabled: ratio && aggregation !== 'sum' && aggregation !== 'avg',
+              })),
+            ]}
+          />
+        </div>
       </fieldset>
 
       <ChipRow label="Range">

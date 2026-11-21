@@ -12,6 +12,7 @@ import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import type { AnalyticsPricingClient } from '../../../../../app/features/settings/pricing-api.ts';
 import { PricingSettings } from '../../../../../app/features/settings/pricing-settings.tsx';
 import { type DaemonConnection, daemonConnection, FyHttpError } from '../../support/shell.ts';
+import { SelectBox } from '@ferretry/app/ui';
 import { render, run, runAsync } from '@ferretry/app/testing';
 
 const connection = (id = 'alpha') =>
@@ -337,7 +338,10 @@ describe('PricingSettings', () => {
 
     expect(marked(renderer, 'data-pricing-field', 'pricingKey')[0]?.props.value).toBe('operator:deepseek-flash');
     expect(marked(renderer, 'data-pricing-field', 'modelId')[0]?.props.value).toBe('deepseek-flash');
-    expect(marked(renderer, 'data-pricing-field', 'provider')[0]?.props.value).toBe('deepseek');
+    // The provider is the app's SelectBox: its props carry the chosen value and the list.
+    const provider = renderer.root.findByType(SelectBox);
+    expect(provider.props['data-pricing-field']).toBe('provider');
+    expect(provider.props.value).toBe('deepseek');
     expect(marked(renderer, 'data-pricing-rate-field', 'input')[0]?.props.value).toBe('1.25');
   });
 
