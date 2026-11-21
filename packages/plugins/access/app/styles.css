@@ -667,3 +667,9 @@
   justify-content: center;
   white-space: nowrap;
 }
+
+/* r11-1b G4: the pairing page's own buttons (Back, Use this link, Rename, Pair this device, Not now) are never narrower
+   than the setup footer's (O2: 8.5rem). Two classes, because a touch screen's `:root button` target floor out-ranks one. */
+.kt-btn.fy-pair-btn {
+  min-width: 8.5rem;
+}

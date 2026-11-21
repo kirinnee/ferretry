@@ -231,3 +231,51 @@ describe('the Pair journey', () => {
     });
   }
 });
+
+/** r11-1b G4: the daemon-less journey pages use O2's footer (136 px Back/Next, 44 px tall, 12 px apart) and 136 px body buttons. */
+describe('the get-started pages: footer and body buttons', () => {
+  const PAGES = [
+    { view: 'install', ready: '[data-onboarding-next]' },
+    { view: 'daemon', ready: '[data-onboarding-next]' },
+    { view: 'local', ready: '[data-onboarding-back]' },
+    { view: 'elsewhere', ready: '[data-onboarding-next]' },
+    { view: 'pair', ready: '[data-onboarding-back]' },
+  ] as const;
+  for (const variant of VARIANTS) {
+    for (const page of PAGES) {
+      it(`${variant.name} ${page.view}: footer Back/Next are 136 px (+-1), >= 44 tall, 12 px apart; body buttons are >= 136`, async () => {
+        const { tab, close } = await open(variant, page.view, page.ready);
+        try {
+          const footer = await tab.locator('[data-onboarding-actions] .kt-btn:visible').evaluateAll(nodes =>
+            nodes.map(node => {
+              const box = node.getBoundingClientRect();
+              return { label: (node.textContent ?? '').trim(), x: box.x, w: box.width, h: box.height };
+            }),
+          );
+          expect(footer.length, `${page.view}: the footer has Back (and Next)`).toBeGreaterThanOrEqual(1);
+          for (const button of footer) {
+            expect(button.w, `${page.view}: footer ${button.label} is 136 +-1`).toBeGreaterThanOrEqual(135);
+            expect(button.w, `${page.view}: footer ${button.label} is 136 +-1`).toBeLessThanOrEqual(137);
+            expect(button.h, `${page.view}: footer ${button.label} is >= 44 tall`).toBeGreaterThanOrEqual(43.5);
+          }
+          const [first, second] = footer;
+          if (first !== undefined && second !== undefined)
+            expect(Math.abs(second.x - (first.x + first.w) - 12), `${page.view}: 12 px apart`).toBeLessThanOrEqual(1);
+          const body = await tab
+            .locator('[data-onboarding="setup"] .kt-btn:visible')
+            .evaluateAll(nodes =>
+              nodes
+                .filter(node => node.closest('[data-onboarding-actions]') === null)
+                .map(node => ({ label: (node.textContent ?? '').trim(), w: node.getBoundingClientRect().width })),
+            );
+          for (const button of body)
+            expect(button.w, `${page.view}: body button "${button.label}" is >= 136`).toBeGreaterThanOrEqual(135.5);
+          await noOverflow(tab);
+          await shot(tab, variant, `getstarted-${page.view}`);
+        } finally {
+          await close();
+        }
+      });
+    }
+  }
+});

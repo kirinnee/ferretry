@@ -5,7 +5,12 @@
  */
 export function PairingBack({ onClose }: { readonly onClose: () => void }) {
   return (
-    <button type="button" className="kt-btn min-h-[44px] self-start px-4 py-3" data-pairing-close="" onClick={onClose}>
+    <button
+      type="button"
+      className="kt-btn min-h-[44px] fy-pair-btn self-start px-4 py-3"
+      data-pairing-close=""
+      onClick={onClose}
+    >
       Back
     </button>
   );

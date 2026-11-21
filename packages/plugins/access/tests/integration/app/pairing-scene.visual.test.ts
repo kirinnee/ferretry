@@ -309,6 +309,14 @@ describe('The pair page: mascot and night sky', () => {
         const confirm = must(await tab.locator('[data-pair-confirm]').boundingBox(), 'Pair this device');
         expect(confirm.height, 'at least 44 px tall').toBeGreaterThanOrEqual(43.5);
         expect(confirm.width, 'not the row wide').toBeLessThan(variant.width * 0.7);
+        // r11-1b G4: every button on the page is at least O2's 136 px (8.5rem), Back included (it was 51 px).
+        expect(back.width, 'Back is at least 136 px wide').toBeGreaterThanOrEqual(135.5);
+        expect(confirm.width, 'Pair this device is at least 136 px wide').toBeGreaterThanOrEqual(135.5);
+        for (const selector of ['[data-pair-device-rename]', 'button:text-is("Not now")']) {
+          const box = must(await tab.locator(selector).boundingBox(), selector);
+          expect(box.width, `${selector} is at least 136 px wide`).toBeGreaterThanOrEqual(135.5);
+          expect(box.height, `${selector} is at least 44 px tall`).toBeGreaterThanOrEqual(43.5);
+        }
         await shot(tab, variant, 'back-confirm');
         await tab.locator('[data-pairing-close]').click();
         expect(await tab.evaluate(() => document.documentElement.hasAttribute('data-went-back'))).toBe(true);
@@ -340,6 +348,7 @@ describe('The pair page: mascot and night sky', () => {
         await tab.waitForSelector('input[aria-label="Pairing link"]');
         const submit = must(await tab.getByRole('button', { name: 'Use this link' }).boundingBox(), 'the submit');
         expect(submit.width, 'the submit is not a full-width bar').toBeLessThan(variant.width * 0.6);
+        expect(submit.width, 'r11-1b G4: Use this link is at least 136 px wide').toBeGreaterThanOrEqual(135.5);
         await shot(tab, variant, 'ways-paste');
         expect(problems).toEqual([]);
       } finally {

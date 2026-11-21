@@ -428,7 +428,11 @@ export function PairingScreen({
               {linkError}
             </p>
           )}
-          <button type="submit" className="kt-btn min-h-[44px] self-start px-6 py-3" disabled={!link.filled}>
+          <button
+            type="submit"
+            className="kt-btn min-h-[44px] fy-pair-btn self-start px-6 py-3"
+            disabled={!link.filled}
+          >
             <Link2 size={16} aria-hidden="true" />
             Use this link
           </button>
@@ -729,7 +733,7 @@ function PairingFocus({
         )}
         <button
           type="button"
-          className="kt-btn min-h-[44px] self-center px-6 py-3"
+          className="kt-btn min-h-[44px] fy-pair-btn self-center px-6 py-3"
           data-variant="primary"
           onClick={onCancel}
         >
@@ -817,7 +821,7 @@ function PairingFocus({
           </span>
           <button
             type="button"
-            className="kt-btn min-h-[44px] px-4 py-3"
+            className="kt-btn min-h-[44px] fy-pair-btn px-4 py-3"
             data-pair-device-rename=""
             onClick={() => setRenaming(true)}
             disabled={busy}
@@ -838,7 +842,7 @@ function PairingFocus({
       */}
       <button
         type="button"
-        className="kt-btn min-h-[44px] self-center px-6 py-3"
+        className="kt-btn min-h-[44px] fy-pair-btn self-center px-6 py-3"
         data-variant="primary"
         data-pair-confirm=""
         onClick={() => {
@@ -852,7 +856,12 @@ function PairingFocus({
         {busy ? 'Pairing…' : 'Pair this device'}
       </button>
       {busy && <p className="m-0 text-center text-ui text-muted">Exchanging the one-time code with this daemon…</p>}
-      <button type="button" className="kt-btn min-h-[44px] self-center px-6 py-3" onClick={onCancel} disabled={busy}>
+      <button
+        type="button"
+        className="kt-btn min-h-[44px] fy-pair-btn self-center px-6 py-3"
+        onClick={onCancel}
+        disabled={busy}
+      >
         Not now
       </button>
     </PairingFrame>
