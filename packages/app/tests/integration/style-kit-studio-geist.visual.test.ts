@@ -167,6 +167,101 @@ const seconds = (value: string): number =>
   value.endsWith('ms') ? Number.parseFloat(value) / 1000 : Number.parseFloat(value);
 const noGradient = (value: string): boolean => !/gradient/u.test(value);
 
+interface SpokeRead {
+  /** Running CSS animations on the four spokes, in part order p1..p4. */
+  readonly active: readonly {
+    readonly part: string;
+    readonly name: string;
+    readonly state: string;
+    readonly delay: number;
+    readonly duration: number;
+    readonly iterations: string;
+  }[];
+  /** Each spoke's computed opacity with every animation paused at the same fixed time (ms), per sample. */
+  readonly samples: Readonly<Record<string, readonly number[]>>;
+}
+
+const SAMPLE_TIMES = [100, 350, 600, 850] as const;
+
+/** What the four spokes are actually DOING in the real engine: the live animation list and their opacity at fixed times. */
+const readSpokes = (disableAnimations: boolean): Promise<SpokeRead> =>
+  page.evaluate(
+    ([disable, times]) => {
+      const root = document.documentElement;
+      root.setAttribute('data-style', 'geist');
+      root.setAttribute('data-palette', 'geist');
+      root.setAttribute('data-mode', 'light');
+      let injected: HTMLStyleElement | undefined;
+      if (disable) {
+        injected = document.createElement('style');
+        injected.textContent = "[class*='fy-spinner__p'] { animation-name: none !important; }";
+        document.head.append(injected);
+      }
+      const spinner = document.querySelector('.fy-spinner') as Element;
+      const parts = [...spinner.querySelectorAll('[class*="fy-spinner__p"]')];
+      const animations = document
+        .getAnimations()
+        .filter(animation => parts.includes((animation.effect as KeyframeEffect).target as Element));
+      const active = parts.map((part, index) => {
+        const animation = animations.find(a => (a.effect as KeyframeEffect).target === part) as
+          | (Animation & { animationName?: string })
+          | undefined;
+        const timing = animation?.effect?.getTiming();
+        return {
+          part: `p${index + 1}`,
+          name: animation?.animationName ?? 'none',
+          state: animation?.playState ?? 'none',
+          delay: Number(timing?.delay ?? -1),
+          duration: Number(timing?.duration ?? -1),
+          iterations: String(timing?.iterations ?? 'none'),
+        };
+      });
+      const samples: Record<string, number[]> = {};
+      for (const index of parts.keys()) samples[`p${index + 1}`] = [];
+      for (const time of times as readonly number[]) {
+        for (const animation of animations) {
+          animation.pause();
+          animation.currentTime = time;
+        }
+        for (const [index, part] of parts.entries())
+          (samples[`p${index + 1}`] as number[]).push(Number.parseFloat(getComputedStyle(part).opacity));
+      }
+      for (const animation of animations) animation.play();
+      injected?.remove();
+      return { active, samples };
+    },
+    [disableAnimations, SAMPLE_TIMES] as const,
+  );
+
+/** The owner-facing claim: four spokes, each really animating, lit one after another a quarter-second apart. */
+const expectSpokesInSequence = (read: SpokeRead): void => {
+  expect(read.active.length, 'four spokes').toBe(4);
+  expect(
+    read.active.map(spoke => spoke.name),
+    'each spoke runs the spoke keyframes',
+  ).toEqual(Array.from({ length: 4 }, () => 'fy-spinner-part'));
+  expect(
+    read.active.map(spoke => spoke.state),
+    'all four are running',
+  ).toEqual(Array.from({ length: 4 }, () => 'running'));
+  expect(new Set(read.active.map(spoke => spoke.duration))).toEqual(new Set([1000]));
+  expect(read.active.every(spoke => spoke.iterations === 'Infinity')).toBe(true);
+  // Clockwise N, E, S, W = p1, p2, p4, p3: phase offsets of 0, 250, 500, 750 ms.
+  expect(
+    ['p1', 'p2', 'p4', 'p3'].map(part => read.active.find(spoke => spoke.part === part)?.delay),
+    'staggered a quarter turn apart',
+  ).toEqual([0, 250, 500, 750]);
+  const at = (part: string, index: number): number => (read.samples[part] ?? [])[index] ?? Number.NaN;
+  // t = 100 ms: only N has begun (1 - .75 * .1); the others still sit at their rest opacity .25.
+  expect(at('p1', 0)).toBeCloseTo(0.925, 2);
+  expect(at('p2', 0)).toBeCloseTo(0.25, 2);
+  // t = 600 ms: N is fading (.55), E mid-way (.7375), S has just lit (.925), W has not begun (.25).
+  expect(at('p1', 2)).toBeCloseTo(0.55, 2);
+  expect(at('p2', 2)).toBeCloseTo(0.7375, 2);
+  expect(at('p4', 2)).toBeCloseTo(0.925, 2);
+  expect(at('p3', 2)).toBeCloseTo(0.25, 2);
+};
+
 describe('r11 T5 · Studio and Geist fill every slot of the component style contract', () => {
   it('Studio is the base: no pattern, no grain, its arc, the base motion, a shaped hypermedia', async () => {
     const studio = await kit('studio');
@@ -221,6 +316,22 @@ describe('r11 T5 · Studio and Geist fill every slot of the component style cont
     expect(new Set(geist.parts.duration).size).toBe(1);
     expect(geist.parts.timing[0]).toBe('linear');
     expect(seconds(geist.parts.duration[0] ?? '')).toBeGreaterThanOrEqual(0.8);
+  });
+
+  it("Geist's four spokes are really animating, lit in sequence a quarter-second apart (live animations + opacity at fixed times)", async () => {
+    const read = await readSpokes(false);
+    console.log('geist spoke animations', JSON.stringify(read));
+    expectSpokesInSequence(read);
+  });
+
+  it('the spinner assert FAILS when Chromium has the spoke animations disabled (animation-name: none)', async () => {
+    const disabled = await readSpokes(true);
+    console.log('geist spokes, animations disabled', JSON.stringify(disabled));
+    expect(disabled.active.every(spoke => spoke.name === 'none')).toBe(true);
+    expect(() => expectSpokesInSequence(disabled)).toThrow();
+    // and the same geometry/duration/easing read the older test makes still passes — only the live animations catch it
+    const geist = await kit('geist');
+    expect(geist.parts.count).toBe(4);
   });
 
   it('Geist is snappy: a shorter pop than Studio, no press shift', async () => {

@@ -283,14 +283,20 @@
 }
 :root[data-style='geist'] .fy-spinner__p2,
 [data-swatch][data-style='geist'] .fy-spinner__p2 {
+  /* The base `animation` shorthand (specificity 0,2,0) resets the delay, so each phase is restated here, above it. */
+  animation-delay: calc(var(--spinner-parts-speed) * 0.25);
   transform: rotate(90deg);
 }
 :root[data-style='geist'] .fy-spinner__p4,
 [data-swatch][data-style='geist'] .fy-spinner__p4 {
+  /* The base `animation` shorthand (specificity 0,2,0) resets the delay, so each phase is restated here, above it. */
+  animation-delay: calc(var(--spinner-parts-speed) * 0.5);
   transform: rotate(180deg);
 }
 :root[data-style='geist'] .fy-spinner__p3,
 [data-swatch][data-style='geist'] .fy-spinner__p3 {
+  /* The base `animation` shorthand (specificity 0,2,0) resets the delay, so each phase is restated here, above it. */
+  animation-delay: calc(var(--spinner-parts-speed) * 0.75);
   transform: rotate(270deg);
 }
 
