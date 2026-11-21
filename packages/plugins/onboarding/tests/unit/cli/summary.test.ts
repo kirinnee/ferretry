@@ -90,6 +90,22 @@ describe('first-run summary', () => {
     );
   });
 
+  test('a step with nothing to look for gets a neutral mark, not the agenda "!"', () => {
+    const pending = step('a', 'x', 'Shells', 80);
+    expect(row(pending, 'Nothing to look for here.', 6, 'unchecked')).toBe('  · Shells  Nothing to look for here.');
+    expect(row(pending, 'found: ok', 6, 'found')).toBe('  · Shells  found: ok');
+    expect(row(pending, 'gone', 6, 'missing')).toBe('  ! Shells  gone');
+  });
+
+  test('the closing counts only the steps that are pending and not found or unchecked', () => {
+    const summary = summarize([
+      { step: step('a', 'x', 'A', 1), line: 'Nothing to look for here.', check: 'unchecked' },
+      { step: step('b', 'y', 'B', 2), line: 'ok', check: 'found' },
+      { step: step('c', 'z', 'C', 3), line: 'gone', check: 'missing', remedy: 'do it' },
+    ]);
+    expect(renderClosing(summary).split('\n')[0]).toBe('1 of 3 steps still need you.');
+  });
+
   test('the linked costs are one line that names the three costs and the way out', () => {
     const line = linkCosts('fy');
     expect(line.split('\n')).toHaveLength(1);
