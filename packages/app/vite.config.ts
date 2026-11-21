@@ -23,6 +23,7 @@ import { textScalePostcss } from './scripts/text-scale-postcss.ts';
 import { prefetchViewChunks } from './scripts/prefetch-view-chunks.ts';
 import { entityDecoderTrustedTypes, leafletTrustedTypes } from './scripts/trusted-types-plugins.ts';
 import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '../plugins/connections/contract/hosted-directory.ts';
+import { durianBuild } from '../plugins/conversation/app/vite-durian.ts';
 import { voiceBuild } from '../plugins/voice/app/vite-voice.ts';
 
 /** The release version this app is built from (`release.json`, §10.6), stamped into the HTML. */
@@ -77,6 +78,8 @@ export default defineConfig({
     ),
   },
   plugins: [
+    // Durian Hypermedia's source build, its stylesheet and one chart.js / dompurify (plugins/conversation/app/vite-durian.ts).
+    durianBuild.plugin,
     leafletTrustedTypes,
     entityDecoderTrustedTypes,
     {
