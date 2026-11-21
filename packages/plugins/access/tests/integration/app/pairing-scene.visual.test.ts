@@ -330,7 +330,7 @@ describe('The pair page: mascot and night sky', () => {
 
   for (const variant of VARIANTS) {
     it(`${variant.name}: a cold open offers scan, upload and paste as three equal cards, none a full-width bar`, async () => {
-      const { tab, problems, close } = await open(variant, '&arrival=cold&scan=camera');
+      const { tab, problems, close } = await open(variant, '&arrival=cold&scan=camera&back=1');
       try {
         const ways = tab.locator('[data-pair-ways] label');
         expect(await ways.allInnerTexts()).toEqual(['Scan QR code', 'Upload a QR image', 'Paste a link']);
@@ -349,6 +349,11 @@ describe('The pair page: mascot and night sky', () => {
         const submit = must(await tab.getByRole('button', { name: 'Use this link' }).boundingBox(), 'the submit');
         expect(submit.width, 'the submit is not a full-width bar').toBeLessThan(variant.width * 0.6);
         expect(submit.width, 'r11-1b G4: Use this link is at least 136 px wide').toBeGreaterThanOrEqual(135.5);
+        // The paste path is mounted WITH a return path, so Back is on it: exactly one, 136 px wide and 44 tall.
+        expect(await tab.locator('[data-pairing-close]').count(), 'the paste path has exactly one Back').toBe(1);
+        const pasteBack = must(await tab.locator('[data-pairing-close]').boundingBox(), 'Back on the paste path');
+        expect(pasteBack.width, 'Back on the paste path is at least 136 px wide').toBeGreaterThanOrEqual(135.5);
+        expect(pasteBack.height, 'Back on the paste path is at least 44 px tall').toBeGreaterThanOrEqual(43.5);
         await shot(tab, variant, 'ways-paste');
         expect(problems).toEqual([]);
       } finally {

@@ -232,44 +232,92 @@ describe('the Pair journey', () => {
   }
 });
 
-/** r11-1b G4: the daemon-less journey pages use O2's footer (136 px Back/Next, 44 px tall, 12 px apart) and 136 px body buttons. */
+/**
+ * r11-1b G4: every onboarding page uses O2's footer (136 px Back/Next/Continue, 44 px tall, 12 px apart, one line) and every
+ * body button is at least 136 px wide. Owner line 1 is "every onboarding button", so the Start screen's Continue and the
+ * target chooser's footer are in the assert too. The completed-step buttons of the progress rail count as body buttons.
+ *
+ * EXEMPT, by selector: `[data-onboarding-copy]`, the command block's compact copy icon control (32 px at 1280 and 44 px on a
+ * phone, a square icon beside the code, not an action button): the lead resolved that it stays compact.
+ */
 describe('the get-started pages: footer and body buttons', () => {
-  const PAGES = [
-    { view: 'install', ready: '[data-onboarding-next]' },
-    { view: 'daemon', ready: '[data-onboarding-next]' },
-    { view: 'local', ready: '[data-onboarding-back]' },
-    { view: 'elsewhere', ready: '[data-onboarding-next]' },
-    { view: 'pair', ready: '[data-onboarding-back]' },
-  ] as const;
+  const COPY_EXEMPT = '[data-onboarding-copy]';
+  const IDENTITY = {
+    back: '[data-onboarding-back]',
+    next: '[data-onboarding-next]',
+    continue: '[data-onboarding-continue]',
+  } as const;
+  type Identity = keyof typeof IDENTITY;
+  const PAGES: ReadonlyArray<{
+    readonly view: string;
+    readonly ready: string;
+    /** The footer's controls, in order: exactly these, no more, no fewer. */
+    readonly footer: readonly Identity[];
+    /** Whether the progress rail has completed steps (buttons) on this page. */
+    readonly jumps: boolean;
+  }> = [
+    { view: 'start', ready: '[data-choice-cards]', footer: ['continue'], jumps: false },
+    { view: 'target', ready: 'label[data-choice="other"]', footer: ['back', 'continue'], jumps: false },
+    { view: 'install', ready: '[data-onboarding-next]', footer: ['back', 'next'], jumps: false },
+    { view: 'daemon', ready: '[data-onboarding-next]', footer: ['back', 'next'], jumps: true },
+    { view: 'local', ready: '[data-onboarding-back]', footer: ['back'], jumps: true },
+    { view: 'elsewhere', ready: '[data-onboarding-next]', footer: ['back', 'next'], jumps: false },
+    { view: 'pair', ready: '[data-onboarding-back]', footer: ['back'], jumps: false },
+  ];
   for (const variant of VARIANTS) {
     for (const page of PAGES) {
-      it(`${variant.name} ${page.view}: footer Back/Next are 136 px (+-1), >= 44 tall, 12 px apart; body buttons are >= 136`, async () => {
+      it(`${variant.name} ${page.view}: footer is ${page.footer.join('+')} at 136 px (+-1), >= 44 tall, 12 px apart, one line; body buttons are >= 136`, async () => {
         const { tab, close } = await open(variant, page.view, page.ready);
         try {
-          const footer = await tab.locator('[data-onboarding-actions] .kt-btn:visible').evaluateAll(nodes =>
-            nodes.map(node => {
-              const box = node.getBoundingClientRect();
-              return { label: (node.textContent ?? '').trim(), x: box.x, w: box.width, h: box.height };
-            }),
+          const footer = await tab.locator('[data-onboarding-actions] .kt-btn:visible').evaluateAll(
+            (nodes, identity) =>
+              nodes.map(node => {
+                const box = node.getBoundingClientRect();
+                const who = (Object.keys(identity) as string[]).filter(key => node.matches(identity[key] as string));
+                return {
+                  who: who.join('|'),
+                  label: (node.textContent ?? '').trim(),
+                  x: box.x,
+                  y: box.y,
+                  w: box.width,
+                  h: box.height,
+                };
+              }),
+            IDENTITY as Record<string, string>,
           );
-          expect(footer.length, `${page.view}: the footer has Back (and Next)`).toBeGreaterThanOrEqual(1);
+          expect(
+            footer.map(button => button.who),
+            `${page.view}: the footer holds exactly ${page.footer.join(' + ')}`,
+          ).toEqual([...page.footer]);
           for (const button of footer) {
             expect(button.w, `${page.view}: footer ${button.label} is 136 +-1`).toBeGreaterThanOrEqual(135);
             expect(button.w, `${page.view}: footer ${button.label} is 136 +-1`).toBeLessThanOrEqual(137);
-            expect(button.h, `${page.view}: footer ${button.label} is >= 44 tall`).toBeGreaterThanOrEqual(43.5);
+            expect(
+              button.h,
+              `${page.view}: footer ${button.label} is >= 44 tall and its label does not wrap`,
+            ).toBeGreaterThanOrEqual(43.5);
+            expect(button.h, `${page.view}: footer ${button.label} label stays on one line`).toBeLessThanOrEqual(60);
           }
           const [first, second] = footer;
-          if (first !== undefined && second !== undefined)
+          if (first !== undefined && second !== undefined) {
             expect(Math.abs(second.x - (first.x + first.w) - 12), `${page.view}: 12 px apart`).toBeLessThanOrEqual(1);
+            expect(Math.abs(second.y - first.y), `${page.view}: the footer is one line`).toBeLessThanOrEqual(1);
+          }
           const body = await tab
-            .locator('[data-onboarding="setup"] .kt-btn:visible')
-            .evaluateAll(nodes =>
-              nodes
-                .filter(node => node.closest('[data-onboarding-actions]') === null)
-                .map(node => ({ label: (node.textContent ?? '').trim(), w: node.getBoundingClientRect().width })),
+            .locator(`[data-onboarding="setup"] .kt-btn:visible, [data-onboarding-jump]:visible`)
+            .evaluateAll(
+              (nodes, exempt) =>
+                nodes
+                  .filter(node => node.closest('[data-onboarding-actions]') === null && !node.matches(exempt))
+                  .map(node => ({ label: (node.textContent ?? '').trim(), w: node.getBoundingClientRect().width })),
+              COPY_EXEMPT,
             );
           for (const button of body)
             expect(button.w, `${page.view}: body button "${button.label}" is >= 136`).toBeGreaterThanOrEqual(135.5);
+          if (page.jumps) {
+            const jumps = await tab.locator('[data-onboarding-jump]:visible').count();
+            expect(jumps, `${page.view}: the rail has completed-step buttons to measure`).toBeGreaterThan(0);
+          }
           await noOverflow(tab);
           await shot(tab, variant, `getstarted-${page.view}`);
         } finally {
