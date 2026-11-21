@@ -15,17 +15,19 @@ const rule = (selector: string): string => {
 
 describe('neumorphism: a held button is pressed IN, not hovered', () => {
   it('lifts on hover only while the button is not pressed', () => {
-    expect(rule(":root[data-style='neumorphism'] .kt-btn:hover:not(:disabled, :active)")).toContain('--shadow-md');
+    expect(rule("[data-swatch][data-style='neumorphism'] .kt-btn:hover:not(:disabled, :active)")).toContain(
+      '--shadow-md',
+    );
   });
 
   it('takes the inset shadow while pressed, at a specificity that outranks the hover lift', () => {
-    expect(rule(":root[data-style='neumorphism'] .kt-btn:active:not(:disabled)")).toContain('--shadow-active');
+    expect(rule("[data-swatch][data-style='neumorphism'] .kt-btn:active:not(:disabled)")).toContain('--shadow-active');
   });
 });
 
 describe('neumorphism: a raised card keeps a real edge', () => {
   it('draws the card border from the palette ink, not the weak --border', () => {
-    const body = rule(":root[data-style='neumorphism'] .kt-panel");
+    const body = rule("[data-swatch][data-style='neumorphism'] .kt-panel");
     expect(body).toContain('border-color');
     expect(body).toContain('var(--fg)');
     expect(body).not.toContain('var(--border)');
