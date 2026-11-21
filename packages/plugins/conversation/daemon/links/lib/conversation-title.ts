@@ -260,11 +260,29 @@ export const cleanTitle = (text: string, scrub: ScrubText): string | undefined =
 const LEAD_IN =
   /^(?:(?:hey|hi|hello|ok|okay|so|um|well|right|alright|thanks|thank you)[\s,.!:-]+)*(?:(?:can|could|would|will) you (?:please |kindly )?|(?:i|we) (?:need|want|would like|have) (?:you )?to |i(?:'d| would) like (?:you )?to |(?:please|pls|kindly)[\s,]+|(?:help me|let's|lets)[\s,]+(?:to )?|you should |here(?:'s| is) my |use (?:it|this|that|them) to |look (?:at|into) (?=(?:why|how|what|whether|if)\b)|(?:why|whether) (?:is |are |does |do )?|what (?:is|are) (?:the )?)*/iu;
 
+/** A list item's marker (`-`, `*`, `1.`, a task box): the request starts after it, so the lead-in is cut from there. */
+const LIST_MARKER = /^\s*(?:[-*+•]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/u;
+
 const withoutLeadIn = (brief: string): string =>
   brief
     .split('\n')
-    .map(line => (/^\s*#/u.test(line) ? line : line.replace(LEAD_IN, '')))
+    .map(line => (/^\s*#/u.test(line) ? line : line.replace(LIST_MARKER, '').replace(LEAD_IN, '')))
     .join('\n');
+
+/** "the difference between X and Y" is a question about two things: it is titled `X vs Y`. */
+const DIFFERENCE =
+  /(?:\bthe\s+)?\bdifferences?\s+between\s+(?:an?\s+|the\s+)?([^.,;?!]+?)\s+and\s+(?:an?\s+|the\s+)?([^.,;?!]+?)(?=\s*(?:[.,;?!]|$)|\s+(?:in|for|when|if|on|with)\b)/iu;
+
+/** A line cut where its first clause ends (`then`, `and`), once two words have been said: a title names one piece of work. */
+function atClauseEnd(line: string): string {
+  const words = line.trim().split(/\s+/u);
+  const end = words.findIndex((word, index) => index >= 2 && /^(?:then|and)$/iu.test(word));
+  return end < 0 ? line : words.slice(0, end).join(' ');
+}
+
+/** What a message that is only a greeting or thanks is titled: it names no work yet. */
+const GREETING_ONLY = /^(?:(?:hey|hi|hello|yo|ok|okay|thanks|thank you|thx)[\s,.!?-]*)+$/iu;
+const GREETING_TITLE = 'New conversation';
 
 /**
  * A title made from the first thing the owner said: its first heading, else its first sentence that names work, at most five
@@ -277,6 +295,7 @@ export function deriveTitle(firstMessage: string, scrub: ScrubText): string | un
     .slice(0, TITLE_BRIEF_MAX)
     .replace(/[\uD800-\uDBFF]$/u, '');
   if (brief.replaceAll(/[\s\uE000]+/gu, '') === '') return undefined;
+  if (GREETING_ONLY.test(brief.trim())) return GREETING_TITLE;
   // A place where a secret was is an edge, never a join: each side is read on its own, and the first that reads as work wins.
   const pieces = brief
     .split(HOLE)
@@ -299,8 +318,13 @@ const HOLE = '\uE000';
 
 /** One stretch of the owner's words as a title: opening filler off, five words at most, ending on a content word. */
 function madeTitle(piece: string): string | undefined {
-  const made = taskTitleFor(withoutLeadIn(piece), FALLBACK_LABEL);
-  return FALLBACK_TITLE.test(made) ? undefined : endOnContent(made);
+  const opened = withoutLeadIn(piece);
+  const versus = DIFFERENCE.test(opened);
+  const lines = (versus ? opened.replace(DIFFERENCE, '$1 vs $2') : opened).split('\n').map(atClauseEnd);
+  const made = taskTitleFor(lines.join('\n'), FALLBACK_LABEL);
+  if (FALLBACK_TITLE.test(made)) return undefined;
+  const ended = endOnContent(made);
+  return versus && ended !== undefined ? ended.replace(/ Vs /u, ' vs ') : ended;
 }
 
 /**
