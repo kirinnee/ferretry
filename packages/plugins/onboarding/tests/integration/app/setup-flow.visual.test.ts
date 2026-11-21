@@ -556,6 +556,45 @@ describe('r11-1b G6: no cover blink, no first-draw hold', () => {
       });
     }
 
+  // With Settings > Motion > Reduced the shared !important rule (ui/loading.css) used to add a SECOND 300 ms delay to the loader the
+  // cover had already waited for, while the hold clock ran from the loader's mount: a 340 ms answer sat behind a BLANK cover and the
+  // loader was visible for ~130 ms (440 ms in normal motion). Counted by what is on screen (opacity, every frame), not by DOM presence.
+  for (const scheme of ['light', 'dark'] as const)
+    for (const viewport of VIEWPORTS) {
+      it(`in reduced motion a 340 ms answer still has its loader on screen for its minimum, from 300 ms on (${viewport.name}, ${scheme})`, async () => {
+        const { context, origin, tab } = await open(scheme, viewport.width, viewport.height);
+        try {
+          await tab.addInitScript(LOADER_SAMPLER);
+          await tab.goto(`${origin}/?theme=studio-${scheme}&case=late&ms=340&motion=reduced`);
+          await tab.waitForFunction(() => (window as unknown as { __readyAt?: number }).__readyAt !== undefined);
+          await tab.waitForSelector('[data-flow-cover]', { state: 'detached' });
+          const seen = await tab.evaluate(() => {
+            const w = window as unknown as {
+              __loader: { first: number; last: number; frames: number };
+              __pageMountedAt: number;
+            };
+            return { ...w.__loader, mounted: w.__pageMountedAt };
+          });
+          expect(seen.frames, 'the loader was visible on some frame').toBeGreaterThan(0);
+          const from = seen.first - seen.mounted;
+          const shown = seen.last - seen.first;
+          console.info(
+            `G6 reduced motion: loader visible from ${from.toFixed(0)} ms for ${shown.toFixed(0)} ms (${viewport.name}, ${scheme})`,
+          );
+          expect(from, `the loader shows at ${from.toFixed(0)} ms: not before 300`).toBeGreaterThanOrEqual(295);
+          expect(
+            from,
+            `and at once after the cover's own wait, not a second 300 ms (${from.toFixed(0)} ms)`,
+          ).toBeLessThanOrEqual(420);
+          expect(shown, `the loader was on screen ${shown.toFixed(0)} ms: not a blink`).toBeGreaterThanOrEqual(
+            HELD_AT_LEAST_MS - 100,
+          );
+        } finally {
+          await context.close();
+        }
+      });
+    }
+
   for (const scheme of ['light', 'dark'] as const)
     for (const viewport of VIEWPORTS) {
       it(`a lazy second page, drawn in advance, is ready in under 150 ms of Next with no loader (${viewport.name}, ${scheme})`, async () => {

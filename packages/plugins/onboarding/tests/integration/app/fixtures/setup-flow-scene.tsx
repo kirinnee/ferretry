@@ -23,6 +23,7 @@
  *     drawn in its own Suspense with the shell's bar as the fallback, as the slot does; the real `NextPagePrefetch` draws it
  *     hidden while the first page shows. `window.__nextAt` / `__secondReadyAt` are performance.now() of the Next press and of the
  *     second page's `ready()`.
+ *   ?motion=reduced   Settings > Appearance > Motion > Reduced (`<html data-motion="reduced">`), with any case
  *   ?case=late&ms=N   a page that says `ready()` N ms after it mounts; `window.__pageMountedAt` / `__readyAt` are performance.now()
  */
 import { LivingBackground, Loading } from '@ferretry/app/ui';
@@ -39,6 +40,8 @@ import type { StepHost } from '@ferretry/kernel/contract';
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const scene = params.get('case') ?? 'choice';
+// r11-1b G6: ?motion=reduced is Settings > Appearance > Motion > Reduced (the shell writes it as <html data-motion="reduced">).
+if (params.get('motion') === 'reduced') document.documentElement.dataset.motion = 'reduced';
 
 const STEP: FlowStep = {
   key: 'fake-pack.choose',
