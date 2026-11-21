@@ -7,8 +7,10 @@
  */
 import { ConfirmToSee } from '@ferretry/app/ui';
 import { TriangleAlert, UserRound } from 'lucide-react';
+import { useState } from 'react';
 import { accountLinks, type ProjectInfo } from '../../../contract/index.ts';
 import type { ProjectsClient } from '../../lib/client.ts';
+import { AccountLinksEditor } from './account-links-editor.tsx';
 import { useGitAccounts } from './use-git-accounts.ts';
 
 export interface AccountLinksViewProps {
@@ -23,10 +25,20 @@ export interface AccountLinksViewProps {
 export function AccountLinksView({ project, existing, error, onConfirm }: AccountLinksViewProps) {
   const linked = project.accounts ?? [];
   if (linked.length === 0) {
+    // An unlinked project still needs the passkey press: the editor that links the FIRST account only opens once the
+    // account list has been read, so hiding the press here would leave that project with no way to be linked.
     return (
-      <p className="m-0 text-meta text-faint" data-project-accounts="none">
-        No GitHub account is linked to this project.
-      </p>
+      <div className="grid gap-xs">
+        <p className="m-0 text-meta text-faint" data-project-accounts="none">
+          No GitHub account is linked to this project.
+        </p>
+        {existing === null && onConfirm !== undefined && (
+          <ConfirmToSee
+            line="This machine wants your passkey before it shows its GitHub accounts, so one cannot be linked yet."
+            onConfirm={onConfirm}
+          />
+        )}
+      </div>
     );
   }
   if (existing === null && onConfirm !== undefined) {
@@ -84,16 +96,51 @@ export function AccountLinksView({ project, existing, error, onConfirm }: Accoun
   );
 }
 
-/** The links of one project, bound to a daemon's accounts. */
+/** The links of one project, bound to a daemon's accounts. Given `edit`, it also offers the control to change them. */
 export function ProjectAccountLinks({
   client,
   project,
+  edit,
 }: {
   readonly client: ProjectsClient;
   readonly project: Pick<ProjectInfo, 'accounts'>;
+  readonly edit?: {
+    readonly projectId: ProjectInfo['id'];
+    /** The daemon accepted a new list; the caller re-reads the project so the list above re-renders. */
+    readonly onSaved: () => void;
+  };
 }) {
   const { accounts, error, stepUp, confirm } = useGitAccounts(client);
+  const [editing, setEditing] = useState(false);
+  const canEdit = edit !== undefined && accounts !== null && accounts.length > 0;
   return (
-    <AccountLinksView project={project} existing={accounts} error={error} onConfirm={stepUp ? confirm : undefined} />
+    <div className="grid gap-xs">
+      <AccountLinksView project={project} existing={accounts} error={error} onConfirm={stepUp ? confirm : undefined} />
+      {canEdit && editing ? (
+        <AccountLinksEditor
+          client={client}
+          project={{ id: edit.projectId, accounts: project.accounts }}
+          existing={accounts}
+          onSaved={() => {
+            setEditing(false);
+            edit.onSaved();
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      ) : (
+        canEdit && (
+          <div>
+            <button
+              type="button"
+              className="kt-btn kt-btn--sm"
+              data-project-accounts-edit=""
+              onClick={() => setEditing(true)}
+            >
+              {(project.accounts ?? []).length === 0 ? 'Link an account' : 'Change accounts'}
+            </button>
+          </div>
+        )
+      )}
+    </div>
   );
 }

@@ -1,5 +1,5 @@
 import { MAX_PROJECT_REPOS, type ProjectRepo } from '../../../contract/index.ts';
-import { isAtOrUnder } from '../folders/fence.ts';
+import { belowHome, isAtOrUnder } from '../folders/fence.ts';
 import { folderPolicy } from '../folders/policy.ts';
 import type { FolderBrowser, FolderVerdict } from '../folders/port.ts';
 import { describeRemote, remoteUrlOfConfig } from './remote.ts';
@@ -12,6 +12,9 @@ export const MAX_SCAN_FOLDERS = 400;
 const READ_LIMIT = 2000;
 /** The most of a `.git/config` that is read. */
 const CONFIG_READ_LIMIT = 64 * 1024;
+
+/** What a scan of a project folder outside the home folder answers: the home fence is kept, and the reply says so. */
+const OUTSIDE_HOME_SENTENCE = 'outside your home folder, not scanned';
 
 /** Folders never entered: a dependency tree holds repositories that are not the owner's. */
 const SKIPPED = new Set(['node_modules']);
@@ -29,6 +32,8 @@ export interface ScanResult {
    * as the whole list.
    */
   readonly truncated: boolean;
+  /** Set when the project folder was not scanned on principle: it is outside the home folder (the fence), not merely cut short. */
+  readonly notScanned?: string;
 }
 
 /** A repository found and the text of its `.git/config`, read through the held folder it was found in. */
@@ -56,6 +61,8 @@ export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResul
   const [rootReal] = await browser.realPaths([root]);
   if (rootReal === undefined) return nothing;
   const home = await browser.home();
+  // The home fence is a decision, not a cut-off: say it, and open and probe nothing.
+  if (belowHome(rootReal, home) === undefined) return { repos: [], truncated: true, notScanned: OUTSIDE_HOME_SENTENCE };
   const policy = await folderPolicy(browser, home);
   const inside =
     (judge: FolderVerdict): FolderVerdict =>

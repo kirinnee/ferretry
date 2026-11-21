@@ -174,6 +174,16 @@ describe('scanning a project folder for repositories', () => {
     const found = await scanRepos('/nowhere', { browser: browserOf({}, []).browser });
     expect(found).toEqual({ repos: [], truncated: true });
   });
+  test('a project folder outside the home folder is not scanned, and the answer says exactly that', async () => {
+    const world = browserOf({ '/srv/work': ['r'], '/srv/work/r': [] }, ['/srv/work/r']);
+    expect(await scanRepos('/srv/work', { browser: world.browser })).toEqual({
+      repos: [],
+      truncated: true,
+      notScanned: 'outside your home folder, not scanned',
+    });
+    expect(world.opened).toEqual([]);
+    expect(world.probed).toEqual([]);
+  });
   test('a project folder that is itself a link is refused and nothing in or behind it is touched', async () => {
     const world = browserOf(
       { [P]: ['r'], '/elsewhere': ['r'], [`${HOME}/.ssh`]: ['r'] },

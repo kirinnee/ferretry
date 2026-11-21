@@ -4,7 +4,7 @@ import { PROJECTS_INSIGHTS_HOOK } from '../../../contract/index.ts';
 import type { ProjectsClient } from '../../../app/lib/client.ts';
 import type { FerretRow } from '../../../app/lib/ferrets.ts';
 import { ProjectDetailPage } from '../../../app/views/project-detail.tsx';
-import { type Call, clickEvent, ferret, PROJECT, refusal, SWITCH_OFF, scripted } from './support/client.ts';
+import { ANSWERED, type Call, clickEvent, ferret, PROJECT, refusal, SWITCH_OFF, scripted } from './support/client.ts';
 
 const LIST = 'GET /v1/projects';
 const FERRETS = 'GET /v1/ferrets';
@@ -259,5 +259,168 @@ describe('the project’s board switch', () => {
     await settled(failed, c => c.querySelector('[data-project-board-switch="failed"]') !== null, 'a failed read');
     expect(failed.container.textContent).toContain('the board store is unreadable');
     await failed.unmount();
+  });
+
+  it('links GitHub accounts to an existing project: sends the ordered list and re-renders the links', async () => {
+    const calls: Call[] = [];
+    let linked: readonly string[] = [];
+    const accounts = [
+      { id: 'gha_1', login: 'octocat', keys: {} },
+      { id: 'gha_2', login: 'hubot', keys: {} },
+    ];
+    const mounted = await mount(
+      detail(
+        client(
+          [],
+          {
+            'GET /v1/git-accounts': accounts,
+            [LIST]: () => [{ ...PROJECT, accounts: linked }],
+            'PUT /v1/projects/:id/accounts': (call: Call) => {
+              linked = (call.body as { accounts: string[] }).accounts;
+              return { ...PROJECT, accounts: linked };
+            },
+          },
+          calls,
+        ),
+      ),
+    );
+    await settled(mounted, c => c.querySelector('[data-project-accounts-edit]') !== null, 'the link control');
+    expect(mounted.container.querySelector('[data-project-accounts="none"]')).not.toBeNull();
+
+    await press(must(mounted.container.querySelector('[data-project-accounts-edit]'), 'the link control'));
+    // Pick the second account, then the first: the order of the picks is the order sent (the first is the default).
+    await press(must(mounted.container.querySelector('[data-project-accounts-choice="gha_2"] input'), 'hubot'));
+    await press(must(mounted.container.querySelector('[data-project-accounts-choice="gha_1"] input'), 'octocat'));
+    await press(must(mounted.container.querySelector('[data-project-accounts-save]'), 'save'));
+
+    await settled(mounted, c => c.querySelector('[data-project-accounts="ready"]') !== null, 'the linked list');
+    expect(
+      calls.filter(call => call.route === 'PUT /v1/projects/:id/accounts').map(call => [call.params, call.body]),
+    ).toEqual([[{ id: PROJECT.id }, { accounts: ['gha_2', 'gha_1'] }]]);
+    expect([...mounted.container.querySelectorAll('[data-project-account]')].map(row => row.textContent)).toEqual([
+      '@hubot',
+      '@octocat',
+    ]);
+    await mounted.unmount();
+  });
+
+  it('keeps the editor open and says why when the daemon refuses the accounts', async () => {
+    const mounted = await mount(
+      detail(
+        client([], {
+          'GET /v1/git-accounts': [{ id: 'gha_1', login: 'octocat', keys: {} }],
+          'PUT /v1/projects/:id/accounts': refusal(403, 'only the owner links accounts'),
+        }),
+      ),
+    );
+    await settled(mounted, c => c.querySelector('[data-project-accounts-edit]') !== null, 'the link control');
+    await press(must(mounted.container.querySelector('[data-project-accounts-edit]'), 'the link control'));
+    await press(must(mounted.container.querySelector('[data-project-accounts-choice="gha_1"] input'), 'octocat'));
+    await press(must(mounted.container.querySelector('[data-project-accounts-save]'), 'save'));
+    await settled(mounted, c => c.querySelector('[data-project-accounts-editor] [role="alert"]') !== null, 'refusal');
+
+    expect(mounted.container.textContent).toContain('This daemon refused the link: only the owner links accounts');
+    await mounted.unmount();
+  });
+});
+
+describe('linking accounts to a project (review fixes for PR 2288)', () => {
+  const ACCOUNTS = 'GET /v1/git-accounts';
+  const PUT_ACCOUNTS = 'PUT /v1/projects/:id/accounts';
+  const octocat = { id: 'gha_1', login: 'octocat', keys: {} };
+  const hubot = { id: 'gha_2', login: 'hubot', keys: {} };
+  const putsOf = (calls: Call[]) =>
+    calls.filter(call => call.route === PUT_ACCOUNTS).map(call => [call.params, call.body]);
+
+  it('lets the owner confirm the passkey and link the FIRST account on a project with no links', async () => {
+    const calls: Call[] = [];
+    const base = client([], { [LIST]: [PROJECT], [PUT_ACCOUNTS]: { ...PROJECT, accounts: ['gha_1'] } }, calls);
+    // The account list is protected: a read the page makes on its own is refused; the person's press reads it.
+    const guarded = {
+      call: <Answer,>(route: string, init?: { readonly quiet?: boolean }) =>
+        route === ACCOUNTS
+          ? init?.quiet === false
+            ? Promise.resolve([octocat] as Answer)
+            : Promise.reject(refusal(403, 'passkey first', 'grant_step_up_required'))
+          : base.call<Answer>(route, init as never),
+    } as ProjectsClient;
+    const mounted = await mount(detail(guarded));
+    await settled(mounted, c => c.querySelector('[data-confirm-to-see]') !== null, 'the confirm action');
+    expect(mounted.container.querySelector('[data-project-accounts="none"]')).not.toBeNull();
+    expect(mounted.container.querySelector('[data-project-accounts-edit]')).toBeNull();
+
+    await press(must(mounted.container.querySelector('[data-confirm-to-see] button'), 'the press'));
+    await settled(mounted, c => c.querySelector('[data-project-accounts-edit]') !== null, 'the link control');
+    expect(mounted.container.querySelector('[data-confirm-to-see]')).toBeNull();
+    await press(must(mounted.container.querySelector('[data-project-accounts-edit]'), 'the link control'));
+    await press(must(mounted.container.querySelector('[data-project-accounts-choice="gha_1"] input'), 'octocat'));
+    await press(must(mounted.container.querySelector('[data-project-accounts-save]'), 'save'));
+    await settled(mounted, () => putsOf(calls).length === 1, 'the save');
+    expect(putsOf(calls)).toEqual([[{ id: PROJECT.id }, { accounts: ['gha_1'] }]]);
+    await mounted.unmount();
+  });
+
+  it('drops an open editor draft when the page moves to another project on the same daemon', async () => {
+    const calls: Call[] = [];
+    const other = { ...ANSWERED, accounts: ['gha_1'] };
+    const c = client([], { [ACCOUNTS]: [octocat, hubot], [LIST]: [PROJECT, other] }, calls);
+    const mounted = await mount(detail(c));
+    await settled(mounted, x => x.querySelector('[data-project-accounts-edit]') !== null, 'the link control');
+    await press(must(mounted.container.querySelector('[data-project-accounts-edit]'), 'the link control'));
+    await press(must(mounted.container.querySelector('[data-project-accounts-choice="gha_2"] input'), 'hubot'));
+
+    await mounted.render(detail(c, ANSWERED.id));
+    await settled(
+      mounted,
+      x => x.querySelector(`[data-project-detail="${ANSWERED.id}"]`) !== null,
+      'the other project',
+    );
+    // The first project's draft did not follow the person: no editor is open, and opening one starts from THIS project.
+    expect(mounted.container.querySelector('[data-project-accounts-editor]')).toBeNull();
+    await settled(mounted, x => x.querySelector('[data-project-accounts-edit]') !== null, 'the link control');
+    await press(must(mounted.container.querySelector('[data-project-accounts-edit]'), 'the link control'));
+    const checked = (id: string) =>
+      (mounted.container.querySelector(`[data-project-accounts-choice="${id}"] input`) as HTMLInputElement).checked;
+    expect([checked('gha_1'), checked('gha_2')]).toEqual([true, false]);
+    await press(must(mounted.container.querySelector('[data-project-accounts-save]'), 'save'));
+    await settled(mounted, () => putsOf(calls).length === 1, 'the save');
+    expect(putsOf(calls)).toEqual([[{ id: ANSWERED.id }, { accounts: ['gha_1'] }]]);
+    await mounted.unmount();
+  });
+
+  const removedDefault = async (calls: Call[]) => {
+    const linked = { ...PROJECT, accounts: ['gha_9', 'gha_1'] };
+    const mounted = await mount(
+      detail(client([], { [ACCOUNTS]: [octocat, hubot], [LIST]: [linked], [PUT_ACCOUNTS]: linked }, calls)),
+    );
+    await settled(mounted, x => x.querySelector('[data-project-accounts-edit]') !== null, 'the link control');
+    await press(must(mounted.container.querySelector('[data-project-accounts-edit]'), 'the link control'));
+    return mounted;
+  };
+
+  it('shows a removed default in the editor and lets the owner choose a new default, keeping the other links', async () => {
+    const calls: Call[] = [];
+    const mounted = await removedDefault(calls);
+    const gone = must(mounted.container.querySelector('[data-project-accounts-choice="gha_9"]'), 'the removed link');
+    expect(gone.textContent).toContain('account removed');
+    expect(mounted.container.querySelector('[data-project-accounts-default-gone]')).not.toBeNull();
+
+    await press(must(mounted.container.querySelector('[data-project-accounts-choice="gha_2"] input'), 'hubot'));
+    await press(must(mounted.container.querySelector('[data-project-accounts-make-default="gha_2"]'), 'make default'));
+    expect(mounted.container.querySelector('[data-project-accounts-default-gone]')).toBeNull();
+    await press(must(mounted.container.querySelector('[data-project-accounts-save]'), 'save'));
+    await settled(mounted, () => putsOf(calls).length === 1, 'the save');
+    expect(putsOf(calls)).toEqual([[{ id: PROJECT.id }, { accounts: ['gha_2', 'gha_9', 'gha_1'] }]]);
+    await mounted.unmount();
+  });
+
+  it('lets the owner drop the removed link, so the next account becomes the default', async () => {
+    const calls: Call[] = [];
+    const mounted = await removedDefault(calls);
+    await press(must(mounted.container.querySelector('[data-project-accounts-choice="gha_9"] input'), 'removed link'));
+    await press(must(mounted.container.querySelector('[data-project-accounts-save]'), 'save'));
+    await settled(mounted, () => putsOf(calls).length === 1, 'the save');
+    expect(putsOf(calls)).toEqual([[{ id: PROJECT.id }, { accounts: ['gha_1'] }]]);
+    await mounted.unmount();
   });
 });

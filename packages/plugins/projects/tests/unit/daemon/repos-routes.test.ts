@@ -89,6 +89,12 @@ describe('GET /v1/projects/:id/repos', () => {
     });
     expect(store.file.projects[0]?.repos?.[0]?.account).toBe('work');
   });
+  test('a project folder outside the home folder answers "outside your home folder, not scanned", not just truncated', async () => {
+    const { registry, id } = await setup();
+    const elsewhere: FolderBrowser = { ...browser, home: async () => '/other/home' };
+    const got = answer(await reposRoute(registry, { browser: elsewhere })(callWith(undefined, { id })));
+    expect(got.json).toEqual({ repos: [], truncated: true, notScanned: 'outside your home folder, not scanned' });
+  });
   test('an unknown project is 404 and a bad id is 400', async () => {
     const { registry, scan } = await setup();
     expect(
