@@ -81,3 +81,37 @@ describe('the accent side-bar gate', () => {
     expect(stale.stderr).toContain('delete its line');
   });
 });
+
+describe('the accent side-bar gate, Tailwind classes in JSX (r11-2b K4)', () => {
+  const TAILWIND_BARS: Record<string, string> = {
+    'a warn left border': '<div className="flex gap-2 border-l-2 border-warn pl-3" />\n',
+    'a start-side accent border': '<div className="border-s-4 border-accent" />\n',
+    'a heavy accent-border left border': '<blockquote className="m-0 border-l-heavy border-accent-border pl-3" />\n',
+    'an arbitrary-width left border': '<div className="border-l-[3px] border-err/40" />\n',
+    'an arbitrary colour': '<div className="border-l-2 border-[var(--accent)]" />\n',
+    'a variant-prefixed bar': '<div className="hover:border-l-4 hover:border-ok" />\n',
+    'a colour that comes first': '<div className="border-warn border-l-2" />\n',
+  };
+  for (const [name, tsx] of Object.entries(TAILWIND_BARS))
+    test(`refuses ${name}`, () => {
+      const result = run({ 'packages/x/a.tsx': tsx });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('packages/x/a.tsx');
+    });
+
+  test('allows a neutral divider, a 1px rule, an accent top border and a comment that names a bar', () => {
+    const result = run({
+      'packages/x/a.tsx': [
+        '<blockquote className="border-l-2 border-border-strong pl-sm" />\n',
+        '<div className="border-l border-border-soft" />\n',
+        '<div className="border-t-2 border-warn" />\n',
+        '<div className="border-2 border-accent" />\n',
+        '// was border-l-2 border-warn\n',
+        '{/* border-l-4 border-accent */}\n',
+        ' * border-l-2 border-warn\n',
+      ].join(''),
+    });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+});

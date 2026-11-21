@@ -110,7 +110,7 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
       <p className="m-0 text-meta leading-base text-faint">{SECRET_LIMIT}</p>
 
       {list.health === 'damaged' ? (
-        <div role="alert" className="flex gap-2 border-l-2 border-warn pl-3" data-testid="secrets-damaged">
+        <div role="alert" className="flex gap-2 rounded-control bg-warn-bg px-3 py-2" data-testid="secrets-damaged">
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
           <div className="min-w-0">
             <p className="m-0 text-ui font-semibold text-fg">This daemon cannot read its secret store</p>
@@ -172,7 +172,7 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
       )}
 
       {unresolved.length > 0 && (
-        <div className="border-l-2 border-warn pl-3" data-testid="secrets-unresolved">
+        <div className="rounded-control bg-warn-bg px-3 py-2" data-testid="secrets-unresolved">
           <p className="m-0 text-ui font-semibold text-fg">Configuration names a secret this daemon does not hold</p>
           <ul className="m-0 mt-1 flex list-none flex-col gap-1 p-0">
             {unresolved.map(reference => (

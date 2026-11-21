@@ -10,6 +10,7 @@
  *  - CONVERSATION LINKS: an open (Continue) and a kept (import) row. The links screen is a route of the conversation plugin with no
  *    scene of its own, so its rows are drawn with the REAL markup classes (`fy-convo-item`, `data-open`, `data-selected`) under
  *    the real bundled `links.css`.
+ *  - SECRETS: the "Configuration names a secret this daemon does not hold" notice (the r11-2b K4 state: it drew a 2px amber bar).
  * For each: no inset box-shadow bar (x offset >= 2px, no y, no blur), no left/inline-start border of 2px or more, nor a 1px one in an accent or tone colour, no `::before`/`::after` strip 2-6px wide filled with a colour. The current item still reads: its fill is not transparent
  * and, for the settings nav, its weight is at least 600.
  * Set `FY_NO_SIDE_BAR_SHOTS_DIR` to keep `<viewport>-<scheme>-<case>.png`.
@@ -107,7 +108,8 @@ const open = async (variant: Variant, scheme: (typeof SCHEMES)[number], path: st
 };
 
 /** What marks the one current / open / kept / lit item, or carries a tone. */
-const MARKED = '[aria-current], .fy-tab--active, [data-selected], [data-open], [data-lit], .fy-acc-notice';
+const MARKED =
+  '[aria-current], .fy-tab--active, [data-selected], [data-open], [data-lit], .fy-acc-notice, [data-testid="secrets-unresolved"], [data-testid="secrets-damaged"]';
 
 interface Bar {
   readonly item: string;
@@ -254,6 +256,24 @@ describe('no accent side bar on a selected item', () => {
             expect(dot.width).toBe(8);
             expect(dot.height).toBe(8);
           }
+        } finally {
+          await close();
+        }
+      });
+
+      it(`the Secrets "names a secret this daemon does not hold" notice is a fill, not a bar (${where})`, async () => {
+        const { page, close } = await open(
+          variant,
+          scheme,
+          '/d/ws/settings/vault/secrets',
+          '[data-testid="secrets-unresolved"]',
+        );
+        try {
+          const measured = await probe(page, '[data-testid="secrets-card"]');
+          await shot(page, variant, scheme, 'secrets-notice');
+          expect(measured.marked).toBe(1);
+          expect(measured.bars).toEqual([]);
+          expect(measured.fills.every(fill => fill !== 'rgba(0, 0, 0, 0)')).toBe(true);
         } finally {
           await close();
         }

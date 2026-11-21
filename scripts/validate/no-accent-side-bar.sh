@@ -62,6 +62,25 @@ git ls-files -- '*.css' | while IFS= read -r file; do
   ' "${file}"
 done >>"${tmp_dir}/lines"
 
+# Shape 4: Tailwind utility classes in JSX, which the stylesheet greps above cannot see. `git grep` finds a 2-6px side-border class,
+# `grep` keeps the lines that also name an accent / tone colour, and the awk drops lines that are only a comment.
+cls_end='([^A-Za-z0-9_-]|$)'
+cls_start='(^|[^A-Za-z0-9_-])([a-z0-9_&>[\]-]+:)*'
+side="${cls_start}border-(l|s)-(\\[-?[2-6](\\.[0-9]+)?px\\]|[2-6]|heavy)${cls_end}"
+hue="${cls_start}border-(accent|tone|warn|err|ok)(-[a-z]+)?(/[0-9]+)?${cls_end}|border-\\[[^]]*var\\(--(accent|tone|warn|err|ok)"
+status=0
+git grep -n -I -E -e "${side}" -- '*.tsx' >"${tmp_dir}/tw" 2>"${tmp_dir}/err" || status=$?
+case "${status}" in
+0 | 1) ;;
+*)
+  echo "❌ git grep failed (exit ${status}):" >&2
+  cat "${tmp_dir}/err" >&2
+  exit 2
+  ;;
+esac
+{ grep -E -e "${hue}" "${tmp_dir}/tw" || true; } |
+  awk '{ text = $0; sub(/^[^:]*:[0-9]+:/, "", text) } text !~ /^[[:space:]]*(\/\/|\*|\/\*|\{\/\*)/' >>"${tmp_dir}/lines"
+
 sort -u "${tmp_dir}/lines" -o "${tmp_dir}/lines"
 sed -E 's/^([^:]+):.*/\1/' "${tmp_dir}/lines" | sort -u >"${tmp_dir}/hit-files"
 { sed -E 's/[[:space:]]*#.*$//; /^[[:space:]]*$/d' "${ledger}" || true; } | sort -u >"${tmp_dir}/listed"

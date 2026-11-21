@@ -63,7 +63,10 @@ export function AccountRow({ account, busy, onRemove }: AccountRowProps) {
         <Chip on={account.keys.signing !== undefined} label="Signing key" />
       </div>
       {asking ? (
-        <section className="flex flex-col gap-2 border-l-2 border-warn pl-3" aria-label={`Remove @${account.login}?`}>
+        <section
+          className="flex flex-col gap-2 rounded-control bg-warn-bg px-3 py-2"
+          aria-label={`Remove @${account.login}?`}
+        >
           <p className="m-0 text-cell leading-base text-muted">
             This deletes the keys Ferretry registered on @{account.login} at GitHub, then forgets its token on this
             machine. To fully revoke the app, open github.com/settings/applications afterwards.
