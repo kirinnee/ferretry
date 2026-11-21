@@ -4,7 +4,7 @@
  * reload loses nothing; a write changes ONLY this key, through the shared one-key editor, so every other key and comment stays.
  */
 import { editConfigText, readConfigText } from '@ferretry/std/yaml';
-import { type ConfigFile, type OnboardingClient, changeAtMachineWords } from '../onboarding-api.ts';
+import { type ConfigFile, type OnboardingClient, PENDING_WORDS, changeAtMachineWords } from '../onboarding-api.ts';
 
 const ROUTE = 'PUT /v1/config/file' as const;
 const FILE = 'harness-codex.yaml';
@@ -46,6 +46,7 @@ export async function writeHistory(
   on: boolean,
 ): Promise<'applied' | 'held'> {
   if (currentHistory(file) === null) throw new Error(changeAtMachineWords(file));
+  if (file.pending) throw new Error(PENDING_WORDS);
   const answer = (await client.call(ROUTE, {
     body: { path: FILE, text: withHistory(file.text, on), etag: file.etag },
   })) as {

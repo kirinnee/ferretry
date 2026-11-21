@@ -1,0 +1,22 @@
+/* The lines of Codex's import and conversations demos fade in one after the other (r11 O5). */
+.cx-row {
+  animation: cx-in 240ms ease-out var(--cx-delay, 0ms) both;
+}
+@keyframes cx-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cx-row {
+    animation: none;
+  }
+}
+:root[data-motion='reduced'] .cx-row {
+  animation: none;
+}

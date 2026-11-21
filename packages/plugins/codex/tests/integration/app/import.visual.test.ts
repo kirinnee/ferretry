@@ -3,6 +3,11 @@
  * (`fixtures/import-scene.tsx`) draws the real pages inside the app's `StepPageFrame`. Each page must stay on screen, keep every
  * button a 44px target and never take the full width of a desktop, in light and dark.
  *
+ * r11 O5 (the kind pages, owner line 3): the five "choose what to import" pages keep their found-list and are laid out like
+ * every other page: the demo in `[data-step-demo]` to the RIGHT of the page's words and list at 1280 (above them, at most 140 px
+ * tall, at 390), the page's own words (the list left out) at most 160 characters, and the list's checkboxes still there. On
+ * every Codex import page, both widths, light and dark: the whole screen never says "Claude".
+ *
  * Set `FY_O10B_SHOTS_DIR` to keep a screenshot of each case.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -30,7 +35,6 @@ const PAGES = [
   'skills',
   'mcp',
   'conversations',
-  'conversations-pick',
   'run',
   'run-done',
   'run-everything',
@@ -97,11 +101,6 @@ const open = async (context: BrowserContext, page: string, mode: 'light' | 'dark
   const tab = await context.newPage();
   await tab.goto(`${server?.url.origin ?? ''}/?page=${page}&theme=studio-${mode}`);
   await tab.waitForSelector('[data-codex-step]');
-  // The pick shot is the page after the person chose the other card: Save and Leave it as it is, nothing written.
-  if (page === 'conversations-pick') {
-    await tab.waitForSelector('input[value="off"]:not([disabled])');
-    await tab.locator('input[value="off"]').check({ force: true });
-  }
   // The done shot is the run page after the one import.
   if (page === 'run-done') {
     await tab.waitForSelector('[data-import-run]');
@@ -137,36 +136,10 @@ describe('the Codex import pages', () => {
           await context.close();
         }, 60_000);
 
-  it('conversations: the owner’s sentence is on screen, and the pick has not written anything', async () => {
-    const context = await newContext(VIEWPORTS[1], 'light');
-    const tab = await open(context, 'conversations-pick', 'light');
-    expect(await tab.locator('[data-conversations-words]').innerText()).toBe(
-      'One way: Ferretry reads them and never changes them. A conversation is copied only when you continue it here.',
-    );
-    expect(await tab.locator('[data-conversations-save]').count()).toBe(1);
-    await context.close();
-  }, 60_000);
-
-  // ── The same pages as Claude Code's, measured in the browser ──
+  // ── The run and kind pages keep the import kit's frame, measured in the browser (the conversations page is proved in onboarding.visual.test.ts) ──
   for (const mode of ['light', 'dark'] as const)
     for (const viewport of VIEWPORTS) {
       const at = `at ${viewport.name}, ${mode}`;
-      it(`conversations: the kit's frame, two cards, the owner's words; a pick shows Claude Code's buttons, ${at}`, async () => {
-        const context = await newContext(viewport, mode);
-        const tab = await open(context, 'conversations', mode);
-        const facts = await factsOf(tab);
-        expectKitFrame(facts, 'conversations');
-        expect(facts.cards).toBe(SAME_AS_CLAUDE.conversations.cards);
-        expect(facts.lines).toBeGreaterThanOrEqual(SAME_AS_CLAUDE.conversations.minLines);
-        expect(facts.buttons, 'no button before a pick').toEqual([]);
-        await tab.locator('input[value="off"]').check({ force: true });
-        await tab.waitForSelector('[data-conversations-confirm]');
-        const picked = await factsOf(tab);
-        expect(picked.buttons).toEqual([...SAME_AS_CLAUDE.conversationsPick.buttons]);
-        expectKitFrame(picked, 'conversations (picked)');
-        await context.close();
-      }, 60_000);
-
       it(`run: the count, what Next does, the kit's name field, and Import + Skip the import like Claude Code, ${at}`, async () => {
         const context = await newContext(viewport, mode);
         const tab = await open(context, 'run', mode);
@@ -190,4 +163,57 @@ describe('the Codex import pages', () => {
         await context.close();
       }, 60_000);
     }
+
+  // ── r11 O5: the kind pages' layout and the no-Claude rule, on every Codex import page ──
+  const KIND_PAGES: readonly string[] = ['settings', 'model-set', 'instructions', 'skills', 'mcp'];
+  for (const viewport of VIEWPORTS.filter(candidate => candidate.name !== 'tablet-768'))
+    for (const mode of ['light', 'dark'] as const)
+      for (const page of PAGES) {
+        it(`${page}: no Claude anywhere${KIND_PAGES.includes(page) ? ', the demo beside the found-list' : ''}, at ${viewport.name}, ${mode}`, async () => {
+          const context = await newContext(viewport, mode);
+          const tab = await open(context, page, mode);
+          const m = await tab.evaluate(() => {
+            const box = (node: Element | null) => {
+              const r = node?.getBoundingClientRect() ?? new DOMRect();
+              return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, bottom: r.bottom };
+            };
+            const body = document.querySelector('[data-codex-step]') as HTMLElement;
+            const list = body.querySelector<HTMLElement>('[data-found-list]');
+            const words = body.innerText
+              .replace(list?.innerText ?? '', '')
+              .replace(/\s+/gu, ' ')
+              .trim();
+            return {
+              screen: document.body.innerText,
+              body: box(body),
+              list: list === null ? null : box(list),
+              demo: box(document.querySelector('[data-step-demo]')),
+              demoKind: document.querySelector('[data-step-demo] [data-demo]')?.getAttribute('data-demo') ?? '',
+              words,
+              checkboxes: body.querySelectorAll('input[type="checkbox"]').length,
+              overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+            };
+          });
+          expect(m.screen.toLowerCase(), 'the page never names Claude').not.toContain('claude');
+          expect(m.overflowX).toBe(false);
+          if (KIND_PAGES.includes(page)) {
+            // The list is kept: rows to tick, drawn inside the page body.
+            expect(m.list, 'the found-list is still on the page').not.toBeNull();
+            expect(m.checkboxes).toBeGreaterThan(0);
+            // The demo is this kind's own, in the frame's demo column.
+            expect(m.demoKind).toBe(`kind-${page}`);
+            expect(m.words.length, m.words).toBeLessThanOrEqual(160);
+            if (viewport.phone) {
+              expect(m.demo.bottom, 'the demo is above the page').toBeLessThanOrEqual(m.body.y + 1);
+              expect(m.demo.h).toBeLessThanOrEqual(140);
+            } else {
+              expect(m.demo.x, 'the demo is right of the page').toBeGreaterThan(m.body.right - 1);
+              expect(Math.abs(m.demo.y - m.body.y), 'the demo starts level with the page').toBeLessThanOrEqual(8);
+              // The list keeps a real width beside the demo (it is not squeezed to a sliver).
+              expect(m.list?.w ?? 0).toBeGreaterThan(280);
+            }
+          }
+          await context.close();
+        }, 60_000);
+      }
 });

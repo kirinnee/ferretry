@@ -20,6 +20,7 @@ import type { ProviderPresetCatalog, ProviderPresetView } from '../../contract/i
 import { LoginScopeChip } from '../components/login-scope-chip.tsx';
 import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { useLoginChanges } from '../lib/login-changes.ts';
+import { lockedSummary } from '../lib/locked-summary.ts';
 import { readLogins, readPresets } from '../lib/logins-api.ts';
 import { HARNESS_NAMES, HARNESSES, type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
 import { type Prefill, withheldSentence } from '../lib/paste-model.ts';
@@ -39,7 +40,7 @@ const HARNESS_SUBJECTS: Readonly<Record<string, HarnessKind>> = {
 
 /** The tool a panel subject locks the panel to; `undefined` for any other subject (Settings has none: the full chooser). */
 export const harnessOfSubject = (subject: string | undefined): HarnessKind | undefined =>
-  subject === undefined ? undefined : HARNESS_SUBJECTS[subject];
+  subject !== undefined && Object.hasOwn(HARNESS_SUBJECTS, subject) ? HARNESS_SUBJECTS[subject] : undefined;
 
 /**
  * A provider as ONE tool sees it: only that tool's half and only the variables that half reads, so a provider shared by
@@ -48,6 +49,7 @@ export const harnessOfSubject = (subject: string | undefined): HarnessKind | und
 const lockedPreset = (preset: ProviderPresetView, lock: HarnessKind): ProviderPresetView => ({
   ...preset,
   harness: lock,
+  summary: lockedSummary(preset.summary, lock),
   halves: preset.halves.filter(half => half.harness === lock),
   variables: preset.variables.filter(variable => variable.harnesses.includes(lock)),
 });

@@ -35,11 +35,11 @@ const CODEX_CONFIG_FILE = 'harness-codex.yaml';
 /** The command a person can run by hand when this machine cannot run an install for them. */
 const MANUAL_INSTALL = 'npm install -g @openai/codex';
 
-/** What `permissionMode: skip` allows, in the words the page says before the person chooses it (the flag is drawn as code). */
-export const SKIP_LEAD = "Codex runs every command without asking you, including deleting files. This is Codex's";
+/** The permission cards' one-line words, and what Skip allows in plain words (the flag is drawn as code beside it). */
+export const SKIP_WORDS = 'No approvals, no sandbox.';
+export const SKIP_PLAIN = 'Runs every command without asking, even deleting files.';
 export const SKIP_FLAG = '--dangerously-bypass-approvals-and-sandbox';
-export const SKIP_TAIL = ': no approvals, no sandbox. Fastest, and only safe on a machine you would let it wipe.';
-export const AUTO_WORDS = 'Codex asks before anything risky.';
+export const AUTO_WORDS = 'Asks before risky things.';
 
 /** The sentence for a failed call: the daemon's own words, or that it did not answer. */
 export const refusalWords = (cause: unknown): string => {
@@ -127,8 +127,11 @@ export async function installCodex(client: OnboardingClient, shown: string): Pro
 
 // ── sign-in ──────────────────────────────────────────────────────────────────────────────────────
 
-/** A login that drives Codex. */
-const driveCodex = (login: LoginView): boolean => login.harnesses.includes('codex');
+/**
+ * A login that IS a Codex login: its own harness is Codex. A login whose primary harness is Claude Code that merely lists Codex
+ * among the tools it can drive is not one: the Codex sign-in panel refuses it ("There is no Codex login <id>").
+ */
+const driveCodex = (login: LoginView): boolean => login.harness === 'codex';
 
 /** A login that is switched on: a disabled one refuses every start, so it never counts as a way to sign in. */
 const enabled = (login: LoginView): boolean => login.disabled === undefined;
@@ -201,7 +204,13 @@ export interface ConfigFile {
   readonly where: string;
   /** The daemon did not show the text (a value in it looks like a credential, or it does not parse): it must not be written. */
   readonly withheld: boolean;
+  /** A held edit waits for the owner's OK (the read's `state` is `pending`): a write from here would overwrite it, so none is made. */
+  readonly pending: boolean;
 }
+
+/** What the footer says when a write is refused because an earlier change to the file still waits for the owner. */
+export const PENDING_WORDS =
+  'A change to this file is waiting for your OK — confirm or discard it in Settings > Files first.';
 
 /** The mode this file says, or `null` when it cannot be known here (withheld, unparsable, or an unknown mode): then nothing is written. */
 export const currentMode = (file: ConfigFile): PermissionMode | null => (file.withheld ? null : modeOf(file.text));
@@ -219,6 +228,7 @@ export async function readConfig(client: OnboardingClient): Promise<ConfigFile> 
     readonly text?: string;
     readonly etag?: string;
     readonly absolutePath?: string;
+    readonly state?: string;
     readonly issues?: readonly { readonly message?: string }[];
   };
   const text = file.text ?? '';
@@ -227,6 +237,7 @@ export async function readConfig(client: OnboardingClient): Promise<ConfigFile> 
     etag: file.etag ?? '',
     where: file.absolutePath ?? `config/${CODEX_CONFIG_FILE}`,
     withheld: withheldView(text, file.issues ?? []),
+    pending: file.state === 'pending',
   };
 }
 
@@ -238,6 +249,8 @@ export async function writeMode(
 ): Promise<'applied' | 'held'> {
   // The last line of defence: a withheld, unparsable or unknown file is never written, whatever the page decided.
   if (currentMode(file) === null) throw new Error(changeAtMachineWords(file));
+  // A held edit waits: the text shown may be the held one, and writing over it would overwrite what the owner has yet to confirm.
+  if (file.pending) throw new Error(PENDING_WORDS);
   const answer = (await client.call(ROUTES.writeFile, {
     body: { path: CODEX_CONFIG_FILE, text: withMode(file.text, mode), etag: file.etag },
   })) as { readonly outcome?: string };

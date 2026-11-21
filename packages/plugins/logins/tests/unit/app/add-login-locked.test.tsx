@@ -90,6 +90,9 @@ describe('the add-login panel locked to one tool', () => {
     expect(panel({ subject: 'harness:claude' }).props.harness).toBe('claude-code');
     expect(panel({ subject: 'harness:gemini' }).props.harness).toBeUndefined();
     expect(panel({ subject: 'codex-studio' }).props.harness).toBeUndefined();
+    // A subject is looked up as an OWN key: names every object inherits are not tools.
+    for (const inherited of ['toString', 'constructor', '__proto__', 'hasOwnProperty'])
+      expect(panel({ subject: inherited }).props.harness).toBeUndefined();
     expect(panel({}).props.harness).toBeUndefined();
     // The old ad hoc prop is not a way in any more.
     expect(panel({ harness: 'codex' }).props.harness).toBeUndefined();

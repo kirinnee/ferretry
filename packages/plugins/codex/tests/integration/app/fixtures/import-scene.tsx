@@ -2,11 +2,10 @@
  * The browser entry for the Codex import pages: the REAL pages over a fixed fake daemon, inside the app's own `StepPageFrame`.
  * Nothing reads a network. Every name, path and command below is made up.
  *
- *   ?page=settings|model-set|instructions|skills|mcp|conversations|conversations-pick|run|run-done|run-everything|run-unreviewed
+ *   ?page=settings|model-set|instructions|skills|mcp|conversations|run|run-done|run-everything|run-unreviewed
  *   &theme=<family>-<mode>
  *
- * `conversations-pick` is the page after the person chose the other card (Use and Keep on screen, nothing
- * written). `run-done` is the run page after the import (the daemon's own sentences). `run-unreviewed` is a reload since
+ * `run-done` is the run page after the import (the daemon's own sentences). `run-unreviewed` is a reload since
  * the pages were seen: everything is left out and the page says so.
  */
 import { StepPageFrame } from '@ferretry/app';
@@ -53,7 +52,7 @@ const segment: Record<string, string | number | boolean | undefined> =
           }
         : { importMode: 'choose' };
 
-let fileText = page === 'conversations' || page === 'conversations-pick' ? 'permissionMode: skip\n' : '';
+let fileText = page === 'conversations' ? 'permissionMode: skip\n' : '';
 const table: Record<string, unknown> = {
   'GET /v1/runtimes/setup/scan': scanOf(CODEX_FULL),
   'GET /v1/claude-code/update': { installed: { state: 'ok', version: '2.1.0' } },
@@ -103,7 +102,7 @@ const step: StepHost = {
 
 const kind = KIND_OF_STEP[`import-${page}`];
 const body =
-  page === 'conversations' || page === 'conversations-pick' ? (
+  page === 'conversations' ? (
     <ConversationsPage client={client} step={step} />
   ) : page.startsWith('run') ? (
     <ImportRunPage client={client} step={step} />
