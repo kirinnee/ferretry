@@ -257,6 +257,44 @@ describe('a key that cannot be started says so in the pane, and runs with no ide
     expect(JSON.stringify(parts)).not.toContain('.pub');
   });
 
+  // Git reads GIT_SSH_COMMAND before core.sshCommand before GIT_SSH, and a configured login may set either variable; core
+  // ferrets merges the pane-env part AFTER the login (pinned in core-ferrets launch-login-env.test.ts). So the part itself
+  // must carry the no-identity command as GIT_SSH_COMMAND, for every kind of generated registration.
+  const paneEnv = (parts: readonly LaunchPart[]): Record<string, string> =>
+    parts.flatMap(part => (part.kind === 'pane-env' ? [part.env] : []))[0] ?? {};
+  const generatedKeys = (slot: 'ssh' | 'signing'): GitAccount['keys'] => ({
+    [slot]: { title: 't', publicKey: PUB, source: 'generated' },
+  });
+  const unavailable = async (): Promise<AccountKit | undefined> => {
+    throw new Error('ssh-agent did not start');
+  };
+
+  test('both slots, auth-only and signing-only generated: the part sets GIT_SSH_COMMAND to the no-identity command', async () => {
+    for (const keys of [made('generated'), generatedKeys('ssh'), generatedKeys('signing')]) {
+      const env = paneEnv(await launch(account(1, 'alice', { keys }), unavailable));
+      for (const word of ['IdentityAgent=none', 'IdentityFile=/dev/null', 'IdentitiesOnly=yes'])
+        expect(env.GIT_SSH_COMMAND).toContain(word);
+      expect(env.GIT_SSH_COMMAND).toBe(config([{ kind: 'pane-env', plugin: 'git-accounts', env }])['core.sshCommand']);
+      expect(config([{ kind: 'pane-env', plugin: 'git-accounts', env }])['url.git@github.com:.insteadOf']).toBe(
+        'https://github.com/',
+      );
+    }
+    // A signing-only key is switched off too; an auth-only one leaves no signing key of Ferretry's to switch off.
+    const signingOnly = config(await launch(account(1, 'alice', { keys: generatedKeys('signing') }), unavailable));
+    expect([signingOnly['commit.gpgsign'], signingOnly['tag.gpgsign']]).toEqual(['false', 'false']);
+  });
+
+  test('the person’s OWN ssh key beside a generated signing key: ssh is not blocked, signing is off', async () => {
+    const keys: GitAccount['keys'] = {
+      ssh: { title: 't', publicKey: PUB, source: 'own' },
+      signing: { title: 't', publicKey: PUB, source: 'generated' },
+    };
+    const env = paneEnv(await launch(account(1, 'alice', { keys }), unavailable));
+    expect(env.GIT_SSH_COMMAND).toBeUndefined();
+    expect(env.GIT_CONFIG_COUNT).toBe('2');
+    expect(config([{ kind: 'pane-env', plugin: 'git-accounts', env }])['core.sshCommand']).toBeUndefined();
+  });
+
   test('a key that is RECORDED but whose sealed entry is gone is that same case through the real key service', async () => {
     const folder = tmpRunFolder();
     const started: string[] = [];

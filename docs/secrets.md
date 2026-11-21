@@ -2175,12 +2175,20 @@ again hands the same socket to older ferrets too. The socket is not rotated. Wha
 **last** key registration (the agent is stopped and the private key forgotten) or removing the account itself.
 
 **A key that cannot be started is said in the pane, and the pane is given no identity.** When the account has a key
-Ferretry made but its agent cannot be served for a launch (the agent fails to start, or the recorded key's sealed entry
-is gone), the ferret still starts, with one instruction sentence that its Git account key is unavailable; no error text
-is put in it. Git is also told to offer **no** ssh identity (no agent, no default key file, `https://github.com/` rewritten
-to ssh so a host credential helper is not used) and not to sign, so a push fails instead of silently succeeding as
-this machine's own ssh identity. An account with no key Ferretry made (none, or the person's own) is launched exactly as
-before and gets no sentence.
+Ferretry made (a push key or a signing-only one) but its agent cannot be served for a launch (the agent fails to start,
+or the recorded key's sealed entry is gone), the ferret still starts, with one instruction sentence that its Git account
+key is unavailable; no error text is put in it. The pane's environment is then given the no-identity ssh command (no
+agent, no default key file, no password) as `GIT_SSH_COMMAND` AND as `core.sshCommand`, and `https://github.com/` is
+rewritten to ssh so a host credential helper is not used; signing is switched off. Git reads `GIT_SSH_COMMAND` before
+`core.sshCommand` before `GIT_SSH`, and the part is merged AFTER the login's environment, so a login's own
+`GIT_SSH_COMMAND` or `GIT_SSH` does not win. A `git push` run with that environment over ssh therefore fails
+instead of succeeding as this machine's own ssh identity. What this is not: it is the environment the pane is _given_,
+not a sandbox. A process of the ferret can set its own environment or pass its own `git -c` or `ssh` options, and
+an ssh agent socket a login set stays in the environment (ignored by `IdentityAgent=none`, not removed). A slot that
+holds the person's OWN key is not blocked: it was never Ferretry's. An account with no key Ferretry made (none, or the
+person's own) is launched exactly as before and gets no sentence. Only the unavailable-key case changes the
+environment; a served key is unchanged, so a login's own `GIT_SSH_COMMAND` can still outrank the account's
+`core.sshCommand` there (a declared GAP).
 
 **GAP — the folder is judged by its spelling.** The resolver compares paths as written; a folder reached through a link
 is not matched to a project registered under the link's target.

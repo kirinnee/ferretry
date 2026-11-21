@@ -45,25 +45,32 @@ export const sshCommand = (kit: AccountKit): string =>
 export const noreplyEmail = (account: GitAccount): string =>
   `${String(account.githubId)}+${account.login}@users.noreply.github.com`;
 
+/** ssh offering no identity at all: no agent, no default key file, no password. */
+const NO_IDENTITY_SSH =
+  'ssh -F none -o IdentitiesOnly=yes -o IdentityFile=/dev/null -o IdentityAgent=none -o PasswordAuthentication=no';
+
 /**
- * What a launch is given when the account's key is RECORDED but cannot be served: git is told to offer no identity at
- * all (no agent, no default key file, no password) instead of the machine's own, and not to sign with a key that is
- * not the account's. A push then fails where it would otherwise have succeeded as somebody else.
+ * What a launch is given when the account has a key Ferretry made that is RECORDED but cannot be served: git is told to
+ * offer no identity at all (no agent, no default key file, no password) instead of the machine's own, and not to sign
+ * with a key that is not the account's. A push then fails where it would otherwise have succeeded as somebody else.
+ *
+ * Any generated key (a push key OR a signing-only one) closes ssh, because the account is Ferretry's to speak for; a
+ * slot holding the person's OWN key is theirs and is never blocked here. Git reads `GIT_SSH_COMMAND` before
+ * `core.sshCommand` before `GIT_SSH`, and a login's environment may set either variable, so the command is set in BOTH
+ * places: this part is merged after the login (core ferrets), so `GIT_SSH_COMMAND` here is what git runs.
  */
 export function noIdentityEnvironment(account: GitAccount): Readonly<Record<string, string>> {
+  const { ssh, signing } = account.keys;
+  const generated = ssh?.source === 'generated' || signing?.source === 'generated';
+  if (!generated) return {};
   const settings: [string, string][] = [];
-  if (account.keys.ssh?.source === 'generated')
-    settings.push(
-      [
-        'core.sshCommand',
-        'ssh -F none -o IdentitiesOnly=yes -o IdentityFile=/dev/null -o IdentityAgent=none -o PasswordAuthentication=no',
-      ],
-      ['url.git@github.com:.insteadOf', 'https://github.com/'],
-    );
-  if (account.keys.signing?.source === 'generated')
-    settings.push(['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']);
-  if (settings.length === 0) return {};
-  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(settings.length) };
+  const env: Record<string, string> = {};
+  if (ssh?.source !== 'own') {
+    settings.push(['core.sshCommand', NO_IDENTITY_SSH], ['url.git@github.com:.insteadOf', 'https://github.com/']);
+    env['GIT_SSH_COMMAND'] = NO_IDENTITY_SSH;
+  }
+  if (signing?.source !== 'own') settings.push(['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']);
+  env['GIT_CONFIG_COUNT'] = String(settings.length);
   settings.forEach(([key, value], index) => {
     env[`GIT_CONFIG_KEY_${String(index)}`] = key;
     env[`GIT_CONFIG_VALUE_${String(index)}`] = value;

@@ -103,6 +103,32 @@ describe('a ferret launch carries its login’s environment', () => {
     expect(f.harness.launched[0]?.parts).toEqual([]);
   });
 
+  test('a pane-env part (the Git account’s no-identity ssh) outranks a login that sets GIT_SSH_COMMAND / GIT_SSH', async () => {
+    const f = fixture({
+      loginEnv: env({
+        GIT_SSH_COMMAND: 'ssh -i /login/key',
+        GIT_SSH: '/login/ssh',
+        GIT_CONFIG_COUNT: '9',
+        FOO: 'login',
+      }),
+      parts: [
+        {
+          kind: 'pane-env',
+          plugin: 'git-accounts',
+          env: { GIT_SSH_COMMAND: 'ssh -F none -o IdentityAgent=none', GIT_CONFIG_COUNT: '0' },
+        },
+      ],
+    });
+
+    await f.service.start({ folder: '/work', harness: 'claude-code', login: 'gw', by: 'owner' }, PERSON_ORIGIN);
+
+    expect(f.asked[0]?.GIT_SSH_COMMAND).toBe('ssh -F none -o IdentityAgent=none');
+    expect(f.asked[0]?.GIT_CONFIG_COUNT).toBe('0');
+    // What the part does not name is still the login's.
+    expect(f.asked[0]?.GIT_SSH).toBe('/login/ssh');
+    expect(f.asked[0]?.FOO).toBe('login');
+  });
+
   test('FY_*, an MCP env part and a shell part keep precedence over the login', async () => {
     const f = fixture({
       loginEnv: env({ FOO: 'login', PATH: 'login-path', GITHUB_TOKEN: 'login-token' }),
