@@ -45,10 +45,17 @@ const rowsOf = (list: LoginList, harness: HarnessKind): readonly Row[] =>
 const usable = (list: LoginList, harness: HarnessKind): boolean =>
   rowsOf(list, harness).some(login => enabled(login) && USABLE.has(login.status.word));
 
-/** The login this panel works on: one of this harness, switched on, that needs a sign-in and can be signed in here. */
-const pending = (list: LoginList, harness: HarnessKind) =>
+/**
+ * The login this panel works on: one of this harness, switched on, that needs a sign-in and can be signed in here. Right
+ * after this panel made one, that one and no other: its sign-in starts at once, so another login must not take its place.
+ */
+const pending = (list: LoginList, harness: HarnessKind, made: string | null) =>
   rowsOf(list, harness).find(
-    login => enabled(login) && login.status.word === 'needs_sign_in' && login.signIn.available,
+    login =>
+      (made === null || login.id === made) &&
+      enabled(login) &&
+      login.status.word === 'needs_sign_in' &&
+      login.signIn.available,
   );
 
 /** Switched on, and the machine has not yet said whether it works: not signed in, not yet known to be signed out. */
@@ -115,7 +122,7 @@ export function HarnessSignInEmbed({
     );
   if (list === null) return <Loading kind="page" label="Reading the logins on this machine…" />;
 
-  const login = pending(list, harness);
+  const login = pending(list, harness, made);
   if (login !== undefined)
     return (
       <LoginSignIn

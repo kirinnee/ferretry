@@ -303,6 +303,41 @@ describe('r11 O5: permission saves on Next only', () => {
     await context.close();
   }, 60_000);
 
+  it('a held edit cleared in Settings after the page opened: Next (refused, then again) re-reads the file and writes exactly once', async () => {
+    const context = await newContext(VIEWPORTS[1], 'light');
+    const tab = await open(context, 'permission-auto', 'light', '&pending=1');
+    await tab.locator('[data-choice="skip"]').click();
+    await tab.locator('[data-step-next]').click();
+    await tab.waitForFunction(() => window.__nextError !== '');
+    expect(await tab.evaluate(() => window.__nextError)).toContain('waiting for your OK');
+    expect(await puts(tab), 'a pending read writes nothing').toEqual([]);
+    // The owner confirms the held edit in Settings; the page is not reopened.
+    await tab.evaluate(() => window.__clearHeld());
+    await tab.locator('[data-step-next]').click();
+    await tab.waitForFunction(() => window.__puts.length > 0);
+    await tab.waitForTimeout(300);
+    expect(await puts(tab), 'exactly one PUT after the hold cleared').toHaveLength(1);
+    expect(await tab.evaluate(() => window.__nextError)).toBe('');
+    await context.close();
+  }, 60_000);
+
+  it('conversations: a held edit cleared in Settings after the page opened: the next Next writes exactly once', async () => {
+    const context = await newContext(VIEWPORTS[1], 'light');
+    const tab = await open(context, 'conversations', 'light', '&pending=1');
+    await tab.locator('[data-choice="off"]').click();
+    await tab.locator('[data-step-next]').click();
+    await tab.waitForFunction(() => window.__nextError !== '');
+    expect(await tab.evaluate(() => window.__nextError)).toContain('waiting for your OK');
+    expect(await puts(tab)).toEqual([]);
+    await tab.evaluate(() => window.__clearHeld());
+    await tab.locator('[data-step-next]').click();
+    await tab.waitForFunction(() => window.__puts.length > 0);
+    await tab.waitForTimeout(300);
+    expect(await puts(tab)).toHaveLength(1);
+    expect(await tab.evaluate(() => window.__nextError)).toBe('');
+    await context.close();
+  }, 60_000);
+
   it('a file the page cannot read safely offers no card and writes nothing', async () => {
     const context = await newContext(VIEWPORTS[1], 'light');
     const tab = await open(context, 'permission-unknown', 'light');
@@ -372,6 +407,17 @@ describe("r11 O5: the sign-in page is Codex's own (production PanelSlot, the rea
     expect(await tab.locator('[data-codex-login="awaiting-callback"]').count()).toBe(1);
     expect(await starts(tab)).toHaveLength(1);
     await expectNoChooser(tab);
+    await context.close();
+  }, 90_000);
+
+  it('another signable Codex login listed before the new one: the sign-in that starts is for the login the press made', async () => {
+    const context = await newContext(VIEWPORTS[1], 'light');
+    const tab = await open(context, 'sign-in', 'light', '&other=1&lag=0');
+    await tab.getByRole('button', { name: 'Sign in to Codex', exact: true }).click();
+    await tab.locator('[data-codex-login="awaiting-callback"]').waitFor({ state: 'visible', timeout: 15_000 });
+    const started = await starts(tab);
+    expect(started, 'one sign-in started').toHaveLength(1);
+    expect(started[0]?.body).toMatchObject({ loginId: 'codex-login', method: 'link' });
     await context.close();
   }, 90_000);
 

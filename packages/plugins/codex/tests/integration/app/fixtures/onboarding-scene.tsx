@@ -4,7 +4,8 @@
  * and command below is made up.
  *
  *   ?page=installed|sign-in|sign-in-link|sign-in-checking|import-choice|conversations|permission|permission-auto|
- *         permission-unknown   ?theme=<family>-<mode>
+ *         permission-unknown   ?theme=<family>-<mode>   &held=1 (a write is held)   &pending=1 (the file read says a held
+ *         edit waits until `window.__clearHeld()`)   &other=1 (another signable Codex login appears beside the one the add makes)
  *
  * The footer's Next runs the page's registered `commit` the way the shell does; every write the pages make is counted on
  * `window.__puts` and what the footer would say about a refusal is on `window.__nextError`.
@@ -48,11 +49,17 @@ declare global {
     __puts: unknown[];
     __calls: { route: string; body: unknown }[];
     __nextError: string;
+    __clearHeld: () => void;
   }
 }
 window.__puts = [];
 window.__calls = [];
 window.__nextError = '';
+/** `?pending=1`: the file read says a held edit waits, until the test clears it the way Settings does. */
+let heldEdit = params.get('pending') === '1';
+window.__clearHeld = () => {
+  heldEdit = false;
+};
 
 /** The authorize link the fake daemon sends: unique, never a value any app file holds. */
 const DAEMON_LINK =
@@ -103,9 +110,11 @@ const checking = {
 };
 /** The login the add makes: the same row as `needsSignIn`'s, under the id the page's add panel suggests. */
 const MADE = { ...needsSignIn.logins[0], id: 'codex-login' };
+/** `?other=1`: a second signable Codex login that sorts BEFORE the one the add makes. */
+const OTHER = { ...needsSignIn.logins[0], id: 'codex-older' };
 const WITHHELD =
   '# ‹hidden›: the text of this file is not shown because it holds a raw secret, which the owner must move into the secret store; edit it at the machine\n';
-const fileText =
+let fileText =
   page === 'permission-auto'
     ? FILE.replace('permissionMode: skip', 'permissionMode: auto')
     : page === 'permission-unknown'
@@ -144,20 +153,21 @@ const table: Record<string, unknown> = {
   }),
   // The daemon publishes `LoginChanged` for the new login BEFORE it answers the apply: the page reads the list again while the add is in flight.
   'POST /v1/logins/changes/:changeId/apply': async () => {
-    NO_LOGIN.logins = [MADE];
+    NO_LOGIN.logins = params.get('other') === '1' ? [OTHER, MADE] : [MADE];
     for (const handler of [...handlers]) handler({ id: 'codex-login', kind: 'added' });
     await new Promise(resolve => setTimeout(resolve, lag));
     return { outcome: 'applied' };
   },
   'POST /v1/logins/sign-in': () => FLOW,
   'GET /v1/logins/sign-in/:flowId': () => FLOW,
-  'GET /v1/config/file': {
+  'GET /v1/config/file': () => ({
     path: 'harness-codex.yaml',
     text: fileText,
     etag: 'e1',
     exists: true,
     absolutePath: '/fake/home/config/harness-codex.yaml',
-  },
+    ...(heldEdit ? { state: 'pending' } : {}),
+  }),
   'PUT /v1/config/file': {
     path: 'harness-codex.yaml',
     etag: 'e2',
@@ -183,7 +193,7 @@ const client = {
     // The fake file keeps what a write put in it, so a card pressed in the browser reads back as it would on a machine.
     if (route === 'PUT /v1/config/file' && options?.body?.text !== undefined) {
       window.__puts.push(options.body);
-      table['GET /v1/config/file'] = { ...(table['GET /v1/config/file'] as object), text: options.body.text };
+      fileText = options.body.text;
     }
     const answer = table[route];
     return typeof answer === 'function' ? await (answer as (body: unknown) => unknown)(options?.body) : answer;

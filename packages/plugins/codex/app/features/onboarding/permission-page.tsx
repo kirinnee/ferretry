@@ -74,10 +74,14 @@ export function PermissionPage({ client, step }: { readonly client: OnboardingCl
 
   const save = useCallback(
     (chosen: PermissionMode) => async (): Promise<void> => {
-      const now = latest.current;
-      if (now === null) throw new Error('The permission file has not been read yet.');
+      if (latest.current === null) throw new Error('The permission file has not been read yet.');
       setSaving(true);
       try {
+        // The file as it is at Next, not as it was when the page opened: a held edit may have been cleared (or an etag moved) since.
+        const now = await readConfig(client).catch((cause: unknown) => {
+          throw new Error(refusalWords(cause));
+        });
+        setFile(now);
         const result = await writeMode(client, now, chosen).catch((cause: unknown) => {
           throw new Error(refusalWords(cause));
         });

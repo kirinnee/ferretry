@@ -292,6 +292,34 @@ describe('conversations', () => {
     expect(writes(calls)).toEqual([]);
   });
 
+  test('a held edit cleared in Settings after the page opened: the next Next re-reads the file and sends exactly 1 PUT', async () => {
+    const harness = stepHarness();
+    let held = true;
+    const { container, calls } = await mount(
+      'conversations',
+      harness,
+      machine(FULL, {
+        'GET /v1/config/file': () => ({
+          path: 'harness-codex.yaml',
+          text: 'hostHistory: false\n',
+          etag: 'e1',
+          exists: true,
+          absolutePath: '/fake/home/config/harness-codex.yaml',
+          ...(held ? { state: 'pending' } : {}),
+        }),
+        'PUT /v1/config/file': { outcome: 'applied' },
+      }),
+    );
+    await pick(container, 'on');
+    await act(async () => {
+      await harness.runCommit().catch(() => undefined);
+    });
+    expect(writes(calls)).toEqual([]);
+    held = false;
+    await next(harness);
+    expect(writes(calls)).toHaveLength(1);
+  });
+
   test('a change the daemon holds is said to be waiting, Next stays, and is never shown as saved', async () => {
     const harness = stepHarness();
     const { container } = await mount(

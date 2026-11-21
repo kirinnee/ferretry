@@ -69,10 +69,14 @@ export function ConversationsPage({ client, step }: { readonly client: Onboardin
 
   const save = useCallback(
     (chosen: boolean) => async (): Promise<void> => {
-      const now = latest.current;
-      if (now === null) throw new Error('The conversations setting has not been read yet.');
+      if (latest.current === null) throw new Error('The conversations setting has not been read yet.');
       setSaving(true);
       try {
+        // The file as it is at Next, not as it was when the page opened: a held edit may have been cleared (or an etag moved) since.
+        const now = await readConfig(client).catch((cause: unknown) => {
+          throw new Error(refusalWords(cause));
+        });
+        setFile(now);
         const result = await writeHistory(client, now, chosen).catch((cause: unknown) => {
           throw new Error(refusalWords(cause));
         });

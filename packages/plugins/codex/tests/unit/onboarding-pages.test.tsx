@@ -512,6 +512,22 @@ describe('permission', () => {
     expect(harness.count('done')).toBe(0);
   });
 
+  test('a held edit cleared in Settings after the page opened: the next Next re-reads the file and sends exactly 1 PUT', async () => {
+    const harness = stepHarness();
+    let held = true;
+    const { container, calls } = await mount('permission', harness, route =>
+      route.startsWith('PUT')
+        ? { outcome: 'applied' }
+        : file('permissionMode: auto\n', held ? { state: 'pending' } : {}),
+    );
+    await choose(container, 'skip');
+    expect(await nextRefused(harness)).toContain('waiting for your OK');
+    expect(putOf(calls)).toEqual([]);
+    held = false;
+    await next(harness);
+    expect(putOf(calls)).toHaveLength(1);
+  });
+
   test('a change the daemon holds is said, Next stays on the page, and a second Next tries again', async () => {
     const harness = stepHarness();
     const { container, calls } = await mount('permission', harness, route =>
