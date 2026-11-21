@@ -108,6 +108,9 @@ beforeAll(async () => {
   );
 }, 120_000);
 
+/** Styles whose kit (r11 T5-T12) deliberately dropped the old gradient field and panel texture; each unit adds its own styles. */
+const NO_GRADIENT_FIELD: ReadonlySet<string> = new Set(['mission', 'hud']);
+
 describe('every old family-mode resolves to the same tokens on the three axes', () => {
   for (const [key, was] of Object.entries(snapshot)) {
     const [width, theme] = key.split(':') as [string, string];
@@ -140,6 +143,13 @@ describe('every old family-mode resolves to the same tokens on the three axes', 
         await drawnNow(page),
       ];
       for (const name of ASSEMBLED) expect(drawn(after[name] ?? '')).toBe(drawn(before[name] ?? ''));
+      if (NO_GRADIENT_FIELD.has(family)) {
+        // The owner's theme line (turn 4247, item 12): no gradient on any background. The style's kit (r11 T5-T12) replaced the
+        // old gradient wash and panel texture with the style contract's pattern tile, so both draw nothing now.
+        expect(after['--panel-texture']).toBe('none');
+        expect(after[FIELD]).toBe('none');
+        return;
+      }
       expect(drawn(after['--panel-texture'] ?? '')).toBe(drawn(before['--panel-texture'] ?? ''));
       expect(drawn(after[FIELD] ?? '')).toBe(drawn(before[FIELD] ?? ''));
     });
@@ -155,10 +165,13 @@ describe('the ruled page field is the Mission style’s geometry and a palette�
         root.setAttribute('data-palette', paletteId as string);
         root.setAttribute('data-mode', tone as string);
         const probe = document.getElementById('probe') as HTMLElement;
-        probe.style.backgroundImage = 'var(--body-wash)';
+        // r11 T6: the ruled field is the style contract's own pattern tile (`--bg-pattern`), not a wash; the tile's size is
+        // `--bg-pattern-size`. Read both: the image, then the size after it.
+        probe.style.backgroundImage = 'var(--bg-pattern)';
         const image = getComputedStyle(probe).backgroundImage;
         probe.style.backgroundImage = '';
-        return image;
+        const size = getComputedStyle(root).getPropertyValue('--bg-pattern-size').trim();
+        return image === 'none' ? image : `${image} @${size}`;
       },
       [style, palette, mode] as const,
     );
@@ -169,20 +182,24 @@ describe('the ruled page field is the Mission style’s geometry and a palette�
     );
   });
 
-  it('Mission style on another palette draws the grid at 96px and 32px, in that palette’s inks', async () => {
-    const wash = await field('mission', 'studio');
-    expect(wash).toContain('repeating-linear-gradient');
-    expect(wash).not.toContain('rgba(11, 82, 95');
+  it('Mission style on another palette draws the grid tile at 32px, in that palette’s inks', async () => {
+    const grid = await field('mission', 'studio');
+    expect(grid).toContain('conic-gradient');
+    expect(grid).toEndWith('@32px');
+    // Mission's own ink is rgba(11, 82, 95, 0.075); Studio's is another colour entirely.
+    expect(grid).not.toBe(await field('mission', 'mission'));
   });
 
   it('Mission palette under another style draws no grid at all', async () => {
-    for (const style of ['studio', 'neo', 'geist']) expect(await field(style, 'mission')).toBe('none');
+    // (Geist draws its own grid tile since r11 T5, so the styles read here are the ones whose field is still none.)
+    for (const style of ['studio', 'neo']) expect(await field(style, 'mission')).toBe('none');
   });
 
   it('the swapped pair and the original pair differ only in the inks', async () => {
     const swapped = await field('mission', 'studio');
     const own = await field('mission', 'mission');
-    expect(own.replace(/rgba?\([^)]*\)/gu, 'C')).toBe(swapped.replace(/rgba?\([^)]*\)/gu, 'C'));
+    const inks = /(?:rgba?|color)\([^)]*\)/gu;
+    expect(own.replace(inks, 'C')).toBe(swapped.replace(inks, 'C'));
   });
 });
 

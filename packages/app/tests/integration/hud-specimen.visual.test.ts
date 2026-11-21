@@ -120,9 +120,12 @@ describe('the HUD specimen', () => {
                 overflow: doc.scrollWidth - doc.clientWidth,
                 bracket: getComputedStyle(panel, '::before').borderTopStyle,
                 film: getComputedStyle(document.body, '::before').opacity,
-                scanlines: /repeating-linear-gradient\(0deg|repeating-linear-gradient\(to bottom/u.test(
-                  getComputedStyle(document.body).backgroundImage,
-                ),
+                // r11 T6: the scan-lines are the style contract's own scan tile (`--bg-pattern: scan`): the body's FIRST layer, a
+                // 1px horizontal line repeated every 3px, never a full-page gradient wash.
+                scanlines:
+                  /^linear-gradient\(/u.test(getComputedStyle(document.body).backgroundImage) &&
+                  getComputedStyle(document.body).backgroundSize.startsWith('3px 3px') &&
+                  getComputedStyle(document.body).backgroundRepeat.startsWith('repeat'),
                 labelFont: getComputedStyle(label).fontFamily,
                 bodyFont: getComputedStyle(target).fontFamily,
                 bodyContrast: ratio(rgba(getComputedStyle(target).color), backdrop(target)),

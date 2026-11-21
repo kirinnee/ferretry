@@ -20,13 +20,7 @@
 [data-swatch] {
   --spinner-arc: var(--accent);
   --spinner-track: color-mix(in srgb, var(--fg) 24%, transparent);
-  --spinner-stroke: 2;
-  --spinner-cap: round;
-  --spinner-sweep: 32;
-  --spinner-speed: 0.9s;
-  --spinner-timing: cubic-bezier(0.45, 0.15, 0.55, 0.85);
-  --spinner-glow: none;
-  --spinner-track-dash: none;
+  /* stroke, cap, sweep, speed, timing, glow and track-dash defaults: tokens/base-style.css (their single owner). */
 }
 
 /* ---- each style's hand (the six compact palettes have none: a palette is colour only)  --------------------------------------------------------------------------
@@ -34,16 +28,6 @@
    busy marks are ink like its status dots and edges, so a working row never reads as a link; what
    changes otherwise is the stroke — the same reason a Neo button is a hard block and a Geist one a hairline. */
 
-/* Mission Control: an instrument dial — a hairline square-cap needle over a ticked bezel. */
-:root[data-style='mission'],
-[data-swatch][data-style='mission'] {
-  --spinner-stroke: 1.5;
-  --spinner-cap: square;
-  --spinner-sweep: 22;
-  --spinner-speed: 1.2s;
-  --spinner-timing: linear;
-  --spinner-track-dash: 1.6 1.54;
-}
 /* Neo-Brutalism: a thick square-cap ink arc on a hard ink track. */
 :root[data-style='neo'],
 [data-swatch][data-style='neo'] {
