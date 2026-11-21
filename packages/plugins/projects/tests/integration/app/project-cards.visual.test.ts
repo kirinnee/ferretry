@@ -100,8 +100,31 @@ describe('the Projects list reads as cards', () => {
         withTab(viewport, scheme, 'projects=2&discoveries=2', async (tab, shot) => {
           await shot('cards');
 
-          const cards = await tab.evaluate(() =>
-            [...document.querySelectorAll('[data-project-card]')].map(card => {
+          const cards = await tab.evaluate(() => {
+            // The bare spots of the actions row: the gap between Open and Start, and the empty area beside Start. A click
+            // on either must reach the project's link (the card face), never an invisible wrapper; the buttons stay buttons.
+            const hrefAt = (x: number, y: number) =>
+              document.elementFromPoint(x, y)?.closest('a')?.getAttribute('href') ?? null;
+            const bareSpots = (card: Element) => {
+              const buttons = [...card.querySelectorAll('.fy-pc__actions .kt-btn')];
+              const [open, start] = buttons.map(button => button.getBoundingClientRect());
+              const actions = card.querySelector('.fy-pc__actions')?.getBoundingClientRect();
+              const middle = (open?.top ?? 0) + (open?.height ?? 0) / 2;
+              const gapX = ((open?.right ?? 0) + (start?.left ?? 0)) / 2;
+              const roomX = ((start?.right ?? 0) + (actions?.right ?? 0)) / 2;
+              return {
+                gapWidth: (start?.left ?? 0) - (open?.right ?? 0),
+                roomWidth: (actions?.right ?? 0) - (start?.right ?? 0),
+                hitGap: hrefAt(gapX, middle),
+                hitRoom: hrefAt(roomX, middle),
+                gapTarget: document.elementFromPoint(gapX, middle)?.className ?? '',
+                hitOpen: hrefAt((open?.left ?? 0) + (open?.width ?? 0) / 2, middle),
+                hitStart:
+                  document.elementFromPoint((start?.left ?? 0) + (start?.width ?? 0) / 2, middle)?.closest('button') !==
+                  null,
+              };
+            };
+            return [...document.querySelectorAll('[data-project-card]')].map(card => {
               const style = getComputedStyle(card);
               const box = card.getBoundingClientRect();
               const border = ['Top', 'Right', 'Bottom', 'Left'].map(
@@ -132,15 +155,19 @@ describe('the Projects list reads as cards', () => {
                 startWidth: startBox?.width ?? 0,
                 startHeight: startBox?.height ?? 0,
                 startRight: startBox?.right ?? 0,
+                ...bareSpots(card),
               };
-            }),
-          );
+            });
+          });
           const page = await tab.evaluate(() => ({
             scrollWidth: document.documentElement.scrollWidth,
             clientWidth: document.documentElement.clientWidth,
           }));
           console.info(
             `[s9] ${viewport.name} ${scheme}: ${cards.length} cards, widths ${cards.map(card => card.width.toFixed(0)).join('/')}, start ${cards.map(card => `${card.startWidth.toFixed(1)}x${card.startHeight.toFixed(0)}`).join('/')}, scrollWidth ${page.scrollWidth} <= ${page.clientWidth}`,
+          );
+          console.info(
+            `[s9] ${viewport.name} ${scheme}: bare spots gap ${cards.map(card => card.gapWidth.toFixed(0)).join('/')}px hit ${cards.map(card => (card.hitGap === null ? 'wrapper' : 'link')).join('/')}, room ${cards.map(card => card.roomWidth.toFixed(0)).join('/')}px hit ${cards.map(card => (card.hitRoom === null ? 'wrapper' : 'link')).join('/')}`,
           );
           expect(cards, 'two projects, two cards').toHaveLength(2);
           for (const card of cards) {
@@ -151,6 +178,17 @@ describe('the Projects list reads as cards', () => {
             expect(card.hasLink, `${card.name} has a link to its page`).toBe(true);
             expect(card.hitTitle, 'the card face is the link').toContain('/projects/');
             expect(card.hitBody, 'the card body is the link').toContain('/projects/');
+            expect(
+              card.hitGap ?? `(hit ${card.gapTarget})`,
+              `${card.name}: the gap between Open and Start (${card.gapWidth}px) is the card face, hit ${card.gapTarget}`,
+            ).toContain('/projects/');
+            if (card.roomWidth > 8)
+              expect(
+                card.hitRoom ?? '(not the link)',
+                `${card.name}: the empty area beside Start (${card.roomWidth.toFixed(0)}px) is the card face`,
+              ).toContain('/projects/');
+            expect(card.hitOpen ?? '(not the link)', 'Open still goes to the project page').toContain('/projects/');
+            expect(card.hitStart, 'Start is still the button').toBe(true);
             expect(card.startName).toBe('Start a ferret here');
             expect(card.startHeight, 'a touch target').toBeGreaterThanOrEqual(44);
             if (!viewport.phone) expect(Math.abs(card.startWidth - 136), 'fixed 136px').toBeLessThanOrEqual(1);
@@ -214,16 +252,7 @@ describe('the Projects list reads as cards', () => {
 
           // Clicking the card navigates in-app to the project page; "Start a ferret here" goes to New ferret.
           await first.click({ position: { x: 8, y: 8 } });
-          await tab
-            .getByRole('button', { name: 'Start a ferret here' })
-            .nth(1)
-            .click()
-            .catch(() => undefined);
-          await tab
-            .getByRole('link', { name: 'Start a ferret here' })
-            .nth(1)
-            .click()
-            .catch(() => undefined);
+          await tab.getByRole('button', { name: 'Start a ferret here' }).nth(1).click();
           const navigated = await tab.evaluate(() => (window as unknown as { __navigated: string[] }).__navigated);
           expect(navigated[0]).toMatch(/\/projects\/00000000-0000-4000-8000-000000000001$/u);
           expect(navigated.at(-1)).toBe('/d/fake/new?folder=%2Ffake%2Fp2');

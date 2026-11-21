@@ -93,10 +93,12 @@
   flex-wrap: wrap;
   gap: 8px;
   grid-column: 1 / -1;
+  pointer-events: none; /* the wrapper's gaps and empty area belong to the card face (the link); only the controls catch clicks */
   position: relative;
 }
 .fy-pc__actions .kt-btn {
   height: auto;
+  pointer-events: auto;
   inline-size: 8.5rem;
   justify-content: center;
   min-block-size: 44px;
