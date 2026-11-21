@@ -427,10 +427,14 @@ export class ConversationIndex {
 
   // ─── refresh ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-  /** Starts an update unless one is running; resolves when it ends (never rejects). */
+  /** The scoped update in flight (the title sweep's): a listing never joins it, it is not a listing's update. */
+  #scoped: Promise<void> | undefined;
+
+  /** Starts an update unless one is running; resolves when it ends (never rejects). It waits for a scoped update in flight, never joins it. */
   refresh(): Promise<void> {
     if (this.#running !== undefined) return this.#running;
-    const run = this.#refreshNow()
+    const run = (this.#scoped ?? Promise.resolve())
+      .then(async () => await this.#refreshNow())
       .catch((error: unknown) => {
         this.needs.warn?.(
           `The conversation index could not be updated: ${error instanceof Error ? error.message : String(error)}`,
@@ -447,21 +451,23 @@ export class ConversationIndex {
   /**
    * Looks again at ONLY the given conversations (`"<harness>:<conversation id>"`), for the title sweep: only the trees of those
    * harnesses are listed, only the files named after those conversations are read, nothing else is added, dropped or judged,
-   * and the index is not marked fresh or built (a listing still does its own full update). Joins a running update instead of
-   * starting a second one. Never rejects.
+   * and the index is not marked fresh or built (a listing still does its own full update). It never joins or reuses an update
+   * in flight (a full listing's included): it waits for it to end, then does its own scoped look, so its answer is about the
+   * conversations it was asked about and nothing else. Never rejects.
    */
   refreshConversations(only: ReadonlySet<string>): Promise<void> {
-    if (this.#running !== undefined) return this.#running;
-    const run = this.#refreshNow(only)
+    const after = Promise.all([this.#running, this.#scoped]);
+    const run: Promise<void> = after
+      .then(async () => await this.#refreshNow(only))
       .catch((error: unknown) => {
         this.needs.warn?.(
           `The conversation index could not be updated: ${error instanceof Error ? error.message : String(error)}`,
         );
       })
       .finally(() => {
-        this.#running = undefined;
+        if (this.#scoped === run) this.#scoped = undefined;
       });
-    this.#running = run;
+    this.#scoped = run;
     return run;
   }
 
@@ -512,7 +518,7 @@ export class ConversationIndex {
 
     // Codex's thread names first, so a row described below already carries its name — and so the row a delta is folded into
     // (`Work.old`, read next) already holds today's name instead of reverting it.
-    for (const source of sources) await this.#codexNames(source);
+    for (const source of sources) await this.#codexNames(source, only);
 
     const work: Work[] = [];
     // Every tree is walked at once: the walk waits on the disk, and each tree is a different part of it.
@@ -893,13 +899,24 @@ export class ConversationIndex {
   }
 
   /** Codex's own name for each thread (its `session_index.jsonl`), which wins over the one a rollout recorded. */
-  async #codexNames(source: IndexSource): Promise<void> {
+  async #codexNames(source: IndexSource, only?: ReadonlySet<string>): Promise<void> {
     if (source.parser !== 'codex') return;
     const db = this.#open();
     const key = sourceKeyOf(source);
     const stat = await source.files.stat(CODEX_INDEX);
     const stamp = stat === undefined ? 'none' : `${stat.size}:${stat.modifiedMs}`;
     const marker = `names:${key}`;
+    // A scoped update touches only the threads it was asked about: the names of every other thread are neither read into the
+    // index, nor cleared from it, and the file is not marked as read (a full update still has to).
+    const scoped =
+      only === undefined
+        ? undefined
+        : new Set(
+            [...only]
+              .filter(item => item.startsWith(`${source.harness}:`))
+              .map(item => item.slice(source.harness.length + 1)),
+          );
+    const inScope = (id: string): boolean => scoped === undefined || scoped.has(id);
     if (db.query<{ v: string }>('SELECT v FROM meta WHERE k = ?', [marker])[0]?.v === stamp) return;
     let names: ReadonlyMap<string, string> = new Map();
     if (stat !== undefined) {
@@ -915,6 +932,7 @@ export class ConversationIndex {
       names = new Map(
         await this.#scrub(scrub =>
           [...named].flatMap(([id, name]) => {
+            if (!inScope(id)) return [];
             const title = cleanTitle(name, scrub);
             return title === undefined ? [] : [[id, title] as const];
           }),
@@ -924,16 +942,18 @@ export class ConversationIndex {
     const before = new Map(
       db
         .query<{ id: string; name: string }>('SELECT id, name FROM index_names WHERE source = ?', [key])
+        .filter(row => inScope(row.id))
         .map(row => [row.id, row.name]),
     );
     const changed = new Set<string>();
     for (const [id, name] of names) if (before.get(id) !== name) changed.add(id);
     for (const id of before.keys()) if (!names.has(id)) changed.add(id);
     db.transaction(() => {
-      db.run('DELETE FROM index_names WHERE source = ?', [key]);
+      if (scoped === undefined) db.run('DELETE FROM index_names WHERE source = ?', [key]);
+      else for (const id of scoped) db.run('DELETE FROM index_names WHERE source = ? AND id = ?', [key, id]);
       for (const [id, name] of names)
         db.run('INSERT INTO index_names (source, id, name) VALUES (?, ?, ?)', [key, id, name]);
-      db.run('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)', [marker, stamp]);
+      if (scoped === undefined) db.run('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)', [marker, stamp]);
     });
     const rows: RowInput[] = [];
     for (const id of changed) {

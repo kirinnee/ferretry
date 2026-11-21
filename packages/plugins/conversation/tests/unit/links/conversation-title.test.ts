@@ -323,8 +323,21 @@ describe('a credential named in a sentence or a URL is masked (review SEC 1)', (
     ['the password :hunter22x please log in', 'hunter22x'],
     ['PASSWORD :zxcvb12 is wrong', 'zxcvb12'],
     ['my passphrase is correcthorse9 ok', 'correcthorse9'],
+    // review round 4 (c): the bare JSON form, no braces, the closing quote of the name before the separator.
+    ['"token":"s3cretpw"', 's3cretpw'],
+    ['use "token":"s3cretpw" for it', 's3cretpw'],
+    ["use 'api_key'='k9x8c7v6b5' for it", 'k9x8c7v6b5'],
+    ['"password":"hunter22x",', 'hunter22x'],
     ['the passphrase: correcthorse9 stays secret', 'correcthorse9'],
   ];
+
+  test('the exact bare form "token":"x" leaves neither its name nor its value in any shown form', () => {
+    const text = 'use "token":"x" here';
+    for (const shown of [scrubShown(text, NO_VAULT), cleanTitle(text, NO_VAULT) ?? '', maskText(text, NO_VAULT)]) {
+      expect(shown).not.toContain('":"x"');
+      expect(shown).not.toContain('token');
+    }
+  });
 
   for (const [text, secret] of cases) {
     test(`“${text}” keeps ${secret} out of the shown line, the title and the preview`, () => {

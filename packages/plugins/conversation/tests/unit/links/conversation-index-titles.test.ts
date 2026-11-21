@@ -532,3 +532,175 @@ describe('a scoped update (the title sweep) reads only the conversations it is a
     expect(listed).toEqual([]);
   });
 });
+
+describe('a scoped update touches only the conversations it was scoped to (r11 S11 round 4 a, b)', () => {
+  const rolloutOf = (id: string) => `sessions/2026/02/01/rollout-2026-02-01T09-00-00-${id}.jsonl`;
+  const CODEX2 = '5c1e0e3a-0000-4000-8000-0000000000bb';
+  const nameOf = (index: ConversationIndex, id: string) =>
+    index.query().conversations.find(entry => entry.row.id === id)?.row.name;
+
+  test('(a) scoped to one Codex thread, another thread whose name left the index keeps its stored name; the scoped one is updated', async () => {
+    const { index, codex } = setup({
+      names: () => new Map([[`codex:${CODEX}`, { ferret: 'ms-9', name: 'Ms-9', titleSource: 'auto' }]]),
+    });
+    codex.set(rolloutOf(CODEX), codexRollout(CODEX, '/work/app', 'fix the build'));
+    codex.set(rolloutOf(CODEX2), codexRollout(CODEX2, '/work/app', 'write the notes'));
+    codex.set(
+      'session_index.jsonl',
+      rec({ id: CODEX, thread_name: 'Build one' }) + rec({ id: CODEX2, thread_name: 'Notes two' }),
+    );
+    await index.refresh();
+    expect(nameOf(index, CODEX)).toBe('Build one');
+    expect(nameOf(index, CODEX2)).toBe('Notes two');
+
+    // The index file now renames the scoped thread, drops the other thread's name and names a third thread nobody scoped.
+    codex.set('session_index.jsonl', rec({ id: CODEX, thread_name: 'Build one, renamed' }));
+    await index.refreshConversations(new Set([`codex:${CODEX}`]));
+    expect(nameOf(index, CODEX)).toBe('Build one, renamed');
+    expect(nameOf(index, CODEX2)).toBe('Notes two');
+
+    // The file was not marked as read: the next full update still applies it everywhere.
+    await index.refresh();
+    expect(nameOf(index, CODEX2)).not.toBe('Notes two');
+  });
+
+  test('(a) a scoped update stores no name for a thread it was not scoped to', async () => {
+    const { index, codex, stored } = setup({
+      names: () => new Map([[`codex:${CODEX}`, { ferret: 'ms-9', name: 'Ms-9', titleSource: 'auto' }]]),
+    });
+    codex.set(rolloutOf(CODEX), codexRollout(CODEX, '/work/app', 'fix the build'));
+    codex.set(rolloutOf(CODEX2), codexRollout(CODEX2, '/work/app', 'write the notes'));
+    await index.refresh();
+    codex.set(
+      'session_index.jsonl',
+      rec({ id: CODEX, thread_name: 'Build one' }) + rec({ id: CODEX2, thread_name: 'Notes two' }),
+    );
+    await index.refreshConversations(new Set([`codex:${CODEX}`]));
+    expect(nameOf(index, CODEX)).toBe('Build one');
+    expect(stored()).not.toContain('Notes two');
+  });
+
+  /** An update listing the Claude tree waits at the gate until it is opened. */
+  const gated = (owner: MemoryHistory) => {
+    let open!: () => void;
+    const gate = new Promise<void>(resolve => (open = resolve));
+    const entries = owner.entries.bind(owner);
+    let hit!: () => void;
+    const reached = new Promise<void>(resolve => (hit = resolve));
+    owner.entries = async directory => {
+      hit();
+      await gate;
+      return await entries(directory);
+    };
+    return { open, reached, restore: () => (owner.entries = entries) };
+  };
+  const C = '3b1a4a52-0000-4000-8000-00000000000c';
+
+  test('(b) a scoped update asked while a FULL update is running does not join it: it waits, then looks at only its own conversation', async () => {
+    const { index, owner } = setup({ names: () => ferretOf({ titleSource: 'auto' }) });
+    owner.set(pathOf(A), talk('please fix the login page'));
+    owner.set(pathOf(B), talk('rewrite the release notes'));
+    await index.refresh();
+    owner.set(pathOf(C), talk('something new'));
+    owner.append(pathOf(B), talk('and mention the beta'));
+    const gate = gated(owner);
+    const full = index.refresh();
+    await gate.reached;
+    gate.restore();
+    owner.resetReads();
+    const scoped = index.refreshConversations(new Set([`claude-code:${A}`]));
+    // The scoped one is its own run: it is not the full update's promise.
+    expect(scoped).not.toBe(full);
+    gate.open();
+    await scoped;
+    expect(index.query().conversations).toHaveLength(3);
+    // The full update read B and C once; the scoped one added nothing of its own beyond A (unchanged, so not read).
+    expect([...owner.readByPath.keys()].sort()).toEqual([pathOf(B), pathOf(C)].sort());
+  });
+
+  test('(b) a listing asked while a scoped update is running is not answered by it: it runs its own full update, finds the new rows, and says so', async () => {
+    const { index, owner, clock } = setup({ names: () => ferretOf({ titleSource: 'auto' }) });
+    owner.set(pathOf(A), talk('please fix the login page'));
+    await index.refresh();
+    owner.set(pathOf(C), talk('something new'));
+    // The index is old enough that a listing refreshes it first.
+    clock.ms += 10 * 60_000;
+    const gate = gated(owner);
+    const scoped = index.refreshConversations(new Set([`claude-code:${A}`]));
+    await gate.reached;
+    gate.restore();
+    const ready = index.ready();
+    gate.open();
+    await scoped;
+    expect(await ready).toEqual({ indexing: false });
+    // `ready` resolved only after a full update: the unrelated, new row is listed.
+    expect(
+      index
+        .query()
+        .conversations.map(entry => entry.row.id)
+        .sort(),
+    ).toEqual([A, C].sort());
+  });
+
+  test('(b) a listing that stops waiting for a slow full update says it is still indexing, and a scoped update asked meanwhile does not clear that', async () => {
+    const owner = new MemoryHistory();
+    const sqlite = memorySqlite();
+    const clock = { ms: 0 };
+    let slept!: () => void;
+    const index = new ConversationIndex({
+      sqlite: () => sqlite,
+      sources: async () => [
+        { harness: 'claude-code', parser: 'claude', kind: 'computer', label: 'owner', files: owner },
+      ],
+      ferretNames: async () => ferretOf({ titleSource: 'auto' }),
+      parsers: PARSERS,
+      nowMs: () => clock.ms,
+      sleep: async () => await new Promise<void>(resolve => (slept = resolve)),
+    });
+    owner.set(pathOf(A), talk('please fix the login page'));
+    await index.refresh();
+    owner.set(pathOf(C), talk('something new'));
+    clock.ms += 10 * 60_000;
+    const gate = gated(owner);
+    const ready = index.ready();
+    await gate.reached;
+    gate.restore();
+    const scoped = index.refreshConversations(new Set([`claude-code:${A}`]));
+    slept();
+    expect(await ready).toEqual({ indexing: true });
+    gate.open();
+    await scoped;
+  });
+});
+
+describe('a bare JSON-quoted credential name is masked everywhere it could be stored or offered (r11 S11 round 4 c)', () => {
+  test('"token":"x" in a first message, a CLI title and an owner title: not in any cell, the listing or the title offered to the ferret', async () => {
+    const { index, owner, stored, offered } = setup({ names: () => ferretOf({ titleSource: 'auto' }) });
+    owner.set(pathOf(A), talk('Please call the api with "token":"s3cretpw" and then fix the login page'));
+    await index.refresh();
+    owner.append(pathOf(A), rec({ type: 'ai-title', aiTitle: 'Send "token":"s3cretpw" to the api' }));
+    await index.refresh();
+    const answer = index.query();
+    const listing = LinkListingSchema.parse({
+      conversations: answer.conversations.map(entry => entry.row),
+      matched: answer.matched,
+      skipped: 0,
+    });
+    expect(listing.conversations[0]?.name).toBe('Send to the api');
+    for (const text of [stored(), JSON.stringify(listing), JSON.stringify(offered)]) {
+      expect(text).not.toContain('s3cretpw');
+      expect(text).not.toContain('"token\\":');
+    }
+    expect(offered.at(-1)).toEqual({ ferret: 'ms-12', title: 'Send to the api' });
+  });
+
+  test('the exact "token":"x" is masked in the stored title, preview, latest and the wire row', async () => {
+    const { index, owner, stored } = setup();
+    owner.set(pathOf(A), talk('use "token":"x" now', AT, 'ok "token":"x" noted'));
+    owner.append(pathOf(A), rec({ type: 'ai-title', aiTitle: 'Rotate "token":"x" soon' }));
+    await index.refresh();
+    const row = index.query().conversations[0]?.row;
+    expect(row?.name).toBe('Rotate soon');
+    for (const text of [stored(), JSON.stringify(row)]) expect(text).not.toContain('\\"x\\"');
+  });
+});

@@ -49,7 +49,7 @@ const SCHEME_THEN_CREDENTIAL = /\b(?:bearer|basic|token)\s+[A-Za-z0-9._~+/=-]{8,
 
 /** A word that names a credential and carries its value glued to it: `TOKEN=…`, `password:…`, `--api-key=…`, `?access_token=…`. */
 const NAMED_CREDENTIAL =
-  /^[\w.-]*(?:token|secret|passw(?:or)?d|passwd|passphrase|passcode|pwd|api[_-]?key|apikey|auth|credential|private[_-]?key|access[_-]?key)[\w.-]*[=:]\S+/iu;
+  /^[\w.-]*(?:token|secret|passw(?:or)?d|passwd|passphrase|passcode|pwd|api[_-]?key|apikey|auth|credential|private[_-]?key|access[_-]?key)[\w.-]*["'`]?[=:]\S+/iu;
 
 /** A word that NAMES a credential (its value is the next word, after a `:`, `=` or `is`). `STRONG` is the names that are never plain English. */
 const STRONG_NAME =
