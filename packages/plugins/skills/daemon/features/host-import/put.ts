@@ -8,8 +8,10 @@
  *    make"), and the write is pinned to "no file yet" so a file that appears in between is never overwritten. The ONE
  *    exception is an update the person accepted (`options.replace`): the item is then replaced, pinned to the file's
  *    current etag (so a file that moved meanwhile is a refusal), the skills it names that are new are installed, and the
- *    skills an import installed earlier (`options.owned`) are rewritten with the files now handed over. A skill that is
- *    installed but was NOT brought in by an import is left exactly as it is, in a sentence;
+ *    skills an import installed earlier (`options.owned`) are rewritten with the files now handed over, but ONLY while the
+ *    folder still holds what the import last wrote (the store's content digest of it): a folder the person deleted and made
+ *    again, or edited, is theirs. A skill that is installed but was NOT brought in by an import, or was changed since, is
+ *    left exactly as it is, in a sentence. The item's write is pinned to the etag verified before any folder work;
  *  - every skill folder the item names must be a folder name a harness can load and the installed store can hold
  *    (`usableSkillName`: never a dot-folder such as `.system`, never a path), and an item names at most
  *    {@link MAX_IMPORTED_SKILLS} folders;
@@ -69,8 +71,13 @@ interface SkillsInstalledStore {
   install(
     skill: string,
     files: readonly InstalledSkillFile[],
-    options?: { readonly createOnly?: boolean },
+    options?: { readonly createOnly?: boolean; readonly stamp?: boolean },
   ): Promise<void>;
+  /**
+   * Whether `installed/<skill>/` still holds exactly what an import last wrote there (installed with `stamp`): a folder
+   * the person deleted and made again, or edited, is not.
+   */
+  unchangedSinceImport(skill: string): Promise<boolean>;
   /** Removes what an install of ours wrote. */
   uninstall(skill: string): Promise<void>;
 }
@@ -80,8 +87,8 @@ export interface SkillsImportDeps {
   has(name: string): boolean;
   /** The config etag of `config/skills/<name>.yaml` on disk right now, or `'absent'`. */
   etag(name: string): Promise<string>;
-  /** Replaces `config/skills/<name>.yaml` as the person's accepted update, pinned to the file's etag read just before. */
-  replace(name: string, text: string): Promise<SkillsItemWrite>;
+  /** Replaces `config/skills/<name>.yaml` as the person's accepted update, pinned to `etag`: the one this import verified. */
+  replace(name: string, text: string, etag: string): Promise<SkillsItemWrite>;
   /** Writes `config/skills/<name>.yaml` as a NEW file (`ifMatch: 'absent'`) through the kernel's config writer. */
   create(name: string, text: string): Promise<SkillsItemWrite>;
   /** Skills' own installed store: where the folders land. */
@@ -168,8 +175,10 @@ export function skillsImportPut(
           kept.push(
             `"${skill}" is already installed here and was not brought in by an import, so it was left as it is`,
           );
+        else if (!(await deps.store.unchangedSinceImport(skill)))
+          kept.push(`"${skill}" was changed after the import wrote it, so it was left as it is`);
         else {
-          // One an import installed: its files are rewritten with what the host has now.
+          // One an import installed and nobody changed since: its files are rewritten with what the host has now.
           const own = filesOf(skill, files);
           if (own.length === 0)
             return refuse(`the files of the skill "${skill}" were not handed over, so it was not updated`);
@@ -193,7 +202,7 @@ export function skillsImportPut(
     };
     for (const { skill, files: own } of toInstall) {
       try {
-        await deps.store.install(skill, own, { createOnly: true });
+        await deps.store.install(skill, own, { createOnly: true, stamp: true });
         landed.push(skill);
       } catch (error) {
         // A skill that landed between the look above and this write is the owner's: left as it is, and said so.
@@ -210,7 +219,7 @@ export function skillsImportPut(
 
     for (const { skill, files: own } of toRewrite) {
       try {
-        await deps.store.install(skill, own);
+        await deps.store.install(skill, own, { stamp: true });
       } catch (error) {
         await undo();
         return refuse(
@@ -219,7 +228,7 @@ export function skillsImportPut(
       }
     }
 
-    const answered = replacing ? await deps.replace(name, text) : await deps.create(name, text);
+    const answered = replacing ? await deps.replace(name, text, current) : await deps.create(name, text);
     const warnings = kept.length === 0 ? {} : { warnings: kept };
     const created = landed.length === 0 ? {} : { created: landed };
     const etags = answered.kind === 'written' || answered.kind === 'held' ? { etags: { [name]: answered.etag } } : {};

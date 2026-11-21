@@ -4539,3 +4539,118 @@ it('binds a reused Vault key to the login on retry', async () => {
   should(requests).length(1);
   should(requests[0]?.minted).eql([{ name: 'ANTHROPIC_API_KEY', secretName: 'ANTHROPIC_API_KEY' }]);
 });
+
+describe('the setup.import executor keeps what the person made or edited (end B2)', () => {
+  it('should keep the etag of an ordinary owner write that names no created item, and hand it back on each successive update', async () => {
+    // Arrange — the MCP owner answers only an etag (no `created`), a new one at every write.
+    let writes = 0;
+    const door = reportingOwners(write =>
+      write.kind === 'mcp'
+        ? { outcome: 'written', etags: { [write.name]: `etag-${++writes}` } }
+        : { outcome: 'written' },
+    );
+    const { service, applied, state } = world({ overrides: { components: door.components } });
+    door.bind(state);
+    state.scans = settingsHost();
+    await importOnce(service);
+    const recordEtags = (): Record<string, string> | undefined =>
+      (
+        JSON.parse(state.assets[RECORD_PATH] ?? '{}') as {
+          components: Record<string, { etags?: Record<string, string> }>;
+        }
+      ).components['mcp/github']?.etags;
+    const settle = (index: number): void => {
+      const documents = applied[index]?.documents ?? [];
+      for (const document of documents) state.assets[document.path] = document.content;
+      state.reading = door.readingOf(documents);
+    };
+    settle(0);
+    const hostWith = (marker: string): readonly HostHarnessScan[] => {
+      const text = MCP_JSON.replace('server-github', marker);
+      return [
+        claudeScan({
+          settings: { kind: 'text', source: '/person/.claude/settings.json', text: HOST_SETTINGS, bytes: 9 },
+          mcp: { kind: 'text', source: '/person/.claude.json', text, bytes: text.length },
+        }),
+        codexScan(),
+      ];
+    };
+
+    // Assert — the first import's etag reached the record
+    should(recordEtags()).eql({ github: 'etag-1' });
+
+    // Act — two accepted updates in a row
+    state.scans = hostWith('server-github-v2');
+    const before = door.calls.length;
+    await importOnce(service, IMPORT({ acceptedUpdates: ['mcp/github'], addDuplicates: true }));
+    settle(1);
+    state.scans = hostWith('server-github-v3');
+    await importOnce(service, IMPORT({ acceptedUpdates: ['mcp/github'], addDuplicates: true }));
+
+    // Assert — each update was handed the etag the write before it answered, and the record moved on
+    const handed = door.calls.slice(before).filter(call => call.kind === 'mcp');
+    should(handed.map(call => call.etags)).eql([{ github: 'etag-1' }, { github: 'etag-2' }]);
+    settle(2);
+    should(recordEtags()).eql({ github: 'etag-3' });
+  });
+
+  it('should leave instructions the person edited here alone when the host file changes', async () => {
+    // Arrange — one import, then the person rewrites the instructions here and the host CLAUDE.md also changes.
+    const { service, applied, state } = world();
+    await importOnce(service);
+    const written = applied[0]?.documents ?? [];
+    for (const document of written) state.assets[document.path] = document.content;
+    const imported = modelOfWrites(written);
+    const edited = parseAccountModel({
+      ...imported,
+      components: {
+        ...imported.components,
+        instructions: {
+          ...imported.components.instructions,
+          'claude-instructions': {
+            ...imported.components.instructions['claude-instructions'],
+            text: 'MY OWN WORDS, written here.\n',
+          },
+        },
+      },
+    });
+    state.reading = configReading(edited, 'rev-2');
+    state.scans = [
+      claudeScan({
+        instructions: { kind: 'text', source: '/person/.claude/CLAUDE.md', text: 'Be kinder.\n', bytes: 11 },
+      }),
+      codexScan(),
+    ];
+
+    // Act
+    const offered = (await service.scan()).updates.map(update => update.reference);
+    const change = IMPORT({ acceptedUpdates: ['instructions/claude-instructions'], addDuplicates: true });
+    const refusal = await catalogRefusal(service.executors.setup.describe(change, MACHINE), 'fleet_change_refused');
+
+    // Assert — nothing is offered, and accepting one anyway writes none of the host's text over the person's
+    should(offered).eql([]);
+    should(refusal.message).containEql('no newer version of instructions/claude-instructions');
+    should(applied).have.length(1);
+  });
+
+  it('should still offer a host instructions change when the local text is as the import left it', async () => {
+    // Arrange
+    const { service, applied, state } = world();
+    await importOnce(service);
+    const written = applied[0]?.documents ?? [];
+    for (const document of written) state.assets[document.path] = document.content;
+    state.reading = configReading(modelOfWrites(written), 'rev-2');
+    state.scans = [
+      claudeScan({
+        instructions: { kind: 'text', source: '/person/.claude/CLAUDE.md', text: 'Be kinder.\n', bytes: 11 },
+      }),
+      codexScan(),
+    ];
+
+    // Act
+    const offered = (await service.scan()).updates.map(update => update.reference);
+
+    // Assert
+    should(offered).eql(['instructions/claude-instructions']);
+  });
+});

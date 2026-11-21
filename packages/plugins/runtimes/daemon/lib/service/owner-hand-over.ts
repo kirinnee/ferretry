@@ -149,7 +149,7 @@ export async function handOver(input: {
     }
   }
   const rebuilt =
-    left.size === 0 && heldReferences.size === 0 && created.size === 0
+    left.size === 0 && heldReferences.size === 0 && created.size === 0 && etags.size === 0
       ? applied
       : await owners.rebuild({ refused: left, held: heldReferences, created, etags });
   // The fleet is built from what the owners report in effect, never from what the import asked for: a held component
