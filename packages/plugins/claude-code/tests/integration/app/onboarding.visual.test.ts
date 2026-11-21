@@ -199,6 +199,54 @@ describe('the Claude pages: stacked cards, the demo on the right, few words', ()
         });
 });
 
+/**
+ * r11-1c C1: the Settings import page, the whole page frame (the flow's `.fy-sf-slot` content) with the kit's checklist cards in it.
+ * "Page text" = what the PAGE writes: the frame's innerText minus the card titles (group headings, card labels), minus the
+ * page title, the footer buttons (the same on every page), the demo (an aria-hidden picture) and the key NAMES (data from
+ * the scan). At most 160 characters at both widths. The Environment-keys card's Vault paragraph (190) was the main cost;
+ * it is one short line now, and the old sentences stay on it as its hover text. The strict count (nothing removed but the
+ * card titles) is logged, not asserted, so the number the owner would count is in the output.
+ */
+describe('the Settings import page: the page text reads short', () => {
+  for (const viewport of VIEWPORTS)
+    it(`kind-settings: page text <= 160 characters at ${viewport.name}`, async () => {
+      const { tab, close } = await open(viewport, 'studio-light', '&page=kind-settings');
+      try {
+        await tab.waitForTimeout(1_200);
+        const { text, strict, hasKeysCard, vaultLine } = await tab.evaluate(() => {
+          const page = document.querySelector('[data-step-page]') as HTMLElement;
+          const flat = (value: string) => value.replace(/\s+/g, ' ').trim();
+          const without = (from: string, parts: readonly Element[]) => {
+            let words = from;
+            for (const part of parts) {
+              const own = flat((part as HTMLElement).innerText);
+              if (own !== '') words = words.replace(own, '');
+            }
+            return flat(words);
+          };
+          const titles = [...page.querySelectorAll('h4, .text-row')];
+          const chrome = [
+            ...page.querySelectorAll('.fy-spf__title, [data-step-footer], [data-step-demo], [data-found-locked] code'),
+          ];
+          return {
+            text: without(flat(page.innerText), [...titles, ...chrome]),
+            strict: without(flat(page.innerText), titles),
+            hasKeysCard: page.querySelector('[data-found-locked]') !== null,
+            vaultLine: (page.querySelector('[data-found-vault]') as HTMLElement | null)?.innerText ?? '',
+          };
+        });
+        console.log(
+          `C1 kind-settings ${viewport.name}: page text ${String(text.length)} chars (strict, demo/title/footer/keys counted: ${String(strict.length)}): ${text}`,
+        );
+        expect(hasKeysCard, 'the scene draws the Environment-keys card').toBe(true);
+        expect(vaultLine.length, 'the Vault sentence is one short line').toBeLessThanOrEqual(40);
+        expect(text.length, `page text: ${text}`).toBeLessThanOrEqual(160);
+      } finally {
+        await close();
+      }
+    });
+});
+
 describe('the permission page: only Next writes, and only permissionMode', () => {
   it('has no button of its own in the page body (1280)', async () => {
     const { tab, close } = await open(VIEWPORTS[0], 'studio-light', '&page=permission');

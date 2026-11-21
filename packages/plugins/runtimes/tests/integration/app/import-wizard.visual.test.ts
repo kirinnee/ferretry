@@ -146,7 +146,7 @@ const CASES: readonly Case[] = [
       'MCP server',
       'Claude settings',
       'This login’s environment',
-      'kept in the Vault: agents use them, and nothing can fetch a value back out of the Vault',
+      'Secret keys go to the Vault.',
       'Not imported: Ferretry doesn’t use hooks',
       'Stay in each project; agents read them there',
       'already read automatically, one way. Nothing to import.',
@@ -165,7 +165,7 @@ const CASES: readonly Case[] = [
   {
     name: 'secret-env',
     view: 'secrets',
-    expectText: ['ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'kept in the Vault', 'in its own environment'],
+    expectText: ['ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'kept in the Vault', 'Secret keys go to the Vault.'],
   },
   {
     name: 'hooks-present',
