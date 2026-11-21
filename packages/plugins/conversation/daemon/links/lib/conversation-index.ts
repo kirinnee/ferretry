@@ -69,6 +69,8 @@ const LAYOUT = '3';
  * name and title (an owner's Rename included) are carried over. The row's title is made again with the precedence a fresh index
  * gives it (a /rename, else a generated title, else the first message), from names found by one read of the WHOLE transcript
  * (`#wholeNames`), so a /rename in the middle of a long transcript is found. A guess from the cached words is never made.
+ * A cached title is replaced ONLY past one guard (`#scanComplete`, shared by every way a stale row is read): the read reached the
+ * size the walk saw and the file still has that size and modified time. Otherwise the cached title stays and the row stays stale.
  */
 const TITLE_RULE = '1';
 /** A row's `size` while its fallback title waits to be made again: no file can match it. */
@@ -696,6 +698,7 @@ export class ConversationIndex {
     if (
       old !== undefined &&
       old.ok === 1 &&
+      old.size !== STALE_SIZE &&
       old.scanned > 0 &&
       found.size > old.size &&
       found.size - old.scanned <= DELTA_READ_MAX_BYTES
@@ -732,13 +735,16 @@ export class ConversationIndex {
         result = await this.#describeText(source, found, wide);
       }
     }
-    // A row waiting on the title rule: its names come from one read of the whole file, not from the two ends. Only when what was
-    // read last still left the middle out: a read that took the whole file (a widened tail) has the names already.
+    // A row waiting on the title rule replaces its cached title ONLY from a COMPLETE scan (`#scanComplete`), whichever way the
+    // file was read: the names of one read of the whole file (`#wholeNames`) when what was read left the middle out, or the whole
+    // read itself (a file small enough, or a widened tail, that was taken whole).
     const stale = old?.size === STALE_SIZE;
-    const whole = stale && read.partial && result !== undefined ? await this.#wholeNames(source, found) : undefined;
-    // The whole read did not finish (it ended early, failed, or the file changed under it): the cached title stands and the row
-    // stays waiting, so the next refresh reads the file whole again.
-    const incomplete = stale && read.partial && result !== undefined && whole === undefined;
+    const scanned = stale && (result !== undefined || old.ok === 1);
+    const whole = scanned && read.partial ? await this.#wholeNames(source, found) : undefined;
+    const incomplete =
+      scanned && !(read.partial ? whole !== undefined : await this.#scanComplete(source, found, read.wholeBytes));
+    // The scan was not complete: the cached row stands untouched and keeps waiting, so the next refresh scans the file again.
+    if (incomplete && result === undefined) return undefined;
     if (whole !== undefined) result = await this.#describeText(source, found, read, whole);
     const used = read;
     const common = {
@@ -803,7 +809,8 @@ export class ConversationIndex {
     let chosen: string | undefined;
     let generated: string | undefined;
     let carry: Uint8Array = new Uint8Array(0);
-    for (let offset = 0; offset < found.size; ) {
+    let offset = 0;
+    while (offset < found.size) {
       const run = await source.files.read(
         found.path,
         offset,
@@ -821,10 +828,19 @@ export class ConversationIndex {
       generated = names.generated ?? generated;
       carry = bytes.slice(end);
     }
-    // A file that changed while it was read is not the one the scan began on.
-    const after = await source.files.stat(found.path);
-    if (after === undefined || after.size !== found.size || after.modifiedMs !== found.mtimeMs) return undefined;
+    if (!(await this.#scanComplete(source, found, offset))) return undefined;
     return { ...(chosen === undefined ? {} : { chosen }), ...(generated === undefined ? {} : { generated }) };
+  }
+
+  /**
+   * THE guard every path that replaces a cached title goes through (a row waiting on `TITLE_RULE` clears only past it): a scan is
+   * complete only when it read up to the size the walk saw (`readTo`: not an early end, not a failed read) AND the file still has
+   * that size and modified time (it did not change while it was read). Anything else keeps the cached title and the row waiting.
+   */
+  async #scanComplete(source: IndexSource, found: Found, readTo: number): Promise<boolean> {
+    if (readTo !== found.size) return false;
+    const after = await Promise.resolve(source.files.stat(found.path)).catch(() => undefined);
+    return after !== undefined && after.size === found.size && after.modifiedMs === found.mtimeMs;
   }
 
   /**
@@ -847,6 +863,7 @@ export class ConversationIndex {
         headText: undefined,
         tailText: undefined,
         partial: false,
+        wholeBytes: bytes.length,
         scanned: completeRecordsEnd(bytes),
         headSha: sha(bytes.subarray(0, Math.min(HASH_BYTES, bytes.length))),
       };
@@ -868,6 +885,7 @@ export class ConversationIndex {
       headText: headCut,
       tailText: tailCut,
       partial: true,
+      wholeBytes: 0,
       scanned: tailStart + completeRecordsEnd(tail),
       headSha: sha(head.subarray(0, Math.min(HASH_BYTES, head.length))),
     };
@@ -1301,6 +1319,8 @@ interface Bounded {
   readonly headText: string | undefined;
   readonly tailText: string | undefined;
   readonly partial: boolean;
+  /** How many bytes of the file the read returned from its start, when it took the whole file (`partial` false); else 0. */
+  readonly wholeBytes: number;
   readonly scanned: number;
   readonly headSha: string;
 }
