@@ -1080,7 +1080,7 @@ describe('current-ferret search control', () => {
 
       expect(drawn).toContain("Indexing this ferret's files and tasks…");
       expect(
-        indexing.root.findAll(node => node.type === 'svg' && node.props['data-search-indexing'] !== undefined),
+        indexing.root.findAll(node => node.type === 'span' && node.props['data-search-indexing'] !== undefined),
       ).toHaveLength(1);
       expect(indexing.root.findAll(node => node.props['data-search-shortcut'] !== undefined)).toHaveLength(0);
       expect(drawn).not.toContain('No files or tasks of this ferret match');

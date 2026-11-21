@@ -10,7 +10,7 @@
  * reached says so in one line. Copied from today's `add-skills-page.tsx`, less its group of skills on this machine.
  */
 
-import { Button, ContextFilterChips, usePullToSearch } from '@ferretry/app/ui';
+import { Button, ContextFilterChips, Spinner, usePullToSearch } from '@ferretry/app/ui';
 import { ArrowLeft, RefreshCw, Search } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { CatalogInstall } from '../../../contract/wire/index.ts';
@@ -315,11 +315,7 @@ export function AddSkillsPage({
             onClick={() => void refresh()}
             data-add-skills-refresh=""
           >
-            <RefreshCw
-              size={14}
-              aria-hidden
-              className={refreshing ? 'animate-spin motion-reduce:animate-none' : undefined}
-            />
+            {refreshing ? <Spinner size={14} wait /> : <RefreshCw size={14} aria-hidden />}
             {refreshing ? REFRESHING : REFRESH_BUTTON}
           </Button>
         </div>

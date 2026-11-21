@@ -3,7 +3,8 @@
  * for a name is checked as you type (`newFolderProblem`), and its refusal, if it still refuses, is shown as it worded it.
  * The name stays after a refusal so nothing has to be typed again.
  */
-import { FolderPlus, LoaderCircle } from 'lucide-react';
+import { Spinner } from '@ferretry/app/ui';
+import { FolderPlus } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { newFolderProblem } from './folders-api.ts';
 
@@ -57,11 +58,7 @@ export function NewFolderRow({ onMake, onCancel }: NewFolderRowProps) {
           }}
         />
         <button type="submit" className="kt-btn min-h-control" data-variant="primary" disabled={busy || name === ''}>
-          {busy ? (
-            <LoaderCircle className="animate-spin motion-reduce:animate-none" size={14} aria-hidden="true" />
-          ) : (
-            <FolderPlus size={14} aria-hidden="true" />
-          )}
+          {busy ? <Spinner size={14} wait /> : <FolderPlus size={14} aria-hidden="true" />}
           Create
         </button>
         <button type="button" className="kt-btn min-h-control" onClick={onCancel} disabled={busy}>

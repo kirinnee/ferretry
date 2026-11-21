@@ -4,7 +4,8 @@
  */
 
 import type { WardenActor } from '../../wire.ts';
-import { FileText, LoaderCircle } from 'lucide-react';
+import { Spinner } from '@ferretry/app/ui';
+import { FileText } from 'lucide-react';
 
 import { useScreenHref } from '@ferretry/app';
 import { displayCallsign, type FerretView, ferretDisplayName, shortFerretId } from '../../lib/callsign.ts';
@@ -30,9 +31,7 @@ export function WardenChipBadge({
       )}
       {...(title === undefined ? {} : { title })}
     >
-      {chip.busy === true && (
-        <LoaderCircle size={11} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-      )}
+      {chip.busy === true && <Spinner size={11} wait />}
       {chip.label}
     </Badge>
   );

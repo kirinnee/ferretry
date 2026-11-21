@@ -17,8 +17,8 @@
  * with the terminal extraction-failure copy — it gets its own action instead.
  */
 
-import { cn } from '@ferretry/app/ui';
-import { FileText, ImageOff, Loader2, LockKeyhole, LockKeyholeOpen, RotateCcw, X } from 'lucide-react';
+import { cn, Spinner } from '@ferretry/app/ui';
+import { FileText, ImageOff, LockKeyhole, LockKeyholeOpen, RotateCcw, X } from 'lucide-react';
 import {
   type AttachmentView,
   attachmentLockCopy,
@@ -127,11 +127,7 @@ export function PendingAttachmentStrip({
                   )}
                   {entry.status === 'uploading' ? (
                     <span className="inline-flex min-w-0 items-center gap-1 text-muted">
-                      <Loader2
-                        aria-hidden="true"
-                        className="shrink-0 animate-spin motion-reduce:animate-none"
-                        size={11}
-                      />{' '}
+                      <Spinner className="shrink-0" size={11} wait />{' '}
                       <span className="truncate">{entry.note ?? 'uploading'}</span>
                     </span>
                   ) : (

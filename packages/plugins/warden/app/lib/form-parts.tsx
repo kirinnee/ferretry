@@ -5,8 +5,8 @@
  * spacings and three error styles.
  */
 
-import { LoaderCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { Spinner } from '@ferretry/app/ui';
 import { Button } from '../ui.ts';
 
 export function FormField({
@@ -68,11 +68,7 @@ export function FormFoot({
         {cancelLabel}
       </Button>
       <Button data-action-submit="" disabled={submitting || disabled} size="sm" type="submit" variant="primary">
-        {submitting ? (
-          <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
-        ) : (
-          icon
-        )}
+        {submitting ? <Spinner size={14} wait /> : icon}
         {submitLabel}
       </Button>
     </div>

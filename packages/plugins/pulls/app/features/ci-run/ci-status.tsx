@@ -2,8 +2,8 @@
  * One status, drawn the same everywhere on the CI pages: an icon with its own SHAPE, plus the word. Colour only
  * reinforces; a state is never told by colour alone (a passed and a failed run differ in shape and in text).
  */
-import { useMotionAllowed } from '@ferretry/app/ui';
-import { Ban, CheckCircle2, CircleDashed, Clock, Loader2, MinusCircle, XCircle } from 'lucide-react';
+import { Spinner, useMotionAllowed } from '@ferretry/app/ui';
+import { Ban, CheckCircle2, CircleDashed, Clock, MinusCircle, XCircle } from 'lucide-react';
 import type { CiStatus } from '../../../contract/wire.ts';
 import { STATUS_WORD } from './ci-format.ts';
 
@@ -37,11 +37,7 @@ export function StatusIcon({ status, size = 16 }: { readonly status: CiStatus; r
       return <XCircle {...common} />;
     case 'running':
       // Still under reduced motion: a dashed ring that does not turn.
-      return moving ? (
-        <Loader2 {...common} className={`${common.className} animate-spin`} />
-      ) : (
-        <CircleDashed {...common} />
-      );
+      return moving ? <Spinner className={common.className} size={size} /> : <CircleDashed {...common} />;
     case 'queued':
       return <Clock {...common} />;
     case 'cancelled':

@@ -13,7 +13,7 @@
  */
 
 import { type ReactNode, useEffect, useRef } from 'react';
-import { BottomSheet, Floating, useDialogFocus, useDismissSurface, useSurfaceOpen } from '../../ui.ts';
+import { BottomSheet, Floating, Spinner, useDialogFocus, useDismissSurface, useSurfaceOpen } from '../../ui.ts';
 import {
   findFerretAction,
   type FerretActionEntry,
@@ -21,7 +21,6 @@ import {
   type FerretActionSection,
 } from './registry.ts';
 import { useActionMenu } from './use-action-menu.ts';
-import { LoaderCircle } from 'lucide-react';
 
 export interface ActionsMenuProps {
   readonly sections: readonly FerretActionSection[];
@@ -198,11 +197,7 @@ function MenuRow({
       title={entry.unavailable}
       type="button"
     >
-      {pending ? (
-        <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={16} />
-      ) : (
-        <Icon aria-hidden="true" size={16} />
-      )}
+      {pending ? <Spinner size={16} wait /> : <Icon aria-hidden="true" size={16} />}
       <span className="fy-actions-menu__label">{entry.label}</span>
       {entry.kind === 'toggle' ? (
         <span className="fy-actions-menu__detail">

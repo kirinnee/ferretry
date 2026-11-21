@@ -3,8 +3,8 @@
  * registers its public half at GitHub; the private half never reaches this screen. A refusal is shown as worded.
  */
 import { StepPageFrame, type StepProgressProps } from '@ferretry/app';
-import { ConfirmToSee } from '@ferretry/app/ui';
-import { Check, KeyRound, LoaderCircle, TriangleAlert } from 'lucide-react';
+import { ConfirmToSee, Spinner } from '@ferretry/app/ui';
+import { Check, KeyRound, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import type { ProjectsClient } from '../../lib/client.ts';
 import { reasonOf } from '../../lib/client.ts';
@@ -97,11 +97,7 @@ export function KeysStep({ client, accounts: read, linked, progress, onNext }: K
                           onClick={() => run(account.id)}
                         >
                           {state?.phase === 'working' ? (
-                            <LoaderCircle
-                              className="animate-spin motion-reduce:animate-none"
-                              size={14}
-                              aria-hidden="true"
-                            />
+                            <Spinner size={14} wait />
                           ) : (
                             <KeyRound size={14} aria-hidden="true" />
                           )}

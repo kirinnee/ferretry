@@ -4,7 +4,7 @@
  * draw the same form, and so the rename and move forms cannot drift into two spacings and two error styles.
  */
 
-import { LoaderCircle } from 'lucide-react';
+import { Spinner } from './spinner.tsx';
 import type { ReactNode } from 'react';
 import { Button } from './primitives.tsx';
 
@@ -67,11 +67,7 @@ export function FormFoot({
         {cancelLabel}
       </Button>
       <Button data-action-submit="" disabled={submitting || disabled} size="sm" type="submit" variant="primary">
-        {submitting ? (
-          <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
-        ) : (
-          icon
-        )}
+        {submitting ? <Spinner size={14} wait /> : icon}
         {submitLabel}
       </Button>
     </div>

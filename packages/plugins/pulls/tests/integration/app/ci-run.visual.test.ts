@@ -3,7 +3,9 @@
  * page, the biggest run the contract allows mounts a bounded few rows, and a step E8 still flags live inside a job that
  * stopped keeps its length an hour later; light and dark, phone and desktop.
  *
- * Set `FY_CI_RUN_SHOTS_DIR` to keep `<viewport>-<scheme>-<case>.png` (cases: long, long-open, big, big-more, stopped).
+ * A run still in progress draws its running mark as the shared spinner (r11 T3), at once and not as a lucide `animate-spin` icon.
+ *
+ * Set `FY_CI_RUN_SHOTS_DIR` to keep `<viewport>-<scheme>-<case>.png` (cases: long, long-open, big, big-more, stopped, running).
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -147,6 +149,38 @@ describe('the CI run page', () => {
       }
     });
 
+    it(`${variant.name}: a running run draws the shared spinner (r11 T3), at once, and no animate-spin icon`, async () => {
+      const { page, close, problems } = await open(variant, 'running');
+      try {
+        const seen = await page.evaluate(() => {
+          const marks = [
+            ...document.querySelectorAll('[data-ci-status="running"] .fy-spinner, [data-ci-job] .fy-spinner'),
+          ];
+          const first = marks[0]?.getBoundingClientRect();
+          return {
+            spinners: document.querySelectorAll('.fy-spinner').length,
+            runMark: document.querySelectorAll('[data-ci-status="running"] .fy-spinner').length,
+            strays: document.querySelectorAll('.animate-spin').length,
+            width: first?.width ?? 0,
+            height: first?.height ?? 0,
+            opacity: marks.map(mark => Number(getComputedStyle(mark).opacity)),
+          };
+        });
+        expect(seen.runMark, 'the run header mark is the shared spinner').toBe(1);
+        expect(seen.spinners, 'the run mark and the live job mark').toBeGreaterThanOrEqual(2);
+        expect(seen.strays).toBe(0);
+        expect(seen.width).toBeGreaterThan(8);
+        expect(seen.height).toBeGreaterThan(8);
+        // A running activity is feedback, not a wait: nothing holds it back for the 300 ms threshold.
+        for (const opacity of seen.opacity) expect(opacity).toBeGreaterThan(0.99);
+        await noSidewaysScroll(page);
+        await shot(page, variant, 'running');
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+
     it(`${variant.name}: a step still flagged live inside a job that stopped keeps its length`, async () => {
       const { page, close, problems } = await open(variant, 'stopped');
       try {
@@ -155,7 +189,7 @@ describe('the CI run page', () => {
         await page.waitForTimeout(400);
         expect(await page.locator('[data-ci-step="2"] [data-ci-duration]').textContent()).toBe('9s');
         // The step the data still calls running is over with its job: no spinner, and it says cancelled.
-        expect(await page.locator('[data-ci-job="8"] .animate-spin').count()).toBe(0);
+        expect(await page.locator('[data-ci-job="8"] .fy-spinner').count()).toBe(0);
         expect(await page.locator('[data-ci-step="2"]').textContent()).toContain('Cancelled');
         await noSidewaysScroll(page);
         await shot(page, variant, 'stopped');

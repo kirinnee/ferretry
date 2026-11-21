@@ -150,10 +150,10 @@ describe('CiRunPage', () => {
     const step = must(section.querySelector('[data-ci-step="2"]'), 'the stopped step');
     expect(step.textContent).toContain('Cancelled');
     expect(step.textContent).not.toContain('Running');
-    expect(step.querySelector('.animate-spin')).toBeNull();
+    expect(step.querySelector('.fy-spinner')).toBeNull();
     expect(step.querySelector('.animate-pulse')).toBeNull();
     expect(step.querySelector('[data-ci-duration]')?.getAttribute('data-ci-duration')).toBe('done');
-    expect(section.querySelector('.animate-spin')).toBeNull();
+    expect(section.querySelector('.fy-spinner')).toBeNull();
   });
 
   test('a CI with no jobs says so instead of drawing an empty list', async () => {

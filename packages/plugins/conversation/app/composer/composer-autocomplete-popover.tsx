@@ -34,7 +34,6 @@ import {
   FileText,
   Folder,
   ListChecks,
-  Loader2,
   type LucideIcon,
   SearchX,
   ShieldAlert,
@@ -43,7 +42,7 @@ import {
   Terminal,
 } from 'lucide-react';
 import { useEffect, useRef } from 'react';
-import { useInputModality } from '@ferretry/app/ui';
+import { Spinner, useInputModality } from '@ferretry/app/ui';
 import { isTaskMenuLabel } from './composer-autocomplete-providers.ts';
 import type {
   ComposerAutocompleteCandidate,
@@ -342,7 +341,7 @@ export function ComposerAutocompletePopover({
           >
             {status === 'loading' ? (
               <div className="fy-ac-state fy-wait-gate" role="status">
-                <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
+                <Spinner size={14} />
                 Searching…
               </div>
             ) : status === 'error' ? (

@@ -4,7 +4,8 @@
  */
 
 import { formatTaskRef } from '@ferretry/core-asks/contract';
-import { Check, LoaderCircle } from 'lucide-react';
+import { Spinner } from '@ferretry/app/ui';
+import { Check } from 'lucide-react';
 import type { DoneCloseView } from './use-done-close-flow.ts';
 
 /** The one button: an answer in the row, never a swipe. */
@@ -19,11 +20,7 @@ export function DoneCloseChip({ view, disabled }: { readonly view: DoneCloseView
       title={view.label}
       type="button"
     >
-      {view.busy ? (
-        <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={13} />
-      ) : (
-        <Check aria-hidden="true" size={13} />
-      )}
+      {view.busy ? <Spinner size={13} wait /> : <Check aria-hidden="true" size={13} />}
       <span aria-hidden="true" className="fy-qr__label fy-qr__close-long">
         {view.label}
       </span>
@@ -65,11 +62,7 @@ export function DoneCloseConfirm({ view }: { readonly view: DoneCloseView }) {
           onClick={confirm.onConfirm}
           type="button"
         >
-          {view.busy ? (
-            <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={13} />
-          ) : (
-            <Check aria-hidden="true" size={13} />
-          )}
+          {view.busy ? <Spinner size={13} wait /> : <Check aria-hidden="true" size={13} />}
           <span className="fy-qr__label">Close {confirm.ticked.size} and resolve</span>
         </button>
         <button

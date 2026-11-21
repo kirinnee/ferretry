@@ -284,7 +284,7 @@ describe('ActionsMenu — running an action', () => {
   it('shows a spinner in place of the icon while a run is pending', async () => {
     const h = await openMenu();
     await interact(() => row(h.container, 'toggle').click());
-    expect(row(h.container, 'toggle').querySelector('.animate-spin')).not.toBeNull();
+    expect(row(h.container, 'toggle').querySelector('.fy-spinner')).not.toBeNull();
     await interact(() => h.state.resolveToggle?.());
   });
 });

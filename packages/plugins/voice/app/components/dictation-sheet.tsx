@@ -44,7 +44,8 @@
  *      say"; they are flat when nothing is.
  */
 
-import { AlertCircle, EyeOff, Loader2, Mic, RotateCcw, Square, X } from 'lucide-react';
+import { Spinner } from '@ferretry/app/ui';
+import { AlertCircle, EyeOff, Mic, RotateCcw, Square, X } from 'lucide-react';
 import { useId } from 'react';
 import type { DictationPhase, DictationReview } from '../hooks/use-dictation.ts';
 import { cn } from '../shell-voice.ts';
@@ -397,11 +398,7 @@ export function DictationSheet({
           {stage === 'recording' ? (
             <LiveDot />
           ) : stage === 'transcribing' ? (
-            <Loader2
-              size={16}
-              aria-hidden="true"
-              className="shrink-0 animate-spin text-accent motion-reduce:animate-none"
-            />
+            <Spinner className="shrink-0" size={16} wait />
           ) : stage === 'error' ? (
             <AlertCircle size={16} aria-hidden="true" className="shrink-0 text-warn" />
           ) : (

@@ -322,6 +322,17 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # A busy mark is the shared `Spinner`: themed per style and, for a wait, held back by the one 300 ms loader threshold.
+    # A lucide icon with `animate-spin` is neither. See scripts/validate/no-stray-spinner.sh.
+    a-no-stray-spinner = {
+      enable = true;
+      name = "No stray spinner";
+      entry = validator "scripts/validate/no-stray-spinner.sh";
+      files = "^(packages/(app/src|core/[^/]+/app|plugins/[^/]+/app)/.*\\.(tsx?|jsx?)|scripts/validate/no-stray-spinner\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # Daemon code holds exactly the synchronous file calls its ledger declares. The daemon's main thread
     # answers every client, and on 2026-11-05 it stalled up to 61.9 s while swap saturated the disk; a sync
     # call holds every client for as long as the disk takes. See scripts/validate/no-sync-io.sh and

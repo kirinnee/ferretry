@@ -103,7 +103,7 @@ describe('FormFoot', () => {
       <FormFoot icon={<span data-testid="icon" />} onCancel={() => undefined} submitLabel="Add server" submitting />,
     );
     expect(submit.querySelector('[data-testid="icon"]')).toBeNull();
-    expect(submit.querySelector('.animate-spin')).not.toBeNull();
+    expect(submit.querySelector('.fy-spinner')).not.toBeNull();
   });
 
   it('disables the submit button when submitting, or when the caller says it is incomplete', async () => {

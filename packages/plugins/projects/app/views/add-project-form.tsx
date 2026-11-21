@@ -29,9 +29,9 @@
  */
 
 import type { RegisterProjectRequest } from '../../contract/index.ts';
-import { FolderPlus, LoaderCircle, TriangleAlert } from 'lucide-react';
+import { FolderPlus, TriangleAlert } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useRef } from 'react';
-import { cn } from '@ferretry/app/ui';
+import { cn, Spinner } from '@ferretry/app/ui';
 import {
   CLONE_PATIENCE,
   NEW_FOLDER_ONE_LEVEL,
@@ -227,11 +227,7 @@ export function AddProjectForm({ draft, onDraftChange, onSubmit, onCancel, statu
 
       <div className="flex flex-wrap items-center gap-sm">
         <button type="submit" className="kt-btn min-h-control" data-variant="primary" disabled={!ready}>
-          {busy ? (
-            <LoaderCircle className="animate-spin motion-reduce:animate-none" size={14} aria-hidden="true" />
-          ) : (
-            <FolderPlus size={14} aria-hidden="true" />
-          )}
+          {busy ? <Spinner size={14} wait /> : <FolderPlus size={14} aria-hidden="true" />}
           {busy ? 'Registering…' : 'Register project'}
         </button>
         <button type="button" className="kt-btn min-h-control" onClick={onCancel} disabled={busy}>

@@ -11,8 +11,8 @@
  * and says where the pairing is managed.
  */
 import { daemonOfClient, SettingGroup, SettingRow } from '@ferretry/app';
-import { PanelPath } from '@ferretry/app/ui';
-import { LoaderCircle, RefreshCw, Wifi, WifiOff } from 'lucide-react';
+import { PanelPath, Spinner } from '@ferretry/app/ui';
+import { RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import type { KernelClient } from '../lib/client.ts';
@@ -98,7 +98,7 @@ export function HostChecksView({
   readonly protocol?: number;
   readonly fingerprint?: string;
 }) {
-  const Icon = value === 'reachable' ? Wifi : value === 'unreachable' ? WifiOff : LoaderCircle;
+  const Icon = value === 'reachable' ? Wifi : WifiOff;
   return (
     <section className="flex min-w-0 flex-col" aria-label="Host checks" data-daemon-host-checks="">
       <div className="mb-6 min-w-0">
@@ -115,11 +115,7 @@ export function HostChecksView({
                 data-daemon-reachability={value}
                 className={`inline-flex min-h-[28px] items-center gap-1.5 rounded-full border px-2 text-meta font-semibold ${TONES[value]}`}
               >
-                <Icon
-                  size={13}
-                  aria-hidden="true"
-                  className={value === 'checking' ? 'animate-spin motion-reduce:animate-none' : undefined}
-                />
+                {value === 'checking' ? <Spinner size={13} wait /> : <Icon size={13} aria-hidden="true" />}
                 {LABELS[value]}
                 {refreshing && value !== 'checking' ? <span className="sr-only">, checking again</span> : null}
               </span>
@@ -129,11 +125,7 @@ export function HostChecksView({
                 aria-label="Check reachability again"
                 onClick={refresh}
               >
-                <RefreshCw
-                  size={14}
-                  aria-hidden="true"
-                  className={refreshing ? 'animate-spin motion-reduce:animate-none' : undefined}
-                />
+                {refreshing ? <Spinner size={14} wait /> : <RefreshCw size={14} aria-hidden="true" />}
               </button>
             </span>
           )}

@@ -49,6 +49,7 @@ and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Q
 | `a-no-fy-render-in-docs`    | `fy-render` fence openers appear only in their three teaching files                                                                                               |
 | `a-no-legacy-state`         | package code cannot reference predecessor state or identifiers                                                                                                    |
 | `a-no-accent-side-bar`      | no stylesheet draws an accent bar down the side of a selected item                                                                                                |
+| `a-no-stray-spinner`        | no browser source draws its own `animate-spin` icon; a busy mark is the shared `Spinner`                                                                          |
 | `a-no-pattern-kill`         | test code never kills processes by pattern (`pkill`, `killall`)                                                                                                   |
 | `a-no-outset-focus`         | a keyboard focus ring is drawn inside its control, never with an outward `outline-offset` (reports until r11-3's gate)                                            |
 | `a-no-native-select`        | the app draws every list choice as a `SelectBox`, never the browser `<select>` (reports until r11 S3f)                                                            |

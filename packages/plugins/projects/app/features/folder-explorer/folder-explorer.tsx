@@ -12,9 +12,9 @@
  * - NO FLICKER: while the next folder is read the current one stays drawn (`aria-busy`), and a failed read is stated
  *   beside it instead of blanking it.
  */
-import { ArrowUp, ChevronRight, FolderPlus, LayoutGrid, List, LoaderCircle, TriangleAlert } from 'lucide-react';
+import { ArrowUp, ChevronRight, FolderPlus, LayoutGrid, List, TriangleAlert } from 'lucide-react';
 import { useId, useRef, useState } from 'react';
-import { cn } from '@ferretry/app/ui';
+import { cn, Spinner } from '@ferretry/app/ui';
 import type { FolderEntry, FolderListing } from '../../../contract/index.ts';
 import { ExplorerEntries } from './explorer-entries.tsx';
 import {
@@ -75,7 +75,7 @@ export function FolderExplorer(props: FolderExplorerProps) {
       <div className="grid gap-sm" data-explorer-state={error === null ? 'loading' : 'failed'} aria-busy={loading}>
         {error === null ? (
           <p className="fy-wait-gate m-0 flex items-center gap-xs text-meta text-muted" role="status">
-            <LoaderCircle className="animate-spin motion-reduce:animate-none" size={14} aria-hidden="true" />
+            <Spinner size={14} />
             Reading your home folder…
           </p>
         ) : (

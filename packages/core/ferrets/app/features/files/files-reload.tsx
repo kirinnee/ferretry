@@ -9,7 +9,8 @@
  * answer than a small shared file.
  */
 
-import { ChevronDown, Loader2, RefreshCw, X } from 'lucide-react';
+import { Spinner } from '@ferretry/app/ui';
+import { ChevronDown, RefreshCw, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 export interface ReloadActionProps {
@@ -40,7 +41,7 @@ export const ReloadAction = ({ what, busy, onReload }: ReloadActionProps) => (
     title={`Re-read ${what} from the ferret’s host`}
     onClick={onReload}
   >
-    <RefreshCw size={14} className={busy ? 'animate-spin' : undefined} aria-hidden="true" />
+    {busy ? <Spinner size={14} wait /> : <RefreshCw size={14} aria-hidden="true" />}
     <span>Reload</span>
   </button>
 );
@@ -131,7 +132,7 @@ export const StaleNotice = ({ what, status, onRetry, dismissible = false }: Stal
       <div className="kt-fs-stale" role="status">
         {progress !== '' && (
           <>
-            <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+            <Spinner size={13} wait />
             <span>{progress}</span>
           </>
         )}

@@ -22,7 +22,8 @@
  * completely different fact.
  */
 
-import { Check, FolderClock, LoaderCircle, TriangleAlert } from 'lucide-react';
+import { Spinner } from '@ferretry/app/ui';
+import { Check, FolderClock, TriangleAlert } from 'lucide-react';
 import type { RecentProjectOption } from '../lib/discoveries.ts';
 import { relativeTime } from '../lib/folders.ts';
 import {
@@ -104,11 +105,7 @@ export function ProjectDiscoveries({ discoveries, ferretsError, status, onConfir
                   onClick={() => onConfirm(option.path)}
                   aria-label={`Confirm ${option.path} as a project`}
                 >
-                  {pending ? (
-                    <LoaderCircle className="animate-spin motion-reduce:animate-none" size={14} aria-hidden="true" />
-                  ) : (
-                    <Check size={14} aria-hidden="true" />
-                  )}
+                  {pending ? <Spinner size={14} wait /> : <Check size={14} aria-hidden="true" />}
                   {pending ? 'Confirming…' : 'Confirm project'}
                 </button>
               </li>
