@@ -4,7 +4,8 @@
  * It writes `config/claude-code/settings/<name>.yaml` through the kernel's config service (`ConfigPort.write`), so the
  * schema check, the refusal of a raw secret and the hold on a loosening (a launch flag that loosens the permission mode)
  * all still apply. It never replaces an item it did not make: the write is create-only (`ifMatch: 'absent'`). The ONE
- * exception is an update the person accepted (`options.replace`): the item is replaced, pinned to its current etag.
+ * exception is an update the person accepted (`options.replace`): the item is replaced, pinned to its current etag, but
+ * only while its file still has the etag the import left (`options.etags`); one made again by hand is left as it is.
  *
  * The answer is a sentence naming files, keys and rules; never a value.
  */
@@ -24,12 +25,15 @@ export function claudeSettingsPut(ports: HostImportPorts): NonNullable<ProfileCo
   return async (name, documentText, _files, options) => {
     const made = importedSettings(documentText);
     if (!made.ok) return refused(made.reason);
-    const replacing = options?.replace === true && ports.config.collection(ports.def).has(name);
-    if (!replacing && ports.config.collection(ports.def).has(name)) {
-      return refused('a Claude Code settings item by that name already exists; an import never replaces one');
+    const taken = ports.config.collection(ports.def).has(name);
+    const current = options?.replace === true && taken ? await ports.config.etag(ports.def, name) : '';
+    if (taken && (current === '' || options?.etags?.[name] !== current)) {
+      return refused(
+        'a Claude Code settings item by that name already exists and is not as an import left it, so it was left as it is',
+      );
     }
     const outcome = await ports.config.write(ports.def, name, JSON.stringify(made.item, null, 2), {
-      ifMatch: replacing ? await ports.config.etag(ports.def, name) : 'absent',
+      ifMatch: taken ? current : 'absent',
     });
     switch (outcome.kind) {
       case 'written':
@@ -38,6 +42,7 @@ export function claudeSettingsPut(ports: HostImportPorts): NonNullable<ProfileCo
         return {
           ok: true,
           ...(outcome.kind === 'held' ? { held: true as const } : {}),
+          etags: { [name]: outcome.etag },
           ...(made.dropped.length === 0 ? {} : { warnings: made.dropped }),
         };
       case 'conflict':

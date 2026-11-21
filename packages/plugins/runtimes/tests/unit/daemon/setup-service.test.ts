@@ -4130,7 +4130,9 @@ describe('the setup.import executor, a skill an owner serves', () => {
   it('should keep what an owner created in the import record and hand it back with an accepted update', async () => {
     // Arrange — the Skills owner answers that it installed "review" for the first import.
     const door = reportingOwners(write =>
-      write.kind === 'skills' ? { outcome: 'written', created: ['review'] } : { outcome: 'written' },
+      write.kind === 'skills'
+        ? { outcome: 'written', created: ['review'], etags: { 'claude-skills': 'etag-written' } }
+        : { outcome: 'written' },
     );
     const { service, applied, state } = world({ overrides: { components: door.components } });
     door.bind(state);
@@ -4140,7 +4142,7 @@ describe('the setup.import executor, a skill an owner serves', () => {
     for (const document of first) state.assets[document.path] = document.content;
     state.reading = door.readingOf(first);
     const recorded = JSON.parse(state.assets[RECORD_PATH] ?? '{}') as {
-      components: Record<string, { owned?: string[] }>;
+      components: Record<string, { owned?: string[]; etags?: Record<string, string> }>;
     };
 
     // Act — the host's skill changes and the person accepts the update.
@@ -4156,9 +4158,11 @@ describe('the setup.import executor, a skill an owner serves', () => {
 
     // Assert
     should(recorded.components['skills/claude-skills']?.owned).eql(['review']);
+    should(recorded.components['skills/claude-skills']?.etags).eql({ 'claude-skills': 'etag-written' });
     const handed = door.calls.slice(before).filter(call => call.kind === 'skills');
     should(handed[0]?.replace).be.true();
     should(handed[0]?.owned).eql(['review']);
+    should(handed[0]?.etags).eql({ 'claude-skills': 'etag-written' });
     should(door.calls.slice(0, before).every(call => call.owned === undefined)).be.true();
   });
 

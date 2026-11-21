@@ -68,7 +68,7 @@ describe('a Codex settings component the import hands over', () => {
       'mine',
       asText({ harness: 'codex', document: { model: 'new' } }),
       undefined,
-      { replace: true },
+      { replace: true, etags: { mine: 'etag-mine' } },
     );
 
     expect(result).toMatchObject({ ok: true });
@@ -88,7 +88,11 @@ describe('a Codex settings component the import hands over', () => {
     };
 
     // Act
-    const result = await codexSettingsPut(config)('mine', asText(document), undefined, { replace: true, owned: [] });
+    const result = await codexSettingsPut(config)('mine', asText(document), undefined, {
+      replace: true,
+      owned: [],
+      etags: { mine: 'etag-mine' },
+    });
 
     // Assert
     expect(written.get('mine')).toEqual({ settings: { model: 'new' } });
@@ -96,7 +100,8 @@ describe('a Codex settings component the import hands over', () => {
     expect(result).toEqual({
       ok: true,
       created: ['mine'],
-      warnings: ['profile-review already exists and was not brought in by an import, so it was left as it is'],
+      etags: { mine: 'e1' },
+      warnings: ['profile-review already exists and was not left by an import as it is now, so it was left as it is'],
     });
   });
 
@@ -110,11 +115,47 @@ describe('a Codex settings component the import hands over', () => {
       'mine',
       asText({ harness: 'codex', document: { profiles: { review: { model: 'host' } } } }),
       undefined,
-      { replace: true, owned: ['profile-review'] },
+      {
+        replace: true,
+        owned: ['profile-review'],
+        etags: { mine: 'etag-mine', 'profile-review': 'etag-profile-review' },
+      },
     );
 
     expect(written.get('profile-review')).toEqual({ settings: { model: 'host' } });
     expect(result.ok).toBe(true);
+  });
+
+  it('an item the person deleted and made again by hand under the same name is left as it is', async () => {
+    // Arrange — the import wrote "profile-review" at etag "etag-gone"; it was deleted and made again by hand, so the file
+    // now has another etag. The record still names it as the import's.
+    const { config, written } = tree({
+      mine: { settings: { model: 'old' } },
+      'profile-review': { settings: { model: 'by-hand' } },
+    });
+
+    // Act
+    const result = await codexSettingsPut(config)(
+      'mine',
+      asText({ harness: 'codex', document: { model: 'new', profiles: { review: { model: 'host' } } } }),
+      undefined,
+      { replace: true, owned: ['profile-review'], etags: { mine: 'etag-mine', 'profile-review': 'etag-gone' } },
+    );
+
+    // Assert
+    expect(written.get('profile-review')).toEqual({ settings: { model: 'by-hand' } });
+    expect(result).toMatchObject({
+      ok: true,
+      warnings: ['profile-review already exists and was not left by an import as it is now, so it was left as it is'],
+    });
+  });
+
+  it('answers the etag of each item it wrote, for the import record', async () => {
+    const { config } = tree();
+
+    const result = await codexSettingsPut(config)('mine', asText({ harness: 'codex', document: { model: 'x' } }));
+
+    expect(result).toMatchObject({ ok: true, etags: { mine: 'e1' } });
   });
 
   it('reports a name taken between the look and the write as taken', async () => {

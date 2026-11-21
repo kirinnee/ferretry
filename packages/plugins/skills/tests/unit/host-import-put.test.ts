@@ -65,6 +65,7 @@ function owner(answer?: (name: string, edit: unknown) => ConfigWriteOutcome, fai
   };
   const put = skillsImportPut({
     has: name => held.has(name),
+    etag: async name => (held.has(name) ? `etag-${name}` : 'absent'),
     create: createSkillsItem(config),
     replace: replaceSkillsItem(config),
     store,
@@ -80,6 +81,7 @@ describe('skills host import: put', () => {
     expect(await put('imported', text(document), folders('pdf', 'review.v2'))).toEqual({
       ok: true,
       created: ['pdf', 'review.v2'],
+      etags: { imported: 'e1' },
     });
 
     expect(calls).toEqual([{ name: 'imported', ifMatch: 'absent' }]);
@@ -95,9 +97,10 @@ describe('skills host import: put', () => {
     const answered = await put('mine', text({ items: ['one', 'two'], harness: 'claude-code' }), folders('one', 'two'), {
       replace: true,
       owned: ['one'],
+      etags: { mine: 'etag-mine' },
     });
 
-    expect(answered).toEqual({ ok: true, created: ['two'] });
+    expect(answered).toEqual({ ok: true, created: ['two'], etags: { mine: 'e1' } });
     expect(calls).toEqual([{ name: 'mine', ifMatch: 'etag-mine' }]);
     expect(held.get('mine')?.items).toEqual(['one', 'two']);
     expect([...installed.keys()].toSorted()).toEqual(['one', 'two']);
@@ -106,17 +109,19 @@ describe('skills host import: put', () => {
   test('an update rewrites the files of a skill an import installed, and leaves one it did not install alone', async () => {
     const { put, installed } = owner();
     const first = await put('mine', text({ items: ['one'] }), folders('one'));
-    expect(first).toEqual({ ok: true, created: ['one'] });
+    expect(first).toEqual({ ok: true, created: ['one'], etags: { mine: 'e1' } });
     installed.set('theirs', [{ path: 'SKILL.md', content: 'the person made this' }]);
     const changed = [{ path: 'one/SKILL.md', content: '---\nname: one\n---\nNEW TEXT\n' }, ...folders('theirs')];
 
     const answered = await put('mine', text({ items: ['one', 'theirs'] }), changed, {
       replace: true,
       owned: ['one'],
+      etags: { mine: 'etag-mine' },
     });
 
     expect(answered).toEqual({
       ok: true,
+      etags: { mine: 'e1' },
       warnings: ['"theirs" is already installed here and was not brought in by an import, so it was left as it is'],
     });
     expect(installed.get('one')).toEqual([{ path: 'SKILL.md', content: '---\nname: one\n---\nNEW TEXT\n' }]);
@@ -127,7 +132,12 @@ describe('skills host import: put', () => {
     const { put, held } = owner();
     await put('mine', text({ items: ['one'] }), folders('one'));
 
-    expect(await put('mine', text({ items: ['one', 'two'] }), folders('one'), { replace: true })).toEqual({
+    expect(
+      await put('mine', text({ items: ['one', 'two'] }), folders('one'), {
+        replace: true,
+        etags: { mine: 'etag-mine' },
+      }),
+    ).toEqual({
       ok: false,
       reason: 'the files of the skill "two" were not handed over, so it was not imported',
     });
@@ -162,7 +172,22 @@ describe('skills host import: put', () => {
       ok: true,
       held: true,
       created: ['one'],
+      etags: { held: 'e' },
     });
+  });
+
+  test('an update leaves a selection made again by hand under the same name as it is', async () => {
+    const { put, held } = owner();
+    await put('mine', text({ items: ['one'] }), folders('one'));
+
+    const answered = await put('mine', text({ items: ['one', 'two'] }), folders('one', 'two'), {
+      replace: true,
+      owned: ['one'],
+      etags: { mine: 'the-etag-of-the-file-the-import-wrote' },
+    });
+
+    expect(answered.ok).toBe(false);
+    expect(held.get('mine')?.items).toEqual(['one']);
   });
 
   test('an item name that is not a plain safe name is refused before anything is written', async () => {

@@ -41,11 +41,12 @@ async function world() {
   const items = new Set<string>();
   const put = skillsImportPut({
     has: name => items.has(name),
+    etag: async () => 'absent',
     create: async name => {
       items.add(name);
-      return { kind: 'written' };
+      return { kind: 'written', etag: 'e1' };
     },
-    replace: async () => ({ kind: 'written' }),
+    replace: async () => ({ kind: 'written', etag: 'e1' }),
     store,
   });
   return { put, store, items, disk: `${home}/state/skills/installed` };
@@ -62,7 +63,11 @@ describe("imported skills land in Skills' own installed store", () => {
   test('each skill folder is written under installed/<skill>/ with its own paths, and the store holds it', async () => {
     const { put, store, items, disk } = await world();
 
-    expect(await put('imported', document, handed)).toEqual({ ok: true, created: ['pdf', 'review'] });
+    expect(await put('imported', document, handed)).toEqual({
+      ok: true,
+      created: ['pdf', 'review'],
+      etags: { imported: 'e1' },
+    });
 
     expect(items.has('imported')).toBe(true);
     expect(await store.holds('pdf')).toBe(true);
@@ -106,8 +111,9 @@ describe("imported skills land in Skills' own installed store", () => {
     });
     const put = skillsImportPut({
       has: () => false,
-      create: async () => ({ kind: 'written' }),
-      replace: async () => ({ kind: 'written' }),
+      create: async () => ({ kind: 'written', etag: 'e1' }),
+      etag: async () => 'absent',
+      replace: async () => ({ kind: 'written', etag: 'e1' }),
       store: {
         holds: async skill => {
           const held = await store.holds(skill);

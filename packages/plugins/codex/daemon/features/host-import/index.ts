@@ -11,9 +11,10 @@
  *
  * Create only: every file is written with `ifMatch: 'absent'`, so an import never replaces an item it did not make (a
  * name taken, even a moment ago, is refused in a sentence). The ONE exception is an update the person accepted
- * (`options.replace`): each item an import made (the component's own item, or one `options.owned` names) is then
- * replaced, pinned to its current etag; an item that exists and was NOT brought in by an import is left exactly as it is,
- * in a sentence. The sentences name rules and keys, never a value.
+ * (`options.replace`): each item an import made is then replaced, pinned to its current etag, but only while its file
+ * still has the etag the import left (`options.etags`, kept in the import record). An item that exists and does not match
+ * (one the person deleted and made again by hand under the same name included) is left exactly as it is, in a sentence.
+ * The sentences name rules and keys, never a value.
  */
 import type { ConfigCollectionDef, ConfigPort, ConfigWriteOutcome } from '@ferretry/kernel/contract';
 import type { ComponentPutOptions, ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
@@ -23,7 +24,9 @@ import { settingsItemsFromImport } from './settings-item.ts';
 /** The one write of the person's apply (`writeAsCaller`) and the only read of what exists, both over Codex's own def. */
 export type HostImportConfig = Pick<ConfigPort, 'writeAsCaller' | 'collection' | 'etag'>;
 
-type ItemAnswer = { readonly wrote: true; readonly held: boolean } | { readonly wrote: false; readonly reason: string };
+type ItemAnswer =
+  | { readonly wrote: true; readonly held: boolean; readonly etag: string }
+  | { readonly wrote: false; readonly reason: string };
 
 const taken = (name: string): ItemAnswer => ({
   wrote: false,
@@ -33,9 +36,9 @@ const taken = (name: string): ItemAnswer => ({
 const answerOf = (outcome: ConfigWriteOutcome, name: string): ItemAnswer => {
   switch (outcome.kind) {
     case 'written':
-      return { wrote: true, held: false };
+      return { wrote: true, held: false, etag: outcome.etag };
     case 'held':
-      return { wrote: true, held: true };
+      return { wrote: true, held: true, etag: outcome.etag };
     case 'conflict':
       return taken(name);
     case 'refused': {
@@ -58,16 +61,16 @@ export function codexSettingsPut(
     const warnings = [...made.warnings];
     const failures: string[] = [];
     const wroteNames: string[] = [];
+    const etags: Record<string, string> = {};
     const kept: string[] = [];
     let wrote = 0;
     let held = false;
     for (const { name: itemName, item } of made.items) {
-      const replacing =
-        options?.replace === true &&
-        existing.has(itemName) &&
-        (itemName === name || (options.owned ?? []).includes(itemName));
+      const current =
+        options?.replace === true && existing.has(itemName) ? await config.etag(CODEX_SETTINGS, itemName) : '';
+      const replacing = current !== '' && options?.etags?.[itemName] === current;
       if (options?.replace === true && existing.has(itemName) && !replacing) {
-        kept.push(`${itemName} already exists and was not brought in by an import, so it was left as it is`);
+        kept.push(`${itemName} already exists and was not left by an import as it is now, so it was left as it is`);
         continue;
       }
       const answer =
@@ -75,7 +78,7 @@ export function codexSettingsPut(
           ? taken(itemName)
           : answerOf(
               await config.writeAsCaller(CODEX_SETTINGS, itemName, JSON.stringify(item, null, 2), {
-                ifMatch: replacing ? await config.etag(CODEX_SETTINGS, itemName) : 'absent',
+                ifMatch: replacing ? current : 'absent',
               }),
               itemName,
             );
@@ -83,6 +86,7 @@ export function codexSettingsPut(
       else {
         wrote += 1;
         wroteNames.push(itemName);
+        etags[itemName] = answer.etag;
         held ||= answer.held;
       }
     }
@@ -91,6 +95,7 @@ export function codexSettingsPut(
       ok: true,
       ...(held ? { held: true as const } : {}),
       created: wroteNames,
+      etags,
       ...(failures.length + warnings.length + kept.length === 0
         ? {}
         : { warnings: [...warnings, ...kept, ...failures.map(reason => `Not imported: ${reason}`)] }),

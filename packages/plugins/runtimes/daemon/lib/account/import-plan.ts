@@ -428,6 +428,9 @@ export function mergeImportRecord(plan: ImportPlan, acceptedUpdates: readonly La
         ...(plan.record.components[update.reference]?.owned === undefined
           ? {}
           : { owned: plan.record.components[update.reference]?.owned }),
+        ...(plan.record.components[update.reference]?.etags === undefined
+          ? {}
+          : { etags: plan.record.components[update.reference]?.etags }),
       };
     }
   }
