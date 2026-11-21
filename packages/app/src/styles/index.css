@@ -152,15 +152,13 @@ select:focus {
   border-color: var(--accent);
 }
 
-/* Every theme keeps a visible focus ring — at least 2px, 3px in High Contrast. */
+/* Every theme keeps a visible focus ring — at least 2px, 3px in High Contrast.
+   THE RING IS DRAWN INSIDE THE CONTROL'S BORDER BOX (r11 S13): a negative offset of its own width puts every pixel of it
+   within the element, so no `overflow` ancestor, whatever its padding, can cut it (it was cut on the first and last row of
+   every scrolling list, and on a control at a card's edge). A text field keeps its border-colour change beside it. */
 :focus-visible {
   outline: var(--focus-width) var(--focus-line) var(--focus-color);
-  outline-offset: var(--focus-offset);
-}
-/* A text field's ring hugs its own edge (offset 0) instead of floating beside the border colour it also changes. */
-input:focus-visible,
-textarea:focus-visible {
-  outline-offset: 0;
+  outline-offset: calc(-1 * var(--focus-width));
 }
 
 code,

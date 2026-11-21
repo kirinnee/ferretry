@@ -104,7 +104,7 @@
   border-color: var(--focus-color);
   box-shadow: var(--focus-shadow);
   outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: var(--focus-offset);
+  outline-offset: calc(-1 * var(--focus-width));
 }
 
 /* ---- card ---- */

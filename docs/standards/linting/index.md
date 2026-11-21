@@ -50,6 +50,7 @@ and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Q
 | `a-no-legacy-state`         | package code cannot reference predecessor state or identifiers                                                                                                    |
 | `a-no-accent-side-bar`      | no stylesheet draws an accent bar down the side of a selected item                                                                                                |
 | `a-no-pattern-kill`         | test code never kills processes by pattern (`pkill`, `killall`)                                                                                                   |
+| `a-no-outset-focus`         | a keyboard focus ring is drawn inside its control, never with an outward `outline-offset` (reports until r11-3's gate)                                            |
 | `a-no-native-select`        | the app draws every list choice as a `SelectBox`, never the browser `<select>` (reports until r11 S3f)                                                            |
 | `a-no-sync-io`              | daemon code declares every synchronous file call in `scripts/validate/sync-io-allowlist.txt`                                                                      |
 | `a-no-raw-yaml`             | product code parses YAML only through the shared bounded reader (`@ferretry/std/yaml`), or a file `scripts/validate/raw-yaml-allowlist.txt` names with its reason |

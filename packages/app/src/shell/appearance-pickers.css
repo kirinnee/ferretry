@@ -120,7 +120,7 @@
 }
 .fy-ap-chip:has(:focus-visible) {
   outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: var(--focus-offset);
+  outline-offset: calc(-1 * var(--focus-width));
 }
 .fy-ap-chip[data-selected='true'] {
   background: var(--accent-soft);
