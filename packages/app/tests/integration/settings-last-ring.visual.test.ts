@@ -79,14 +79,27 @@ const VARIANTS = [
 const SCHEMES = ['light', 'dark'] as const;
 /** The three tabs whose last control sat flush on the scroller's bottom edge: the route, what proves the real controls drew, and the stops the gate saw cut. */
 const TABS = [
-  { name: 'layout', path: '/d/ws/settings/layouts/layout', ready: '.fy-chips .fy-chip-main', affected: /fy-chip-main/ },
-  { name: 'voice', path: '/d/ws/settings/voice/voice', ready: 'input.fy-ar-range', affected: /fy-ar-range/ },
+  {
+    name: 'layout',
+    path: '/d/ws/settings/layouts/layout',
+    ready: '.fy-chips .fy-chip-main',
+    affected: /fy-chip-main/,
+    shot: '.fy-chips .fy-chip-main',
+  },
+  {
+    name: 'voice',
+    path: '/d/ws/settings/voice/voice',
+    ready: 'input.fy-ar-range',
+    affected: /fy-ar-range/,
+    shot: 'input.fy-ar-range',
+  },
   {
     name: 'warden',
     path: '/d/ws/settings/warden/warden',
     ready: '.fy-settings-page .fy-wf-seg__opt input[type="radio"]',
     /** The segmented choice's radio (a bare `input` stop: the LABEL paints its ring). */
     affected: /^input$/,
+    shot: '.fy-settings-page .fy-wf-seg__opt input[type="radio"]:checked',
   },
 ] as const;
 
@@ -144,8 +157,29 @@ describe('the last control of a settings tab has its whole focus ring inside the
             const walk = await walkFocusRings(page, WALK_CAP);
             const reached = await page.evaluate(() => (window as unknown as { __reached: boolean }).__reached);
             if (shotsDir !== '') {
-              // The picture is of the last control focused after keyboard use, where the browser leaves it.
-              await page.evaluate(() => (window as unknown as { __last: HTMLElement }).__last.focus());
+              // The picture is of the AFFECTED control (the one the gate saw cut), reached by the real Tab from the top of the page, where the
+              // browser leaves it: the last one of the tab's `shot` selector.
+              const found = await page.evaluate(selector => {
+                const all = [...document.querySelectorAll<HTMLElement>(selector)];
+                const target = all.at(-1);
+                if (target === undefined) return false;
+                (window as unknown as { __shot: Element }).__shot = target;
+                (document.activeElement as HTMLElement | null)?.blur();
+                document.body.setAttribute('tabindex', '-1');
+                document.body.focus();
+                document.body.removeAttribute('tabindex');
+                return true;
+              }, tab.shot);
+              expect(found, `the shot target ${tab.shot} exists`).toBe(true);
+              for (let press = 0; press < WALK_CAP; press += 1) {
+                await page.keyboard.press('Tab');
+                if (
+                  await page.evaluate(
+                    () => document.activeElement === (window as unknown as { __shot: Element }).__shot,
+                  )
+                )
+                  break;
+              }
               await page.screenshot({ path: join(shotsDir, `${variant.name}-${scheme}-${tab.name}.png`) });
             }
             // A COMPLETE native traversal: the Tab order left the page (or came back to its start), it did not stop at a cap or a trap.
