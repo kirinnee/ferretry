@@ -33,7 +33,7 @@ export function shellsStepView(check: NixCheck): ShellsStepView {
     return {
       kind: 'show',
       outcome: 'missing',
-      line: 'Nix is not on this machine.',
+      line: 'Nix is missing.',
       consequence: sentence(check.facts.consequence),
       remedy: sentence(check.facts.remedy),
     };

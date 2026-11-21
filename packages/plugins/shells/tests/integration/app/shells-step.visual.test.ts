@@ -82,7 +82,7 @@ describe('The Shells onboarding step', () => {
               expect(text).toContain('Couldn’t check');
               expect(await page.$$('[data-shells-step-retry]')).toHaveLength(1);
             } else {
-              expect(text).toContain('Nix is not on this machine');
+              expect(text).toContain('Nix is missing');
               expect(await page.$$('[data-shells-step-retry]')).toHaveLength(0);
             }
             expect(await page.$$('[data-step-later]'), 'the body draws no Later of its own').toHaveLength(0);
@@ -127,6 +127,30 @@ describe('r11 O13: the Shells page layout', () => {
             await page.goto(`${origin}/?theme=studio-${scheme}&case=${outcome}`);
             await page.waitForSelector(`[data-testid="shells-step"][data-outcome="${outcome}"]`);
             await page.waitForTimeout(1_300);
+            const look = await page.evaluate(() => {
+              const luminance = (css: string): number => {
+                const [r = 0, g = 0, b = 0] = (css.match(/[\d.]+/g) ?? []).map(Number);
+                return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+              };
+              const root = document.documentElement;
+              const copy = document.querySelector('.fy-shells-step p') as HTMLElement;
+              return {
+                palette: root.dataset.palette,
+                mode: root.dataset.mode,
+                bg: luminance(getComputedStyle(document.body).backgroundColor),
+                fg: luminance(getComputedStyle(copy).color),
+              };
+            });
+            expect(look.palette).toBe('studio');
+            expect(look.mode).toBe(scheme);
+            // The mode colours are computed from the palette selectors, not just attributes: dark is dark ink-on-night.
+            if (scheme === 'dark') {
+              expect(look.bg, 'dark: the page background is dark').toBeLessThan(0.25);
+              expect(look.fg, 'dark: the words are light').toBeGreaterThan(0.6);
+            } else {
+              expect(look.bg, 'light: the page background is light').toBeGreaterThan(0.75);
+              expect(look.fg, 'light: the words are dark').toBeLessThan(0.4);
+            }
             const m = await page.evaluate(() => {
               const box = (node: Element | null) => {
                 const r = node?.getBoundingClientRect() ?? new DOMRect();
@@ -143,7 +167,8 @@ describe('r11 O13: the Shells page layout', () => {
                 demo: box(demo),
                 hasDemo: demo !== null && demo.textContent !== '',
                 words: words.map(box),
-                text: body.innerText,
+                // The whole main area: the copy column AND the demo column the portal draws beside it.
+                text: (document.querySelector('.fy-spf__main') as HTMLElement).innerText.replace(/\s+/g, ' ').trim(),
                 buttons: body.querySelectorAll('button').length,
                 writes: window.__writes,
                 overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -171,7 +196,7 @@ describe('r11 O13: the Shells page layout', () => {
               expect(Math.abs(m.demo.y - (m.words[0]?.y ?? 0))).toBeLessThanOrEqual(8);
             }
             expect(m.overflowX).toBe(false);
-            expect(m.text.length).toBeLessThanOrEqual(160);
+            expect(m.text.length, `main area text (${m.text.length}): ${m.text}`).toBeLessThanOrEqual(160);
             expect(m.buttons).toBe(outcome === 'unreadable' ? 1 : 0);
             expect(m.writes, 'nothing here is a pick, so nothing is registered to save').toEqual([]);
             expect(m.clipped).toBe(0);
@@ -181,4 +206,78 @@ describe('r11 O13: the Shells page layout', () => {
             await context.close();
           }
         }, 60_000);
+});
+
+/**
+ * r11 O13 (review item 2): the demo's motion is REAL. By the time the page is measured the 560 ms animation is over, so
+ * presence at 1300 ms would pass with the animation deleted. Here a fresh copy of each demo row is inserted (the same
+ * stylesheet rule matches it, and CSS starts its animation at once), paused, and read at its start and its end: the start
+ * is invisible and lifted, the end is at rest. With motion reduced there is no animation and the rows are at rest.
+ */
+describe('r11 O13: the Shells demo animates', () => {
+  async function open(reduced: boolean) {
+    const context = await browser.newContext({
+      viewport: { width: 1_280, height: 720 },
+      reducedMotion: reduced ? 'reduce' : 'no-preference',
+    });
+    const origin = server?.url.origin ?? '';
+    await context.route('**/*', async route =>
+      new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+    );
+    const page = await context.newPage();
+    await page.goto(`${origin}/?theme=studio-light&case=missing`);
+    await page.waitForSelector('[data-shells-demo]');
+    return { context, page };
+  }
+  const probe = () => {
+    const demo = document.querySelector('[data-shells-demo]') as HTMLElement;
+    return ['.fy-shd__row[data-without]', '.fy-shd__row--with'].map(selector => {
+      const row = (demo.querySelector(selector) as HTMLElement).cloneNode(true) as HTMLElement;
+      row.dataset.probe = '';
+      demo.append(row);
+      const running = row.getAnimations().filter(a => (a as CSSAnimation).animationName === 'fy-shd-in');
+      const read = (at: number | undefined) => {
+        for (const a of running) {
+          a.pause();
+          if (at !== undefined) a.currentTime = at;
+        }
+        const style = getComputedStyle(row);
+        const lift = new DOMMatrix(style.transform === 'none' ? undefined : style.transform).m42;
+        return { opacity: Number(style.opacity), lift };
+      };
+      const start = read(0);
+      const end = read(10_000);
+      row.remove();
+      return { animations: running.length, start, end };
+    });
+  };
+  it('plays: each row starts invisible and lifted, and ends visible and at rest', async () => {
+    const { context, page } = await open(false);
+    try {
+      const rows = await page.evaluate(probe);
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row.animations, 'a CSS animation runs on the row').toBe(1);
+        expect(row.start.opacity, 'it starts invisible').toBeLessThan(0.05);
+        expect(row.start.lift, 'it starts lifted').toBeLessThan(-4);
+        expect(row.end.opacity, 'it ends visible').toBe(1);
+        expect(row.end.lift, 'it ends at rest').toBe(0);
+      }
+    } finally {
+      await context.close();
+    }
+  }, 60_000);
+  it('with motion reduced nothing animates and the finished picture is already there', async () => {
+    const { context, page } = await open(true);
+    try {
+      const rows = await page.evaluate(probe);
+      for (const row of rows) {
+        expect(row.animations).toBe(0);
+        expect(row.start.opacity).toBe(1);
+        expect(row.start.lift).toBe(0);
+      }
+    } finally {
+      await context.close();
+    }
+  }, 60_000);
 });

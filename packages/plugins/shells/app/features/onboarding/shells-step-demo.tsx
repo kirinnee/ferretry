@@ -13,7 +13,7 @@ export function ShellsDemo() {
         <span className="fy-shd__arrow" aria-hidden="true">
           →
         </span>
-        <span className="fy-shd__tools">This machine’s tools</span>
+        <span className="fy-shd__tools">Machine tools</span>
       </div>
       <div className="fy-shd__row fy-shd__row--with" data-with="">
         <span className="fy-shd__ferret">Ferret</span>

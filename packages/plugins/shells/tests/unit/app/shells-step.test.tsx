@@ -81,7 +81,7 @@ describe('the Shells step', () => {
   it('shows what ferrets use without nix, with the daemon’s own words, and is ready', async () => {
     const { harness, view } = await open(async () => ABSENT);
     expect(harness.decision).toBe('shown');
-    expect(view.container.textContent).toContain('Nix is not on this machine');
+    expect(view.container.textContent).toContain('Nix is missing');
     const body = must(view.container.querySelector('[data-testid="shells-step"]'), 'the step body').textContent;
     expect(body).toContain('Ferrets use the machine’s own tools.');
     expect(body).toContain('Install nix, then look again.');
@@ -151,7 +151,7 @@ describe('the Shells step', () => {
         },
       }),
     ).toMatchObject({
-      line: 'Nix is not on this machine.',
+      line: 'Nix is missing.',
       consequence: 'Ferrets use the tools already on this machine.',
       remedy: 'Install nix to give each ferret its own shell.',
     });

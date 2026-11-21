@@ -12,7 +12,15 @@ import { ShellsStep } from '../../../../app/features/onboarding/shells-step.tsx'
 import type { NixCheck } from '../../../../app/features/onboarding/shells-step-model.ts';
 
 const params = new URLSearchParams(window.location.search);
-document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+// The look is three root axes (`data-style`, `data-palette`, `data-mode`), not `data-theme` alone: the dark palette
+// selectors read `[data-palette=studio][data-mode=dark]`, so a fixture that sets only `data-theme` would draw light.
+const theme = params.get('theme') ?? 'studio-light';
+const cut = theme.lastIndexOf('-');
+const root = document.documentElement;
+root.dataset.theme = theme;
+root.dataset.style = 'studio';
+root.dataset.palette = theme.slice(0, cut);
+root.dataset.mode = theme.slice(cut + 1);
 
 declare global {
   interface Window {
