@@ -8,6 +8,7 @@
  *   ?scene=none    stacked cards, no demo at all
  *   ?scene=inline  a StepDemo OUTSIDE a frame (renders inline)
  *   ?scene=long    the ending's footer: Back + a long Next label ("Open this machine"), no Later
+ *   ?scene=busy&busyMs=N  the stack page whose Next is busy (the footer's busy mark) for N ms after it is pressed (r11-1c C3)
  *   ?scene=pending a FlowPage-shaped page: its slot is `hidden` behind a loading cover until the button is pressed
  */
 
@@ -74,6 +75,12 @@ const Pending = () => {
 
 const Page = () => {
   const [value, setValue] = useState<string | null>('auto');
+  const [busy, setBusy] = useState(false);
+  const pressNext = (): void => {
+    if (scene !== 'busy') return;
+    setBusy(true);
+    window.setTimeout(() => setBusy(false), Number(params.get('busyMs') ?? 0));
+  };
   return (
     <div style={{ height: '100vh', overflow: 'auto' }} data-scroller="">
       <StepPageFrame
@@ -82,10 +89,10 @@ const Page = () => {
         {...(scene === 'prop' ? { demo: <Demo /> } : {})}
         back={{ onClick: () => undefined }}
         {...(scene === 'long' ? {} : { later: { onClick: () => undefined } })}
-        next={{ label: scene === 'long' ? 'Open this machine' : 'Next', onClick: () => undefined }}
+        next={{ label: scene === 'long' ? 'Open this machine' : 'Next', busy, onClick: pressNext }}
       >
         <ChoiceCards label="Permission mode" layout="stack" options={OPTIONS} value={value} onChange={setValue} />
-        {scene === 'stack' ? (
+        {scene === 'stack' || scene === 'busy' ? (
           <StepDemo>
             <Demo />
           </StepDemo>
