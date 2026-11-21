@@ -21,7 +21,7 @@
  *   FY_ONBOARDING_E2E_SHOTS_DIR  keep `<variant>-<nn>-<page>.png` of every page (fake data only)
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { cpus, loadavg } from 'node:os';
 import { join } from 'node:path';
@@ -148,7 +148,7 @@ const reach = async (tab: Page, key: string): Promise<void> => {
         return page?.getAttribute('data-flow-page') === wanted && page.hasAttribute('data-ready');
       },
       key,
-      { timeout: 15_000 },
+      { timeout: loadAware(15_000, IDLE_FRAME_MS) },
     );
   } catch {
     throw new Error(`expected the flow on ${key} but it is on ${await keyOf(tab)}`);
@@ -164,9 +164,11 @@ const moves: { from: string; to: string; ms: number; latency: number; frameMs: n
  * work takes several times as long and the test flaked red with nothing wrong in the product (a Next press measured 152 ms against
  * 150 at load 44, while the page's frames still read an idle 16.7 ms). So each bound is stated at idle and scales with the larger of
  * two measured slow-downs: the page's own median animation-frame interval (measured just before the act) over an idle frame, and the
- * host's one-minute load over its core count. It is never tighter than the idle bound.
+ * host's load (the larger of the one-minute average and the runnable count of the last ten seconds) over its core count (twice, see `LOAD_MARGIN`). It is never tighter than the idle bound.
  */
 const IDLE_FRAME_MS = 1_000 / 60;
+/** The one-minute load average lags and time-slicing costs more than the ratio (a press took 2.6x its idle time at a load ratio of 2.1). */
+const LOAD_MARGIN = 2;
 const frameBaseline = async (tab: Page): Promise<number> =>
   await tab.evaluate(
     () =>
@@ -186,8 +188,31 @@ const frameBaseline = async (tab: Page): Promise<number> =>
         requestAnimationFrame(tick);
       }),
   );
+/**
+ * The host's runnable-task count NOW (Linux: the fourth field of /proc/loadavg), because the one-minute average lags a burst by
+ * minutes: a run that started at load 13 saw a Next press take 260 ms once other work arrived. Elsewhere the one-minute load stands in.
+ */
+const runnableNow = (): number => {
+  try {
+    return Number(readFileSync('/proc/loadavg', 'utf8').split(' ')[3]?.split('/')[0]);
+  } catch {
+    return loadavg()[0] ?? 0;
+  }
+};
+const recentRunnable: number[] = [];
+const sampler = setInterval(() => {
+  recentRunnable.push(runnableNow());
+  if (recentRunnable.length > 20) recentRunnable.shift();
+}, 500);
+sampler.unref();
+/** The host's slow-down: the larger of its one-minute load and the mean runnable count of the last ten seconds, over its core count. */
+const hostSlowdown = (): number => {
+  const recent =
+    recentRunnable.length === 0 ? 0 : recentRunnable.reduce((sum, count) => sum + count, 0) / recentRunnable.length;
+  return Math.max(loadavg()[0] ?? 0, recent) / cpus().length;
+};
 const loadAware = (idleMs: number, frameMs: number): number =>
-  Math.round(idleMs * Math.max(1, frameMs / IDLE_FRAME_MS, (loadavg()[0] ?? 0) / cpus().length));
+  Math.round(idleMs * Math.max(1, frameMs / IDLE_FRAME_MS, LOAD_MARGIN * hostSlowdown()));
 /** The answer delay of the journey being walked: 0 (the machines answer at once) or the slow run's 100 ms (r11-1b G6). */
 let latencyNow = 0;
 /**
@@ -197,8 +222,9 @@ let latencyNow = 0;
  * frames are given six frames of slack; a blink on base was 50-183 ms, far under either bound.
  */
 const SAMPLE_SLACK_MS = 100;
-const COVER_ON_SCREEN_AT_LEAST_MS = LOADING_FADE_MS + LOADING_MIN_MS - SAMPLE_SLACK_MS;
-const COVER_FULL_AT_LEAST_MS = LOADING_MIN_MS - SAMPLE_SLACK_MS;
+/** The slack grows with the host load, like every time bound here: a late frame samples the loader later and shortens what it saw. */
+const coverOnScreenAtLeast = (): number => LOADING_FADE_MS + LOADING_MIN_MS - loadAware(SAMPLE_SLACK_MS, IDLE_FRAME_MS);
+const coverFullAtLeast = (): number => LOADING_MIN_MS - loadAware(SAMPLE_SLACK_MS, IDLE_FRAME_MS);
 /**
  * Every step-cover loader of a journey, and how long it was ON SCREEN: from the first frame its computed opacity is above 0 to
  * the moment it leaves the document (a frame loop samples the opacity; a MutationObserver stamps the removal). A loader that
@@ -446,7 +472,7 @@ const next = async (tab: Page, to: string): Promise<void> => {
           : false;
       },
       to,
-      { timeout: 15_000 },
+      { timeout: loadAware(15_000, IDLE_FRAME_MS) },
     )
     .then(handle => handle.jsonValue())
     .catch(() => Number.NaN);
@@ -738,7 +764,7 @@ describe('the first run, end to end', () => {
         await context.addInitScript(COVER_LOG);
         await context.addInitScript(NEXT_SPINNER_LOG);
         const tab = await context.newPage();
-        tab.setDefaultTimeout(20_000);
+        tab.setDefaultTimeout(loadAware(60_000, IDLE_FRAME_MS));
         tab.on('pageerror', error => seen.pageErrors.push(error.message));
         const consoleLines: string[] = [];
         tab.on('console', message => consoleLines.push(message.text()));
@@ -1432,7 +1458,7 @@ describe('the End page of a Pair journey', () => {
           { key: 'fy:onboarding:client', daemon: MACHINE_B.id },
         );
         const tab = await context.newPage();
-        tab.setDefaultTimeout(20_000);
+        tab.setDefaultTimeout(loadAware(60_000, IDLE_FRAME_MS));
         const problems: string[] = [];
         tab.on('pageerror', error => problems.push(error.message));
         try {
@@ -1530,11 +1556,9 @@ describe('the gaps the gate found, now closed', () => {
       0,
     );
     for (const cover of seen.covers) {
-      expect(cover.ms, `a cover's loader was on screen ${cover.ms} ms`).toBeGreaterThanOrEqual(
-        COVER_ON_SCREEN_AT_LEAST_MS,
-      );
+      expect(cover.ms, `a cover's loader was on screen ${cover.ms} ms`).toBeGreaterThanOrEqual(coverOnScreenAtLeast());
       expect(cover.fullMs, `a cover's loader was fully shown ${cover.fullMs} ms`).toBeGreaterThanOrEqual(
-        COVER_FULL_AT_LEAST_MS,
+        coverFullAtLeast(),
       );
     }
   });
@@ -1556,9 +1580,9 @@ describe('the gaps the gate found, now closed', () => {
       expect(
         spinner.ms,
         `the Next spinner was on screen ${spinner.ms} ms (answers ${spinner.latency} ms late)`,
-      ).toBeGreaterThanOrEqual(COVER_ON_SCREEN_AT_LEAST_MS);
+      ).toBeGreaterThanOrEqual(coverOnScreenAtLeast());
       expect(spinner.fullMs, `the Next spinner was fully shown ${spinner.fullMs} ms`).toBeGreaterThanOrEqual(
-        COVER_FULL_AT_LEAST_MS,
+        coverFullAtLeast(),
       );
     }
   });
