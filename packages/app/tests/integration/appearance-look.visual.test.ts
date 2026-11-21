@@ -636,3 +636,192 @@ describe('r11 T13 · the Appearance page', () => {
         }
       });
 });
+
+/**
+ * r11 FR3 (gate r11-3, the two blockers). Each assert was written first and is red on the base it was built on.
+ *
+ *   1. NO SPECIMEN CARD IS CLIPPED BY ITS OWN CORNER (owner: "alot of the super rounded ones are broken"): in every one of the 16
+ *      styles, every painted rounded box on the specimen (the Markdown card included) keeps its text boxes inside its own rounded
+ *      outline. The Markdown card used the control radius, which is a pill in Glass, Neumorphism, Lucid, Briefing and Gen Z, so it
+ *      became a circle and `overflow: hidden` cut the first letters off. (The matrix scene, `theme-matrix.visual.test.ts`, does not
+ *      draw the specimen; the specimen belongs to this page, so the same T14 radius/clipping check lives here, over all 16 styles.)
+ *   2. A SELECTED CHOICE CARD STAYS READABLE WHILE THE POINTER IS ON IT: after a click the pointer is still on the card, so the hover
+ *      look is the look a person sees on every pick. Its title and line keep >= 4.5:1 against the fill painted behind them, in every
+ *      style, light and dark (Raw's hover rule outranked its selected rule, so the ink fill was lost and the paper text stayed).
+ */
+
+/** Each specimen box that paints something and has a corner radius, and every text box in it that pokes out of the rounded outline. */
+const specimenClipped = (): { checked: number; clipped: string[] } => {
+  const clipped: string[] = [];
+  let checked = 0;
+  const scope = document.querySelector('[data-specimen]');
+  if (scope === null) return { checked, clipped: ['no [data-specimen] on the page'] };
+  const painted = (css: CSSStyleDeclaration): boolean =>
+    css.backgroundImage !== 'none' ||
+    !/rgba\(\d+, \d+, \d+, 0\)|transparent/.test(css.backgroundColor) ||
+    ['Top', 'Right', 'Bottom', 'Left'].some(
+      side =>
+        css.getPropertyValue(`border-${side.toLowerCase()}-style`) !== 'none' &&
+        Number.parseFloat(css.getPropertyValue(`border-${side.toLowerCase()}-width`)) > 0,
+    );
+  const name = (element: Element): string =>
+    `${element.tagName.toLowerCase()}.${String(element.className).split(' ')[0]}`;
+  for (const box of scope.querySelectorAll<HTMLElement>('*')) {
+    const css = getComputedStyle(box);
+    const rect = box.getBoundingClientRect();
+    // A card is a block: an inline link that wraps over two lines is one box with two line rects, not a card with corners.
+    if (css.display === 'inline') continue;
+    if (rect.width < 2 || rect.height < 2 || !painted(css)) continue;
+    // The four corners' radii, scaled down together the way CSS does when they would overlap (a 999px pill is half the short side).
+    const corner = (side: string): [number, number] => {
+      const [x, y = x] = css.getPropertyValue(`border-${side}-radius`).split(' ');
+      const read = (value: string, whole: number): number =>
+        value.endsWith('%') ? (Number.parseFloat(value) / 100) * whole : Number.parseFloat(value) || 0;
+      return [read(x as string, rect.width), read(y as string, rect.height)];
+    };
+    const radii = {
+      tl: corner('top-left'),
+      tr: corner('top-right'),
+      br: corner('bottom-right'),
+      bl: corner('bottom-left'),
+    };
+    const scale = Math.min(
+      1,
+      rect.width / Math.max(radii.tl[0] + radii.tr[0], radii.bl[0] + radii.br[0], 1),
+      rect.height / Math.max(radii.tl[1] + radii.bl[1], radii.tr[1] + radii.br[1], 1),
+    );
+    for (const key of Object.keys(radii) as (keyof typeof radii)[]) {
+      radii[key][0] *= scale;
+      radii[key][1] *= scale;
+    }
+    if (Math.max(...Object.values(radii).flat()) < 1) continue;
+    // A point is outside the outline when it lies in a corner's radius square but beyond that corner's ellipse.
+    const outside = (x: number, y: number): boolean =>
+      (
+        [
+          ['tl', rect.left, rect.top, 1, 1],
+          ['tr', rect.right, rect.top, -1, 1],
+          ['br', rect.right, rect.bottom, -1, -1],
+          ['bl', rect.left, rect.bottom, 1, -1],
+        ] as const
+      ).some(([key, cx, cy, sx, sy]) => {
+        const [rx, ry] = radii[key];
+        if (rx < 1 || ry < 1) return false;
+        const dx = (x - cx) * sx;
+        const dy = (y - cy) * sy;
+        if (dx >= rx || dy >= ry) return false;
+        return ((rx - dx) / rx) ** 2 + ((ry - dy) / ry) ** 2 > 1.001;
+      });
+    const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      if ((node.textContent ?? '').trim() === '') continue;
+      const parent = node.parentElement;
+      if (parent === null || getComputedStyle(parent).visibility === 'hidden') continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const line of range.getClientRects()) {
+        if (line.width < 1 || line.height < 1) continue;
+        checked += 1;
+        for (const [x, y] of [
+          [line.left, line.top],
+          [line.right, line.top],
+          [line.right, line.bottom],
+          [line.left, line.bottom],
+        ] as const)
+          if (outside(x, y)) {
+            clipped.push(
+              `${name(box)} cuts "${(node.textContent ?? '').trim().slice(0, 24)}" at (${Math.round(x)},${Math.round(y)})`,
+            );
+            break;
+          }
+      }
+    }
+  }
+  return { checked, clipped: [...new Set(clipped)] };
+};
+
+/** For every SELECTED choice card on the page, with the pointer on it: the lowest contrast of its text against the fill behind it. */
+const selectedCardsHovered = async (
+  tab: Page,
+): Promise<{ cards: number; worst: { card: string; text: string; ratio: number }[]; painted: number }> => {
+  await tab.evaluate(COLOUR_TOOLS);
+  const count = await tab.locator('.fy-cc__card[data-selected="true"]').count();
+  const worst: { card: string; text: string; ratio: number }[] = [];
+  let painted = 0;
+  for (let index = 0; index < count; index += 1) {
+    const card = tab.locator('.fy-cc__card[data-selected="true"]').nth(index);
+    await card.scrollIntoViewIfNeeded();
+    await card.hover();
+    await tab.waitForTimeout(250);
+    const read = await card.evaluate(element => {
+      const { backdrop, over, ratio, rgba } = (window as unknown as { __colour: ColourTools }).__colour;
+      const label = `${element.getAttribute('data-choice') ?? '?'}`;
+      if (!element.matches(':hover')) return { label, hovered: false, gradient: false, rows: [] };
+      const rows: { text: string; ratio: number }[] = [];
+      for (const text of element.querySelectorAll<HTMLElement>('.fy-cc__title, .fy-cc__line')) {
+        const fill = backdrop(text);
+        const ink = rgba(getComputedStyle(text).color);
+        rows.push({ text: (text.textContent ?? '').trim().slice(0, 24), ratio: ratio(over(ink, [...fill, 1]), fill) });
+      }
+      return { label, hovered: true, gradient: getComputedStyle(element).backgroundImage !== 'none', rows };
+    });
+    if (!read.hovered) throw new Error(`the pointer is not on the selected card ${read.label}`);
+    if (read.gradient) painted += 1;
+    for (const row of read.rows) worst.push({ card: read.label, ...row });
+  }
+  return { cards: count, worst, painted };
+};
+
+describe('r11 FR3 · the Appearance page, every style', () => {
+  for (const scheme of ['light', 'dark'] as const)
+    for (const viewport of VIEWPORTS)
+      it(`no specimen card has its text clipped by its own rounded corner, all ${CATALOGUE_STYLES.length} styles (${viewport.name} ${scheme})`, async () => {
+        const { tab, problems, close } = await open(viewport, { scheme, seed: { ...INDIGO_STUDIO, mode: scheme } });
+        try {
+          const found: string[] = [];
+          let checked = 0;
+          for (const entry of CATALOGUE_STYLES) {
+            await pick(tab, entry.id);
+            await tab.waitForTimeout(300);
+            const read = await tab.evaluate(specimenClipped);
+            checked += read.checked;
+            for (const line of read.clipped) found.push(`${entry.id}: ${line}`);
+          }
+          if (measuring)
+            console.log(`MEASURED clip ${viewport.name} ${scheme}: ${checked} text boxes, ${found.length} clipped`);
+          expect(checked, 'the probe read text boxes').toBeGreaterThan(CATALOGUE_STYLES.length * 10);
+          expect(found, 'no text box leaves its card’s rounded outline').toEqual([]);
+          expect(problems).toEqual([]);
+        } finally {
+          await close();
+        }
+      });
+
+  for (const scheme of ['light', 'dark'] as const)
+    it(`a selected choice card keeps its text >= 4.5:1 against its fill while hovered, all ${CATALOGUE_STYLES.length} styles (${scheme})`, async () => {
+      const { tab, problems, close } = await open(VIEWPORTS[0], { scheme, seed: { ...INDIGO_STUDIO, mode: scheme } });
+      try {
+        const low: string[] = [];
+        let rows = 0;
+        for (const entry of CATALOGUE_STYLES) {
+          await pick(tab, entry.id);
+          await tab.waitForTimeout(300);
+          const read = await selectedCardsHovered(tab);
+          expect(read.cards, `${entry.id}: the page has a selected choice card`).toBeGreaterThan(0);
+          rows += read.worst.length;
+          if (measuring)
+            console.log(
+              `MEASURED hover ${entry.id} ${scheme}: ${read.worst.map(row => `${row.card}/${row.text} ${row.ratio.toFixed(2)}`).join(', ')}`,
+            );
+          for (const row of read.worst)
+            if (row.ratio < 4.5)
+              low.push(`${entry.id}: card "${row.card}" text "${row.text}" ${row.ratio.toFixed(2)}:1`);
+        }
+        expect(rows, 'the probe read the selected cards’ text').toBeGreaterThan(CATALOGUE_STYLES.length);
+        expect(low, 'every selected card, hovered, stays readable').toEqual([]);
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+});
