@@ -146,7 +146,9 @@ export function NewFerretPage({
   AccountSlot = ShellAccountSlot,
 }: NewFerretPageProps) {
   const [draft, setDraft] = useState<NewFerretDraft>(() =>
-    initialFolder === undefined ? emptyNewFerretDraft : { ...emptyNewFerretDraft, folder: initialFolder },
+    initialFolder === undefined
+      ? emptyNewFerretDraft
+      : { ...emptyNewFerretDraft, folder: initialFolder, folderExact: initialFolder },
   );
   const [submitting, setSubmitting] = useState(false);
   const attempt = useRef<StartAttempt | undefined>(undefined);
@@ -265,7 +267,10 @@ export function NewFerretPage({
             <PanelSlot
               daemon={daemon}
               props={
-                { value: draft.folder, onPick: folder => update('folder', folder) } satisfies NewFerretProjectSlotProps
+                {
+                  value: draft.folder,
+                  onPick: folder => setDraft(current => ({ ...current, folder, folderExact: folder })),
+                } satisfies NewFerretProjectSlotProps
               }
               slot={NEW_FERRET_PROJECT_SLOT}
             />

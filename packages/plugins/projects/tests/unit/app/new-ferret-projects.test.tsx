@@ -92,4 +92,21 @@ describe('projectLine', () => {
     const two = { ...SECOND, repos: [...(SECOND.repos ?? []), { path: 'api', remote: 'https://github.com/acme/api' }] };
     expect(projectLine(two)).toBe('acme/website + 1 more');
   });
+
+  it('names another host with its host, and shows a remote that is not a URL as written', () => {
+    const on = (remote: string) => ({ ...SECOND, repos: [{ path: '.', remote }] });
+    expect(projectLine(on('https://git.example.com/team/app.git'))).toBe('git.example.com/team/app');
+    expect(projectLine(on('git@github.com:acme/site.git'))).toBe('git@github.com:acme/site.git');
+  });
+});
+
+describe('the panel in a slot it was not built for', () => {
+  it('draws nothing for props that are not the New ferret project slot’s', async () => {
+    const Panel = createNewFerretProjectsPanel(scripted({ 'GET /v1/projects': [PROJECT] })) as (
+      props: object,
+    ) => ReactNode;
+    open = await mount(<Panel />);
+    await interact(async () => await new Promise(resolve => setTimeout(resolve, 20)));
+    expect(open.container.querySelector('[data-new-ferret-projects]')).toBeNull();
+  });
 });

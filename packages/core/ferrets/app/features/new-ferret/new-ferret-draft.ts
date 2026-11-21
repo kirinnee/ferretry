@@ -17,6 +17,11 @@ export interface NewFerretDraft {
   /** The runtime's wrapper id: what a ferret is started with. */
   runtime: string;
   folder: string;
+  /**
+   * The folder a project pick or `?folder=` named, exactly as registered. While `folder` still equals it, it is sent
+   * verbatim (a registered path may end in a space, and a sibling without it is another folder); typed text is trimmed.
+   */
+  folderExact?: string;
   model: string;
   mode: 'auto' | 'interactive';
   /** Launch in the harness's fast mode. */
@@ -58,7 +63,8 @@ const StartBodySchema = z.strictObject({
 export type StartBody = z.infer<typeof StartBodySchema>;
 
 export function buildStartBody(draft: NewFerretDraft): StartBody {
-  const folder = optionalText(draft.folder);
+  const exact = draft.folderExact !== undefined && draft.folderExact === draft.folder && draft.folder.trim() !== '';
+  const folder = exact ? draft.folder : optionalText(draft.folder);
   const model = optionalText(draft.model);
   const label = optionalText(draft.label);
   const prompt = optionalText(draft.prompt);
