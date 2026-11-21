@@ -38,6 +38,18 @@ const INVISIBLE: readonly (readonly [from: number, to: number])[] = [
   [0xfeff, 0xfeff],
 ];
 
+/**
+ * A word that names a credential, anywhere in a text, in any case and inside any punctuation or quoting (`"Password":`,
+ * `my_token=`, `(bearer`). A text that holds one is NEVER the source of a heuristic title: the words that follow a cue cannot be
+ * told from the secret they hold (multiword, glued, after `is:`, across a line), so no title is derived from it at all.
+ */
+const CREDENTIAL_CUE =
+  /pass[\s_-]?w(?:or)?d|pass[\s_-]?phrase|pass[\s_-]?code|\bpwd\b|token|secret|api[\s_-]?key|private[\s_-]?key|credential|bearer/iu;
+
+/** Whether `text` (as written, or made plain: NFKC with the invisible characters out) holds a credential cue. */
+export const hasCredentialCue = (text: string): boolean =>
+  CREDENTIAL_CUE.test(text) || CREDENTIAL_CUE.test(matchViewOf(text).plain);
+
 /** The marks a vault leaves where a value was (`[redacted]`, `[redacted:NAME]`, `${secret:NAME}`): never words of a title. */
 const MASK_MARKS = /\[redacted(?::[^\]\s]*)?\]|\$\{secret:[^}\s]*\}/giu;
 
@@ -261,7 +273,7 @@ export const scrubShown = (text: string, scrub: ScrubText): string =>
  * cut. `undefined` when nothing readable is left, so the next source of a title is used instead of an empty one.
  */
 export const cleanTitle = (text: string, scrub: ScrubText): string | undefined =>
-  shown(text, scrub, CONVERSATION_NAME_MAX);
+  hasCredentialCue(text) ? undefined : shown(text, scrub, CONVERSATION_NAME_MAX);
 
 /**
  * How people open a request: a greeting, "can you", "please", "I need you to", "help me". A task title names the work, not the
@@ -303,6 +315,8 @@ const GREETING_TITLE = 'New conversation';
  * `undefined` when nothing readable is left (the caller's fallback shows the message's own opening instead).
  */
 export function deriveTitle(firstMessage: string, scrub: ScrubText): string | undefined {
+  // FAIL CLOSED: a message that names a credential makes no heuristic title (the masking below is the second layer, not the first).
+  if (hasCredentialCue(firstMessage)) return undefined;
   // Masked from the WHOLE message, then cut to what a title reads: a value that crosses the cut is gone before it.
   const brief = withoutControls(maskText(firstMessage, scrub, HOLE))
     .slice(0, TITLE_BRIEF_MAX)
@@ -350,5 +364,13 @@ export function fileTitle(
 ): string | null {
   const named = input.name === undefined ? undefined : cleanTitle(input.name, scrub);
   if (named !== undefined) return named;
-  return (input.firstMessage === undefined ? undefined : deriveTitle(input.firstMessage, scrub)) ?? null;
+  if (input.firstMessage === undefined) return null;
+  const made = deriveTitle(input.firstMessage, scrub);
+  if (made !== undefined) return made;
+  // A first message that names a credential gets the plain fallback title, never its own opening (the preview the row would
+  // otherwise be named by may still hold the unmasked tail of a multiword value).
+  return hasCredentialCue(input.firstMessage) ? UNTITLED_TITLE : null;
 }
+
+/** What a conversation is called when the only thing to name it by is a message that names a credential. */
+export const UNTITLED_TITLE = 'Conversation';

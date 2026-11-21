@@ -13,7 +13,7 @@ import { describeConversation, type DescribedConversation } from './conversation
 import { isOwnerMessage } from '../../reader/lib/transcript/owner.ts';
 import { codexIndexNames, type TranscriptNames, transcriptNames } from './conversation-name.ts';
 import { spokenMessages, spokenSources, truncateText, writtenSources } from './conversation-text.ts';
-import { cleanTitle, fileTitle, type ScrubText, scrubShown } from './conversation-title.ts';
+import { cleanTitle, fileTitle, hasCredentialCue, type ScrubText, scrubShown } from './conversation-title.ts';
 
 /**
  * THE CONVERSATION INDEX (shared-history design §3.3): one row per transcript file of every history Conversation lists,
@@ -338,7 +338,9 @@ const untitledName = (row: {
   readonly preview: string;
 }): string => {
   const folder = row.project.split(/[\\/]/u).findLast(part => part !== '') ?? '';
-  return row.written === 1 && folder !== '' ? folder : truncateText(row.preview, NAME_FALLBACK_MAX);
+  if (row.written === 1 && folder !== '') return folder;
+  // An opening that names a credential is not shown as the name either: the words after the cue may be the secret's.
+  return hasCredentialCue(row.preview) ? UNTITLED_NAME : truncateText(row.preview, NAME_FALLBACK_MAX);
 };
 
 export class ConversationIndex {

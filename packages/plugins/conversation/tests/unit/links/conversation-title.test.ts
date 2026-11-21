@@ -4,6 +4,7 @@ import {
   deriveTitle,
   dropCredentialShapes,
   fileTitle,
+  hasCredentialCue,
   looksLikeCredential,
   maskText,
   type ScrubText,
@@ -65,6 +66,11 @@ describe('the credential shapes are dropped with no vault at all', () => {
     test(`${shape}: not in the title, whether the first sentence is built round it or it trails`, () => {
       const around = deriveTitle(`Fix the login ${token} bug in auth. Thanks`, NO_VAULT);
       const trailing = deriveTitle(`Fix the flaky login test, here is the key ${token}`, NO_VAULT);
+      // A token that NAMES a credential (`DB_PASSWORD=…`) makes no heuristic title at all (fail closed: R2).
+      if (hasCredentialCue(token)) {
+        expect(around).toBeUndefined();
+        return;
+      }
       for (const title of [around, trailing]) {
         expect(title).toBeDefined();
         // Neither the token nor any run of it long enough to be a fragment of it.
@@ -77,7 +83,7 @@ describe('the credential shapes are dropped with no vault at all', () => {
 
     test(`${shape}: a CLI title that carries it is cut to the words around it`, () => {
       const title = cleanTitle(`Debug ${token} login`, NO_VAULT);
-      expect(title).toBe('Debug login');
+      expect(title).toBe(hasCredentialCue(token) ? undefined : 'Debug login');
     });
   }
 
@@ -90,9 +96,7 @@ describe('the credential shapes are dropped with no vault at all', () => {
   });
 
   test('a Bearer or Basic credential loses the credential, whatever its shape', () => {
-    expect(deriveTitle('Why does curl fail? Authorization: Bearer abcdef0123456789xyz', NO_VAULT)).not.toContain(
-      'abcdef0123456789xyz',
-    );
+    expect(deriveTitle('Why does curl fail? Authorization: Bearer abcdef0123456789xyz', NO_VAULT)).toBeUndefined();
     expect(maskText('send Basic dXNlcjpwYXNzd29yZA== now', NO_VAULT)).not.toContain('dXNlcjpwYXNzd29yZA');
   });
 
@@ -151,14 +155,15 @@ describe('the vault’s own values are masked, through a fake vault', () => {
 
   test('a value of several words is masked whole', () => {
     const title = deriveTitle('My password is correct horse battery staple, so why is login refused', vault);
-    expect(title).not.toMatch(/horse|battery|staple/iu);
-    expect(title).not.toMatch(/redacted|DB_PASSWORD/iu);
+    // It names a password, so no heuristic title is made from it (fail closed).
+    expect(title).toBeUndefined();
+    expect(maskText('My password is correct horse battery staple', vault)).not.toMatch(/horse|battery|staple/iu);
   });
 
   test('a value that spans lines is masked whole', () => {
     const message = 'Please use this cert:\nline one of the secret\nline two of the secret\nto sign the build';
     const title = deriveTitle(message, vault);
-    expect(title).not.toMatch(/secret|line one|line two/iu);
+    expect(title ?? '').not.toMatch(/secret|line one|line two/iu);
     expect(maskText(message, vault)).not.toContain('line one of the secret');
   });
 
@@ -199,10 +204,11 @@ describe('the vault’s own values are masked, through a fake vault', () => {
 describe('text over several lines', () => {
   const GH = TOKEN_SHAPES['GitHub classic'] as string;
 
-  test('a token on a later line is gone, and the heading on the first line is the title', () => {
+  test('a token on a later line is gone, and the message that names it makes no heuristic title', () => {
     const message = `# Rotate the billing keys\n\nUse this token:\n${GH}\n\nThen redeploy.`;
     const title = deriveTitle(message, NO_VAULT);
-    expect(title).toBe('Rotate the Billing Keys');
+    expect(title).toBeUndefined();
+    expect(deriveTitle('# Rotate the billing keys\n\nThen redeploy.', NO_VAULT)).toBe('Rotate the Billing Keys');
     expect(maskText(message, NO_VAULT)).not.toContain(GH);
   });
 
@@ -442,10 +448,8 @@ describe('a multiword passphrase is masked whole, before any title is made (revi
     });
   }
 
-  test('the words before the passphrase and on other lines still make the title', () => {
-    expect(deriveTitle('Fix the login\nthe passphrase is correct horse battery staple', NO_VAULT)).toBe(
-      'Fix the Login',
-    );
+  test('a message that names a passphrase makes no heuristic title, even from its other lines', () => {
+    expect(deriveTitle('Fix the login\nthe passphrase is correct horse battery staple', NO_VAULT)).toBeUndefined();
   });
 });
 

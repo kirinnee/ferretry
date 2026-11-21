@@ -85,7 +85,7 @@ const ferretOf = (extra: Record<string, unknown> = {}): FerretConversationNames 
   new Map([[`claude-code:${A}`, { ferret: 'ms-12', name: 'Ms-12', ...extra }]]);
 
 describe('nothing secret is stored in the index, whichever way the conversation was named', () => {
-  test('a first message with a token and a vault value: neither is in any stored cell, and the title is made from the rest', async () => {
+  test('a first message with a token and a vault value: neither is in any stored cell, and the title is the plain fallback', async () => {
     const { index, owner, stored } = setup();
     owner.set(
       pathOf(A),
@@ -93,8 +93,9 @@ describe('nothing secret is stored in the index, whichever way the conversation 
     );
     await index.refresh();
     const row = index.query().conversations[0]?.row;
-    expect(row?.name).toBe('Fix the Deploy Script');
-    expect(row?.title).toBe('Fix the Deploy Script');
+    // It names a token, so no heuristic title is made from it (fail closed).
+    expect(row?.name).toBe('Conversation');
+    expect(row?.title).toBe('Conversation');
     for (const secret of [VALUES.DEPLOY_KEY, GHP, VALUES.NOTE, 'hunter2', GHP.slice(0, 10)]) {
       expect(stored()).not.toContain(secret);
     }
@@ -806,12 +807,13 @@ describe('a bare JSON-quoted credential name is masked everywhere it could be st
       matched: answer.matched,
       skipped: 0,
     });
-    expect(listing.conversations[0]?.name).toBe('Send to the api');
+    // The first message and the CLI title both name a token: neither makes a title (fail closed).
+    expect(listing.conversations[0]?.name).toBe('Conversation');
     for (const text of [stored(), JSON.stringify(listing), JSON.stringify(offered)]) {
       expect(text).not.toContain('s3cretpw');
       expect(text).not.toContain('"token\\":');
     }
-    expect(offered.at(-1)).toEqual({ ferret: 'ms-12', title: 'Send to the api' });
+    expect(offered.at(-1)).toEqual({ ferret: 'ms-12', title: 'Conversation' });
   });
 
   test('the exact "token":"x" is masked in the stored title, preview, latest and the wire row', async () => {
@@ -820,7 +822,7 @@ describe('a bare JSON-quoted credential name is masked everywhere it could be st
     owner.append(pathOf(A), rec({ type: 'ai-title', aiTitle: 'Rotate "token":"x" soon' }));
     await index.refresh();
     const row = index.query().conversations[0]?.row;
-    expect(row?.name).toBe('Rotate soon');
+    expect(row?.name).toBe('Conversation');
     for (const text of [stored(), JSON.stringify(row)]) expect(text).not.toContain('\\"x\\"');
   });
 });
