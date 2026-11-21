@@ -5,8 +5,9 @@ set -euo pipefail
 # browser's default"). Every choice from a list is a `SelectBox` (packages/app/src/ui/select-box.tsx): drawn by the app, so
 # every theme styles it, searchable, and a centred dialog on a phone.
 #
-# WHAT IS MATCHED. A JSX `<select` element in a product `.tsx` file: `packages/app/src`, `packages/core/*/app` and
-# `packages/plugins/*/app`. Tests and fixtures are not product code.
+# WHAT IS MATCHED. A JSX `<select` element (spaced, `>`-closed or compact `<select/>`) in a product `.tsx` file: `packages/app/src`,
+# `packages/core/*/app` and `packages/plugins/*/app`, each searched recursively. The globs are component-bounded (`*` is one
+# path component, `**` the descendants), so `packages/plugins/<id>/tests/**` and its fixtures are never reached.
 #
 # MODE. `fail` (the default since r11 S3f, the last adoption PR) makes any hit exit 1. `report` lists every file that still
 # draws one and exits 0, for a local look. A line that is only a comment (`*`, `//`, `/*`) may name the element: it draws none.
@@ -28,8 +29,8 @@ hits="$(mktemp)"
 trap 'rm -f "${hits}"' EXIT
 
 status=0
-git grep -n -E '<select([[:space:]>]|$)' -- \
-  'packages/app/src/*.tsx' 'packages/core/*/app/*.tsx' 'packages/plugins/*/app/*.tsx' | grep -v -E ':[0-9]+:[[:space:]]*(\*|//|/\*)' >"${hits}" || status=$?
+git grep -n -E '<select([[:space:]/>]|$)' -- \
+  ':(glob)packages/app/src/**/*.tsx' ':(glob)packages/core/*/app/**/*.tsx' ':(glob)packages/plugins/*/app/**/*.tsx' | grep -v -E ':[0-9]+:[[:space:]]*(\*|//|/\*)' >"${hits}" || status=$?
 [ "${status}" -gt 1 ] && echo "❌ git grep failed (exit ${status}) while searching for native selects" >&2 && exit 2
 
 if [ ! -s "${hits}" ]; then
