@@ -39,8 +39,8 @@ export function ferretConversationNames(
 }
 
 /**
- * Offers Ferrets a title made from a ferret's conversation (the production wiring of `adoptTitle`; the daemon and the browser
- * test use this one function). An id that is not a ferret's, or a Ferrets with no such port, keeps what it has.
+ * Offers Ferrets a title made from a ferret's conversation (the production wiring of `adoptTitle`; the daemon runs this one function and the
+ * kernel host test `conversation-titles-sweep` drives it). An id that is not a ferret's, or a Ferrets with no such port, keeps what it has.
  */
 export function titleOffer(ferrets: {
   readonly adoptTitle?: ((ferret: SessionId, title: string) => Promise<'adopted' | 'kept'>) | undefined;
@@ -52,10 +52,10 @@ export function titleOffer(ferrets: {
 }
 
 /** How often the daemon looks for a title a CLI has written since. */
-export const TITLE_SWEEP_MS = 5_000;
+const TITLE_SWEEP_MS = 5_000;
 
 /**
- * Keeps ferrets' conversation titles fresh (the production wiring; the daemon and the browser test both start it): every
+ * Keeps ferrets' conversation titles fresh (the production wiring; `buildReading` starts it, and the kernel host test `conversation-titles-sweep` winds its clock): every
  * {@link TITLE_SWEEP_MS}, while some ferret's conversation can still take a title (its owner has not chosen one), the index is read
  * again, which offers that ferret any title its CLI wrote since. With every ferret titled by its owner nothing is read. Nothing
  * else asks the index in between (it is otherwise read only when a listing or a search needs it), so without this a title
