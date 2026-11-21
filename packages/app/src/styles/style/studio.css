@@ -25,3 +25,19 @@
     --label-size: 12.5px;
   }
 }
+
+/* ═══ r11 T5 · THE COMPONENT STYLE CONTRACT: Studio is the base ═══
+   Studio's pattern, grain, markdown, spinner (the soft arc) and motion are the defaults in tokens/base-style.css and
+   ui/spinner.css, drawn exactly as before the slots existed (`style-contract.visual.test.ts` holds that). The one slot with
+   no base default is the hypermedia set, which the renderer reads from the page (r12 H5): Studio's is SHAPED — filled,
+   rounded nodes, curved edges and a banded header, the picture with the most body. */
+:root[data-style='studio'],
+[data-swatch][data-style='studio'] {
+  --hm-shape: shaped;
+  --hm-radius: var(--radius-md);
+  --hm-stroke: 1px;
+  --hm-font: var(--font-body);
+  --hm-node-fill-alpha: 0.85;
+  --hm-edge: curve;
+  --hm-header: band;
+}
