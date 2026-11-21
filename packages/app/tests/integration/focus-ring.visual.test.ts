@@ -7,7 +7,8 @@
  * every clipping ancestor's padding box: 0 violations. A primary button's ring also keeps >= 3:1 against what sits just
  * inside it and just outside it.
  *
- * Pages: Usage analytics (`/d/ws/insights`), New ferret, Projects, three Settings tabs, and the step frame; at 1280, 768 and
+ * Pages: Usage analytics Overview (`/d/ws/insights`) and Query (`/d/ws/insights/query`, where the owner's screenshot 22 shows the
+ * Metric select), New ferret, Projects, three Settings tabs, and the step frame; at 1280, 768 and
  * 390, light and dark. `FY_FOCUS_RING_ONLY=<name,name>` narrows the pages; `FY_FOCUS_RING_REPORT=<file>` writes the
  * measured numbers as JSON (the PR body quotes them).
  */
@@ -17,11 +18,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser } from 'playwright-core';
 import { sceneBuilder, sceneServer, sharedChromium } from '../support/browser/index.ts';
-import { walkFocusRings } from '../support/browser/focus-ring.ts';
+import { ringOf, walkFocusRings } from '../support/browser/focus-ring.ts';
+import { STYLE_IDS } from '../../src/theme/catalog.ts';
 
 setDefaultTimeout(90_000);
 
 const reportPath = process.env.FY_FOCUS_RING_REPORT ?? '';
+/** `FY_FOCUS_RING_SHOTS=<dir>`: also write a screenshot of the focused Metric select in every style (local evidence, never committed). */
+const shotsDir = process.env.FY_FOCUS_RING_SHOTS ?? '';
 const only = (process.env.FY_FOCUS_RING_ONLY ?? '').split(',').filter(Boolean);
 const appScene = new URL('./fixtures/mobile-scene.tsx', import.meta.url).pathname;
 const frameScene = new URL('./fixtures/step-frame-scene.tsx', import.meta.url).pathname;
@@ -95,6 +99,7 @@ interface Page {
 }
 const PAGES: readonly Page[] = [
   { name: 'usage-analytics', scene: 'app', path: '/d/ws/insights', ready: '.fy-main' },
+  { name: 'usage-query', scene: 'app', path: '/d/ws/insights/query', ready: 'select.kt-input:not(:disabled)' },
   { name: 'new-ferret', scene: 'app', path: '/d/ws/new', ready: '.fy-main' },
   { name: 'projects', scene: 'app', path: '/d/ws/projects', ready: '.fy-main' },
   { name: 'settings-budgets', scene: 'app', path: '/d/ws/settings/usage/budgets', ready: '.fy-page' },
@@ -143,6 +148,9 @@ describe('a keyboard focus ring is never cut by a clipping ancestor', () => {
             };
             expect(problems).toEqual([]);
             expect(walk.stops.length).toBeGreaterThan(2);
+            // Every stop paints a ring (a missing one is a violation, not "nothing to clip") and the walk came all the way round.
+            expect(walk.stops.filter(stop => !stop.painted).map(stop => stop.label)).toEqual([]);
+            expect(['wrapped', 'left-page']).toContain(walk.ended);
             expect(walk.violations).toEqual([]);
             for (const ring of primary) {
               expect(ring.inside).toBeGreaterThanOrEqual(3);
@@ -152,4 +160,96 @@ describe('a keyboard focus ring is never cut by a clipping ancestor', () => {
             await context.close();
           }
         });
+});
+
+/**
+ * THE OWNER'S OWN CONTROL (review r11 S13, shot 22): Insights > Query > "Metric" select. A real Tab reaches it, and in EVERY style
+ * its ring is painted, reaches 0px outside its border box, and is cut by no clipping ancestor. (Studio drew -2px; Pixel drew a 3px
+ * outline at offset 0 and Gen Z a 3px outline at offset 5px plus a 5px shadow band: both outside.)
+ */
+/** The first label of the "Query helpers" fieldset (`analytics-custom-query.tsx`): Metric, then Aggregation. */
+const METRIC = 'fieldset > label:first-of-type > select.kt-input';
+describe('the Query tab Metric select keeps its focus ring inside itself in every style', () => {
+  for (const viewport of VIEWPORTS.filter(v => v.name !== '768'))
+    for (const scheme of ['light', 'dark'] as const)
+      it(`at ${viewport.name} ${scheme}`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          hasTouch: viewport.phone,
+          isMobile: viewport.phone,
+          colorScheme: scheme,
+        });
+        try {
+          const tab = await context.newPage();
+          tab.setDefaultTimeout(30_000);
+          await tab.goto(`${origins.app}/d/ws/insights/query?theme=studio-${scheme}`);
+          await tab.waitForSelector(`${METRIC}:not(:disabled)`, { timeout: 30_000 });
+          await tab.waitForTimeout(1_200);
+          const measured: Record<string, unknown> = {};
+          const bad: string[] = [];
+          for (const style of STYLE_IDS) {
+            await tab.evaluate(id => {
+              document.documentElement.dataset.style = id;
+            }, style);
+            const ring = await ringOf(tab, METRIC);
+            if (ring === null) {
+              bad.push(`${style}: Tab never reached the Metric select`);
+              continue;
+            }
+            if (shotsDir !== '') {
+              const box = await tab.locator(METRIC).boundingBox();
+              if (box !== null)
+                await tab.screenshot({
+                  path: join(shotsDir, `metric-${style}-${viewport.name}-${scheme}.png`),
+                  clip: {
+                    x: Math.max(0, box.x - 24),
+                    y: Math.max(0, box.y - 28),
+                    width: Math.min(viewport.width, box.width + 48),
+                    height: box.height + 56,
+                  },
+                });
+            }
+            measured[style] = { reach: ring.reach, painted: ring.painted, violations: ring.violations };
+            if (!ring.painted) bad.push(`${style}: no ring painted`);
+            if (ring.reach !== 0) bad.push(`${style}: the ring reaches ${ring.reach}px outside the select`);
+            for (const line of ring.violations) bad.push(`${style}: ${line}`);
+          }
+          report[`metric-select@${viewport.name}-${scheme}`] = measured;
+          expect(bad).toEqual([]);
+        } finally {
+          await context.close();
+        }
+      });
+});
+
+/**
+ * THE PROBE CANNOT BE FOOLED (review r11 S13, item 2): a control that paints NO ring is a violation (it used to count as
+ * "reach 0", i.e. clipped by nothing), and a walk ends on element IDENTITY, so a second control with the same label is still
+ * visited (it used to stop on the label and never reach the clipped one behind it).
+ */
+describe('the focus probe itself', () => {
+  const html = `<!doctype html><meta charset="utf-8"><style>
+    button { outline: 2px solid #00f; outline-offset: -2px; }
+    .bare { outline: none; box-shadow: none; }
+    .clip { overflow: hidden; width: 200px; }
+    .clip button.out { outline-offset: 4px; margin: 0; }
+  </style>
+  <button>Save</button><button>Save</button><button class="bare">Save</button>
+  <div class="clip"><button class="out">Save</button></div>`;
+  it('flags a control with no ring and visits every same-labelled control to the end of the page', async () => {
+    const context = await browser.newContext({ viewport: { width: 600, height: 400 } });
+    try {
+      const tab = await context.newPage();
+      await tab.setContent(html);
+      const walk = await walkFocusRings(tab);
+      // Four same-labelled buttons: all four are stops (the old label-based end stopped at the second).
+      expect(walk.stops.map(stop => stop.label)).toHaveLength(4);
+      expect(walk.stops.map(stop => stop.painted)).toEqual([true, true, false, true]);
+      expect(walk.violations.some(line => line.includes('paints no visible focus ring'))).toBe(true);
+      expect(walk.violations.some(line => line.includes('crosses'))).toBe(true);
+      expect(['wrapped', 'left-page']).toContain(walk.ended);
+    } finally {
+      await context.close();
+    }
+  });
 });

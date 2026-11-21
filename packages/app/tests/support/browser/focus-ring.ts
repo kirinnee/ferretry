@@ -20,29 +20,39 @@
 import type { Page } from 'playwright-core';
 import { COLOUR_TOOLS, type ColourTools } from './colour.ts';
 
-interface FocusStop {
+export interface FocusStop {
   /** `tag.class "first words"` of the focused element. */
   readonly label: string;
   /** One line per ancestor that would clip the ring (empty = none). */
   readonly violations: readonly string[];
   /** The widest the ring reaches outside the control's border box, in px (0 = drawn inside). */
   readonly reach: number;
+  /** True when the stop paints a visible ring: its own outline, or an ancestor's `:has(:focus-visible)` outline. */
+  readonly painted: boolean;
+  /** True when the focused element matches the selector the caller was looking for (`ringOf`). */
+  readonly target: boolean;
+  /** True when this exact element (not just a same-labelled one) was already a stop of this walk: the Tab order wrapped. */
+  readonly repeat: boolean;
+  /** True when the element is the very one the previous Tab already stopped on: Tab did not move focus (an autocomplete took it). */
+  readonly stuck: boolean;
   /** Set when the stop is a primary button: contrast of the ring against the inside / outside neighbours. */
   readonly primary?: { readonly inside: number; readonly outside: number; readonly separator: boolean };
 }
 
 export interface FocusWalk {
   readonly stops: readonly FocusStop[];
+  /** How the walk ended: the Tab order came back to a stop it had already measured (by element identity), left the page, hit the cap, or Tab could not leave a control (a keyboard trap). */
+  readonly ended: 'wrapped' | 'left-page' | 'cap' | 'stuck';
   /** Flattened `label — violation` lines across every stop. */
   readonly violations: readonly string[];
 }
 
 /** The page function: measure the active element's ring and every clipping ancestor. Self-contained. */
-const measureActive = (): FocusStop | null => {
+const measureActive = (target: string | null): FocusStop | 'none' | 'hidden' => {
   /** Sub-pixel slack: a scroll position snaps to whole device pixels, so an element at a fractional offset can sit < 1px past the edge. */
   const TOLERANCE = 1;
   const active = document.activeElement;
-  if (active === null || active === document.body || active === document.documentElement) return null;
+  if (active === null || active === document.body || active === document.documentElement) return 'none';
   const colour = (window as unknown as { __colour: ColourTools }).__colour;
   const describe = (el: Element): string =>
     `${el.tagName.toLowerCase()}${
@@ -54,7 +64,7 @@ const measureActive = (): FocusStop | null => {
     const box = el.getBoundingClientRect();
     return box.width > 0 && box.height > 0 && getComputedStyle(el).visibility !== 'hidden';
   };
-  if (!visible(active)) return null;
+  if (!visible(active)) return 'hidden';
   active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 
   /** How far the outline reaches outside the border box (0 = drawn inside), or null when it paints nothing. */
@@ -92,6 +102,16 @@ const measureActive = (): FocusStop | null => {
     if (outlineReach(node) !== null) owners.push(node);
 
   const violations: string[] = [];
+  /** A stop that paints no ring at all is a violation: a missing ring is not "nothing outside the control to clip". */
+  const painted = owners.some(owner => outlineReach(owner) !== null);
+  if (!painted)
+    violations.push(`${describe(active)} paints no visible focus ring (outline absent, zero-width or transparent)`);
+  const holder = window as unknown as { __ringSeen?: Element[] };
+  const seen = holder.__ringSeen ?? [];
+  holder.__ringSeen = seen;
+  const stuck = seen.at(-1) === active;
+  const repeat = !stuck && seen.includes(active);
+  if (!repeat && !stuck) seen.push(active);
   let widest = 0;
   for (const owner of owners) {
     const reach = Math.max(outlineReach(owner) ?? 0, owner === active ? shadowReach(owner) : 0);
@@ -160,26 +180,71 @@ const measureActive = (): FocusStop | null => {
       separator: inset !== undefined,
     };
   }
-  return { label: describe(active), violations, reach: widest, ...(primary === undefined ? {} : { primary }) };
+  return {
+    label: describe(active),
+    violations,
+    reach: widest,
+    painted,
+    repeat,
+    stuck,
+    target: target !== null && active.matches(target),
+    ...(primary === undefined ? {} : { primary }),
+  };
+};
+
+/** Press Tab until `stop` says to end (or `cap`), measuring each stop. The walk ends on ELEMENT identity, never on a label. */
+const tabThrough = async (
+  tab: Page,
+  cap: number,
+  target: string | null,
+): Promise<{ stops: FocusStop[]; ended: FocusWalk['ended'] }> => {
+  await tab.evaluate(COLOUR_TOOLS);
+  await tab.evaluate(() => {
+    (window as unknown as { __ringSeen: Element[] }).__ringSeen = [];
+    // Start from the top of the page: a blur alone leaves Chromium's sequential-focus starting point on the control that had
+    // focus, so the next Tab would continue from THERE. Focusing the body moves the starting point to the document.
+    (document.activeElement as HTMLElement | null)?.blur();
+    document.body.setAttribute('tabindex', '-1');
+    document.body.focus();
+    document.body.removeAttribute('tabindex');
+  });
+  const stops: FocusStop[] = [];
+  for (let index = 0; index < cap; index += 1) {
+    await tab.keyboard.press('Tab');
+    let measured = await tab.evaluate(measureActive, target);
+    // A control that keeps Tab for itself (an autocomplete accepting a suggestion): Escape closes it, one more Tab moves on.
+    if (typeof measured !== 'string' && measured.stuck) {
+      await tab.keyboard.press('Escape');
+      await tab.keyboard.press('Tab');
+      measured = await tab.evaluate(measureActive, target);
+      if (typeof measured !== 'string' && measured.stuck) return { stops, ended: 'stuck' };
+    }
+    // Focus left the document (the browser's own chrome): the walk is over. A merely invisible stop is skipped.
+    if (measured === 'none') return { stops, ended: stops.length > 0 ? 'left-page' : 'cap' };
+    if (measured === 'hidden') continue;
+    if (measured.repeat) return { stops, ended: 'wrapped' };
+    stops.push(measured);
+    if (measured.target) return { stops, ended: 'wrapped' };
+  }
+  return { stops, ended: 'cap' };
 };
 
 /** Tab through `tab` (cap `cap`, default 80) and measure every stop. The page must already be drawn. */
 export const walkFocusRings = async (tab: Page, cap = 80): Promise<FocusWalk> => {
-  await tab.evaluate(COLOUR_TOOLS);
-  const stops: FocusStop[] = [];
-  await tab.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-  for (let index = 0; index < cap; index += 1) {
-    await tab.keyboard.press('Tab');
-    const stop = await tab.evaluate(measureActive);
-    if (stop === null) {
-      if (index > 0 && stops.length > 0) break;
-      continue;
-    }
-    if (stops.length > 2 && stop.label === stops[0]?.label) break;
-    stops.push(stop);
-  }
+  const { stops, ended } = await tabThrough(tab, cap, null);
   return {
     stops,
+    ended,
     violations: stops.flatMap(stop => stop.violations.map(line => `${stop.label} — ${line}`)),
   };
+};
+
+/**
+ * Tab (a real keyboard, so `:focus-visible` draws) until the element matching `selector` has focus, and measure ITS ring.
+ * Null when Tab never reaches it within `cap` stops.
+ */
+export const ringOf = async (tab: Page, selector: string, cap = 80): Promise<FocusStop | null> => {
+  const { stops } = await tabThrough(tab, cap, selector);
+  const last = stops.at(-1);
+  return last?.target === true ? last : null;
 };
