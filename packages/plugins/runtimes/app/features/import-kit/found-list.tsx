@@ -16,6 +16,7 @@ import {
   plural,
   PROJECT_INSTRUCTIONS_STAY,
   SECRET_KEPT,
+  VAULT_LINE,
   VAULT_VS_ENVIRONMENT,
 } from './mapping-words.ts';
 
@@ -214,7 +215,13 @@ export function FoundList({
                         </span>
                       ))}
                     </span>
-                    <span className="text-cell text-fg">{`Secret-looking keys are ${SECRET_KEPT}. ${VAULT_VS_ENVIRONMENT}`}</span>
+                    <span
+                      className="text-cell text-fg"
+                      data-found-vault=""
+                      title={`Secret-looking keys are ${SECRET_KEPT}. ${VAULT_VS_ENVIRONMENT}`}
+                    >
+                      {VAULT_LINE}
+                    </span>
                   </span>
                 )}
               </Row>

@@ -99,7 +99,9 @@ describe('everything found', () => {
     const root = view.container;
     expect(text(root, '[data-tool-headline]')).toBe('Installed · version 2.1.0 · signed in as sam@example.test');
     expect(root.querySelectorAll('input[type="checkbox"]')).toHaveLength(7);
-    expect(text(root, '[data-found-group="env"]')).toContain(
+    expect(text(root, '[data-found-group="env"]')).toContain('Secrets go to the Vault.');
+    // The long sentences moved to the line's hover text: shorter on screen, the same meaning kept.
+    expect(root.querySelector('[data-found-vault]')?.getAttribute('title')).toContain(
       'kept in the Vault: agents use them, and nothing can fetch a value back out of the Vault',
     );
     expect(text(root, '[data-found-group="env"]')).toContain('ANTHROPIC_API_KEY');
