@@ -1,4 +1,4 @@
-import { Badge } from '@ferretry/app/ui';
+import { Badge, ExternalLink } from '@ferretry/app/ui';
 import type { ReactNode } from 'react';
 import type { PullComment, PullDetail, PullPage, PullReview } from '../../../contract/index.ts';
 import { timeline } from '../../lib/timeline.ts';
@@ -43,9 +43,7 @@ function Entry({
           {when !== undefined && (
             <>
               {' · '}
-              <a href={url} rel="noopener noreferrer" target="_blank">
-                {localTime(when)}
-              </a>
+              <ExternalLink href={url}>{localTime(when)}</ExternalLink>
             </>
           )}
         </p>
@@ -104,10 +102,7 @@ export function Conversation({ page }: { readonly page: PullPage }) {
         {page.truncated && (
           <p className="m-0 text-meta text-warn" role="status">
             This page shows the first {page.comments.length} comments and {page.reviews.length} reviews.{' '}
-            <a href={pull.url} rel="noopener noreferrer" target="_blank">
-              Read the rest on GitHub
-            </a>
-            .
+            <ExternalLink href={pull.url}>Read the rest on GitHub</ExternalLink>.
           </p>
         )}
       </div>

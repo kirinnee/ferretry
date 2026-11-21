@@ -36,6 +36,13 @@ describe('links', () => {
     ])
       expect(safeHref(bad)).toBeUndefined();
   });
+  test('http: is not a link: only https is', () => {
+    expect(safeHref('http://example.com/a')).toBeUndefined();
+    const nodes = inline('[plain](http://example.com) [safe](https://example.com) http://bare.example');
+    expect(kinds(nodes).filter(k => k === 'link')).toEqual(['link']);
+    expect(texts(nodes)).toContain('plain');
+    expect(texts(nodes)).toContain('http://bare.example');
+  });
   test('a javascript: link is its text, never a link', () => {
     const nodes = inline('[click](javascript:alert(1)) and [ok](https://example.com)');
     expect(kinds(nodes).filter(k => k === 'link')).toEqual(['link']);
