@@ -38,6 +38,29 @@ const INVISIBLE: readonly (readonly [from: number, to: number])[] = [
   [0xfeff, 0xfeff],
 ];
 
+/** The names of a password: its value is what follows, even with no separator (`passcode 4817 2951`). */
+const PASS_WORD = String.raw`(?:pass[\s_-]?w(?:or)?d|pass[\s_-]?phrase|pass[\s_-]?code|\bpwd\b)`;
+/** The words that name a credential (any case, any quoting around them: `"Password"`, `my_token`, `(bearer`). */
+const CUE_WORD = String.raw`(?:${PASS_WORD}|token|secret|api[\s_-]?key|private[\s_-]?key|credential|bearer|authori[sz]ation)s?`;
+/** What may close a quoted name before its value (`"password":`, `'token' =`, `“password” —`). */
+const CUE_CLOSER = '["\'`”’)\\]}]*';
+/**
+ * A cue is a credential's NAME followed by a VALUE FORM: a separator (`:` `=` `=>` `->` `:=`, a dash) on the same line and then a
+ * value (a word, a quoted value, a JSON `"password":"…"`, the value may start on the next line), or `is` / `was` / `to` / `are`
+ * (with or without a `:` after it) and then a value, or, for a password's name only, a word with a digit right after it
+ * (`passcode 4817 …`). The words after a cue cannot be told from the secret they hold (multiword, glued, after `is:`, across a
+ * line), so a text that holds one is NEVER the source of a heuristic title. A bare mention (`Fix token refresh`, `Rotate the API
+ * secret`, `password reset flow`) is a topic, not a cue.
+ */
+const CREDENTIAL_CUE = new RegExp(
+  `${CUE_WORD}${CUE_CLOSER}(?:[ \\t]*(?:[:=]|->|[—–])\\s*\\S|\\s+(?:is|was|to|are)\\b[ \\t]*[:=]?\\s*\\S)|${PASS_WORD}${CUE_CLOSER}[ \\t]+\\S*\\d`,
+  'iu',
+);
+
+/** Whether `text` (as written, or made plain: NFKC with the invisible characters out) holds a credential cue. */
+export const hasCredentialCue = (text: string): boolean =>
+  CREDENTIAL_CUE.test(text) || CREDENTIAL_CUE.test(matchViewOf(text).plain);
+
 /** The marks a vault leaves where a value was (`[redacted]`, `[redacted:NAME]`, `${secret:NAME}`): never words of a title. */
 const MASK_MARKS = /\[redacted(?::[^\]\s]*)?\]|\$\{secret:[^}\s]*\}/giu;
 
@@ -151,6 +174,9 @@ function credentialSpans(plain: string): readonly (readonly [number, number])[] 
   words.forEach((word, position) => {
     const before = texts[position - 1];
     let hidden = looksLikeCredential(word.text) || shownWord(word.text, before).hidden;
+    // A passphrase or password is often several words and nothing marks where it ends: the value of one is every word to the end
+    // of its line (over-masking is the safe side), masked here, before any clause is cut or any title is made.
+    let toLineEnd = false;
     if (!hidden && before !== undefined) {
       // The value of a named credential: `password: X` / `API_KEY= X` (the separator glued to the name), `API_KEY = X` / `token : X`
       // (its own word), `password is X` (a name that is never plain English only).
@@ -161,11 +187,18 @@ function credentialSpans(plain: string): readonly (readonly [number, number])[] 
       const apart = named > 0 && SEPARATOR_WORD.test(before);
       const saying = named === 2 && /^is$/iu.test(before);
       hidden = glued || apart || saying;
+      const name = glued ? before : texts[position - 2];
+      toLineEnd = hidden && MULTIWORD_NAME.test(nameCore(name ?? ''));
     }
-    if (hidden) spans.push([word.start, word.start + word.text.length]);
+    if (!hidden) return;
+    const lineEnd = plain.indexOf('\n', word.start);
+    spans.push([word.start, toLineEnd ? (lineEnd < 0 ? plain.length : lineEnd) : word.start + word.text.length]);
   });
   return spans;
 }
+
+/** Names whose value is words, not one token: a passphrase, a password, a token said as a phrase (`API_KEY` and the like are one token). */
+const MULTIWORD_NAME = /passphrase|passcode|passw(?:or)?d|passwd|pwd|token/iu;
 
 /** `text` with the given spans of its PLAIN form blanked in the ORIGINAL (the glyphs around them untouched). */
 function blank(text: string, view: MatchView, spans: readonly (readonly [number, number])[], hole: string): string {
@@ -250,8 +283,15 @@ export const scrubShown = (text: string, scrub: ScrubText): string =>
  * A title somebody ELSE wrote (the CLI's, Codex's thread name, a ferret's own): masked from the whole text, put on one line and
  * cut. `undefined` when nothing readable is left, so the next source of a title is used instead of an empty one.
  */
-export const cleanTitle = (text: string, scrub: ScrubText): string | undefined =>
-  shown(text, scrub, CONVERSATION_NAME_MAX);
+export const cleanTitle = (text: string, scrub: ScrubText, by: TitleAuthor = 'generated'): string | undefined =>
+  by === 'generated' && hasCredentialCue(text) ? undefined : shown(text, scrub, CONVERSATION_NAME_MAX);
+
+/**
+ * Who wrote a title. A GENERATED one (the CLI's, a ferret's automatic one) that holds a credential cue is dropped whole; an
+ * OWNER's (`/rename`, a title the owner typed) is the owner's data and is never dropped for a cue, only masked like any other.
+ * The caller says which: nothing here guesses.
+ */
+export type TitleAuthor = 'owner' | 'generated';
 
 /**
  * How people open a request: a greeting, "can you", "please", "I need you to", "help me". A task title names the work, not the
@@ -260,11 +300,32 @@ export const cleanTitle = (text: string, scrub: ScrubText): string | undefined =
 const LEAD_IN =
   /^(?:(?:hey|hi|hello|ok|okay|so|um|well|right|alright|thanks|thank you)[\s,.!:-]+)*(?:(?:can|could|would|will) you (?:please |kindly )?|(?:i|we) (?:need|want|would like|have) (?:you )?to |i(?:'d| would) like (?:you )?to |(?:please|pls|kindly)[\s,]+|(?:help me|let's|lets)[\s,]+(?:to )?|you should |here(?:'s| is) my |use (?:it|this|that|them) to |look (?:at|into) (?=(?:why|how|what|whether|if)\b)|(?:why|whether) (?:is |are |does |do )?|what (?:is|are) (?:the )?)*/iu;
 
+/** A list item's marker (`-`, `*`, `1.`, a task box): the request starts after it, so the lead-in is cut from there. */
+const LIST_MARKER = /^\s*(?:[-*+•]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/u;
+
 const withoutLeadIn = (brief: string): string =>
   brief
     .split('\n')
-    .map(line => (/^\s*#/u.test(line) ? line : line.replace(LEAD_IN, '')))
+    .map(line => (/^\s*#/u.test(line) ? line : line.replace(LIST_MARKER, '').replace(LEAD_IN, '')))
     .join('\n');
+
+/** "the difference between X and Y" is a question about two things: it is titled `X vs Y`. */
+const DIFFERENCE =
+  /(?:\bthe\s+)?\bdifferences?\s+between\s+(?:an?\s+|the\s+)?([^.,;?!]+?)\s+and\s+(?:an?\s+|the\s+)?([^.,;?!]+?)(?=\s*(?:[.,;?!]|$)|\s+(?:in|for|when|if|on|with)\b)/iu;
+
+/** A line cut where its first clause ends (`then`, or `and` once five words are said), after two words: a title names one piece of work. */
+function atClauseEnd(line: string): string {
+  const words = line.trim().split(/\s+/u);
+  // `and` joins two things inside a short clause (`Compare Firefox and Chrome`), so it ends one only after a whole title's worth.
+  const end = words.findIndex(
+    (word, index) => index >= 2 && (/^then$/iu.test(word) || (index >= 5 && /^and$/iu.test(word))),
+  );
+  return end < 0 ? line : words.slice(0, end).join(' ');
+}
+
+/** What a message that is only a greeting or thanks is titled: it names no work yet. */
+const GREETING_ONLY = /^(?:(?:hey|hi|hello|yo|ok|okay|thanks|thank you|thx)[\s,.!?-]*)+$/iu;
+const GREETING_TITLE = 'New conversation';
 
 /**
  * A title made from the first thing the owner said: its first heading, else its first sentence that names work, at most five
@@ -272,11 +333,14 @@ const withoutLeadIn = (brief: string): string =>
  * `undefined` when nothing readable is left (the caller's fallback shows the message's own opening instead).
  */
 export function deriveTitle(firstMessage: string, scrub: ScrubText): string | undefined {
+  // FAIL CLOSED: a message that names a credential makes no heuristic title (the masking below is the second layer, not the first).
+  if (hasCredentialCue(firstMessage)) return undefined;
   // Masked from the WHOLE message, then cut to what a title reads: a value that crosses the cut is gone before it.
   const brief = withoutControls(maskText(firstMessage, scrub, HOLE))
     .slice(0, TITLE_BRIEF_MAX)
     .replace(/[\uD800-\uDBFF]$/u, '');
   if (brief.replaceAll(/[\s\uE000]+/gu, '') === '') return undefined;
+  if (GREETING_ONLY.test(brief.trim())) return GREETING_TITLE;
   // A place where a secret was is an edge, never a join: each side is read on its own, and the first that reads as work wins.
   const pieces = brief
     .split(HOLE)
@@ -299,8 +363,13 @@ const HOLE = '\uE000';
 
 /** One stretch of the owner's words as a title: opening filler off, five words at most, ending on a content word. */
 function madeTitle(piece: string): string | undefined {
-  const made = taskTitleFor(withoutLeadIn(piece), FALLBACK_LABEL);
-  return FALLBACK_TITLE.test(made) ? undefined : endOnContent(made);
+  const opened = withoutLeadIn(piece);
+  const versus = DIFFERENCE.test(opened);
+  const lines = (versus ? opened.replace(DIFFERENCE, '$1 vs $2') : opened).split('\n').map(atClauseEnd);
+  const made = taskTitleFor(lines.join('\n'), FALLBACK_LABEL);
+  if (FALLBACK_TITLE.test(made)) return undefined;
+  const ended = endOnContent(made);
+  return versus && ended !== undefined ? ended.replace(/ Vs /u, ' vs ') : ended;
 }
 
 /**
@@ -308,10 +377,23 @@ function madeTitle(piece: string): string | undefined {
  * generated, already chosen by the describer), else a deterministic one from the first message. Always scrubbed.
  */
 export function fileTitle(
-  input: { readonly name?: string | undefined; readonly firstMessage?: string | undefined },
+  input: {
+    readonly name?: string | undefined;
+    /** Who gave `name`; the CLI's when not said (fail closed). */
+    readonly nameBy?: TitleAuthor | undefined;
+    readonly firstMessage?: string | undefined;
+  },
   scrub: ScrubText,
 ): string | null {
-  const named = input.name === undefined ? undefined : cleanTitle(input.name, scrub);
+  const named = input.name === undefined ? undefined : cleanTitle(input.name, scrub, input.nameBy);
   if (named !== undefined) return named;
-  return (input.firstMessage === undefined ? undefined : deriveTitle(input.firstMessage, scrub)) ?? null;
+  if (input.firstMessage === undefined) return null;
+  const made = deriveTitle(input.firstMessage, scrub);
+  if (made !== undefined) return made;
+  // A first message that names a credential gets the plain fallback title, never its own opening (the preview the row would
+  // otherwise be named by may still hold the unmasked tail of a multiword value).
+  return hasCredentialCue(input.firstMessage) ? UNTITLED_TITLE : null;
 }
+
+/** What a conversation is called when the only thing to name it by is a message that names a credential. */
+export const UNTITLED_TITLE = 'Conversation';

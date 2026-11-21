@@ -17,7 +17,11 @@ import { daemonConnection } from '../support/shell.ts';
 import { DaemonResponseError } from '../support/shell.ts';
 import { aggregateResponse, group } from '../support/analytics-query-fixtures.ts';
 import { SelectBox } from '@ferretry/app/ui';
-import { render, run, runAsync } from '@ferretry/app/testing';
+import { ensureDom, render, run, runAsync } from '@ferretry/app/testing';
+
+// The Single/Trend choice is a device preference: the page hears a change through a window event, so a file run alone
+// needs a window (another file's DOM used to be left behind for it in the shared unit process).
+ensureDom();
 
 /** The reads these suites inject are their own; a call that reached this client is a failure. */
 const noClient = fakeClient({});

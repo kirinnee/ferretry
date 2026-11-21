@@ -62,11 +62,14 @@ afterAll(async () => {
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
+// The axis label and its question sit BESIDE the switch (the `LabelledSwitch` is drawn with its label hidden), so the text is
+// read from the row, not from inside `[role="switch"]`.
+const ROW = '[data-scene] .fy-acc-grant__axis';
 const PROBES = {
-  /** The accent title of a switched-on axis: the text the first polish painted accent-on-accent. */
-  onTitle: '[role="switch"][aria-checked="true"] span.block.font-semibold',
+  /** The title of a switched-on axis: the text the first polish painted accent-on-accent. */
+  onTitle: `${ROW}:has([role="switch"][aria-checked="true"]) > span > span.font-semibold`,
   /** The helper line under every title. */
-  helper: '[role="switch"] span.block.text-muted',
+  helper: `${ROW} .fy-acc-grant__question`,
 } as const;
 
 describe('the Grants card under Neo', () => {
@@ -84,7 +87,7 @@ describe('the Grants card under Neo', () => {
         tab.on('pageerror', error => problems.push(error.message));
         try {
           await tab.goto(`${origin}/?style=neo&palette=${palette}&mode=${mode}`);
-          await tab.waitForSelector('[data-scene] [role="switch"]');
+          await tab.waitForSelector(`${ROW} [role="switch"]`);
           await tab.evaluate(async () => await document.fonts.ready);
           if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${palette}-${mode}.png`), fullPage: true });
           if (shotsDir !== '') {
@@ -93,7 +96,7 @@ describe('the Grants card under Neo', () => {
             await tab.setViewportSize({ width: 1_280, height: 900 });
           }
           expect(problems).toEqual([]);
-          const report = await textContrast(tab, { within: '[data-scene] [role="switch"]', probes: PROBES });
+          const report = await textContrast(tab, { within: ROW, probes: PROBES });
           expect(report.checked).toBeGreaterThan(10);
           // The sample really holds both kinds of text (a missing one would pass vacuously).
           expect(report.probes.onTitle).toBeDefined();
@@ -101,9 +104,9 @@ describe('the Grants card under Neo', () => {
           expect({ palette, mode, failures: report.failures }).toEqual({ palette, mode, failures: [] });
           // The text spans keep their natural width (they were forced 14px wide).
           const narrow = await tab.evaluate(() =>
-            [...document.querySelectorAll<HTMLElement>('[data-scene] [role="switch"] span.block')]
+            [...document.querySelectorAll<HTMLElement>('[data-scene] .fy-acc-grant__axis > span:first-child > span')]
               .map(span => ({ text: span.textContent ?? '', width: span.getBoundingClientRect().width }))
-              .filter(span => span.width < 40),
+              .filter(span => span.width < 14),
           );
           expect({ palette, mode, narrow }).toEqual({ palette, mode, narrow: [] });
         } finally {
