@@ -8,6 +8,10 @@
  * `clip-path`. The ring box must lie inside that ancestor's PADDING box (± 1 px: scrolling snaps to whole pixels). A ring drawn inside the control's own
  * border box (`outline-offset: -<width>`) inflates by 0, so it can never be cut by an ancestor, whatever its padding.
  *
+ * Geometry is measured WHERE THE BROWSER LEFT THE FOCUS (a real Tab scrolls natively) before this probe scrolls anything; a second look
+ * follows `scrollIntoView` for walks. Only what a ring adds OUTSIDE its owner counts, so an owner the page left partly hidden is not a
+ * ring defect. `ringOfFocused`, `arrowWalkRings` and `edgeRings` never scroll at all (r11-1c C2).
+ *
  * Ring owners are the focused element AND any ancestor that draws an outline of its own while the focus is inside it
  * (`.fy-cc__card:has(:focus-visible)`, `.kt-tab:has(> input:focus-visible)`): the ring is on them, not on the input.
  *
@@ -17,7 +21,7 @@
  * The gate (r11-1 / r11-2 / r11-3) and T14's probe 7 reuse this file; the page function below is self-contained because
  * Playwright serialises it into the page.
  */
-import type { Page } from 'playwright-core';
+import type { Locator, Page } from 'playwright-core';
 import { COLOUR_TOOLS, type ColourTools } from './colour.ts';
 
 export interface FocusStop {
@@ -48,7 +52,8 @@ export interface FocusWalk {
 }
 
 /** The page function: measure the active element's ring and every clipping ancestor. Self-contained. */
-const measureActive = (target: string | null): FocusStop | 'none' | 'hidden' => {
+const measureActive = (arg: { target: string | null; scroll: boolean }): FocusStop | 'none' | 'hidden' => {
+  const { target, scroll } = arg;
   /** Sub-pixel slack: a scroll position snaps to whole device pixels, so an element at a fractional offset can sit < 1px past the edge. */
   const TOLERANCE = 1;
   const active = document.activeElement;
@@ -65,7 +70,6 @@ const measureActive = (target: string | null): FocusStop | 'none' | 'hidden' => 
     return box.width > 0 && box.height > 0 && getComputedStyle(el).visibility !== 'hidden';
   };
   if (!visible(active)) return 'hidden';
-  active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 
   /** How far the outline reaches outside the border box (0 = drawn inside), or null when it paints nothing. */
   const outlineReach = (el: Element): number | null => {
@@ -113,49 +117,68 @@ const measureActive = (target: string | null): FocusStop | 'none' | 'hidden' => 
   const repeat = !stuck && seen.includes(active);
   if (!repeat && !stuck) seen.push(active);
   let widest = 0;
-  for (const owner of owners) {
-    const reach = Math.max(outlineReach(owner) ?? 0, owner === active ? shadowReach(owner) : 0);
-    widest = Math.max(widest, reach);
-    const rect = owner.getBoundingClientRect();
-    const ring = {
-      left: rect.left - reach,
-      top: rect.top - reach,
-      right: rect.right + reach,
-      bottom: rect.bottom + reach,
-    };
-    const style = getComputedStyle(owner);
-    let escaped = style.position === 'absolute';
-    for (let node = owner.parentElement; node !== null; node = node.parentElement) {
-      if (node === document.body || node === document.documentElement) break;
-      if (style.position === 'fixed') break;
-      if (escaped) {
-        // An absolutely placed owner is clipped only by its containing block and what is above it.
-        if (!positioned(node)) continue;
-        escaped = false;
+  /**
+   * Judge every owner's ring against every clipping ancestor. Only what the ring adds OUTSIDE its owner counts: an owner the page
+   * left partly hidden (a card's own border row under the frame's edge, a control scrolled half out of view) is not a ring defect,
+   * but a ring that reaches beyond such an owner is cut by that much more.
+   */
+  const judge = (): void => {
+    for (const owner of owners) {
+      const reach = Math.max(outlineReach(owner) ?? 0, owner === active ? shadowReach(owner) : 0);
+      widest = Math.max(widest, reach);
+      const rect = owner.getBoundingClientRect();
+      const ring = {
+        left: rect.left - reach,
+        top: rect.top - reach,
+        right: rect.right + reach,
+        bottom: rect.bottom + reach,
+      };
+      const style = getComputedStyle(owner);
+      let escaped = style.position === 'absolute';
+      for (let node = owner.parentElement; node !== null; node = node.parentElement) {
+        if (node === document.body || node === document.documentElement) break;
+        if (style.position === 'fixed') break;
+        if (escaped) {
+          // An absolutely placed owner is clipped only by its containing block and what is above it.
+          if (!positioned(node)) continue;
+          escaped = false;
+        }
+        if (clips(node)) {
+          const box = node.getBoundingClientRect();
+          const pad = {
+            left: box.left + node.clientLeft,
+            top: box.top + node.clientTop,
+            right: box.left + node.clientLeft + node.clientWidth,
+            bottom: box.top + node.clientTop + node.clientHeight,
+          };
+          const sides = {
+            left: pad.left - ring.left,
+            top: pad.top - ring.top,
+            right: ring.right - pad.right,
+            bottom: ring.bottom - pad.bottom,
+          };
+          const own = {
+            left: pad.left - rect.left,
+            top: pad.top - rect.top,
+            right: rect.right - pad.right,
+            bottom: rect.bottom - pad.bottom,
+          };
+          const net = (key: keyof typeof sides): number => sides[key] - Math.max(own[key], 0);
+          const keys = Object.keys(sides) as (keyof typeof sides)[];
+          const over = Math.max(...keys.map(net));
+          const side = keys.find(key => net(key) === over) ?? 'left';
+          const line = `${describe(owner)} ring (${reach}px outside) crosses ${describe(node)} padding box by ${over.toFixed(1)}px on its ${side}`;
+          if (over > TOLERANCE && !violations.includes(line)) violations.push(line);
+        }
+        if (getComputedStyle(node).position === 'fixed') break;
       }
-      if (clips(node)) {
-        const box = node.getBoundingClientRect();
-        const pad = {
-          left: box.left + node.clientLeft,
-          top: box.top + node.clientTop,
-          right: box.left + node.clientLeft + node.clientWidth,
-          bottom: box.top + node.clientTop + node.clientHeight,
-        };
-        const sides = {
-          left: pad.left - ring.left,
-          top: pad.top - ring.top,
-          right: ring.right - pad.right,
-          bottom: ring.bottom - pad.bottom,
-        };
-        const over = Math.max(sides.left, sides.top, sides.right, sides.bottom);
-        const side = (Object.keys(sides) as (keyof typeof sides)[]).find(key => sides[key] === over) ?? 'left';
-        if (over > TOLERANCE)
-          violations.push(
-            `${describe(owner)} ring (${reach}px outside) crosses ${describe(node)} padding box by ${over.toFixed(1)}px on its ${side}`,
-          );
-      }
-      if (getComputedStyle(node).position === 'fixed') break;
     }
+  };
+  judge();
+  if (scroll) {
+    // The page's own scroll (a real Tab) is judged above, as it left the ring; then bring the control into view, as before, and judge again.
+    active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    judge();
   }
 
   let primary: FocusStop['primary'];
@@ -211,12 +234,12 @@ const tabThrough = async (
   const stops: FocusStop[] = [];
   for (let index = 0; index < cap; index += 1) {
     await tab.keyboard.press('Tab');
-    let measured = await tab.evaluate(measureActive, target);
+    let measured = await tab.evaluate(measureActive, { target, scroll: true });
     // A control that keeps Tab for itself (an autocomplete accepting a suggestion): Escape closes it, one more Tab moves on.
     if (typeof measured !== 'string' && measured.stuck) {
       await tab.keyboard.press('Escape');
       await tab.keyboard.press('Tab');
-      measured = await tab.evaluate(measureActive, target);
+      measured = await tab.evaluate(measureActive, { target, scroll: true });
       if (typeof measured !== 'string' && measured.stuck) return { stops, ended: 'stuck' };
     }
     // Focus left the document (the browser's own chrome): the walk is over. A merely invisible stop is skipped.
@@ -251,10 +274,173 @@ export const ringOf = async (tab: Page, selector: string, cap = 80): Promise<Foc
 
 /**
  * Measure the ring of whatever has focus RIGHT NOW (no Tab): for a control the keyboard reaches another way, such as the
- * radios of a group (one Tab stop; the arrow keys move between them). Null when nothing visible is focused.
+ * radios of a group (one Tab stop; the arrow keys move between them). Null when nothing visible is focused. Nothing is
+ * scrolled: the ring is measured exactly where the browser left it (r11-1c C2).
  */
 export const ringOfFocused = async (tab: Page): Promise<FocusStop | null> => {
   await tab.evaluate(COLOUR_TOOLS);
-  const measured = await tab.evaluate(measureActive, null);
+  const measured = await tab.evaluate(measureActive, { target: null, scroll: false });
   return typeof measured === 'string' ? null : measured;
+};
+
+/** What one arrow-key walk through a radio group saw: for each radio, which group member held focus and how its ring sat. */
+export interface ArrowWalk {
+  /** The `idAttr` value of the element around each focused radio, in the order ArrowDown reached them. */
+  readonly ids: readonly string[];
+  readonly stops: readonly FocusStop[];
+  readonly violations: readonly string[];
+}
+
+/**
+ * Walk a radio group by the arrow keys (the group is ONE Tab stop, so Tab never visits the rest): keyboard modality on, focus the
+ * first radio matching `radio`, then ArrowDown through all of them, measuring the ring of each where the browser left it.
+ * `idAttr` names the attribute (on the radio's card) that says WHICH member holds focus, so a stalled arrow cannot count as a new
+ * one: the caller asserts the ids are all different.
+ */
+export const arrowWalkRings = async (tab: Page, radio: string, idAttr: string): Promise<ArrowWalk> => {
+  const count = await tab.locator(radio).count();
+  await tab.keyboard.press('Shift'); // keyboard modality, so :focus-visible draws on a scripted focus
+  await tab.locator(radio).first().focus();
+  const ids: string[] = [];
+  const stops: FocusStop[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const stop = await ringOfFocused(tab);
+    if (stop !== null) stops.push(stop);
+    ids.push(
+      await tab.evaluate(
+        attr => (document.activeElement?.closest(`[${attr}]`) as HTMLElement | null)?.getAttribute(attr) ?? '',
+        idAttr,
+      ),
+    );
+    if (index < count - 1) await tab.keyboard.press('ArrowDown');
+  }
+  return { ids, stops, violations: stops.flatMap(stop => stop.violations.map(line => `${stop.label} — ${line}`)) };
+};
+
+/**
+ * Scroll so `target` sits `gap` px below (negative = above) the top of the padding box of its nearest clipping ancestor, and return the
+ * gap actually reached (scroll ranges can refuse). `null` scrolls nothing and only reports the gap. The scroll moves whatever scrolls: that ancestor, any scrollable one above it, the page.
+ */
+export const placeFromFrameTop = async (target: Locator, gap: number | null): Promise<number> =>
+  target.evaluate(async (node, wanted) => {
+    const clipper = (): HTMLElement => {
+      for (let el = node.parentElement; el !== null; el = el.parentElement) {
+        const style = getComputedStyle(el);
+        if (style.overflowX !== 'visible' || style.overflowY !== 'visible') return el;
+      }
+      return document.documentElement;
+    };
+    const frame = clipper();
+    const gapNow = (): number => {
+      const top = frame === document.documentElement ? 0 : frame.getBoundingClientRect().top + frame.clientTop;
+      return node.getBoundingClientRect().top - top;
+    };
+    const scrollers: Element[] = [];
+    for (let el: Element | null = node.parentElement; el !== null; el = el.parentElement)
+      if (el.scrollHeight > el.clientHeight) scrollers.push(el);
+    scrollers.push(document.scrollingElement ?? document.documentElement);
+    const place = (to: number): void => {
+      for (const scroller of scrollers) {
+        const delta = gapNow() - to;
+        if (Math.abs(delta) < 0.5) break;
+        scroller.scrollTop += delta;
+      }
+    };
+    if (wanted === null) return gapNow();
+    // Placed, then let the page settle (a list that has just opened or a choice that has just re-drawn it moves things on its own):
+    // done only when the gap held for two looks 120 ms apart.
+    let held = 0;
+    for (let attempt = 0; attempt < 12 && held < 2; attempt += 1) {
+      place(wanted);
+      await new Promise(resolve => setTimeout(resolve, 120));
+      held = Math.abs(gapNow() - wanted) < 0.5 ? held + 1 : 0;
+    }
+    return gapNow();
+  }, gap);
+
+/** One edge case: the card placed, the gap it was placed at, the gap it still had when the ring was measured, and that ring. */
+interface EdgeCase {
+  readonly card: number;
+  readonly gap: number;
+  readonly gapAtRing: number;
+  readonly stop: FocusStop | null;
+}
+
+/** The two edge cases of a ring near the edge of its frame, each measured exactly where the browser left the focus. */
+export interface EdgeRings {
+  /** Which card (index) was placed for each case, and the gap to the frame top that was reached (px; negative = above). */
+  readonly nearTop: EdgeCase;
+  readonly partlyHidden: EdgeCase;
+}
+
+/**
+ * The cases a scroll cannot be trusted to hide. Among the `cards` (each holding a radio `radio`), take the first one the frame can place
+ * 2 px under its top, press it with the pointer, then press Shift (so keyboard modality turns the ring on where the card stands); and
+ * the first one the frame can leave at least `hidden` px above its top, focus it with `focus({ preventScroll: true })` after Shift.
+ * Neither measurement scrolls anything.
+ */
+export const edgeRings = async (tab: Page, cards: string, radio: string, hidden = 14): Promise<EdgeRings> => {
+  const count = await tab.locator(cards).count();
+  const attempt = async (
+    wanted: number,
+    reached: (gap: number) => boolean,
+  ): Promise<{ card: number; gap: number; locator: Locator }> => {
+    let last = { card: -1, gap: Number.NaN, locator: tab.locator(cards).first() };
+    for (let card = 0; card < count; card += 1) {
+      const locator = tab.locator(cards).nth(card);
+      const gap = await placeFromFrameTop(locator, wanted);
+      last = { card, gap, locator };
+      if (reached(gap)) return last;
+    }
+    return last;
+  };
+  const near = await attempt(2, gap => Math.abs(gap - 2) < 1);
+  // A raw mouse press where the card stands (Playwright's own click would scroll the card to a better place first, which is the very thing
+  // this case must not have): the press has to land on the card's radio, or the case proves nothing.
+  const box = await near.locator.locator(radio).boundingBox();
+  if (box === null) throw new Error('the card has no box to press');
+  const point = { x: box.x + 20, y: box.y + Math.max(box.height / 2, 20) };
+  const hit = await tab.evaluate(({ x, y, selector }) => document.elementFromPoint(x, y)?.matches(selector) ?? false, {
+    ...point,
+    selector: radio,
+  });
+  if (!hit) throw new Error(`the press at ${point.x},${point.y} does not land on ${radio}`);
+  // Pressed and still held: the press focuses the radio (pointer focus, no ring); choosing the card would re-render the page, and the
+  // page moving is not the case. Shift then turns keyboard modality on while the pointer's focus is still there.
+  await tab.mouse.move(point.x, point.y);
+  await tab.mouse.down();
+  await tab.keyboard.press('Shift');
+  const nearStop = await ringOfFocused(tab);
+  const nearGap = await placeFromFrameTop(near.locator, null);
+  await tab.mouse.up();
+  const half = await attempt(-hidden, gap => gap <= -hidden + 1 && gap >= -hidden - 1);
+  await tab.keyboard.press('Shift');
+  await half.locator.locator(radio).evaluate(node => (node as HTMLElement).focus({ preventScroll: true }));
+  const halfStop = await ringOfFocused(tab);
+  const halfGap = await placeFromFrameTop(half.locator, null);
+  return {
+    nearTop: { card: near.card, gap: near.gap, gapAtRing: nearGap, stop: nearStop },
+    partlyHidden: { card: half.card, gap: half.gap, gapAtRing: halfGap, stop: halfStop },
+  };
+};
+
+/**
+ * The contrast of the ring drawn by the element around the focused control (`owner`, such as a card that outlines itself while
+ * its radio has keyboard focus) against the owner's own fill (what sits on both sides of an inset ring) and against the page
+ * behind the owner. Null when nothing focused sits in such an owner or the owner paints no outline.
+ */
+export const ringContrastOf = async (tab: Page, owner: string): Promise<{ card: number; page: number } | null> => {
+  await tab.evaluate(COLOUR_TOOLS);
+  return tab.evaluate(selector => {
+    const colour = (window as unknown as { __colour: ColourTools }).__colour;
+    const el = document.activeElement?.closest(selector) as HTMLElement | null | undefined;
+    if (el === null || el === undefined) return null;
+    const style = getComputedStyle(el);
+    if (style.outlineStyle === 'none' || !(Number.parseFloat(style.outlineWidth) > 0)) return null;
+    const ring = colour.rgba(style.outlineColor);
+    const fill = colour.backdrop(el);
+    const page = colour.backdrop(el.parentElement ?? el);
+    const seen = (below: readonly number[]) => colour.over(ring, [...below, 1]);
+    return { card: colour.ratio(seen(fill), fill), page: colour.ratio(seen(page), page) };
+  }, owner);
 };

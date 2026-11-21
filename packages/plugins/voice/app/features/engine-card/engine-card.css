@@ -37,9 +37,13 @@
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent) inset;
 }
+/* THE KEYBOARD RING is drawn INSIDE the card: it reaches nothing outside the card's own box, so no scroll position and no clipping
+   ancestor (main.fy-main, div.fy-frame) can ever cut it (r11-1c C2). It sits 3 px in from the edge, so the card's own border (and a chosen
+   card's accent inset line) stays between the ring and the page, and the card's fill is on both sides of it: --focus-color keeps its
+   >= 3:1 against the card and against the page. */
 .fy-engine-card:has(.fy-engine-radio:focus-visible) {
   outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
-  outline-offset: var(--focus-offset, 2px);
+  outline-offset: calc(-1 * (var(--focus-width, 2px) + 3px));
 }
 /* The radio is the whole card: invisible, above the text, below the small buttons. */
 .fy-engine-radio {
@@ -50,9 +54,6 @@
   inset: 0;
   margin: 0;
   position: absolute;
-  /* The radio covers the card, and the card's focus ring is drawn 4 px outside it: when a key moves focus here the browser scrolls
-     THIS box flush with the frame's edge, so the margin keeps the ring inside the frame, never cut (r11-1c C2). */
-  scroll-margin-block: 8px;
   z-index: 1;
 }
 .fy-engine-body {

@@ -16,4 +16,16 @@ export const sceneServer: string = new URL('./serve-scene.ts', import.meta.url).
 
 export { ALL_PALETTE_IDS, COLOUR_TOOLS, type ColourTools, type TextContrastReport, textContrast } from './colour.ts';
 
-export { type FocusStop, type FocusWalk, ringOf, ringOfFocused, walkFocusRings } from './focus-ring.ts';
+export {
+  type ArrowWalk,
+  arrowWalkRings,
+  type EdgeRings,
+  edgeRings,
+  type FocusStop,
+  type FocusWalk,
+  placeFromFrameTop,
+  ringContrastOf,
+  ringOf,
+  ringOfFocused,
+  walkFocusRings,
+} from './focus-ring.ts';
