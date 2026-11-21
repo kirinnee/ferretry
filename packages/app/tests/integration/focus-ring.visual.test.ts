@@ -99,7 +99,7 @@ interface Page {
 }
 const PAGES: readonly Page[] = [
   { name: 'usage-analytics', scene: 'app', path: '/d/ws/insights', ready: '.fy-main' },
-  { name: 'usage-query', scene: 'app', path: '/d/ws/insights/query', ready: 'select.kt-input:not(:disabled)' },
+  { name: 'usage-query', scene: 'app', path: '/d/ws/insights/query', ready: 'button.fy-sb__trigger:not(:disabled)' },
   { name: 'new-ferret', scene: 'app', path: '/d/ws/new', ready: '.fy-main' },
   { name: 'projects', scene: 'app', path: '/d/ws/projects', ready: '.fy-main' },
   { name: 'settings-budgets', scene: 'app', path: '/d/ws/settings/usage/budgets', ready: '.fy-page' },
@@ -167,8 +167,8 @@ describe('a keyboard focus ring is never cut by a clipping ancestor', () => {
  * its ring is painted, reaches 0px outside its border box, and is cut by no clipping ancestor. (Studio drew -2px; Pixel drew a 3px
  * outline at offset 0 and Gen Z a 3px outline at offset 5px plus a 5px shadow band: both outside.)
  */
-/** The first label of the "Query helpers" fieldset (`analytics-custom-query.tsx`): Metric, then Aggregation. */
-const METRIC = 'fieldset > label:first-of-type > select.kt-input';
+/** The Metric combo box trigger in the "Query helpers" fieldset (`analytics-custom-query.tsx`, a `SelectBox`; Aggregation follows it). */
+const METRIC = 'fieldset button.fy-sb__trigger[aria-label="Metric"]';
 describe('the Query tab Metric select keeps its focus ring inside itself in every style', () => {
   for (const viewport of VIEWPORTS.filter(v => v.name !== '768'))
     for (const scheme of ['light', 'dark'] as const)
