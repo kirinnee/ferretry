@@ -174,28 +174,30 @@ function Host() {
               ),
             })}
       >
-        {view === 'speedups' ? (
-          <SpeedupsStep settings={settings} step={hostRef.current} keys={keys} />
-        ) : (
-          <VoiceStep
-            settings={settings}
-            update={patch => {
-              if (refuse) {
-                refuse = false;
-                throw new Error('This device refused the write.');
-              }
-              fake.writes.push(patch);
-              writeCount += 1;
-              kept = writeCount > deny;
-              setSettings(previous => ({ ...previous, ...patch }));
-            }}
-            persisted={() => kept}
-            voices={voices}
-            browserSupport={{ available: true, availability: 'available', implementation: 'standard' }}
-            deviceClass={deviceClass}
-            step={hostRef.current}
-          />
-        )}
+        <div className="fy-sf-slot" data-flow-slot="">
+          {view === 'speedups' ? (
+            <SpeedupsStep settings={settings} step={hostRef.current} keys={keys} />
+          ) : (
+            <VoiceStep
+              settings={settings}
+              update={patch => {
+                if (refuse) {
+                  refuse = false;
+                  throw new Error('This device refused the write.');
+                }
+                fake.writes.push(patch);
+                writeCount += 1;
+                kept = writeCount > deny;
+                setSettings(previous => ({ ...previous, ...patch }));
+              }}
+              persisted={() => kept}
+              voices={voices}
+              browserSupport={{ available: true, availability: 'available', implementation: 'standard' }}
+              deviceClass={deviceClass}
+              step={hostRef.current}
+            />
+          )}
+        </div>
       </StepPageFrame>
     </div>
   );

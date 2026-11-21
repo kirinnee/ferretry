@@ -1,6 +1,7 @@
 /**
  * THE ENGINE CARDS, in a real browser, over fixed fake engines (`fixtures/engine-card-scene.tsx`): every card is the same
- * 108 px tall on the first-run page (186 px in Settings) whatever it says, one to a row on the first-run page, nothing is wider than
+ * 108 px tall on the first-run page (186 px in Settings) whatever it says (the two cards with no bars, the browser's voice and Off,
+ * are 58 px there), one to a row on the first-run page, nothing is wider than
  * the screen, the radio group has one tab stop, and the small buttons are a full 44 px to press.
  *
  * Set `FY_ENGINE_CARD_SHOTS_DIR` to keep a screenshot of each case (light and dark, 1280 and 390).
@@ -95,7 +96,7 @@ const shoot = async (tab: Awaited<ReturnType<typeof open>>['tab'], path: string)
 describe('the engine cards', () => {
   for (const viewport of VIEWPORTS)
     for (const mode of ['light', 'dark'] as const) {
-      it(`keeps every first-run card 108 px tall, stacked one to a row, never wider than the screen (${viewport.name}, ${mode})`, async () => {
+      it(`keeps every first-run card its fixed height (108 px, 58 px for the two with no bars), stacked one to a row, never wider than the screen (${viewport.name}, ${mode})`, async () => {
         const { context, tab } = await open('short', viewport, mode);
         await tab.waitForSelector('.fy-engine-card');
         const boxes = await tab.locator('.fy-engine-card').evaluateAll(nodes =>
@@ -110,7 +111,7 @@ describe('the engine cards', () => {
           }),
         );
         expect(boxes.length).toBe(5);
-        for (const box of boxes) expect(box.height).toBe(108);
+        expect(boxes.map(box => box.height)).toEqual([108, 108, 108, 58, 58]);
         // The first-run page is a stacked list (r11 O12): one card to a row, at every width.
         expect(boxes.filter(box => box.top === boxes[0]?.top).length).toBe(1);
         expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -123,14 +124,15 @@ describe('the engine cards', () => {
         expect(clipped).toEqual([]);
         // One tab stop for the whole group: the checked radio, and no other radio takes a Tab.
         expect(await tab.locator('input[type="radio"]:checked').count()).toBe(1);
-        // Install and Size say the same number on every card that offers an install (the fake sizes carry the runtime too).
+        // The first-run bars are drawn by length alone (the page's text budget): no number beside a bar, and the one size a
+        // person sees is the Install button's, on every card that offers an install.
+        const numbered = await tab.locator('[data-option-bar-text]').count();
+        expect(numbered).toBe(0);
         const disagree = await tab.locator('.fy-engine-card').evaluateAll(nodes =>
           nodes.flatMap(node => {
             const install = /\(([^)]+)\)/u.exec(node.querySelector('[data-state="idle"]')?.textContent ?? '')?.[1];
-            const size = node.querySelector('[data-option-bar="size"] [data-option-bar-text]')?.textContent;
-            return install !== undefined && install !== size
-              ? [`${(node as HTMLElement).dataset.engine}: ${install} vs ${size}`]
-              : [];
+            const offers = node.querySelector('[data-state="idle"]') !== null;
+            return offers && install === undefined ? [(node as HTMLElement).dataset.engine] : [];
           }),
         );
         expect(disagree).toEqual([]);
@@ -170,7 +172,7 @@ describe('the engine cards', () => {
           const heights = await tab
             .locator('.fy-engine-card')
             .evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().height)));
-          expect(new Set(heights)).toEqual(new Set([108]));
+          expect(heights.filter(height => height !== 108 && height !== 58)).toEqual([]);
           if (view === 'all') expect(heights.length).toBe(10);
           if (shotsDir !== '') await shoot(tab, join(shotsDir, `after-${view}-${viewport.name}-${mode}.png`));
           await context.close();

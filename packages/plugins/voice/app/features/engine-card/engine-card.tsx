@@ -58,6 +58,8 @@ export interface EngineCardProps {
   readonly error?: string;
   /** Also blocks a card for a reason the install view does not carry. An `unavailable` install view always blocks. */
   readonly disabled?: boolean;
+  /** The first-run page: the bars are drawn by length alone, their numbers staying in the spoken description and the "i". */
+  readonly compact?: boolean;
 }
 
 function InstallSlot({ install, name }: { readonly install: InstallView; readonly name: string }) {
@@ -144,6 +146,7 @@ export function EngineCard({
   badge,
   error,
   disabled = false,
+  compact = false,
 }: EngineCardProps) {
   const [open, setOpen] = useState(false);
   const detailsId = useId();
@@ -211,7 +214,7 @@ export function EngineCard({
         {bars === null ? (
           <p className="fy-engine-none">{note ?? details[0]}</p>
         ) : (
-          <OptionBars bars={optionBarsOf(bars)} className="fy-engine-bars min-w-0" />
+          <OptionBars bars={optionBarsOf(bars, compact)} className="fy-engine-bars min-w-0" />
         )}
         <div className="fy-engine-foot">
           <span className="fy-engine-chips">

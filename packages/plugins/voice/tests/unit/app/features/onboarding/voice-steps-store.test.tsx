@@ -214,6 +214,52 @@ describe('<VoiceStep> when the browser denies storage', () => {
     expect(denying.persisted).toBe(true);
     await view.unmount();
   });
+
+  it('still rejects Next after Back and a return: a fresh mount does not read the unkept in-memory choice as saved', async () => {
+    let allow = false;
+    const denying = new SttSettingsStore({
+      getItem: () => null,
+      setItem: () => {
+        if (!allow) throw new Error('QuotaExceededError');
+      },
+    });
+    const store: VoiceStore = { ...storeOver(catalog(true)), stt: denying };
+    const first = fakeHost();
+    const draw = (host: StepHost) => (
+      <StoreProvider store={store}>
+        <VoiceStepContainer step={host} />
+      </StoreProvider>
+    );
+    const view = await mount(draw(first.host));
+    await settle();
+    await interact(() => radio(view.container, 'sherpa-zipformer-en').click());
+    await interact(
+      async () =>
+        await first
+          .save()?.()
+          .catch(() => undefined),
+    );
+    expect(denying.persisted).toBe(false);
+    // Back: the page unmounts. Return: a fresh mount over the same store, which already holds the choice in memory.
+    await view.unmount();
+    const second = fakeHost();
+    const again = await mount(draw(second.host));
+    await settle();
+    expect(radio(again.container, 'sherpa-zipformer-en').checked).toBe(true);
+    // It must register a commit (null would let Next advance with nothing kept), and that commit must reject again.
+    expect(second.save()).not.toBeNull();
+    const refusals: string[] = [];
+    await interact(async () => {
+      await second
+        .save()?.()
+        .catch((cause: unknown) => void refusals.push(String(cause)));
+    });
+    expect(refusals.join()).toContain('would not keep');
+    allow = true;
+    await interact(async () => await second.save()?.());
+    expect(denying.persisted).toBe(true);
+    await again.unmount();
+  });
 });
 
 describe('<SpeedupsStep> over a real vault', () => {

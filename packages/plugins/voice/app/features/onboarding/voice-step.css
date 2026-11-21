@@ -195,19 +195,26 @@
   grid-column: 1 / -1;
 }
 
-/* The two cards with no bars (the browser's own voice, Off) are as tall as their words, not as tall as a card with bars: no
-   empty row under "No mic button.", no blank line between the browser card's two lines. */
-.fy-voice-step .fy-engine-card[data-engine='browser'] {
-  --fy-engine-height: 78px;
-}
+/* The two cards with no bars (the browser's voice, Off) say nothing under their name here, so they are as tall as a name and its
+   reserved line (an unavailable engine's reason or an error needs it), not as tall as a card with bars. */
+.fy-voice-step .fy-engine-card[data-engine='browser'],
 .fy-voice-step .fy-engine-card[data-engine='off'] {
   --fy-engine-height: 58px;
 }
-.fy-voice-step .fy-engine-card[data-engine='browser'] .fy-engine-body {
-  grid-template-rows: 18px 18px 18px;
-}
+.fy-voice-step .fy-engine-card[data-engine='browser'] .fy-engine-body,
 .fy-voice-step .fy-engine-card[data-engine='off'] .fy-engine-body {
   grid-template-rows: 18px 18px;
+}
+/* Their foot (chips are hidden here, nothing to install) is drawn only when it has something to say, an unavailable engine's
+   reason, and then beside the reserved line, so the card never grows a third row. */
+.fy-voice-step .fy-engine-card[data-engine='browser'] .fy-engine-foot,
+.fy-voice-step .fy-engine-card[data-engine='off'] .fy-engine-foot {
+  grid-row: 2;
+  height: 18px;
+}
+.fy-voice-step .fy-engine-card[data-engine='browser'] .fy-engine-foot:not(:has(.fy-engine-state)),
+.fy-voice-step .fy-engine-card[data-engine='off'] .fy-engine-foot:not(:has(.fy-engine-state)) {
+  display: none;
 }
 .fy-voice-step .fy-engine-none:empty {
   display: none;

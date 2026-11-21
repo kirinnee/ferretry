@@ -5,8 +5,8 @@
  *
  * The ASSERT, on computed geometry, the DOM and the fake device (never a snapshot):
  *   1280 — the engine cards share x and width and stack (y strictly increases); the demo sits right of them (> 32 px gap)
- *   with its top within 8 px of the first card's; the page's own prose (everything outside the card list) is <= 160
- *   characters; no in-body button except the cards' own controls (Install, the "i"); Parakeet 110M is checked on arrival;
+ *   with its top within 8 px of the first card's; the page text, by the plan's measure (the `.fy-sf-slot`'s innerText minus the card titles), is <= 160
+ *   characters (measured 139 on Voice, 112 on Speed-ups); no in-body button except the cards' own controls (Install, the "i"); Parakeet 110M is checked on arrival;
  *   nothing is written by arriving, picking or the arrow keys; Next writes ONCE (or not at all when the pick is what is saved).
  *   390 — the demo sits above the cards and is <= 140 px tall, no sideways scroll, the footer buttons stay in the screen.
  * The Speed-ups page: one line, the demo on the right, the key cards stacked, no in-body button outside a key card, and a
@@ -106,27 +106,23 @@ interface Fake {
 const fakeOf = (tab: Tab) => tab.evaluate(() => (window as unknown as { __fake: Fake }).__fake);
 
 /**
- * The DESCRIPTION a person can see on the page: every character in the page body and its demo (`.fy-spf__main`) that is not
- * a card title, a bar's label or value, or a control's own label (the `skip` selector names them). That is the page's
- * line, each card's line and note, and the demo's words: the owner's "reduce the amount of description" as a number.
- * Hidden text (the chips, the "i" text, descriptions for a screen reader) is not seen, so it is not counted.
- * Self-contained: Playwright runs its source in the page.
+ * The PAGE TEXT, by the plan's own measure (r11 PLAN, the "text <= 160 characters" assert): the `.fy-sf-slot`'s innerText, the
+ * setup flow's own page slot, minus the card titles. innerText is what a person reads (hidden text is not in it); a card's
+ * title is the name its radio carries (`aria-label`) or its setting row's label. The slot is the shell's own element, so no
+ * selector here names a page's inner parts. Input placeholders are not text and do not count; the demo counts only if it is
+ * inside the slot (it is drawn in the frame's demo column, outside it). Self-contained: Playwright runs its source in the page.
  */
-function seenText(skip: string): string {
-  const parts: string[] = [];
-  const main = document.querySelector('.fy-spf__main') as Element;
-  const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
-  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-    const el = node.parentElement;
-    if (el === null || el.closest(skip) !== null || !el.checkVisibility({ checkVisibilityCSS: true })) continue;
-    const text = (node.textContent ?? '').replace(/\s+/g, ' ').trim();
-    if (text !== '') parts.push(text);
-  }
-  return parts.join(' ');
+function slotText(): string {
+  const slot = document.querySelector('.fy-sf-slot') as HTMLElement;
+  let text = slot.innerText;
+  const titles = [
+    ...[...slot.querySelectorAll('input[type=radio][aria-label]')].map(el => el.getAttribute('aria-label') ?? ''),
+    ...[...slot.querySelectorAll('[data-setting-row] [id$="-label"]')].map(el => (el as HTMLElement).innerText),
+  ];
+  for (const title of titles) if (title !== '') text = text.replace(title, '');
+  return text.replace(/\s+/g, ' ').trim();
 }
 const SEEN_TEXT_MAX = 160;
-const VOICE_NOT_DESCRIPTION = '.fy-engine-name, .fy-engine-badge, .fy-engine-bars, .fy-engine-state, button, summary';
-const SPEEDUPS_NOT_DESCRIPTION = '[data-setting-row] [id$="-label"], [data-setting-hint], button';
 
 interface DemoProbe {
   names: string[];
@@ -214,8 +210,8 @@ describe('the Voice first-run page', () => {
             expect((g.cards[i]?.y ?? 0) > (g.cards[i - 1]?.y ?? 0)).toBe(true);
           expect(g.checked).toBe('parakeet-tdt-110m');
           expect(g.prose.length).toBeGreaterThan(0);
-          // Everything seen on the page and in its demo, card titles aside, not just the intro line.
-          const seen = await tab.evaluate(seenText, VOICE_NOT_DESCRIPTION);
+          // Everything a person reads in the page slot, card titles aside, not just the intro line.
+          const seen = await tab.evaluate(slotText);
           // A failure shows the text itself, so what to cut is on screen.
           expect(seen.length <= SEEN_TEXT_MAX ? '' : `${seen.length} chars: ${seen}`).toBe('');
           // The demo plays: the browser has the animations running, and each takes its word from invisible to seen.
@@ -406,7 +402,7 @@ describe('the Speed-ups first-run page', () => {
           expect(Math.abs((g.rows[0]?.x ?? 0) - (g.rows[1]?.x ?? 1))).toBeLessThanOrEqual(1);
           expect((g.rows[1]?.y ?? 0) > (g.rows[0]?.y ?? 0)).toBe(true);
           expect(g.prose.length).toBeGreaterThan(0);
-          const seen = await tab.evaluate(seenText, SPEEDUPS_NOT_DESCRIPTION);
+          const seen = await tab.evaluate(slotText);
           // A failure shows the text itself, so what to cut is on screen.
           expect(seen.length <= SEEN_TEXT_MAX ? '' : `${seen.length} chars: ${seen}`).toBe('');
           expectPlays(await probeDemo(tab, '[data-speedups-demo]'), 1);

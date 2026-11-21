@@ -71,18 +71,17 @@ export function VoiceStep({ settings, update, voices, browserSupport, deviceClas
   const pick = pressed ?? saved ?? (voices?.get(defaultEngine)?.support.available === true ? defaultEngine : null);
   const writer = useRef({ update, persisted });
   writer.current = { update, persisted };
-  // A write the store applied but storage refused: the pick then reads as held (this tab has it), yet nothing was kept, so
-  // Next must still write it, and say so, until a write is kept.
-  const unkept = useRef(false);
-  // What Next saves follows the pick; a pick that is what the device already holds saves nothing.
+  // What Next saves follows the pick; a pick that is what the device already holds saves nothing. "Holds" means KEPT: a write
+  // the store applied but storage refused leaves the choice in this tab's memory (it reads as saved, here and on a fresh mount
+  // after Back) while `persisted` is false, so Next must still write it, and say so, until a write is kept.
   useEffect(() => {
+    const kept = writer.current.persisted?.() !== false;
     step?.commit(
-      pick === null || (pick === saved && !unkept.current)
+      pick === null || (pick === saved && kept)
         ? null
         : async () => {
             writer.current.update(patchFor(pick));
-            unkept.current = writer.current.persisted?.() === false;
-            if (unkept.current) throw new Error(NOT_KEPT);
+            if (writer.current.persisted?.() === false) throw new Error(NOT_KEPT);
           },
     );
   }, [pick, saved, step]);

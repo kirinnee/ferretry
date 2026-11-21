@@ -107,6 +107,7 @@ interface OnDeviceCardProps {
 function OnDeviceFace({
   model,
   badge,
+  brief,
   group,
   value,
   chosen,
@@ -114,7 +115,7 @@ function OnDeviceFace({
   install,
   line,
   error,
-}: Omit<OnDeviceCardProps, 'voice' | 'onBusy' | 'brief'> & {
+}: Omit<OnDeviceCardProps, 'voice' | 'onBusy'> & {
   readonly install: InstallView;
   readonly line: string;
   readonly error?: string;
@@ -125,6 +126,7 @@ function OnDeviceFace({
       name={cardName(model)}
       line={line}
       bars={engineBars(model)}
+      compact={brief}
       chips={chipsOf(model)}
       details={detailsOf(model)}
       selected={value === model.id}
@@ -150,6 +152,7 @@ function InstallingCard({ voice, onBusy, brief, ...face }: OnDeviceCardProps & {
   return (
     <OnDeviceFace
       {...face}
+      brief={brief}
       install={installViewOf(snapshot, voice)}
       line={
         installing
@@ -166,6 +169,7 @@ function OnDeviceCard({ voice, onBusy, brief, ...face }: OnDeviceCardProps) {
   return (
     <OnDeviceFace
       {...face}
+      brief={brief}
       line={(brief ? ENGINE_BRIEF_LINES : ENGINE_LINES)[face.model.id]}
       install={{ kind: 'unavailable', reason: `${face.model.shortName} is not available in this copy of Ferretry.` }}
     />
@@ -260,7 +264,7 @@ export function EngineCardGrid({
           chosen={chosen}
           onChoose={choose}
           onBusy={noteBusy}
-          badge={DEFAULT_ON_DEVICE_ENGINE[deviceClass] === model.id ? 'Default' : undefined}
+          badge={!brief && DEFAULT_ON_DEVICE_ENGINE[deviceClass] === model.id ? 'Default' : undefined}
           brief={brief}
         />
       ))}
@@ -268,9 +272,9 @@ export function EngineCardGrid({
         <EngineCard
           id="browser"
           name="Browser voice"
-          line={brief ? 'Your browser’s own.' : "Your browser's own. Words appear live."}
+          line={brief ? '' : "Your browser's own. Words appear live."}
           bars={null}
-          note={brief ? 'Not measured.' : 'Not measured. Nothing to download.'}
+          note={brief ? '' : 'Not measured. Nothing to download.'}
           chips={['Live words', 'Not on device']}
           details={[
             'The browser’s own speech recognition. Nothing downloads, but most browsers send the audio to their maker to be turned into text, so choose an on-device engine when that matters.',
@@ -292,7 +296,7 @@ export function EngineCardGrid({
         <EngineCard
           id="off"
           name="Off"
-          line={brief ? 'No mic button.' : 'No microphone button.'}
+          line={brief ? '' : 'No microphone button.'}
           bars={null}
           {...(brief ? { note: '' } : {})}
           chips={[]}
