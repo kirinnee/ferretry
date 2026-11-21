@@ -10,20 +10,13 @@ import {
 } from '../../contract/index.ts';
 import type { ProjectsClient } from '../lib/client.ts';
 import { reasonOf } from '../lib/client.ts';
-import {
-  activeProjectFerrets,
-  type FerretRow,
-  projectFerrets,
-  type projectLaunchRequest,
-  readFerrets,
-  startFerret,
-} from '../lib/ferrets.ts';
+import { activeProjectFerrets, type FerretRow, projectFerrets, readFerrets } from '../lib/ferrets.ts';
 import { ferretPath, projectLanesPath, projectsPath } from '../lib/paths.ts';
+import { startFerretHref } from '../lib/start-href.ts';
 import { ProjectAccountLinks } from '../features/create-project/account-links.tsx';
 import { ProjectBoardSwitch } from './project-board-switch.tsx';
 import { useProjectsSlice } from '../hooks/use-projects.ts';
 import { ProjectFiles } from './project-files.tsx';
-import { ProjectLaunch } from './project-launch.tsx';
 import { ProjectProvenance } from './project-provenance.tsx';
 import { projectsStoreFor } from './context.ts';
 
@@ -58,7 +51,6 @@ function ProjectDetailView({
   daemon,
   project,
   reading: read,
-  onLaunch,
   onNavigate,
   onBack,
 }: {
@@ -66,7 +58,6 @@ function ProjectDetailView({
   readonly daemon: string;
   readonly project: ProjectInfo;
   readonly reading: FerretsReading;
-  readonly onLaunch: (request: ReturnType<typeof projectLaunchRequest>, requestId: string) => Promise<void>;
   readonly onNavigate: (to: string) => void;
   readonly onBack: (to: string) => void;
 }) {
@@ -112,7 +103,19 @@ function ProjectDetailView({
           >
             Lanes ✎
           </button>
-          <ProjectLaunch project={project} onLaunch={onLaunch} />
+          <div className="grid shrink-0 justify-items-start gap-1">
+            <button
+              className="kt-btn min-h-[44px] w-[8.5rem] max-w-full justify-center text-balance text-center leading-tight"
+              style={{ paddingInline: '0.75rem', whiteSpace: 'normal', height: 'auto' }}
+              data-project-start=""
+              data-variant="primary"
+              type="button"
+              onClick={() => onNavigate(startFerretHref(daemon, project.path))}
+            >
+              Start a ferret here
+            </button>
+            <p className="m-0 text-meta text-muted">Starts in this project’s folder</p>
+          </div>
         </div>
       </div>
 
@@ -271,17 +274,12 @@ export function ProjectDetailPage({
       </main>
     );
 
-  const launch = async (request: ReturnType<typeof projectLaunchRequest>, requestId: string): Promise<void> => {
-    const created = await startFerret(client, request, requestId);
-    navigate(ferretPath(daemon, created.id));
-  };
   return (
     <ProjectDetailView
       client={client}
       daemon={daemon}
       project={project}
       reading={ferrets}
-      onLaunch={launch}
       onNavigate={navigate}
       onBack={back}
     />

@@ -1,5 +1,5 @@
 import { FERRETS_LIST_SCOPE_HOOK, type FerretsListScope } from '@ferretry/core-ferrets/contract';
-import type { AppComponent, ScreenProps } from '@ferretry/kernel/manifest';
+import type { AppComponent, PanelProps, ScreenProps } from '@ferretry/kernel/manifest';
 import { daemonHomeHref, daemonOfClient, deviceControls, provideToShell } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
@@ -47,6 +47,14 @@ type ScreenFactory = (client: ProjectsClient) => AppComponent<ScreenProps>;
 const screen = (factory: 'createProjectsScreen' | 'createProjectScreen', client: ProjectsClient) =>
   lazyComponent<ScreenProps>(async () => ((await loadScreens())[factory] as ScreenFactory)(client));
 
+/** The registered-projects picker for New ferret: its module loads when that page first draws the slot. */
+const loadPanels = (): Promise<Record<string, unknown>> => import(`./views/${'new-ferret-projects'}.tsx`);
+
+const newFerretProjectsPanel = (client: ProjectsClient): AppComponent<PanelProps> =>
+  lazyComponent<PanelProps>(async () =>
+    ((await loadPanels()).createNewFerretProjectsPanel as (client: ProjectsClient) => AppComponent<PanelProps>)(client),
+  );
+
 /**
  * Projects' app half: the `projects` screen (the registry, the add form, the discoveries) and the `project` screen (one
  * project's provenance, board switch, ferrets and files). The lane editor draws Board's data and is Board's.
@@ -58,6 +66,7 @@ export default provideToShell(
         projects: screen('createProjectsScreen', client),
         project: screen('createProjectScreen', client),
       },
+      panels: { 'new-ferret-projects': newFerretProjectsPanel(client) },
     }),
   }),
   {

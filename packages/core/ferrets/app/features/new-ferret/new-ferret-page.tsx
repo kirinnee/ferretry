@@ -119,6 +119,11 @@ export interface NewFerretPageProps {
    * when it offers that runtime as usable and ignores it otherwise. Nothing starts from it.
    */
   readonly initialAgent?: string;
+  /**
+   * The folder a project's "Start a ferret here" named (`?folder=`). A PREFILL ONLY: it starts in the Folder box and the
+   * daemon's start route still decides whether it may be used.
+   */
+  readonly initialFolder?: string;
   /** What draws the runtime field's slot. The shell's by default; a test hands a stand-in. */
   readonly AccountSlot?: ComponentType<AccountSlotProps>;
 }
@@ -137,9 +142,12 @@ export function NewFerretPage({
   onBack = onNavigate,
   backPlace,
   initialAgent,
+  initialFolder,
   AccountSlot = ShellAccountSlot,
 }: NewFerretPageProps) {
-  const [draft, setDraft] = useState<NewFerretDraft>(emptyNewFerretDraft);
+  const [draft, setDraft] = useState<NewFerretDraft>(() =>
+    initialFolder === undefined ? emptyNewFerretDraft : { ...emptyNewFerretDraft, folder: initialFolder },
+  );
   const [submitting, setSubmitting] = useState(false);
   const attempt = useRef<StartAttempt | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -252,6 +260,15 @@ export function NewFerretPage({
           </FerretField>
 
           <FerretField hint="the folder the agent works in" inputId={fieldId('folder')} label="Folder">
+            {/* Registered projects are Projects': its picker fills the folder field through the slot Ferrets offers.
+                It sits ABOVE the box so a machine with projects and no ferret history still shows where to start. */}
+            <PanelSlot
+              daemon={daemon}
+              props={
+                { value: draft.folder, onPick: folder => update('folder', folder) } satisfies NewFerretProjectSlotProps
+              }
+              slot={NEW_FERRET_PROJECT_SLOT}
+            />
             <FolderPicker
               id={fieldId('folder')}
               label="Folder"
@@ -263,14 +280,6 @@ export function NewFerretPage({
               }
               read={folders}
               value={draft.folder}
-            />
-            {/* Registered projects are Projects': its picker fills the folder field through the slot Ferrets offers. */}
-            <PanelSlot
-              daemon={daemon}
-              props={
-                { value: draft.folder, onPick: folder => update('folder', folder) } satisfies NewFerretProjectSlotProps
-              }
-              slot={NEW_FERRET_PROJECT_SLOT}
             />
           </FerretField>
 

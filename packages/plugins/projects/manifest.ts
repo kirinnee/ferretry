@@ -1,5 +1,5 @@
-import { LaunchRoots } from '@ferretry/core-ferrets/contract';
-import { appAction, definePlugin, route, screen, verb } from '@ferretry/kernel/manifest';
+import { LaunchRoots, NEW_FERRET_PROJECT_SLOT } from '@ferretry/core-ferrets/contract';
+import { appAction, definePlugin, panel, route, screen, verb } from '@ferretry/kernel/manifest';
 import {
   filesystemConfigure,
   filesystemUse,
@@ -135,6 +135,9 @@ export default definePlugin({
       screen('projects', { path: 'projects', nav: { label: 'Projects', icon: 'folder', order: 35 } }),
       screen('project', { path: 'projects/:id' }),
     ],
+    // The registered-projects picker Ferrets' New ferret page offers as a slot above its Folder box: Projects contributes,
+    // Ferrets imports nothing of it.
+    panels: [panel(NEW_FERRET_PROJECT_SLOT, { id: 'new-ferret-projects', order: 10 })],
   },
 
   data: {

@@ -14,7 +14,7 @@ import { type FolderOption, type FolderRead, folderSource } from './recent-folde
  * WHAT AN EMPTY FOLDER LIST SAYS, once for both channels: the visible notice and the spoken status are a pair on
  * purpose, and written once here so two literals that must agree cannot drift apart.
  */
-const EMPTY_COPY = 'No ferret on this daemon has been started in a folder yet. Type a path instead.';
+const EMPTY_COPY = 'No recent folders. Pick a project above, or type a path.';
 
 /**
  * The absolute path IS the submitted value, and two folders can share every visible character of a truncated one,

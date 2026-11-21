@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { holdsPicker } from '../../../../app/lib/slot-picker.ts';
-import { initialAgentOf } from '../../../../app/views/new-ferret.tsx';
+import { initialAgentOf, initialFolderOf } from '../../../../app/views/new-ferret.tsx';
 import { mount, must } from '../support/dom.ts';
 
 const SLOT = 'ferrets.new-ferret-account';
@@ -44,5 +44,15 @@ describe('the runtime a Launch button named', () => {
     expect(initialAgentOf('?agent=%20codex-b%20')).toBe('codex-b');
     expect(initialAgentOf('?agent=')).toBeUndefined();
     expect(initialAgentOf('')).toBeUndefined();
+  });
+});
+
+describe('the folder a project named', () => {
+  it('is read from ?folder= on the page address, and absent or blank is no prefill', () => {
+    expect(initialFolderOf('?folder=%2Fwork%2Fmy%20project')).toBe('/work/my project');
+    expect(initialFolderOf('?agent=codex&folder=%2Fwork%2Fa')).toBe('/work/a');
+    expect(initialFolderOf('?folder=')).toBeUndefined();
+    expect(initialFolderOf('?folder=%20')).toBeUndefined();
+    expect(initialFolderOf('')).toBeUndefined();
   });
 });

@@ -17,12 +17,19 @@ export const initialAgentOf = (search: string): string | undefined => {
   return agent === undefined || agent === '' ? undefined : agent;
 };
 
+/** The folder a project's "Start a ferret here" named: `?folder=` on this page's address. A PREFILL only: the start still goes through the daemon's fence. Absent or blank means none. */
+export const initialFolderOf = (search: string): string | undefined => {
+  const folder = new URLSearchParams(search).get('folder');
+  return folder === null || folder.trim() === '' ? undefined : folder;
+};
+
 export function createNewFerretScreen(client: LiveFerretsClient): AppComponent<ScreenProps> {
   return function NewFerretScreen() {
     const { route, navigate, back } = useRouter();
     // A per-daemon screen is always routed with its daemon; a route without one has nothing to start a ferret on.
     if (route.kind !== 'screen' || route.daemon === undefined) return null;
     const initialAgent = initialAgentOf(globalThis.location?.search ?? '');
+    const initialFolder = initialFolderOf(globalThis.location?.search ?? '');
     return (
       <NewFerretPage
         client={client}
@@ -30,6 +37,7 @@ export function createNewFerretScreen(client: LiveFerretsClient): AppComponent<S
         onBack={back}
         onNavigate={path => navigate(path)}
         {...(initialAgent === undefined ? {} : { initialAgent })}
+        {...(initialFolder === undefined ? {} : { initialFolder })}
       />
     );
   };

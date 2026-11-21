@@ -1,10 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  activeProjectFerrets,
-  type FerretRow,
-  projectFerrets,
-  projectLaunchRequest,
-} from '../../../app/lib/ferrets.ts';
+import { activeProjectFerrets, type FerretRow, projectFerrets } from '../../../app/lib/ferrets.ts';
 
 const row = (id: string, folder: string, stateAt: string, state: FerretRow['state'] = 'working'): FerretRow => ({
   id,
@@ -33,24 +28,5 @@ describe('project detail model', () => {
     ]);
 
     expect(activeProjectFerrets(set).map(ferret => ferret.id)).toEqual(['active']);
-  });
-});
-
-describe('projectLaunchRequest', () => {
-  test('builds an interactive start rooted in the project folder', () => {
-    expect(projectLaunchRequest('claude-code', '/work/ferretry')).toEqual({
-      runtime: 'claude-code',
-      folder: '/work/ferretry',
-      mode: 'interactive',
-    });
-  });
-
-  test('trims the typed runtime name rather than sending the whitespace with it', () => {
-    expect(projectLaunchRequest('  codex \n', '/work/ferretry').runtime).toBe('codex');
-  });
-
-  test('refuses a blank runtime and an empty folder before asking the daemon', () => {
-    expect(() => projectLaunchRequest('   ', '/work/ferretry')).toThrow();
-    expect(() => projectLaunchRequest('claude', '')).toThrow();
   });
 });
