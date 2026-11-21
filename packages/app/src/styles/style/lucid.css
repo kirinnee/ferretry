@@ -1,16 +1,19 @@
 /* ============================================================================
    LUCID — a glossy GEL desktop look: every control is a lit capsule of liquid glass. HOW things are drawn, never WHICH colours:
      · TYPE: the device's Lucida / system UI face, set a little wide and bold — headings are semibold, labels sentence case;
-     · every control and badge is a capsule with a HARD-STOP gloss: the top half of the face is a lighter band, the bottom
-       half a deeper one, with a bright line under the top edge and a shaded line at the foot (the gel-button look);
-     · panels are brushed sheets: a clearly visible horizontal pinstripe, a big radius, a glossy title strip, deep soft shadows;
+     · every control and badge is a capsule lit from above: a bright line under the top edge, a deeper LOWER HALF and a shaded
+       foot, all drawn with inset shadows (r11 T11: the style carries no gradient, so the face is the palette's own solid fill
+       and the gloss sits on top of it, never instead of it);
+     · the page is brushed: a fine horizontal pinstripe (the contract's own tile, one line every 4px), not a wash;
+     · panels are sheets with a glossy title strip, a big radius and deep soft shadows;
      · lists stripe (every second row is tinted), fields are deep recessed wells, a chosen card glows;
-     · a springy motion (a small overshoot when a choice is made), a thick glowing focus halo.
+     · the slots of the component contract: a springy motion (a small overshoot when a choice is made), shaped hypermedia, a
+       window-sheet markdown, and a spinner that is a glossy BEAD rolling round a thin rail.
    It ships no icon, no font and no image: the faces are the system's own (no font file is bundled or preloaded for it).
    Every colour comes from the active palette through `var()` (a style file holds no colour value), so any palette wears it,
    in either mode. The gloss highlights are the palette's own surface/ink/accent mixed, never a literal white.
-   A gradient face ALWAYS sits on the solid `background-color` the design system declares, so the colour a label is judged
-   against stays real; the gloss is an image over it, never instead of it.
+   SCOPE: every element rule below names the page (`:root`, outside any `[data-swatch]`) or a swatch of THIS style, so a preview of
+   another style on a Lucid page keeps its own look (and a Lucid preview looks the same on any page).
    ============================================================================ */
 :root[data-style='lucid'],
 [data-swatch][data-style='lucid'] {
@@ -48,19 +51,6 @@
   --shadow-control: 0 1px 2px var(--shadow-sm-1), 0 3px 6px var(--shadow-sm-1);
   --shadow-active: inset 0 2px 4px var(--shadow-md-1);
   --press-translate: 1px;
-  /* The page is brushed: a pinstripe you can see (one line in three, 6% ink). */
-  --body-wash: repeating-linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--fg) 7%, transparent) 0 2px,
-    transparent 2px 4px
-  );
-  /* The same pinstripe on every panel: a panel is a sheet of the same striped material as the page. */
-  --panel-texture: repeating-linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--fg) 4%, transparent) 0 1px,
-    transparent 1px 3px
-  );
-  --panel-texture-size: auto;
   --nav-sel-shadow: var(--shadow-sm);
   --menu-radius: 12px;
   --menu-item-h: 34px;
@@ -75,16 +65,9 @@
   --gap-xs: 5px;
   --gap-sm: 8px;
   --gap-md: 12px;
-  /* Springy and a touch slower than Studio: a chosen item overshoots a little and settles. */
-  --motion-fast: 140ms;
-  --motion-base: 240ms;
-  --motion-slow: 420ms;
-  --ease-standard: cubic-bezier(0.25, 0.8, 0.3, 1);
-  --ease-emphasis: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --select-pop: 1.07;
-  /* A thick halo: the focus ring is the style's loudest signature, and stays a hard, visible 3px. */
+  /* A thick halo: the focus ring is the style's loudest signature, a hard, visible 3px drawn INSIDE the control. */
   --focus-width: 3px;
-  --focus-offset: 1px;
+  --focus-offset: calc(-1 * var(--focus-width));
   --font-display:
     'Lucida Grande', 'Lucida Sans Unicode', 'Lucida Sans', system-ui, -apple-system, 'Segoe UI', Roboto,
     'Helvetica Neue', sans-serif;
@@ -92,19 +75,77 @@
     'Lucida Grande', 'Lucida Sans Unicode', 'Lucida Sans', system-ui, -apple-system, 'Segoe UI', Roboto,
     'Helvetica Neue', sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', Menlo, Consolas, monospace;
+
+  /* ═══ the component contract (r11 T11): what carries Lucid in every slot — a gel desktop ═══ */
+  /* BACKGROUND: a brushed pinstripe, one fine line every 4px in the page ink (the contract's `scan` tile), never a gradient wash; no grain. */
+  --bg-pattern-ink: color-mix(in srgb, var(--fg) 5%, transparent);
+  --bg-pattern: var(--bg-pattern-scan);
+  --bg-pattern-size: 4px;
+  --bg-pattern-alpha: 100%;
+  --grain-alpha: 0;
+  /* MARKDOWN: a window sheet. A 700-weight h1 over a hairline rule, a recessed code well, a tinted quote block (no side bar), a
+     table of rules only under a striped body, links as small tags. */
+  --md-h1-size: 1.4em;
+  --md-h1-weight: 700;
+  --md-h1-case: none;
+  --md-h1-rule: 1px solid var(--border);
+  --md-h1-rule-pad: 0.25em;
+  --md-h2-size: 1.16em;
+  --md-h2-weight: 650;
+  --md-h2-case: none;
+  --md-h2-rule: none;
+  --md-code-radius: 12px;
+  --md-code-shadow: inset 0 2px 4px var(--shadow-md-1);
+  --md-quote-bar: none;
+  --md-quote-pad: 1em;
+  --md-quote-bg: var(--accent-soft);
+  --md-quote-radius: 10px;
+  --md-quote-font-style: normal;
+  --md-cell-border-x: none;
+  --md-th-weight: 700;
+  --md-zebra: color-mix(in srgb, var(--accent) 7%, transparent);
+  --md-link-decoration: none;
+  --md-link-weight: 600;
+  --md-link-bg: var(--accent-soft);
+  --md-link-pad: 0.05em 0.45em;
+  --md-link-radius: 8px;
+  --md-list-marker-color: var(--accent);
+  /* SPINNER: a glossy bead rolling round a thin rail with a droplet behind it (the arc is hidden; shaped below the contract block).
+     The whole mark turns once per 1.2s on an ease-in-out, and the bead squashes on the same clock. */
+  --spinner-ring: inline;
+  --spinner-parts: inline;
+  --spinner-parts-speed: 1.2s;
+  --spinner-parts-timing: ease-in-out;
+  --spinner-speed: 1.2s;
+  --spinner-timing: ease-in-out;
+  --spinner-stroke: 1.5;
+  /* MOTION: springy and a touch slower than Studio: a chosen item overshoots a little and settles. */
+  --motion-fast: 140ms;
+  --motion-base: 240ms;
+  --motion-slow: 420ms;
+  --motion-pop: 220ms;
+  --ease-standard: cubic-bezier(0.25, 0.8, 0.3, 1);
+  --ease-emphasis: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --select-pop: 1.07;
+  /* HYPERMEDIA (read by r12 H5; no renderer reads an --hm-* slot yet): SHAPED — filled, glassy rounded nodes, curved edges, a banded header. */
+  --hm-shape: shaped;
+  --hm-radius: 14px;
+  --hm-stroke: 1px;
+  --hm-font: var(--font-body);
+  --hm-node-fill-alpha: 0.95;
+  --hm-edge: curve;
+  --hm-header: band;
+  /* SURFACES: a lit, bevelled edge on every panel. */
+  --panel-edge: bevel;
+  --focus-line: solid;
 }
 
-/* THE GLOSS. Light: the face is lit from above (the top band is the surface, the foot a little ink). Dark: the lit top is a
-   little ink, fading into the surface. The primary button is the accent, brightened at the top by a thin inner line. */
 :root[data-style='lucid'][data-mode='dark'],
 [data-swatch][data-style='lucid'][data-mode='dark'] {
   --shadow-md: 0 1px 3px var(--shadow-md-1), 0 12px 30px var(--shadow-md-2);
   /* Lit from above: a light line along a panel's top edge. */
   --rule-inset: inset 0 1px 0 color-mix(in srgb, var(--fg) 12%, transparent);
-  /* Glass: a sheen across the top of every panel, over the pinstripe. */
-  --panel-texture:
-    linear-gradient(180deg, color-mix(in srgb, var(--fg) 7%, transparent), transparent 56px),
-    repeating-linear-gradient(180deg, color-mix(in srgb, var(--fg) 4%, transparent) 0 1px, transparent 1px 3px);
 }
 
 :root[data-style='lucid'][data-mode='light'],
@@ -113,107 +154,6 @@
   --rule-inset:
     inset 0 1px 0 color-mix(in srgb, var(--surface) 90%, transparent),
     inset 0 -1px 0 color-mix(in srgb, var(--fg) 9%, transparent);
-  --panel-texture:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface) 80%, transparent), transparent 56px),
-    repeating-linear-gradient(180deg, color-mix(in srgb, var(--fg) 4%, transparent) 0 1px, transparent 1px 3px);
-}
-
-/* ---- the capsule button: a hard-stop gloss (upper half lighter, lower half deeper) ---- */
-:root[data-style='lucid'][data-mode='light']
-.kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger'], :disabled) {
-  background-image:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface) 95%, transparent) 0 50%, transparent 50%),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--surface) 92%, var(--fg)),
-      color-mix(in srgb, var(--surface) 76%, var(--fg))
-    );
-  box-shadow:
-    var(--shadow-control),
-    inset 0 1px 0 color-mix(in srgb, var(--surface) 90%, transparent),
-    inset 0 -1px 1px color-mix(in srgb, var(--fg) 14%, transparent);
-}
-
-:root[data-style='lucid'][data-mode='dark']
-  .kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger'], :disabled) {
-  background-image:
-    linear-gradient(180deg, color-mix(in srgb, var(--fg) 12%, transparent) 0 50%, transparent 50%),
-    linear-gradient(180deg, color-mix(in srgb, var(--surface) 93%, var(--fg)), var(--surface));
-  box-shadow:
-    var(--shadow-control),
-    inset 0 1px 0 color-mix(in srgb, var(--fg) 22%, transparent);
-}
-
-:root[data-style='lucid'] .kt-btn[data-variant='primary']:not(:disabled) {
-  background-image: linear-gradient(180deg, var(--accent) 0 50%, var(--accent-strong) 50%);
-}
-
-:root[data-style='lucid'] .kt-btn[data-variant='primary']:not(:disabled):hover {
-  background-image: linear-gradient(
-    180deg,
-    var(--accent-strong) 0 50%,
-    color-mix(in srgb, var(--accent-strong) 88%, var(--fg)) 50%
-  );
-}
-
-:root[data-style='lucid'] .kt-btn:active:not(:disabled) {
-  box-shadow: var(--shadow-active);
-}
-
-/* ---- badges are small gel capsules too ---- */
-:root[data-style='lucid'][data-mode='light'] .kt-badge {
-  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 55%, transparent) 0 50%, transparent 50%);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 85%, transparent);
-}
-
-:root[data-style='lucid'][data-mode='dark'] .kt-badge {
-  /* No lightened band in dark: a badge's tinted face is what its label is judged against. The lit top is a line only. */
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 20%, transparent);
-}
-
-/* ---- the field is a deep recessed well; its focus is the halo, drawn here because the shared field rule resets `outline` ---- */
-:root[data-style='lucid'] .kt-input {
-  background-image: linear-gradient(180deg, color-mix(in srgb, var(--fg) 8%, var(--surface)) 0%, var(--surface) 45%);
-  box-shadow:
-    inset 0 3px 5px var(--shadow-md-1),
-    inset 0 0 0 1px color-mix(in srgb, var(--fg) 6%, transparent),
-    0 1px 0 color-mix(in srgb, var(--surface) 80%, transparent);
-}
-
-:root[data-style='lucid'] .kt-input:focus-visible {
-  outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: var(--focus-offset);
-}
-
-/* ---- a panel's title strip is the window's glossy bar ---- */
-:root[data-style='lucid'] .kt-panel__header {
-  background-image: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--fg) 7%, var(--surface)) 0 50%,
-    var(--surface-2) 50%
-  );
-  border-top-left-radius: calc(var(--radius-panel) - 1px);
-  border-top-right-radius: calc(var(--radius-panel) - 1px);
-}
-
-/* ---- lists stripe: every second row is tinted, the way a desktop list always did ---- */
-:root[data-style='lucid'] .kt-row:nth-child(even) {
-  background-color: color-mix(in srgb, var(--accent) 7%, transparent);
-}
-
-/* ---- a choice card is a raised tile; the chosen one glows ---- */
-:root[data-style='lucid'] .fy-cc__card {
-  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface) 70%, transparent) 0 50%, transparent 50%);
-  box-shadow:
-    var(--shadow-sm),
-    inset 0 1px 0 color-mix(in srgb, var(--surface) 85%, transparent);
-}
-
-:root[data-style='lucid'] .fy-cc__card[data-selected='true'] {
-  box-shadow:
-    0 0 0 3px var(--ring),
-    var(--shadow-sm),
-    inset 0 1px 0 color-mix(in srgb, var(--surface) 85%, transparent);
 }
 
 @media (max-width: 640px) {
@@ -229,21 +169,216 @@
   }
 }
 
-/* ---- LETTERPRESS: text on a gel face is pressed into it (a one-pixel light edge below, a dark one on a filled face) ---- */
+/* ---- the capsule button: the upper half is the face, the LOWER half a deeper band (an inset shadow 16px tall), a bright line
+   under the top edge and a shaded foot ---- */
 :root[data-style='lucid'][data-mode='light']
-:is(.kt-btn:not([data-variant='primary'], [data-variant='ghost'], :disabled), h1, h2, h3, h4) {
-  text-shadow: 0 1px 0 color-mix(in srgb, var(--surface) 95%, transparent);
+.kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger'], :disabled):not([data-swatch] *),
+[data-swatch][data-style='lucid'][data-mode='light']
+  .kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger'], :disabled) {
+  box-shadow:
+    var(--shadow-control),
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 90%, transparent),
+    inset 0 -1px 1px 0 color-mix(in srgb, var(--fg) 14%, transparent),
+    inset 0 -16px 0 0 color-mix(in srgb, var(--fg) 5%, transparent),
+    inset 0 -17px 0 0 color-mix(in srgb, var(--fg) 9%, transparent);
 }
 
-:root[data-style='lucid'] .kt-btn[data-variant='primary']:not(:disabled) {
-  text-shadow: 0 -1px 0 color-mix(in srgb, var(--accent-strong) 55%, var(--fg));
+:root[data-style='lucid'][data-mode='dark']
+  .kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger'], :disabled):not(
+    [data-swatch] *
+  ),
+[data-swatch][data-style='lucid'][data-mode='dark']
+  .kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger'], :disabled) {
+  box-shadow:
+    var(--shadow-control),
+    inset 0 1px 0 color-mix(in srgb, var(--fg) 22%, transparent),
+    inset 0 -16px 0 0 color-mix(in srgb, var(--bg) 40%, transparent),
+    inset 0 -17px 0 0 color-mix(in srgb, var(--fg) 10%, transparent);
 }
 
-/* ---- a filled button also glows in its own colour ---- */
-:root[data-style='lucid'] .kt-btn[data-variant='primary']:not(:disabled) {
+/* The primary button is the accent, its lower half the strong accent, brightened at the top by a thin inner line and glowing in its
+   own colour. While the keyboard is on it the shared ring and its `--surface` band (design-system.css) own the box-shadow. */
+:root[data-style='lucid'] .kt-btn[data-variant='primary']:not(:disabled, :focus-visible):not([data-swatch] *),
+[data-swatch][data-style='lucid'] .kt-btn[data-variant='primary']:not(:disabled, :focus-visible) {
   box-shadow:
     0 2px 10px color-mix(in srgb, var(--accent) 55%, transparent),
     var(--shadow-control),
     inset 0 1px 0 color-mix(in srgb, var(--accent-fg) 45%, transparent),
-    inset 0 -1px 1px color-mix(in srgb, var(--accent-strong) 70%, var(--fg));
+    inset 0 -16px 0 0 var(--accent-strong);
+}
+
+:root[data-style='lucid'] .kt-btn[data-variant='primary']:not(:disabled, :focus-visible):hover:not([data-swatch] *),
+[data-swatch][data-style='lucid'] .kt-btn[data-variant='primary']:not(:disabled, :focus-visible):hover {
+  box-shadow:
+    0 2px 10px color-mix(in srgb, var(--accent) 55%, transparent),
+    var(--shadow-control),
+    inset 0 1px 0 color-mix(in srgb, var(--accent-fg) 45%, transparent),
+    inset 0 -16px 0 0 color-mix(in srgb, var(--accent-strong) 88%, var(--fg));
+}
+
+:root[data-style='lucid'] .kt-btn:active:not(:disabled, [data-swatch] *),
+[data-swatch][data-style='lucid'] .kt-btn:active:not(:disabled) {
+  box-shadow: var(--shadow-active);
+}
+
+/* ---- badges are small gel capsules too: a lit top line ---- */
+:root[data-style='lucid'][data-mode='light'] .kt-badge:not([data-swatch] *),
+[data-swatch][data-style='lucid'][data-mode='light'] .kt-badge {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 85%, transparent);
+}
+
+:root[data-style='lucid'][data-mode='dark'] .kt-badge:not([data-swatch] *),
+[data-swatch][data-style='lucid'][data-mode='dark'] .kt-badge {
+  /* A badge's tinted face is what its label is judged against: the lit top is a line only. */
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 20%, transparent);
+}
+
+/* ---- the field is a deep recessed well: a shadow falling in from the top edge ---- */
+:root[data-style='lucid'] .kt-input:not([data-swatch] *),
+[data-swatch][data-style='lucid'] .kt-input {
+  box-shadow:
+    inset 0 3px 5px var(--shadow-md-1),
+    inset 0 0 0 1px color-mix(in srgb, var(--fg) 6%, transparent),
+    0 1px 0 color-mix(in srgb, var(--surface) 80%, transparent);
+}
+
+/* ---- a panel's title strip is the window's glossy bar: a tinted solid with a lit top line ---- */
+:root[data-style='lucid'] .kt-panel__header:not([data-swatch] *),
+[data-swatch][data-style='lucid'] .kt-panel__header {
+  background-color: color-mix(in srgb, var(--fg) 5%, var(--surface-2));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 8%, transparent);
+  border-top-left-radius: calc(var(--radius-panel) - 1px);
+  border-top-right-radius: calc(var(--radius-panel) - 1px);
+}
+
+/* ---- lists stripe: every second row is tinted, the way a desktop list always did ---- */
+:root[data-style='lucid'] .kt-row:nth-child(even):not([data-swatch] *),
+[data-swatch][data-style='lucid'] .kt-row:nth-child(even) {
+  background-color: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+/* ---- a choice card is a raised tile with a lit top line; the chosen one glows from inside, and its tick is a small gel bead ---- */
+:root[data-style='lucid'] .fy-cc__card:not([data-swatch] *),
+[data-swatch][data-style='lucid'] .fy-cc__card {
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 85%, transparent);
+}
+
+:root[data-style='lucid'] .fy-cc__card[data-selected='true']:not([data-swatch] *),
+[data-swatch][data-style='lucid'] .fy-cc__card[data-selected='true'] {
+  border-color: var(--accent);
+  box-shadow:
+    inset 0 0 0 2px var(--ring),
+    var(--shadow-sm),
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 85%, transparent);
+}
+
+:root[data-style='lucid'] .fy-cc__check:not([data-swatch] *),
+[data-swatch][data-style='lucid'] .fy-cc__check {
+  box-shadow:
+    0 1px 3px var(--shadow-sm-1),
+    inset 0 1px 0 color-mix(in srgb, var(--accent-fg) 45%, transparent),
+    inset 0 -10px 0 0 var(--accent-strong);
+}
+
+/* ---- the segmented control: a recessed tray; the chosen segment is a raised gel capsule (a filled accent would need its own
+   ring colour; a raised face keeps the shared one) ---- */
+:root[data-style='lucid'] [data-neo-segmented]:not([data-swatch] *),
+[data-swatch][data-style='lucid'] [data-neo-segmented] {
+  box-shadow: inset 0 2px 4px var(--shadow-md-1);
+}
+:root[data-style='lucid'] [data-neo-segmented] > label:has(:checked):not([data-swatch] *),
+[data-swatch][data-style='lucid'] [data-neo-segmented] > label:has(:checked) {
+  background-color: var(--surface);
+  box-shadow:
+    var(--shadow-control),
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 85%, transparent);
+  color: var(--fg);
+}
+:root[data-style='lucid'] [data-neo-segmented] > label:has(:focus-visible):not([data-swatch] *),
+[data-swatch][data-style='lucid'] [data-neo-segmented] > label:has(:focus-visible) {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 85%, transparent);
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+/* ---- LETTERPRESS: text on a gel face is pressed into it (a one-pixel light edge below, a dark one on a filled face) ---- */
+:root[data-style='lucid'][data-mode='light']
+:is(.kt-btn:not([data-variant='primary'], [data-variant='ghost'], :disabled), h1, h2, h3, h4):not([data-swatch] *),
+[data-swatch][data-style='lucid'][data-mode='light']
+  :is(.kt-btn:not([data-variant='primary'], [data-variant='ghost'], :disabled), h1, h2, h3, h4) {
+  text-shadow: 0 1px 0 color-mix(in srgb, var(--surface) 95%, transparent);
+}
+
+:root[data-style='lucid'] .kt-btn[data-variant='primary']:not(:disabled):not([data-swatch] *),
+[data-swatch][data-style='lucid'] .kt-btn[data-variant='primary']:not(:disabled) {
+  text-shadow: 0 -1px 0 color-mix(in srgb, var(--accent-strong) 55%, var(--fg));
+}
+
+/* ---- THE LUCID SPINNER: a glossy BEAD rolling round a thin rail, with a smaller droplet trailing it. The arc is not drawn; the
+   rail is the ring's own track (the mark turns, so the bead sitting at the top of the rail travels round it). `p1` is the bead,
+   squashing 1 to 1.35 and back on the mark's own clock (`animation-delay: 0s`, restated here: the base `.fy-spinner__p2` stagger
+   is a lower specificity than the base `animation` shorthand and would not apply anyway, but a part that animates in this file owns
+   its own delay); `p2` is the droplet, riding the mark with no animation of its own. `p3` and `p4` are not drawn. Both are filled
+   with the arc colour, so a busy mark on a filled button keeps the button's own foreground (`.fy-spinner--on-accent`).
+   SCOPE: element rules, so the page rule skips a spinner inside a `[data-swatch]` (a swatch preview draws ITS OWN style's mark,
+   not the page's), and the swatch rule matches only a swatch of this style. */
+:root[data-style='lucid'] .fy-spinner:not([data-swatch] *) .fy-spinner-arc,
+[data-swatch][data-style='lucid'] .fy-spinner .fy-spinner-arc {
+  display: none;
+}
+:root[data-style='lucid'] .fy-spinner:not([data-swatch] *) .fy-spinner__p3,
+:root[data-style='lucid'] .fy-spinner:not([data-swatch] *) .fy-spinner__p4,
+[data-swatch][data-style='lucid'] .fy-spinner .fy-spinner__p3,
+[data-swatch][data-style='lucid'] .fy-spinner .fy-spinner__p4 {
+  display: none;
+}
+:root[data-style='lucid'] .fy-spinner:not([data-swatch] *) .fy-spinner__p1,
+[data-swatch][data-style='lucid'] .fy-spinner .fy-spinner__p1 {
+  animation: fy-lucid-bead var(--spinner-parts-speed) var(--spinner-parts-timing) 0s infinite;
+  height: 5px;
+  opacity: 1;
+  rx: 2.5px;
+  transform-box: fill-box;
+  transform-origin: center;
+  width: 5px;
+  x: 5.5px;
+  y: -0.5px;
+}
+:root[data-style='lucid'] .fy-spinner:not([data-swatch] *) .fy-spinner__p2,
+[data-swatch][data-style='lucid'] .fy-spinner .fy-spinner__p2 {
+  animation: none;
+  height: 3px;
+  opacity: 0.55;
+  rx: 1.5px;
+  width: 3px;
+  x: 2.65px;
+  y: 1.9px;
+}
+@keyframes fy-lucid-bead {
+  from {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.35);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+/* A FOCUS RING INSIDE A FILLED CONTROL (Send) is drawn in that fill's own ink (the label's colour, which the palette holds to 4.5:1 on
+   it) and set 2px in from the edge, so it reads against the fill: the page's `--focus-color` IS the accent, which on Send is the fill
+   itself (1:1). */
+:root[data-style='lucid'] .fy-composer-send:focus-visible:not([data-swatch] *),
+[data-swatch][data-style='lucid'] .fy-composer-send:focus-visible {
+  outline-color: var(--accent-fg);
+  outline-offset: calc(-1 * (var(--focus-width) + 2px));
+}
+
+/* The Settings nav's rings (the shell draws them at -2px, which at this ring's 3px pokes 1px out of the entry) are drawn fully inside. */
+:root[data-style='lucid'] .fy-settings-nav :is(.fy-tab, .fy-tab-group__title):focus-visible:not([data-swatch] *),
+[data-swatch][data-style='lucid'] .fy-settings-nav :is(.fy-tab, .fy-tab-group__title):focus-visible {
+  outline-offset: calc(-1 * var(--focus-width));
 }
