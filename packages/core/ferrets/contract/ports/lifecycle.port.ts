@@ -280,4 +280,11 @@ export interface LifecycleApi {
     options: MoveOptions,
     caller?: FerretId,
   ): Promise<Result<FerretSummary, MoveFailure>>;
+  /**
+   * Additive (r11 S10, in-process only: no route, no capability): offers a title made from the ferret's conversation (the
+   * Conversation plugin's, from the first exchange or the CLI's own generated title). Written only while the ferret's title is
+   * not the owner's, and recorded as `auto`: `adopted` when it was written, `kept` when the owner's title (or the same one) stood
+   * or the offer was empty. A title is bounded and stripped of control characters as any other is.
+   */
+  adoptTitle?(ferret: FerretId, title: string): Promise<'adopted' | 'kept'>;
 }

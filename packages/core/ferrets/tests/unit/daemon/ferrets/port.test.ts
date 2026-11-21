@@ -102,6 +102,7 @@ test('through the port, the service’s own members are not there: revokeToken, 
   // Exactly the FerretsApi members the service implements are there.
   expect(Object.keys(port).sort()).toEqual(
     [
+      'adoptTitle',
       'agentControl',
       'attach',
       'children',

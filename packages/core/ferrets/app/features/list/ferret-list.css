@@ -149,37 +149,9 @@
 .fy-sbar__session[aria-current='page'] .fy-sbar__name {
   font-weight: var(--weight-strong);
 }
-/* The ferret on a row: a small initial disc and its name, the second line under the task. */
+/* The detail lines under the task: the ask it waits on, then the directory. No callsign line. */
 .fy-sbar__detail {
   display: contents;
-}
-.fy-sbar__ferret {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.fy-sbar__initial {
-  display: inline-grid;
-  flex-shrink: 0;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  border-radius: var(--radius-pill);
-  background: var(--surface-2);
-  color: var(--muted);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-strong);
-  line-height: 1;
-}
-.fy-sbar__session[aria-current='page'] .fy-sbar__initial {
-  background: var(--surface);
-  color: inherit;
-}
-.fy-sbar__ferret-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .fy-sbar__sub {
   grid-column: 2;

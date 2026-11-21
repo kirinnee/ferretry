@@ -84,6 +84,7 @@ interface FerretsApiAtBase {
     options: MoveOptions,
     caller?: FerretId,
   ): Promise<Result<FerretSummary, MoveFailure>>;
+  adoptTitle?(ferret: FerretId, title: string): Promise<'adopted' | 'kept'>;
   compactAt?(ferret: FerretId, caller?: FerretId): Promise<CompactAt | undefined>;
   setCompactAt?(ferret: FerretId, value: CompactAt | undefined, caller?: FerretId): Promise<void>;
   paneLimits?(): Promise<readonly FerretPaneLimit[]>;

@@ -1,7 +1,7 @@
 import { defineState } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { InstantSchema } from '@ferretry/std';
-import { FerretTitleSchema, FerretWaitingSchema } from '../ids.ts';
+import { FerretTitleSchema, FerretTitleSourceSchema, FerretWaitingSchema } from '../ids.ts';
 import { StartOptionsSchema } from '../port.ts';
 import { AgentPinsDocumentSchema, FerretPinsDocumentSchema } from '../pins.ts';
 import { LAUNCH_SWITCH_VARIABLES } from '../instructions-report.ts';
@@ -115,6 +115,8 @@ export const AgentPinsFile = defineState({
 export const FerretDetailsSchema = z.strictObject({
   options: StartOptionsSchema.omit({ title: true, initialAttachments: true }).optional(),
   title: FerretTitleSchema.optional(),
+  /** Who chose `title` (`FerretTitleSourceSchema`); absent on a file written before the field: the owner's. */
+  titleSource: FerretTitleSourceSchema.optional(),
 });
 export type FerretDetails = z.infer<typeof FerretDetailsSchema>;
 

@@ -187,7 +187,7 @@ describe('the per-ferret file definitions', () => {
   test('FINAL KEY LIST pins.json, agent-pins.json and details.json', () => {
     expect(keysOf(FerretPinsDocumentSchema)).toEqual(['pins']);
     expect(keysOf(AgentPinsDocumentSchema)).toEqual(['pins']);
-    expect(keysOf(FerretDetailsSchema)).toEqual(['options', 'title']);
+    expect(keysOf(FerretDetailsSchema)).toEqual(['options', 'title', 'titleSource']);
   });
 });
 

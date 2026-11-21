@@ -149,6 +149,13 @@ export const FerretCardIdSchema = z.string().regex(FERRET_TASK_ID_PATTERN);
  */
 export const FerretTitleSchema = z.string().trim().min(1).max(120);
 
+/**
+ * Who chose a ferret's title. `owner`: a person (`--name`, `rename --title`, the header's Rename) — nothing replaces it.
+ * `auto`: a reader offered one made from the conversation's first exchange (`adoptTitle`) and a later, better one may
+ * replace it.
+ */
+export const FerretTitleSourceSchema = z.enum(['owner', 'auto']);
+
 // ─── quota (today's `protocol/src/lib/session.ts` QuotaSchema, unchanged) ──────────────────────────────────────────
 
 const NonNegativeFiniteSchema = z.number().finite().nonnegative();
@@ -214,6 +221,8 @@ export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handl
   /** The former name of `task`: read for one release, never written. */
   card: FerretCardIdSchema.optional(),
   title: FerretTitleSchema.optional(),
+  /** Who chose `title`; present exactly when `title` is. A title stored before the field existed is the owner's. */
+  titleSource: FerretTitleSourceSchema.optional(),
   pinnedAt: InstantSchema.optional(),
   quota: FerretQuotaSchema.optional(),
   /** Present exactly while the ferret has a declared wait (`signal waiting`); `signal working` clears it. */
