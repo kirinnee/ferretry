@@ -1,6 +1,6 @@
 /**
- * ONE FERRET IN THE LIST: the status mark, its task as the title, the ferret doing it (an initial and its name) and the
- * directory it runs in. The whole row is ONE link to the ferret's chat; the open one is a soft filled pill.
+ * ONE FERRET IN THE LIST: the status mark, its task as the title and the directory it runs in. The callsign is not
+ * drawn (a title names the work); it stays in the row's tooltip, in Info and in `:agent` references. The whole row is ONE link to the ferret's chat; the open one is a soft filled pill.
  *
  * THE TITLE IS ALWAYS THE TASK, else the folder. A batch label never stands in for it: a rename changes the task, so a
  * title that preferred the label would hide the rename.
@@ -115,14 +115,6 @@ export function FerretRow({
           <OutdatedMark ferret={ferret} overlayKey={overlayKey} />
         </span>
         <span className="fy-sbar__detail" data-sbar-detail="">
-          {callsign === null ? null : (
-            <span className="fy-sbar__sub fy-sbar__ferret" data-sbar-ferret="">
-              <span aria-hidden="true" className="fy-sbar__initial">
-                {callsign.charAt(0).toUpperCase()}
-              </span>
-              <span className="fy-sbar__ferret-name">{callsign}</span>
-            </span>
-          )}
           {needsYou === undefined || needsYou.ask === '' ? null : (
             <span className="fy-sbar__sub fy-sbar__ask" data-sbar-ask="">
               {needsYou.ask}

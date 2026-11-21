@@ -84,7 +84,7 @@ export function summaryOf(
     ...(mode === undefined ? {} : { mode }),
     ...(nudgeAfterSeconds === undefined ? {} : { nudgeAfterSeconds }),
     ...(killAfterSeconds === undefined ? {} : { killAfterSeconds }),
-    ...(details.title === undefined ? {} : { title: details.title }),
+    ...(details.title === undefined ? {} : { title: details.title, titleSource: details.titleSource ?? 'owner' }),
   };
 }
 

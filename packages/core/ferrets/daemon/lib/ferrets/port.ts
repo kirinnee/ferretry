@@ -217,6 +217,7 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     setCompactAt: (ferret, value, caller) => service.setCompactAt(ferret, value, caller),
     lastSnapshot: (ferret, caller) => service.lastSnapshot(ferret, caller),
     runtimeRecords: () => service.runtimeRecords(),
+    adoptTitle: (ferret, title) => service.adoptTitle(ferret, title),
     repointRuntime: async rename => {
       // Rewrites ferrets' records: Runtimes' alone, as the rename it is told of is its own.
       if (consumer !== RUNTIMES_PLUGIN)

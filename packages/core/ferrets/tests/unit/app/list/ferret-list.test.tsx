@@ -102,19 +102,20 @@ describe('the ferret list as a column', () => {
     const open = must(root.querySelector('[data-sbar-session="hadi-1"]'), 'the open ferret');
     expect(open.getAttribute('aria-current')).toBe('page');
     expect(root.querySelector('[data-sbar-session="maryah-1"]')?.getAttribute('aria-current')).toBeNull();
-    // The title is the task; the ferret doing it is the small second line, with its initial.
+    // The title is the task, and no callsign line is drawn (it stays in the tooltip).
     expect(open.querySelector('.fy-sbar__name')?.textContent).toBe('Fix the stuck sign-in');
-    expect(open.querySelector('[data-sbar-ferret] .fy-sbar__ferret-name')?.textContent).toBe('Hadi');
-    expect(open.querySelector('[data-sbar-ferret] .fy-sbar__initial')?.textContent).toBe('H');
+    expect(open.querySelector('[data-sbar-ferret]')).toBeNull();
+    expect(open.textContent).not.toContain('Hadi');
     expect(open.querySelector('[data-sbar-dir]')?.textContent).toBe('/work/ferretry');
-    // A ferret with no task of its own is titled by its folder, the ferret second.
+    // A ferret with no task of its own is titled by its folder.
     const nameless = must(root.querySelector('[data-sbar-session="nameless"]'), 'the task-less ferret');
     expect(nameless.querySelector('.fy-sbar__name')?.textContent).toBe('home-manager');
-    expect(nameless.querySelector('[data-sbar-ferret] .fy-sbar__ferret-name')?.textContent).toBe('Nem');
+    expect(nameless.querySelector('[data-sbar-ferret]')).toBeNull();
+    expect(nameless.textContent).not.toContain('Nem');
     expect(nameless.querySelector('[data-sbar-dir]')?.textContent).toBe('/work/home-manager');
   });
 
-  it('S-0405 titles a row by its task, else its folder, with the ferret second', async () => {
+  it('S-0405 titles a row by its task, else its folder, with no callsign line', async () => {
     const taskless = ferretSummary('taskless-1', {
       name: 'pim',
       title: undefined,
@@ -124,9 +125,10 @@ describe('the ferret list as a column', () => {
     const root = await draw(listDaemon([...FERRETS, taskless]));
     const row = (id: string) => must(root.querySelector(`[data-sbar-session="${id}"]`), id);
     expect(row('maryah-1').querySelector('.fy-sbar__name')?.textContent).toBe('Diene work');
-    expect(row('maryah-1').querySelector('.fy-sbar__ferret-name')?.textContent).toBe('Maryah');
+    expect(row('maryah-1').querySelector('[data-sbar-ferret]')).toBeNull();
     expect(row('taskless-1').querySelector('.fy-sbar__name')?.textContent).toBe('ferretry');
-    expect(row('taskless-1').querySelector('.fy-sbar__ferret-name')?.textContent).toBe('Pim');
+    expect(row('taskless-1').querySelector('[data-sbar-ferret]')).toBeNull();
+    expect(row('taskless-1').textContent).not.toContain('Pim');
     expect(row('maryah-1').getAttribute('title')).toContain('Diene work — Maryah');
   });
 

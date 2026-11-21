@@ -11,11 +11,18 @@ const baseName = (path: string): string =>
     .filter(part => part !== '')
     .at(-1) ?? '';
 
+/** The placeholder a start with no task used to be named by: never a title. */
+const START_PLACEHOLDER = 'interactive';
+
 /**
- * THE TASK A FERRET WAS GIVEN, or `''` when it has none. Ferrets keeps the task title beside the record (`title`); a
- * ferret started without one has none, and its callsign is not a task.
+ * THE TASK A FERRET WAS GIVEN, or `''` when it has none. Ferrets keeps the task title beside the record (`title`, with
+ * `titleSource` saying whether the owner or the conversation chose it); a ferret started without one has none, and its
+ * callsign and the `interactive` start placeholder are not tasks.
  */
-export const ferretTask = (ferret: Pick<FerretSummary, 'title'>): string => (ferret.title ?? '').trim();
+export const ferretTask = (ferret: Pick<FerretSummary, 'title'>): string => {
+  const task = (ferret.title ?? '').trim();
+  return task.toLowerCase() === START_PLACEHOLDER ? '' : task;
+};
 
 /**
  * A ferret's two names. With a task: the task, over the ferret. With none: the folder it works in, the closest thing it

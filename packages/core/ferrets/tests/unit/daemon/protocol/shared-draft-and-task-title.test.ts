@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { SharedDraftSentSchema } from '../../../../daemon/lib/protocol/shared-draft.ts';
-import { taskTitleFor } from '../../../../daemon/lib/protocol/task-title.ts';
+import { taskTitleFor } from '../../../../contract/task-title.ts';
 
 const sent = (text: unknown) => ({ generation: 'gen-1', epoch: 0, base: 3, text });
 

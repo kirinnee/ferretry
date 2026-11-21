@@ -26,6 +26,11 @@ describe('what a ferret row is titled', () => {
     expect(ferretTitles(named({ folder: 'C:\\work\\home-manager\\' })).title).toBe('home-manager');
   });
 
+  test('the start placeholder is never a title', () => {
+    expect(ferretTask(named({ title: 'interactive' }))).toBe('');
+    expect(ferretTitles(named({ title: 'Interactive' })).title).toBe('home-manager');
+  });
+
   test('the one-line label is the title alone', () => {
     expect(ferretLabel(named({}))).toBe('home-manager');
     expect(ferretLabel(named({ title: 'Diene Work' }))).toBe('Diene Work');

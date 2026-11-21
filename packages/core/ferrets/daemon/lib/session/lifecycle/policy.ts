@@ -5,7 +5,7 @@ import {
   assignedTaskDocument as protocolAssignedTaskDocument,
   turnFileInstruction,
 } from '../../protocol/turn-handoff.ts';
-import { taskTitleFor } from '../../protocol/task-title.ts';
+import { taskTitleFor } from '../../../../contract/task-title.ts';
 import type { CoreAccount } from '../peers/core.ts';
 import { formatSessionTitle } from '../../names/policy.ts';
 import { parseSessionId, type SessionId } from '../../session-id.ts';

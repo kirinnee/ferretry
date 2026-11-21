@@ -75,7 +75,7 @@ const click = async (root: ParentNode, selector: string): Promise<void> => {
 const GET = 'GET /v1/ferrets/:ferretId';
 
 describe('the name and status panels', () => {
-  it('draw the task, the callsign beside it and the state as a shape and a word', async () => {
+  it('draw the task alone (the callsign is in Info and the tooltip) and the state as a shape and a word', async () => {
     const h = harness(ferretSummary('a1', { name: 'hadi', title: 'Fix the sign-in', state: 'working' }));
     const Name = createNamePanel(h.client) as ComponentType<PanelProps>;
     const Status = createStatusPanel(h.client) as ComponentType<PanelProps>;
@@ -88,7 +88,8 @@ describe('the name and status panels', () => {
     await settle();
     const root = mounted.container;
     expect(root.querySelector('h1')?.textContent).toBe('Fix the sign-in');
-    expect(root.querySelector('[data-ferret-callsign]')?.textContent).toBe('Hadi');
+    expect(root.querySelector('[data-ferret-callsign]')).toBeNull();
+    expect(root.querySelector('[data-ferret-name]')?.textContent).toBe('Fix the sign-in');
     expect(root.querySelector('[data-ferret-name]')?.getAttribute('title')).toBe('Fix the sign-in — Hadi');
     expect(root.querySelector('.fy-ferret-status__word')?.textContent).toBe('working');
     expect(root.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('active — working');

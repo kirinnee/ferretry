@@ -24,6 +24,7 @@ import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../../../cont
 import {
   type FerretBirth,
   DAEMON_ORIGIN,
+  FerretTitleSchema,
   LaunchRefusal,
   type LaunchOrigin,
   birthOf,
@@ -80,7 +81,7 @@ import type {
 } from '../../../contract/index.ts';
 import type { CompactAt } from '../../../contract/view/compact-at.ts';
 import { claimStartName, displayAgentName, type SessionNameClaims } from '../names/session-names.ts';
-import { normalizeCallsign } from '../names/policy.ts';
+import { formatSessionTitle, normalizeCallsign } from '../names/policy.ts';
 import type { NameAllocationErrorCode } from '../names/types.ts';
 import type { SystemCallsignPrefix } from '../protocol/system-callsigns.ts';
 import {
@@ -1135,7 +1136,7 @@ export class FerretsService implements FerretsApi {
       const { title, initialAttachments: _attached, allowScratch: _scratch, ...options } = request.options;
       await this.saveDetails(id, {
         ...(Object.keys(options).length === 0 ? {} : { options }),
-        ...(title === undefined ? {} : { title }),
+        ...(title === undefined ? {} : { title, titleSource: 'owner' as const }),
       });
     }
     const at = this.ports.now();
@@ -1692,7 +1693,11 @@ export class FerretsService implements FerretsApi {
       }
     }
     const title = change.title?.trim();
-    if (title !== undefined) await this.saveDetails(ferret, { ...this.registry.detailsOf(ferret), title });
+    if (title !== undefined) {
+      // An emptied title clears the task (and who chose it); any other one is the owner's and nothing replaces it.
+      const { title: _before, titleSource: _by, ...rest } = this.registry.detailsOf(ferret) ?? {};
+      await this.saveDetails(ferret, title === '' ? rest : { ...rest, title, titleSource: 'owner' });
+    }
     if (name !== undefined) {
       try {
         await this.write({ ...record, name: claimed ?? (keep ? record.name : name) }, record.state, 'renamed');
@@ -1703,6 +1708,23 @@ export class FerretsService implements FerretsApi {
       }
     } else this.ports.changed({ ferret, state: record.state, previous: record.state, change: 'renamed' });
     return ok((await this.get(ferret)) as FerretSummary);
+  }
+
+  /**
+   * Offers a title made from the conversation (`LifecycleApi.adoptTitle`): written only while the ferret's title is not
+   * the owner's, and recorded as `auto`. In-process only (no route). Control characters and length are normalized exactly
+   * as a title is anywhere else, so what is stored is what `formatSessionTitle` would show.
+   */
+  async adoptTitle(ferret: FerretId, offered: string): Promise<'adopted' | 'kept'> {
+    const record = this.registry.get(ferret);
+    if (record === undefined) return 'kept';
+    const details = this.registry.detailsOf(ferret);
+    if (details?.title !== undefined && (details.titleSource ?? 'owner') === 'owner') return 'kept';
+    const parsed = FerretTitleSchema.safeParse(formatSessionTitle(offered));
+    if (!parsed.success || parsed.data === details?.title) return 'kept';
+    await this.saveDetails(ferret, { ...details, title: parsed.data, titleSource: 'auto' });
+    this.ports.changed({ ferret, state: record.state, previous: record.state, change: 'renamed' });
+    return 'adopted';
   }
 
   /** What a ferret may control: `limits.yaml` read fresh (the body is in `insights.ts`). */

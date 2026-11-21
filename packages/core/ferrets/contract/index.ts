@@ -37,6 +37,7 @@ export * from './state.ts';
 export { type CompactAtParse, checkCompactAt, parseCompactAt } from './view/compact-at.ts';
 export * from './transfer.ts';
 export * from './subtree.ts';
+export * from './task-title.ts';
 export * from './fork.ts';
 export * from './handover.ts';
 export * from './move.ts';

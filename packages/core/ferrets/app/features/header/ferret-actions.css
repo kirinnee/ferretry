@@ -528,12 +528,6 @@
   text-transform: var(--display-transform, none);
   white-space: nowrap;
 }
-.fy-ferret-name__callsign {
-  flex-shrink: 0;
-  color: var(--muted);
-  font-size: var(--text-sm);
-  white-space: nowrap;
-}
 .fy-ferret-status {
   display: inline-flex;
   align-items: center;
