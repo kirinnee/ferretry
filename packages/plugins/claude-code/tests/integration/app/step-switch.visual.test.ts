@@ -106,6 +106,10 @@ describe('moving between the Claude step pages', () => {
     console.log(`G5 step moves: ${line(moves)}`);
     expect(errors).toEqual([]);
     expect(
+      moves.filter(move => move.failed).map(move => move.subject),
+      'a page that threw on its draw (the error boundary caught it)',
+    ).toEqual([]);
+    expect(
       moves.filter(move => !move.drawn).map(move => move.subject),
       'a page whose own panel never got a body',
     ).toEqual([]);

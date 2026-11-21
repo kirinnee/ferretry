@@ -116,11 +116,15 @@ function Slot() {
 const panelOf = (subject: string): Element | null =>
   document.querySelector(`[data-panel="onboarding-${subject.slice('claude-code.'.length)}"]`);
 
+/** The page's own body: a child of its panel that is not the error boundary's marker (a failed page has no body). */
+const hasBody = (subject: string): boolean =>
+  panelOf(subject)?.querySelector(':scope > :not([data-page-error])') != null;
+
 /** A page is on screen once the boundary committed its subject, shows no fallback, and ITS OWN panel has a body. */
 const shown = (subject: string): boolean =>
   document.querySelector(`[data-subject="${subject}"]`) !== null &&
   document.querySelector('[data-suspense-fallback]') === null &&
-  (panelOf(subject)?.childElementCount ?? 0) > 0;
+  hasBody(subject);
 (window as unknown as { __shown: (subject: string) => boolean }).__shown = shown;
 
 (window as unknown as { __walk: (subject: string) => Promise<unknown> }).__walk = subject =>
