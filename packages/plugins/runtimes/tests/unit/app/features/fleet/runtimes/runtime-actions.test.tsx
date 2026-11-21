@@ -1,3 +1,4 @@
+import { chooseStarting, labelOf, openBox, optionsOpen } from '../../../../support/select-box.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { MachineView, RunningSession } from '../../../../../../contract/index.ts';
 import type { MoveConversation } from '../../../../../../app/features/fleet/runtimes/runtime-actions-model.ts';
@@ -66,12 +67,7 @@ const type = async (input: HTMLInputElement, value: string): Promise<void> => {
   });
 };
 
-const choose = async (select: HTMLSelectElement, value: string): Promise<void> => {
-  await interact(() => {
-    select.value = value;
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-};
+const choose = chooseStarting;
 
 const text = (container: ParentNode, selector: string): string =>
   must(container.querySelector(selector), selector).textContent ?? '';
@@ -437,7 +433,7 @@ describe('Runtime actions: Remove after a rolled-back apply', () => {
     });
     await chooseRuntimeAction(view.container, 'claude-work', 'remove');
     await choose(
-      must(view.container.querySelector<HTMLSelectElement>('[data-runtime-move-target]'), 'move target'),
+      must(view.container.querySelector<HTMLElement>('[data-runtime-move-target]'), 'move target'),
       'codex-default',
     );
 
@@ -519,7 +515,7 @@ describe('Runtime actions: Remove', () => {
 
     // Act
     await choose(
-      must(view.container.querySelector<HTMLSelectElement>('[data-runtime-move-target]'), 'move target'),
+      must(view.container.querySelector<HTMLElement>('[data-runtime-move-target]'), 'move target'),
       'codex-default',
     );
     await interact(() => submit(view.container).click());
@@ -554,7 +550,7 @@ describe('Runtime actions: Remove', () => {
     });
     await chooseRuntimeAction(view.container, 'claude-work', 'remove');
     await choose(
-      must(view.container.querySelector<HTMLSelectElement>('[data-runtime-move-target]'), 'move target'),
+      must(view.container.querySelector<HTMLElement>('[data-runtime-move-target]'), 'move target'),
       'claude-review',
     );
 
@@ -583,11 +579,12 @@ describe('Runtime actions: Remove', () => {
       routes: { [PROPOSE]: removalStaged(), [APPLY]: COMMITTED },
     });
     await chooseRuntimeAction(view.container, 'claude-work', 'remove');
-    const select = must(view.container.querySelector<HTMLSelectElement>('[data-runtime-move-target]'), 'move target');
+    const select = must(view.container.querySelector<HTMLElement>('[data-runtime-move-target]'), 'move target');
 
     // Act
-    expect([...select.options].map(option => option.value)).toEqual([
-      '',
+    await openBox(select);
+    expect(optionsOpen().map(option => labelOf(option).split(' · ')[0])).toEqual([
+      'Leave them running here',
       'claude-default',
       'claude-agent',
       'claude-review',
@@ -625,7 +622,7 @@ describe('Runtime actions: Remove', () => {
 
     // Act
     await choose(
-      must(view.container.querySelector<HTMLSelectElement>('[data-runtime-move-target]'), 'move target'),
+      must(view.container.querySelector<HTMLElement>('[data-runtime-move-target]'), 'move target'),
       'claude-review',
     );
     expect(submit(view.container).textContent).toBe('Move 1 ferret to claude-review and remove claude-work');
@@ -646,7 +643,7 @@ describe('Runtime actions: Remove', () => {
     });
     await chooseRuntimeAction(view.container, 'claude-work', 'remove');
     await choose(
-      must(view.container.querySelector<HTMLSelectElement>('[data-runtime-move-target]'), 'move target'),
+      must(view.container.querySelector<HTMLElement>('[data-runtime-move-target]'), 'move target'),
       'claude-review',
     );
 
@@ -720,7 +717,7 @@ describe('Runtime actions: Remove', () => {
 
     // Act
     await choose(
-      must(view.container.querySelector<HTMLSelectElement>('[data-runtime-default-picker]'), 'picker'),
+      must(view.container.querySelector<HTMLElement>('[data-runtime-default-picker]'), 'picker'),
       'claude-agent',
     );
     await interact(() => submit(view.container).click());
@@ -771,7 +768,7 @@ describe('Runtime actions: Remove', () => {
     });
     await chooseRuntimeAction(view.container, 'claude-default', 'remove');
     await choose(
-      must(view.container.querySelector<HTMLSelectElement>('[data-runtime-default-picker]'), 'picker'),
+      must(view.container.querySelector<HTMLElement>('[data-runtime-default-picker]'), 'picker'),
       'claude-agent',
     );
 

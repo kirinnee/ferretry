@@ -1,3 +1,4 @@
+import { closeBox, labelOf, openBox, optionsOpen } from '../../../../support/select-box.ts';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { ProfileDraftView, ResolvedEntry } from '../../../../../../contract/index.ts';
 import { ProfilesTab } from '../../../../../../app/features/fleet/profiles/profiles-tab.tsx';
@@ -380,7 +381,7 @@ describe('ProfilesTab — the profile page', () => {
     await type(library, '[data-library-search]', 'zzz');
     expect(library.textContent).toContain('No components match.');
     await type(library, '[data-library-search]', '');
-    await choose(library, '[data-library-kind]', 'profile');
+    await choose(library, '[data-library-kind]', 'Profile');
     expect(library.querySelectorAll('[data-library-item]')).toHaveLength(2);
   });
 
@@ -592,10 +593,9 @@ describe('ProfilesTab — delete (E21)', () => {
     await click(root, '[data-profile-row="Old"]');
     await click(root, '[data-profile-delete]');
     expect(text(root, '[data-catalog-note="delete"]')).toContain('a, b move to:');
-    expect([...root.querySelectorAll('[data-profile-switch] option')].map(option => option.textContent)).toEqual([
-      'New · Generic',
-      'Other · Generic',
-    ]);
+    await openBox(q(root, '[data-profile-switch]'));
+    expect(optionsOpen().map(labelOf)).toEqual(['New · Generic', 'Other · Generic']);
+    await closeBox(q(root, '[data-profile-switch]'));
     await choose(root, '[data-profile-switch]', 'Other');
     const panel = q(root, '[data-catalog-note="delete"]');
     expect(text(panel, '[data-change-submit]')).toBe('Switch 2 runtimes and delete Old');

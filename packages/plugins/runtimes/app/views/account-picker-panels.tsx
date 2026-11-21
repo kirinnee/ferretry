@@ -17,7 +17,7 @@ import {
 } from '@ferretry/core-ferrets/contract';
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useRef } from 'react';
-import { type ChosenRuntime, RuntimeButtons } from '../components/runtime-buttons.tsx';
+import { type ChosenRuntime, RuntimeSelect } from '../components/runtime-select.tsx';
 import { useUsageRows } from '../hooks/use-usage-rows.ts';
 import {
   checkAccountPickerHealth,
@@ -75,7 +75,7 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
   const { rows, error } = useUsageRows(client);
   const move = isMoveAccountSlotProps(slot) ? slot : null;
   const preferred = 'preferred' in slot ? slot.preferred : undefined;
-  // RuntimeButtons proposes the choice from an effect keyed on this callback. A page keeps the proposal in state and draws the
+  // RuntimeSelect proposes the choice from an effect keyed on this callback. A page keeps the proposal in state and draws the
   // slot again with fresh props, so a callback rebuilt on every render made the effect re-propose on every render: each
   // proposal (a new object) re-rendered the page, which rebuilt the callback ... React error #185 on the move screen. The
   // callback is therefore stable and reads the page's latest one from a ref.
@@ -87,11 +87,10 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
   told.current = slot.onOffered;
   const onOffered = useCallback((wrappers: readonly string[] | null) => told.current?.(wrappers), []);
   return (
-    <RuntimeButtons
+    <RuntimeSelect
       client={{ subscribe: client.subscribe ?? noSubscribe }}
       fallbackId={slot.fallbackId}
       fallbackPlaceholder={slot.fallbackPlaceholder}
-      labelId={slot.labelId}
       noAccounts={slot.noAccounts as ReactNode}
       now={now}
       onChosen={onChosen}

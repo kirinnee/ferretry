@@ -1,3 +1,4 @@
+import { chooseStarting } from '../../../../support/select-box.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
 import { InstantSchema } from '@ferretry/std';
 import { type ReactNode, useState } from 'react';
@@ -46,13 +47,17 @@ const click = async (element: Element | null, what: string): Promise<void> => {
   await settle();
 };
 
-const fill = async (field: HTMLInputElement | HTMLSelectElement, value: string): Promise<void> => {
+const fill = async (field: HTMLInputElement, value: string): Promise<void> => {
   await interact(() => {
     const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), 'value')?.set;
     setter?.call(field, value);
-    field.dispatchEvent(new Event(field instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+    field.dispatchEvent(new Event('input', { bubbles: true }));
   });
 };
+
+/** The "Switch back on" box: pick the option whose label starts with `label`. */
+const until = async (container: ParentNode, label: string): Promise<void> =>
+  await chooseStarting(must(container.querySelector('[data-disable-until]'), 'until'), label);
 
 const proposed = (calls: readonly Call[]): unknown[] =>
   calls.filter(call => call.route === PROPOSE).map(call => (call.body as { change: unknown }).change);
@@ -171,7 +176,7 @@ describe('the switch on a login', () => {
       must(view.container.querySelector<HTMLInputElement>('[data-disable-reason]'), 'reason'),
       'Out of credit',
     );
-    await fill(must(view.container.querySelector<HTMLSelectElement>('[data-disable-until]'), 'until'), 'date');
+    await until(view.container, 'Until a date');
     await fill(must(view.container.querySelector<HTMLInputElement>('[data-disable-date]'), 'date'), '2026-11-01');
     await click(view.container.querySelector('[data-disable-form] [data-change-submit]'), 'submit');
 
@@ -189,7 +194,7 @@ describe('the switch on a login', () => {
     await click(switchOf(view.container, 'codex'), 'switch');
 
     // Act
-    await fill(must(view.container.querySelector<HTMLSelectElement>('[data-disable-until]'), 'until'), 'date');
+    await until(view.container, 'Until a date');
     await fill(must(view.container.querySelector<HTMLInputElement>('[data-disable-date]'), 'date'), '2026-10-13');
 
     // Assert
@@ -380,7 +385,7 @@ describe('the switch on a runtime', () => {
     await click(switchOf(view.container, 'claude-agent'), 'switch');
 
     // Act
-    await fill(must(view.container.querySelector<HTMLSelectElement>('[data-disable-until]'), 'until'), 'week');
+    await until(view.container, 'For 1 week');
     await click(view.container.querySelector('[data-disable-form] [data-change-submit]'), 'submit');
 
     // Assert

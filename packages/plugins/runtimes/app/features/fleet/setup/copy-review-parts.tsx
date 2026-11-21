@@ -6,7 +6,7 @@
  * daemon's whole description of what it will do.
  */
 
-import { SetupNote, SetupSection } from '@ferretry/app/ui';
+import { SelectBox, SetupNote, SetupSection } from '@ferretry/app/ui';
 import type { ReactNode } from 'react';
 import type {
   AccountChangeView,
@@ -288,22 +288,21 @@ export function LoginRows({
             </span>
             {login.runnable === undefined ? null : <RunnableEntries entries={login.runnable.entries} />}
             {onPick === undefined || login.candidates === undefined || login.candidates.length === 0 ? null : (
-              <label className="flex min-h-11 flex-wrap items-center gap-2 text-meta text-muted">
-                Use
-                <select
-                  className="min-h-11 rounded-control border border-line bg-surface px-2 text-cell text-fg"
-                  data-copy-login-pick={login.sourceId}
-                  value={picks?.[login.sourceId] ?? login.target ?? 'slot'}
-                  onChange={event => onPick(login.sourceId, event.target.value)}
-                >
-                  {login.candidates.map(candidate => (
-                    <option key={candidate} value={candidate}>
-                      the login {candidate}
-                    </option>
-                  ))}
-                  <option value="slot">an empty slot to sign in to</option>
-                </select>
-              </label>
+              <div className="flex min-h-11 flex-wrap items-center gap-2 text-meta text-muted">
+                <span aria-hidden="true">Use</span>
+                <span className="contents" data-copy-login-pick={login.sourceId}>
+                  <SelectBox
+                    className="w-auto max-w-full"
+                    label={`Use for ${login.sourceId}`}
+                    value={picks?.[login.sourceId] ?? login.target ?? 'slot'}
+                    onChange={next => onPick(login.sourceId, next)}
+                    options={[
+                      ...login.candidates.map(candidate => ({ value: candidate, label: `the login ${candidate}` })),
+                      { value: 'slot', label: 'an empty slot to sign in to' },
+                    ]}
+                  />
+                </span>
+              </div>
             )}
           </li>
         ))}

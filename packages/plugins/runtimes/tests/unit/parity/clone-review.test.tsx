@@ -10,6 +10,7 @@
  * machines changed), S-0098 (the line diff of a changed document) and S-0189 (the provider-key runtime of the harness
  * step). See the runtimes ports-pending line.
  */
+import { choose, labelOf, openBox, optionsOpen } from '../support/select-box.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
 import type { DaemonReach } from '@ferretry/app';
@@ -198,13 +199,11 @@ describe('the clone review sheet of a repeat copy', () => {
     expect(list.querySelector('[data-copy-login="work"]')?.textContent).toContain('uses work-here');
     expect(list.querySelector('[data-copy-login="cli-login"]')?.textContent).toContain('an empty slot to sign in to');
     // The only control of a login is which login here it uses, and an empty slot is always one of its choices.
-    expect(list.querySelectorAll('button').length).toBe(0);
-    const select = must(list.querySelector<HTMLSelectElement>('[data-copy-login-pick="side"]'), 'the login choice');
-    expect([...select.options].map(option => option.value)).toEqual(['mine-a', 'mine-b', 'slot']);
-    await interact(() => {
-      select.value = 'mine-b';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    expect(list.querySelectorAll('button:not([role="combobox"])').length).toBe(0);
+    const select = must(list.querySelector('[data-copy-login-pick="side"]'), 'the login choice');
+    await openBox(select);
+    expect(optionsOpen().map(labelOf)).toEqual(['the login mine-a', 'the login mine-b', 'an empty slot to sign in to']);
+    await choose(select, 'the login mine-b');
     await click(root, '[data-copy-item-choice="profile/both"] [data-copy-item-pick="take"]');
     await stage(root);
     expect(sentChange(calls)).toMatchObject({ logins: { side: 'mine-b' } });

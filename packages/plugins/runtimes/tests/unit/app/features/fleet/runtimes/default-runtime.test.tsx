@@ -1,3 +1,4 @@
+import { chooseStarting, closeBox, labelOf, openBox, optionsOpen, shownBy } from '../../../../support/select-box.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
 import { InstantSchema } from '@ferretry/std';
 import type { MachineView, RuntimeCatalog } from '../../../../../../contract/index.ts';
@@ -49,11 +50,8 @@ const click = async (container: ParentNode, selector: string): Promise<void> => 
   await settle();
 };
 
-const choose = async (select: HTMLSelectElement, value: string): Promise<void> => {
-  await interact(() => {
-    select.value = value;
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+const choose = async (select: Element, value: string): Promise<void> => {
+  await chooseStarting(select, value);
   await settle();
 };
 
@@ -134,11 +132,19 @@ const UNCHANGED_SETTINGS = {
   publicUsageFeed: false,
 };
 
-const select = (container: ParentNode): HTMLSelectElement =>
-  must(container.querySelector<HTMLSelectElement>('[data-default-runtime-select]'), 'default runtime select');
+const select = (container: ParentNode): HTMLElement =>
+  must(container.querySelector<HTMLElement>('[data-default-runtime-select]'), 'default runtime select');
 
-const optionTexts = (container: ParentNode): string[] =>
-  [...select(container).options].map(option => option.textContent ?? '');
+/** The list's rows, read with the box open and then shut again. */
+const optionTexts = async (container: ParentNode): Promise<string[]> => {
+  await openBox(select(container));
+  const rows = optionsOpen().map(labelOf);
+  await closeBox(select(container));
+  return rows;
+};
+
+/** What the box shows: "automatic" is the empty value. */
+const shown = (container: ParentNode): string => shownBy(select(container));
 
 const machineChanges = (calls: readonly Call[]): unknown[] =>
   calls.filter(call => call.route === PROPOSE).map(call => (call.body as { change: unknown }).change);
@@ -149,24 +155,32 @@ describe('Default for new agents on the Runtimes tab', () => {
 
     const control = must(view.container.querySelector('[data-default-runtime]'), 'control');
     expect(control.querySelector('h3')?.textContent).toBe('Default for new agents');
-    expect(select(view.container).getAttribute('aria-label')).toBe('Default for new agents');
+    expect(must(select(view.container).querySelector('[role="combobox"]'), 'the box').getAttribute('aria-label')).toBe(
+      'Default for new agents',
+    );
     expect(control.querySelector('[data-default-runtime-hint]')?.textContent).toBe(
       'Used when a start names no runtime.',
     );
-    expect(optionTexts(view.container)).toEqual(['claude-default', 'claude-work', 'claude-atomi', 'codex-kirin']);
-    expect(select(view.container).value).toBe('claude-default');
+    expect(await optionTexts(view.container)).toEqual(['claude-default', 'claude-work', 'claude-atomi', 'codex-kirin']);
+    expect(shown(view.container)).toBe('claude-default');
     expect(view.container.querySelector('[data-change-apply]')).toBeNull();
   });
 
   it('marks a switched-off runtime in words and does not let it be picked, unless it is already the default', async () => {
     const view = await open();
-    const off = (container: ParentNode) =>
-      [...select(container).options].filter(option => option.disabled).map(option => option.value);
-    expect(off(view.container)).toEqual(['claude-atomi']);
+    const off = async (container: ParentNode): Promise<string[]> => {
+      await openBox(select(container));
+      const rows = optionsOpen()
+        .filter(option => option.getAttribute('aria-disabled') === 'true')
+        .map(labelOf);
+      await closeBox(select(container));
+      return rows;
+    };
+    expect(await off(view.container)).toEqual(['claude-atomi']);
 
     const held = await open({ machine: machine({ defaultRuntime: 'claude-atomi' }) });
-    expect(off(held.container)).toEqual([]);
-    expect(select(held.container).value).toBe('claude-atomi');
+    expect(await off(held.container)).toEqual([]);
+    expect(shown(held.container)).toBe('claude-atomi');
   });
 
   it('names a CLI that is not installed, in the picked runtime’s badge and not in its option', async () => {
@@ -180,7 +194,7 @@ describe('Default for new agents on the Runtimes tab', () => {
       }),
     });
 
-    expect(optionTexts(view.container)).toContain('codex-kirin');
+    expect(await optionTexts(view.container)).toContain('codex-kirin');
     expect(view.container.querySelector('[data-default-runtime-state]')?.textContent).toBe('Codex not installed');
   });
 
@@ -226,7 +240,7 @@ describe('Default for new agents on the Runtimes tab', () => {
 
     await click(view.container, '[data-default-runtime-undo]');
 
-    expect(select(view.container).value).toBe('claude-default');
+    expect(shown(view.container)).toBe('claude-default');
     expect(view.container.querySelector('[data-change-apply]')).toBeNull();
     expect(machineChanges(calls)).toEqual([]);
   });
@@ -234,14 +248,14 @@ describe('Default for new agents on the Runtimes tab', () => {
   it('a machine with no default shows "automatic", and Keep returns to it', async () => {
     const view = await open({ machine: machine({ defaultRuntime: null }) });
 
-    expect(optionTexts(view.container)[0]).toBe('automatic');
+    expect((await optionTexts(view.container))[0]).toBe('automatic');
     expect(view.container.querySelector('[data-runtime-default-badge]')).toBeNull();
     await choose(select(view.container), 'claude-default');
     expect(must(view.container.querySelector('[data-default-runtime-undo]'), 'keep').textContent).toBe(
       'Keep automatic',
     );
     await click(view.container, '[data-default-runtime-undo]');
-    expect(select(view.container).value).toBe('');
+    expect(shown(view.container)).toBe('automatic');
   });
 
   it('R3-M1: a rolled-back save names the file that stayed, keeps the pick and does not refresh', async () => {
@@ -255,7 +269,7 @@ describe('Default for new agents on the Runtimes tab', () => {
     expect(alert.getAttribute('role')).toBe('alert');
     expect(alert.textContent).toStartWith('This change was not applied: the fleet apply failed and was rolled back.');
     expect(alert.textContent).toContain(LANDED_FILE);
-    expect(select(view.container).value).toBe('claude-work');
+    expect(shown(view.container)).toBe('claude-work');
     expect(refreshes).toEqual([]);
   });
 
@@ -270,7 +284,7 @@ describe('Default for new agents on the Runtimes tab', () => {
     expect(said).toContain('needs a look');
     expect(said).toContain(UNRESTORED_PATH);
     expect(said).toContain(LANDED_FILE);
-    expect(select(view.container).value).toBe('claude-work');
+    expect(shown(view.container)).toBe('claude-work');
     expect(refreshes).toEqual([]);
   });
 
@@ -283,7 +297,7 @@ describe('Default for new agents on the Runtimes tab', () => {
     expect(must(view.container.querySelector('[data-change-refusal]'), 'refusal').textContent).toContain(
       'didn’t answer',
     );
-    expect(select(view.container).value).toBe('claude-work');
+    expect(shown(view.container)).toBe('claude-work');
   });
 });
 
@@ -363,7 +377,7 @@ describe('The Default badge and Make default on the runtimes list', () => {
 
     await chooseRuntimeAction(view.container, 'claude-work', 'make-default');
 
-    expect(select(view.container).value).toBe('claude-work');
+    expect(shown(view.container)).toBe('claude-work');
     expect(must(view.container.querySelector('[data-default-runtime-undo]'), 'keep').textContent).toBe(
       'Keep claude-default',
     );

@@ -26,7 +26,7 @@ import type {
 import { MoreHorizontal, Pencil, Star, Trash2 } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { HARNESS_NAMES } from '../../../lib/shell-ports.ts';
-import { Button, ContextMenu, type MenuAnchor, useDialogFocus } from '../../../ui.ts';
+import { Button, ContextMenu, type MenuAnchor, SelectBox, useDialogFocus } from '../../../ui.ts';
 import { machineSettings } from '../machine/machine-settings.ts';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
@@ -558,21 +558,22 @@ function RunningFerrets({
           <label htmlFor={selectId} className="text-cell font-semibold text-fg">
             Move them to…
           </label>
-          <select
-            id={selectId}
-            className="kt-input"
-            value={target ?? ''}
-            disabled={disabled}
-            data-runtime-move-target=""
-            onChange={event => onTarget(event.currentTarget.value === '' ? null : event.currentTarget.value)}
-          >
-            <option value="">Leave them running here</option>
-            {targets.map(candidate => (
-              <option key={candidate.name} value={candidate.name}>
-                {candidate.name} · {HARNESS_NAMES[candidate.harness]}
-              </option>
-            ))}
-          </select>
+          <span className="contents" data-runtime-move-target="">
+            <SelectBox
+              id={selectId}
+              label="Move them to…"
+              value={target ?? ''}
+              disabled={disabled}
+              onChange={next => onTarget(next === '' ? null : next)}
+              options={[
+                { value: '', label: 'Leave them running here' },
+                ...targets.map(candidate => ({
+                  value: candidate.name,
+                  label: `${candidate.name} · ${HARNESS_NAMES[candidate.harness]}`,
+                })),
+              ]}
+            />
+          </span>
         </div>
       )}
       <p className="m-0 text-meta leading-base text-muted" data-runtime-move-plan="">
@@ -629,22 +630,21 @@ function DefaultPicker({
             <label htmlFor={selectId} className="text-cell font-semibold text-fg">
               New default runtime
             </label>
-            <select
-              id={selectId}
-              className="kt-input"
-              value={picked}
-              data-runtime-default-picker=""
-              onChange={event => {
-                setPicked(event.currentTarget.value);
-                changes.clear();
-              }}
-            >
-              {candidates.map(candidate => (
-                <option key={candidate.name} value={candidate.name}>
-                  {candidate.name} · {HARNESS_NAMES[candidate.harness]}
-                </option>
-              ))}
-            </select>
+            <span className="contents" data-runtime-default-picker="">
+              <SelectBox
+                id={selectId}
+                label="New default runtime"
+                value={picked}
+                onChange={next => {
+                  setPicked(next);
+                  changes.clear();
+                }}
+                options={candidates.map(candidate => ({
+                  value: candidate.name,
+                  label: `${candidate.name} · ${HARNESS_NAMES[candidate.harness]}`,
+                }))}
+              />
+            </span>
           </div>
           <ChangeApplyPanel
             machineName={machineName}

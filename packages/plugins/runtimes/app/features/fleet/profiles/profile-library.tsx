@@ -11,7 +11,7 @@ import { type DragEvent, type ReactNode, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { COMPONENT_MCP_SLOT } from '../../../../contract/index.ts';
 import { cn } from '../../../ui.ts';
-import { BottomSheet } from '../../../ui.ts';
+import { BottomSheet, SelectBox } from '../../../ui.ts';
 import { Button } from '../../../ui.ts';
 import { CatalogNote } from '../components/catalog-ui.tsx';
 import { currentDaemon } from '../shell/machine-route.ts';
@@ -63,23 +63,19 @@ function FilterBar({
         data-library-search=""
         onChange={event => onFilter({ ...filter, query: event.currentTarget.value })}
       />
-      <label htmlFor={kind} className="sr-only">
-        Filter by kind
-      </label>
-      <select
-        id={kind}
-        className="kt-input w-auto"
-        value={filter.kind}
-        data-library-kind=""
-        onChange={event => onFilter({ ...filter, kind: event.currentTarget.value as LibraryFilter['kind'] })}
-      >
-        <option value="all">All kinds</option>
-        {ITEM_KINDS.map(each => (
-          <option key={each} value={each}>
-            {ITEM_KIND_WORDS[each]}
-          </option>
-        ))}
-      </select>
+      <span className="contents" data-library-kind="">
+        <SelectBox
+          id={kind}
+          className="w-auto"
+          label="Filter by kind"
+          value={filter.kind}
+          onChange={next => onFilter({ ...filter, kind: next as LibraryFilter['kind'] })}
+          options={[
+            { value: 'all', label: 'All kinds' },
+            ...ITEM_KINDS.map(each => ({ value: each, label: ITEM_KIND_WORDS[each] })),
+          ]}
+        />
+      </span>
     </div>
   );
 }

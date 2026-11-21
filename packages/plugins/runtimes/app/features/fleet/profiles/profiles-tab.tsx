@@ -16,7 +16,7 @@ import { Loading } from '@ferretry/app/ui';
 import { daemonSettingsHref } from '@ferretry/app';
 import type { AccountChange, ComponentKind, LayeredProfileView } from '../../../../contract/index.ts';
 import { useEffect, useId, useState } from 'react';
-import { Button } from '../../../ui.ts';
+import { Button, SelectBox } from '../../../ui.ts';
 import { type AccountCatalog, allComponents, useAccountCatalog } from '../components/account-catalog.ts';
 import {
   CatalogNote,
@@ -383,20 +383,18 @@ function DeletePanel(props: DetailProps & { onKeep: () => void }) {
           {others.length === 0 ? (
             <span>There is no other profile to move to yet. Make one first.</span>
           ) : (
-            <select
-              id={id}
-              aria-label="Move to profile"
-              className="kt-input"
-              value={target}
-              data-profile-switch=""
-              onChange={event => setTarget(event.currentTarget.value)}
-            >
-              {others.map(other => (
-                <option key={other.name} value={other.name}>
-                  {other.name} · {profileScopeWord(other.scope)}
-                </option>
-              ))}
-            </select>
+            <span className="contents" data-profile-switch="">
+              <SelectBox
+                id={id}
+                label="Move to profile"
+                value={target ?? ''}
+                onChange={setTarget}
+                options={others.map(other => ({
+                  value: other.name,
+                  label: `${other.name} · ${profileScopeWord(other.scope)}`,
+                }))}
+              />
+            </span>
           )}
         </>
       ) : (
