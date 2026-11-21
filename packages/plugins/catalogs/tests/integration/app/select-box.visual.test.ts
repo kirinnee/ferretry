@@ -6,7 +6,7 @@
  *
  *   add     "Add to catalog" over nine catalogs: open the Catalog list, type "sec" (a search field: more than seven), pick,
  *           Preview, Add. The machine is sent the preview and the add for THAT catalog.
- *   share   the invite's "The link works for" list (five options: no search field, no scroll bar): pick "8 hours", Confirm.
+ *   share   the invite's "The link works for" list (five options: no scroll bar; a search field only in the phone dialog): pick "8 hours", Confirm.
  *           The machine is sent a mint carrying `expiresIn: '8h'`.
  *
  * At 1280 the list is a popover under the button; at 390 (touch) a CENTRED dialog over the sheet. Light and dark.
@@ -187,7 +187,7 @@ describe('the catalogs pick from lists with the app’s select box', () => {
 
   for (const viewport of VIEWPORTS)
     for (const theme of THEMES)
-      it(`the invite's expiry: five options, no search, no scroll bar; Confirm mints with the pick (${viewport.name}, ${theme})`, async () => {
+      it(`the invite's expiry: five options, no scroll bar, search only on a phone; Confirm mints with the pick (${viewport.name}, ${theme})`, async () => {
         const { context, tab } = await openScene('share', viewport, theme);
         try {
           const expiry = '[data-share-expiry] [role="combobox"]';
@@ -199,7 +199,10 @@ describe('the catalogs pick from lists with the app’s select box', () => {
           await tab.waitForSelector('[role="option"]');
           const open = await listing(tab);
           expect(open.options).toEqual(['15 minutes', '1 hour', '3 hours', '8 hours', '1 day']);
-          expect(open.hasSearch, 'five options: no search field').toBe(false);
+          // Search follows the mode: the phone dialog always searches ("auto"), a desktop popover keeps the length threshold.
+          expect(open.hasSearch, `five options: search only in the phone dialog (${viewport.name})`).toBe(
+            viewport.phone,
+          );
           expect(open.listScrolls, 'five options: no scroll bar').toBe(false);
           if (viewport.phone) {
             expect(open.asDialog).toBe(true);

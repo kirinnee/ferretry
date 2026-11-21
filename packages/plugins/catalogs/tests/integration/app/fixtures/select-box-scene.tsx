@@ -2,7 +2,7 @@
  * The browser entry for "the catalogs' choices from a list are the app's own SelectBox" (r11 S3d), over fake data:
  *
  *   ?scene=add     the REAL "Add to catalog" sheet over nine catalogs (a list long enough to carry a search field)
- *   ?scene=share   the REAL invite sheet (its "The link works for" list has five options: no search, no scroll bar)
+ *   ?scene=share   the REAL invite sheet (its "The link works for" list has five options: no scroll bar, search only on a phone)
  *   &theme=<family>-<mode>
  *
  * The machine's catalog client is faked: every request it is sent is recorded on `window.__calls` (method, path, body) and
