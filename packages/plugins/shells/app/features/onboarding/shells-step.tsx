@@ -8,9 +8,12 @@
 import type { StepHost } from '@ferretry/kernel/contract';
 import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { StepDemo } from '@ferretry/app';
 import { Button } from '../../ui.ts';
 import { shellsClient } from '../../lib/shells-client.ts';
+import { ShellsDemo } from './shells-step-demo.tsx';
 import { type NixCheck, shellsStepView } from './shells-step-model.ts';
+import './shells-step.css';
 
 interface ShellsStepProps {
   readonly step: StepHost;
@@ -44,16 +47,22 @@ export function ShellsStep({ step, check }: ShellsStepProps) {
   }, [decision, step]);
   if (view === undefined || view.kind === 'hide') return null;
   return (
-    <div data-testid="shells-step" data-outcome={view.outcome} className="grid gap-2 text-ui">
-      <p className="m-0">{view.line}</p>
-      {view.consequence === '' ? null : <p className="m-0">{view.consequence}</p>}
-      <p className="m-0 text-muted">{view.remedy}</p>
+    <div data-testid="shells-step" data-outcome={view.outcome} className="fy-shells-step">
+      <p>{view.line}</p>
+      {view.consequence === '' ? null : <p>{view.consequence}</p>}
+      <p className="fy-shells-step-muted">{view.remedy}</p>
       {view.outcome === 'unreadable' ? (
-        <div>
+        <div className="fy-shells-step-retry">
           <Button size="sm" disabled={looking} onClick={retry} data-shells-step-retry="">
             Check again
           </Button>
         </div>
+      ) : null}
+      {/* A failed check proves nothing about nix, so it has no picture claiming what ferrets use. */}
+      {view.outcome === 'missing' ? (
+        <StepDemo>
+          <ShellsDemo />
+        </StepDemo>
       ) : null}
     </div>
   );

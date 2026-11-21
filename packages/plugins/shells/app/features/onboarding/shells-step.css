@@ -1,0 +1,97 @@
+/* The first-run Shells page body: a few short lines. The shell owns the page frame (columns, footer); the scene on the
+   right is drawn into the frame's demo column by StepDemo. */
+.fy-shells-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md, 12px);
+  min-width: 0;
+}
+.fy-shells-step p {
+  font-size: var(--text-md);
+  margin: 0;
+}
+.fy-shells-step-retry {
+  padding-block-start: 4px;
+}
+.fy-shells-step-muted {
+  color: var(--muted);
+}
+
+/* Without nix vs with nix: the ferret and the tools it gets. */
+/* No card of its own: the frame's demo column already draws the panel. */
+.fy-shd {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  inline-size: 100%;
+  max-inline-size: 440px;
+  min-width: 0;
+  padding: 10px;
+}
+.fy-shd__row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.fy-shd__ferret,
+.fy-shd__tools,
+.fy-shd__shell {
+  border-radius: var(--radius-control);
+  font-size: var(--text-md);
+  line-height: 1.3;
+  min-width: 0;
+  padding: 6px 10px;
+}
+.fy-shd__ferret {
+  background: var(--surface-3);
+  color: var(--fg);
+}
+.fy-shd__arrow {
+  color: var(--muted);
+}
+.fy-shd__tools {
+  border: 1px dashed var(--border);
+  color: var(--muted);
+}
+.fy-shd__shell {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+@keyframes fy-shd-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion='reduced']) .fy-shd__row {
+    animation: fy-shd-in 260ms ease-out backwards;
+  }
+  :root:not([data-motion='reduced']) .fy-shd__row--with {
+    animation-delay: 300ms;
+  }
+}
+
+/* On a wide page the demo column is generous, so the scene fills it and reads at the size of the words beside it. */
+@media (min-width: 900px) {
+  .fy-shd {
+    gap: 16px;
+    max-inline-size: none;
+    padding: 24px;
+  }
+  .fy-shd__ferret,
+  .fy-shd__tools,
+  .fy-shd__shell {
+    font-size: calc(var(--text-md) + 2px);
+    padding: 10px 14px;
+  }
+}
