@@ -1,16 +1,22 @@
 /**
- * THE LAYOUT STEP (O14): first run's client page about how this device is arranged: navigation Left / Bottom and
- * density Comfortable / Compact, each a short row of cards with a demo that plays once when it is picked.
+ * THE LAYOUT STEP (r11 O11): first run's client page about how this device is arranged: how the places at the side bar's foot
+ * are drawn (icons or words) and how close the rows sit (comfortable or compact). Two short stacked lists on the left and ONE
+ * picture on the right (`StepDemo`) that shows both answers and moves once when one is picked.
  *
- * It writes THIS device only, through the shell's `DeviceLayout.set` (`fy:app:layout`), and tells its host `done()` after
- * each save so the device ledger knows the question was answered; the setup flow draws the title, the footer and the
- * loading cover. Outside a shell there is no device to write to, so it skips as `not-needed` and draws nothing. Its
- * memory is the saved device layout itself: nothing is kept in step memory or in any storage by this page.
+ * It writes THIS device only, through the shell's `DeviceLayout.set` (`fy:app:layout`), and only when the footer's Next is
+ * pressed: a pick registers what Next must save (`host.commit`, contract rule 8) and writes nothing by itself, so there is no
+ * Save button and no per-pick `done()` (the shell records the step when the save was accepted). A pick back to the answer the
+ * device already shows clears the write. A refusal is thrown to the shell, which says it in the footer and keeps Next ready.
+ * The setup flow draws the title, the footer and the loading cover. Outside a shell there is no device to write to, so the
+ * page skips as `not-needed` and draws nothing. Its memory is the saved device layout itself: nothing is kept in step memory
+ * or in any storage by this page.
+ *
+ * The bottom bar is not offered here: owner answer C2 keeps it a switch in Settings › Layout only.
  */
-import { ChoiceCards, type DeviceLayout, type Viewport } from '@ferretry/app';
+import { ChoiceCards, type DeviceLayout, StepDemo, type Viewport } from '@ferretry/app';
 import type { StepHost } from '@ferretry/kernel/contract';
-import { useEffect, useState } from 'react';
-import { DensityDemo, NavDemo } from './layout-step-demos.tsx';
+import { useEffect, useRef, useState } from 'react';
+import { LayoutDemo, type LayoutDemoProps } from './layout-step-demos.tsx';
 import { answerOf, keysFor, LAYOUT_QUESTIONS, type LayoutQuestion } from './layout-step-model.ts';
 import './layout-step.css';
 
@@ -22,30 +28,54 @@ export interface LayoutStepProps {
   readonly viewport: Viewport | undefined;
 }
 
-const demoOf = (question: LayoutQuestion, answer: string) =>
-  question.id === 'nav' ? <NavDemo labels={answer} /> : <DensityDemo density={answer} />;
+type Picks = Readonly<Partial<Record<LayoutQuestion['id'], string>>>;
 
 export function LayoutStep({ step, device, viewport }: LayoutStepProps) {
-  const [problem, setProblem] = useState<string | undefined>(undefined);
+  const [picks, setPicks] = useState<Picks>({});
+  const [moved, setMoved] = useState<LayoutDemoProps['moved']>(undefined);
+  // True from the moment Next starts the write until it answers: the picks the footer captured are the ones written.
+  const [saving, setSaving] = useState(false);
+  // The host and the device are read through refs: a shell that hands new objects each render never re-runs the page.
+  const host = useRef(step);
+  host.current = step;
+  const live = useRef({ device, viewport });
+  live.current = { device, viewport };
   const absent = device === undefined || viewport === undefined;
   useEffect(() => {
-    if (absent) step?.skip('not-needed');
-    else step?.ready();
-  }, [absent, step]);
+    if (absent) host.current?.skip('not-needed');
+    else host.current?.ready();
+  }, [absent]);
   if (device === undefined || viewport === undefined) return null;
 
+  const shown = (question: LayoutQuestion): string =>
+    picks[question.id] ?? answerOf(device.inForce, question, viewport);
+
   const choose = (question: LayoutQuestion, answer: string): void => {
-    for (const path of keysFor(device.inForce, question)) {
-      const refused = device.set(path, answer);
-      if (refused !== undefined) {
-        setProblem(refused);
-        return;
-      }
+    // A pick equal to what the device already shows is no pick at all.
+    const next: Record<string, string> = { ...picks, [question.id]: answer };
+    if (answer === answerOf(device.inForce, question, viewport)) delete next[question.id];
+    setPicks(next);
+    setMoved({ question: question.id, count: (moved?.count ?? 0) + 1 });
+    const changed = LAYOUT_QUESTIONS.filter(entry => next[entry.id] !== undefined);
+    if (changed.length === 0) {
+      host.current?.commit(null);
+      return;
     }
-    setProblem(undefined);
-    step?.done();
+    host.current?.commit(async () => {
+      setSaving(true);
+      try {
+        for (const entry of changed)
+          for (const path of keysFor(live.current.device?.inForce ?? device.inForce, entry)) {
+            const refused = (live.current.device ?? device).set(path, next[entry.id] as string);
+            if (refused !== undefined) throw new Error(refused);
+          }
+      } finally {
+        setSaving(false);
+      }
+    });
   };
 
+  const [navQuestion, densityQuestion] = LAYOUT_QUESTIONS;
   return (
     <div className="fy-lstep" data-layout-step="">
       {LAYOUT_QUESTIONS.map(question => (
@@ -55,23 +85,22 @@ export function LayoutStep({ step, device, viewport }: LayoutStepProps) {
           </h2>
           <ChoiceCards
             label={question.name}
-            value={answerOf(device.inForce, question, viewport)}
+            layout="stack"
+            value={shown(question)}
             onChange={answer => choose(question, answer)}
-            options={question.answers.map(answer => ({
-              id: answer.id,
-              title: answer.title,
-              line: answer.line,
-              demo: demoOf(question, answer.id),
-            }))}
+            disabled={saving}
+            options={question.answers.map(answer => ({ id: answer.id, title: answer.title, line: answer.line }))}
           />
         </section>
       ))}
-      {problem === undefined ? null : (
-        <p role="alert" className="fy-lstep__problem">
-          {problem}
-        </p>
-      )}
-      <p className="fy-lstep__note">Just this device. Change it any time in Settings › Layout.</p>
+      <p className="fy-lstep__note">This device only.</p>
+      <StepDemo>
+        <LayoutDemo
+          labels={shown(navQuestion as LayoutQuestion)}
+          density={shown(densityQuestion as LayoutQuestion)}
+          moved={moved}
+        />
+      </StepDemo>
     </div>
   );
 }

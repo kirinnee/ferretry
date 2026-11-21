@@ -11,11 +11,14 @@ export interface StepRecorder {
   readonly decision: 'shown' | 'skipped' | 'undecided';
   readonly skippedWhy: string | undefined;
   readonly segment: StepSegmentMemory;
+  /** The save the page last registered with `commit` (null when none or cleared). */
+  readonly committed: (() => Promise<void>) | null;
 }
 
 export function stepRecorder(phase: StepHost['phase'] = 'client'): StepRecorder {
   const calls: string[] = [];
   let segment: StepSegmentMemory = {};
+  let committed: (() => Promise<void>) | null = null;
   const host: StepHost = {
     phase,
     appliesTo: [],
@@ -29,7 +32,10 @@ export function stepRecorder(phase: StepHost['phase'] = 'client'): StepRecorder 
     ready: () => void calls.push('ready'),
     skip: why => void calls.push(`skip:${why}`),
     notNeeded: () => void calls.push('notNeeded'),
-    commit: () => undefined,
+    commit: save => {
+      committed = save;
+      calls.push(save === null ? 'commit:clear' : 'commit');
+    },
     done: () => void calls.push('done'),
     busy: () => void calls.push('busy'),
     next: () => void calls.push('next'),
@@ -49,6 +55,9 @@ export function stepRecorder(phase: StepHost['phase'] = 'client'): StepRecorder 
     },
     get segment() {
       return segment;
+    },
+    get committed() {
+      return committed;
     },
   };
 }

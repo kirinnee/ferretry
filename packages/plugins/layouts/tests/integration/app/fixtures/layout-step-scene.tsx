@@ -27,6 +27,14 @@ const phoneLabels = params.get('phoneLabels');
 const BASE: Layout =
   phoneLabels === 'words' ? { ...DEFAULT_LAYOUT, phone: { nav: { labels: 'words' } } } : DEFAULT_LAYOUT;
 
+declare global {
+  interface Window {
+    __writes: string[];
+  }
+}
+window.__writes = [];
+let save: (() => Promise<void>) | null = null;
+
 const host: StepHost = {
   phase: 'client',
   appliesTo: [],
@@ -35,7 +43,9 @@ const host: StepHost = {
   ready: () => undefined,
   skip: () => undefined,
   notNeeded: () => undefined,
-  commit: () => undefined,
+  commit: next => {
+    save = next;
+  },
   done: () => undefined,
   busy: () => undefined,
   next: () => undefined,
@@ -52,6 +62,7 @@ function Scene() {
     set: (path, value) => {
       const edited = setDeviceOverride(BASE, latest.current, path, value);
       if (!edited.ok) return edited.error;
+      window.__writes.push(`${path}=${value}`);
       latest.current = edited.overrides;
       setOverrides(edited.overrides);
       return undefined;
@@ -59,12 +70,12 @@ function Scene() {
     reset: () => setOverrides({}),
   };
   return (
-    <div className="mx-auto max-w-3xl p-4" data-scene-ready="">
+    <div style={{ height: '100vh', overflow: 'auto' }} data-scene-ready="">
       <StepPageFrame
         title="How should this device look?"
-        line="Two quick choices. You can change both later."
         back={{}}
-        next={{ label: 'Next' }}
+        later={{ onClick: () => undefined }}
+        next={{ label: 'Next', onClick: () => void save?.() }}
         progress={{
           segments: [
             { id: 'machine', label: 'Machine' },
