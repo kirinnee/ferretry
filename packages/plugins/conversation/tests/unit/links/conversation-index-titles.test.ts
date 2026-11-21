@@ -882,3 +882,57 @@ describe('a full refresh clears a ferret or an owner title only from a snapshot 
     expect(rowOf(made.sqlite)).toMatchObject({ ferret_id: null, ferret_title: null, ferret_title_owner: 0 });
   });
 });
+
+describe('what the index says when a look or an offer fails (r11 S11 CI coverage)', () => {
+  const build = (extra: Partial<ConstructorParameters<typeof ConversationIndex>[0]>) => {
+    const owner = new MemoryHistory();
+    const warnings: string[] = [];
+    const source: IndexSource = {
+      harness: 'claude-code',
+      parser: 'claude',
+      kind: 'computer',
+      label: 'owner',
+      files: owner,
+    };
+    const index = new ConversationIndex({
+      sqlite: () => memorySqlite(),
+      sources: async () => [source],
+      ferretNames: async () => ferretOf({ titleSource: 'auto' }),
+      parsers: PARSERS,
+      nowMs: () => 0,
+      warn: message => void warnings.push(message),
+      ...extra,
+    });
+    return { index, owner, warnings };
+  };
+
+  test('a scoped look that cannot list its sources is said once and never rejects', async () => {
+    const { index, warnings } = build({ sources: async () => Promise.reject(new Error('no tree')) });
+    await expect(index.refreshConversations(new Set([`claude-code:${A}`]))).resolves.toBeUndefined();
+    expect(warnings).toEqual(['The conversation index could not be updated: no tree']);
+  });
+
+  test('a scoped look that fails with something that is not an Error says what it was', async () => {
+    const { index, warnings } = build({ sources: async () => Promise.reject('plain text') });
+    await index.refreshConversations(new Set([`claude-code:${A}`]));
+    expect(warnings).toEqual(['The conversation index could not be updated: plain text']);
+  });
+
+  test('a ferret that refuses the offered title is warned about, and the offer is made again at the next update', async () => {
+    const attempts: string[] = [];
+    const { index, owner, warnings } = build({
+      adoptTitle: async (ferret, title) => {
+        attempts.push(`${ferret}:${title}`);
+        return Promise.reject(new Error('ferret is busy'));
+      },
+    });
+    owner.set(pathOf(A), talk('hello') + rec({ type: 'ai-title', aiTitle: 'Fix flaky login test' }));
+    await index.refresh();
+    expect(attempts).toEqual(['ms-12:Fix flaky login test']);
+    expect(warnings).toEqual(["A conversation's title could not be offered to its ferret: ferret is busy"]);
+    // A refused offer is forgotten, so the same title is offered again rather than silently dropped.
+    owner.append(pathOf(A), talk('and one more thing', '2026-02-01T09:30:00.000Z'));
+    await index.refresh();
+    expect(attempts).toEqual(['ms-12:Fix flaky login test', 'ms-12:Fix flaky login test']);
+  });
+});
