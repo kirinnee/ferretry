@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { type Block, type Inline, inline, parseProse, safeHref } from '../../../app/features/pr-page/prose-model.ts';
+import {
+  type Block,
+  type Inline,
+  inline,
+  parseProse,
+  safeHref,
+  trimSpace,
+} from '../../../app/features/pr-page/prose-model.ts';
 
 const texts = (nodes: readonly Inline[]): string =>
   nodes
@@ -145,6 +152,23 @@ describe('structure and bounds', () => {
       'text',
       'italic',
     ]);
+  });
+  test('U+FEFF is never eaten as whitespace: a line, a heading, a list item and a link all keep it for the marker', () => {
+    const mark = '\uFEFF';
+    expect(parseProse(mark)).toEqual([{ kind: 'paragraph', inline: [{ kind: 'text', text: mark }] }]);
+    expect(parseProse(`# ${mark}`)).toEqual([
+      { kind: 'paragraph', inline: [{ kind: 'bold', children: [{ kind: 'text', text: mark }] }] },
+    ]);
+    expect(parseProse(`- ${mark}`)).toEqual([
+      { kind: 'list', ordered: false, items: [[{ kind: 'text', text: mark }]] },
+    ]);
+    expect(parseProse(`> ${mark}`)).toEqual([
+      { kind: 'quote', blocks: [{ kind: 'paragraph', inline: [{ kind: 'text', text: mark }] }] },
+    ]);
+    expect(parseProse(`\`\`\`\n${mark}\n\`\`\``)).toEqual([{ kind: 'code', text: mark }]);
+    expect(safeHref(`${mark}https://example.com/`)).toBeUndefined();
+    expect(safeHref(`https://example.com/${mark}`)).toBeUndefined();
+    expect(trimSpace(` \t${mark} \n`)).toBe(mark);
   });
   test('a hostile input is read, not run: it parses to plain text or code', () => {
     expect(() => parseProse(`${'*'.repeat(200)}\n${'[a](b'.repeat(50)}\n${'<!--'.repeat(50)}`)).not.toThrow();

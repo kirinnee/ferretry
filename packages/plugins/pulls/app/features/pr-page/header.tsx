@@ -1,6 +1,7 @@
 import { Badge, ExternalLink } from '@ferretry/app/ui';
 import type { BadgeTone } from '@ferretry/app/ui';
 import type { CiState, PullDetail } from '../../../contract/index.ts';
+import { VisibleText } from '../diff/visible-text.tsx';
 import { CI_WORDS, localTime, REVIEW_WORDS, STATE_WORDS } from './format.ts';
 
 const MERGE_VERB: Readonly<Record<PullDetail['state'], string>> = {
@@ -25,7 +26,7 @@ export function PullHeader({ pull }: { readonly pull: PullDetail }) {
     <header className="grid gap-xs border-b border-border-strong pb-panel" data-pull-header="">
       <p className="m-0 text-meta font-semibold uppercase tracking-wide text-muted">{repo}</p>
       <h1 className="m-0 break-words font-display text-display font-bold tracking-display">
-        <bdi>{pull.title}</bdi> <span className="font-normal text-muted">#{pull.number}</span>
+        <VisibleText text={pull.title} /> <span className="font-normal text-muted">#{pull.number}</span>
       </h1>
       <div className="flex flex-wrap items-center gap-xs">
         <Badge

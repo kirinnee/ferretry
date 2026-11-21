@@ -1,5 +1,5 @@
-import { ExternalLink } from '@ferretry/app/ui';
-import { type ReactNode, useMemo } from 'react';
+import { Button, ExternalLink } from '@ferretry/app/ui';
+import { type ReactNode, useMemo, useState } from 'react';
 import { VisibleRuns } from '../diff/visible-text.tsx';
 import { type Block, type Inline, parseProse } from './prose-model.ts';
 
@@ -30,12 +30,26 @@ function drawInline(nodes: readonly Inline[], sourceUrl: string, key = ''): Reac
         return <em key={id}>{drawInline(node.children, sourceUrl, `${id}.`)}</em>;
       case 'strike':
         return <s key={id}>{drawInline(node.children, sourceUrl, `${id}.`)}</s>;
-      case 'link':
+      case 'link': {
+        // The label is the author's; the address is the page's. It is drawn beside the label, in the page, so a tap on a
+        // phone (no hover, no tooltip) shows where it goes before it goes there. A label that already is the address says it once.
+        const label = node.children.map(child => (child.kind === 'text' ? child.text : '')).join('');
         return (
-          <ExternalLink data-gh-link="" href={node.href} key={id} title={node.href}>
-            {drawInline(node.children, sourceUrl, `${id}.`)}
-          </ExternalLink>
+          <span key={id}>
+            <ExternalLink data-gh-link="" href={node.href} title={node.href}>
+              {drawInline(node.children, sourceUrl, `${id}.`)}
+            </ExternalLink>
+            {label === node.href ? null : (
+              <>
+                {' '}
+                <span className="break-all text-meta text-muted" data-gh-dest="">
+                  ({node.href})
+                </span>
+              </>
+            )}
+          </span>
         );
+      }
       default:
         // an image
         return (
@@ -87,11 +101,31 @@ function drawBlocks(blocks: readonly Block[], sourceUrl: string, key = ''): Reac
   });
 }
 
+/** Characters drawn before a long text asks to be opened: a page of many long texts is not drawn whole. */
+export const COLLAPSED_CHARS = 1_000;
+
+/** `text` cut to `limit` characters, never through the middle of a surrogate pair. */
+function head(text: string, limit: number): string {
+  const cut = text.slice(0, limit);
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
 export function SafeProse({ text, sourceUrl }: { readonly text: string; readonly sourceUrl: string }) {
-  const blocks = useMemo(() => parseProse(text), [text]);
+  const [open, setOpen] = useState(false);
+  const long = text.length > COLLAPSED_CHARS;
+  const shown = long && !open ? head(text, COLLAPSED_CHARS) : text;
+  const blocks = useMemo(() => parseProse(shown), [shown]);
   return (
     <div className="md fy-seg min-w-0 break-words" data-gh-text="">
       {drawBlocks(blocks, sourceUrl)}
+      {long && !open && (
+        <p className="m-0" data-gh-collapsed="">
+          <Button onClick={() => setOpen(true)} size="sm" type="button">
+            Show all {text.length.toLocaleString('en-US')} characters
+          </Button>
+        </p>
+      )}
     </div>
   );
 }
