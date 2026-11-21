@@ -111,6 +111,9 @@ beforeAll(async () => {
 /** Styles whose kit (r11 T5-T12) deliberately dropped the old gradient field and panel texture; each unit adds its own styles. */
 const NO_GRADIENT_FIELD: ReadonlySet<string> = new Set(['mission', 'hud']);
 
+/** Styles whose kit (r11 T7) moved the focus ring INSIDE the control: `--focus-offset` is no longer the captured outward 0 or 2px. */
+const RING_INSIDE: ReadonlySet<string> = new Set(['neo']);
+
 describe('every old family-mode resolves to the same tokens on the three axes', () => {
   for (const [key, was] of Object.entries(snapshot)) {
     const [width, theme] = key.split(':') as [string, string];
@@ -126,12 +129,14 @@ describe('every old family-mode resolves to the same tokens on the three axes', 
           !(ASSEMBLED as readonly string[]).includes(name) &&
           name !== TEXTURE &&
           name !== FIELD &&
-          name !== '--shadow-ink',
+          name !== '--shadow-ink' &&
+          !(RING_INSIDE.has(family) && name === '--focus-offset'),
       );
       const different = compared
         .filter(name => now[name] !== was[name])
         .map(name => `${name}: ${was[name]} → ${now[name]}`);
       expect(different).toEqual([]);
+      if (RING_INSIDE.has(family)) expect(now['--focus-offset']).toMatch(/^calc\(-1 \* /u);
       if (!real) return;
       const [before, after] = [
         await drawnOld(
@@ -191,8 +196,8 @@ describe('the ruled page field is the Mission style’s geometry and a palette�
   });
 
   it('Mission palette under another style draws no grid at all', async () => {
-    // (Geist draws its own grid tile since r11 T5, so the styles read here are the ones whose field is still none.)
-    for (const style of ['studio', 'neo']) expect(await field(style, 'mission')).toBe('none');
+    // (Geist draws its own grid tile since r11 T5 and Neo its own dot tile since r11 T7, so the styles read here are the ones whose field is still none.)
+    for (const style of ['studio', 'raw']) expect(await field(style, 'mission')).toBe('none');
   });
 
   it('the swapped pair and the original pair differ only in the inks', async () => {

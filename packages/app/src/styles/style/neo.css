@@ -62,7 +62,7 @@
   --gap-xs: 6px;
   --gap-sm: 8px;
   --gap-md: 12px;
-  --focus-offset: 0px; /* the ring rides the hard border instead of floating off it */
+  --focus-offset: calc(-1 * var(--focus-width)); /* the ring is drawn inside the hard border, never floating off it */
   --font-display: 'Archivo Black', 'Arial Black', 'Helvetica Neue', Impact, system-ui, sans-serif;
   --font-body: 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', 'Cascadia Mono', ui-monospace, 'Courier New', monospace;
@@ -93,11 +93,79 @@
   --shadow-sm: 2px 2px 0 var(--shadow-ink);
   --shadow-md: 4px 4px 0 var(--shadow-ink);
   --shadow-lg: 6px 6px 0 var(--shadow-ink);
-}
 
-:root[data-style='neo'][data-mode='light'],
-[data-swatch][data-style='neo'][data-mode='light'] {
-  --focus-offset: 2px;
+  /* ═══ the component contract (r11 T7): what carries Neo in every slot — a poster of hard blocks ═══ */
+  /* BACKGROUND: a halftone dot field (one dot every 20px, the contract's own tile) in the page ink, not the palette's faint
+     accent wash, never a gradient; no grain (a poster is printed flat). */
+  --bg-pattern-ink: color-mix(in srgb, var(--fg) 14%, transparent);
+  --bg-pattern: var(--bg-pattern-dots);
+  --bg-pattern-size: 20px;
+  --bg-pattern-alpha: 100%;
+  --grain-alpha: 0;
+  /* MARKDOWN: a poster sheet. A 900-weight display h1 under a 3px ink rule, a boxed code frame that casts the family's hard offset
+     shadow, a quote that is a tinted block (no side bar), a ruled grid table under a tinted header, links as marker strokes. */
+  --md-h1-size: 1.36em;
+  --md-h1-weight: 900;
+  --md-h1-case: none;
+  --md-h1-rule: 3px solid var(--border-strong);
+  --md-h1-rule-pad: 0.2em;
+  --md-h2-size: 1.12em;
+  --md-h2-weight: 800;
+  --md-h2-case: none;
+  --md-h2-rule: none;
+  --md-code-border: var(--stroke-control) solid var(--border-strong);
+  --md-code-bar: var(--md-code-border);
+  --md-code-radius: 0px;
+  --md-code-shadow: 4px 4px 0 var(--shadow-ink);
+  --md-quote-bar: none;
+  --md-quote-pad: 1em;
+  --md-quote-bg: var(--surface-2);
+  --md-quote-radius: 0px;
+  --md-quote-font-style: normal;
+  --md-cell-border-x: var(--stroke-control) solid var(--border-strong);
+  --md-cell-border-y: var(--stroke-control) solid var(--border-strong);
+  --md-th-bg: var(--surface-3);
+  --md-th-case: uppercase;
+  --md-th-weight: 800;
+  --md-zebra: transparent;
+  --md-link-decoration: underline;
+  --md-link-weight: 800;
+  --md-link-bg: var(--surface-3);
+  --md-link-pad: 0 0.2em;
+  --md-link-radius: 0px;
+  --md-stack-radius: 0px;
+  --md-stack-frame: var(--stroke-control) solid var(--border-strong);
+  --md-ul-marker: square;
+  --md-list-marker-color: var(--fg);
+  /* SPINNER: a hard square HOPPING over its own offset shadow, in whole steps (the ring is hidden, the mark does not turn;
+     shaped below the contract block). */
+  --spinner-ring: none;
+  --spinner-parts: inline;
+  --spinner-parts-speed: 0.8s;
+  --spinner-parts-timing: steps(4, end);
+  /* MOTION: snappy and stepped. A hard block answers at once, pops further than any other style and sinks 2px when pressed. */
+  --motion-pop: 90ms;
+  --ease-in: steps(3, end);
+  --ease-out: steps(3, end);
+  --ease-in-out: steps(3, end);
+  --ease-spring: steps(3, end);
+  --motion-loading-ring: 1s;
+  --motion-loading-run: 0.8s;
+  --motion-loading-shimmer: 1.4s;
+  --ease-loading-ring: steps(8, end);
+  --ease-loading-run: steps(8, end);
+  /* HYPERMEDIA (read by r12 H5; no renderer reads an --hm-* slot yet): BLOCK — hard filled nodes with a 2px ink rule, square
+     corners, straight edges and a banded header. */
+  --hm-shape: block;
+  --hm-radius: 0px;
+  --hm-stroke: 2px;
+  --hm-font: var(--font-display);
+  --hm-node-fill-alpha: 1;
+  --hm-edge: straight;
+  --hm-header: band;
+  /* SURFACES: a hard offset block under every panel; the ring is drawn inside the control. */
+  --panel-edge: offset;
+  --focus-line: solid;
 }
 
 @media (max-width: 640px) {
@@ -124,7 +192,7 @@
    field showed only a border-colour change. Neo draws the hard ring, and the family offset block beside it. */
 :root[data-style='neo'] .kt-input:focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: 0;
+  outline-offset: calc(-1 * var(--focus-width));
   box-shadow: var(--shadow-md);
 }
 
@@ -172,7 +240,7 @@
 :root[data-style='neo'] [data-neo-segmented] > label:has(:focus-visible) {
   box-shadow: none;
   outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: 2px;
+  outline-offset: calc(-1 * var(--focus-width));
 }
 
 /* Choice cards: a block with a flat shadow that lifts on hover, presses on click and pops once when chosen. */
@@ -202,7 +270,11 @@
 }
 :root[data-style='neo'] .fy-cc__card:has(:focus-visible) {
   outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: 3px;
+  outline-offset: calc(-1 * var(--focus-width));
+}
+/* A chosen card is filled, so its inside ring is drawn in the ink that fill is read in (the family's selected-row text), not in the accent. */
+:root[data-style='neo'] .fy-cc__card[data-selected='true']:has(:focus-visible) {
+  outline-color: var(--nav-sel-fg);
 }
 :root[data-style='neo'] .fy-cc__card[aria-disabled='true'] {
   box-shadow: none;
@@ -269,4 +341,96 @@
 :root[data-style='neo'] .kt-badge,
 :root[data-style='neo'] .kt-badge[data-tone] {
   border-color: var(--border-strong);
+}
+
+/* THE NEO SPINNER: a hard square HOPPING over its own offset shadow, in whole steps. Two of the four generic parts are drawn:
+   `p1` is the shadow (ink, offset right and down, no blur) and `p2` the face (the family's marker fill, ruled in ink); they
+   share one keyframe and one start (`animation-delay: 0s`, restated here: the base `.fy-spinner__p2` stagger is a lower
+   specificity than the base `animation` shorthand and would not apply anyway, but a part that animates in this file owns its
+   own delay), so the face never leaves its shadow. `p3` and `p4` are not drawn. The mark itself does not turn and the ring
+   is hidden (`--spinner-ring: none`).
+   SCOPE: element rules, so the page rule skips a spinner inside a `[data-swatch]` (a swatch preview draws ITS OWN style's
+   mark, not the page's), and the swatch rule matches only a swatch of this style. */
+:root[data-style='neo'] .fy-spinner:not([data-swatch] *),
+[data-swatch][data-style='neo'] .fy-spinner {
+  animation: none;
+}
+:root[data-style='neo'] .fy-spinner:not([data-swatch] *) .fy-spinner__p3,
+:root[data-style='neo'] .fy-spinner:not([data-swatch] *) .fy-spinner__p4,
+[data-swatch][data-style='neo'] .fy-spinner .fy-spinner__p3,
+[data-swatch][data-style='neo'] .fy-spinner .fy-spinner__p4 {
+  display: none;
+}
+:root[data-style='neo'] .fy-spinner:not([data-swatch] *) .fy-spinner__p1,
+:root[data-style='neo'] .fy-spinner:not([data-swatch] *) .fy-spinner__p2,
+[data-swatch][data-style='neo'] .fy-spinner .fy-spinner__p1,
+[data-swatch][data-style='neo'] .fy-spinner .fy-spinner__p2 {
+  animation: fy-neo-hop var(--spinner-parts-speed) var(--spinner-parts-timing) 0s infinite;
+  height: 7px;
+  opacity: 1;
+  width: 7px;
+}
+:root[data-style='neo'] .fy-spinner:not([data-swatch] *) .fy-spinner__p1,
+[data-swatch][data-style='neo'] .fy-spinner .fy-spinner__p1 {
+  fill: var(--shadow-ink);
+  x: 4.75px;
+  y: 8.75px;
+}
+:root[data-style='neo'] .fy-spinner:not([data-swatch] *) .fy-spinner__p2,
+[data-swatch][data-style='neo'] .fy-spinner .fy-spinner__p2 {
+  fill: var(--surface-3);
+  stroke: var(--border-strong);
+  stroke-linejoin: miter;
+  stroke-width: 1.5px;
+  x: 3px;
+  y: 7px;
+}
+@keyframes fy-neo-hop {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* The settings nav: its selected item is the family's marker block, ruled in ink and casting the hard offset (the shell draws
+   a soft accent pill with a literal 6px radius; no radius, no pill here). The icon reads in the block's own ink. */
+/* SCOPE: every rule here names the page (`:root`, outside any `[data-swatch]`) or a swatch of THIS style, so a Studio swatch on a
+   Neo page keeps its own selected-link fill. */
+:root[data-style='neo'] .fy-settings-nav .fy-tab:not([data-swatch] *),
+[data-swatch][data-style='neo'] .fy-settings-nav .fy-tab {
+  border-radius: var(--radius-tab);
+}
+:root[data-style='neo'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']):not([data-swatch] *),
+[data-swatch][data-style='neo'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']) {
+  background: var(--nav-sel-bg);
+  box-shadow:
+    inset 0 0 0 var(--stroke-control) var(--border-strong),
+    var(--shadow-sm);
+  color: var(--nav-sel-fg);
+}
+:root[data-style='neo']
+  .fy-settings-nav
+  .fy-tab:is(.fy-tab--active, [aria-current='page']):not([data-swatch] *)
+  .fy-icon,
+[data-swatch][data-style='neo'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']) .fy-icon {
+  color: var(--nav-sel-fg);
+}
+
+/* A FOCUS RING INSIDE A FILLED CONTROL is drawn in that fill's own ink (the label's colour, which the palette holds to 4.5:1 on it)
+   and set 2px in from the edge, so it reads against the fill and against the ink rule: the page's `--focus-color` IS the accent,
+   which on Send is the fill itself (1:1) and on the selected link a near-miss (1.0 to 7.9:1 across modes). */
+:root[data-style='neo'] .fy-composer-send:focus-visible:not([data-swatch] *),
+[data-swatch][data-style='neo'] .fy-composer-send:focus-visible {
+  outline-color: var(--accent-fg);
+  outline-offset: calc(-1 * (var(--focus-width) + 2px));
+}
+:root[data-style='neo']
+  .fy-settings-nav
+  .fy-tab:is(.fy-tab--active, [aria-current='page']):focus-visible:not([data-swatch] *),
+[data-swatch][data-style='neo'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']):focus-visible {
+  outline-color: var(--nav-sel-fg);
+  outline-offset: calc(-1 * (var(--focus-width) + var(--stroke-control) + 2px));
 }
