@@ -8,15 +8,8 @@
  * request identity of the move.
  */
 
-import {
-  AlertOctagon,
-  AlertTriangle,
-  ArrowRight,
-  LoaderCircle,
-  MessageSquare,
-  RefreshCw,
-  ShieldAlert,
-} from 'lucide-react';
+import { Spinner } from '@ferretry/app/ui';
+import { AlertOctagon, AlertTriangle, ArrowRight, MessageSquare, RefreshCw, ShieldAlert } from 'lucide-react';
 import { type FormEvent, type ReactNode, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AskToStopJobsResult, ChosenFerretAccount, FerretSummary, InflightItem } from '../../../contract/index.ts';
 import { Button } from '../../ui.ts';
@@ -235,7 +228,7 @@ export function ChangeAccount({ summary, slot, move, askToStopJobs, onCancel, on
         data-move-submitting=""
         role="status"
       >
-        <LoaderCircle aria-hidden="true" className="animate-spin text-accent" size={28} />
+        <Spinner size={28} wait />
         <p className="m-0 text-title font-semibold text-fg">
           Moving — running the safety gate, stopping the old pane and relaunching…
         </p>
@@ -574,11 +567,7 @@ function AgentJobsAsk({
           type="button"
           variant="primary"
         >
-          {ask.state === 'asking' ? (
-            <LoaderCircle aria-hidden="true" className="animate-spin" size={15} />
-          ) : (
-            <MessageSquare aria-hidden="true" size={15} />
-          )}
+          {ask.state === 'asking' ? <Spinner size={15} wait /> : <MessageSquare aria-hidden="true" size={15} />}
           {ask.state === 'asking' ? 'Asking the agent…' : 'Ask the agent to stop its background jobs'}
         </Button>
       )}

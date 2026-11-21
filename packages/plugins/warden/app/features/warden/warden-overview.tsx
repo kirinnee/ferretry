@@ -9,9 +9,9 @@
  * The page is quiet by design: stats first, then flat one-line lists — no card per row.
  */
 
-import { Loading } from '@ferretry/app/ui';
+import { Loading, Spinner } from '@ferretry/app/ui';
 import type { WardenAgendaView, WardenLeaveDuration, WardenStatusView } from '../../wire.ts';
-import { AlertTriangle, LoaderCircle, RefreshCw, ShieldCheck, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, RefreshCw, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 
 import type { WardenReadState } from '../../hooks/use-warden-poll.ts';
 import { readView } from '../../hooks/use-warden-poll.ts';
@@ -116,11 +116,7 @@ export function WardenOverview({
               disabled={sweeping || statusView?.config.enabled === false}
               onClick={onSweep}
             >
-              {sweeping ? (
-                <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-              ) : (
-                <RefreshCw size={14} aria-hidden="true" />
-              )}
+              {sweeping ? <Spinner size={14} wait /> : <RefreshCw size={14} aria-hidden="true" />}
               {sweeping ? 'Sweeping…' : 'Sweep now'}
             </button>
             <RouteLink

@@ -543,7 +543,7 @@ describe('ChangeAccount asking the agent to stop its background jobs', () => {
     await interact(() => must(askButton(root), 'ask button').click());
     const pending = control(root, 'Asking the agent…');
     expect(pending.disabled).toBe(true);
-    expect(pending.querySelector('.animate-spin')).not.toBeNull();
+    expect(pending.querySelector('.fy-spinner')).not.toBeNull();
     await interact(() => pending.click());
     await interact(async () => {
       release();

@@ -16,10 +16,10 @@ import {
   AnalyticsMetricSchema,
   type AnalyticsResponse,
 } from '../../../contract/index.ts';
-import { Loader2 } from 'lucide-react';
+
 import { type ReactNode, useId, useMemo } from 'react';
 
-import { Button, cn } from '@ferretry/app/ui';
+import { Button, cn, Spinner } from '@ferretry/app/ui';
 import type { DaemonConnection } from '../../shell.ts';
 import { AnalyticsQueryAutocomplete } from './analytics-query-autocomplete.tsx';
 import { ANALYTICS_RANGE_PRESETS } from './analytics-query-complete.ts';
@@ -93,11 +93,7 @@ export function AnalyticsQueryEditor({ value, onValueChange, onRun, querying, lo
           placeholder={ANALYTICS_QUERY_DEFAULT}
         />
         <Button type="submit" variant="primary" disabled={querying || showError} className="min-h-[44px] shrink-0">
-          {querying ? (
-            <Loader2 size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-          ) : (
-            'Run'
-          )}
+          {querying ? <Spinner size={15} wait /> : 'Run'}
           {querying && <span className="sr-only">Running query</span>}
         </Button>
       </form>

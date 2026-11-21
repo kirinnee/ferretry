@@ -10,7 +10,8 @@
  */
 
 import type { AgendaItem } from '@ferretry/core-asks/contract';
-import { ChevronUp, LoaderCircle, X } from 'lucide-react';
+import { Spinner } from '@ferretry/app/ui';
+import { ChevronUp, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { type AgendaCounts, agendaSegments } from '../../lib/agenda-chat.ts';
 import { AgendaRow } from './agenda-row.tsx';
@@ -131,7 +132,7 @@ function AgendaLineStatus({
       role="status"
       title={sending.headings.length === 0 ? undefined : sending.headings.join(', ')}
     >
-      <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
+      <Spinner size={14} wait />
       {sending.count === 1 ? 'Sending…' : `Sending ${sending.count}…`}
     </span>
   );

@@ -23,7 +23,8 @@ import {
   agendaTitle,
   hasOwnTitle,
 } from '@ferretry/core-asks/contract';
-import { LoaderCircle, TriangleAlert } from 'lucide-react';
+import { Spinner } from '@ferretry/app/ui';
+import { TriangleAlert } from 'lucide-react';
 import { createContext, useContext } from 'react';
 import { type InboxAction, undeliveredAction } from '../../lib/agenda-answers.ts';
 import { Button } from '../../shell.ts';
@@ -64,7 +65,7 @@ export function AgendaDelivery({ item, ferret, busy = false, onAct }: AgendaDeli
   if (state.sending.has(item.id))
     return (
       <p className="fy-attn-delivery" data-agenda-delivery="sending" role="status">
-        <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
+        <Spinner size={14} wait />
         Sending…
       </p>
     );

@@ -2,8 +2,8 @@
  * The pieces the Add MCP server form is built from: a labelled field, a one-line failure, and the foot with Cancel and the
  * form's one primary button (the same look as Ferrets' other action forms).
  */
-import { Button } from '@ferretry/app/ui';
-import { LoaderCircle } from 'lucide-react';
+import { Button, Spinner } from '@ferretry/app/ui';
+
 import type { ReactNode } from 'react';
 
 export function FormField({
@@ -56,11 +56,7 @@ export function FormFoot({
         Cancel
       </Button>
       <Button data-action-submit="" disabled={submitting || disabled} size="sm" type="submit" variant="primary">
-        {submitting ? (
-          <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
-        ) : (
-          icon
-        )}
+        {submitting ? <Spinner size={14} wait /> : icon}
         {submitLabel}
       </Button>
     </div>

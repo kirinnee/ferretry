@@ -6,7 +6,8 @@
  * or reading it never involves the position again. Colours are theme tokens only.
  */
 
-import { LoaderCircle, MapPin, RotateCw, X } from 'lucide-react';
+import { Spinner } from '../ui/spinner.tsx';
+import { MapPin, RotateCw, X } from 'lucide-react';
 import { accuracyLabel, coordinatePair, type LocationError, type LocationFix } from './location-share.ts';
 
 /** Where a pending share stands. `null` (no chip) is the resting state, held by the composer. */
@@ -81,7 +82,7 @@ export function PendingLocationChip({
       <div className={CHIP} data-location-draft="locating" role="status">
         <span className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-2 text-muted">
-            <LoaderCircle size={16} className="shrink-0 animate-spin" aria-hidden="true" />
+            <Spinner className="shrink-0" size={16} wait />
             Finding your location…
           </span>
           {remove}

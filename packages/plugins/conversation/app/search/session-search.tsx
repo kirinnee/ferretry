@@ -17,7 +17,7 @@ import {
   type SessionFileIndexSkip,
   sessionSearchFileHaystack,
 } from '@ferretry/core-ferrets/contract';
-import { LoaderCircle, Search, TriangleAlert } from 'lucide-react';
+import { Search, TriangleAlert } from 'lucide-react';
 import {
   createContext,
   type KeyboardEvent,
@@ -37,6 +37,7 @@ import {
   nextActiveIndex,
   SUBSTRING_SCORE,
   scoreFields,
+  Spinner,
   WORD_START_SCORE,
 } from '@ferretry/app/ui';
 import { useConversationClient } from '../client.ts';
@@ -768,7 +769,9 @@ export function SessionSearchControl({
       >
         {loading ? (
           <span className="fy-wait-gate inline-flex">
-            <LoaderCircle aria-hidden="true" className="animate-spin" size={13} data-search-indexing="" />
+            <span data-search-indexing="">
+              <Spinner size={13} />
+            </span>
           </span>
         ) : null}
       </span>
@@ -784,7 +787,7 @@ export function SessionSearchControl({
         >
           {loading && (
             <p className="fy-wait-gate m-0 flex items-center gap-2 px-3 py-2 text-ui text-muted" role="status">
-              <LoaderCircle className="animate-spin" size={14} />
+              <Spinner size={14} />
               {indexingCopy(search.taskState, search.fileState)}
             </p>
           )}

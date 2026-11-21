@@ -33,14 +33,14 @@
  * the catalog is read through the store of the daemon the picker is mounted for (`lib/runtime-models.ts`).
  */
 
-import { Check, LoaderCircle, Terminal } from 'lucide-react';
+import { Check, Terminal } from 'lucide-react';
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
 import {
   type RuntimeModelCatalog,
   type RuntimeModelChoice,
   runtimeModelCatalogErrorMessage,
 } from '../lib/runtime-models.ts';
-import { CUSTOM_MODEL_ID, contextWords, groupByTier, Loading } from '@ferretry/app/ui';
+import { contextWords, CUSTOM_MODEL_ID, groupByTier, Loading, Spinner } from '@ferretry/app/ui';
 import { callFailure } from '../lib/client.ts';
 import type { RuntimeControlApi, RuntimeControlCommand } from '../lib/runtime-switch.ts';
 import {
@@ -424,7 +424,7 @@ function NativePickerButton({
     >
       <span>{submitting ? 'Opening native picker…' : 'Use native picker in Terminal'}</span>
       {submitting ? (
-        <LoaderCircle aria-hidden="true" className="shrink-0 animate-spin" size={15} />
+        <Spinner className="shrink-0" size={15} wait />
       ) : (
         <Terminal aria-hidden="true" className="shrink-0" size={15} />
       )}
@@ -603,7 +603,7 @@ export function RuntimeChoiceMenu({ ariaLabel, items, disabled, presentation = '
                 <span className="block truncate text-meta text-muted leading-base">{item.description}</span>
               ) : null}
             </span>
-            {item.pending ? <LoaderCircle aria-hidden="true" className="shrink-0 animate-spin" size={15} /> : null}
+            {item.pending ? <Spinner className="shrink-0" size={15} wait /> : null}
           </button>
         ));
         if (group === undefined) return buttons;

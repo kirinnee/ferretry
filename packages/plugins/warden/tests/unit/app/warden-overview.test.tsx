@@ -817,7 +817,7 @@ describe('WardenChipBadge', () => {
     const idle = await mount(<WardenChipBadge chip={{ label: 'flagged', tone: 'accent' }} />);
     try {
       expect(busy.container.textContent).toBe('investigating');
-      expect(busy.container.querySelector('svg.animate-spin') === null).toBe(false);
+      expect(busy.container.querySelector('svg.fy-spinner') === null).toBe(false);
       expect(idle.container.textContent).toBe('flagged');
       expect(idle.container.querySelector('svg')).toBeNull();
     } finally {
