@@ -104,11 +104,22 @@ function drawBlocks(blocks: readonly Block[], sourceUrl: string, key = ''): Reac
 /** Characters drawn before a long text asks to be opened: a page of many long texts is not drawn whole. */
 export const COLLAPSED_CHARS = 1_000;
 
-/** `text` cut to `limit` characters, never through the middle of a surrogate pair. */
+/**
+ * `text` cut to at most `limit` characters, never through the middle of a surrogate pair and never through the middle
+ * of a word: a URL cut short is a DIFFERENT clickable address, so the cut backs up to the whitespace before it (or, in
+ * a run with none, to the start of the last "http"), and what is left is drawn as text, never as a link.
+ */
 function head(text: string, limit: number): string {
-  const cut = text.slice(0, limit);
+  if (text.length <= limit) return text;
+  let cut = text.slice(0, limit);
   const last = cut.charCodeAt(cut.length - 1);
-  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+  if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
+  // On a boundary already (the next character is whitespace): nothing was cut through.
+  if (/\s/u.test(text.charAt(cut.length))) return cut;
+  const space = cut.search(/\S*$/u);
+  if (space > 0) return cut.slice(0, space);
+  const url = cut.toLowerCase().lastIndexOf('http');
+  return url >= 0 ? cut.slice(0, url) : cut;
 }
 
 export function SafeProse({ text, sourceUrl }: { readonly text: string; readonly sourceUrl: string }) {
