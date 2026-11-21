@@ -185,7 +185,7 @@ export function CodexSettingsView({ settings }: { readonly settings: CodexSettin
             <li className="min-w-0">
               <fieldset
                 aria-label="Not yet verified by Ferretry"
-                className="m-0 flex min-w-0 flex-col gap-2 border-0 border-l-2 border-warn py-2 pl-panel pr-1 text-ui text-fg"
+                className="m-0 flex min-w-0 flex-col gap-2 rounded-control border-0 bg-warn-bg px-3 py-2 text-ui text-fg"
               >
                 <p className="m-0">{unverifiedQuestion(view, confirming.target)}</p>
                 <a href={view.verified.url} target="_blank" rel="noreferrer noopener" className="text-accent">
