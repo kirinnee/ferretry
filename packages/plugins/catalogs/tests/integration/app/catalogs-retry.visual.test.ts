@@ -80,6 +80,11 @@ describe('Settings › Catalogs when the list cannot be read', () => {
         await tab.waitForSelector('[data-catalog-failure]');
         const button = tab.getByRole('button', { name: 'Try again' });
         expect(await button.count()).toBe(1);
+        if (width === 390)
+          expect(
+            (await button.boundingBox())?.height ?? 0,
+            'the Try again is a 44px target at 390',
+          ).toBeGreaterThanOrEqual(44);
         if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name}-${scheme}-failed.png`) });
         expect(await reads(tab)).toEqual([null]);
 
