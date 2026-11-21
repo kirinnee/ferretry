@@ -142,6 +142,9 @@ const reach = async (tab: Page, key: string): Promise<void> => {
   await tab.waitForTimeout(350);
 };
 
+/** Every Next press: where it was, where it went and how long (page clock) until the target was ready. */
+const moves: { from: string; to: string; ms: number }[] = [];
+
 /** The flow's pages in the order they were reached (a page the flow dropped is never in it). */
 const walked: string[] = [];
 
@@ -325,7 +328,25 @@ const measureButton = async (tab: Page, variant: Variant, label: string, selecto
 
 /** Presses Next and waits for `to` (a page key, or `end`). */
 const next = async (tab: Page, to: string): Promise<void> => {
+  const from = await keyOf(tab);
+  const began = await tab.evaluate(() => performance.now());
   await tab.locator('[data-step-next]').click();
+  // The frame the page is READY in (the cover is down and the page said so), read in the page's own clock.
+  const readyAt = await tab
+    .waitForFunction(
+      wanted => {
+        if (wanted === 'end') return document.querySelector('[data-flow-end]') !== null ? performance.now() : false;
+        const page = document.querySelector('[data-flow-page]');
+        return page?.getAttribute('data-flow-page') === wanted && page.hasAttribute('data-ready')
+          ? performance.now()
+          : false;
+      },
+      to,
+      { timeout: 15_000 },
+    )
+    .then(handle => handle.jsonValue())
+    .catch(() => Number.NaN);
+  moves.push({ from, to, ms: Math.round((readyAt as number) - began) });
   await reach(tab, to);
 };
 
@@ -1015,6 +1036,19 @@ describe('the first run, end to end', () => {
 
 // ─── what the run found (each gap was `it.failing` until it was fixed; now each is a plain test) ───────────────────────
 describe('the gaps the gate found, now closed', () => {
+  // r11-1b G6 (owner line 4): the machines here answer at once, so a step the person moves to draws at once. A page whose
+  // lazy module had not been used yet paid React's 300 ms hold on its first draw (Lessons to Appearance 775-1254 ms,
+  // Appearance to Layouts ~400 ms at the gate); the flow now draws the next two pages hidden while the current one shows.
+  // The line is 250 ms, under React's 300 ms hold with room for the Shells pass-over and the machine write that sit in the
+  // Lessons move (base 416 ms; 98-152 ms after, box load ~50); the strict 150 ms line is the isolated move in setup-flow.visual.test.ts.
+  it('moving onto Appearance and onto Layouts stays under the 300 ms hold (the next pages were drawn in advance)', () => {
+    console.info(`G6 moves: ${moves.map(move => `${move.from} -> ${move.to} ${move.ms} ms`).join('; ')}`);
+    for (const target of ['onboarding.appearance', 'layouts.layout']) {
+      const onto = moves.filter(move => move.to === target);
+      expect(onto.length, `the run moved onto ${target}`).toBeGreaterThan(0);
+      for (const move of onto) expect(move.ms, `${move.from} -> ${target}: ms from Next to ready`).toBeLessThan(250);
+    }
+  });
   it('no page threw', () => {
     expect(seen.pageErrors).toEqual([]);
   });
