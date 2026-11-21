@@ -1,32 +1,36 @@
 /**
- * FIRST RUN › THIS DEVICE › "How should this device hear you?" — the engine cards, in a short list, with Off as a card too.
+ * FIRST RUN › THIS DEVICE › "Voice" — the engine cards as a stacked list on the left, a picture of what dictation does with
+ * the pick on the right (`StepDemo`), one line of words.
  *
  * A client step (`voice`, side client): it configures THIS browser (`fy:voice:stt-settings`), so it is asked once per device,
- * whichever daemon the person paired first. It shows at once (`ready()`); there is nothing to check first.
+ * whichever daemon the person paired first. It shows at once (`ready()`); there is nothing to check first. The shell owns the
+ * frame (the title, Back / Later / Next), so the page draws no title and no button of its own.
  *
- *   - Choosing a card saves the engine on this device and answers the step (`done()`). Off switches dictation off and keeps
- *     the engine, exactly as the Dictation switch in Settings › Voice does.
+ *   - What the device already holds is chosen on arrival; with nothing held, Parakeet 110M (this device's default, `engine-defaults.ts`)
+ *     when this browser can run it.
+ *   - A pick only REGISTERS the write (`step.commit`, contract rule 8): nothing is saved by a click or an arrow key. Next saves
+ *     the pick on this device (Off switches dictation off and keeps the engine, exactly as the Dictation switch in Settings ›
+ *     Voice does) and answers the step. A pick equal to what the device already holds saves nothing.
  *   - Choosing never downloads. A card's own Install button does, and while it runs the step is busy (`busy(label)`), so
  *     Next waits for it.
  *   - The list is short on purpose: this device's default first, then the fastest, a balanced one, the browser's own and
- *     Off. "Show every engine" opens the whole catalog, the same cards Settings › Voice draws.
+ *     Off. "Show every engine" (a disclosure, not a button) opens the whole catalog, the same cards Settings › Voice draws.
  */
 
-import { useMemo, useState } from 'react';
+import { StepDemo } from '@ferretry/app';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SttSettings, SttSettingsPatch } from '../../lib/stt/stt-settings.ts';
 import type { BrowserRecognitionSupport } from '../../lib/stt/browser-recognition.ts';
 import { DEFAULT_ON_DEVICE_ENGINE, type DeviceClass } from '../../lib/stt/engine-defaults.ts';
 import { ON_DEVICE_MODELS, type OnDeviceModel, type OnDeviceModelId } from '../../lib/stt/model-catalog.ts';
 import type { OnDeviceVoices } from '../../lib/stt/on-device-voices.ts';
-import { Button } from '../../shell-voice.ts';
 import { EngineCardGrid, type EngineChoice } from '../engine-card/engine-card-grid.tsx';
 import type { StepHost } from '@ferretry/kernel/contract';
+import { VoiceDemo } from './voice-demo.tsx';
 import { useStepReady } from './use-step-ready.ts';
 import './voice-step.css';
 
-export const VOICE_STEP_TITLE = 'How should this device hear you?';
-const VOICE_STEP_LINE =
-  'Pick an engine for dictation. Everything is chosen for this device only, and nothing downloads until you press Install.';
+const VOICE_STEP_LINE = 'This device only.';
 
 /** The few engines the short list shows, in order: the device's default, then the fastest and a balanced one. */
 export const shortListOf = (device: DeviceClass): readonly OnDeviceModelId[] => [
@@ -46,42 +50,69 @@ export interface VoiceStepProps {
   readonly voices: OnDeviceVoices | null;
   readonly browserSupport: BrowserRecognitionSupport;
   readonly deviceClass: DeviceClass;
+  /**
+   * Whether the device's store really kept the last write (`SttSettingsStore.persisted`): a browser that denies storage
+   * applies the change for this tab and keeps nothing. Read right after `update`; left out, a write is taken as kept.
+   */
+  persisted?(): boolean;
   readonly step?: StepHost | undefined;
 }
 
-export function VoiceStep({ settings, update, voices, browserSupport, deviceClass, step }: VoiceStepProps) {
+const NOT_KEPT = 'This device would not keep that choice. Allow site storage for this page, then press Next again.';
+
+export function VoiceStep({ settings, update, voices, browserSupport, deviceClass, persisted, step }: VoiceStepProps) {
   useStepReady(step);
   const [all, setAll] = useState(false);
+  const saved = choiceOf(settings);
+  // Until a card is pressed the pick is what the device holds, and nothing held yet reads as this device's default, shown
+  // chosen so Next accepts it, when this browser can run it (a default that cannot run here is never chosen for anyone).
+  const [pressed, setPick] = useState<EngineChoice | null>(null);
+  const defaultEngine = DEFAULT_ON_DEVICE_ENGINE[deviceClass];
+  const pick = pressed ?? saved ?? (voices?.get(defaultEngine)?.support.available === true ? defaultEngine : null);
+  const writer = useRef({ update, persisted });
+  writer.current = { update, persisted };
+  // What Next saves follows the pick; a pick that is what the device already holds saves nothing. "Holds" means KEPT: a write
+  // the store applied but storage refused leaves the choice in this tab's memory (it reads as saved, here and on a fresh mount
+  // after Back) while `persisted` is false, so Next must still write it, and say so, until a write is kept.
+  useEffect(() => {
+    const kept = writer.current.persisted?.() !== false;
+    step?.commit(
+      pick === null || (pick === saved && kept)
+        ? null
+        : async () => {
+            writer.current.update(patchFor(pick));
+            if (writer.current.persisted?.() === false) throw new Error(NOT_KEPT);
+          },
+    );
+  }, [pick, saved, step]);
   const models = useMemo((): readonly OnDeviceModel[] => {
     if (all) return ON_DEVICE_MODELS;
     const wanted = shortListOf(deviceClass);
     return wanted.flatMap(id => ON_DEVICE_MODELS.filter(model => model.id === id));
   }, [all, deviceClass]);
   return (
-    <section className="fy-voice-step" aria-labelledby="fy-voice-step-title">
-      <h2 id="fy-voice-step-title" className="fy-voice-step-title">
-        {VOICE_STEP_TITLE}
-      </h2>
-      <p className="fy-voice-step-line">{VOICE_STEP_LINE}</p>
+    <section className="fy-voice-step" aria-label="Voice" data-voice-step="">
       <EngineCardGrid
-        value={choiceOf(settings)}
-        onChoose={choice => {
-          update(patchFor(choice));
-          step?.done();
-        }}
+        value={pick}
+        onChoose={setPick}
         voices={voices}
         browserSupport={browserSupport}
         deviceClass={deviceClass}
         models={models}
+        brief
         onBusy={label => step?.busy(label)}
       />
-      {all ? null : (
-        <div>
-          <Button type="button" variant="outline" size="sm" className="min-h-[44px]" onClick={() => setAll(true)}>
-            Show every engine
-          </Button>
-        </div>
-      )}
+      <p className="fy-voice-step-line">{VOICE_STEP_LINE}</p>
+      <details
+        className="fy-voice-more"
+        open={all}
+        onToggle={event => setAll((event.currentTarget as HTMLDetailsElement).open)}
+      >
+        <summary>{all ? 'Show fewer engines' : 'Show every engine'}</summary>
+      </details>
+      <StepDemo>
+        <VoiceDemo pick={pick} />
+      </StepDemo>
     </section>
   );
 }

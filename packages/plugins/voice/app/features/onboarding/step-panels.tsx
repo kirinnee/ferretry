@@ -29,6 +29,7 @@ function VoiceStepWithStore({
     <VoiceStep
       settings={settings}
       update={update}
+      persisted={() => store.persisted}
       voices={voices}
       browserSupport={support}
       deviceClass={deviceClass}

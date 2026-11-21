@@ -71,9 +71,21 @@ export interface DeviceKeyCardProps {
   readonly onSave: (value: string) => void | Promise<void>;
   readonly onTest: () => void | Promise<void>;
   readonly onRemove: () => void | Promise<void>;
+  /** The first-run page's card: the link alone under the field, no sentence about Test (the "i" keeps what matters). */
+  readonly brief?: boolean;
 }
 
-export function DeviceKeyCard({ provider, status, busy, test, error, onSave, onTest, onRemove }: DeviceKeyCardProps) {
+export function DeviceKeyCard({
+  provider,
+  status,
+  busy,
+  test,
+  error,
+  onSave,
+  onTest,
+  onRemove,
+  brief = false,
+}: DeviceKeyCardProps) {
   const fieldId = useId();
   // The key lives only in the field's own value (read on Save); state knows how long it is, never what it says.
   const key = useSecretField(typed => typed.trim().length);
@@ -156,14 +168,29 @@ export function DeviceKeyCard({ provider, status, busy, test, error, onSave, onT
             <Trash2 size={14} aria-hidden="true" /> {busy === 'removing' ? 'Removing…' : 'Remove'}
           </button>
         </div>
-        <p className="fy-vs-note">
-          Get a key:{' '}
-          <a href={copy.keyUrl} target="_blank" rel="noreferrer noopener" className="break-all text-accent underline">
-            {copy.keyUrl}
-            <ExternalLink size={12} aria-hidden="true" className="ml-1 inline align-baseline" />
-          </a>
-          . Test lists the models your key can use. It is free.
-        </p>
+        {brief ? (
+          <p className="fy-vs-note">
+            <a
+              href={copy.keyUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-accent underline"
+              title={copy.keyUrl}
+            >
+              Get a key
+              <ExternalLink size={12} aria-hidden="true" className="ml-1 inline align-baseline" />
+            </a>
+          </p>
+        ) : (
+          <p className="fy-vs-note">
+            Get a key:{' '}
+            <a href={copy.keyUrl} target="_blank" rel="noreferrer noopener" className="break-all text-accent underline">
+              {copy.keyUrl}
+              <ExternalLink size={12} aria-hidden="true" className="ml-1 inline align-baseline" />
+            </a>
+            . Test lists the models your key can use. It is free.
+          </p>
+        )}
         {test !== null && (
           <p className="fy-vs-note" data-tone={test.ok ? 'ok' : 'warn'} role="status" data-device-key-test="">
             {keyTestLine(test)}
@@ -195,9 +222,11 @@ export interface SpeedupKeysSettingsProps {
   readonly keys?: DeviceSpeedupKeys | null;
   /** Told once each time a key was saved and read back as saved; never on a failed save, a test or a removal. */
   readonly onSaved?: (provider: SpeedupKeyProvider) => void;
+  /** The first-run page: each card says less (see {@link DeviceKeyCardProps.brief}). */
+  readonly brief?: boolean;
 }
 
-export function SpeedupKeysSettings({ keys: injected, onSaved }: SpeedupKeysSettingsProps) {
+export function SpeedupKeysSettings({ keys: injected, onSaved, brief = false }: SpeedupKeysSettingsProps) {
   const ambient = useSpeedupKeys();
   const keys = injected === undefined ? ambient : injected;
   const [cards, setCards] = useState<Readonly<Record<SpeedupKeyProvider, CardState>>>({ groq: IDLE, cerebras: IDLE });
@@ -268,6 +297,7 @@ export function SpeedupKeysSettings({ keys: injected, onSaved }: SpeedupKeysSett
                 busy={card.busy}
                 test={card.test}
                 error={card.error}
+                brief={brief}
                 onSave={value => act(provider, 'saving', async vault => await vault.save(provider, value))}
                 onRemove={() => act(provider, 'removing', async vault => await vault.remove(provider))}
                 onTest={() =>

@@ -59,6 +59,22 @@ export const ENGINE_LINES: Readonly<Record<OnDeviceModelId, string>> = {
   parakeet: 'Most accurate. Wants a laptop.',
 };
 
+/**
+ * The lines cut to what the bars do not already say, for the first-run page where the owner asked for less description
+ * ("reduce the amount of description"): speed, accuracy and size are the bars, so a card says nothing more (the demo shows words
+ * arriving live or after Stop). The long line and the measured paragraph stay behind the card's "i" and in Settings › Voice.
+ */
+export const ENGINE_BRIEF_LINES: Readonly<Record<OnDeviceModelId, string>> = {
+  'sherpa-zipformer-en': '',
+  'moonshine-tiny-en': '',
+  'moonshine-base-en': '',
+  'whisper-tiny-en': '',
+  'whisper-base-en': '',
+  'parakeet-tdt-110m': '',
+  'vosk-small-en': '',
+  parakeet: '',
+};
+
 /** One bar: its label, how long it is (0–1), and the words beside it. */
 export interface EngineBar {
   readonly label: 'Speed' | 'Accuracy' | 'Size';
@@ -98,6 +114,14 @@ export function engineBars(model: OnDeviceModel): readonly EngineBar[] {
 /** A bar group's text equivalent for a screen reader: "Speed 0.4 s. Accuracy 52%. Size 86 MB." */
 export const barsText = (bars: readonly EngineBar[]): string => bars.map(bar => `${bar.label} ${bar.text}.`).join(' ');
 
-/** The bars as the shared `OptionBars` takes them. */
-export const optionBarsOf = (bars: readonly EngineBar[]): readonly { label: string; value: number; text: string }[] =>
-  bars.map(bar => ({ label: bar.label, value: bar.value, text: bar.text }));
+/**
+ * The bars as the shared `OptionBars` takes them. `compact` (the first-run page) draws the length alone: the numbers stay in the
+ * card's description for a screen reader and behind the "i", and the bar's length is what is seen at a glance.
+ */
+export const optionBarsOf = (
+  bars: readonly EngineBar[],
+  compact = false,
+): readonly { label: string; value: number; text?: string }[] =>
+  bars.map(bar =>
+    compact ? { label: bar.label, value: bar.value } : { label: bar.label, value: bar.value, text: bar.text },
+  );

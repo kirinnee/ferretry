@@ -22,7 +22,7 @@ import type { OnDeviceInstallSnapshot, OnDeviceVoice } from '../../lib/stt/on-de
 import type { OnDeviceVoices } from '../../lib/stt/on-device-voices.ts';
 import type { DictationEngineId } from '../../lib/stt/stt-settings.ts';
 import { EngineCard, type InstallView } from './engine-card.tsx';
-import { ENGINE_LINES, engineBars } from './engine-numbers.ts';
+import { ENGINE_BRIEF_LINES, ENGINE_LINES, engineBars } from './engine-numbers.ts';
 import './engine-card.css';
 
 /** What a card can choose: an engine, or `off` (dictation is switched off on this device). */
@@ -94,6 +94,8 @@ interface OnDeviceCardProps {
   readonly model: OnDeviceModel;
   readonly voice: OnDeviceVoice | null;
   readonly badge: string | undefined;
+  /** A few words under the name instead of the sentence (the first-run page). */
+  readonly brief: boolean;
   readonly group: string;
   readonly value: EngineChoice | null;
   readonly chosen: EngineChoice | null;
@@ -105,6 +107,7 @@ interface OnDeviceCardProps {
 function OnDeviceFace({
   model,
   badge,
+  brief,
   group,
   value,
   chosen,
@@ -123,6 +126,7 @@ function OnDeviceFace({
       name={cardName(model)}
       line={line}
       bars={engineBars(model)}
+      compact={brief}
       chips={chipsOf(model)}
       details={detailsOf(model)}
       selected={value === model.id}
@@ -137,7 +141,7 @@ function OnDeviceFace({
 }
 
 /** A card whose voice exists: its install phase is read live, and a running download is reported up. */
-function InstallingCard({ voice, onBusy, ...face }: OnDeviceCardProps & { readonly voice: OnDeviceVoice }) {
+function InstallingCard({ voice, onBusy, brief, ...face }: OnDeviceCardProps & { readonly voice: OnDeviceVoice }) {
   const snapshot = useOnDeviceInstall(voice);
   const installing = snapshot.phase === 'installing';
   const { model } = face;
@@ -148,19 +152,25 @@ function InstallingCard({ voice, onBusy, ...face }: OnDeviceCardProps & { readon
   return (
     <OnDeviceFace
       {...face}
+      brief={brief}
       install={installViewOf(snapshot, voice)}
-      line={installing ? `Downloading ${snapshot.label?.toLowerCase() ?? 'the model'}…` : ENGINE_LINES[model.id]}
+      line={
+        installing
+          ? `Downloading ${snapshot.label?.toLowerCase() ?? 'the model'}…`
+          : (brief ? ENGINE_BRIEF_LINES : ENGINE_LINES)[model.id]
+      }
       {...(snapshot.error === undefined ? {} : { error: snapshot.error.message })}
     />
   );
 }
 
-function OnDeviceCard({ voice, onBusy, ...face }: OnDeviceCardProps) {
-  if (voice !== null) return <InstallingCard voice={voice} onBusy={onBusy} {...face} />;
+function OnDeviceCard({ voice, onBusy, brief, ...face }: OnDeviceCardProps) {
+  if (voice !== null) return <InstallingCard voice={voice} onBusy={onBusy} brief={brief} {...face} />;
   return (
     <OnDeviceFace
       {...face}
-      line={ENGINE_LINES[face.model.id]}
+      brief={brief}
+      line={(brief ? ENGINE_BRIEF_LINES : ENGINE_LINES)[face.model.id]}
       install={{ kind: 'unavailable', reason: `${face.model.shortName} is not available in this copy of Ferretry.` }}
     />
   );
@@ -182,6 +192,8 @@ export interface EngineCardGridProps {
   readonly browser?: boolean;
   /** Whether an Off card is listed. */
   readonly off?: boolean;
+  /** A few words per card instead of a sentence (the first-run page; the full lines stay behind the "i"). */
+  readonly brief?: boolean;
   /** Told when a download starts (`Downloading Whisper tiny…`) and when none is running (`null`). */
   onBusy?(label: string | null): void;
   readonly label?: string;
@@ -198,6 +210,7 @@ export function EngineCardGrid({
   models = ON_DEVICE_MODELS,
   browser = true,
   off = true,
+  brief = false,
   onBusy,
   label = 'How this device hears you',
   className,
@@ -251,16 +264,17 @@ export function EngineCardGrid({
           chosen={chosen}
           onChoose={choose}
           onBusy={noteBusy}
-          badge={DEFAULT_ON_DEVICE_ENGINE[deviceClass] === model.id ? 'Default' : undefined}
+          badge={!brief && DEFAULT_ON_DEVICE_ENGINE[deviceClass] === model.id ? 'Default' : undefined}
+          brief={brief}
         />
       ))}
       {browser ? (
         <EngineCard
           id="browser"
           name="Browser voice"
-          line="Your browser's own. Words appear live."
+          line={brief ? '' : "Your browser's own. Words appear live."}
           bars={null}
-          note="Not measured. Nothing to download."
+          note={brief ? '' : 'Not measured. Nothing to download.'}
           chips={['Live words', 'Not on device']}
           details={[
             'The browser’s own speech recognition. Nothing downloads, but most browsers send the audio to their maker to be turned into text, so choose an on-device engine when that matters.',
@@ -282,8 +296,9 @@ export function EngineCardGrid({
         <EngineCard
           id="off"
           name="Off"
-          line="No microphone button."
+          line={brief ? '' : 'No microphone button.'}
           bars={null}
+          {...(brief ? { note: '' } : {})}
           chips={[]}
           details={['Dictation is switched off on this device. Turn it on again any time in Settings › Voice.']}
           selected={value === 'off'}
