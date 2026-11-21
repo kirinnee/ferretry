@@ -1,3 +1,4 @@
+import { isSecretFileName, isSecretFolderName } from '@ferretry/std';
 import { BINARY_SNIFF_BYTES, FsError } from './types.ts';
 
 /**
@@ -10,33 +11,6 @@ import { BINARY_SNIFF_BYTES, FsError } from './types.ts';
  * root pinner port; nothing here is a substitute for it.
  */
 
-/** Basenames and globs refused unconditionally, in content and in diff. */
-const DENY_PATTERNS: readonly RegExp[] = [
-  /^\.env$/i,
-  /^\.env\..*$/i,
-  /^secrets?\.ya?ml$/i,
-  /^secrets?\.enc\.ya?ml$/i,
-  /^secrets?\.json$/i,
-  /\.pem$/i,
-  /\.key$/i,
-  /^id_rsa/i,
-  /^id_ed25519/i,
-  /^id_ecdsa/i,
-  /^id_dsa/i,
-  /\.age$/i,
-  /credentials.*\.json$/i,
-  /\.kdbx$/i,
-  /^\.netrc$/i,
-  /^\.npmrc$/i,
-  /^\.pypirc$/i,
-  /^\.pgpass$/i,
-  /^\.htpasswd$/i,
-  /\.p12$/i,
-  /\.pfx$/i,
-  /\.jks$/i,
-  /\.keystore$/i,
-];
-
 /**
  * Directories refused wholesale, at any depth.
  *
@@ -44,6 +18,10 @@ const DENY_PATTERNS: readonly RegExp[] = [
  * `node_modules` is pure noise and hundred-thousand-entry listings. Matched case-insensitively
  * because a macOS checkout is case-preserving but case-INsensitive, so `.GIT/config` opens the same
  * file as `.git/config`.
+ *
+ * Which NAMES say "secret" — files (`.env`, `*.pem`, `id_*`, `auth.json`) and key-store folders
+ * (`.ssh`, `.gnupg`) — is not decided here: `secret-names.ts` in `@ferretry/std` is the one list this gate and
+ * the project folder explorer both read.
  */
 const DENY_DIRECTORIES: readonly string[] = ['.git', 'node_modules'];
 
@@ -113,7 +91,7 @@ export function deniedSegment(rel: string): string | undefined {
     .split('/')
     .find(
       segment =>
-        DENY_DIRECTORIES.includes(segment.toLowerCase()) || DENY_PATTERNS.some(pattern => pattern.test(segment)),
+        DENY_DIRECTORIES.includes(segment.toLowerCase()) || isSecretFileName(segment) || isSecretFolderName(segment),
     );
 }
 
