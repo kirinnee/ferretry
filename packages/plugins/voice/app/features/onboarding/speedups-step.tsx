@@ -23,7 +23,7 @@ import { SpeedupsDemo } from './speedups-demo.tsx';
 import { useStepReady } from './use-step-ready.ts';
 import './voice-step.css';
 
-const SPEEDUPS_STEP_LINE = 'Optional. Keys make clean-up faster. Add one later in Settings › Voice.';
+const SPEEDUPS_STEP_LINE = 'Optional: a key makes clean-up faster.';
 
 /** Whether the page has anything to say: dictation is on and a local engine was picked. */
 export const needsSpeedups = (settings: SttSettings): boolean => settings.enabled && isOnDeviceEngine(settings.engine);
@@ -47,7 +47,7 @@ export function SpeedupsStep({
   return (
     <section className="fy-voice-step" aria-label="Speed-ups" data-speedups-step="">
       <p className="fy-voice-step-line">{SPEEDUPS_STEP_LINE}</p>
-      <SpeedupKeysSettings keys={keys} onSaved={() => step?.done()} />
+      <SpeedupKeysSettings keys={keys} brief onSaved={() => step?.done()} />
       <StepDemo>
         <SpeedupsDemo />
       </StepDemo>

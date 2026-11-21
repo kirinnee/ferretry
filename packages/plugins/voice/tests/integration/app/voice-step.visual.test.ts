@@ -105,6 +105,64 @@ interface Fake {
 }
 const fakeOf = (tab: Tab) => tab.evaluate(() => (window as unknown as { __fake: Fake }).__fake);
 
+/**
+ * The DESCRIPTION a person can see on the page: every character in the page body and its demo (`.fy-spf__main`) that is not
+ * a card title, a bar's label or value, or a control's own label (the `skip` selector names them). That is the page's
+ * line, each card's line and note, and the demo's words: the owner's "reduce the amount of description" as a number.
+ * Hidden text (the chips, the "i" text, descriptions for a screen reader) is not seen, so it is not counted.
+ * Self-contained: Playwright runs its source in the page.
+ */
+function seenText(skip: string): string {
+  const parts: string[] = [];
+  const main = document.querySelector('.fy-spf__main') as Element;
+  const walker = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const el = node.parentElement;
+    if (el === null || el.closest(skip) !== null || !el.checkVisibility({ checkVisibilityCSS: true })) continue;
+    const text = (node.textContent ?? '').replace(/\s+/g, ' ').trim();
+    if (text !== '') parts.push(text);
+  }
+  return parts.join(' ');
+}
+const SEEN_TEXT_MAX = 160;
+const VOICE_NOT_DESCRIPTION = '.fy-engine-name, .fy-engine-badge, .fy-engine-bars, .fy-engine-state, button, summary';
+const SPEEDUPS_NOT_DESCRIPTION = '[data-setting-row] [id$="-label"], [data-setting-hint], button';
+
+interface DemoProbe {
+  names: string[];
+  states: string[];
+  atStart: string[];
+  atEnd: string[];
+}
+/**
+ * Does the demo really PLAY? Reads the browser's own animation list for the demo (a demo whose animation CSS was removed has
+ * none), checks each runs on its own, then seeks each to its first and last frame and reads the element's computed opacity:
+ * 0 before, 1 after. Destructive (it pauses them), so a test probes once per mount.
+ */
+const probeDemo = (tab: Tab, demo: string): Promise<DemoProbe> =>
+  tab.evaluate(selector => {
+    const root = document.querySelector(selector) as HTMLElement;
+    const animations = root.getAnimations({ subtree: true }) as CSSAnimation[];
+    const targets = animations.map(animation => (animation.effect as KeyframeEffect).target as HTMLElement);
+    const states = animations.map(animation => animation.playState);
+    const opacity = (el: HTMLElement) => getComputedStyle(el).opacity;
+    for (const animation of animations) {
+      animation.pause();
+      animation.currentTime = 0;
+    }
+    const atStart = targets.map(opacity);
+    for (const animation of animations) animation.currentTime = animation.effect?.getComputedTiming().endTime as number;
+    const atEnd = targets.map(opacity);
+    return { names: animations.map(animation => animation.animationName), states, atStart, atEnd };
+  }, demo);
+
+const expectPlays = (probe: DemoProbe, count: number) => {
+  expect(probe.names).toEqual(Array<string>(count).fill('fy-vd-word'));
+  for (const state of probe.states) expect(['running', 'finished']).toContain(state);
+  expect(probe.atStart).toEqual(Array<string>(count).fill('0'));
+  expect(probe.atEnd).toEqual(Array<string>(count).fill('1'));
+};
+
 const VOICE = '&view=voice';
 const SPEEDUPS = '&view=speedups';
 const CARD = '.fy-engine-card';
@@ -156,7 +214,12 @@ describe('the Voice first-run page', () => {
             expect((g.cards[i]?.y ?? 0) > (g.cards[i - 1]?.y ?? 0)).toBe(true);
           expect(g.checked).toBe('parakeet-tdt-110m');
           expect(g.prose.length).toBeGreaterThan(0);
-          expect(g.prose.length).toBeLessThanOrEqual(160);
+          // Everything seen on the page and in its demo, card titles aside, not just the intro line.
+          const seen = await tab.evaluate(seenText, VOICE_NOT_DESCRIPTION);
+          // A failure shows the text itself, so what to cut is on screen.
+          expect(seen.length <= SEEN_TEXT_MAX ? '' : `${seen.length} chars: ${seen}`).toBe('');
+          // The demo plays: the browser has the animations running, and each takes its word from invisible to seen.
+          expectPlays(await probeDemo(tab, '[data-voice-demo]'), 5);
           expect(g.stray).toEqual([]);
           expect(g.scrollX).toBeLessThanOrEqual(0);
           for (const button of g.buttons) expect(button.right).toBeLessThanOrEqual(g.viewport);
@@ -234,6 +297,75 @@ describe('the Voice first-run page', () => {
     }
   });
 
+  it('a pick plays the demo again: live words, then Off, each from its own first frame (1280, 390)', async () => {
+    for (const viewport of VIEWPORTS) {
+      const { tab, close } = await open(viewport, 'studio-light', VOICE, CARD);
+      try {
+        await tab.locator('.fy-engine-card[data-engine="browser"] input').click();
+        await tab.waitForFunction(() => document.querySelector('[data-voice-demo="live"]') !== null);
+        expectPlays(await probeDemo(tab, '[data-voice-demo]'), 5);
+        await tab.locator('.fy-engine-card[data-engine="off"] input').click();
+        await tab.waitForFunction(() => document.querySelector('[data-voice-demo="off"]') !== null);
+        expectPlays(await probeDemo(tab, '[data-voice-demo]'), 1);
+      } finally {
+        await close();
+      }
+    }
+  });
+
+  it('with motion reduced the demo has no animation and shows every word (1280)', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', VOICE, CARD);
+    try {
+      await tab.emulateMedia({ reducedMotion: 'reduce' });
+      const now = await tab.evaluate(() => ({
+        animations: (document.querySelector('[data-voice-demo]') as HTMLElement).getAnimations({ subtree: true })
+          .length,
+        opacities: [...document.querySelectorAll('.fy-vd__word')].map(el => getComputedStyle(el).opacity),
+      }));
+      expect(now.animations).toBe(0);
+      expect(now.opacities).toEqual(['1', '1', '1', '1', '1']);
+    } finally {
+      await close();
+    }
+  });
+
+  it('storage that refuses the write keeps the page and says so; the next try that is kept moves on (1280)', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', `${VOICE}&save=denied-once`, CARD);
+    try {
+      await tab.locator('.fy-engine-card[data-engine="browser"] input').click();
+      await tab.locator('[data-step-next]').click();
+      await tab.locator('[data-flow-commit-error]').waitFor({ state: 'visible' });
+      expect(await tab.locator('[data-flow-commit-error]').innerText()).toContain('would not keep');
+      expect(await tab.locator('[data-next-page]').count()).toBe(0);
+      expect(await tab.locator(CARD).count()).toBe(5);
+      // The tab already holds the pick, so "what is saved" now equals it: Next still has to write it again.
+      await tab.locator('[data-step-next]').click();
+      await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
+      expect(((await fakeOf(tab)) as Fake).writes).toEqual([
+        { enabled: true, engine: 'browser' },
+        { enabled: true, engine: 'browser' },
+      ]);
+    } finally {
+      await close();
+    }
+  });
+
+  it('storage that keeps refusing never lets Next through (1280)', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', `${VOICE}&save=denied`, CARD);
+    try {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await tab.locator('[data-step-next]').click();
+        await tab.locator('[data-flow-commit-error]').waitFor({ state: 'visible' });
+        expect(await tab.locator('[data-flow-commit-error]').innerText()).toContain('would not keep');
+        await tab.waitForFunction(() => document.querySelector('[data-step-next]:not([disabled])') !== null);
+      }
+      expect(await tab.locator('[data-next-page]').count()).toBe(0);
+      expect(((await fakeOf(tab)) as Fake).writes.length).toBe(3);
+    } finally {
+      await close();
+    }
+  });
+
   it('"Show every engine" opens the whole list and is not a button (1280)', async () => {
     const { tab, close } = await open(VIEWPORTS[0], 'studio-light', VOICE, CARD);
     try {
@@ -274,7 +406,10 @@ describe('the Speed-ups first-run page', () => {
           expect(Math.abs((g.rows[0]?.x ?? 0) - (g.rows[1]?.x ?? 1))).toBeLessThanOrEqual(1);
           expect((g.rows[1]?.y ?? 0) > (g.rows[0]?.y ?? 0)).toBe(true);
           expect(g.prose.length).toBeGreaterThan(0);
-          expect(g.prose.length).toBeLessThanOrEqual(160);
+          const seen = await tab.evaluate(seenText, SPEEDUPS_NOT_DESCRIPTION);
+          // A failure shows the text itself, so what to cut is on screen.
+          expect(seen.length <= SEEN_TEXT_MAX ? '' : `${seen.length} chars: ${seen}`).toBe('');
+          expectPlays(await probeDemo(tab, '[data-speedups-demo]'), 1);
           expect(g.stray).toEqual([]);
           expect(g.scrollX).toBeLessThanOrEqual(0);
           if (viewport.phone) expect(g.demo.h).toBeLessThanOrEqual(140);

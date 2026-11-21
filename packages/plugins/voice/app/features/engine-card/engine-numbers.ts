@@ -59,6 +59,21 @@ export const ENGINE_LINES: Readonly<Record<OnDeviceModelId, string>> = {
   parakeet: 'Most accurate. Wants a laptop.',
 };
 
+/**
+ * The same lines cut to a few words, for the first-run page where the owner asked for less description ("reduce the amount of
+ * description"). The long line and the measured paragraph stay behind the card's "i" and in Settings › Voice.
+ */
+export const ENGINE_BRIEF_LINES: Readonly<Record<OnDeviceModelId, string>> = {
+  'sherpa-zipformer-en': 'Fastest. Live words.',
+  'moonshine-tiny-en': 'Small and quick.',
+  'moonshine-base-en': 'Balanced.',
+  'whisper-tiny-en': 'Small, slower.',
+  'whisper-base-en': 'Careful, slow.',
+  'parakeet-tdt-110m': 'Accurate, light.',
+  'vosk-small-en': 'Smallest.',
+  parakeet: 'Most accurate.',
+};
+
 /** One bar: its label, how long it is (0–1), and the words beside it. */
 export interface EngineBar {
   readonly label: 'Speed' | 'Accuracy' | 'Size';

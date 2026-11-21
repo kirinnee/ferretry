@@ -16,6 +16,7 @@ import type { ModelInstaller, ModelStoreStatus } from '../../../../../app/lib/st
 import { OnDeviceVoice } from '../../../../../app/lib/stt/on-device-voice.ts';
 import { OnDeviceVoices } from '../../../../../app/lib/stt/on-device-voices.ts';
 import { DeviceSpeedupKeys } from '../../../../../app/lib/stt/speedup-keys.ts';
+import { SttSettingsStore } from '../../../../../app/lib/stt/stt-settings.ts';
 import { StoreProvider, createVoiceStore, type VoiceStore } from '../../../../../app/lib/voice-store.tsx';
 import { interact, mount, must, submit, typeInto } from '../../../../support/app/dom.ts';
 
@@ -175,6 +176,42 @@ describe('<VoiceStep> over the real voice store', () => {
     expect(store.stt.get().engine).toBeNull();
     await interact(async () => await save()?.());
     expect(store.stt.get()).toMatchObject({ enabled: true, engine: 'sherpa-zipformer-en' });
+    await view.unmount();
+  });
+});
+
+describe('<VoiceStep> when the browser denies storage', () => {
+  it('rejects Next with the reason until a write is really kept, even though this tab already holds the pick', async () => {
+    let allow = false;
+    const denying = new SttSettingsStore({
+      getItem: () => null,
+      setItem: () => {
+        if (!allow) throw new Error('QuotaExceededError');
+      },
+    });
+    const store: VoiceStore = { ...storeOver(catalog(true)), stt: denying };
+    const { host, save } = fakeHost();
+    const view = await mount(
+      <StoreProvider store={store}>
+        <VoiceStepContainer step={host} />
+      </StoreProvider>,
+    );
+    await settle();
+    await interact(() => radio(view.container, 'sherpa-zipformer-en').click());
+    await interact(async () => await save()?.().catch(() => undefined));
+    // The first Next was refused with the reason, and the store says nothing was kept.
+    expect(denying.persisted).toBe(false);
+    expect(denying.get()).toMatchObject({ enabled: true, engine: 'sherpa-zipformer-en' });
+    await settle();
+    expect(save()).not.toBeNull();
+    const refusals: string[] = [];
+    await interact(async () => {
+      await save()?.().catch((cause: unknown) => void refusals.push(String(cause)));
+    });
+    expect(refusals.join()).toContain('would not keep');
+    allow = true;
+    await interact(async () => await save()?.());
+    expect(denying.persisted).toBe(true);
     await view.unmount();
   });
 });

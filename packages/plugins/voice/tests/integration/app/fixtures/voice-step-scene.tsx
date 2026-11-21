@@ -7,7 +7,10 @@
  *
  *   ?view=voice|speedups
  *   ?saved=none|browser|off   what this device already holds for the Voice page (none: nothing chosen yet)
- *   ?save=fail                the first commit is refused
+ *   ?save=fail                the first commit is refused (the writer throws)
+ *   ?save=denied              storage denies every write: like the real store, the change applies for this tab and
+ *                             `persisted` reads false afterwards
+ *   ?save=denied-once         storage denies the first write only
  *   ?phone=1                  the device is a phone (the short list's first card follows the device class)
  *   ?theme=<family>-<mode>
  */
@@ -30,6 +33,9 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const view = params.get('view') ?? 'voice';
 const saved = params.get('saved') ?? 'none';
 let refuse = params.get('save') === 'fail';
+const deny = params.get('save') === 'denied' ? Number.POSITIVE_INFINITY : params.get('save') === 'denied-once' ? 1 : 0;
+let writeCount = 0;
+let kept = true;
 const deviceClass: DeviceClass = params.get('phone') === '1' ? 'phone' : 'computer';
 
 interface Fake {
@@ -179,8 +185,11 @@ function Host() {
                 throw new Error('This device refused the write.');
               }
               fake.writes.push(patch);
+              writeCount += 1;
+              kept = writeCount > deny;
               setSettings(previous => ({ ...previous, ...patch }));
             }}
+            persisted={() => kept}
             voices={voices}
             browserSupport={{ available: true, availability: 'available', implementation: 'standard' }}
             deviceClass={deviceClass}

@@ -194,3 +194,21 @@
 .fy-voice-step .fy-engine-card[data-engine='off'] .fy-engine-none {
   grid-column: 1 / -1;
 }
+
+/* The two cards with no bars (the browser's own voice, Off) are as tall as their words, not as tall as a card with bars: no
+   empty row under "No mic button.", no blank line between the browser card's two lines. */
+.fy-voice-step .fy-engine-card[data-engine='browser'] {
+  --fy-engine-height: 78px;
+}
+.fy-voice-step .fy-engine-card[data-engine='off'] {
+  --fy-engine-height: 58px;
+}
+.fy-voice-step .fy-engine-card[data-engine='browser'] .fy-engine-body {
+  grid-template-rows: 18px 18px 18px;
+}
+.fy-voice-step .fy-engine-card[data-engine='off'] .fy-engine-body {
+  grid-template-rows: 18px 18px;
+}
+.fy-voice-step .fy-engine-none:empty {
+  display: none;
+}

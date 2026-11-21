@@ -30,7 +30,7 @@ import { VoiceDemo } from './voice-demo.tsx';
 import { useStepReady } from './use-step-ready.ts';
 import './voice-step.css';
 
-const VOICE_STEP_LINE = 'Chosen for this device only. Nothing downloads until you press Install.';
+const VOICE_STEP_LINE = 'This device only.';
 
 /** The few engines the short list shows, in order: the device's default, then the fastest and a balanced one. */
 export const shortListOf = (device: DeviceClass): readonly OnDeviceModelId[] => [
@@ -50,10 +50,17 @@ export interface VoiceStepProps {
   readonly voices: OnDeviceVoices | null;
   readonly browserSupport: BrowserRecognitionSupport;
   readonly deviceClass: DeviceClass;
+  /**
+   * Whether the device's store really kept the last write (`SttSettingsStore.persisted`): a browser that denies storage
+   * applies the change for this tab and keeps nothing. Read right after `update`; left out, a write is taken as kept.
+   */
+  persisted?(): boolean;
   readonly step?: StepHost | undefined;
 }
 
-export function VoiceStep({ settings, update, voices, browserSupport, deviceClass, step }: VoiceStepProps) {
+const NOT_KEPT = 'This device would not keep that choice. Allow site storage for this page, then press Next again.';
+
+export function VoiceStep({ settings, update, voices, browserSupport, deviceClass, persisted, step }: VoiceStepProps) {
   useStepReady(step);
   const [all, setAll] = useState(false);
   const saved = choiceOf(settings);
@@ -62,15 +69,20 @@ export function VoiceStep({ settings, update, voices, browserSupport, deviceClas
   const [pressed, setPick] = useState<EngineChoice | null>(null);
   const defaultEngine = DEFAULT_ON_DEVICE_ENGINE[deviceClass];
   const pick = pressed ?? saved ?? (voices?.get(defaultEngine)?.support.available === true ? defaultEngine : null);
-  const writer = useRef(update);
-  writer.current = update;
+  const writer = useRef({ update, persisted });
+  writer.current = { update, persisted };
+  // A write the store applied but storage refused: the pick then reads as held (this tab has it), yet nothing was kept, so
+  // Next must still write it, and say so, until a write is kept.
+  const unkept = useRef(false);
   // What Next saves follows the pick; a pick that is what the device already holds saves nothing.
   useEffect(() => {
     step?.commit(
-      pick === null || pick === saved
+      pick === null || (pick === saved && !unkept.current)
         ? null
         : async () => {
-            writer.current(patchFor(pick));
+            writer.current.update(patchFor(pick));
+            unkept.current = writer.current.persisted?.() === false;
+            if (unkept.current) throw new Error(NOT_KEPT);
           },
     );
   }, [pick, saved, step]);
@@ -88,6 +100,7 @@ export function VoiceStep({ settings, update, voices, browserSupport, deviceClas
         browserSupport={browserSupport}
         deviceClass={deviceClass}
         models={models}
+        brief
         onBusy={label => step?.busy(label)}
       />
       <p className="fy-voice-step-line">{VOICE_STEP_LINE}</p>
