@@ -65,8 +65,23 @@
   }
 }
 
-/* "Show every engine": a disclosure (summary), not a button, as tall as a button to press. */
+/* The cards' Install and Resume fill the right column (9.5rem = 152 px), so every one is the same width, and never under the
+   footer's 136 px (r11-1b G3); the longest label ("Install (683 MB)", 143 px) fits. `:root` outranks the engine card's own
+   `min-width: 0`; the icon-only cancel has no data-state. */
+:root .fy-voice-step .fy-engine-mini[data-state='idle'],
+:root .fy-voice-step .fy-engine-mini[data-state='partial'] {
+  inline-size: 9.5rem;
+  min-width: 136px;
+}
+
+/* "Show every engine": a disclosure (summary), not a button, as tall as a button to press. Its ring is drawn 4 px outside, and
+   it is the last thing on the page at a phone's width: Tab scrolls the summary flush with the bottom of the frame, so its
+   scroll margin (and the room under the disclosure) keeps the ring inside it, never cut (r11-1b G3). */
+.fy-voice-more {
+  padding-block-end: 8px;
+}
 .fy-voice-more > summary {
+  scroll-margin-block-end: 8px;
   align-items: center;
   color: var(--accent);
   cursor: pointer;
@@ -81,7 +96,7 @@
 
 /* The key cards sit in the left column; their buttons are one row that wraps. */
 .fy-voice-step [data-device-key] .fy-vs-field > button {
-  min-inline-size: 5.5rem;
+  min-inline-size: 136px;
 }
 
 /* The Speed-ups page names itself once: the group's own heading and its intro row repeat the page's line. */

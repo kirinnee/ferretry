@@ -15,3 +15,5 @@ export const sceneBuilder: string = new URL('./build-scene.ts', import.meta.url)
 export const sceneServer: string = new URL('./serve-scene.ts', import.meta.url).pathname;
 
 export { ALL_PALETTE_IDS, COLOUR_TOOLS, type ColourTools, type TextContrastReport, textContrast } from './colour.ts';
+
+export { type FocusStop, type FocusWalk, ringOf, walkFocusRings } from './focus-ring.ts';

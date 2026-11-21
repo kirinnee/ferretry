@@ -53,7 +53,7 @@ import {
 } from './first-passkey-offer.tsx';
 import type { DaemonConnection } from '../../shell-grants.ts';
 import { PairedNext } from './paired-next.tsx';
-import { PairingBack } from './pairing-back.tsx';
+import { PairButton, PairingBack } from './pairing-back.tsx';
 import { PairingSky } from './pairing-sky.tsx';
 
 /** What the exchange learned, so the screen can say how it got there. Both parts are optional: a host may know neither. */
@@ -428,10 +428,10 @@ export function PairingScreen({
               {linkError}
             </p>
           )}
-          <button type="submit" className="kt-btn min-h-[44px] self-start px-6 py-3" disabled={!link.filled}>
+          <PairButton type="submit" className="self-start px-6 py-3" disabled={!link.filled}>
             <Link2 size={16} aria-hidden="true" />
             Use this link
-          </button>
+          </PairButton>
         </form>
       ) : null}
 
@@ -727,14 +727,9 @@ function PairingFocus({
             )}
           </p>
         )}
-        <button
-          type="button"
-          className="kt-btn min-h-[44px] self-center px-6 py-3"
-          data-variant="primary"
-          onClick={onCancel}
-        >
+        <PairButton type="button" className="self-center px-6 py-3" data-variant="primary" onClick={onCancel}>
           {paired ? 'Back to my daemons' : 'Start over'}
-        </button>
+        </PairButton>
       </PairingFrame>
     );
   }
@@ -815,15 +810,15 @@ function PairingFocus({
           <span>
             This device will be called <span className="font-semibold text-fg">{deviceName}</span>.
           </span>
-          <button
+          <PairButton
             type="button"
-            className="kt-btn min-h-[44px] px-4 py-3"
+            className="px-4 py-3"
             data-pair-device-rename=""
             onClick={() => setRenaming(true)}
             disabled={busy}
           >
             Rename
-          </button>
+          </PairButton>
         </p>
       )}
 
@@ -836,9 +831,9 @@ function PairingFocus({
         NAVIGATION control, and `data-variant="primary"` is a styling choice a restyle may take away
         while leaving a journey silently pressing nothing.
       */}
-      <button
+      <PairButton
         type="button"
-        className="kt-btn min-h-[44px] self-center px-6 py-3"
+        className="self-center px-6 py-3"
         data-variant="primary"
         data-pair-confirm=""
         onClick={() => {
@@ -850,11 +845,11 @@ function PairingFocus({
         disabled={busy || sendableName === undefined || machineNameChoice(machineName).kind === 'refused'}
       >
         {busy ? 'Pairing…' : 'Pair this device'}
-      </button>
+      </PairButton>
       {busy && <p className="m-0 text-center text-ui text-muted">Exchanging the one-time code with this daemon…</p>}
-      <button type="button" className="kt-btn min-h-[44px] self-center px-6 py-3" onClick={onCancel} disabled={busy}>
+      <PairButton type="button" className="self-center px-6 py-3" onClick={onCancel} disabled={busy}>
         Not now
-      </button>
+      </PairButton>
     </PairingFrame>
   );
 }
