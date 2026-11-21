@@ -18,7 +18,7 @@
   container-type: inline-size;
 }
 
-/* The footer of every daemon-less page: auto-width buttons, at least 44px tall with 12px above and below, right aligned
+/* The footer of every daemon-less page: 8.5rem buttons (O2's width), at least 44px tall with 12px above and below, right aligned
    (the setup flow's page frame, `compose/step-page-frame.css`, reads the same). Below 600px of the page's own width it is
    sticky at the bottom, above the safe area, so the way on is always in reach. */
 .fy-ob-actions {
@@ -32,9 +32,14 @@
 }
 .fy-ob-actions .kt-btn {
   flex: 0 0 auto;
+  inline-size: 8.5rem;
   min-height: 44px;
   padding-block: 12px;
-  width: auto;
+  padding-inline: 8px;
+}
+/* r11-1b G4: a button in the page body is never narrower than the footer's (O2: 8.5rem). */
+[data-onboarding='setup'] .kt-btn {
+  min-inline-size: 8.5rem;
 }
 @container (max-width: 599.98px) {
   .fy-ob-sticky {

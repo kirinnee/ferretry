@@ -91,8 +91,12 @@ export function OnboardingTrack({ path, current, furthest, onJump }: OnboardingT
             <span className="sr-only">{STATUS_WORD[status]}</span>
           </>
         );
+        // r11-1b G4: a completed step is a button, and a button is never narrower than the footer's (O2: 8.5rem); the rail wraps instead.
         return (
-          <li key={step.id} className="min-w-0 flex-1 basis-[4.25rem]">
+          <li
+            key={step.id}
+            className={`flex-1 basis-[4.25rem] ${status === 'completed' ? 'min-w-[8.5rem]' : 'min-w-0'}`}
+          >
             {status === 'completed' ? (
               <button
                 type="button"
