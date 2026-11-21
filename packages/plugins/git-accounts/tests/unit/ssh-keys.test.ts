@@ -769,7 +769,7 @@ describe.skipIf(!HAVE_TOOLS || spawnSync('git', ['--version']).status !== 0)(
       try {
         const command = (ctx.git(['config', 'core.sshCommand']).stdout || '').trim();
         expect(command).toMatch(
-          /^ssh -F none -o IdentitiesOnly=yes -o IdentityFile=\S+\.pub -o IdentityAgent=\S+\.sock -o StrictHostKeyChecking=yes -o UserKnownHostsFile=\S+\/known_hosts$/u,
+          /^ssh -F none -o IdentitiesOnly=yes -o IdentityFile=\S+\.pub -o IdentityAgent=\S+\.sock -o StrictHostKeyChecking=yes -o UserKnownHostsFile=\S+\/known_hosts -o GlobalKnownHostsFile=none$/u,
         );
         // A hostile or merely busy ~/.ssh/config: a proxy, a key, agent forwarding and an alias for github.com.
         const home = `${root}/sshconfig-home`;
@@ -801,6 +801,8 @@ describe.skipIf(!HAVE_TOOLS || spawnSync('git', ['--version']).status !== 0)(
         expect(effective.get('userknownhostsfile')).toBe(
           `${String(ctx.env.SSH_AUTH_SOCK).replace(/[^/]+$/u, '')}known_hosts`,
         );
+        // The machine's own /etc/ssh/ssh_known_hosts is never consulted either: only the pinned file.
+        expect(effective.get('globalknownhostsfile')).toBe('none');
       } finally {
         finish(ctx);
       }

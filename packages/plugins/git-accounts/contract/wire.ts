@@ -122,6 +122,8 @@ export const GIT_ACCOUNT_CODES = {
   keyRefused: 'key_refused',
   keyNotOnAccount: 'key_not_on_account',
   agentUnavailable: 'agent_unavailable',
+  /** The daemon's scratch folder sits where `git` cannot be fenced into it (a `:` in its parent's path). */
+  scratchUnusable: 'scratch_unusable',
 } as const;
 
 /** Where a person ends an OAuth app's access to their account. Shown, never opened for them. */
