@@ -30,9 +30,7 @@ export function SignInPage({ client, step }: StepPageProps<ClaudeCodeClient>) {
 
   return (
     <div className="cc-step" data-onboarding-step="claude-code.sign-in">
-      <p className="cc-step__line">
-        Sign in to your Claude account on this machine. Ferretry never sees the sign-in: Claude Code keeps it.
-      </p>
+      <p className="cc-step__line">Sign in to Claude on this machine. Ferretry never sees it: Claude Code keeps it.</p>
       {available ? (
         <PanelSlot
           daemon={daemon}

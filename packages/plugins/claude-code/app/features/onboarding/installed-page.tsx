@@ -5,7 +5,7 @@
  * back scrubbed). The command is read from the installer's own plan, never made up here, and nothing installs until the
  * person presses the button.
  */
-import { Button } from '@ferretry/app';
+import { Button, StepDemo } from '@ferretry/app';
 import { isStepUpRefusal } from '@ferretry/app/ui';
 import { SetupToolSchema, type ToolInstallPlan, ToolInstallResultSchema } from '@ferretry/plugin-runtimes/contract';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -173,11 +173,16 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
   // The way out of a manual command: after a refused auto install, or when there is no package manager to run it.
   const canCheckAgain = read.kind === 'plan' && (read.plan.kind === 'no-package-manager' || note !== null);
   const shownCommand = read.kind === 'plan' && read.plan.kind === 'runnable' ? read.plan.command : '';
+  /** The demo types the command this page shows (the installer's plan): none is known, none is drawn. */
+  const demoCommand =
+    shownCommand !== ''
+      ? shownCommand
+      : read.kind === 'plan' && read.plan.kind === 'no-package-manager'
+        ? read.plan.manualCommand
+        : '';
   return (
     <div className="cc-step" data-onboarding-step="claude-code.installed">
-      <p className="cc-step__line">
-        Claude Code runs the ferrets that use your Claude account. It is not on this machine yet.
-      </p>
+      <p className="cc-step__line">Claude Code runs the ferrets that use your Claude account.</p>
       {read.kind === 'confirm' ? (
         <div className="cc-actions">
           <Button onClick={() => void readPlan(false)}>Show the install command</Button>
@@ -190,7 +195,7 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
       ) : null}
       {read.kind === 'plan' && read.plan.kind === 'runnable' ? (
         <>
-          <p className="cc-step__line">Ferretry will run exactly this, once you press the button:</p>
+          <p className="cc-step__line">Runs exactly this when you press Install:</p>
           <pre className="cc-command" data-install-command="">
             {read.plan.command}
           </pre>
@@ -226,7 +231,11 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
           </Button>
         </div>
       ) : null}
-      <InstalledDemo />
+      {demoCommand === '' ? null : (
+        <StepDemo>
+          <InstalledDemo command={demoCommand} />
+        </StepDemo>
+      )}
     </div>
   );
 }

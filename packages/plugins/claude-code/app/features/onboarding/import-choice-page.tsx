@@ -7,10 +7,11 @@
  * unanswered step, this one is already answered, and the memory is empty. So a MISSING `importMode` means "the person has
  * not chosen in this run", never "everything": see {@link importModeOf}, which every import page must use.
  */
-import { ChoiceCards, type ChoiceOption } from '@ferretry/app';
+import { ChoiceCards, type ChoiceOption, StepDemo } from '@ferretry/app';
 import type { StepSegmentMemory } from '@ferretry/kernel/contract';
 import { useEffect, useRef, useState } from 'react';
 import type { ClaudeCodeClient } from '../../lib/client.ts';
+import { ImportDemo } from './demos.tsx';
 import type { StepPageProps } from './props.ts';
 
 export type ImportMode = 'everything' | 'choose' | 'fresh';
@@ -32,14 +33,14 @@ const OPTIONS: readonly ChoiceOption[] = [
   {
     id: 'everything',
     title: 'Import everything',
-    line: 'Settings, models, CLAUDE.md, skills and MCP servers, in one go.',
+    line: 'Settings, CLAUDE.md, skills, MCP.',
   },
   {
     id: 'choose',
     title: 'Choose what to import',
-    line: 'Go through them one at a time and leave out what you do not want.',
+    line: 'One at a time. Leave out what you like.',
   },
-  { id: 'fresh', title: 'Start fresh', line: 'Bring nothing over. You can import later from Settings.' },
+  { id: 'fresh', title: 'Start fresh', line: 'Nothing. Import later from Settings.' },
 ];
 
 export function ImportChoicePage({ step }: StepPageProps<ClaudeCodeClient>) {
@@ -63,11 +64,11 @@ export function ImportChoicePage({ step }: StepPageProps<ClaudeCodeClient>) {
 
   return (
     <div className="cc-step" data-onboarding-step="claude-code.import-choice">
-      <p className="cc-step__line">
-        Claude Code on your computer already has settings, a CLAUDE.md, skills and MCP servers. Bring them to this
-        machine? Hooks are never imported.
-      </p>
-      <ChoiceCards label="What to bring over" options={OPTIONS} value={mode} onChange={pick} />
+      <ChoiceCards label="What to bring over" layout="stack" options={OPTIONS} value={mode} onChange={pick} />
+      <StepDemo>
+        <ImportDemo key={mode} mode={mode} />
+      </StepDemo>
+      <p className="cc-step__line">Hooks are never imported.</p>
     </div>
   );
 }

@@ -40,3 +40,120 @@
   padding: 12px 16px;
   width: auto;
 }
+.cc-step__warn {
+  color: var(--fg);
+}
+/* The import and conversations demos in the frame's demo column: rows that fill once and rest on their last frame. */
+.cc-demo {
+  background: var(--surface-2);
+  border: var(--stroke-control, 1px) solid var(--border);
+  border-radius: var(--card-radius);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  font-size: var(--font-size-meta, 0.875em);
+  gap: 8px;
+  min-height: 160px;
+  padding: 12px 16px;
+  width: 100%;
+}
+.cc-demo__head {
+  color: var(--muted);
+  margin: 0;
+}
+.cc-demo__row {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+}
+.cc-demo__row[data-brought='false'] {
+  color: var(--muted);
+}
+.cc-demo__row[data-brought='true'] .cc-demo__mark {
+  color: var(--ok);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cc-demo__row {
+    animation: cc-demo-in 600ms ease-out both;
+    animation-delay: calc(var(--cc-i, 0) * 180ms);
+  }
+}
+:root[data-motion='reduced'] .cc-demo__row {
+  animation: none;
+}
+@keyframes cc-demo-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+/* Below 900px the frame shows the demo above the page, at most 140px tall: the rows sit two by two, the heading goes. */
+@container (max-width: 899.98px) {
+  .cc-demo {
+    column-gap: 24px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: 0;
+    padding: 12px 16px;
+    row-gap: 8px;
+  }
+  .cc-demo__head {
+    display: none;
+  }
+}
+.cc-demo__note {
+  color: var(--muted);
+  margin: 0;
+}
+/* The install demo: a terminal typing the planned command (it wraps, so a long one shows whole), then its answer. */
+.cc-term {
+  background: var(--surface-2);
+  border: var(--stroke-control, 1px) solid var(--border);
+  border-radius: var(--card-radius);
+  box-sizing: border-box;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-meta, 0.875em);
+  min-height: 84px;
+  padding: 12px 16px;
+  width: 100%;
+}
+.cc-term__line {
+  display: flex;
+  gap: 1ch;
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+/* A block, so the reveal clips one rectangle even when a long command wraps onto a second line. */
+.cc-term__cmd {
+  display: block;
+  min-width: 0;
+}
+.cc-term__done {
+  color: var(--ok);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cc-term__cmd {
+    animation: cc-term-type 1100ms steps(24, end) both;
+  }
+  .cc-term__done {
+    animation: cc-term-done 240ms ease-out 1200ms both;
+  }
+}
+:root[data-motion='reduced'] .cc-term__cmd,
+:root[data-motion='reduced'] .cc-term__done {
+  animation: none;
+}
+@keyframes cc-term-type {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes cc-term-done {
+  from {
+    opacity: 0;
+  }
+}

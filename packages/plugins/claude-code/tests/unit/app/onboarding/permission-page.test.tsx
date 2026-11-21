@@ -34,13 +34,6 @@ const open = async (table: Record<string, unknown>, calls: Call[]) => {
 
 const select = (view: Mounted, value: string) =>
   interact(() => must(view.container.querySelector<HTMLInputElement>(`input[value="${value}"]`), value).click());
-const confirm = async (view: Mounted): Promise<void> => {
-  const button = must(
-    view.container.querySelector<HTMLButtonElement>('[data-permission-confirm] button'),
-    'the confirm button',
-  );
-  await interact(() => button.click());
-};
 
 describe('the permission text', () => {
   it('reads the mode, defaulting to skip (owner !A525)', () => {
@@ -87,94 +80,79 @@ describe('the permission text', () => {
 });
 
 describe('the permission page', () => {
-  it('selects the current value, says what skip allows and names the real flag', async () => {
+  const AUTO_FILE = FILE.replace('permissionMode: skip', 'permissionMode: auto');
+  const READ_FILE = (text: string) => ({ path: 'harness-claude-code.yaml', text, etag: 'e1', exists: true });
+  const WROTE = { path: 'harness-claude-code.yaml', etag: 'e2', outcome: 'applied' };
+
+  it('selects the current value, says what skip allows and names the real flag, with no button of its own', async () => {
     const calls: Call[] = [];
-    const { view, run } = await open(
-      { 'GET /v1/config/file': { path: 'harness-claude-code.yaml', text: FILE, etag: 'e1', exists: true } },
-      calls,
-    );
+    const { view, run } = await open({ 'GET /v1/config/file': READ_FILE(FILE) }, calls);
     expect((view.container.querySelector('input[value="skip"]') as HTMLInputElement).checked).toBe(true);
     const text = view.container.textContent ?? '';
     expect(text).toContain('--dangerously-skip-permissions');
-    expect(text).toContain('without asking you, including deleting files');
+    expect(text).toContain('even deleting files');
     expect(text).not.toContain('dangerousRmWaiver');
-    expect(run.events).toEqual(['ready']);
+    expect(view.container.querySelector('button')).toBeNull();
+    // The saved mode is showing: the page clears any save, so Next only records the answer.
+    expect(run.events).toEqual(['ready', 'commit']);
+    expect(run.hasCommit).toBe(false);
     expect(calls.map(call => call.route)).toEqual(['GET /v1/config/file']);
   });
 
-  it('saves a pick through the config route against the etag it read, touching only permissionMode', async () => {
+  it('writes nothing on a pick: only the save Next runs writes, against the etag it read, touching only permissionMode', async () => {
     const calls: Call[] = [];
-    const { view, run } = await open(
-      {
-        'GET /v1/config/file': { path: 'harness-claude-code.yaml', text: FILE, etag: 'e1', exists: true },
-        'PUT /v1/config/file': { path: 'harness-claude-code.yaml', etag: 'e2', outcome: 'applied' },
-      },
-      calls,
-    );
+    const { view, run } = await open({ 'GET /v1/config/file': READ_FILE(FILE), 'PUT /v1/config/file': WROTE }, calls);
     await select(view, 'auto');
-    await confirm(view);
     await settle();
-    const put = calls.find(call => call.route === 'PUT /v1/config/file');
-    expect(put?.init?.body).toEqual({
+    expect(view.container.querySelector('[data-permission-consequence]')).toBeNull();
+    expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
+    // The page never holds Next (rule 8): it registers a save instead.
+    expect(run.events.some(event => event.startsWith('busy:'))).toBe(false);
+    await interact(() => run.runCommit());
+    const puts = calls.filter(call => call.route === 'PUT /v1/config/file');
+    expect(puts).toHaveLength(1);
+    expect(puts[0]?.init?.body).toEqual({
       path: 'harness-claude-code.yaml',
-      text: FILE.replace('permissionMode: skip', 'permissionMode: auto'),
+      text: AUTO_FILE,
       etag: 'e1',
     });
-    expect(run.events).toEqual([
-      'ready',
-      'busy:Press “Use …” or “Keep …” to continue',
-      'busy:Saving…',
-      'done',
-      'busy:null',
-    ]);
   });
 
-  it('writes nothing on a pick: it shows the full consequence of Skip, and only the explicit confirm writes', async () => {
+  it('shows the full consequence of Skip as one line when Skip is picked, and writes nothing until Next', async () => {
     const calls: Call[] = [];
-    const AUTO_FILE = FILE.replace('permissionMode: skip', 'permissionMode: auto');
     const { view, run } = await open(
-      {
-        'GET /v1/config/file': { path: 'harness-claude-code.yaml', text: AUTO_FILE, etag: 'e1', exists: true },
-        'PUT /v1/config/file': { path: 'harness-claude-code.yaml', etag: 'e2', outcome: 'applied' },
-      },
+      { 'GET /v1/config/file': READ_FILE(AUTO_FILE), 'PUT /v1/config/file': WROTE },
       calls,
     );
-    expect(view.container.querySelector('[data-permission-confirm]')).toBeNull();
+    expect(view.container.querySelector('[data-permission-consequence]')).toBeNull();
     await select(view, 'skip');
     await settle();
     const warning = view.container.querySelector('[data-permission-consequence="skip"]')?.textContent ?? '';
-    expect(warning).toContain('run every command without asking you, including deleting files');
+    expect(warning).toContain('runs every command, even deleting files');
     expect(warning).toContain('--dangerously-skip-permissions');
     expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
-    // The pick differs from the saved mode: Next is held, so it cannot record done over the old mode.
-    expect(run.events).toEqual(['ready', 'busy:Press “Use …” or “Keep …” to continue']);
-    await confirm(view);
-    await settle();
+    await interact(() => run.runCommit());
     expect(calls.filter(call => call.route === 'PUT /v1/config/file')).toHaveLength(1);
-    expect(run.events).toEqual([
-      'ready',
-      'busy:Press “Use …” or “Keep …” to continue',
-      'busy:Saving…',
-      'done',
-      'busy:null',
-    ]);
-    // Written: nothing left to confirm.
-    expect(view.container.querySelector('[data-permission-confirm]')).toBeNull();
   });
 
-  it('writes nothing when the arrow keys move over the cards, and moving back withdraws the pick', async () => {
+  it('registers no save when the pick is the saved mode, and withdraws it when the pick moves back', async () => {
     const calls: Call[] = [];
-    const { view, run } = await open(
-      {
-        'GET /v1/config/file': { path: 'harness-claude-code.yaml', text: FILE, etag: 'e1', exists: true },
-        'PUT /v1/config/file': { path: 'harness-claude-code.yaml', etag: 'e2', outcome: 'applied' },
-      },
-      calls,
-    );
-    const group = must(view.container.querySelector('[role="radiogroup"]'), 'the cards');
+    const { view, run } = await open({ 'GET /v1/config/file': READ_FILE(FILE), 'PUT /v1/config/file': WROTE }, calls);
+    await select(view, 'auto');
+    await select(view, 'skip');
+    await settle();
+    // Back on the saved card: the registered save is cleared, so Next writes nothing.
+    expect(run.events.filter(event => event === 'commit').length).toBeGreaterThanOrEqual(2);
+    expect(run.hasCommit).toBe(false);
+    await interact(() => run.runCommit());
+    expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
+  });
+
+  it('writes nothing when the arrow keys move over the cards', async () => {
+    const calls: Call[] = [];
+    const { view, run } = await open({ 'GET /v1/config/file': READ_FILE(FILE), 'PUT /v1/config/file': WROTE }, calls);
     const key = (name: string) =>
       interact(() => {
-        // The key goes to the radio holding the focus (the checked one until an arrow has moved it).
         const focused = document.activeElement;
         const holder =
           focused instanceof HTMLInputElement && view.container.contains(focused)
@@ -182,68 +160,54 @@ describe('the permission page', () => {
             : must(view.container.querySelector<HTMLInputElement>('input:checked'), 'checked');
         holder.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
       });
-    expect(group).toBeDefined();
-    await key('ArrowLeft'); // focus moves skip -> auto, and nothing is picked
+    await key('ArrowLeft'); // focus moves skip -> auto
     await settle();
-    expect(view.container.querySelector('[data-permission-consequence="auto"]')).toBeNull();
-    expect(view.container.querySelector('[data-permission-confirm]')).toBeNull();
-    await key('Enter'); // Enter picks the focused card: auto
-    await settle();
-    expect(view.container.querySelector('[data-permission-consequence="auto"]')).not.toBeNull();
-    await key('ArrowRight'); // focus moves to skip: still auto
-    await key('Enter'); // back to the saved one
-    await settle();
-    // The hold came with the pick and goes with it.
-    expect(run.events).toEqual(['ready', 'busy:Press “Use …” or “Keep …” to continue', 'busy:null']);
-    expect(view.container.querySelector('[data-permission-confirm]')).toBeNull();
     expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
+    expect(run.events.some(event => event.startsWith('busy:') || event === 'done')).toBe(false);
   });
 
-  it('says so, and is not done, when the daemon refuses the write', async () => {
+  it('throws the daemon’s words, stays the page, and the next Next reads the file afresh and writes once', async () => {
     const calls: Call[] = [];
+    let puts = 0;
     const { view, run } = await open(
       {
-        'GET /v1/config/file': { path: 'harness-claude-code.yaml', text: FILE, etag: 'e1', exists: true },
-        'PUT /v1/config/file': new Error('That file changed since you read it.'),
+        'GET /v1/config/file': READ_FILE(FILE),
+        'PUT /v1/config/file': () => {
+          puts += 1;
+          return puts === 1 ? new Error('That file changed since you read it.') : WROTE;
+        },
       },
       calls,
     );
     await select(view, 'auto');
-    await confirm(view);
     await settle();
-    expect(view.container.querySelector('[role="alert"]')?.textContent).toContain(
-      'That file changed since you read it.',
-    );
+    await interact(() => expect(run.runCommit()).rejects.toThrow('That file changed since you read it.'));
     expect(run.events).not.toContain('done');
-    // Refused: the pick is still unwritten, so Next is held again (never left free to record the old mode as done).
-    expect(run.events).toEqual([
-      'ready',
-      'busy:Press “Use …” or “Keep …” to continue',
-      'busy:Saving…',
-      'busy:Press “Use …” or “Keep …” to continue',
+    await interact(() => run.runCommit());
+    // The refused write dropped the file: the second Next read it again before it wrote.
+    expect(calls.map(call => call.route)).toEqual([
+      'GET /v1/config/file',
+      'PUT /v1/config/file',
+      'GET /v1/config/file',
+      'PUT /v1/config/file',
     ]);
   });
 
-  it('holds Next while a pick differs, and "Keep …" drops the pick, writes nothing and says done', async () => {
+  it('says once that a held write is saved but not yet in effect, and the next Next writes nothing more', async () => {
     const calls: Call[] = [];
     const { view, run } = await open(
       {
-        'GET /v1/config/file': { path: 'harness-claude-code.yaml', text: FILE, etag: 'e1', exists: true },
-        'PUT /v1/config/file': { path: 'harness-claude-code.yaml', etag: 'e2', outcome: 'applied' },
+        'GET /v1/config/file': READ_FILE(FILE),
+        'PUT /v1/config/file': { path: 'harness-claude-code.yaml', etag: 'e2', outcome: 'pending' },
       },
       calls,
     );
-    // Nothing picked yet: Next is free (the saved mode is what the daemon runs).
-    expect(run.events).toEqual(['ready']);
     await select(view, 'auto');
-    expect(run.events).toEqual(['ready', 'busy:Press “Use …” or “Keep …” to continue']);
-    const keep = [...view.container.querySelectorAll('button')].find(b => b.textContent === 'Keep Skip permissions');
-    await interact(() => must(keep, 'the keep button').click());
     await settle();
-    expect(run.events).toEqual(['ready', 'busy:Press “Use …” or “Keep …” to continue', 'busy:null', 'done']);
-    expect(calls.some(call => call.route === 'PUT /v1/config/file')).toBe(false);
-    expect((view.container.querySelector('input[value="skip"]') as HTMLInputElement).checked).toBe(true);
-    expect(view.container.querySelector('[data-permission-confirm]')).toBeNull();
+    await interact(() => expect(run.runCommit()).rejects.toThrow('the owner has to confirm it'));
+    await settle();
+    expect(run.hasCommit).toBe(false);
+    expect(calls.filter(call => call.route === 'PUT /v1/config/file')).toHaveLength(1);
   });
 });
 
@@ -266,7 +230,7 @@ describe('the permission page on other YAML forms', () => {
 
     it(`writes a pick over ${name} as YAML that still reads, with the other keys kept`, async () => {
       const calls: Call[] = [];
-      const { view } = await open(
+      const { view, run } = await open(
         {
           'GET /v1/config/file': { path: 'harness-claude-code.yaml', text, etag: 'e1', exists: true },
           'PUT /v1/config/file': { path: 'harness-claude-code.yaml', etag: 'e2', outcome: 'applied' },
@@ -274,8 +238,8 @@ describe('the permission page on other YAML forms', () => {
         calls,
       );
       await select(view, 'skip');
-      await confirm(view);
       await settle();
+      await interact(() => run.runCommit());
       const body = calls.find(call => call.route === 'PUT /v1/config/file')?.init?.body as { text: string };
       const read = readConfigText(body.text);
       expect(read.ok && read.read.value).toEqual({ permissionMode: 'skip', dangerousRmWaiver: false });
@@ -302,6 +266,8 @@ describe('the permission page on other YAML forms', () => {
     expect(unknown).toContain('unknown');
     expect(unknown).toContain('Change this at the machine: /fake/home/config/harness-claude-code.yaml');
     expect(calls.map(call => call.route)).toEqual(['GET /v1/config/file']);
+    // Nothing to save: no commit is ever registered.
     expect(run.events).toEqual(['ready']);
+    expect(run.hasCommit).toBe(false);
   });
 });
