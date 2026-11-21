@@ -1,8 +1,8 @@
 /* ============================================================================
-   GLASSMORPHISM. Panels are frosted glass laid over a soft colour field: translucent surfaces that blur what is behind
+   GLASSMORPHISM. Panels are frosted glass laid over a quiet dot lattice and fine grain: translucent surfaces that blur what is behind
    them, large generous radii, a thin light edge, long soft shadows and light type weights. What carries the style in
-   greyscale is the STRUCTURE: big radii, hairline edges, airy padding, blur. The colour field behind (`--body-wash`) is
-   built from the palette's own accent and tool hues, so any palette takes it.
+   greyscale is the STRUCTURE: big radii, hairline edges, airy padding, blur. There is no colour wash behind (r11 T9: the lattice
+   is the palette's texture ink, the grain a data URI) and the only gradient is one frost highlight on a pane.
 
    READABILITY STAYS ON. Surfaces never drop below ~76% opaque (88% for menus, which float over content), so text keeps its
    contrast even over a bright field; the blur is an addition, not what makes the text legible. No second font: it draws in
@@ -31,10 +31,10 @@
   --radius-sm: 10px;
   --radius-md: 14px;
   --radius-lg: 22px;
-  --radius-control: 12px;
+  --radius-control: 999px;
   --radius-panel: 22px;
   --radius-badge: 999px;
-  --radius-tab: 12px;
+  --radius-tab: 999px;
   --radius-input: 12px;
   --bubble-radius: 20px 20px 8px 20px;
   --card-tail-radius: 8px;
@@ -57,16 +57,34 @@
   --shadow-sm: 0 2px 10px -2px var(--shadow-sm-1);
   --shadow-md: 0 8px 30px -8px var(--shadow-md-2);
   --shadow-lg: 0 20px 60px -16px var(--shadow-lg-2);
-  --shadow-control: 0 1px 3px var(--shadow-sm-1);
+  /* A glass control floats: a long soft shadow under it (a hairline would be Studio). */
+  --shadow-control: 0 10px 20px -10px var(--shadow-md-2), 0 1px 3px var(--shadow-sm-1);
   --shadow-active: none;
   --press-translate: 1px;
   /* The light rim: a bright inner edge along the top and sides, the way glass catches light. */
   --rule-inset: inset 0 1px 0 var(--surface), inset 0 0 0 1px color-mix(in srgb, var(--surface) 55%, transparent);
-  /* The field the glass sits over: three soft colour glows from the palette's own hues. */
-  --body-wash:
-    radial-gradient(60rem 40rem at 8% -8%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 70%),
-    radial-gradient(48rem 36rem at 96% 6%, color-mix(in srgb, var(--tool-search) 20%, transparent), transparent 70%),
-    radial-gradient(54rem 40rem at 60% 112%, color-mix(in srgb, var(--syn-keyword) 18%, transparent), transparent 70%);
+  /* THE FIELD (r11 T9): no colour wash. The page is a quiet dot lattice under a fine soft grain, so there is always something
+     for a pane's blur to frost (a flat ground would make the blur invisible). The dots are the style contract's own tile in the
+     palette's `--texture-ink`, held low; the grain is its inline SVG noise, blended soft. Nothing here is a gradient wash. */
+  --body-wash: none;
+  --bg-pattern: var(--bg-pattern-dots);
+  --bg-pattern-size: 24px;
+  --bg-pattern-alpha: 100%;
+  --grain-image: var(--grain-noise);
+  /* The matrix reads the worst pixel behind each text run: on a light page a grain that darkens costs the status inks their 4.5:1,
+     so the light grain is neutral soft light and the dark page carries the visible one (restated in the dark block). */
+  --grain-alpha: 0.07;
+  --grain-scale: 1;
+  --grain-blend: soft-light;
+  /* THE FROST HIGHLIGHT: the one gradient the style keeps. A single soft sheen across the top-left of a pane, the way a
+     frosted sheet catches light; it sits on the panel only, never on a control, a field, a badge or the page. */
+  --panel-texture: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--surface) 90%, transparent) 0%,
+    transparent 45%,
+    color-mix(in srgb, var(--fg) 5%, transparent) 100%
+  );
+  --panel-texture-size: auto;
   /* Roomier than the house style: glass needs air around its panels. */
   --control-h-desktop: 32px;
   --control-h-sm-desktop: 28px;
@@ -79,17 +97,76 @@
   --gap-sm: 8px;
   --gap-md: 12px;
   --focus-width: 2px;
-  --focus-offset: 2px;
+  /* The ring is drawn INSIDE the control (a negative offset as deep as the ring is thick): nothing can clip it. */
+  --focus-offset: calc(-1 * var(--focus-width));
   /* Calm: a slow, soft ease and a gentle pop on select. */
   --motion-fast: 140ms;
   --motion-base: 240ms;
   --motion-slow: 420ms;
+  --motion-pop: 240ms;
   --ease-standard: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.2, 1);
+  --ease-spring: var(--ease-standard);
   --select-pop: 1.03;
+  --motion-loading-ring: 2.6s;
+  --motion-loading-run: 1.8s;
+  --motion-loading-shimmer: 3s;
+
+  /* ═══ the component contract (r11 T9): what carries Glass in every slot, in greyscale ═══ */
+  /* MARKDOWN: airy and light. Light headings with no rules, a frosted code pane floating on a soft shadow, a quote that is a
+     frosted pane (no bar), soft horizontal rules in a table, links as tinted tags. */
+  --md-h1-size: 1.3em;
+  --md-h1-weight: 500;
+  --md-h2-size: 1.15em;
+  --md-h2-weight: 520;
+  --md-code-border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
+  --md-code-bar: var(--md-code-border);
+  --md-code-radius: 14px;
+  --md-code-shadow: 0 8px 24px -12px var(--shadow-md-2), inset 0 1px 0 color-mix(in srgb, var(--fg) 8%, transparent);
+  --md-quote-bar: none;
+  --md-quote-pad: 1.1em;
+  --md-quote-bg: color-mix(in srgb, var(--surface) 70%, transparent);
+  --md-quote-radius: 14px;
+  --md-cell-border-x: none;
+  --md-cell-border-y: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+  --md-th-bg: transparent;
+  --md-th-weight: 500;
+  --md-zebra: transparent;
+  --md-link-decoration: none;
+  --md-link-weight: 500;
+  --md-link-bg: color-mix(in srgb, var(--accent) 12%, transparent);
+  --md-link-pad: 0 0.35em;
+  --md-link-radius: 8px;
+  --md-stack-radius: 14px;
+  --md-stack-frame: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
+  --md-ul-marker: circle;
+  --md-list-marker-color: var(--accent);
+  /* SPINNER: a soft orbit: four dots of falling size circling (the whole mark turns), each breathing a quarter-turn apart
+     (the parts; shaped below the contract block). The ring is hidden. */
+  --spinner-ring: none;
+  --spinner-parts: inline;
+  --spinner-parts-speed: 1.8s;
+  --spinner-parts-timing: linear;
+  --spinner-speed: 1.8s;
+  --spinner-timing: linear;
+  /* HYPERMEDIA (read by r12 H5): shaped, translucent rounded nodes on curved edges under a banded header. */
+  --hm-shape: shaped;
+  --hm-radius: 14px;
+  --hm-stroke: 1px;
+  --hm-font: var(--font-body);
+  --hm-node-fill-alpha: 0.6;
+  --hm-edge: curve;
+  --hm-header: band;
+  /* SURFACES: a pane's edge is a hairline with a light rim (`--rule-inset`); the ring is drawn inside the control. */
+  --panel-edge: line;
 }
 
 :root[data-style='glass'][data-mode='dark'],
 [data-swatch][data-style='glass'][data-mode='dark'] {
+  --grain-alpha: 0.05;
+  --grain-blend: normal;
   --panel-bg: color-mix(in srgb, var(--surface) 72%, transparent);
   --card-bg: color-mix(in srgb, var(--surface) 72%, transparent);
   --menu-bg: color-mix(in srgb, var(--surface-2) 90%, transparent);
@@ -98,6 +175,9 @@
     inset 0 0 0 1px color-mix(in srgb, var(--fg) 5%, transparent);
   --shadow-md: 0 10px 34px -8px var(--shadow-md-2);
   --shadow-lg: 0 24px 64px -14px var(--shadow-lg-2);
+  /* In the dark the sheen is light let in, not the surface lifted: a faint ink at the top-left. */
+  --panel-texture: linear-gradient(135deg, color-mix(in srgb, var(--fg) 9%, transparent) 0%, transparent 50%);
+  --md-quote-bg: color-mix(in srgb, var(--surface-2) 70%, transparent);
 }
 
 /* ---- component touches: the glass itself. Only blur, translucency and the light edge; no colour literal. ----
@@ -126,7 +206,25 @@
 /* A text field draws a real 2px ring on keyboard focus, like a button (its border alone is 1px here). */
 :root[data-style='glass'] .kt-input:focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: 1px;
+  outline-offset: var(--focus-offset);
+}
+/* A single-line field is a pill like the buttons beside it (a textarea keeps the 12px radius: a multi-line field is never a pill).
+   A translucent fill and a bright rim go with it. A page rule, so it skips a swatch. */
+:root[data-style='glass'] input.kt-input:not([data-swatch] *) {
+  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--surface) 62%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 90%, transparent);
+}
+/* A glass button is a small pane of its own: translucent over what is behind it, blurring it, with a bright rim along the top
+   (the primary and danger buttons keep their solid fill; a ghost one stays bare). A page rule, so it skips a swatch. */
+:root[data-style='glass']
+.kt-btn:not([data-variant='primary'], [data-variant='danger'], [data-variant='ghost']):not([data-swatch] *) {
+  background-color: color-mix(in srgb, var(--surface) 62%, transparent);
+  box-shadow:
+    var(--shadow-control),
+    inset 0 1px 0 color-mix(in srgb, var(--surface) 90%, transparent);
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  backdrop-filter: blur(10px) saturate(1.4);
 }
 /* The primary button takes a soft accent halo, the one glow in the style. */
 :root[data-style='glass'] .kt-btn[data-variant='primary'] {
@@ -176,4 +274,53 @@
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
   }
+  /* A button pane is solid too. */
+  :root[data-style='glass']
+  .kt-btn:not([data-variant='primary'], [data-variant='danger'], [data-variant='ghost']):not([data-swatch] *) {
+    background-color: var(--surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* THE GLASS SPINNER: a soft orbit. The whole mark turns once every 1.8s at a steady rate; on it four round dots sit at the
+   quarter points, falling in size clockwise (a comet: 4.2, 3.4, 2.6, 1.8 units) and each breathing from full to a quarter ink a
+   quarter-turn behind the one before, so the brightest dot leads and a soft tail follows. The ring is hidden.
+   The base `animation` shorthand (specificity 0,2,0) resets the delay, so each part's phase is restated here, above it.
+   SCOPE: element rules, so the page rule skips a spinner inside a `[data-swatch]` (a swatch preview draws its own style's
+   mark) and the swatch rule matches only a swatch of this style. */
+:root[data-style='glass'] .fy-spinner:not([data-swatch] *) .fy-spinner__p1,
+[data-swatch][data-style='glass'] .fy-spinner .fy-spinner__p1 {
+  height: 4.2px;
+  rx: 2.1px;
+  width: 4.2px;
+  x: 5.9px;
+  y: 0.3px;
+}
+:root[data-style='glass'] .fy-spinner:not([data-swatch] *) .fy-spinner__p2,
+[data-swatch][data-style='glass'] .fy-spinner .fy-spinner__p2 {
+  animation-delay: calc(var(--spinner-parts-speed) * 0.25);
+  height: 3.4px;
+  rx: 1.7px;
+  width: 3.4px;
+  x: 11.9px;
+  y: 6.3px;
+}
+:root[data-style='glass'] .fy-spinner:not([data-swatch] *) .fy-spinner__p4,
+[data-swatch][data-style='glass'] .fy-spinner .fy-spinner__p4 {
+  animation-delay: calc(var(--spinner-parts-speed) * 0.5);
+  height: 2.6px;
+  rx: 1.3px;
+  width: 2.6px;
+  x: 6.7px;
+  y: 12.3px;
+}
+:root[data-style='glass'] .fy-spinner:not([data-swatch] *) .fy-spinner__p3,
+[data-swatch][data-style='glass'] .fy-spinner .fy-spinner__p3 {
+  animation-delay: calc(var(--spinner-parts-speed) * 0.75);
+  height: 1.8px;
+  rx: 0.9px;
+  width: 1.8px;
+  x: 1.5px;
+  y: 7.1px;
 }

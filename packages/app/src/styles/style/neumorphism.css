@@ -46,11 +46,11 @@
   --leading-base: 1.6;
   --radius-xs: 10px;
   --radius-sm: 14px;
-  --radius-md: 20px;
-  --radius-lg: 30px;
-  --radius-panel: 30px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-panel: 24px;
   --radius-control: 999px;
-  --radius-input: 20px;
+  --radius-input: 16px;
   --radius-tab: 999px;
   --radius-badge: 999px;
   --stroke-control: 1px;
@@ -75,29 +75,106 @@
   --ease-standard: cubic-bezier(0.33, 1, 0.68, 1);
   --ease-emphasis: cubic-bezier(0.34, 1.56, 0.64, 1);
   --focus-width: 2px;
-  --focus-offset: 3px;
+  --focus-offset: calc(-1 * var(--focus-width));
   /* One ground for the page, the raised things and the menus. */
   --panel-bg: color-mix(in srgb, var(--ground) 78%, var(--surface));
   /* `.kt-panel` lists `--shadow-panel, --rule-inset`: a bare `none` there voids the whole declaration, so the panel would lose its shadow. */
   --rule-inset: 0 0 0 0 transparent;
-  --body-wash: linear-gradient(var(--panel-bg), var(--panel-bg));
   --bubble-stroke: 0px;
-  --bubble-radius: 26px 26px 10px 26px;
+  --bubble-radius: 22px 22px 10px 22px;
   --card-tail-radius: 10px;
   --shadow-control: var(--shadow-sm);
   --shadow-panel: var(--shadow-md);
   --shadow-popover: var(--shadow-lg);
-  --menu-radius: 24px;
+  --menu-radius: 16px;
   --menu-item-h: 44px;
   --hover-fill: color-mix(in srgb, var(--fg) 4%, transparent);
   --select-fill: transparent;
+
+  /* ═══ the component contract (r11 T9): what carries Neumorphism in every slot, in greyscale ═══ */
+  /* THE FIELD: one plain ground (the page is painted the panel's own colour, below) under a fine plaster grain; no pattern, no
+     wash, no gradient anywhere (a raised thing is two shadows, never a sheen). */
+  --body-wash: none;
+  --bg-pattern: var(--bg-pattern-none);
+  --grain-image: var(--grain-noise);
+  --grain-alpha: 0.04;
+  --grain-scale: 1.4;
+  /* The grain is a plain grey noise laid over the page. The theme matrix reads the WORST pixel behind each text run, and a grain
+     costs a light page one 8-bit level of ground (any alpha at all: the High contrast palette's 7:1 text on white read 7.00 and 6.98), so the
+     light block below draws none: a light clay is its shadows alone, and the plaster grain is the dark page's. */
+  --grain-blend: normal;
+  --panel-texture: none;
+  --panel-texture-size: auto;
+  /* MARKDOWN: heavy and moulded. Fat headings with an engraved groove under an h2, a code block that is a WELL dug in, a quote
+     that is a soft sunk pane, a table cut into engraved grooves, links as embossed beads. */
+  --md-h1-size: 1.34em;
+  --md-h1-weight: 800;
+  --md-h2-size: 1.19em;
+  --md-h2-weight: 800;
+  --md-h2-rule: 2px groove var(--border);
+  --md-h2-rule-pad: 0.25em;
+  --md-code-border: 1px solid var(--border);
+  --md-code-bar: var(--md-code-border);
+  --md-code-radius: 14px;
+  --md-code-shadow: var(--shadow-active);
+  --md-quote-bar: none;
+  --md-quote-pad: 1.1em;
+  --md-quote-bg: color-mix(in srgb, var(--fg) 4%, transparent);
+  --md-quote-radius: 16px;
+  --md-cell-border-x: none;
+  --md-cell-border-y: 2px groove var(--border);
+  --md-th-bg: transparent;
+  --md-th-weight: 800;
+  --md-zebra: transparent;
+  --md-link-decoration: none;
+  --md-link-weight: 800;
+  --md-link-bg: color-mix(in srgb, var(--accent) 12%, transparent);
+  --md-link-pad: 0.05em 0.6em;
+  --md-link-radius: 999px;
+  --md-stack-radius: 16px;
+  --md-stack-row-rule: 2px groove var(--border);
+  --md-ul-marker: disc;
+  --md-list-marker-color: var(--accent);
+  /* SPINNER: an embossed BEAD rolling round a groove. The ring stays (the track is the groove: fat) and the arc is a
+     short round bead that stands off it on a drop shadow; the turn is a slow ease-in-out (slow, quick, slow), never steady.
+     The four generic parts stay hidden. */
+  --spinner-stroke: 3.6;
+  --spinner-cap: round;
+  --spinner-sweep: 7;
+  --spinner-speed: 1.4s;
+  --spinner-timing: cubic-bezier(0.65, 0, 0.35, 1);
+  --spinner-glow: drop-shadow(1.5px 1.5px 1px color-mix(in srgb, var(--fg) 35%, transparent));
+  /* MOTION: slow and springy. A press squishes (the shadows go inset and the control shrinks a hair on a little overshoot). */
+  --motion-pop: 260ms;
+  --ease-in: ease-in;
+  --ease-out: cubic-bezier(0.33, 1, 0.68, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: var(--ease-emphasis);
+  --motion-loading-ring: 2.8s;
+  --motion-loading-run: 1.9s;
+  --motion-loading-shimmer: 3.2s;
+  /* HYPERMEDIA (read by r12 H5): shaped, solid, rounded nodes on curved edges under a banded header. */
+  --hm-shape: shaped;
+  --hm-radius: 16px;
+  --hm-stroke: 1px;
+  --hm-font: var(--font-body);
+  --hm-node-fill-alpha: 1;
+  --hm-edge: curve;
+  --hm-header: band;
+  /* SURFACES: the panel's edge is its pair of shadows. */
+  --panel-edge: shadow;
 }
 
 /* ---- the light side and the dark side: deep, wide pairs (a control stands PROUD of the ground) ---- */
 :root[data-style='neumorphism'][data-mode='light'],
 [data-swatch][data-style='neumorphism'][data-mode='light'] {
-  --shadow-sm: 6px 6px 13px color-mix(in srgb, var(--fg) 19%, transparent), -6px -6px 13px var(--surface);
-  --shadow-md: 10px 10px 24px color-mix(in srgb, var(--fg) 19%, transparent), -10px -10px 24px var(--surface);
+  --grain-alpha: 0;
+  --shadow-sm:
+    6px 6px 13px color-mix(in srgb, var(--fg) 19%, transparent), -6px -6px 13px var(--surface),
+    inset 1px 1px 1px var(--surface);
+  --shadow-md:
+    10px 10px 24px color-mix(in srgb, var(--fg) 19%, transparent), -10px -10px 24px var(--surface),
+    inset 1px 1px 1px var(--surface);
   --shadow-lg: 16px 16px 38px color-mix(in srgb, var(--fg) 22%, transparent), -16px -16px 38px var(--surface);
   --shadow-active:
     inset 5px 5px 11px color-mix(in srgb, var(--fg) 21%, transparent), inset -5px -5px 11px var(--surface);
@@ -123,10 +200,13 @@
 }
 
 /* ---- component touches: every raised thing is cut from the one ground; a field is dug into it ---- */
-:root[data-style='neumorphism']
-:is(.kt-panel, .kt-popover, .kt-groupcard, .fy-cc__card, .kt-tabbar, .bg-bg, .bg-surface),
+:root[data-style='neumorphism'] :is(.kt-panel, .kt-groupcard, .fy-cc__card, .kt-tabbar, .bg-bg, .bg-surface),
 :root[data-style='neumorphism'] .kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger']) {
   background: var(--panel-bg);
+}
+/* A menu floats a step nearer the surface than the clay, so a danger row (the palette's error ink) keeps 7:1 on High contrast. */
+:root[data-style='neumorphism'] .kt-popover {
+  background: color-mix(in srgb, var(--panel-bg) 30%, var(--surface));
 }
 /* On a ground this close to every surface the control edge is the one thing that says "this is a control", so it is a step
    stronger than the palette's own control edge (still the palette's hue). Hover and keyboard focus keep their own colours. */
@@ -140,7 +220,9 @@
   border-color: color-mix(in srgb, var(--border-strong) 80%, var(--fg));
 }
 :root[data-style='neumorphism'] .kt-btn[data-variant='danger'] {
-  background: var(--panel-bg);
+  /* A danger label is the palette's error ink: it keeps 7:1 on the High contrast palette only on a ground a step nearer the
+     surface than the clay (the ground alone read 6.6:1). */
+  background: color-mix(in srgb, var(--panel-bg) 30%, var(--surface));
 }
 /* A button is a heavy pill; its label is set a weight up. Motion is slow and springy: the shadow eases over the base
    duration, the squish over the fast one with a little overshoot. */
@@ -251,40 +333,10 @@
   }
 }
 
-/* ---- CLAY: a raised thing is CONVEX (lit top left, shaded bottom right), a well is CONCAVE (the reverse), and a held
-   control flips from one to the other. The gradients are mixed from the palette's own roles, so no colour is written here.
-   This is what keeps dark Neumorphism an extrusion and not a thin outline on a dark page. ---- */
-:root[data-style='neumorphism'][data-mode='light']
-:is(
-  .kt-btn:not([data-variant='primary'], [data-variant='ghost']),
-  .fy-cc__card:not([data-selected='true']),
-  .kt-panel
-):not(:active) {
-  background-image: linear-gradient(145deg, var(--surface), color-mix(in srgb, var(--panel-bg) 98%, var(--fg)));
-}
-:root[data-style='neumorphism'][data-mode='light']
-  :is(
-    .kt-input,
-    .kt-composer,
-    .kt-btn:not([data-variant='primary'], [data-variant='ghost']):active,
-    .fy-cc__card[data-selected='true']
-  ) {
-  background-image: linear-gradient(145deg, color-mix(in srgb, var(--panel-bg) 97%, var(--fg)), var(--surface));
-}
-:root[data-style='neumorphism'][data-mode='dark']
-  :is(
-    .kt-btn:not([data-variant='primary'], [data-variant='ghost']),
-    .fy-cc__card:not([data-selected='true']),
-    .kt-panel
-  ):not(:active) {
-  background-image: linear-gradient(145deg, var(--panel-bg), color-mix(in srgb, var(--panel-bg) 68%, var(--scrim)));
-}
-:root[data-style='neumorphism'][data-mode='dark']
-  :is(
-    .kt-input,
-    .kt-composer,
-    .kt-btn:not([data-variant='primary'], [data-variant='ghost']):active,
-    .fy-cc__card[data-selected='true']
-  ) {
-  background-image: linear-gradient(145deg, color-mix(in srgb, var(--panel-bg) 82%, var(--scrim)), var(--panel-bg));
+/* ---- THE GROUND (r11 T9): the page is painted the panel's own colour, so a raised thing is cut from the very ground it sits on
+   and only its shadow pair separates it. This replaces the old one-colour gradient wash and the "clay" gradients on every raised
+   and sunk thing: a raised light-mode thing now takes a bright 1px inner catch-light in its shadow list instead of a convex
+   sheen, a well takes the inset pair, and nothing carries a gradient. ---- */
+:root[data-style='neumorphism'] body {
+  background-color: var(--panel-bg);
 }

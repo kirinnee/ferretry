@@ -165,7 +165,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['lucid', 'neumorphism', 'retro'],
+    styles: ['lucid', 'retro'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'gradient',
@@ -174,7 +174,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['antiposh', 'genz', 'lucid', 'neumorphism'],
+    styles: ['antiposh', 'genz', 'lucid'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'gradient',
@@ -183,7 +183,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['antiposh', 'lucid', 'neumorphism'],
+    styles: ['antiposh', 'lucid'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'gradient',
@@ -192,7 +192,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['lucid', 'neumorphism'],
+    styles: ['lucid'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'gradient',
@@ -201,7 +201,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['genz', 'glass', 'lucid', 'pixel', 'retro'],
+    styles: ['genz', 'lucid', 'pixel', 'retro'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'gradient',
@@ -219,7 +219,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['genz', 'neumorphism'],
+    styles: ['genz'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'radius',
@@ -228,7 +228,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['genz', 'neumorphism'],
+    styles: ['genz'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'radius',
@@ -237,7 +237,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['briefing', 'neumorphism'],
+    styles: ['briefing'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'radius',
@@ -282,7 +282,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['glass', 'lucid', 'neumorphism', 'studio'],
+    styles: ['lucid', 'studio'],
     palettes: ['studio'],
     modes: BOTH_MODES,
     check: 'spinner',
@@ -300,21 +300,12 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['neumorphism'],
-    palettes: ['contrast'],
-    modes: ['light'],
-    check: 'text',
-    what: 'Danger',
-    why: WHY.text,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['neumorphism'],
-    palettes: ['contrast'],
-    modes: ['light'],
-    check: 'text',
-    what: 'Stop ferret',
-    why: WHY.text,
+    styles: ['raw'],
+    palettes: ['neo'],
+    modes: BOTH_MODES,
+    check: 'spinner',
+    what: 'spinner shared with another style',
+    why: WHY.spinner,
   },
   {
     viewports: BOTH_WIDTHS,
