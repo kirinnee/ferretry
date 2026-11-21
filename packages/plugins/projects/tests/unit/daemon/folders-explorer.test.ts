@@ -3,6 +3,11 @@ import type { ApiRequest, CallContext } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import { MakeFolderRequestSchema } from '../../../contract/index.ts';
 import { FolderExplorer } from '../../../daemon/features/folders/browse.ts';
+import {
+  foldName as sharedFoldName,
+  holdsSignIn as sharedHoldsSignIn,
+  isPrivateFolder as sharedIsPrivateFolder,
+} from '@ferretry/std';
 import { foldName, holdsSignIn, isPrivateFolder, parsePath } from '../../../daemon/features/folders/fence.ts';
 import type {
   FolderBrowser,
@@ -163,6 +168,16 @@ describe('fence rules', () => {
     expect(holdsSignIn(['ID_RSA'])).toBe(true);
     expect(holdsSignIn(['Auth.JSON'])).toBe(true);
     expect(holdsSignIn(['id_rsa.pub'])).toBe(false);
+  });
+
+  test('a project folder holding a .env, a key file or an .npmrc is an ordinary folder, not a sign-in folder', () => {
+    expect(holdsSignIn(['.env', '.npmrc', 'server.pem', 'package.json'])).toBe(false);
+  });
+
+  test('the fence reads the one shared secret-name list', () => {
+    expect(holdsSignIn).toBe(sharedHoldsSignIn);
+    expect(isPrivateFolder).toBe(sharedIsPrivateFolder);
+    expect(foldName).toBe(sharedFoldName);
   });
 });
 
