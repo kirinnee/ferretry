@@ -26,14 +26,7 @@ const HAND = {
     timing: 'cubic-bezier(0.45, 0.15, 0.55, 0.85)',
     dash: 'none',
   },
-  mission: {
-    stroke: '1.5px',
-    cap: 'square',
-    sweep: '22px, 100px',
-    speed: '1.2s',
-    timing: 'linear',
-    dash: '1.6px, 1.54px',
-  },
+  // Mission and HUD draw their own marks from the generic parts (corner brackets; a radar): `mission-hud-kit.visual.test.ts`.
   neo: { stroke: '3.25px', cap: 'square', sweep: '28px, 100px', speed: '0.8s', timing: 'linear', dash: 'none' },
 } as const;
 
@@ -114,7 +107,8 @@ describe('the real spinner under the real stylesheet', () => {
 
   it('reduced motion (the OS setting) pulses the whole ring and draws the arc as a full ring', async () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    const now = await read(page, 'mission', 'dark');
+    // A ring style: Mission draws no ring (its brackets pulse; `mission-hud-kit.visual.test.ts` reads that live).
+    const now = await read(page, 'studio', 'dark');
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     expect(now.animationName).toBe('fy-spinner-pulse');
     expect(now.arcDash).toBe('100px, 0px');
