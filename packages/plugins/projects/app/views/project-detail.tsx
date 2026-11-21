@@ -77,6 +77,12 @@ function ProjectDetailView({
   // What another plugin tells about this project (PRs & CI, today), if one is installed on this daemon.
   const provided = useAppHook(daemon, PROJECTS_INSIGHTS_HOOK);
   const insights = isProjectsInsights(provided) ? provided : undefined;
+  // A saved link changes the project record, so the registry is read again and the list re-renders from the daemon's word.
+  const onAccountsSaved = (): void => {
+    void projectsStoreFor(client)
+      .refresh()
+      .catch(() => {});
+  };
   return (
     <main
       className="grid h-full min-h-0 content-start gap-panel overflow-y-auto p-panel"
@@ -128,7 +134,11 @@ function ProjectDetailView({
             )}
           </Section>
           <Section icon={<UserRound className="text-muted" size={16} aria-hidden="true" />} title="GitHub accounts">
-            <ProjectAccountLinks client={client} project={project} />
+            <ProjectAccountLinks
+              client={client}
+              project={project}
+              edit={{ projectId: project.id, onSaved: onAccountsSaved }}
+            />
           </Section>
           <Section icon={<KanbanSquare className="text-muted" size={16} aria-hidden="true" />} title="Board">
             <ProjectBoardSwitch client={client} projectId={project.id} />

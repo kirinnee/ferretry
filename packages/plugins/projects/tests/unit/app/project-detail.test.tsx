@@ -260,4 +260,66 @@ describe('the project’s board switch', () => {
     expect(failed.container.textContent).toContain('the board store is unreadable');
     await failed.unmount();
   });
+
+  it('links GitHub accounts to an existing project: sends the ordered list and re-renders the links', async () => {
+    const calls: Call[] = [];
+    let linked: readonly string[] = [];
+    const accounts = [
+      { id: 'gha_1', login: 'octocat', keys: {} },
+      { id: 'gha_2', login: 'hubot', keys: {} },
+    ];
+    const mounted = await mount(
+      detail(
+        client(
+          [],
+          {
+            'GET /v1/git-accounts': accounts,
+            [LIST]: () => [{ ...PROJECT, accounts: linked }],
+            'PUT /v1/projects/:id/accounts': (call: Call) => {
+              linked = (call.body as { accounts: string[] }).accounts;
+              return { ...PROJECT, accounts: linked };
+            },
+          },
+          calls,
+        ),
+      ),
+    );
+    await settled(mounted, c => c.querySelector('[data-project-accounts-edit]') !== null, 'the link control');
+    expect(mounted.container.querySelector('[data-project-accounts="none"]')).not.toBeNull();
+
+    await press(must(mounted.container.querySelector('[data-project-accounts-edit]'), 'the link control'));
+    // Pick the second account, then the first: the order of the picks is the order sent (the first is the default).
+    await press(must(mounted.container.querySelector('[data-project-accounts-choice="gha_2"] input'), 'hubot'));
+    await press(must(mounted.container.querySelector('[data-project-accounts-choice="gha_1"] input'), 'octocat'));
+    await press(must(mounted.container.querySelector('[data-project-accounts-save]'), 'save'));
+
+    await settled(mounted, c => c.querySelector('[data-project-accounts="ready"]') !== null, 'the linked list');
+    expect(
+      calls.filter(call => call.route === 'PUT /v1/projects/:id/accounts').map(call => [call.params, call.body]),
+    ).toEqual([[{ id: PROJECT.id }, { accounts: ['gha_2', 'gha_1'] }]]);
+    expect([...mounted.container.querySelectorAll('[data-project-account]')].map(row => row.textContent)).toEqual([
+      '@hubot',
+      '@octocat',
+    ]);
+    await mounted.unmount();
+  });
+
+  it('keeps the editor open and says why when the daemon refuses the accounts', async () => {
+    const mounted = await mount(
+      detail(
+        client([], {
+          'GET /v1/git-accounts': [{ id: 'gha_1', login: 'octocat', keys: {} }],
+          'PUT /v1/projects/:id/accounts': refusal(403, 'only the owner links accounts'),
+        }),
+      ),
+    );
+    await settled(mounted, c => c.querySelector('[data-project-accounts-edit]') !== null, 'the link control');
+    await press(must(mounted.container.querySelector('[data-project-accounts-edit]'), 'the link control'));
+    await press(must(mounted.container.querySelector('[data-project-accounts-choice="gha_1"] input'), 'octocat'));
+    await press(must(mounted.container.querySelector('[data-project-accounts-save]'), 'save'));
+    await settled(mounted, c => c.querySelector('[data-project-accounts-editor] [role="alert"]') !== null, 'refusal');
+
+    expect(mounted.container.textContent).toContain('This daemon refused the link: only the owner links accounts');
+    await mounted.unmount();
+  });
 });
