@@ -51,8 +51,11 @@ export type NotifyChoices = z.infer<typeof NotifyChoicesSchema>;
 export const WatchProjectIdSchema = z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/u);
 
 export const ProjectWatchSettingSchema = z.strictObject({
-  /** Off unless a person turned it on: a watch asks GitHub on a timer, with the account's token. */
-  watch: z.boolean().default(false),
+  /**
+   * A person's own choice. Absent (r11 S7): watched when the project has a linked GitHub reader, else off. A watch asks
+   * GitHub on a timer, with the account the owner already linked to that project and never another.
+   */
+  watch: z.boolean().optional(),
   notify: NotifyChoicesSchema.default({}),
 });
 export type ProjectWatchSetting = z.infer<typeof ProjectWatchSettingSchema>;
@@ -73,18 +76,49 @@ export const PullsConfigDef = defineConfig({
   loosens: neverLoosens,
 }) as unknown as ConfigFileDef<PullsConfig>;
 
-/** What a project's settings come to: absent reads as watch off and the default choices. */
+/** Who made a project's watch what it is: the daemon's default (a linked account), or the owner's own choice. */
+export type WatchedBy = 'default' | 'you';
+
+/** A project watched only by default tells the phone nothing until an event is ticked (no surprise pushes). */
+const NO_NOTIFY: Readonly<Record<WatchEvent, boolean>> = Object.freeze({
+  ciFailed: false,
+  reviewRequested: false,
+  changesRequested: false,
+  approved: false,
+  ciPassed: false,
+  comment: false,
+  closed: false,
+});
+
+/**
+ * What a project's settings come to. The watch is the owner's stored choice, else ON when the project has a GitHub
+ * reader (`linked`) and off when it has none. A project watched by default notifies nothing until the owner ticks an
+ * event; one the owner watched on purpose keeps the defaults. A person's own ticks sit on top either way.
+ */
 export function settingsOf(
   config: PullsConfig | undefined,
   project: string,
+  linked: boolean,
 ): {
   readonly watch: boolean;
+  readonly watchedBy: WatchedBy;
   readonly notify: Readonly<Record<WatchEvent, boolean>>;
 } {
   const own = config?.projects[project];
-  const notify = { ...DEFAULT_NOTIFY };
-  for (const event of WATCH_EVENTS) notify[event] = own?.notify[event] ?? DEFAULT_NOTIFY[event];
-  return { watch: own?.watch ?? false, notify };
+  const watchedBy: WatchedBy = own?.watch === undefined ? 'default' : 'you';
+  const base = watchedBy === 'you' ? DEFAULT_NOTIFY : NO_NOTIFY;
+  const notify = { ...base };
+  for (const event of WATCH_EVENTS) notify[event] = own?.notify[event] ?? base[event];
+  return { watch: own?.watch ?? linked, watchedBy, notify };
+}
+
+/**
+ * The stored setting after a PATCH: only what the patch names changes. A notify-only patch leaves `watch` exactly as it
+ * was stored (absent stays absent, so the default keeps applying and a tick never silently stops a watch).
+ */
+export function nextSetting(own: ProjectWatchSetting | undefined, patch: WatchPatch): ProjectWatchSetting {
+  const watch = patch.watch ?? own?.watch;
+  return { ...(watch === undefined ? {} : { watch }), notify: { ...(own?.notify ?? {}), ...(patch.notify ?? {}) } };
 }
 
 // ─── the last-seen snapshot (state/pulls/watch/<project>.json) ────────────────────────────────────────────────────
@@ -133,6 +167,11 @@ export const PullsChanged = defineEvent('pulls.changed', z.strictObject({ projec
 export const WatchProjectViewSchema = z.strictObject({
   project: WatchProjectIdSchema,
   watch: z.boolean(),
+  /**
+   * Who decided `watch`: `default` (no stored choice: on with a linked account, off without one) or `you` (the owner
+   * stopped or started it). With `watch: false`, `default` therefore reads "no GitHub account is linked".
+   */
+  watchedBy: z.enum(['default', 'you']),
   /** The effective choice per event (the defaults with the project's own on top). */
   notify: z.record(z.enum(WATCH_EVENTS), z.boolean()),
   repos: z.array(WatchedRepoSchema).max(50),

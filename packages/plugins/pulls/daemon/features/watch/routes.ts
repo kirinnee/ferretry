@@ -7,8 +7,10 @@ import {
   parseBody,
   type RouteHandler,
 } from '@ferretry/kernel/contract';
+import type { GitAccount } from '@ferretry/plugin-git-accounts/contract';
 import type { ProjectInfo } from '@ferretry/plugin-projects/contract';
 import {
+  nextSetting,
   PULLS_CODES,
   PullsConfigDef,
   settingsOf,
@@ -18,6 +20,7 @@ import {
   type PullsConfig,
 } from '../../../contract/index.ts';
 import type { ConfigDoor } from './config-door.ts';
+import { hasReader } from './repos.ts';
 import type { WatchService } from './service.ts';
 
 const BODY_LIMIT = { maxBytes: 4 * 1024 } as const;
@@ -27,6 +30,7 @@ export interface WatchRouteDeps {
   readonly door: ConfigDoor | undefined;
   readonly config: () => PullsConfig | undefined;
   readonly projects: () => Promise<readonly ProjectInfo[]>;
+  readonly accounts: () => Promise<readonly GitAccount[]>;
 }
 
 /**
@@ -47,10 +51,8 @@ export function watchRoutes(deps: WatchRouteDeps) {
         return errorResponse(503, 'this daemon cannot change its settings yet', PULLS_CODES.refused);
       const config = deps.config();
       const own = config?.projects[id.data];
-      const next = {
-        watch: patch.watch ?? own?.watch ?? false,
-        notify: { ...(own?.notify ?? {}), ...(patch.notify ?? {}) },
-      };
+      // Only what the patch names changes: a notify-only patch keeps the stored watch (absent stays the default).
+      const next = nextSetting(own, patch);
       const written = await deps.door.write(PullsConfigDef, undefined, {
         patch: { projects: { ...(config?.projects ?? {}), [id.data]: next } },
       });
@@ -60,7 +62,11 @@ export function watchRoutes(deps: WatchRouteDeps) {
         });
       const view = {
         project: id.data,
-        ...settingsOf({ projects: { [id.data]: next } as PullsConfig['projects'] }, id.data),
+        ...settingsOf(
+          { projects: { [id.data]: next } as PullsConfig['projects'] },
+          id.data,
+          hasReader(project, await deps.accounts()),
+        ),
       };
       return written.kind === 'held' ? jsonResponse({ held: written.sentences, view }, 202) : jsonResponse({ view });
     },

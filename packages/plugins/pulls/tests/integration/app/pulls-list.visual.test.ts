@@ -112,3 +112,127 @@ describe('PRs & CI screen', () => {
     }
   }
 });
+
+/**
+ * r11 S7, the owner's line: "I don't understand 'Watch this project's pull requests'. If a GitHub account is linked,
+ * watch by default and show the PRs; the checkbox becomes a quiet 'Stop watching'". Computed geometry and DOM, in real
+ * Chromium, over a client that decides like the daemon (see the scene). The measured numbers go in the PR body.
+ */
+describe('r11 S7: PRs are watched by default when an account is linked', () => {
+  for (const variant of VARIANTS) {
+    it(`project with a linked account at ${variant.name}: PRs show, only a quiet Stop watching, one PATCH to stop, ticks keep the watch`, async () => {
+      const context = await browser.newContext({
+        viewport: { width: variant.width, height: variant.height },
+        deviceScaleFactor: variant.phone ? 2 : 1,
+        hasTouch: variant.phone,
+        isMobile: variant.phone,
+        colorScheme: variant.scheme,
+      });
+      const tab = await context.newPage();
+      const problems: string[] = [];
+      tab.on('pageerror', error => problems.push(error.message));
+      await tab.goto(`${server?.url.origin ?? ''}/?theme=studio-${variant.scheme}&case=default&project=A`);
+      await tab.waitForSelector('[data-pull-row]');
+
+      // (a) PR rows with no setup; no watch checkbox; a quiet button, not a full row.
+      const measured = await tab.evaluate(() => {
+        const labelOf = (input: Element): string => (input.closest('label')?.textContent ?? '').trim();
+        const watchBoxes = [...document.querySelectorAll('input[type="checkbox"]')].filter(box =>
+          /watch/i.test(labelOf(box)),
+        );
+        const stops = [...document.querySelectorAll('button')].filter(button =>
+          /^Stop watching/.test(button.textContent ?? ''),
+        );
+        const card = document.querySelector('[data-pulls-project]') as HTMLElement;
+        const stop = stops[0] as HTMLElement | undefined;
+        return {
+          rows: document.querySelectorAll('[data-pull-row]').length,
+          watchBoxes: watchBoxes.length,
+          stops: stops.length,
+          cardWidth: card.getBoundingClientRect().width,
+          stopWidth: stop?.getBoundingClientRect().width ?? 0,
+          stopHeight: stop?.getBoundingClientRect().height ?? 0,
+          stopTop: stop?.getBoundingClientRect().top ?? 0,
+          lastRowBottom: Math.max(
+            ...[...document.querySelectorAll('[data-pull-row]')].map(row => row.getBoundingClientRect().bottom),
+          ),
+          text: document.body.innerText.includes('Watch this project'),
+          sideways: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        };
+      });
+      console.log(`S7 measured ${variant.name}: ${JSON.stringify(measured)}`);
+      expect(measured.rows).toBeGreaterThanOrEqual(1);
+      expect(measured.watchBoxes).toBe(0);
+      expect(measured.text).toBe(false);
+      expect(measured.stops).toBe(1);
+      expect(measured.stopWidth).toBeLessThan(measured.cardWidth * 0.5);
+      expect(measured.stopHeight).toBeGreaterThanOrEqual(44);
+      // The PRs come first; the control sits after them.
+      expect(measured.stopTop).toBeGreaterThan(measured.lastRowBottom);
+      expect(measured.sideways).toBeLessThanOrEqual(0);
+
+      // (d) ticking one event sends notify only, and the read after it still has the watch on.
+      await tab.locator('[data-pulls-notify] summary').click();
+      expect(await tab.locator('[data-pulls-notify-hint]').innerText()).toBe('Pick what should notify your phone.');
+      const unticked = await tab
+        .locator('[data-pulls-notify-event]')
+        .evaluateAll(boxes => boxes.filter(box => (box as HTMLInputElement).checked).length);
+      expect(unticked).toBe(0);
+      await tab.locator('[data-pulls-notify-event="ciPassed"]').click();
+      await tab.waitForFunction(() => (window as unknown as { __patches: unknown[] }).__patches.length === 1);
+      await tab.waitForFunction(
+        () =>
+          (document.querySelector('[data-pulls-notify-event="ciPassed"]') as HTMLInputElement | null)?.checked === true,
+      );
+      expect(await tab.evaluate(() => (window as unknown as { __patches: unknown[] }).__patches)).toEqual([
+        { notify: { ciPassed: true } },
+      ]);
+      expect(await tab.locator('[data-pulls-stop]').count()).toBe(1);
+      expect(await tab.locator('[data-pull-row]').count()).toBeGreaterThanOrEqual(1);
+
+      if (shotsDir !== '') {
+        await tab.setViewportSize({ width: variant.width, height: variant.phone ? 2000 : 1100 });
+        await tab.screenshot({ path: join(shotsDir, `${variant.name}-default-watched.png`) });
+      }
+
+      // (b) Stop: exactly one more PATCH {watch:false}; the rows go; "Watch again" shows.
+      await tab.locator('[data-pulls-stop]').click();
+      await tab.waitForSelector('[data-pulls-watch-again]');
+      expect(await tab.evaluate(() => (window as unknown as { __patches: unknown[] }).__patches)).toEqual([
+        { notify: { ciPassed: true } },
+        { watch: false },
+      ]);
+      expect(await tab.locator('[data-pull-row]').count()).toBe(0);
+      expect(await tab.locator('[data-pulls-watch-again]').innerText()).toBe('Watch again');
+      expect(await tab.locator('[data-pulls-empty="watch-off"]').innerText()).toContain(
+        'You stopped watching this project.',
+      );
+      if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${variant.name}-default-stopped.png`) });
+      expect(problems).toEqual([]);
+      await context.close();
+    });
+
+    it(`project with NO account at ${variant.name}: no GitHub look at all, and it says so in plain words`, async () => {
+      const context = await browser.newContext({
+        viewport: { width: variant.width, height: variant.height },
+        deviceScaleFactor: variant.phone ? 2 : 1,
+        colorScheme: variant.scheme,
+      });
+      const tab = await context.newPage();
+      await tab.goto(`${server?.url.origin ?? ''}/?theme=studio-${variant.scheme}&case=default&project=B`);
+      await tab.waitForSelector('[data-pulls-empty="no-reader"]');
+      expect(await tab.locator('[data-pulls-empty="no-reader"]').innerText()).toBe(
+        'No GitHub account linked to this project.',
+      );
+      expect(await tab.locator('[data-pull-row]').count()).toBe(0);
+      expect(await tab.locator('[data-pulls-stop]').count()).toBe(0);
+      // No dead link: the project page only shows linked accounts and cannot link one, so the words are plain text.
+      expect(await tab.locator('[data-pulls-empty="no-reader"] a, [data-pulls-empty="no-reader"] button').count()).toBe(
+        0,
+      );
+      expect(await tab.getByRole('link', { name: /Link a GitHub account/ }).count()).toBe(0);
+      if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${variant.name}-default-no-account.png`) });
+      await context.close();
+    });
+  }
+});

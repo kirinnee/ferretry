@@ -41,6 +41,9 @@ export const EVENT_WORDS: Readonly<Record<WatchEvent, string>> = {
   closed: 'My PR is merged or closed',
 };
 
+/** The (i) on "Stop watching": the one place the cadence is said. */
+export const STOP_WATCHING_TIP = 'Ferretry asks GitHub every 5 minutes with the linked account.';
+
 export const EVENT_ORDER: readonly WatchEvent[] = WATCH_EVENTS;
 
 const keeps = (filter: Filter, pull: WatchedPull): boolean =>
@@ -104,7 +107,14 @@ export function orderProjects(
 }
 
 /** What the screen says when a watched project shows nothing, so an empty list always has a reason. */
-export type EmptyReason = 'watch-off' | 'no-results' | 'no-repos' | 'no-account' | 'none-open' | 'filtered';
+export type EmptyReason =
+  | 'watch-off'
+  | 'no-reader'
+  | 'no-results'
+  | 'no-repos'
+  | 'no-account'
+  | 'none-open'
+  | 'filtered';
 
 export function emptyReason(
   view: WatchProjectView,
@@ -113,7 +123,8 @@ export function emptyReason(
   /** The project's own record says its folder holds no repository. */
   noRepo: boolean,
 ): EmptyReason | undefined {
-  if (!view.watch) return 'watch-off';
+  // Stopped by the owner, or never started because no GitHub account is linked: told apart by who decided.
+  if (!view.watch) return view.watchedBy === 'you' ? 'watch-off' : 'no-reader';
   if (groups.some(group => group.pulls.length > 0)) return undefined;
   // The watch sends no repository both for "a repository is linked but not read yet" and for "there is none": only the
   // project's own record can tell them apart, so without it the honest words are "no results yet".
@@ -123,8 +134,8 @@ export function emptyReason(
 }
 
 export const EMPTY_WORDS: Readonly<Record<EmptyReason, string>> = {
-  'watch-off':
-    'Watching is off for this project, so Ferretry is not asking GitHub about it. Turn it on to see its pull requests.',
+  'watch-off': 'You stopped watching this project.',
+  'no-reader': 'No GitHub account linked to this project.',
   'no-results': 'No results yet. Ferretry has not read this project’s pull requests so far.',
   'no-repos': 'No GitHub repository was found inside this project’s folder.',
   'no-account':

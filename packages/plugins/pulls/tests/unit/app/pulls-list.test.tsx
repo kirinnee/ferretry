@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { ScreenHrefProvider } from '@ferretry/app';
 import { interact, type Mounted, mount, must, RouterProvider, settleUntil } from '@ferretry/app/testing';
 import type { ListClient } from '../../../app/features/list/api.ts';
+import { EVENT_ORDER } from '../../../app/features/list/model.ts';
 import { PullsList } from '../../../app/features/list/pulls-list.tsx';
 import { ProjectPulls } from '../../../app/features/list/project-section.tsx';
 import type { WatchOverview } from '../../../contract/index.ts';
@@ -164,7 +165,17 @@ describe('the PRs screen', () => {
     let mounted = await mount(screen(fake(() => off)));
     await shown(mounted, '[data-pulls-empty]');
     expect(mounted.container.querySelector('[data-pulls-empty="watch-off"]')).not.toBeNull();
-    expect(mounted.container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(false);
+    expect(mounted.container.querySelector('[data-pulls-watch] input[type="checkbox"]')).toBeNull();
+    expect(mounted.container.querySelector('[data-pulls-watch-again]')?.textContent).toBe('Watch again');
+    await mounted.unmount();
+
+    const unlinked = overview(view({ watch: false, watchedBy: 'default', repos: [] }));
+    mounted = await mount(screen(fake(() => unlinked)));
+    await shown(mounted, '[data-pulls-empty="no-reader"]');
+    expect(mounted.container.querySelector('[data-pulls-empty="no-reader"]')?.textContent).toContain(
+      'No GitHub account linked to this project.',
+    );
+    expect(mounted.container.querySelector('[data-pulls-stop]')).toBeNull();
     await mounted.unmount();
 
     const lonely = overview(
@@ -198,7 +209,7 @@ describe('the PRs screen', () => {
     const mounted = await mount(screen(fake(() => current, calls)));
     await shown(mounted, '[data-pulls-watch]');
     current = overview(view({ watch: true }));
-    await click(must(mounted.container.querySelector('[data-pulls-watch] input[type="checkbox"]'), 'watch switch'));
+    await click(must(mounted.container.querySelector('[data-pulls-watch-again]'), 'watch again'));
     await settleUntil(() => calls.some(c => c.route.startsWith('PATCH')), 'the patch', interact);
     const patch = calls.find(c => c.route.startsWith('PATCH'));
     expect(patch?.init).toEqual({ params: { project: PROJECT }, body: { watch: true } });
@@ -208,6 +219,50 @@ describe('the PRs screen', () => {
       'the notify choices',
       interact,
     );
+    await mounted.unmount();
+  });
+
+  it('a watched project shows its PRs with only a quiet Stop watching, and stopping is one PATCH', async () => {
+    let current = mixed();
+    const calls: Call[] = [];
+    const mounted = await mount(screen(fake(() => current, calls)));
+    await shown(mounted, '[data-pull-row]');
+    expect(mounted.container.querySelector('input[type="checkbox"][id^="pulls-watch"]')).toBeNull();
+    const stop = must(mounted.container.querySelector<HTMLButtonElement>('[data-pulls-stop]'), 'stop');
+    expect(stop.textContent).toContain('Stop watching');
+    // The list comes first and the control after it.
+    expect(
+      must(mounted.container.querySelector('[data-pull-row]'), 'row').compareDocumentPosition(stop) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    current = overview(view({ watch: false }));
+    await click(stop);
+    await settleUntil(
+      () => mounted.container.querySelector('[data-pulls-watch-again]') !== null,
+      'watch again',
+      interact,
+    );
+    const patches = calls.filter(c => c.route.startsWith('PATCH'));
+    expect(patches.map(c => c.init?.body)).toEqual([{ watch: false }]);
+    expect(mounted.container.querySelector('[data-pull-row]')).toBeNull();
+    await mounted.unmount();
+  });
+
+  it('a project watched only by default asks the owner to pick what notifies the phone', async () => {
+    const current = overview(
+      view({
+        watchedBy: 'default',
+        notify: Object.fromEntries(EVENT_ORDER.map(event => [event, false])),
+      }),
+    );
+    const mounted = await mount(screen(fake(() => current)));
+    await shown(mounted, '[data-pulls-notify-hint]');
+    expect(mounted.container.querySelector('[data-pulls-notify-hint]')?.textContent).toBe(
+      'Pick what should notify your phone.',
+    );
+    const boxes = [...mounted.container.querySelectorAll<HTMLInputElement>('[data-pulls-notify-event]')];
+    expect(boxes).toHaveLength(EVENT_ORDER.length);
+    expect(boxes.every(box => !box.checked)).toBe(true);
     await mounted.unmount();
   });
 

@@ -4,6 +4,7 @@ import type { ProjectInfo } from '@ferretry/plugin-projects/contract';
 import {
   DEFAULT_NOTIFY,
   PullsConfigSchema,
+  nextSetting,
   settingsOf,
   WATCH_CADENCE_MS,
   type WatchedPull,
@@ -189,15 +190,39 @@ describe('cadence', () => {
 });
 
 describe('settings', () => {
-  test('absent reads as watch off and the defaults; a project’s own choices sit on top', () => {
-    expect(settingsOf(undefined, 'p')).toEqual({ watch: false, notify: DEFAULT_NOTIFY });
+  test('absent reads as watched by default with a linked account, off without one; the owner’s own choice wins', () => {
+    const quiet = Object.fromEntries(Object.keys(DEFAULT_NOTIFY).map(event => [event, false])) as Record<
+      keyof typeof DEFAULT_NOTIFY,
+      boolean
+    >;
+    expect(settingsOf(undefined, 'p', false)).toEqual({ watch: false, watchedBy: 'default', notify: quiet });
+    expect(settingsOf(undefined, 'p', true)).toEqual({ watch: true, watchedBy: 'default', notify: quiet });
     const config = PullsConfigSchema.parse({
       projects: { p: { watch: true, notify: { ciPassed: true, ciFailed: false } } },
     });
-    const s = settingsOf(config, 'p');
+    const s = settingsOf(config, 'p', false);
     expect(s.watch).toBe(true);
+    expect(s.watchedBy).toBe('you');
     expect(s.notify).toMatchObject({ ciPassed: true, ciFailed: false, reviewRequested: true, comment: false });
-    expect(settingsOf(config, 'other').watch).toBe(false);
+    expect(settingsOf(config, 'other', false).watch).toBe(false);
+    // Stopped on purpose stays stopped even with an account; ticks alone leave a default watch on and quiet elsewhere.
+    expect(settingsOf({ projects: { p: { watch: false, notify: {} } } }, 'p', true)).toMatchObject({
+      watch: false,
+      watchedBy: 'you',
+    });
+    expect(settingsOf({ projects: { p: { notify: { ciFailed: true } } } }, 'p', true)).toMatchObject({
+      watch: true,
+      watchedBy: 'default',
+      notify: { ...quiet, ciFailed: true },
+    });
+  });
+  test('a notify-only patch keeps the stored watch exactly as it was; only a named watch changes it', () => {
+    expect(nextSetting(undefined, { notify: { ciFailed: true } })).toEqual({ notify: { ciFailed: true } });
+    expect(nextSetting({ watch: false, notify: { comment: true } }, { notify: { ciFailed: true } })).toEqual({
+      watch: false,
+      notify: { comment: true, ciFailed: true },
+    });
+    expect(nextSetting({ notify: {} }, { watch: false })).toEqual({ watch: false, notify: {} });
   });
   test('the defaults are the ones the owner chose: failures and reviews on; passes, comments and ends off', () => {
     expect(DEFAULT_NOTIFY).toEqual({
