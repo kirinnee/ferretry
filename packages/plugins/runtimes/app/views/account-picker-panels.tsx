@@ -90,6 +90,7 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
     <RuntimeSelect
       client={{ subscribe: client.subscribe ?? noSubscribe }}
       fallbackId={slot.fallbackId}
+      labelId={slot.labelId}
       fallbackPlaceholder={slot.fallbackPlaceholder}
       noAccounts={slot.noAccounts as ReactNode}
       now={now}

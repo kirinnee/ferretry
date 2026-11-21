@@ -87,6 +87,7 @@ const openScene = async (
   scene: 'start' | 'default',
   viewport: (typeof VIEWPORTS)[number],
   theme: (typeof THEMES)[number],
+  label = '',
 ) => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
@@ -100,7 +101,9 @@ const openScene = async (
     new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
   );
   const tab = await context.newPage();
-  await tab.goto(`${origin}/?scene=${scene}&theme=studio-${theme}`);
+  await tab.goto(
+    `${origin}/?scene=${scene}&theme=studio-${theme}${label === '' ? '' : `&label=${encodeURIComponent(label)}`}`,
+  );
   return { context, tab };
 };
 
@@ -149,6 +152,7 @@ describe('the runtimes plugin picks from lists with the app’s select box', () 
           expect(await tab.textContent(box)).toContain('claude-personal');
           // The page's own label still names the field it points at.
           expect(await tab.getAttribute(box, 'id')).toBe('runtime-field');
+          expect(await tab.getAttribute(box, 'aria-label'), 'announced as the visible label says').toBe('Runtime');
           await tab.click(box);
           await tab.waitForSelector('[role="option"]');
           const open = await listing(tab);
@@ -195,6 +199,20 @@ describe('the runtimes plugin picks from lists with the app’s select box', () 
         }
       });
 
+  it('Move: the box announces the visible label (Agent wrapper), not a generic "Runtime", and titles its dialog with it', async () => {
+    const { context, tab } = await openScene('start', VIEWPORTS[0], 'light', 'Agent wrapper');
+    try {
+      const box = '[data-runtime-select] [role="combobox"]';
+      await tab.waitForSelector(box);
+      expect(await tab.getAttribute(box, 'aria-label')).toBe('Agent wrapper');
+      await tab.click(box);
+      await tab.waitForSelector('[role="listbox"]');
+      expect(await tab.getAttribute('[role="listbox"]', 'aria-label')).toBe('Agent wrapper');
+    } finally {
+      await context.close();
+    }
+  });
+
   for (const viewport of VIEWPORTS)
     for (const theme of THEMES)
       it(`Default runtime: open, type to narrow, pick, Save writes the default (${viewport.name}, ${theme})`, async () => {
@@ -228,27 +246,59 @@ describe('the runtimes plugin picks from lists with the app’s select box', () 
           expect(await tab.textContent(box)).toContain('codex-team');
           const sent = async () =>
             await tab.evaluate(() =>
-              (window as unknown as { __calls: { route: string; body: unknown }[] }).__calls
+              (
+                window as unknown as {
+                  __calls: { route: string; params?: unknown; body: unknown }[];
+                }
+              ).__calls
                 .filter(call => call.route.startsWith('POST'))
-                .map(call => ({ route: call.route, body: call.body })),
+                .map(call => ({ route: call.route, params: call.params, body: call.body })),
             );
           expect(await sent(), 'nothing is written before Save').toEqual([]);
           await tab.click('[data-change-submit]');
-          await tab.waitForFunction(
-            () =>
-              (window as unknown as { __calls: { route: string }[] }).__calls.filter(call =>
-                call.route.startsWith('POST'),
-              ).length >= 2,
-          );
-          const writes = await sent();
-          const proposal = writes.find(call => call.route === 'POST /v1/runtimes/proposals');
-          expect(proposal?.body, 'the change proposed: the default, beside every other machine setting').toMatchObject({
-            change: { kind: 'machine.settings', defaultRuntime: 'codex-team' },
-          });
-          expect(writes.map(call => call.route)).toEqual([
-            'POST /v1/runtimes/proposals',
-            expect.stringMatching(/^POST \/v1\/runtimes\/proposals\/.+\/apply$/u),
+          // The apply ANSWERED: the scene's apply route only answers the proposal id the scene staged, and the tab
+          // closes the pick (the box returns to the saved default) only for an applied change.
+          await tab.waitForFunction(() => (window as unknown as { __applied?: unknown[] }).__applied?.length === 1);
+          expect(await sent(), 'the exact proposal, then the exact apply of that proposal id').toEqual([
+            {
+              route: 'POST /v1/runtimes/proposals',
+              params: undefined,
+              body: {
+                change: {
+                  kind: 'machine.settings',
+                  agentPermissions: 'auto',
+                  defaultRuntime: 'codex-team',
+                  agentControl: {
+                    terminals: true,
+                    browsers: true,
+                    files: true,
+                    ferretrySettings: false,
+                    pageScripts: false,
+                  },
+                  browserMode: 'headless',
+                  browserProxy: null,
+                  browserPorts: 'random',
+                  browserFirewallFailure: 'warn',
+                  autoResume: true,
+                  agendaMode: false,
+                  publicUsageFeed: false,
+                },
+              },
+            },
+            {
+              route: 'POST /v1/runtimes/proposals/:proposalId/apply',
+              params: { proposalId: 'fy_fprop_abcdefghijklmnopqrstuv' },
+              body: {},
+            },
           ]);
+          expect(
+            await tab.evaluate(() => (window as unknown as { __applied: unknown[] }).__applied),
+            'the daemon answered the apply with a committed outcome',
+          ).toEqual([{ proposalId: 'fy_fprop_abcdefghijklmnopqrstuv', outcome: 'applied' }]);
+          await tab.waitForFunction(
+            selector => document.querySelector(selector)?.textContent?.includes('claude-personal') === true,
+            box,
+          );
           await shoot(tab, viewport.name, theme, 'default-saved');
         } finally {
           await context.close();

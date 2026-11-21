@@ -69,7 +69,7 @@ function Start() {
     >
       <h1 style={{ fontSize: 20, margin: 0 }}>New ferret</h1>
       <label htmlFor="runtime-field" id="runtime-label" style={{ fontWeight: 600 }}>
-        Runtime
+        {params.get('label') ?? 'Runtime'}
       </label>
       <Slot
         fallbackId="runtime-field"
@@ -102,7 +102,13 @@ function Default() {
       'GET /v1/runtimes': { format: 'present', runtimes: defaults },
       'GET /v1/runtimes/machine': shown,
       'POST /v1/runtimes/proposals': stagedFrom,
-      [`POST /v1/runtimes/proposals/${CHANGE_ID}/apply`]: COMMITTED,
+      // Answers only the proposal id the scene staged (a call for any other id finds no route and fails), and records
+      // each answer so the test can tell a finished apply from one that was merely sent.
+      [`POST /v1/runtimes/proposals/${CHANGE_ID}/apply`]: () => {
+        const answered = window as unknown as { __applied?: unknown[] };
+        answered.__applied = [...(answered.__applied ?? []), { proposalId: CHANGE_ID, outcome: COMMITTED.outcome }];
+        return COMMITTED;
+      },
     },
     calls,
   );

@@ -24,7 +24,7 @@ import { Loading, SelectBox, type SelectOption } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { UsageAccountView } from '@ferretry/plugin-usage/contract';
 import { Activity } from 'lucide-react';
-import { type ReactNode, useEffect, useMemo } from 'react';
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useAccountPickerSlice } from '../hooks/use-account-picker.ts';
 import { accountHealthView } from '../lib/account-health-view.ts';
 import type { PickerAccount } from '../lib/account-picker-catalog.ts';
@@ -87,6 +87,8 @@ export interface RuntimeSelectProps {
   readonly offerHealthCheck?: boolean;
   /** The id the box (or the typed fallback input) takes, so the page's own label keeps pointing at it. */
   readonly fallbackId: string;
+  /** The page's visible label element: the box announces (and titles its dialog with) that text, not a generic word. */
+  readonly labelId?: string;
   readonly fallbackPlaceholder: string;
 }
 
@@ -155,6 +157,16 @@ function ChosenReadout({ account, now }: { readonly account: AccountPickerOption
  * rows handed in and the stored health the store hydrates beside it. It reads nothing else and writes
  * only the draft — choosing a button probes no runtime and starts nothing.
  */
+/** The words the page's own label shows (New ferret: "Runtime"; Move: "Agent wrapper"), so the box says what the person reads. */
+function useVisibleLabel(labelId: string | undefined): string {
+  const [text, setText] = useState('Runtime');
+  useLayoutEffect(() => {
+    const shown = labelId === undefined ? '' : (document.getElementById(labelId)?.textContent ?? '').trim();
+    setText(shown === '' ? 'Runtime' : shown);
+  }, [labelId]);
+  return text;
+}
+
 export function RuntimeSelect({
   store,
   client,
@@ -170,8 +182,10 @@ export function RuntimeSelect({
   harness,
   offerHealthCheck = false,
   fallbackId,
+  labelId,
   fallbackPlaceholder,
 }: RuntimeSelectProps): ReactNode {
+  const label = useVisibleLabel(labelId);
   const slice = useAccountPickerSlice(store, client);
   const published = slice.catalog?.accounts ?? null;
   const health = slice.health;
@@ -236,7 +250,7 @@ export function RuntimeSelect({
         <SelectBox
           className="w-full"
           id={fallbackId}
-          label="Runtime"
+          label={label}
           onChange={onValueChange}
           options={harnessGroups(offered).flatMap(group =>
             group.options.map(account => ({ ...optionOf(account, now), group: group.label })),
