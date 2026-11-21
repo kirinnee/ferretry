@@ -1052,8 +1052,9 @@ export class ConversationIndex {
         await this.#scrub(scrub =>
           [...named].flatMap(([id, name]) => {
             if (!inScope(id)) return [];
-            // Codex's thread names are the ones its owner gave (`transcriptNames` reads them as `chosen` too).
-            const title = cleanTitle(name, scrub, 'owner');
+            // A Codex manual name and its automatic title are the same record, so neither is known to be the owner's:
+            // the credential cue applies (`transcriptNames` reads them as `generated` too).
+            const title = cleanTitle(name, scrub, 'generated');
             return title === undefined ? [] : [[id, title] as const];
           }),
         ),
