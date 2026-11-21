@@ -268,6 +268,25 @@ describe('a page the wire allows at its limit is drawn in a bounded few nodes', 
     await mounted.unmount();
   });
 
+  it('never cuts inside a link: a bare URL straddling the collapse boundary is not drawn as a different link', async () => {
+    const real = 'https://example.com/a/very/long/path/that/matters?token=abc';
+    for (const prefix of [COLLAPSED_CHARS - 20, COLLAPSED_CHARS - 2, COLLAPSED_CHARS - 1]) {
+      for (const wrap of [(u: string) => u, (u: string) => `<${u}>`]) {
+        const text = `${'x '.repeat(Math.floor(prefix / 2))}${prefix % 2 === 1 ? ' ' : ''}${wrap(real)} ${'tail '.repeat(100)}`;
+        const mounted = await mount(<SafeProse sourceUrl={URL} text={text} />);
+        const hrefs = [...mounted.container.querySelectorAll('a')].map(a => a.getAttribute('href'));
+        for (const href of hrefs) expect(href).toBe(real);
+        await mounted.unmount();
+      }
+    }
+    // a URL with nothing but itself in the first COLLAPSED_CHARS is not drawn as a link either
+    const run = `${real}${'z'.repeat(COLLAPSED_CHARS)}`;
+    const alone = await mount(<SafeProse sourceUrl={URL} text={`${'a'.repeat(COLLAPSED_CHARS - 20)}${run}`} />);
+    for (const a of alone.container.querySelectorAll('a'))
+      expect(a.getAttribute('href')).toBe(`${real}${'z'.repeat(COLLAPSED_CHARS)}`);
+    await alone.unmount();
+  });
+
   it('opens a long text whole when asked', async () => {
     const mounted = await mount(
       <Conversation

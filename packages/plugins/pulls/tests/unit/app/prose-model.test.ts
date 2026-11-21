@@ -170,6 +170,20 @@ describe('structure and bounds', () => {
     expect(safeHref(`https://example.com/${mark}`)).toBeUndefined();
     expect(trimSpace(` \t${mark} \n`)).toBe(mark);
   });
+  test('the Markdown link-title separator does not eat U+FEFF: it stays in the text for the marker, never a link', () => {
+    const mark = '﻿';
+    for (const text of [
+      `[a](https://example.com/${mark}"t")`,
+      `[a](https://example.com/ ${mark}"t")`,
+      `[a](https://example.com/${mark} "t")`,
+    ]) {
+      const nodes = inline(text);
+      expect(kinds(nodes)).not.toContain('link');
+      expect(texts(nodes)).toContain(mark);
+    }
+    // an ordinary titled link is still a link
+    expect(kinds(inline('[a](https://example.com/ "t")'))).toEqual(['link']);
+  });
   test('a hostile input is read, not run: it parses to plain text or code', () => {
     expect(() => parseProse(`${'*'.repeat(200)}\n${'[a](b'.repeat(50)}\n${'<!--'.repeat(50)}`)).not.toThrow();
     expect(parseProse('`'.repeat(100)).length).toBeGreaterThan(0);
