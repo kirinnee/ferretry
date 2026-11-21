@@ -63,6 +63,12 @@ const CODEX_INDEX_READ_MAX_BYTES = 1024 * 1024;
 const ROLLOUT_ID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/iu;
 /** Bump when a column or what a column holds changes: the cache is dropped and rebuilt. */
 const LAYOUT = '3';
+/**
+ * Bump when the RULE that makes a fallback title (`file_title`, from the first message) changes: every cached row is then read
+ * again once, so a conversation indexed under the old rule gets the new title. Unlike `LAYOUT` nothing is dropped: a row's ferret
+ * name and title (an owner's Rename included) are carried over, and a title the harness wrote is read again from its transcript.
+ */
+const TITLE_RULE = '1';
 const NAME_FALLBACK_MAX = 60;
 /** What a row is called when nothing readable is left to name it by (every word of it was masked). */
 const UNTITLED_NAME = 'Conversation';
@@ -368,6 +374,11 @@ export class ConversationIndex {
       'CREATE TABLE IF NOT EXISTS index_names (source TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (source, id))',
     );
     db.run("INSERT OR REPLACE INTO meta (k, v) VALUES ('layout', ?)", [LAYOUT]);
+    if (db.query<{ v: string }>("SELECT v FROM meta WHERE k = 'title_rule'")[0]?.v !== TITLE_RULE) {
+      // No stamp can match a file again, and `scanned = 0` keeps an append from being folded onto the old title (`#delta`).
+      db.run('UPDATE conv SET size = -1, mtime_ms = -1, scanned = 0');
+      db.run("INSERT OR REPLACE INTO meta (k, v) VALUES ('title_rule', ?)", [TITLE_RULE]);
+    }
     this.#db = db;
     return db;
   }
