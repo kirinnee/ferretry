@@ -209,6 +209,10 @@
   min-height: 0;
   overflow-y: auto;
   padding: 16px;
+  /* The page's one scroller (every Settings tab lives in it). A native Tab scrolls a control into view by the least amount, which parks
+     its BORDER BOX flush on the scroller's edge and cuts the focus ring (up to 4px: 3px outline + offset) in half. The scroll padding
+     keeps a focused control that far inside the edge, so the whole ring is drawn (r11-2b K13: Layout chips, Voice, Warden). */
+  scroll-padding-block: 8px;
 }
 .fy-side {
   min-height: 0;
