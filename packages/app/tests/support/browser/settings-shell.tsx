@@ -15,7 +15,7 @@
  */
 
 import { implementApp, type Manifest } from '@ferretry/kernel/manifest';
-import type { ComponentType, ReactNode } from 'react';
+import { type ComponentType, type ReactNode, useEffect, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { TransportAnswer, TransportRequest } from '../../../src/client/transport.ts';
 import { type DaemonlessPorts, registeredDaemonless } from '../../../src/connect/provides.ts';
@@ -29,7 +29,15 @@ import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { PlacedPanel } from '../../../src/testing/slot-panels.tsx';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
-import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
+import { AddressTaker } from '../../../src/router/address.ts';
+import { DeviceProvider, type DeviceContextValue, NO_INSTALL_PROMPT } from '../../../src/shell/device-context.tsx';
+import { HandOffs } from '../../../src/shell/hand-off.ts';
+import {
+  applyTextScale,
+  applyThemeAxes,
+  resolveThemeMode,
+  ThemePreferenceStore,
+} from '../../../src/theme/preferences.ts';
 import { CORE, FakeTransport, inventoryOf, json } from '../../unit/client/fixtures.ts';
 
 export interface SettingsShellScene {
@@ -169,4 +177,37 @@ export function registeredPanel(plugin: string, id: string, client: unknown): Pl
   const view = panels?.panels?.[id];
   if (view === undefined) throw new Error(`${plugin} registers no panel ${id}`);
   return { plugin, id, view };
+}
+
+/**
+ * A DEVICE CONTEXT FOR A SCENE THAT DRAWS ONE REAL PANEL OUTSIDE THE SHELL (r11 G2 review): the panel's own `useDeviceTheme` reads
+ * a real `ThemePreferenceStore` (kept in memory, first look = `mode`), and a pick publishes the style, palette, mode and text
+ * scale on `<html>` exactly as the shell root does (`applyThemeAxes`, `applyTextScale`), so the page restyles for real.
+ */
+export function WithDeviceTheme({
+  mode,
+  children,
+}: {
+  readonly mode: 'light' | 'dark';
+  readonly children: ReactNode;
+}): ReactNode {
+  const [device] = useState<DeviceContextValue>(() => {
+    const theme = new ThemePreferenceStore(memoryStore());
+    theme.setMode(mode);
+    return {
+      theme,
+      systemDark: false,
+      install: NO_INSTALL_PROMPT,
+      address: new AddressTaker([]),
+      handOffs: new HandOffs(() => undefined, { now: Date.now, after: () => {} }),
+      daemons: new DaemonList({ storage: memoryStore(), now: () => 1 }),
+    };
+  });
+  const preference = useSyncExternalStore(device.theme.subscribe, () => device.theme.snapshot());
+  useEffect(() => {
+    const root = document.documentElement;
+    applyThemeAxes(root, preference, resolveThemeMode(preference.mode, false));
+    applyTextScale(root, preference.textScale);
+  }, [preference]);
+  return <DeviceProvider value={device}>{children}</DeviceProvider>;
 }

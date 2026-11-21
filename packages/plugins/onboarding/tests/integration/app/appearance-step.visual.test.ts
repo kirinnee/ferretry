@@ -112,14 +112,16 @@ const measure = async (tab: Page) =>
       cards: [...group.querySelectorAll('.fy-cc__card')].map(box),
     }));
     const slot = document.querySelector('.fy-sf-slot') as HTMLElement;
-    const clone = slot.cloneNode(true) as HTMLElement;
-    for (const hidden of clone.querySelectorAll('.fy-cc__title, .sr-only, [aria-hidden="true"]')) hidden.remove();
-    const text = (clone.textContent ?? '').replace(/\s+/g, ' ').trim();
+    // What a person reads in the slot (`innerText`, so styling and hidden parts count as they do on screen), minus ONLY the card titles.
+    let text = slot.innerText;
+    for (const title of slot.querySelectorAll<HTMLElement>('.fy-cc__title')) text = text.replace(title.innerText, '');
+    text = text.replace(/\s+/g, ' ').trim();
     const demo = document.querySelector('[data-step-demo]') as HTMLElement | null;
     const painted =
       demo === null ? [] : [...demo.querySelectorAll('*')].filter(el => el.getBoundingClientRect().height > 0);
     return {
       groups,
+      labels: [...slot.querySelectorAll('[role=radiogroup]')].map(group => group.getAttribute('aria-label') ?? ''),
       text,
       demo: demo === null ? null : box(demo),
       demoPainted: painted.length,
@@ -135,7 +137,8 @@ describe('the onboarding Appearance step (r11 G2)', () => {
         await shot(tab, variant, 'appearance');
         const seen = await measure(tab);
         // Stacked: every group is the stack layout, and each card sits under the one before it, in one column.
-        expect(seen.groups.length).toBeGreaterThanOrEqual(3);
+        // Five lists: colour mode, palette, style, and the two the base step kept (text size, motion).
+        expect(seen.labels).toEqual(['Colour mode', 'Palette', 'Style', 'Text size', 'Motion']);
         for (const group of seen.groups) {
           expect(group.layout).toBe('stack');
           for (let index = 1; index < group.cards.length; index += 1) {
@@ -155,6 +158,9 @@ describe('the onboarding Appearance step (r11 G2)', () => {
           // Beside the choices: the demo starts to the right of every card.
           const rightmost = Math.max(...seen.groups.flatMap(group => group.cards.map(card => card.right)));
           expect(demo.x).toBeGreaterThanOrEqual(rightmost - 1);
+          // ...and BESIDE them, not below: it starts above the bottom of the last card.
+          const lowest = Math.max(...seen.groups.flatMap(group => group.cards.map(card => card.bottom)));
+          expect(demo.y).toBeLessThan(lowest);
           expect(demo.bottom - demo.y).toBeGreaterThan(160);
         }
         if (shotsDir !== '')
@@ -201,6 +207,16 @@ describe('the onboarding Appearance step (r11 G2)', () => {
       await tab.locator('[aria-label="Style"] .fy-cc__card[data-choice="neo"]').click();
       await shot(tab, variant, 'picked');
       expect((await read()).style).toBe('neo');
+      // The two controls the base step had stay and work: Text size scales the type, Motion is chosen.
+      const scale = async () =>
+        await tab.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--fy-text-scale').trim());
+      const defaultScale = await scale();
+      await tab.locator('[aria-label="Text size"] .fy-cc__card[data-choice="larger"]').click();
+      await tab.waitForTimeout(200);
+      expect(await scale()).not.toBe(defaultScale);
+      await tab.locator('[aria-label="Motion"] .fy-cc__card[data-choice="reduced"]').click();
+      await tab.waitForTimeout(200);
+      expect(await tab.locator('[aria-label="Motion"] input:checked').getAttribute('value')).toBe('reduced');
     } finally {
       await close();
     }
