@@ -287,6 +287,61 @@ describe('a page the wire allows at its limit is drawn in a bounded few nodes', 
     await alone.unmount();
   });
 
+  it('draws the run the cut lands in as plain text: no collapsed link differs from one in the expanded body', async () => {
+    const hrefsOf = (root: Element): string[] =>
+      [...root.querySelectorAll('a[data-gh-link]')].map(a => a.getAttribute('href') ?? '');
+    const ok = 'https://example.com/ok';
+    // `[ok](…)`, filler words, then `target` starting at character `position`, then a long tail
+    const startingAt = (target: string, position: number): string => {
+      const first = `[ok](${ok}) `;
+      return `${first}${'x'.repeat(position - first.length - 1)} ${target} ${'tail '.repeat(100)}`;
+    };
+    const targets = [
+      // the reviewer's case: an "http" inside the URL's own path
+      'https://example.com/a?u=http://evil.example/p/q',
+      // a query string, a fragment
+      'https://example.com/search?q=one&r=two&s=three#frag',
+      // a bare URL, an angle URL and a Markdown link, each whitespace-free
+      'https://example.com/a/very/long/path/that/matters?token=abc',
+      '<https://example.com/a/very/long/path/that/matters?token=abc>',
+      '[md](https://example.com/a/very/long/path/that/matters?token=abc)',
+    ];
+    for (const target of targets) {
+      // slide the cut through the whole target, so it lands before, inside and after every part of it
+      for (let offset = 0; offset <= target.length + 2; offset += 1) {
+        const closed = await mount(<SafeProse sourceUrl={URL} text={startingAt(target, COLLAPSED_CHARS - offset)} />);
+        const shown = hrefsOf(closed.container);
+        await tap(must(closed.container.querySelector('[data-gh-collapsed] button'), 'Show all'));
+        const whole = new Set(hrefsOf(closed.container));
+        for (const href of shown) expect(whole.has(href)).toBe(true);
+        await closed.unmount();
+      }
+    }
+    // one whitespace-free run longer than the whole collapsed head, with an "http" inside its own path or query: the
+    // run is text from its first character on, never a link to the address cut at that inner "http"
+    for (const run of [
+      `https://example.com/a?u=http://evil.example/${'p'.repeat(COLLAPSED_CHARS + 200)}`,
+      `https://example.com/a/http/b/${'q'.repeat(COLLAPSED_CHARS + 200)}`,
+      `<https://example.com/a?u=http://evil.example/${'p'.repeat(COLLAPSED_CHARS + 200)}>`,
+      `[md](https://example.com/a?u=http://evil.example/${'p'.repeat(COLLAPSED_CHARS + 200)})`,
+    ]) {
+      const long = await mount(<SafeProse sourceUrl={URL} text={`${run} after`} />);
+      expect(hrefsOf(long.container)).toEqual([]);
+      await long.unmount();
+    }
+    // a link wholly before the run stays a link; the run holding the cut is text
+    // the cut inside the path's "http" (…?u=http|://evil…): the link before it is kept, none to the shortened address,
+    // and the text of the run is all there
+    const run = 'https://example.com/a?u=http://evil.example/p';
+    const mounted = await mount(
+      <SafeProse sourceUrl={URL} text={startingAt(run, COLLAPSED_CHARS - 'https://example.com/a?u=http'.length)} />,
+    );
+    expect(hrefsOf(mounted.container)).toEqual([ok]);
+    expect(mounted.container.textContent).toContain('https://example.com/a?u=http');
+    expect(mounted.container.textContent).not.toContain('://evil');
+    await mounted.unmount();
+  });
+
   it('opens a long text whole when asked', async () => {
     const mounted = await mount(
       <Conversation

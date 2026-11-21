@@ -105,28 +105,74 @@ function drawBlocks(blocks: readonly Block[], sourceUrl: string, key = ''): Reac
 export const COLLAPSED_CHARS = 1_000;
 
 /**
- * `text` cut to at most `limit` characters, never through the middle of a surrogate pair and never through the middle
- * of a word: a URL cut short is a DIFFERENT clickable address, so the cut backs up to the whitespace before it (or, in
- * a run with none, to the start of the last "http"), and what is left is drawn as text, never as a link.
+ * `text` cut to at most `limit` characters, never through the middle of a surrogate pair. The cut can land inside a
+ * whitespace-free run (a URL, a `[label](url)`), and a link cut short is a DIFFERENT clickable address, so that run is
+ * split off as `run`: it is drawn as plain text, whatever it holds (no guessing where a URL starts), and `body`, the
+ * text before it, is read as usual, so a link wholly before the run stays a link.
  */
-function head(text: string, limit: number): string {
-  if (text.length <= limit) return text;
+function head(text: string, limit: number): { readonly body: string; readonly run: string } {
   let cut = text.slice(0, limit);
   const last = cut.charCodeAt(cut.length - 1);
   if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
   // On a boundary already (the next character is whitespace): nothing was cut through.
-  if (/\s/u.test(text.charAt(cut.length))) return cut;
-  const space = cut.search(/\S*$/u);
-  if (space > 0) return cut.slice(0, space);
-  const url = cut.toLowerCase().lastIndexOf('http');
-  return url >= 0 ? cut.slice(0, url) : cut;
+  if (/\s/u.test(text.charAt(cut.length))) return { body: cut, run: '' };
+  const start = cut.search(/\S*$/u);
+  return { body: cut.slice(0, start), run: cut.slice(start) };
+}
+
+/** A private-use character that is not in `text`: it stands in for the plain-text run while the body is read. */
+function stand(text: string): string {
+  const used = new Set(text);
+  for (let code = 0xe000; code <= 0xf8ff; code += 1) {
+    const char = String.fromCharCode(code);
+    if (!used.has(char)) return char;
+  }
+  return ''; // unreachable: a cut text of at most COLLAPSED_CHARS characters cannot hold all 6,400
+}
+
+const putInline = (nodes: readonly Inline[], from: string, run: string): readonly Inline[] =>
+  nodes.map((node): Inline => {
+    switch (node.kind) {
+      case 'text':
+      case 'code':
+        return { ...node, text: node.text.replaceAll(from, run) };
+      case 'image':
+        return { ...node, alt: node.alt.replaceAll(from, run) };
+      default:
+        return { ...node, children: putInline(node.children, from, run) };
+    }
+  });
+
+/** `blocks` with every `from` put back as `run`, as text (pure). */
+function putBlocks(blocks: readonly Block[], from: string, run: string): readonly Block[] {
+  return blocks.map((block): Block => {
+    switch (block.kind) {
+      case 'paragraph':
+        return { ...block, inline: putInline(block.inline, from, run) };
+      case 'list':
+        return { ...block, items: block.items.map(item => putInline(item, from, run)) };
+      case 'quote':
+        return { ...block, blocks: putBlocks(block.blocks, from, run) };
+      case 'code':
+        return { ...block, text: block.text.replaceAll(from, run) };
+      default:
+        return block;
+    }
+  });
+}
+
+/** The collapsed head, read: the body as usual, then the cut run as text (the stand-in keeps the run in its place, in its paragraph or list item). */
+function collapsed(text: string): readonly Block[] {
+  const { body, run } = head(text, COLLAPSED_CHARS);
+  if (run === '') return parseProse(body);
+  const mark = stand(body);
+  return putBlocks(parseProse(`${body}${mark}`), mark, run);
 }
 
 export function SafeProse({ text, sourceUrl }: { readonly text: string; readonly sourceUrl: string }) {
   const [open, setOpen] = useState(false);
   const long = text.length > COLLAPSED_CHARS;
-  const shown = long && !open ? head(text, COLLAPSED_CHARS) : text;
-  const blocks = useMemo(() => parseProse(shown), [shown]);
+  const blocks = useMemo(() => (long && !open ? collapsed(text) : parseProse(text)), [long, open, text]);
   return (
     <div className="md fy-seg min-w-0 break-words" data-gh-text="">
       {drawBlocks(blocks, sourceUrl)}
