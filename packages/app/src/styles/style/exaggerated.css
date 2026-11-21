@@ -223,8 +223,10 @@
    Every display-sized heading may break inside a word, and hyphenate where the language allows, rather than push the page
    sideways. `anywhere` (not `break-word`) also lowers the title's min-content width, so a flex or grid parent that
    forgot `min-width: 0` still shrinks it. */
-:root[data-style='exaggerated'] .text-display,
-:root[data-style='exaggerated'] .fy-spec__display {
+:root[data-style='exaggerated'] .text-display:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .text-display,
+:root[data-style='exaggerated'] .fy-spec__display:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .fy-spec__display {
   overflow-wrap: anywhere;
   hyphens: auto;
 }
@@ -235,29 +237,35 @@
    ========================================================================== */
 
 /* A text field is an empty ruled frame: no fill, one hairline in the control edge colour. */
-:root[data-style='exaggerated'] .kt-input {
+:root[data-style='exaggerated'] .kt-input:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .kt-input {
   background: transparent;
   border-color: var(--border-strong);
 }
-:root[data-style='exaggerated'] .kt-input:focus-visible {
+:root[data-style='exaggerated'] .kt-input:focus-visible:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .kt-input:focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: calc(-1 * var(--focus-width));
 }
 
 /* A choice card is a ruled cell; the chosen one takes an ink frame and a ruled tick, not a fill. */
-:root[data-style='exaggerated'] .fy-cc__card {
+:root[data-style='exaggerated'] .fy-cc__card:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .fy-cc__card {
   background: transparent;
   box-shadow: none;
   transition: border-color var(--motion-base) var(--ease-standard);
 }
-:root[data-style='exaggerated'] .fy-cc__card[data-selected='true'] {
+:root[data-style='exaggerated'] .fy-cc__card[data-selected='true']:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .fy-cc__card[data-selected='true'] {
   border-color: var(--fg);
 }
-:root[data-style='exaggerated'] .fy-cc__card:has(:focus-visible) {
+:root[data-style='exaggerated'] .fy-cc__card:has(:focus-visible):not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .fy-cc__card:has(:focus-visible) {
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: calc(-1 * var(--focus-width));
 }
-:root[data-style='exaggerated'] .fy-cc__check {
+:root[data-style='exaggerated'] .fy-cc__check:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .fy-cc__check {
   background: transparent;
   border: var(--stroke-control) solid var(--fg);
   border-radius: 0;
@@ -265,45 +273,57 @@
 }
 
 /* The switch is an empty ruled frame with a square mark; ON inverts to ink, never an accent block. */
-:root[data-style='exaggerated'] [data-neo-switch-track] {
+:root[data-style='exaggerated'] [data-neo-switch-track]:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] [data-neo-switch-track] {
   background: transparent;
   border-color: var(--border-strong);
   border-radius: 0;
 }
-:root[data-style='exaggerated'] [role='switch'][aria-checked='true'] [data-neo-switch-track] {
+:root[data-style='exaggerated'] [role='switch'][aria-checked='true'] [data-neo-switch-track]:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] [role='switch'][aria-checked='true'] [data-neo-switch-track] {
   background: var(--fg);
   border-color: var(--fg);
 }
-:root[data-style='exaggerated'] [data-neo-switch-thumb] {
+:root[data-style='exaggerated'] [data-neo-switch-thumb]:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] [data-neo-switch-thumb] {
   border-radius: 0;
   transition: transform var(--motion-base) var(--ease-standard);
 }
-:root[data-style='exaggerated'] [role='switch'][aria-checked='true'] [data-neo-switch-thumb] {
+:root[data-style='exaggerated'] [role='switch'][aria-checked='true'] [data-neo-switch-thumb]:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] [role='switch'][aria-checked='true'] [data-neo-switch-thumb] {
   background: var(--bg);
 }
 
 /* A badge and a message bubble are outlined, never tinted blocks. */
-:root[data-style='exaggerated'] .kt-badge,
-:root[data-style='exaggerated'] .kt-badge[data-tone] {
+:root[data-style='exaggerated'] .kt-badge:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .kt-badge,
+:root[data-style='exaggerated'] .kt-badge[data-tone]:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .kt-badge[data-tone] {
   background: transparent;
   border-color: currentColor;
 }
-:root[data-style='exaggerated'] .kt-bubble {
+:root[data-style='exaggerated'] .kt-bubble:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .kt-bubble {
   background: transparent;
   border-color: var(--border-strong);
 }
 
 /* "Selected" is one 2px rule beneath the thing, never a box: the segmented control's chosen segment and a pressed chip or tab. */
-:root[data-style='exaggerated'] [data-neo-segmented] {
+:root[data-style='exaggerated'] [data-neo-segmented]:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] [data-neo-segmented] {
   background: transparent;
   border-color: var(--border);
 }
-:root[data-style='exaggerated'] [data-neo-segmented] > label {
+:root[data-style='exaggerated'] [data-neo-segmented] > label:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] [data-neo-segmented] > label {
   transition: box-shadow var(--motion-base) var(--ease-standard);
 }
-:root[data-style='exaggerated'] [data-neo-segmented] > label:has(:checked),
-:root[data-style='exaggerated'] .kt-tab[aria-pressed='true'],
-:root[data-style='exaggerated'] .kt-tab[aria-selected='true'] {
+:root[data-style='exaggerated'] [data-neo-segmented] > label:has(:checked):not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] [data-neo-segmented] > label:has(:checked),
+:root[data-style='exaggerated'] .kt-tab[aria-pressed='true']:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .kt-tab[aria-pressed='true'],
+:root[data-style='exaggerated'] .kt-tab[aria-selected='true']:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .kt-tab[aria-selected='true'] {
   background: transparent;
   border-color: transparent;
   box-shadow: inset 0 calc(var(--border-width-heavy) * -1) 0 var(--fg);
@@ -311,21 +331,25 @@
 }
 
 /* Progress is a row of hairlines: done is full ink, now is the accent and a little taller, the rest are rules. */
-:root[data-style='exaggerated'] .fy-sp-progress__segment {
+:root[data-style='exaggerated'] .fy-sp-progress__segment:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .fy-sp-progress__segment {
   border-radius: 0;
   height: 2px;
 }
-:root[data-style='exaggerated'] .fy-sp-progress__segment[data-state='done'] {
+:root[data-style='exaggerated'] .fy-sp-progress__segment[data-state='done']:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .fy-sp-progress__segment[data-state='done'] {
   background: var(--fg);
   opacity: 1;
 }
-:root[data-style='exaggerated'] .fy-sp-progress__segment[data-state='current'] {
+:root[data-style='exaggerated'] .fy-sp-progress__segment[data-state='current']:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] .fy-sp-progress__segment[data-state='current'] {
   background: var(--accent);
   height: 4px;
 }
 
 /* A bar track is a hairline, the fill a heavier line over it. */
-:root[data-style='exaggerated'] [data-option-bar-track] {
+:root[data-style='exaggerated'] [data-option-bar-track]:not([data-swatch] *),
+[data-swatch][data-style='exaggerated'] [data-option-bar-track] {
   border-radius: 0;
   height: 2px;
 }

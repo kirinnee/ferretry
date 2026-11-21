@@ -736,6 +736,85 @@ describe('a swatch draws its own style’s spinner, on a page of any style', () 
     });
 });
 
+/**
+ * The same boundary for CONTROLS (the PR 2270 review, item 1): a swatch draws ITS OWN style's controls, whatever the page is
+ * wearing. The reference is each style's controls on a page of that style; every swatch of that style, on a page of any style,
+ * must read back the same values. A Swiss page rule that leaked would square a Studio swatch's round choice tick; an Exaggerated
+ * one would strip the fills of a Studio swatch's input and tick.
+ */
+const CONTROL_PROBE = `<div class="fy-cc__card" data-selected="true" data-probe-control="card"><span class="fy-cc__check" data-probe-control="check"></span></div><input class="kt-input" data-probe-control="input"><span class="kt-badge" data-probe-control="badge">x</span><div class="kt-bubble" data-probe-control="bubble">x</div><div data-neo-segmented data-probe-control="segmented"><label><input type="radio" checked>x</label></div>`;
+const readControls = async (tab: Page, holderSelector: string): Promise<Record<string, Record<string, string>>> =>
+  await tab.evaluate(holder => {
+    const out: Record<string, Record<string, string>> = {};
+    for (const el of document.querySelectorAll(`${holder} [data-probe-control]`)) {
+      const style = getComputedStyle(el);
+      out[el.getAttribute('data-probe-control') as string] = {
+        backgroundColor: style.backgroundColor,
+        borderColor: style.borderTopColor,
+        borderRadius: style.borderTopLeftRadius,
+        borderWidth: style.borderTopWidth,
+        boxShadow: style.boxShadow,
+        outlineOffset: style.outlineOffset,
+      };
+    }
+    return out;
+  }, holderSelector);
+const mountControls = async (tab: Page, id: string, swatchStyle: string | null): Promise<void> => {
+  await tab.evaluate(
+    ([holderId, style, source]) => {
+      const holder = document.createElement('div');
+      holder.id = holderId as string;
+      if (style !== null) {
+        holder.setAttribute('data-swatch', '');
+        holder.setAttribute('data-style', style as string);
+        holder.setAttribute('data-palette', 'studio');
+        holder.setAttribute('data-mode', 'light');
+      }
+      holder.innerHTML = source as string;
+      document.body.append(holder);
+    },
+    [id, swatchStyle, CONTROL_PROBE] as const,
+  );
+};
+
+describe('a swatch draws its own style’s controls, on a page of any style', () => {
+  // HUD is not in this list: its own page rules still reach a swatch of another style (and its own swatch loses them), which is
+  // the HUD kit's to scope, not this PR's. Studio, Swiss, Exaggerated and Mission hold the boundary.
+  const PAGES = ['studio', 'swiss', 'exaggerated', 'mission'] as const;
+  const reference: Record<string, Record<string, Record<string, string>>> = {};
+  beforeAll(async () => {
+    for (const style of PAGES) {
+      const { tab, close } = await open(VIEWPORTS[0], 'light', style, 'studio');
+      try {
+        await mountControls(tab, 'reference', null);
+        reference[style] = await readControls(tab, '#reference');
+      } finally {
+        await close();
+      }
+    }
+    // The reference has to tell the styles apart, or the comparison below proves nothing.
+    expect(reference.swiss?.check?.borderRadius).toBe('0px');
+    expect(reference.studio?.check?.borderRadius).not.toBe('0px');
+    expect(reference.exaggerated?.input?.backgroundColor).toBe('rgba(0, 0, 0, 0)');
+    expect(reference.studio?.input?.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+  }, 180_000);
+
+  for (const pageStyle of PAGES)
+    it(`on a ${pageStyle} page: every swatch style keeps its own controls`, async () => {
+      const { tab, close } = await open(VIEWPORTS[0], 'light', pageStyle, 'studio');
+      try {
+        for (const swatch of PAGES) {
+          await mountControls(tab, `swatch-${swatch}`, swatch);
+          const got = await readControls(tab, `#swatch-${swatch}`);
+          report[`controls:${pageStyle}:${swatch}`] = got;
+          expect(got, `${swatch} swatch on a ${pageStyle} page`).toEqual(reference[swatch] as typeof got);
+        }
+      } finally {
+        await close();
+      }
+    });
+});
+
 /** Shots (only when FY_SWISS_EXAGGERATED_SHOTS_DIR is set): the specimen page per style, width and mode, fake data. The style's own
  * motion is waited out (a colour transition caught half way is not the style), the specimen's opaque cover is taken off so the page
  * pattern shows, and the spinner is shot again at 8x. */

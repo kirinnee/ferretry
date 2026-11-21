@@ -280,6 +280,7 @@
 }
 
 /* The chosen card's tick is a square block, like everything else here: no round badge. */
-:root[data-style='swiss'] .fy-cc__check {
+:root[data-style='swiss'] .fy-cc__check:not([data-swatch] *),
+[data-swatch][data-style='swiss'] .fy-cc__check {
   border-radius: 0;
 }
