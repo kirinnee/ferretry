@@ -95,6 +95,13 @@ export function registrationClosesSentence(closesAt: string | undefined): string
  * no end, the end is not a time, or it has passed. Rounded UP: a window with 61 s left says 2 minutes, never a
  * false "closed", and under a minute says so.
  */
+export function registrationMinutes(closesAt: string | undefined, nowMs: number): number | null {
+  if (closesAt === undefined) return null;
+  const closes = new Date(closesAt).getTime();
+  if (Number.isNaN(closes) || closes <= nowMs) return null;
+  return Math.ceil((closes - nowMs) / 60_000);
+}
+
 export function registrationMinutesLeft(closesAt: string | undefined, nowMs: number): string | null {
   if (closesAt === undefined) return null;
   const closes = new Date(closesAt).getTime();

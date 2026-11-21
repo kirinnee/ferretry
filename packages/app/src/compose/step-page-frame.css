@@ -145,6 +145,11 @@
     max-width: 1080px;
   }
 }
+/* C59 O3, the same rule as the answer row (`ui/action-row.css`): the way back is at the LEFT end of the footer, the way on (Later,
+   Next) at the right. A phone keeps its equal thirds below (full width, one size). */
+.fy-spf__footer [data-step-back] {
+  margin-inline-end: auto;
+}
 /* Fixed width, never stretched or shrunk to the label; 44px tall. */
 .fy-spf__footer .fy-spf__button {
   flex: 0 0 auto;
@@ -168,6 +173,7 @@
   }
   .fy-spf__footer [data-step-back] {
     grid-column: 1;
+    margin-inline-end: 0;
   }
   .fy-spf__footer [data-step-later] {
     grid-column: 2;

@@ -568,7 +568,10 @@ describe('the /pair page offers the first passkey on its success screen', () => 
     await pairNow(Page, moves);
     const page = must(view, 'the page').container;
     expect(page.textContent).toContain('Connected');
-    expect(must(page.querySelector('[data-first-passkey-offer]'), 'the offer').textContent).toContain('7 minutes left');
+    // C59 O3: why and what happens after, with the window named once ("about 7 minutes"), not a bare "7 minutes left".
+    const offer = must(page.querySelector('[data-first-passkey-offer]'), 'the offer').textContent;
+    expect(offer).toContain('about 7 minutes');
+    expect(offer).not.toContain('minutes left');
     expect(page.textContent).toContain('Add a passkey now');
     expect(moves).toEqual([]);
     // One clear way on, and it moves on.

@@ -26,7 +26,7 @@
  * a sentence explaining that it is 0 is noise; the list earns its place once
  * there is something in it.
  */
-import { SecretInput, useSecretField } from '@ferretry/app/ui';
+import { ActionRow, SecretInput, useSecretField } from '@ferretry/app/ui';
 import { Check, ChevronRight, Link2, ShieldCheck, Trash2 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { type DaemonPath, describeDaemonPath, describeListedDaemon } from '@ferretry/plugin-connections/contract';
@@ -53,6 +53,8 @@ import {
 } from './first-passkey-offer.tsx';
 import type { DaemonConnection } from '../../shell-grants.ts';
 import { PairedNext } from './paired-next.tsx';
+import { PairConfirmActions } from './pair-confirm-actions.tsx';
+import { PairProgress } from './pair-progress.tsx';
 import { PairButton, PairingBack } from './pairing-back.tsx';
 import { PairingSky } from './pairing-sky.tsx';
 
@@ -556,6 +558,7 @@ function PairingFrame({ embedded, stage, announce = '', onClose, children }: Pai
       <PairingSky celebrating={stage === 'paired'} />
       <main className={SHELL} aria-labelledby="pairing-title" data-pairing-stage={stage}>
         {onClose !== undefined && stage !== 'paired' && <PairingBack onClose={onClose} />}
+        <PairProgress stage={stage} />
         {pose !== undefined && (
           <div className="fy-pair-hero">
             <FerretMascot pose={pose} />
@@ -680,9 +683,14 @@ function PairingFocus({
           <Title id="pairing-title" ref={doneTitle} tabIndex={-1} className={`${titleClass} outline-none`}>
             Connected
           </Title>
-          <p className="m-0 text-ui leading-base text-muted">
-            Paired with <span className="font-semibold text-fg">{stage.path.title}</span>, {stage.path.path}.
+          {/* ONE heading and ONE supporting line, both centred. How it connected (relay or direct) is a detail, behind a tap. */}
+          <p className="m-0 text-ui leading-base text-fg" data-paired-with="">
+            Paired with <span className="font-semibold">{stage.path.title}</span>.
           </p>
+          <details className="text-meta text-muted" data-paired-details="">
+            <summary className="cursor-pointer py-2">Details</summary>
+            <p className="m-0">Connection: {stage.path.path}.</p>
+          </details>
           {onContinue !== undefined ? (
             <PairedNext
               connection={stage.connection}
@@ -727,9 +735,13 @@ function PairingFocus({
             )}
           </p>
         )}
-        <PairButton type="button" className="self-center px-6 py-3" data-variant="primary" onClick={onCancel}>
-          {paired ? 'Back to my daemons' : 'Start over'}
-        </PairButton>
+        <ActionRow
+          primary={
+            <PairButton type="button" data-variant="primary" onClick={onCancel}>
+              {paired ? 'Back to my daemons' : 'Start over'}
+            </PairButton>
+          }
+        />
       </PairingFrame>
     );
   }
@@ -770,10 +782,9 @@ function PairingFocus({
         <p className="m-0 mt-1 text-meta text-faint" data-name-after-pairing="">
           Its name shows once paired.
         </p>
-        <details className="mt-2" data-pair-details="">
-          <summary className="min-h-[44px] cursor-pointer text-ui font-medium text-muted hover:text-accent">
-            Details
-          </summary>
+        <details className="-mb-3 mt-1" data-pair-details="">
+          {/* The 44 px target is the summary's own padding, so the label sits in the middle of it and the card ends one row under it, not a blank band lower. */}
+          <summary className="cursor-pointer py-3 text-ui font-medium text-muted hover:text-accent">Details</summary>
           <p className="m-0 break-all font-mono text-meta text-faint">
             <span className="sr-only">Daemon fingerprint: </span>
             {seed.daemonId}
@@ -803,22 +814,19 @@ function PairingFocus({
           />
         </label>
       ) : (
-        <p
-          className="m-0 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 break-words text-ui leading-base text-muted"
-          data-pair-device-label=""
-        >
+        <p className="m-0 min-w-0 break-words text-ui leading-base text-muted" data-pair-device-label="">
           <span>
             This device will be called <span className="font-semibold text-fg">{deviceName}</span>.
-          </span>
-          <PairButton
+          </span>{' '}
+          <button
             type="button"
-            className="px-4 py-3"
+            className="fy-pair-inline"
             data-pair-device-rename=""
             onClick={() => setRenaming(true)}
             disabled={busy}
           >
             Rename
-          </PairButton>
+          </button>
         </p>
       )}
 
@@ -831,25 +839,18 @@ function PairingFocus({
         NAVIGATION control, and `data-variant="primary"` is a styling choice a restyle may take away
         while leaving a journey silently pressing nothing.
       */}
-      <PairButton
-        type="button"
-        className="self-center px-6 py-3"
-        data-variant="primary"
-        data-pair-confirm=""
-        onClick={() => {
+      {busy && <p className="m-0 text-center text-ui text-muted">Exchanging the one-time code with this daemon…</p>}
+      <PairConfirmActions
+        busy={busy}
+        blocked={sendableName === undefined || machineNameChoice(machineName).kind === 'refused'}
+        onCancel={onCancel}
+        onConfirm={() => {
           const machine = machineNameChoice(machineName);
           if (sendableName === undefined || machine.kind === 'refused') return;
           if (machine.kind === 'none') onPair(seed, sendableName);
           else onPair(seed, sendableName, machine.name);
         }}
-        disabled={busy || sendableName === undefined || machineNameChoice(machineName).kind === 'refused'}
-      >
-        {busy ? 'Pairing…' : 'Pair this device'}
-      </PairButton>
-      {busy && <p className="m-0 text-center text-ui text-muted">Exchanging the one-time code with this daemon…</p>}
-      <PairButton type="button" className="self-center px-6 py-3" onClick={onCancel} disabled={busy}>
-        Not now
-      </PairButton>
+      />
     </PairingFrame>
   );
 }

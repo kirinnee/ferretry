@@ -17,6 +17,7 @@
 @import './loading.css';
 @import './dialog.css';
 @import './select-box.css';
+@import './action-row.css';
 
 /* ---- thin, unobtrusive scrollbars in scroll regions ---------------------- */
 .scroll-thin {

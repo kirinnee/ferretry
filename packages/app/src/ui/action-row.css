@@ -1,0 +1,33 @@
+/* THE ANSWER ROW (`action-row.tsx`): layout only, no colour, so every style family keeps its own buttons.
+   Phone: stacked, each answer the full container width, the way on first. `action-row.tsx` writes the DOM in the order
+   drawn (primary first here, secondary first from 640 px), so Tab follows the eye; there is no `column-reverse` or
+   `order` here to part the two. Desktop: one row, space-between, both answers one width. */
+.fy-action-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+.fy-action-row > .kt-btn {
+  box-sizing: border-box;
+  inline-size: 100%;
+  height: auto;
+  min-block-size: 44px;
+  padding-block: 0.75rem;
+  white-space: nowrap;
+}
+@media (min-width: 640px) {
+  .fy-action-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .fy-action-row > .kt-btn {
+    inline-size: 12rem;
+    flex: 0 0 auto;
+  }
+  .fy-action-row:not(.fy-action-row--start) > :only-child {
+    margin-inline-start: auto;
+  }
+}
