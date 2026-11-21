@@ -17,6 +17,7 @@ import { TranscriptionLogSettings } from './features/settings/transcription-log-
 import { SpeedupsStepContainer, VoiceStepContainer } from './features/onboarding/step-panels.tsx';
 import { SpeedupsSurface } from './features/speedups/speedups-surface.tsx';
 import { useAutoRead } from './hooks/use-auto-read.ts';
+import { useDeviceVoiceSettingsStore, useLiveVoiceSettings } from './hooks/use-live-voice-settings.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { needsInputOf } from './lib/voice-chat/reply-picker.ts';
 import type { SpeechAssets } from './lib/stt/on-device-voices.ts';
@@ -183,6 +184,12 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
     </Boundary>
   );
 
+  /** The button is opt-in (Settings › Voice › "Show Read aloud on each reply"): nothing is drawn until this device turns it on. */
+  function ReadAloudGate({ entryId, text }: { readonly entryId: string; readonly text: string }) {
+    const { settings } = useLiveVoiceSettings(useDeviceVoiceSettingsStore());
+    return settings.readAloudButton ? <ReadAloudControl entryId={entryId} text={text} /> : null;
+  }
+
   /**
    * "Read aloud" on an assistant message (`conversation.row-actions`): the chat hands the row, and only an assistant's own
    * words are read. The text is the daemon's redacted reading of the transcript, which is what the voice speaks.
@@ -190,7 +197,7 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
   const ReadAloudPanel = ({ entry }: { readonly subject?: string } & Partial<ConversationRowProps>) =>
     entry === undefined || entry.kind !== 'assistant' ? null : (
       <Boundary>
-        <ReadAloudControl entryId={entry.id} text={entry.text} />
+        <ReadAloudGate entryId={entry.id} text={entry.text} />
       </Boundary>
     );
 

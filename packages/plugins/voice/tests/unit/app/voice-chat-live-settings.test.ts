@@ -24,6 +24,7 @@ describe('defaults', () => {
     expect(DEFAULT_LIVE_VOICE_SETTINGS).toEqual({
       format: 1,
       autoRead: false,
+      readAloudButton: false,
       voiceId: null,
       rate: 1.1,
       maxSeconds: 60,
@@ -37,6 +38,12 @@ describe('defaults', () => {
 });
 
 describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
+  test('r11 S12: a record stored before the field existed parses with the Read aloud button OFF; a bad value falls back to OFF', () => {
+    expect(parseLiveVoiceSettings(JSON.stringify({ format: 1, autoRead: true })).readAloudButton).toBe(false);
+    expect(parseLiveVoiceSettings(JSON.stringify({ format: 1, readAloudButton: 'yes' })).readAloudButton).toBe(false);
+    expect(parseLiveVoiceSettings(JSON.stringify({ format: 1, readAloudButton: true })).readAloudButton).toBe(true);
+  });
+
   test('null, garbage, the wrong shape and an unknown version all give the defaults', () => {
     expect(parseLiveVoiceSettings(null)).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
     expect(parseLiveVoiceSettings('{nope')).toBe(DEFAULT_LIVE_VOICE_SETTINGS);
@@ -50,6 +57,7 @@ describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
     const good = {
       format: 1,
       autoRead: true,
+      readAloudButton: true,
       voiceId: 'uri:Samantha',
       rate: 1.5,
       maxSeconds: 120,
@@ -101,7 +109,15 @@ describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
     const parsed = parseLiveVoiceSettings(
       JSON.stringify({ format: 1, autoRead: true, token: 'secret', text: 'a reply' }),
     );
-    expect(Object.keys(parsed).sort()).toEqual(['autoRead', 'format', 'maxSeconds', 'rate', 'voiceId', 'whatToRead']);
+    expect(Object.keys(parsed).sort()).toEqual([
+      'autoRead',
+      'format',
+      'maxSeconds',
+      'rate',
+      'readAloudButton',
+      'voiceId',
+      'whatToRead',
+    ]);
   });
 
   test('normalise clamps what a caller hands in', () => {

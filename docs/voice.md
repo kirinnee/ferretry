@@ -572,7 +572,7 @@ Browser speech cannot see inside the browser's recogniser, so it reports only ho
 
 ## Read aloud: hearing a reply
 
-Every assistant message has a **Read aloud** button (icon and words, never an emoji alone). Press it and the device's own voice reads
+The button is **opt-in** (r11 S12): it is hidden until this device turns on **Settings › Voice › Show Read aloud on each reply** (off by default; stored with the other device voice settings, independent of Auto-read). With it on, every assistant message has a **Read aloud** button (icon and words, never an emoji alone). Press it and the device's own voice reads
 the reply; the same button becomes **Stop** (it is the same element, so keyboard focus stays on it). It is the first slice of live voice
 chat (F137): reading on request now, hands-free turns later. Nothing is read by itself, and the microphone is not
 involved.
