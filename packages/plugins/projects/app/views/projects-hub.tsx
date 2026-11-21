@@ -34,16 +34,17 @@ import type { ProjectsSlice } from '../lib/projects-store.ts';
 import { CreateProjectFlow } from '../features/create-project/create-project-flow.tsx';
 import type { CreateDraft } from '../features/create-project/create-project-model.ts';
 import type { ProjectsClient } from '../lib/client.ts';
+import { activeProjectFerrets, type FerretRow, projectFerrets } from '../lib/ferrets.ts';
 import { AddProjectForm } from './add-project-form.tsx';
+import { ProjectCard } from './project-card.tsx';
 import { ProjectDiscoveries } from './project-discoveries.tsx';
 
-import { Loading, RouteLink } from '@ferretry/app/ui';
+import { Loading } from '@ferretry/app/ui';
 import {
   confirmDiscoveryRequest,
   emptyProjectRegistrationDraft,
   type ProjectRegistrationDraft,
   type ProjectRegistrationStatus,
-  projectSourceLabel,
 } from '../lib/registration-model.ts';
 
 interface ProjectsHubProps {
@@ -51,6 +52,10 @@ interface ProjectsHubProps {
   /** The authoritative unregistered-path projection; `null` = ferrets unread. */
   readonly discoveries: readonly RecentProjectOption[] | null;
   readonly ferretsError: string | null;
+  /** The ferret list the page read, for each card's "N ferrets"; `null`/absent = unread, so no count is claimed. */
+  readonly ferrets?: readonly FerretRow[] | null;
+  /** The daemon this registry belongs to: where a card's "Start a ferret here" goes. Without it the card has no start button. */
+  readonly daemon?: string;
   readonly status: ProjectRegistrationStatus | null;
   /**
    * Sends one request and answers whether the daemon accepted it. `true` is the
@@ -137,6 +142,8 @@ export function ProjectsHub({
   slice,
   discoveries,
   ferretsError,
+  ferrets,
+  daemon,
   status,
   onRegister,
   onDismiss,
@@ -173,7 +180,7 @@ export function ProjectsHub({
     // Its own scroller: the page host gives it a fixed height and clips, so a phone could not reach the
     // discoveries below the fold.
     <section className="h-full min-h-0 overflow-y-auto p-panel" aria-labelledby="projects-heading">
-      <div className="mx-auto grid w-full max-w-[640px] content-start gap-panel">
+      <div className="mx-auto grid w-full max-w-[960px] content-start gap-panel">
         <header className="flex flex-wrap items-start justify-between gap-md">
           <div className="grid min-w-0 gap-xs">
             <Heading className="m-0 font-display text-display font-bold tracking-display" id="projects-heading">
@@ -196,7 +203,7 @@ export function ProjectsHub({
           </button>
         </header>
         {open && (
-          <div id={FORM_ID}>
+          <div id={FORM_ID} className="max-w-[640px]">
             {client === undefined ? (
               <AddProjectForm
                 draft={draft}
@@ -262,37 +269,20 @@ export function ProjectsHub({
                 )}
               </div>
             ) : (
-              <ul className="m-0 grid list-none divide-y divide-border-soft p-0">
+              <ul className="fy-pcards" data-project-cards="">
                 {projects.map(project => (
-                  <li
-                    className="grid min-w-0 gap-0 py-2"
-                    data-registered-project={project.path}
+                  <ProjectCard
+                    activeFerrets={
+                      ferrets === null || ferrets === undefined
+                        ? 0
+                        : activeProjectFerrets(projectFerrets(project.path, ferrets)).length
+                    }
+                    daemon={daemon}
+                    href={project.id === undefined || projectHref === undefined ? undefined : projectHref(project.id)}
                     key={project.id ?? project.path}
-                  >
-                    {project.id === undefined || projectHref === undefined ? (
-                      <h3 className="m-0 text-ui font-semibold text-fg">{project.name}</h3>
-                    ) : (
-                      <h3 className="m-0 leading-tight">
-                        <RouteLink
-                          to={projectHref(project.id)}
-                          {...(onNavigate === undefined ? {} : { onNavigate })}
-                          className="inline-flex min-h-0 items-center py-0.5 text-left text-ui font-semibold text-fg underline-offset-4 hover:text-accent hover:underline"
-                        >
-                          {project.name}
-                        </RouteLink>
-                      </h3>
-                    )}
-                    <p
-                      className="m-0 min-w-0 text-meta leading-tight text-muted"
-                      data-project-provenance={project.path}
-                    >
-                      <span className="mono break-all">{project.path}</span>
-                      {projectSourceLabel(project.source) !== null && (
-                        <span data-project-source={project.source}> · {projectSourceLabel(project.source)}</span>
-                      )}
-                      {project.git !== undefined && <span> · git</span>}
-                    </p>
-                  </li>
+                    onNavigate={onNavigate}
+                    project={project}
+                  />
                 ))}
               </ul>
             )}

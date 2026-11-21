@@ -119,6 +119,8 @@ export function ProjectsPage({ client, daemon }: { readonly client: ProjectsClie
       slice={slice}
       discoveries={discoveries}
       ferretsError={ferrets.error}
+      ferrets={ferrets.rows}
+      daemon={daemon}
       status={status}
       onRegister={register}
       onDismiss={() => setStatus(null)}

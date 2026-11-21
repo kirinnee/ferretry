@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { interact, mount, must } from '@ferretry/app/testing';
 import type { RecentProjectOption } from '../../../app/lib/discoveries.ts';
-import { DISCOVERY_PROMISE, type ProjectRegistrationStatus } from '../../../app/lib/registration-model.ts';
+import type { ProjectRegistrationStatus } from '../../../app/lib/registration-model.ts';
 import { ProjectDiscoveries } from '../../../app/views/project-discoveries.tsx';
 import { clickEvent } from './support/client.ts';
 
@@ -46,7 +46,9 @@ describe('ProjectDiscoveries', () => {
     const rows = [...mounted.container.querySelectorAll('[data-project-discovery]')];
     expect(rows.map(row => row.getAttribute('data-project-discovery'))).toEqual(['/home/k/scratch', '/home/k/notes']);
     expect(mounted.container.textContent).toContain('last used 2h ago');
-    expect(mounted.container.textContent).toContain(DISCOVERY_PROMISE);
+    // ONE closed line, not the two explanation paragraphs it used to carry.
+    expect(mounted.container.textContent).not.toContain('registers none of them on its own');
+    expect(mounted.container.querySelector('details')?.open).toBe(false);
     expect([...mounted.container.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual([
       'Confirm /home/k/scratch as a project',
       'Confirm /home/k/notes as a project',
@@ -54,10 +56,10 @@ describe('ProjectDiscoveries', () => {
     await mounted.unmount();
   });
 
-  it('counts the discoveries beside the heading', async () => {
+  it('counts the discoveries in the one-line summary', async () => {
     const mounted = await mount(view([scratch, notes]));
 
-    expect(must(mounted.container.querySelector('h2'), 'the heading').textContent).toContain('2');
+    expect(must(mounted.container.querySelector('summary'), 'the summary').textContent).toContain('(2)');
     await mounted.unmount();
   });
 
@@ -87,11 +89,9 @@ describe('ProjectDiscoveries', () => {
     ).toContain('has not been read yet');
     await unread.unmount();
 
+    // Nothing to confirm is nothing drawn (not a section saying so), and never the unread state.
     const none = await mount(view([]));
-    expect(
-      must(none.container.querySelector('[data-project-discoveries-state="none"]'), 'the empty state').textContent,
-    ).toContain('already covered by a registered project');
-    expect(none.container.querySelector('h2')?.textContent).not.toContain('0');
+    expect(none.container.innerHTML).toBe('');
     await none.unmount();
   });
 

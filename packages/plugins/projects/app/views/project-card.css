@@ -1,0 +1,128 @@
+/* r11 S9: a registered project is a CARD. The whole face is one link (the title's ::after covers it); "Open" and "Start a
+   ferret here" sit above that cover. The ring is drawn INSIDE the card's border box so no clipping ancestor cuts it. */
+.fy-pcards {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+@media (min-width: 900px) {
+  .fy-pcards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.fy-pc {
+  align-items: center;
+  background: var(--surface);
+  border: var(--stroke-panel, 1px) solid var(--border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-control);
+  column-gap: 12px;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  min-width: 0;
+  padding: 14px;
+  position: relative;
+  row-gap: 12px;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    translate 80ms ease;
+}
+.fy-pc:hover {
+  background: var(--surface-2);
+  border-color: var(--accent);
+}
+.fy-pc:active {
+  translate: var(--press-translate, 1px) var(--press-translate, 1px);
+}
+.fy-pc:has(.fy-pc__link:focus-visible) {
+  outline: var(--focus-width, 2px) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width, 2px));
+}
+.fy-pc__icon {
+  align-items: center;
+  background: var(--accent-soft);
+  border-radius: var(--radius-control);
+  color: var(--accent);
+  display: inline-flex;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
+}
+.fy-pc__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.fy-pc__title {
+  font-size: var(--text-md, 1rem);
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fy-pc__link {
+  color: var(--fg);
+  text-decoration: none;
+}
+.fy-pc__link::after {
+  content: '';
+  inset: 0;
+  position: absolute;
+}
+.fy-pc__link:focus-visible {
+  outline: none;
+}
+.fy-pc__meta {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-pc__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  grid-column: 1 / -1;
+  position: relative;
+}
+.fy-pc__actions .kt-btn {
+  height: auto;
+  inline-size: 8.5rem;
+  justify-content: center;
+  min-block-size: 44px;
+  padding-inline: 0.75rem;
+  text-align: center;
+  text-wrap: balance;
+  white-space: normal;
+}
+/* A phone: the two actions share the row in equal halves, so each label sits on ONE line and nothing is left dead. */
+@media (max-width: 599px) {
+  .fy-pc__actions {
+    display: grid;
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+  }
+  .fy-pc__actions .kt-btn {
+    inline-size: auto;
+  }
+}
+/* One column, wide enough: the actions move to the right of the text. Two columns keep them underneath. */
+@media (min-width: 600px) and (max-width: 899px) {
+  .fy-pc {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .fy-pc__actions {
+    flex-wrap: nowrap;
+    grid-column: auto;
+  }
+}

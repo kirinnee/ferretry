@@ -117,8 +117,11 @@ describe('ProjectsPage', () => {
     await settled(mounted, c => c.querySelector('h3') !== null, 'the registered row');
 
     expect(must(mounted.container.querySelector('h3'), 'the row heading').textContent).toBe('ferretry');
-    expect(mounted.container.textContent).toContain('/work/ferretry');
-    expect(mounted.container.textContent).toContain('existing folder');
+    // A card: the path is its tooltip, not a line of text.
+    expect(must(mounted.container.querySelector('[data-project-card]'), 'the card').getAttribute('title')).toBe(
+      '/work/ferretry',
+    );
+    expect(mounted.container.textContent).not.toContain('/work/ferretry');
     expect(must(mounted.container.querySelector('h3 a'), 'the row link').getAttribute('href')).toBe(
       `/d/workstation/projects/${PROJECT.id}`,
     );
@@ -325,9 +328,10 @@ describe('ProjectsPage', () => {
     release([]);
     await settled(
       mounted,
-      c => c.querySelector('[data-project-discoveries-state="none"]') !== null,
+      c => c.querySelector('[data-project-discoveries-state="unread"]') === null,
       'the settled discoveries',
     );
+    expect(mounted.container.querySelector('[data-project-discoveries]')).toBeNull();
     await mounted.unmount();
   });
 
