@@ -126,6 +126,8 @@ const panelProblems = (): string[] => {
     const inRow = leaves.filter(el => row.contains(el) && el.closest('li') === row);
     for (const [i, a] of inRow.entries())
       for (const b of inRow.slice(i + 1)) {
+        // A button and the words inside it (a select box's shown value) are one control, not two that overlap.
+        if (a.contains(b) || b.contains(a)) continue;
         // Line boxes, not the bounding box: a date that wraps mid-sentence spans two lines but covers nothing between them.
         const touching = [...a.getClientRects()].some(x =>
           [...b.getClientRects()].some(

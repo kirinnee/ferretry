@@ -1,10 +1,12 @@
 /**
  * The daemon filter of the Warden page: All, then each paired daemon, the choice kept on this device.
  *
- * The same native select as the Inbox's machine filter, in the same look (`fy-attn-inbox__machine`), so
- * a phone gets its own picker and a keyboard gets the usual keys.
+ * A `SelectBox`, in the same look as the Inbox's machine filter (`fy-attn-inbox__machine`), so a phone gets
+ * a centred, searchable dialog and a keyboard gets the combobox keys.
  */
 
+import { SelectBox } from '@ferretry/app/ui';
+import { useId } from 'react';
 import { INSIGHTS_COLUMN_CLASS } from '../../lib/layout.ts';
 import type { DaemonId } from '../../lib/machine.ts';
 import type { WardenMachine } from './warden-daemon-scope.ts';
@@ -18,24 +20,23 @@ export function WardenDaemonFilter({
   readonly selected: DaemonId | null;
   readonly onChoose: (daemonId: DaemonId | null) => void;
 }) {
+  const id = useId();
   return (
     <div className={`${INSIGHTS_COLUMN_CLASS} flex min-w-0 items-center gap-sm pt-3 sm:pt-4`} data-warden-filter="">
-      <label className="flex min-w-0 items-center gap-sm text-meta text-muted">
-        <span>Daemon</span>
-        <select
-          aria-label="Daemon"
-          className="fy-attn-inbox__machine min-h-[44px] sm:min-h-8"
-          onChange={event => onChoose(event.target.value === '' ? null : (event.target.value as DaemonId))}
+      <div className="flex min-w-0 items-center gap-sm text-meta text-muted">
+        <label htmlFor={id}>Daemon</label>
+        <SelectBox
+          id={id}
+          className="fy-attn-inbox__machine !min-h-[44px] !min-w-[10rem] sm:!min-h-8"
+          label="Daemon"
+          onChange={next => onChoose(next === '' ? null : (next as DaemonId))}
+          options={[
+            { value: '', label: 'All daemons' },
+            ...machines.map(machine => ({ value: machine.connection.daemonId, label: machine.name })),
+          ]}
           value={selected ?? ''}
-        >
-          <option value="">All daemons</option>
-          {machines.map(machine => (
-            <option key={machine.connection.daemonId} value={machine.connection.daemonId}>
-              {machine.name}
-            </option>
-          ))}
-        </select>
-      </label>
+        />
+      </div>
     </div>
   );
 }

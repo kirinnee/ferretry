@@ -23,6 +23,7 @@ import {
   INSIGHTS_TIME_ZONE_KEY,
   insightsTimeZonePreference,
 } from '../../../../app/lib/insights-time-zone.ts';
+import { SelectBox } from '@ferretry/app/ui';
 import { render, RouterProvider, run, runAsync } from '@ferretry/app/testing';
 import { DaemonResponseError } from '../support/shell.ts';
 import { dayAggregate, rawResponse, rawRow } from '../support/analytics-rows.ts';
@@ -609,9 +610,9 @@ describe('GlobalAnalyticsPage', () => {
       expect(text(renderer)).toContain('Days in');
 
       client.calls.length = 0;
-      const select = renderer.root.findByType('select');
+      const select = renderer.root.findByType(SelectBox);
       await runAsync(async () => {
-        select.props.onChange({ target: { value: 'America/Los_Angeles' } });
+        select.props.onChange('America/Los_Angeles');
         await Promise.resolve();
       });
       await settle();
@@ -682,7 +683,7 @@ describe('GlobalAnalyticsPage', () => {
     expect(text(renderer)).not.toContain('did not answer');
 
     // A run that one machine misses says so, with that run's result.
-    const editor = renderer.root.findByProps({ role: 'combobox' });
+    const editor = renderer.root.findByProps({ role: 'combobox', 'aria-autocomplete': 'list' });
     run(() => editor.props.onChange({ currentTarget: { value: 'sum by (day)', selectionStart: 12 } }));
     await runAsync(async () => {
       renderer.root.findAllByType('form')[0]!.props.onSubmit({ preventDefault() {} });

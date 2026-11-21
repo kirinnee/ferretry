@@ -3,6 +3,7 @@ import type { WardenInvestigateRequest, WardenInvestigateView, WardenStatusView 
 import type { FerretActionFormHost } from '../../../app/lib/ferret-actions.ts';
 import { AskWardenForm, type AskWardenPorts } from '../../../app/features/warden/ask-warden.tsx';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { boxLabelled, choose } from '../../support/app/select-box.ts';
 import { wardenConfig, wardenStatus } from '../../support/app/warden.ts';
 
 let view: Mounted | null = null;
@@ -63,11 +64,10 @@ const submit = async (root: HTMLElement): Promise<void> => {
   await interact(() => must(root.querySelector('form'), 'form').requestSubmit());
   await settle();
 };
-const setValue = async (element: HTMLSelectElement | HTMLTextAreaElement, value: string): Promise<void> => {
+const setValue = async (element: HTMLTextAreaElement, value: string): Promise<void> => {
   await interact(() => {
-    const proto = element instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLTextAreaElement.prototype;
-    Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(element, value);
-    element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(element, value);
+    element.dispatchEvent(new Event('input', { bubbles: true }));
   });
 };
 
@@ -96,7 +96,7 @@ describe('AskWardenForm', () => {
       portsFor(rec, async () => wardenStatus()),
       rec,
     );
-    await setValue(must(root.querySelector('select'), 'focus'), 'failures');
+    await choose(boxLabelled(root, 'What should it look at?'), 'The recent failures');
     await setValue(must(root.querySelector('textarea'), 'notes'), 'CI went red');
     await submit(root);
     expect(rec.requests).toEqual([{ ferret: 'sess-1', note: 'Focus: the recent failures. CI went red' }]);

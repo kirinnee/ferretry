@@ -16,6 +16,7 @@ import { fakeClient } from '../support/client.ts';
 import { daemonConnection } from '../support/shell.ts';
 import { DaemonResponseError } from '../support/shell.ts';
 import { aggregateResponse, group } from '../support/analytics-query-fixtures.ts';
+import { SelectBox } from '@ferretry/app/ui';
 import { render, run, runAsync } from '@ferretry/app/testing';
 
 /** The reads these suites inject are their own; a call that reached this client is a failure. */
@@ -63,7 +64,10 @@ const memory = (): SavedQueriesStorage & { data: Map<string, string> } => {
   const data = new Map<string, string>();
   return { data, getItem: key => data.get(key) ?? null, setItem: (key, value) => void data.set(key, value) };
 };
-const input = (renderer: ReactTestRenderer) => renderer.root.findByProps({ role: 'combobox' });
+const input = (renderer: ReactTestRenderer) =>
+  renderer.root.findAll(node => node.type === 'textarea' && node.props.role === 'combobox')[0]!;
+/** The metric and aggregation helpers: the app's SelectBox (its props are the list and the write). */
+const pickers = (renderer: ReactTestRenderer) => renderer.root.findAllByType(SelectBox);
 const type = (renderer: ReactTestRenderer, value: string) =>
   run(() => input(renderer).props.onChange({ currentTarget: { value, selectionStart: value.length } }));
 const submit = async (renderer: ReactTestRenderer) => {
@@ -151,7 +155,8 @@ describe('AnalyticsQueryPage', () => {
     );
     expect(button(renderer, 'Run').props.disabled).toBe(true);
     expect(button(renderer, '7d').props.disabled).toBe(true);
-    expect(renderer.root.findAllByType('select').every(select => select.props.disabled)).toBe(true);
+    expect(pickers(renderer)).toHaveLength(2);
+    expect(pickers(renderer).every(select => select.props.disabled)).toBe(true);
     type(renderer, '   ');
     expect(renderer.root.findAllByProps({ 'data-analytics-parse-error': '' })).toHaveLength(0);
     expect(calls).toEqual([]);
@@ -159,10 +164,10 @@ describe('AnalyticsQueryPage', () => {
 
   it('rewrites the text from the metric, aggregation, range and group helpers', () => {
     const renderer = mount(<AnalyticsQueryPage connection={daemonA} client={noClient} requestAnalytics={fleet([])} />);
-    const [metric, aggregation] = renderer.root.findAllByType('select');
-    run(() => metric!.props.onChange({ currentTarget: { value: 'turns' } }));
+    const [metric, aggregation] = pickers(renderer);
+    run(() => metric!.props.onChange('turns'));
     expect(input(renderer).props.value).toBe('sum(turns) by (model) [7d]');
-    run(() => aggregation!.props.onChange({ currentTarget: { value: 'avg' } }));
+    run(() => aggregation!.props.onChange('avg'));
     expect(input(renderer).props.value).toBe('avg(turns) by (model) [7d]');
     run(() => button(renderer, '30d').props.onClick());
     expect(input(renderer).props.value).toBe('avg(turns) by (model) [30d]');
@@ -172,11 +177,11 @@ describe('AnalyticsQueryPage', () => {
     expect(input(renderer).props.value).toBe('avg(turns) by (model, runtime)');
     run(() => button(renderer, 'model').props.onClick());
     expect(input(renderer).props.value).toBe('avg(turns) by (runtime)');
-    run(() => renderer.root.findAllByType('select')[0]!.props.onChange({ currentTarget: { value: '' } }));
+    run(() => pickers(renderer)[0]!.props.onChange(''));
     expect(input(renderer).props.value).toBe('avg by (runtime)');
     expect(button(renderer, 'runtime').props['aria-pressed']).toBe(true);
     type(renderer, '{model=a}');
-    expect(renderer.root.findAllByType('select')[1]!.props.value).toBe('');
+    expect(pickers(renderer)[1]!.props.value).toBe('');
     expect(text(renderer)).toContain('Raw sessions');
   });
 
@@ -713,8 +718,8 @@ describe('AnalyticsQueryPage ratio metric', () => {
         currentTarget: { value: 'sum(duration_active_seconds_per_turn)', selectionStart: 5 },
       }),
     );
-    const options = renderer.root.findAllByType('select')[1]!.findAllByType('option');
-    expect(options.map(option => [option.props.value, option.props.disabled])).toEqual([
+    const options = pickers(renderer)[1]!.props.options as readonly { value: string; disabled?: boolean }[];
+    expect(options.map(option => [option.value, option.disabled])).toEqual([
       ['sum', false],
       ['avg', false],
       ['min', true],
