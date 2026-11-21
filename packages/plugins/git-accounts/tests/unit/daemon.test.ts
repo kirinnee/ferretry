@@ -5,8 +5,9 @@ import type { SealedDocumentDef, SealedDocumentHandle } from '@ferretry/core-vau
 import { FakeSealedDocuments } from '@ferretry/core-vault/contract/testing';
 import type { SpawnOptions, SpawnResult, StatePort } from '@ferretry/kernel/contract';
 import { testHost } from '@ferretry/kernel/testing';
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import type { GitAccountId, GitAccountsApi } from '../../contract/index.ts';
 import { GIT_ACCOUNT_TOKENS, GitAccountsPort, GitDeviceFlowStatusSchema } from '../../contract/index.ts';
 import { AccountBook } from '../../daemon/lib/accounts.ts';
@@ -718,6 +719,36 @@ describe('gh runs as an account, narrowed (review HIGH 1)', () => {
     });
     await run(port, ['pr', 'list']);
     expect(seen?.ceiling).toBe(dirname(seen?.cwd as string));
+  });
+
+  test('a scratch parent holding a ":" (which GIT_CEILING_DIRECTORIES cannot spell) refuses BEFORE any child is started, and leaves nothing behind', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'fy-colon-'));
+    const parent = join(base, 'a:b');
+    mkdirSync(parent);
+    const before = process.env.TMPDIR;
+    process.env.TMPDIR = parent;
+    try {
+      const { port, calls } = await ready();
+      const refused = await run(port, ['pr', 'list']).catch((error: unknown) => error);
+      expect(refused).toMatchObject({ status: 503, code: 'scratch_unusable' });
+      // No child (it would have held the token) was started, and the folder is gone.
+      expect(calls).toEqual([]);
+      expect(readdirSync(parent)).toEqual([]);
+      expect(String((refused as Error).message)).not.toContain(FAKE_TOKEN);
+      // Same daemon, a parent without a colon: it runs, with the ceiling fully intact.
+      const plain = join(base, 'plain');
+      mkdirSync(plain);
+      process.env.TMPDIR = plain;
+      await run(port, ['pr', 'list']);
+      expect(calls).toHaveLength(1);
+      const ceiling = (calls[0]?.options?.env as Record<string, string> | undefined)?.GIT_CEILING_DIRECTORIES;
+      expect(ceiling).toBe(plain);
+      expect(ceiling?.includes(':')).toBe(false);
+    } finally {
+      if (before === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = before;
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 
   test('the folder is removed when the child fails too', async () => {

@@ -2168,14 +2168,19 @@ repository's own account, else the project's first account. A link to an account
 **GAP — a process of that ferret can push and sign as the account while it runs.** That is "use". Every ferret that
 shares the project is given the same account's socket, and the key opens every repository the account can reach.
 
-**GAP — unlinking does not cut a running ferret.** The agent socket is at a stable path on purpose (a ferret that
-outlives a daemon restart must keep its `SSH_AUTH_SOCK`), so removing a project's link or an account's key does not
-stop a ferret that already holds the socket: it can push and sign until it ends or the agent stops. Linking the account
-again hands the same socket to older ferrets too. The socket is not rotated.
+**GAP — unlinking a project does not cut a running ferret.** The agent socket is at a stable path on purpose (a ferret
+that outlives a daemon restart must keep its `SSH_AUTH_SOCK`), so removing a project's link to the account does not stop
+a ferret that already holds the socket: it can push and sign until it ends or the agent stops. Linking the account
+again hands the same socket to older ferrets too. The socket is not rotated. What DOES cut it: removing the account's
+**last** key registration (the agent is stopped and the private key forgotten) or removing the account itself.
 
-**A key that cannot be started is said in the pane.** When the account's agent fails to start for a launch, the ferret
-still starts, with one instruction sentence that its Git account key is unavailable and that `git push` would use this
-machine's own ssh identity; no error text is put in it. Without the sentence the pane silently used that identity.
+**A key that cannot be started is said in the pane, and the pane is given no identity.** When the account has a key
+Ferretry made but its agent cannot be served for a launch (the agent fails to start, or the recorded key's sealed entry
+is gone), the ferret still starts, with one instruction sentence that its Git account key is unavailable; no error text
+is put in it. Git is also told to offer **no** ssh identity (no agent, no default key file, `https://github.com/` rewritten
+to ssh so a host credential helper is not used) and not to sign, so a push fails instead of silently succeeding as
+this machine's own ssh identity. An account with no key Ferretry made (none, or the person's own) is launched exactly as
+before and gets no sentence.
 
 **GAP — the folder is judged by its spelling.** The resolver compares paths as written; a folder reached through a link
 is not matched to a project registered under the link's target.
@@ -2251,10 +2256,12 @@ host's own `gh` sign-in being used by ferrets; a repository's own git config or 
   a `gh api repos/x/y/…` endpoint, reach **any repository the account can see**, not only the project's: the project's
   repository is only the default, never a fence.
 - **GAP: a folder decides the account, and a ferret's folder can be broad.** A ferret may name only its own work folder
-  or one below it, but a ferret whose work folder is a **parent of several projects**, or a child ferret started in
-  **another project's folder**, gets that project's account (the first account the resolver finds for the folder), the
-  same as B4's SSH. Ferretry does not claim a ferret cannot use another project's account: it claims a ferret cannot
-  pick one by naming a path outside its own folder.
+  or one below it, and `gh` runs as the account of the ferret's **own** work folder (the first account the resolver
+  finds for it), the same as B4's SSH. A ferret whose work folder is a **parent of several projects** cannot select a
+  nested project's account by naming that project's folder: when the named folder resolves to a different project or
+  account than its own folder does, the run is refused. A child ferret **started in another project's folder** still
+  gets that project's account for its own folder. Ferretry does not claim a ferret cannot use another project's
+  account: it claims a ferret cannot pick one by naming a path other than its own work folder's.
 
 **GAP — what the plan wanted and the seam still refuses.** No stdin and no file slots (`--body-file`, `-F`, `--input`,
 `release upload`, `gist create` from files); no `repo create|edit|fork`, `secret`, `variable`, `label`, `cache`, `ruleset`,
@@ -2302,7 +2309,10 @@ folder inside the state home removed, runs the answer by absolute path, and refu
 state home or a fence that cannot be built. The reason: a ferret pane's `PATH` starts with the shim folder, a file the
 ferret can rewrite, and `fy daemon start|restart|update` run from a pane would write that `PATH` into the service unit.
 The CLI therefore also drops every state-home folder from the `PATH` it writes into the unit, plist or direct-start
-environment. Either guard alone keeps the token out of a ferret-writable file.
+environment. The locator protects **the `gh` executable** only: a descendant `gh` starts (a `git`, an editor it was
+refused) still inherits the sealed daemon `PATH`, and only the normal service launch strips state-home folders from it.
+Neither guard alone makes every descendant safe: the locator keeps the token from a ferret-writable `gh`, and the
+stripped `PATH` keeps a daemon started from a pane from carrying a ferret-writable folder at all.
 
 **`fy gh-doctor`** (run in a pane) warns when `command -v gh` is not the shim (the first `gh` on `PATH` is somewhere
 else: a shell rc moved `PATH`), when the pane was not started with the shim, or when a GitHub token variable is set in

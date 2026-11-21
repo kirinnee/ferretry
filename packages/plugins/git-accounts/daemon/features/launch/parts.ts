@@ -3,7 +3,7 @@ import type { LaunchPart, LaunchPartSource } from '@ferretry/core-ferrets/contra
 import type { ProjectInfo } from '@ferretry/plugin-projects/contract';
 import type { GitAccount, GitAccountId } from '../../../contract/index.ts';
 import { accountForFolder } from '../../lib/account-for-folder.ts';
-import { type AccountKit, gitEnvironment } from './environment.ts';
+import { type AccountKit, gitEnvironment, noIdentityEnvironment } from './environment.ts';
 
 const GIT_ACCOUNTS_PLUGIN = 'git-accounts';
 
@@ -16,7 +16,7 @@ export interface AccountLaunchDeps {
 }
 
 const KEY_UNAVAILABLE =
-  "The Git account key for this project is unavailable: Ferretry could not start it. `git push` and signed commits here would use this machine's own ssh identity, not the GitHub account linked to this project. Do not push; tell the person to open the Git accounts page and try again.";
+  "The Git account key for this project is unavailable: Ferretry could not start it. `git push` over ssh here is given no identity at all (not this machine's own), so it will fail, and commits here are not signed as the GitHub account linked to this project. Do not push; tell the person to open the Git accounts page and try again.";
 
 /**
  * Only a folder inside a project that is linked to an account that exists, and only an account with a key Ferretry
@@ -37,8 +37,15 @@ export function accountLaunchParts(deps: AccountLaunchDeps): LaunchPartSource {
       try {
         kit = await deps.kit(account.id);
       } catch {
-        // Without a word the pane would push with the machine's own ssh identity: say so, never why (no error text).
-        return [{ kind: 'instruction', id: 'git-accounts-key-unavailable', text: KEY_UNAVAILABLE }];
+        // Without a word the pane would push with the machine's own ssh identity: say so, never why (no error text),
+        // and give git no identity to fall back to.
+        const none = noIdentityEnvironment(account);
+        return [
+          { kind: 'instruction', id: 'git-accounts-key-unavailable', text: KEY_UNAVAILABLE },
+          ...(Object.keys(none).length === 0
+            ? []
+            : [{ kind: 'pane-env' as const, plugin: GIT_ACCOUNTS_PLUGIN, env: none }]),
+        ];
       }
       if (kit === undefined || (!kit.auth && !kit.signing)) return [];
       return [{ kind: 'pane-env', plugin: GIT_ACCOUNTS_PLUGIN, env: gitEnvironment(account, kit) }];

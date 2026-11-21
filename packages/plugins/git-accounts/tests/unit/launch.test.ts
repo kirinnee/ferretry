@@ -5,7 +5,13 @@ import type { LaunchPart, LaunchSpec } from '@ferretry/core-ferrets/contract';
 import type { ProjectInfo } from '@ferretry/plugin-projects/contract';
 import type { GitAccount } from '../../contract/index.ts';
 import { accountForFolder } from '../../daemon/lib/account-for-folder.ts';
-import { type AccountKit, gitEnvironment, noreplyEmail, sshCommand } from '../../daemon/features/launch/environment.ts';
+import {
+  type AccountKit,
+  gitEnvironment,
+  noIdentityEnvironment,
+  noreplyEmail,
+  sshCommand,
+} from '../../daemon/features/launch/environment.ts';
 import { accountLaunchParts } from '../../daemon/features/launch/parts.ts';
 import { AgentSupervisor, type RunFolder } from '../../daemon/features/ssh-keys/agents.ts';
 import { SshKeyService } from '../../daemon/features/ssh-keys/service.ts';
@@ -210,21 +216,110 @@ describe('the launch source', () => {
   });
 });
 
-describe('a key that cannot be started says so in the pane', () => {
-  test('the kit throws: the launch parts carry the "key unavailable" sentence and no git env', async () => {
-    const source = accountLaunchParts({
+describe('a key that cannot be started says so in the pane, and runs with no identity', () => {
+  const PUB = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPUBLICPUBLICPUBLICPUBLICPUBLICPUBLICPUBLICPUBLIC';
+  const made = (source: 'generated' | 'own'): GitAccount['keys'] => ({
+    ssh: { title: 't', publicKey: PUB, source },
+    signing: { title: 't', publicKey: PUB, source },
+  });
+  const launch = (who: GitAccount, kit: () => Promise<AccountKit | undefined>) =>
+    accountLaunchParts({
       projects: async () => [project('/work/app', { accounts: ['gha_1'] })],
-      accounts: async () => [account(1, 'alice')],
-      kit: async () => {
-        throw new Error('ssh-agent did not start');
-      },
+      accounts: async () => [who],
+      kit,
+    }).parts({ folder: '/work/app' } as unknown as Omit<LaunchSpec, 'parts' | 'credential'>);
+  const config = (parts: readonly LaunchPart[]): Record<string, string> => {
+    const env = parts.flatMap(part => (part.kind === 'pane-env' ? [part.env] : []))[0] ?? {};
+    return Object.fromEntries(
+      Array.from({ length: Number(env.GIT_CONFIG_COUNT ?? 0) }, (_, i) => [
+        env[`GIT_CONFIG_KEY_${String(i)}`] as string,
+        env[`GIT_CONFIG_VALUE_${String(i)}`] as string,
+      ]),
+    );
+  };
+
+  test('the kit throws: the "key unavailable" sentence, and git is given no identity at all (no agent, no key file, no https)', async () => {
+    const parts = await launch(account(1, 'alice', { keys: made('generated') }), async () => {
+      throw new Error('ssh-agent did not start');
     });
-    const parts = await source.parts({ folder: '/work/app' } as unknown as Omit<LaunchSpec, 'parts' | 'credential'>);
-    expect(parts.some(part => part.kind === 'pane-env')).toBe(false);
     const text = parts.flatMap(part => (part.kind === 'instruction' ? [part.text] : [])).join('\n');
     expect(text).toContain('Git account key for this project is unavailable');
-    expect(text).toContain("this machine's own ssh identity");
+    expect(text).toContain('given no identity at all');
     expect(text).not.toContain('did not start');
+    const settings = config(parts);
+    expect(settings['core.sshCommand']).toContain('IdentityAgent=none');
+    expect(settings['core.sshCommand']).toContain('IdentityFile=/dev/null');
+    expect(settings['core.sshCommand']).toContain('IdentitiesOnly=yes');
+    expect(settings['url.git@github.com:.insteadOf']).toBe('https://github.com/');
+    expect([settings['commit.gpgsign'], settings['tag.gpgsign']]).toEqual(['false', 'false']);
+    // Nothing of the account's own key is handed over, and no socket is named.
+    expect(JSON.stringify(parts)).not.toContain('.sock');
+    expect(JSON.stringify(parts)).not.toContain('.pub');
+  });
+
+  test('a key that is RECORDED but whose sealed entry is gone is that same case through the real key service', async () => {
+    const folder = tmpRunFolder();
+    const started: string[] = [];
+    const agents = new AgentSupervisor(
+      {
+        run: async () => ({ exitCode: 0, signal: null, stdout: '', stderr: '' }),
+        start: (_program: string, args: readonly string[]) => {
+          started.push(args.at(-1) as string);
+          throw new Error('an agent must not start without a key');
+        },
+      },
+      folder,
+      { after: () => () => undefined, sleep: () => new Promise<void>(() => undefined) },
+      { warn: () => undefined },
+    );
+    const who = account(1, 'alice', { keys: made('generated') });
+    const service = new SshKeyService(
+      {
+        find: async () => who,
+        api: async () => {
+          throw new Error('not used');
+        },
+        recordKeys: async () => undefined,
+      },
+      { get: async () => undefined } as unknown as SealedDocumentHandle,
+      agents,
+      () => 'machine',
+    );
+    await expect(service.launchKit(who.id)).rejects.toMatchObject({ status: 503, code: 'agent_unavailable' });
+    const parts = await launch(who, () => service.launchKit(who.id));
+    expect(parts.some(part => part.kind === 'instruction' && part.id === 'git-accounts-key-unavailable')).toBe(true);
+    expect(config(parts)['core.sshCommand']).toContain('IdentityAgent=none');
+    expect(started).toEqual([]);
+    folder.destroy();
+  });
+
+  test('an account with no generated key (none, or the person’s own) keeps today’s launch: nothing, and no warning', async () => {
+    for (const keys of [{}, made('own')]) {
+      const who = account(1, 'alice', { keys });
+      const service = new SshKeyService(
+        { find: async () => who, api: async () => undefined as never, recordKeys: async () => undefined },
+        { get: async () => undefined } as unknown as SealedDocumentHandle,
+        {} as AgentSupervisor,
+        () => 'machine',
+      );
+      expect(await service.launchKit(who.id)).toBeUndefined();
+      expect(await launch(who, () => service.launchKit(who.id))).toEqual([]);
+    }
+  });
+
+  test('git itself reads the no-identity command as: no agent, only /dev/null as an identity file, no default key', async () => {
+    const ssh = Bun.which('ssh');
+    if (ssh === null) return;
+    const env = noIdentityEnvironment(account(1, 'alice', { keys: made('generated') }));
+    const command = env.GIT_CONFIG_VALUE_0 as string;
+    const run = Bun.spawnSync([ssh, ...command.split(' ').slice(1), '-G', 'github.com'], {
+      env: { PATH: process.env.PATH ?? '', HOME: '/nonexistent-fy-home' },
+    });
+    const effective = new TextDecoder().decode(run.stdout);
+    expect(effective).toContain('identityagent none');
+    expect(effective).toContain('identitiesonly yes');
+    expect(effective).toContain('identityfile /dev/null');
+    expect(effective).not.toMatch(/identityfile .*id_(ed25519|rsa|ecdsa)/u);
   });
 });
 

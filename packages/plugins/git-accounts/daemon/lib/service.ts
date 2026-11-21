@@ -89,6 +89,15 @@ export class GitAccountsService {
     const timeout = milliseconds(Math.min(Math.max(spec.timeoutMs ?? 60_000, 1_000), 300_000));
     const folder = await this.scratch.open();
     try {
+      // `GIT_CEILING_DIRECTORIES` is a colon-separated list and has no way to escape a `:`: a scratch parent holding one
+      // would be cut in two and the fence lost. Refuse BEFORE a child that holds the token is started.
+      const ceiling = folder.path.slice(0, folder.path.lastIndexOf('/')) || '/';
+      if (ceiling.includes(':'))
+        throw new ApiError(
+          503,
+          "gh cannot run here: the daemon's scratch folder is under a path with a ':' in it; set TMPDIR to one without",
+          GIT_ACCOUNT_CODES.scratchUnusable,
+        );
       await folder.makeDirectory('home');
       await folder.makeDirectory('home/config');
       await folder.writeFile('refuse', '#!/bin/sh\nexit 1\n', 0o700);
@@ -122,7 +131,7 @@ export class GitAccountsService {
         GIT_CONFIG_NOSYSTEM: '1',
         // `git` (a `pr merge --delete-branch` may start one) looks upward for a repository: stop at this scratch
         // folder, so a `.git` in a parent folder is never found.
-        GIT_CEILING_DIRECTORIES: folder.path.slice(0, folder.path.lastIndexOf('/')) || '/',
+        GIT_CEILING_DIRECTORIES: ceiling,
         NO_COLOR: '1',
       };
       const result = await this.spawn.runBytes(program, [...spec.args], {

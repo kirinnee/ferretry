@@ -45,6 +45,32 @@ export const sshCommand = (kit: AccountKit): string =>
 export const noreplyEmail = (account: GitAccount): string =>
   `${String(account.githubId)}+${account.login}@users.noreply.github.com`;
 
+/**
+ * What a launch is given when the account's key is RECORDED but cannot be served: git is told to offer no identity at
+ * all (no agent, no default key file, no password) instead of the machine's own, and not to sign with a key that is
+ * not the account's. A push then fails where it would otherwise have succeeded as somebody else.
+ */
+export function noIdentityEnvironment(account: GitAccount): Readonly<Record<string, string>> {
+  const settings: [string, string][] = [];
+  if (account.keys.ssh?.source === 'generated')
+    settings.push(
+      [
+        'core.sshCommand',
+        'ssh -F none -o IdentitiesOnly=yes -o IdentityFile=/dev/null -o IdentityAgent=none -o PasswordAuthentication=no',
+      ],
+      ['url.git@github.com:.insteadOf', 'https://github.com/'],
+    );
+  if (account.keys.signing?.source === 'generated')
+    settings.push(['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']);
+  if (settings.length === 0) return {};
+  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(settings.length) };
+  settings.forEach(([key, value], index) => {
+    env[`GIT_CONFIG_KEY_${String(index)}`] = key;
+    env[`GIT_CONFIG_VALUE_${String(index)}`] = value;
+  });
+  return env;
+}
+
 export function gitEnvironment(account: GitAccount, kit: AccountKit): Readonly<Record<string, string>> {
   const settings: [string, string][] = [
     ['user.name', clean(account.name ?? '') || account.login],
