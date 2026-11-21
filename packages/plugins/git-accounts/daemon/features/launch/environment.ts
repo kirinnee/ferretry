@@ -50,6 +50,13 @@ const NO_IDENTITY_SSH =
   'ssh -F none -o IdentitiesOnly=yes -o IdentityFile=/dev/null -o IdentityAgent=none -o PasswordAuthentication=no';
 
 /**
+ * EVERY git-config(1) key that makes git sign by default (checked against git 2.55: the four keys whose text says
+ * signing): commits, tags, annotated tags (`git tag -m`) and pushes. `user.signingkey`, `gpg.*`, `log.showSignature`
+ * and `merge.verifySignatures` select a key or verify, and do not make git sign, so they are not here.
+ */
+const SIGNING_SWITCHES: readonly string[] = ['commit.gpgsign', 'tag.gpgsign', 'tag.forceSignAnnotated', 'push.gpgSign'];
+
+/**
  * What a launch is given when the account has a key Ferretry made that is RECORDED but cannot be served: git is told to
  * offer no identity at all (no agent, no default key file, no password) instead of the machine's own, and not to sign
  * with a key that is not the account's. A push then fails where it would otherwise have succeeded as somebody else.
@@ -72,10 +79,10 @@ export function noIdentityEnvironment(account: GitAccount): Readonly<Record<stri
     env['GIT_SSH_COMMAND'] = NO_IDENTITY_SSH;
   }
   if (signing?.source !== 'own') {
-    settings.push(['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']);
+    for (const key of SIGNING_SWITCHES) settings.push([key, 'false']);
     // Git applies GIT_CONFIG_PARAMETERS AFTER GIT_CONFIG_COUNT, and a login may set it to keep signing on. Core ferrets
     // appends this value to the login's, so these entries come last, in git's own quoted `'key'='value'` form, and win.
-    env['GIT_CONFIG_PARAMETERS'] = `'commit.gpgsign'='false' 'tag.gpgsign'='false'`;
+    env['GIT_CONFIG_PARAMETERS'] = SIGNING_SWITCHES.map(key => `'${key}'='false'`).join(' ');
   }
   env['GIT_CONFIG_COUNT'] = String(settings.length);
   settings.forEach(([key, value], index) => {

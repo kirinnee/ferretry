@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { SealedDocumentHandle } from '@ferretry/core-vault/contract';
 import type { LaunchPart, LaunchSpec } from '@ferretry/core-ferrets/contract';
 import type { ProjectInfo } from '@ferretry/plugin-projects/contract';
@@ -315,6 +317,71 @@ describe('a key that cannot be started says so in the pane, and runs with no ide
     }
   });
 
+  // EVERY git-config(1) key that makes git sign by default (spelled out here, not read from the code under test), each
+  // enabled by a login in turn, after the core merge rule: real git must read it false, for every generated-key shape.
+  const SIGNING_ON: readonly (readonly [string, string])[] = [
+    ['commit.gpgsign', 'true'],
+    ['tag.gpgsign', 'true'],
+    ['tag.forceSignAnnotated', 'true'],
+    ['push.gpgSign', 'true'],
+    ['push.gpgSign', 'if-asked'],
+  ];
+  const mergedEnv = (part: Record<string, string>, login: string): Record<string, string> => ({
+    PATH: process.env.PATH ?? '',
+    HOME: '/nonexistent-fy-home',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    ...part,
+    GIT_CONFIG_PARAMETERS: `${login} ${part.GIT_CONFIG_PARAMETERS ?? ''}`,
+  });
+
+  test.each(SIGNING_ON)(
+    'a login enabling %s=%s: after the merge, real git reads it false (every key shape)',
+    async (key, value) => {
+      for (const keys of [made('generated'), generatedKeys('ssh'), generatedKeys('signing')]) {
+        const part = paneEnv(await launch(account(1, 'alice', { keys }), unavailable));
+        const out = Bun.spawnSync(['git', 'config', '--get', key], {
+          env: mergedEnv(part, `'${key}'='${value}'`),
+        });
+        expect(new TextDecoder().decode(out.stdout).trim()).toBe('false');
+      }
+    },
+  );
+
+  test('a login with tag.forceSignAnnotated and an unusable gpg: real `git tag -m` still succeeds (unsigned)', async () => {
+    const part = paneEnv(await launch(account(1, 'alice', { keys: made('generated') }), unavailable));
+    const dir = mkdtempSync(join(tmpdir(), 'fy-sign-'));
+    try {
+      const login = `'tag.forceSignAnnotated'='true' 'user.signingkey'='/login/key.pub' 'gpg.format'='ssh' 'gpg.ssh.program'='/bin/false'`;
+      const env = {
+        ...mergedEnv(part, login),
+        GIT_DIR: join(dir, '.git'),
+        GIT_COMMITTER_NAME: 't',
+        GIT_COMMITTER_EMAIL: 't@example.test',
+      };
+      const run = (...args: string[]) => Bun.spawnSync(['git', ...args], { cwd: dir, env });
+      run('init', '-q');
+      const commit = run(
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@example.test',
+        'commit',
+        '--allow-empty',
+        '-q',
+        '-m',
+        'x',
+      );
+      expect(commit.exitCode).toBe(0);
+      const tag = run('tag', '-m', 'msg', 'v1');
+      expect(new TextDecoder().decode(tag.stderr)).toBe('');
+      expect(tag.exitCode).toBe(0);
+      expect(new TextDecoder().decode(run('cat-file', '-p', 'v1').stdout)).not.toContain('BEGIN SSH SIGNATURE');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('the person’s OWN ssh key beside a generated signing key: ssh is not blocked, signing is off', async () => {
     const keys: GitAccount['keys'] = {
       ssh: { title: 't', publicKey: PUB, source: 'own' },
@@ -322,7 +389,7 @@ describe('a key that cannot be started says so in the pane, and runs with no ide
     };
     const env = paneEnv(await launch(account(1, 'alice', { keys }), unavailable));
     expect(env.GIT_SSH_COMMAND).toBeUndefined();
-    expect(env.GIT_CONFIG_COUNT).toBe('2');
+    expect(env.GIT_CONFIG_COUNT).toBe('4');
     expect(config([{ kind: 'pane-env', plugin: 'git-accounts', env }])['core.sshCommand']).toBeUndefined();
   });
 
