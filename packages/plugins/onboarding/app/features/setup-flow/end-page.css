@@ -1,14 +1,15 @@
 /* ============================================================================
-   THE LAST PAGE ("You're set up", end-page.tsx + setup-summary.tsx). Nothing here is a box: no border, no card, no
-   gradient; only spacing. A small mascot slot, then two checklists (this machine, this device) side by side from 720px
-   of the frame's own width (stacked under it), one row per segment, then the way on: the two ways to start and the
-   footer's "Open this machine" share ONE width on a desktop (--fy-end-action) and fill the row on a phone.
+   THE LAST PAGE ("You're set up", end-page.tsx + setup-summary.tsx). Nothing in the body is a box: no border, no card,
+   no gradient; only spacing. The ferret sits in the frame's demo column (the right half from 900px of the frame, above
+   the page under it); the body is the two checklists (this machine, this device) stacked, one row per segment, then the
+   way on: the two ways to start and the footer's "Open this machine" share ONE width on a desktop (--fy-end-action) and
+   fill the row on a phone, where the footer is Back at its fixed 136px and Open this machine on ONE line beside it.
    Theme tokens only; no colour chosen here.
    ========================================================================== */
 
 /* The footer's Open this machine is outside .fy-end but takes the same width, so the token sits on the frame. */
 .fy-spf:has(.fy-end) {
-  --fy-end-action: 15rem;
+  --fy-end-action: 13rem;
 }
 .fy-end {
   display: flex;
@@ -16,17 +17,30 @@
   gap: 24px;
 }
 
-/* The mascot's place: the waving ferret takes it when the access plugin exports it. */
+/* The ferret's place: the demo column. It keeps its own proportions (240 x 190): at most 340px wide, and on a phone the
+   column is 140px tall, so the drawing is that tall. */
 .fy-end__mascot {
   align-items: center;
-  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
-  border-radius: 999px;
-  color: var(--accent);
   display: flex;
-  flex: 0 0 auto;
-  height: 56px;
   justify-content: center;
-  width: 56px;
+  padding: 8px;
+  width: 100%;
+}
+.fy-end__mascot .fy-ferret {
+  max-height: 124px;
+  max-width: 340px;
+}
+/* From 900px the right half is a tall stage for the ferret (it sticks to the top as the lists scroll), not a strip. */
+@container (min-width: 900px) {
+  .fy-spf:has(.fy-end) .fy-spf__demo {
+    min-height: 28rem;
+  }
+  .fy-end__mascot {
+    padding: 32px;
+  }
+  .fy-end__mascot .fy-ferret {
+    max-height: none;
+  }
 }
 
 .fy-end__summary {
@@ -34,17 +48,12 @@
   flex-direction: column;
   gap: 8px;
 }
+/* Stacked: the body is the left column beside the ferret (a desktop) or the whole page (a phone). */
 .fy-end__lists {
   align-items: start;
   display: grid;
   gap: 24px;
   grid-template-columns: minmax(0, 1fr);
-}
-@container (min-width: 720px) {
-  .fy-end__lists[data-lists='two'] {
-    gap: 48px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 .fy-end__list {
   display: flex;
@@ -150,10 +159,23 @@
     inline-size: var(--fy-end-action);
   }
 }
-/* On a phone the footer's primary fills what Back leaves, like the two buttons above it fill their row. */
-@container (max-width: 719.98px) {
+/* On a phone the footer is two buttons, not three thirds: Back keeps the footer's fixed 136px and Open this machine takes
+   the rest, so its label stays on ONE line (a third of 390px wrapped it to two). A 320px phone leaves that button 140px,
+   narrower than the label at the footer's size, so below 360px the label is a little smaller and still one line (a second
+   line would make the footer taller than the room the page reserves for it). */
+@container (max-width: 599.98px) {
+  .fy-spf:has(.fy-end) .fy-spf__footer .fy-spf__actions {
+    grid-template-columns: 8.5rem minmax(0, 1fr);
+  }
   .fy-spf:has(.fy-end) .fy-spf__footer [data-step-next] {
-    flex: 1 1 auto;
+    grid-column: 2;
+    white-space: nowrap;
+  }
+}
+@container (max-width: 359.98px) {
+  .fy-spf:has(.fy-end) .fy-spf__footer [data-step-next] {
+    font-size: 0.8125rem;
+    padding-inline: 2px;
   }
 }
 /* The shared words about working without a project stay whole, but behind one line (the page says little). */

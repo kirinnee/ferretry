@@ -6,6 +6,7 @@ import { accessClaims, accessForget } from './connect.ts';
 import { agendaItemOpenedHook, pageRegistration } from './lib/item-opened-hook.ts';
 import { howToEnableLocationHook } from './lib/location-steps-hook.ts';
 import { accessPasskey } from './step-up-shell.tsx';
+import { EndMascotPanel } from './features/onboarding/end-mascot-panel.tsx';
 import { passkeyStepPanel } from './features/onboarding/passkey-step-panel.tsx';
 import { daemonlessPlaceholder, PAIR_SCREEN_ID, pairPage } from './pair-page.tsx';
 import { pairPhoneCommands } from './pair-phone-host.tsx';
@@ -47,6 +48,8 @@ export default provideToShell(
         'agenda-notifications-off': agendaNotificationsOffPanel(client),
         // Draws only for its own step (`access.passkey`); any other step's subject is nothing.
         'onboarding-passkey': forSubject('access.passkey', passkeyStepPanel(client)),
+        // The cheering ferret on Onboarding's last page (its `onboarding.end` slot).
+        'end-mascot': EndMascotPanel,
       },
     }),
   }),

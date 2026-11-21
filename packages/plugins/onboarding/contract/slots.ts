@@ -9,5 +9,12 @@
  */
 export const ONBOARDING_STEP_SLOT = 'onboarding.step' as const;
 
+/**
+ * THE SLOT THE LAST PAGE OFFERS ("You're set up"). It is the page's picture: the panel a plugin places here is drawn in the
+ * frame's demo column (the right half on a desktop, above the page on a phone). Access places the cheering ferret; with
+ * no panel (Access off) the page draws no column and is the lists and the way on. No props, no subject.
+ */
+export const ONBOARDING_END_SLOT = 'onboarding.end' as const;
+
 /** The subject a step's panels are mounted with: `<plugin>.<stepId>`. */
 export const stepSubject = (plugin: string, step: string): string => `${plugin}.${step}`;
