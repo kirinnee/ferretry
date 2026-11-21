@@ -205,7 +205,10 @@ describe('the onboarding Appearance step (r11 G2)', () => {
       await tab.waitForTimeout(300);
       expect((await read()).mode).toBe('dark');
       await tab.locator('[aria-label="Style"] .fy-cc__card[data-choice="neo"]').click();
-      await shot(tab, variant, 'picked');
+      // Let the pick's pop finish, then keep the picture of the picked look (palette, then Dark, then the Neo style).
+      await tab.waitForTimeout(800);
+      await tab.evaluate(() => window.scrollTo(0, 0));
+      await shot(tab, variant, 'picked-vaporwave-dark-neo');
       expect((await read()).style).toBe('neo');
       // The two controls the base step had stay and work: Text size scales the type, Motion is chosen.
       const scale = async () =>
