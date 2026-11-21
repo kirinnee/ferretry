@@ -89,19 +89,47 @@ describe('the real spinner under the real stylesheet', () => {
     }
   }
 
-  it('a swapped pair keeps the style’s hand: Pixel style on the Magenta palette still draws a thick square arc', async () => {
-    await page.evaluate(() => {
+  /** Pixel's own hand: no ring, four blocks lit in turn (clockwise p1, p2, p4, p3), a quarter of the 1s cycle apart. */
+  const pixelHand = (palette: string | null) =>
+    page.evaluate(paletteId => {
       const root = document.documentElement;
       root.setAttribute('data-style', 'pixel');
-      root.setAttribute('data-palette', 'vaporwave');
+      if (paletteId === null) root.removeAttribute('data-palette');
+      else root.setAttribute('data-palette', paletteId);
       root.setAttribute('data-mode', 'dark');
-    });
-    const arc = await page.evaluate(() => {
-      const computed = getComputedStyle(document.querySelector('.fy-spinner-arc') as SVGElement);
-      return { width: computed.strokeWidth, cap: computed.strokeLinecap, stroke: computed.stroke };
-    });
-    expect(arc).toMatchObject({ width: '3.25px', cap: 'square' });
-    expect(arc.stroke).not.toBe('none');
+      const svg = document.querySelector('.fy-spinner') as SVGElement;
+      const parts = [1, 2, 4, 3].map(n => getComputedStyle(svg.querySelector(`.fy-spinner__p${n}`) as SVGElement));
+      return {
+        figureAnimation: getComputedStyle(svg).animationName,
+        ringDisplay: getComputedStyle(svg.querySelector('.fy-spinner-ring') as SVGElement).display,
+        partDisplays: parts.map(part => part.display),
+        partAnimations: parts.map(part => part.animationName),
+        partDurations: parts.map(part => part.animationDuration),
+        partDelays: parts.map(part => part.animationDelay),
+        partTimings: parts.map(part => part.animationTimingFunction),
+        partEdges: parts.map(part => part.shapeRendering),
+        partFills: parts.map(part => part.fill),
+      };
+    }, palette);
+
+  it('a swapped pair keeps the style’s hand: Pixel style on the Magenta palette still draws its own four chasing blocks', async () => {
+    const own = await pixelHand(null);
+    const swapped = await pixelHand('vaporwave');
+    // Pixel's own mark (r11 T10), not the ring: the ring is hidden and four crisp blocks step round in 1s, a quarter apart.
+    expect(swapped.ringDisplay).toBe('none');
+    expect(swapped.figureAnimation).toBe('none');
+    expect(swapped.partDisplays).toEqual(['inline', 'inline', 'inline', 'inline']);
+    expect(swapped.partAnimations).toEqual(['fy-pixel-chase', 'fy-pixel-chase', 'fy-pixel-chase', 'fy-pixel-chase']);
+    expect(swapped.partDurations).toEqual(['1s', '1s', '1s', '1s']);
+    expect(swapped.partDelays).toEqual(['0s', '0.25s', '0.5s', '0.75s']);
+    expect(swapped.partTimings).toEqual(['steps(1)', 'steps(1)', 'steps(1)', 'steps(1)']);
+    expect(swapped.partEdges).toEqual(['crispedges', 'crispedges', 'crispedges', 'crispedges']);
+    for (const fill of swapped.partFills) expect(fill).not.toBe('none');
+    // The palette may recolour the blocks, never reshape or re-time the style's mark.
+    const { partFills: ownFills, ...ownHand } = own;
+    const { partFills: swappedFills, ...swappedHand } = swapped;
+    expect(swappedHand).toEqual(ownHand);
+    expect(swappedFills).not.toEqual(ownFills);
   });
 
   it('reduced motion (the OS setting) pulses the whole ring and draws the arc as a full ring', async () => {
