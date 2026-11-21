@@ -2080,7 +2080,7 @@ close reopen`), `run` (`list view watch cancel rerun`), `workflow` (`list view`)
 for every secret here ([threat model](#threat-model)). The sealed document narrows who is _handed_ it; it is not a
 sandbox against a process running as the owner.
 
-**GAP — what `gh` can still do with the token.** The `gh` seam is GitHub API work only, and there is **no `git` child that can run a repository's hooks or config** (`pr merge --delete-branch` may run `git` in an empty scratch folder with an empty `HOME`: no hooks, no config, no repository), so a repository's own hooks or `.git/config` can never run with the token (the old `repo clone` and `pr checkout`
+**GAP — what `gh` can still do with the token.** The `gh` seam is GitHub API work only, and there is **no `git` child that can run a repository's hooks or config** (any `gh` command may start `git`, not only `pr merge --delete-branch`, and it runs in the empty scratch folder with an empty `HOME`: no hooks, no config, no repository; `GIT_CEILING_DIRECTORIES` is that folder's parent, so `git` never looks above the scratch folder for one), so a repository's own hooks or `.git/config` can never run with the token (the old `repo clone` and `pr checkout`
 route is gone). What an allowed command can still do is everything the token's scopes allow on the GitHub API: with `repo`
 that is reading and writing every repository the account can reach (opening, merging or closing pull requests, commenting,
 creating or editing issues, re-running workflows) and, through `api`, any REST or GraphQL call. The scrub catches the token
@@ -2153,7 +2153,7 @@ repository's own account, else the project's first account. A link to an account
   from anywhere): `SSH_AUTH_SOCK`, and `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` for `user.name`,
   `user.email` (`<id>+<login>@users.noreply.github.com`, an address GitHub counts as verified), and, for what is
   registered: `gpg.format=ssh`, `user.signingkey=<public key file>`, `commit.gpgsign`, `tag.gpgsign`, and
-  `core.sshCommand=ssh -F none -o IdentitiesOnly=yes -o IdentityFile=<public key file> -o IdentityAgent=<socket> -o StrictHostKeyChecking=yes -o UserKnownHostsFile=<pinned>`
+  `core.sshCommand=ssh -F none -o IdentitiesOnly=yes -o IdentityFile=<public key file> -o IdentityAgent=<socket> -o StrictHostKeyChecking=yes -o UserKnownHostsFile=<pinned> -o GlobalKnownHostsFile=none`
   with `url.git@github.com:.insteadOf=https://github.com/`. `-F none` means the person's `~/.ssh/config` (a
   `ProxyCommand`, an `IdentityFile`, `ForwardAgent`, a host alias) is never read, and `IdentitiesOnly` with that one
   public `IdentityFile` offers exactly this account's key from the agent and no key from the host.
@@ -2167,6 +2167,30 @@ repository's own account, else the project's first account. A link to an account
 
 **GAP — a process of that ferret can push and sign as the account while it runs.** That is "use". Every ferret that
 shares the project is given the same account's socket, and the key opens every repository the account can reach.
+
+**GAP — unlinking a project does not cut a running ferret.** The agent socket is at a stable path on purpose (a ferret
+that outlives a daemon restart must keep its `SSH_AUTH_SOCK`), so removing a project's link to the account does not stop
+a ferret that already holds the socket: it can push and sign until it ends or the agent stops. Linking the account
+again hands the same socket to older ferrets too. The socket is not rotated. What DOES cut it: removing the account's
+**last** key registration (the agent is stopped and the private key forgotten) or removing the account itself.
+
+**A key that cannot be started is said in the pane, and the pane is given no identity.** When the account has a key
+Ferretry made (a push key or a signing-only one) but its agent cannot be served for a launch (the agent fails to start,
+or the recorded key's sealed entry is gone), the ferret still starts, with one instruction sentence that its Git account
+key is unavailable; no error text is put in it. The pane's environment is then given the no-identity ssh command (no
+agent, no default key file, no password) as `GIT_SSH_COMMAND` AND as `core.sshCommand`, and `https://github.com/` is
+rewritten to ssh so a host credential helper is not used; signing is switched off (`commit.gpgsign` and `tag.gpgsign`
+`false`, as settings and as the END of `GIT_CONFIG_PARAMETERS`, which Ferrets appends to a login's own value and Git
+applies last, so a login's parameters cannot keep signing on). Git reads `GIT_SSH_COMMAND` before
+`core.sshCommand` before `GIT_SSH`, and the part is merged AFTER the login's environment, so a login's own
+`GIT_SSH_COMMAND` or `GIT_SSH` does not win. A `git push` run with that environment over ssh therefore fails
+instead of succeeding as this machine's own ssh identity. What this is not: it is the environment the pane is _given_,
+not a sandbox. A process of the ferret can set its own environment or pass its own `git -c` or `ssh` options, and
+an ssh agent socket a login set stays in the environment (ignored by `IdentityAgent=none`, not removed). A slot that
+holds the person's OWN key is not blocked: it was never Ferretry's. An account with no key Ferretry made (none, or the
+person's own) is launched exactly as before and gets no sentence. Only the unavailable-key case changes the
+environment; a served key is unchanged, so a login's own `GIT_SSH_COMMAND` can still outrank the account's
+`core.sshCommand` there (a declared GAP).
 
 **GAP — the folder is judged by its spelling.** The resolver compares paths as written; a folder reached through a link
 is not matched to a project registered under the link's target.
@@ -2188,7 +2212,7 @@ account's token"). The token is never in the ferret's environment, never in a re
   the project's first account. Outside a project linked to an account the call is refused with "This folder is in no
   project linked to a GitHub account… Link one on the project page." **The host's own `gh` is never a fallback.**
 - **A ferret may only name its own folder (or one below it)**, checked against the folder Ferrets recorded for that
-  ferret (its real path), so it cannot pick a neighbouring project's account by naming that path (but see the GAP below on a broad folder). A ferret may not
+  ferret (its real path), so it cannot pick a neighbouring project's account by naming that path (but see the GAP below on a broad folder). The account is also resolved from the ferret's OWN folder, and a `cwd` that resolves to a different project or account (a project nested below the ferret's folder) is refused, so a nested project cannot lend a ferret another account. A ferret may not
   pass `account`; the owner's own shell may (by login or id).
 - **The repository is the project's record** (`repos[].remote`, written by Projects' scan, `github.com` only), passed as
   `-R OWNER/NAME` unless the argv already names one, and filled into a `gh api` endpoint's `{owner}`/`{repo}`. **No file
@@ -2242,10 +2266,12 @@ host's own `gh` sign-in being used by ferrets; a repository's own git config or 
   a `gh api repos/x/y/…` endpoint, reach **any repository the account can see**, not only the project's: the project's
   repository is only the default, never a fence.
 - **GAP: a folder decides the account, and a ferret's folder can be broad.** A ferret may name only its own work folder
-  or one below it, but a ferret whose work folder is a **parent of several projects**, or a child ferret started in
-  **another project's folder**, gets that project's account (the first account the resolver finds for the folder), the
-  same as B4's SSH. Ferretry does not claim a ferret cannot use another project's account: it claims a ferret cannot
-  pick one by naming a path outside its own folder.
+  or one below it, and `gh` runs as the account of the ferret's **own** work folder (the first account the resolver
+  finds for it), the same as B4's SSH. A ferret whose work folder is a **parent of several projects** cannot select a
+  nested project's account by naming that project's folder: when the named folder resolves to a different project or
+  account than its own folder does, the run is refused. A child ferret **started in another project's folder** still
+  gets that project's account for its own folder. Ferretry does not claim a ferret cannot use another project's
+  account: it claims a ferret cannot pick one by naming a path other than its own work folder's.
 
 **GAP — what the plan wanted and the seam still refuses.** No stdin and no file slots (`--body-file`, `-F`, `--input`,
 `release upload`, `gist create` from files); no `repo create|edit|fork`, `secret`, `variable`, `label`, `cache`, `ruleset`,
@@ -2293,7 +2319,10 @@ folder inside the state home removed, runs the answer by absolute path, and refu
 state home or a fence that cannot be built. The reason: a ferret pane's `PATH` starts with the shim folder, a file the
 ferret can rewrite, and `fy daemon start|restart|update` run from a pane would write that `PATH` into the service unit.
 The CLI therefore also drops every state-home folder from the `PATH` it writes into the unit, plist or direct-start
-environment. Either guard alone keeps the token out of a ferret-writable file.
+environment. The locator protects **the `gh` executable** only: a descendant `gh` starts (a `git`, an editor it was
+refused) still inherits the sealed daemon `PATH`, and only the normal service launch strips state-home folders from it.
+Neither guard alone makes every descendant safe: the locator keeps the token from a ferret-writable `gh`, and the
+stripped `PATH` keeps a daemon started from a pane from carrying a ferret-writable folder at all.
 
 **`fy gh-doctor`** (run in a pane) warns when `command -v gh` is not the shim (the first `gh` on `PATH` is somewhere
 else: a shell rc moved `PATH`), when the pane was not started with the shim, or when a GitHub token variable is set in

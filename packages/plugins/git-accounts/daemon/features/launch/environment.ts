@@ -27,7 +27,8 @@ const clean = (text: string): string => text.replace(/[\p{Cc}]/gu, ' ').trim();
 /**
  * `ssh -F none` ignores the host's `~/.ssh/config` (no ProxyCommand, ForwardAgent, alias or IdentityFile of the person's);
  * `IdentitiesOnly=yes` with this one `IdentityFile` offers exactly this account's key, taken from `IdentityAgent`; the
- * host key is checked against the pinned file, never trusted on first use.
+ * host key is checked against the pinned file alone (`GlobalKnownHostsFile=none`: the machine's own
+ * `ssh_known_hosts` is not consulted), never trusted on first use.
  */
 export const sshCommand = (kit: AccountKit): string =>
   [
@@ -37,11 +38,52 @@ export const sshCommand = (kit: AccountKit): string =>
     `-o IdentityAgent=${word(kit.socket)}`,
     '-o StrictHostKeyChecking=yes',
     `-o UserKnownHostsFile=${word(kit.knownHosts)}`,
+    '-o GlobalKnownHostsFile=none',
   ].join(' ');
 
 /** GitHub counts `<id>+<login>@users.noreply.github.com` as a verified address of the account. */
 export const noreplyEmail = (account: GitAccount): string =>
   `${String(account.githubId)}+${account.login}@users.noreply.github.com`;
+
+/** ssh offering no identity at all: no agent, no default key file, no password. */
+const NO_IDENTITY_SSH =
+  'ssh -F none -o IdentitiesOnly=yes -o IdentityFile=/dev/null -o IdentityAgent=none -o PasswordAuthentication=no';
+
+/**
+ * What a launch is given when the account has a key Ferretry made that is RECORDED but cannot be served: git is told to
+ * offer no identity at all (no agent, no default key file, no password) instead of the machine's own, and not to sign
+ * with a key that is not the account's. A push then fails where it would otherwise have succeeded as somebody else.
+ *
+ * Any generated key (a push key OR a signing-only one) closes ssh, because the account is Ferretry's to speak for; a
+ * slot holding the person's OWN key is theirs and is never blocked here. Git reads `GIT_SSH_COMMAND` before
+ * `core.sshCommand` before `GIT_SSH`, and a login's environment may set either variable, so the command is set in BOTH
+ * places: this part is merged after the login (core ferrets), so `GIT_SSH_COMMAND` here is what git runs. Signing is
+ * switched off twice too: as settings, and as the END of `GIT_CONFIG_PARAMETERS` (git applies it last, so a login's own
+ * parameters cannot keep signing on).
+ */
+export function noIdentityEnvironment(account: GitAccount): Readonly<Record<string, string>> {
+  const { ssh, signing } = account.keys;
+  const generated = ssh?.source === 'generated' || signing?.source === 'generated';
+  if (!generated) return {};
+  const settings: [string, string][] = [];
+  const env: Record<string, string> = {};
+  if (ssh?.source !== 'own') {
+    settings.push(['core.sshCommand', NO_IDENTITY_SSH], ['url.git@github.com:.insteadOf', 'https://github.com/']);
+    env['GIT_SSH_COMMAND'] = NO_IDENTITY_SSH;
+  }
+  if (signing?.source !== 'own') {
+    settings.push(['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']);
+    // Git applies GIT_CONFIG_PARAMETERS AFTER GIT_CONFIG_COUNT, and a login may set it to keep signing on. Core ferrets
+    // appends this value to the login's, so these entries come last, in git's own quoted `'key'='value'` form, and win.
+    env['GIT_CONFIG_PARAMETERS'] = `'commit.gpgsign'='false' 'tag.gpgsign'='false'`;
+  }
+  env['GIT_CONFIG_COUNT'] = String(settings.length);
+  settings.forEach(([key, value], index) => {
+    env[`GIT_CONFIG_KEY_${String(index)}`] = key;
+    env[`GIT_CONFIG_VALUE_${String(index)}`] = value;
+  });
+  return env;
+}
 
 export function gitEnvironment(account: GitAccount, kit: AccountKit): Readonly<Record<string, string>> {
   const settings: [string, string][] = [

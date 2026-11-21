@@ -327,6 +327,23 @@ describe('who may ask, and for which folder', () => {
     expect(JSON.stringify(world.gate.audits)).toContain('"ferret":"f1"');
   });
 
+  test("a ferret cannot borrow a nested project: its own folder's project and account must be the cwd's", async () => {
+    const mine = mkdtempSync(join(tmpdir(), 'fy-gh-mine-'));
+    folders.push(mine);
+    const nested = join(mine, 'vendor', 'other');
+    mkdirSync(nested, { recursive: true });
+    const world = await boot({
+      projects: [linked(mine), linked(nested, { id: '00000000-0000-4000-8000-000000000002' })],
+      ferretFolders: { f1: mine },
+      standing: () => ferretStanding('f1' as never),
+    });
+    expect((await world.gh(['pr', 'list'], mine)).json()).not.toHaveProperty('refused');
+    expect(world.calls).toHaveLength(1);
+    const borrowed = (await world.gh(['pr', 'list'], nested)).json<{ refused: string }>();
+    expect(borrowed.refused).toContain('folder this ferret works in');
+    expect(world.calls).toHaveLength(1);
+  });
+
   test('a ferret may not choose an account; the owner may, by login', async () => {
     const { root: folder } = projectFolder();
     const asFerret = await boot({

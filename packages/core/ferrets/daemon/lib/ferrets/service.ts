@@ -2795,7 +2795,15 @@ export class FerretsService implements FerretsApi {
       return own === undefined || own === '' ? this.ports.daemonPath?.() : own;
     });
     if (!contributed.ok) return err(contributed.error);
+    // Git applies GIT_CONFIG_PARAMETERS last, in order: a part's entries are APPENDED to the pane's own, never replacing them.
+    const priorParameters = env['GIT_CONFIG_PARAMETERS'];
     Object.assign(env, contributed.value);
+    if (
+      priorParameters !== undefined &&
+      priorParameters !== '' &&
+      contributed.value['GIT_CONFIG_PARAMETERS'] !== undefined
+    )
+      env['GIT_CONFIG_PARAMETERS'] = `${priorParameters} ${contributed.value['GIT_CONFIG_PARAMETERS']}`;
     // The ferret's mode (v4 parity: the pane is handed FY_SESSION_MODE, which the wrappers and `instructions` read) goes
     // in AFTER the parts: it is the record's own fact, the same one the harness decided its question tool from
     // (`LaunchSpec.mode`), so no part or login file can make the pane say something else.
