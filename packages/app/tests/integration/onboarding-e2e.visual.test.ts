@@ -25,6 +25,7 @@ import { appendFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright-core';
+import { LOADING_FADE_MS, LOADING_MIN_MS } from '../../src/ui/loading-gate.ts';
 import { sceneServer, sharedChromium, walkFocusRings } from '../support/browser/index.ts';
 import { clippedBoxes, footerButtons, gapUnderTitle, underFooter } from '../support/browser/stepper-layout.ts';
 import { FAKE_CODE, MACHINE_A, MACHINE_B, pairLinkOf } from './fixtures/onboarding-e2e-daemon.ts';
@@ -77,7 +78,7 @@ interface Observed {
   /** Every page's counter and segment count, in order (printed with FY_ONBOARDING_E2E_SHOTS_DIR). */
   counters: string[];
   /** r11-1b G6: every step cover that drew its loader in a journey with `latency` ms answers: how long the loader stayed. */
-  covers: { latency: number; variant: string; ms: number }[];
+  covers: { latency: number; variant: string; ms: number; fullMs: number }[];
 }
 const seen: Observed = {
   nameForms: -1,
@@ -149,21 +150,45 @@ const reach = async (tab: Page, key: string): Promise<void> => {
 const moves: { from: string; to: string; ms: number; latency: number }[] = [];
 /** The answer delay of the journey being walked: 0 (the machines answer at once) or the slow run's 100 ms (r11-1b G6). */
 let latencyNow = 0;
-/** How long the step cover keeps its loader once it has drawn it (fade + min, r11-1b G6), with a little slack for the timer. */
-const COVER_HELD_AT_LEAST_MS = 450;
-/** Every time the step cover's loader is put into the document and when it leaves it (a MutationObserver: no frame loop to skew it). */
+/**
+ * What the step cover's loader must show (r11-1b G6), from the code's own constants (`useHeldLoading`, `delay: 0` because the
+ * cover's own 300 ms already waited), so the bounds move with them: on screen (opacity above 0) for the fade plus the minimum,
+ * and fully shown (opacity 1) for the minimum. The first frame of each is SAMPLED, not announced, so a loaded machine's late
+ * frames are given six frames of slack; a blink on base was 50-183 ms, far under either bound.
+ */
+const SAMPLE_SLACK_MS = 100;
+const COVER_ON_SCREEN_AT_LEAST_MS = LOADING_FADE_MS + LOADING_MIN_MS - SAMPLE_SLACK_MS;
+const COVER_FULL_AT_LEAST_MS = LOADING_MIN_MS - SAMPLE_SLACK_MS;
+/**
+ * Every step-cover loader of a journey, and how long it was ON SCREEN: from the first frame its computed opacity is above 0 to
+ * the moment it leaves the document (a frame loop samples the opacity; a MutationObserver stamps the removal). A loader that
+ * leaves before any frame saw it is 0 ms: it blinked.
+ */
 const COVER_LOG = `
   window.__covers = [];
-  let at = -1;
-  const look = () => {
-    const there = document.querySelector('[data-flow-cover] [data-loading]') !== null;
-    if (there && at < 0) at = performance.now();
-    if (!there && at >= 0) {
-      window.__covers.push(performance.now() - at);
-      at = -1;
-    }
+  let shownAt = -1;
+  let fullAt = -1;
+  let there = false;
+  const loader = () => document.querySelector('[data-flow-cover] [data-loading]');
+  const sample = () => {
+    const node = loader();
+    if (node === null) return;
+    const opacity = Number.parseFloat(getComputedStyle(node).opacity);
+    if (shownAt < 0 && opacity > 0) shownAt = performance.now();
+    if (fullAt < 0 && opacity >= 0.99) fullAt = performance.now();
+    requestAnimationFrame(sample);
   };
-  new MutationObserver(look).observe(document, { childList: true, subtree: true });
+  new MutationObserver(() => {
+    const now = loader() !== null;
+    if (now && !there) requestAnimationFrame(sample);
+    if (!now && there) {
+      const end = performance.now();
+      window.__covers.push({ ms: shownAt < 0 ? 0 : end - shownAt, fullMs: fullAt < 0 ? 0 : end - fullAt });
+      shownAt = -1;
+      fullAt = -1;
+    }
+    there = now;
+  }).observe(document, { childList: true, subtree: true });
 `;
 
 /** The flow's pages in the order they were reached (a page the flow dropped is never in it). */
@@ -350,8 +375,25 @@ const measureButton = async (tab: Page, variant: Variant, label: string, selecto
 /** Presses Next and waits for `to` (a page key, or `end`). */
 const next = async (tab: Page, to: string): Promise<void> => {
   const from = await keyOf(tab);
-  const began = await tab.evaluate(() => performance.now());
+  // The press is stamped IN the browser (pointerdown, page clock): Playwright's own scroll/stability checks before the click
+  // (up to ~100 ms on a phone) are not the app's time.
+  await tab.evaluate(() => {
+    const mine = window as unknown as { __pressedAt: number; __pressHook?: true };
+    mine.__pressedAt = Number.NaN;
+    if (mine.__pressHook === undefined) {
+      mine.__pressHook = true;
+      document.addEventListener(
+        'pointerdown',
+        event => {
+          if (event.target instanceof Element && event.target.closest('[data-step-next]') !== null)
+            mine.__pressedAt = performance.now();
+        },
+        true,
+      );
+    }
+  });
   await tab.locator('[data-step-next]').click();
+  const began = await tab.evaluate(() => (window as unknown as { __pressedAt: number }).__pressedAt);
   // The frame the page is READY in (the cover is down and the page said so), read in the page's own clock.
   const readyAt = await tab
     .waitForFunction(
@@ -1218,8 +1260,15 @@ describe('the first run, end to end', () => {
           await Bun.write(join(shotsDir, `${variant.name}-counters.txt`), `${seen.counters.join('\n')}\n`);
         seen.counters.length = 0;
         seen.unanswered = [...(await daemonOf(tab, A)).unanswered, ...(await daemonOf(tab, B)).unanswered];
-        for (const ms of await tab.evaluate(() => (window as unknown as { __covers: number[] }).__covers))
-          seen.covers.push({ latency, variant: variant.name, ms: Math.round(ms) });
+        for (const cover of await tab.evaluate(
+          () => (window as unknown as { __covers: { ms: number; fullMs: number }[] }).__covers,
+        ))
+          seen.covers.push({
+            latency,
+            variant: variant.name,
+            ms: Math.round(cover.ms),
+            fullMs: Math.round(cover.fullMs),
+          });
         await context.close();
       });
 });
@@ -1346,14 +1395,20 @@ describe('the gaps the gate found, now closed', () => {
   // that loader must then stay for its minimum (a cover that blinked for 50-183 ms eight times on base).
   it('a journey whose answers are 100 ms late never blinks a cover: each loader that came up stayed for its minimum', () => {
     const slow = seen.covers.filter(cover => cover.latency === 100);
-    console.info(`G6 covers at 100 ms answers: ${slow.map(cover => `${cover.ms} ms`).join(', ') || 'none'}`);
+    console.info(
+      `G6 covers at 100 ms answers (on screen / fully shown): ${slow.map(cover => `${cover.ms}/${cover.fullMs} ms`).join(', ') || 'none'}`,
+    );
     expect(slow.length, 'the slow journey covered at least one page (otherwise this proves nothing)').toBeGreaterThan(
       0,
     );
-    for (const cover of slow)
-      expect(cover.ms, `a cover's loader stayed ${cover.ms} ms`).toBeGreaterThanOrEqual(COVER_HELD_AT_LEAST_MS);
-    for (const cover of seen.covers.filter(other => other.latency === 0))
-      expect(cover.ms, `a cover's loader stayed ${cover.ms} ms`).toBeGreaterThanOrEqual(COVER_HELD_AT_LEAST_MS);
+    for (const cover of seen.covers) {
+      expect(cover.ms, `a cover's loader was on screen ${cover.ms} ms`).toBeGreaterThanOrEqual(
+        COVER_ON_SCREEN_AT_LEAST_MS,
+      );
+      expect(cover.fullMs, `a cover's loader was fully shown ${cover.fullMs} ms`).toBeGreaterThanOrEqual(
+        COVER_FULL_AT_LEAST_MS,
+      );
+    }
   });
   it('no page threw', () => {
     expect(seen.pageErrors).toEqual([]);
