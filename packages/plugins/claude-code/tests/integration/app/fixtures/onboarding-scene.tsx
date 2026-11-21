@@ -8,7 +8,7 @@
  *        |kind-settings|kind-model-set|kind-instructions|kind-skills|kind-mcp
  *   ?theme=<family>-<mode>   ?save=fail (the first PUT is refused)
  *   ?reread=withheld (the read AFTER a refused PUT is withheld, the one after that readable again)
- *   ?read=pending (the file carries a change held for the owner)   ?signin=chooser (the sign-in slot draws a harness chooser)
+ *   ?read=pending (the file carries a change held for the owner)   ?read=pending-once (held at the first read only: the owner confirmed it)   ?signin=chooser (the sign-in slot draws a harness chooser)
  */
 import { StepPageFrame } from '@ferretry/app';
 import type { StepHost, StepSegmentMemory } from '@ferretry/kernel/contract';
@@ -106,7 +106,10 @@ const table: Record<string, (request?: { body?: unknown }) => unknown> = {
       text: withheld ? WITHHELD : (fake.puts.at(-1)?.text ?? (page === 'permission-auto' ? AUTO_FILE : FILE)),
       etag: `e${String(etag)}`,
       exists: true,
-      state: params.get('read') === 'pending' ? 'pending' : 'ok',
+      state:
+        params.get('read') === 'pending' || (params.get('read') === 'pending-once' && fake.gets === 1)
+          ? 'pending'
+          : 'ok',
     };
   },
   'PUT /v1/config/file': request => {
@@ -136,7 +139,11 @@ const client = {
 /**
  * The sign-in page's shape: its own intro line, then what Logins draws in the slot (in outline: a card with its one
  * button). The page itself needs the shell's slot machinery, which a browser scene cannot import (context-imports), so
- * its slot is shown filled here; the page's behaviour is covered by the unit suite and the app-wide onboarding walk.
+ * its slot is shown filled here. The repo's `context-imports` rule keeps a plugin's tests from importing Logins' app half, so the
+ * REAL slot is proved at the two seams it can be: `tests/unit/app/slots.test.ts` pins the registry (the ONLY panel placed in
+ * `claude-code.sign-in` is Logins' harness-locked `claude-code-sign-in`, never its generic add-login), and Logins' own
+ * `sign-in-harness.visual.test.ts` measures that panel in a browser (zero radios; the generic one keeps its two). The page's
+ * behaviour is covered by the unit suite.
  */
 const signIn = (
   <div className="cc-step" data-onboarding-step="claude-code.sign-in">

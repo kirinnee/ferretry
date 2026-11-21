@@ -124,7 +124,8 @@ describe('the Claude import pages', () => {
           }
           for (const card of await tab.locator('.fy-cc__card').all()) {
             const box = await card.boundingBox();
-            if (!viewport.phone) expect(box?.width).toBeLessThanOrEqual(320);
+            // The cards are stacked (r11 O4), so one is as wide as the page body of the stand-in (880 less its padding), never the screen.
+            if (!viewport.phone) expect(box?.width).toBeLessThanOrEqual(880);
             // The text is drawn.
             expect((await card.innerText()).trim().length).toBeGreaterThan(0);
             // The radio is visually hidden (the card is the control), so it paints nothing over the text.
@@ -137,7 +138,7 @@ describe('the Claude import pages', () => {
 
   for (const viewport of VIEWPORTS)
     for (const mode of ['light', 'dark'] as const) {
-      it(`conversations: the one-way words are on screen and a pick offers Use and Keep at ${viewport.name}, ${mode}`, async () => {
+      it(`conversations: the one-way words are on screen and a pick draws no Use/Keep button at ${viewport.name}, ${mode}`, async () => {
         const context = await newContext(viewport, mode);
         const tab = await open(context, 'conversations', mode);
         expect(await tab.locator('.cc-step').innerText()).toContain(
@@ -145,11 +146,12 @@ describe('the Claude import pages', () => {
         );
         await tab.locator('[data-choice="off"]').click();
         await tab.waitForTimeout(400);
-        for (const label of ['Use: don’t show them', 'Keep showing them']) {
-          const box = await tab.getByRole('button', { name: label }).boundingBox();
-          expect(box?.height).toBeGreaterThanOrEqual(44);
-          expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
-        }
+        // Next saves the pick (r11 O4): the page itself draws no Use / Keep button, and the pick stays inside the screen.
+        expect(await tab.locator('.cc-step button').count()).toBe(0);
+        for (const label of ['Use: don’t show them', 'Keep showing them'])
+          expect(await tab.getByRole('button', { name: label }).count()).toBe(0);
+        const picked = await tab.locator('[data-choice="off"]').boundingBox();
+        expect((picked?.x ?? 0) + (picked?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
         if (shotsDir !== '')
           await tab.screenshot({
             fullPage: true,

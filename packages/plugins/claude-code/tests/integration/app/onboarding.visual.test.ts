@@ -449,7 +449,7 @@ describe('a read that stops being readable, and a file with a held change', () =
     }
   });
 
-  it('a held change: the waiting line replaces the cards, Next writes nothing (1280 and 390)', async () => {
+  it('a held change: the waiting line replaces the cards, Next re-reads and writes nothing while it is held (1280 and 390)', async () => {
     for (const viewport of VIEWPORTS) {
       const { tab, close } = await open(viewport, 'studio-light', '&page=permission&read=pending');
       try {
@@ -457,8 +457,40 @@ describe('a read that stops being readable, and a file with a held change', () =
         expect(await tab.locator('[data-config-waiting]').innerText()).toContain('waiting for your OK');
         expect(await tab.locator('[data-choice]').count()).toBe(0);
         await tab.locator('[data-step-next]').click();
+        await tab.locator('[data-flow-commit-error]').waitFor({ state: 'visible' });
+        expect(await tab.locator('[data-flow-commit-error]').innerText()).toContain('waiting for your OK');
+        const fake = await fakeOf(tab);
+        console.log(`O4 held ${viewport.name}: reads ${String(fake.gets)}, puts ${String(fake.puts.length)}`);
+        expect(fake.gets, 'Next read the file again').toBe(2);
+        expect(fake.puts.length).toBe(0);
+        expect(fake.advanced, 'the page stays while it is held').toBe(false);
+      } finally {
+        await close();
+      }
+    }
+  });
+
+  it('a held change the owner then confirms: Next re-reads, the cards appear, and one pick + Next writes exactly one PUT (1280 and 390)', async () => {
+    for (const viewport of VIEWPORTS) {
+      const { tab, close } = await open(viewport, 'studio-light', '&page=permission-auto&read=pending-once');
+      try {
+        await tab.locator('[data-config-waiting]').waitFor({ state: 'visible' });
+        await tab.locator('[data-step-next]').click();
+        await tab.locator('[data-choice]').first().waitFor({ state: 'visible' });
+        expect(await tab.locator('[data-config-waiting]').count()).toBe(0);
+        const mid = await fakeOf(tab);
+        console.log(
+          `O4 held-then-confirmed ${viewport.name}: reads ${String(mid.gets)}, puts ${String(mid.puts.length)}`,
+        );
+        expect(mid.gets, 'Next re-read the file').toBe(2);
+        expect(mid.puts.length, 'nothing written by that Next').toBe(0);
+        expect(mid.advanced).toBe(false);
+        await tab.locator('[data-choice="skip"]').click();
+        await tab.locator('[data-step-next]').click();
         await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
-        expect((await fakeOf(tab)).puts.length).toBe(0);
+        const end = await fakeOf(tab);
+        expect(end.puts.length, 'the pick writes once').toBe(1);
+        expect(lineDiff(AUTO_ORIGINAL, end.puts[0]?.text ?? '')).toEqual(['permissionMode: skip']);
       } finally {
         await close();
       }

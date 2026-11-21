@@ -92,9 +92,46 @@ describe('useConfigChoice: a file with a change held for the owner', () => {
     expect(view.container.querySelector('input[type="radio"]')).toBeNull();
     // The held text says auto, but the cards (and so the "saved" mode) are not drawn from it.
     expect(view.container.querySelector('[data-permission-consequence]')).toBeNull();
-    expect(run.hasCommit).toBe(false);
+    // Next re-reads the file (still held here: the footer says so and nothing is written).
+    expect(run.hasCommit).toBe(true);
+    await expect(interact(() => run.runCommit())).rejects.toThrow('waiting for your OK');
+    expect(calls.map(call => call.route)).toEqual(['GET /v1/config/file', 'GET /v1/config/file']);
+  });
+
+  it('recovers after the owner confirms the held edit: Next re-reads, the cards appear, and the pick then writes exactly once', async () => {
+    const calls: Call[] = [];
+    const run = stepHarness();
+    const reads = [{ ...file('permissionMode: auto\n', 'e1'), state: 'pending' }, file('permissionMode: auto\n', 'e2')];
+    const view = await mount(
+      <PermissionPage
+        client={scripted(
+          {
+            'GET /v1/config/file': () => reads.shift() ?? file('permissionMode: auto\n', 'e2'),
+            'PUT /v1/config/file': { path: 'harness-claude-code.yaml', etag: 'e3', outcome: 'applied' },
+          },
+          calls,
+        )}
+        step={run.step}
+      />,
+    );
+    mounted.push(view);
+    await settle();
+    expect(view.container.querySelector('[data-config-waiting]')).not.toBeNull();
+    const count = (route: string) => calls.filter(call => call.route === route).length;
+
+    // The owner confirms elsewhere; Next re-reads instead of going on over the stale waiting screen.
+    await expect(interact(() => run.runCommit())).rejects.toThrow('settled');
+    await settle();
+    expect(count('GET /v1/config/file')).toBe(2);
+    expect(count('PUT /v1/config/file')).toBe(0);
+    expect(view.container.querySelector('[data-config-waiting]')).toBeNull();
+    expect(view.container.querySelectorAll('input[type="radio"]').length).toBe(2);
+
+    // Now there is something to pick: one pick, one Next, exactly one PUT.
+    await interact(() => must(view.container.querySelector<HTMLInputElement>('input[value="skip"]'), 'skip').click());
+    await settle();
     await interact(() => run.runCommit());
-    expect(calls.map(call => call.route)).toEqual(['GET /v1/config/file']);
+    expect(count('PUT /v1/config/file')).toBe(1);
   });
 
   it('says so too on the conversations page', async () => {
@@ -109,7 +146,7 @@ describe('useConfigChoice: a file with a change held for the owner', () => {
     mounted.push(view);
     await settle();
     expect(view.container.querySelector('[data-config-waiting]')?.textContent).toBe(WAITING);
-    expect(run.hasCommit).toBe(false);
+    expect(run.hasCommit).toBe(true); // Next re-reads a held file rather than going on over it
     expect(calls.map(call => call.route)).toEqual(['GET /v1/config/file']);
   });
 });

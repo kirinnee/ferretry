@@ -33,6 +33,8 @@ const WroteSchema = z.looseObject({ etag: z.string().min(1), outcome: z.enum(['a
 /** Shown (by the page) in place of the cards while the file carries a change held for the owner. */
 export const WAITING = 'A change to this file is waiting for your OK. Confirm or discard it in Settings › Files first.';
 
+const SETTLED = 'That change is settled. Choose below, then press Next.';
+
 const HELD = 'Saved, but the owner has to confirm it before it takes effect. Press Next to go on.';
 
 interface Loaded {
@@ -119,6 +121,18 @@ export function useConfigChoice<T extends string>({
   // What Next saves follows the pick: nothing when it is the saved answer.
   useEffect(() => {
     if (step === undefined || saved === null) return;
+    if (waiting) {
+      // The file carries a held change, so nothing can be picked or written. But the owner may confirm or discard it
+      // while this page stays up: Next reads the file again instead of just going on. Still held: the footer says so
+      // and the page stays. Settled: the page now draws the cards, and the owner picks (or keeps) the mode and presses Next.
+      registered.current = true;
+      step.commit(async () => {
+        const failure = await load();
+        if (failure !== null) throw new Error(failure);
+        throw new Error(SETTLED);
+      });
+      return;
+    }
     if (saved === 'unknown' || picked === null) {
       // Nothing is shown to save: a hidden pick never writes, now or once the file reads again.
       if (registered.current) step.commit(null);
@@ -148,7 +162,7 @@ export function useConfigChoice<T extends string>({
         throw error instanceof Error ? error : new Error(sentenceOf(error));
       }
     });
-  }, [saved, picked, step, client, load, write]);
+  }, [saved, picked, waiting, step, client, load, write]);
 
   const pick = useCallback((next: T) => setPicked(next), []);
   const retry = useCallback(() => void load(), [load]);
