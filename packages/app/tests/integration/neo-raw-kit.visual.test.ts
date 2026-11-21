@@ -24,7 +24,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
-import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
+import { COLOUR_TOOLS, sceneBuilder, sharedChromium } from '../support/browser/index.ts';
 
 setDefaultTimeout(60_000);
 
@@ -620,6 +620,150 @@ describe('a swatch draws its own style’s spinner, on a page of any style', () 
         await close();
       }
     });
+});
+/**
+ * FILLED CONTROLS (r11 T7 review, items 1-3). A style that moves its focus ring INSIDE a filled control must keep the ring >= 3:1
+ * against that fill (a ring in the fill's own colour is 1:1 and invisible); the busy mark on a filled Send keeps the button's
+ * foreground; and none of it leaks into a `[data-swatch]` preview of another style. Measured on the REAL composer Send
+ * (`.fy-composer-send`, the shipped chat stylesheet) and the REAL selected Settings link, keyboard-focused.
+ */
+const FILLED_HOLDER = `<div data-filled-fix style="padding:16px;display:flex;gap:16px;align-items:center">
+  <button class="fy-composer-send" data-fix="send" type="button">Send</button>
+  <button class="fy-composer-send" data-fix="busy" data-sending type="button">__SPINNER__</button>
+  <nav class="fy-settings-nav" style="width:200px"><a aria-current="page" class="fy-tab fy-tab--active" data-fix="nav" href="#fix-current">Selected</a></nav>
+</div>`;
+
+/** Reads the keyboard-focus ring of Send and of the selected link, and the busy mark's paint, inside `scope`. */
+const FILLED_READ = `((scope) => {
+  const tools = window.__colour;
+  const holder = scope.querySelector('[data-filled-fix]');
+  const sel = (n) => holder.querySelector('[data-fix="' + n + '"]');
+  const ringOf = (el) => {
+    el.focus();
+    const c = getComputedStyle(el);
+    const fill = tools.backdrop(el);
+    const ring = tools.rgba(c.outlineColor);
+    const composed = tools.over(ring, [...fill, 1]);
+    return {
+      focusVisible: el.matches(':focus-visible'),
+      style: c.outlineStyle, width: parseFloat(c.outlineWidth), offset: parseFloat(c.outlineOffset),
+      ringColour: c.outlineColor, fillColour: 'rgb(' + fill.map(Math.round).join(',') + ')',
+      ratio: tools.ratio(composed, fill),
+      background: c.backgroundColor, shadow: c.boxShadow,
+    };
+  };
+  const send = ringOf(sel('send'));
+  const nav = ringOf(sel('nav'));
+  sel('nav').blur(); sel('send').blur();
+  const busyButton = sel('busy');
+  const fill = tools.backdrop(busyButton);
+  const marks = [...busyButton.querySelectorAll('[class*="fy-spinner__p"]')]
+    .filter(el => getComputedStyle(el).display !== 'none')
+    .map(el => {
+      const c = getComputedStyle(el);
+      const paint = c.fill !== 'none' && tools.rgba(c.fill)[3] > 0 ? c.fill : c.stroke;
+      return { part: el.getAttribute('class'), paint, ratio: tools.ratio(tools.over(tools.rgba(paint), [...fill, 1]), fill) };
+    });
+  return { send, nav, busy: { fill: 'rgb(' + fill.map(Math.round).join(',') + ')', marks } };
+})`;
+
+const mountFilled = async (tab: Page, scope: string): Promise<void> => {
+  await tab.evaluate(COLOUR_TOOLS);
+  const spinner = await tab.evaluate(
+    selector =>
+      (document.querySelector(selector) as Element).outerHTML.replace(
+        'class="fy-spinner',
+        'class="fy-spinner fy-spinner--on-accent',
+      ),
+    PROBE,
+  );
+  await tab.evaluate(
+    ([where, template, mark]) => {
+      const parent = document.querySelector(where as string) as Element;
+      const holder = document.createElement('div');
+      holder.innerHTML = (template as string).replace('__SPINNER__', mark as string);
+      parent.append(holder.firstElementChild as Element);
+    },
+    [scope, FILLED_HOLDER, spinner] as const,
+  );
+};
+
+interface Stop {
+  ratio: number;
+  focusVisible: boolean;
+  [field: string]: unknown;
+}
+interface FilledRead {
+  send: Stop;
+  nav: Stop;
+  busy: { fill: string; marks: { part: string; paint: string; ratio: number }[] };
+}
+const readFilled = async (tab: Page, scope: string): Promise<FilledRead> => {
+  await tab.keyboard.press('Tab'); // a real key press, so a script focus() draws :focus-visible
+  return (await tab.evaluate(`${FILLED_READ}(document.querySelector(${JSON.stringify(scope)}))`)) as FilledRead;
+};
+
+describe('a style that moves its focus ring inside a filled control keeps the ring and the busy mark visible', () => {
+  for (const style of ['neo', 'raw'] as const)
+    for (const mode of MODES)
+      it(`${style} in ${mode}: keyboard focus on Send and the selected Settings link is >= 3:1 on its fill; the busy mark keeps the button's ink`, async () => {
+        const { tab, close } = await open(VIEWPORTS[0], mode, style);
+        try {
+          await mountFilled(tab, 'body');
+          const read = await readFilled(tab, 'body');
+          report[`filled:${style}:${mode}`] = read;
+          for (const [name, stop] of [
+            ['Send', read.send],
+            ['selected Settings link', read.nav],
+          ] as const) {
+            expect(stop.focusVisible, `${name}: the keyboard focus draws :focus-visible`).toBe(true);
+            expect(stop.ratio, `${name} ring vs its fill (${JSON.stringify(stop)})`).toBeGreaterThanOrEqual(3);
+          }
+          expect(read.busy.marks.length, 'the busy mark draws parts').toBeGreaterThan(0);
+          // Neo draws a shadow square and a face (the face is the mark); Raw a box and a marker: both are the mark.
+          const ratios = read.busy.marks.map(mark => mark.ratio);
+          const worst = style === 'raw' ? Math.min(...ratios) : Math.max(...ratios);
+          expect(worst, `busy mark vs the Send fill (${JSON.stringify(read.busy)})`).toBeGreaterThanOrEqual(3);
+        } finally {
+          await close();
+        }
+      });
+});
+
+describe('the filled-control rules do not leak into a swatch of another style', () => {
+  for (const pageStyle of ['neo', 'raw'] as const)
+    for (const mode of MODES)
+      it(`on a ${pageStyle} page (${mode}): a Studio swatch's Send, busy mark and selected link paint exactly as on a Studio page`, async () => {
+        const reads: Record<string, FilledRead> = {};
+        for (const page of ['studio', pageStyle] as const) {
+          const { tab, close } = await open(VIEWPORTS[0], mode, page);
+          try {
+            await tab.evaluate(() => {
+              const holder = document.createElement('div');
+              holder.id = 'swatch-fix';
+              holder.setAttribute('data-swatch', '');
+              holder.setAttribute('data-style', 'studio');
+              holder.setAttribute('data-palette', 'neo');
+              holder.setAttribute('data-mode', document.documentElement.getAttribute('data-mode') as string);
+              holder.style.cssText = 'background:var(--bg);color:var(--fg)';
+              document.body.append(holder);
+            });
+            await mountFilled(tab, '#swatch-fix');
+            reads[page] = await readFilled(tab, '#swatch-fix');
+          } finally {
+            await close();
+          }
+        }
+        report[`swatch-filled:${pageStyle}:${mode}`] = reads;
+        const base = reads.studio as FilledRead;
+        const mixed = reads[pageStyle] as FilledRead;
+        for (const key of ['send', 'nav'] as const)
+          for (const field of ['background', 'shadow', 'ringColour', 'offset', 'width'])
+            expect(mixed[key][field], `${key}.${field} in a Studio swatch on a ${pageStyle} page`).toEqual(
+              base[key][field],
+            );
+        expect(mixed.busy, 'the busy mark in a Studio swatch').toEqual(base.busy);
+      });
 });
 
 /**

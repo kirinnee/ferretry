@@ -397,16 +397,40 @@
 
 /* The settings nav: its selected item is the family's marker block, ruled in ink and casting the hard offset (the shell draws
    a soft accent pill with a literal 6px radius; no radius, no pill here). The icon reads in the block's own ink. */
-:root[data-style='neo'] .fy-settings-nav .fy-tab {
+/* SCOPE: every rule here names the page (`:root`, outside any `[data-swatch]`) or a swatch of THIS style, so a Studio swatch on a
+   Neo page keeps its own selected-link fill. */
+:root[data-style='neo'] .fy-settings-nav .fy-tab:not([data-swatch] *),
+[data-swatch][data-style='neo'] .fy-settings-nav .fy-tab {
   border-radius: var(--radius-tab);
 }
-:root[data-style='neo'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']) {
+:root[data-style='neo'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']):not([data-swatch] *),
+[data-swatch][data-style='neo'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']) {
   background: var(--nav-sel-bg);
   box-shadow:
     inset 0 0 0 var(--stroke-control) var(--border-strong),
     var(--shadow-sm);
   color: var(--nav-sel-fg);
 }
-:root[data-style='neo'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']) .fy-icon {
+:root[data-style='neo']
+  .fy-settings-nav
+  .fy-tab:is(.fy-tab--active, [aria-current='page']):not([data-swatch] *)
+  .fy-icon,
+[data-swatch][data-style='neo'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']) .fy-icon {
   color: var(--nav-sel-fg);
+}
+
+/* A FOCUS RING INSIDE A FILLED CONTROL is drawn in that fill's own ink (the label's colour, which the palette holds to 4.5:1 on it)
+   and set 2px in from the edge, so it reads against the fill and against the ink rule: the page's `--focus-color` IS the accent,
+   which on Send is the fill itself (1:1) and on the selected link a near-miss (1.0 to 7.9:1 across modes). */
+:root[data-style='neo'] .fy-composer-send:focus-visible:not([data-swatch] *),
+[data-swatch][data-style='neo'] .fy-composer-send:focus-visible {
+  outline-color: var(--accent-fg);
+  outline-offset: calc(-1 * (var(--focus-width) + 2px));
+}
+:root[data-style='neo']
+  .fy-settings-nav
+  .fy-tab:is(.fy-tab--active, [aria-current='page']):focus-visible:not([data-swatch] *),
+[data-swatch][data-style='neo'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']):focus-visible {
+  outline-color: var(--nav-sel-fg);
+  outline-offset: calc(-1 * (var(--focus-width) + var(--stroke-control) + 2px));
 }
