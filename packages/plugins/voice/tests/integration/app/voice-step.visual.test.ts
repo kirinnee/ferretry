@@ -18,7 +18,7 @@ import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bu
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import { sceneBuilder, sharedChromium, walkFocusRings } from '@ferretry/app/testing/browser';
 
 setDefaultTimeout(60_000);
 
@@ -458,4 +458,106 @@ describe('the Speed-ups first-run page', () => {
       await close();
     }
   });
+});
+
+/** The owner's "buttons are one fixed width" floor (r11 line 1): a text button is at least this wide. */
+const BUTTON_MIN_WIDTH = 136;
+
+/** Every visible button in the page body (footer and the cards' icon-only (i) / cancel excluded) with its label and width. */
+const bodyButtons = (tab: Tab, scope: string) =>
+  tab.evaluate(selector => {
+    return [...document.querySelectorAll(`${selector} button`)]
+      .filter(el => (el.textContent ?? '').trim() !== '' && !(el as HTMLButtonElement).hidden)
+      .map(el => {
+        const box = el.getBoundingClientRect();
+        return { label: (el.textContent ?? '').trim(), w: box.width, h: box.height };
+      })
+      .filter(button => button.w > 0);
+  }, scope);
+
+describe('r11-1b G3: the Voice and Speed-ups buttons and their focus ring', () => {
+  for (const viewport of VIEWPORTS) {
+    for (const theme of THEMES) {
+      it(`every Install button is >= ${BUTTON_MIN_WIDTH} px wide, short list and every engine (${viewport.name}, ${theme})`, async () => {
+        const { tab, close } = await open(viewport, theme, VOICE, CARD);
+        try {
+          const short = await bodyButtons(tab, '.fy-voice-step .fy-engine-card');
+          const installs = short.filter(button => /^(Install|Resume)/.test(button.label));
+          expect(installs.length).toBeGreaterThan(0);
+          for (const button of installs) {
+            expect(button.w >= BUTTON_MIN_WIDTH ? '' : `${button.label}: ${button.w}px`).toBe('');
+            expect(button.h).toBeGreaterThanOrEqual(44);
+            // One width for every card, whatever its label says (the owner's "fixed width").
+            expect(Math.abs(button.w - (installs[0]?.w ?? 0))).toBeLessThanOrEqual(1);
+          }
+          await tab.getByText('Show every engine').click();
+          await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 10);
+          const all = (await bodyButtons(tab, '.fy-voice-step .fy-engine-card')).filter(button =>
+            /^(Install|Resume)/.test(button.label),
+          );
+          expect(all.length).toBeGreaterThan(installs.length);
+          for (const button of all) {
+            expect(button.w >= BUTTON_MIN_WIDTH ? '' : `${button.label}: ${button.w}px`).toBe('');
+            expect(Math.abs(button.w - (installs[0]?.w ?? 0))).toBeLessThanOrEqual(1);
+          }
+          const scrollX = await tab.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          );
+          expect(scrollX).toBeLessThanOrEqual(0);
+          if (shotsDir !== '') {
+            // The picture is of the END of the page: the last cards, then "Show every engine" with its ring on.
+            await tab.keyboard.press('Tab');
+            await tab.locator('.fy-voice-more > summary').focus();
+            await tab.keyboard.press('Shift+Tab');
+            await tab.keyboard.press('Tab');
+            await tab.waitForTimeout(150);
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-voice-all-engines.png`) });
+          }
+        } finally {
+          await close();
+        }
+      });
+
+      it(`Save, Test and Remove are >= ${BUTTON_MIN_WIDTH} px wide on every key card (${viewport.name}, ${theme})`, async () => {
+        const { tab, close } = await open(viewport, theme, SPEEDUPS, '[data-device-key]');
+        try {
+          await tab.waitForTimeout(600);
+          const buttons = (await bodyButtons(tab, '.fy-voice-step [data-device-key]')).filter(button =>
+            /^(Save|Test|Remove)/.test(button.label),
+          );
+          expect(buttons.length).toBe(6);
+          for (const button of buttons) {
+            expect(button.w >= BUTTON_MIN_WIDTH ? '' : `${button.label}: ${button.w}px`).toBe('');
+            expect(button.h).toBeGreaterThanOrEqual(44);
+          }
+          const scrollX = await tab.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          );
+          expect(scrollX).toBeLessThanOrEqual(0);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-speedups-buttons.png`) });
+        } finally {
+          await close();
+        }
+      });
+
+      it(`no focus ring on the Voice or Speed-ups page is cut by the frame, 'Show every engine' included (${viewport.name}, ${theme})`, async () => {
+        for (const [query, waitFor] of [
+          [VOICE, CARD],
+          [SPEEDUPS, '[data-device-key]'],
+        ] as const) {
+          const { tab, close } = await open(viewport, theme, query, waitFor);
+          try {
+            await tab.waitForTimeout(600);
+            const walk = await walkFocusRings(tab);
+            expect(walk.stops.length).toBeGreaterThan(3);
+            if (query === VOICE) expect(walk.stops.some(stop => stop.label.includes('Show every engine'))).toBe(true);
+            expect(walk.violations).toEqual([]);
+          } finally {
+            await close();
+          }
+        }
+      });
+    }
+  }
 });

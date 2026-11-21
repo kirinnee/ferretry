@@ -25,7 +25,7 @@ import { appendFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright-core';
-import { sceneServer, sharedChromium } from '../support/browser/index.ts';
+import { sceneServer, sharedChromium, walkFocusRings } from '../support/browser/index.ts';
 import { clippedBoxes, footerButtons, gapUnderTitle, underFooter } from '../support/browser/stepper-layout.ts';
 import { FAKE_CODE, MACHINE_A, MACHINE_B, pairLinkOf } from './fixtures/onboarding-e2e-daemon.ts';
 
@@ -818,13 +818,29 @@ describe('the first run, end to end', () => {
       expect(installs.length, 'Voice: at least one Install button').toBeGreaterThan(0);
       for (const height of installs)
         expect(height, 'Voice: an Install button is 44px tall').toBeGreaterThanOrEqual(43.5);
+      // r11-1b G3 (line 1): an Install button is a full 136 px wide, the same floor as the footer's.
+      const installWidths = await tab
+        .locator('.fy-engine-card button.fy-engine-mini')
+        .evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().width * 10) / 10));
+      for (const width of installWidths)
+        expect(width, 'Voice: an Install button is >= 136 px wide').toBeGreaterThanOrEqual(136);
       await shot(tab, variant, 'voice.voice');
-      await tab.getByRole('button', { name: 'Show every engine' }).click();
-      // The Off card, on its own, so its whole text can be read in the picture (the page shot scrolls past it).
+      // r11-1b G3 (line 14): every focus ring on the real page, 'Show every engine' included, stays inside the frame.
+      const voiceRings = await walkFocusRings(tab);
+      expect(
+        voiceRings.stops.some(stop => stop.label.includes('Show every engine')),
+        'Voice: Tab reaches "Show every engine"',
+      ).toBe(true);
+      expect(voiceRings.violations, 'Voice: no focus ring is cut by main.fy-main or div.fy-frame').toEqual([]);
+      // r11 O12: "Show every engine" is a disclosure (a summary), not a button.
+      await tab.getByText('Show every engine').click();
+      // The Off card, on its own, so it can be seen in the picture (the page shot scrolls past it).
       const off = tab.locator('.fy-engine-card[data-engine="off"]');
       // Centred, so the footer bar does not sit over its lower half in the picture.
       await off.evaluate(node => node.scrollIntoView({ block: 'center' }));
-      expect(await off.innerText(), 'Voice: the Off card shows its whole text').toContain('Settings › Voice.');
+      // The first-run card is short (r11 O12): just its name, its sentence is drawn only when the card is open elsewhere.
+      expect(await off.isVisible(), 'Voice: the Off card is listed once every engine is shown').toBe(true);
+      expect((await off.innerText()).trim(), 'Voice: the Off card is just its name').toBe('Off');
       if (shotsDir !== '') await off.screenshot({ path: join(shotsDir, `${variant.name}-voice-off-card.png`) });
       const clipped = await tab
         .locator('.fy-engine-card')
