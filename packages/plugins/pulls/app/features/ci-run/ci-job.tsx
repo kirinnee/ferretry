@@ -125,7 +125,7 @@ export function CiJobView({ job, nowMs, runLive, open, onToggle, slowestStep }: 
           aria-expanded={open}
           aria-controls={bodyId}
           onClick={onToggle}
-          className="flex min-h-control min-w-[12rem] flex-1 items-center gap-1.5 bg-transparent px-control-x py-row-y text-left"
+          className="flex min-h-control flex-[1_1_12rem] items-center gap-1.5 bg-transparent px-control-x py-row-y text-left"
         >
           <ChevronRight
             aria-hidden="true"

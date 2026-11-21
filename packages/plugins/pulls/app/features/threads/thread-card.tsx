@@ -1,4 +1,6 @@
+import { ExternalLink } from '@ferretry/app/ui';
 import type { PullComment, ReviewThread } from '../../../contract/index.ts';
+import { VisibleRuns } from '../diff/visible-text.tsx';
 import { safeGithubUrl } from './place.ts';
 
 /** The device's local time (the owner reads local time everywhere on these screens). */
@@ -16,13 +18,15 @@ function Comment({ comment }: { readonly comment: PullComment }) {
         <strong className="font-semibold text-fg">{comment.author.login}</strong>
         <time dateTime={comment.createdAt}>{localTime(comment.createdAt)}</time>
         {link !== undefined && (
-          <a href={link} target="_blank" rel="noopener noreferrer" className="text-accent underline">
+          <ExternalLink className="text-accent underline" href={link}>
             Open on GitHub
-          </a>
+          </ExternalLink>
         )}
       </div>
       {/* A stranger's text, shown as text only: no HTML, no Markdown, no reference links, no images. */}
-      <p className="m-0 whitespace-pre-wrap break-words text-body text-fg">{comment.body}</p>
+      <p className="m-0 whitespace-pre-wrap break-words text-body text-fg">
+        <VisibleRuns text={comment.body} />
+      </p>
     </li>
   );
 }
@@ -82,9 +86,9 @@ export function ThreadCard({
             {moreLink !== undefined && (
               <>
                 {' '}
-                <a href={moreLink} target="_blank" rel="noopener noreferrer" className="text-accent underline">
+                <ExternalLink className="text-accent underline" href={moreLink}>
                   Open the thread
-                </a>
+                </ExternalLink>
               </>
             )}
           </li>
