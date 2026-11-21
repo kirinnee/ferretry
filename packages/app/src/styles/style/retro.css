@@ -206,7 +206,7 @@
 }
 /* A panel's TITLE BAR: a soft vertical gradient and a bold caption, the dialog title bar without the colour fill. The one
    gradient Retro keeps (the theme matrix allows it on `Panel header` only). */
-[data-style='retro'] .kt-panel__header {
+[data-style='retro'] .kt-panel__header:where(:not([data-swatch]:not([data-style='retro']) *)) {
   background-color: var(--surface);
   background-image: linear-gradient(180deg, var(--surface) 0%, var(--surface-3) 100%);
   border-top-left-radius: calc(var(--radius-panel) - 1px);
@@ -214,8 +214,8 @@
   font-weight: var(--weight-strong);
 }
 /* DARK: the strip is lit from the top (a surface cannot get darker than the page, so the light edge does the work). */
-[data-style='retro'][data-mode='dark'] .kt-panel__header,
-[data-mode='dark'] [data-style='retro'] .kt-panel__header {
+[data-style='retro'][data-mode='dark'] .kt-panel__header:where(:not([data-swatch]:not([data-style='retro']) *)),
+[data-mode='dark'] [data-style='retro'] .kt-panel__header:where(:not([data-swatch]:not([data-style='retro']) *)) {
   background-image: linear-gradient(180deg, color-mix(in srgb, var(--fg) 12%, var(--surface)) 0%, var(--surface) 100%);
 }
 /* The text field takes the shell's own keyboard ring (2px, the focus colour), drawn inside its edge by the shell's one rule
@@ -233,7 +233,7 @@
    the segmenting, which is a moving figure, is only drawn when the ring moves. */
 @media (prefers-reduced-motion: no-preference) {
   :root[data-style='retro']:not([data-motion='reduced']) .fy-spinner:not([data-swatch] *) .fy-spinner-arc,
-  [data-swatch][data-style='retro']:not([data-motion='reduced']) .fy-spinner .fy-spinner-arc {
+  :root:not([data-motion='reduced']) [data-swatch][data-style='retro'] .fy-spinner .fy-spinner-arc {
     stroke-dasharray: 5.83 2.5 5.83 2.5 5.83 100;
   }
 }

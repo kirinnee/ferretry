@@ -12,8 +12,9 @@
               `--texture-ink`); no wash and no grain.
      motion   stepped: a press, a hover and a select land in 3-4 frames; the spinner is four blocks lit in turn.
      focus    a 3px ring on a 2px gap on a block (a field's ring is drawn inside by the shell's one rule), so the keyboard is
-              never lost in a busy block. A choice card or segment keeps its outside ring: on the selected (inverted) fill an
-              inside ring is 1.65:1 against it in High contrast, short of the 3:1 the theme matrix holds.
+              never lost in a busy block. A choice card draws its ring INSIDE its border over a `--bg` band (reach 0, so no
+              overflow holder cuts it, and >= 3:1 against both neighbours even on the inverted selected fill, r11 S13); a segment
+              keeps its outside ring.
      r11 T10  every slot of the component contract: markdown, spinner, motion, hypermedia (`block`) and surfaces (`offset`).
 
    This style is NOT `loud`: it keeps the readability rules (every pair clears the contrast matrix). Colour comes only from
@@ -209,7 +210,8 @@
    ========================================================================== */
 
 /* A panel edge is as heavy as the controls inside it. */
-:root[data-style='pixel'] .kt-panel {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+.kt-panel:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   border-color: var(--border-strong);
 }
 
@@ -231,7 +233,8 @@
   font-family: 'Press Start 2P', system-ui, sans-serif;
   line-height: 1.6;
 }
-:root[data-style='pixel'] .kt-badge {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .kt-badge:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   font-family: var(--font-body);
   line-height: 1.4;
   max-width: 100%;
@@ -291,37 +294,55 @@
 }
 
 /* Choice cards: a block with a flat shadow that steps up on hover, presses on click and pops one frame when chosen. */
-:root[data-style='pixel'] .fy-cc__card {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+.fy-cc__card:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   background: var(--surface);
   box-shadow: var(--shadow-panel);
   transition:
     translate var(--motion-fast) var(--ease-standard),
     box-shadow var(--motion-fast) var(--ease-standard);
 }
-:root[data-style='pixel'] .fy-cc__card:not([aria-disabled='true']):hover {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .fy-cc__card:not([aria-disabled='true']):hover:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   border-color: var(--border-strong);
   translate: -2px -2px;
 }
-:root[data-style='pixel'] .fy-cc__card:not([aria-disabled='true']):active {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .fy-cc__card:not([aria-disabled='true']):active:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   box-shadow: none;
   translate: var(--press-translate) var(--press-translate);
 }
-:root[data-style='pixel'] .fy-cc__card[data-selected='true'] {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .fy-cc__card[data-selected='true']:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   background: var(--nav-sel-bg);
   border-color: var(--border-strong);
   color: var(--nav-sel-fg);
 }
-:root[data-style='pixel'] .fy-cc__card[data-selected='true'] .fy-cc__line {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .fy-cc__card[data-selected='true']
+  .fy-cc__line:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   color: var(--nav-sel-sub);
 }
-:root[data-style='pixel'] .fy-cc__card:has(:focus-visible) {
+/* The keyboard ring is drawn INSIDE the card's border (reach 0: a zero-padding overflow holder cannot cut it, r11 S13), set in a
+   `--bg` band: a `--stroke-panel` gap between the border and the ring, the ring, and one ring-width more inside it. The band is
+   what the ring stands off on BOTH sides (the border and the selected, inverted fill are each as little as 1.65:1 against the ring
+   colour). The flat shadow stays. The shadow does not transition here: a band that fades in would leave the ring bare for
+   the first frames. */
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+.fy-cc__card:has(:focus-visible):where(:not([data-swatch]:not([data-style='pixel']) *)) {
+  box-shadow:
+    var(--shadow-panel),
+    inset 0 0 0 calc(var(--stroke-panel) + var(--focus-width) * 2) var(--bg);
   outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: 3px;
+  outline-offset: calc(-1 * (var(--stroke-panel) * 2 + var(--focus-width)));
+  transition: translate var(--motion-fast) var(--ease-standard);
 }
-:root[data-style='pixel'] .fy-cc__card[aria-disabled='true'] {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .fy-cc__card[aria-disabled='true']:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   box-shadow: none;
 }
-:root[data-style='pixel'] .fy-cc__check {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .fy-cc__check:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   background: var(--accent);
   border: var(--stroke-control) solid var(--border-strong);
   border-radius: 0;
@@ -335,7 +356,8 @@
   }
 }
 @media (prefers-reduced-motion: no-preference) {
-  :root[data-style='pixel']:not([data-motion='reduced']) .fy-cc__card[data-pulse='true'] {
+  :root[data-style='pixel']:not([data-motion='reduced'])
+    .fy-cc__card[data-pulse='true']:where(:not([data-swatch]:not([data-style='pixel']) *)) {
     animation: fy-pixel-pop var(--motion-base) var(--ease-standard);
   }
 }
@@ -379,8 +401,10 @@
 }
 
 /* Every badge tone is ruled in ink, whatever its tint. */
-:root[data-style='pixel'] .kt-badge,
-:root[data-style='pixel'] .kt-badge[data-tone] {
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+.kt-badge:where(:not([data-swatch]:not([data-style='pixel']) *)),
+:is(:root[data-style='pixel'], [data-swatch][data-style='pixel'])
+  .kt-badge[data-tone]:where(:not([data-swatch]:not([data-style='pixel']) *)) {
   border-color: var(--border-strong);
 }
 

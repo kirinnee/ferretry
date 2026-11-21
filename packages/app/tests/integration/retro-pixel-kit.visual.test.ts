@@ -24,7 +24,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
-import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
+import { type ColourTools, ringOf, sceneBuilder, sharedChromium } from '../support/browser/index.ts';
 
 setDefaultTimeout(60_000);
 
@@ -699,9 +699,208 @@ describe('a swatch draws its own style’s spinner, on a page of any style', () 
 });
 
 /**
+ * A swatch's CONTROLS are its own style's too (the T10 review's item 2: the mixed-swatch matrix mounted only SVGs). The same
+ * control set is mounted as a `[data-swatch][data-style=S]` preview on a STUDIO page (the neutral baseline: nothing of Retro or
+ * Pixel is on the page) and on a RETRO and on a PIXEL page. A control's computed look must not differ between the baseline and
+ * either kit's page: whatever differs is a Retro or Pixel page rule reaching into another style's preview. The baseline carries
+ * every OTHER seam's own noise (a HUD swatch's transitions, say), so the assert isolates what this unit's two files do. `color`
+ * is left out (a preview inherits its ink from the page unless a rule sets it, which is the shell's, not a kit's).
+ */
+const CONTROLS = `
+  <button class="kt-btn" data-probe-control="button" data-variant="primary" type="button">Send</button>
+  <button class="kt-btn" data-probe-control="ghost" type="button">Cancel</button>
+  <label class="fy-cc__card" data-probe-control="card" data-selected="true"><input type="radio" class="sr-only" name="s" checked><span class="fy-cc__line">Left</span></label>
+  <label class="fy-cc__card" data-probe-control="card-idle"><input type="radio" class="sr-only" name="s"><span class="fy-cc__line">Right</span></label>
+  <div class="kt-panel" data-probe-control="panel"><div class="kt-panel__header" data-probe-control="header">Title</div><div>Body</div></div>
+  <input class="kt-input" data-probe-control="input" aria-label="Name" value="Name">
+  <span class="kt-badge" data-probe-control="badge">ok</span>`;
+const CONTROL_PROPS = [
+  'backgroundColor',
+  'backgroundImage',
+  'borderTopColor',
+  'borderTopStyle',
+  'borderTopWidth',
+  'borderTopLeftRadius',
+  'boxShadow',
+  'fontWeight',
+  'textTransform',
+  'transitionDuration',
+  'transitionProperty',
+  'translate',
+] as const;
+const readControls = async (tab: Page, host: string): Promise<Record<string, Record<string, string>>> =>
+  (await tab.evaluate(
+    ([selector, props]) => {
+      const out: Record<string, Record<string, string>> = {};
+      for (const el of document.querySelectorAll(`${selector} [data-probe-control]`)) {
+        const style = getComputedStyle(el);
+        out[(el as HTMLElement).dataset.probeControl as string] = Object.fromEntries(
+          (props as readonly string[]).map(prop => [prop, style[prop as keyof CSSStyleDeclaration] as string]),
+        );
+      }
+      return out;
+    },
+    [host, CONTROL_PROPS] as const,
+  )) as Record<string, Record<string, string>>;
+
+describe('a swatch’s controls are drawn in the swatch’s own style, on a page of any style', () => {
+  const swatches = ['studio', 'mission', 'hud', 'geist'] as const;
+  const mount = async (tab: Page, style: string): Promise<Record<string, Record<string, string>>> => {
+    await tab.evaluate(
+      ([s, p, source]) => {
+        const holder = document.createElement('div');
+        holder.setAttribute('data-swatch', '');
+        holder.setAttribute('data-style', s as string);
+        holder.setAttribute('data-palette', p as string);
+        holder.setAttribute('data-mode', 'light');
+        holder.innerHTML = source as string;
+        document.body.append(holder);
+      },
+      [style, PALETTE[style as keyof typeof PALETTE], CONTROLS] as const,
+    );
+    const got = await readControls(tab, `[data-swatch][data-style="${style}"]`);
+    await tab.evaluate(sel => document.querySelector(sel)?.remove(), `[data-swatch][data-style="${style}"]`);
+    return got;
+  };
+  it('on a Retro and a Pixel page, the Studio, Mission, HUD and Geist swatches keep the controls they have on a Studio page', async () => {
+    const baseline = {} as Record<string, Record<string, Record<string, string>>>;
+    const studio = await open(VIEWPORTS[0], 'light', 'studio');
+    try {
+      for (const style of swatches) baseline[style] = await mount(studio.tab, style);
+    } finally {
+      await studio.close();
+    }
+    const leaks: string[] = [];
+    for (const pageStyle of ['retro', 'pixel'] as const) {
+      const { tab, close } = await open(VIEWPORTS[0], 'light', pageStyle);
+      try {
+        for (const style of swatches) {
+          const got = await mount(tab, style);
+          for (const [control, props] of Object.entries(baseline[style] ?? {}))
+            for (const prop of CONTROL_PROPS)
+              if (got[control]?.[prop] !== props[prop])
+                leaks.push(
+                  `${pageStyle} page, ${style} swatch, ${control}.${prop}: ${got[control]?.[prop]} (a studio page: ${props[prop]})`,
+                );
+        }
+      } finally {
+        await close();
+      }
+    }
+    report['swatch-controls'] = leaks;
+    expect(leaks).toEqual([]);
+  });
+});
+
+/**
+ * REDUCED MOTION READS THE ROOT (the T10 review's item 2). Settings > Appearance > Motion sets `data-motion="reduced"` on
+ * `<html>`, never on a swatch, so a Retro swatch's segmented arc has to answer to the root: the whole ring (`100px, 0px`).
+ */
+describe('a Retro swatch under app-level reduced motion draws the plain full ring', () => {
+  for (const pageStyle of ['studio', 'retro', 'pixel'] as const)
+    it(`on a ${pageStyle} page`, async () => {
+      const { tab, close } = await open(VIEWPORTS[0], 'light', pageStyle);
+      try {
+        const source = await tab.evaluate(selector => (document.querySelector(selector) as Element).outerHTML, PROBE);
+        await tab.evaluate(
+          ([html]) => {
+            const holder = document.createElement('div');
+            holder.setAttribute('data-swatch', '');
+            holder.setAttribute('data-style', 'retro');
+            holder.setAttribute('data-palette', 'geist');
+            holder.setAttribute('data-mode', 'light');
+            holder.innerHTML = html as string;
+            document.body.append(holder);
+          },
+          [source] as const,
+        );
+        const dash = async (): Promise<string> =>
+          await tab.evaluate(
+            () => getComputedStyle(document.querySelector('[data-swatch] .fy-spinner-arc') as Element).strokeDasharray,
+          );
+        expect(await dash(), 'motion on: the segmented arc').toBe('5.83px, 2.5px, 5.83px, 2.5px, 5.83px, 100px');
+        await tab.evaluate(() => document.documentElement.setAttribute('data-motion', 'reduced'));
+        await tab.waitForTimeout(600);
+        expect(await dash(), 'app-level reduced motion: the full ring').toBe('100px, 0px');
+      } finally {
+        await close();
+      }
+    });
+});
+
+/**
+ * THE PIXEL CHOICE CARD'S KEYBOARD RING (r11 S13, the T10 review's item 1). The card's ring used to be drawn 3px outside the
+ * card with a 3px offset, so it reached 6px beyond the card and a zero-padding overflow container cut it. It is now drawn
+ * INSIDE the card's border (reach 0, nothing can clip it) over a contrasting inset band, so on the selected (inverted) fill, where the
+ * ring colour alone gives 1.65:1 in High contrast dark, the ring still stands off its neighbours by >= 3:1.
+ * The choice cards sit in a `padding: 0; overflow: auto` holder, the worst case an ancestor can be.
+ */
+describe('the Pixel choice card keeps its keyboard ring whole and legible', () => {
+  for (const palette of ['hacker', 'contrast'])
+    for (const mode of MODES)
+      for (const viewport of VIEWPORTS)
+        it(`${palette} in ${mode} at ${viewport.name}: reach 0, no clipping ancestor, ring >= 3:1 against both neighbours`, async () => {
+          const { tab, close } = await open(viewport, mode, 'pixel');
+          try {
+            await tab.evaluate(p => document.documentElement.setAttribute('data-palette', p), palette);
+            await tab.evaluate(() => {
+              const grid = document.querySelector('.fy-cc') as HTMLElement;
+              const holder = document.createElement('div');
+              holder.setAttribute('data-probe', 'cc-clip');
+              holder.style.cssText = 'overflow: auto; padding: 0;';
+              grid.replaceWith(holder);
+              holder.append(grid);
+            });
+            const stop = await ringOf(tab, '.fy-cc input:checked');
+            expect(stop, 'Tab reaches the chosen card').not.toBeNull();
+            const read = await tab.evaluate(() => {
+              const colour = (window as unknown as { __colour: ColourTools }).__colour;
+              const card = (document.activeElement as HTMLElement).closest('.fy-cc__card') as HTMLElement;
+              const style = getComputedStyle(card);
+              const ring = colour.rgba(style.outlineColor);
+              const fill = colour.backdrop(card);
+              const inset = style.boxShadow.split(/,(?![^()]*\))/).find(part => part.includes('inset'));
+              const paint = inset === undefined ? null : /(rgba?\([^)]*\))/.exec(inset);
+              const band = paint === null ? fill : colour.over(colour.rgba(paint[1] as string), [...fill, 1]);
+              const edge = colour.over(colour.rgba(style.borderTopColor), [
+                ...colour.backdrop(card.parentElement as HTMLElement),
+                1,
+              ]);
+              // What sits just OUTSIDE the ring: the band's outer gap when the ring is set in from the border, else the border.
+              const gap =
+                -Number.parseFloat(style.outlineOffset) -
+                Number.parseFloat(style.borderTopWidth) -
+                Number.parseFloat(style.outlineWidth);
+              const border = gap > 0 ? band : edge;
+              const lit = (below: readonly number[]) => colour.over(ring, [...below, 1]);
+              return {
+                offset: Number.parseFloat(style.outlineOffset),
+                width: Number.parseFloat(style.outlineWidth),
+                inside: colour.ratio(lit(band), band),
+                outside: colour.ratio(lit(border), border),
+                bandDrawn: inset !== undefined,
+                gap,
+                paint: { ring, fill, band, edge, shadow: style.boxShadow },
+              };
+            });
+            report[`pixel-card-ring:${palette}:${mode}:${viewport.name}`] = { reach: stop?.reach, ...read };
+            expect(stop?.violations, 'a clipping ancestor cuts the ring').toEqual([]);
+            expect(stop?.reach, 'the ring reaches 0px outside the card').toBe(0);
+            expect(read.inside, 'ring against the band just inside it').toBeGreaterThanOrEqual(3);
+            expect(
+              read.outside,
+              'ring against what sits just outside it (the band gap, or the border)',
+            ).toBeGreaterThanOrEqual(3);
+          } finally {
+            await close();
+          }
+        });
+});
+
+/**
  * Set `FY_RETRO_PIXEL_KIT_SHOTS_DIR=<dir>` to keep, on fake data: `<style>-<width>-<mode>.png` (the whole specimen page),
  * `<style>-corner-<mode>.png` (the top-left 200 x 120 of the page at 4x: the field pattern, close up) and
- * `<style>-md-<mode>.png` (the markdown block at 2x).
+ * `<style>-md-<mode>.png` (the markdown block at 2x), and `pixel-card-ring-<width>-<mode>.png` (the choice cards with the keyboard ring on the chosen one, at 2x).
  */
 const shotsDir = process.env.FY_RETRO_PIXEL_KIT_SHOTS_DIR ?? '';
 describe.skipIf(shotsDir === '')('the kits, photographed', () => {
@@ -718,6 +917,20 @@ describe.skipIf(shotsDir === '')('the kits, photographed', () => {
             await close();
           }
         });
+      if (style === 'pixel')
+        for (const viewport of VIEWPORTS)
+          it(`pixel choice card, keyboard ring, at ${viewport.name} in ${mode}`, async () => {
+            const { mkdir } = await import('node:fs/promises');
+            await mkdir(shotsDir, { recursive: true });
+            const { tab, close } = await open(viewport, mode, style, 2);
+            try {
+              await ringOf(tab, '.fy-cc input:checked');
+              const grid = await tab.$('.fy-cc');
+              await grid?.screenshot({ path: join(shotsDir, `pixel-card-ring-${viewport.name}-${mode}.png`) });
+            } finally {
+              await close();
+            }
+          });
       it(`${style} close up in ${mode}`, async () => {
         const { mkdir } = await import('node:fs/promises');
         await mkdir(shotsDir, { recursive: true });
