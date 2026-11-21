@@ -40,6 +40,17 @@
   justify-content: center;
   padding-bottom: 10vh;
 }
+/* ...but the progress bar stays at the top, as on every other page: it takes the free space above the hero, and the hero and
+   the words under it share the rest. */
+.fy-pair-scene main[data-pairing-stage='paired'] > [data-step-progress] {
+  margin-block-end: auto;
+}
+.fy-pair-scene main[data-pairing-stage='paired'] > .fy-pair-hero {
+  margin-block-start: auto;
+}
+.fy-pair-scene main[data-pairing-stage='paired'] > .fy-pair-arrive {
+  margin-block-end: auto;
+}
 
 /* ───────── the hero: the mascot, and the check badge on success ───────── */
 .fy-pair-hero {
@@ -59,10 +70,14 @@
     width: min(100%, 210px);
   }
 }
+/* The check is ON the burrow, at the front-right of its lip (the mascot's own coordinates, 71% / 86% of its box), so it reads as
+   the ferret's, not as something floating off the corner of the picture. `translate` (not `transform`) centres it, so the pop-in
+   animation's own transform is free. */
 .fy-pair-badge {
   position: absolute;
-  top: 2%;
-  right: 4%;
+  top: 88%;
+  left: 77%;
+  translate: -50% -50%;
   display: grid;
   place-items: center;
   width: 44px;
@@ -657,19 +672,41 @@
   }
 }
 
-/* The passkey offer's two answers ("Add a passkey now", "Not now", and "Continue" after it) are one fixed size, so the
-   row reads as a set: 12 rem wide, 44 px or taller, the label centred. Where two do not fit a row they stack, 12 px apart. */
-.fy-pair-answer {
-  box-sizing: border-box;
-  inline-size: 12rem;
-  min-block-size: 44px;
-  padding-inline: 1rem;
-  justify-content: center;
-  white-space: nowrap;
-}
-
 /* r11-1b G4: the pairing page's own buttons (Back, Use this link, Rename, Pair this device, Not now) are never narrower
    than the setup footer's (O2: 8.5rem). Two classes, because a touch screen's `:root button` target floor out-ranks one. */
 .kt-btn.fy-pair-btn {
   min-width: 8.5rem;
+}
+
+/* C59 O2: "Rename" is text, not a button: it sits ON the "This device will be called X" line at the line's own size and
+   height, so the sentence stays one even line. On a touch screen its 44 px target is an invisible layer over the text (the
+   transcript's rule in design-system.css), never a taller box that makes the line uneven. */
+.fy-pair-inline {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.fy-pair-inline:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+:root .fy-pair-inline {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+}
+:root .fy-pair-inline::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 44px);
+  height: 44px;
+  transform: translate(-50%, -50%);
 }
