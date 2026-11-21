@@ -11,7 +11,7 @@ import { CONVERSATION_NAME_MAX, type LinkableConversation } from '../../../contr
 import type { TranscriptEvent, TranscriptHarness } from '../../reader/lib/transcript/types.ts';
 import { describeConversation, type DescribedConversation } from './conversation-describer.ts';
 import { isOwnerMessage } from '../../reader/lib/transcript/owner.ts';
-import { codexIndexNames, transcriptNames } from './conversation-name.ts';
+import { codexIndexNames, type TranscriptNames, transcriptNames } from './conversation-name.ts';
 import { spokenMessages, spokenSources, truncateText, writtenSources } from './conversation-text.ts';
 import { cleanTitle, fileTitle, type ScrubText, scrubShown } from './conversation-title.ts';
 
@@ -66,8 +66,9 @@ const LAYOUT = '3';
 /**
  * Bump when the RULE that makes a fallback title (`file_title`, from the first message) changes: every cached row is then read
  * again once, so a conversation indexed under the old rule gets the new title. Unlike `LAYOUT` nothing is dropped: a row's ferret
- * name and title (an owner's Rename included) are carried over, and a title the harness wrote is kept whether or not the bounded
- * read finds it again (`#keptTitle`).
+ * name and title (an owner's Rename included) are carried over. The row's title is made again with the precedence a fresh index
+ * gives it (a /rename, else a generated title, else the first message), from names found by one read of the WHOLE transcript
+ * (`#wholeNames`), so a /rename in the middle of a long transcript is found. A guess from the cached words is never made.
  */
 const TITLE_RULE = '1';
 /** A row's `size` while its fallback title waits to be made again: no file can match it. */
@@ -714,12 +715,15 @@ export class ConversationIndex {
       source.parser === 'claude' ? TAIL_NARROW_BYTES : TAIL_READ_BYTES,
     );
     if (read === undefined) return undefined;
-    let result = await this.#describeText(source, found, read);
+    // A row waiting on the title rule: its names come from one read of the whole file, not from the two ends.
+    const stale = old?.size === STALE_SIZE;
+    const whole = stale && read.partial ? await this.#wholeNames(source, found) : undefined;
+    let result = await this.#describeText(source, found, read, whole);
     if (result !== undefined && read.partial && !result.tailSpoke) {
       const fuller = await this.#bounded(source.files, found.path, found.size, HEAD_READ_BYTES, TAIL_READ_BYTES);
       if (fuller !== undefined) {
         read = fuller;
-        result = await this.#describeText(source, found, fuller);
+        result = await this.#describeText(source, found, fuller, whole);
       }
     }
     // A head holding no message at all (as opposed to messages that say nothing: a hand-off pointer, a reminder) was cut
@@ -728,7 +732,7 @@ export class ConversationIndex {
       const wide = await this.#bounded(source.files, found.path, found.size, HEAD_WIDE_READ_BYTES, TAIL_READ_BYTES);
       if (wide !== undefined) {
         read = wide;
-        result = await this.#describeText(source, found, wide);
+        result = await this.#describeText(source, found, wide, whole);
       }
     }
     const used = read;
@@ -761,7 +765,8 @@ export class ConversationIndex {
         turns_at_least: 0,
         model: null,
       };
-    const kept = this.#keptTitle(old, result.row);
+    // The whole file could not be read to remake the title: the cached one stands.
+    const kept = stale && read.partial && whole === undefined ? (old?.file_title ?? undefined) : undefined;
     return {
       ...common,
       id: result.row.id,
@@ -769,7 +774,7 @@ export class ConversationIndex {
       project: result.row.project,
       fresh: true as const,
       // What the title is made from, scrubbed with its batch (`#titled`). A conversation that is only hand-off pointers has no
-      // first message of its own: its ferret's title stands. A title the harness wrote that this read could not find again stays.
+      // first message of its own: its ferret's title stands.
       ...(kept === undefined
         ? { file_title: null, titleParts: { name: result.row.name, firstMessage: result.row.brief } }
         : { file_title: kept }),
@@ -785,21 +790,33 @@ export class ConversationIndex {
   }
 
   /**
-   * The cached title a row waiting on the title rule keeps (`STALE_SIZE`): one the harness wrote (a `/rename`, a generated title)
-   * that the bounded read did not find again, because it sits in the middle of the transcript. Only a fallback title is made
-   * again. A row cached before titles were tagged is told by its words: a fallback is the opening words of the first message.
+   * The names of a transcript read WHOLE, for a row waiting on the title rule (`STALE_SIZE`): the latest /rename and the latest
+   * generated title anywhere in the file, which the two ends of a long one may not hold. Read in runs, each cut to whole records;
+   * only the name records are parsed, so the file is never held. `undefined` when a run cannot be read.
    */
-  #keptTitle(
-    old: Row | undefined,
-    read: { readonly name?: string | undefined; readonly brief?: string | undefined },
-  ): string | undefined {
-    if (old === undefined || old.size !== STALE_SIZE || old.file_title === null || read.name !== undefined)
-      return undefined;
-    const words = (text: string): string[] => text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
-    const cached = words(old.file_title);
-    const opening = words(read.brief ?? '');
-    const fallback = cached.length > 0 && opening.some((_, at) => cached.every((word, i) => opening[at + i] === word));
-    return fallback ? undefined : old.file_title;
+  async #wholeNames(source: IndexSource, found: Found): Promise<TranscriptNames | undefined> {
+    let chosen: string | undefined;
+    let generated: string | undefined;
+    let carry: Uint8Array = new Uint8Array(0);
+    for (let offset = 0; offset < found.size; ) {
+      const run = await source.files.read(
+        found.path,
+        offset,
+        Math.min(found.size - offset, HARNESS_HISTORY_READ_MAX_BYTES),
+      );
+      if (run === undefined) return undefined;
+      if (run.length === 0) break;
+      offset += run.length;
+      const bytes = new Uint8Array(carry.length + run.length);
+      bytes.set(carry);
+      bytes.set(run, carry.length);
+      const end = offset >= found.size ? bytes.length : lastRecordEnd(bytes);
+      const names = transcriptNames(source.parser, decode(bytes.subarray(0, end)));
+      chosen = names.chosen ?? chosen;
+      generated = names.generated ?? generated;
+      carry = bytes.slice(end);
+    }
+    return { ...(chosen === undefined ? {} : { chosen }), ...(generated === undefined ? {} : { generated }) };
   }
 
   /**
@@ -852,6 +869,7 @@ export class ConversationIndex {
     source: IndexSource,
     found: Found,
     read: Bounded,
+    names?: TranscriptNames,
   ): Promise<
     | {
         readonly row: DescribedConversation;
@@ -882,6 +900,7 @@ export class ConversationIndex {
       undefined,
       read.partial,
       true,
+      names,
     );
     return row === undefined
       ? undefined
