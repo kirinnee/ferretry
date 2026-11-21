@@ -842,6 +842,26 @@ describe('the first run, end to end', () => {
         ] as const) {
           walked.push(key);
           await inspect(tab, variant, key);
+          if (key === 'claude-code.import-settings') {
+            // r11-1c C1 (the gate's count): the real flow's `.fy-sf-slot` text with ONLY the card titles (group headings and
+            // card labels) taken out, whitespace folded — the scanned key names, the page line and every sentence counted.
+            await tab.waitForTimeout(1_800);
+            const slot = await tab.evaluate(() => {
+              const root = document.querySelector('.fy-sf-slot') as HTMLElement;
+              const flat = (value: string) => value.replace(/\s+/gu, ' ').trim();
+              let text = flat(root.innerText);
+              for (const title of root.querySelectorAll('h4, .text-row')) {
+                const own = flat((title as HTMLElement).innerText);
+                if (own !== '') text = text.replace(own, '');
+              }
+              return flat(text);
+            });
+            console.log(`C1 Settings page slot text ${variant.name} (${String(slot.length)} chars): ${slot}`);
+            expect(
+              slot.length,
+              `Settings page slot text, card titles out and nothing else: ${slot}`,
+            ).toBeLessThanOrEqual(160);
+          }
           await shot(tab, variant, key);
           if (key === 'claude-code.import-skills') {
             // A kind page's tick is the run's memory, not a write: leave one skill out and nothing is sent.

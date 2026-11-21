@@ -24,7 +24,7 @@ import type { StepPageProps } from '../props.ts';
 import { HARNESS, leftOf, leftPatch, SCAN_RUN, tickedEnvOf, tickedPatch } from './segment.ts';
 
 const LINE: Readonly<Record<ImportKind, string>> = {
-  settings: 'Your Claude Code settings.',
+  settings: 'Your settings.',
   'model-set': 'The models your settings name become a model set for this machine.',
   instructions: 'Your CLAUDE.md becomes a Ferretry instruction that every Claude Code runtime starts with.',
   skills: 'Skills you wrote become Ferretry skills.',

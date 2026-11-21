@@ -201,11 +201,12 @@ describe('the Claude pages: stacked cards, the demo on the right, few words', ()
 
 /**
  * r11-1c C1: the Settings import page, the whole page frame (the flow's `.fy-sf-slot` content) with the kit's checklist cards in it.
- * "Page text" = what the PAGE writes: the frame's innerText minus the card titles (group headings, card labels), minus the
- * page title, the footer buttons (the same on every page), the demo (an aria-hidden picture) and the key NAMES (data from
- * the scan). At most 160 characters at both widths. The Environment-keys card's Vault paragraph (190) was the main cost;
- * it is one short line now, and the old sentences stay on it as its hover text. The strict count (nothing removed but the
- * card titles) is logged, not asserted, so the number the owner would count is in the output.
+ * "Page text" = the same count the gate makes on the real slot: the frame's innerText minus the card titles (group headings,
+ * card labels) and nothing else but the page title, the footer buttons (outside the slot) and the demo (an aria-hidden
+ * picture, outside the slot). The scanned key NAMES are counted. At most 160 characters at both widths; the same count is
+ * asserted on the real flow's `.fy-sf-slot` in packages/app onboarding-e2e. The Environment-keys card's Vault paragraph
+ * (190) was the main cost; it is one short line now, and the old sentences stay on it as its hover text. The strict count
+ * (card titles out, title/footer/demo counted too) is logged for reference.
  */
 describe('the Settings import page: the page text reads short', () => {
   for (const viewport of VIEWPORTS)
@@ -225,9 +226,7 @@ describe('the Settings import page: the page text reads short', () => {
             return flat(words);
           };
           const titles = [...page.querySelectorAll('h4, .text-row')];
-          const chrome = [
-            ...page.querySelectorAll('.fy-spf__title, [data-step-footer], [data-step-demo], [data-found-locked] code'),
-          ];
+          const chrome = [...page.querySelectorAll('.fy-spf__title, [data-step-footer], [data-step-demo]')];
           return {
             text: without(flat(page.innerText), [...titles, ...chrome]),
             strict: without(flat(page.innerText), titles),
