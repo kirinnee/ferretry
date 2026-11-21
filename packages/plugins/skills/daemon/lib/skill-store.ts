@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { RootsPort, SharedTree, StatePort } from '@ferretry/kernel/contract';
 import { SKILLS_INSTALLED_STATE } from '../../contract/index.ts';
 
@@ -17,6 +18,23 @@ const SKILL_ENTRY_FILE = 'SKILL.md';
  * skill holds can be this folder.
  */
 const INDEX_FOLDER = '_files';
+
+/**
+ * The folder that remembers what the setup import last WROTE into a skill folder (`_written/<name>`: one digest of its
+ * paths and bytes). A folder whose content is not that digest now was made or changed by the person since, and an import
+ * never replaces it. Same naming rule as {@link INDEX_FOLDER}.
+ */
+const WRITTEN_FOLDER = '_written';
+
+/** The digest of a skill folder's files: every path and every byte, in path order. */
+function folderDigest(files: readonly { readonly path: string; readonly bytes: Uint8Array }[]): string {
+  const hash = createHash('sha256');
+  for (const file of files.toSorted((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))) {
+    hash.update(`${file.path}\n${String(file.bytes.byteLength)}\n`);
+    hash.update(file.bytes);
+  }
+  return hash.digest('hex');
+}
 
 /** One folder name: a plain path component a harness can load as a skill (no leading dot, so never `.system`). */
 const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
@@ -150,11 +168,15 @@ export class SkillStore {
   async install(
     name: string,
     files: readonly InstalledSkillFile[],
-    options: { readonly createOnly?: boolean } = {},
+    options: { readonly createOnly?: boolean; readonly stamp?: boolean } = {},
   ): Promise<void> {
     const refusal = installRefusal(name, files);
     if (refusal !== undefined) throw new InstalledSkillRefused(refusal);
-    if (options.createOnly === true) return await this.#create(name, files);
+    if (options.createOnly === true) {
+      await this.#create(name, files);
+      if (options.stamp === true) await this.#stamp(name, files);
+      return;
+    }
     const owned = await this.#ownedFiles(name, 'replaced');
     const incoming = new Set(files.map(file => file.path));
     const stale = owned.filter(path => !incoming.has(path));
@@ -162,6 +184,35 @@ export class SkillStore {
     // The index names the new paths before they land, so a crash part-way leaves them ours, not someone else's.
     await this.#remember(name, [...new Set([...owned.filter(path => incoming.has(path)), ...incoming])]);
     for (const file of files) await this.state.write(SKILLS_INSTALLED_STATE, file.content, `${name}/${file.path}`);
+    if (options.stamp === true) await this.#stamp(name, files);
+  }
+
+  /** Remembers the digest of what the setup import just wrote into `installed/<name>/`. */
+  async #stamp(name: string, files: readonly InstalledSkillFile[]): Promise<void> {
+    const digest = folderDigest(
+      files.map(file => ({ path: file.path, bytes: new TextEncoder().encode(file.content) })),
+    );
+    await this.state.write(SKILLS_INSTALLED_STATE, digest, `${WRITTEN_FOLDER}/${name}`);
+  }
+
+  /**
+   * Whether `installed/<name>/` holds exactly what the setup import last wrote there (every file, every byte, nothing
+   * more): false for a folder the import never stamped, one the person deleted and made again, or one edited since.
+   */
+  async unchangedSinceImport(name: string): Promise<boolean> {
+    if (!usableSkillName(name)) return false;
+    const recorded = await this.state.read(SKILLS_INSTALLED_STATE, `${WRITTEN_FOLDER}/${name}`).catch(() => undefined);
+    if (recorded === undefined || !recorded.ok || recorded.value === undefined) return false;
+    const digest =
+      typeof recorded.value === 'string' ? recorded.value : new TextDecoder().decode(recorded.value as Uint8Array);
+    const found: { path: string; bytes: Uint8Array }[] = [];
+    for (const entry of await this.walk(name)) {
+      if (entry.kind !== 'file') return false;
+      const bytes = await this.read(name, entry.path);
+      if (bytes === undefined) return false;
+      found.push({ path: entry.path, bytes });
+    }
+    return found.length > 0 && folderDigest(found) === digest;
   }
 
   /**
@@ -298,9 +349,10 @@ export class SkillStore {
       await this.state.removeEmptyDirectory(SKILLS_INSTALLED_STATE, folder).catch(() => undefined);
     const gone = new Set(plain);
     const left = (await this.paths(name)).filter(path => !gone.has(path));
-    if (left.length === 0 && !(await this.holds(name)))
+    if (left.length === 0 && !(await this.holds(name))) {
       await this.state.remove(SKILLS_INSTALLED_STATE, `${INDEX_FOLDER}/${name}`);
-    else await this.#remember(name, left);
+      await this.state.remove(SKILLS_INSTALLED_STATE, `${WRITTEN_FOLDER}/${name}`).catch(() => undefined);
+    } else await this.#remember(name, left);
   }
 
   async #remember(name: string, paths: readonly string[]): Promise<void> {

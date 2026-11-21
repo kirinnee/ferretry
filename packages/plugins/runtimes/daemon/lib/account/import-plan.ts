@@ -54,6 +54,17 @@ import {
   type Runtime,
 } from './schema.ts';
 
+/** The digest of the instructions text held here, in the form an import records (scope, then text). */
+function localInstructionsDigest(
+  existing: AccountModel | undefined,
+  name: string,
+  digest: (text: string) => string,
+): string | undefined {
+  const local = existing?.components.instructions[name];
+  if (local === undefined) return undefined;
+  return digest(`${JSON.stringify(local.harness === undefined ? {} : { harness: local.harness })}\n${local.text}`);
+}
+
 /** The installed harnesses a scan list should import, in a stable order. */
 const importedHarnesses = (scans: readonly HostHarnessScan[], include?: readonly HarnessKind[]): HarnessKind[] =>
   (['claude', 'codex'] as const).filter(
@@ -194,6 +205,15 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     const digest = options.digest(comparable.digestText);
     if (existing?.components[kind][name] !== undefined && previous !== undefined) {
       if (previous.digest !== digest) {
+        // Instructions are Runtimes' own text: an update replaces them only while the text here is still what the last
+        // import wrote (its digest is the recorded one). Text the person changed here is theirs and is left as it is.
+        if (kind === 'instructions' && localInstructionsDigest(existing, name, options.digest) !== previous.digest) {
+          notes.push({
+            harness: existing.components.instructions[name]?.harness ?? 'claude',
+            text: `Instructions "${name}": the host's file changed, but you changed them here, so they were left as they are.`,
+          });
+          continue;
+        }
         const left = [...new Set([...(previous.left ?? []), ...(candidate.left ?? [])])];
         updates.push({
           reference,
@@ -428,6 +448,9 @@ export function mergeImportRecord(plan: ImportPlan, acceptedUpdates: readonly La
         ...(plan.record.components[update.reference]?.owned === undefined
           ? {}
           : { owned: plan.record.components[update.reference]?.owned }),
+        ...(plan.record.components[update.reference]?.etags === undefined
+          ? {}
+          : { etags: plan.record.components[update.reference]?.etags }),
       };
     }
   }
