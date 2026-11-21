@@ -36,7 +36,7 @@ import { VoicePicker } from './voice-picker.tsx';
 const AUTO_READ_EXPLANATION =
   'When a ferret finishes a turn, this device reads its reply aloud. It reads the last message of the turn, describes code, tables and pictures instead of reading them, and says “Done. No message.” for a turn that wrote nothing. If the ferret asks you something, it reads the question and its options — you still answer by tapping. Tap anywhere or press a key to stop. The microphone is never used.';
 
-const AUTO_READ_OFF_EXPLANATION = 'Off by default. Nothing is read aloud unless you press Read aloud on a message.';
+const AUTO_READ_OFF_EXPLANATION = 'Off by default. Nothing is read aloud on its own.';
 
 const OLDER_MACHINE_NOTE =
   'Auto-read needs a newer Ferretry on your computer. Until you update the Ferretry app on your computer, nothing is read on its own, but Read aloud on a message still works.';
@@ -182,6 +182,19 @@ function Supported({
             </div>
           ) : null}
         </SettingRow>
+
+        <SettingRow
+          settingId="read-aloud-button"
+          name="Show Read aloud on each reply"
+          hint="Off by default."
+          control={labelId => (
+            <SettingSwitch
+              checked={settings.readAloudButton}
+              labelledBy={labelId}
+              onChange={readAloudButton => update({ readAloudButton })}
+            />
+          )}
+        />
 
         <SettingRow
           name="Voice"

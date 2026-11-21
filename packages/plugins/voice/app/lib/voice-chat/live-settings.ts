@@ -59,6 +59,8 @@ export interface LiveVoiceSettings {
   readonly format: typeof LIVE_VOICE_SETTINGS_FORMAT;
   /** Read each finished reply aloud on its own. OFF by default: nothing speaks unless the person asks. */
   readonly autoRead: boolean;
+  /** Draw a "Read aloud" button on each assistant message. OFF by default (r11 S12): the person opts in. Independent of `autoRead`. */
+  readonly readAloudButton: boolean;
   /** The chosen voice (`SpeakerVoice.id`), or null for the device's best pick. */
   readonly voiceId: string | null;
   /** 0.8 – 2.0. */
@@ -71,6 +73,7 @@ export interface LiveVoiceSettings {
 export const DEFAULT_LIVE_VOICE_SETTINGS: LiveVoiceSettings = Object.freeze({
   format: LIVE_VOICE_SETTINGS_FORMAT,
   autoRead: false,
+  readAloudButton: false,
   voiceId: null,
   rate: DEFAULT_SPEECH_RATE,
   maxSeconds: DEFAULT_READING_SECONDS,
@@ -79,6 +82,7 @@ export const DEFAULT_LIVE_VOICE_SETTINGS: LiveVoiceSettings = Object.freeze({
 
 const fieldsSchema = z.object({
   autoRead: z.boolean().catch(DEFAULT_LIVE_VOICE_SETTINGS.autoRead),
+  readAloudButton: z.boolean().catch(DEFAULT_LIVE_VOICE_SETTINGS.readAloudButton),
   voiceId: z
     .string()
     .max(MAX_VOICE_ID_CHARS)

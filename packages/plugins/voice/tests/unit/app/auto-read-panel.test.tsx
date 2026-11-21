@@ -83,6 +83,16 @@ describe('the Read replies aloud panel above the composer', () => {
     expect(mounted.container.querySelector('[data-auto-read]')?.textContent).toContain('Reading the reply');
   });
 
+  test('r11 S12: auto-read ON with the Read aloud button OFF still reads a finished reply (the two settings are independent)', async () => {
+    const r = rig(true);
+    expect(r.store.get().readAloudButton).toBe(false);
+    mounted = await mount(tree(r, props()));
+    await mounted.render(tree(r, finished([asked, row('a1', 'assistant', 'The fix is in.', 9000)])));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(1);
+    expect(said(r)).toBe('The fix is in.');
+  });
+
   test('OFF: the same finished reply says nothing', async () => {
     const r = rig(false);
     mounted = await mount(tree(r, props()));
