@@ -136,6 +136,7 @@ async function boot(): Promise<World> {
       real('ferrets'),
       real('mailbox'),
       real('conversation'),
+      real('agenda'),
       harnessPlugin(new HistoryHarness(tree)),
       runnerPlugin(new FakeRunner()),
     ],
@@ -262,22 +263,39 @@ describe('r11 S11 round 3: the sweep reads only for a RUNNING ferret that is sti
   });
 });
 
-describe('r11 S11 round 6: a refresh that runs before Ferrets has loaded its records never clears an owner title or a ferret', () => {
+describe('r11 S11 rounds 6-7: a refresh that runs before Ferrets has a whole roster never clears an owner title or a ferret', () => {
   type Listed = { ferret?: string; ferretName?: string; title?: string; name?: string };
   const listed = async (w: World): Promise<Listed | undefined> => {
     const answer = (await w.h.request('GET', '/v1/links/conversations')).json<{ conversations: Listed[] }>();
     return answer.conversations.find(row => row.ferret === w.id) ?? answer.conversations[0];
   };
 
-  test('the owner title and the ferret association survive full refreshes that run while the registry is still loading', async () => {
+  /** A world whose ferret the owner has renamed, and whose index has read that. */
+  const owned = async (): Promise<World> => {
     const w = await boot();
     await wind(w, 3_000);
     expect((await w.h.request('POST', `/v1/ferrets/${w.id}/rename`, { body: { title: OWNERS } })).status).toBe(200);
     await w.h.request('GET', '/v1/links/conversations');
     await wind(w, 6_000);
-    const before = await listed(w);
-    expect(before).toMatchObject({ ferret: w.id, title: OWNERS });
+    expect(await listed(w)).toMatchObject({ ferret: w.id, title: OWNERS });
+    return w;
+  };
 
+  /** Driven time only passes (a registry read held on purpose cannot settle the host). */
+  const drive = async (h: TestHost, ms: number): Promise<void> => {
+    for (let spent = 0; spent < ms; spent += 500) {
+      await h.clock.advance(500);
+      await Bun.sleep(5);
+    }
+  };
+  /** An answer that did not come within a second of real time is no answer (so a hang fails instead of timing out the file). */
+  const within = async <T>(answer: Promise<T>): Promise<T | 'hung'> =>
+    await Promise.race([answer, Bun.sleep(1_500).then((): 'hung' => 'hung')]);
+
+  const AGENDA_PREVIEW = ['POST', '/v1/agenda/clear-agents', { body: { dryRun: true } }] as const;
+
+  test('the registry still loading: the owner title and the ferret survive; the agenda clear-agents preview answers as it does without Conversation', async () => {
+    const w = await owned();
     // A daemon restart whose Ferrets records load slowly: its state listing is held until the test lets it go.
     let release!: () => void;
     const held = new Promise<void>(resolve => (release = resolve));
@@ -296,19 +314,13 @@ describe('r11 S11 round 6: a refresh that runs before Ferrets has loaded its rec
     const second = await w.h.restart();
     const again: World = { ...w, h: second };
 
-    // The warm-up refresh runs while the registry holds no record yet. Nothing here waits for the host to settle: the registry
-    // read is held on purpose, so the refresh waits on it (driven time only passes).
-    const drive = async (ms: number): Promise<void> => {
-      for (let spent = 0; spent < ms; spent += 500) {
-        await second.clock.advance(500);
-        await Bun.sleep(5);
-      }
-    };
-    await drive(2_000);
-    // A listing asked in that window: it answers from the index (still catching up) with what the index held, and an empty
-    // registry is not "no ferrets" — the row keeps its ferret and the owner's title.
+    await drive(second, 2_000);
+    // The preview other callers use does not wait for the registry (as on the parent): it answers 200 while the records are held.
+    const preview = await within(second.request(...AGENDA_PREVIEW));
+    expect(preview === 'hung' ? preview : preview.status).toBe(200);
+    // A listing asked in that window answers from the index with what it held: an empty registry is not "no ferrets".
     const duringLoad = second.request('GET', '/v1/links/conversations');
-    await drive(8_000);
+    await drive(second, 8_000);
     const whileLoading = (await duringLoad).json<{ conversations: Listed[] }>().conversations[0];
     release();
     await second.settle();
@@ -319,5 +331,58 @@ describe('r11 S11 round 6: a refresh that runs before Ferrets has loaded its rec
 
     expect(await listed(again)).toMatchObject({ ferret: w.id, title: OWNERS });
     expect(await again.shown()).toEqual({ title: OWNERS, titleSource: 'owner' });
+  });
+
+  test('the registry failing to load: the owner title and the ferret survive a full refresh; the preview still answers 200', async () => {
+    const w = await owned();
+    const folder = w.h.state('ferrets');
+    const realPort = folder.port.bind(folder);
+    folder.port = declared => ({
+      ...realPort(declared),
+      list: async () => Promise.reject(new Error('the ferret records could not be listed')),
+    });
+    const second = await w.h.restart();
+    await drive(second, 3_000);
+    const preview = await within(second.request(...AGENDA_PREVIEW));
+    expect(preview === 'hung' ? preview : preview.status).toBe(200);
+    await second.request('GET', '/v1/links/conversations');
+    await drive(second, 8_000);
+    const after = (await second.request('GET', '/v1/links/conversations')).json<{ conversations: Listed[] }>()
+      .conversations[0];
+    expect(after).toMatchObject({ ferret: w.id, title: OWNERS });
+  });
+
+  test('one listed record that cannot be read: the owner title and the ferret survive a full refresh, once the registry is ready', async () => {
+    const w = await owned();
+    // The ferret's record is damaged on disk (the state reads a damaged file as damaged, never as empty): Ferrets lists it and
+    // cannot read it, so its roster is ready and still lacks a ferret that exists.
+    const folder = w.h.state('ferrets');
+    const records = [...folder.files.keys()].filter(path => path.endsWith('/ferret.json'));
+    expect(records.length).toBeGreaterThan(0);
+    for (const path of records) folder.files.set(path, '{ this is not a ferret record');
+    const second = await w.h.restart();
+    const again: World = { ...w, h: second };
+    await second.settle();
+    expect((await second.request('GET', '/v1/ferrets')).status).toBe(200);
+    expect((await second.request('GET', '/v1/ferrets')).json<unknown[]>()).toHaveLength(0);
+    await wind(again, 3_000);
+    await second.request('GET', '/v1/links/conversations');
+    await wind(again, 6_000);
+    expect(await listed(again)).toMatchObject({ ferret: w.id, title: OWNERS });
+  });
+
+  test('a ferret that is really gone, with a whole roster, IS cleared (the cleanup still runs)', async () => {
+    const w = await owned();
+    const folder = w.h.state('ferrets');
+    for (const path of [...folder.files.keys()].filter(key => key.startsWith(`${w.id}/`))) folder.files.delete(path);
+    const second = await w.h.restart();
+    const again: World = { ...w, h: second };
+    await second.settle();
+    await wind(again, 3_000);
+    await second.request('GET', '/v1/links/conversations');
+    await wind(again, 6_000);
+    const row = await listed(again);
+    expect(row?.ferret).toBeUndefined();
+    expect(row?.title).not.toBe(OWNERS);
   });
 });

@@ -120,16 +120,25 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
 
   // Load what is held. Sync answers (`mayTouch`, `bearers:ferret`, `WorkFolders`) see nothing until this lands,
   // which fails closed: an unknown ferret is refused, an unknown digest is no ferret.
+  // Whether every record the state lists was read whole (its record, and its details file): a roster with one missing
+  // is not the truth about who exists, and a reader that would CLEAR something for a ferret not in it must be able to ask.
+  let wholeRoster = true;
   const loaded = (async () => {
     for (const name of await kernel.state.list(FerretFiles)) {
       const read = await kernel.state.read(FerretFiles, name);
       if (read.ok && read.value !== undefined) registry.put(read.value);
       else if (!read.ok) log.warn('a ferret record could not be read', { file: read.error.file });
-      if (!read.ok || read.value === undefined) continue;
+      if (!read.ok || read.value === undefined) {
+        wholeRoster = false;
+        continue;
+      }
       // Its start options and title, kept beside the record so a list or a read stays memory-only.
       const details = await kernel.state.read(FerretDetailsFile, name);
       if (details.ok && details.value !== undefined) registry.putDetails(read.value.id, details.value);
-      else if (!details.ok) log.warn('a ferret details file could not be read', { file: details.error.file });
+      else if (!details.ok) {
+        wholeRoster = false;
+        log.warn('a ferret details file could not be read', { file: details.error.file });
+      }
       // Its declared wait, if it was parked when the daemon last ran.
       const wait = await kernel.state.read(FerretWaitFiles, name);
       if (wait.ok && wait.value?.waiting !== undefined) registry.putWaiting(read.value.id, wait.value.waiting);
@@ -424,6 +433,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       forget: async ferret => await kernel.state.remove(FerretLaunchSectionsFiles, ferret),
     },
     ready,
+    wholeRoster: () => wholeRoster,
     launchSteps: launch,
     session: sessionFiles.port,
     claims,

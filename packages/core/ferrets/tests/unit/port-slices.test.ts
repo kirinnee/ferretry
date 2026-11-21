@@ -44,6 +44,7 @@ interface FerretsApiAtBase {
     readonly parent?: FerretId;
     readonly pack?: PackId;
   }): Promise<readonly FerretSummary[]>;
+  rosterComplete?(): Promise<boolean>;
   mayTouch(caller: FerretId, target: FerretId): boolean;
   children(ferret: FerretId): readonly FerretId[];
   harnesses(): readonly HarnessKey[];

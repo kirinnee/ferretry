@@ -160,6 +160,8 @@ function endedOnPurpose(record: FerretRecord): boolean {
 export interface FerretsPorts {
   /** Resolves once the held ferret records are loaded (a read before then would see no ferret). */
   ready?(): Promise<void>;
+  /** Whether every held record was read whole when they loaded (read after `ready`). Unbound: it was. */
+  wholeRoster?(): boolean;
   now(): Instant;
   /** A fresh, server-minted ferret id; a request never names one (today's `TimeSessionIdFactory`). */
   newId(): FerretId;
@@ -830,10 +832,20 @@ export class FerretsService implements FerretsApi {
     return { kind: 'unknown' };
   }
 
+  /**
+   * Whether the roster {@link list} answers is the whole truth: the records are loaded (waits for it) and every one the state
+   * lists was read. A load that failed, or left a record out, answers `false`; `list` itself is unchanged (it never waits).
+   */
+  async rosterComplete(): Promise<boolean> {
+    try {
+      await this.ports.ready?.();
+    } catch {
+      return false;
+    }
+    return this.ports.wholeRoster?.() ?? true;
+  }
+
   async list(filter?: FerretFilter): Promise<readonly FerretSummary[]> {
-    // The registry is complete only once its records are loaded: a list read before that would look like "no ferrets" and
-    // make a reader (Conversation's name refresh) clear a name or title that a still-loading ferret owns.
-    await this.ports.ready?.();
     const pins = await this.pins();
     return this.registry.list(filter).map(summary => this.mark(summary, pins));
   }

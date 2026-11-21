@@ -94,6 +94,12 @@ export interface ReadsApi {
     input: ConversationImport,
   ): Promise<Result<void, { readonly reason: string }>>;
   /**
+   * Additive (Conversation's name refresh): whether {@link list} answers the WHOLE roster, as one that may CLEAR something
+   * for a ferret missing from it needs to know. It waits for the records to load, and answers `false` when the load failed or
+   * left a record unread (a ferret that exists would then be missing). `list` itself never waits and is unchanged.
+   */
+  rosterComplete?(): Promise<boolean>;
+  /**
    * The past conversations each provided harness holds, as read-only trees (additive, the conversation index): one entry per
    * harness that answered (its `sources` empty when it holds none now), in no particular order. A harness that fails is left
    * out. Reads nothing itself.

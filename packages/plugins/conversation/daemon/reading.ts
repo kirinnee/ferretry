@@ -202,6 +202,9 @@ export function buildReading(deps: {
     state: kernel.state,
     sources,
     ferretNames,
+    // A refresh clears a ferret's name or an owner's title only from a roster Ferrets says is whole (loaded, every record read);
+    // a Ferrets that cannot say is never taken as complete.
+    rosterComplete: async () => (await ferrets.rosterComplete?.()) ?? false,
     // Every title is scrubbed with the vault's values before it is stored or offered to a ferret (one read per batch).
     scrubbing: async work => await kernel.redaction.read(scope => work(text => scope.text(text))),
     // r11 S11: a ferret's conversation title is offered to Ferrets (in-process; it keeps an owner's title).

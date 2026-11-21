@@ -40,6 +40,8 @@ export interface LinkNeeds {
   readonly sources: () => Promise<readonly IndexSource[]>;
   /** The ferret that runs each harness conversation (`"<harness>:<id>"`) and its name now, from Ferrets. */
   readonly ferretNames: () => Promise<FerretConversationNames>;
+  /** Whether that snapshot is the whole registry (Ferrets' `rosterComplete`); only then may a refresh clear a ferret or an owner title. */
+  readonly rosterComplete?: () => Promise<boolean>;
   /** Scrubs the titles the index stores, one read of the vault's values per batch (the kernel's read-scoped redaction). */
   readonly scrubbing?: ScrubBatch;
   /** Offers Ferrets a title made from a ferret's conversation (`adoptTitle`); Ferrets keeps an owner's. */
@@ -155,6 +157,7 @@ export function buildLinks(needs: LinkNeeds) {
     sqlite: () => needs.state.sqlite(CONVERSATION_INDEX_STATE),
     sources: needs.sources,
     ferretNames: needs.ferretNames,
+    ...(needs.rosterComplete === undefined ? {} : { rosterComplete: needs.rosterComplete }),
     ...(needs.scrubbing === undefined ? {} : { scrubbing: needs.scrubbing }),
     ...(needs.adoptTitle === undefined ? {} : { adoptTitle: needs.adoptTitle }),
     parsers: {

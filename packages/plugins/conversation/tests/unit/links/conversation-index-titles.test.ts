@@ -44,6 +44,8 @@ const setup = (
     /** `'none'`: no vault is wired at all. */
     readonly scrubbing?: ScrubBatch | 'none';
     readonly adopt?: (ferret: string, title: string) => Promise<'adopted' | 'kept'>;
+    /** Whether the ferret snapshot is the whole registry (Ferrets' `rosterComplete`). Absent: no such need (complete). */
+    readonly complete?: () => Promise<boolean>;
   } = {},
 ) => {
   const sqlite = memorySqlite();
@@ -59,6 +61,7 @@ const setup = (
     sqlite: () => sqlite,
     sources: async () => sources,
     ferretNames: async () => options.names?.() ?? new Map(),
+    ...(options.complete === undefined ? {} : { rosterComplete: options.complete }),
     parsers: PARSERS,
     nowMs: () => clock.ms,
     ...(options.scrubbing === 'none' ? {} : { scrubbing: options.scrubbing ?? vault(VALUES) }),
@@ -819,5 +822,63 @@ describe('a bare JSON-quoted credential name is masked everywhere it could be st
     const row = index.query().conversations[0]?.row;
     expect(row?.name).toBe('Rotate soon');
     for (const text of [stored(), JSON.stringify(row)]) expect(text).not.toContain('\\"x\\"');
+  });
+});
+
+describe('a full refresh clears a ferret or an owner title only from a snapshot known to be complete (r11 S11 round 7)', () => {
+  const OWNER = 'Owner chose this';
+  const owned = (): FerretConversationNames =>
+    new Map([[`claude-code:${A}`, { ferret: 'ms-12', name: 'Ms-12', titleSource: 'owner' as const, title: OWNER }]]);
+  const rowOf = (sqlite: ReturnType<typeof memorySqlite>) =>
+    sqlite.database
+      .query('SELECT ferret_id, ferret_name, ferret_title, ferret_title_owner FROM conv WHERE id = ?')
+      .get(A) as Record<string, unknown>;
+  const nameOf = (index: ConversationIndex, id: string) =>
+    index.query().conversations.find(entry => entry.row.id === id)?.row.name;
+  const KEPT = { ferret_id: 'ms-12', ferret_name: 'Ms-12', ferret_title: OWNER, ferret_title_owner: 1 };
+  const world = (answer: () => Promise<boolean>, snapshot: { value: FerretConversationNames }) => {
+    const made = setup({ names: () => snapshot.value, complete: answer });
+    made.owner.set(pathOf(A), talk('fix the build'));
+    return made;
+  };
+
+  const variants: readonly [string, () => Promise<boolean>][] = [
+    ['the registry is still loading (resolves false)', async () => false],
+    ['the registry failed to load (rejects)', async () => Promise.reject(new Error('the records could not be listed'))],
+    ['one listed record could not be read (resolves false)', async () => false],
+  ];
+  for (const [what, answer] of variants)
+    test(`${what}: an empty snapshot clears nothing, the owner title and the ferret stay`, async () => {
+      const snapshot = { value: owned() };
+      let complete = true;
+      const made = world(async () => (complete ? true : await answer()), snapshot);
+      await made.index.refresh();
+      expect(rowOf(made.sqlite)).toMatchObject(KEPT);
+
+      complete = false;
+      snapshot.value = new Map();
+      await made.index.refresh();
+      expect(rowOf(made.sqlite)).toMatchObject(KEPT);
+      expect(nameOf(made.index, A)).toBe(OWNER);
+    });
+
+  test('an incomplete snapshot that lists the ferret without its title keeps the title the row holds; offers still run', async () => {
+    const snapshot = { value: owned() };
+    let complete = true;
+    const made = world(async () => complete, snapshot);
+    await made.index.refresh();
+    complete = false;
+    snapshot.value = new Map([[`claude-code:${A}`, { ferret: 'ms-12', name: 'Ms-12-renamed' }]]);
+    await made.index.refresh();
+    expect(rowOf(made.sqlite)).toMatchObject({ ...KEPT, ferret_name: 'Ms-12-renamed' });
+  });
+
+  test('once the snapshot is complete again, a ferret that is really gone is cleared (the cleanup still runs)', async () => {
+    const snapshot = { value: owned() };
+    const made = world(async () => true, snapshot);
+    await made.index.refresh();
+    snapshot.value = new Map();
+    await made.index.refresh();
+    expect(rowOf(made.sqlite)).toMatchObject({ ferret_id: null, ferret_title: null, ferret_title_owner: 0 });
   });
 });

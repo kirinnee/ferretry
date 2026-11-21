@@ -114,6 +114,7 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     get: ferret => service.get(ferret),
     resolve: reference => service.resolve(reference),
     list: filter => service.list(filter),
+    rosterComplete: () => service.rosterComplete(),
     mayTouch: (caller, target) => service.mayTouch(caller, target),
     children: ferret => service.children(ferret),
     harnesses: () => service.harnesses(),

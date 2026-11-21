@@ -108,6 +108,13 @@ export interface ConversationIndexNeeds {
   readonly sqlite: () => SqliteHandle;
   readonly sources: () => Promise<readonly IndexSource[]>;
   readonly ferretNames: () => Promise<FerretConversationNames>;
+  /**
+   * Whether the snapshot {@link ferretNames} gives is the WHOLE registry (loaded, every record read). Only then may a full refresh
+   * clear a ferret or an owner's title from a conversation the snapshot lacks; otherwise it clears nothing (offers still run). Asked
+   * BEFORE the snapshot is read, so a registry that finishes loading in between is never taken as complete for a snapshot read
+   * early. Absent: complete (a test).
+   */
+  readonly rosterComplete?: () => Promise<boolean>;
   readonly parsers: Readonly<Record<TranscriptHarness, IndexParser>>;
   readonly nowMs: () => number;
   /** Waits `ms`. Absent: a listing waits for its refresh to finish, however long (a test). */
@@ -982,12 +989,15 @@ export class ConversationIndex {
    * cleared of its ferret, nor offered a title, whatever the snapshot says about it. A FULL update treats the snapshot (Ferrets'
    * registry, read in one go) as the truth: a conversation whose ferret is not in it has lost its ferret, and only then does its
    * row drop the ferret's name and title (an owner's title included: it belonged to a ferret that is no longer there). A snapshot
-   * that could not be read changes nothing. The snapshot is COMPLETE only once Ferrets has loaded its records: the port's `list()`
-   * waits for that (an empty registry that is merely still loading would otherwise look like "no ferrets" and clear every
-   * ferret name and owner title), and a scoped update selects only its own rows in SQL.
+   * that could not be read changes nothing. That clearing runs ONLY from a snapshot known to be complete
+   * ({@link ConversationIndexNeeds.rosterComplete}: Ferrets has loaded its records AND read every one): an empty registry that is
+   * merely still loading, a load that failed, or one record left unread would otherwise look like "no such ferret" and clear a
+   * name or an owner title that a ferret still owns. An incomplete snapshot still updates the ferrets it does list and still
+   * offers titles; it just clears nothing. A scoped update selects only its own rows in SQL.
    */
   async #applyFerretNames(only?: ReadonlySet<string>): Promise<void> {
     const db = this.#open();
+    const complete = await (this.needs.rosterComplete?.() ?? Promise.resolve(true)).catch(() => false);
     const all = await this.needs.ferretNames().catch((): FerretConversationNames | undefined => undefined);
     if (all === undefined) return;
     const names: FerretConversationNames =
@@ -1009,13 +1019,18 @@ export class ConversationIndex {
       const harness = key.slice(0, split);
       const id = key.slice(split + 1);
       const name = ferret.name.slice(0, CONVERSATION_NAME_MAX);
-      const title = titles.get(key) ?? null;
-      const owner = ferret.titleSource === 'auto' ? 0 : 1;
+      const snapshotTitle = titles.get(key) ?? null;
       for (const row of db.query<Row>('SELECT * FROM conv WHERE harness = ? AND id = ? ORDER BY last_at DESC, rowid', [
         harness,
         id,
       ])) {
         wanted.add(`${row.harness}\u0000${row.kind}\u0000${row.label}\u0000${row.path}`);
+        // A snapshot that is not whole may have lost this ferret's details (its title): a title the row already holds for the SAME
+        // ferret is then kept, not cleared, when the snapshot offers none.
+        const keep =
+          !complete && snapshotTitle === null && row.ferret_id === ferret.ferret && row.ferret_title !== null;
+        const title = keep ? row.ferret_title : snapshotTitle;
+        const owner = keep ? row.ferret_title_owner : ferret.titleSource === 'auto' ? 0 : 1;
         if (
           row.ferret_id !== ferret.ferret ||
           row.ferret_name !== name ||
@@ -1036,9 +1051,11 @@ export class ConversationIndex {
         if (!ownerTitled && own !== null && own !== title && !offers.has(ferret.ferret)) offers.set(ferret.ferret, own);
       }
     }
-    // A scoped update selects only its own rows in SQL, so a conversation outside it is never read at all.
-    const linked =
-      only === undefined
+    // A scoped update selects only its own rows in SQL, so a conversation outside it is never read at all. An incomplete snapshot
+    // clears nothing, so it selects nothing either.
+    const linked = !complete
+      ? []
+      : only === undefined
         ? db.query<Row>('SELECT * FROM conv WHERE ferret_id IS NOT NULL')
         : [...only].flatMap(key => {
             const split = key.indexOf(':');
