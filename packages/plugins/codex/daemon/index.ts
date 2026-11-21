@@ -2,7 +2,7 @@ import type { RuntimeModelChoice } from '@ferretry/core-ferrets/contract';
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
-import { selectedComponents } from '@ferretry/plugin-runtimes/contract';
+import { harnessFallbackDirectories, selectedComponents } from '@ferretry/plugin-runtimes/contract';
 import manifest from '../manifest.ts';
 import {
   CODEX_CONFIG,
@@ -82,6 +82,11 @@ export default implementDaemon(manifest, {
         { binary: configured.binary, searchPaths: configured.searchPaths },
         host,
         await homeDirectory(),
+        harnessFallbackDirectories({
+          home: await homeDirectory(),
+          platform: await host.platform(),
+          xdgStateHome: await host.environment('XDG_STATE_HOME'),
+        }),
       );
     };
 

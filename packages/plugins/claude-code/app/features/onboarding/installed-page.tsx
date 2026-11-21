@@ -76,9 +76,12 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
 
   /** Reads the installer's plan; says whether Claude is on the machine, still missing (`plan`), or could not be read. */
   const readPlan = useCallback(
-    async (quiet: boolean): Promise<'found' | 'plan' | 'unread'> => {
+    async (quiet: boolean, fresh = false): Promise<'found' | 'plan' | 'unread'> => {
       try {
-        const scan = ScanToolsSchema.parse(await client.call(SCAN, { quiet }));
+        // `fresh` is an explicit "Check again": the daemon looks the tools up now, not from its last ten seconds.
+        const scan = ScanToolsSchema.parse(
+          await client.call(SCAN, { quiet, ...(fresh ? { query: { fresh: '1' } } : {}) }),
+        );
         const tool = scan.tools.find(entry => entry.harness === 'claude-code');
         if (tool === undefined || tool.installed) {
           markFound();
@@ -129,7 +132,7 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
     setWorking(true);
     try {
       if (await isLocated()) markFound();
-      else if ((await readPlan(true)) === 'plan') setNote('Claude Code is still not on this machine.');
+      else if ((await readPlan(true, true)) === 'plan') setNote('Claude Code is still not on this machine.');
     } finally {
       setWorking(false);
     }

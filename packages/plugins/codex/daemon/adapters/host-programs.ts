@@ -14,7 +14,7 @@ import type { ExecutableResolverPort } from '../lib/update/ports.ts';
 const FACT_TIMEOUT = seconds(10);
 
 /** The only environment names this plugin reads. */
-export type EnvironmentName = 'HOME' | 'PATH' | 'LANG';
+export type EnvironmentName = 'HOME' | 'PATH' | 'LANG' | 'XDG_STATE_HOME';
 
 export class HostPrograms implements ExecutableResolverPort {
   readonly #spawn: SpawnPort;

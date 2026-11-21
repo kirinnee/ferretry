@@ -51,9 +51,9 @@ export function InstalledPage({ client, step }: { readonly client: OnboardingCli
           step.done();
           return;
         }
-        setView({ kind: 'missing', facts: { state: 'missing', plan: await readInstallPlan(client) } });
+        setView({ kind: 'missing', facts: { state: 'missing', plan: await readInstallPlan(client, !first) } });
       } catch (cause) {
-        const plan = await readInstallPlan(client);
+        const plan = await readInstallPlan(client, !first);
         setView({ kind: 'missing', facts: { state: 'missing', plan }, note: refusalWords(cause) });
       }
       if (first) {
