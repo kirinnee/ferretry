@@ -197,6 +197,45 @@ describe('the harness sign-in embed', () => {
     await view.unmount();
   });
 
+  it('after one press, the sign-in it starts is the login it just made, not the first signable one listed', async () => {
+    const calls: Call[] = [];
+    let added = false;
+    const other = login({ id: 'codex-older', harness: 'codex', harnesses: ['codex'], status: NEEDS });
+    const client = scripted(
+      {
+        [LIST]: () =>
+          added
+            ? loginList(other, login({ id: 'codex-login', harness: 'codex', harnesses: ['codex'], status: NEEDS }))
+            : loginList(login({ id: 'claude-x' })),
+        [GRANTS]: OPEN,
+        [STAGE]: (call: Call) => ({
+          id: 'chg1',
+          change: call.body,
+          summary: 'Add',
+          consequences: [],
+          expiresAt: '2026-11-01T10:15:00.000Z',
+          state: 'pending',
+        }),
+        [APPLY]: () => {
+          added = true;
+          return { outcome: 'applied' };
+        },
+        [START]: { ...claudeFlow('awaiting-code'), loginId: 'codex-login' },
+      },
+      calls,
+    );
+    const view = await mount(<HarnessSignInEmbed client={client} harness="codex" />);
+    await settle();
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-change-submit]'), 'the sign-in button').click(),
+    );
+    await settle();
+    const starts = calls.filter(call => call.route === START);
+    expect(starts).toHaveLength(1);
+    expect(starts[0]?.body).toMatchObject({ loginId: 'codex-login' });
+    await view.unmount();
+  });
+
   it('as a slot panel it checks its untyped props and still draws without a callback', () => {
     const client = scripted({});
     expect(harnessSignIn(client, 'codex', {}).props).toMatchObject({ harness: 'codex' });

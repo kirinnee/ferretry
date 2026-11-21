@@ -4,7 +4,7 @@
  * passkey). The page is `busy` while it installs, and a failure says why and what to run by hand.
  */
 import type { StepHost } from './onboarding-api.ts';
-import { Button } from '@ferretry/app';
+import { Button, StepDemo } from '@ferretry/app';
 import { InstalledDemo, StepActions, StepBody, StepCommand, StepLine } from '@ferretry/plugin-runtimes/import-kit';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -111,11 +111,11 @@ export function InstalledPage({ client, step }: { readonly client: OnboardingCli
   const canCheckAgain = plan.kind !== 'runnable' || view.note !== undefined;
   return (
     <StepBody step="codex.installed" label="Install Codex" data-codex-step="installed">
-      <StepLine>Codex runs the ferrets that use your Codex account. It is not on this machine yet.</StepLine>
+      <StepLine>Codex is not on this machine yet.</StepLine>
       {plan.kind === 'runnable' ? (
-        <StepLine>Ferretry will run exactly this, once you press the button:</StepLine>
+        <StepLine>Install runs exactly this:</StepLine>
       ) : (
-        <StepLine data-install-reason="">{plan.reason} To do it yourself, run:</StepLine>
+        <StepLine data-install-reason="">{plan.reason} Run this yourself:</StepLine>
       )}
       <StepCommand>{plan.command}</StepCommand>
       {plan.kind === 'runnable' ? (
@@ -137,7 +137,9 @@ export function InstalledPage({ client, step }: { readonly client: OnboardingCli
           </Button>
         </StepActions>
       ) : null}
-      <InstalledDemo command="codex --version" answer="codex-cli 0.166.0" label="Codex" />
+      <StepDemo>
+        <InstalledDemo command="codex --version" answer="codex-cli 0.166.0" label="Codex" />
+      </StepDemo>
     </StepBody>
   );
 }

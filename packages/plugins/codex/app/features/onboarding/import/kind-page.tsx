@@ -13,9 +13,11 @@
  * and the one import happens once, at `import-run`. A scan that wants the passkey waits for the person's own press; a scan that
  * failed says so and offers a retry, so a page never hangs under its loading cover.
  */
+import { StepDemo } from '@ferretry/app';
 import type { ImportItemId } from '@ferretry/plugin-runtimes/contract';
 import { FoundKindList, type ImportKind, kindFound, StepBody, StepLine } from '@ferretry/plugin-runtimes/import-kit';
 import { useEffect, useRef, useState } from 'react';
+import { KindDemo } from '../demos.tsx';
 import type { OnboardingClient, StepHost } from '../onboarding-api.ts';
 import { importingMode, KIND_WORDS, rememberReview, reviewOf, STEP_OF_KIND } from './import-memory.ts';
 import { ScanProblem } from './scan-problem.tsx';
@@ -23,10 +25,10 @@ import { useRunScan } from './use-run-scan.ts';
 
 const LEAD: Readonly<Record<ImportKind, string>> = {
   settings: 'Your Codex settings. Hooks are never imported.',
-  'model-set': 'The models your settings name, and each Codex profile, become a model set for this machine.',
-  instructions: 'Your AGENTS.md becomes a Ferretry instruction that every Codex runtime starts with.',
+  'model-set': 'Your models and Codex profiles become a model set.',
+  instructions: 'Your AGENTS.md becomes a Ferretry instruction.',
   skills: 'Skills you wrote become Ferretry skills.',
-  mcp: 'MCP servers you set up become Ferretry MCP servers. Their secrets go to the Vault.',
+  mcp: 'MCP servers come over; their secrets go to the Vault.',
 };
 
 /**
@@ -127,6 +129,9 @@ function KindBody({
               You left Settings out, so the models they name are left out too.
             </StepLine>
           ) : null}
+          <StepDemo>
+            <KindDemo kind={kind} />
+          </StepDemo>
           <FoundKindList
             model={model}
             kind={kind}
