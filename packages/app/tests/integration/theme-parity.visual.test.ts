@@ -109,10 +109,10 @@ beforeAll(async () => {
 }, 120_000);
 
 /** Styles whose kit (r11 T5-T12) deliberately dropped the old gradient field and panel texture; each unit adds its own styles. */
-const NO_GRADIENT_FIELD: ReadonlySet<string> = new Set(['mission', 'hud', 'retro', 'pixel']);
+const NO_GRADIENT_FIELD: ReadonlySet<string> = new Set(['mission', 'hud', 'lucid', 'retro', 'pixel']);
 
-/** Styles whose kit (r11 T7) moved the focus ring INSIDE the control: `--focus-offset` is no longer the captured outward 0 or 2px. */
-const RING_INSIDE: ReadonlySet<string> = new Set(['neo']);
+/** Styles whose kit (r11 T7, T11) moved the focus ring INSIDE the control: `--focus-offset` is no longer the captured outward 0 or 2px. */
+const RING_INSIDE: ReadonlySet<string> = new Set(['neo', 'lucid', 'briefing']);
 
 describe('every old family-mode resolves to the same tokens on the three axes', () => {
   for (const [key, was] of Object.entries(snapshot)) {
@@ -236,8 +236,8 @@ describe('the shell page heading takes its weight from the style, and only Brief
       expect(await headingWeight(style)).toBe('400');
     });
 
-  it('Briefing draws it in its display weight (600), not the 400 that falls to the 300 face', async () => {
-    expect(await headingWeight('briefing')).toBe('600');
+  it('Briefing draws it in its display weight (700, Gelasio), not the 400 that falls to the 300 face', async () => {
+    expect(await headingWeight('briefing')).toBe('700');
   });
 
   it('Neumorphism draws it heavy and round (800), its signature weight', async () => {
