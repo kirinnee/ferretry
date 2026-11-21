@@ -120,7 +120,7 @@ export function StepPageFrame({ title, line, demo, children, back, next, later, 
               onClick={next.onClick}
               data-step-next=""
             >
-              {next.busy === true ? <Spinner size={14} /> : null}
+              {next.busy === true ? <Spinner size={14} wait /> : null}
               {next.label}
             </Button>
           </div>

@@ -29,3 +29,4 @@ export {
   ringOfFocused,
   walkFocusRings,
 } from './focus-ring.ts';
+export { NEXT_SPINNER_LOG, type NextSpinnerRun } from './next-spinner-log.ts';
