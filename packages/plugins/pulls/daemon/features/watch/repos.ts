@@ -20,6 +20,15 @@ export interface WatchedRepoRef {
 }
 
 /**
+ * Whether a project has a GitHub reader: some repository of it reads as an account, or the project names an account that
+ * still exists. This is what turns a watch on by itself (r11 S7); with none, nothing is ever asked of GitHub for it.
+ */
+export function hasReader(project: ProjectInfo, accounts: readonly GitAccount[]): boolean {
+  if (reposOf(project, accounts).some(ref => ref.account !== undefined)) return true;
+  return (project.accounts ?? []).some(id => accounts.some(account => account.id === id));
+}
+
+/**
  * Each GitHub repository of a project (one per remote), with the account that reads it: the repository's own link, else
  * the project's first account. A link to an account that no longer exists reads as no account, never as a guess.
  * (B4 owns the general folder → account rule; until it lands this is the same two-step choice, in one place.)

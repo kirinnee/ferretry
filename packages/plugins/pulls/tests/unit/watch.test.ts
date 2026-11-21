@@ -374,12 +374,12 @@ describe('watch: live, settings and removal', () => {
     expect(host.published.at(-1)?.payload).toEqual({ project: P1 });
   });
 
-  test('the status route answers per project with the effective choices, even for a project not watched', async () => {
+  test('the status route answers per project with the effective choices, even for a project not watched (no account linked, so it is off)', async () => {
     const github = new FakeGithub();
-    const host = await boot(github, { config: { projects: {} } });
+    const host = await boot(github, { projects: [project({ accounts: undefined })], config: { projects: {} } });
     const view = (await host.request('GET', '/v1/pulls/watch')).json<WatchOverview>();
     expect(view.projects[0]).toMatchObject({ project: P1, watch: false, repos: [] });
-    expect(view.projects[0]?.notify).toMatchObject({ ciFailed: true, ciPassed: false });
+    expect(view.projects[0]?.notify).toMatchObject({ ciFailed: false, ciPassed: false });
   });
 
   test('PATCH writes the choice to config/pulls.yaml, naming only what changes; an unknown project is 404; a bad body 400', async () => {

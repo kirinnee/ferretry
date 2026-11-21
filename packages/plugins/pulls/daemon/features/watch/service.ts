@@ -16,7 +16,7 @@ import type { GithubClient, ReadFailure } from '../../adapters/github/client.ts'
 import { intervalFor, isViewed } from './cadence.ts';
 import { eventsOf, type WatchEventLine } from './events.ts';
 import { observeRepo, type Observation } from './observe.ts';
-import { reposOf, type WatchedRepoRef } from './repos.ts';
+import { hasReader, reposOf, type WatchedRepoRef } from './repos.ts';
 import type { WatchStore } from './store.ts';
 import { buzzOf, summaryBuzzOf, type PullBuzz } from './words.ts';
 
@@ -117,10 +117,9 @@ export class WatchService {
       const config = this.deps.config();
       const now = this.deps.nowMs();
       const viewed = isViewed(this.#lastRead, now);
-      const projects = await this.deps.projects();
-      const watched = projects.filter(project => settingsOf(config, project.id).watch);
+      const [projects, accounts] = await Promise.all([this.deps.projects(), this.deps.accounts()]);
+      const watched = projects.filter(project => settingsOf(config, project.id, hasReader(project, accounts)).watch);
       if (watched.length === 0) return;
-      const accounts = await this.deps.accounts();
       const due: ProjectInfo[] = [];
       for (const project of watched) {
         const snapshot = await this.#snapshot(project.id);
@@ -250,7 +249,7 @@ export class WatchService {
     });
     if (!kept) return;
     if (moved) this.deps.changed(project.id);
-    await this.#tell(project.id, lines, settingsOf(config, project.id).notify);
+    await this.#tell(project.id, lines, settingsOf(config, project.id, hasReader(project, accounts)).notify);
   }
 
   /** Whether the project still reads these repositories as these accounts, as it is now. */
@@ -284,7 +283,7 @@ export class WatchService {
     const [projects, accounts] = await Promise.all([this.deps.projects(), this.deps.accounts()]);
     const out: WatchProjectView[] = [];
     for (const project of projects) {
-      const settings = settingsOf(config, project.id);
+      const settings = settingsOf(config, project.id, hasReader(project, accounts));
       const snapshot = await this.#snapshot(project.id);
       const refs = reposOf(project, accounts);
       const known = new Set(accounts.map(account => account.id));
@@ -295,6 +294,7 @@ export class WatchService {
       out.push({
         project: project.id,
         watch: settings.watch,
+        watchedBy: settings.watchedBy,
         notify: settings.notify,
         // A snapshot of an account that is gone is not shown (its next look drops it).
         repos: (snapshot?.repos ?? []).filter(repo => known.has(repo.account)),

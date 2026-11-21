@@ -41,6 +41,7 @@ const NOTIFY = {
 export const view = (over: Record<string, unknown> = {}) => ({
   project: PROJECT,
   watch: true,
+  watchedBy: 'you',
   notify: NOTIFY,
   repos: [
     {

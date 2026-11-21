@@ -1,12 +1,24 @@
 /**
  * The browser entry for the PRs & CI screen: the REAL `PullsList` over a scripted client and FAKE data (no real
  * repository, login or account), on a fixed clock. Cases: `?case=empty|mixed|running|paused|long`. `?theme=<family>-<mode>`.
+ *
+ * `?case=default&project=A|B` (r11 S7) draws the project page's PRs section over a client that behaves like the daemon:
+ * project A has a linked account and NO stored choice, project B has none. It uses the REAL `settingsOf` / `nextSetting`,
+ * records every PATCH body in `window.__patches` and every GitHub look in `window.__reads` (a project is only "read" while
+ * its effective watch is on), so a test can assert on what the daemon would have been asked.
  */
 import { ScreenHrefProvider } from '@ferretry/app';
 import { createRoot } from 'react-dom/client';
 import type { ListClient } from '../../../../app/features/list/api.ts';
+import { ProjectPulls } from '../../../../app/features/list/project-section.tsx';
 import { PullsList } from '../../../../app/features/list/pulls-list.tsx';
-import { WatchOverviewSchema } from '../../../../contract/index.ts';
+import {
+  nextSetting,
+  settingsOf,
+  WatchOverviewSchema,
+  type PullsConfig,
+  type WatchPatch,
+} from '../../../../contract/index.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
@@ -50,6 +62,7 @@ const pull = (number: number, over: Record<string, unknown> = {}) => ({
 const watched = (pulls: unknown[], over: Record<string, unknown> = {}) => ({
   project: A,
   watch: true,
+  watchedBy: 'you',
   notify: NOTIFY,
   repos: [{ repo: REPO, account: 'gha_1', login: 'me-fake', checkedAt: '2026-02-03T11:59:00Z', pulls }],
   needsAccount: [],
@@ -108,6 +121,46 @@ const cases: Record<string, unknown> = {
   },
 };
 
+// ─── r11 S7: a client that decides like the daemon ───────────────────────────────────────────────────────────────────
+const stored: PullsConfig['projects'] = {};
+const LINKED: Record<string, boolean> = { [A]: true, [B]: false };
+const patches: WatchPatch[] = [];
+const reads: Record<string, number> = { [A]: 0, [B]: 0 };
+Object.assign(window, { __patches: patches, __reads: reads });
+
+const defaultOverview = () => ({
+  projects: [A, B].map(id => {
+    const settings = settingsOf({ projects: stored }, id, LINKED[id] === true);
+    if (settings.watch) reads[id] = (reads[id] ?? 0) + 1;
+    const pulls = id === A ? mixedPulls : [];
+    return {
+      project: id,
+      watch: settings.watch,
+      watchedBy: settings.watchedBy,
+      notify: settings.notify,
+      repos: settings.watch
+        ? [{ repo: REPO, account: 'gha_1', login: 'me-fake', checkedAt: '2026-02-03T11:59:00Z', pulls }]
+        : [],
+      needsAccount: [],
+    };
+  }),
+});
+
+const defaultClient: ListClient = {
+  call: (async (route: string, init?: { params?: { project?: string }; body?: WatchPatch }) => {
+    if (route === 'GET /v1/pulls/watch') return WatchOverviewSchema.parse(defaultOverview());
+    if (route === 'GET /v1/projects') return [{ id: A, name: 'ferretry-demo', repos: [{}] }];
+    if (route === 'PATCH /v1/pulls/watch/:project') {
+      const id = init?.params?.project ?? '';
+      const body = init?.body ?? {};
+      patches.push(body);
+      stored[id] = nextSetting(stored[id], body);
+      return { view: {} };
+    }
+    return { view: {} };
+  }) as ListClient['call'],
+};
+
 const client: ListClient = {
   call: (async (route: string) => {
     if (route === 'GET /v1/pulls/watch') return WatchOverviewSchema.parse(cases[kind]);
@@ -125,7 +178,21 @@ if (root === null) throw new Error('the scene page has no #root');
 createRoot(root).render(
   <ScreenHrefProvider href={(_daemon, _plugin, _screen, p = {}) => `/pulls/${p.repo ?? ''}/${p.number ?? ''}`}>
     <div data-scene-ready="" style={{ height: '100%' }}>
-      <PullsList client={client} daemon="workstation" nowMs={NOW} onNavigate={() => undefined} />
+      {kind === 'default' ? (
+        <main className="mx-auto w-full max-w-3xl p-panel" data-scene-project="">
+          <section className="kt-panel grid gap-sm p-panel">
+            <ProjectPulls
+              client={defaultClient}
+              daemon="workstation"
+              nowMs={NOW}
+              onNavigate={() => undefined}
+              project={params.get('project') === 'B' ? B : A}
+            />
+          </section>
+        </main>
+      ) : (
+        <PullsList client={client} daemon="workstation" nowMs={NOW} onNavigate={() => undefined} />
+      )}
     </div>
   </ScreenHrefProvider>,
 );

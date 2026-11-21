@@ -24,6 +24,12 @@ export function watchFeature(deps: WatchFeatureDeps) {
   });
   return {
     service,
-    routes: watchRoutes({ service, door: deps.door, config: deps.config, projects: deps.projects }),
+    routes: watchRoutes({
+      service,
+      door: deps.door,
+      config: deps.config,
+      projects: deps.projects,
+      accounts: deps.accounts,
+    }),
   };
 }
