@@ -119,6 +119,19 @@ export function withoutDeliveryWrappers(text: string): string {
  * interruption marker, or nothing at all.
  */
 export function spokenText(text: string, documents: HandoffDocuments = NO_DOCUMENTS): string | undefined {
+  const spoken = spokenSource(text, documents);
+  return spoken === undefined ? undefined : collapse(spoken);
+}
+
+/**
+ * How much of one message is ever read in as the SOURCE of a row's words (its preview, latest and title). A value the vault
+ * masks is found only in the whole text, so a row's words are masked from this much and only then collapsed and cut short;
+ * the cap bounds memory, and no value of a vault is anywhere near it.
+ */
+export const SOURCE_TEXT_MAX = 20_000;
+
+/** What {@link spokenText} says, with its line breaks kept (trimmed), or `undefined` when it says nothing. */
+function spokenSource(text: string, documents: HandoffDocuments): string | undefined {
   const pointer = handoffPointerPath(text);
   let message = text;
   if (pointer !== undefined) {
@@ -126,8 +139,41 @@ export function spokenText(text: string, documents: HandoffDocuments = NO_DOCUME
     if (document === undefined) return undefined;
     message = handoffDocumentMessage(document);
   }
-  const spoken = collapse(withoutDeliveryWrappers(message));
-  return spoken === '' || spoken.startsWith('<') || NOISE.has(spoken) ? undefined : spoken;
+  const source = withoutDeliveryWrappers(message).trim();
+  const spoken = collapse(source);
+  return spoken === '' || spoken.startsWith('<') || NOISE.has(spoken) ? undefined : source;
+}
+
+/**
+ * The first thing the owner said, LINES KEPT (a heading is still a heading) and cut to `max` characters: what a title is
+ * made from. It is the message {@link spokenMessages} lists first, and it stays inside the daemon; it is never listed.
+ */
+export function firstSpokenBrief(
+  events: readonly TranscriptEvent[],
+  max: number,
+  documents: HandoffDocuments = NO_DOCUMENTS,
+): string | undefined {
+  for (const event of events) {
+    if (!isOwnerMessage(event)) continue;
+    const source = spokenSource(event.text, documents);
+    if (source !== undefined) return source.replaceAll('\r\n', '\n').slice(0, max);
+  }
+  return undefined;
+}
+
+/**
+ * What the owner said, in order, one entry per user message that said something, AS WRITTEN: line breaks kept and not cut
+ * short (to {@link SOURCE_TEXT_MAX}). A row's words are masked from this, never from a collapsed or clipped copy.
+ */
+export function spokenSources(
+  events: readonly TranscriptEvent[],
+  documents: HandoffDocuments = NO_DOCUMENTS,
+): readonly string[] {
+  return events.flatMap(event => {
+    if (!isOwnerMessage(event)) return [];
+    const source = spokenSource(event.text, documents);
+    return source === undefined ? [] : [source.slice(0, SOURCE_TEXT_MAX)];
+  });
 }
 
 /** The words of `text` a title is compared on: lower-case, letters and digits, a plural's `s` dropped. */
@@ -199,14 +245,16 @@ export function spokenMessages(
 
 /**
  * What the owner's messages say AS WRITTEN: a hand-off pointer is its own line, not skipped. For a conversation whose every
- * message is a pointer (a ferret's: its turns arrive as "Read the file …/turn-001.md"), where {@link spokenMessages} finds
- * nothing to describe it by. Reminders, a CLI's own tagged blocks and interruption markers still say nothing.
+ * message is a pointer (a ferret's: its turns arrive as "Read the file …/turn-001.md"), where {@link spokenSources} finds
+ * nothing to describe it by. Reminders, a CLI's own tagged blocks and interruption markers still say nothing. Line breaks are kept
+ * and the text is not cut short (to {@link SOURCE_TEXT_MAX}): a row's words are masked from the whole text first.
  */
-export function writtenMessages(events: readonly TranscriptEvent[]): readonly string[] {
+export function writtenSources(events: readonly TranscriptEvent[]): readonly string[] {
   return events.flatMap(event => {
     if (!isOwnerMessage(event)) return [];
-    const written = collapse(withoutDeliveryWrappers(event.text));
-    return written === '' || written.startsWith('<') || NOISE.has(written) ? [] : [written];
+    const source = withoutDeliveryWrappers(event.text).trim();
+    const written = collapse(source);
+    return written === '' || written.startsWith('<') || NOISE.has(written) ? [] : [source.slice(0, SOURCE_TEXT_MAX)];
   });
 }
 
@@ -244,3 +292,6 @@ export function recentExchanges(
     .slice(from)
     .map(message => ({ role: message.role, text: truncateText(message.text, CONVERSATION_EXCHANGE_TEXT_MAX) }));
 }
+
+/** How much of a first message a title is made from: a title reads its first heading or sentence, never a whole paste. */
+export const TITLE_BRIEF_MAX = 2_000;

@@ -160,6 +160,8 @@ function endedOnPurpose(record: FerretRecord): boolean {
 export interface FerretsPorts {
   /** Resolves once the held ferret records are loaded (a read before then would see no ferret). */
   ready?(): Promise<void>;
+  /** Whether the held records have finished loading AND every one was read whole: a synchronous flag, `false` until the load settles (never waits). Unbound: it is. */
+  wholeRoster?(): boolean;
   now(): Instant;
   /** A fresh, server-minted ferret id; a request never names one (today's `TimeSessionIdFactory`). */
   newId(): FerretId;
@@ -828,6 +830,15 @@ export class FerretsService implements FerretsApi {
     if (resolution.kind === 'ambiguous')
       return { kind: 'ambiguous', message: ambiguousAgentAddressMessage(resolution.name, resolution.candidates) };
     return { kind: 'unknown' };
+  }
+
+  /**
+   * Whether the roster {@link list} answers is the whole truth: the records finished loading AND every one the state lists was
+   * read. It NEVER waits: `false` while the load has not settled (a synchronous flag, `FerretsPorts.wholeRoster`), after a load
+   * that failed, or with a record left out. `list` itself is unchanged.
+   */
+  async rosterComplete(): Promise<boolean> {
+    return this.ports.wholeRoster?.() ?? true;
   }
 
   async list(filter?: FerretFilter): Promise<readonly FerretSummary[]> {

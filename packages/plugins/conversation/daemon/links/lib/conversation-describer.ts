@@ -1,6 +1,5 @@
 import type { Instant } from '@ferretry/std';
 import {
-  CONVERSATION_PREVIEW_MAX,
   LinkIdSchema as ImportConversationIdSchema,
   type LinkableConversation,
   type LinkPreview as ConversationPreview,
@@ -13,14 +12,16 @@ import {
   HANDOFF_READ_MAX_BYTES,
   type HandoffDocuments,
   type HandoffScope,
+  firstSpokenBrief,
+  SOURCE_TEXT_MAX,
   handoffPointers,
   isReadableHandoff,
   isWrapperTitle,
   NO_HANDOFF_SCOPE,
   recentExchanges,
-  spokenMessages,
+  spokenSources,
   wrapperOnlyWords,
-  writtenMessages,
+  writtenSources,
 } from './conversation-text.ts';
 
 /**
@@ -67,6 +68,11 @@ export interface ConversationCandidate {
 /** The listing row a transcript describes, before the listing adds where it was kept. */
 export type DescribedConversation = Omit<LinkableConversation, 'harness' | 'keptBy' | 'keptIn'> & {
   readonly harness: Harness;
+  /**
+   * The first thing the owner said, lines kept (r11 S11): what a title is made from when the CLI named none.
+   * Absent when the conversation is only hand-off pointers. It stays inside the daemon and is never listed.
+   */
+  readonly brief?: string;
 };
 
 /** Describes the conversation one transcript holds; where its read and parse run is the adapter's choice. */
@@ -188,8 +194,8 @@ export function describeConversation(
   const { project } = head;
   const id = conversationIdOf(candidate, head);
   if (id === undefined) return undefined;
-  const said = spokenMessages(events, documents);
-  const spoken = said.length > 0 || !pointersAsWritten ? said : writtenMessages(events);
+  const said = spokenSources(events, documents);
+  const spoken = said.length > 0 || !pointersAsWritten ? said : writtenSources(events);
   const first = spoken[0];
   if (first === undefined) return undefined;
   const names = transcriptNames(candidate.harness, text);
@@ -199,6 +205,7 @@ export function describeConversation(
       : names.generated;
   const name = names.chosen ?? generated;
   const latest = spoken.at(-1);
+  const brief = said.length > 0 ? firstSpokenBrief(events, SOURCE_TEXT_MAX, documents) : undefined;
   let model: string | undefined;
   let last: string | undefined;
   for (const event of events) {
@@ -213,8 +220,10 @@ export function describeConversation(
     harness: candidate.harness,
     project,
     ...(name === undefined ? {} : { name }),
-    preview: first.slice(0, CONVERSATION_PREVIEW_MAX),
-    ...(latest === undefined || latest === first ? {} : { latest: latest.slice(0, CONVERSATION_PREVIEW_MAX) }),
+    ...(brief === undefined ? {} : { brief }),
+    // The words AS WRITTEN (lines kept, not cut to a preview): the index masks the secrets in them first, then collapses and cuts.
+    preview: first,
+    ...(latest === undefined || latest === first ? {} : { latest }),
     lastActivityAt: new Date(Number.isNaN(parsedLast) ? modifiedAtMs : parsedLast).toISOString() as Instant,
     turns: spoken.length,
     ...(partial ? { turnsAtLeast: true as const } : {}),

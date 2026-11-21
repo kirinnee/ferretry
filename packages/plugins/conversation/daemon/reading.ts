@@ -8,6 +8,7 @@ import { buildAttachments } from './attachments/index.ts';
 import { AttachmentError } from './attachments/lib/index.ts';
 import { buildLinks, keepInSyncFrom } from './links/index.ts';
 import type { FerretConversationNames, IndexSource } from './links/index.ts';
+import { ferretConversationNames, startTitleSweep, titleOffer, titleWatch } from './links/lib/ferret-names.ts';
 import { indexSourcesOf } from './links/lib/history-groups.ts';
 import type { LinkKeeper } from './links/lib/service.ts';
 import type { TranscriptOpener } from './reader/adapters/file-reads.ts';
@@ -193,19 +194,7 @@ export function buildReading(deps: {
     indexSourcesOf((await ferrets.historySources?.()) ?? [], harnessFamily);
   // Which ferret runs each harness conversation, and its name now (Ferrets' registry, not its files): a rename shows on the
   // next listing.
-  const ferretNames = async (): Promise<FerretConversationNames> =>
-    new Map(
-      (await ferrets.list()).flatMap(summary =>
-        summary.harnessConversation === undefined
-          ? []
-          : [
-              [
-                `${summary.harness}:${summary.harnessConversation}`,
-                { ferret: summary.id, name: summary.name },
-              ] as const,
-            ],
-      ),
-    );
+  const ferretNames = async (): Promise<FerretConversationNames> => ferretConversationNames(await ferrets.list());
   const keeper: LinkKeeper = {
     keep: async () => ({ ok: false, error: { code: 'unavailable', reason: KEEP_PENDING } }),
   };
@@ -213,6 +202,13 @@ export function buildReading(deps: {
     state: kernel.state,
     sources,
     ferretNames,
+    // A refresh clears a ferret's name or an owner's title only from a roster Ferrets says is whole (loaded, every record read);
+    // a Ferrets that cannot say is never taken as complete.
+    rosterComplete: async () => (await ferrets.rosterComplete?.()) ?? false,
+    // Every title is scrubbed with the vault's values before it is stored or offered to a ferret (one read per batch).
+    scrubbing: async work => await kernel.redaction.read(scope => work(text => scope.text(text))),
+    // r11 S11: a ferret's conversation title is offered to Ferrets (in-process; it keeps an owner's title).
+    adoptTitle: titleOffer(ferrets),
     importer: async (harness, input) =>
       (await ferrets.importConversation?.(harness as HarnessKey, input)) ??
       err({ reason: 'No harness is offering to keep a copy of that conversation.' }),
@@ -245,6 +241,14 @@ export function buildReading(deps: {
   const cancelWarm = kernel.clock.after(milliseconds(WORK_SEARCH_WARM_DELAY_MS), () => search.service.warm());
   // The conversation index is read a little after start, in the background, so the first link listing finds most of it done.
   const cancelIndexWarm = kernel.clock.after(milliseconds(INDEX_WARM_DELAY_MS), () => void links.index.refresh());
+  // A title the CLI writes later (Claude Code's `ai-title` comes after the first exchange) reaches the drawer without anyone opening the
+  // Conversations list: while a ferret can still take one, the index is kept at its own freshness bound.
+  const cancelTitleSweep = startTitleSweep({
+    every: (intervalMs, tick) => kernel.clock.every(milliseconds(intervalMs), tick),
+    watching: async () => titleWatch(await ferrets.list()),
+    refresh: async only => await links.index.refreshConversations(only),
+    warn: message => kernel.log.warn(message),
+  });
 
   /** The ferret must exist, as the routes' `known` requires; the same 404 for every port member. */
   const knownFerret = async (ferret: FerretId): Promise<void> => {
@@ -357,6 +361,7 @@ export function buildReading(deps: {
     stop: () => {
       cancelWarm();
       cancelIndexWarm();
+      cancelTitleSweep();
       // Every transcript handle the reader opened is closed with the daemon (a harness would close an idle one in a
       // minute; the one consumer does not wait for that).
       void reader.close();

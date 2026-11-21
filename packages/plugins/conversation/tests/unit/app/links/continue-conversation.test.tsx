@@ -150,7 +150,7 @@ describe('ContinueConversation over all conversations', () => {
     await open({ list: () => listing([conversation('shop-cart', { name: 'Cart total bugfix', latest: 'ship it' })]) });
     const row = '[data-continue-row="shop-cart"]';
     expect(text(`${row} [data-conversation-name]`)).toBe('Cart total bugfix');
-    expect(text(`${row} [data-conversation-first]`)).toBe('Fix the shop-cart page');
+    expect(view?.container.querySelectorAll(`${row} [data-conversation-first]`)).toHaveLength(0);
   });
 
   it('lists Ferretry’s own conversations: first message and age, the latest message, then its marks', async () => {
@@ -170,9 +170,7 @@ describe('ContinueConversation over all conversations', () => {
     expect(view?.container.querySelector('[data-continue-row="api-codex"] [data-conversation-latest]')).toBeNull();
     expect(text('[data-continue-row="api-codex"] [data-conversation-harness="codex"]')).toBe('Codex');
     expect(text('[data-continue-row="api-codex"]')).not.toContain('Sonnet');
-    expect(text('[data-continue-row="notes-kept"] [data-conversation-ferret="notes-ferret"]')).toBe(
-      'Ferret notes-ferret',
-    );
+    expect(text('[data-continue-row="notes-kept"] [data-conversation-ferret="notes-ferret"]')).toBe('Ferret');
   });
 
   it('searches on the daemon with the words, the CLI and the date', async () => {
@@ -478,11 +476,13 @@ describe('ContinueConversation marks and the Ferretry filter', () => {
     });
     const row = '[data-continue-row="notes-kept"]';
     expect(text(`${row} [data-conversation-name]`)).toBe('Notes cleanup');
-    expect(text(`${row} [data-conversation-first]`)).toBe('Fix the notes-kept page');
-    expect(text(`${row} [data-conversation-ferret="notes-ferret"]`)).toBe('Ferret Mika · stopped');
+    expect(view?.container.querySelectorAll(`${row} [data-conversation-first]`)).toHaveLength(0);
+    // "Ferret" and its state: the callsign is the tooltip, never a word of the row.
+    expect(text(`${row} [data-conversation-ferret="notes-ferret"]`)).toBe('Ferret · stopped');
+    expect(find(`${row} [data-conversation-ferret="notes-ferret"]`).getAttribute('title')).toBe('Mika');
     expect(text(`${row} [data-conversation-harness="claude-code"]`)).toBe('Claude');
     expect(find(`${row} .fy-convo-avatar__dot`).getAttribute('data-state')).toBe('stopped');
-    expect(text(`${row} .fy-convo-avatar__initial`)).toBe('M');
+    expect(text(`${row} .fy-convo-avatar__initial`)).toBe('');
   });
 
   it('lists the stopped ferrets the listing does not describe in every source that fits', async () => {
@@ -491,7 +491,7 @@ describe('ContinueConversation marks and the Ferretry filter', () => {
     const bare = '[data-continue-ferret="api-ferret"]';
     expect(text(`${bare} .fy-convo-title`)).toBe('Api');
     expect(text(`${bare} [data-conversation-age]`)).toBe('1d ago');
-    expect(text(`${bare} [data-conversation-ferret="api-ferret"]`)).toBe('Ferret Api · stopped');
+    expect(text(`${bare} [data-conversation-ferret="api-ferret"]`)).toBe('Ferret · stopped');
     expect(text(`${bare} [data-conversation-harness="codex"]`)).toBe('Codex');
     expect(find(`${bare} .fy-convo-avatar__dot`).getAttribute('data-state')).toBe('stopped');
     await click('[data-segmented="source"] [data-segment="claude-code"]');

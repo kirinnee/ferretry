@@ -125,6 +125,7 @@ test('through the port, the service’s own members are not there: revokeToken, 
       'repointRuntime',
       'resolve',
       'resume',
+      'rosterComplete',
       'runtimeRecords',
       'setCompactAt',
       'sitrep',
@@ -234,4 +235,26 @@ test('a shared copy delegates to its harness and reports unavailable, unsupporte
   expect(await copy('codex', input)).toEqual({ ok: false, error: { reason: 'the transcript is absent' } });
   expect(await copy('claude-code', input)).toEqual({ ok: true, value: undefined });
   expect(seen).toEqual([input]);
+});
+
+test('rosterComplete never waits: false until the records have loaded whole, true only then; list never waits (r11 S11 round 8)', async () => {
+  const f = additivesFixture();
+  const ports = f.ports as { ready?: () => Promise<void>; wholeRoster?: () => boolean };
+  const port = ferretsPort(f.service, 'conversation');
+  // Unbound: nothing to wait for, nothing missing.
+  expect(await port.rosterComplete?.()).toBe(true);
+
+  // The registry is still loading (a flag the host flips once its load settles; `ready` is held and never consulted).
+  let loaded = false;
+  ports.ready = () => new Promise<void>(() => undefined);
+  ports.wholeRoster = () => loaded;
+  expect(await port.rosterComplete?.()).toBe(false);
+  expect(await port.list()).toBeDefined();
+  loaded = true;
+  expect(await port.rosterComplete?.()).toBe(true);
+
+  // A load that failed never flips it; a load that left a record unread answers false.
+  loaded = false;
+  ports.ready = async () => Promise.reject(new Error('the records could not be listed'));
+  expect(await port.rosterComplete?.()).toBe(false);
 });

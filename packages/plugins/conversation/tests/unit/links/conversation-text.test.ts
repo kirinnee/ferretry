@@ -9,6 +9,7 @@ import { CONVERSATION_EXCHANGE_TEXT_MAX } from '../../../contract/index.ts';
 import {
   handoffDocumentMessage,
   handoffPointerPath,
+  firstSpokenBrief,
   handoffPointers,
   isReadableHandoff,
   isWrapperTitle,
@@ -288,5 +289,23 @@ describe('a harness’s injected blocks', () => {
     should(spokenText('# AGENTS.md instructions for my repo: what should they say?')).equal(
       '# AGENTS.md instructions for my repo: what should they say?',
     );
+  });
+});
+
+describe('the first thing the owner said, in full (r11 S11 CI coverage)', () => {
+  it('should be the first message that said something, with its line breaks, cut to the limit', () => {
+    // Act & Assert
+    should(
+      firstSpokenBrief([assistant('Hi'), user('[Request interrupted by user]'), user('Fix\r\nthe cart')], 100),
+    ).equal('Fix\nthe cart');
+    should(firstSpokenBrief([user('Fix the cart please')], 7)).equal('Fix the');
+  });
+
+  it('should be nothing when no message said anything', () => {
+    // Act & Assert
+    should(firstSpokenBrief([], 100)).be.undefined();
+    should(
+      firstSpokenBrief([assistant('On it.'), user('<system-reminder>only this</system-reminder>'), user('  ')], 100),
+    ).be.undefined();
   });
 });

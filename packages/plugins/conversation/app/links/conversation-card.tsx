@@ -2,11 +2,12 @@
  * ONE conversation row, shared by every links list, so a conversation
  * reads the same wherever it is listed:
  *
- *   avatar   the ferret's initial (with a dot saying whether it is live) when a ferret keeps it, else the
- *            CLI's own mark — the row's colour, readable before any word is
- *   title    what it is about: the conversation's name, else the first real thing the owner said
- *   preview  the first message under a name, or the latest one under an unnamed first message
- *   meta     coloured marks — the ferret, the CLI — then the folder (or "scratch"), turns and model
+ *   avatar   a paw (with a dot saying whether the ferret is live) when a ferret keeps it, else the CLI's own
+ *            mark — the row's colour, readable before any word is. No callsign anywhere on the row.
+ *   title    what it is about: a short task-like title (the owner's, the CLI's, else one made from the first
+ *            exchange); only a conversation with no title at all is headed by its first message
+ *   preview  the latest message, under an unnamed first message only
+ *   meta     coloured marks — "Ferret" and its state, the CLI — then the folder (or "scratch"), turns and model
  *
  * Every colour comes from a source token (`--fy-src-*` in `session-screens.css`) mixed with the theme's
  * own ink and surface, so each theme family and mode keeps its contrast.
@@ -52,20 +53,22 @@ function SourceBadge({
   source,
   children,
   data,
+  title,
 }: {
   readonly source: string;
   readonly children: ReactNode;
   readonly data?: Readonly<Record<`data-${string}`, string>>;
+  readonly title?: string;
 }) {
   return (
-    <span className="fy-src-badge" data-source={source} {...data}>
+    <span className="fy-src-badge" data-source={source} title={title} {...data}>
       <SourceIcon source={source} />
       <span className="min-w-0 truncate">{children}</span>
     </span>
   );
 }
 
-/** The row's leading mark: a ferret's initial with its state dot, or the CLI's icon. */
+/** The row's leading mark: a ferret's paw with its state dot (no initial: the callsign is not shown), or the CLI's icon. */
 function Avatar({ harness, ferret }: { readonly harness: string; readonly ferret: FerretMark | undefined }) {
   if (ferret === undefined)
     return (
@@ -76,18 +79,19 @@ function Avatar({ harness, ferret }: { readonly harness: string; readonly ferret
   const state = ferretState(ferret.status);
   return (
     <span className="fy-convo-avatar" data-source="ferretry" aria-hidden="true">
-      <span className="fy-convo-avatar__initial">{ferret.name.slice(0, 1).toUpperCase()}</span>
+      <span className="fy-convo-avatar__initial">
+        <SourceIcon source="ferretry" size={16} />
+      </span>
       {state === undefined ? null : <span className="fy-convo-avatar__dot" data-state={state} />}
     </span>
   );
 }
 
-/** The ferret's tag: its name, and its status when the app has read it. */
+/** The ferret's tag: "Ferret" and its status when the app has read it. Its callsign is the tooltip, never a word of the row. */
 function FerretBadge({ ferret }: { readonly ferret: FerretMark }) {
   return (
-    <SourceBadge source="ferretry" data={{ 'data-conversation-ferret': ferret.id }}>
-      <span className="sr-only">Ferret </span>
-      {ferret.name}
+    <SourceBadge source="ferretry" title={ferret.name} data={{ 'data-conversation-ferret': ferret.id }}>
+      Ferret
       {ferret.status === undefined ? null : (
         <span className="fy-src-badge__state"> · {statusLabel(ferret.status)}</span>
       )}
@@ -151,9 +155,8 @@ function Card({
 }
 
 /**
- * A conversation: headed by its name (else its first real message), the first message under a name or
- * the latest one under an unnamed first message, then the ferret that keeps it, its CLI, folder, turns
- * and model.
+ * A conversation: headed by its title (else its first real message), the latest message only under an
+ * unnamed first message, then the ferret that keeps it, its CLI, folder, turns and model.
  */
 export function ConversationLines({
   row,
@@ -165,7 +168,7 @@ export function ConversationLines({
   /** The ferret that keeps it, when one does. */
   readonly ferret?: FerretMark;
 }) {
-  const { headline, secondary, named } = conversationHeadline(row);
+  const { headline, named } = conversationHeadline(row);
   const turns = `${row.turns}${row.turnsAtLeast === true ? '+' : ''} ${row.turns === 1 ? 'turn' : 'turns'}`;
   return (
     <Card
@@ -175,19 +178,12 @@ export function ConversationLines({
       named={named}
       age={relativeTime(row.lastActivityAt, now)}
       lines={
-        <>
-          {secondary === undefined ? null : (
-            <span className="fy-convo-line" title={secondary} data-conversation-first="">
-              {secondary}
-            </span>
-          )}
-          {named || row.latest === undefined ? null : (
-            <span className="fy-convo-line" title={row.latest} data-conversation-latest="">
-              <span className="sr-only">Latest: </span>
-              {row.latest}
-            </span>
-          )}
-        </>
+        named || row.latest === undefined ? null : (
+          <span className="fy-convo-line" title={row.latest} data-conversation-latest="">
+            <span className="sr-only">Latest: </span>
+            {row.latest}
+          </span>
+        )
       }
       meta={
         <>

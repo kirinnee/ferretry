@@ -98,7 +98,7 @@ describe('links', () => {
       preview: 'please add a login page',
       turns: 1,
       keptIn: 'computer',
-      name: 'please add a login page',
+      name: 'Add a Login Page',
     });
   });
 
@@ -181,7 +181,7 @@ describe('links', () => {
       conversations: [{ id: ID, start: false }],
     });
     expect(result.kept).toEqual([
-      { id: ID, ferret: 'login-page' as FerretId, name: 'please add a login page', state: 'stopped' },
+      { id: ID, ferret: 'login-page' as FerretId, name: 'Add a Login Page', state: 'stopped' },
     ]);
     expect(stored.links).toEqual([
       {
@@ -374,6 +374,11 @@ describe('links', () => {
     await index.refresh();
     const service = new LinkService({ ...needs, index });
     const listing = await service.list({ q: 'scout' });
-    expect(listing.conversations[0]).toMatchObject({ name: 'Login scout', ferretName: 'Login scout', keptBy: 'scout' });
+    // The ferret's callsign finds the row; it never names it (a title made from the first message does).
+    expect(listing.conversations[0]).toMatchObject({
+      name: 'Add a Login Page',
+      ferretName: 'Login scout',
+      keptBy: 'scout',
+    });
   });
 });

@@ -1,6 +1,5 @@
-import { CONVERSATION_NAME_MAX } from '../../../contract/index.ts';
 import type { TranscriptHarness as Harness } from '../../reader/lib/transcript/types.ts';
-import { truncateText } from './conversation-text.ts';
+import { SOURCE_TEXT_MAX } from './conversation-text.ts';
 
 /**
  * The NAME a CLI gave a conversation, read out of its transcript with no parser: a name is a record
@@ -14,13 +13,14 @@ import { truncateText } from './conversation-text.ts';
  *                wins. (`session_index.jsonl` holds the same names; see {@link codexIndexNames}.)
  */
 
-const collapse = (text: string): string => text.replace(/\s+/gu, ' ').trim();
-
-/** A record's name, cleaned and cut, or `undefined` when it is not a usable string. */
+/**
+ * A record's name as written (lines kept, not cut short), or `undefined` when it is not a usable string. A name is masked for
+ * secrets (`cleanTitle`) before it is collapsed to one line and cut, so a value spanning a line or the cut is still found.
+ */
 const cleaned = (value: unknown): string | undefined => {
   if (typeof value !== 'string') return undefined;
-  const name = collapse(value);
-  return name === '' ? undefined : truncateText(name, CONVERSATION_NAME_MAX);
+  const name = value.slice(0, SOURCE_TEXT_MAX).trim();
+  return name === '' ? undefined : name;
 };
 
 /**
