@@ -13,7 +13,8 @@ describe('transcriptNames for Claude', () => {
       { type: 'custom-title', customTitle: '   ' },
       { type: 'ai-title', aiTitle: 42 },
     );
-    expect(transcriptNames('claude', text)).toEqual({ chosen: 'zoe', generated: 'A summary of it' });
+    // A name is read as written (lines kept): the index masks its secrets, then makes it one line and cuts it.
+    expect(transcriptNames('claude', text)).toEqual({ chosen: 'zoe', generated: 'A  summary\nof it' });
   });
 
   test('skips blank lines, lines that are not JSON, and values that are not records', () => {

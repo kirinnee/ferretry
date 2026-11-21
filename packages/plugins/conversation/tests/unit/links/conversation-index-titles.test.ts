@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { LinkListingSchema } from '../../../contract/index.ts';
 import {
   ConversationIndex,
   type FerretConversationNames,
@@ -13,6 +14,7 @@ import { claudeRecord, codexRollout, MemoryHistory, memorySqlite, PARSERS } from
  */
 
 const A = '3b1a4a52-0000-4000-8000-00000000000a';
+const B = '3b1a4a52-0000-4000-8000-00000000000b';
 const CODEX = '5c1e0e3a-0000-4000-8000-0000000000aa';
 const pathOf = (id: string) => `projects/-work-app/${id}.jsonl`;
 const AT = '2026-02-01T09:00:00.000Z';
@@ -351,5 +353,133 @@ describe('a ferret’s conversation title is offered to Ferrets', () => {
       globalThis.fetch = original;
     }
     expect(calls).toEqual([]);
+  });
+});
+
+describe('what is stored and offered is masked from the WHOLE message, then collapsed, then cut (review SEC 2, review 1)', () => {
+  const PEM = 'first pem line\nsecond pem line\nthird pem line';
+  const FRUIT = 'zebraMangoPapayaKiwi';
+  const vaultOf = vault({ ...VALUES, PEM, FRUIT });
+  const SECRET_PARTS = ['first pem', 'second pem', 'third pem', 'zebra', 'Mango', 'Papaya', 'Kiwi', 'hunter2'];
+  const leaks = (text: string): string[] => SECRET_PARTS.filter(part => text.includes(part));
+
+  test('a value across several lines never reaches the stored row, the wire row or the title a ferret is offered', async () => {
+    const { index, owner, stored, offered } = setup({ scrubbing: vaultOf, names: () => ferretOf() });
+    owner.set(pathOf(A), talk(`Fix the signing step. Use this cert:\n${PEM}\nthen push`, AT, `ok, used\n${PEM}\nfine`));
+    await index.refresh();
+    const wire = JSON.stringify(index.query().conversations);
+    expect(leaks(stored())).toEqual([]);
+    expect(leaks(wire)).toEqual([]);
+    expect(leaks(JSON.stringify(offered))).toEqual([]);
+    expect(index.query().conversations[0]?.row.preview).toContain('Fix the signing step');
+  });
+
+  test('a value that crosses the 120-character cut leaves no prefix, in the preview or in the latest', async () => {
+    const { index, owner, stored } = setup({ scrubbing: vaultOf });
+    owner.set(
+      pathOf(A),
+      `${talk(`${'a'.repeat(111)} ${FRUIT} the end`)}${talk(`${'b'.repeat(112)} ${FRUIT}`, '2026-02-01T09:20:00.000Z')}`,
+    );
+    await index.refresh();
+    const row = index.query().conversations[0]?.row;
+    expect(row?.preview.length).toBeLessThanOrEqual(120);
+    expect(row?.latest?.length ?? 0).toBeLessThanOrEqual(120);
+    expect(leaks(stored())).toEqual([]);
+    expect(leaks(JSON.stringify(index.query().conversations))).toEqual([]);
+  });
+
+  test('the append path masks a value that is on several lines or across the cut, in the latest and in the stored row', async () => {
+    const { index, owner, stored } = setup({ scrubbing: vaultOf });
+    owner.set(pathOf(A), talk('please fix the login page'));
+    await index.refresh();
+    owner.append(pathOf(A), talk(`also note:\n${PEM}\nplease`, '2026-02-01T09:30:00.000Z'));
+    await index.refresh();
+    expect(index.query().conversations[0]?.row.latest).toBe('also note: please');
+    owner.append(pathOf(A), talk(`${'c'.repeat(113)} ${FRUIT}`, '2026-02-01T09:40:00.000Z'));
+    await index.refresh();
+    expect(leaks(stored())).toEqual([]);
+    expect(leaks(JSON.stringify(index.query().conversations))).toEqual([]);
+  });
+
+  test('a CLI title on several lines, or across the cut, is masked whole before it is stored or offered', async () => {
+    const { index, owner, stored, offered } = setup({ scrubbing: vaultOf, names: () => ferretOf() });
+    owner.set(
+      pathOf(A),
+      talk('hello') + rec({ type: 'ai-title', aiTitle: `Sign with\n${PEM}\nand ${'t'.repeat(90)} ${FRUIT}` }),
+    );
+    await index.refresh();
+    expect(leaks(stored())).toEqual([]);
+    expect(leaks(JSON.stringify(index.query().conversations))).toEqual([]);
+    expect(leaks(JSON.stringify(offered))).toEqual([]);
+  });
+
+  test('a title made from the first message of 2000+ characters, with a value across the brief cut, leaks no prefix', async () => {
+    const { index, owner, stored, offered } = setup({ scrubbing: vaultOf, names: () => ferretOf() });
+    owner.set(pathOf(A), talk(`Fix the login redirect.\n\n${'x '.repeat(983)}${FRUIT} end`));
+    await index.refresh();
+    expect(leaks(stored())).toEqual([]);
+    expect(leaks(JSON.stringify(offered))).toEqual([]);
+  });
+});
+
+describe('a credential named in a sentence or a URL is not stored, shown or offered (review SEC 1)', () => {
+  const cases: readonly (readonly [string, string])[] = [
+    ['set API_KEY = q8w7e6r5t4 then deploy', 'q8w7e6r5t4'],
+    ['password: hunter22x then log in', 'hunter22x'],
+    ['the password is zxcvb12 so fix the login', 'zxcvb12'],
+    ['fetch https://example.test/api?token=s3cretpw now', 's3cretpw'],
+    ['fetch https://example.test/api?access_token=abcd1234 now', 'abcd1234'],
+  ];
+
+  for (const [message, secret] of cases) {
+    test(`“${message}”`, async () => {
+      const { index, owner, stored, offered } = setup({ scrubbing: 'none', names: () => ferretOf() });
+      owner.set(pathOf(A), talk(message));
+      await index.refresh();
+      expect(stored()).not.toContain(secret);
+      expect(JSON.stringify(index.query().conversations)).not.toContain(secret);
+      expect(JSON.stringify(offered)).not.toContain(secret);
+    });
+  }
+
+  test('a title that comes out empty falls back to the SCRUBBED opening, never the raw message', async () => {
+    const { index, owner, stored } = setup({ scrubbing: 'none' });
+    owner.set(pathOf(A), talk('password: hunter22x'));
+    await index.refresh();
+    const row = index.query().conversations[0]?.row;
+    expect(stored()).not.toContain('hunter22x');
+    expect((row?.name ?? '').length).toBeGreaterThan(0);
+    expect(row?.name ?? '').not.toContain('hunter22x');
+  });
+});
+
+describe('ordinary text is shown as written, and the wire never gets a row it refuses (review 2)', () => {
+  test('a preview with compatibility characters keeps its glyphs and stays within 120', async () => {
+    const { index, owner } = setup();
+    const written = `ﬁx the ｌｏｇｉｎ ﬂow ${'ﬁ'.repeat(100)} and more words after that`;
+    owner.set(pathOf(A), talk(written));
+    await index.refresh();
+    const row = index.query().conversations[0]?.row;
+    expect(row?.preview.startsWith('ﬁx the ｌｏｇｉｎ ﬂow ﬁﬁ')).toBe(true);
+    expect(row?.preview.length).toBeLessThanOrEqual(120);
+  });
+
+  test('a message that is only a secret leaves no empty latest, no empty name and no unlisted row: the WHOLE listing parses', async () => {
+    const { index, owner } = setup({ scrubbing: 'none', names: () => ferretOf({ name: '' }) });
+    owner.set(pathOf(A), talk(`${GHP}`, AT, 'fine') + talk(GHP, '2026-02-01T09:10:00.000Z'));
+    owner.set(pathOf(B), talk('Fix the flaky login test'));
+    await index.refresh();
+    const answer = index.query();
+    expect(answer.conversations.length).toBe(2);
+    const listing = LinkListingSchema.parse({
+      conversations: answer.conversations.map(entry => entry.row),
+      matched: answer.matched,
+      skipped: 0,
+    });
+    for (const row of listing.conversations) {
+      expect(row.name?.length).toBeGreaterThan(0);
+      expect(row.latest === undefined || row.latest.length > 0).toBe(true);
+    }
+    expect(JSON.stringify(listing)).not.toContain(GHP);
   });
 });

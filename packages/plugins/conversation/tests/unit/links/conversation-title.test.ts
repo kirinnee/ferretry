@@ -5,8 +5,9 @@ import {
   dropCredentialShapes,
   fileTitle,
   looksLikeCredential,
+  maskText,
   type ScrubText,
-  scrubTitleText,
+  scrubShown,
 } from '../../../daemon/links/lib/conversation-title.ts';
 
 /**
@@ -92,7 +93,7 @@ describe('the credential shapes are dropped with no vault at all', () => {
     expect(deriveTitle('Why does curl fail? Authorization: Bearer abcdef0123456789xyz', NO_VAULT)).not.toContain(
       'abcdef0123456789xyz',
     );
-    expect(scrubTitleText('send Basic dXNlcjpwYXNzd29yZA== now', NO_VAULT)).not.toContain('dXNlcjpwYXNzd29yZA');
+    expect(maskText('send Basic dXNlcjpwYXNzd29yZA== now', NO_VAULT)).not.toContain('dXNlcjpwYXNzd29yZA');
   });
 
   test('ordinary words are never taken for a credential', () => {
@@ -158,7 +159,7 @@ describe('the vault’s own values are masked, through a fake vault', () => {
     const message = 'Please use this cert:\nline one of the secret\nline two of the secret\nto sign the build';
     const title = deriveTitle(message, vault);
     expect(title).not.toMatch(/secret|line one|line two/iu);
-    expect(scrubTitleText(message, vault)).not.toContain('line one of the secret');
+    expect(maskText(message, vault)).not.toContain('line one of the secret');
   });
 
   test('a unicode value is masked', () => {
@@ -202,19 +203,19 @@ describe('text over several lines', () => {
     const message = `# Rotate the billing keys\n\nUse this token:\n${GH}\n\nThen redeploy.`;
     const title = deriveTitle(message, NO_VAULT);
     expect(title).toBe('Rotate the Billing Keys');
-    expect(scrubTitleText(message, NO_VAULT)).not.toContain(GH);
+    expect(maskText(message, NO_VAULT)).not.toContain(GH);
   });
 
   test('a private key block is dropped from its BEGIN line to its END line', () => {
     const key = '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAxyz\nabc123def456\n-----END RSA PRIVATE KEY-----';
-    const out = scrubTitleText(`Fix the signing step\n${key}\nthen push`, NO_VAULT);
+    const out = maskText(`Fix the signing step\n${key}\nthen push`, NO_VAULT);
     expect(out).not.toMatch(/MIIEow|abc123def456|BEGIN|PRIVATE KEY/u);
     expect(out).toContain('Fix the signing step');
     expect(out).toContain('then push');
   });
 
   test('a private key block whose END was cut off by the length limit is dropped to the end of the text', () => {
-    const out = scrubTitleText('Fix signing\n-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC', NO_VAULT);
+    const out = maskText('Fix signing\n-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC', NO_VAULT);
     expect(out).not.toMatch(/MIIEvQ|BEGIN/u);
     expect(out).toContain('Fix signing');
   });
@@ -247,14 +248,14 @@ describe('unicode', () => {
   test('full-width Latin spelling a token is the token', () => {
     const wide = 'ｇｈｐ＿ａＢ３ｄＥ６ｇＨ９ｊＫ２ｍＮ５ｐＱ８ｓＴ１ｖＷ４ｙＺ７ｂＣ０ｄＦ３ｈＪ６';
     expect(deriveTitle(`Fix login ${wide} now`, NO_VAULT)).toBe('Fix Login Now');
-    expect(scrubTitleText(wide, NO_VAULT).trim()).toBe('');
+    expect(maskText(wide, NO_VAULT).trim()).toBe('');
   });
 
   test('zero-width and direction characters inside a token do not hide it', () => {
     const token = 'ghp_aB3dE6gH​9jK2mN5pQ8sT1vW4⁠yZ7bC0dF3hJ6';
-    expect(scrubTitleText(`key ${token}`, NO_VAULT).trim()).toBe('key');
+    expect(maskText(`key ${token}`, NO_VAULT).trim()).toBe('key');
     const reversed = `‮gnirts‬ ${TOKEN_SHAPES.npm}`;
-    expect(scrubTitleText(reversed, NO_VAULT)).not.toContain('npm_');
+    expect(maskText(reversed, NO_VAULT)).not.toContain('npm_');
   });
 
   test('titles in other scripts, emoji and accents survive', () => {
@@ -303,5 +304,99 @@ describe('what the title is made from', () => {
     expect(fileTitle({ firstMessage: '```\n```' }, NO_VAULT)).toBeNull();
     expect(fileTitle({ firstMessage: '   ' }, NO_VAULT)).toBeNull();
     expect(fileTitle({}, NO_VAULT)).toBeNull();
+  });
+});
+
+describe('a credential named in a sentence or a URL is masked (review SEC 1)', () => {
+  const cases: readonly (readonly [string, string])[] = [
+    ['set API_KEY = q8w7e6r5t4 then deploy', 'q8w7e6r5t4'],
+    ['password: hunter22x please log in', 'hunter22x'],
+    ['the password is zxcvb12 now what', 'zxcvb12'],
+    ['call https://example.test/api?token=s3cretpw to start', 's3cretpw'],
+    ['fetch https://example.test/api?access_token=abcd1234 again', 'abcd1234'],
+    ['the API key is k9x8c7v6b5 for prod', 'k9x8c7v6b5'],
+    ['export GITHUB_TOKEN= gh0stval99 first', 'gh0stval99'],
+  ];
+
+  for (const [text, secret] of cases) {
+    test(`“${text}” keeps ${secret} out of the shown line, the title and the preview`, () => {
+      expect(scrubShown(text, NO_VAULT)).not.toContain(secret);
+      expect(cleanTitle(text, NO_VAULT) ?? '').not.toContain(secret);
+      expect(deriveTitle(text, NO_VAULT) ?? '').not.toContain(secret);
+      expect(maskText(text, NO_VAULT)).not.toContain(secret);
+    });
+  }
+
+  test('only the value goes: the words around it stay as the owner wrote them', () => {
+    expect(scrubShown('set API_KEY = q8w7e6r5t4 then deploy', NO_VAULT)).toBe('set API_KEY = then deploy');
+    expect(scrubShown('Mot de passe: déjà vu', NO_VAULT)).toBe('Mot de passe: déjà vu');
+  });
+
+  test('ordinary words that merely sit near a name are not masked', () => {
+    expect(scrubShown('the auth page looks fine', NO_VAULT)).toBe('the auth page looks fine');
+    expect(scrubShown('token refresh is slow', NO_VAULT)).toBe('token refresh is slow');
+  });
+});
+
+describe('masking comes first: mask the whole text, then one line, then the cut (review SEC 2, review 1)', () => {
+  const VALUE = 'zebraMangoPapayaKiwi';
+  const vault = fakeVault({ FRUIT: VALUE, PEM: 'first pem line\nsecond pem line' });
+
+  test('a value that crosses the 120-character cut leaves no prefix of itself', () => {
+    const text = `${'a'.repeat(110)} ${VALUE} tail`;
+    const shown = scrubShown(text, vault);
+    expect(shown.length).toBeLessThanOrEqual(120);
+    expect(shown).not.toContain('zebra');
+    expect(shown).not.toContain('Mango');
+    expect(shown).not.toMatch(/redacted|FRUIT/iu);
+  });
+
+  test('a value that crosses the 2000-character brief cut leaves no prefix of itself', () => {
+    const text = `Fix the login redirect. ${'x'.repeat(1_960)} ${VALUE}`;
+    expect(deriveTitle(text, vault) ?? '').not.toContain('zebra');
+    expect(maskText(text, vault)).not.toContain('zebra');
+  });
+
+  test('a value on several lines is masked whole, then the lines become one', () => {
+    const shown = scrubShown('use this:\nfirst pem line\nsecond pem line\nthanks', vault);
+    expect(shown).toBe('use this: thanks');
+    expect(scrubShown('use this: first pem line second pem line', vault)).toBe(
+      'use this: first pem line second pem line',
+    );
+  });
+
+  test('a name cut at the cut is masked as well', () => {
+    const name = `${'n'.repeat(100)} ${VALUE} end`;
+    expect(cleanTitle(name, vault) ?? '').not.toContain('zebra');
+    expect((cleanTitle(name, vault) ?? '').length).toBeLessThanOrEqual(120);
+  });
+});
+
+describe('ordinary text keeps its glyphs and its length (review 2)', () => {
+  test('a message of compatibility characters is shown as written, not normalised', () => {
+    // NFKC would turn each ﬁ into two letters, the ligature, the full-width digits and the ellipsis into more characters.
+    const written = 'ﬁx the ｌｏｇｉｎ ﬂow … ① ½';
+    expect(scrubShown(written, NO_VAULT)).toBe(written);
+    expect(cleanTitle(written, NO_VAULT)).toBe(written);
+  });
+
+  test('a snippet of exactly 120 characters is never longer once shown', () => {
+    const written = 'ﬁ'.repeat(120);
+    const shown = scrubShown(written, NO_VAULT);
+    expect(shown).toBe(written);
+    expect(shown.length).toBe(120);
+    expect(scrubShown(`${written} more`, NO_VAULT).length).toBeLessThanOrEqual(120);
+    expect(scrubShown('😀'.repeat(100), NO_VAULT).length).toBeLessThanOrEqual(120);
+  });
+
+  test('a cut never splits an emoji in two', () => {
+    const shown = scrubShown(`${'a'.repeat(118)}😀😀😀`, NO_VAULT);
+    expect(shown.length).toBeLessThanOrEqual(120);
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/u.test(shown)).toBe(false);
+  });
+
+  test('a text that is all secret shows as nothing, never as a mark', () => {
+    expect(scrubShown(TOKEN_SHAPES['GitHub classic'] as string, NO_VAULT)).toBe('');
+    expect(scrubShown(`[redacted:X] ${'$'}{secret:Y}`, NO_VAULT)).toBe('');
   });
 });

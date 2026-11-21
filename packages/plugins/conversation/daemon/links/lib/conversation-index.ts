@@ -7,12 +7,12 @@ import {
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { SqliteHandle } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
-import { CONVERSATION_NAME_MAX, CONVERSATION_PREVIEW_MAX, type LinkableConversation } from '../../../contract/index.ts';
+import { CONVERSATION_NAME_MAX, type LinkableConversation } from '../../../contract/index.ts';
 import type { TranscriptEvent, TranscriptHarness } from '../../reader/lib/transcript/types.ts';
 import { describeConversation, type DescribedConversation } from './conversation-describer.ts';
 import { isOwnerMessage } from '../../reader/lib/transcript/owner.ts';
 import { codexIndexNames, transcriptNames } from './conversation-name.ts';
-import { spokenMessages, truncateText, writtenMessages } from './conversation-text.ts';
+import { spokenMessages, spokenSources, truncateText, writtenSources } from './conversation-text.ts';
 import { cleanTitle, fileTitle, type ScrubText, scrubShown } from './conversation-title.ts';
 
 /**
@@ -62,8 +62,10 @@ const CODEX_INDEX = 'session_index.jsonl';
 const CODEX_INDEX_READ_MAX_BYTES = 1024 * 1024;
 const ROLLOUT_ID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/iu;
 /** Bump when a column or what a column holds changes: the cache is dropped and rebuilt. */
-const LAYOUT = '2';
+const LAYOUT = '3';
 const NAME_FALLBACK_MAX = 60;
+/** What a row is called when nothing readable is left to name it by (every word of it was masked). */
+const UNTITLED_NAME = 'Conversation';
 
 /** One tree of transcripts the index reads: which harness wrote it, what parses it, and the read-only view of it. */
 export interface IndexSource {
@@ -157,12 +159,25 @@ interface Row {
 type RowInput = Omit<Row, 'hay' | 'title' | 'written'> & {
   /** What a title is made from, not yet scrubbed: scrubbed with the rest of its batch, then written as `file_title`. */
   readonly titleParts?: { readonly name?: string | undefined; readonly firstMessage?: string | undefined } | undefined;
-  /** `preview` and `latest` are raw messages: they are scrubbed with the batch too, because a row is shown wherever a title is. */
+  /**
+   * `preview` and `latest` are the messages AS WRITTEN (lines kept, not cut short): they are masked with the batch too, because a row
+   * is shown wherever a title is, and only then made one line and cut to the preview length.
+   */
   readonly fresh?: true | undefined;
   readonly written?: number | undefined;
   readonly hay?: string | undefined;
   readonly title?: string | null | undefined;
 };
+
+/**
+ * A fresh row's `preview` and `latest` as they are stored: each masked from the whole message, THEN on one line, THEN cut. A
+ * `latest` that masks to nothing, or to the preview, is not kept (the wire refuses an empty one).
+ */
+function shownRow(row: { readonly preview: string; readonly latest: string | null }, scrub: ScrubText) {
+  const preview = scrubShown(row.preview, scrub);
+  const latest = row.latest === null ? '' : scrubShown(row.latest, scrub);
+  return { preview, latest: latest === '' || latest === preview ? null : latest };
+}
 
 /** What the walk compares a file against, without loading the row. */
 interface Stamp {
@@ -599,12 +614,7 @@ export class ConversationIndex {
         return {
           ...rest,
           ...(titleParts === undefined ? {} : { file_title: fileTitle(titleParts, scrub) }),
-          ...(fresh === true
-            ? {
-                preview: scrubShown(rest.preview, scrub),
-                latest: rest.latest === null ? null : scrubShown(rest.latest, scrub),
-              }
-            : {}),
+          ...(fresh === true ? shownRow(rest, scrub) : {}),
         };
       }),
     );
@@ -803,9 +813,10 @@ export class ConversationIndex {
     const names = transcriptNames(source.parser, text);
     if (names.chosen !== undefined || names.generated !== undefined) return undefined;
     const { events } = await this.needs.parsers[source.parser].parse({ text, source: found.path, endOfInput: true });
-    const spoken = old.written === 1 ? writtenMessages(events) : spokenMessages(events);
+    // As written (lines kept, not cut short): `#titled` masks the secrets in it, and only then makes it a line and cuts it.
+    const spoken = old.written === 1 ? writtenSources(events) : spokenSources(events);
     const seen = activity(events);
-    const latest = spoken.at(-1)?.slice(0, CONVERSATION_PREVIEW_MAX);
+    const latest = spoken.at(-1);
     return {
       harness: source.harness,
       kind: source.kind,
@@ -826,7 +837,7 @@ export class ConversationIndex {
       ferret_title_owner: old.ferret_title_owner,
       fresh: true as const,
       preview: old.preview,
-      latest: latest === undefined ? old.latest : latest === old.preview ? null : latest,
+      latest: latest === undefined ? old.latest : latest,
       first_at: old.first_at,
       last_at: seen.last === undefined ? Math.max(old.last_at, found.mtimeMs) : Math.max(old.last_at, seen.last),
       turns: old.turns + spoken.length,
@@ -1074,10 +1085,12 @@ export class ConversationIndex {
 
   #wire(row: Row & { also: number }): IndexedConversation {
     const title = row.title ?? undefined;
-    const ferretName = row.ferret_name ?? undefined;
+    const ferretName = row.ferret_name === null || row.ferret_name === '' ? undefined : row.ferret_name;
     // The title alone: no callsign leads it and no opening message labels it. A conversation with no title (nothing readable in
     // its first message, or only hand-off pointers) goes by the folder it works in, else its opening words.
-    const name = truncateText(title ?? untitledName(row), CONVERSATION_NAME_MAX);
+    // Never empty: a row whose words were all masked still has a name (the wire refuses an empty one, and one bad row would
+    // fail the whole listing).
+    const name = truncateText(title ?? untitledName(row), CONVERSATION_NAME_MAX).trim() || UNTITLED_NAME;
     const parser: TranscriptHarness = row.harness === 'codex' ? 'codex' : 'claude';
     return {
       harness: row.harness,

@@ -128,6 +128,18 @@ export function refusal(edge: ImportEdge): string | undefined {
   )
     return undefined;
 
+  // THIRD EXEMPTION: a title Claude Code writes after the first exchange must reach the drawer, and that is one path split by
+  // ownership (Conversation's index reads the transcript and offers the title; Ferrets keeps it and draws it). Its integration proof
+  // runs Conversation's real index against Ferrets' real service. Only Conversation's tests may reach Ferrets' daemon half, and only
+  // for that; the app half is built from Ferrets' own scene by a child process, never imported.
+  if (
+    from === 'tests' &&
+    edge.fromPkg.name === '@ferretry/plugin-conversation' &&
+    toPkg.name === '@ferretry/core-ferrets' &&
+    to === 'daemon'
+  )
+    return undefined;
+
   // SECOND EXEMPTION: a step page's behaviour (a skip is recorded on the machine and drops the page for the run; Back, Later and
   // busy live in the frame) exists only in Onboarding's setup flow, so the Claude Code and Codex import pages' tests
   // drive the real flow screen. Only those two packages' tests may reach Onboarding's app half and its manifest, and only for that.

@@ -383,6 +383,28 @@ describe('context-imports', () => {
     expect(found).toContain('other/tests/send.test.ts:1: @ferretry/core-mailbox/daemon');
   });
 
+  test("only Conversation's tests may import Ferrets' daemon half (a late title reaching the real drawer): its own daemon half, its app half and any other package's tests are still refused", async () => {
+    const f = ws([
+      {
+        id: 'conversation',
+        files: {
+          'tests/titles.test.ts': `import '@ferretry/core-ferrets/daemon';\n`,
+          'daemon/host.ts': `import '@ferretry/core-ferrets/daemon';\n`,
+          'app/page.ts': `import '@ferretry/core-ferrets/app';\n`,
+          'tests/app.test.ts': `import '@ferretry/core-ferrets/app';\n`,
+        },
+      },
+      { id: 'ferrets', core: true },
+      { id: 'other', files: { 'tests/titles.test.ts': `import '@ferretry/core-ferrets/daemon';\n` } },
+    ]);
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('conversation/tests/titles.test.ts');
+    expect(found).toContain('conversation/daemon/host.ts:1: @ferretry/core-ferrets/daemon');
+    expect(found).toContain('conversation/app/page.ts:1: @ferretry/core-ferrets/app');
+    expect(found).toContain('conversation/tests/app.test.ts:1: @ferretry/core-ferrets/app');
+    expect(found).toContain('other/tests/titles.test.ts:1: @ferretry/core-ferrets/daemon');
+  });
+
   test("only Claude Code's and Codex's tests may import Onboarding's app half and manifest (the real setup flow): their app halves and any other package's tests are still refused", async () => {
     const f = ws([
       {
