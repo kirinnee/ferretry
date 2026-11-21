@@ -1,20 +1,51 @@
 /**
- * THE LAST PAGE: a real ending, not a box. A small mascot slot (the waving ferret takes its place when access exports it),
- * two borderless checklists side by side on a desktop (this machine, this device; `setup-summary.tsx`), then the way on:
+ * THE LAST PAGE: a real ending, not a box. The picture is the `onboarding.end` slot's (Access places the cheering ferret,
+ * which answers a hover or a tap; Onboarding imports nothing of it) and fills the frame's demo column: the right half on a
+ * desktop, above the page on a phone. The body is the two borderless checklists (this machine, this device;
+ * `setup-summary.tsx`), then the way on:
  * ONE primary button (the footer's "Open this machine") and the two ways to start work as secondary buttons, all three
  * ONE width (`end-page.css`): a project, or a conversation without one. Those two buttons and the sentence about working
  * projectless are the Home card's (`../stepper/project-action.ts`), so the words never differ between the two places.
  * Either one missing (its plugin is paused) leaves the other; both missing leaves just the way to the machine's Home.
  */
-import { daemonHomeHref, StepPageFrame, useOptionalRouter, useScreenHref } from '@ferretry/app';
+import {
+  daemonHomeHref,
+  PanelSlot,
+  StepDemo,
+  StepPageFrame,
+  useOptionalRouter,
+  useScreenHref,
+  useSlotHasUsablePanels,
+} from '@ferretry/app';
 import { Button } from '@ferretry/app/ui';
-import { PartyPopper } from 'lucide-react';
 import './end-page.css';
+import { ONBOARDING_END_SLOT } from '../../../contract/index.ts';
 import type { Unsaved } from './use-setup-flow.ts';
 import { type ReactNode, useMemo } from 'react';
 import type { SummaryStep } from '../../views/steps-screen.tsx';
 import { SetupSummary } from './setup-summary.tsx';
 import { addProjectHref, projectAction } from '../stepper/project-action.ts';
+
+/** The picture, in the frame's demo column. */
+function Picture({ children }: { readonly children: ReactNode }): ReactNode {
+  return (
+    <StepDemo>
+      <div className="fy-end__mascot" data-end-mascot="" aria-hidden="true">
+        {children}
+      </div>
+    </StepDemo>
+  );
+}
+
+/** The `onboarding.end` slot's panels; with none usable (Access off) the page draws no column. */
+function SlotPicture({ daemon }: { readonly daemon: string }): ReactNode {
+  const usable = useSlotHasUsablePanels(daemon, ONBOARDING_END_SLOT);
+  return usable ? (
+    <Picture>
+      <PanelSlot daemon={daemon} slot={ONBOARDING_END_SLOT} />
+    </Picture>
+  ) : null;
+}
 
 export function EndPage({
   daemon,
@@ -22,6 +53,7 @@ export function EndPage({
   summary,
   unsaved = [],
   onRetry,
+  picture,
 }: {
   readonly daemon: string;
   readonly onBack: (() => void) | undefined;
@@ -29,6 +61,8 @@ export function EndPage({
   /** Answers the machine did not take: each is named, with its own Try again. */
   readonly unsaved?: readonly Unsaved[];
   readonly onRetry?: (key: string) => void;
+  /** Stands in for the `onboarding.end` slot's picture (a browser scene has no shell); `null` is no picture. */
+  readonly picture?: ReactNode;
 }): ReactNode {
   const router = useOptionalRouter();
   const screenHref = useScreenHref();
@@ -66,9 +100,11 @@ export function EndPage({
             </ul>
           </div>
         )}
-        <div className="fy-end__mascot" data-end-mascot="" aria-hidden="true">
-          <PartyPopper size={28} strokeWidth={1.75} />
-        </div>
+        {picture === undefined ? (
+          <SlotPicture daemon={daemon} />
+        ) : picture === null ? null : (
+          <Picture>{picture}</Picture>
+        )}
         <SetupSummary daemon={daemon} steps={summary} />
         {action === undefined ? null : (
           <section className="fy-end__start" data-flow-end-start="" aria-label="Start with">

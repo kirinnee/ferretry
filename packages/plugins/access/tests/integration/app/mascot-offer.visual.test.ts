@@ -424,6 +424,44 @@ describe('r11 O10: the Access app exports the mascot for the End page', () => {
   });
 });
 
+describe('r11-1b G1: the panel on the onboarding End page is that ferret and it answers', () => {
+  for (const variant of [VARIANTS[0], VARIANTS[2]]) {
+    it(`${variant.name}: the end-mascot panel reacts to a ${variant.phone ? 'tap' : 'hover'}: pupils look, arm waves, ferret hops`, async () => {
+      const { tab, problems, close } = await open(variant, '&scene=end-panel');
+      try {
+        await tab.waitForSelector('[data-export-mascot] .fy-ferret[data-pose="cheer"]');
+        await settle(tab);
+        const box = must(await tab.locator('[data-export-mascot] .fy-ferret').boundingBox(), 'the panel ferret');
+        const before = Date.now();
+        if (variant.phone) await tab.touchscreen.tap(box.x + box.width * 0.9, box.y + box.height * 0.5);
+        else await tab.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.9);
+        await tab.waitForFunction(
+          () =>
+            document
+              .querySelector('[data-mascot-wave]')
+              ?.getAnimations()
+              .some(a => a.playState === 'running') === true,
+          undefined,
+          { timeout: 400 },
+        );
+        const waveMs = Date.now() - before;
+        const running = await markedAnimations(tab);
+        const looked = await look(tab);
+        MEASURED.push(
+          `${variant.name} end-panel: wave running after ${waveMs} ms; look ${looked.x.toFixed(2)},${looked.y.toFixed(2)}; ${running.join(',')}`,
+        );
+        expect(running).toContain('fy-ferret-wave-again@data-mascot-wave');
+        expect(running).toContain('fy-ferret-hop@data-mascot-hop');
+        expect(looked.x, 'the pupils look toward the pointer').toBeGreaterThan(1);
+        expect(Math.abs(looked.x)).toBeLessThanOrEqual(LOOK_X_MAX);
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+  }
+});
+
 describe('r11 O10: the passkey offer buttons are one fixed size', () => {
   for (const variant of VARIANTS) {
     it(`${variant.name}: "Add a passkey now" and "Not now" share one width, 44 px or taller, 12 px apart`, async () => {

@@ -8,6 +8,10 @@
  *            later = some of everything set up, one segment set up in part (Claude Code: one page left), three skipped
  *            on the machine and one on this device; clean = all set up, nothing skipped;
  *            device = only this device's own pages; bare = no start button (both screens' plugins paused)
+ *   &picture=none   Access places no panel in `onboarding.end` (it is off): the page has no picture column
+ *
+ * The picture is a STAND-IN with the real ferret's box (240 x 190, `.fy-ferret`): Onboarding imports nothing of Access, so
+ * the REAL ferret on this page is proved by Access's own test (`end-mascot-panel.test.tsx`, `mascot-offer.visual.test.ts`).
  */
 import { ScreenHrefProvider } from '@ferretry/app';
 import { LivingBackground } from '@ferretry/app/ui';
@@ -59,6 +63,25 @@ const STEPS: Record<string, readonly SummaryStep[]> = {
 };
 
 const noop = (): void => undefined;
+const StandIn = () => (
+  <svg
+    role="img"
+    viewBox="0 0 240 190"
+    className="fy-ferret"
+    data-stand-in=""
+    aria-hidden="true"
+    style={{ display: 'block', width: '100%' }}
+  >
+    <title>stand-in</title>
+    <circle cx="120" cy="95" r="80" fill="currentColor" opacity="0.4" />
+  </svg>
+);
+const PICTURE =
+  params.get('picture') === 'none' ? null : (
+    <div data-panel="access.end-mascot">
+      <StandIn />
+    </div>
+  );
 const href = (_daemon: string, plugin: string, screen: string): string | undefined =>
   scene === 'bare' ? undefined : `/d/studio-mac/${plugin}/${screen}`;
 
@@ -74,7 +97,7 @@ if (root !== null)
         >
           <div className="fy-sf-root" data-scene-ready="">
             <LivingBackground />
-            <EndPage daemon="studio-mac" onBack={noop} summary={STEPS[scene] ?? STEPS['later'] ?? []} />
+            <EndPage daemon="studio-mac" onBack={noop} summary={STEPS[scene] ?? STEPS.later ?? []} picture={PICTURE} />
           </div>
         </main>
       </div>
