@@ -773,6 +773,7 @@ export class FleetSetupService {
       assetFiles: prefix => assets.filter(asset => asset.path.startsWith(prefix)),
       touched,
       ownedOf: reference => plan.record.components[reference]?.owned ?? [],
+      etagsOf: reference => plan.record.components[reference]?.etags ?? {},
       documents: async (next, outcome) =>
         await this.#documents(reading, next, written, [
           { path: this.#recordPath(), content: recordText(plan, updates, outcome) },

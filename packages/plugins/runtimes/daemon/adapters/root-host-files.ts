@@ -39,8 +39,9 @@ function below(base: string, path: string): string | undefined {
 const kindOf = (stat: RootStat | RootLstat): HostEntry['kind'] => (stat.kind === 'symlink' ? 'link' : stat.kind);
 const entryOf = (stat: RootStat | RootLstat): HostEntry => ({ kind: kindOf(stat), size: stat.size });
 
-/** The kernel's answer for a name whose parent folder is not there. */
-const FOLDER_MISSING = 'root refused: outside';
+/** Whether the kernel refused as "outside" (the name's parent folder is not there): its typed `refusal`, never its sentence. */
+const isOutside = (error: unknown): boolean =>
+  error instanceof Error && (error as Error & { readonly refusal?: unknown }).refusal === 'outside';
 
 /** `look`'s answer, or `undefined` when it is refused only because a folder above the name is not there. */
 async function orAbsent<T>(target: Mounted, look: () => Promise<T | undefined>): Promise<T | undefined> {
@@ -48,7 +49,7 @@ async function orAbsent<T>(target: Mounted, look: () => Promise<T | undefined>):
   try {
     return await look();
   } catch (error) {
-    if (error instanceof Error && error.message === FOLDER_MISSING) return undefined;
+    if (isOutside(error)) return undefined;
     throw error;
   }
 }
