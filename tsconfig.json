@@ -21,7 +21,15 @@
     "types": ["bun"],
     // The plugins' browser tests (tests/integration/app) import playwright-core, which only the app package installs: resolve it
     // to that one copy, so the root project can check them without a second dependency.
-    "paths": { "playwright-core": ["./packages/app/node_modules/playwright-core"] }
+    "paths": {
+      "playwright-core": ["./packages/app/node_modules/playwright-core"],
+      // `durian-hypermedia` is read as source and this workspace's compiler rejects that source (see the first file): the type
+      // checker reads the declarations of the subset we use instead; the bundler still builds the real package.
+      "durian-hypermedia": ["./packages/plugins/conversation/app/hypermedia/types/durian-hypermedia.d.ts"],
+      "durian-hypermedia/react/strict": [
+        "./packages/plugins/conversation/app/hypermedia/types/durian-hypermedia-react-strict.d.ts"
+      ]
+    }
   },
   "include": [
     "packages/std",

@@ -119,6 +119,12 @@ export function bannedIn(file: string, where = file, browser = false): Finding[]
  */
 export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folder: string; readonly reason: string }[] =
   [
+    {
+      pkg: 'conversation',
+      folder: 'app/vite-durian.ts',
+      reason:
+        'a build-time Vite plugin the shell config registers: it runs the installed Durian package stylesheet script with bun; it never runs in a browser or a daemon',
+    },
     { pkg: 'connections', folder: 'worker/', reason: 'the standalone Cloudflare relay Worker, deployed on its own' },
     { pkg: 'catalogs', folder: 'worker/', reason: 'the standalone Cloudflare catalog Worker, deployed on its own' },
     {
