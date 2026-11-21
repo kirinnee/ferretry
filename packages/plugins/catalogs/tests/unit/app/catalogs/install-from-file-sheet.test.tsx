@@ -1,14 +1,15 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { DaemonCallError } from '@ferretry/app';
 import type { DaemonIdentity } from '../../../../daemon/lib/relay-wire/kernel-wire/index.ts';
-import { openCatalogFile } from '../../../../app/features/catalogs/catalog-install-model.ts';
+import { CHOOSE_PLACEHOLDER, openCatalogFile } from '../../../../app/features/catalogs/catalog-install-model.ts';
 import { InstallFromFileSheet, type InstallHost } from '../../../../app/features/catalogs/install-from-file-sheet.tsx';
 import { daemonConnection } from '../../../../app/lib/machine.ts';
 import { fakeClient } from '../support/catalog-client.ts';
 import { crypto, mcpItem, newIdentity, signedFile, skillItem } from '../support/catalog-files.ts';
 import { INSTALL_ID, installPreview, installRecord } from '../support/catalog-views.ts';
 import { click, settle } from '../support/dom-form.ts';
-import { interact, mount } from '@ferretry/app/testing';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { choose as chooseOption, labelsOf, shownBy } from '../support/select-box.ts';
 import { runAsync } from '@ferretry/app/testing';
 import { settleUntil } from '@ferretry/app/testing';
 import { watchedCrypto } from '../support/watched-crypto.ts';
@@ -126,14 +127,14 @@ const give = async (file: unknown): Promise<void> => {
 };
 const giveText = async (content: string) => await give(new File([content], 'team.catalog.json'));
 
-const choose = async (selector: string, value: string): Promise<void> => {
-  const select = q(selector) as HTMLSelectElement;
-  await interact(() => {
-    select.value = value;
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+/** Opens the select box inside `selector` and clicks the option that says `label`. */
+const choose = async (selector: string, label: string): Promise<void> => {
+  await chooseOption(must(q(selector), selector), label);
   await settle();
 };
+/** What the select box inside `selector` shows. */
+const shown = (selector: string): string => shownBy(must(q(selector), selector));
+const labelsAt = async (selector: string): Promise<readonly string[]> => await labelsOf(must(q(selector), selector));
 const tap = async (selector: string) => {
   await click(q(selector));
   await settle();
@@ -149,8 +150,8 @@ const answer = async (selector: string) => {
 };
 const pickItem = async (itemId: string) => await tap(`[data-catalog-file-item="${itemId}"] input`);
 const pickRuntime = async () => {
-  await choose('[data-catalog-scope]', 'runtime');
-  await choose('[data-catalog-runtime]', 'box');
+  await choose('[data-catalog-scope]', 'A runtime');
+  await choose('[data-catalog-runtime]', 'box · default');
 };
 
 describe('opening a file', () => {
@@ -215,17 +216,17 @@ describe('choosing where', () => {
     await giveText(fileText);
     await pickItem(SKILL_ID);
     expect(q('[data-catalog-choice-problem]')?.textContent).toBe('Pick where to install it.');
-    await choose('[data-catalog-scope]', 'project');
+    await choose('[data-catalog-scope]', 'A project');
     expect(q('[data-catalog-choice-problem]')?.textContent).toBe('Pick a project.');
-    await choose('[data-catalog-harness]', 'codex');
-    await choose('[data-catalog-project]', '/work/proj');
+    await choose('[data-catalog-harness]', 'Codex');
+    await choose('[data-catalog-project]', 'proj');
     expect(q('[data-catalog-choice-problem]')).toBeNull();
-    await choose('[data-catalog-harness]', '');
+    await choose('[data-catalog-harness]', CHOOSE_PLACEHOLDER);
     expect(q('[data-catalog-choice-problem]')?.textContent).toContain('Claude or Codex');
-    await choose('[data-catalog-harness]', 'claude');
-    await choose('[data-catalog-project]', '');
+    await choose('[data-catalog-harness]', 'Claude');
+    await choose('[data-catalog-project]', CHOOSE_PLACEHOLDER);
     expect(q('[data-catalog-choice-problem]')?.textContent).toBe('Pick a project.');
-    await choose('[data-catalog-scope]', '');
+    await choose('[data-catalog-scope]', CHOOSE_PLACEHOLDER);
     expect(q('[data-catalog-project]')).toBeNull();
     await view.unmount();
   });
@@ -233,11 +234,11 @@ describe('choosing where', () => {
   it('offers this machine runtimes with their profile', async () => {
     const { view } = await open({});
     await giveText(fileText);
-    await choose('[data-catalog-scope]', 'runtime');
-    expect(q('[data-catalog-runtime]')?.textContent).toContain('box · default');
-    await choose('[data-catalog-runtime]', 'box');
+    await choose('[data-catalog-scope]', 'A runtime');
+    expect(await labelsAt('[data-catalog-runtime]')).toContain('box · default');
+    await choose('[data-catalog-runtime]', 'box · default');
     expect(q('[data-catalog-choice-problem]')?.textContent).toBe('Pick an item.');
-    await choose('[data-catalog-runtime]', '');
+    await choose('[data-catalog-runtime]', CHOOSE_PLACEHOLDER);
     await view.unmount();
   });
 });
@@ -267,19 +268,21 @@ describe('the review and the install', () => {
     expect(q('[data-catalog-first-seen]')).not.toBeNull();
     expect(q('[data-catalog-install]')?.hasAttribute('disabled')).toBe(true);
     expect(q('[data-catalog-install-reason]')?.textContent).toContain('ACME_TOKEN, ACME_REGION');
-    const options = [...(q('[data-catalog-secret="ACME_TOKEN"] select')?.querySelectorAll('option') ?? [])].map(
-      o => o.textContent,
-    );
-    expect(options).toEqual(['Choose…', 'Leave unbound', 'ACME_TOKEN', 'ZED']);
+    expect(await labelsAt('[data-catalog-secret="ACME_TOKEN"]')).toEqual([
+      'Choose…',
+      'Leave unbound',
+      'ACME_TOKEN',
+      'ZED',
+    ]);
     expect(q('[data-catalog-secret="ACME_REGION"]')?.textContent).toContain('You have a secret with this name.');
 
-    await choose('[data-catalog-secret="ACME_TOKEN"] select', 'ACME_TOKEN');
+    await choose('[data-catalog-secret="ACME_TOKEN"]', 'ACME_TOKEN');
     expect(q('[data-catalog-secret-note]')?.textContent).toBe('This program will receive your secret ACME_TOKEN.');
-    await choose('[data-catalog-secret="ACME_TOKEN"] select', '');
+    await choose('[data-catalog-secret="ACME_TOKEN"]', CHOOSE_PLACEHOLDER);
     expect(q('[data-catalog-secret-note]')).toBeNull();
-    await choose('[data-catalog-secret="ACME_TOKEN"] select', 'ACME_TOKEN');
+    await choose('[data-catalog-secret="ACME_TOKEN"]', 'ACME_TOKEN');
     expect(q('[data-catalog-install]')?.hasAttribute('disabled')).toBe(true);
-    await choose('[data-catalog-secret="ACME_REGION"] select', '\u0000unbound');
+    await choose('[data-catalog-secret="ACME_REGION"]', 'Leave unbound');
     expect(q('[data-catalog-install]')?.hasAttribute('disabled')).toBe(false);
 
     await answer('[data-catalog-install]');
@@ -301,7 +304,9 @@ describe('the review and the install', () => {
     await pickItem(MCP_ID);
     await pickRuntime();
     await answer('[data-catalog-preview]');
-    const buttons = [...document.querySelectorAll<HTMLElement>('[data-catalog-confirm] button[aria-expanded]')];
+    const buttons = [
+      ...document.querySelectorAll<HTMLElement>('[data-catalog-confirm] button[aria-expanded]:not([role="combobox"])'),
+    ];
     expect(buttons.length).toBe(2);
     for (const button of buttons) {
       const before = button.textContent ?? '';
@@ -353,7 +358,7 @@ describe('the review and the install', () => {
     await pickRuntime();
     await answer('[data-catalog-preview]');
     expect(q('[data-catalog-secrets]')?.textContent).toContain('could not be read');
-    expect(q('[data-catalog-secret="ACME_TOKEN"] select')?.querySelectorAll('option').length).toBe(2);
+    expect(await labelsAt('[data-catalog-secret="ACME_TOKEN"]')).toHaveLength(2);
     await view.unmount();
   });
 
@@ -369,9 +374,9 @@ describe('the review and the install', () => {
     const { fake, view } = await open({ 'POST /v1/catalog-installs/project/preview': () => projectPreview });
     await giveText(fileText);
     await pickItem(SKILL_ID);
-    await choose('[data-catalog-scope]', 'project');
-    await choose('[data-catalog-project]', '/work/proj');
-    await choose('[data-catalog-harness]', 'claude');
+    await choose('[data-catalog-scope]', 'A project');
+    await choose('[data-catalog-project]', 'proj');
+    await choose('[data-catalog-harness]', 'Claude');
     await answer('[data-catalog-preview]');
     expect(fake.calls.at(-1)?.path).toBe('/v1/catalog-installs/project/preview');
     expect(q('[data-catalog-confirm]')?.textContent).toContain('project proj, Claude');
@@ -467,7 +472,7 @@ describe('refusals', () => {
     await pickItem(SKILL_ID);
     expect(q('[data-catalog-confirm]')).toBeNull();
     await answer('[data-catalog-preview]');
-    await choose('[data-catalog-scope]', 'runtime');
+    await choose('[data-catalog-scope]', 'A runtime');
     expect(q('[data-catalog-confirm]')).toBeNull();
     await view.unmount();
   });
@@ -484,8 +489,8 @@ describe('the projects the host names', () => {
       />,
     );
     await giveText(fileText);
-    await choose('[data-catalog-scope]', 'project');
-    expect(q('[data-catalog-project]')?.textContent).toContain('known');
+    await choose('[data-catalog-scope]', 'A project');
+    expect(await labelsAt('[data-catalog-project]')).toContain('known');
     await view.unmount();
   });
 });
@@ -505,7 +510,7 @@ describe('catalogs#5 the projects of the machine being installed onto', () => {
       />,
     );
     await giveText(fileText);
-    await choose('[data-catalog-scope]', 'project');
+    await choose('[data-catalog-scope]', 'A project');
     await settle();
     return view;
   };
@@ -513,15 +518,17 @@ describe('catalogs#5 the projects of the machine being installed onto', () => {
   it('offers the TARGET machine’s projects, never the screen’s own, when they differ', async () => {
     // The screen is on alpha (its own list rides `projects`); the person picked beta to install onto.
     const view = await openOn('beta', { projects: ALPHA, readProjects: read });
-    expect(q('[data-catalog-project]')?.textContent).toContain('beta-proj');
-    expect(q('[data-catalog-project]')?.textContent).not.toContain('alpha-proj');
+    const labels = await labelsAt('[data-catalog-project]');
+    expect(labels).toContain('beta-proj');
+    expect(labels).not.toContain('alpha-proj');
     await view.unmount();
   });
 
   it('offers the screen’s own machine’s projects when that is the target', async () => {
     const view = await openOn('alpha', { projects: BETA, readProjects: read });
-    expect(q('[data-catalog-project]')?.textContent).toContain('alpha-proj');
-    expect(q('[data-catalog-project]')?.textContent).not.toContain('beta-proj');
+    const labels = await labelsAt('[data-catalog-project]');
+    expect(labels).toContain('alpha-proj');
+    expect(labels).not.toContain('beta-proj');
     await view.unmount();
   });
 
@@ -532,7 +539,7 @@ describe('catalogs#5 the projects of the machine being installed onto', () => {
         throw new Error('This device cannot reach Catalogs on that machine yet.');
       },
     });
-    expect(q('[data-catalog-project]')?.textContent).not.toContain('alpha-proj');
+    expect(await labelsAt('[data-catalog-project]')).not.toContain('alpha-proj');
     await view.unmount();
   });
 
@@ -591,8 +598,8 @@ describe('a preview that is overtaken', () => {
     expect(q('[data-catalog-preview]')?.textContent).toBe('Reading…');
     const locked = [
       ...document.querySelectorAll<HTMLInputElement>('[data-catalog-file-item] input'),
-      q('[data-catalog-scope]'),
-      q('[data-catalog-runtime]'),
+      q('[data-catalog-scope] [role="combobox"]'),
+      q('[data-catalog-runtime] [role="combobox"]'),
       q('[data-catalog-pick-file]'),
       q('[data-catalog-file-input]'),
     ];
@@ -674,7 +681,7 @@ describe('the publisher fingerprint', () => {
     const file = q('[data-catalog-file]')?.textContent ?? '';
     expect(file).toContain('Machine ID:');
     expect(file).not.toMatch(/·\s*Machine ID/u);
-    const button = q('[data-catalog-file] button[aria-expanded]') as HTMLElement;
+    const button = q('[data-catalog-file] button[aria-expanded]:not([role="combobox"])') as HTMLElement;
     const shown = button.textContent ?? '';
     expect(shown).toBe(`${identity.daemonId.slice(0, 'fy_daemon_'.length + 20)}…`);
     await click(button);
@@ -770,10 +777,10 @@ describe('an item a member already opened', () => {
       />,
     );
     await settle();
-    expect((q('[data-catalog-scope]') as HTMLSelectElement).value).toBe('project');
-    expect((q('[data-catalog-project]') as HTMLSelectElement).value).toBe('/work/proj');
-    await choose('[data-catalog-scope]', 'runtime');
-    expect((q('[data-catalog-scope]') as HTMLSelectElement).value).toBe('runtime');
+    expect(shown('[data-catalog-scope]')).toBe('A project');
+    expect(shown('[data-catalog-project]')).toBe('proj');
+    await choose('[data-catalog-scope]', 'A runtime');
+    expect(shown('[data-catalog-scope]')).toBe('A runtime');
     await view.unmount();
   });
 });
@@ -789,8 +796,8 @@ describe('B16 the runtime and profile an item installs into are the target machi
     );
     await giveText(fileText);
     await settle();
-    await choose('[data-catalog-scope]', 'runtime');
-    expect(q('[data-catalog-runtime]')?.textContent).toContain('studio · lean');
+    await choose('[data-catalog-scope]', 'A runtime');
+    expect(await labelsAt('[data-catalog-runtime]')).toContain('studio · lean');
     expect(fake.calls.filter(call => call.path === '/v1/catalog-installs/targets')).toHaveLength(1);
     await view.unmount();
   });
@@ -806,8 +813,8 @@ describe('B16 the runtime and profile an item installs into are the target machi
     );
     await giveText(fileText);
     await settle();
-    await choose('[data-catalog-scope]', 'runtime');
-    expect(q('[data-catalog-runtime]')?.querySelectorAll('option')).toHaveLength(1);
+    await choose('[data-catalog-scope]', 'A runtime');
+    expect(await labelsAt('[data-catalog-runtime]')).toEqual([CHOOSE_PLACEHOLDER]);
     await view.unmount();
   });
 

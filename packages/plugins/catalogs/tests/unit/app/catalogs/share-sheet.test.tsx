@@ -15,7 +15,8 @@ import {
   T0_MS,
 } from '../support/catalog-sharing.ts';
 import { ownedCatalog } from '../support/catalog-views.ts';
-import { mount } from '@ferretry/app/testing';
+import { mount, must } from '@ferretry/app/testing';
+import { choose as chooseOption, labelsOf } from '../support/select-box.ts';
 import { click, settle, typeInto } from '../support/dom-form.ts';
 
 /** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
@@ -183,11 +184,12 @@ describe('ShareSheet form', () => {
     await typeInto(q('[data-share-cap]'), '1');
     expect(q('[data-share-problem]')?.textContent).toContain('2 to 200');
     await typeInto(q('[data-share-cap]'), '30');
-    const select = q('[data-share-expiry]') as HTMLSelectElement;
-    expect([...select.options].map(option => option.value)).toEqual(['15m', '1h', '3h', '8h', '1d']);
+    const expiry = must(q('[data-share-expiry]'), 'the expiry box');
+    expect(await labelsOf(expiry)).toEqual(['15 minutes', '1 hour', '3 hours', '8 hours', '1 day']);
+    await chooseOption(expiry, '3 hours');
     await choose('[data-share-confirm]');
     const minted = fake.calls.find(call => call.method === 'POST');
-    expect(minted?.body).toMatchObject({ member: { name: 'crew' }, uses: { kind: 'multi', cap: 30 } });
+    expect(minted?.body).toMatchObject({ member: { name: 'crew' }, expiresIn: '3h', uses: { kind: 'multi', cap: 30 } });
     await view.unmount();
   });
 

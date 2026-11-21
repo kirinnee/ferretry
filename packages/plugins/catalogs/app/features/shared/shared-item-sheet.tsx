@@ -16,7 +16,7 @@ import {
 import { createContext, useContext, useId, useMemo, useState } from 'react';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import type { OpenedItemValue } from './shared-controller.ts';
-import { Button } from '@ferretry/app/ui';
+import { Button, SelectBox } from '@ferretry/app/ui';
 import { CatalogSheet } from '../catalogs/catalog-parts.tsx';
 import type { TargetDraft } from '../catalogs/catalog-install-model.ts';
 import { MarkedText, ReviewBody, WarningList } from '../catalogs/catalog-review-view.tsx';
@@ -125,19 +125,15 @@ export function SharedItemSheet({
               <label htmlFor={pickId} className="text-meta font-semibold text-muted">
                 {INSTALL_ON_LABEL}
               </label>
-              <select
-                id={pickId}
-                className="kt-input"
-                value={target.connection.daemonId}
-                onChange={event => setPickedId(event.target.value)}
-                data-shared-machine=""
-              >
-                {machines.map(machine => (
-                  <option key={machine.connection.daemonId} value={machine.connection.daemonId}>
-                    {machine.name}
-                  </option>
-                ))}
-              </select>
+              <div data-shared-machine="">
+                <SelectBox
+                  id={pickId}
+                  label={INSTALL_ON_LABEL}
+                  value={target.connection.daemonId}
+                  onChange={setPickedId}
+                  options={machines.map(machine => ({ value: machine.connection.daemonId, label: machine.name }))}
+                />
+              </div>
             </div>
           ) : null}
           <Button type="button" variant="primary" onClick={() => setInstalling(true)} data-shared-install-button="">

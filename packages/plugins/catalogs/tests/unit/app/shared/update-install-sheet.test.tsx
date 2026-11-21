@@ -9,7 +9,8 @@ import {
 import { fakeClient } from '../support/catalog-client.ts';
 import { catalogChanges, installRecord } from '../support/catalog-views.ts';
 import { click, settle } from '../support/dom-form.ts';
-import { interact, mount } from '@ferretry/app/testing';
+import { mount, must } from '@ferretry/app/testing';
+import { choose as chooseOption } from '../support/select-box.ts';
 import { runAsync } from '@ferretry/app/testing';
 import { settleUntil } from '@ferretry/app/testing';
 import {
@@ -317,17 +318,11 @@ describe('secrets', () => {
   it('reads the machine’s secret names when the review lists placeholders, and takes a pick and its undoing', async () => {
     const rig = await open({ [PREVIEW]: withToken(), [SECRETS]: list });
     expect(rig.calls.map(call => call.path)).toContain('/v1/secrets');
-    const select = '[data-catalog-secret="ACME_TOKEN"] select';
-    const choose = async (value: string) => {
-      const element = q(select) as HTMLSelectElement;
-      await interact(() => {
-        element.value = value;
-        element.dispatchEvent(new Event('change', { bubbles: true }));
-      });
-    };
+    const select = '[data-catalog-secret="ACME_TOKEN"]';
+    const choose = async (label: string) => await chooseOption(must(q(select), 'the secret box'), label);
     await choose('ACME_TOKEN');
     expect(q('[data-catalog-secret-note]')?.textContent).toBe('This program will receive your secret ACME_TOKEN.');
-    await choose('');
+    await choose('Choose…');
     expect(q('[data-catalog-secret-note]')).toBeNull();
     await rig.unmount();
   });
