@@ -135,7 +135,7 @@ export function emptyReason(
 
 export const EMPTY_WORDS: Readonly<Record<EmptyReason, string>> = {
   'watch-off': 'You stopped watching this project.',
-  'no-reader': 'Link a GitHub account to see its pull requests.',
+  'no-reader': 'No GitHub account linked to this project.',
   'no-results': 'No results yet. Ferretry has not read this project’s pull requests so far.',
   'no-repos': 'No GitHub repository was found inside this project’s folder.',
   'no-account':

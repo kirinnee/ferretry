@@ -214,7 +214,15 @@ export class WatchService {
       // unlinked (or removed) meanwhile must not be asked about with its former account.
       if (!(await this.#stillLinked(project, refs))) return;
       const target = { project: project.id, repo, account: account.id as GitAccountId, login: account.login };
-      const seen = await observeRepo(this.deps.github, target, earlier?.pulls ?? []);
+      let gone = false;
+      // Every read inside the observation asks this again, so a link removed between two of its reads stops the next one.
+      const linked = async (): Promise<boolean> => {
+        const still = await this.#stillLinked(project, refs);
+        if (!still) gone = true;
+        return still;
+      };
+      const seen = await observeRepo(this.deps.github, target, earlier?.pulls ?? [], linked);
+      if (gone) return;
       this.#learn(account.id, seen);
       if (!seen.ok) {
         // Keep the last good look and say why this one did not answer (a code of ours).

@@ -8,7 +8,6 @@ import { Loading, useNow } from '@ferretry/app/ui';
 import { useState } from 'react';
 import type { ListClient } from './api.ts';
 import { countsOf, FILTER_WORDS, FILTERS, type Filter, folded, orderProjects, PROJECT_PAGE } from './model.ts';
-import { useScreenHref } from '@ferretry/app';
 import { ProjectBlock } from './project-block.tsx';
 import { type Reading, useOverview } from './use-overview.ts';
 
@@ -71,7 +70,6 @@ interface BodyProps {
 }
 
 function Body({ client, daemon, reading, filter, limit, nowMs, onFilter, onOpen, more, reload, refresh }: BodyProps) {
-  const hrefOf = useScreenHref();
   if (reading.status === 'loading') return <Loading kind="page" compact label="Reading your pull requests…" />;
   if (reading.status === 'failed')
     return (
@@ -125,7 +123,6 @@ function Body({ client, daemon, reading, filter, limit, nowMs, onFilter, onOpen,
             <bdi>{nameOf(view.project)}</bdi>
           </h2>
           <ProjectBlock
-            accountsHref={hrefOf(daemon, 'projects', 'project', { id: view.project })}
             client={client}
             daemon={daemon}
             filter={filter}

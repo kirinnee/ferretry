@@ -141,11 +141,9 @@ export interface ProjectBlockProps extends Shared {
   /** The project's own record says its folder holds no repository (see `emptyReason`). */
   readonly noRepo: boolean;
   readonly onChanged: () => void;
-  /** Where "Link a GitHub account" goes: the project's own page (the all-projects screen passes it). */
-  readonly accountsHref?: string | undefined;
 }
 
-export function ProjectBlock({ client, view, filter, noRepo, onChanged, accountsHref, ...shared }: ProjectBlockProps) {
+export function ProjectBlock({ client, view, filter, noRepo, onChanged, ...shared }: ProjectBlockProps) {
   const groups = groupsOf(view, filter);
   const reason = emptyReason(view, groups, filter, noRepo);
   // What the owner opened or folded by hand, by repository: the first REPOS_OPEN repositories start open and the rest
@@ -186,13 +184,7 @@ export function ProjectBlock({ client, view, filter, noRepo, onChanged, accounts
           );
         })}
       {/* At the foot: the PRs come first, the one quiet control after them (r11 S7). */}
-      <WatchControls
-        accountsHref={accountsHref}
-        client={client}
-        onChanged={onChanged}
-        onOpen={shared.onOpen}
-        view={view}
-      />
+      <WatchControls client={client} onChanged={onChanged} view={view} />
     </div>
   );
 }

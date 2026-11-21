@@ -212,7 +212,7 @@ describe('r11 S7: PRs are watched by default when an account is linked', () => {
       await context.close();
     });
 
-    it(`project with NO account at ${variant.name}: no GitHub look at all, and it says to link one`, async () => {
+    it(`project with NO account at ${variant.name}: no GitHub look at all, and it says so in plain words`, async () => {
       const context = await browser.newContext({
         viewport: { width: variant.width, height: variant.height },
         deviceScaleFactor: variant.phone ? 2 : 1,
@@ -221,17 +221,16 @@ describe('r11 S7: PRs are watched by default when an account is linked', () => {
       const tab = await context.newPage();
       await tab.goto(`${server?.url.origin ?? ''}/?theme=studio-${variant.scheme}&case=default&project=B`);
       await tab.waitForSelector('[data-pulls-empty="no-reader"]');
-      expect(await tab.locator('[data-pulls-empty="no-reader"]').innerText()).toContain('Link a GitHub account');
+      expect(await tab.locator('[data-pulls-empty="no-reader"]').innerText()).toBe(
+        'No GitHub account linked to this project.',
+      );
       expect(await tab.locator('[data-pull-row]').count()).toBe(0);
       expect(await tab.locator('[data-pulls-stop]').count()).toBe(0);
-      // The link is a real link to this project's own page, where its GitHub accounts are managed (chromium found zero).
-      const link = tab.getByRole('link', { name: 'Link a GitHub account' });
-      expect(await link.count()).toBe(1);
-      expect(await link.getAttribute('href')).toBe('/projects/22222222-2222-4222-8222-222222222222');
-      await link.click();
-      expect(await tab.evaluate(() => (window as unknown as { __navigated: string[] }).__navigated)).toEqual([
-        '/projects/22222222-2222-4222-8222-222222222222',
-      ]);
+      // No dead link: the project page only shows linked accounts and cannot link one, so the words are plain text.
+      expect(await tab.locator('[data-pulls-empty="no-reader"] a, [data-pulls-empty="no-reader"] button').count()).toBe(
+        0,
+      );
+      expect(await tab.getByRole('link', { name: /Link a GitHub account/ }).count()).toBe(0);
       if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${variant.name}-default-no-account.png`) });
       await context.close();
     });

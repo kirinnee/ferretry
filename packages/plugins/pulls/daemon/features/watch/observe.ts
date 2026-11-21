@@ -1,7 +1,8 @@
 import { err, ok, type Result } from '@ferretry/std';
 import type { GitAccountId } from '@ferretry/plugin-git-accounts/contract';
 import { PULLS_CODES, WatchedPullSchema, type RepoRef, type WatchedPull } from '../../../contract/index.ts';
-import type { GithubClient, ReadFailure } from '../../adapters/github/client.ts';
+import type { GithubClient, PagedAnswer, ReadAnswer, ReadFailure, Reading } from '../../adapters/github/client.ts';
+import { nextPagePath } from '../../adapters/github/link.ts';
 import { foldCi, type CiSignal } from './ci-fold.ts';
 import {
   CheckRunsSchema,
@@ -46,6 +47,40 @@ export interface Observation {
 }
 
 type Reader = Pick<GithubClient, 'get' | 'getAll'>;
+
+/** Whether the project still reads this repository as this account, as it is RIGHT NOW (asked afresh each time). */
+export type LinkGuard = () => Promise<boolean>;
+
+/** What a read answers when the link went before it was made: nothing was asked of GitHub. The caller drops the look. */
+const LINK_GONE: ReadFailure = {
+  code: PULLS_CODES.noAccount,
+  message: 'the project no longer reads this repository as this account',
+};
+
+/**
+ * The ONE place the link is rechecked: every GitHub read of an observation (the list, each sub-resource, each page of a
+ * paged list, each ended-PR lookup) goes through this reader, so none can start after the link was removed.
+ */
+function guarded(github: Reader, linked: LinkGuard): Reader {
+  const get = async (reading: Reading): Promise<Result<ReadAnswer, ReadFailure>> =>
+    (await linked()) ? github.get(reading) : err(LINK_GONE);
+  const getAll = async (reading: Reading, maxPages = 1): Promise<Result<PagedAnswer, ReadFailure>> => {
+    const items: unknown[] = [];
+    let path: string | undefined = reading.path;
+    let allCached = true;
+    for (let page = 0; page < maxPages && path !== undefined; page += 1) {
+      const read = await get({ ...reading, path });
+      if (!read.ok) return read;
+      if (!Array.isArray(read.value.body))
+        return err({ code: PULLS_CODES.github, message: 'GitHub answered something other than a list' });
+      items.push(...(read.value.body as unknown[]));
+      allCached &&= read.value.fromCache;
+      path = nextPagePath(read.value.link);
+    }
+    return ok({ items, fromCache: allCached, truncated: path !== undefined });
+  };
+  return { get, getAll };
+}
 
 const base = (target: WatchTarget): string => `/repos/${target.repo.owner}/${target.repo.name}`;
 
@@ -123,13 +158,16 @@ async function describe(
  *
  * ANY failed read fails the repository (`err`), so the caller keeps what it saw last and tells nobody anything: a PR is
  * never reported merged because a read failed. The one exception is a missing sub-resource (a repository with Actions
- * off), which reads as empty.
+ * off), which reads as empty. Every read first asks `linked` afresh: a link removed mid-pass means no further read, and the
+ * result is `err(LINK_GONE)`.
  */
 export async function observeRepo(
-  github: Reader,
+  client: Reader,
   target: WatchTarget,
   previous: readonly WatchedPull[],
+  linked: LinkGuard,
 ): Promise<Result<Observation, ReadFailure>> {
+  const github = guarded(client, linked);
   const list = await github.get({
     project: target.project,
     account: target.account,

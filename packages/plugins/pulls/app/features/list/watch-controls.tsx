@@ -7,7 +7,6 @@
  * Every change is one PATCH of what changed; the screen then reads again, so what is drawn is what the daemon holds. A
  * change the daemon holds for the owner (it would loosen something) is shown as the daemon worded it, never as done.
  */
-import { RouteLink } from '@ferretry/app/ui';
 import { Info } from 'lucide-react';
 import { useState } from 'react';
 import type { WatchEvent, WatchProjectView } from '../../../contract/index.ts';
@@ -25,12 +24,9 @@ export interface WatchControlsProps {
   readonly view: WatchProjectView;
   /** Called after the daemon took a change, so the screen reads the truth again. */
   readonly onChanged: () => void;
-  /** Where "Link a GitHub account" goes (the project's page), when the screen knows it. */
-  readonly accountsHref?: string | undefined;
-  readonly onOpen?: ((to: string) => void) | undefined;
 }
 
-export function WatchControls({ client, view, onChanged, accountsHref, onOpen }: WatchControlsProps) {
+export function WatchControls({ client, view, onChanged }: WatchControlsProps) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | undefined>();
   const [held, setHeld] = useState<readonly string[]>([]);
@@ -71,16 +67,7 @@ export function WatchControls({ client, view, onChanged, accountsHref, onOpen }:
       )}
       {!view.watch && view.watchedBy === 'default' && (
         <p className="m-0 text-meta text-muted" data-pulls-empty="no-reader">
-          {accountsHref !== undefined && onOpen !== undefined ? (
-            <>
-              <RouteLink className="underline" onNavigate={onOpen} to={accountsHref}>
-                Link a GitHub account
-              </RouteLink>{' '}
-              to see its pull requests.
-            </>
-          ) : (
-            EMPTY_WORDS['no-reader']
-          )}
+          {EMPTY_WORDS['no-reader']}
         </p>
       )}
       {view.watch && (

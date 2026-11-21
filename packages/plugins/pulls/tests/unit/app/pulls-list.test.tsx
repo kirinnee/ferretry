@@ -173,7 +173,7 @@ describe('the PRs screen', () => {
     mounted = await mount(screen(fake(() => unlinked)));
     await shown(mounted, '[data-pulls-empty="no-reader"]');
     expect(mounted.container.querySelector('[data-pulls-empty="no-reader"]')?.textContent).toContain(
-      'Link a GitHub account to see its pull requests',
+      'No GitHub account linked to this project.',
     );
     expect(mounted.container.querySelector('[data-pulls-stop]')).toBeNull();
     await mounted.unmount();

@@ -540,13 +540,16 @@ describe('watch: a look that lands after its project is gone', () => {
     servePull(github, { ci: failed });
     await host.clock.advance(31_000);
     armed = true;
+    const mark = github.seen.length;
     const pass = host.runJob('pulls-watch');
     while (held === 0) await new Promise(resolve => setTimeout(resolve, 0));
     await during(host, projects);
     await host.settle();
     release();
     await pass;
-    return { folder, baseline, buzzes, changed: changes() - before };
+    /** Every path GitHub was asked for from the held list read on (the held list read itself included). */
+    const asked = () => github.seen.slice(mark).map(seen => seen.path);
+    return { folder, baseline, buzzes, changed: changes() - before, asked };
   }
 
   test('removed: nothing is written back, nothing is sent, nobody is told', async () => {
@@ -573,6 +576,14 @@ describe('watch: a look that lands after its project is gone', () => {
     expect(out.folder.raw(WATCH_STATE, P1)).toBe(out.baseline);
     expect(out.buzzes).toEqual([]);
     expect(out.changed).toBe(0);
+  });
+
+  test('unlinked between two reads of ONE observe pass: the second read is never made', async () => {
+    const out = await held(async (_host, projects) => {
+      projects[0] = project({ accounts: undefined });
+    });
+    // The list read was already out when the link went; the PR's checks, runs, reviews and comments are NOT then asked.
+    expect(out.asked()).toEqual([LIST]);
   });
 
   test('a project that is gone from the list altogether is not written either', async () => {
