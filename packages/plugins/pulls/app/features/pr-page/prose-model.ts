@@ -35,7 +35,7 @@ const MAX_INPUT = 70_000;
 
 /** `https` with no credentials, else undefined. The one gate a link passes. */
 export function safeHref(value: string): string | undefined {
-  const text = value.trim();
+  const text = trimSpace(value);
   if (text.length === 0 || text.length > 2000 || /[\s\p{Cc}]/u.test(text) || !URL.canParse(text)) return undefined;
   const url = new URL(text);
   if (url.protocol !== 'https:') return undefined;
@@ -43,13 +43,16 @@ export function safeHref(value: string): string | undefined {
   return url.href;
 }
 
+/** Trims whitespace but never U+FEFF: `\s` and `trim()` count the byte-order mark as blank, which would let it vanish unmarked. */
+export const trimSpace = (text: string): string => text.replace(/^[^\S\uFEFF]+|[^\S\uFEFF]+$/gu, '');
+
 const FENCE = /^ {0,3}(`{3,}|~{3,})/u;
-const HEADING = /^ {0,3}#{1,6}\s+(.*?)\s*#*\s*$/u;
-const RULE = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/u;
-const BULLET = /^ {0,3}[-*+]\s+(.*)$/u;
-const NUMBERED = /^ {0,3}\d{1,9}[.)]\s+(.*)$/u;
-const QUOTE = /^ {0,3}>\s?(.*)$/u;
-const TASK = /^\[( |x|X)\]\s+/u;
+const HEADING = /^ {0,3}#{1,6}[^\S\uFEFF]+(.*?)[^\S\uFEFF]*#*[^\S\uFEFF]*$/u;
+const RULE = /^ {0,3}([-*_])(?:[^\S\uFEFF]*\1){2,}[^\S\uFEFF]*$/u;
+const BULLET = /^ {0,3}[-*+][^\S\uFEFF]+(.*)$/u;
+const NUMBERED = /^ {0,3}\d{1,9}[.)][^\S\uFEFF]+(.*)$/u;
+const QUOTE = /^ {0,3}>[^\S\uFEFF]?(.*)$/u;
+const TASK = /^\[( |x|X)\][^\S\uFEFF]+/u;
 
 /**
  * `<!-- … -->` removed in one linear pass (indexOf, never a lazy regex: an unclosed comment repeated would re-scan to
@@ -91,7 +94,7 @@ function blocks(lines: readonly string[], depth: number): readonly Block[] {
       at += 1;
       while (
         at < lines.length &&
-        !new RegExp(`^ {0,3}${marker[0] === '`' ? '`' : '~'}{${String(marker.length)},}\\s*$`, 'u').test(
+        !new RegExp(`^ {0,3}${marker[0] === '`' ? '`' : '~'}{${String(marker.length)},}[^\\S\\uFEFF]*$`, 'u').test(
           lines[at] ?? '',
         )
       ) {
@@ -102,7 +105,7 @@ function blocks(lines: readonly string[], depth: number): readonly Block[] {
       out.push({ kind: 'code', text: body.join('\n') });
       continue;
     }
-    if (line.trim() === '') {
+    if (trimSpace(line) === '') {
       flush();
       at += 1;
       continue;
@@ -145,10 +148,10 @@ function blocks(lines: readonly string[], depth: number): readonly Block[] {
         const match = (ordered ? NUMBERED : BULLET).exec(current);
         if (match?.[1] === undefined) {
           // An indented continuation (or a nested list line) belongs to the item above, as text.
-          if (/^\s{2,}\S/u.test(current) && items.length > 0) {
+          if (/^[^\S\uFEFF]{2,}\S/u.test(current) && items.length > 0) {
             const last = items[items.length - 1] ?? [];
             last.push({ kind: 'text', text: ' ' });
-            for (const part of inline(current.trim())) last.push(part);
+            for (const part of inline(trimSpace(current))) last.push(part);
             at += 1;
             continue;
           }
@@ -163,11 +166,11 @@ function blocks(lines: readonly string[], depth: number): readonly Block[] {
       out.push({ kind: 'list', ordered, items });
       continue;
     }
-    if (/^\s*\|/u.test(line)) {
+    if (/^[^\S\uFEFF]*\|/u.test(line)) {
       // A table is shown as the text it was written as (columns line up in a monospaced block).
       flush();
       const rows: string[] = [];
-      while (at < lines.length && /^\s*\|/u.test(lines[at] ?? '')) {
+      while (at < lines.length && /^[^\S\uFEFF]*\|/u.test(lines[at] ?? '')) {
         rows.push(lines[at] ?? '');
         at += 1;
       }
