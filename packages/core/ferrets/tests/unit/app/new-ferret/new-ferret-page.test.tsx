@@ -215,6 +215,43 @@ describe('NewFerretPage', () => {
     expect(harness.navigated).toEqual(['/d/daemon%2Fa/ferrets/new-ferret/chat']);
   });
 
+  it('starts with the folder a project named in the box, and only prefills: the daemon still decides', async () => {
+    const harness = page({
+      props: { initialFolder: '/etc' },
+      start: Object.assign(new Error('that folder is not allowed'), { status: 403 }),
+    });
+    expect(input(harness.view, 'fy-new-ferret-folder').props.value).toBe('/etc');
+    change(harness.view, 'fy-new-ferret-runtime', 'claude-auto-loge');
+    change(harness.view, 'fy-new-ferret-prompt', 'Port the page');
+
+    await runAsync(async () => {
+      button(harness.view, 'Create ferret').props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The request carried the prefilled folder untouched; the daemon's own refusal is what the reader sees.
+    expect(post(harness)?.body).toMatchObject({ folder: '/etc' });
+    expect(harness.view.root.findByProps({ role: 'alert' }).children.join('')).toBe('that folder is not allowed');
+    expect(harness.navigated).toEqual([]);
+  });
+
+  it('sends a prefilled folder exactly, trailing space and all, and trims it once the person edits the box', async () => {
+    const prefilled = page({ props: { initialFolder: '/work/project ' } });
+    change(prefilled.view, 'fy-new-ferret-runtime', 'claude-auto-loge');
+    change(prefilled.view, 'fy-new-ferret-prompt', 'Go');
+    await runAsync(async () => button(prefilled.view, 'Create ferret').props.onClick());
+    expect(post(prefilled)?.body).toMatchObject({ folder: '/work/project ' });
+
+    const typed = page({ props: { initialFolder: '/work/project ' } });
+    change(typed.view, 'fy-new-ferret-runtime', 'claude-auto-loge');
+    change(typed.view, 'fy-new-ferret-prompt', 'Go');
+    change(typed.view, 'fy-new-ferret-folder', '/work/project ');
+    change(typed.view, 'fy-new-ferret-folder', '/work/other ');
+    await runAsync(async () => button(typed.view, 'Create ferret').props.onClick());
+    expect(post(typed)?.body).toMatchObject({ folder: '/work/other' });
+  });
+
   it('shows a daemon failure and makes the form actionable again', async () => {
     const harness = page({ start: Object.assign(new Error('daemon refused start'), { status: 409 }) });
     fill(harness.view);
