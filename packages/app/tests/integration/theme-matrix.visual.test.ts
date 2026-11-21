@@ -154,7 +154,7 @@ const EVERY_PALETTE = ['studio', 'geist', 'mission', 'neo', 'hacker', 'vintage',
 const KNOWN: readonly Known[] = [
   {
     viewports: BOTH_WIDTHS,
-    styles: ['neumorphism', 'retro'],
+    styles: ['neumorphism'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'gradient',
@@ -190,7 +190,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['genz', 'glass', 'pixel', 'retro'],
+    styles: ['genz', 'glass'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'gradient',
@@ -237,15 +237,6 @@ const KNOWN: readonly Known[] = [
     viewports: BOTH_WIDTHS,
     styles: ['antiposh'],
     palettes: ['vintage'],
-    modes: BOTH_MODES,
-    check: 'spinner',
-    what: 'spinner shared with another style',
-    why: WHY.spinner,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['retro'],
-    palettes: ['geist'],
     modes: BOTH_MODES,
     check: 'spinner',
     what: 'spinner shared with another style',
