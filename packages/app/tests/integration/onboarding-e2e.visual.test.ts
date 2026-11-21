@@ -439,6 +439,154 @@ const endPage = async (tab: Page, variant: Variant, key: string): Promise<void> 
   expect(gap.gap, `${key}: no dead gap under the title`).toBeLessThanOrEqual(40);
 };
 
+/** What the mascot asserts measured (printed with FY_ONBOARDING_E2E_SHOTS_DIR). */
+const mascotMeasured: string[] = [];
+
+/**
+ * r11-1b G1 (gate line 12): right after a page hands over to the End page the "You're set up" heading is fully on screen
+ * and nothing that holds it has kept the previous page's scroll (Voice with every engine shown is long; its scroll used to
+ * carry over and draw the heading at y=-147).
+ */
+const endHeadingInView = async (tab: Page, variant: Variant, key: string): Promise<void> => {
+  const read = await tab.evaluate(() => {
+    const heading = document.querySelector('.fy-spf__title');
+    const box = heading?.getBoundingClientRect();
+    const scrolled: string[] = [];
+    for (let el = heading?.parentElement ?? null; el !== null; el = el.parentElement)
+      if (el.scrollTop > 0) scrolled.push(`${el.tagName.toLowerCase()}.${el.className}: ${el.scrollTop}px`);
+    return { top: box?.top ?? Number.NaN, bottom: box?.bottom ?? Number.NaN, height: window.innerHeight, scrolled };
+  });
+  // The picture the person sees on arrival (the window, not the whole page): the heading must be in it.
+  if (shotsDir !== '')
+    await tab.screenshot({
+      path: join(shotsDir, `${variant.name}-end-arrival-${key.replaceAll(' ', '').replaceAll('>', '')}.png`),
+    });
+  mascotMeasured.push(
+    `${variant.name}:${key}: End heading top ${read.top.toFixed(1)} bottom ${read.bottom.toFixed(1)} of ${read.height}; scrolled ancestors [${read.scrolled.join(', ')}]`,
+  );
+  expect(read.scrolled, `${key}: no ancestor of the End heading keeps the last page's scroll`).toEqual([]);
+  expect(read.top, `${key}: the "You're set up" heading starts on screen (top ${read.top})`).toBeGreaterThanOrEqual(0);
+  expect(read.bottom, `${key}: the heading ends above the fold (bottom ${read.bottom})`).toBeLessThanOrEqual(
+    read.height,
+  );
+};
+
+/** The slot the End page draws its picture from, and the ferret Access places in it. */
+const END_SLOT = '.fy-slot[data-slot="onboarding.end"]';
+
+/** Running CSS animations that belong to the ferret, as `<name>@<marker>`. */
+const ferretAnimations = async (tab: Page): Promise<string[]> =>
+  await tab.evaluate(() =>
+    document
+      .getAnimations()
+      .filter(animation => animation.playState === 'running' && animation instanceof CSSAnimation)
+      .map(animation => ({ animation: animation as CSSAnimation, target: (animation.effect as KeyframeEffect).target }))
+      .filter(({ target }) => target?.closest('.fy-ferret') != null)
+      .map(({ animation, target }) => {
+        const marker = (target as Element).getAttributeNames().find(name => name.startsWith('data-mascot-')) ?? '-';
+        return `${animation.animationName}@${marker}`;
+      }),
+  );
+
+/** Where the pupils look (translation of the look layer, SVG units) once any transition has finished. */
+const pupilLook = async (tab: Page): Promise<{ x: number; y: number }> =>
+  await tab.evaluate(async () => {
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter(animation => animation instanceof CSSTransition)
+        .map(animation => animation.finished),
+    );
+    const node = document.querySelector('[data-end-mascot] [data-mascot-look]');
+    if (node === null) return { x: Number.NaN, y: Number.NaN };
+    const matrix = new DOMMatrixReadOnly(getComputedStyle(node).transform);
+    return { x: matrix.e, y: matrix.f };
+  });
+
+/**
+ * r11-1b G1 (gate line 2), in the REAL shell: the End page's picture is exactly Access's `access.end-mascot` panel in the
+ * `onboarding.end` slot; hovering (a mouse) or tapping (a phone) it moves the pupils and starts the wave within 400 ms;
+ * under reduced motion only the blink runs; it never takes focus.
+ */
+const endMascot = async (tab: Page, variant: Variant, key: string): Promise<void> => {
+  const phone = variant.width < 600;
+  expect(
+    await tab
+      .locator(`${END_SLOT} [data-panel]`)
+      .evaluateAll(nodes => nodes.map(node => node.getAttribute('data-panel'))),
+    `${key}: the slot holds exactly Access's end-mascot panel`,
+  ).toEqual(['access.end-mascot']);
+  const ferret = tab.locator(`${END_SLOT} .fy-ferret[data-pose="cheer"]`);
+  expect(await ferret.count(), `${key}: the panel draws the cheering ferret`).toBe(1);
+  await ferret.evaluate(node => node.scrollIntoView({ block: 'center' }));
+  await tab.waitForTimeout(100);
+  const box = (await ferret.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
+  expect(box.width, `${key}: the ferret has a size`).toBeGreaterThan(40);
+  if (!phone)
+    expect(box.x, `${key}: on a desktop the ferret is in the right half (x ${box.x})`).toBeGreaterThanOrEqual(
+      variant.width / 2 - 1,
+    );
+  // The pointer starts far from the ferret, so the move below is what the pupils answer.
+  await tab.mouse.move(2, 2);
+  await tab.waitForTimeout(200);
+  const rest = await pupilLook(tab);
+  expect(rest, `${key}: at rest the pupils look straight ahead`).toEqual({ x: 0, y: 0 });
+  const aim = { x: box.x + box.width * 0.9, y: box.y + box.height * 0.5 };
+  const started = Date.now();
+  if (phone) await tab.touchscreen.tap(aim.x, aim.y);
+  else await tab.mouse.move(aim.x, aim.y);
+  await tab.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-end-mascot] [data-mascot-wave]')
+        ?.getAnimations()
+        .some(
+          animation =>
+            animation instanceof CSSAnimation &&
+            animation.animationName === 'fy-ferret-wave-again' &&
+            animation.playState === 'running',
+        ) === true,
+    undefined,
+    { timeout: 400 },
+  );
+  const waveMs = Date.now() - started;
+  expect(
+    waveMs,
+    `${key}: the wave runs within 400 ms of the ${phone ? 'tap' : 'hover'} (${waveMs} ms)`,
+  ).toBeLessThanOrEqual(400);
+  const looked = await pupilLook(tab);
+  expect(looked.x, `${key}: the pupils moved toward the pointer (x ${looked.x.toFixed(2)})`).toBeGreaterThan(1);
+  expect(Math.abs(looked.x), `${key}: and stay inside the eye`).toBeLessThanOrEqual(3.3);
+  expect(
+    await tab.evaluate(() => document.activeElement?.closest('[data-end-mascot]') != null),
+    `${key}: the ferret never takes focus`,
+  ).toBe(false);
+  expect(
+    await tab.locator(`${END_SLOT} :is(a, button, input, select, textarea, [tabindex])`).count(),
+    `${key}: nothing in the picture can be focused or clicked`,
+  ).toBe(0);
+  mascotMeasured.push(
+    `${variant.name}:${key}: wave after ${waveMs} ms; pupils ${looked.x.toFixed(2)},${looked.y.toFixed(2)}`,
+  );
+  // Let the poke settle, then ask for reduced motion: a hover or tap moves nothing but the blink.
+  await tab.waitForFunction(
+    () => document.querySelector('[data-end-mascot] .fy-ferret[data-poke]') === null,
+    undefined,
+    {
+      timeout: 4_000,
+    },
+  );
+  await tab.emulateMedia({ reducedMotion: 'reduce' });
+  await tab.mouse.move(2, 2);
+  await tab.waitForTimeout(150);
+  if (phone) await tab.touchscreen.tap(aim.x, aim.y);
+  else await tab.mouse.move(aim.x, aim.y);
+  await tab.waitForTimeout(200);
+  const moving = (await ferretAnimations(tab)).filter(name => !name.endsWith('@data-mascot-blink'));
+  await tab.emulateMedia({ reducedMotion: 'no-preference' });
+  expect(moving, `${key}: under reduced motion nothing but the blink runs`).toEqual([]);
+};
+
 // ─── the journey ────────────────────────────────────────────────────────────────────────────────────────────────────
 describe('the first run, end to end', () => {
   for (const variant of VARIANTS)
@@ -853,6 +1001,7 @@ describe('the first run, end to end', () => {
       expect(clipped, 'Voice: no engine card clips its text').toEqual([]);
       await shot(tab, variant, 'voice.voice-all-engines');
       await next(tab, 'end');
+      await endHeadingInView(tab, variant, 'voice -> end');
       expect(Object.keys(await ledgerOf(tab))).toContain('voice.voice');
 
       // ── ONE counter model for the whole run (item 1) ──
@@ -923,6 +1072,7 @@ describe('the first run, end to end', () => {
       expect(await tab.locator('[data-flow-end]').count()).toBe(1);
       await endPage(tab, variant, 'end');
       await shot(tab, variant, 'end');
+      await endMascot(tab, variant, 'end');
       // Every machine step ended up answered, each exactly once.
       const done = await daemonOf(tab, A);
       for (const step of MACHINE_A.steps.filter(candidate => candidate.side === undefined)) {
@@ -987,12 +1137,14 @@ describe('the first run, end to end', () => {
       await inspect(tab, variant, 'access.passkey', { first: true });
       await shot(tab, variant, 'access.passkey-chip');
       await next(tab, 'end');
+      await endHeadingInView(tab, variant, 'passkey -> end');
       expect(Object.keys(await ledgerOf(tab))).toContain('access.passkey');
       expect((await ledgerOf(tab))['access.passkey']?.daemons, 'the passkey answer is for the new machine').toEqual([
         B,
       ]);
       await shot(tab, variant, 'end-pair');
       await endPage(tab, variant, 'end-pair');
+      await endMascot(tab, variant, 'end-pair');
       // The Pair journey's ending has the same summary: what this device now holds, and where to change it.
       const pairSummary = await tab.locator('[data-onboarding-summary]').innerText();
       expect(pairSummary, 'end-pair: the summary says what was set up on this device').toMatch(/this device\s/iu);
@@ -1007,11 +1159,117 @@ describe('the first run, end to end', () => {
       expect(walked.filter(key => key === 'onboarding.appearance')).toHaveLength(1);
 
       if (shotsDir !== '')
+        await Bun.write(join(shotsDir, `${variant.name}-end-measured.txt`), `${mascotMeasured.join('\n')}\n`);
+      mascotMeasured.length = 0;
+      if (shotsDir !== '')
         await Bun.write(join(shotsDir, `${variant.name}-counters.txt`), `${seen.counters.join('\n')}\n`);
       seen.counters.length = 0;
       seen.unanswered = [...(await daemonOf(tab, A)).unanswered, ...(await daemonOf(tab, B)).unanswered];
       await context.close();
     });
+});
+
+// ─── the End page of a short Pair journey, with Access on and with Access switched off on the machine ───────────────────
+describe('the End page of a Pair journey', () => {
+  for (const variant of VARIANTS)
+    for (const access of ['on', 'paused'] as const)
+      it(`${variant.name}: Access ${access}: ${access === 'on' ? "the picture is Access's ferret, in the real shell" : 'no picture column, the one primary still opens the machine'}`, async () => {
+        const browser = await sharedChromium();
+        const phone = variant.width < 600;
+        const context = await browser.newContext({
+          viewport: { width: variant.width, height: variant.height },
+          colorScheme: variant.dark ? 'dark' : 'light',
+          deviceScaleFactor: phone ? 2 : 1,
+          hasTouch: phone,
+          isMobile: phone,
+        });
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        // This device already set Appearance, Layout and Voice, so the Pair journey has nothing else to ask once Access is off.
+        await context.addInitScript(
+          ({ key, daemon }) =>
+            window.localStorage.setItem(
+              key,
+              JSON.stringify({
+                format: 1,
+                steps: Object.fromEntries(
+                  ['onboarding.appearance', 'layouts.layout', 'voice.voice'].map(step => [
+                    step,
+                    { at: '2026-11-20T10:00:00.000Z', daemons: [daemon] },
+                  ]),
+                ),
+              }),
+            ),
+          { key: 'fy:onboarding:client', daemon: MACHINE_B.id },
+        );
+        const tab = await context.newPage();
+        tab.setDefaultTimeout(20_000);
+        const problems: string[] = [];
+        tab.on('pageerror', error => problems.push(error.message));
+        try {
+          await tab.goto(
+            `${origin}/pair?theme=studio-${variant.dark ? 'dark' : 'light'}${access === 'paused' ? '&paused=access' : ''}`,
+          );
+          await tab.getByText('Paste a link').click();
+          await tab.getByLabel('Pairing link').fill(pairLinkOf(MACHINE_B, origin));
+          await tab.getByText('Use this link').click();
+          await tab.locator('[data-pair-confirm]').waitFor();
+          await tab.locator('[data-pair-confirm]').click();
+          const offer = tab.locator('[data-first-passkey-offer]');
+          if (
+            await offer.waitFor({ timeout: 4_000 }).then(
+              () => true,
+              () => false,
+            )
+          )
+            await tab.getByRole('button', { name: 'Not now' }).click();
+          // The paired machine's own setup flow, the Pair journey (what this device already set is skipped).
+          await tab.evaluate(path => {
+            history.pushState(null, '', path);
+            dispatchEvent(new PopStateEvent('popstate'));
+          }, `/d/${MACHINE_B.id}/onboarding/setup?phase=client&journey=pair`);
+          if (access === 'on') {
+            // Access's own Passkey page is the one step this device has not answered.
+            await reach(tab, 'access.passkey');
+            await next(tab, 'end');
+            await endHeadingInView(tab, variant, 'passkey -> end');
+            await endMascot(tab, variant, `short ${variant.name}`);
+            if (shotsDir !== '') {
+              await tab.evaluate(() =>
+                (document.querySelector('.fy-spf__title') as HTMLElement).scrollIntoView({ block: 'start' }),
+              );
+              await tab.screenshot({ path: join(shotsDir, `${variant.name}-short-end-top.png`) });
+              await tab.evaluate(() => {
+                for (
+                  let el: Element | null = document.querySelector('[data-step-footer]');
+                  el !== null;
+                  el = el.parentElement
+                )
+                  if (el.scrollHeight > el.clientHeight + 1) el.scrollTop = el.scrollHeight;
+              });
+              await tab.waitForTimeout(150);
+              await tab.screenshot({ path: join(shotsDir, `${variant.name}-short-end-bottom.png`) });
+            }
+            expect(await tab.locator('[data-variant="primary"]:visible').count(), 'exactly one primary button').toBe(1);
+            expect(problems).toEqual([]);
+            return;
+          }
+          await reach(tab, 'end');
+          expect(await tab.locator('[data-flow-end]').count(), 'the End page is drawn').toBe(1);
+          expect(await tab.locator('.fy-slot[data-slot="onboarding.end"]').count(), 'no picture slot is drawn').toBe(0);
+          expect(await tab.locator('[data-end-mascot]').count(), 'no empty picture column is left behind').toBe(0);
+          expect(await tab.locator('[data-variant="primary"]:visible').count(), 'exactly one primary button').toBe(1);
+          expect(await tab.locator('[data-step-footer] [data-variant="primary"]').innerText()).toBe(
+            'Open this machine',
+          );
+          await tab.locator('[data-step-next]').click();
+          await tab.waitForURL(url => url.pathname.startsWith(`/d/${MACHINE_B.id}`));
+          expect(problems).toEqual([]);
+        } finally {
+          await context.close();
+        }
+      });
 });
 
 // ─── what the run found (each gap was `it.failing` until it was fixed; now each is a plain test) ───────────────────────

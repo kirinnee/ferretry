@@ -7,16 +7,35 @@
  */
 import { Button, LivingBackground, Loading } from '@ferretry/app/ui';
 import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
-import type { ReactNode } from 'react';
+import { type ReactNode, useLayoutEffect, useRef } from 'react';
 import { EndPage } from './end-page.tsx';
 import { type FlowDeps, useSetupFlow } from './use-setup-flow.ts';
 import { FlowPage } from './page-frame.tsx';
 import { END } from './flow-model.ts';
 import './flow.css';
 
+/**
+ * Every page of the flow opens at its top. The shell's main area (not the flow) owns the scroll, so a long page left
+ * scrolled (Voice with every engine shown) carried its offset onto the next page and drew the End heading above the fold.
+ * On each arrival the scroll of every scrolling ancestor, and of the window, goes back to 0 before the page paints.
+ */
+function resetScroll(from: HTMLElement | null): void {
+  for (let el = from; el !== null; el = el.parentElement) if (el.scrollTop !== 0) el.scrollTop = 0;
+  if (window.scrollY !== 0) window.scrollTo(0, 0);
+}
+
 export function createSetupFlow(client: PluginClient, deps: FlowDeps = {}) {
   return function SetupFlow(_props: ScreenProps): ReactNode {
     const flow = useSetupFlow(client, deps);
+    const root = useRef<HTMLDivElement>(null);
+    // One arrival per page visit (the key of the page and which visit of it), so a re-render alone never moves the scroll.
+    const here = `${flow.at}:${flow.visit}`;
+    const arrivedAt = useRef<string | undefined>(undefined);
+    useLayoutEffect(() => {
+      if (arrivedAt.current === here) return;
+      arrivedAt.current = here;
+      resetScroll(root.current);
+    }, [here]);
     const body = ((): ReactNode => {
       if (flow.loading === 'failed')
         return (
@@ -73,7 +92,7 @@ export function createSetupFlow(client: PluginClient, deps: FlowDeps = {}) {
       );
     })();
     return (
-      <div className="fy-sf-root" data-setup-flow="" data-journey={flow.journey}>
+      <div className="fy-sf-root" ref={root} data-setup-flow="" data-journey={flow.journey}>
         <LivingBackground />
         {body}
       </div>

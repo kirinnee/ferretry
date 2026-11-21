@@ -31,6 +31,7 @@ const shotsDir = process.env.FY_END_PAGE_SHOTS_DIR ?? '';
 const VIEWPORTS = [
   { name: '1280', width: 1_280, height: 800, phone: false },
   { name: '390', width: 390, height: 844, phone: true },
+  { name: '320', width: 320, height: 640, phone: true },
 ] as const;
 
 let browser: Browser;
@@ -220,6 +221,19 @@ describe('the last page', () => {
               }),
               '390: Open this machine is drawn on one line',
             ).toBe(1);
+            // The label sits inside its button on every phone (at 320px it once ran 144.7px across a 140px button).
+            const label = await tab.locator('[data-step-next]').evaluate(node => {
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              const text = range.getBoundingClientRect();
+              const button = node.getBoundingClientRect();
+              return { left: text.left - button.left, right: button.right - text.right, width: text.width };
+            });
+            expect(
+              label.left,
+              `${viewport.name}: the label starts inside the button (${label.width.toFixed(1)}px wide in ${next.w.toFixed(1)}px)`,
+            ).toBeGreaterThanOrEqual(0);
+            expect(label.right, `${viewport.name}: the label ends inside the button`).toBeGreaterThanOrEqual(0);
           } else {
             expect(Math.abs(project.w - alternative.w), '1280: Create / Continue share one width').toBeLessThanOrEqual(
               1,

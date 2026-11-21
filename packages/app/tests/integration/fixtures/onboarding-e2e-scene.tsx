@@ -5,6 +5,7 @@
  *
  *   /            a first visit: the shell sends a device with no daemon to the first run
  *   ?theme=<family>-<mode>
+ *   ?paused=<plugin>   the machines report that plugin as off and list none of its steps, as a daemon with it switched off does
  *
  * Pairing is REAL up to the wire: Access's pairing page reads the link, mints its device key in the browser, and asks the
  * (fake) `pairDirect`; the fake saves the key as the shell does after a sealed `paired` answer, and the machine is added.
@@ -30,8 +31,16 @@ import { extraRoutes } from './onboarding-e2e-routes.ts';
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const surfaces = generated.surfaces;
+const paused = params.get('paused');
+const overrides = paused === null ? {} : { [paused]: { on: false } };
 
-const daemons = new Map<string, FakeDaemon>(MACHINES.map(machine => [machine.id, new FakeDaemon(machine)]));
+// A paused plugin offers the machine no steps (a switched-off plugin's steps are not listed).
+const daemons = new Map<string, FakeDaemon>(
+  MACHINES.map(machine => [
+    machine.id,
+    new FakeDaemon({ ...machine, steps: machine.steps.filter(step => step.plugin !== paused) }),
+  ]),
+);
 const transports = new Map<string, FakeTransport>();
 const transportOf = (id: string): FakeTransport => {
   const known = transports.get(id);
@@ -39,7 +48,7 @@ const transportOf = (id: string): FakeTransport => {
   const fake = daemons.get(id);
   if (fake === undefined) throw new Error(`no fake machine ${id}`);
   const made = new FakeTransport(request => {
-    if (request.path === '/v1/plugins') return json(inventoryOf(surfaces));
+    if (request.path === '/v1/plugins') return json(inventoryOf(surfaces, overrides));
     return fake.answer(request, extraRoutes(fake));
   });
   transports.set(id, made);

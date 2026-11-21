@@ -160,7 +160,9 @@
   }
 }
 /* On a phone the footer is two buttons, not three thirds: Back keeps the footer's fixed 136px and Open this machine takes
-   the rest, so its label stays on ONE line (a third of 390px wrapped it to two). */
+   the rest, so its label stays on ONE line (a third of 390px wrapped it to two). A 320px phone leaves that button 140px,
+   narrower than the label at the footer's size, so below 360px the label is a little smaller and still one line (a second
+   line would make the footer taller than the room the page reserves for it). */
 @container (max-width: 599.98px) {
   .fy-spf:has(.fy-end) .fy-spf__footer .fy-spf__actions {
     grid-template-columns: 8.5rem minmax(0, 1fr);
@@ -168,6 +170,12 @@
   .fy-spf:has(.fy-end) .fy-spf__footer [data-step-next] {
     grid-column: 2;
     white-space: nowrap;
+  }
+}
+@container (max-width: 359.98px) {
+  .fy-spf:has(.fy-end) .fy-spf__footer [data-step-next] {
+    font-size: 0.8125rem;
+    padding-inline: 2px;
   }
 }
 /* The shared words about working without a project stay whole, but behind one line (the page says little). */
