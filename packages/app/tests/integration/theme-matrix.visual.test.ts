@@ -263,15 +263,6 @@ const KNOWN: readonly Known[] = [
     why: WHY.sidebar,
   },
   {
-    viewports: ['1280'],
-    styles: ['exaggerated'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'size',
-    what: 'display heading',
-    why: WHY.size,
-  },
-  {
     viewports: BOTH_WIDTHS,
     styles: ['antiposh'],
     palettes: ['vintage'],
@@ -282,7 +273,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['briefing', 'retro', 'swiss'],
+    styles: ['briefing', 'retro'],
     palettes: ['geist'],
     modes: BOTH_MODES,
     check: 'spinner',
@@ -291,7 +282,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['exaggerated', 'glass', 'lucid', 'neumorphism', 'studio'],
+    styles: ['glass', 'lucid', 'neumorphism', 'studio'],
     palettes: ['studio'],
     modes: BOTH_MODES,
     check: 'spinner',
@@ -356,17 +347,8 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['briefing', 'swiss'],
+    styles: ['briefing'],
     palettes: ['geist'],
-    modes: BOTH_MODES,
-    check: 'distinct',
-    what: 'differs from Studio on fewer than 6 of 8 components',
-    why: WHY.hypermedia,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['exaggerated'],
-    palettes: ['studio'],
     modes: BOTH_MODES,
     check: 'distinct',
     what: 'differs from Studio on fewer than 6 of 8 components',
