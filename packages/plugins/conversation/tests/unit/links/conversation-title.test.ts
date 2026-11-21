@@ -316,6 +316,14 @@ describe('a credential named in a sentence or a URL is masked (review SEC 1)', (
     ['fetch https://example.test/api?access_token=abcd1234 again', 'abcd1234'],
     ['the API key is k9x8c7v6b5 for prod', 'k9x8c7v6b5'],
     ['export GITHUB_TOKEN= gh0stval99 first', 'gh0stval99'],
+    // review round 3 (SEC non-blocking a, b): a JSON-quoted name, a separator glued to the value, a name said with "is".
+    ['send {"token":"s3cretpw"} to the api', 's3cretpw'],
+    ['body is {"password": "hunter22x", "user": "bo"} ok', 'hunter22x'],
+    ['curl -d \'{"api_key":"k9x8c7v6b5"}\' now', 'k9x8c7v6b5'],
+    ['the password :hunter22x please log in', 'hunter22x'],
+    ['PASSWORD :zxcvb12 is wrong', 'zxcvb12'],
+    ['my passphrase is correcthorse9 ok', 'correcthorse9'],
+    ['the passphrase: correcthorse9 stays secret', 'correcthorse9'],
   ];
 
   for (const [text, secret] of cases) {

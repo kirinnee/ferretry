@@ -445,6 +445,27 @@ export class ConversationIndex {
   }
 
   /**
+   * Looks again at ONLY the given conversations (`"<harness>:<conversation id>"`), for the title sweep: only the trees of those
+   * harnesses are listed, only the files named after those conversations are read, nothing else is added, dropped or judged,
+   * and the index is not marked fresh or built (a listing still does its own full update). Joins a running update instead of
+   * starting a second one. Never rejects.
+   */
+  refreshConversations(only: ReadonlySet<string>): Promise<void> {
+    if (this.#running !== undefined) return this.#running;
+    const run = this.#refreshNow(only)
+      .catch((error: unknown) => {
+        this.needs.warn?.(
+          `The conversation index could not be updated: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      })
+      .finally(() => {
+        this.#running = undefined;
+      });
+    this.#running = run;
+    return run;
+  }
+
+  /**
    * What a listing does first. A built index that is older than {@link INDEX_FRESH_MS} is refreshed and waited for, up to
    * {@link INDEX_WAIT_MS}; an index never built is never waited for. Resolves with whether the answer will be partial
    * (an update is still running).
@@ -461,18 +482,24 @@ export class ConversationIndex {
     return { indexing: this.#running !== undefined };
   }
 
-  async #refreshNow(): Promise<void> {
+  /** @param only when given, a SCOPED update (see {@link refreshConversations}); absent, the whole index. */
+  async #refreshNow(only?: ReadonlySet<string>): Promise<void> {
     const db = this.#open();
-    const sources = await this.needs.sources();
-    this.#sources = new Map(sources.map(source => [sourceKeyOf(source), source]));
+    const everySource = await this.needs.sources();
+    const wanted = only === undefined ? undefined : new Set([...only].map(key => key.slice(0, key.indexOf(':'))));
+    const sources = wanted === undefined ? everySource : everySource.filter(source => wanted.has(source.harness));
+    this.#sources = new Map([
+      ...(only === undefined ? [] : this.#sources),
+      ...sources.map(source => [sourceKeyOf(source), source] as const),
+    ]);
     const present = new Set(this.#sources.keys());
     const harnesses = new Set(sources.map(source => source.harness));
 
     // A source that is no longer there (a ferret deleted, a home that became a link) takes its rows with it. Only a harness
     // that answered at all is judged: one that is off hides its history, it does not empty it.
-    for (const stale of db.query<{ harness: string; kind: string; label: string }>(
-      'SELECT DISTINCT harness, kind, label FROM conv',
-    )) {
+    for (const stale of only !== undefined
+      ? []
+      : db.query<{ harness: string; kind: string; label: string }>('SELECT DISTINCT harness, kind, label FROM conv')) {
       if (harnesses.has(stale.harness) && !present.has(sourceKeyOf(stale))) {
         this.#changed = true;
         db.run('DELETE FROM conv WHERE harness = ? AND kind = ? AND label = ?', [
@@ -500,6 +527,8 @@ export class ConversationIndex {
       const seen = new Set<string>();
       for (const found of listed) {
         seen.add(found.path);
+        // A scoped update reads only the files of the conversations it was asked about.
+        if (only !== undefined && !only.has(`${source.harness}:${found.nameId}`)) continue;
         const old = existing.get(found.path);
         if (old !== undefined && old.size === found.size && old.mtime_ms === found.mtimeMs) continue;
         work.push({
@@ -517,7 +546,7 @@ export class ConversationIndex {
         });
       }
       for (const [path] of existing)
-        if (!seen.has(path)) {
+        if (only === undefined && !seen.has(path)) {
           this.#changed = true;
           db.run('DELETE FROM conv WHERE harness = ? AND kind = ? AND label = ? AND path = ?', [
             source.harness,
@@ -532,7 +561,7 @@ export class ConversationIndex {
     await this.#run(work);
     await this.#applyFerretNames();
     this.#settleWinners();
-    db.run("INSERT OR REPLACE INTO meta (k, v) VALUES ('built', '1')");
+    if (only === undefined) db.run("INSERT OR REPLACE INTO meta (k, v) VALUES ('built', '1')");
   }
 
   /** Every transcript file of one tree, from directory listings alone: no file is opened. */

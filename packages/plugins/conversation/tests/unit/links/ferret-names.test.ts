@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ferretConversationNames } from '../../../daemon/links/lib/ferret-names.ts';
+import { ferretConversationNames, titleWatch } from '../../../daemon/links/lib/ferret-names.ts';
 
 const ferret = (extra: Record<string, unknown>) =>
   ({ id: 'ms-12', harness: 'claude-code', harnessConversation: 'c1', name: 'Ms-12', ...extra }) as never;
@@ -43,5 +43,35 @@ describe('which ferret runs each conversation, and its title', () => {
 
   test('a ferret that runs no harness conversation is not listed', () => {
     expect(ferretConversationNames([ferret({ harnessConversation: undefined })]).size).toBe(0);
+  });
+});
+
+describe('which conversations the title sweep still watches (r11 S11 round 3)', () => {
+  test('a running ferret with no title, the placeholder or an offered title is watched', () => {
+    for (const state of ['starting', 'working', 'idle']) {
+      for (const extra of [
+        {},
+        { title: 'interactive', titleSource: 'auto' },
+        { title: 'Fix login', titleSource: 'auto' },
+      ]) {
+        expect([...titleWatch([ferret({ state, ...extra })])]).toEqual(['claude-code:c1']);
+      }
+    }
+  });
+
+  test('a STOPPED ferret is never watched, whatever its title', () => {
+    for (const extra of [{}, { title: 'Fix login', titleSource: 'auto' }]) {
+      expect(titleWatch([ferret({ state: 'stopped', ...extra })]).size).toBe(0);
+    }
+  });
+
+  test('an owner title ends the watch, stored before the source existed or not', () => {
+    expect(titleWatch([ferret({ state: 'idle', title: 'Mine', titleSource: 'owner' })]).size).toBe(0);
+    expect(titleWatch([ferret({ state: 'idle', title: 'Mine' })]).size).toBe(0);
+    expect(titleWatch([ferret({ state: 'idle', title: 'interactive', titleSource: 'owner' })]).size).toBe(0);
+  });
+
+  test('a ferret with no harness conversation is not watched', () => {
+    expect(titleWatch([ferret({ state: 'idle', harnessConversation: undefined })]).size).toBe(0);
   });
 });

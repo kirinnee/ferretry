@@ -39,6 +39,26 @@ export function ferretConversationNames(
 }
 
 /**
+ * The conversations (`"<harness>:<conversation id>"`) of the ferrets the title sweep still has a reason to look for: a ferret that is
+ * RUNNING (not stopped) and whose title is not the owner's (it has none yet, or only one it was offered). A stopped ferret is never
+ * one: nothing more is written to its conversation by it, so there is nothing to wait for (a resumed ferret is one again).
+ */
+export function titleWatch(
+  summaries: readonly Pick<FerretSummary, 'harness' | 'harnessConversation' | 'state' | 'title' | 'titleSource'>[],
+): ReadonlySet<string> {
+  return new Set(
+    summaries.flatMap(summary => {
+      if (summary.harnessConversation === undefined || summary.state === 'stopped') return [];
+      const placeholder = summary.title?.trim().toLowerCase() === START_PLACEHOLDER && summary.titleSource !== 'owner';
+      const titled = summary.title !== undefined && summary.title.trim() !== '' && !placeholder;
+      return titled && (summary.titleSource ?? 'owner') === 'owner'
+        ? []
+        : [`${summary.harness}:${summary.harnessConversation}`];
+    }),
+  );
+}
+
+/**
  * Offers Ferrets a title made from a ferret's conversation (the production wiring of `adoptTitle`; the daemon runs this one function and the
  * kernel host test `conversation-titles-sweep` drives it). An id that is not a ferret's, or a Ferrets with no such port, keeps what it has.
  */
@@ -56,16 +76,20 @@ const TITLE_SWEEP_MS = 5_000;
 
 /**
  * Keeps ferrets' conversation titles fresh (the production wiring; `buildReading` starts it, and the kernel host test `conversation-titles-sweep` winds its clock): every
- * {@link TITLE_SWEEP_MS}, while some ferret's conversation can still take a title (its owner has not chosen one), the index is read
- * again, which offers that ferret any title its CLI wrote since. With every ferret titled by its owner nothing is read. Nothing
- * else asks the index in between (it is otherwise read only when a listing or a search needs it), so without this a title
- * Claude Code writes after the first exchange would reach the drawer only once somebody opened the Conversations list.
- * Returns what stops it. A tick still running when the next is due is not started twice.
+ * {@link TITLE_SWEEP_MS}, while some RUNNING ferret's conversation can still take a title (its owner has not chosen one), the index
+ * looks again at THOSE conversations only (their harness's tree is listed and only their own transcripts are read), which offers
+ * the ferret any title its CLI wrote since. With no such ferret a tick lists and reads nothing at all: a stopped ferret, or one its
+ * owner titled, costs no history I/O (the one cheap check of the ferrets' records is all that is left, because a ferret started or
+ * resumed later must be picked up). Nothing else asks the index in between (it is otherwise read only when a listing or a
+ * search needs it), so without this a title Claude Code writes after the first exchange would reach the drawer only once somebody
+ * opened the Conversations list. Returns what stops it. A tick still running when the next is due is not started twice.
  */
 export function startTitleSweep(needs: {
   readonly every: (intervalMs: number, tick: () => void) => () => void;
-  readonly names: () => Promise<FerretConversationNames>;
-  readonly refresh: () => Promise<void>;
+  /** The conversations a title can still arrive for ({@link titleWatch}). */
+  readonly watching: () => Promise<ReadonlySet<string>>;
+  /** Looks again at exactly those conversations. */
+  readonly refresh: (only: ReadonlySet<string>) => Promise<void>;
   readonly warn: (message: string) => void;
 }): () => void {
   let running = false;
@@ -73,8 +97,8 @@ export function startTitleSweep(needs: {
     if (running) return;
     running = true;
     void (async () => {
-      const names = await needs.names();
-      if ([...names.values()].some(ferret => ferret.titleSource !== 'owner')) await needs.refresh();
+      const watching = await needs.watching();
+      if (watching.size > 0) await needs.refresh(watching);
     })()
       .catch((error: unknown) =>
         needs.warn(`The title sweep failed: ${error instanceof Error ? error.message : String(error)}`),

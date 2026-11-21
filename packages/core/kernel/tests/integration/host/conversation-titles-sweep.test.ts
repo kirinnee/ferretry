@@ -43,7 +43,11 @@ class Tree implements HarnessHistoryFiles {
     bytes.set(added, held.length);
     this.files.set(path, { bytes, modifiedMs: this.#clock });
   }
+  /** What the daemon asked of the tree: each directory listed and each file opened (the sweep's own I/O, counted). */
+  readonly listed: string[] = [];
+  readonly opened: string[] = [];
   async entries(directory: string) {
+    this.listed.push(directory);
     const prefix = directory === '' ? '' : `${directory}/`;
     const seen = new Map<string, { kind: 'file' | 'directory'; size: number; modifiedMs: number }>();
     for (const [path, file] of this.files) {
@@ -63,6 +67,7 @@ class Tree implements HarnessHistoryFiles {
     return file === undefined ? undefined : { size: file.bytes.length, modifiedMs: file.modifiedMs };
   }
   async read(path: string, offset: number, length: number) {
+    this.opened.push(path);
     return this.files.get(path)?.bytes.slice(offset, offset + length);
   }
 }
@@ -199,5 +204,60 @@ describe('r11 S11 a title the CLI writes later reaches the ferret by the daemonâ
     w.tree.put(w.transcript, record({ type: 'ai-title', aiTitle: NEWER }));
     await wind(w, 12_000);
     expect(await w.shown()).toEqual({ title: OWNERS, titleSource: 'owner' });
+  });
+});
+
+describe('r11 S11 round 3: the sweep reads only for a RUNNING ferret that is still auto-titled, and only what can be that ferretâ€™s', () => {
+  const OTHER = 'projects/-work-b/00000000-0000-4000-8000-000000000b0b.jsonl';
+
+  test('after the only ferret stops, the next ticks list and read nothing, whatever lands in the history', async () => {
+    const w = await boot();
+    await wind(w, 3_000);
+    expect((await w.shown()).titleSource).toBe('auto');
+
+    const stopped = await w.h.request('POST', `/v1/ferrets/${w.id}/stop`);
+    expect(stopped.status).toBe(200);
+    await w.h.settle();
+    // A tick that was already running when the ferret stopped may still finish: let it, then count from a clean slate.
+    await wind(w, 6_000);
+    w.tree.listed.length = 0;
+    w.tree.opened.length = 0;
+
+    // A new, unrelated conversation appears in the owner's history, and the ferret's own gets a late title.
+    w.tree.put(OTHER, exchange());
+    w.tree.put(w.transcript, record({ type: 'ai-title', aiTitle: LATE }));
+    await wind(w, 20_000);
+
+    expect({ listed: w.tree.listed.length, opened: w.tree.opened.length }).toEqual({ listed: 0, opened: 0 });
+    expect((await w.shown()).title).not.toBe(LATE);
+  });
+
+  test('while the ferret runs, a transcript that is not its own is never read by a tick', async () => {
+    const w = await boot();
+    await wind(w, 3_000);
+    w.tree.opened.length = 0;
+
+    w.tree.put(OTHER, exchange());
+    w.tree.put(w.transcript, record({ type: 'ai-title', aiTitle: LATE }));
+    await wind(w, 12_000);
+
+    expect(await w.shown()).toEqual({ title: LATE, titleSource: 'auto' });
+    expect(w.tree.opened.filter(path => path === OTHER)).toEqual([]);
+    expect(w.tree.opened.some(path => path === w.transcript)).toBe(true);
+  });
+
+  test('a ferret resumed after it stopped is watched again', async () => {
+    const w = await boot();
+    await wind(w, 3_000);
+    await w.h.request('POST', `/v1/ferrets/${w.id}/stop`);
+    await w.h.settle();
+    await wind(w, 6_000);
+    const resumed = await w.h.request('POST', `/v1/ferrets/${w.id}/resume`);
+    expect(resumed.status).toBeLessThan(300);
+    await w.h.settle();
+
+    w.tree.put(w.transcript, record({ type: 'ai-title', aiTitle: LATE }));
+    await wind(w, 12_000);
+    expect(await w.shown()).toEqual({ title: LATE, titleSource: 'auto' });
   });
 });

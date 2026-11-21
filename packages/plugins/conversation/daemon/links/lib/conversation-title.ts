@@ -49,11 +49,11 @@ const SCHEME_THEN_CREDENTIAL = /\b(?:bearer|basic|token)\s+[A-Za-z0-9._~+/=-]{8,
 
 /** A word that names a credential and carries its value glued to it: `TOKEN=…`, `password:…`, `--api-key=…`, `?access_token=…`. */
 const NAMED_CREDENTIAL =
-  /^[\w.-]*(?:token|secret|passw(?:or)?d|passwd|pwd|api[_-]?key|apikey|auth|credential|private[_-]?key|access[_-]?key)[\w.-]*[=:]\S+/iu;
+  /^[\w.-]*(?:token|secret|passw(?:or)?d|passwd|passphrase|passcode|pwd|api[_-]?key|apikey|auth|credential|private[_-]?key|access[_-]?key)[\w.-]*[=:]\S+/iu;
 
 /** A word that NAMES a credential (its value is the next word, after a `:`, `=` or `is`). `STRONG` is the names that are never plain English. */
 const STRONG_NAME =
-  /(?:token|secret|passw(?:or)?d|passwd|pwd|api[_-]?key|apikey|private[_-]?key|access[_-]?key|secret[_-]?key)/iu;
+  /(?:token|secret|passw(?:or)?d|passwd|passphrase|passcode|pwd|api[_-]?key|apikey|private[_-]?key|access[_-]?key|secret[_-]?key)/iu;
 const WEAK_NAME = /(?:auth|credential)/iu;
 /** `key` is a credential's name only after one of these (`api key is …`, `ssh key: …`). */
 const KEY_QUALIFIER = /^(?:api|secret|private|access|ssh|signing)$/iu;
@@ -153,7 +153,9 @@ function credentialSpans(plain: string): readonly (readonly [number, number])[] 
     if (!hidden && before !== undefined) {
       // The value of a named credential: `password: X` / `API_KEY= X` (the separator glued to the name), `API_KEY = X` / `token : X`
       // (its own word), `password is X` (a name that is never plain English only).
-      const glued = /[=:]$/u.test(before) && namesCredential(texts, position - 1) > 0;
+      // The separator may sit on either side of the space: `password: X` (glued to the name) or `password :X` (glued to the value).
+      const glued =
+        namesCredential(texts, position - 1) > 0 && (/[=:]$/u.test(before) || /^(?:=>|:=|[=:])\S/u.test(word.text));
       const named = position > 1 ? namesCredential(texts, position - 2) : 0;
       const apart = named > 0 && SEPARATOR_WORD.test(before);
       const saying = named === 2 && /^is$/iu.test(before);

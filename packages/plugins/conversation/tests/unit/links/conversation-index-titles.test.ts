@@ -483,3 +483,52 @@ describe('ordinary text is shown as written, and the wire never gets a row it re
     expect(JSON.stringify(listing)).not.toContain(GHP);
   });
 });
+
+describe('a scoped update (the title sweep) reads only the conversations it is asked about (r11 S11 round 3)', () => {
+  test('only the named conversation is read, nothing else is added or dropped, and the index is not marked fresh', async () => {
+    const { index, owner, offered } = setup({ names: () => ferretOf({ titleSource: 'auto' }) });
+    owner.set(pathOf(A), talk('please fix the login page'));
+    owner.set(pathOf(B), talk('rewrite the release notes'));
+    await index.refresh();
+    expect(index.query().conversations).toHaveLength(2);
+    offered.length = 0;
+
+    // The ferret's CLI titles its conversation; an unrelated transcript changes, and a third one appears.
+    owner.append(pathOf(A), rec({ type: 'ai-title', aiTitle: 'Fix flaky login test' }));
+    owner.append(pathOf(B), talk('and mention the beta'));
+    const C = '3b1a4a52-0000-4000-8000-00000000000c';
+    owner.set(pathOf(C), talk('something new'));
+    owner.resetReads();
+
+    await index.refreshConversations(new Set([`claude-code:${A}`]));
+
+    expect([...owner.readByPath.keys()]).toEqual([pathOf(A)]);
+    expect(offered).toEqual([{ ferret: 'ms-12', title: 'Fix flaky login test' }]);
+    // The unrelated ones are exactly as they were: B not re-read, C not added.
+    expect(index.query().conversations).toHaveLength(2);
+
+    // A listing still does its own full update afterwards and finds both.
+    owner.resetReads();
+    await index.refresh();
+    expect(index.query().conversations).toHaveLength(3);
+    expect([...owner.readByPath.keys()].sort()).toEqual([pathOf(B), pathOf(C)].sort());
+  });
+
+  test('a harness no watched conversation belongs to is not even listed', async () => {
+    const { index, owner, codex } = setup({ names: () => ferretOf({ titleSource: 'auto' }) });
+    owner.set(pathOf(A), talk('please fix the login page'));
+    codex.set(
+      `sessions/2026/02/01/rollout-2026-02-01T09-00-00-${CODEX}.jsonl`,
+      codexRollout(CODEX, '/work/app', 'fix'),
+    );
+    await index.refresh();
+    const listed: string[] = [];
+    const entries = codex.entries.bind(codex);
+    codex.entries = async directory => {
+      listed.push(directory);
+      return await entries(directory);
+    };
+    await index.refreshConversations(new Set([`claude-code:${A}`]));
+    expect(listed).toEqual([]);
+  });
+});

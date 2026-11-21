@@ -8,7 +8,7 @@ import { buildAttachments } from './attachments/index.ts';
 import { AttachmentError } from './attachments/lib/index.ts';
 import { buildLinks, keepInSyncFrom } from './links/index.ts';
 import type { FerretConversationNames, IndexSource } from './links/index.ts';
-import { ferretConversationNames, startTitleSweep, titleOffer } from './links/lib/ferret-names.ts';
+import { ferretConversationNames, startTitleSweep, titleOffer, titleWatch } from './links/lib/ferret-names.ts';
 import { indexSourcesOf } from './links/lib/history-groups.ts';
 import type { LinkKeeper } from './links/lib/service.ts';
 import type { TranscriptOpener } from './reader/adapters/file-reads.ts';
@@ -242,8 +242,8 @@ export function buildReading(deps: {
   // Conversations list: while a ferret can still take one, the index is kept at its own freshness bound.
   const cancelTitleSweep = startTitleSweep({
     every: (intervalMs, tick) => kernel.clock.every(milliseconds(intervalMs), tick),
-    names: ferretNames,
-    refresh: async () => await links.index.refresh(),
+    watching: async () => titleWatch(await ferrets.list()),
+    refresh: async only => await links.index.refreshConversations(only),
     warn: message => kernel.log.warn(message),
   });
 
