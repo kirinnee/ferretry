@@ -23,14 +23,10 @@
  */
 
 import { Spinner } from '@ferretry/app/ui';
-import { Check, FolderClock, TriangleAlert } from 'lucide-react';
+import { Check, ChevronRight, TriangleAlert } from 'lucide-react';
 import type { RecentProjectOption } from '../lib/discoveries.ts';
 import { relativeTime } from '../lib/folders.ts';
-import {
-  DISCOVERY_PROMISE,
-  type ProjectRegistrationStatus,
-  registrationPendingFor,
-} from '../lib/registration-model.ts';
+import { type ProjectRegistrationStatus, registrationPendingFor } from '../lib/registration-model.ts';
 
 interface ProjectDiscoveriesProps {
   /** `null` = this daemon's ferret list has not been read, so nothing is known. */
@@ -49,45 +45,52 @@ export function ProjectDiscoveries({ discoveries, ferretsError, status, onConfir
   const busy = status?.phase === 'submitting';
   const refusal = status?.phase === 'refused' && status.request.kind === 'confirmed-discovery' ? status.message : null;
 
-  return (
-    <section className="grid gap-sm" aria-labelledby={HEADING_ID} data-project-discoveries="">
-      <header className="grid gap-xs">
-        <h2 className="m-0 flex items-center gap-xs text-title font-semibold text-fg" id={HEADING_ID}>
-          <FolderClock className="text-muted" size={16} aria-hidden="true" />
+  // Nothing to say is nothing drawn: "every folder is covered" is not news. An UNREAD list is different (it is not "none"),
+  // so that one stays as a quiet line.
+  if (discoveries !== null && discoveries.length === 0) return null;
+
+  const refused =
+    refusal === null ? null : (
+      <p className="m-0 flex items-start gap-xs text-meta text-err" role="alert">
+        <TriangleAlert className="mt-0.5 shrink-0" size={14} aria-hidden="true" />
+        <span>This daemon refused the confirmation: {refusal}</span>
+      </p>
+    );
+
+  if (discoveries === null)
+    return (
+      <section className="grid gap-sm" aria-labelledby={HEADING_ID} data-project-discoveries-state="unread">
+        <h2 className="sr-only" id={HEADING_ID}>
           Discovered from ferrets
-          {discoveries !== null && discoveries.length > 0 && (
-            <span className="rounded-control bg-surface-2 px-1.5 py-0.5 text-meta font-medium text-muted">
-              {discoveries.length}
-            </span>
-          )}
         </h2>
-        <p className="m-0 max-w-prose text-meta leading-base text-muted">{DISCOVERY_PROMISE}</p>
-      </header>
-
-      {refusal !== null && (
-        <p className="m-0 flex items-start gap-xs text-meta text-err" role="alert">
-          <TriangleAlert className="mt-0.5 shrink-0" size={14} aria-hidden="true" />
-          <span>This daemon refused the confirmation: {refusal}</span>
-        </p>
-      )}
-
-      {discoveries === null ? (
-        <p className="m-0 text-meta leading-base text-faint" data-project-discoveries-state="unread">
+        {refused}
+        <p className="m-0 text-meta leading-base text-faint">
           {ferretsError === null
             ? 'This daemon’s ferret list has not been read yet, so Ferretry cannot say which folders are unregistered.'
             : `This daemon’s ferret list could not be read (${ferretsError}), so Ferretry cannot say which folders are unregistered.`}
         </p>
-      ) : discoveries.length === 0 ? (
-        <p className="m-0 text-meta leading-base text-faint" data-project-discoveries-state="none">
-          Every folder a ferret on this daemon has worked in is already covered by a registered project.
-        </p>
-      ) : (
-        <ul className="m-0 grid list-none divide-y divide-border-soft p-0">
+      </section>
+    );
+
+  return (
+    <div className="grid gap-sm">
+      {refused}
+      {/* Closed by default and ONE line: these are folders a ferret used that nobody registered, and registering none
+          of them on its own is the point (confirming one is what enrols it), so it never competes with the cards above. */}
+      <details className="group grid gap-sm" data-project-discoveries="">
+        <summary
+          className="flex min-h-control cursor-pointer list-none items-center gap-xs text-meta font-medium text-muted hover:text-fg [&::-webkit-details-marker]:hidden"
+          id={HEADING_ID}
+        >
+          <ChevronRight className="shrink-0 transition-transform group-open:rotate-90" size={14} aria-hidden="true" />
+          <span className="min-w-0 truncate">Folders ferrets used, not yet projects ({discoveries.length})</span>
+        </summary>
+        <ul className="m-0 grid list-none gap-sm p-0">
           {discoveries.map(option => {
             const pending = registrationPendingFor(status, option.path);
             return (
               <li
-                className="flex min-w-0 flex-wrap items-center gap-sm py-2"
+                className="flex min-w-0 flex-wrap items-center gap-sm rounded-control border border-border-soft bg-surface px-control-x py-2"
                 data-project-discovery={option.path}
                 key={option.key}
               >
@@ -112,7 +115,7 @@ export function ProjectDiscoveries({ discoveries, ferretsError, status, onConfir
             );
           })}
         </ul>
-      )}
-    </section>
+      </details>
+    </div>
   );
 }
