@@ -715,15 +715,12 @@ export class ConversationIndex {
       source.parser === 'claude' ? TAIL_NARROW_BYTES : TAIL_READ_BYTES,
     );
     if (read === undefined) return undefined;
-    // A row waiting on the title rule: its names come from one read of the whole file, not from the two ends.
-    const stale = old?.size === STALE_SIZE;
-    const whole = stale && read.partial ? await this.#wholeNames(source, found) : undefined;
-    let result = await this.#describeText(source, found, read, whole);
+    let result = await this.#describeText(source, found, read);
     if (result !== undefined && read.partial && !result.tailSpoke) {
       const fuller = await this.#bounded(source.files, found.path, found.size, HEAD_READ_BYTES, TAIL_READ_BYTES);
       if (fuller !== undefined) {
         read = fuller;
-        result = await this.#describeText(source, found, fuller, whole);
+        result = await this.#describeText(source, found, fuller);
       }
     }
     // A head holding no message at all (as opposed to messages that say nothing: a hand-off pointer, a reminder) was cut
@@ -732,15 +729,23 @@ export class ConversationIndex {
       const wide = await this.#bounded(source.files, found.path, found.size, HEAD_WIDE_READ_BYTES, TAIL_READ_BYTES);
       if (wide !== undefined) {
         read = wide;
-        result = await this.#describeText(source, found, wide, whole);
+        result = await this.#describeText(source, found, wide);
       }
     }
+    // A row waiting on the title rule: its names come from one read of the whole file, not from the two ends. Only when what was
+    // read last still left the middle out: a read that took the whole file (a widened tail) has the names already.
+    const stale = old?.size === STALE_SIZE;
+    const whole = stale && read.partial && result !== undefined ? await this.#wholeNames(source, found) : undefined;
+    // The whole read did not finish (it ended early, failed, or the file changed under it): the cached title stands and the row
+    // stays waiting, so the next refresh reads the file whole again.
+    const incomplete = stale && read.partial && result !== undefined && whole === undefined;
+    if (whole !== undefined) result = await this.#describeText(source, found, read, whole);
     const used = read;
     const common = {
       ...base,
-      size: found.size,
-      mtime_ms: found.mtimeMs,
-      scanned: used.scanned,
+      size: incomplete ? STALE_SIZE : found.size,
+      mtime_ms: incomplete ? -1 : found.mtimeMs,
+      scanned: incomplete ? 0 : used.scanned,
       head_sha: used.headSha,
       ferret_id: old?.ferret_id ?? null,
       ferret_name: old?.ferret_name ?? null,
@@ -765,8 +770,7 @@ export class ConversationIndex {
         turns_at_least: 0,
         model: null,
       };
-    // The whole file could not be read to remake the title: the cached one stands.
-    const kept = stale && read.partial && whole === undefined ? (old?.file_title ?? undefined) : undefined;
+    const kept = incomplete ? (old?.file_title ?? undefined) : undefined;
     return {
       ...common,
       id: result.row.id,
@@ -792,7 +796,8 @@ export class ConversationIndex {
   /**
    * The names of a transcript read WHOLE, for a row waiting on the title rule (`STALE_SIZE`): the latest /rename and the latest
    * generated title anywhere in the file, which the two ends of a long one may not hold. Read in runs, each cut to whole records;
-   * only the name records are parsed, so the file is never held. `undefined` when a run cannot be read.
+   * only the name records are parsed, so the file is never held. `undefined` when the scan is not complete: a run cannot be read,
+   * the file ends before the size the scan began with, or its size or time is no longer the one it began with.
    */
   async #wholeNames(source: IndexSource, found: Found): Promise<TranscriptNames | undefined> {
     let chosen: string | undefined;
@@ -804,8 +809,8 @@ export class ConversationIndex {
         offset,
         Math.min(found.size - offset, HARNESS_HISTORY_READ_MAX_BYTES),
       );
-      if (run === undefined) return undefined;
-      if (run.length === 0) break;
+      // An early end (nothing left to read short of the size the scan began with) is not a whole read.
+      if (run === undefined || run.length === 0) return undefined;
       offset += run.length;
       const bytes = new Uint8Array(carry.length + run.length);
       bytes.set(carry);
@@ -816,6 +821,9 @@ export class ConversationIndex {
       generated = names.generated ?? generated;
       carry = bytes.slice(end);
     }
+    // A file that changed while it was read is not the one the scan began on.
+    const after = await source.files.stat(found.path);
+    if (after === undefined || after.size !== found.size || after.modifiedMs !== found.mtimeMs) return undefined;
     return { ...(chosen === undefined ? {} : { chosen }), ...(generated === undefined ? {} : { generated }) };
   }
 
