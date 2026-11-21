@@ -421,3 +421,36 @@ describe('ordinary text keeps its glyphs and its length (review 2)', () => {
     expect(scrubShown(`[redacted:X] ${'$'}{secret:Y}`, NO_VAULT)).toBe('');
   });
 });
+
+describe('a multiword passphrase is masked whole, before any title is made (review 2289 item 1)', () => {
+  const cases: readonly (readonly [string, readonly string[]])[] = [
+    ['my passphrase is correct horse battery staple', ['correct', 'horse', 'battery', 'staple']],
+    ['passphrase: correct horse battery staple', ['horse', 'battery', 'staple']],
+    ['the password is purple monkey dishwasher and then log in', ['purple', 'monkey', 'dishwasher']],
+    ['password = purple monkey dishwasher', ['purple', 'monkey', 'dishwasher']],
+    ['Fix login, the passphrase is correct horse battery staple', ['horse', 'battery', 'staple']],
+  ];
+
+  for (const [text, words] of cases) {
+    test(`“${text}” leaves no word of the passphrase in the title, the line or the preview`, () => {
+      for (const shown of [
+        deriveTitle(text, NO_VAULT) ?? '',
+        cleanTitle(text, NO_VAULT) ?? '',
+        scrubShown(text, NO_VAULT),
+      ])
+        for (const word of words) expect(shown.toLowerCase()).not.toContain(word);
+    });
+  }
+
+  test('the words before the passphrase and on other lines still make the title', () => {
+    expect(deriveTitle('Fix the login\nthe passphrase is correct horse battery staple', NO_VAULT)).toBe(
+      'Fix the Login',
+    );
+  });
+});
+
+describe('a short clause is not cut at its own "and" or "or" (review 2289 item 2)', () => {
+  test('“Compare Firefox and Chrome” keeps both browsers', () => {
+    expect(deriveTitle('Compare Firefox and Chrome', NO_VAULT)).toBe('Compare Firefox and Chrome');
+  });
+});

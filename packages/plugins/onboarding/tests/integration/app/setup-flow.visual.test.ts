@@ -250,6 +250,56 @@ describe('the page frame in the shell scroll box', () => {
         });
 });
 
+// A page whose controls are positioned layers at z-index 2 (the Voice engine card's Install button is one) scrolled under the
+// sticky footer must stay UNDER it: the footer centre hits the footer, not the page's control.
+describe('the footer draws over a z-index 2 control scrolled beneath it', () => {
+  // With motion allowed the page is held in a stacking context by its slide-in animation, so the bug shows when motion is reduced.
+  for (const scheme of ['light', 'dark'] as const)
+    it(`elementFromPoint at the footer centre is inside the footer, scrolled, reduced motion (390, ${scheme})`, async () => {
+      const context = await browser.newContext({
+        viewport: { width: 390, height: 844 },
+        colorScheme: scheme,
+        deviceScaleFactor: 2,
+        hasTouch: true,
+        isMobile: true,
+      });
+      const origin = server?.url.origin ?? '';
+      await context.route('**/*', async route =>
+        new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+      );
+      const tab = await context.newPage();
+      try {
+        await tab.goto(`${origin}/?theme=studio-${scheme}&case=tall&motion=reduced`);
+        await tab.waitForSelector('[data-scene-ready] [data-last-content]');
+        await tab.waitForTimeout(300);
+        const hits: boolean[] = [];
+        for (const fraction of [0.2, 0.4, 0.6, 0.8]) {
+          await tab.evaluate(fraction => {
+            const main = document.querySelector('[data-scene-main]') as HTMLElement;
+            main.scrollTop = (main.scrollHeight - main.clientHeight) * fraction;
+          }, fraction);
+          await tab.waitForTimeout(100);
+          hits.push(
+            await tab.evaluate(() => {
+              const footer = document.querySelector('.fy-spf__footer') as HTMLElement;
+              const box = footer.getBoundingClientRect();
+              const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+              return hit !== null && footer.contains(hit);
+            }),
+          );
+        }
+        expect(hits, 'the footer centre is inside .fy-spf__footer at every scroll position').toEqual([
+          true,
+          true,
+          true,
+          true,
+        ]);
+      } finally {
+        await context.close();
+      }
+    });
+});
+
 // ─── r11 O1: Next saves the choice, and the loading cover waits 300 ms (owner items 4 and 5) ────────────────────────────
 // The proof of the owner's lines is in the browser, on the real `FlowPage`: (a) a page that registers `commit` is saved by
 // Next, once, and only then does the next page come up; a save that rejects keeps the page, says why, and runs again on the

@@ -97,7 +97,14 @@ function Cards({ host, height }: { readonly host: StepHost; readonly height: num
       {Array.from({ length: count }, (_, index) => `card-${index + 1}`).map((id, index) => (
         <div
           key={id}
-          style={{ border: '1px solid var(--border)', borderRadius: 12, height: 100, padding: 12 }}
+          style={{
+            border: '1px solid var(--border)',
+            borderRadius: 12,
+            height: 100,
+            padding: 12,
+            position: 'relative',
+            zIndex: 2,
+          }}
           {...(index === count - 1 ? { 'data-last-content': '' } : {})}
         >
           {id}
