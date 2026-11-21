@@ -33,6 +33,9 @@ export const SECRET_KEPT = 'kept in the Vault: agents use them, and nothing can 
 /** Said once under the secret keys: where the value lives and how a ferret gets it, so "use it" is not read as "can read it". */
 export const VAULT_VS_ENVIRONMENT = 'A ferret on this login gets each value in its own environment when it starts.';
 
+/** The one visible line under the secret keys; the two sentences above stay on it as its `title` (hover) so nothing is lost. */
+export const VAULT_LINE = 'Secrets go to the Vault.';
+
 /** The variables that carry a GitHub account's token (the same three Logins' A8 import leaves out unless ticked). */
 export const GITHUB_TOKEN_NAMES: readonly string[] = ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN'];
 

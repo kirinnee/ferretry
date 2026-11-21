@@ -26,7 +26,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright-core';
 import { LOADING_FADE_MS, LOADING_MIN_MS } from '../../src/ui/loading-gate.ts';
-import { sceneServer, sharedChromium, walkFocusRings } from '../support/browser/index.ts';
+import { NEXT_SPINNER_LOG, sceneServer, sharedChromium, walkFocusRings } from '../support/browser/index.ts';
 import { clippedBoxes, footerButtons, gapUnderTitle, underFooter } from '../support/browser/stepper-layout.ts';
 import { FAKE_CODE, MACHINE_A, MACHINE_B, pairLinkOf } from './fixtures/onboarding-e2e-daemon.ts';
 
@@ -79,6 +79,8 @@ interface Observed {
   counters: string[];
   /** r11-1b G6: every step cover that drew its loader in a journey with `latency` ms answers: how long the loader stayed. */
   covers: { latency: number; variant: string; ms: number; fullMs: number }[];
+  /** r11-1c C3: every time the Next button's busy spinner was VISIBLE in a journey: how long, and how long fully shown. */
+  nextSpinners: { latency: number; variant: string; ms: number; fullMs: number }[];
 }
 const seen: Observed = {
   nameForms: -1,
@@ -91,6 +93,7 @@ const seen: Observed = {
   pageErrors: [],
   counters: [],
   covers: [],
+  nextSpinners: [],
 };
 
 // ─── small helpers ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -675,7 +678,7 @@ const endMascot = async (tab: Page, variant: Variant, key: string): Promise<void
 describe('the first run, end to end', () => {
   // r11-1b G6: the first variant is walked twice: the machines answer at once, then every answer 100 ms late (a covered page).
   for (const variant of VARIANTS)
-    for (const latency of variant === VARIANTS[0] ? [0, 100] : [0])
+    for (const latency of variant === VARIANTS[0] ? [0, 1, 100] : [0])
       it(`${variant.name}: First time, then a second machine's Pair journey${latency === 0 ? '' : ` (every machine answer ${latency} ms late)`}`, async () => {
         latencyNow = latency;
         shotCounter.n = 0;
@@ -694,6 +697,7 @@ describe('the first run, end to end', () => {
           new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
         );
         await context.addInitScript(COVER_LOG);
+        await context.addInitScript(NEXT_SPINNER_LOG);
         const tab = await context.newPage();
         tab.setDefaultTimeout(20_000);
         tab.on('pageerror', error => seen.pageErrors.push(error.message));
@@ -842,6 +846,26 @@ describe('the first run, end to end', () => {
         ] as const) {
           walked.push(key);
           await inspect(tab, variant, key);
+          if (key === 'claude-code.import-settings') {
+            // r11-1c C1 (the gate's count): the real flow's `.fy-sf-slot` text with ONLY the card titles (group headings and
+            // card labels) taken out, whitespace folded — the scanned key names, the page line and every sentence counted.
+            await tab.waitForTimeout(1_800);
+            const slot = await tab.evaluate(() => {
+              const root = document.querySelector('.fy-sf-slot') as HTMLElement;
+              const flat = (value: string) => value.replace(/\s+/gu, ' ').trim();
+              let text = flat(root.innerText);
+              for (const title of root.querySelectorAll('h4, .text-row')) {
+                const own = flat((title as HTMLElement).innerText);
+                if (own !== '') text = text.replace(own, '');
+              }
+              return flat(text);
+            });
+            console.log(`C1 Settings page slot text ${variant.name} (${String(slot.length)} chars): ${slot}`);
+            expect(
+              slot.length,
+              `Settings page slot text, card titles out and nothing else: ${slot}`,
+            ).toBeLessThanOrEqual(160);
+          }
           await shot(tab, variant, key);
           if (key === 'claude-code.import-skills') {
             // A kind page's tick is the run's memory, not a write: leave one skill out and nothing is sent.
@@ -1269,6 +1293,15 @@ describe('the first run, end to end', () => {
             ms: Math.round(cover.ms),
             fullMs: Math.round(cover.fullMs),
           });
+        for (const spinner of await tab.evaluate(
+          () => (window as unknown as { __nextSpinner: { ms: number; fullMs: number }[] }).__nextSpinner,
+        ))
+          seen.nextSpinners.push({
+            latency,
+            variant: variant.name,
+            ms: Math.round(spinner.ms),
+            fullMs: Math.round(spinner.fullMs),
+          });
         await context.close();
       });
 });
@@ -1406,6 +1439,30 @@ describe('the gaps the gate found, now closed', () => {
         COVER_ON_SCREEN_AT_LEAST_MS,
       );
       expect(cover.fullMs, `a cover's loader was fully shown ${cover.fullMs} ms`).toBeGreaterThanOrEqual(
+        COVER_FULL_AT_LEAST_MS,
+      );
+    }
+  });
+  // r11-1c C3 (owner line 4, the gate's one literal miss): the Next button's own busy spinner is a loader for a short step, so it waits
+  // the same 300 ms as a page loader and, once shown, stays for its minimum. Base drew it at once: 15-38 ms at 1 ms answers.
+  it('the Next button spinner never flashes: none for answers under the delay, and once shown it stays for its minimum', () => {
+    const runs = (latency: number) => seen.nextSpinners.filter(spinner => spinner.latency === latency);
+    for (const latency of [0, 1, 100])
+      console.info(
+        `C3 Next spinner at ${latency} ms answers (on screen / fully shown): ${
+          runs(latency)
+            .map(spinner => `${spinner.ms}/${spinner.fullMs} ms`)
+            .join(', ') || 'never drawn'
+        }`,
+      );
+    for (const latency of [0, 1])
+      expect(runs(latency), `answers ${latency} ms late: the Next spinner is never visible`).toEqual([]);
+    for (const spinner of seen.nextSpinners) {
+      expect(
+        spinner.ms,
+        `the Next spinner was on screen ${spinner.ms} ms (answers ${spinner.latency} ms late)`,
+      ).toBeGreaterThanOrEqual(COVER_ON_SCREEN_AT_LEAST_MS);
+      expect(spinner.fullMs, `the Next spinner was fully shown ${spinner.fullMs} ms`).toBeGreaterThanOrEqual(
         COVER_FULL_AT_LEAST_MS,
       );
     }
