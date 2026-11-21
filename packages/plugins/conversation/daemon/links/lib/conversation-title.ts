@@ -151,6 +151,9 @@ function credentialSpans(plain: string): readonly (readonly [number, number])[] 
   words.forEach((word, position) => {
     const before = texts[position - 1];
     let hidden = looksLikeCredential(word.text) || shownWord(word.text, before).hidden;
+    // A passphrase or password is often several words and nothing marks where it ends: the value of one is every word to the end
+    // of its line (over-masking is the safe side), masked here, before any clause is cut or any title is made.
+    let toLineEnd = false;
     if (!hidden && before !== undefined) {
       // The value of a named credential: `password: X` / `API_KEY= X` (the separator glued to the name), `API_KEY = X` / `token : X`
       // (its own word), `password is X` (a name that is never plain English only).
@@ -161,11 +164,18 @@ function credentialSpans(plain: string): readonly (readonly [number, number])[] 
       const apart = named > 0 && SEPARATOR_WORD.test(before);
       const saying = named === 2 && /^is$/iu.test(before);
       hidden = glued || apart || saying;
+      const name = glued ? before : texts[position - 2];
+      toLineEnd = hidden && MULTIWORD_NAME.test(nameCore(name ?? ''));
     }
-    if (hidden) spans.push([word.start, word.start + word.text.length]);
+    if (!hidden) return;
+    const lineEnd = plain.indexOf('\n', word.start);
+    spans.push([word.start, toLineEnd ? (lineEnd < 0 ? plain.length : lineEnd) : word.start + word.text.length]);
   });
   return spans;
 }
+
+/** Names whose value is words, not one token: a passphrase, a password, a token said as a phrase (`API_KEY` and the like are one token). */
+const MULTIWORD_NAME = /passphrase|passcode|passw(?:or)?d|passwd|pwd|token/iu;
 
 /** `text` with the given spans of its PLAIN form blanked in the ORIGINAL (the glyphs around them untouched). */
 function blank(text: string, view: MatchView, spans: readonly (readonly [number, number])[], hole: string): string {
@@ -273,10 +283,13 @@ const withoutLeadIn = (brief: string): string =>
 const DIFFERENCE =
   /(?:\bthe\s+)?\bdifferences?\s+between\s+(?:an?\s+|the\s+)?([^.,;?!]+?)\s+and\s+(?:an?\s+|the\s+)?([^.,;?!]+?)(?=\s*(?:[.,;?!]|$)|\s+(?:in|for|when|if|on|with)\b)/iu;
 
-/** A line cut where its first clause ends (`then`, `and`), once two words have been said: a title names one piece of work. */
+/** A line cut where its first clause ends (`then`, or `and` once five words are said), after two words: a title names one piece of work. */
 function atClauseEnd(line: string): string {
   const words = line.trim().split(/\s+/u);
-  const end = words.findIndex((word, index) => index >= 2 && /^(?:then|and)$/iu.test(word));
+  // `and` joins two things inside a short clause (`Compare Firefox and Chrome`), so it ends one only after a whole title's worth.
+  const end = words.findIndex(
+    (word, index) => index >= 2 && (/^then$/iu.test(word) || (index >= 5 && /^and$/iu.test(word))),
+  );
   return end < 0 ? line : words.slice(0, end).join(' ');
 }
 
