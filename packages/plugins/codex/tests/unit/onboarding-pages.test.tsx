@@ -284,6 +284,25 @@ describe('sign-in', () => {
     }
   });
 
+  test('a login whose own harness is Claude Code is not a Codex login, even when it lists Codex among its tools', () => {
+    const view = (...logins: ReturnType<typeof codexLogin>[]) => ({ format: 1 as const, machine: 'fixture', logins });
+    const shared = {
+      ...codexLogin('needs_sign_in', { id: 'claude-first' }),
+      harness: 'claude-code' as const,
+      harnesses: ['claude-code' as const, 'codex' as const],
+    };
+    // Not offered as the login to sign in (the Codex panel would refuse it); with nothing else, the add panel is.
+    expect(signInFacts(view(shared))).toEqual({ state: 'no-login' });
+    expect(signInFacts(view(shared, codexLogin('needs_sign_in', { id: 'b' })))).toMatchObject({
+      state: 'needs-sign-in',
+      login: { id: 'b' },
+    });
+    // Nor does one that is ready for Claude Code count as Codex being signed in.
+    expect(signInFacts(view({ ...shared, status: { ...shared.status, word: 'ready' as const } }))).toEqual({
+      state: 'no-login',
+    });
+  });
+
   test('the facts pick the signable login among several, and ignore switched-off rows', () => {
     const view = (...logins: ReturnType<typeof codexLogin>[]) => ({ format: 1 as const, machine: 'fixture', logins });
     const stuck = codexLogin('needs_sign_in', { id: 'a', canSignIn: false });
@@ -478,6 +497,19 @@ describe('permission', () => {
     expect(container.querySelector('[data-permission-words]')).toBeNull();
     await next(harness);
     expect(putOf(calls)).toEqual([]);
+  });
+
+  test('a file with a held edit waiting (the read is pending): Next writes NOTHING and says why, every time', async () => {
+    const harness = stepHarness();
+    const { container, calls } = await mount('permission', harness, route =>
+      route.startsWith('PUT') ? { outcome: 'applied' } : file('permissionMode: auto\n', { state: 'pending' }),
+    );
+    await choose(container, 'skip');
+    const words = 'A change to this file is waiting for your OK — confirm or discard it in Settings > Files first.';
+    expect(await nextRefused(harness)).toBe(words);
+    expect(await nextRefused(harness)).toBe(words);
+    expect(putOf(calls)).toEqual([]);
+    expect(harness.count('done')).toBe(0);
   });
 
   test('a change the daemon holds is said, Next stays on the page, and a second Next tries again', async () => {

@@ -33,9 +33,18 @@ export const signInPanelFor = (
     ? { panel: 'codex-login', subject: facts.login.id }
     : { panel: 'add-login', subject: ADD_SUBJECT };
 
+const KEPT_ADD = { panel: 'add-login', subject: ADD_SUBJECT } as const;
+
 export function SignInPage({ client, step }: { readonly client: OnboardingClient; readonly step: StepHost }) {
   const [view, setView] = useState<View>({ kind: 'reading' });
   const [shown, setShown] = useState(false);
+  /**
+   * The add-login panel makes the login AND starts its sign-in in one press (Logins' `HarnessSignInEmbed`), and the daemon
+   * publishes `LoginChanged` for the new login BEFORE it answers the add. A page that swapped the add panel for the
+   * login's own panel the moment the login appeared would unmount the panel that is about to start (or has just started)
+   * the sign-in. So once the add panel was drawn it stays, until the page is signed in.
+   */
+  const [keepAdd, setKeepAdd] = useState(false);
 
   const read = useCallback(
     async (first: boolean): Promise<void> => {
@@ -48,6 +57,7 @@ export function SignInPage({ client, step }: { readonly client: OnboardingClient
           }
           step.done();
         }
+        if (facts.state === 'no-login') setKeepAdd(true);
         setView({ kind: 'facts', facts });
       } catch (cause) {
         setView({ kind: 'failed', words: refusalWords(cause) });
@@ -83,7 +93,7 @@ export function SignInPage({ client, step }: { readonly client: OnboardingClient
         <StepLine role="status">Signed in as {facts.who}.</StepLine>
       </StepBody>
     );
-  if (facts.state === 'checking')
+  if (facts.state === 'checking' && !keepAdd)
     return (
       <StepBody step="codex.sign-in" label="Sign in to Codex" data-codex-step="sign-in">
         {INTRO}
@@ -96,11 +106,11 @@ export function SignInPage({ client, step }: { readonly client: OnboardingClient
       </StepBody>
     );
   const daemon = daemonOfClient(client);
-  const { panel, subject } = signInPanelFor(facts);
+  const { panel, subject } = keepAdd || facts.state === 'checking' ? KEPT_ADD : signInPanelFor(facts);
   return (
     <StepBody step="codex.sign-in" label="Sign in to Codex" data-codex-step="sign-in">
       {INTRO}
-      {facts.state === 'needs-sign-in' ? null : <StepLine>No Codex login can be signed in here yet.</StepLine>}
+      {facts.state === 'no-login' ? <StepLine>No Codex login can be signed in here yet.</StepLine> : null}
       {daemon === undefined ? null : (
         <PanelSlot
           daemon={daemon}

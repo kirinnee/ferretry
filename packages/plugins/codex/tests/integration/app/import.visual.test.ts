@@ -3,6 +3,11 @@
  * (`fixtures/import-scene.tsx`) draws the real pages inside the app's `StepPageFrame`. Each page must stay on screen, keep every
  * button a 44px target and never take the full width of a desktop, in light and dark.
  *
+ * r11 O5 (the kind pages, owner line 3): the five "choose what to import" pages keep their found-list and are laid out like
+ * every other page: the demo in `[data-step-demo]` to the RIGHT of the page's words and list at 1280 (above them, at most 140 px
+ * tall, at 390), the page's own words (the list left out) at most 160 characters, and the list's checkboxes still there. On
+ * every Codex import page, both widths, light and dark: the whole screen never says "Claude".
+ *
  * Set `FY_O10B_SHOTS_DIR` to keep a screenshot of each case.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -158,4 +163,57 @@ describe('the Codex import pages', () => {
         await context.close();
       }, 60_000);
     }
+
+  // ── r11 O5: the kind pages' layout and the no-Claude rule, on every Codex import page ──
+  const KIND_PAGES: readonly string[] = ['settings', 'model-set', 'instructions', 'skills', 'mcp'];
+  for (const viewport of VIEWPORTS.filter(candidate => candidate.name !== 'tablet-768'))
+    for (const mode of ['light', 'dark'] as const)
+      for (const page of PAGES) {
+        it(`${page}: no Claude anywhere${KIND_PAGES.includes(page) ? ', the demo beside the found-list' : ''}, at ${viewport.name}, ${mode}`, async () => {
+          const context = await newContext(viewport, mode);
+          const tab = await open(context, page, mode);
+          const m = await tab.evaluate(() => {
+            const box = (node: Element | null) => {
+              const r = node?.getBoundingClientRect() ?? new DOMRect();
+              return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, bottom: r.bottom };
+            };
+            const body = document.querySelector('[data-codex-step]') as HTMLElement;
+            const list = body.querySelector<HTMLElement>('[data-found-list]');
+            const words = body.innerText
+              .replace(list?.innerText ?? '', '')
+              .replace(/\s+/gu, ' ')
+              .trim();
+            return {
+              screen: document.body.innerText,
+              body: box(body),
+              list: list === null ? null : box(list),
+              demo: box(document.querySelector('[data-step-demo]')),
+              demoKind: document.querySelector('[data-step-demo] [data-demo]')?.getAttribute('data-demo') ?? '',
+              words,
+              checkboxes: body.querySelectorAll('input[type="checkbox"]').length,
+              overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+            };
+          });
+          expect(m.screen.toLowerCase(), 'the page never names Claude').not.toContain('claude');
+          expect(m.overflowX).toBe(false);
+          if (KIND_PAGES.includes(page)) {
+            // The list is kept: rows to tick, drawn inside the page body.
+            expect(m.list, 'the found-list is still on the page').not.toBeNull();
+            expect(m.checkboxes).toBeGreaterThan(0);
+            // The demo is this kind's own, in the frame's demo column.
+            expect(m.demoKind).toBe(`kind-${page}`);
+            expect(m.words.length, m.words).toBeLessThanOrEqual(160);
+            if (viewport.phone) {
+              expect(m.demo.bottom, 'the demo is above the page').toBeLessThanOrEqual(m.body.y + 1);
+              expect(m.demo.h).toBeLessThanOrEqual(140);
+            } else {
+              expect(m.demo.x, 'the demo is right of the page').toBeGreaterThan(m.body.right - 1);
+              expect(Math.abs(m.demo.y - m.body.y), 'the demo starts level with the page').toBeLessThanOrEqual(8);
+              // The list keeps a real width beside the demo (it is not squeezed to a sliver).
+              expect(m.list?.w ?? 0).toBeGreaterThan(280);
+            }
+          }
+          await context.close();
+        }, 60_000);
+      }
 });

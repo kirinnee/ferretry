@@ -269,6 +269,29 @@ describe('conversations', () => {
     expect(harness.hasCommit).toBe(false);
   });
 
+  test('a file with a held edit waiting (the read is pending): Next writes NOTHING and says why', async () => {
+    const harness = stepHarness();
+    const { container, calls } = await mount(
+      'conversations',
+      harness,
+      machine(FULL, {
+        ...FILE('hostHistory: false\n', { state: 'pending' }),
+        'PUT /v1/config/file': { outcome: 'applied' },
+      }),
+    );
+    await pick(container, 'on');
+    let said = '';
+    await act(async () => {
+      await harness.runCommit().catch((cause: unknown) => {
+        said = cause instanceof Error ? cause.message : String(cause);
+      });
+    });
+    expect(said).toBe(
+      'A change to this file is waiting for your OK — confirm or discard it in Settings > Files first.',
+    );
+    expect(writes(calls)).toEqual([]);
+  });
+
   test('a change the daemon holds is said to be waiting, Next stays, and is never shown as saved', async () => {
     const harness = stepHarness();
     const { container } = await mount(

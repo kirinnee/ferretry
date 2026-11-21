@@ -7,19 +7,24 @@
  *         permission-unknown   ?theme=<family>-<mode>
  *
  * The footer's Next runs the page's registered `commit` the way the shell does; every write the pages make is counted on
- * `window.__puts` and what the footer would say about a refusal is on `window.__nextError`. The sign-in pages mount the
- * Logins panel the page chose, in outline, with the subject it chose (`signInPanelFor`).
+ * `window.__puts` and what the footer would say about a refusal is on `window.__nextError`.
+ *
+ * THE SIGN-IN PAGES ARE THE PRODUCTION WIRING: `SignInPage` mounts Logins' panels through the app's own `PanelSlot`, and the
+ * slot is filled with the REAL views Logins registers (`logins.build(...).panels`: `add-login` and `codex-login`), so a page
+ * that drops its `subject`, mounts the wrong panel or swaps one panel for another mid-flow shows it in the DOM. The fake
+ * daemon answers Logins' own routes (the login list, the change and its apply, the sign-in flow) and records every call on
+ * `window.__calls`. `sign-in` is a machine with no login: the add is applied the way the daemon does it, the `LoginChanged`
+ * event published BEFORE the apply is answered (`?lag=<ms>` is that gap; default 700).
  */
 import { StepPageFrame } from '@ferretry/app';
-import { LoginListSchema } from '@ferretry/plugin-logins/contract';
-import { type ReactElement } from 'react';
+import { noteClientDaemon, registeredPanel, WithSlotPanels } from '@ferretry/app/testing/settings-shell';
 import { createRoot } from 'react-dom/client';
 import { ConversationsPage } from '../../../../app/features/onboarding/import/conversations-page.tsx';
 import { ImportChoicePage } from '../../../../app/features/onboarding/import-choice-page.tsx';
 import { InstalledPage } from '../../../../app/features/onboarding/installed-page.tsx';
-import { type StepHost, signInFacts } from '../../../../app/features/onboarding/onboarding-api.ts';
+import type { StepHost } from '../../../../app/features/onboarding/onboarding-api.ts';
 import { PermissionPage } from '../../../../app/features/onboarding/permission-page.tsx';
-import { SignInPage, signInPanelFor } from '../../../../app/features/onboarding/sign-in-page.tsx';
+import { SignInPage } from '../../../../app/features/onboarding/sign-in-page.tsx';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
@@ -41,14 +46,22 @@ const COPY: Record<string, { title: string; line: string }> = {
 declare global {
   interface Window {
     __puts: unknown[];
+    __calls: { route: string; body: unknown }[];
     __nextError: string;
   }
 }
 window.__puts = [];
+window.__calls = [];
 window.__nextError = '';
 
+/** The authorize link the fake daemon sends: unique, never a value any app file holds. */
+const DAEMON_LINK =
+  'https://auth.example.test/oauth/authorize?response_type=code&state=unique-3c9d1e7a&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback';
+const OPEN = { capabilities: [{ capability: 'fleet', use: true, configure: true, configureRefusal: 'granted' }] };
+const lag = Number(params.get('lag') ?? '700');
+
 const FILE = 'binary: /fake/bin/codex\npermissionMode: skip\n';
-const NO_LOGIN = { format: 1, machine: 'studio-mac', logins: [] };
+const NO_LOGIN = { format: 1, machine: 'studio-mac', logins: [] as unknown[] };
 const absent = {
   harness: 'codex',
   location: { state: 'absent', searched: ['/fake/bin'] },
@@ -88,10 +101,16 @@ const checking = {
     signIn: { available: false, reason: 'checking' },
   })),
 };
+/** The login the add makes: the same row as `needsSignIn`'s, under the id the page's add panel suggests. */
+const MADE = { ...needsSignIn.logins[0], id: 'codex-login' };
 const WITHHELD =
   '# ‹hidden›: the text of this file is not shown because it holds a raw secret, which the owner must move into the secret store; edit it at the machine\n';
 const fileText =
-  page === 'permission-auto' ? 'permissionMode: auto\n' : page === 'permission-unknown' ? WITHHELD : FILE;
+  page === 'permission-auto'
+    ? FILE.replace('permissionMode: skip', 'permissionMode: auto')
+    : page === 'permission-unknown'
+      ? WITHHELD
+      : FILE;
 const table: Record<string, unknown> = {
   'GET /v1/codex/update': absent,
   'GET /v1/runtimes/setup/scan': {
@@ -112,14 +131,26 @@ const table: Record<string, unknown> = {
     notes: [],
     importing: { available: true },
   },
-  'GET /v1/logins':
-    page === 'sign-in-checking'
-      ? checking
-      : page === 'sign-in-link'
-        ? needsSignIn
-        : page === 'sign-in'
-          ? NO_LOGIN
-          : needsSignIn,
+  'GET /v1/logins': () => (page === 'sign-in-checking' ? checking : page === 'sign-in' ? NO_LOGIN : needsSignIn),
+  'GET /v1/grants': OPEN,
+  'GET /v1/logins/presets': { presets: [] },
+  'POST /v1/logins/changes': (body: unknown) => ({
+    id: 'chg1',
+    change: body,
+    summary: 'Add a login',
+    consequences: [],
+    expiresAt: '2026-11-01T10:15:00.000Z',
+    state: 'pending',
+  }),
+  // The daemon publishes `LoginChanged` for the new login BEFORE it answers the apply: the page reads the list again while the add is in flight.
+  'POST /v1/logins/changes/:changeId/apply': async () => {
+    NO_LOGIN.logins = [MADE];
+    for (const handler of [...handlers]) handler({ id: 'codex-login', kind: 'added' });
+    await new Promise(resolve => setTimeout(resolve, lag));
+    return { outcome: 'applied' };
+  },
+  'POST /v1/logins/sign-in': () => FLOW,
+  'GET /v1/logins/sign-in/:flowId': () => FLOW,
   'GET /v1/config/file': {
     path: 'harness-codex.yaml',
     text: fileText,
@@ -133,18 +164,38 @@ const table: Record<string, unknown> = {
     outcome: params.get('held') === '1' ? 'pending' : 'applied',
   },
 };
+/** The link sign-in the daemon starts for the new login. */
+const FLOW = {
+  harness: 'codex',
+  flowId: 'flow-one',
+  startedAt: '2026-11-01T10:00:00.000Z',
+  expiresAt: '2026-11-01T10:10:00.000Z',
+  loginId: 'codex-login',
+  identity: 'codex:studio',
+  state: 'awaiting-callback',
+  verificationUrl: DAEMON_LINK,
+};
+const handlers = new Set<(event: unknown) => void>();
 const client = {
   call: async (route: string, options?: { readonly body?: { readonly text?: string } }) => {
+    window.__calls.push({ route, body: options?.body });
     if (!(route in table)) throw new Error(`no route ${route}`);
     // The fake file keeps what a write put in it, so a card pressed in the browser reads back as it would on a machine.
     if (route === 'PUT /v1/config/file' && options?.body?.text !== undefined) {
       window.__puts.push(options.body);
       table['GET /v1/config/file'] = { ...(table['GET /v1/config/file'] as object), text: options.body.text };
     }
-    return table[route];
+    const answer = table[route];
+    return typeof answer === 'function' ? await (answer as (body: unknown) => unknown)(options?.body) : answer;
   },
-  subscribe: () => () => undefined,
+  subscribe: (_event: unknown, handler: (event: unknown) => void) => {
+    handlers.add(handler);
+    return () => {
+      handlers.delete(handler);
+    };
+  },
 } as never;
+noteClientDaemon(client, 'fy_daemon_fake');
 
 let save: (() => Promise<void>) | null = null;
 const step: StepHost = {
@@ -165,29 +216,17 @@ const step: StepHost = {
 };
 
 /**
- * The sign-in page mounts Logins' own panel through the shell's slot machinery, and another package is reached only through its
- * contract, so the scene draws the slot in outline: a card that records the panel and the SUBJECT the page's own rule
- * (`signInPanelFor`) chose. Logins' own browser suite mounts the real panel with that subject (`harness:codex`).
+ * The slot the sign-in page draws into: the app's own `WithSlotPanels` (the shell's `PluginView` path) placing the panels
+ * Logins REGISTERS (read from the app's registry, built exactly as the shell builds them). The page picks which one and with
+ * which subject; nothing here does. Logins' half gets its OWN client over the same fake daemon, one the shell never noted a
+ * daemon for: the stub shell has no grants cache, so Logins reads the change authority from `GET /v1/grants`, as a half
+ * outside a shell does.
  */
-const signInPanel = (): ReactElement | null => {
-  const facts = signInFacts(LoginListSchema.parse(table['GET /v1/logins']));
-  if (facts.state !== 'needs-sign-in' && facts.state !== 'no-login') return null;
-  const { panel, subject } = signInPanelFor(facts);
-  return (
-    <section
-      className="kt-panel flex max-w-xl flex-col gap-3 p-panel"
-      data-fake-logins={panel}
-      data-fake-logins-subject={subject}
-    >
-      <p className="m-0 text-row font-semibold text-fg">Sign in to Codex</p>
-      <div>
-        <button type="button" className="kt-button">
-          Sign in to Codex
-        </button>
-      </div>
-    </section>
-  );
-};
+const loginsClient = { call: (client as unknown as { call: unknown }).call };
+const loginsPanels = [
+  registeredPanel('logins', 'add-login', loginsClient),
+  registeredPanel('logins', 'codex-login', loginsClient),
+];
 
 const body =
   page === 'installed' ? (
@@ -195,10 +234,9 @@ const body =
   ) : page === 'conversations' ? (
     <ConversationsPage client={client} step={step} />
   ) : page === 'sign-in' || page === 'sign-in-checking' || page === 'sign-in-link' ? (
-    <div className="flex flex-col gap-3">
+    <WithSlotPanels slots={{ settings: loginsPanels }}>
       <SignInPage client={client} step={step} />
-      {signInPanel()}
-    </div>
+    </WithSlotPanels>
   ) : page === 'import-choice' ? (
     <ImportChoicePage step={step} />
   ) : (

@@ -40,7 +40,7 @@ const HARNESS_SUBJECTS: Readonly<Record<string, HarnessKind>> = {
 
 /** The tool a panel subject locks the panel to; `undefined` for any other subject (Settings has none: the full chooser). */
 export const harnessOfSubject = (subject: string | undefined): HarnessKind | undefined =>
-  subject === undefined ? undefined : HARNESS_SUBJECTS[subject];
+  subject !== undefined && Object.hasOwn(HARNESS_SUBJECTS, subject) ? HARNESS_SUBJECTS[subject] : undefined;
 
 /**
  * A provider as ONE tool sees it: only that tool's half and only the variables that half reads, so a provider shared by

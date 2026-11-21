@@ -8,12 +8,14 @@
  *           page has no button of its own (permission, conversations, import-choice). At 390 the demo is ABOVE the cards and
  *           <= 140 px tall, the three footer buttons are inside the viewport, and nothing scrolls sideways.
  *   (1, 5)  Back / Later / Next are 136 px wide (+-1) and >= 44 px tall at 1280; equal thirds inside the viewport at 390.
- *   (6)     no Codex page says "Claude" (the whole screen's text, light and dark, 390 and 1280), and the sign-in page mounts the
- *           add-login panel with the subject `harness:codex` that LOCKS it (Logins' own browser suite mounts the real panel
- *           with that subject and proves: no chooser, no grid, the link first, and the shared provider's summary naming
- *           Codex alone; the page cannot import it: another package is reached only through its contract).
- *   save    a pick writes NOTHING (a click or an arrow key); Next writes exactly once, `permissionMode` only; a pick back on
- *           the saved card clears the save; a held change keeps the page and a second Next tries again.
+ *   (6)     no Codex page says "Claude" (the whole screen's text, light and dark, 390 and 1280), and the sign-in page is the
+ *           PRODUCTION WIRING: `SignInPage` through the app's own `PanelSlot`, filled with the REAL views Logins registers
+ *           (`add-login`, `codex-login`). On the real DOM: no chooser, no provider grid, the link first with a device code
+ *           behind it, and the one-press add keeps its flow when the daemon publishes `LoginChanged` BEFORE it answers the
+ *           add (the link flow starts once, and its UI stays).
+ *   save    a pick writes NOTHING (a click or an arrow key); Next writes exactly once, `permissionMode` only, for Skip -> Auto
+ *           AND for Auto -> Skip (the whole YAML diff is that one line); a pick back on the saved card clears the save; a held
+ *           change keeps the page and a second Next tries again.
  *
  * Set `FY_O5_SHOTS_DIR` to keep a screenshot of each case.
  */
@@ -246,6 +248,37 @@ describe('r11 O5: permission saves on Next only', () => {
     await context.close();
   }, 60_000);
 
+  it('Auto -> Skip (the applied write): no click or arrow writes; Next writes once, and the YAML differs in permissionMode only', async () => {
+    const context = await newContext(VIEWPORTS[1], 'light');
+    const tab = await open(context, 'permission-auto', 'light');
+    expect(await tab.locator('input[value="auto"]').isChecked()).toBe(true);
+    // No warning while Auto is the card.
+    expect(await tab.locator('[data-permission-words]').count()).toBe(0);
+    await tab.locator('[data-choice="skip"]').click();
+    await tab.waitForSelector('[data-choice="skip"][data-selected="true"]');
+    await tab.keyboard.press('ArrowUp');
+    await tab.keyboard.press('ArrowDown');
+    expect(await puts(tab), 'a click and the arrow keys write nothing').toEqual([]);
+    // The warning shows while Skip is selected, and the demo follows the pick.
+    expect(await tab.locator('[data-permission-words="skip"]').count()).toBe(1);
+    expect(await tab.locator('[data-step-demo] [data-demo="permission-skip"]').count()).toBe(1);
+    const before = await tab.evaluate(() => window.__puts.length);
+    expect(before).toBe(0);
+    await tab.locator('[data-step-next]').click();
+    await tab.waitForFunction(() => window.__puts.length > 0);
+    await tab.waitForTimeout(300);
+    const written = await puts(tab);
+    expect(written, 'exactly one Next PUT').toHaveLength(1);
+    expect(written[0]?.path).toBe('harness-codex.yaml');
+    // The line-by-line diff against the file the page read: only `permissionMode` changed, the other key stays.
+    const was = 'binary: /fake/bin/codex\npermissionMode: auto\n'.split('\n');
+    const now = (written[0]?.text ?? '').split('\n');
+    expect(now).toHaveLength(was.length);
+    expect(now.flatMap((line, at) => (line === was[at] ? [] : [line]))).toEqual(['permissionMode: skip']);
+    expect(await tab.evaluate(() => window.__nextError)).toBe('');
+    await context.close();
+  }, 60_000);
+
   it('on the saved card, Next writes nothing', async () => {
     const context = await newContext(VIEWPORTS[1], 'light');
     const tab = await open(context, 'permission-auto', 'light');
@@ -295,25 +328,82 @@ describe('r11 O5: permission saves on Next only', () => {
   }, 60_000);
 });
 
-describe("r11 O5: the sign-in page is Codex's own", () => {
-  it('a machine with no Codex login mounts the add-login panel LOCKED to Codex (subject harness:codex): no chooser, no grid, no Claude', async () => {
+describe("r11 O5: the sign-in page is Codex's own (production PanelSlot, the real Logins panels)", () => {
+  const calls = (tab: Page) => tab.evaluate(() => window.__calls);
+  const starts = async (tab: Page) => (await calls(tab)).filter(call => call.route === 'POST /v1/logins/sign-in');
+  /** What the person can see of the screen: no chooser, no provider grid, no Claude, on the real panels. */
+  const expectNoChooser = async (tab: Page): Promise<void> => {
+    expect(await tab.locator('input[type="radio"], [role="radiogroup"], [role="radio"]').count()).toBe(0);
+    expect(await tab.locator('[data-provider-grid]').count(), 'the provider grid is folded away').toBe(0);
+    expect((await tab.evaluate(() => document.body.innerText)).toLowerCase()).not.toContain('claude');
+  };
+
+  it('a machine with no Codex login: the REAL add panel, locked to Codex (no chooser, no grid), its press starts the link sign-in and the flow STAYS when LoginChanged arrives before the add is answered', async () => {
     const context = await newContext(VIEWPORTS[1], 'light');
     const tab = await open(context, 'sign-in', 'light');
-    const slot = tab.locator('[data-fake-logins="add-login"]');
-    await slot.waitFor({ state: 'visible' });
-    // The subject is what Logins reads to lock the panel (`harnessOfSubject`); without it the panel opens on the tool chooser.
-    expect(await slot.getAttribute('data-fake-logins-subject')).toBe('harness:codex');
-    expect(await tab.locator('input[type="radio"], [role="radiogroup"], [data-provider-grid]').count()).toBe(0);
-    expect((await tab.evaluate(() => document.body.innerText)).toLowerCase()).not.toContain('claude');
-    await context.close();
-  }, 60_000);
+    // The page chose the add panel and gave it the subject: the real panel is locked to Codex and is the one-press sign-in.
+    const press = tab.getByRole('button', { name: 'Sign in to Codex', exact: true });
+    await press.waitFor({ state: 'visible' });
+    expect(await tab.locator('[data-harness-sign-in="codex"]').count()).toBe(1);
+    await expectNoChooser(tab);
+    expect(await tab.locator('[data-slot="settings"] [data-panel="logins.add-login"]').count()).toBe(1);
 
-  it("a login that needs signing in mounts its own Codex sign-in, by its id (the link-first panel is Logins' own)", async () => {
+    await press.click();
+    // The daemon has published the new login (the page read the list again, the add is still in flight), then answers the add.
+    await tab.waitForFunction(
+      () => window.__calls.filter(call => call.route === 'GET /v1/logins').length >= 3,
+      undefined,
+      { timeout: 15_000 },
+    );
+    // The link flow's own UI: the authorize link is exactly the one the daemon sent, with the paste field behind it.
+    await tab.locator('[data-codex-login="awaiting-callback"]').waitFor({ state: 'visible', timeout: 15_000 });
+    expect(await tab.locator('[data-codex-login-callback] code').first().innerText()).toContain(
+      'auth.example.test/oauth/authorize?response_type=code&state=unique-3c9d1e7a',
+    );
+    expect(await tab.locator('[data-sign-in-steps]').count()).toBe(1);
+    expect(await tab.locator('textarea').count()).toBe(1);
+    // The sign-in was started ONCE, link method, for the login the add made; the idle replacement panel never drew.
+    const started = await starts(tab);
+    expect(started).toHaveLength(1);
+    expect(started[0]?.body).toMatchObject({ loginId: 'codex-login', method: 'link' });
+    expect(await tab.locator('[data-login-sign-in="start"]').count()).toBe(0);
+    // And the flow survives the page's own re-reads (it did not unmount): wait past a poll and look again.
+    await tab.waitForTimeout(1_200);
+    expect(await tab.locator('[data-codex-login="awaiting-callback"]').count()).toBe(1);
+    expect(await starts(tab)).toHaveLength(1);
+    await expectNoChooser(tab);
+    await context.close();
+  }, 90_000);
+
+  it('the same add when the reply wins (no lag): the flow starts once and stays', async () => {
+    const context = await newContext(VIEWPORTS[1], 'light');
+    const tab = await open(context, 'sign-in', 'light', '&lag=0');
+    await tab.getByRole('button', { name: 'Sign in to Codex', exact: true }).click();
+    await tab.locator('[data-codex-login="awaiting-callback"]').waitFor({ state: 'visible', timeout: 15_000 });
+    await tab.waitForTimeout(800);
+    expect(await tab.locator('[data-codex-login="awaiting-callback"]').count()).toBe(1);
+    expect(await starts(tab)).toHaveLength(1);
+    await context.close();
+  }, 90_000);
+
+  it('a login that needs signing in: the REAL codex-login panel for THAT login (the subject), link first, a device code behind one button, no chooser', async () => {
     const context = await newContext(VIEWPORTS[1], 'light');
     const tab = await open(context, 'sign-in-link', 'light');
-    const slot = tab.locator('[data-fake-logins="codex-login"]');
-    await slot.waitFor({ state: 'visible' });
-    expect(await slot.getAttribute('data-fake-logins-subject')).toBe('codex-main');
+    // The panel found its login by the subject the page gave it (without it: "Name a Codex login to sign in.").
+    const card = tab.locator('[data-login-sign-in="start"]');
+    await card.waitFor({ state: 'visible' });
+    expect(await tab.locator('[data-panel="logins.codex-login"]').count()).toBe(1);
+    expect(await tab.locator('[data-login-sign-in-panel]').count()).toBe(0);
+    expect(await tab.locator('[data-codex-login-identity], [data-login-sign-in-method]').count()).toBeGreaterThan(0);
+    expect(await tab.locator('[data-login-sign-in-method="link"]').count(), 'the link is the first method').toBe(1);
+    expect(await tab.getByRole('button', { name: 'Sign in to Codex with a link' }).count()).toBe(1);
+    await expectNoChooser(tab);
+    // The device code is the option behind one button, and the way back is there too.
+    await tab.getByRole('button', { name: 'Use a device code instead' }).click();
+    await tab.locator('[data-login-sign-in-method="device-code"]').waitFor({ state: 'visible' });
+    expect(await tab.getByRole('button', { name: 'Sign in with a link instead' }).count()).toBe(1);
+    expect(await tab.getByRole('button', { name: 'Sign in to Codex', exact: true }).count()).toBe(1);
+    await expectNoChooser(tab);
     await context.close();
   }, 60_000);
 });

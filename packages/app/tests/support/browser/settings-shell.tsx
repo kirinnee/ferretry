@@ -15,17 +15,19 @@
  */
 
 import { implementApp, type Manifest } from '@ferretry/kernel/manifest';
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { TransportAnswer, TransportRequest } from '../../../src/client/transport.ts';
 import { type DaemonlessPorts, registeredDaemonless } from '../../../src/connect/provides.ts';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
+import { generated } from '../../../src/generated/surfaces.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import type { PasskeyHandler, PasskeyProvision } from '../../../src/passkey/passkey.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
+import type { PlacedPanel } from '../../../src/testing/slot-panels.tsx';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
 import { CORE, FakeTransport, inventoryOf, json } from '../../unit/client/fixtures.ts';
@@ -145,4 +147,26 @@ export function renderSettingsShellOf(
         scroll={new ScrollMemory(null)}
       />,
     );
+}
+
+/**
+ * FOR A SCENE THAT DRAWS A PAGE OVER ANOTHER PLUGIN'S REAL PANELS (a page that offers a slot, e.g. Codex's sign-in page
+ * mounting Logins' panels). A plugin never imports another package's source, so the panel it needs comes from the app's
+ * own registry (`generated/surfaces.ts`, what the shell loads) and is BUILT as the shell builds it, over the client given.
+ * `WithSlotPanels` is the shell's slot machinery (`PanelSlot` → `PluginView`) over the panels a scene places in a slot, and
+ * `noteClientDaemon` names the daemon a page's client talks to (`daemonOfClient`). Kept here, not in `./testing`: that
+ * barrel carries the happy-dom harness, which a browser bundle cannot take.
+ */
+export { noteClientDaemon } from '../../../src/connect/daemon-of.ts';
+export { type PlacedPanel, WithSlotPanels } from '../../../src/testing/slot-panels.tsx';
+
+/** One panel a plugin REGISTERS, as the shell builds it over `client`, placed under the plugin's own id. */
+export function registeredPanel(plugin: string, id: string, client: unknown): PlacedPanel {
+  const half = generated.surfaces.find(entry => entry.id === plugin)?.app;
+  const panels = half?.build?.({ client } as never) as unknown as
+    | { readonly panels?: Readonly<Record<string, (props: Record<string, unknown>) => ReactNode>> }
+    | undefined;
+  const view = panels?.panels?.[id];
+  if (view === undefined) throw new Error(`${plugin} registers no panel ${id}`);
+  return { plugin, id, view };
 }
