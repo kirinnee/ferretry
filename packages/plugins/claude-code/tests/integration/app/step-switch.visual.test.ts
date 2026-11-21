@@ -7,6 +7,10 @@
  * first draw even with the module in memory. React holds a fallback it just showed for at least 300 ms, so each Claude
  * page took ~370 ms from Next to ready and put the shell's top bar up with every answer at 1 ms. Measured on the gate's
  * e2e at 1 ms answers (1280 light, 1-min load 49-57): 363-388 ms per Claude page before, 68-128 ms after.
+ *
+ * A page counts as drawn only when ITS OWN panel has a body: a page that renders nothing must fail the timing, not pass
+ * it in 3 ms. And the one shared load keeps only SUCCESS: a load that fails once (a dropped chunk request) is retried by
+ * the next page, instead of turning every Claude page into an error for the rest of the app half's life.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -66,39 +70,60 @@ afterAll(async () => {
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
+type Move = { subject: string; ms: number; fallback: boolean; drawn: boolean; failed: boolean };
+
+/** Opens the scene (`query` selects its mode), walks every later step and returns what each move cost. */
+async function walkAll(query: string): Promise<{ moves: Move[]; errors: string[]; loads: number }> {
+  const context = await browser.newContext({ viewport: { width: 1_280, height: 800 } });
+  const tab = await context.newPage();
+  const errors: string[] = [];
+  tab.on('pageerror', error => errors.push(error.message));
+  await tab.goto(`${server?.url.origin ?? ''}/${query}`);
+  // The segment's first page may wait for the module once: that is the one load.
+  await tab.waitForFunction(
+    () =>
+      (window as unknown as { __shown: (subject: string) => boolean }).__shown('claude-code.import-choice') ||
+      document.querySelector('[data-page-error]') !== null,
+  );
+  const moves: Move[] = [];
+  for (const subject of STEPS)
+    moves.push(
+      await tab.evaluate(next => (window as unknown as { __walk: (s: string) => Promise<Move> }).__walk(next), subject),
+    );
+  const loads = await tab.evaluate(() => (window as unknown as { __loads: number }).__loads);
+  await context.close();
+  return { moves, errors, loads };
+}
+
+const line = (moves: Move[]): string =>
+  moves
+    .map(move => `${move.subject} ${move.ms} ms${move.fallback ? ' (fallback)' : ''}${move.drawn ? '' : ' (NO BODY)'}`)
+    .join(', ');
+
 describe('moving between the Claude step pages', () => {
-  it('draws every later page at once: no fallback, under 200 ms from the move', async () => {
-    const context = await browser.newContext({ viewport: { width: 1_280, height: 800 } });
-    const tab = await context.newPage();
-    const errors: string[] = [];
-    tab.on('pageerror', error => errors.push(error.message));
-    await tab.goto(`${server?.url.origin ?? ''}/`);
-    // The segment's first page may wait for the module once: that is the one load.
-    await tab.waitForFunction(() =>
-      (window as unknown as { __shown: (subject: string) => boolean }).__shown('claude-code.import-choice'),
-    );
-    const moves: { subject: string; ms: number; fallback: boolean }[] = [];
-    for (const subject of STEPS)
-      moves.push(
-        await tab.evaluate(
-          next =>
-            (
-              window as unknown as {
-                __walk: (s: string) => Promise<{ subject: string; ms: number; fallback: boolean }>;
-              }
-            ).__walk(next),
-          subject,
-        ),
-      );
-    console.log(
-      `G5 step moves: ${moves.map(move => `${move.subject} ${move.ms} ms${move.fallback ? ' (fallback)' : ''}`).join(', ')}`,
-    );
+  it('draws every later page at once: its own body, no fallback, under 200 ms from the move', async () => {
+    const { moves, errors } = await walkAll('');
+    console.log(`G5 step moves: ${line(moves)}`);
     expect(errors).toEqual([]);
+    expect(
+      moves.filter(move => !move.drawn).map(move => move.subject),
+      'a page whose own panel never got a body',
+    ).toEqual([]);
     expect(
       moves.filter(move => move.fallback).map(move => move.subject),
       'a page that suspended on its move',
     ).toEqual([]);
     for (const move of moves) expect(move.ms, `${move.subject}: ms from the move to the page`).toBeLessThan(FAST_MS);
-    await context.close();
+  }, 120_000);
+
+  it('retries a load that failed once: the next page renders, no page is stuck on the dropped chunk', async () => {
+    const { moves, errors, loads } = await walkAll('?flaky');
+    console.log(`G5 flaky first load: ${loads} loads, ${line(moves)}`);
+    expect(errors).toEqual([]);
+    expect(loads, 'the failed load was tried again').toBeGreaterThanOrEqual(2);
+    expect(
+      moves.filter(move => move.failed || !move.drawn).map(move => move.subject),
+      'a page left on the failed load',
+    ).toEqual([]);
   }, 120_000);
 });
