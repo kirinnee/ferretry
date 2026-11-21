@@ -1,13 +1,24 @@
-/** The small demos Claude's pages show in the frame's demo column: the shared ones from the import kit (Codex's pages draw the same), with Claude's words, and the import and conversations scenes. */
+/** The small demos Claude's pages show in the frame's demo column: the shared permission demo from the import kit (Codex's pages draw the same), with Claude's words, and Claude's own install, import, kind and conversations scenes. */
 import type { CSSProperties } from 'react';
-import {
-  InstalledDemo as InstalledDemoBox,
-  PermissionDemo as PermissionDemoBox,
-} from '@ferretry/plugin-runtimes/import-kit';
+import { PermissionDemo as PermissionDemoBox } from '@ferretry/plugin-runtimes/import-kit';
 
-/** A terminal line typing `claude --version`, then the answer. */
-export const InstalledDemo = () => (
-  <InstalledDemoBox command="claude --version" answer="2.1.0 (Claude Code)" label="Claude" />
+/** A terminal typing the command the Install button runs (the installer's own plan, never made up here), then the answer. */
+export const InstalledDemo = ({ command }: { readonly command: string }) => (
+  <div
+    className="cc-term"
+    role="img"
+    aria-label={`A terminal running ${command}, then Claude Code is installed`}
+    data-demo="installed"
+    data-demo-tool="Claude"
+  >
+    <p className="cc-term__line">
+      <span aria-hidden="true">$ </span>
+      <span className="cc-term__cmd" data-demo-command="">
+        {command}
+      </span>
+    </p>
+    <p className="cc-term__line cc-term__done">Claude Code is installed.</p>
+  </div>
 );
 
 /** An agent that asks before running a command, against one that runs it straight through. */
@@ -33,6 +44,37 @@ export const ImportDemo = ({ mode }: { readonly mode: 'everything' | 'choose' | 
         <span>{item}</span>
         <span className="cc-demo__mark" aria-hidden="true">
           {index < BROUGHT[mode] ? '✓' : '·'}
+        </span>
+      </p>
+    ))}
+    {mode === 'choose' ? (
+      <p className="cc-demo__note" data-demo-example="">
+        An example: you tick what comes over.
+      </p>
+    ) : null}
+  </div>
+);
+
+/** What each kind page's list becomes on this machine: the kind as Claude Code keeps it, then what Ferretry makes of it. */
+const BECOMES: Readonly<
+  Record<'settings' | 'model-set' | 'instructions' | 'skills' | 'mcp', readonly [string, string]>
+> = {
+  settings: ['Settings', 'Ferretry settings'],
+  'model-set': ['Models', 'A model set'],
+  instructions: ['CLAUDE.md', 'An instruction'],
+  skills: ['Skills', 'Ferretry skills'],
+  mcp: ['MCP servers', 'Ferretry MCP servers'],
+};
+
+/** One kind of thing Claude Code keeps, and what it becomes here. Plays once, rests on its last frame. */
+export const KindDemo = ({ kind }: { readonly kind: keyof typeof BECOMES }) => (
+  <div className="cc-demo" data-demo={`kind-${kind}`} role="img" aria-label="What this becomes on this machine">
+    <p className="cc-demo__head">Claude Code → this machine</p>
+    {BECOMES[kind].map((label, index) => (
+      <p key={label} className="cc-demo__row" data-brought="true" style={{ '--cc-i': index } as CSSProperties}>
+        <span>{label}</span>
+        <span className="cc-demo__mark" aria-hidden="true">
+          {index === 0 ? '→' : '✓'}
         </span>
       </p>
     ))}

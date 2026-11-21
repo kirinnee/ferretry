@@ -173,6 +173,13 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
   // The way out of a manual command: after a refused auto install, or when there is no package manager to run it.
   const canCheckAgain = read.kind === 'plan' && (read.plan.kind === 'no-package-manager' || note !== null);
   const shownCommand = read.kind === 'plan' && read.plan.kind === 'runnable' ? read.plan.command : '';
+  /** The demo types the command this page shows (the installer's plan): none is known, none is drawn. */
+  const demoCommand =
+    shownCommand !== ''
+      ? shownCommand
+      : read.kind === 'plan' && read.plan.kind === 'no-package-manager'
+        ? read.plan.manualCommand
+        : '';
   return (
     <div className="cc-step" data-onboarding-step="claude-code.installed">
       <p className="cc-step__line">Claude Code runs the ferrets that use your Claude account.</p>
@@ -224,9 +231,11 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
           </Button>
         </div>
       ) : null}
-      <StepDemo>
-        <InstalledDemo />
-      </StepDemo>
+      {demoCommand === '' ? null : (
+        <StepDemo>
+          <InstalledDemo command={demoCommand} />
+        </StepDemo>
+      )}
     </div>
   );
 }

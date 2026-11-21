@@ -19,7 +19,7 @@ import { editConfigText, readConfigText } from '@ferretry/std/yaml';
 import type { z } from 'zod';
 import { PermissionModeSchema } from '../../../contract/index.ts';
 import type { ClaudeCodeClient } from '../../lib/client.ts';
-import { useConfigChoice } from './config-choice.ts';
+import { useConfigChoice, WAITING } from './config-choice.ts';
 import { PermissionDemo } from './demos.tsx';
 import type { StepPageProps } from './props.ts';
 
@@ -69,7 +69,7 @@ const modeOf = (text: string, state?: string): Mode | null => {
 };
 
 export function PermissionPage({ client, step }: StepPageProps<ClaudeCodeClient>) {
-  const { saved, shown, pick, where, note, retry } = useConfigChoice<Mode>({
+  const { saved, shown, pick, where, note, waiting, retry } = useConfigChoice<Mode>({
     client,
     step,
     read: modeOf,
@@ -79,7 +79,11 @@ export function PermissionPage({ client, step }: StepPageProps<ClaudeCodeClient>
   if (saved === null) return null;
   return (
     <div className="cc-step" data-onboarding-step="claude-code.permission">
-      {saved === 'unknown' ? (
+      {waiting ? (
+        <p className="cc-step__line" data-config-waiting="">
+          {WAITING}
+        </p>
+      ) : saved === 'unknown' ? (
         <p className="cc-step__line" data-mode-unknown="">
           The current mode is unknown: this page cannot read it safely. Change this at the machine: {where}
         </p>

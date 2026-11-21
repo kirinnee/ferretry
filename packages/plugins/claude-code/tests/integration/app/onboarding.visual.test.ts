@@ -10,6 +10,12 @@
  *   from the original in the `permissionMode` line alone; Auto (= saved) + Next -> no PUT; arrow keys -> no PUT; a refused
  *   write keeps the page, shows the reason, and the next Next writes once.
  *   390 — the demo is above the first card and <= 140 px tall; no sideways scroll; the footer buttons are inside the screen.
+ *   Every page (the four above, the five import kind pages, the sign-in page) in both widths and both modes: the footer is
+ *   Back, Later, Next, in that order, all the same width (136 px at 1280; equal thirds inside the screen at 390). The kind
+ *   pages keep their checklist and draw the demo right of it (above it at 390). The sign-in slot draws no harness chooser
+ *   (the detector is itself proved on a scene that draws one). From a saved Auto, picking Skip shows its warning and only
+ *   Next sends one exact YAML change; an untouched saved Auto sends none. A read that becomes unreadable after a refused
+ *   write drops the hidden pick; a file with a change held for the owner is never written.
  *
  * Set `FY_O4_SHOTS_DIR` to keep a screenshot of each case.
  */
@@ -24,6 +30,7 @@ setDefaultTimeout(60_000);
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_O4_SHOTS_DIR ?? '';
 const ORIGINAL = 'binary: /fake/bin/claude\npermissionMode: skip\nhostHistory: true\n';
+const AUTO_ORIGINAL = 'binary: /fake/bin/claude\npermissionMode: auto\nhostHistory: true\n';
 
 let browser: Awaited<ReturnType<typeof sharedChromium>>;
 let directory = '';
@@ -68,11 +75,14 @@ const VIEWPORTS = [
 ] as const;
 const THEMES = ['studio-light', 'studio-dark'] as const;
 const CARD_PAGES = ['import-choice', 'conversations', 'permission'] as const;
-const DEMO_PAGES = [...CARD_PAGES, 'installed'] as const;
+const KIND_PAGES = ['kind-settings', 'kind-model-set', 'kind-instructions', 'kind-skills', 'kind-mcp'] as const;
+const DEMO_PAGES = [...CARD_PAGES, 'installed', ...KIND_PAGES] as const;
+const FOOTER = ['Back', 'Later', 'Next'] as const;
 
 type Tab = Awaited<ReturnType<Awaited<ReturnType<typeof sharedChromium>>['newPage']>>;
 interface Fake {
   puts: { path: string; text: string }[];
+  gets: number;
   advanced: boolean;
 }
 
@@ -112,8 +122,17 @@ describe('the Claude pages: stacked cards, the demo on the right, few words', ()
               const demo = rect(demoEl);
               const body = document.querySelector('.cc-step') as HTMLElement;
               const titles = [...body.querySelectorAll('.fy-cc__title')].map(el => (el as HTMLElement).innerText);
-              let text = body.innerText.replace(/\s+/g, ' ');
+              // A kind page keeps its checklist (the kit's list, whatever it holds): its WORDS are the lines it writes itself.
+              const checklist = body.querySelector('input[type="checkbox"]') !== null;
+              let text = (
+                checklist
+                  ? [...body.querySelectorAll('.cc-step__line')].map(el => (el as HTMLElement).innerText).join(' ')
+                  : body.innerText
+              ).replace(/\s+/g, ' ');
               for (const title of titles) text = text.replace(title, '');
+              // The install command is data the installer sent, not words the page wrote.
+              const command = body.querySelector('[data-install-command]')?.textContent?.replace(/\s+/g, ' ').trim();
+              if (command !== undefined && command !== '') text = text.replace(command, '');
               return {
                 cards: cards.map(c => ({ x: c.x, y: c.y, w: c.width, right: c.right, bottom: c.bottom })),
                 demo: {
@@ -126,7 +145,10 @@ describe('the Claude pages: stacked cards, the demo on the right, few words', ()
                   /** What the demo draws past its box (the frame clips it at 140px on a phone): 0 when nothing is cut off. */
                   clipped: Math.max(0, (demoEl as HTMLElement).scrollHeight - (demoEl as HTMLElement).clientHeight),
                 },
+                step: { x: rect(body).x, y: rect(body).y, right: rect(body).right },
+                checklist,
                 buttons: [...document.querySelectorAll('[data-step-footer] button')].map(b => ({
+                  label: (b as HTMLElement).innerText.trim(),
                   w: rect(b).width,
                   h: rect(b).height,
                   right: rect(b).right,
@@ -137,6 +159,9 @@ describe('the Claude pages: stacked cards, the demo on the right, few words', ()
               };
             });
             const { cards, demo, buttons } = geometry;
+            expect(buttons.map(b => b.label)).toEqual([...FOOTER]);
+            expect(Math.max(...buttons.map(b => b.w)) - Math.min(...buttons.map(b => b.w))).toBeLessThanOrEqual(1);
+            if (page.startsWith('kind-')) expect(geometry.checklist, 'the kind page keeps its checklist').toBe(true);
             console.log(
               `O4 ${page} ${viewport.name} ${theme}: text ${String(geometry.text.length)} chars; cards ${String(cards.length)}; demo x ${String(Math.round(demo.x))} y ${String(Math.round(demo.y))} h ${String(Math.round(demo.h))}; first card right ${String(Math.round(cards[0]?.right ?? 0))} y ${String(Math.round(cards[0]?.y ?? 0))}; footer widths ${buttons.map(b => String(Math.round(b.w))).join('/')}`,
             );
@@ -153,12 +178,18 @@ describe('the Claude pages: stacked cards, the demo on the right, few words', ()
               if (cards.length > 0) {
                 expect(demo.x).toBeGreaterThan((cards[0]?.right ?? 0) + 32);
                 expect(Math.abs(demo.y - (cards[0]?.y ?? 0))).toBeLessThanOrEqual(8);
+              } else if (page.startsWith('kind-')) {
+                expect(demo.x, 'the demo is right of the checklist').toBeGreaterThan(geometry.step.right + 16);
+                expect(Math.abs(demo.y - geometry.step.y)).toBeLessThanOrEqual(8);
               }
               for (const button of buttons) expect(Math.abs(button.w - 136)).toBeLessThanOrEqual(1);
             } else {
               expect(demo.h).toBeLessThanOrEqual(140);
               expect(demo.clipped, 'nothing of the demo is cut off by the 140px limit').toBe(0);
               if (cards.length > 0) expect(demo.bottom).toBeLessThanOrEqual((cards[0]?.y ?? 0) + 1);
+              else if (page.startsWith('kind-')) expect(demo.bottom).toBeLessThanOrEqual(geometry.step.y + 1);
+              // The three footer buttons share the row inside the screen (equal thirds).
+              expect(Math.min(...buttons.map(b => b.w))).toBeGreaterThan(80);
             }
             if (shotsDir !== '')
               await tab.screenshot({ path: join(shotsDir, `${page}-${viewport.name}-${theme}.png`) });
@@ -285,6 +316,202 @@ describe('the installed page', () => {
       await tab.locator('[data-install-command]').waitFor({ state: 'visible' });
       expect(await tab.getByRole('button', { name: 'Install Claude Code' }).count()).toBe(1);
       expect(await tab.locator('[data-step-demo] [data-demo="installed"]').count()).toBe(1);
+    } finally {
+      await close();
+    }
+  });
+});
+
+/** What a harness chooser looks like on a page: a radio or a choice card, or a button that names BOTH harnesses' tools. */
+const chooserIn = (tab: Tab) =>
+  tab.evaluate(() => {
+    const body = document.querySelector('.cc-step') as HTMLElement;
+    const text = body.innerText;
+    return {
+      choices: body.querySelectorAll('[role="radio"], input[type="radio"], [data-choice]').length,
+      codex: /codex/i.test(text),
+      buttons: body.querySelectorAll('button').length,
+    };
+  });
+
+describe('the sign-in page: the slot draws no harness chooser', () => {
+  for (const viewport of VIEWPORTS)
+    for (const theme of THEMES)
+      it(`sign-in: one locked panel, no chooser, the footer is Back/Later/Next at ${viewport.name}, ${theme}`, async () => {
+        const { tab, close } = await open(viewport, theme, '&page=sign-in');
+        try {
+          const found = await chooserIn(tab);
+          console.log(
+            `O4 sign-in ${viewport.name} ${theme}: choices ${String(found.choices)}; buttons ${String(found.buttons)}`,
+          );
+          expect(found.choices, 'no harness chooser in the slot').toBe(0);
+          expect(found.codex, 'the page never names Codex').toBe(false);
+          expect(found.buttons).toBe(1);
+          const footer = await tab.evaluate(() =>
+            [...document.querySelectorAll('[data-step-footer] button')].map(b => ({
+              label: (b as HTMLElement).innerText.trim(),
+              w: b.getBoundingClientRect().width,
+              right: b.getBoundingClientRect().right,
+            })),
+          );
+          expect(footer.map(b => b.label)).toEqual([...FOOTER]);
+          const widths = footer.map(b => b.w);
+          expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1);
+          if (!viewport.phone) for (const w of widths) expect(Math.abs(w - 136)).toBeLessThanOrEqual(1);
+          for (const b of footer) expect(b.right).toBeLessThanOrEqual(viewport.width);
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `sign-in-${viewport.name}-${theme}.png`) });
+        } finally {
+          await close();
+        }
+      });
+
+  it('catches a scene whose slot draws a harness chooser (the detector works)', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', '&page=sign-in&signin=chooser');
+    try {
+      const found = await chooserIn(tab);
+      expect(found.choices).toBeGreaterThan(0);
+      expect(found.codex).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('the permission page from a saved Auto', () => {
+  for (const viewport of VIEWPORTS)
+    for (const theme of THEMES)
+      it(`Skip shows its warning; only Next writes ONE put, permissionMode: skip (${viewport.name}, ${theme})`, async () => {
+        const { tab, close } = await open(viewport, theme, '&page=permission-auto');
+        try {
+          await tab.locator('[data-choice="auto"]').waitFor({ state: 'visible' });
+          expect(await tab.locator('input[value="auto"]').isChecked()).toBe(true);
+          expect(await tab.locator('[data-permission-consequence]').count()).toBe(0);
+          await tab.locator('[data-choice="skip"]').click();
+          const warning = tab.locator('[data-permission-consequence="skip"]');
+          await warning.waitFor({ state: 'visible' });
+          const said = await warning.innerText();
+          expect(said).toContain('--dangerously-skip-permissions');
+          expect(said).toContain('deleting files');
+          // Nothing is sent by the pick itself, nor by moving the focus.
+          await tab.keyboard.press('ArrowUp');
+          await tab.waitForTimeout(300);
+          expect((await fakeOf(tab)).puts.length).toBe(0);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `permission-skip-from-auto-${viewport.name}-${theme}.png`) });
+          await tab.locator('[data-choice="skip"]').click();
+          await tab.locator('[data-step-next]').click();
+          await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
+          const { puts } = await fakeOf(tab);
+          expect(puts.length).toBe(1);
+          expect(lineDiff(AUTO_ORIGINAL, puts[0]?.text ?? '')).toEqual(['permissionMode: skip']);
+        } finally {
+          await close();
+        }
+      });
+
+  it('an untouched saved Auto + Next writes nothing (1280)', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', '&page=permission-auto');
+    try {
+      await tab.locator('[data-choice="auto"]').waitFor({ state: 'visible' });
+      await tab.locator('[data-step-next]').click();
+      await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
+      expect((await fakeOf(tab)).puts.length).toBe(0);
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('a read that stops being readable, and a file with a held change', () => {
+  it('after a refused write the withheld re-read drops the hidden pick: a later Next writes nothing (1280)', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', '&page=permission&save=fail&reread=withheld');
+    try {
+      await tab.locator('[data-choice="auto"]').click();
+      await tab.locator('[data-step-next]').click();
+      await tab.locator('[data-flow-commit-error]').waitFor({ state: 'visible' });
+      expect(await tab.locator('[data-flow-commit-error]').innerText()).toContain('refused');
+      // The next Next reads the file afresh: it is withheld now, the cards go, and so does the pick.
+      await tab.locator('[data-step-next]').click();
+      await tab.locator('[data-mode-unknown]').waitFor({ state: 'visible' });
+      expect(await tab.locator('[data-choice]').count()).toBe(0);
+      const reads = (await fakeOf(tab)).gets;
+      // The file reads again (the scene serves it): the hidden Auto pick must NOT be written by the next Next.
+      await tab.locator('[data-step-next]').click();
+      await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
+      const after = await fakeOf(tab);
+      console.log(
+        `O4 stale commit: reads ${String(reads)} -> ${String(after.gets)}; puts ${String(after.puts.length)}`,
+      );
+      expect(after.puts.length, 'the hidden pick was never written').toBe(0);
+      expect(after.gets).toBe(reads);
+    } finally {
+      await close();
+    }
+  });
+
+  it('a held change: the waiting line replaces the cards, Next writes nothing (1280 and 390)', async () => {
+    for (const viewport of VIEWPORTS) {
+      const { tab, close } = await open(viewport, 'studio-light', '&page=permission&read=pending');
+      try {
+        await tab.locator('[data-config-waiting]').waitFor({ state: 'visible' });
+        expect(await tab.locator('[data-config-waiting]').innerText()).toContain('waiting for your OK');
+        expect(await tab.locator('[data-choice]').count()).toBe(0);
+        await tab.locator('[data-step-next]').click();
+        await tab.locator('[data-next-page]').waitFor({ state: 'visible' });
+        expect((await fakeOf(tab)).puts.length).toBe(0);
+      } finally {
+        await close();
+      }
+    }
+  });
+});
+
+describe('the demos say what they show', () => {
+  it('the install demo types the command the page shows, not a version check (1280, 390)', async () => {
+    for (const viewport of VIEWPORTS) {
+      const { tab, close } = await open(viewport, 'studio-light', '&page=installed');
+      try {
+        await tab.locator('[data-install-command]').waitFor({ state: 'visible' });
+        const shown = (await tab.locator('[data-install-command]').innerText()).trim();
+        const typed = (await tab.locator('[data-demo-command]').textContent())?.trim();
+        expect(typed).toBe(shown);
+        expect(typed).not.toContain('--version');
+        // Once typed, every glyph of the command lies inside the box the reveal clips to (a long one wraps, never cut).
+        await tab.waitForTimeout(1_600);
+        const fit = await tab.evaluate(() => {
+          const cmd = document.querySelector('[data-demo-command]') as HTMLElement;
+          const box = cmd.getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(cmd);
+          const text = range.getBoundingClientRect();
+          const term = (cmd.closest('[data-demo="installed"]') as HTMLElement).getBoundingClientRect();
+          return {
+            below: text.bottom - box.bottom,
+            right: text.right - box.right,
+            inside: text.right <= term.right && text.left >= term.left,
+            lines: Math.round(box.height / Number.parseFloat(getComputedStyle(cmd).lineHeight)),
+          };
+        });
+        console.log(`O4 install demo ${String(viewport.width)}: command lines ${String(fit.lines)}`);
+        expect(fit.below).toBeLessThanOrEqual(1);
+        expect(fit.right).toBeLessThanOrEqual(1);
+        expect(fit.inside).toBe(true);
+        if (viewport.phone) expect(fit.lines, 'a long command wraps on a phone').toBeGreaterThanOrEqual(2);
+      } finally {
+        await close();
+      }
+    }
+  });
+
+  it('Choose what to import labels its two ticked items as an example; the other answers do not (1280)', async () => {
+    const { tab, close } = await open(VIEWPORTS[0], 'studio-light', '&page=import-choice');
+    try {
+      await tab.locator('[data-choice="choose"]').click();
+      await tab.locator('[data-demo="import-choose"] [data-demo-example]').waitFor({ state: 'visible' });
+      expect(await tab.locator('[data-demo-example]').innerText()).toContain('example');
+      await tab.locator('[data-choice="everything"]').click();
+      await tab.locator('[data-demo="import-everything"]').waitFor({ state: 'visible' });
+      expect(await tab.locator('[data-demo-example]').count()).toBe(0);
     } finally {
       await close();
     }

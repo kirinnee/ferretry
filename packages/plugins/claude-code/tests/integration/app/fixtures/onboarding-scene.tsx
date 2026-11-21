@@ -5,17 +5,28 @@
  * `window.__fake` (every PUT of the config file, with its YAML), so the visual test can prove what Next wrote.
  *
  *   ?page=installed|installed-manual|sign-in|import-choice|conversations|permission|permission-auto
+ *        |kind-settings|kind-model-set|kind-instructions|kind-skills|kind-mcp
  *   ?theme=<family>-<mode>   ?save=fail (the first PUT is refused)
+ *   ?reread=withheld (the read AFTER a refused PUT is withheld, the one after that readable again)
+ *   ?read=pending (the file carries a change held for the owner)   ?signin=chooser (the sign-in slot draws a harness chooser)
  */
 import { StepPageFrame } from '@ferretry/app';
-import type { StepHost } from '@ferretry/kernel/contract';
+import type { StepHost, StepSegmentMemory } from '@ferretry/kernel/contract';
 import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../../../../app/features/onboarding/onboarding.css';
 import { ConversationsPage } from '../../../../app/features/onboarding/import/conversations-page.tsx';
 import { ImportChoicePage } from '../../../../app/features/onboarding/import-choice-page.tsx';
 import { InstalledPage } from '../../../../app/features/onboarding/installed-page.tsx';
+import {
+  InstructionsPage,
+  McpPage,
+  ModelSetPage,
+  SettingsPage,
+  SkillsPage,
+} from '../../../../app/features/onboarding/import/kind-page.tsx';
 import { PermissionPage } from '../../../../app/features/onboarding/permission-page.tsx';
+import { importRoutes, scanOf } from '../../../fixtures/onboarding/scan.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
@@ -30,20 +41,43 @@ const TITLES: Record<string, string> = {
   conversations: 'Conversations',
   permission: 'Permissions',
   'permission-auto': 'Permissions',
+  'kind-settings': 'Settings',
+  'kind-model-set': 'Models',
+  'kind-instructions': 'CLAUDE.md',
+  'kind-skills': 'Skills',
+  'kind-mcp': 'MCP servers',
 };
+const KIND_PAGES = {
+  'kind-settings': SettingsPage,
+  'kind-model-set': ModelSetPage,
+  'kind-instructions': InstructionsPage,
+  'kind-skills': SkillsPage,
+  'kind-mcp': McpPage,
+} as const;
+/** What a run remembers when the person chose "Choose what to import": a couple of items left out. */
+const SEGMENT: StepSegmentMemory = page.startsWith('kind-')
+  ? { importMode: 'choose', 'skip:mcp': JSON.stringify(['claude-code:mcp:issues']) }
+  : {};
 
 interface Fake {
   /** Every PUT of `harness-claude-code.yaml` the page made, in order. */
   puts: { path: string; text: string }[];
+  /** Every read of the config file, in order. */
+  gets: number;
   advanced: boolean;
   done: number;
 }
-const fake: Fake = { puts: [], advanced: false, done: 0 };
+const fake: Fake = { puts: [], gets: 0, advanced: false, done: 0 };
+const WITHHELD =
+  '# ‹hidden›: the text of this file is not shown because it holds a raw secret, which the owner must move into the secret store; edit it at the machine\n';
+let refusedOnce = false;
+let withheldServed = false;
 (window as unknown as { __fake: Fake }).__fake = fake;
 
 const FILE = 'binary: /fake/bin/claude\npermissionMode: skip\nhostHistory: true\n';
 const AUTO_FILE = 'binary: /fake/bin/claude\npermissionMode: auto\nhostHistory: true\n';
 let etag = 1;
+const kindRoutes = page.startsWith('kind-') ? importRoutes(scanOf()) : {};
 const table: Record<string, (request?: { body?: unknown }) => unknown> = {
   'GET /v1/claude-code/update': () => ({ location: { state: 'absent', searched: ['/fake/bin'] } }),
   'GET /v1/runtimes/setup/scan': () => ({
@@ -59,19 +93,26 @@ const table: Record<string, (request?: { body?: unknown }) => unknown> = {
                 reason: 'No package manager was found on this machine.',
                 manualCommand: 'curl -fsSL https://example.invalid/install | sh',
               }
-            : { kind: 'runnable', command: 'npm install --global @fake/claude-code' },
+            : { kind: 'runnable', command: 'npm install --global --no-fund @fake/claude-code' },
       },
     ],
   }),
-  'GET /v1/config/file': () => ({
-    path: 'harness-claude-code.yaml',
-    text: fake.puts.at(-1)?.text ?? (page === 'permission-auto' ? AUTO_FILE : FILE),
-    etag: `e${String(etag)}`,
-    exists: true,
-  }),
+  'GET /v1/config/file': () => {
+    fake.gets += 1;
+    const withheld = params.get('reread') === 'withheld' && refusedOnce && !withheldServed;
+    if (withheld) withheldServed = true;
+    return {
+      path: 'harness-claude-code.yaml',
+      text: withheld ? WITHHELD : (fake.puts.at(-1)?.text ?? (page === 'permission-auto' ? AUTO_FILE : FILE)),
+      etag: `e${String(etag)}`,
+      exists: true,
+      state: params.get('read') === 'pending' ? 'pending' : 'ok',
+    };
+  },
   'PUT /v1/config/file': request => {
     if (refuse) {
       refuse = false;
+      refusedOnce = true;
       throw new Error('The machine refused the write.');
     }
     const body = request?.body as { path: string; text: string };
@@ -80,6 +121,9 @@ const table: Record<string, (request?: { body?: unknown }) => unknown> = {
     return { path: body.path, etag: `e${String(etag)}`, outcome: 'applied' };
   },
 };
+// The import pages read the fake host scan (the kind pages) instead of the installer's plan.
+for (const [route, answer] of Object.entries(kindRoutes))
+  table[route] = typeof answer === 'function' ? (answer as (request?: { body?: unknown }) => unknown) : () => answer;
 const client = {
   call: async (route: string, request?: { body?: unknown }) => {
     const answer = table[route];
@@ -96,14 +140,29 @@ const client = {
  */
 const signIn = (
   <div className="cc-step" data-onboarding-step="claude-code.sign-in">
-    <p className="cc-step__line">Sign in to your Claude account on this machine. Ferretry never sees it.</p>
-    <section className="kt-panel flex flex-col gap-3 p-panel" data-fake-logins="">
-      <p className="m-0 text-row font-semibold text-fg">Sign in to Claude Code</p>
-      <p className="m-0 text-cell text-muted">Signs in on studio-mac, for every runtime that uses it.</p>
-      <button type="button" className="kt-button">
-        Sign in to Claude Code
-      </button>
-    </section>
+    <p className="cc-step__line">Sign in to Claude on this machine. Ferretry never sees it: Claude Code keeps it.</p>
+    {params.get('signin') === 'chooser' ? (
+      // What a generic add-login panel draws: a harness chooser. The visual test must catch this in the slot.
+      <section className="kt-panel flex flex-col gap-3 p-panel" data-fake-logins="">
+        <fieldset className="flex gap-2 border-0 p-0">
+          <legend className="sr-only">Harness</legend>
+          <label className="kt-button">
+            <input type="radio" name="harness" defaultChecked /> Claude Code
+          </label>
+          <label className="kt-button">
+            <input type="radio" name="harness" /> Codex
+          </label>
+        </fieldset>
+      </section>
+    ) : (
+      <section className="kt-panel flex flex-col gap-3 p-panel" data-fake-logins="">
+        <p className="m-0 text-row font-semibold text-fg">Sign in to Claude Code</p>
+        <p className="m-0 text-cell text-muted">Signs in on studio-mac, for every runtime that uses it.</p>
+        <button type="button" className="kt-button">
+          Sign in to Claude Code
+        </button>
+      </section>
+    )}
   </div>
 );
 
@@ -117,7 +176,7 @@ function Host() {
   hostRef.current ??= {
     phase: 'daemon',
     appliesTo: [],
-    segment: {},
+    segment: SEGMENT,
     remember: () => undefined,
     ready: () => setReady(true),
     skip: () => undefined,
@@ -161,6 +220,11 @@ function Host() {
       signIn
     ) : page === 'import-choice' ? (
       <ImportChoicePage client={client} step={step} />
+    ) : page in KIND_PAGES ? (
+      (() => {
+        const Kind = KIND_PAGES[page as keyof typeof KIND_PAGES];
+        return <Kind client={client} step={step} />;
+      })()
     ) : page === 'conversations' ? (
       <ConversationsPage client={client} step={step} />
     ) : (
@@ -171,6 +235,7 @@ function Host() {
       <StepPageFrame
         title={TITLES[page] ?? 'Claude Code'}
         back={{ onClick: () => undefined }}
+        later={{ onClick: () => undefined }}
         next={{ label: 'Next', disabled: page !== 'sign-in' && !ready, busy, onClick: press }}
         {...(error === null
           ? {}

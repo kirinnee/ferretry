@@ -8,7 +8,9 @@
  * A refused write throws: the footer shows the reason, the page stays, and the next Next reads the file afresh and tries
  * again. A write the machine HELD for the owner is saved but not yet in effect: the footer says so once and the next Next
  * goes on (the saved mode is then the pick, so nothing is written again). When the route does not show the file (its text
- * is WITHHELD, or the YAML does not read), the page shows the answer as unknown and writes nothing.
+ * is WITHHELD, or the YAML does not read), the page shows the answer as unknown and writes nothing. The same when the file
+ * has a change HELD for the owner (the read says `pending`): the text on disk is not what is in effect, and a one-key save
+ * would carry the held edit with it, so the page writes nothing and says to confirm or discard that change first.
  */
 import type { StepHost } from '@ferretry/kernel/contract';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -27,6 +29,9 @@ const FileSchema = z.looseObject({
   state: z.string().optional(),
 });
 const WroteSchema = z.looseObject({ etag: z.string().min(1), outcome: z.enum(['applied', 'pending']) });
+
+/** Shown (by the page) in place of the cards while the file carries a change held for the owner. */
+export const WAITING = 'A change to this file is waiting for your OK. Confirm or discard it in Settings › Files first.';
 
 const HELD = 'Saved, but the owner has to confirm it before it takes effect. Press Next to go on.';
 
@@ -54,6 +59,8 @@ export interface ConfigChoice<T extends string> {
   readonly where: string;
   /** Why the file could not be read, when it could not. */
   readonly note: string | null;
+  /** The file carries a change held for the owner: nothing is shown to pick and nothing is written ({@link WAITING}). */
+  readonly waiting: boolean;
   readonly retry: () => void;
 }
 
@@ -67,18 +74,25 @@ export function useConfigChoice<T extends string>({
   const [picked, setPicked] = useState<T | null>(null);
   const [where, setWhere] = useState<string>(CONFIG_FILE);
   const [note, setNote] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState(false);
   const file = useRef<Loaded | null>(null);
+  /** A save is registered with the shell (and so must be withdrawn when the file stops being readable). */
+  const registered = useRef(false);
 
-  /** Reads the file; the sentence of why it could not be read, or `null`. */
+  /** Reads the file; the sentence of why it cannot be saved to (unreadable, or held), or `null`. */
   const load = useCallback(async (): Promise<string | null> => {
     let failure: string | null = null;
     try {
       const got = FileSchema.parse(await client.call(READ, { query: { path: CONFIG_FILE } }));
-      const found = read(got.text, got.state);
+      const held = got.state === 'pending';
+      const found = held ? null : read(got.text, got.state);
       setWhere(got.absolutePath ?? CONFIG_FILE);
+      setWaiting(held);
+      if (held) failure = WAITING; // said by the footer when Next reaches a held file; the page itself shows it in the cards' place
       if (found === null) {
         file.current = null; // never written: its text is not shown, or does not read
         setSaved('unknown');
+        setPicked(null); // the pick was made against a file that can no longer be read: it is hidden, so it is dropped
       } else {
         file.current = { text: got.text, etag: got.etag };
         setSaved(found);
@@ -104,11 +118,18 @@ export function useConfigChoice<T extends string>({
 
   // What Next saves follows the pick: nothing when it is the saved answer.
   useEffect(() => {
-    if (step === undefined || saved === null || saved === 'unknown' || picked === null) return;
+    if (step === undefined || saved === null) return;
+    if (saved === 'unknown' || picked === null) {
+      // Nothing is shown to save: a hidden pick never writes, now or once the file reads again.
+      if (registered.current) step.commit(null);
+      registered.current = false;
+      return;
+    }
     if (picked === saved) {
       step.commit(null);
       return;
     }
+    registered.current = true;
     step.commit(async () => {
       const failure = file.current === null ? await load() : null;
       const loaded = file.current as Loaded | null;
@@ -131,5 +152,5 @@ export function useConfigChoice<T extends string>({
 
   const pick = useCallback((next: T) => setPicked(next), []);
   const retry = useCallback(() => void load(), [load]);
-  return { saved, shown: picked ?? (saved === 'unknown' ? null : saved), pick, where, note, retry };
+  return { saved, shown: picked ?? (saved === 'unknown' ? null : saved), pick, where, note, waiting, retry };
 }

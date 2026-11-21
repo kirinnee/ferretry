@@ -13,11 +13,12 @@
  *   - `importMode` is MISSING (a reload dropped the run's memory): it shows its checklist exactly as in Customize, every
  *     item ticked as Import everything would bring it. No chooser, no extra button: only the footer Next answers it.
  */
-import { Button } from '@ferretry/app';
+import { Button, StepDemo } from '@ferretry/app';
 import { FoundKindList, type ImportKind, kindFound, useHarnessScan } from '@ferretry/plugin-runtimes/import-kit';
 import { importItemId, type ImportItemId } from '@ferretry/plugin-runtimes/contract';
 import { useEffect, useRef, useState } from 'react';
 import type { ClaudeCodeClient } from '../../../lib/client.ts';
+import { KindDemo } from '../demos.tsx';
 import { importModeOf } from '../import-choice-page.tsx';
 import type { StepPageProps } from '../props.ts';
 import { HARNESS, leftOf, leftPatch, SCAN_RUN, tickedEnvOf, tickedPatch } from './segment.ts';
@@ -101,6 +102,9 @@ function KindPage({ client, step, kind }: StepPageProps<ClaudeCodeClient> & { re
               Nothing of this kind was found on this computer.
             </p>
           )}
+          <StepDemo>
+            <KindDemo kind={kind} />
+          </StepDemo>
         </>
       ) : read.kind === 'confirm' ? (
         <div className="cc-actions">

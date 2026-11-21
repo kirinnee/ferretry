@@ -8,7 +8,7 @@
  */
 import { Button, ChoiceCards, type ChoiceOption, StepDemo } from '@ferretry/app';
 import type { ClaudeCodeClient } from '../../../lib/client.ts';
-import { useConfigChoice } from '../config-choice.ts';
+import { useConfigChoice, WAITING } from '../config-choice.ts';
 import { ConversationsDemo } from '../demos.tsx';
 import type { StepPageProps } from '../props.ts';
 import { historyRead, withHostHistory } from './history-config.ts';
@@ -31,7 +31,7 @@ const choiceOf = (text: string, state?: string): Choice | null => {
 const withChoice = (text: string, choice: Choice): string => withHostHistory(text, choice === 'on');
 
 export function ConversationsPage({ client, step }: StepPageProps<ClaudeCodeClient>) {
-  const { saved, shown, pick, where, note, retry } = useConfigChoice<Choice>({
+  const { saved, shown, pick, where, note, waiting, retry } = useConfigChoice<Choice>({
     client,
     step,
     read: choiceOf,
@@ -41,7 +41,11 @@ export function ConversationsPage({ client, step }: StepPageProps<ClaudeCodeClie
   if (saved === null) return null;
   return (
     <div className="cc-step" data-onboarding-step="claude-code.conversations">
-      {saved === 'unknown' ? (
+      {waiting ? (
+        <p className="cc-step__line" data-config-waiting="">
+          {WAITING}
+        </p>
+      ) : saved === 'unknown' ? (
         <p className="cc-step__line" data-mode-unknown="">
           The current setting is unknown: this page cannot read it safely. Change it at the machine: {where}
         </p>
