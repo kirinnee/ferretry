@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { ensureDom, type Mounted, mount } from '@ferretry/app/testing';
 import { stepHarness } from '../../../contract/testing/index.ts';
-import { AppearancePage, routeNameDecision } from '../../../app/features/setup-flow/shell-pages.tsx';
+import { AppearancePage } from '../../../app/features/setup-flow/appearance-page.tsx';
+import { routeNameDecision } from '../../../app/features/setup-flow/shell-pages.tsx';
 
 ensureDom();
 
