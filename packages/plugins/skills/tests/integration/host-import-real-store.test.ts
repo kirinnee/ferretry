@@ -188,3 +188,48 @@ describe('an accepted update never overwrites a skill folder the person made or 
     expect(await readFile(`${disk}/pdf/SKILL.md`, 'utf8')).toBe('NEW PDF');
   });
 });
+
+describe('a folder changed after its digest check is still kept at the moment of replacement', () => {
+  test('an owner edit that lands during the preflight of another skill is never written over', async () => {
+    const { store, disk, items } = await world();
+    const first = skillsImportPut({
+      has: name => items.has(name),
+      etag: async name => (items.has(name) ? 'e1' : 'absent'),
+      create: async name => {
+        items.add(name);
+        return { kind: 'written', etag: 'e1' };
+      },
+      replace: async () => ({ kind: 'written', etag: 'e1' }),
+      store,
+    });
+    await first('imported', document, handed);
+    const update = { replace: true, owned: ['pdf', 'review'], etags: { imported: 'e1' } } as const;
+    const newer: readonly ComponentPutFile[] = [
+      { path: 'pdf/SKILL.md', content: 'NEW PDF' },
+      { path: 'review/SKILL.md', content: 'NEW REVIEW' },
+    ];
+    // pdf passes its digest check first; while review is checked, the person edits pdf.
+    const put = skillsImportPut({
+      has: name => items.has(name),
+      etag: async name => (items.has(name) ? 'e1' : 'absent'),
+      create: async () => ({ kind: 'written', etag: 'e1' }),
+      replace: async () => ({ kind: 'written', etag: 'e1' }),
+      store: {
+        holds: store.holds.bind(store),
+        install: store.install.bind(store),
+        uninstall: store.uninstall.bind(store),
+        unchangedSinceImport: async skill => {
+          const unchanged = await store.unchangedSinceImport(skill);
+          if (skill === 'review') await writeFile(`${disk}/pdf/SKILL.md`, 'OWNER EDIT DURING PREFLIGHT');
+          return unchanged;
+        },
+      },
+    });
+
+    const answered = await put('imported', document, newer, update);
+
+    expect(answered).toMatchObject({ ok: true, warnings: [expect.stringContaining('"pdf"')] });
+    expect(await readFile(`${disk}/pdf/SKILL.md`, 'utf8')).toBe('OWNER EDIT DURING PREFLIGHT');
+    expect(await readFile(`${disk}/review/SKILL.md`, 'utf8')).toBe('NEW REVIEW');
+  });
+});

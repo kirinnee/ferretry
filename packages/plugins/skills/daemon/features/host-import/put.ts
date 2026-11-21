@@ -31,6 +31,7 @@ import type { ComponentPutFile, ComponentPutOptions, ComponentPutResult } from '
 import { ITEM_NAME_PATTERN } from '@ferretry/std';
 import {
   type InstalledSkillFile,
+  InstalledSkillChanged,
   InstalledSkillExists,
   installRefusal,
   usableSkillName,
@@ -71,7 +72,11 @@ interface SkillsInstalledStore {
   install(
     skill: string,
     files: readonly InstalledSkillFile[],
-    options?: { readonly createOnly?: boolean; readonly stamp?: boolean },
+    options?: {
+      readonly createOnly?: boolean;
+      readonly stamp?: boolean;
+      readonly onlyIfUnchangedSinceImport?: boolean;
+    },
   ): Promise<void>;
   /**
    * Whether `installed/<skill>/` still holds exactly what an import last wrote there (installed with `stamp`): a folder
@@ -219,8 +224,13 @@ export function skillsImportPut(
 
     for (const { skill, files: own } of toRewrite) {
       try {
-        await deps.store.install(skill, own, { stamp: true });
+        // The digest is compared again at the store's replacement boundary: an edit after the preflight keeps the folder.
+        await deps.store.install(skill, own, { stamp: true, onlyIfUnchangedSinceImport: true });
       } catch (error) {
+        if (error instanceof InstalledSkillChanged) {
+          kept.push(`"${skill}" was changed after the import wrote it, so it was left as it is`);
+          continue;
+        }
         await undo();
         return refuse(
           `the skill "${skill}" was not updated: ${error instanceof Error ? error.message : 'it could not be installed'}`,

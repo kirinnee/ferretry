@@ -59,6 +59,17 @@ export class InstalledSkillConflict extends InstalledSkillRefused {
   }
 }
 
+/**
+ * A replacing install that was told to touch the folder only while it still holds what the setup import last wrote found
+ * it changed (edited, deleted and made again) at the moment of replacement: nothing of it was touched.
+ */
+export class InstalledSkillChanged extends InstalledSkillRefused {
+  constructor(name: string) {
+    super(`${name} was changed after the import wrote it, so it was left as it is.`);
+    this.name = 'InstalledSkillChanged';
+  }
+}
+
 /** A create-only install found `installed/<name>/` already there: nothing of it was touched. */
 export class InstalledSkillExists extends InstalledSkillRefused {
   constructor(name: string) {
@@ -168,7 +179,12 @@ export class SkillStore {
   async install(
     name: string,
     files: readonly InstalledSkillFile[],
-    options: { readonly createOnly?: boolean; readonly stamp?: boolean } = {},
+    options: {
+      readonly createOnly?: boolean;
+      readonly stamp?: boolean;
+      /** Replace only while the folder still holds what the import last wrote (compared here, right before any write). */
+      readonly onlyIfUnchangedSinceImport?: boolean;
+    } = {},
   ): Promise<void> {
     const refusal = installRefusal(name, files);
     if (refusal !== undefined) throw new InstalledSkillRefused(refusal);
@@ -177,6 +193,9 @@ export class SkillStore {
       if (options.stamp === true) await this.#stamp(name, files);
       return;
     }
+    // The replacement boundary: nothing below runs for a folder the person changed after any earlier look at it.
+    if (options.onlyIfUnchangedSinceImport === true && !(await this.unchangedSinceImport(name)))
+      throw new InstalledSkillChanged(name);
     const owned = await this.#ownedFiles(name, 'replaced');
     const incoming = new Set(files.map(file => file.path));
     const stale = owned.filter(path => !incoming.has(path));
