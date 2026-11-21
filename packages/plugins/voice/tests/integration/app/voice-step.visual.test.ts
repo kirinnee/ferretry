@@ -18,7 +18,14 @@ import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bu
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sceneBuilder, sharedChromium, walkFocusRings } from '@ferretry/app/testing/browser';
+import {
+  arrowWalkRings,
+  edgeRings,
+  ringContrastOf,
+  sceneBuilder,
+  sharedChromium,
+  walkFocusRings,
+} from '@ferretry/app/testing/browser';
 
 setDefaultTimeout(60_000);
 
@@ -553,6 +560,86 @@ describe('r11-1b G3: the Voice and Speed-ups buttons and their focus ring', () =
             expect(walk.stops.length).toBeGreaterThan(3);
             if (query === VOICE) expect(walk.stops.some(stop => stop.label.includes('Show every engine'))).toBe(true);
             expect(walk.violations).toEqual([]);
+            if (query === VOICE) {
+              // r11-1c C2: the same walk AFTER "Show every engine" is open, plus every engine card by the arrow keys (the cards are
+              // one radio group: one Tab stop). The last cards' rings used to be cut at the bottom of the frame (5.4 px).
+              await tab.getByText('Show every engine').click();
+              await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 10);
+              const open = await walkFocusRings(tab, 150);
+              expect(open.violations).toEqual([]);
+              // The ring is drawn INSIDE the card, so no scroll can ever cut it: every case below is measured where the browser left
+              // the focus (nothing scrolled by the probe), and the walk by the arrows must reach every engine, each a different one.
+              const arrows = await arrowWalkRings(tab, 'input.fy-engine-radio', 'data-engine');
+              expect(arrows.ids.length).toBe(10);
+              expect(new Set(arrows.ids).size, `ArrowDown reached ten different engines: ${arrows.ids.join(',')}`).toBe(
+                10,
+              );
+              expect(arrows.stops.length, 'every engine card was measured').toBe(10);
+              // The two cases a scroll cannot be trusted with: a card 2 px under the frame top, pressed then Shift; and a card the frame
+              // has left partly out of view, focused with preventScroll under keyboard modality.
+              const edge = await edgeRings(tab, '.fy-engine-card', 'input.fy-engine-radio');
+              expect(
+                Math.abs(edge.nearTop.gap - 2),
+                `a card sits 2 px under the frame top (${edge.nearTop.gap})`,
+              ).toBeLessThan(1);
+              expect(
+                Math.abs(edge.nearTop.gapAtRing - 2),
+                `the press did not move the card (${edge.nearTop.gapAtRing})`,
+              ).toBeLessThan(1);
+              expect(edge.partlyHidden.gap, `a card is partly above the frame (${edge.partlyHidden.gap})`).toBeLessThan(
+                -10,
+              );
+              expect(edge.nearTop.stop?.painted, 'the pressed card has a ring after Shift').toBe(true);
+              expect(edge.partlyHidden.stop?.painted, 'the partly hidden card has a ring').toBe(true);
+              // The ring reads >= 3:1 against the card it sits on and against the page, on the card the arrows chose AND on one that is not.
+              await tab.keyboard.press('Shift');
+              await tab.locator('input.fy-engine-radio').last().focus();
+              const chosen = await ringContrastOf(tab, '.fy-engine-card');
+              const ringed = tab.locator('.fy-engine-card:has(.fy-engine-radio:focus-visible)');
+              if (shotsDir !== '') {
+                // The chosen card with its ring, and (below) one nobody chose: the page, and the card up close.
+                await ringed.evaluate(node => node.scrollIntoView({ block: 'center' }));
+                await tab.waitForTimeout(150);
+                await tab.screenshot({
+                  path: join(shotsDir, `${viewport.name}-${theme}-voice-card-ring-chosen-page.png`),
+                });
+                await ringed.screenshot({
+                  path: join(shotsDir, `${viewport.name}-${theme}-voice-card-ring-chosen.png`),
+                });
+              }
+              await tab.keyboard.press('Shift');
+              await tab.locator('input.fy-engine-radio').first().focus();
+              const plain = await ringContrastOf(tab, '.fy-engine-card');
+              if (shotsDir !== '') {
+                await ringed.evaluate(node => node.scrollIntoView({ block: 'center' }));
+                await tab.waitForTimeout(150);
+                await tab.screenshot({
+                  path: join(shotsDir, `${viewport.name}-${theme}-voice-card-ring-plain-page.png`),
+                });
+                await ringed.screenshot({
+                  path: join(shotsDir, `${viewport.name}-${theme}-voice-card-ring-plain.png`),
+                });
+              }
+              expect(chosen, 'the card holding focus draws a ring').not.toBeNull();
+              expect(plain, 'a card nobody chose draws a ring').not.toBeNull();
+              for (const [which, contrast] of [
+                ['chosen card', chosen],
+                ['plain card', plain],
+              ] as const) {
+                expect(contrast?.card ?? 0, `${which}: ring vs the card's fill`).toBeGreaterThanOrEqual(3);
+                expect(contrast?.page ?? 0, `${which}: ring vs the page`).toBeGreaterThanOrEqual(3);
+              }
+              // All three cases in one object, so a failure names every case that broke.
+              expect({
+                'ArrowDown walk (10 cards)': arrows.violations,
+                'press + Shift, card 2 px from the top': edge.nearTop.stop?.violations,
+                'preventScroll focus, card partly hidden': edge.partlyHidden.stop?.violations,
+              }).toEqual({
+                'ArrowDown walk (10 cards)': [],
+                'press + Shift, card 2 px from the top': [],
+                'preventScroll focus, card partly hidden': [],
+              });
+            }
           } finally {
             await close();
           }

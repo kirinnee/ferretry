@@ -1,10 +1,11 @@
 /**
- * RETRO DESKTOP BUTTON STATES, in the real engine: the bevel must never paint over the fill a shared hover or press declares.
+ * RETRO DESKTOP BUTTON STATES, in the real engine: nothing Retro draws may paint over the fill a shared hover or press declares.
  *
- * Retro draws its bevel as a background IMAGE, and an image paints over the background COLOUR the shared design system sets
+ * (r11 T10: Retro no longer draws a gradient face on any button, so there is no bevel IMAGE left to cover a fill; this test now
+ * pins that it stays that way. It used to be needed because Retro drew its bevel as a background IMAGE, and an image paints over the background COLOUR the shared design system sets
  * on `:hover` (Danger's `--err-bg`, Ghost's `--surface-2`) and `:active` (`--surface-3`). In dark the bevel also out-ranked the
  * press rule, so a hovered Danger button was the resting face (1.009:1 in Studio, 1.027:1 in Hacker) and a press kept its
- * gradient. A computed colour cannot see that (it still says the fill changed), so each state is read two ways:
+ * gradient.) A computed colour cannot see that (it still says the fill changed), so each state is read two ways:
  *
  *  - the computed `background-image` is `none` in that state, and
  *  - a SCREENSHOT of the button is one flat fill from its top inner edge to its bottom one (a bevel is a vertical ramp).

@@ -26,7 +26,14 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright-core';
 import { LOADING_FADE_MS, LOADING_MIN_MS } from '../../src/ui/loading-gate.ts';
-import { NEXT_SPINNER_LOG, sceneServer, sharedChromium, walkFocusRings } from '../support/browser/index.ts';
+import {
+  arrowWalkRings,
+  edgeRings,
+  NEXT_SPINNER_LOG,
+  sceneServer,
+  sharedChromium,
+  walkFocusRings,
+} from '../support/browser/index.ts';
 import { clippedBoxes, footerButtons, gapUnderTitle, underFooter } from '../support/browser/stepper-layout.ts';
 import { FAKE_CODE, MACHINE_A, MACHINE_B, pairLinkOf } from './fixtures/onboarding-e2e-daemon.ts';
 
@@ -1100,6 +1107,58 @@ describe('the first run, end to end', () => {
         expect(voiceRings.violations, 'Voice: no focus ring is cut by main.fy-main or div.fy-frame').toEqual([]);
         // r11 O12: "Show every engine" is a disclosure (a summary), not a button.
         await tab.getByText('Show every engine').click();
+        await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length > 4);
+        // r11-1c C2 (line 14): the same walk AFTER the list is open. The last engine card's radio ring used to cross the bottom of
+        // main.fy-main / div.fy-frame by 5.4 px at 1280, which the walk above (list closed) never reached.
+        const openRings = await walkFocusRings(tab, 150);
+        expect(['wrapped', 'left-page'], 'Voice (every engine): the walk came all the way round').toContain(
+          openRings.ended,
+        );
+        expect(
+          openRings.violations,
+          'Voice (every engine): no focus ring is cut by main.fy-main or div.fy-frame',
+        ).toEqual([]);
+        // The engine cards are one radio group (one Tab stop): the arrow keys reach the rest, so walk THEM too, each card's ring.
+        const cards = await tab.locator('.fy-engine-card').count();
+        const arrows = await arrowWalkRings(tab, 'input.fy-engine-radio', 'data-engine');
+        expect(arrows.ids.length, 'Voice (every engine): an arrow stop for every card').toBe(cards);
+        // A stalled arrow would measure the same card again: the engine ids must all differ.
+        expect(
+          new Set(arrows.ids).size,
+          `Voice (every engine): every arrow stop is a different engine (${arrows.ids.join(',')})`,
+        ).toBe(cards);
+        expect(arrows.stops.length, 'Voice (every engine): every engine card was measured').toBe(cards);
+        expect(
+          arrows.violations,
+          'Voice (every engine): no engine card ring is cut by main.fy-main or div.fy-frame',
+        ).toEqual([]);
+        // The two cases a scroll cannot be trusted with, on the real page: a card 2 px under the frame top (pressed, then Shift), and a card
+        // the frame has left partly out of view (keyboard focus WITHOUT scrolling). The ring is inside the card, so both measure 0.
+        const edge = await edgeRings(tab, '.fy-engine-card', 'input.fy-engine-radio');
+        expect(
+          Math.abs(edge.nearTop.gap - 2),
+          `Voice: a card sits 2 px under the frame top (${edge.nearTop.gap})`,
+        ).toBeLessThan(1);
+        expect(
+          Math.abs(edge.nearTop.gapAtRing - 2),
+          `Voice: the press did not move the card (${edge.nearTop.gapAtRing})`,
+        ).toBeLessThan(1);
+        expect(
+          edge.partlyHidden.gap,
+          `Voice: a card is partly above the frame (${edge.partlyHidden.gap})`,
+        ).toBeLessThan(-10);
+        expect(edge.nearTop.stop?.painted, 'Voice: the pressed card has a ring after Shift').toBe(true);
+        expect(edge.partlyHidden.stop?.painted, 'Voice: the partly hidden card has a ring').toBe(true);
+        expect(
+          {
+            'press + Shift, card 2 px from the top': edge.nearTop.stop?.violations,
+            'preventScroll focus, card partly hidden': edge.partlyHidden.stop?.violations,
+          },
+          'Voice (every engine): no ring is cut by main.fy-main or div.fy-frame at the frame edge',
+        ).toEqual({
+          'press + Shift, card 2 px from the top': [],
+          'preventScroll focus, card partly hidden': [],
+        });
         // The Off card, on its own, so it can be seen in the picture (the page shot scrolls past it).
         const off = tab.locator('.fy-engine-card[data-engine="off"]');
         // Centred, so the footer bar does not sit over its lower half in the picture.

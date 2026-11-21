@@ -79,6 +79,13 @@
 .fy-pc__link:focus-visible {
   outline: none;
 }
+/* THE RING IS THE CARD'S, BUT THE BROWSER SCROLLS THE LINK (r11 FR1). Tab scrolls the focused element into view and the link is just the
+   title, so at 390 the card's own ring (drawn on `.fy-pc`) could sit half below the scroller's edge (35px of it cut). The link
+   asks for room around itself: a card padding above it, and below it the meta line and the action row (the card's remaining height,
+   with a margin), so a focused card arrives whole. On wider rows the card is shorter and the extra room is only a little more scroll. */
+.fy-pc__link {
+  scroll-margin-block: 1rem 7rem;
+}
 .fy-pc__meta {
   color: var(--muted);
   font-size: var(--text-xs);

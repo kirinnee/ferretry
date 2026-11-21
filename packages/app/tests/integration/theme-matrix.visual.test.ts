@@ -137,14 +137,12 @@ const WHY = {
   sidebar:
     "an accent side bar on the selected item (owner: 'this side highlight thing is VERY LLM'); r11 S2 removes the shell/nav ones, the style unit the style ones",
   ringclip:
-    'a focus ring drawn outside its control is cut by a clipping ancestor; r11 S13 drew it inside everywhere but here; the style unit (r11 T11 briefing, T12 genz) draws it inside',
+    'a focus ring drawn outside its control is cut by a clipping ancestor; r11 S13 drew it inside everywhere but here; the style unit (r11 T12 genz) draws it inside',
   spinner: 'this style shares a spinner with another; the style unit (r11 T5-T12) gives it its own',
   distinct:
     'this style differs from Studio on fewer than 6 of 8 components; the style unit (r11 T5-T12) designs the rest',
   hypermedia:
     'this style differs from Studio on 5 of 8 components, short only on hypermedia: no renderer reads an --hm-* slot until r12 H5 (C6), so the style unit cannot fix it; r12 H5 deletes the row',
-  primaryRing:
-    "the style's own :focus-visible rule on the Primary button removes the --surface band r11 S13 draws under the inside ring, so the ring is accent on accent (1.00:1); the style unit (r11 T11) keeps the band",
   text: 'the High contrast palette must pass 7:1 body text hard on this style (no loud exemption); the style unit fixes it',
 } as const;
 
@@ -156,25 +154,7 @@ const EVERY_PALETTE = ['studio', 'geist', 'mission', 'neo', 'hacker', 'vintage',
 const KNOWN: readonly Known[] = [
   {
     viewports: BOTH_WIDTHS,
-    styles: ['lucid'],
-    palettes: EVERY_PALETTE,
-    modes: ['light'],
-    check: 'gradient',
-    what: 'Badge background',
-    why: WHY.gradient,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['lucid', 'retro'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'gradient',
-    what: 'Button background',
-    why: WHY.gradient,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['antiposh', 'genz', 'lucid'],
+    styles: ['antiposh', 'genz'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'gradient',
@@ -183,7 +163,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['antiposh', 'lucid'],
+    styles: ['antiposh'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'gradient',
@@ -192,29 +172,11 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['lucid'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'gradient',
-    what: 'Field background',
-    why: WHY.gradient,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['genz', 'lucid', 'pixel', 'retro'],
+    styles: ['genz'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'gradient',
     what: 'Page background',
-    why: WHY.gradient,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['lucid'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'gradient',
-    what: 'Panel header background',
     why: WHY.gradient,
   },
   {
@@ -237,30 +199,12 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['briefing'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'radius',
-    what: 'Textarea radius',
-    why: WHY.radius,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['briefing', 'genz'],
+    styles: ['genz'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'ringclip',
     what: 'Clipped button ring',
     why: WHY.ringclip,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['briefing'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'sidebar',
-    what: 'Selected choice card',
-    why: WHY.sidebar,
   },
   {
     viewports: BOTH_WIDTHS,
@@ -273,16 +217,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['briefing', 'retro'],
-    palettes: ['geist'],
-    modes: BOTH_MODES,
-    check: 'spinner',
-    what: 'spinner shared with another style',
-    why: WHY.spinner,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['lucid', 'studio'],
+    styles: ['studio'],
     palettes: ['studio'],
     modes: BOTH_MODES,
     check: 'spinner',
@@ -308,7 +243,7 @@ const KNOWN: readonly Known[] = [
     why: WHY.text,
   },
   // The hypermedia component: no renderer reads an `--hm-*` slot yet (r12 H5 owns that, per C6), so every style draws the
-  // picture the same and these four reach 5 of 8 (the shared --radius-sm on .fy-render-pan no longer counts). r12 H5 deletes them.
+  // picture the same and this one reaches 5 of 8 (the shared --radius-sm on .fy-render-pan no longer counts). r12 H5 deletes it.
   {
     viewports: BOTH_WIDTHS,
     styles: ['antiposh'],
@@ -317,24 +252,6 @@ const KNOWN: readonly Known[] = [
     check: 'distinct',
     what: 'differs from Studio on fewer than 6 of 8 components',
     why: WHY.hypermedia,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['briefing'],
-    palettes: ['geist'],
-    modes: BOTH_MODES,
-    check: 'distinct',
-    what: 'differs from Studio on fewer than 6 of 8 components',
-    why: WHY.hypermedia,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['briefing', 'lucid'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'focus',
-    what: 'Primary ring colour',
-    why: WHY.primaryRing,
   },
 ];
 
