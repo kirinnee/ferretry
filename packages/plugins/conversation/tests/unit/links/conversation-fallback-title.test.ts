@@ -36,7 +36,7 @@ const PROMPTS: readonly (readonly [prompt: string, title: string])[] = [
     'ok so I want to rename the project folder cards to say Projects, can you do that and open a PR',
     'Rename the Project Folder Cards',
   ],
-  [`Use ${FAKE_TOKEN} to push the branch then write release notes`, 'Push the Branch'],
+  [`Use token ${FAKE_TOKEN} to push the branch then write release notes`, 'Push the Branch'],
   [
     'Investigate the memory leak in the daemon after 6 hours uptime. Start with heap snapshots.',
     'Investigate the Memory Leak',
@@ -98,7 +98,7 @@ describe('a list item loses its marker and its opening filler', () => {
 
 describe('where a secret was scrubbed', () => {
   test('the words around the hole are not joined across it', () => {
-    const title = deriveTitle(`Use ${FAKE_TOKEN} to push the branch`, NO_VAULT);
+    const title = deriveTitle(`Use token ${FAKE_TOKEN} to push the branch`, NO_VAULT);
     expect(title).toBe('Push the Branch');
     expect(title).not.toMatch(/Use/u);
   });

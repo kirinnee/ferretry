@@ -70,7 +70,19 @@ describe('a text that names a credential makes no heuristic title', () => {
   }
 
   test('a cue is found in any case, inside any quoting, and past invisible characters', () => {
-    for (const text of ['Passphrase', '"TOKEN"', "'api-key'", 'pass_word', 'pa​ssword', 'ＰＡＳＳＷＯＲＤ'])
+    for (const text of [
+      'Passphrase: x',
+      '"TOKEN": "x"',
+      "'token': 'x'",
+      "'api-key' = x",
+      'pass_word=x',
+      'pa​ssword is x',
+      'ＰＡＳＳＷＯＲＤ=x',
+      'token => x',
+      'token -> x',
+      'the secret was x',
+      'rotate it to the new secret to x',
+    ])
       expect(hasCredentialCue(text)).toBe(true);
   });
 
@@ -78,6 +90,37 @@ describe('a text that names a credential makes no heuristic title', () => {
     expect(hasCredentialCue('Fix the flaky login test')).toBe(false);
     expect(deriveTitle('Fix the flaky login test in packages/auth', NO_VAULT)).toBe('Fix the Flaky Login Test');
     expect(cleanTitle('Plan the release', NO_VAULT)).toBe('Plan the release');
+  });
+
+  // A bare mention is a topic, not a cue (review 2289, lead decision R3): dev titles name tokens and passwords all the time.
+  const MENTIONS: readonly (readonly [message: string, title: string])[] = [
+    ['Fix token refresh', 'Fix Token Refresh'],
+    ['Rotate the API secret', 'Rotate the API Secret'],
+    ['password reset flow', 'Password Reset Flow'],
+  ];
+
+  for (const [text, title] of MENTIONS) {
+    test(`“${text}” is a topic: it keeps its title on every path`, () => {
+      expect(hasCredentialCue(text)).toBe(false);
+      expect(deriveTitle(text, NO_VAULT)).toBe(title);
+      expect(cleanTitle(text, NO_VAULT)).toBe(text);
+      expect(fileTitle({ name: text }, NO_VAULT)).toBe(text);
+      expect(fileTitle({ firstMessage: text }, NO_VAULT)).toBe(title);
+    });
+  }
+
+  // An owner's own name (`/rename`) is the owner's data: the caller says so, and it never goes through the cue filter.
+  test('an owner /rename keeps its words verbatim, a generated title with the same words is dropped', () => {
+    const value = 'token: velvet thunder lantern';
+    expect(cleanTitle('Fix token refresh', NO_VAULT, 'owner')).toBe('Fix token refresh');
+    expect(fileTitle({ name: 'Fix token refresh', nameBy: 'owner' }, NO_VAULT)).toBe('Fix token refresh');
+    expect(fileTitle({ name: 'Rotate the API secret', nameBy: 'owner' }, NO_VAULT)).toBe('Rotate the API secret');
+    // The same cue-shaped words from the CLI (or with no author said) are dropped.
+    expect(cleanTitle(value, NO_VAULT, 'generated')).toBeUndefined();
+    expect(cleanTitle(value, NO_VAULT)).toBeUndefined();
+    expect(fileTitle({ name: value, nameBy: 'generated' }, NO_VAULT)).toBeNull();
+    // An owner name is still MASKED: a credential-shaped word in it never survives.
+    expect(cleanTitle(`Use ${'ghp_'}aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0dF3hJ6 today`, NO_VAULT, 'owner')).toBe('Use today');
   });
 
   test('a name with a cue yields to the first message when that holds none', () => {

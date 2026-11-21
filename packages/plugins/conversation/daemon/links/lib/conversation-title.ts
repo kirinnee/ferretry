@@ -38,13 +38,24 @@ const INVISIBLE: readonly (readonly [from: number, to: number])[] = [
   [0xfeff, 0xfeff],
 ];
 
+/** The names of a password: its value is what follows, even with no separator (`passcode 4817 2951`). */
+const PASS_WORD = String.raw`(?:pass[\s_-]?w(?:or)?d|pass[\s_-]?phrase|pass[\s_-]?code|\bpwd\b)`;
+/** The words that name a credential (any case, any quoting around them: `"Password"`, `my_token`, `(bearer`). */
+const CUE_WORD = String.raw`(?:${PASS_WORD}|token|secret|api[\s_-]?key|private[\s_-]?key|credential|bearer|authori[sz]ation)s?`;
+/** What may close a quoted name before its value (`"password":`, `'token' =`, `“password” —`). */
+const CUE_CLOSER = '["\'`”’)\\]}]*';
 /**
- * A word that names a credential, anywhere in a text, in any case and inside any punctuation or quoting (`"Password":`,
- * `my_token=`, `(bearer`). A text that holds one is NEVER the source of a heuristic title: the words that follow a cue cannot be
- * told from the secret they hold (multiword, glued, after `is:`, across a line), so no title is derived from it at all.
+ * A cue is a credential's NAME followed by a VALUE FORM: a separator (`:` `=` `=>` `->` `:=`, a dash) on the same line and then a
+ * value (a word, a quoted value, a JSON `"password":"…"`, the value may start on the next line), or `is` / `was` / `to` / `are`
+ * (with or without a `:` after it) and then a value, or, for a password's name only, a word with a digit right after it
+ * (`passcode 4817 …`). The words after a cue cannot be told from the secret they hold (multiword, glued, after `is:`, across a
+ * line), so a text that holds one is NEVER the source of a heuristic title. A bare mention (`Fix token refresh`, `Rotate the API
+ * secret`, `password reset flow`) is a topic, not a cue.
  */
-const CREDENTIAL_CUE =
-  /pass[\s_-]?w(?:or)?d|pass[\s_-]?phrase|pass[\s_-]?code|\bpwd\b|token|secret|api[\s_-]?key|private[\s_-]?key|credential|bearer/iu;
+const CREDENTIAL_CUE = new RegExp(
+  `${CUE_WORD}${CUE_CLOSER}(?:[ \\t]*(?:[:=]|->|[—–])\\s*\\S|\\s+(?:is|was|to|are)\\b[ \\t]*[:=]?\\s*\\S)|${PASS_WORD}${CUE_CLOSER}[ \\t]+\\S*\\d`,
+  'iu',
+);
 
 /** Whether `text` (as written, or made plain: NFKC with the invisible characters out) holds a credential cue. */
 export const hasCredentialCue = (text: string): boolean =>
@@ -272,8 +283,15 @@ export const scrubShown = (text: string, scrub: ScrubText): string =>
  * A title somebody ELSE wrote (the CLI's, Codex's thread name, a ferret's own): masked from the whole text, put on one line and
  * cut. `undefined` when nothing readable is left, so the next source of a title is used instead of an empty one.
  */
-export const cleanTitle = (text: string, scrub: ScrubText): string | undefined =>
-  hasCredentialCue(text) ? undefined : shown(text, scrub, CONVERSATION_NAME_MAX);
+export const cleanTitle = (text: string, scrub: ScrubText, by: TitleAuthor = 'generated'): string | undefined =>
+  by === 'generated' && hasCredentialCue(text) ? undefined : shown(text, scrub, CONVERSATION_NAME_MAX);
+
+/**
+ * Who wrote a title. A GENERATED one (the CLI's, a ferret's automatic one) that holds a credential cue is dropped whole; an
+ * OWNER's (`/rename`, a title the owner typed) is the owner's data and is never dropped for a cue, only masked like any other.
+ * The caller says which: nothing here guesses.
+ */
+export type TitleAuthor = 'owner' | 'generated';
 
 /**
  * How people open a request: a greeting, "can you", "please", "I need you to", "help me". A task title names the work, not the
@@ -359,10 +377,15 @@ function madeTitle(piece: string): string | undefined {
  * generated, already chosen by the describer), else a deterministic one from the first message. Always scrubbed.
  */
 export function fileTitle(
-  input: { readonly name?: string | undefined; readonly firstMessage?: string | undefined },
+  input: {
+    readonly name?: string | undefined;
+    /** Who gave `name`; the CLI's when not said (fail closed). */
+    readonly nameBy?: TitleAuthor | undefined;
+    readonly firstMessage?: string | undefined;
+  },
   scrub: ScrubText,
 ): string | null {
-  const named = input.name === undefined ? undefined : cleanTitle(input.name, scrub);
+  const named = input.name === undefined ? undefined : cleanTitle(input.name, scrub, input.nameBy);
   if (named !== undefined) return named;
   if (input.firstMessage === undefined) return null;
   const made = deriveTitle(input.firstMessage, scrub);

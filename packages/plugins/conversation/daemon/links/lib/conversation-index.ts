@@ -13,7 +13,14 @@ import { describeConversation, type DescribedConversation } from './conversation
 import { isOwnerMessage } from '../../reader/lib/transcript/owner.ts';
 import { codexIndexNames, type TranscriptNames, transcriptNames } from './conversation-name.ts';
 import { spokenMessages, spokenSources, truncateText, writtenSources } from './conversation-text.ts';
-import { cleanTitle, fileTitle, hasCredentialCue, type ScrubText, scrubShown } from './conversation-title.ts';
+import {
+  cleanTitle,
+  fileTitle,
+  hasCredentialCue,
+  type ScrubText,
+  scrubShown,
+  type TitleAuthor,
+} from './conversation-title.ts';
 
 /**
  * THE CONVERSATION INDEX (shared-history design §3.3): one row per transcript file of every history Conversation lists,
@@ -177,7 +184,13 @@ interface Row {
 
 type RowInput = Omit<Row, 'hay' | 'title' | 'written'> & {
   /** What a title is made from, not yet scrubbed: scrubbed with the rest of its batch, then written as `file_title`. */
-  readonly titleParts?: { readonly name?: string | undefined; readonly firstMessage?: string | undefined } | undefined;
+  readonly titleParts?:
+    | {
+        readonly name?: string | undefined;
+        readonly nameBy?: TitleAuthor | undefined;
+        readonly firstMessage?: string | undefined;
+      }
+    | undefined;
   /**
    * `preview` and `latest` are the messages AS WRITTEN (lines kept, not cut short): they are masked with the batch too, because a row
    * is shown wherever a title is, and only then made one line and cut to the preview length.
@@ -788,7 +801,10 @@ export class ConversationIndex {
       // What the title is made from, scrubbed with its batch (`#titled`). A conversation that is only hand-off pointers has no
       // first message of its own: its ferret's title stands.
       ...(kept === undefined
-        ? { file_title: null, titleParts: { name: result.row.name, firstMessage: result.row.brief } }
+        ? {
+            file_title: null,
+            titleParts: { name: result.row.name, nameBy: result.row.nameBy, firstMessage: result.row.brief },
+          }
         : { file_title: kept }),
       preview: result.row.preview,
       latest: result.row.latest ?? null,
@@ -1036,7 +1052,8 @@ export class ConversationIndex {
         await this.#scrub(scrub =>
           [...named].flatMap(([id, name]) => {
             if (!inScope(id)) return [];
-            const title = cleanTitle(name, scrub);
+            // Codex's thread names are the ones its owner gave (`transcriptNames` reads them as `chosen` too).
+            const title = cleanTitle(name, scrub, 'owner');
             return title === undefined ? [] : [[id, title] as const];
           }),
         ),
@@ -1103,7 +1120,9 @@ export class ConversationIndex {
         new Map(
           [...names].map(([key, ferret]) => [
             key,
-            ferret.title === undefined ? null : (cleanTitle(ferret.title, scrub) ?? null),
+            ferret.title === undefined
+              ? null
+              : (cleanTitle(ferret.title, scrub, ferret.titleSource === 'auto' ? 'generated' : 'owner') ?? null),
           ]),
         ),
     );

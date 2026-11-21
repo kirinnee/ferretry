@@ -153,6 +153,40 @@ describe('nothing secret is stored in the index, whichever way the conversation 
     expect(stored()).not.toContain(GHP);
   });
 
+  // Lead decision R3 (review 2289): an owner's own name is the owner's data. The cue filter is for generated titles only, and the
+  // caller (here: the index) says which path a name came by; the name is still masked.
+  test('an owner /rename, a Codex thread name and an owner ferret title that mention a token keep their words', async () => {
+    const { index, owner, codex } = setup();
+    owner.set(
+      pathOf(A),
+      talk('please fix the login page') + rec({ type: 'ai-title', aiTitle: 'token: velvet thunder lantern' }),
+    );
+    await index.refresh();
+    // The CLI's own title holds a cue: it is dropped (fail closed) and the first message names the conversation.
+    expect(index.query().conversations[0]?.row.name).toBe('Fix the Login Page');
+    owner.append(pathOf(A), rec({ type: 'custom-title', customTitle: 'Fix token refresh' }));
+    await index.refresh();
+    expect(index.query().conversations[0]?.row.name).toBe('Fix token refresh');
+    codex.set(
+      `sessions/2026/02/01/rollout-2026-02-01T09-00-00-${CODEX}.jsonl`,
+      codexRollout(CODEX, '/work/app', 'fix the build'),
+    );
+    codex.set('session_index.jsonl', rec({ id: CODEX, thread_name: 'Rotate the API secret', updated_at: AT }));
+    await index.refresh();
+    expect(index.query().conversations.some(entry => entry.row.name === 'Rotate the API secret')).toBe(true);
+  });
+
+  test('an owner ferret title that mentions a token keeps its words; an automatic one with a cue is dropped', async () => {
+    const mine = setup({ names: () => ferretOf({ title: 'Fix token refresh', titleSource: 'owner' }) });
+    mine.owner.set(pathOf(A), talk('hello there'));
+    await mine.index.refresh();
+    expect(mine.index.query().conversations[0]?.row.name).toBe('Fix token refresh');
+    const auto = setup({ names: () => ferretOf({ title: 'token: velvet thunder lantern', titleSource: 'auto' }) });
+    auto.owner.set(pathOf(A), talk('hello there'));
+    await auto.index.refresh();
+    expect(JSON.stringify(auto.index.query().conversations[0]?.row)).not.toContain('velvet');
+  });
+
   test('a vault that cannot be read fails closed: nothing is stored, and the next update tries again', async () => {
     let failing = true;
     const scrubbing: ScrubBatch = async work => {
