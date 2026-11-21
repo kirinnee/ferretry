@@ -2042,6 +2042,11 @@ body {
 .kt-input::placeholder {
   color: var(--muted);
 }
+/* A disabled field LOOKS disabled (r11 T13, end-list): faded like a disabled button, not-allowed, and no keyboard-focus tint. */
+.kt-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 /* ONE ring. The field is a border colour change plus the shell's thin keyboard outline (index.css); the composer is
    the focus context for the text field inside it, so it takes the border colour alone and that field draws nothing. */
 .kt-input:focus-visible,

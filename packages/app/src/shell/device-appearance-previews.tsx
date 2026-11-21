@@ -8,7 +8,7 @@
  *                   scope re-declares that look's light or dark tokens locally); Auto is one frame split down the middle.
  *   - Text size:    the same few lines at 100% / 112% / 125%, beside a button that keeps its size — "touch targets never
  *                   shrink", shown instead of said.
- *   - Motion:       "Follow system" is dots bouncing and a ring turning; "Reduced" is the same dots at rest.
+ *   - Motion:       "Follow system" is the style's own spinner turning; "Reduced" is the same spinner at rest.
  *
  * What it loops from is a contrast, not a history: `before` is the value the chosen one is most unlike, so every choice
  * plays a visible change, including the first time the page opens. With motion off the frame holds the final state
@@ -19,6 +19,7 @@ import type { MotionPreference } from '../compose/controls.ts';
 import { SettingPreview } from '../compose/setting-preview.tsx';
 import type { PaletteId, StyleId } from '../theme/catalog.ts';
 import type { TextScale } from '../theme/preferences.ts';
+import { Spinner } from '../ui/spinner.tsx';
 import { useMotionAllowed } from '../ui/use-motion-allowed.ts';
 import { lookAttributes } from './appearance-pickers.tsx';
 import './device-appearance-previews.css';
@@ -121,17 +122,12 @@ export function TextSizePreview({ scale }: { readonly scale: TextScale }) {
   );
 }
 
-/** Three dots and a ring: bouncing and turning when motion is on, at rest when it is off. */
+/** The style's own spinner: moving when motion is on, at rest when it is off. */
 function MotionFrame({ motion, moving }: { readonly motion: MotionPreference; readonly moving: boolean }) {
   const alive = motion === 'system' && moving;
   return (
     <div className="fy-dap-frame fy-dap-frame--motion" data-dap-motion={alive ? 'moving' : 'still'}>
-      <span className="fy-dap-dots">
-        <i className="fy-dap-dot" />
-        <i className="fy-dap-dot" />
-        <i className="fy-dap-dot" />
-      </span>
-      <i className="fy-dap-ring" />
+      <Spinner size={28} />
       <span className="fy-dap-caption">{alive ? 'Moving' : 'Still'}</span>
     </div>
   );

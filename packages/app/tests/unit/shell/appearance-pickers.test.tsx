@@ -5,7 +5,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { useState } from 'react';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
-import { lookAttributes, PalettePicker, StylePicker } from '../../../src/shell/appearance-pickers.tsx';
+import {
+  cardPalette,
+  KeepPaletteSwitch,
+  lookAttributes,
+  PalettePicker,
+  StylePicker,
+} from '../../../src/shell/appearance-pickers.tsx';
 import { AppearanceSpecimen } from '../../../src/shell/appearance-specimen.tsx';
 import { PALETTES, type PaletteId, STYLES, type StyleId } from '../../../src/theme/catalog.ts';
 
@@ -85,8 +91,28 @@ describe('PalettePicker', () => {
   });
 });
 
+describe('cardPalette', () => {
+  const neo = STYLES.find(style => style.id === 'neo');
+  it('should be the style’s own default palette, or the palette in force when colours are kept', () => {
+    expect(neo && cardPalette(neo, 'vintage', false)).toBe(neo?.defaultPalette);
+    expect(neo && cardPalette(neo, 'vintage', true)).toBe('vintage');
+  });
+});
+
+describe('KeepPaletteSwitch', () => {
+  it('should be one switch that reports the opposite of its state', async () => {
+    const seen: boolean[] = [];
+    mounted = await mount(<KeepPaletteSwitch checked={false} onChange={next => seen.push(next)} />);
+    const toggle = must(mounted.container.querySelector<HTMLButtonElement>('[role="switch"]'), 'the switch');
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    expect(mounted.container.textContent).toContain("Don't change my colours when I change style");
+    await interact(() => toggle.click());
+    expect(seen).toEqual([true]);
+  });
+});
+
 describe('StylePicker', () => {
-  it('should draw each card in its own style and report a pick', async () => {
+  it('should draw each card in its own style and its default palette, and report a pick', async () => {
     const picks: StyleId[] = [];
     mounted = await mount(
       <StylePicker
@@ -99,11 +125,25 @@ describe('StylePicker', () => {
     );
     const scenes = [...mounted.container.querySelectorAll('[data-swatch]')];
     expect(scenes.map(scene => scene.getAttribute('data-style'))).toEqual(STYLES.map(style => style.id));
-    expect(
-      new Set(scenes.map(scene => `${scene.getAttribute('data-palette')}/${scene.getAttribute('data-mode')}`)),
-    ).toEqual(new Set(['vintage/dark']));
+    expect(scenes.map(scene => scene.getAttribute('data-palette'))).toEqual(STYLES.map(style => style.defaultPalette));
+    expect(new Set(scenes.map(scene => scene.getAttribute('data-mode')))).toEqual(new Set(['dark']));
     await interact(() => mounted?.container.querySelector<HTMLInputElement>('[data-choice="geist"] input')?.click());
     expect(picks).toEqual(['geist']);
+  });
+
+  it('should draw every card in the palette in force when colours are kept', async () => {
+    mounted = await mount(
+      <StylePicker
+        styles={STYLES}
+        value="studio"
+        palette="vintage"
+        keepPalette
+        mode="dark"
+        onChange={() => undefined}
+      />,
+    );
+    const scenes = [...mounted.container.querySelectorAll('[data-swatch]')];
+    expect(new Set(scenes.map(scene => scene.getAttribute('data-palette')))).toEqual(new Set(['vintage']));
   });
 });
 

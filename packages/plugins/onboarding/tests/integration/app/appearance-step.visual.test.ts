@@ -224,4 +224,29 @@ describe('the onboarding Appearance step (r11 G2)', () => {
       await close();
     }
   });
+
+  // r11 T13: the "triple dots" the owner disliked were the Motion preview on the Appearance page; none may animate here either.
+  it('draws no three animated dots on the page, in any picked style (1280 light)', async () => {
+    const { tab, close } = await open(VARIANTS[0]);
+    try {
+      for (const style of ['studio', 'neo', 'mission', 'pixel']) {
+        await tab.locator(`[aria-label="Style"] .fy-cc__card[data-choice="${style}"]`).click();
+        await tab.waitForTimeout(300);
+        const probe = await tab.evaluate(() => {
+          const found: string[] = [];
+          for (const element of document.querySelectorAll('*')) {
+            const kids = [...element.children];
+            if (kids.length !== 3) continue;
+            const names = kids.map(kid => getComputedStyle(kid).animationName);
+            if (names[0] !== 'none' && names.every(name => name === names[0]))
+              found.push(`${element.tagName}.${element.className}`);
+          }
+          return { found, dots: document.querySelectorAll('.fy-dap-dots').length };
+        });
+        expect(probe, style).toEqual({ found: [], dots: 0 });
+      }
+    } finally {
+      await close();
+    }
+  });
 });

@@ -254,6 +254,172 @@
   font-style: normal;
 }
 
+/* ---- markdown: the real `.md` block, so a style's markdown recipe shows here ---- */
+.fy-spec__md {
+  background: var(--surface);
+  border: var(--divider-width) solid var(--divider-color);
+  border-radius: var(--radius-control);
+  min-width: 0;
+  overflow: hidden;
+  padding: var(--pad-panel);
+}
+.fy-spec__md pre {
+  overflow-x: auto;
+}
+
+/* ---- hypermedia: a static mini diagram from the --hm-* slots ----
+   Shape, edge and header are STRINGS a style sets, so they are read with style queries (the page's tokens reach a
+   `[data-swatch]` preview too). Radius, stroke, font and fill are read directly. */
+.fy-spec__hm {
+  background: var(--surface);
+  border: var(--hm-stroke) solid var(--border-strong);
+  border-radius: var(--hm-radius);
+  font-family: var(--hm-font);
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.fy-spec__hm-header {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  border-bottom: var(--hm-stroke) solid var(--border-strong);
+  color: var(--fg);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  padding: 4px var(--pad-cell-x);
+}
+@container style(--hm-header: label) {
+  .fy-spec__hm-header {
+    background: transparent;
+    border-bottom: 0;
+    color: var(--muted);
+  }
+}
+@container style(--hm-header: none) {
+  .fy-spec__hm-header {
+    display: none;
+  }
+}
+.fy-spec__hm-body {
+  align-items: center;
+  display: grid;
+  gap: 0;
+  grid-template-columns: auto minmax(24px, 1fr) auto;
+  padding: var(--gap-md);
+}
+.fy-spec__hm-nodes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+.fy-spec__hm-node {
+  background: color-mix(in srgb, var(--accent) calc(var(--hm-node-fill-alpha) * 24%), var(--surface));
+  border: var(--hm-stroke) solid var(--border-strong);
+  border-radius: var(--hm-radius);
+  color: var(--fg);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  padding: 4px 10px;
+  text-align: center;
+}
+@container style(--hm-shape: shaped) {
+  .fy-spec__hm-node {
+    box-shadow: var(--shadow-control);
+  }
+}
+@container style(--hm-shape: block) {
+  .fy-spec__hm-node {
+    background: var(--accent-soft);
+    box-shadow: 3px 3px 0 var(--border-strong);
+  }
+}
+.fy-spec__hm-edges {
+  align-self: stretch;
+  fill: none;
+  height: 100%;
+  min-height: 48px;
+  stroke: var(--border-strong);
+  stroke-width: var(--hm-stroke);
+  vector-effect: non-scaling-stroke;
+  width: 100%;
+}
+.fy-spec__hm-edges path {
+  display: none;
+  vector-effect: non-scaling-stroke;
+}
+.fy-spec__hm-edges path[data-hm-edge='curve'] {
+  display: inline;
+}
+@container style(--hm-edge: orthogonal) {
+  .fy-spec__hm-edges path[data-hm-edge='curve'] {
+    display: none;
+  }
+  .fy-spec__hm-edges path[data-hm-edge='orthogonal'] {
+    display: inline;
+  }
+}
+@container style(--hm-edge: straight) {
+  .fy-spec__hm-edges path[data-hm-edge='curve'] {
+    display: none;
+  }
+  .fy-spec__hm-edges path[data-hm-edge='straight'] {
+    display: inline;
+  }
+}
+
+/* ---- the style's spinner ---- */
+.fy-spec__spinner-word {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+/* ---- background + grain: the body's own two layers, tiled in a box ---- */
+.fy-spec__backdrop {
+  align-items: center;
+  background-color: var(--bg);
+  background-image: var(--bg-pattern), var(--body-wash);
+  background-repeat: repeat, no-repeat;
+  background-size:
+    var(--bg-pattern-size) var(--bg-pattern-size),
+    auto;
+  border: var(--divider-width) solid var(--divider-color);
+  border-radius: var(--radius-control);
+  display: flex;
+  height: 84px;
+  isolation: isolate;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+.fy-spec__backdrop::after {
+  background-image: var(--grain-image);
+  background-size: calc(160px * var(--grain-scale)) calc(160px * var(--grain-scale));
+  content: '';
+  inset: 0;
+  mix-blend-mode: var(--grain-blend);
+  opacity: var(--grain-alpha);
+  pointer-events: none;
+  position: absolute;
+}
+.fy-spec__backdrop-chip {
+  background: var(--surface);
+  border: var(--stroke-panel) solid var(--border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--card-shadow);
+  color: var(--fg);
+  font-size: var(--text-sm);
+  padding: 4px 12px;
+  position: relative;
+  z-index: 1;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .fy-spec__backdrop {
+    background-image: var(--body-wash);
+  }
+  .fy-spec__backdrop::after {
+    display: none;
+  }
+}
+
 /* Motion off, by the operating system OR by Settings: the specimen only ever draws its end state. */
 @media (prefers-reduced-motion: reduce) {
   .fy-spec [data-spec-play],

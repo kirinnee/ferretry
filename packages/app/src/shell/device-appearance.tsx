@@ -12,7 +12,7 @@ import { useDeviceControls } from '../compose/device-controls.ts';
 import type { TextScale } from '../theme/preferences.ts';
 import { MODE_OPTIONS } from '../ui/theme-toggle.tsx';
 import { useDeviceTheme } from './device-context.tsx';
-import { PalettePicker, StylePicker } from './appearance-pickers.tsx';
+import { KeepPaletteSwitch, PalettePicker, StylePicker } from './appearance-pickers.tsx';
 import { AppearanceSpecimen } from './appearance-specimen.tsx';
 import { ColourModePreview, MotionPreview, TextSizePreview } from './device-appearance-previews.tsx';
 
@@ -58,16 +58,20 @@ export function DeviceAppearance() {
         settingId="theme"
         name="Style"
         hint={style?.label}
-        explanation="How the app is drawn: type, corners, borders, shadows, spacing and motion. Every style works with every palette. Saved on this device."
+        explanation="How the app is drawn: type, corners, borders, shadows, spacing and motion. Each style comes with a palette (the colours shown with it); pick another palette after, or keep yours with the switch. Saved on this device."
       >
         <div className="px-panel pb-3">
           <StylePicker
             styles={theme.styles}
             value={preference.style}
             palette={preference.palette}
+            keepPalette={preference.keepPalette}
             mode={resolved}
             onChange={theme.setStyle}
           />
+        </div>
+        <div className="px-panel pb-3">
+          <KeepPaletteSwitch checked={preference.keepPalette} onChange={theme.setKeepPalette} />
         </div>
       </SettingRow>
       <SettingRow
