@@ -84,7 +84,8 @@ function coalesce(project: string, lines: readonly WatchEventLine[]): readonly P
  * - The first look at a repository is a silent baseline.
  * - An account is one budget for every project: GitHub's `Retry-After`, a secondary limit, a 429 and a run of 5xx each make
  *   it wait (backoff capped and jittered), and until then no project reading as it asks anything.
- * - A look that lands after its project, its link or its account is gone writes nothing and sends nothing.
+ * - A look that lands after its project, its link or its account is gone writes nothing and sends nothing, and the link is
+ *   read again right before each GitHub read, so a link removed mid-pass means no read at all.
  */
 export class WatchService {
   readonly #lastLook = new Map<string, number>();
@@ -209,6 +210,9 @@ export class WatchService {
       const earlier = before?.repos.find(
         each => each.account === account.id && each.repo.owner === repo.owner && each.repo.name === repo.name,
       );
+      // The links are read AGAIN right before each read: an earlier read in this pass can take a while, and a project that was
+      // unlinked (or removed) meanwhile must not be asked about with its former account.
+      if (!(await this.#stillLinked(project, refs))) return;
       const target = { project: project.id, repo, account: account.id as GitAccountId, login: account.login };
       const seen = await observeRepo(this.deps.github, target, earlier?.pulls ?? []);
       this.#learn(account.id, seen);

@@ -2,6 +2,7 @@
  * The PRs section on a project's own page (r9 E3, the first implementation of Projects' insights hook): this project's
  * watch switch and open PRs, the same block the PRs screen draws, so the two can never disagree.
  */
+import { useScreenHref } from '@ferretry/app';
 import { Loading, useNow } from '@ferretry/app/ui';
 import { useState } from 'react';
 import type { ListClient } from './api.ts';
@@ -20,6 +21,7 @@ export interface ProjectPullsProps {
 export function ProjectPulls({ client, daemon, project, onNavigate, nowMs }: ProjectPullsProps) {
   const { reading, refresh } = useOverview(client);
   const now = useNow(nowMs);
+  const hrefOf = useScreenHref();
   const [filter, setFilter] = useState<Filter>('all');
   if (reading.status === 'loading') return <Loading kind="bar" label="Reading this project’s pull requests…" />;
   if (reading.status === 'failed')
@@ -57,6 +59,7 @@ export function ProjectPulls({ client, daemon, project, onNavigate, nowMs }: Pro
         </p>
       )}
       <ProjectBlock
+        accountsHref={hrefOf(daemon, 'projects', 'project', { id: project })}
         client={client}
         daemon={daemon}
         filter={filter}

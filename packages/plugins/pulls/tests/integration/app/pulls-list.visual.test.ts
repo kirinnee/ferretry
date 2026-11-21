@@ -224,10 +224,14 @@ describe('r11 S7: PRs are watched by default when an account is linked', () => {
       expect(await tab.locator('[data-pulls-empty="no-reader"]').innerText()).toContain('Link a GitHub account');
       expect(await tab.locator('[data-pull-row]').count()).toBe(0);
       expect(await tab.locator('[data-pulls-stop]').count()).toBe(0);
-      expect(await tab.evaluate(() => (window as unknown as { __reads: Record<string, number> }).__reads)).toEqual({
-        '11111111-1111-4111-8111-111111111111': expect.any(Number),
-        '22222222-2222-4222-8222-222222222222': 0,
-      });
+      // The link is a real link to this project's own page, where its GitHub accounts are managed (chromium found zero).
+      const link = tab.getByRole('link', { name: 'Link a GitHub account' });
+      expect(await link.count()).toBe(1);
+      expect(await link.getAttribute('href')).toBe('/projects/22222222-2222-4222-8222-222222222222');
+      await link.click();
+      expect(await tab.evaluate(() => (window as unknown as { __navigated: string[] }).__navigated)).toEqual([
+        '/projects/22222222-2222-4222-8222-222222222222',
+      ]);
       if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${variant.name}-default-no-account.png`) });
       await context.close();
     });

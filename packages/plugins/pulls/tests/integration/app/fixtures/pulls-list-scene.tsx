@@ -4,8 +4,9 @@
  *
  * `?case=default&project=A|B` (r11 S7) draws the project page's PRs section over a client that behaves like the daemon:
  * project A has a linked account and NO stored choice, project B has none. It uses the REAL `settingsOf` / `nextSetting`,
- * records every PATCH body in `window.__patches` and every GitHub look in `window.__reads` (a project is only "read" while
- * its effective watch is on), so a test can assert on what the daemon would have been asked.
+ * records every PATCH body in `window.__patches` and every address the page was sent to in `window.__navigated`. It does
+ * NOT count GitHub reads: that is the daemon's, and `tests/integration/watch-loopback.test.ts` drives the real watch against a
+ * loopback GitHub for it. A browser scene that counted its own stand-in's reads would assert on itself.
  */
 import { ScreenHrefProvider } from '@ferretry/app';
 import { createRoot } from 'react-dom/client';
@@ -125,13 +126,12 @@ const cases: Record<string, unknown> = {
 const stored: PullsConfig['projects'] = {};
 const LINKED: Record<string, boolean> = { [A]: true, [B]: false };
 const patches: WatchPatch[] = [];
-const reads: Record<string, number> = { [A]: 0, [B]: 0 };
-Object.assign(window, { __patches: patches, __reads: reads });
+const navigated: string[] = [];
+Object.assign(window, { __patches: patches, __navigated: navigated });
 
 const defaultOverview = () => ({
   projects: [A, B].map(id => {
     const settings = settingsOf({ projects: stored }, id, LINKED[id] === true);
-    if (settings.watch) reads[id] = (reads[id] ?? 0) + 1;
     const pulls = id === A ? mixedPulls : [];
     return {
       project: id,
@@ -176,7 +176,11 @@ const client: ListClient = {
 const root = document.getElementById('root');
 if (root === null) throw new Error('the scene page has no #root');
 createRoot(root).render(
-  <ScreenHrefProvider href={(_daemon, _plugin, _screen, p = {}) => `/pulls/${p.repo ?? ''}/${p.number ?? ''}`}>
+  <ScreenHrefProvider
+    href={(_daemon, plugin, _screen, p = {}) =>
+      plugin === 'projects' ? `/projects/${p.id ?? ''}` : `/pulls/${p.repo ?? ''}/${p.number ?? ''}`
+    }
+  >
     <div data-scene-ready="" style={{ height: '100%' }}>
       {kind === 'default' ? (
         <main className="mx-auto w-full max-w-3xl p-panel" data-scene-project="">
@@ -185,7 +189,7 @@ createRoot(root).render(
               client={defaultClient}
               daemon="workstation"
               nowMs={NOW}
-              onNavigate={() => undefined}
+              onNavigate={to => navigated.push(to)}
               project={params.get('project') === 'B' ? B : A}
             />
           </section>
