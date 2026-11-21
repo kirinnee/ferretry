@@ -66,3 +66,49 @@ test('an offer is stripped of control characters and bounded; an empty one and a
   expect(/\p{Cc}/u.test(title)).toBe(false);
   expect(await f.service.adoptTitle('ghost' as never, 'Anything')).toBe('kept');
 });
+
+/** A fixture whose state write takes a moment, as a file write does: the window a second writer can read inside. */
+const slowFixture = () => {
+  const f = fixture();
+  f.ports.saveDetails = async (_ferret, details) => {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    f.saved.push(details);
+  };
+  return f;
+};
+
+test('a Rename and an adoption started together: the owner’s title wins, whichever reads first', async () => {
+  const f = slowFixture();
+  f.registry.putDetails(f.id, { options: { model: 'opus' } });
+  // Neither is awaited before the other starts: the adoption's read sits inside the Rename's write.
+  const renamed = f.service.rename(f.id, { title: 'Mine' });
+  const adopted = f.service.adoptTitle(f.id, 'Auto Title');
+  expect((await renamed).ok).toBe(true);
+  expect(await adopted).toBe('kept');
+  expect(f.saved.at(-1)).toEqual({ options: { model: 'opus' }, title: 'Mine', titleSource: 'owner' });
+  const summary = await f.service.get(f.id);
+  expect(summary?.title).toBe('Mine');
+  expect(summary?.titleSource).toBe('owner');
+});
+
+test('an adoption started before a Rename lands first and the Rename replaces it, start options kept', async () => {
+  const f = slowFixture();
+  f.registry.putDetails(f.id, { options: { model: 'opus' } });
+  const adopted = f.service.adoptTitle(f.id, 'Auto Title');
+  const renamed = f.service.rename(f.id, { title: 'Mine' });
+  expect(await adopted).toBe('adopted');
+  expect((await renamed).ok).toBe(true);
+  expect(f.saved.map(details => details.titleSource)).toEqual(['auto', 'owner']);
+  expect(f.saved.at(-1)).toEqual({ options: { model: 'opus' }, title: 'Mine', titleSource: 'owner' });
+});
+
+test('two offers at once: one is written after the other, none is lost and the options stay', async () => {
+  const f = slowFixture();
+  f.registry.putDetails(f.id, { options: { model: 'opus' } });
+  const results = await Promise.all([
+    f.service.adoptTitle(f.id, 'First Offer'),
+    f.service.adoptTitle(f.id, 'Second Offer'),
+  ]);
+  expect(results).toEqual(['adopted', 'adopted']);
+  expect(f.saved.at(-1)).toEqual({ options: { model: 'opus' }, title: 'Second Offer', titleSource: 'auto' });
+});

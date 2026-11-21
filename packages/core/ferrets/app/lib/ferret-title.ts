@@ -2,7 +2,7 @@ import type { FerretSummary } from '../../contract/index.ts';
 import { displayCallsign } from './callsign.ts';
 
 /** The fields a ferret's two names are made from. */
-export type TitledFerret = Pick<FerretSummary, 'id' | 'name' | 'folder' | 'title'>;
+export type TitledFerret = Pick<FerretSummary, 'id' | 'name' | 'folder' | 'title' | 'titleSource'>;
 
 /** The last segment of a folder path, whichever separator it uses. */
 const baseName = (path: string): string =>
@@ -11,17 +11,18 @@ const baseName = (path: string): string =>
     .filter(part => part !== '')
     .at(-1) ?? '';
 
-/** The placeholder a start with no task used to be named by: never a title. */
+/** The placeholder a start with no task used to be named by: never a title, unless its owner chose it. */
 const START_PLACEHOLDER = 'interactive';
 
 /**
  * THE TASK A FERRET WAS GIVEN, or `''` when it has none. Ferrets keeps the task title beside the record (`title`, with
  * `titleSource` saying whether the owner or the conversation chose it); a ferret started without one has none, and its
- * callsign and the `interactive` start placeholder are not tasks.
+ * callsign and the `interactive` start placeholder are not tasks — but an `interactive` the owner typed (`titleSource`
+ * `owner`) is their title and is kept.
  */
-export const ferretTask = (ferret: Pick<FerretSummary, 'title'>): string => {
+export const ferretTask = (ferret: Pick<FerretSummary, 'title' | 'titleSource'>): string => {
   const task = (ferret.title ?? '').trim();
-  return task.toLowerCase() === START_PLACEHOLDER ? '' : task;
+  return task.toLowerCase() === START_PLACEHOLDER && ferret.titleSource !== 'owner' ? '' : task;
 };
 
 /**

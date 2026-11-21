@@ -764,6 +764,12 @@ export class FerretsService implements FerretsApi {
   /** Today's lifecycle gate: read the current record only after acquiring its key. */
   private readonly serial: Pick<SerialExecutor, 'run'>;
   /**
+   * One write queue per ferret for `details.json`: every read-then-write of the details (a title's rename or adoption, a
+   * move's options, a carried label) runs on it, so two writers that start together each read what the other left. It is
+   * NOT `serial`: a start, stop or resume holds that queue for as long as it runs and some of them write details.
+   */
+  private readonly detailsQueue = new KeyedSerialExecutor();
+  /**
    * The pin-marked summary made from one registry summary, so the same summary with the same pin answers the same
    * object (R501: the fleet read reuses its body while nothing moved). Held weakly by the input summary.
    */
@@ -1695,8 +1701,10 @@ export class FerretsService implements FerretsApi {
     const title = change.title?.trim();
     if (title !== undefined) {
       // An emptied title clears the task (and who chose it); any other one is the owner's and nothing replaces it.
-      const { title: _before, titleSource: _by, ...rest } = this.registry.detailsOf(ferret) ?? {};
-      await this.saveDetails(ferret, title === '' ? rest : { ...rest, title, titleSource: 'owner' });
+      await this.updateDetails(ferret, current => {
+        const { title: _before, titleSource: _by, ...rest } = current ?? {};
+        return title === '' ? rest : { ...rest, title, titleSource: 'owner' };
+      });
     }
     if (name !== undefined) {
       try {
@@ -1718,11 +1726,15 @@ export class FerretsService implements FerretsApi {
   async adoptTitle(ferret: FerretId, offered: string): Promise<'adopted' | 'kept'> {
     const record = this.registry.get(ferret);
     if (record === undefined) return 'kept';
-    const details = this.registry.detailsOf(ferret);
-    if (details?.title !== undefined && (details.titleSource ?? 'owner') === 'owner') return 'kept';
     const parsed = FerretTitleSchema.safeParse(formatSessionTitle(offered));
-    if (!parsed.success || parsed.data === details?.title) return 'kept';
-    await this.saveDetails(ferret, { ...details, title: parsed.data, titleSource: 'auto' });
+    if (!parsed.success) return 'kept';
+    // The owner check and the write are one step on the details queue: a Rename that started first has landed by now.
+    const written = await this.updateDetails(ferret, details => {
+      if (details?.title !== undefined && (details.titleSource ?? 'owner') === 'owner') return undefined;
+      if (parsed.data === details?.title) return undefined;
+      return { ...details, title: parsed.data, titleSource: 'auto' };
+    });
+    if (!written) return 'kept';
     this.ports.changed({ ferret, state: record.state, previous: record.state, change: 'renamed' });
     return 'adopted';
   }
@@ -1780,15 +1792,16 @@ export class FerretsService implements FerretsApi {
    * launch record, because the target is another login whose model may have none.
    */
   private async moveOptions(ferret: FerretId, target: ResumeTarget): Promise<void> {
-    const before = this.registry.detailsOf(ferret);
-    const { effort: _effort, fast: _fast, ...kept } = before?.options ?? {};
-    const options = {
-      ...kept,
-      ...(target.model === undefined ? {} : { model: target.model }),
-      ...(target.effort === undefined ? {} : { effort: target.effort }),
-    };
-    if (JSON.stringify(options) === JSON.stringify(before?.options ?? {})) return;
-    await this.saveDetails(ferret, { ...before, options });
+    await this.updateDetails(ferret, before => {
+      const { effort: _effort, fast: _fast, ...kept } = before?.options ?? {};
+      const options = {
+        ...kept,
+        ...(target.model === undefined ? {} : { model: target.model }),
+        ...(target.effort === undefined ? {} : { effort: target.effort }),
+      };
+      if (JSON.stringify(options) === JSON.stringify(before?.options ?? {})) return undefined;
+      return { ...before, options };
+    });
   }
 
   /**
@@ -2004,8 +2017,23 @@ export class FerretsService implements FerretsApi {
 
   /** The label the spawn stamp forced is the record's too (`withStampedLabel`); a ferret that already says it is left alone. */
   private async carryLabel(ferret: FerretId, label: string | undefined | void): Promise<void> {
-    const details = withStampedLabel(this.registry.detailsOf(ferret), label ?? undefined);
-    if (details !== undefined) await this.saveDetails(ferret, details);
+    await this.updateDetails(ferret, current => withStampedLabel(current, label ?? undefined));
+  }
+
+  /**
+   * One read-modify-write of a ferret's details, on its details queue: `change` sees the details as the writer before it
+   * left them and returns what to store, or `undefined` to store nothing. True when something was written.
+   */
+  private async updateDetails(
+    ferret: FerretId,
+    change: (current: FerretDetails | undefined) => FerretDetails | undefined,
+  ): Promise<boolean> {
+    return await this.detailsQueue.run(ferret, async () => {
+      const next = change(this.registry.detailsOf(ferret));
+      if (next === undefined) return false;
+      await this.saveDetails(ferret, next);
+      return true;
+    });
   }
 
   private async saveDetails(ferret: FerretId, details: FerretDetails): Promise<void> {

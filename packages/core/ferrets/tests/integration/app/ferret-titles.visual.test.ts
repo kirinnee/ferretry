@@ -1,6 +1,11 @@
 /**
  * ONE TASK-LIKE TITLE PER FERRET AND NO CALLSIGN LINE, in a real browser over fake data (`fixtures/ferret-titles-scene.tsx`):
- * the real list and the real header name; no daemon.
+ * the real list and the real header name over the REAL `FerretsService` (`fixtures/ferret-titles-daemon.ts`, run in this
+ * process, `details.json` on disk); no network beyond 127.0.0.1.
+ *
+ * Second half (§8.2 b, c): an owner's title survives an offer and a daemon restart; an untitled ferret adopts a title
+ * and the row shows it on the list's next read; a Rename from the header updates the header and the row and stays the
+ * owner's after a later offer; a Rename and an offer started together leave the owner's title.
  *
  *  - The drawer's rows (an owner's title, a conversation's title, an untitled ferret) carry no callsign line: no
  *    `[data-sbar-ferret]`, and no row's visible text contains its ferret's callsign. The untitled row shows its folder's name.
@@ -8,11 +13,12 @@
  *
  * Set `FY_FERRET_TITLES_SHOTS_DIR` to keep `<viewport>-<theme>-<case>.png` (desktop 1280 and phone 390, light and dark).
  */
-import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import { type TitlesDaemon, titlesDaemon } from './fixtures/ferret-titles-daemon.ts';
 
 setDefaultTimeout(30_000);
 
@@ -24,6 +30,7 @@ type Page = Awaited<ReturnType<Browser['newPage']>>;
 
 let browser: Browser;
 let directory = '';
+let daemon: TitlesDaemon;
 let server: ReturnType<typeof Bun.serve> | undefined;
 
 beforeAll(async () => {
@@ -45,16 +52,23 @@ beforeAll(async () => {
   server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
-    fetch: request => {
+    fetch: async request => {
+      const served = await daemon.handle(request);
+      if (served !== undefined) return served;
       const path = new URL(request.url).pathname;
       if (path === '/app.js') return new Response(js, { headers: { 'content-type': 'text/javascript' } });
-      if (path === '/') return new Response(html, { headers: { 'content-type': 'text/html' } });
-      return new Response('not here', { status: 404 });
+      // Every other address is the page: the scene sits at `/d/alpha/ferrets`, which a reload asks for.
+      return new Response(html, { headers: { 'content-type': 'text/html' } });
     },
   });
+  daemon = await titlesDaemon(directory);
   browser = await sharedChromium();
   if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
 }, 180_000);
+
+beforeEach(async () => {
+  await daemon.reset();
+});
 
 afterAll(async () => {
   server?.stop(true);
@@ -131,6 +145,87 @@ describe('the chat header name', () => {
         expect(await tab.locator('[data-ferret-name]').innerText()).toBe('Fix Flaky Login Test');
         expect(await tab.locator('[data-ferret-name]').getAttribute('title')).toContain('Kai');
         await shotOf(tab, variant, 'header');
+      } finally {
+        await close();
+      }
+    });
+});
+
+// ─── the titles move: adoption, a reload, and a real Rename (§8.2 b, c) ───────────────────────────────────────────────
+
+const rowTitle = (tab: Page, ferret: string) => tab.locator(`[data-sbar-session="${ferret}"] .fy-sbar__name`);
+
+describe('a conversation offers a title (adoptTitle) to the real service behind the list', () => {
+  for (const variant of VARIANTS)
+    it(`${variant.name}: an owner's title is kept across a reload; an untitled ferret adopts and shows it on the next read`, async () => {
+      const { tab, close } = await open(variant, 'view=list', '[data-sbar-session]');
+      try {
+        // (b) the owner-titled ferret keeps its title, in the row and in the stored details.
+        expect(await daemon.adoptTitle('f-zoe', 'Some Auto Title')).toBe('kept');
+        expect(await rowTitle(tab, 'f-zoe').innerText()).toBe('Fix stuck sign-in');
+        expect(await daemon.stored('f-zoe')).toEqual({ title: 'Fix stuck sign-in', titleSource: 'owner' });
+        // The untitled ferret shows its folder, then adopts, and the row shows it on the list's next read.
+        expect(await rowTitle(tab, 'f-ora').innerText()).toBe('handbook');
+        expect(await daemon.adoptTitle('f-ora', 'Fix Handbook Typos')).toBe('adopted');
+        await rowTitle(tab, 'f-ora').filter({ hasText: 'Fix Handbook Typos' }).waitFor();
+        expect(await daemon.stored('f-ora')).toEqual({ title: 'Fix Handbook Typos', titleSource: 'auto' });
+        // A reload reads what was kept: the owner's title survives, and so does the adopted one.
+        await daemon.restart();
+        await tab.reload();
+        await tab.waitForSelector('[data-sbar-session]');
+        expect(await rowTitle(tab, 'f-zoe').innerText()).toBe('Fix stuck sign-in');
+        expect(await rowTitle(tab, 'f-ora').innerText()).toBe('Fix Handbook Typos');
+        expect(await daemon.adoptTitle('f-zoe', 'Another Auto Title')).toBe('kept');
+        expect(await rowTitle(tab, 'f-zoe').innerText()).toBe('Fix stuck sign-in');
+        await shotOf(tab, variant, 'adopted');
+      } finally {
+        await close();
+      }
+    });
+});
+
+describe('a Rename and an offer in flight together (real file writes under the service)', () => {
+  for (const variant of VARIANTS)
+    it(`${variant.name}: an offer that races a Rename never replaces the owner's title`, async () => {
+      const { tab, close } = await open(variant, 'view=list', '[data-sbar-session]');
+      try {
+        const [, offered] = await Promise.all([
+          daemon.rename('f-kai', { title: 'Mine Now' }),
+          daemon.adoptTitle('f-kai', 'Offered Title'),
+        ]);
+        expect(offered, 'the offer that raced the Rename').toBe('kept');
+        await rowTitle(tab, 'f-kai').filter({ hasText: 'Mine Now' }).waitFor();
+        expect(await daemon.stored('f-kai')).toEqual({ title: 'Mine Now', titleSource: 'owner' });
+        await tab.reload();
+        await tab.waitForSelector('[data-sbar-session]');
+        expect(await rowTitle(tab, 'f-kai').innerText()).toBe('Mine Now');
+      } finally {
+        await close();
+      }
+    });
+});
+
+describe("the header's Rename", () => {
+  for (const variant of VARIANTS)
+    it(`${variant.name}: a Rename on an auto-titled ferret updates the header and the row, and stays the owner's after a later offer`, async () => {
+      const { tab, close } = await open(variant, 'view=live&ferret=f-kai', '[data-ferret-name]');
+      try {
+        await tab.waitForSelector('[data-sbar-session]');
+        expect(await tab.locator('[data-ferret-name]').innerText()).toBe('Fix Flaky Login Test');
+        expect((await daemon.stored('f-kai'))?.titleSource).toBe('auto');
+        await tab.getByRole('button', { name: 'Rename…' }).click();
+        const task = tab.getByLabel('Task');
+        await task.fill('Ship The Login Fix');
+        await tab.getByRole('button', { name: 'Save' }).click();
+        await tab.locator('[data-ferret-name]').filter({ hasText: 'Ship The Login Fix' }).waitFor();
+        await rowTitle(tab, 'f-kai').filter({ hasText: 'Ship The Login Fix' }).waitFor();
+        expect(await daemon.stored('f-kai')).toEqual({ title: 'Ship The Login Fix', titleSource: 'owner' });
+        // A later offer from the conversation cannot take it back.
+        expect(await daemon.adoptTitle('f-kai', 'Fix Flaky Login Test')).toBe('kept');
+        expect(await tab.locator('[data-ferret-name]').innerText()).toBe('Ship The Login Fix');
+        expect(await rowTitle(tab, 'f-kai').innerText()).toBe('Ship The Login Fix');
+        expect((await daemon.stored('f-kai'))?.titleSource).toBe('owner');
+        await shotOf(tab, variant, 'renamed');
       } finally {
         await close();
       }
