@@ -66,9 +66,12 @@ const LAYOUT = '3';
 /**
  * Bump when the RULE that makes a fallback title (`file_title`, from the first message) changes: every cached row is then read
  * again once, so a conversation indexed under the old rule gets the new title. Unlike `LAYOUT` nothing is dropped: a row's ferret
- * name and title (an owner's Rename included) are carried over, and a title the harness wrote is read again from its transcript.
+ * name and title (an owner's Rename included) are carried over, and a title the harness wrote is kept whether or not the bounded
+ * read finds it again (`#keptTitle`).
  */
 const TITLE_RULE = '1';
+/** A row's `size` while its fallback title waits to be made again: no file can match it. */
+const STALE_SIZE = -1;
 const NAME_FALLBACK_MAX = 60;
 /** What a row is called when nothing readable is left to name it by (every word of it was masked). */
 const UNTITLED_NAME = 'Conversation';
@@ -374,11 +377,14 @@ export class ConversationIndex {
       'CREATE TABLE IF NOT EXISTS index_names (source TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (source, id))',
     );
     db.run("INSERT OR REPLACE INTO meta (k, v) VALUES ('layout', ?)", [LAYOUT]);
-    if (db.query<{ v: string }>("SELECT v FROM meta WHERE k = 'title_rule'")[0]?.v !== TITLE_RULE) {
-      // No stamp can match a file again, and `scanned = 0` keeps an append from being folded onto the old title (`#delta`).
-      db.run('UPDATE conv SET size = -1, mtime_ms = -1, scanned = 0');
-      db.run("INSERT OR REPLACE INTO meta (k, v) VALUES ('title_rule', ?)", [TITLE_RULE]);
-    }
+    if (db.query<{ v: string }>("SELECT v FROM meta WHERE k = 'title_rule'")[0]?.v !== TITLE_RULE)
+      db.transaction(() => {
+        // No stamp can match a file again, and `scanned = 0` keeps an append from being folded onto the old title (`#delta`).
+        db.run('UPDATE conv SET size = ?, mtime_ms = -1, scanned = 0', [STALE_SIZE]);
+        db.run("INSERT OR REPLACE INTO meta (k, v) VALUES ('title_rule', ?)", [TITLE_RULE]);
+      });
+    // Rows written (or dropped) by a run that stopped before it settled the winners: they are settled by the next one.
+    this.#changed = db.query<{ v: string }>("SELECT v FROM meta WHERE k = 'winners_dirty'")[0]?.v === '1';
     this.#db = db;
     return db;
   }
@@ -388,11 +394,19 @@ export class ConversationIndex {
     return this.#open().query<{ v: string }>("SELECT v FROM meta WHERE k = 'built'")[0]?.v === '1';
   }
 
+  /** Rows are about to be dropped: the winners must be settled again, even by a later run if this one stops first. */
+  #markChanged(): void {
+    this.#changed = true;
+    this.#open().run("INSERT OR REPLACE INTO meta (k, v) VALUES ('winners_dirty', '1')");
+  }
+
   #write(rows: readonly RowInput[]): void {
     if (rows.length === 0) return;
     this.#changed = true;
     const db = this.#open();
     db.transaction(() => {
+      // In the transaction of the rows: they and the need to settle their winners are saved together, or neither is.
+      db.run("INSERT OR REPLACE INTO meta (k, v) VALUES ('winners_dirty', '1')");
       for (const input of rows) {
         const title = input.title ?? titleOf(input);
         const hay =
@@ -525,7 +539,7 @@ export class ConversationIndex {
       ? []
       : db.query<{ harness: string; kind: string; label: string }>('SELECT DISTINCT harness, kind, label FROM conv')) {
       if (harnesses.has(stale.harness) && !present.has(sourceKeyOf(stale))) {
-        this.#changed = true;
+        this.#markChanged();
         db.run('DELETE FROM conv WHERE harness = ? AND kind = ? AND label = ?', [
           stale.harness,
           stale.kind,
@@ -571,7 +585,7 @@ export class ConversationIndex {
       }
       for (const [path] of existing)
         if (only === undefined && !seen.has(path)) {
-          this.#changed = true;
+          this.#markChanged();
           db.run('DELETE FROM conv WHERE harness = ? AND kind = ? AND label = ? AND path = ?', [
             source.harness,
             source.kind,
@@ -747,16 +761,18 @@ export class ConversationIndex {
         turns_at_least: 0,
         model: null,
       };
+    const kept = this.#keptTitle(old, result.row);
     return {
       ...common,
       id: result.row.id,
       ok: 1,
       project: result.row.project,
       fresh: true as const,
-      file_title: null,
       // What the title is made from, scrubbed with its batch (`#titled`). A conversation that is only hand-off pointers has no
-      // first message of its own: its ferret's title stands.
-      titleParts: { name: result.row.name, firstMessage: result.row.brief },
+      // first message of its own: its ferret's title stands. A title the harness wrote that this read could not find again stays.
+      ...(kept === undefined
+        ? { file_title: null, titleParts: { name: result.row.name, firstMessage: result.row.brief } }
+        : { file_title: kept }),
       preview: result.row.preview,
       latest: result.row.latest ?? null,
       first_at: result.firstAt ?? Date.parse(result.row.lastActivityAt),
@@ -766,6 +782,24 @@ export class ConversationIndex {
       model: result.row.model ?? null,
       written: result.written ? 1 : 0,
     };
+  }
+
+  /**
+   * The cached title a row waiting on the title rule keeps (`STALE_SIZE`): one the harness wrote (a `/rename`, a generated title)
+   * that the bounded read did not find again, because it sits in the middle of the transcript. Only a fallback title is made
+   * again. A row cached before titles were tagged is told by its words: a fallback is the opening words of the first message.
+   */
+  #keptTitle(
+    old: Row | undefined,
+    read: { readonly name?: string | undefined; readonly brief?: string | undefined },
+  ): string | undefined {
+    if (old === undefined || old.size !== STALE_SIZE || old.file_title === null || read.name !== undefined)
+      return undefined;
+    const words = (text: string): string[] => text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
+    const cached = words(old.file_title);
+    const opening = words(read.brief ?? '');
+    const fallback = cached.length > 0 && opening.some((_, at) => cached.every((word, i) => opening[at + i] === word));
+    return fallback ? undefined : old.file_title;
   }
 
   /**
@@ -908,11 +942,15 @@ export class ConversationIndex {
    */
   #settleWinners(): void {
     if (!this.#changed) return;
-    this.#open().run(
-      `UPDATE conv SET win = CASE WHEN ok = 1 AND NOT EXISTS (SELECT 1 FROM conv d WHERE d.harness = conv.harness AND d.id = conv.id
-         AND d.ok = 1 AND d.rowid <> conv.rowid AND (d.last_at > conv.last_at OR (d.last_at = conv.last_at AND d.rowid < conv.rowid)))
-         THEN 1 ELSE 0 END`,
-    );
+    const db = this.#open();
+    db.transaction(() => {
+      db.run(
+        `UPDATE conv SET win = CASE WHEN ok = 1 AND NOT EXISTS (SELECT 1 FROM conv d WHERE d.harness = conv.harness AND d.id = conv.id
+           AND d.ok = 1 AND d.rowid <> conv.rowid AND (d.last_at > conv.last_at OR (d.last_at = conv.last_at AND d.rowid < conv.rowid)))
+           THEN 1 ELSE 0 END`,
+      );
+      db.run("DELETE FROM meta WHERE k = 'winners_dirty'");
+    });
     this.#changed = false;
   }
 
