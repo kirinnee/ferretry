@@ -74,7 +74,9 @@ export async function exchangePairing(
       address: seed.daemonUrl,
       daemonId: seed.daemonId,
       code: seed.code,
-      key: { ...pairingKey, deviceName },
+      // The name rides the pairing itself: the daemon keeps it before it answers, so the answer, the Connected screen and
+      // the first passkey (made before this device may change any setting) all carry it, never the host name.
+      key: { ...pairingKey, deviceName, ...(machineName === undefined ? {} : { machineName }) },
     });
     const response = PairingResponseSchema.parse(outcome.response);
     const connection = pairedDaemonConnection(seed, response, undefined, crossing(outcome.via));
@@ -87,7 +89,8 @@ export async function exchangePairing(
       carriers: response.carriers,
       // The shell then offers a machine with no name of the owner's a name, once (skippable, governed by the daemon).
       askName: true,
-      ...(machineName === undefined ? {} : { chosenName: machineName }),
+      // Only a name the daemon did not take (it already had one, or is an older daemon) is left for the shell to try.
+      ...(machineName === undefined || response.daemonName === machineName.trim() ? {} : { chosenName: machineName }),
     });
   } catch (reason) {
     // Only a key `save` wrote can differ from `previous`; before `save` there is nothing to undo.

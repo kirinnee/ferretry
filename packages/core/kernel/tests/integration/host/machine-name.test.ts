@@ -3,10 +3,21 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { type Admission, AdmissionPort } from '../../../contract/bound.ts';
 import { jsonResponse, queryFrom } from '../../../contract/http.ts';
+import type { CarrierKey } from '../../../contract/ids.ts';
+import { SessionModes } from '../../../contract/kernel.ts';
 import { bootHost, type RunningHost } from '../../../host/host.ts';
+import {
+  devicePairMessage,
+  SESSION_PROTOCOL_ID,
+  sessionIdFromBytes,
+  signDeviceProof,
+  toBase64Url,
+} from '../../../host/session/index.ts';
 import { realAdapters } from '../../../host/wiring.ts';
 import { definePlugin, implementDaemon, route } from '../../../manifest/index.ts';
 import { recordingAdmission, request } from '../../unit/host/fixtures.ts';
+import { TestClient } from '../../unit/host-session/harness.ts';
+import { relayCrypto } from '../../unit/host-session/identities.ts';
 
 const homes: string[] = [];
 const running: RunningHost[] = [];
@@ -149,5 +160,101 @@ describe('the machine name is the owner’s, else the host name, with no restart
     }, 'the broken file to be seen');
     expect(await inventoryName(host)).toBe('pebox');
     expect(await mintedName(host)).toBe('pebox');
+  });
+});
+
+/** A `pair` mode that accepts every code and answers the name this machine goes by at that moment, as Access's does. */
+function pairingPlugin() {
+  const pairer = definePlugin({
+    id: 'access',
+    title: 'Access',
+    version: '5.0.0',
+    api: 5,
+    core: false,
+    kinds: [],
+    hooks: { takes: [{ hook: SessionModes, key: 'pair' }] },
+  });
+  return implementDaemon(pairer, {
+    build: ctx => ({
+      hooks: {
+        'session.modes:pair': {
+          principalKind: 'none' as const,
+          redeem: async attempt => {
+            const proved = await attempt.prove();
+            return proved
+              ? {
+                  outcome: 'paired',
+                  fields: { response: { deviceId: 'dev', daemonName: ctx.kernel.identity.daemonName } },
+                }
+              : 'refused';
+          },
+        },
+      },
+    }),
+  });
+}
+
+describe('a machine name typed while pairing is the machine’s name from the answer on', () => {
+  async function pairAs(host: RunningHost, machineName: string | undefined): Promise<Record<string, unknown>> {
+    const id = sessionIdFromBytes(crypto.getRandomValues(new Uint8Array(16)));
+    if (id === null) throw new Error('fixture id');
+    const client = new TestClient(host.sessionLayer.open('direct' as CarrierKey, { address: '192.0.2.9' }), id);
+    await client.handshake(host.identity.daemonId);
+    const key = await relayCrypto.generateDeviceKey();
+    const deviceKey = toBase64Url(key.publicKeySpki);
+    const proof = await signDeviceProof(
+      relayCrypto,
+      relayCrypto.deviceKeyHandle(key.privateKey),
+      devicePairMessage(client.transcript ?? new Uint8Array(), deviceKey),
+    );
+    await client.send({
+      t: 'pair',
+      protocol: SESSION_PROTOCOL_ID,
+      code: 'ABCD-1234',
+      deviceName: 'phone',
+      ...(machineName === undefined ? {} : { machineName }),
+      deviceKey,
+      proof,
+    });
+    // Saving the name writes a file, so the answer comes after the disk, not after one turn of the loop.
+    await until(async () => (await client.pump(), client.last('paired') !== undefined), 'the paired answer');
+    return (client.last('paired') as { response: Record<string, unknown> }).response;
+  }
+
+  async function bootPairing() {
+    const parent = await mkdtemp(`${tmpdir()}/fy-machine-name-pair-`);
+    homes.push(parent);
+    const home = `${parent}/home`;
+    const outcome = await bootHost({
+      home,
+      version: '5.0.0',
+      implementations: [...plugins(), pairingPlugin()],
+      adapters: { ...realAdapters(home, () => {}, { binary: 'fy' }), hostname: () => HOSTNAME },
+    });
+    if (outcome.kind !== 'running') throw new Error(outcome.sentence);
+    running.push(outcome.host);
+    return outcome.host;
+  }
+
+  test('the name is saved in host.yaml, answered, and read by the next mint', async () => {
+    const host = await bootPairing();
+    expect((await pairAs(host, 'Studio box'))['daemonName']).toBe('Studio box');
+    expect(await mintedName(host)).toBe('Studio box');
+    expect(await inventoryName(host)).toBe('Studio box');
+  });
+
+  test('no name typed: the host name stays; an owner’s own name is never replaced', async () => {
+    const host = await bootPairing();
+    expect((await pairAs(host, undefined))['daemonName']).toBe(HOSTNAME);
+    expect((await put(host, 'name: "pebox"\n')).status).toBe(200);
+    await until(async () => (await mintedName(host)) === 'pebox', 'the owner name to be in effect');
+    expect((await pairAs(host, 'Studio box'))['daemonName']).toBe('pebox');
+    expect(await mintedName(host)).toBe('pebox');
+  });
+
+  test('a name the daemon’s rule refuses is not saved', async () => {
+    const host = await bootPairing();
+    expect((await pairAs(host, 'bell\u0007'))['daemonName']).toBe(HOSTNAME);
+    expect(await mintedName(host)).toBe(HOSTNAME);
   });
 });

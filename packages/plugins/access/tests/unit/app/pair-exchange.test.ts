@@ -102,6 +102,38 @@ describe('the pairing exchange', () => {
     should(added[0]).have.property('chosenName', 'Studio box');
   });
 
+  it('sends the machine name in the pairing, and takes the name the daemon answers with as the machine’s', async () => {
+    const { store, claims, added, inputs, base } = harness();
+    const ports: PairingPorts = {
+      ...base,
+      pairDirect: async input => {
+        inputs.push(input);
+        return {
+          kind: 'paired',
+          response: await sealedPaired(input, { ...response(), daemonName: 'Studio box' }),
+        } as never;
+      },
+    };
+    await exchangePairing({ ports, claims, store }, seed, 'My phone', 'Studio box');
+    should(inputs[0]?.key).have.property('machineName', 'Studio box');
+    // The daemon already keeps it, so the shell has nothing left to save.
+    should(added[0]).have.property('machine', 'Studio box');
+    should(added[0]).not.have.property('chosenName');
+  });
+
+  it('sends no machine name when none was typed', async () => {
+    const { store, claims, inputs, base } = harness();
+    const ports: PairingPorts = {
+      ...base,
+      pairDirect: async input => {
+        inputs.push(input);
+        return { kind: 'paired', response: await sealedPaired(input, response()) } as never;
+      },
+    };
+    await exchangePairing({ ports, claims, store }, seed, 'My phone');
+    should(inputs[0]?.key).not.have.property('machineName');
+  });
+
   it('falls back to a direct pairing over the pairing’s own address when the shell offers no walk', async () => {
     const { store, claims, added, inputs, base } = harness();
     const ports: PairingPorts = {

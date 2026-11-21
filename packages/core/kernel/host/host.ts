@@ -76,6 +76,7 @@ import type {
   ToolResult,
 } from '../manifest/implement.ts';
 import type { Manifest, Needer, ToolDecl } from '../manifest/types.ts';
+import { MachineNameSchema } from '../contract/kernel.ts';
 import kernelManifest, { HostConfigFile, PluginsConfig, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
@@ -1548,6 +1549,13 @@ async function bootLocked(
     },
     clock,
     lease: (options.timings ?? DEFAULT_DAEMON_TIMINGS).lease,
+    nameMachine: async typed => {
+      // Only a machine nobody has named yet takes the name a pairing brought; the owner's own name is never replaced.
+      const name = MachineNameSchema.safeParse(typed);
+      if (!name.success || readHostName(hostConfig) !== undefined) return undefined;
+      const written = await hostConfig?.write(HostConfigFile, undefined, { patch: { name: name.data } });
+      return written?.kind === 'written' ? identityPort.daemonName : undefined;
+    },
     log: warnings.child('session'),
   });
   own(() => sessionLayer.close());
