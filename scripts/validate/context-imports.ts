@@ -10,11 +10,7 @@ import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
 import type { Area, ImportEdge } from '../gen/lib/imports.ts';
 
 /** The packages whose tests drive Onboarding's real setup flow (see the second exemption in `refusal`). */
-const FLOW_DRIVING_TESTS: ReadonlySet<string> = new Set([
-  '@ferretry/plugin-claude-code',
-  '@ferretry/plugin-codex',
-  '@ferretry/plugin-runtimes',
-]);
+const FLOW_DRIVING_TESTS: ReadonlySet<string> = new Set(['@ferretry/plugin-claude-code', '@ferretry/plugin-codex']);
 
 const CONTRACT_EXTERNALS = new Set(['zod']);
 const MANIFEST_EXTERNALS = new Set(['zod']);
@@ -91,26 +87,19 @@ export function refusal(edge: ImportEdge): string | undefined {
 
   // The app shell's public API (lead decision 10, `packages/app/README.md`): an app half imports `@ferretry/app`,
   // `@ferretry/app/ui` and `@ferretry/app/worker`; its tests may also import the test support in `/testing`, the real-browser
-  // support in `/testing/browser` (one shared Chromium per test process) and the test router in `/testing/router` and the real Settings shell for a plugin's browser scene in `/testing/settings-shell`, and the browser-safe shell pieces for a scene that drives Onboarding's real flow in `/testing/flow-host`.
+  // support in `/testing/browser` (one shared Chromium per test process) and the test router in `/testing/router` and the real Settings shell for a plugin's browser scene in `/testing/settings-shell`.
   if (toPkg.kind === 'shell' && toPkg.name === '@ferretry/app' && edge.specifier.startsWith('@ferretry/app')) {
     const subpath = edge.specifier.slice('@ferretry/app'.length);
     if (
       from === 'tests' &&
-      [
-        '',
-        '/ui',
-        '/worker',
-        '/testing',
-        '/testing/browser',
-        '/testing/router',
-        '/testing/settings-shell',
-        '/testing/flow-host',
-      ].includes(subpath)
+      ['', '/ui', '/worker', '/testing', '/testing/browser', '/testing/router', '/testing/settings-shell'].includes(
+        subpath,
+      )
     )
       return undefined;
     if (from === 'app' && ['', '/ui', '/worker'].includes(subpath)) return undefined;
     if (from === 'tests')
-      return `${edge.specifier} is not the app shell's public API: tests import @ferretry/app, /ui, /worker, /testing, /testing/browser, /testing/router, /testing/settings-shell and /testing/flow-host only`;
+      return `${edge.specifier} is not the app shell's public API: tests import @ferretry/app, /ui, /worker, /testing, /testing/browser, /testing/router and /testing/settings-shell only`;
     return `${edge.specifier} is imported only by app halves (and @ferretry/app/testing only by tests)`;
   }
 
@@ -141,7 +130,7 @@ export function refusal(edge: ImportEdge): string | undefined {
 
   // SECOND EXEMPTION: a step page's behaviour (a skip is recorded on the machine and drops the page for the run; Back, Later and
   // busy live in the frame) exists only in Onboarding's setup flow, so the Claude Code and Codex import pages' tests
-  // (and Runtimes' Start page's) drive the real flow screen. Only those three packages' tests may reach Onboarding's app half and its manifest, and only for that.
+  // drive the real flow screen. Only those two packages' tests may reach Onboarding's app half and its manifest, and only for that.
   if (
     from === 'tests' &&
     FLOW_DRIVING_TESTS.has(edge.fromPkg.name) &&

@@ -1,12 +1,14 @@
 /**
- * THE FIRST-RUN "START FROM" PAGE (r11 O14), in a real browser over a fake machine (`fixtures/start-step-scene.tsx`), inside
- * the real step frame. These asserts are the proof of the owner's items 3 and 5 on this page: "put them vertically, show
+ * THE FIRST-RUN "START FROM" PAGE (r11 O14), in a real browser over a fake machine: the app's own settings-shell scene
+ * (`packages/app/tests/integration/fixtures/settings-shell-scene.tsx`) opened at `/d/ws/onboarding/setup` with the REAL onboarding,
+ * runtimes and logins plugins registered on `globalThis.__FY_SCENE__` by a generated entry (the way the Access settings test
+ * does it), so the REAL setup flow draws the REAL Start page inside the real step frame and its real footer. These asserts are the proof of the owner's items 3 and 5 on this page: "put them vertically, show
  * the example animation on the right, reduce the description" and "make buttons have fixed width".
  *
  *   1280: the two cards are stacked (same x and width, y increasing); the demo is in `[data-step-demo]`, right of the cards
  *         (gap > 32px) and top-aligned with the first card (within 8px); the page text is <= 160 characters; the page has
  *         no button of its own (the footer's Back / Later / Next are 136px wide); choosing a card writes nothing, and the
- *         REAL setup flow's Next records the step done exactly once and writes no setting (the copy itself is the Copy
+ *         REAL setup flow's Next records the step done exactly once (one POST `{state:'done'}`) and writes no setting (the copy itself is the Copy
  *         panel's own reviewed change).
  *   both choices: the whole body PLUS the portaled demo is <= 160 characters (Fresh and Copy with the Copy panel open).
  *   390:  the demo is above the first card; no sideways scroll; footer buttons inside the viewport.
@@ -17,12 +19,20 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
 type Browser = Awaited<ReturnType<typeof sharedChromium>>;
 
 const packageRoot = import.meta.dir;
+const workspace = resolve(packageRoot, '../../../../../..');
+const shellScene = resolve(workspace, 'packages/app/tests/integration/fixtures/settings-shell-scene.tsx');
+const fleetReads = resolve(packageRoot, '../../unit/app/features/fleet/account-support.ts');
+
+interface Write {
+  readonly key: string;
+  readonly body: unknown;
+}
 const shotsDir = process.env.FY_START_STEP_SHOTS_DIR ?? '';
 
 const VIEWPORTS = [
@@ -36,10 +46,36 @@ let server: ReturnType<typeof Bun.serve> | undefined;
 
 const build = async (): Promise<{ readonly css: string; readonly js: string }> => {
   directory = await mkdtemp(join(tmpdir(), 'ferretry-start-step-'));
-  const child = Bun.spawn(
-    [process.execPath, sceneBuilder, '--out', directory, '--entry', 'fixtures/start-step-scene.tsx'],
-    { cwd: packageRoot, stderr: 'pipe', stdout: 'pipe' },
+  // The entry is generated: it registers the fake machine (the real onboarding, runtimes and logins over the existing Runtimes
+  // reads; one onboarding step, "runtimes.start"; every non-GET recorded) THEN imports the app's shell scene.
+  const entry = join(directory, 'entry.tsx');
+  await Bun.write(
+    entry,
+    `import { READS } from ${JSON.stringify(fleetReads)};
+const reads = READS() as Record<string, unknown>;
+const writes: unknown[] = [];
+const step = { plugin: 'runtimes', id: 'start', title: 'Start from', order: 10, side: 'daemon', stepHost: true, state: 'pending' };
+const json = (body: unknown) => ({ status: 200, headers: {}, body });
+(window as unknown as { __writes: unknown[] }).__writes = writes;
+(globalThis as Record<string, unknown>).__FY_SCENE__ = {
+  real: ['onboarding', 'runtimes', 'logins'],
+  answer(request: { method: string; path: string; body?: { state?: string } }) {
+    const key = \`\${request.method} \${request.path}\`;
+    if (request.method !== 'GET') writes.push({ key, body: request.body });
+    if (key === 'GET /v1/onboarding') return json({ steps: [step], complete: false, setUp: false });
+    if (key === 'POST /v1/onboarding/steps/runtimes/start') return json({ ...step, state: request.body?.state });
+    if (Object.hasOwn(reads, key)) return json(reads[key]);
+    return undefined;
+  },
+};
+await import(${JSON.stringify(shellScene)});
+`,
   );
+  const child = Bun.spawn([process.execPath, sceneBuilder, '--out', directory, '--entry', entry], {
+    cwd: workspace,
+    stderr: 'pipe',
+    stdout: 'pipe',
+  });
   const [stdout, stderr, code] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
@@ -59,8 +95,8 @@ beforeAll(async () => {
     fetch: request => {
       const path = new URL(request.url).pathname;
       if (path === '/app.js') return new Response(js, { headers: { 'content-type': 'text/javascript' } });
-      if (path === '/') return new Response(html, { headers: { 'content-type': 'text/html' } });
-      return new Response('not here', { status: 404 });
+      // The shell scene routes on the path (`/d/ws/onboarding/setup`): every other path is the page.
+      return new Response(html, { headers: { 'content-type': 'text/html' } });
     },
   });
   browser = await sharedChromium();
@@ -84,9 +120,8 @@ const open = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 'dark'
     new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
   );
   const tab = await context.newPage();
-  await tab.goto(`${origin}/?view=page&theme=studio-${mode}`);
-  await tab.waitForSelector('[data-scene="ready"]');
-  await tab.waitForSelector('[data-choice="clone"]');
+  await tab.goto(`${origin}/d/ws/onboarding/setup?theme=studio-${mode}`);
+  await tab.waitForSelector('[data-flow-page="runtimes.start"] [data-choice="clone"]', { timeout: 30_000 });
   return { context, tab };
 };
 
@@ -122,9 +157,9 @@ const sticksOut = (tab: Awaited<ReturnType<typeof open>>['tab']) =>
     return [...out, ...overlap];
   });
 
-/** The route keys of every call the page made that is not a read: a write would show here. */
+/** Every call the scene's fake machine answered that is not a read (route key + body): a write would show here. */
 const writes = (tab: Awaited<ReturnType<typeof open>>['tab']) =>
-  tab.evaluate(() => window.__calls.filter(route => !route.startsWith('GET ')));
+  tab.evaluate(() => (window as unknown as { __writes: Write[] }).__writes);
 
 describe('r11 O14: the first-run Start from page', () => {
   for (const viewport of VIEWPORTS)
@@ -256,8 +291,10 @@ describe('r11 O14: the first-run Start from page', () => {
         await tab.locator('[data-step-next]').click();
         await tab.waitForSelector('[data-flow-page="runtimes.start"]', { state: 'detached' });
         await tab.waitForTimeout(300);
-        expect(await tab.evaluate(() => window.__answers)).toEqual(['runtimes.start=done']);
-        expect(await writes(tab)).toEqual(['POST /v1/onboarding/steps/:plugin/:stepId']);
+        // Exactly ONE write: the step answer. No setting was written by the page.
+        expect(await writes(tab)).toEqual([
+          { key: 'POST /v1/onboarding/steps/runtimes/start', body: { state: 'done' } },
+        ]);
         await context.close();
       }, 60_000);
     }
