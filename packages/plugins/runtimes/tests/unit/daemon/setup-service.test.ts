@@ -175,6 +175,8 @@ interface World {
     emails: () => Promise<LoginView[]>;
     plans: readonly ToolInstallPreview[];
     install: () => Promise<readonly ToolInstallOutcome[]>;
+    /** How many times the tool lookups were asked to look again past their cache. */
+    refreshes: number;
     documentError: unknown;
     scanError: unknown;
     locate: Partial<Record<'claude' | 'codex', string>>;
@@ -234,6 +236,7 @@ function world(
       },
     ],
     install: async () => [],
+    refreshes: 0,
     documentError: undefined,
     scanError: undefined,
     locate: { claude: '/usr/bin/claude' },
@@ -285,6 +288,9 @@ function world(
     },
     tools: {
       plans: harnesses => state.plans.filter(plan => harnesses.includes(plan.harness)),
+      refresh: async () => {
+        state.refreshes += 1;
+      },
       install: async () => await state.install(),
     },
     secrets: {
@@ -472,6 +478,17 @@ describe('scan', () => {
     should(identical.instructionsIdentical).equal(true);
     should(differing.instructionsIdentical).equal(false);
     should(single).not.have.property('instructionsIdentical');
+  });
+
+  it('should look the tools up again past the cache only when the scan is asked to be fresh', async () => {
+    const { service, state } = world();
+
+    await service.scan();
+    await service.scan({ fresh: false });
+    should(state.refreshes).equal(0);
+
+    await service.scan({ fresh: true });
+    should(state.refreshes).equal(1);
   });
 
   it('should show a tool with no package manager with the command to run by hand', async () => {

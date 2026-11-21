@@ -241,6 +241,8 @@ export interface FleetSetupServiceDeps {
   /** The tool installer (`tool-install.ts`): its plans, and an install a person asked for. */
   readonly tools: {
     plans(harnesses: readonly HarnessKind[]): readonly ToolInstallPreview[];
+    /** Look every tool up again now, past the lookup cache: an explicit "Check again" must not be told a stale answer. */
+    refresh?(): Promise<void>;
     install(
       request: ToolInstallRequest,
       governance: CallerGovernance | undefined,
@@ -363,7 +365,8 @@ export class FleetSetupService {
   // ── Scan ───────────────────────────────────────────────────────────────────────────────────────
 
   /** `GET /v1/fleet/setup/scan`: what the first run and Import again would find. No value of anything. */
-  async scan(): Promise<SetupScan> {
+  async scan(options: { readonly fresh?: boolean } = {}): Promise<SetupScan> {
+    if (options.fresh === true) await this.deps.tools.refresh?.();
     const catalog = this.deps.catalog;
     const reading = await this.#read();
     const scans = await this.#scans();
