@@ -137,12 +137,16 @@ const WHY = {
   sidebar:
     "an accent side bar on the selected item (owner: 'this side highlight thing is VERY LLM'); r11 S2 removes the shell/nav ones, the style unit the style ones",
   ringclip:
-    'a focus ring drawn outside its control is cut by a clipping ancestor; r11 S13 / the style unit draws it inside',
+    'a focus ring drawn outside its control is cut by a clipping ancestor; r11 S13 drew it inside everywhere but here; the style unit (r11 T11 briefing, T12 genz) draws it inside',
   spinner: 'this style shares a spinner with another; the style unit (r11 T5-T12) gives it its own',
   distinct:
     'this style differs from Studio on fewer than 6 of 8 components; the style unit (r11 T5-T12) designs the rest',
   hypermedia:
     'this style differs from Studio on 5 of 8 components, short only on hypermedia: no renderer reads an --hm-* slot until r12 H5 (C6), so the style unit cannot fix it; r12 H5 deletes the row',
+  primaryRing:
+    "the style's own :focus-visible rule on the Primary button removes the --surface band r11 S13 draws under the inside ring, so the ring is accent on accent (1.00:1); the style unit (r11 T11) keeps the band",
+  nameRing:
+    "the style's own ring on the Name field sits at under 3:1 against the field it is drawn inside (r11 S13 moved it inside); the style unit (r11 T12) draws it at >= 3:1",
   text: 'the High contrast palette must pass 7:1 body text hard on this style (no loud exemption); the style unit fixes it',
 } as const;
 
@@ -244,74 +248,11 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: [
-      'antiposh',
-      'briefing',
-      'exaggerated',
-      'genz',
-      'glass',
-      'hud',
-      'lucid',
-      'mission',
-      'neo',
-      'neumorphism',
-      'pixel',
-      'raw',
-      'retro',
-      'swiss',
-    ],
+    styles: ['briefing', 'genz'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'ringclip',
     what: 'Clipped button ring',
-    why: WHY.ringclip,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: [
-      'antiposh',
-      'briefing',
-      'exaggerated',
-      'genz',
-      'glass',
-      'hud',
-      'lucid',
-      'mission',
-      'neo',
-      'neumorphism',
-      'pixel',
-      'raw',
-      'retro',
-      'swiss',
-    ],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'ringclip',
-    what: 'Clipped link ring',
-    why: WHY.ringclip,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: [
-      'antiposh',
-      'briefing',
-      'exaggerated',
-      'genz',
-      'glass',
-      'hud',
-      'lucid',
-      'mission',
-      'neo',
-      'neumorphism',
-      'pixel',
-      'raw',
-      'retro',
-      'swiss',
-    ],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'ringclip',
-    what: 'Clipped name ring',
     why: WHY.ringclip,
   },
   {
@@ -450,6 +391,51 @@ const KNOWN: readonly Known[] = [
     check: 'distinct',
     what: 'differs from Studio on fewer than 6 of 8 components',
     why: WHY.hypermedia,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['briefing', 'lucid'],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'focus',
+    what: 'Primary ring colour',
+    why: WHY.primaryRing,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['genz'],
+    palettes: ['contrast', 'mission', 'neo', 'studio', 'vaporwave', 'vintage'],
+    modes: BOTH_MODES,
+    check: 'focus',
+    what: 'Name ring colour',
+    why: WHY.nameRing,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['genz'],
+    palettes: ['geist', 'hacker'],
+    modes: ['dark'],
+    check: 'focus',
+    what: 'Name ring colour',
+    why: WHY.nameRing,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['genz'],
+    palettes: ['contrast', 'mission', 'neo', 'studio', 'vaporwave', 'vintage'],
+    modes: BOTH_MODES,
+    check: 'focus',
+    what: 'Clipped name ring colour',
+    why: WHY.nameRing,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['genz'],
+    palettes: ['geist', 'hacker'],
+    modes: ['dark'],
+    check: 'focus',
+    what: 'Clipped name ring colour',
+    why: WHY.nameRing,
   },
 ];
 
@@ -709,7 +695,20 @@ const FOCUSED = `(() => {
   const colour = outlineChanged ? cs.outlineColor : cs.borderTopColor;
   // A ring drawn outside the border box sits on what is around the control; one drawn inside sits on the control's own fill.
   const inside = outlineChanged && Number.parseFloat(cs.outlineOffset) < 0;
-  const back = paint(behind(mark, inside));
+  // A FILLED control (the primary button) keeps a hard inset band of --surface under its inside ring (r11 S13, ui/design-system.css):
+  // the ring sits on the band, not on the accent fill it is often the same colour as. When the focused state draws such a band
+  // (an inset, blur-0, zero-offset shadow at least as thick as the ring), that band is what is behind the ring.
+  let band = null;
+  if (inside && cs.boxShadow !== 'none')
+    for (const part of splitTop(cs.boxShadow)) {
+      if (!/inset/.test(part)) continue;
+      const lengths = (part.match(/-?\\d*\\.?\\d+px/g) || []).map(Number.parseFloat);
+      if (lengths.length >= 4 && lengths[0] === 0 && lengths[1] === 0 && lengths[2] === 0 && lengths[3] >= Number.parseFloat(cs.outlineWidth)) {
+        const colourPart = part.match(/(rgba?|color|hsla?|oklch|oklab|lab|lch)\\([^()]*(?:\\([^()]*\\)[^()]*)*\\)/);
+        if (colourPart && window.__m.rgba(colourPart[0])[3] === 1) band = colourPart[0];
+      }
+    }
+  const back = paint(band === null ? behind(mark, inside) : [...behind(mark, inside), band]);
   // r11 T14 probe 7 (S13's measure): the ring box is the border box inflated by what the focused state draws OUTSIDE it (an
   // outline's offset + width when it is positive, a non-inset box-shadow's spread); it must lie inside the padding box of
   // every ancestor that clips (overflow other than visible, contain: paint, a clip-path). The page's own scroll is not one.
@@ -742,7 +741,7 @@ const FOCUSED = `(() => {
     visible: el.matches(':focus-visible'),
     drawn,
     width: Number.parseFloat(outlineChanged ? cs.outlineWidth : cs.borderTopWidth) || 0,
-    ratio: drawn ? ratio(paint([...behind(mark, inside), colour]), back) : 0,
+    ratio: drawn ? ratio(paint([...(band === null ? behind(mark, inside) : [...behind(mark, inside), band]), colour]), back) : 0,
   };
 })()`;
 
@@ -1183,6 +1182,36 @@ describe('the probes read the real page', () => {
   const washed = (tab: Page, css: string) => tab.addStyleTag({ content: css });
   const gone = async (style: Awaited<ReturnType<Page['addStyleTag']>>) =>
     await style.evaluate(node => (node as Element).remove());
+
+  it('the Primary ring is read against the surface band the button draws under it, and fails where the band is gone', async () => {
+    const session = await open(VIEWPORTS[0], 'light');
+    try {
+      const primaryRing = async () => {
+        const measured = await settle(session.tab, 'studio', 'studio', 'light');
+        const read = measured.focus.find(row => row.what === 'Primary');
+        return {
+          ratio: read?.ratio ?? 0,
+          miss: misses(measured, { style: 'studio', highContrast: false, wide: true }).find(
+            miss => miss.check === 'focus' && miss.what === 'Primary ring colour',
+          ),
+        };
+      };
+      const withBand = await primaryRing();
+      expect(withBand.ratio, 'the ring on the surface band').toBeGreaterThanOrEqual(3);
+      expect(withBand.miss).toBeUndefined();
+      // Without the band the ring sits on the accent fill it is drawn in: 1:1, and the probe says so.
+      const noBand = await washed(
+        session.tab,
+        ".kt-btn[data-variant='primary']:focus-visible { box-shadow: none !important; }",
+      );
+      const without = await primaryRing();
+      await gone(noBand);
+      expect(without.ratio, 'the ring on the accent fill').toBeLessThan(1.5);
+      expect(without.miss?.got).toBeDefined();
+    } finally {
+      await session.close();
+    }
+  });
 
   it('the gradient probe tells a verified T2 tile from a wash on any layer, and reads the grain too', async () => {
     const session = await open(VIEWPORTS[0], 'light');
