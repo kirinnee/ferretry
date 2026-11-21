@@ -128,40 +128,8 @@ const DEVICE_FACES: readonly string[] = [
  * default palette, at both widths in both modes, with the real motion), sidebar (6), ringclip (7), and text on the High
  * contrast palette (probe 1).
  */
-const WHY = {
-  gradient:
-    "a gradient background (owner: 'most of them should not have gradient background'); the style unit (r11 T5-T12) removes it",
-  radius:
-    'a radius over 16px on a field, code block, table or menu (owner: the super-rounded ones are broken); the style unit caps it',
-  size: 'display text over 3.25rem at 1280 (owner: Exaggerated Minimalism is too large); the style unit caps it',
-  sidebar:
-    "an accent side bar on the selected item (owner: 'this side highlight thing is VERY LLM'); r11 S2 removes the shell/nav ones, the style unit the style ones",
-  ringclip:
-    'a focus ring drawn outside its control is cut by a clipping ancestor; r11 S13 drew it inside everywhere but here; the style unit (r11 T12 genz) draws it inside',
-  spinner: 'this style shares a spinner with another; the style unit (r11 T5-T12) gives it its own',
-  distinct:
-    'this style differs from Studio on fewer than 6 of 8 components; the style unit (r11 T5-T12) designs the rest',
-  hypermedia:
-    'this style differs from Studio on 5 of 8 components, short only on hypermedia: no renderer reads an --hm-* slot until r12 H5 (C6), so the style unit cannot fix it; r12 H5 deletes the row',
-  text: 'the High contrast palette must pass 7:1 body text hard on this style (no loud exemption); the style unit fixes it',
-} as const;
-
-const BOTH_WIDTHS = ['1280', '390'] as const;
-const BOTH_MODES = ['light', 'dark'] as const;
-/** Explicit, never `PALETTES.map(...)`: a palette added to the catalogue is in no pin until somebody reads what it misses. */
-const EVERY_PALETTE = ['studio', 'geist', 'mission', 'neo', 'hacker', 'vintage', 'vaporwave', 'contrast'] as const;
-
-const KNOWN: readonly Known[] = [
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['studio'],
-    palettes: ['studio'],
-    modes: BOTH_MODES,
-    check: 'spinner',
-    what: 'spinner shared with another style',
-    why: WHY.spinner,
-  },
-];
+// EMPTY NOW: every style unit (r11 T5-T12) has deleted its rows, so the owner's theme line (turn 4247, item 12) holds on every style.
+const KNOWN: readonly Known[] = [];
 
 const pins = pinnedMisses(KNOWN);
 const usedPins = new Set<string>();

@@ -30,7 +30,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
-import { COLOUR_TOOLS, sceneBuilder, sharedChromium } from '../support/browser/index.ts';
+import { COLOUR_TOOLS, type ColourTools, sceneBuilder, sharedChromium } from '../support/browser/index.ts';
 
 setDefaultTimeout(60_000);
 
@@ -973,8 +973,12 @@ const RING_CONTROLS = `
   <button class="kt-btn" data-variant="ghost" data-ring="ghost">Ghost</button>
   <input class="kt-input" data-ring="input">
   <textarea class="kt-input" data-ring="textarea"></textarea>
-  <div class="fy-cc__card" data-ring="card"><input type="radio" name="r1" data-ring-focus><span>Card</span></div>
-  <div class="fy-cc__card" data-selected="true" data-ring="card-selected"><input type="radio" name="r2" checked data-ring-focus><span>Card</span></div>
+  <label class="fy-cc__card" data-ring="card"><input class="sr-only" type="radio" name="r1" data-ring-focus><span class="fy-cc__title">Card</span></label>
+  <label class="fy-cc__card" data-selected="true" data-ring="card-selected"><input class="sr-only" type="radio" name="r2" checked data-ring-focus><span class="fy-cc__title">Card</span></label>
+  <label class="fy-cc__card" data-ring="style-card"><input class="sr-only" type="radio" name="r3" data-ring-focus><span class="fy-ap-mini"><span class="fy-ap-mini__top"><b class="fy-ap-mini__type">Ag</b></span><span class="fy-ap-mini__bottom"><i class="fy-ap-mini__button"></i><i class="fy-ap-mini__card"></i></span></span><span class="fy-cc__title">Style</span></label>
+  <label class="fy-cc__card" data-selected="true" data-ring="style-card-selected"><input class="sr-only" type="radio" name="r4" checked data-ring-focus><span class="fy-ap-mini"><span class="fy-ap-mini__top"><b class="fy-ap-mini__type">Ag</b></span><span class="fy-ap-mini__bottom"><i class="fy-ap-mini__button"></i><i class="fy-ap-mini__card"></i></span></span><span class="fy-cc__title">Style</span></label>
+  <label class="fy-ap-chip" data-ring="chip"><input class="sr-only" type="radio" name="r5" data-ring-focus><span class="fy-ap-chip__name">Magenta</span></label>
+  <label class="fy-ap-chip" data-selected="true" data-ring="chip-selected"><input class="sr-only" type="radio" name="r6" checked data-ring-focus><span class="fy-ap-chip__name">Magenta</span></label>
   <button class="kt-tab" aria-selected="true" data-ring="tab">Tab</button>
   <button class="fy-composer-send" data-ring="send">Send</button>
   <nav class="fy-settings-nav"><a class="fy-tab fy-tab--active" aria-current="page" href="#x" data-ring="nav">Active</a></nav>
@@ -986,6 +990,7 @@ describe('no focus ring of a kit sticks out of its control (a tight clipping box
       it(`${style} in ${mode}`, async () => {
         const { tab, close } = await open(VIEWPORTS[0], mode, style);
         try {
+          await tab.evaluate(COLOUR_TOOLS);
           await tab.evaluate(async markup => {
             const clip = document.createElement('div');
             clip.id = 'ring-clip';
@@ -995,7 +1000,8 @@ describe('no focus ring of a kit sticks out of its control (a tight clipping box
           }, RING_CONTROLS);
           await tab.keyboard.press('Tab');
           const rows = (await tab.evaluate(() => {
-            const out: { id: string; visible: boolean; reach: number; clipped: boolean }[] = [];
+            const out: { id: string; visible: boolean; reach: number; clipped: boolean; ratio: number }[] = [];
+            const tools = (window as unknown as { __colour: ColourTools }).__colour;
             for (const holder of Array.from(document.querySelectorAll<HTMLElement>('#ring-clip [data-ring]'))) {
               const focusable = (holder.querySelector('[data-ring-focus]') ?? holder) as HTMLElement;
               focusable.focus({ focusVisible: true } as FocusOptions);
@@ -1026,20 +1032,26 @@ describe('no focus ring of a kit sticks out of its control (a tight clipping box
                 box.right + reach > clipBox.right + 0.5 ||
                 box.top - reach < clipBox.top - 0.5 ||
                 box.bottom + reach > clipBox.bottom + 0.5;
+              const fill = tools.backdrop(holder);
+              const ring = tools.rgba(drawn.outlineColor);
               out.push({
                 id: holder.dataset.ring as string,
                 visible: focusable.matches(':focus-visible'),
                 reach,
                 clipped,
+                ratio: tools.ratio(tools.over(ring, [...fill, 1]), fill),
               });
             }
             return out;
-          })) as { id: string; visible: boolean; reach: number; clipped: boolean }[];
+          })) as { id: string; visible: boolean; reach: number; clipped: boolean; ratio: number }[];
           report[`ring:${style}:${mode}`] = rows;
           for (const row of rows) {
             expect(row.visible, `${row.id}: keyboard focus draws :focus-visible`).toBe(true);
             expect(row.reach, `${row.id}: the ring reaches 0px beyond its control`).toBe(0);
             expect(row.clipped, `${row.id}: the ring is inside the clipping box`).toBe(false);
+            // A card (the Appearance style cards included), a palette chip and a field: the ring reads >= 3:1 on the control it is drawn on.
+            if (/^(card|style-card|chip|input|textarea)/u.test(row.id))
+              expect(row.ratio, `${row.id}: the ring is >= 3:1 on its control`).toBeGreaterThanOrEqual(3);
           }
         } finally {
           await close();
