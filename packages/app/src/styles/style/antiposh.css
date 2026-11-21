@@ -278,6 +278,11 @@
   border-style: solid;
   background: var(--select-fill);
 }
+/* The muted line is too faint on the tan swipe (4.05:1 light): the chosen card's line reads in ink. */
+:root[data-style='antiposh'] .fy-cc__card[data-selected='true'] .fy-cc__line:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .fy-cc__card[data-selected='true'] .fy-cc__line {
+  color: var(--fg);
+}
 :root[data-style='antiposh'] .fy-cc__card:has(:focus-visible):where(:not([data-swatch] *)),
 [data-swatch][data-style='antiposh'] .fy-cc__card:has(:focus-visible) {
   outline: var(--focus-width) solid var(--focus-color);

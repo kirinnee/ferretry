@@ -282,13 +282,14 @@
   outline-offset: calc(-1 * var(--focus-width));
 }
 
-/* Choice cards: a ruled box; the chosen one is inverted, with no lift and no pop. */
+/* Choice cards: a ruled box; the chosen one is inverted, with no lift and no pop. The hover fill is for a card that is NOT chosen: the chosen
+   one keeps its ink fill under the pointer (a click leaves the pointer on it), or its paper text would sit on the hover tint. */
 :root[data-style='raw'] .fy-cc__card {
   background: var(--surface);
   border-color: var(--border-strong);
   box-shadow: none;
 }
-:root[data-style='raw'] .fy-cc__card:not([aria-disabled='true']):hover {
+:root[data-style='raw'] .fy-cc__card:not([aria-disabled='true']):not([data-selected='true']):hover {
   background: var(--hover-fill);
   border-color: var(--border-strong);
 }
