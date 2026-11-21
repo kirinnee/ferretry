@@ -565,7 +565,7 @@ export class ConversationIndex {
     // Newest first, so a listing during a cold build shows the conversations people are most likely to want.
     work.sort((a, b) => b.found.mtimeMs - a.found.mtimeMs);
     await this.#run(work);
-    await this.#applyFerretNames();
+    await this.#applyFerretNames(only);
     this.#settleWinners();
     if (only === undefined) db.run("INSERT OR REPLACE INTO meta (k, v) VALUES ('built', '1')");
   }
@@ -977,11 +977,19 @@ export class ConversationIndex {
    * The ferret that runs each conversation, its name and its title today: a rename shows on the next listing. The title is
    * scrubbed here too (it may have been typed with a secret in it). A ferret whose title is not the owner's is then OFFERED the
    * conversation's own title, once per change (`adoptTitle`), so the drawer, the header and this list say the same words.
+   *
+   * A SCOPED update (`only`) looks at its own conversations alone: a conversation outside it is neither read from the snapshot,
+   * cleared of its ferret, nor offered a title, whatever the snapshot says about it. A FULL update treats the snapshot (Ferrets'
+   * registry, read in one go) as the truth: a conversation whose ferret is not in it has lost its ferret, and only then does its
+   * row drop the ferret's name and title (an owner's title included: it belonged to a ferret that is no longer there). A snapshot
+   * that could not be read changes nothing.
    */
-  async #applyFerretNames(): Promise<void> {
+  async #applyFerretNames(only?: ReadonlySet<string>): Promise<void> {
     const db = this.#open();
-    const names = await this.needs.ferretNames().catch((): FerretConversationNames | undefined => undefined);
-    if (names === undefined) return;
+    const all = await this.needs.ferretNames().catch((): FerretConversationNames | undefined => undefined);
+    if (all === undefined) return;
+    const names: FerretConversationNames =
+      only === undefined ? all : new Map([...all].filter(([key]) => only.has(key)));
     const titles = await this.#scrub(
       scrub =>
         new Map(
@@ -1027,7 +1035,10 @@ export class ConversationIndex {
       }
     }
     for (const row of db.query<Row>('SELECT * FROM conv WHERE ferret_id IS NOT NULL'))
-      if (!wanted.has(`${row.harness}\u0000${row.kind}\u0000${row.label}\u0000${row.path}`))
+      if (
+        (only === undefined || only.has(`${row.harness}:${row.id}`)) &&
+        !wanted.has(`${row.harness}\u0000${row.kind}\u0000${row.label}\u0000${row.path}`)
+      )
         rows.push({
           ...row,
           ferret_id: null,

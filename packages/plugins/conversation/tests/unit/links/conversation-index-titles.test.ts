@@ -580,6 +580,99 @@ describe('a scoped update touches only the conversations it was scoped to (r11 S
     expect(stored()).not.toContain('Notes two');
   });
 
+  describe('ferret names and owner titles under a scoped update (r11 S11 round 5 a)', () => {
+    const OWNER = 'Owner chose this';
+    /** Two Codex threads, each with its own ferret; B's has an owner title over B's CLI title "Other CLI title". */
+    const world = (snapshot: { value: FerretConversationNames }) => {
+      const made = setup({ names: () => snapshot.value });
+      made.codex.set(rolloutOf(CODEX), codexRollout(CODEX, '/work/app', 'fix the build'));
+      made.codex.set(rolloutOf(CODEX2), codexRollout(CODEX2, '/work/app', 'write the notes'));
+      made.codex.set(
+        'session_index.jsonl',
+        rec({ id: CODEX, thread_name: 'Build one' }) + rec({ id: CODEX2, thread_name: 'Other CLI title' }),
+      );
+      return made;
+    };
+    const both = (): FerretConversationNames =>
+      new Map([
+        [`codex:${CODEX}`, { ferret: 'ms-9', name: 'Ms-9', titleSource: 'auto' as const, title: 'Build one' }],
+        [`codex:${CODEX2}`, { ferret: 'ms-8', name: 'Ms-8', titleSource: 'owner' as const, title: OWNER }],
+      ]);
+    const bRow = (sqlite: ReturnType<typeof memorySqlite>) =>
+      sqlite.database
+        .query('SELECT ferret_id, ferret_name, ferret_title, ferret_title_owner, title FROM conv WHERE id = ?')
+        .get(CODEX2) as Record<string, unknown>;
+
+    test('the reviewer repro: B is absent from the snapshot and a scoped refresh of A renames A; B keeps its ferret, owner title and shown title', async () => {
+      const snapshot = { value: both() };
+      const { index, codex, sqlite, offered } = world(snapshot);
+      await index.refresh();
+      const before = bRow(sqlite);
+      expect(before).toMatchObject({ ferret_id: 'ms-8', ferret_title: OWNER, ferret_title_owner: 1 });
+      expect(nameOf(index, CODEX2)).toBe(OWNER);
+
+      snapshot.value = new Map([...both()].filter(([key]) => key === `codex:${CODEX}`));
+      codex.set(
+        'session_index.jsonl',
+        rec({ id: CODEX, thread_name: 'Build one, renamed' }) + rec({ id: CODEX2, thread_name: 'Other CLI title' }),
+      );
+      offered.length = 0;
+      await index.refreshConversations(new Set([`codex:${CODEX}`]));
+      expect(nameOf(index, CODEX)).toBe('Build one, renamed');
+      expect(bRow(sqlite)).toEqual(before);
+      expect(nameOf(index, CODEX2)).toBe(OWNER);
+      // Nothing is offered for B (not in scope); A's ferret is offered its CLI's new title.
+      expect(offered).toEqual([{ ferret: 'ms-9', title: 'Build one, renamed' }]);
+    });
+
+    test("a scoped refresh does not read the snapshot rows of another conversation: B's ferret renamed meanwhile is not applied until a full refresh", async () => {
+      const snapshot = { value: both() };
+      const { index, sqlite } = world(snapshot);
+      await index.refresh();
+      snapshot.value = new Map([...both()].map(([key, ferret]) => [key, { ...ferret, name: `${ferret.name}-x` }]));
+      await index.refreshConversations(new Set([`codex:${CODEX}`]));
+      expect(bRow(sqlite)).toMatchObject({ ferret_name: 'Ms-8', ferret_title: OWNER });
+      await index.refresh();
+      expect(bRow(sqlite)).toMatchObject({ ferret_name: 'Ms-8-x', ferret_title: OWNER });
+    });
+
+    test('a FULL refresh keeps an owner title while its ferret is in the snapshot or the snapshot cannot be read; it drops it only once the ferret is gone', async () => {
+      const snapshot = { value: both() };
+      let failing = false;
+      const sqlite = memorySqlite();
+      const codex = new MemoryHistory();
+      codex.set(rolloutOf(CODEX2), codexRollout(CODEX2, '/work/app', 'write the notes'));
+      codex.set('session_index.jsonl', rec({ id: CODEX2, thread_name: 'Other CLI title' }));
+      const index = new ConversationIndex({
+        sqlite: () => sqlite,
+        sources: async () => [
+          { harness: 'codex', parser: 'codex', kind: 'computer', label: 'codex-owner', files: codex },
+        ],
+        ferretNames: async () => {
+          if (failing) throw new Error('registry unavailable');
+          return snapshot.value;
+        },
+        parsers: PARSERS,
+        nowMs: () => 0,
+        adoptTitle: async () => 'kept',
+      });
+      await index.refresh();
+      expect(bRow(sqlite)).toMatchObject({ ferret_id: 'ms-8', ferret_title: OWNER });
+      // The registry cannot be read: nothing changes.
+      failing = true;
+      await index.refresh();
+      expect(bRow(sqlite)).toMatchObject({ ferret_id: 'ms-8', ferret_title: OWNER });
+      // Readable again, the ferret still there: still its title.
+      failing = false;
+      await index.refresh();
+      expect(bRow(sqlite)).toMatchObject({ ferret_id: 'ms-8', ferret_title: OWNER });
+      // The ferret is really gone (the registry no longer has it): the row falls back to the conversation's own title.
+      snapshot.value = new Map();
+      await index.refresh();
+      expect(bRow(sqlite)).toMatchObject({ ferret_id: null, ferret_title: null, title: 'Other CLI title' });
+    });
+  });
+
   /** An update listing the Claude tree waits at the gate until it is opened. */
   const gated = (owner: MemoryHistory) => {
     let open!: () => void;
