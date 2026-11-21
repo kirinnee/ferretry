@@ -122,21 +122,24 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   // which fails closed: an unknown ferret is refused, an unknown digest is no ferret.
   // Whether every record the state lists was read whole (its record, and its details file): a roster with one missing
   // is not the truth about who exists, and a reader that would CLEAR something for a ferret not in it must be able to ask.
-  let wholeRoster = true;
+  // `hydrated` flips only once the load below has finished: a roster still loading (or one whose load failed) is not whole, and
+  // a caller asking must get that answer AT ONCE (it is a flag, never a wait).
+  let hydrated = false;
+  let missingRecord = false;
   const loaded = (async () => {
     for (const name of await kernel.state.list(FerretFiles)) {
       const read = await kernel.state.read(FerretFiles, name);
       if (read.ok && read.value !== undefined) registry.put(read.value);
       else if (!read.ok) log.warn('a ferret record could not be read', { file: read.error.file });
       if (!read.ok || read.value === undefined) {
-        wholeRoster = false;
+        missingRecord = true;
         continue;
       }
       // Its start options and title, kept beside the record so a list or a read stays memory-only.
       const details = await kernel.state.read(FerretDetailsFile, name);
       if (details.ok && details.value !== undefined) registry.putDetails(read.value.id, details.value);
       else if (!details.ok) {
-        wholeRoster = false;
+        missingRecord = true;
         log.warn('a ferret details file could not be read', { file: details.error.file });
       }
       // Its declared wait, if it was parked when the daemon last ran.
@@ -149,6 +152,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // An unreadable/missing token document beside existing records cannot prove no owner cut-off was held.
     if (!held.ok || (held.value === undefined && registry.list().length > 0)) tokens.unavailable();
     if (held.ok && held.value !== undefined) for (const entry of held.value.tokens) tokens.add(entry as TokenEntry);
+    hydrated = true;
   })();
   const ready = async (): Promise<void> => {
     await loaded;
@@ -433,7 +437,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       forget: async ferret => await kernel.state.remove(FerretLaunchSectionsFiles, ferret),
     },
     ready,
-    wholeRoster: () => wholeRoster,
+    wholeRoster: () => hydrated && !missingRecord,
     launchSteps: launch,
     session: sessionFiles.port,
     claims,

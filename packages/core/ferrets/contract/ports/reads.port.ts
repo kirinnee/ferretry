@@ -95,7 +95,7 @@ export interface ReadsApi {
   ): Promise<Result<void, { readonly reason: string }>>;
   /**
    * Additive (Conversation's name refresh): whether {@link list} answers the WHOLE roster, as one that may CLEAR something
-   * for a ferret missing from it needs to know. It waits for the records to load, and answers `false` when the load failed or
+   * for a ferret missing from it needs to know. It never waits: it answers `false` while the records are still loading, when the load failed or
    * left a record unread (a ferret that exists would then be missing). `list` itself never waits and is unchanged.
    */
   rosterComplete?(): Promise<boolean>;

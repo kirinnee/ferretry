@@ -333,6 +333,69 @@ describe('r11 S11 rounds 6-7: a refresh that runs before Ferrets has a whole ros
     expect(await again.shown()).toEqual({ title: OWNERS, titleSource: 'owner' });
   });
 
+  test('round 8: hydration held pending never holds a refresh — a transcript appended after one IS read by the next, full refreshes do not queue, the owner title stays', async () => {
+    const w = await owned();
+    let release!: () => void;
+    const held = new Promise<void>(resolve => (release = resolve));
+    const folder = w.h.state('ferrets');
+    const realPort = folder.port.bind(folder);
+    folder.port = declared => {
+      const port = realPort(declared);
+      return {
+        ...port,
+        list: async (...args: Parameters<typeof port.list>) => {
+          await held;
+          return await port.list(...args);
+        },
+      };
+    };
+    const second = await w.h.restart();
+    await drive(second, 2_000);
+
+    // A listing's own deadline is on the driven clock, so time is wound while each is asked.
+    const rowsOf = async (count: number) => {
+      const asked = Array.from({ length: count }, () => second.request('GET', '/v1/links/conversations'));
+      const winding = drive(second, 8_000);
+      const rows = await within(
+        Promise.all(asked).then(answers =>
+          answers.map(answer => answer.json<{ conversations: (Listed & { latest?: string })[] }>().conversations[0]),
+        ),
+      );
+      await winding;
+      return rows;
+    };
+    // A refresh while the roster is still loading answers (it does not wait for the registry) and keeps the owner title.
+    const first = await rowsOf(1);
+    expect(first).not.toBe('hung');
+    expect((first as unknown[])[0]).toMatchObject({ ferret: w.id, title: OWNERS });
+
+    // The conversation grows AFTER that refresh. The next refresh, hydration still pending, must read it.
+    // The index is fresh for 5 s: let that pass, so the next listing refreshes (hydration is STILL held).
+    await drive(second, 6_000);
+    const SECOND = 'and does the linux runner fail the same way afterwards?';
+    w.tree.put(
+      w.transcript,
+      record({ type: 'user', cwd: '/work/a', timestamp: AT, message: { role: 'user', content: SECOND } }) +
+        record({
+          type: 'assistant',
+          cwd: '/work/a',
+          timestamp: AT,
+          message: { role: 'assistant', content: 'checking' },
+        }),
+    );
+    // Two listings at once while hydration is held: neither hangs (a refresh never waits for the registry, so none queues behind one).
+    const concurrent = await rowsOf(2);
+    expect(concurrent).not.toBe('hung');
+    for (const row of concurrent as { title?: string; ferret?: string }[])
+      expect(row).toMatchObject({ ferret: w.id, title: OWNERS });
+    // The refresh they started read the appended transcript, hydration still held, and the owner title stayed.
+    const after = await rowsOf(1);
+    expect(after).not.toBe('hung');
+    expect((after as unknown[])[0]).toMatchObject({ ferret: w.id, title: OWNERS, latest: SECOND });
+    release();
+    await second.settle();
+  });
+
   test('the registry failing to load: the owner title and the ferret survive a full refresh; the preview still answers 200', async () => {
     const w = await owned();
     const folder = w.h.state('ferrets');
