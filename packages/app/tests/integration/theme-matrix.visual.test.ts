@@ -300,15 +300,6 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['raw'],
-    palettes: ['neo'],
-    modes: BOTH_MODES,
-    check: 'spinner',
-    what: 'spinner shared with another style',
-    why: WHY.spinner,
-  },
-  {
-    viewports: BOTH_WIDTHS,
     styles: ['antiposh'],
     palettes: ['contrast'],
     modes: BOTH_MODES,

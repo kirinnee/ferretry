@@ -781,3 +781,182 @@ describe('a swatch draws its own style’s spinner, on a page of any style (mixe
     }
   });
 });
+
+/* ======================================================================================================================
+   r11 T9 REVIEW (PR 2272): THE KITS' COMPONENT RULES STAY ON THEIR OWN PAGE, AND THE FILLED SEND STAYS FINDABLE.
+   Three measured asserts, each red on the head the reviewer read and green after the fix (the PR body quotes the numbers).
+   ====================================================================================================================== */
+
+/** The component classes a kit styles, in the markup a Studio swatch preview draws. Each one is read for its paint. */
+const SWATCH_CONTROLS = `
+  <button class="kt-btn" data-probe="btn">Outline</button>
+  <button class="kt-btn" data-variant="primary" data-probe="btn-primary">Primary</button>
+  <button class="kt-btn" data-variant="danger" data-probe="btn-danger">Danger</button>
+  <button class="kt-btn" data-variant="ghost" data-probe="btn-ghost">Ghost</button>
+  <input class="kt-input" data-probe="input">
+  <textarea class="kt-input" data-probe="textarea-input"></textarea>
+  <div class="kt-composer" data-probe="composer">Composer</div>
+  <div class="kt-popover" data-probe="menu">Menu</div>
+  <section class="kt-panel" data-probe="panel"><header class="kt-panel__header">Head</header><div class="kt-row" data-probe="row">Row</div><div class="kt-row" data-active="true" data-probe="row-active">Active</div></section>
+  <div class="kt-groupcard" data-probe="groupcard">Group</div>
+  <div class="kt-tabbar" data-probe="tabbar"><button class="kt-tab" aria-selected="true" data-probe="tab">Tab</button><button class="kt-navpill" aria-selected="true" data-probe="navpill">Pill</button></div>
+  <span class="kt-badge" data-probe="badge">Badge</span>
+  <div class="fy-cc__card" data-probe="card">Card</div>
+  <div class="fy-cc__card" data-selected="true" data-probe="card-selected">Card</div>
+  <div class="kt-details" data-probe="details">Details</div>
+  <div class="kt-sheet" data-probe="sheet">Sheet</div>`;
+
+/** Every paint property a kit rule could set on those controls, read from a Studio swatch placed in the page. */
+const readSwatchControls = (tab: Page, mode: 'light' | 'dark'): Promise<Record<string, Record<string, string>>> =>
+  tab.evaluate(
+    ([markup, swatchMode]) => {
+      const holder = document.createElement('div');
+      holder.setAttribute('data-swatch', '');
+      holder.setAttribute('data-style', 'studio');
+      holder.setAttribute('data-palette', 'studio');
+      holder.setAttribute('data-mode', swatchMode as string);
+      holder.innerHTML = markup as string;
+      document.body.append(holder);
+      const out: Record<string, Record<string, string>> = {};
+      for (const node of Array.from(holder.querySelectorAll<HTMLElement>('[data-probe]'))) {
+        const css = getComputedStyle(node);
+        out[node.dataset.probe as string] = {
+          background: css.backgroundColor,
+          shadow: css.boxShadow,
+          blur: css.backdropFilter,
+          radius: css.borderTopLeftRadius,
+          border: `${css.borderTopStyle} ${css.borderTopWidth} ${css.borderTopColor}`,
+          groove: css.borderBottomStyle,
+          weight: css.fontWeight,
+          tracking: css.letterSpacing,
+          padding: css.padding,
+          transition: css.transitionProperty,
+          outlineOffset: css.outlineOffset,
+        };
+      }
+      holder.remove();
+      return out;
+    },
+    [SWATCH_CONTROLS, mode] as const,
+  );
+
+describe('a Studio swatch keeps its own control paint on a Glass or Neumorphism page (mixed page x swatch, controls)', () => {
+  for (const mode of MODES)
+    it(`${mode}: every control in a Studio swatch reads the same on a Glass and a Neumorphism page as on a Studio page`, async () => {
+      const studio = await open(VIEWPORTS[0], mode, 'studio');
+      let want: Record<string, Record<string, string>>;
+      try {
+        want = await readSwatchControls(studio.tab, mode);
+      } finally {
+        await studio.close();
+      }
+      for (const pageStyle of ['glass', 'neumorphism'] as const) {
+        const { tab, close } = await open(VIEWPORTS[0], mode, pageStyle);
+        try {
+          const got = await readSwatchControls(tab, mode);
+          const drifted: string[] = [];
+          for (const [control, props] of Object.entries(want))
+            for (const [prop, value] of Object.entries(props))
+              if (got[control]?.[prop] !== value)
+                drifted.push(`${control}.${prop}: studio page ${value} | ${pageStyle} page ${got[control]?.[prop]}`);
+          report[`swatch-controls:${mode}:${pageStyle}`] = { controls: Object.keys(want).length, drifted };
+          expect(drifted, `a Studio swatch on a ${pageStyle} page (${mode}) drifted`).toEqual([]);
+        } finally {
+          await close();
+        }
+      }
+    });
+});
+
+describe('the filled Send keeps a keyboard ring you can see, inside the control, in both kits', () => {
+  for (const style of ['glass', 'neumorphism'] as const)
+    for (const mode of MODES)
+      it(`${style} in ${mode}: Send's ring is >= 3:1 against its fill on Indigo and High contrast (it was accent on accent, 1.00:1)`, async () => {
+        const chatCss = await readFile(resolve(packageRoot, '../../../plugins/conversation/app/chat/chat.css'), 'utf8');
+        const { tab, close } = await open(VIEWPORTS[0], mode, style);
+        try {
+          await tab.addStyleTag({ content: chatCss });
+          const reads: Record<string, unknown> = {};
+          for (const palette of ['studio', 'contrast']) {
+            const read = await tab.evaluate(paletteId => {
+              document.documentElement.setAttribute('data-palette', paletteId);
+              document.querySelector('#send-clip')?.remove();
+              const clip = document.createElement('div');
+              clip.id = 'send-clip';
+              clip.style.cssText = 'overflow:hidden;width:max-content;padding:8px';
+              clip.innerHTML = '<button class="fy-composer-send">Send</button>';
+              document.body.prepend(clip);
+              const probe = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+              if (probe === null) throw new Error('no canvas');
+              const rgb = (color: string): number[] => {
+                probe.clearRect(0, 0, 1, 1);
+                probe.fillStyle = color;
+                probe.fillRect(0, 0, 1, 1);
+                return Array.from(probe.getImageData(0, 0, 1, 1).data);
+              };
+              const lum = (c: number[]): number =>
+                c.slice(0, 3).reduce((sum, v, i) => {
+                  const u = v / 255;
+                  return sum + (u <= 0.04045 ? u / 12.92 : ((u + 0.055) / 1.055) ** 2.4) * [0.2126, 0.7152, 0.0722][i]!;
+                }, 0);
+              const send = clip.querySelector<HTMLElement>('.fy-composer-send') as HTMLElement;
+              send.focus({ preventScroll: true });
+              const css = getComputedStyle(send);
+              const a = lum(rgb(css.outlineColor));
+              const b = lum(rgb(css.backgroundColor));
+              return {
+                visible: send.matches(':focus-visible'),
+                ring: css.outlineColor,
+                fill: css.backgroundColor,
+                ratio: Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100,
+                width: parseFloat(css.outlineWidth),
+                offset: parseFloat(css.outlineOffset),
+              };
+            }, palette);
+            reads[palette] = read;
+            expect(read.visible, `${style} ${mode} ${palette}: the ring is drawn`).toBe(true);
+            expect(
+              read.ratio,
+              `${style} ${mode} ${palette}: ring ${read.ring} on fill ${read.fill}`,
+            ).toBeGreaterThanOrEqual(3);
+            // INSIDE the control: the ring never overhangs, so no clipping ancestor can cut it (the clip box above is tight).
+            expect(read.offset + read.width, `${style} ${mode} ${palette}: ring overhang`).toBeLessThanOrEqual(0);
+          }
+          report[`send-ring:${style}:${mode}`] = reads;
+        } finally {
+          await close();
+        }
+      });
+});
+
+describe('Glass single-line fields are opaque when the OS asks for reduced transparency', () => {
+  for (const mode of MODES)
+    it(`${mode}: input.kt-input paints alpha 255 with prefers-reduced-transparency: reduce (it read 158/255)`, async () => {
+      const { tab, close } = await open(VIEWPORTS[0], mode, 'glass');
+      try {
+        const cdp = await tab.context().newCDPSession(tab);
+        await cdp.send('Emulation.setEmulatedMedia', {
+          features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }],
+        });
+        const read = await tab
+          .locator('input.kt-input')
+          .first()
+          .evaluate(node => {
+            const canvas = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+            if (canvas === null) throw new Error('no canvas');
+            canvas.fillStyle = getComputedStyle(node).backgroundColor;
+            canvas.fillRect(0, 0, 1, 1);
+            return {
+              emulated: matchMedia('(prefers-reduced-transparency: reduce)').matches,
+              background: getComputedStyle(node).backgroundColor,
+              alpha: canvas.getImageData(0, 0, 1, 1).data[3],
+            };
+          });
+        report[`reduced-transparency-input:${mode}`] = read;
+        expect(read.emulated).toBe(true);
+        expect(read.alpha).toBe(255);
+      } finally {
+        await close();
+      }
+    });
+});
