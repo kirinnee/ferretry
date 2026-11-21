@@ -3,15 +3,17 @@
  * run on a fixed fake clock.
  *
  *   ?theme=<family>-<mode>
- *   &run=long|big|stopped   (default long)
+ *   &run=long|big|stopped|running   (default long)
  *     long     a failed run whose run, job and step names are 500 characters with no break in them
  *     big      256 failed jobs x 500 steps, the most the contract allows
  *     stopped  a cancelled job holding a step E8 still flags live, read an hour after it stopped
+ *     running  a run still in progress: the running mark of the run and of its live job (r11 T3: the shared spinner)
  */
 import { createRoot } from 'react-dom/client';
 import { CiRunPage } from '../../../../app/features/ci-run/ci-run-page.tsx';
 import type { CiClient } from '../../../../app/features/ci-run/ci-api.ts';
 import type { CiRun } from '../../../../contract/wire.ts';
+import { NOW, runningRun } from '../../../fixtures/ci-run-views.ts';
 import { BIG_RUN, CANCELLED_RUN, FAILED_RUN, secondsAfterT0 } from '../../../fixtures/flame-runs.ts';
 
 const params = new URLSearchParams(window.location.search);
@@ -40,8 +42,9 @@ const bigRun = (): CiRun => {
 };
 
 const which = params.get('run') ?? 'long';
-const run = which === 'big' ? bigRun() : which === 'stopped' ? CANCELLED_RUN : longRun();
-const nowMs = which === 'stopped' ? secondsAfterT0(11 + 3_600) : secondsAfterT0(20_000);
+const run =
+  which === 'big' ? bigRun() : which === 'stopped' ? CANCELLED_RUN : which === 'running' ? runningRun() : longRun();
+const nowMs = which === 'stopped' ? secondsAfterT0(11 + 3_600) : which === 'running' ? NOW : secondsAfterT0(20_000);
 const client: CiClient = { call: (async () => run) as CiClient['call'] };
 
 const root = document.getElementById('root');

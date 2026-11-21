@@ -1,12 +1,13 @@
 /**
  * r11 T3 — STRAY SPINNERS ONTO THE SHARED ONE, in a real browser over real app sites that used to draw a lucide
- * `animate-spin` icon (`fixtures/stray-spinner-scene.tsx`): the action-form foot and the "Finding your location" line,
- * beside a running-activity mark. Each must render the shared mark (`.fy-spinner`), none may leave an `animate-spin`
- * icon, a wait must be held back for the 300 ms threshold (invisible at 100 ms, painted by 700 ms) and a running
- * activity must be there at once. The plugin-owned sites are held by their own unit tests (an app test may not import
- * another package's source) and by the `no-stray-spinner.sh` guard.
+ * `animate-spin` icon (`fixtures/stray-spinner-scene.tsx`): the action-form foot and the "Finding your location" line.
+ * Each must render the shared mark (`.fy-spinner`), none may leave an `animate-spin` icon, and a wait must keep to the
+ * owner's 300 ms threshold, MEASURED FROM THE MOUNT: not one painted frame through 250 ms, and the mark painted for the
+ * first time near the 300 ms boundary (the scene's frame loop records the first painted frame per site). The third
+ * migrated site, the running CI mark, is held in a real browser by pulls' `ci-run.visual.test.ts`; the other plugin
+ * sites by their own unit tests (an app test may not import another package's source) and by `no-stray-spinner.sh`.
  *
- * Set `FY_STRAY_SPINNER_SHOTS_DIR` to keep `<viewport>-<mode>-<100ms|700ms>.png` (1280 and 390, light and dark).
+ * Set `FY_STRAY_SPINNER_SHOTS_DIR` to keep `<viewport>-<mode>-<waiting|shown>.png` (1280 and 390, light and dark).
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -64,8 +65,13 @@ afterAll(async () => {
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
+/** Nothing may paint before this, measured from the mount: the owner's 300 ms less a frame loop's and a timer's slack. */
+const QUIET_UNTIL_MS = 250;
+/** The first painted frame lands by this, or the mark is not "near the 300 ms boundary" (a loaded host may be frames late). */
+const SHOWN_BY_MS = 500;
+
 interface Site {
-  readonly site: 'form' | 'locate' | 'run';
+  readonly site: 'form' | 'locate';
   readonly present: boolean;
   readonly painted: boolean;
   readonly width: number;
@@ -98,30 +104,44 @@ describe('the stray spinner sites draw the shared spinner', () => {
         const tab = await context.newPage();
         try {
           await tab.goto(`${origin}/?theme=studio-${mode}`);
-          await tab.waitForSelector('[data-site="run"]');
+          await tab.waitForSelector('[data-site="locate"]');
           const read = async (): Promise<Seen> =>
             await tab.evaluate(() => (window as unknown as { __strays: () => Seen }).__strays());
-          const early = await read();
-          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${width}-${mode}-100ms.png`) });
-          await tab.waitForTimeout(700);
+          const firstPaints = async (): Promise<Record<string, number | null>> =>
+            await tab.evaluate(() =>
+              (window as unknown as { __firstPaint: () => Record<string, number | null> }).__firstPaint(),
+            );
+          // A frame loop has been timing the waits since the mount: let it see both painted, then read when.
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${width}-${mode}-waiting.png`) });
+          await tab.waitForFunction(
+            () =>
+              Object.values(
+                (window as unknown as { __firstPaint: () => Record<string, unknown> }).__firstPaint(),
+              ).every(at => at !== null),
+            undefined,
+            { timeout: 5_000 },
+          );
+          const first = await firstPaints();
           const late = await read();
-          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${width}-${mode}-700ms.png`) });
-          const sites = (seen: Seen) => Object.fromEntries(seen.sites.map(site => [site.site, site]));
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${width}-${mode}-shown.png`) });
 
           // The owner line: the shared spinner, and no icon of its own.
           expect(late.strays).toBe(0);
-          expect(late.spinners).toBe(3);
+          expect(late.spinners).toBe(2);
           for (const site of late.sites) {
             expect(site.present).toBe(true);
             expect(site.width).toBeGreaterThan(8);
             expect(site.height).toBeGreaterThan(8);
             expect(site.painted).toBe(true);
           }
-          // The 300 ms threshold: the waits are not painted yet, the running activity is.
-          expect(early.strays).toBe(0);
-          expect(sites(early).form?.painted).toBe(false);
-          expect(sites(early).locate?.painted).toBe(false);
-          expect(sites(early).run?.painted).toBe(true);
+          // The 300 ms threshold, from the mount: no painted frame through 250 ms, then painted near the boundary.
+          for (const site of ['form', 'locate']) {
+            const at = first[site] ?? -1;
+            expect(at, `${site}: first painted frame (ms from the mount)`).toBeGreaterThanOrEqual(QUIET_UNTIL_MS);
+            expect(at, `${site}: first painted frame (ms from the mount)`).toBeLessThanOrEqual(SHOWN_BY_MS);
+          }
+          if (process.env.FY_STRAY_SPINNER_LOG === '1')
+            console.log(`${width} ${mode} first painted: ${JSON.stringify(first)}`);
         } finally {
           await context.close();
         }
