@@ -434,7 +434,8 @@ const endPage = async (tab: Page, variant: Variant, key: string): Promise<void> 
     await underFooter(tab, '[data-step-footer]'),
     `${key}: nothing is under the footer at the end of the scroll`,
   ).toEqual([]);
-  const gap = await gapUnderTitle(tab, '.fy-spf__head', '.fy-spf__body');
+  // Measured from `.fy-spf__main` (picture + body): on a phone the picture (the ferret) is drawn ABOVE the body, like every demo.
+  const gap = await gapUnderTitle(tab, '.fy-spf__head', '.fy-spf__main');
   expect(gap.gap, `${key}: no dead gap under the title`).toBeLessThanOrEqual(40);
 };
 

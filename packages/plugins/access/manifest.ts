@@ -273,6 +273,8 @@ export default definePlugin({
       panel('device.settings', { id: 'notifications', order: 30 }),
       // The first-run step that offers this device a passkey (side client; skips when it holds one): `onboarding` below.
       panel('onboarding.step', { id: 'onboarding-passkey', order: 2 }),
+      // The picture on Onboarding's last page ("You're set up"): the cheering ferret, in the `onboarding.end` slot it offers.
+      panel('onboarding.end', { id: 'end-mascot', order: 1 }),
     ],
   },
 

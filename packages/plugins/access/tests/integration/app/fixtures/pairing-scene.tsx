@@ -12,10 +12,12 @@
  *   &motion=reduced             the app's own Motion = Reduced (`<html data-motion="reduced">`)
  *   &scene=export              ONLY the cheering ferret, imported from the Access app's export (`FerretMascot`, which the
  *                              onboarding End page uses): proves the export draws the same reacting mascot
+ *   &scene=end-panel           ONLY the `end-mascot` panel Access places in Onboarding's `onboarding.end` slot (r11-1b G1)
  */
 
 import { createRoot } from 'react-dom/client';
 import { FerretMascot } from '../../../../app/index.ts';
+import { EndMascotPanel } from '../../../../app/features/onboarding/end-mascot-panel.tsx';
 import { PairingScreen } from '../../../../app/features/pairing/pairing-screen.tsx';
 import type { StepUpClient } from '../../../../app/lib/step-up-client.ts';
 import { daemonConnection } from '../../../../app/shell-pairing.ts';
@@ -41,6 +43,12 @@ if (params.get('scene') === 'export') {
   createRoot(root).render(
     <div data-export-mascot="" style={{ width: 240, margin: '80px auto' }}>
       <FerretMascot pose="cheer" />
+    </div>,
+  );
+} else if (params.get('scene') === 'end-panel') {
+  createRoot(root).render(
+    <div data-export-mascot="" style={{ width: 340, margin: '80px auto' }}>
+      <EndMascotPanel />
     </div>,
   );
 } else
