@@ -27,7 +27,8 @@ const clean = (text: string): string => text.replace(/[\p{Cc}]/gu, ' ').trim();
 /**
  * `ssh -F none` ignores the host's `~/.ssh/config` (no ProxyCommand, ForwardAgent, alias or IdentityFile of the person's);
  * `IdentitiesOnly=yes` with this one `IdentityFile` offers exactly this account's key, taken from `IdentityAgent`; the
- * host key is checked against the pinned file, never trusted on first use.
+ * host key is checked against the pinned file alone (`GlobalKnownHostsFile=none`: the machine's own
+ * `ssh_known_hosts` is not consulted), never trusted on first use.
  */
 export const sshCommand = (kit: AccountKit): string =>
   [
@@ -37,6 +38,7 @@ export const sshCommand = (kit: AccountKit): string =>
     `-o IdentityAgent=${word(kit.socket)}`,
     '-o StrictHostKeyChecking=yes',
     `-o UserKnownHostsFile=${word(kit.knownHosts)}`,
+    '-o GlobalKnownHostsFile=none',
   ].join(' ');
 
 /** GitHub counts `<id>+<login>@users.noreply.github.com` as a verified address of the account. */

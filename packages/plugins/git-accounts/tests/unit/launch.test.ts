@@ -104,7 +104,7 @@ describe('what the ferret is handed', () => {
       ['tag.gpgsign', 'true'],
       [
         'core.sshCommand',
-        'ssh -F none -o IdentitiesOnly=yes -o IdentityFile=/run/fy/gha_1.pub -o IdentityAgent=/run/fy/gha_1.sock -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/run/fy/known_hosts',
+        'ssh -F none -o IdentitiesOnly=yes -o IdentityFile=/run/fy/gha_1.pub -o IdentityAgent=/run/fy/gha_1.sock -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/run/fy/known_hosts -o GlobalKnownHostsFile=none',
       ],
       ['url.git@github.com:.insteadOf', 'https://github.com/'],
     ]);
@@ -207,6 +207,24 @@ describe('the launch source', () => {
     ).toEqual([]);
     expect(await source([]).source.parts(spec('/work/app'))).toEqual([]);
     expect(await source([project('/work/app', { accounts: ['gha_77'] })]).source.parts(spec('/work/app'))).toEqual([]);
+  });
+});
+
+describe('a key that cannot be started says so in the pane', () => {
+  test('the kit throws: the launch parts carry the "key unavailable" sentence and no git env', async () => {
+    const source = accountLaunchParts({
+      projects: async () => [project('/work/app', { accounts: ['gha_1'] })],
+      accounts: async () => [account(1, 'alice')],
+      kit: async () => {
+        throw new Error('ssh-agent did not start');
+      },
+    });
+    const parts = await source.parts({ folder: '/work/app' } as unknown as Omit<LaunchSpec, 'parts' | 'credential'>);
+    expect(parts.some(part => part.kind === 'pane-env')).toBe(false);
+    const text = parts.flatMap(part => (part.kind === 'instruction' ? [part.text] : [])).join('\n');
+    expect(text).toContain('Git account key for this project is unavailable');
+    expect(text).toContain("this machine's own ssh identity");
+    expect(text).not.toContain('did not start');
   });
 });
 

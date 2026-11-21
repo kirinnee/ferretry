@@ -120,6 +120,9 @@ export class GitAccountsService {
         GH_SPINNER_DISABLED: '1',
         GIT_TERMINAL_PROMPT: '0',
         GIT_CONFIG_NOSYSTEM: '1',
+        // `git` (a `pr merge --delete-branch` may start one) looks upward for a repository: stop at this scratch
+        // folder, so a `.git` in a parent folder is never found.
+        GIT_CEILING_DIRECTORIES: folder.path.slice(0, folder.path.lastIndexOf('/')) || '/',
         NO_COLOR: '1',
       };
       const result = await this.spawn.runBytes(program, [...spec.args], {

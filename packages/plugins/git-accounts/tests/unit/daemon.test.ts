@@ -6,6 +6,7 @@ import { FakeSealedDocuments } from '@ferretry/core-vault/contract/testing';
 import type { SpawnOptions, SpawnResult, StatePort } from '@ferretry/kernel/contract';
 import { testHost } from '@ferretry/kernel/testing';
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type { GitAccountId, GitAccountsApi } from '../../contract/index.ts';
 import { GIT_ACCOUNT_TOKENS, GitAccountsPort, GitDeviceFlowStatusSchema } from '../../contract/index.ts';
 import { AccountBook } from '../../daemon/lib/accounts.ts';
@@ -704,6 +705,19 @@ describe('gh runs as an account, narrowed (review HIGH 1)', () => {
     expect(calls[0]?.options?.sealed).toBe(true);
     // The folder goes away with the run, even a failed one.
     expect(existsSync(seen?.cwd as string)).toBe(false);
+  });
+
+  test('git (pr merge --delete-branch) cannot climb out of the scratch folder: GIT_CEILING_DIRECTORIES is its parent', async () => {
+    let seen: { cwd: string; ceiling: string | undefined } | undefined;
+    const { port } = await ready(call => {
+      seen = {
+        cwd: String(call.options?.cwd),
+        ceiling: (call.options?.env as Record<string, string | undefined> | undefined)?.GIT_CEILING_DIRECTORIES,
+      };
+      return EMPTY;
+    });
+    await run(port, ['pr', 'list']);
+    expect(seen?.ceiling).toBe(dirname(seen?.cwd as string));
   });
 
   test('the folder is removed when the child fails too', async () => {

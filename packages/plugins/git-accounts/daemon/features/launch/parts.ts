@@ -15,10 +15,14 @@ export interface AccountLaunchDeps {
   kit(account: GitAccountId): Promise<AccountKit | undefined>;
 }
 
+const KEY_UNAVAILABLE =
+  "The Git account key for this project is unavailable: Ferretry could not start it. `git push` and signed commits here would use this machine's own ssh identity, not the GitHub account linked to this project. Do not push; tell the person to open the Git accounts page and try again.";
+
 /**
  * Only a folder inside a project that is linked to an account that exists, and only an account with a key Ferretry
- * made, is given anything: elsewhere the launch is exactly what it was. A source that cannot answer is skipped (the
- * ferret starts, without the account), because it is an addition and never a reason to refuse a start.
+ * made, is given anything: elsewhere the launch is exactly what it was. A key that cannot be started does not refuse the
+ * start (this is an addition): the ferret starts with a one-sentence instruction that its account key is unavailable.
+ * A source that cannot answer at all is skipped.
  */
 export function accountLaunchParts(deps: AccountLaunchDeps): LaunchPartSource {
   return {
@@ -29,7 +33,13 @@ export function accountLaunchParts(deps: AccountLaunchDeps): LaunchPartSource {
       const found = accountForFolder(spec.folder, projects, id => accounts.some(account => account.id === id));
       const account = accounts.find(each => each.id === found?.account);
       if (account === undefined) return [];
-      const kit = await deps.kit(account.id);
+      let kit: AccountKit | undefined;
+      try {
+        kit = await deps.kit(account.id);
+      } catch {
+        // Without a word the pane would push with the machine's own ssh identity: say so, never why (no error text).
+        return [{ kind: 'instruction', id: 'git-accounts-key-unavailable', text: KEY_UNAVAILABLE }];
+      }
       if (kit === undefined || (!kit.auth && !kit.signing)) return [];
       return [{ kind: 'pane-env', plugin: GIT_ACCOUNTS_PLUGIN, env: gitEnvironment(account, kit) }];
     },
