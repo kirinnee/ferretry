@@ -128,132 +128,8 @@ const DEVICE_FACES: readonly string[] = [
  * default palette, at both widths in both modes, with the real motion), sidebar (6), ringclip (7), and text on the High
  * contrast palette (probe 1).
  */
-const WHY = {
-  gradient:
-    "a gradient background (owner: 'most of them should not have gradient background'); the style unit (r11 T5-T12) removes it",
-  radius:
-    'a radius over 16px on a field, code block, table or menu (owner: the super-rounded ones are broken); the style unit caps it',
-  size: 'display text over 3.25rem at 1280 (owner: Exaggerated Minimalism is too large); the style unit caps it',
-  sidebar:
-    "an accent side bar on the selected item (owner: 'this side highlight thing is VERY LLM'); r11 S2 removes the shell/nav ones, the style unit the style ones",
-  ringclip:
-    'a focus ring drawn outside its control is cut by a clipping ancestor; r11 S13 drew it inside everywhere but here; the style unit (r11 T12 genz) draws it inside',
-  spinner: 'this style shares a spinner with another; the style unit (r11 T5-T12) gives it its own',
-  distinct:
-    'this style differs from Studio on fewer than 6 of 8 components; the style unit (r11 T5-T12) designs the rest',
-  hypermedia:
-    'this style differs from Studio on 5 of 8 components, short only on hypermedia: no renderer reads an --hm-* slot until r12 H5 (C6), so the style unit cannot fix it; r12 H5 deletes the row',
-  text: 'the High contrast palette must pass 7:1 body text hard on this style (no loud exemption); the style unit fixes it',
-} as const;
-
-const BOTH_WIDTHS = ['1280', '390'] as const;
-const BOTH_MODES = ['light', 'dark'] as const;
-/** Explicit, never `PALETTES.map(...)`: a palette added to the catalogue is in no pin until somebody reads what it misses. */
-const EVERY_PALETTE = ['studio', 'geist', 'mission', 'neo', 'hacker', 'vintage', 'vaporwave', 'contrast'] as const;
-
-const KNOWN: readonly Known[] = [
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['antiposh', 'genz'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'gradient',
-    what: 'Card background',
-    why: WHY.gradient,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['antiposh'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'gradient',
-    what: 'Choice card background',
-    why: WHY.gradient,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['genz'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'gradient',
-    what: 'Page background',
-    why: WHY.gradient,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['genz'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'radius',
-    what: 'Code block radius',
-    why: WHY.radius,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['genz'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'radius',
-    what: 'Menu radius',
-    why: WHY.radius,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['genz'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'ringclip',
-    what: 'Clipped button ring',
-    why: WHY.ringclip,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['antiposh'],
-    palettes: ['vintage'],
-    modes: BOTH_MODES,
-    check: 'spinner',
-    what: 'spinner shared with another style',
-    why: WHY.spinner,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['studio'],
-    palettes: ['studio'],
-    modes: BOTH_MODES,
-    check: 'spinner',
-    what: 'spinner shared with another style',
-    why: WHY.spinner,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['genz'],
-    palettes: ['vaporwave'],
-    modes: BOTH_MODES,
-    check: 'spinner',
-    what: 'spinner shared with another style',
-    why: WHY.spinner,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['antiposh'],
-    palettes: ['contrast'],
-    modes: BOTH_MODES,
-    check: 'text',
-    what: 'The menu beside your work',
-    why: WHY.text,
-  },
-  // The hypermedia component: no renderer reads an `--hm-*` slot yet (r12 H5 owns that, per C6), so every style draws the
-  // picture the same and this one reaches 5 of 8 (the shared --radius-sm on .fy-render-pan no longer counts). r12 H5 deletes it.
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['antiposh'],
-    palettes: ['vintage'],
-    modes: BOTH_MODES,
-    check: 'distinct',
-    what: 'differs from Studio on fewer than 6 of 8 components',
-    why: WHY.hypermedia,
-  },
-];
+// EMPTY NOW: every style unit (r11 T5-T12) has deleted its rows, so the owner's theme line (turn 4247, item 12) holds on every style.
+const KNOWN: readonly Known[] = [];
 
 const pins = pinnedMisses(KNOWN);
 const usedPins = new Set<string>();
@@ -1099,6 +975,11 @@ describe('the probes read the real page', () => {
    * r11 S13b, review of PR 2258: Gen Z lists two opaque inset bands, the surface FIRST (painted on top) and the accent under it.
    * The ring is read on what a viewer sees at its inner edge, the topmost band, so the probe's ratio is the screenshot's, and
    * the same page with the two bands swapped reads the accent one: the probe follows the layering, not the list's last row.
+   *
+   * Gen Z paints a fine grain over the whole page (`body::after`, a few % of noise on top of every pixel); a pixel sample taken
+   * through it is the band's colour plus noise, which moves a 3:1 ring by more than the margin (Mission dark: the probe and the pixels
+   * disagree). The overlay is held OUT of the sample (the one rule below, removed with the page), so the sample is the band as painted
+   * and the coverage this test gave stays whole.
    */
   for (const viewport of VIEWPORTS)
     for (const mode of MODES)
@@ -1106,6 +987,7 @@ describe('the probes read the real page', () => {
         it(`Gen Z's Name ring is read on its topmost band, as painted (${palette}, ${mode}, ${viewport.name})`, async () => {
           const session = await open(viewport, mode);
           try {
+            await session.tab.addStyleTag({ content: 'body::after { display: none !important; }' });
             const name = 'input[aria-label="Name"]';
             const read = await probeRatio(session.tab, 'genz', palette, mode, 'Name');
             const pixels = await ringPixels(session.tab, name);

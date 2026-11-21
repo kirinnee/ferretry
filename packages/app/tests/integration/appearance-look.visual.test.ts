@@ -18,7 +18,7 @@
  *      and the read goes to `none` when the image is removed.
  *   6. FOCUS (S13): the switch, a palette chip and a style card draw a ring >= 2px, INSIDE the box (outline width + offset <= 0),
  *      inside every clipping ancestor's padding box on both axes, and >= 3:1 against what is PAINTED behind it (the border and fill
- *      under the stroke, composited). Gen Z's style card keeps its 3px outline at +5px until r11 T12 lands: pinned as KNOWN.
+ *      under the stroke, composited). Gen Z's style card is judged like every other control (r11 T12 drew its ring inside, clear of its border).
  *
  * Set `FY_T13_SHOTS_DIR` to keep `<viewport>-<style>-<mode>.png` (the Look group, 4 styles x light/dark x 1280/390).
  * Set `FY_T13_MEASURE=1` to print the measured numbers.
@@ -571,26 +571,17 @@ describe('r11 T13 · the Appearance page', () => {
     }
   });
 
-  // KNOWN (r11 T12 owns it): Gen Z's style cards still draw their own 3px outline at +5px (`genz.css` `.fy-cc__card:has(:focus-visible)`),
-  // outside the card. T13's two css files cannot change that file, so the genz style card is PINNED to exactly that until T12 lands
-  // (this assert then fails on purpose: delete the pin and the genz card is judged like every other control). The switch and the
-  // palette chips are T13's own and are judged in Gen Z like everywhere else.
-  it('in Gen Z the switch and palette chips are judged in full, and the style card is pinned to the known T12 ring', async () => {
+  // Gen Z draws its own style-card ring (`genz.css` `.fy-cc__card:has(:focus-visible)`): r11 T12 pulled it inside the card and clear of its
+  // 3px border (the ring used to sit at +5px, then on the border at 2.42:1 light), so the style card is judged in full here like the
+  // switch and the palette chips: no pin, the same ring assertion as every other style.
+  it('in Gen Z the switch, the palette chips and the style card are all judged in full', async () => {
     for (const scheme of ['light', 'dark'] as const) {
       const { tab, close } = await open(VIEWPORTS[0], { scheme, seed: { ...INDIGO_STUDIO, mode: scheme } });
       try {
         await pick(tab, 'genz');
         for (const target of FOCUS_TARGETS(tab)) {
           const where = `genz ${scheme} ${target.name}`;
-          const ring = await focusRing(tab, target.locator);
-          if (target.name !== 'style card') {
-            judgeRing(where, ring);
-            continue;
-          }
-          expect(
-            { width: ring.width, offset: ring.offset },
-            `${where}: KNOWN T12 ring (3px at +5px). If this fails, T12 has landed: remove the pin`,
-          ).toEqual({ width: 3, offset: 5 });
+          judgeRing(where, await focusRing(tab, target.locator));
         }
       } finally {
         await close();
