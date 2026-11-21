@@ -69,12 +69,12 @@ function StartStep({ client, machineName, machine, step }: MachineTabProps) {
         value={start}
         onChange={id => setStart(id === 'clone' ? 'clone' : 'fresh')}
         options={[
-          { id: 'fresh', title: 'Start fresh', icon: <Sparkles size={18} />, line: 'Walk through each step.' },
+          { id: 'fresh', title: 'Start fresh', icon: <Sparkles size={18} />, line: 'Step by step.' },
           {
             id: 'clone',
             title: 'Copy from another machine',
             icon: <Copy size={18} />,
-            line: 'Settings only. Never secrets or logins.',
+            line: 'Settings only.',
           },
         ]}
       />
@@ -90,6 +90,7 @@ function StartStep({ client, machineName, machine, step }: MachineTabProps) {
           onCopied={markDone}
           onDone={() => setStart('fresh')}
           doneLabel="Continue setup"
+          compact
         />
       ) : null}
       {unmarked ? (

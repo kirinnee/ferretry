@@ -5,8 +5,10 @@
  *
  *   1280: the two cards are stacked (same x and width, y increasing); the demo is in `[data-step-demo]`, right of the cards
  *         (gap > 32px) and top-aligned with the first card (within 8px); the page text is <= 160 characters; the page has
- *         no button of its own (the footer's Back / Later / Next are 136px wide); choosing a card and pressing Next write
- *         NOTHING (the copy itself is the Copy panel's own reviewed change).
+ *         no button of its own (the footer's Back / Later / Next are 136px wide); choosing a card writes nothing, and the
+ *         REAL setup flow's Next records the step done exactly once and writes no setting (the copy itself is the Copy
+ *         panel's own reviewed change).
+ *   both choices: the whole body PLUS the portaled demo is <= 160 characters (Fresh and Copy with the Copy panel open).
  *   390:  the demo is above the first card; no sideways scroll; footer buttons inside the viewport.
  *   both: nothing is clipped; one tab stop; the demo follows the chosen card; with motion off it never animates.
  *
@@ -140,11 +142,15 @@ describe('r11 O14: the first-run Start from page', () => {
             demo: box(document.querySelector('[data-step-demo]')),
             demoHasScene: document.querySelector('[data-step-demo] [data-start-demo]') !== null,
             bodyText: body.innerText,
+            pageText:
+              `${body.innerText}\n${(document.querySelector('[data-step-demo]') as HTMLElement).innerText}`.trim(),
             bodyButtons: body.querySelectorAll('button').length,
             overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-            footer: ['[data-step-back]', '[data-step-later]', '[data-step-next]'].map(s =>
-              box(document.querySelector(s)),
-            ),
+            // The first page of the flow has no Back: the footer is whichever of the three the flow draws.
+            footer: ['[data-step-back]', '[data-step-later]', '[data-step-next]']
+              .map(s => document.querySelector(s))
+              .filter((node): node is Element => node !== null)
+              .map(box),
             viewport: window.innerWidth,
             clipped: [...document.querySelectorAll('.fy-cc__title, .fy-cc__line')]
               .filter(node => node.scrollWidth > node.clientWidth)
@@ -153,6 +159,7 @@ describe('r11 O14: the first-run Start from page', () => {
           };
         });
         expect(m.cards).toHaveLength(2);
+        expect(m.footer.length).toBeGreaterThanOrEqual(2);
         expect(m.demoHasScene).toBe(true);
         // Stacked: one x and width, y strictly increasing.
         expect(Math.abs((m.cards[0]?.x ?? 0) - (m.cards[1]?.x ?? 1))).toBeLessThan(0.5);
@@ -169,12 +176,14 @@ describe('r11 O14: the first-run Start from page', () => {
           }
         } else {
           const cardsRight = Math.max(...m.cards.map(card => card.right));
-          expect(m.demo.x).toBeGreaterThan(cardsRight + 32);
+          // The frame's column gap is 32px; sub-pixel card widths leave it a hair under.
+          expect(m.demo.x).toBeGreaterThanOrEqual(cardsRight + 31);
           expect(Math.abs(m.demo.y - (m.cards[0]?.y ?? 0))).toBeLessThanOrEqual(8);
           for (const button of m.footer) expect(Math.abs(button.w - 136)).toBeLessThanOrEqual(1);
         }
         // The owner's words: short, nothing to press on the page itself.
-        expect(m.bodyText.length).toBeLessThanOrEqual(160);
+        console.log(`O14 fresh ${viewport.name} ${mode}: ${String(m.pageText.length)} chars`);
+        expect(m.pageText.length).toBeLessThanOrEqual(160);
         expect(m.bodyButtons).toBe(0);
         expect(m.clipped).toEqual([]);
         expect(m.tabStops).toBe(1);
@@ -202,7 +211,7 @@ describe('r11 O14: the first-run Start from page', () => {
         await context.close();
       }, 60_000);
 
-      it(`a card click and Next write nothing; the demo follows the card; the Copy panel opens below (${viewport.name}, ${mode})`, async () => {
+      it(`a card click writes nothing and Next records the step once; the demo follows the card; the Copy panel opens below (${viewport.name}, ${mode})`, async () => {
         const { context, tab } = await open(viewport, mode);
         expect(await tab.locator('[data-step-demo] [data-start-demo][data-start-mode="fresh"]').count()).toBe(1);
         await tab.locator('[data-choice="clone"]').click();
@@ -215,6 +224,12 @@ describe('r11 O14: the first-run Start from page', () => {
         expect(playing).toBeGreaterThanOrEqual(3);
         // The Copy flow is the page's own second half: it sits BELOW the cards, never beside them.
         await tab.waitForSelector('[data-copy-no-sources], [data-copy-source]');
+        // The Copy choice reads as short as the Fresh one: the cards, the Copy panel's source stage and the demo together.
+        const copyText = await tab.evaluate(() =>
+          `${(document.querySelector('.fy-spf__body') as HTMLElement).innerText}\n${(document.querySelector('[data-step-demo]') as HTMLElement).innerText}`.trim(),
+        );
+        console.log(`O14 copy ${viewport.name} ${mode}: ${String(copyText.length)} chars`);
+        expect(copyText.length).toBeLessThanOrEqual(160);
         const order = await tab.evaluate(() => {
           const cards = document.querySelector('[data-choice-cards]')?.getBoundingClientRect();
           const copy = document.querySelector('[data-copy-settings], [data-copy-no-sources]')?.getBoundingClientRect();
@@ -222,17 +237,27 @@ describe('r11 O14: the first-run Start from page', () => {
         });
         expect(order.copyTop).toBeGreaterThanOrEqual(order.cardsBottom - 1);
         expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-        await tab.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished)));
+        // (The flow's living background never stops moving, so only the demo's own animations are waited for.)
+        await tab.evaluate(() =>
+          Promise.all(
+            (document.querySelector('[data-step-demo]') as HTMLElement)
+              .getAnimations({ subtree: true })
+              .map(animation => animation.finished),
+          ),
+        );
         // The settled copy scene: both machines and the arrow between them sit inside the column, none over another.
         expect(await sticksOut(tab)).toEqual([]);
         if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `after-copy-${viewport.name}-${mode}.png`) });
         await tab.locator('[data-choice="fresh"]').click();
         await tab.waitForSelector('[data-choice="fresh"][data-selected="true"]');
-        await tab.locator('[data-step-next]').click();
-        expect(await tab.evaluate(() => window.__nextPresses)).toBe(1);
-        // Choosing and Next wrote nothing: starting fresh has nothing to save, and a copy is its own reviewed change.
+        // Choosing wrote nothing at all, and nothing has recorded the step yet.
         expect(await writes(tab)).toEqual([]);
-        expect(await tab.evaluate(() => window.__hostCalls)).toEqual(['ready']);
+        // The REAL Next (the setup flow's own): it records the step done exactly once and writes no setting.
+        await tab.locator('[data-step-next]').click();
+        await tab.waitForSelector('[data-flow-page="runtimes.start"]', { state: 'detached' });
+        await tab.waitForTimeout(300);
+        expect(await tab.evaluate(() => window.__answers)).toEqual(['runtimes.start=done']);
+        expect(await writes(tab)).toEqual(['POST /v1/onboarding/steps/:plugin/:stepId']);
         await context.close();
       }, 60_000);
     }

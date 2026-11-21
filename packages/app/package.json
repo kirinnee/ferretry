@@ -15,6 +15,7 @@
     "./testing/router": "./src/testing/router.tsx",
     "./worker-facts": "./src/worker/facts.ts",
     "./testing/browser": "./tests/support/browser/index.ts",
+    "./testing/flow-host": "./tests/support/browser/flow-host.tsx",
     "./testing/settings-shell": "./tests/support/browser/settings-shell.tsx"
   },
   "scripts": {

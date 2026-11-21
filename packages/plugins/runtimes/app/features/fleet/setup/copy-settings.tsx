@@ -70,6 +70,8 @@ export interface CopySettingsProps {
   /** The copy was applied (before the person continues): where a setup step marks itself done. */
   readonly onCopied?: () => void;
   readonly doneLabel?: string;
+  /** Drawn inline under the first run's cards (r11 O14): the source stage drops its explainer and keeps one short line. */
+  readonly compact?: boolean;
   /** The machines to copy from, where the shell is not the one to say (a suite); absent: every paired machine the shell lists. */
   readonly reaches?: readonly DaemonReach[];
 }
@@ -149,6 +151,7 @@ export function CopySettings({
   onDone,
   onCopied,
   doneLabel,
+  compact = false,
   reaches,
 }: CopySettingsProps) {
   const own = daemonOfClient(client);
@@ -555,14 +558,18 @@ export function CopySettings({
 
   return (
     <div className="flex min-w-0 flex-col gap-4" data-copy-source="">
-      <p className="m-0 text-cell leading-base text-muted">
-        {machineName} receives a copy of the instructions, skills, settings and hooks of the machine you pick, so only
-        pick one whose setup you’re happy for {machineName} to see. A sign-in never leaves it, and no API key is
-        carried.
-      </p>
+      {compact ? null : (
+        <p className="m-0 text-cell leading-base text-muted">
+          {machineName} receives a copy of the instructions, skills, settings and hooks of the machine you pick, so only
+          pick one whose setup you’re happy for {machineName} to see. A sign-in never leaves it, and no API key is
+          carried.
+        </p>
+      )}
       {sources.length === 0 ? (
         <p className="m-0 text-cell text-muted" data-copy-no-sources="">
-          Pair another machine first: a copy is made from a machine this browser is paired with.
+          {compact
+            ? 'Pair a machine first.'
+            : 'Pair another machine first: a copy is made from a machine this browser is paired with.'}
         </p>
       ) : (
         <ChoiceCards

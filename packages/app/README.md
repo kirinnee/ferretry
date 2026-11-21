@@ -4,14 +4,15 @@ The shell holds no feature (design §5): router, layout engine, slots, theme, th
 per-daemon client with its hash guard (§9.6), the daemon list, the reference grammar, and the seams below. Every view is
 a plugin's app half, read from the generated surfaces registry (`src/generated/surfaces.ts`).
 
-| Import                                 | What                                                                          |
-| -------------------------------------- | ----------------------------------------------------------------------------- |
-| `@ferretry/app`                        | the public API: connect interface, client types, layout, slots, theme, refs   |
-| `@ferretry/app/ui`                     | the shared UI kit (primitives, sheet, menu, tabs, picker, command bar, hooks) |
-| `@ferretry/app/testing`                | fakes for the connect interface                                               |
-| `@ferretry/app/testing/browser`        | real-browser test support: one shared Chromium, the scene builder, waits      |
-| `@ferretry/app/testing/router`         | the test router provider                                                      |
-| `@ferretry/app/testing/settings-shell` | the real Settings shell over one fake machine, for a plugin's browser scene   |
+| Import                                 | What                                                                                 |
+| -------------------------------------- | ------------------------------------------------------------------------------------ |
+| `@ferretry/app`                        | the public API: connect interface, client types, layout, slots, theme, refs          |
+| `@ferretry/app/ui`                     | the shared UI kit (primitives, sheet, menu, tabs, picker, command bar, hooks)        |
+| `@ferretry/app/testing`                | fakes for the connect interface                                                      |
+| `@ferretry/app/testing/browser`        | real-browser test support: one shared Chromium, the scene builder, waits             |
+| `@ferretry/app/testing/router`         | the test router provider                                                             |
+| `@ferretry/app/testing/settings-shell` | the real Settings shell over one fake machine, for a plugin's browser scene          |
+| `@ferretry/app/testing/flow-host`      | the browser-safe shell pieces a scene needs to draw a step in Onboarding's real flow |
 
 ## Reaching a daemon: what Access and Connections provide
 

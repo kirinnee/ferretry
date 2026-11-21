@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { ShellContext, type ShellModel } from '../shell/context.tsx';
 
+const NO_DAEMONS = { daemons: [] };
+
 /** One panel a suite places in a slot: the plugin and id it is declared under, and what it draws (its props in). */
 export interface PlacedPanel {
   readonly plugin: string;
@@ -28,6 +30,8 @@ export function WithSlotPanels({
   const shell = {
     runtime: {
       // A page mounted in these slots may read an app hook; no plugin here provides one.
+      // ...and the machines this device is paired with (`usePairedDaemons`): none, as on a device with an empty list.
+      daemons: { subscribe: () => () => undefined, snapshot: () => NO_DAEMONS },
       appHook: (): unknown => undefined,
       subscribe: () => () => undefined,
       version: () => 0,
