@@ -137,12 +137,14 @@ const WHY = {
   sidebar:
     "an accent side bar on the selected item (owner: 'this side highlight thing is VERY LLM'); r11 S2 removes the shell/nav ones, the style unit the style ones",
   ringclip:
-    'a focus ring drawn outside its control is cut by a clipping ancestor; r11 S13 / the style unit draws it inside',
+    'a focus ring drawn outside its control is cut by a clipping ancestor; r11 S13 drew it inside everywhere but here; the style unit (r11 T11 briefing, T12 genz) draws it inside',
   spinner: 'this style shares a spinner with another; the style unit (r11 T5-T12) gives it its own',
   distinct:
     'this style differs from Studio on fewer than 6 of 8 components; the style unit (r11 T5-T12) designs the rest',
   hypermedia:
     'this style differs from Studio on 5 of 8 components, short only on hypermedia: no renderer reads an --hm-* slot until r12 H5 (C6), so the style unit cannot fix it; r12 H5 deletes the row',
+  primaryRing:
+    "the style's own :focus-visible rule on the Primary button removes the --surface band r11 S13 draws under the inside ring, so the ring is accent on accent (1.00:1); the style unit (r11 T11) keeps the band",
   text: 'the High contrast palette must pass 7:1 body text hard on this style (no loud exemption); the style unit fixes it',
 } as const;
 
@@ -244,74 +246,11 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: [
-      'antiposh',
-      'briefing',
-      'exaggerated',
-      'genz',
-      'glass',
-      'hud',
-      'lucid',
-      'mission',
-      'neo',
-      'neumorphism',
-      'pixel',
-      'raw',
-      'retro',
-      'swiss',
-    ],
+    styles: ['briefing', 'genz'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'ringclip',
     what: 'Clipped button ring',
-    why: WHY.ringclip,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: [
-      'antiposh',
-      'briefing',
-      'exaggerated',
-      'genz',
-      'glass',
-      'hud',
-      'lucid',
-      'mission',
-      'neo',
-      'neumorphism',
-      'pixel',
-      'raw',
-      'retro',
-      'swiss',
-    ],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'ringclip',
-    what: 'Clipped link ring',
-    why: WHY.ringclip,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: [
-      'antiposh',
-      'briefing',
-      'exaggerated',
-      'genz',
-      'glass',
-      'hud',
-      'lucid',
-      'mission',
-      'neo',
-      'neumorphism',
-      'pixel',
-      'raw',
-      'retro',
-      'swiss',
-    ],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'ringclip',
-    what: 'Clipped name ring',
     why: WHY.ringclip,
   },
   {
@@ -450,6 +389,15 @@ const KNOWN: readonly Known[] = [
     check: 'distinct',
     what: 'differs from Studio on fewer than 6 of 8 components',
     why: WHY.hypermedia,
+  },
+  {
+    viewports: BOTH_WIDTHS,
+    styles: ['briefing', 'lucid'],
+    palettes: EVERY_PALETTE,
+    modes: BOTH_MODES,
+    check: 'focus',
+    what: 'Primary ring colour',
+    why: WHY.primaryRing,
   },
 ];
 
@@ -709,7 +657,27 @@ const FOCUSED = `(() => {
   const colour = outlineChanged ? cs.outlineColor : cs.borderTopColor;
   // A ring drawn outside the border box sits on what is around the control; one drawn inside sits on the control's own fill.
   const inside = outlineChanged && Number.parseFloat(cs.outlineOffset) < 0;
-  const back = paint(behind(mark, inside));
+  // A FILLED control (the primary button) keeps a hard inset band of --surface under its inside ring (r11 S13, ui/design-system.css):
+  // the ring sits on the band, not on the accent fill it is often the same colour as. The band is the shadow a viewer SEES at the
+  // ring's inner edge: shadows paint first-on-top, so the FIRST inset, blur-0, zero-offset shadow whose painted depth (from the
+  // padding edge, which the border pushes in) covers that edge. A shadow under it is hidden there (Gen Z lists its surface band
+  // above its accent one and the ring reads on the surface), and one that stops short of the ring paints nothing behind it.
+  // The ring's inner edge lies (minus the outline offset) px inside the border box; a band that is opaque is its colour, else no band.
+  let band = null;
+  if (inside && cs.boxShadow !== 'none') {
+    const depth = -Number.parseFloat(cs.outlineOffset);
+    const border = Number.parseFloat(cs.borderTopWidth) || 0;
+    for (const part of splitTop(cs.boxShadow)) {
+      if (!/inset/.test(part)) continue;
+      const lengths = (part.match(/-?\\d*\\.?\\d+px/g) || []).map(Number.parseFloat);
+      if (lengths.length < 4 || lengths[0] !== 0 || lengths[1] !== 0 || lengths[2] !== 0) continue;
+      if (!(border <= depth && border + lengths[3] > depth)) continue;
+      const colourPart = part.match(/(rgba?|color|hsla?|oklch|oklab|lab|lch)\\([^()]*(?:\\([^()]*\\)[^()]*)*\\)/);
+      if (colourPart && window.__m.rgba(colourPart[0])[3] === 1) band = colourPart[0];
+      break;
+    }
+  }
+  const back = paint(band === null ? behind(mark, inside) : [...behind(mark, inside), band]);
   // r11 T14 probe 7 (S13's measure): the ring box is the border box inflated by what the focused state draws OUTSIDE it (an
   // outline's offset + width when it is positive, a non-inset box-shadow's spread); it must lie inside the padding box of
   // every ancestor that clips (overflow other than visible, contain: paint, a clip-path). The page's own scroll is not one.
@@ -742,7 +710,7 @@ const FOCUSED = `(() => {
     visible: el.matches(':focus-visible'),
     drawn,
     width: Number.parseFloat(outlineChanged ? cs.outlineWidth : cs.borderTopWidth) || 0,
-    ratio: drawn ? ratio(paint([...behind(mark, inside), colour]), back) : 0,
+    ratio: drawn ? ratio(paint([...(band === null ? behind(mark, inside) : [...behind(mark, inside), band]), colour]), back) : 0,
   };
 })()`;
 
@@ -1183,6 +1151,150 @@ describe('the probes read the real page', () => {
   const washed = (tab: Page, css: string) => tab.addStyleTag({ content: css });
   const gone = async (style: Awaited<ReturnType<Page['addStyleTag']>>) =>
     await style.evaluate(node => (node as Element).remove());
+
+  it('the Primary ring is read against the surface band the button draws under it, and fails where the band is gone', async () => {
+    const session = await open(VIEWPORTS[0], 'light');
+    try {
+      const primaryRing = async () => {
+        const measured = await settle(session.tab, 'studio', 'studio', 'light');
+        const read = measured.focus.find(row => row.what === 'Primary');
+        return {
+          ratio: read?.ratio ?? 0,
+          miss: misses(measured, { style: 'studio', highContrast: false, wide: true }).find(
+            miss => miss.check === 'focus' && miss.what === 'Primary ring colour',
+          ),
+        };
+      };
+      const withBand = await primaryRing();
+      expect(withBand.ratio, 'the ring on the surface band').toBeGreaterThanOrEqual(3);
+      expect(withBand.miss).toBeUndefined();
+      // Without the band the ring sits on the accent fill it is drawn in: 1:1, and the probe says so.
+      const noBand = await washed(
+        session.tab,
+        ".kt-btn[data-variant='primary']:focus-visible { box-shadow: none !important; }",
+      );
+      const without = await primaryRing();
+      await gone(noBand);
+      expect(without.ratio, 'the ring on the accent fill').toBeLessThan(1.5);
+      expect(without.miss?.got).toBeDefined();
+    } finally {
+      await session.close();
+    }
+  });
+
+  /**
+   * What a real screenshot paints across the left edge of a control: the colour on the ring, just inside it and just outside it
+   * (the pixel at the middle of the outline, the first pixel past its inner edge, the first pixel past its outer edge), read at
+   * mid-height. The control is focused by keyboard, so `:focus-visible` is on.
+   */
+  const ringPixels = async (tab: Page, selector: string) => {
+    const target = tab.locator(selector).first();
+    await target.scrollIntoViewIfNeeded();
+    await tab.keyboard.press('Tab');
+    await target.focus();
+    const geometry = await target.evaluate(node => {
+      const cs = getComputedStyle(node);
+      const box = node.getBoundingClientRect();
+      return {
+        visible: node.matches(':focus-visible'),
+        width: Number.parseFloat(cs.outlineWidth),
+        offset: Number.parseFloat(cs.outlineOffset),
+        x: box.left + window.scrollX,
+        y: box.top + window.scrollY + box.height / 2,
+      };
+    });
+    const left = Math.floor(geometry.x) - 6;
+    const png = (
+      await tab.screenshot({
+        clip: { x: left, y: Math.floor(geometry.y), width: 24, height: 1 },
+        fullPage: true,
+        scale: 'css',
+        type: 'png',
+      })
+    ).toString('base64');
+    const row = (await tab.evaluate(async (data: string) => {
+      const bitmap = await createImageBitmap(
+        new Blob([Uint8Array.from(atob(data), c => c.charCodeAt(0))], { type: 'image/png' }),
+      );
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const g = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D;
+      g.drawImage(bitmap, 0, 0);
+      const d = g.getImageData(0, 0, bitmap.width, 1).data;
+      return Array.from({ length: bitmap.width }, (_, i) => [d[i * 4] ?? 0, d[i * 4 + 1] ?? 0, d[i * 4 + 2] ?? 0]);
+    }, png)) as number[][];
+    // Depth `d` px inside the border box is the pixel at x = box.left + d.
+    const at = (depth: number) => row[Math.floor(geometry.x) - left + Math.floor(depth)] as number[];
+    const inner = -geometry.offset;
+    const ratio = (a: number[], b: number[]) =>
+      contrastRatio(luminance(a[0] ?? 0, a[1] ?? 0, a[2] ?? 0), luminance(b[0] ?? 0, b[1] ?? 0, b[2] ?? 0));
+    const ring = at(inner - geometry.width / 2);
+    return {
+      visible: geometry.visible,
+      inside: ratio(ring, at(inner + 0.5)),
+      outside: ratio(ring, at(inner - geometry.width - 0.5)),
+    };
+  };
+  const probeRatio = async (tab: Page, style: string, palette: string, mode: string, what: string) => {
+    const measured = await settle(tab, style, palette, mode);
+    return measured.focus.find(row => row.what === what)?.ratio ?? 0;
+  };
+
+  /**
+   * r11 S13b, review of PR 2258: Gen Z lists two opaque inset bands, the surface FIRST (painted on top) and the accent under it.
+   * The ring is read on what a viewer sees at its inner edge, the topmost band, so the probe's ratio is the screenshot's, and
+   * the same page with the two bands swapped reads the accent one: the probe follows the layering, not the list's last row.
+   */
+  for (const viewport of VIEWPORTS)
+    for (const mode of MODES)
+      for (const palette of ['studio', 'mission']) {
+        it(`Gen Z's Name ring is read on its topmost band, as painted (${palette}, ${mode}, ${viewport.name})`, async () => {
+          const session = await open(viewport, mode);
+          try {
+            const name = 'input[aria-label="Name"]';
+            const read = await probeRatio(session.tab, 'genz', palette, mode, 'Name');
+            const pixels = await ringPixels(session.tab, name);
+            expect(pixels.visible).toBe(true);
+            expect(read, 'the probe on the surface band').toBeGreaterThanOrEqual(3);
+            expect(Math.min(pixels.inside, pixels.outside), 'the painted ring on both sides').toBeGreaterThanOrEqual(3);
+            expect(Math.abs(read - pixels.inside), 'the probe and the pixels agree').toBeLessThan(0.5);
+            // The same two bands, accent on top: what the viewer sees at the ring is now the accent band.
+            const swapped = await session.tab.addStyleTag({
+              content: `:root[data-style='genz'] :is(select, input, textarea).kt-input:focus-visible { box-shadow: inset 0 0 0 calc(var(--focus-width) + 5px) var(--focus-color), inset 0 0 0 calc(var(--focus-width) + 2px) var(--surface) !important; }`,
+            });
+            const readSwapped = await probeRatio(session.tab, 'genz', palette, mode, 'Name');
+            const pixelsSwapped = await ringPixels(session.tab, name);
+            await gone(swapped);
+            expect(Math.abs(readSwapped - pixelsSwapped.inside), 'the probe follows the top band').toBeLessThan(0.5);
+          } finally {
+            await session.close();
+          }
+        });
+      }
+
+  /**
+   * r11 S13b, review of PR 2258: an inset band thick enough to match the ring is no use if it stops short of it. Studio's ring
+   * at offset -8px with border 0 and a 2px surface band paints accent on accent on BOTH sides (the band is at the edge, the ring
+   * 8px in): the probe must read that as a miss, as the pixels do.
+   */
+  it('an inset band that does not reach the ring is no band, and the probe reads the ring on the fill', async () => {
+    const session = await open(VIEWPORTS[0], 'light');
+    try {
+      const style = await washed(
+        session.tab,
+        ".kt-btn[data-variant='primary']:focus-visible:not(:disabled) { outline-offset: -8px !important; border-width: 0 !important; box-shadow: inset 0 0 0 2px var(--surface) !important; }",
+      );
+      const read = await probeRatio(session.tab, 'studio', 'studio', 'light', 'Primary');
+      const pixels = await ringPixels(session.tab, ".kt-btn[data-variant='primary']");
+      await gone(style);
+      expect(pixels.visible).toBe(true);
+      expect(Math.max(pixels.inside, pixels.outside), 'the painted ring').toBeLessThan(1.5);
+      expect(read, 'the probe').toBeLessThan(1.5);
+    } finally {
+      await session.close();
+    }
+  });
 
   it('the gradient probe tells a verified T2 tile from a wash on any layer, and reads the grain too', async () => {
     const session = await open(VIEWPORTS[0], 'light');
