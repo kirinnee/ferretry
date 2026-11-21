@@ -20,13 +20,7 @@
 [data-swatch] {
   --spinner-arc: var(--accent);
   --spinner-track: color-mix(in srgb, var(--fg) 24%, transparent);
-  --spinner-stroke: 2;
-  --spinner-cap: round;
-  --spinner-sweep: 32;
-  --spinner-speed: 0.9s;
-  --spinner-timing: cubic-bezier(0.45, 0.15, 0.55, 0.85);
-  --spinner-glow: none;
-  --spinner-track-dash: none;
+  /* stroke, cap, sweep, speed, timing, glow and track-dash defaults: tokens/base-style.css (their single owner). */
 }
 
 /* ---- each style's hand (the six compact palettes have none: a palette is colour only)  --------------------------------------------------------------------------

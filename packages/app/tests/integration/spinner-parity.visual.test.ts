@@ -107,7 +107,8 @@ describe('the real spinner under the real stylesheet', () => {
 
   it('reduced motion (the OS setting) pulses the whole ring and draws the arc as a full ring', async () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
-    const now = await read(page, 'mission', 'dark');
+    // A ring style: Mission draws no ring (its brackets pulse; `mission-hud-kit.visual.test.ts` reads that live).
+    const now = await read(page, 'studio', 'dark');
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     expect(now.animationName).toBe('fy-spinner-pulse');
     expect(now.arcDash).toBe('100px, 0px');

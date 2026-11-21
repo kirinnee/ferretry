@@ -273,15 +273,17 @@
 }
 
 /* THE HUD SPINNER: a radar. The ring is the bezel (ticks) and the arc is the sweep, turning at a steady rate with a lit glow; the
-   first generic part is the ping at the centre (a small square that blinks in whole steps). The other three parts stay hidden. */
-:root[data-style='hud'] .fy-spinner .fy-spinner__p1,
+   first generic part is the ping at the centre (a small square that blinks in whole steps). The other three parts stay hidden.
+   SCOPE: element rules, so the page rule skips a spinner inside a `[data-swatch]` (a swatch preview draws its own style's
+   mark) and the swatch rule matches only a swatch of this style. */
+:root[data-style='hud'] .fy-spinner:not([data-swatch] *) .fy-spinner__p1,
 [data-swatch][data-style='hud'] .fy-spinner .fy-spinner__p1 {
   display: inline;
   transform: translate(6.67px, 6.67px) scale(0.33);
 }
-:root[data-style='hud'] .fy-spinner .fy-spinner__p2,
-:root[data-style='hud'] .fy-spinner .fy-spinner__p3,
-:root[data-style='hud'] .fy-spinner .fy-spinner__p4,
+:root[data-style='hud'] .fy-spinner:not([data-swatch] *) .fy-spinner__p2,
+:root[data-style='hud'] .fy-spinner:not([data-swatch] *) .fy-spinner__p3,
+:root[data-style='hud'] .fy-spinner:not([data-swatch] *) .fy-spinner__p4,
 [data-swatch][data-style='hud'] .fy-spinner .fy-spinner__p2,
 [data-swatch][data-style='hud'] .fy-spinner .fy-spinner__p3,
 [data-swatch][data-style='hud'] .fy-spinner .fy-spinner__p4 {

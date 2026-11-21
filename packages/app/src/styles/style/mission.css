@@ -227,8 +227,11 @@
 
 /* THE MISSION SPINNER: four corner registration brackets that turn in whole eighth-turns, like an instrument's range finder
    locking on. Each part is one of the four generic squares, drawn as an L (two adjacent sides of its perimeter, `dasharray`
-   on the 24-unit outline) instead of a filled block, and held at full ink: the figure moves, not the opacity. */
-:root[data-style='mission'] .fy-spinner [class*='fy-spinner__p'],
+   on the 24-unit outline) instead of a filled block, and held at full ink: the figure moves, not the opacity.
+   SCOPE: a custom property is inherited and the nearest style wins, but these are element rules, so each is keyed to the
+   boundary it belongs to: the page rule skips a spinner inside a `[data-swatch]` (a swatch preview draws ITS OWN style's
+   mark, not the page's), and the swatch rule matches only a swatch of this style. */
+:root[data-style='mission'] .fy-spinner:not([data-swatch] *) [class*='fy-spinner__p'],
 [data-swatch][data-style='mission'] .fy-spinner [class*='fy-spinner__p'] {
   animation: none;
   fill: none;
@@ -237,20 +240,20 @@
   stroke-linecap: square;
   stroke-width: 1.6;
 }
-:root[data-style='mission'] .fy-spinner .fy-spinner__p1,
+:root[data-style='mission'] .fy-spinner:not([data-swatch] *) .fy-spinner__p1,
 [data-swatch][data-style='mission'] .fy-spinner .fy-spinner__p1 {
   stroke-dasharray: 6 12 6 0;
 }
-:root[data-style='mission'] .fy-spinner .fy-spinner__p2,
+:root[data-style='mission'] .fy-spinner:not([data-swatch] *) .fy-spinner__p2,
 [data-swatch][data-style='mission'] .fy-spinner .fy-spinner__p2 {
   stroke-dasharray: 12 12;
 }
-:root[data-style='mission'] .fy-spinner .fy-spinner__p4,
+:root[data-style='mission'] .fy-spinner:not([data-swatch] *) .fy-spinner__p4,
 [data-swatch][data-style='mission'] .fy-spinner .fy-spinner__p4 {
   stroke-dasharray: 12 12;
   stroke-dashoffset: -6;
 }
-:root[data-style='mission'] .fy-spinner .fy-spinner__p3,
+:root[data-style='mission'] .fy-spinner:not([data-swatch] *) .fy-spinner__p3,
 [data-swatch][data-style='mission'] .fy-spinner .fy-spinner__p3 {
   stroke-dasharray: 12 12;
   stroke-dashoffset: -12;

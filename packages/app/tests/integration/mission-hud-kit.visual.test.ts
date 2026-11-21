@@ -335,3 +335,287 @@ describe('the field pattern is painted', () => {
         }
       });
 });
+
+/**
+ * THE SPINNERS ARE REALLY MOVING (r11 T6 review item 2). The computed `animation-duration` and `animation-timing-function` read
+ * above are DECLARATIONS: forcing `animation-name: none !important` on the mark left every one of them passing. These read what
+ * the engine is DOING: the live CSS animations on the mark, then every one paused at the same fixed times and the mark's
+ * rotation (from its computed matrix) and each part's opacity read back (the STYLE KITS rule: the assert must FAIL with
+ * `animation-name: none`; each test below also runs with that injected and proves its own expectation throws).
+ */
+interface MarkRead {
+  /** Every running CSS animation on the mark: the svg itself (`mark`) and its parts (`p1`..`p4`). */
+  readonly active: readonly {
+    readonly target: string;
+    readonly name: string;
+    readonly state: string;
+    readonly delay: number;
+    readonly duration: number;
+    readonly iterations: string;
+  }[];
+  /** The mark's rotation in degrees at each sample time (0..360). */
+  readonly angle: readonly number[];
+  /** The mark's own opacity at each sample time. */
+  readonly markOpacity: readonly number[];
+  /** Each part's opacity at each sample time. */
+  readonly opacity: Readonly<Record<string, readonly number[]>>;
+  /** Each part's computed display. */
+  readonly display: readonly string[];
+}
+
+const KILL_ANIMATIONS =
+  ".fy-spinner.fy-spinner.fy-spinner, .fy-spinner.fy-spinner [class*='fy-spinner__p'] { animation-name: none !important; }";
+
+/** What the mark at `selector` is DOING in the real engine: its live animation list, and rotation + opacities at fixed times. */
+const readMark = (tab: Page, selector: string, times: readonly number[], disable: boolean): Promise<MarkRead> =>
+  tab.evaluate(
+    ([target, sampleAt, kill, css]) => {
+      let injected: HTMLStyleElement | undefined;
+      if (kill) {
+        injected = document.createElement('style');
+        injected.textContent = css as string;
+        document.head.append(injected);
+      }
+      const svg = document.querySelector(target as string) as SVGElement;
+      const parts = [1, 2, 3, 4].map(n => svg.querySelector(`.fy-spinner__p${n}`) as SVGElement);
+      // CSS animations only (a CSS transition, such as the arc's one-frame dash change under reduced motion, is not the mark's motion).
+      const owned = document.getAnimations().filter(animation => {
+        const element = (animation.effect as KeyframeEffect).target as Element;
+        return animation instanceof CSSAnimation && (element === svg || svg.contains(element));
+      });
+      const label = (element: Element): string =>
+        element === svg ? 'mark' : `p${parts.indexOf(element as SVGElement) + 1}`;
+      const active = owned.map(animation => {
+        const timing = animation.effect?.getTiming();
+        return {
+          target: label((animation.effect as KeyframeEffect).target as Element),
+          name: (animation as Animation & { animationName?: string }).animationName ?? 'none',
+          state: animation.playState,
+          delay: Number(timing?.delay ?? -1),
+          duration: Number(timing?.duration ?? -1),
+          iterations: String(timing?.iterations ?? 'none'),
+        };
+      });
+      const angleOf = (transform: string): number => {
+        if (transform === 'none') return 0;
+        const m = /matrix\(([^)]+)\)/u.exec(transform);
+        const [a = 1, b = 0] = (m?.[1] ?? '1,0').split(',').map(Number);
+        return ((((Math.atan2(b, a) * 180) / Math.PI) % 360) + 360) % 360;
+      };
+      const angle: number[] = [];
+      const markOpacity: number[] = [];
+      const opacity: Record<string, number[]> = { p1: [], p2: [], p3: [], p4: [] };
+      for (const time of sampleAt as readonly number[]) {
+        for (const animation of owned) {
+          animation.pause();
+          animation.currentTime = time;
+        }
+        angle.push(angleOf(getComputedStyle(svg).transform));
+        markOpacity.push(Number.parseFloat(getComputedStyle(svg).opacity));
+        for (const [index, part] of parts.entries())
+          (opacity[`p${index + 1}`] as number[]).push(Number.parseFloat(getComputedStyle(part).opacity));
+      }
+      for (const animation of owned) animation.play();
+      const display = parts.map(part => getComputedStyle(part).display);
+      injected?.remove();
+      return { active, angle, markOpacity, opacity, display };
+    },
+    [selector, times, disable, KILL_ANIMATIONS] as const,
+  );
+
+const PROBE = '[data-probe="spinner"] svg';
+const near = (actual: number | undefined, expected: number, digits = 1): void =>
+  expect(actual ?? Number.NaN).toBeCloseTo(expected, digits);
+
+// MISSION: the whole figure turns in whole eighth-turns (45deg every 300ms of the 2400ms turn); the brackets themselves stay at full ink.
+const MISSION_TIMES = [100, 290, 310, 760, 1_250, 2_390] as const;
+const expectMissionTurning = (read: MarkRead): void => {
+  const marks = read.active.filter(animation => animation.target === 'mark');
+  expect(marks.length, 'the mark runs one animation').toBe(1);
+  expect(marks[0]).toMatchObject({
+    name: 'fy-spinner-turn',
+    state: 'running',
+    duration: 2_400,
+    iterations: 'Infinity',
+  });
+  expect(
+    read.active.filter(animation => animation.target !== 'mark'),
+    'the four brackets run no animation of their own: the figure moves, not the opacity',
+  ).toEqual([]);
+  // Whole eighth-turns: held at 0deg until the first 300ms step, then 45deg per step. A smooth turn would read 4, 44, 46, ...
+  const expected = [0, 0, 45, 90, 180, 315];
+  for (const [index, degrees] of expected.entries()) near(read.angle[index], degrees, 0);
+  for (const part of ['p1', 'p2', 'p3', 'p4'])
+    expect(read.opacity[part], `${part} stays at full ink`).toEqual(MISSION_TIMES.map(() => 1));
+};
+
+// HUD: the bezel and its sweep turn at a steady rate (360deg / 1400ms); the centre ping steps through four opacities.
+const HUD_TIMES = [100, 400, 750, 1_100] as const;
+const expectHudSweeping = (read: MarkRead): void => {
+  const marks = read.active.filter(animation => animation.target === 'mark');
+  expect(marks.length, 'the sweep is one animation').toBe(1);
+  expect(marks[0]).toMatchObject({
+    name: 'fy-spinner-turn',
+    state: 'running',
+    duration: 1_400,
+    iterations: 'Infinity',
+  });
+  const parts = read.active.filter(animation => animation.target !== 'mark');
+  expect(
+    parts.map(animation => animation.target),
+    'only the centre ping animates (the other three parts are hidden, so their staggered delays are never drawn)',
+  ).toEqual(['p1']);
+  expect(parts[0]).toMatchObject({
+    name: 'fy-spinner-part',
+    state: 'running',
+    delay: 0,
+    duration: 1_400,
+    iterations: 'Infinity',
+  });
+  // Linear: the sweep covers 360deg / 1400ms.
+  for (const [index, time] of HUD_TIMES.entries()) near(read.angle[index], (time / 1_400) * 360, 0);
+  // The ping: opacity 1 -> .25 in four whole steps over 1400ms (steps(4, end)): 1, .8125, .625, .4375 at 100, 400, 750, 1100ms.
+  const expected = [1, 0.8125, 0.625, 0.4375];
+  for (const [index, opacity] of expected.entries()) near(read.opacity.p1?.[index], opacity, 2);
+};
+
+describe('the Mission and HUD spinners are really moving (live animations and phase, not declarations)', () => {
+  for (const mode of MODES) {
+    it(`Mission in ${mode}: four brackets turning in whole eighth-turns`, async () => {
+      const { tab, close } = await open(VIEWPORTS[0], mode, 'mission');
+      try {
+        const live = await readMark(tab, PROBE, MISSION_TIMES, false);
+        report[`motion:mission:${mode}`] = live;
+        expect(live.display, 'all four brackets drawn').toEqual(['inline', 'inline', 'inline', 'inline']);
+        expectMissionTurning(live);
+        const dead = await readMark(tab, PROBE, MISSION_TIMES, true);
+        expect(dead.active, 'animation-name: none stops every animation').toEqual([]);
+        expect(() => expectMissionTurning(dead), 'the assert fails when the mark does not move').toThrow();
+      } finally {
+        await close();
+      }
+    });
+
+    it(`HUD in ${mode}: a sweep at a steady rate and a stepping centre ping`, async () => {
+      const { tab, close } = await open(VIEWPORTS[0], mode, 'hud');
+      try {
+        const live = await readMark(tab, PROBE, HUD_TIMES, false);
+        report[`motion:hud:${mode}`] = live;
+        expect(live.display).toEqual(['inline', 'none', 'none', 'none']);
+        expectHudSweeping(live);
+        const dead = await readMark(tab, PROBE, HUD_TIMES, true);
+        expect(dead.active).toEqual([]);
+        expect(() => expectHudSweeping(dead), 'the assert fails when the mark does not move').toThrow();
+      } finally {
+        await close();
+      }
+    });
+
+    it(`Mission in ${mode}, reduced motion: the VISIBLE brackets pulse in place (the ring is hidden, so it cannot)`, async () => {
+      const { tab, close } = await open(VIEWPORTS[0], mode, 'mission');
+      try {
+        await tab.emulateMedia({ reducedMotion: 'reduce' });
+        const expectPulse = (read: MarkRead): void => {
+          expect(read.display, 'the brackets stay drawn').toEqual(['inline', 'inline', 'inline', 'inline']);
+          expect(read.active.map(animation => animation.name)).toEqual(['fy-spinner-pulse']);
+          expect(read.active[0]).toMatchObject({ target: 'mark', state: 'running', duration: 1_600 });
+          // 0% -> 50% -> 100%: opacity 1, .72, 1 across the 1600ms pulse.
+          near(read.markOpacity[0], 1, 2);
+          near(read.markOpacity[1], 0.72, 2);
+          near(read.markOpacity[2], 1, 2);
+          for (const part of ['p1', 'p2', 'p3', 'p4']) expect(read.opacity[part]).toEqual([1, 1, 1]);
+        };
+        const live = await readMark(tab, PROBE, [0, 800, 1_600], false);
+        report[`motion:mission-reduced:${mode}`] = live;
+        expectPulse(live);
+        const bracket = (await tab.evaluate(selector => {
+          const p = getComputedStyle(document.querySelector(`${selector} .fy-spinner__p1`) as Element);
+          return {
+            fill: p.fill,
+            stroke: p.stroke,
+            ring: getComputedStyle(document.querySelector(`${selector} .fy-spinner-ring`) as Element).display,
+          };
+        }, PROBE)) as { fill: string; stroke: string; ring: string };
+        expect(bracket.ring, 'the hidden ring is not what pulses').toBe('none');
+        expect(bracket.stroke, 'the bracket is drawn in ink').not.toBe('none');
+        const dead = await readMark(tab, PROBE, [0, 800, 1_600], true);
+        expect(() => expectPulse(dead), 'the assert fails when the mark does not pulse').toThrow();
+      } finally {
+        await close();
+      }
+    });
+  }
+});
+
+/**
+ * ITEM 3: a swatch draws ITS OWN style's mark, whatever the page is wearing. The page-level spinner rules used to be plain
+ * descendant rules, so a Geist swatch on a Mission page lost its animations, a Geist swatch under HUD showed one spoke and a
+ * Mission swatch under HUD lost three brackets. Every page style x every swatch style, each swatch's mark read back whole.
+ */
+const SIGNATURE = {
+  studio: { ring: 'inline', parts: ['none', 'none', 'none', 'none'], animations: ['mark:fy-spinner-turn:900'] },
+  mission: {
+    ring: 'none',
+    parts: ['inline', 'inline', 'inline', 'inline'],
+    animations: ['mark:fy-spinner-turn:2400'],
+  },
+  hud: {
+    ring: 'inline',
+    parts: ['inline', 'none', 'none', 'none'],
+    animations: ['mark:fy-spinner-turn:1400', 'p1:fy-spinner-part:1400'],
+  },
+  geist: {
+    ring: 'none',
+    parts: ['inline', 'inline', 'inline', 'inline'],
+    animations: [
+      'p1:fy-spinner-part:1000',
+      'p2:fy-spinner-part:1000',
+      'p3:fy-spinner-part:1000',
+      'p4:fy-spinner-part:1000',
+    ],
+  },
+} as const;
+type StyleId = keyof typeof SIGNATURE;
+
+describe('a swatch draws its own style’s spinner, on a page of any style', () => {
+  for (const pageStyle of ['studio', 'mission', 'hud'] as const)
+    it(`on a ${pageStyle} page: Studio, Mission, HUD and Geist swatches each keep their own mark`, async () => {
+      const { tab, close } = await open(VIEWPORTS[0], 'light', pageStyle);
+      try {
+        for (const swatch of Object.keys(SIGNATURE) as StyleId[]) {
+          const selector = `[data-swatch][data-style="${swatch}"] svg`;
+          await tab.evaluate(
+            ([style, source]) => {
+              const holder = document.createElement('div');
+              holder.setAttribute('data-swatch', '');
+              holder.setAttribute('data-style', style as string);
+              holder.setAttribute('data-palette', 'mission');
+              holder.setAttribute('data-mode', 'light');
+              holder.innerHTML = source as string;
+              document.body.append(holder);
+            },
+            [
+              swatch,
+              await tab.evaluate(selector => (document.querySelector(selector) as Element).outerHTML, PROBE),
+            ] as const,
+          );
+          const read = await readMark(tab, selector, [0], false);
+          const got = read.active
+            .map(animation => `${animation.target}:${animation.name}:${animation.duration}`)
+            .sort();
+          const ring = await tab.evaluate(
+            sel => getComputedStyle(document.querySelector(`${sel} .fy-spinner-ring`) as Element).display,
+            selector,
+          );
+          report[`swatch:${pageStyle}:${swatch}`] = { ring, parts: read.display, animations: got };
+          const want = SIGNATURE[swatch];
+          expect(ring, `${swatch} swatch on a ${pageStyle} page: ring`).toBe(want.ring);
+          expect(read.display, `${swatch} swatch on a ${pageStyle} page: parts`).toEqual(want.parts);
+          expect(got, `${swatch} swatch on a ${pageStyle} page: live animations`).toEqual([...want.animations].sort());
+          await tab.evaluate(sel => document.querySelector(sel)?.parentElement?.remove(), selector);
+        }
+      } finally {
+        await close();
+      }
+    });
+});
