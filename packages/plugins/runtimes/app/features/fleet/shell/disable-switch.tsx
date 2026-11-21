@@ -12,7 +12,7 @@
 import type { Disabled } from '../../../../contract/index.ts';
 import { type ReactNode, useState } from 'react';
 import { cn } from '../../../ui.ts';
-import { Button, useNow } from '../../../ui.ts';
+import { Button, SelectBox, useNow } from '../../../ui.ts';
 import { runtimeActionRefusal } from '../runtimes/runtime-actions-model.ts';
 import { followInApp } from './machine-route.ts';
 import { type AccountChanges, ChangeApplyPanel } from './apply-change-panel.tsx';
@@ -224,19 +224,15 @@ export function DisableSwitch({
             <label htmlFor={`${id}-until`} className="text-ui font-semibold text-fg">
               Switch back on
             </label>
-            <select
-              id={`${id}-until`}
-              className="kt-input"
-              value={choice}
-              onChange={event => setChoice(event.target.value as UntilChoice)}
-              data-disable-until=""
-            >
-              {UNTIL_CHOICES.map(option => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            <span className="contents" data-disable-until="">
+              <SelectBox
+                id={`${id}-until`}
+                label="Switch back on"
+                value={choice}
+                onChange={next => setChoice(next as UntilChoice)}
+                options={UNTIL_CHOICES.map(option => ({ value: option.value, label: option.label }))}
+              />
+            </span>
             {choice === 'date' ? (
               <>
                 <input

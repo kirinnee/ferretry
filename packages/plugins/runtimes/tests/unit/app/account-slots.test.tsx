@@ -12,6 +12,7 @@ import { RuntimesChanged } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { type Call, scripted } from './support/client.ts';
+import { choose, openBox, optionsOpen } from '../support/select-box.ts';
 import { loginList, loginView, runtimeCatalog, runtimeView } from './support/picker.ts';
 
 /**
@@ -106,22 +107,30 @@ describe('Ferrets’ account slots and Runtimes’ panels', () => {
 });
 
 describe('the new-ferret account slot, Usage on', () => {
-  it('draws one radio per runtime under its harness, with health and Usage’s quota, and fills in the first usable one', async () => {
+  it('lists each runtime under its harness, with health and Usage’s quota, and fills in the first usable one', async () => {
     const calls: Call[] = [];
     const page: Page = { value: '', chosen: undefined };
     const view = await draw(panelFor(NEW_FERRET_ACCOUNT_SLOT, { ...READS, 'GET /v1/usage': FEED }, calls), page);
-    expect(
-      [...view.container.querySelectorAll('[data-runtime-group]')].map(group =>
-        group.getAttribute('data-runtime-group'),
-      ),
-    ).toEqual(['claude-code', 'codex']);
-    expect(view.container.querySelectorAll('[data-runtime-option]')).toHaveLength(2);
-    const claude = must(view.container.querySelector('[data-runtime-option="claude-a"]'), 'claude');
+    await openBox(view.container);
+    expect([...document.querySelectorAll('[role="group"]')].map(group => group.getAttribute('aria-label'))).toEqual([
+      'Claude',
+      'Codex',
+    ]);
+    const rows = optionsOpen();
+    expect(rows).toHaveLength(2);
+    const claude = must(
+      rows.find(row => row.textContent?.includes('claude-a')),
+      'claude',
+    );
     expect(claude.textContent).toContain('5h 42%');
-    expect(claude.querySelector('[data-runtime-quota]')?.getAttribute('title')).toStartWith('resets in');
-    const codex = must(view.container.querySelector('[data-runtime-option="codex-b"]'), 'codex');
+    const codex = must(
+      rows.find(row => row.textContent?.includes('codex-b')),
+      'codex',
+    );
     expect(codex.textContent).toContain('needs sign-in');
-    expect(codex.querySelector('[data-runtime-quota]')).toBeNull();
+    expect(codex.textContent).not.toContain('5h');
+    // The chosen runtime's quota is also drawn under the box, in its tone, with its reset time.
+    expect(view.container.querySelector('[data-runtime-quota]')?.getAttribute('title')).toStartWith('resets in');
     expect(calls.map(call => call.route)).toContain('GET /v1/usage');
     expect(page.value).toBe('claude-a');
   });
@@ -132,8 +141,7 @@ describe('the new-ferret account slot, Usage on', () => {
     expect(page.chosen?.wrapper).toBe('claude-a');
     expect(page.chosen?.kind).toBe('claude-code');
     expect(Object.keys(page.chosen ?? {}).sort()).toEqual(['defaultModel', 'displayName', 'kind', 'models', 'wrapper']);
-    const radio = must(view.container.querySelector('[data-runtime-option="codex-b"] input'), 'codex radio');
-    await interact(() => (radio as HTMLInputElement).click());
+    await choose(view.container, 'codex-b');
     expect(page.value).toBe('codex-b');
   });
 
@@ -206,7 +214,7 @@ describe('the new-ferret account slot, Usage on', () => {
     );
     mounted.push(view);
     await settle();
-    expect(view.container.querySelector('[data-runtime-buttons]')).toBeNull();
+    expect(view.container.querySelector('[data-runtime-select]')).toBeNull();
   });
 });
 
@@ -214,10 +222,11 @@ describe('the new-ferret account slot, Usage off', () => {
   it('draws the picker without quota and without a complaint when Usage is off on the daemon', async () => {
     const page: Page = { value: '', chosen: undefined };
     const view = await draw(panelFor(NEW_FERRET_ACCOUNT_SLOT, { ...READS, 'GET /v1/usage': usageOff() }), page);
-    expect(view.container.querySelectorAll('[data-runtime-option]')).toHaveLength(2);
+    await openBox(view.container);
+    expect(optionsOpen()).toHaveLength(2);
     expect(view.container.querySelector('[data-runtime-quota]')).toBeNull();
     expect(view.container.querySelector('[data-picker-advisory]')).toBeNull();
-    expect(view.container.textContent).toContain('needs sign-in');
+    expect(optionsOpen().some(option => option.textContent?.includes('needs sign-in'))).toBe(true);
     expect(page.value).toBe('claude-a');
   });
 
@@ -226,7 +235,8 @@ describe('the new-ferret account slot, Usage off', () => {
       panelFor(NEW_FERRET_ACCOUNT_SLOT, { ...READS, 'GET /v1/usage': new Error('the feed is warming up') }),
       { value: '', chosen: undefined },
     );
-    expect(view.container.querySelectorAll('[data-runtime-option]')).toHaveLength(2);
+    await openBox(view.container);
+    expect(optionsOpen()).toHaveLength(2);
     expect(view.container.querySelector('[data-runtime-quota]')).toBeNull();
     expect(view.container.querySelector('[data-picker-advisory]')?.textContent).toContain(
       'Quota could not be read (the feed is warming up).',
@@ -250,10 +260,9 @@ describe('the move account slot', () => {
       { value: '', chosen: undefined },
       { harness: 'claude-code' },
     );
-    expect(
-      [...view.container.querySelectorAll('[data-runtime-option]')].map(o => o.getAttribute('data-runtime-option')),
-    ).toEqual(['claude-a']);
-    expect(view.container.textContent).toContain('5h 42%');
+    await openBox(view.container);
+    expect(optionsOpen().map(option => option.querySelector('[data-label]')?.textContent)).toEqual(['claude-a']);
+    expect(optionsOpen()[0]?.textContent).toContain('5h 42%');
   });
 
   it('checks the logins again only when the owner presses Check now, then shows the new verdict', async () => {
@@ -269,14 +278,17 @@ describe('the move account slot', () => {
       { harness: 'codex' },
     );
     expect(calls.some(call => call.route.startsWith('POST'))).toBe(false);
-    expect(view.container.querySelector('[data-runtime-option="codex-b"]')?.textContent).toContain('needs sign-in');
+    await openBox(view.container);
+    expect(optionsOpen()[0]?.textContent).toContain('needs sign-in');
+    await openBox(view.container); // close
     const button = must(view.container.querySelector('[data-picker-health] button'), 'Check now');
     await interact(() => (button as HTMLButtonElement).click());
     await settle();
     expect(calls.filter(call => call.route.startsWith('POST')).map(call => call.params?.loginId)).toContain(
       'login-codex-b',
     );
-    expect(view.container.querySelector('[data-runtime-option="codex-b"]')?.textContent).not.toContain('needs sign-in');
+    await openBox(view.container);
+    expect(optionsOpen()[0]?.textContent).not.toContain('needs sign-in');
   });
 
   it('tells the page which runtimes of that harness can run, once the roster is read, and says nothing if the page did not ask', async () => {
@@ -293,7 +305,8 @@ describe('the move account slot', () => {
       { value: '', chosen: undefined },
       { harness: 'codex' },
     );
-    expect(quiet.container.querySelectorAll('[data-runtime-option]')).toHaveLength(1);
+    await openBox(quiet.container);
+    expect(optionsOpen()).toHaveLength(1);
   });
 
   it('does not tell a page the cached roster is the answer while a changed roster is still being read', async () => {
@@ -346,7 +359,7 @@ describe('the move account slot', () => {
     );
     mounted.push(view);
     await settle();
-    expect(view.container.querySelector('[data-runtime-buttons]')).toBeNull();
+    expect(view.container.querySelector('[data-runtime-select]')).toBeNull();
   });
 });
 

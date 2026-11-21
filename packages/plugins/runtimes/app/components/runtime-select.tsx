@@ -1,33 +1,30 @@
 /**
- * THE NEW-SESSION RUNTIME CHOICE: one button per runtime, split Claude and Codex.
+ * THE NEW-SESSION RUNTIME CHOICE: the app's SelectBox, the runtimes grouped under Claude and Codex.
  *
- * It replaces the Account combobox on the form that STARTS a session. A person picking where a
- * session runs is choosing among a handful of named things, and a closed box that has to be opened,
- * searched and read row by row is the slow way to do that — on a phone most of all. Here every
- * runtime is on screen under its harness, one tap picks it, and the machine's first usable runtime
- * is already picked.
+ * The owner asked for one custom list control everywhere ("for dropdown, please use a custom component … on mobile, make it appear in
+ * the middle as a modal … like a combo box, where people can type to search"), and New ferret is now the only start form, so
+ * its runtime field is that control: a closed box showing the chosen runtime, a drawn list (a search field once it is long, a
+ * centred dialog on a phone) with each runtime under its harness, and the machine's first usable runtime already chosen.
  *
- * ONE ANSWER ACROSS BOTH GROUPS. Every button is a native radio sharing one `name`, so the browser
- * keeps a single selection across Claude and Codex and gives arrow-key movement and a single Tab stop
- * for free. The wrapping `role="radiogroup"` names the field; the harness groups only label.
+ * ONE ANSWER ACROSS BOTH GROUPS. The box holds one value, the runtime's wrapper, across Claude and Codex; the groups only head
+ * the list. A runtime that cannot run a session (its login is gone) is listed greyed with the reason, never pickable.
  *
- * THE DRAFT STAYS THE SOURCE OF TRUTH. A button writes the runtime's wrapper into the draft, exactly
- * as typing it would, and what is highlighted is read back from that text — so a value this page did
- * not choose (a stale one after a daemon switch) can never leave a highlighted button and a different
- * runtime in the request. When nothing offered matches the text, the first usable runtime (or the one
- * a Launch button named) replaces it. A runtime the roster never mentioned can still be typed, but only
- * where the roster could not be read at all — the one place there is nothing to press.
+ * THE DRAFT STAYS THE SOURCE OF TRUTH. A pick writes the runtime's wrapper into the draft, exactly as typing it would, and what
+ * the box shows is read back from that text — so a value this page did not choose (a stale one after a daemon switch) can never
+ * show one runtime and send another. When nothing offered matches the text, the first usable runtime (or the one a Launch
+ * button named) replaces it. A runtime the roster never mentioned can still be typed, but only where the roster could not be
+ * read at all — the one place there is nothing to pick.
  *
- * EVERY MISSING FACT STAYS MISSING. A button shows quota only when the cached feed has a row for it
- * and health only when the login's status was read; an unread fact draws nothing rather than
- * "quota —" or "never checked", because on a phone chip those would be noise claiming nothing.
+ * EVERY MISSING FACT STAYS MISSING. A runtime's row shows quota only when the cached feed has a row for it and health only when
+ * the login's status was read; an unread fact draws nothing rather than "quota —" or "never checked". The chosen runtime's
+ * quota and health are also drawn under the box, in their tones, so they are seen without opening the list.
  */
 
-import { Loading } from '@ferretry/app/ui';
+import { Loading, SelectBox, type SelectOption } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { UsageAccountView } from '@ferretry/plugin-usage/contract';
-import { Activity, Check } from 'lucide-react';
-import { type ReactNode, useEffect, useMemo } from 'react';
+import { Activity } from 'lucide-react';
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useAccountPickerSlice } from '../hooks/use-account-picker.ts';
 import { accountHealthView } from '../lib/account-health-view.ts';
 import type { PickerAccount } from '../lib/account-picker-catalog.ts';
@@ -48,9 +45,6 @@ import {
 /** The harnesses a runtime can drive, in the order their groups are drawn. */
 const HARNESS_ORDER = ['claude-code', 'codex'] as const satisfies readonly PickerAccount['kind'][];
 
-/** The one `name` that makes every button, in either group, a single choice. */
-const RADIO_NAME = 'fy-new-session-runtime';
-
 const HEALTH_TONE = {
   ok: 'text-ok',
   bad: 'text-err',
@@ -65,7 +59,7 @@ export interface ChosenRuntime {
   readonly account: AccountPickerOption;
 }
 
-export interface RuntimeButtonsProps {
+export interface RuntimeSelectProps {
   /** The roster of the one daemon whose runtimes this may ever offer (the store is made over its client). */
   readonly store: AccountPickerStore;
   /** The client bound to that daemon: the roster is read again when its runtimes move. */
@@ -91,10 +85,10 @@ export interface RuntimeButtonsProps {
   readonly harness?: PickerAccount['kind'];
   /** Offer "Check now", the one place the host is asked to check each login again. Never done on mount. */
   readonly offerHealthCheck?: boolean;
-  /** The id the typed fallback input takes, so the field's own label keeps pointing at it. */
+  /** The id the box (or the typed fallback input) takes, so the page's own label keeps pointing at it. */
   readonly fallbackId: string;
-  /** The element naming this field, for the radiogroup. */
-  readonly labelId: string;
+  /** The page's visible label element: the box announces (and titles its dialog with) that text, not a generic word. */
+  readonly labelId?: string;
   readonly fallbackPlaceholder: string;
 }
 
@@ -113,67 +107,46 @@ const runtimeHint = (account: AccountPickerOption): string => {
   return hint.length === 0 ? 'default model' : hint.join(' · ');
 };
 
-function RuntimeButton({
-  account,
-  checked,
-  now,
-  onChoose,
-}: {
-  readonly account: AccountPickerOption;
-  readonly checked: boolean;
-  readonly now: number;
-  readonly onChoose: () => void;
-}): ReactNode {
+/** One runtime as a list row: its name, then the words a person picks by (what it runs on, its quota, its health, why it is off). */
+const optionOf = (account: AccountPickerOption, now: number): SelectOption => {
+  const health = account.health === null ? null : accountHealthView(account.health, now);
+  const parts = [
+    runtimeHint(account),
+    ...quotaParts(account.quota, now).map(part => part.text),
+    ...(health === null ? [] : [health.label.toLowerCase()]),
+    ...(account.unavailableReason === null ? [] : [account.unavailableReason]),
+  ];
+  return {
+    value: account.wrapper,
+    label: account.displayName,
+    hint: parts.join(' · '),
+    disabled: !account.available,
+  };
+};
+
+/** What the chosen runtime's login and quota say, in their tones, under the box. Draws nothing when neither fact is known. */
+function ChosenReadout({ account, now }: { readonly account: AccountPickerOption; readonly now: number }): ReactNode {
   const health = account.health === null ? null : accountHealthView(account.health, now);
   const quota = quotaParts(account.quota, now);
+  if (quota.length === 0 && health === null) return null;
   return (
-    <label
-      className={cn(
-        'flex min-h-control min-w-0 max-w-full cursor-pointer flex-col justify-center gap-0.5 rounded-control border px-control-x py-1.5 text-left transition-colors',
-        'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
-        checked ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2 hover:border-accent',
-        account.available ? null : 'cursor-not-allowed opacity-60 hover:border-border',
-      )}
-      data-runtime-option={account.wrapper}
-      title={account.wrapper}
-    >
-      <input
-        checked={checked}
-        className="sr-only"
-        disabled={!account.available}
-        name={RADIO_NAME}
-        onChange={onChoose}
-        type="radio"
-        value={account.wrapper}
-      />
-      <span className="flex min-w-0 items-center gap-1">
-        {checked ? <Check aria-hidden="true" className="shrink-0 text-accent" size={12} /> : null}
-        <span className="min-w-0 break-words text-ui font-semibold text-fg">{account.displayName}</span>
-      </span>
-      <span className="mono min-w-0 break-words text-meta text-muted">{runtimeHint(account)}</span>
-      {quota.length > 0 || health !== null ? (
-        <span className="flex flex-wrap items-center gap-x-2 text-2xs">
-          {quota.map(part => (
-            <span
-              className={cn('mono shrink-0', QUOTA_TONE[part.tone])}
-              data-runtime-quota=""
-              key={part.text}
-              {...(part.title === undefined ? {} : { title: part.title })}
-            >
-              {part.text}
-            </span>
-          ))}
-          {health === null ? null : (
-            <span className={cn('mono', HEALTH_TONE[health.tone])} title={health.detail}>
-              {health.label.toLowerCase()}
-            </span>
-          )}
+    <span className="flex flex-wrap items-center gap-x-2 text-2xs" data-runtime-chosen="">
+      {quota.map(part => (
+        <span
+          className={cn('mono shrink-0', QUOTA_TONE[part.tone])}
+          data-runtime-quota=""
+          key={part.text}
+          {...(part.title === undefined ? {} : { title: part.title })}
+        >
+          {part.text}
         </span>
-      ) : null}
-      {account.unavailableReason === null ? null : (
-        <span className="text-meta text-warn">{account.unavailableReason}</span>
+      ))}
+      {health === null ? null : (
+        <span className={cn('mono', HEALTH_TONE[health.tone])} title={health.detail}>
+          {health.label.toLowerCase()}
+        </span>
       )}
-    </label>
+    </span>
   );
 }
 
@@ -184,7 +157,17 @@ function RuntimeButton({
  * rows handed in and the stored health the store hydrates beside it. It reads nothing else and writes
  * only the draft — choosing a button probes no runtime and starts nothing.
  */
-export function RuntimeButtons({
+/** The words the page's own label shows (New ferret: "Runtime"; Move: "Agent wrapper"), so the box says what the person reads. */
+function useVisibleLabel(labelId: string | undefined): string {
+  const [text, setText] = useState('Runtime');
+  useLayoutEffect(() => {
+    const shown = labelId === undefined ? '' : (document.getElementById(labelId)?.textContent ?? '').trim();
+    setText(shown === '' ? 'Runtime' : shown);
+  }, [labelId]);
+  return text;
+}
+
+export function RuntimeSelect({
   store,
   client,
   now,
@@ -201,7 +184,8 @@ export function RuntimeButtons({
   fallbackId,
   labelId,
   fallbackPlaceholder,
-}: RuntimeButtonsProps): ReactNode {
+}: RuntimeSelectProps): ReactNode {
+  const label = useVisibleLabel(labelId);
   const slice = useAccountPickerSlice(store, client);
   const published = slice.catalog?.accounts ?? null;
   const health = slice.health;
@@ -262,25 +246,19 @@ export function RuntimeButtons({
 
   return (
     <div className="grid gap-xs">
-      {/* `relative` is load-bearing: each radio is `sr-only`, which is absolutely positioned, and
-          without a positioned ancestor focusing one scrolls the fixed app shell out of view. */}
-      <div aria-labelledby={labelId} className="relative mt-1 grid gap-sm" data-runtime-buttons="" role="radiogroup">
-        {harnessGroups(offered).map(group => (
-          <fieldset className="m-0 grid min-w-0 gap-xs border-0 p-0" data-runtime-group={group.kind} key={group.kind}>
-            <legend className="kt-label mb-1 p-0 text-faint">{group.label}</legend>
-            <div className="flex flex-wrap gap-sm">
-              {group.options.map(account => (
-                <RuntimeButton
-                  account={account}
-                  checked={account.wrapper === selected?.wrapper}
-                  key={account.key}
-                  now={now}
-                  onChoose={() => onValueChange(account.wrapper)}
-                />
-              ))}
-            </div>
-          </fieldset>
-        ))}
+      <div className="grid min-w-0 max-w-sm gap-xs" data-runtime-select="">
+        <SelectBox
+          className="w-full"
+          id={fallbackId}
+          label={label}
+          onChange={onValueChange}
+          options={harnessGroups(offered).flatMap(group =>
+            group.options.map(account => ({ ...optionOf(account, now), group: group.label })),
+          )}
+          placeholder="Choose a runtime"
+          value={selected?.wrapper ?? ''}
+        />
+        {selected === null ? null : <ChosenReadout account={selected} now={now} />}
       </div>
       {offerHealthCheck ? (
         <div className="flex flex-wrap items-center gap-sm" data-picker-health={slice.healthStatus}>

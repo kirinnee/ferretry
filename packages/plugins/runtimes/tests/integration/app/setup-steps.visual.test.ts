@@ -114,7 +114,7 @@ const shootWhole = async (tab: Page, path: string, width: number): Promise<void>
 
 /** Picks the one paired machine and reads its review, as a person does. */
 const toCopyReview = async (tab: Page): Promise<void> => {
-  await tab.locator('input[name="copy-source"]').click();
+  await tab.locator('[data-copy-source] label:has(input[type="radio"])').first().click();
   await tab.locator('[data-copy-read]').click();
   await tab.waitForSelector('[data-copy-review]');
 };
@@ -122,7 +122,7 @@ const toCopyReview = async (tab: Page): Promise<void> => {
 /** On a phone, every control a person presses in the copy flow is a 44px target (the label around a tick or a radio counts). */
 const tapTargetsAreBigEnough = async (tab: Page): Promise<void> => {
   const targets = tab.locator(
-    '[data-copy-review] label:has(input), [data-copy-review] button, [data-copy-review] select',
+    '[data-copy-review] label:has(input), [data-copy-review] button, [data-copy-review] [role="combobox"]',
   );
   for (let at = 0; at < (await targets.count()); at += 1) {
     const height = (await targets.nth(at).boundingBox())?.height ?? 0;

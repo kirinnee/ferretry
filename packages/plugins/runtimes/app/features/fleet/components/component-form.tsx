@@ -8,7 +8,7 @@
 import { Lock } from 'lucide-react';
 import { useId } from 'react';
 import { cn } from '../../../ui.ts';
-import { Textarea } from '../../../ui.ts';
+import { SelectBox, Textarea } from '../../../ui.ts';
 import {
   type ComponentDraft,
   draftDefault,
@@ -65,19 +65,18 @@ export function ComponentForm({ draft, onChange, editing, problem }: ComponentFo
       {harnessBound(draft.kind) && !editing ? (
         <label className="flex min-w-0 flex-col gap-1" htmlFor={`${id}-harness`}>
           <span className="text-cell font-medium text-fg">Tool</span>
-          <select
-            id={`${id}-harness`}
-            className="kt-input"
-            value={draft.harness ?? 'claude-code'}
-            data-component-field="harness"
-            onChange={event => set({ harness: event.currentTarget.value as CatalogHarness })}
-          >
-            {(['claude-code', 'codex'] as const).map(harness => (
-              <option key={harness} value={harness}>
-                {HARNESS_NAMES[harness]}
-              </option>
-            ))}
-          </select>
+          <span className="contents" data-component-field="harness">
+            <SelectBox
+              id={`${id}-harness`}
+              label="Tool"
+              value={draft.harness ?? 'claude-code'}
+              onChange={next => set({ harness: next as CatalogHarness })}
+              options={(['claude-code', 'codex'] as const).map(harness => ({
+                value: harness,
+                label: HARNESS_NAMES[harness],
+              }))}
+            />
+          </span>
         </label>
       ) : null}
 
@@ -133,19 +132,16 @@ export function ComponentForm({ draft, onChange, editing, problem }: ComponentFo
       {draft.kind === 'modelSets' && models.length > 0 ? (
         <label className="flex min-w-0 flex-col gap-1" htmlFor={`${id}-default`}>
           <span className="text-cell font-medium text-fg">Default</span>
-          <select
-            id={`${id}-default`}
-            className="kt-input font-mono"
-            value={draftDefault(draft)}
-            data-component-field="default"
-            onChange={event => set({ defaultModel: event.currentTarget.value })}
-          >
-            {models.map(model => (
-              <option key={model} value={model}>
-                {model}
-              </option>
-            ))}
-          </select>
+          <span className="contents" data-component-field="default">
+            <SelectBox
+              id={`${id}-default`}
+              className="font-mono"
+              label="Default"
+              value={draftDefault(draft) ?? ''}
+              onChange={next => set({ defaultModel: next })}
+              options={models.map(model => ({ value: model, label: model }))}
+            />
+          </span>
         </label>
       ) : null}
     </div>

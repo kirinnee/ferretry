@@ -6,6 +6,7 @@
  *
  * Mounted over a scripted source and a scripted target; the source is a machine this browser is paired with.
  */
+import { chooseStarting as choose } from '../support/select-box.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
 import type { DaemonReach } from '@ferretry/app';
@@ -442,11 +443,7 @@ describe('copy settings: every item, login and mode is the person’s choice (v4
         logins: [{ sourceId: 'work', outcome: 'ask', candidates: ['mine-a', 'mine-b'] }],
       }),
     );
-    const select = must(root.querySelector<HTMLSelectElement>('[data-copy-login-pick="work"]'), 'the login choice');
-    await interact(() => {
-      select.value = 'mine-b';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await choose(must(root.querySelector('[data-copy-login-pick="work"]'), 'the login choice'), 'the login mine-b');
     await stage(root);
     expect(sentChange(calls)).toMatchObject({ logins: { work: 'mine-b' } });
   });

@@ -10,7 +10,7 @@
 
 import type { MachineView, RuntimeView } from '../../../../contract/index.ts';
 import { useId } from 'react';
-import { Badge, Button } from '../../../ui.ts';
+import { Badge, Button, SelectBox } from '../../../ui.ts';
 import { machineSettings } from '../machine/machine-settings.ts';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { Block, FleetGroup } from '../shell/fleet-group.tsx';
@@ -74,30 +74,27 @@ export function DefaultRuntimeControl({
         <Block>
           {/* The select is as wide as its longest option up to 24rem, and never wider than the panel it sits in; the picked runtime's state is a badge beside it, never part of an option's name. */}
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-            <select
-              id={id}
-              aria-label={DEFAULT_RUNTIME_LABEL}
-              aria-describedby={`${id}-hint`}
-              className="kt-input min-w-0 w-full max-w-sm"
-              data-default-runtime-select=""
-              value={shown}
-              onChange={event => {
-                changes.clear();
-                const value = event.target.value;
-                onPick(value === '' || value === current ? null : value);
-              }}
-            >
-              {current === null ? <option value="">{AUTOMATIC_DEFAULT}</option> : null}
-              {candidates.map(runtime => (
-                <option
-                  key={runtime.name}
-                  value={runtime.name}
-                  disabled={runtime.disabled !== undefined && runtime.name !== shown}
-                >
-                  {defaultOptionLabel(runtime)}
-                </option>
-              ))}
-            </select>
+            <span className="contents" data-default-runtime-select="">
+              <SelectBox
+                id={id}
+                label={DEFAULT_RUNTIME_LABEL}
+                aria-describedby={`${id}-hint`}
+                className="min-w-0 w-full max-w-sm"
+                value={shown}
+                onChange={value => {
+                  changes.clear();
+                  onPick(value === '' || value === current ? null : value);
+                }}
+                options={[
+                  ...(current === null ? [{ value: '', label: AUTOMATIC_DEFAULT }] : []),
+                  ...candidates.map(runtime => ({
+                    value: runtime.name,
+                    label: defaultOptionLabel(runtime),
+                    disabled: runtime.disabled !== undefined && runtime.name !== shown,
+                  })),
+                ]}
+              />
+            </span>
             {stateWords === null ? null : (
               <Badge
                 tone={

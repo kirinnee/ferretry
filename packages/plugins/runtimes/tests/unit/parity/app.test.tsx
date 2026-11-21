@@ -12,6 +12,7 @@
  * list, so the model set screens stand in for today's component screens here. The tabs' own behaviour is in the suites
  * under `tests/unit/app/features/fleet/`.
  */
+import { chooseStarting as choose, closeBox, labelOf, openBox, optionsOpen, shownBy } from '../support/select-box.ts';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
 import type { PanelProps, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
@@ -163,15 +164,14 @@ describe('the Runtimes Settings tab the half builds', () => {
     const control = must(root.querySelector('[data-default-runtime]'), 'the default runtime control');
     expect(control.textContent).toContain('Default for new agents');
     expect(text(control, '[data-default-runtime-hint]')).toBe('Used when a start names no runtime.');
-    const select = must(control.querySelector<HTMLSelectElement>('[data-default-runtime-select]'), 'the select');
-    expect([...select.options].map(option => option.value)).toEqual(['claude-default', 'claude-work', 'codex-kirin']);
-    expect(select.value).toBe('claude-default');
+    const select = must(control.querySelector('[data-default-runtime-select]'), 'the select');
+    await openBox(select);
+    expect(optionsOpen().map(labelOf)).toEqual(['claude-default', 'claude-work', 'codex-kirin']);
+    await closeBox(select);
+    expect(shownBy(select)).toBe('claude-default');
     expect(control.querySelector('[data-change-submit]')).toBeNull();
     // Picking another one shows the apply panel, never a save by itself.
-    await interact(() => {
-      select.value = 'claude-work';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await choose(select, 'claude-work');
     await settle();
     expect(text(control, '[data-change-submit]')).toBe('Save default runtime');
     expect(text(control, '[data-default-runtime-undo]')).toBe('Keep claude-default');
@@ -243,13 +243,15 @@ describe('the Runtimes Settings tab the half builds', () => {
       'Fisher' + 'Claude Code',
       'Otter' + 'Claude Code',
     ]);
-    const target = must(removal.querySelector<HTMLSelectElement>('[data-runtime-move-target]'), 'the move target');
-    expect([...target.options].map(option => option.value)).toEqual([
-      '',
+    const target = must(removal.querySelector('[data-runtime-move-target]'), 'the move target');
+    await openBox(target);
+    expect(optionsOpen().map(option => labelOf(option).split(' · ')[0])).toEqual([
+      'Leave them running here',
       'claude-default',
       'claude-work',
       'claude-plain',
     ]);
+    await closeBox(target);
     expect(text(removal, '[data-runtime-dialog-cancel]')).toBe('Cancel');
     expect(must(removal.querySelector('[data-change-submit]'), 'the Remove button').textContent).toContain('Remove');
   });

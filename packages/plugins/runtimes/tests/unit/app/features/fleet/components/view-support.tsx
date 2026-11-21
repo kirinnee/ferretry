@@ -4,6 +4,7 @@ import type { ReactElement } from 'react';
 import type { AccountCatalog } from '../../../../../../app/features/fleet/components/account-catalog.ts';
 import type { MachineTabProps } from '../../../../../../app/features/fleet/shell/machine-tab.ts';
 import type { RuntimesClient } from '../../../../../../app/lib/client.ts';
+import { chooseStarting } from '../../../../support/select-box.ts';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 import { APPLIED, type Call, CHANGE_ID, machine as machineView, scripted, stagedFrom } from '../account-support.ts';
 import { studioCatalog, studioMachine } from './catalog-fixture.ts';
@@ -96,12 +97,11 @@ export const type = async (root: ParentNode, selector: string, value: string): P
   });
 };
 
-export const choose = async (root: ParentNode, selector: string, value: string): Promise<void> => {
-  const field = must(root.querySelector<HTMLSelectElement>(selector), selector);
-  await settled(() => {
-    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(field, value);
-    field.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+/** Picks the option of a SelectBox (the element at `selector`, or a wrapper holding it) whose label starts with `label`. */
+export const choose = async (root: ParentNode, selector: string, label: string): Promise<void> => {
+  const host = must(root.querySelector(selector), selector);
+  await chooseStarting(host, label);
+  await settled(() => undefined);
 };
 
 export const text = (root: ParentNode, selector: string): string =>

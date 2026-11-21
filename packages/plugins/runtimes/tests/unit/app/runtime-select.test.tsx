@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { type ChosenRuntime, RuntimeButtons } from '../../../app/components/runtime-buttons.tsx';
+import { type ChosenRuntime, RuntimeSelect } from '../../../app/components/runtime-select.tsx';
 import { AccountPickerStore } from '../../../app/lib/account-picker-store.ts';
 import type { UsageAccountView } from '@ferretry/plugin-usage/contract';
 import { interact, mount, must } from '../support/dom.ts';
 import { healthMap, pickerAccount, pickerHealth } from './support/picker.ts';
+import { choose, openBox, optionsOpen } from '../support/select-box.ts';
 
 const NOW = Date.parse('2026-10-13T08:00:00.000Z');
 const client = { subscribe: () => () => undefined } as unknown as Pick<PluginClient, 'subscribe'>;
@@ -32,7 +33,7 @@ interface Harness {
 
 const host = (store: AccountPickerStore, state: Harness, extra: { usage?: UsageAccountView[] } = {}) => {
   const element = (
-    <RuntimeButtons
+    <RuntimeSelect
       store={store}
       client={client}
       now={NOW}
@@ -47,15 +48,14 @@ const host = (store: AccountPickerStore, state: Harness, extra: { usage?: UsageA
       }}
       noAccounts={<p data-none="">No runtimes</p>}
       fallbackId="fb"
-      labelId="lbl"
       fallbackPlaceholder="runtime"
     />
   );
   return element;
 };
 
-describe('RuntimeButtons', () => {
-  it('draws one radio per runtime under its harness, and picks the first usable one when the draft names none', async () => {
+describe('RuntimeSelect', () => {
+  it('lists each runtime under its harness, and picks the first usable one when the draft names none', async () => {
     const state: Harness = { value: '', chosen: null };
     const store = storeOf('claude-a', 'codex-b');
     const view = await mount(host(store, state));
@@ -63,11 +63,11 @@ describe('RuntimeButtons', () => {
     await view.render(host(store, state));
     await settle();
 
-    const groups = [...view.container.querySelectorAll('[data-runtime-group]')].map(group =>
-      group.getAttribute('data-runtime-group'),
-    );
-    expect(groups).toEqual(['claude-code', 'codex']);
-    expect(view.container.querySelectorAll('[data-runtime-option]')).toHaveLength(2);
+    expect(view.container.querySelectorAll('select, input[type="radio"]'), 'no native control').toHaveLength(0);
+    await openBox(view.container);
+    const groups = [...document.querySelectorAll('[role="group"]')].map(group => group.getAttribute('aria-label'));
+    expect(groups).toEqual(['Claude', 'Codex']);
+    expect(optionsOpen()).toHaveLength(2);
     expect(state.value).toBe('claude-a');
     await view.unmount();
   });
@@ -77,9 +77,7 @@ describe('RuntimeButtons', () => {
     const store = storeOf('claude-a', 'codex-b');
     const view = await mount(host(store, state));
     await settle();
-    await interact(() =>
-      must(view.container.querySelector<HTMLInputElement>('[data-runtime-option="codex-b"] input'), 'codex').click(),
-    );
+    await choose(view.container, 'codex-b');
     expect(state.value).toBe('codex-b');
     await view.render(host(store, state));
     await settle();
@@ -92,7 +90,7 @@ describe('RuntimeButtons', () => {
     const told: (readonly string[] | null)[] = [];
     const store = storeOf('claude-a', 'codex-b');
     const onOffered = (wrappers: readonly string[] | null): void => void told.push(wrappers);
-    const element = () => <RuntimeButtons {...host(store, state).props} onOffered={onOffered} />;
+    const element = () => <RuntimeSelect {...host(store, state).props} onOffered={onOffered} />;
     const view = await mount(element());
     await settle();
     await view.render(element());
@@ -122,7 +120,7 @@ describe('RuntimeButtons', () => {
       checkHealth: async () => ({ health: new Map(), error: null }),
     });
     const onOffered = (wrappers: readonly string[] | null): void => void told.push(wrappers);
-    const element = () => <RuntimeButtons {...host(store, state).props} onOffered={onOffered} />;
+    const element = () => <RuntimeSelect {...host(store, state).props} onOffered={onOffered} />;
     const view = await mount(element());
     await settle();
     expect(told.at(-1)).toEqual(['claude-a']);
@@ -130,7 +128,9 @@ describe('RuntimeButtons', () => {
     await interact(async () => store.reread());
     await settle();
     // The old single runtime is still on screen, but it is not the machine's answer to the read in flight.
-    expect(view.container.querySelectorAll('[data-runtime-option]')).toHaveLength(1);
+    await openBox(view.container);
+    expect(optionsOpen()).toHaveLength(1);
+    await openBox(view.container); // already open: stays open
     expect(told.at(-1)).toBeNull();
 
     await interact(async () => resolveRead(['claude-a', 'claude-b']));
@@ -150,11 +150,20 @@ describe('RuntimeButtons', () => {
     const store = storeOf('claude-a', 'codex-b');
     const view = await mount(host(store, state, { usage: [{ agent: 'codex-b', fiveHourPercent: 80 }] }));
     await settle();
-    const codex = must(view.container.querySelector('[data-runtime-option="codex-b"]'), 'codex');
+    await openBox(view.container);
+    const rows = optionsOpen();
+    const codex = must(
+      rows.find(row => row.textContent?.includes('codex-b')),
+      'codex',
+    );
     expect(codex.textContent).toContain('needs sign-in');
     expect(codex.textContent).toContain('5h 80%');
-    const claude = must(view.container.querySelector('[data-runtime-option="claude-a"]'), 'claude');
+    const claude = must(
+      rows.find(row => row.textContent?.includes('claude-a')),
+      'claude',
+    );
     expect(claude.textContent).not.toContain('quota');
+    expect(claude.textContent).not.toContain('5h');
     await view.unmount();
   });
 
