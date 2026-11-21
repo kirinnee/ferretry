@@ -35,8 +35,8 @@ export const LinkableConversationSchema = z.strictObject({
   keptBy: z.string().min(1).optional(),
   keptIn: z.enum(['ferretry', 'computer']).optional(),
   /**
-   * The ferret that runs, or ran, this conversation, and its name now. `name` leads with the ferret's name and adds the
-   * conversation's own `title` when that differs, so one line names the conversation either way it is remembered.
+   * The ferret that runs, or ran, this conversation, and its name now (its callsign: how it is found, never how its conversation
+   * is called). `name` is the conversation's title alone: the owner's, the CLI's, else one made from the first exchange.
    */
   ferret: FerretIdSchema.optional(),
   ferretName: z.string().min(1).max(CONVERSATION_NAME_MAX).optional(),

@@ -119,6 +119,12 @@ export function withoutDeliveryWrappers(text: string): string {
  * interruption marker, or nothing at all.
  */
 export function spokenText(text: string, documents: HandoffDocuments = NO_DOCUMENTS): string | undefined {
+  const spoken = spokenSource(text, documents);
+  return spoken === undefined ? undefined : collapse(spoken);
+}
+
+/** What {@link spokenText} says, with its line breaks kept (trimmed), or `undefined` when it says nothing. */
+function spokenSource(text: string, documents: HandoffDocuments): string | undefined {
   const pointer = handoffPointerPath(text);
   let message = text;
   if (pointer !== undefined) {
@@ -126,8 +132,26 @@ export function spokenText(text: string, documents: HandoffDocuments = NO_DOCUME
     if (document === undefined) return undefined;
     message = handoffDocumentMessage(document);
   }
-  const spoken = collapse(withoutDeliveryWrappers(message));
-  return spoken === '' || spoken.startsWith('<') || NOISE.has(spoken) ? undefined : spoken;
+  const source = withoutDeliveryWrappers(message).trim();
+  const spoken = collapse(source);
+  return spoken === '' || spoken.startsWith('<') || NOISE.has(spoken) ? undefined : source;
+}
+
+/**
+ * The first thing the owner said, LINES KEPT (a heading is still a heading) and cut to `max` characters: what a title is
+ * made from. It is the message {@link spokenMessages} lists first, and it stays inside the daemon; it is never listed.
+ */
+export function firstSpokenBrief(
+  events: readonly TranscriptEvent[],
+  max: number,
+  documents: HandoffDocuments = NO_DOCUMENTS,
+): string | undefined {
+  for (const event of events) {
+    if (!isOwnerMessage(event)) continue;
+    const source = spokenSource(event.text, documents);
+    if (source !== undefined) return source.replaceAll('\r\n', '\n').slice(0, max);
+  }
+  return undefined;
 }
 
 /** The words of `text` a title is compared on: lower-case, letters and digits, a plural's `s` dropped. */
@@ -244,3 +268,6 @@ export function recentExchanges(
     .slice(from)
     .map(message => ({ role: message.role, text: truncateText(message.text, CONVERSATION_EXCHANGE_TEXT_MAX) }));
 }
+
+/** How much of a first message a title is made from: a title reads its first heading or sentence, never a whole paste. */
+export const TITLE_BRIEF_MAX = 2_000;

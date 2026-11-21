@@ -20,6 +20,7 @@ import {
   type IndexedConversation,
   type IndexParser,
   type IndexSource,
+  type ScrubBatch,
 } from './lib/conversation-index.ts';
 import { type LinkCopier, type LinkKeeper, type LinkLedger, type LinkPreviewer, LinkService } from './lib/service.ts';
 import { linkRoutes } from './routes.ts';
@@ -39,6 +40,10 @@ export interface LinkNeeds {
   readonly sources: () => Promise<readonly IndexSource[]>;
   /** The ferret that runs each harness conversation (`"<harness>:<id>"`) and its name now, from Ferrets. */
   readonly ferretNames: () => Promise<FerretConversationNames>;
+  /** Scrubs the titles the index stores, one read of the vault's values per batch (the kernel's read-scoped redaction). */
+  readonly scrubbing?: ScrubBatch;
+  /** Offers Ferrets a title made from a ferret's conversation (`adoptTitle`); Ferrets keeps an owner's. */
+  readonly adoptTitle?: (ferret: string, title: string) => Promise<'adopted' | 'kept'>;
   readonly keeper: LinkKeeper;
   /**
    * Asks a harness plugin to copy one conversation of the owner's own history into ITS shared history pool
@@ -150,6 +155,8 @@ export function buildLinks(needs: LinkNeeds) {
     sqlite: () => needs.state.sqlite(CONVERSATION_INDEX_STATE),
     sources: needs.sources,
     ferretNames: needs.ferretNames,
+    ...(needs.scrubbing === undefined ? {} : { scrubbing: needs.scrubbing }),
+    ...(needs.adoptTitle === undefined ? {} : { adoptTitle: needs.adoptTitle }),
     parsers: {
       claude: direct(new ClaudeTranscriptParser(), parsers.claude),
       codex: direct(new CodexTranscriptParser(), parsers.codex),

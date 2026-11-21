@@ -23,10 +23,9 @@ import {
 import { conversation, NOW } from '../../../support/app/links.ts';
 
 describe('the headline of a row', () => {
-  it('is the name, with the first message under it', () => {
+  it('is the title alone: the first message is not printed under it', () => {
     expect(conversationHeadline(conversation('a', { name: 'Cart bugfix', preview: 'Fix the cart' }))).toEqual({
       headline: 'Cart bugfix',
-      secondary: 'Fix the cart',
       named: true,
     });
   });

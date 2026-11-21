@@ -13,6 +13,7 @@ import { describeConversation, type DescribedConversation } from './conversation
 import { isOwnerMessage } from '../../reader/lib/transcript/owner.ts';
 import { codexIndexNames, transcriptNames } from './conversation-name.ts';
 import { spokenMessages, truncateText, writtenMessages } from './conversation-text.ts';
+import { cleanTitle, fileTitle, type ScrubText, scrubShown } from './conversation-title.ts';
 
 /**
  * THE CONVERSATION INDEX (shared-history design §3.3): one row per transcript file of every history Conversation lists,
@@ -61,7 +62,7 @@ const CODEX_INDEX = 'session_index.jsonl';
 const CODEX_INDEX_READ_MAX_BYTES = 1024 * 1024;
 const ROLLOUT_ID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/iu;
 /** Bump when a column or what a column holds changes: the cache is dropped and rebuilt. */
-const LAYOUT = '1';
+const LAYOUT = '2';
 const NAME_FALLBACK_MAX = 60;
 
 /** One tree of transcripts the index reads: which harness wrote it, what parses it, and the read-only view of it. */
@@ -75,7 +76,22 @@ export interface IndexSource {
 }
 
 /** The ferret that runs, or ran, a harness conversation, by `"<harness>:<conversation id>"`. */
-export type FerretConversationNames = ReadonlyMap<string, { readonly ferret: string; readonly name: string }>;
+export type FerretConversationNames = ReadonlyMap<
+  string,
+  {
+    readonly ferret: string;
+    readonly name: string;
+    /** The ferret's task title (Ferrets' record), and who chose it; absent when it has none. */
+    readonly title?: string;
+    readonly titleSource?: 'owner' | 'auto';
+  }
+>;
+
+/** Opens the vault's values for one read and hands `work` the scrub that masks them (the kernel's read-scoped redaction). */
+export type ScrubBatch = <T>(work: (scrub: ScrubText) => T) => Promise<T>;
+
+/** What a title scrub does with no vault: nothing (a test); the credential shapes are dropped whatever the vault says. */
+const NO_VALUES: ScrubText = text => text;
 
 /** What the index needs of a parser: a text in, its events out. Where the parse runs (and how it paces itself) is the caller's. */
 export interface IndexParser {
@@ -96,6 +112,13 @@ export interface ConversationIndexNeeds {
   readonly sleep?: (ms: number) => Promise<void>;
   readonly yieldToLoop?: () => Promise<void>;
   readonly warn?: (message: string) => void;
+  /** Every title is scrubbed before it is stored, in ONE read per batch of rows. Absent: no vault values (a test). */
+  readonly scrubbing?: ScrubBatch;
+  /**
+   * Offers Ferrets a title made from the conversation (`adoptTitle`, in-process): only for a ferret whose title is not the
+   * owner's. Absent: nothing is offered.
+   */
+  readonly adoptTitle?: (ferret: string, title: string) => Promise<'adopted' | 'kept'>;
 }
 
 /** A row as the index holds it. */
@@ -116,6 +139,9 @@ interface Row {
   readonly title: string | null;
   readonly ferret_id: string | null;
   readonly ferret_name: string | null;
+  /** The ferret's own task title, scrubbed, and whether the owner chose it (1) or the conversation did (0). */
+  readonly ferret_title: string | null;
+  readonly ferret_title_owner: number;
   readonly preview: string;
   readonly latest: string | null;
   readonly first_at: number;
@@ -129,6 +155,10 @@ interface Row {
 }
 
 type RowInput = Omit<Row, 'hay' | 'title' | 'written'> & {
+  /** What a title is made from, not yet scrubbed: scrubbed with the rest of its batch, then written as `file_title`. */
+  readonly titleParts?: { readonly name?: string | undefined; readonly firstMessage?: string | undefined } | undefined;
+  /** `preview` and `latest` are raw messages: they are scrubbed with the batch too, because a row is shown wherever a title is. */
+  readonly fresh?: true | undefined;
   readonly written?: number | undefined;
   readonly hay?: string | undefined;
   readonly title?: string | null | undefined;
@@ -254,6 +284,29 @@ interface Work {
   readonly old: Row | undefined;
 }
 
+/**
+ * The title a row goes by. The owner's own title on the ferret first; then a name the CLI gave (Codex's thread index, the
+ * transcript's own: `/rename`, then the title it generated), then the one made from the first message; a title the conversation
+ * gave the ferret earlier last (it is only ever one of those, offered back).
+ */
+const titleOf = (row: {
+  readonly ferret_title: string | null;
+  readonly ferret_title_owner: number;
+  readonly index_title: string | null;
+  readonly file_title: string | null;
+}): string | null =>
+  (row.ferret_title_owner === 1 ? row.ferret_title : null) ?? row.index_title ?? row.file_title ?? row.ferret_title;
+
+/** What a conversation with no title is called: its folder when the first message is only a hand-off pointer, else its opening words. */
+const untitledName = (row: {
+  readonly written: number;
+  readonly project: string;
+  readonly preview: string;
+}): string => {
+  const folder = row.project.split(/[\\/]/u).findLast(part => part !== '') ?? '';
+  return row.written === 1 && folder !== '' ? folder : truncateText(row.preview, NAME_FALLBACK_MAX);
+};
+
 export class ConversationIndex {
   #db: SqliteHandle | undefined;
   #running: Promise<void> | undefined;
@@ -280,6 +333,7 @@ export class ConversationIndex {
       harness TEXT NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL, path TEXT NOT NULL, id TEXT NOT NULL,
       size INTEGER NOT NULL, mtime_ms INTEGER NOT NULL, scanned INTEGER NOT NULL, head_sha TEXT NOT NULL, ok INTEGER NOT NULL,
       project TEXT NOT NULL, file_title TEXT, index_title TEXT, title TEXT, ferret_id TEXT, ferret_name TEXT,
+      ferret_title TEXT, ferret_title_owner INTEGER NOT NULL DEFAULT 0,
       preview TEXT NOT NULL, latest TEXT, first_at INTEGER NOT NULL, last_at INTEGER NOT NULL,
       turns INTEGER NOT NULL, turns_at_least INTEGER NOT NULL, model TEXT, hay TEXT NOT NULL,
       win INTEGER NOT NULL DEFAULT 1, written INTEGER NOT NULL DEFAULT 0,
@@ -307,7 +361,7 @@ export class ConversationIndex {
     const db = this.#open();
     db.transaction(() => {
       for (const input of rows) {
-        const title = input.title ?? input.index_title ?? input.file_title;
+        const title = input.title ?? titleOf(input);
         const hay =
           input.hay ??
           hayOf({
@@ -319,8 +373,9 @@ export class ConversationIndex {
           });
         db.run(
           `INSERT OR REPLACE INTO conv (harness, kind, label, path, id, size, mtime_ms, scanned, head_sha, ok, project, file_title,
-             index_title, title, ferret_id, ferret_name, preview, latest, first_at, last_at, turns, turns_at_least, model, hay, written)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             index_title, title, ferret_id, ferret_name, ferret_title, ferret_title_owner, preview, latest, first_at, last_at, turns,
+             turns_at_least, model, hay, written)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             input.harness,
             input.kind,
@@ -338,6 +393,8 @@ export class ConversationIndex {
             title,
             input.ferret_id,
             input.ferret_name,
+            input.ferret_title,
+            input.ferret_title_owner,
             input.preview,
             input.latest,
             input.first_at,
@@ -505,9 +562,7 @@ export class ConversationIndex {
   async #run(work: readonly Work[]): Promise<void> {
     let next = 0;
     const pending: RowInput[] = [];
-    const flush = (): void => {
-      this.#write(pending.splice(0));
-    };
+    const flush = async (): Promise<void> => this.#write(await this.#titled(pending.splice(0)));
     const worker = async (): Promise<void> => {
       for (let index = next++; index < work.length; index = next++) {
         const item = work[index] as Work;
@@ -518,12 +573,41 @@ export class ConversationIndex {
           return undefined;
         });
         if (row !== undefined) pending.push(row);
-        if (pending.length >= BATCH_ROWS) flush();
+        if (pending.length >= BATCH_ROWS) await flush();
         await this.needs.yieldToLoop?.();
       }
     };
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, work.length) }, worker));
-    flush();
+    await flush();
+  }
+
+  /** One read of the vault's values for the whole batch. */
+  async #scrub<T>(work: (scrub: ScrubText) => T): Promise<T> {
+    return this.needs.scrubbing === undefined ? work(NO_VALUES) : await this.needs.scrubbing(work);
+  }
+
+  /**
+   * The rows of a batch with their `file_title` made: every title is scrubbed before it is stored (the vault's values masked,
+   * credential-shaped words dropped), in ONE read for the batch. A scrub that fails fails the batch: nothing is written, and the
+   * files are read again by the next update.
+   */
+  async #titled(rows: readonly RowInput[]): Promise<readonly RowInput[]> {
+    if (!rows.some(row => row.titleParts !== undefined || row.fresh === true)) return rows;
+    return await this.#scrub(scrub =>
+      rows.map(row => {
+        const { titleParts, fresh, ...rest } = row;
+        return {
+          ...rest,
+          ...(titleParts === undefined ? {} : { file_title: fileTitle(titleParts, scrub) }),
+          ...(fresh === true
+            ? {
+                preview: scrubShown(rest.preview, scrub),
+                latest: rest.latest === null ? null : scrubShown(rest.latest, scrub),
+              }
+            : {}),
+        };
+      }),
+    );
   }
 
   // ─── describing one file ──────────────────────────────────────────────────────────────────────────────────────
@@ -579,6 +663,8 @@ export class ConversationIndex {
       head_sha: used.headSha,
       ferret_id: old?.ferret_id ?? null,
       ferret_name: old?.ferret_name ?? null,
+      ferret_title: old?.ferret_title ?? null,
+      ferret_title_owner: old?.ferret_title_owner ?? 0,
       index_title: this.#indexTitle(source, result?.row.id ?? found.nameId),
     };
     if (result === undefined)
@@ -603,7 +689,11 @@ export class ConversationIndex {
       id: result.row.id,
       ok: 1,
       project: result.row.project,
-      file_title: result.row.name ?? null,
+      fresh: true as const,
+      file_title: null,
+      // What the title is made from, scrubbed with its batch (`#titled`). A conversation that is only hand-off pointers has no
+      // first message of its own: its ferret's title stands.
+      titleParts: { name: result.row.name, firstMessage: result.row.brief },
       preview: result.row.preview,
       latest: result.row.latest ?? null,
       first_at: result.firstAt ?? Date.parse(result.row.lastActivityAt),
@@ -732,6 +822,9 @@ export class ConversationIndex {
       index_title: old.index_title,
       ferret_id: old.ferret_id,
       ferret_name: old.ferret_name,
+      ferret_title: old.ferret_title,
+      ferret_title_owner: old.ferret_title_owner,
+      fresh: true as const,
       preview: old.preview,
       latest: latest === undefined ? old.latest : latest === old.preview ? null : latest,
       first_at: old.first_at,
@@ -777,7 +870,16 @@ export class ConversationIndex {
       );
       if (bytes === undefined) return;
       const text = decode(bytes);
-      names = codexIndexNames(stat.size > CODEX_INDEX_READ_MAX_BYTES ? text.slice(text.indexOf('\n') + 1) : text);
+      const named = codexIndexNames(stat.size > CODEX_INDEX_READ_MAX_BYTES ? text.slice(text.indexOf('\n') + 1) : text);
+      // Scrubbed before they are stored (a failing scrub leaves this stamp unrecorded, so the names are read again).
+      names = new Map(
+        await this.#scrub(scrub =>
+          [...named].flatMap(([id, name]) => {
+            const title = cleanTitle(name, scrub);
+            return title === undefined ? [] : [[id, title] as const];
+          }),
+        ),
+      );
     }
     const before = new Map(
       db
@@ -811,28 +913,90 @@ export class ConversationIndex {
     this.#write(rows);
   }
 
-  /** The ferret that runs each conversation, and its name today: a rename shows on the next listing. */
+  /**
+   * The ferret that runs each conversation, its name and its title today: a rename shows on the next listing. The title is
+   * scrubbed here too (it may have been typed with a secret in it). A ferret whose title is not the owner's is then OFFERED the
+   * conversation's own title, once per change (`adoptTitle`), so the drawer, the header and this list say the same words.
+   */
   async #applyFerretNames(): Promise<void> {
     const db = this.#open();
     const names = await this.needs.ferretNames().catch((): FerretConversationNames | undefined => undefined);
     if (names === undefined) return;
+    const titles = await this.#scrub(
+      scrub =>
+        new Map(
+          [...names].map(([key, ferret]) => [
+            key,
+            ferret.title === undefined ? null : (cleanTitle(ferret.title, scrub) ?? null),
+          ]),
+        ),
+    );
     const rows: RowInput[] = [];
     const wanted = new Set<string>();
+    const offers = new Map<string, string>();
     for (const [key, ferret] of names) {
       const split = key.indexOf(':');
       const harness = key.slice(0, split);
       const id = key.slice(split + 1);
-      for (const row of db.query<Row>('SELECT * FROM conv WHERE harness = ? AND id = ?', [harness, id])) {
+      const name = ferret.name.slice(0, CONVERSATION_NAME_MAX);
+      const title = titles.get(key) ?? null;
+      const owner = ferret.titleSource === 'auto' ? 0 : 1;
+      for (const row of db.query<Row>('SELECT * FROM conv WHERE harness = ? AND id = ? ORDER BY last_at DESC, rowid', [
+        harness,
+        id,
+      ])) {
         wanted.add(`${row.harness}\u0000${row.kind}\u0000${row.label}\u0000${row.path}`);
-        const name = ferret.name.slice(0, CONVERSATION_NAME_MAX);
-        if (row.ferret_id !== ferret.ferret || row.ferret_name !== name)
-          rows.push({ ...row, ferret_id: ferret.ferret, ferret_name: name, title: undefined, hay: undefined });
+        if (
+          row.ferret_id !== ferret.ferret ||
+          row.ferret_name !== name ||
+          row.ferret_title !== title ||
+          row.ferret_title_owner !== (title === null ? 0 : owner)
+        )
+          rows.push({
+            ...row,
+            ferret_id: ferret.ferret,
+            ferret_name: name,
+            ferret_title: title,
+            ferret_title_owner: title === null ? 0 : owner,
+            title: undefined,
+            hay: undefined,
+          });
+        const own = row.index_title ?? row.file_title;
+        const ownerTitled = title !== null && owner === 1;
+        if (!ownerTitled && own !== null && own !== title && !offers.has(ferret.ferret)) offers.set(ferret.ferret, own);
       }
     }
     for (const row of db.query<Row>('SELECT * FROM conv WHERE ferret_id IS NOT NULL'))
       if (!wanted.has(`${row.harness}\u0000${row.kind}\u0000${row.label}\u0000${row.path}`))
-        rows.push({ ...row, ferret_id: null, ferret_name: null, title: undefined, hay: undefined });
+        rows.push({
+          ...row,
+          ferret_id: null,
+          ferret_name: null,
+          ferret_title: null,
+          ferret_title_owner: 0,
+          title: undefined,
+          hay: undefined,
+        });
     this.#write(rows);
+    await this.#offerTitles(offers);
+  }
+
+  /** The ferret a title was last offered, and the title: a change is offered again, an unchanged title is not. */
+  readonly #offered = new Map<string, string>();
+
+  async #offerTitles(offers: ReadonlyMap<string, string>): Promise<void> {
+    const adopt = this.needs.adoptTitle;
+    if (adopt === undefined) return;
+    for (const [ferret, title] of offers) {
+      if (this.#offered.get(ferret) === title) continue;
+      this.#offered.set(ferret, title);
+      await adopt(ferret, title).catch((error: unknown) => {
+        this.#offered.delete(ferret);
+        this.needs.warn?.(
+          `A conversation's title could not be offered to its ferret: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+    }
   }
 
   // ─── query ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -911,14 +1075,9 @@ export class ConversationIndex {
   #wire(row: Row & { also: number }): IndexedConversation {
     const title = row.title ?? undefined;
     const ferretName = row.ferret_name ?? undefined;
-    const name = truncateText(
-      ferretName === undefined
-        ? (title ?? truncateText(row.preview, NAME_FALLBACK_MAX))
-        : title === undefined || title === ferretName
-          ? ferretName
-          : `${ferretName} — ${title}`,
-      CONVERSATION_NAME_MAX,
-    );
+    // The title alone: no callsign leads it and no opening message labels it. A conversation with no title (nothing readable in
+    // its first message, or only hand-off pointers) goes by the folder it works in, else its opening words.
+    const name = truncateText(title ?? untitledName(row), CONVERSATION_NAME_MAX);
     const parser: TranscriptHarness = row.harness === 'codex' ? 'codex' : 'claude';
     return {
       harness: row.harness,

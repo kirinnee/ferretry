@@ -13,6 +13,8 @@ import {
   HANDOFF_READ_MAX_BYTES,
   type HandoffDocuments,
   type HandoffScope,
+  firstSpokenBrief,
+  TITLE_BRIEF_MAX,
   handoffPointers,
   isReadableHandoff,
   isWrapperTitle,
@@ -67,6 +69,11 @@ export interface ConversationCandidate {
 /** The listing row a transcript describes, before the listing adds where it was kept. */
 export type DescribedConversation = Omit<LinkableConversation, 'harness' | 'keptBy' | 'keptIn'> & {
   readonly harness: Harness;
+  /**
+   * The first thing the owner said, lines kept and cut short (r11 S11): what a title is made from when the CLI named none.
+   * Absent when the conversation is only hand-off pointers. It stays inside the daemon and is never listed.
+   */
+  readonly brief?: string;
 };
 
 /** Describes the conversation one transcript holds; where its read and parse run is the adapter's choice. */
@@ -199,6 +206,7 @@ export function describeConversation(
       : names.generated;
   const name = names.chosen ?? generated;
   const latest = spoken.at(-1);
+  const brief = said.length > 0 ? firstSpokenBrief(events, TITLE_BRIEF_MAX, documents) : undefined;
   let model: string | undefined;
   let last: string | undefined;
   for (const event of events) {
@@ -213,6 +221,7 @@ export function describeConversation(
     harness: candidate.harness,
     project,
     ...(name === undefined ? {} : { name }),
+    ...(brief === undefined ? {} : { brief }),
     preview: first.slice(0, CONVERSATION_PREVIEW_MAX),
     ...(latest === undefined || latest === first ? {} : { latest: latest.slice(0, CONVERSATION_PREVIEW_MAX) }),
     lastActivityAt: new Date(Number.isNaN(parsedLast) ? modifiedAtMs : parsedLast).toISOString() as Instant,

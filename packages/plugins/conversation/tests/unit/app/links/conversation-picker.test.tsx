@@ -118,7 +118,7 @@ describe('ConversationPicker rows', () => {
     ]);
     expect(all('input[type="checkbox"]:checked')).toHaveLength(0);
     expect(find<HTMLInputElement>('[data-conversation-keep="notes-kept"]').disabled).toBe(true);
-    expect(text('[data-conversation-kept="notes-ferret"] [data-conversation-ferret]')).toBe('Ferret notes-ferret');
+    expect(text('[data-conversation-kept="notes-ferret"] [data-conversation-ferret]')).toBe('Ferret');
     expect(text('[data-conversation-row="shop-cart"]')).toContain(
       'Fix the shop-cart page1d agoLatest: and the testsClaudeshop4 turns · Sonnet 5.5',
     );
@@ -197,7 +197,7 @@ describe('ConversationPicker rows', () => {
       },
     });
     expect(text('[data-conversation-row="named"] [data-conversation-name]')).toBe('Cart total bugfix');
-    expect(text('[data-conversation-row="named"] [data-conversation-first]')).toBe('Fix the named page');
+    expect(all('[data-conversation-row="named"] [data-conversation-first]')).toHaveLength(0);
     expect(all('[data-conversation-row="named"] [data-conversation-latest]')).toHaveLength(0);
     expect(all('[data-conversation-row="plain"] [data-conversation-name]')).toHaveLength(0);
     expect(all('[data-conversation-row="plain"] [data-conversation-first]')).toHaveLength(0);

@@ -8,6 +8,7 @@ import { buildAttachments } from './attachments/index.ts';
 import { AttachmentError } from './attachments/lib/index.ts';
 import { buildLinks, keepInSyncFrom } from './links/index.ts';
 import type { FerretConversationNames, IndexSource } from './links/index.ts';
+import { ferretConversationNames } from './links/lib/ferret-names.ts';
 import { indexSourcesOf } from './links/lib/history-groups.ts';
 import type { LinkKeeper } from './links/lib/service.ts';
 import type { TranscriptOpener } from './reader/adapters/file-reads.ts';
@@ -193,19 +194,7 @@ export function buildReading(deps: {
     indexSourcesOf((await ferrets.historySources?.()) ?? [], harnessFamily);
   // Which ferret runs each harness conversation, and its name now (Ferrets' registry, not its files): a rename shows on the
   // next listing.
-  const ferretNames = async (): Promise<FerretConversationNames> =>
-    new Map(
-      (await ferrets.list()).flatMap(summary =>
-        summary.harnessConversation === undefined
-          ? []
-          : [
-              [
-                `${summary.harness}:${summary.harnessConversation}`,
-                { ferret: summary.id, name: summary.name },
-              ] as const,
-            ],
-      ),
-    );
+  const ferretNames = async (): Promise<FerretConversationNames> => ferretConversationNames(await ferrets.list());
   const keeper: LinkKeeper = {
     keep: async () => ({ ok: false, error: { code: 'unavailable', reason: KEEP_PENDING } }),
   };
@@ -213,6 +202,13 @@ export function buildReading(deps: {
     state: kernel.state,
     sources,
     ferretNames,
+    // Every title is scrubbed with the vault's values before it is stored or offered to a ferret (one read per batch).
+    scrubbing: async work => await kernel.redaction.read(scope => work(text => scope.text(text))),
+    // r11 S11: a ferret's conversation title is offered to Ferrets (in-process; it keeps an owner's title).
+    adoptTitle: async (ferret, title) => {
+      const id = tryParseSessionId(ferret);
+      return id === undefined ? 'kept' : ((await ferrets.adoptTitle?.(id, title)) ?? 'kept');
+    },
     importer: async (harness, input) =>
       (await ferrets.importConversation?.(harness as HarnessKey, input)) ??
       err({ reason: 'No harness is offering to keep a copy of that conversation.' }),

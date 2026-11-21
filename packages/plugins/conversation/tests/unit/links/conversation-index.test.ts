@@ -58,7 +58,9 @@ describe('the conversation index updater', () => {
       preview: 'please add a login page',
       turns: 1,
       keptIn: 'computer',
-      name: 'please add a login page',
+      // No title from the CLI: one from the first message, task-like, not the message itself.
+      name: 'Add a Login Page',
+      title: 'Add a Login Page',
     });
     expect(answer.conversations[0]?.row.lastActivityAt as string).toBe('2026-02-01T09:00:00.000Z');
   });
@@ -337,13 +339,20 @@ describe('a conversation whose every message is a hand-off pointer (a ferret’s
     `Read the file /home/x/.ferretry/state/ferrets/sessions/scout/turns/turn-00${n}.md now, then carefully follow every instruction inside it. This is your complete task for this turn.`;
 
   test('is listed by its pointer line, found by its ferret’s name, and its later turns are counted', async () => {
-    const names = new Map([[`claude-code:${A}`, { ferret: 'scout', name: 'Scout the billing code' }]]);
+    const names = new Map([
+      [
+        `claude-code:${A}`,
+        { ferret: 'scout', name: 'Scout', title: 'Billing code audit', titleSource: 'owner' as const },
+      ],
+    ]);
     const { index, owner } = setup(() => names);
     owner.set(pathOf(A), talk(pointer(1), '2026-02-01T09:00:00.000Z'));
     await index.refresh();
     expect(index.query({ words: ['scout', 'billing'] }).conversations[0]?.row).toMatchObject({
       id: A,
-      name: 'Scout the billing code',
+      // The ferret's own title is the name: no callsign leads it.
+      name: 'Billing code audit',
+      ferretName: 'Scout',
       turns: 1,
       preview: expect.stringContaining('turn-001.md'),
     });
@@ -366,8 +375,18 @@ describe('a conversation whose every message is a hand-off pointer (a ferret’s
   });
 });
 
-describe('names: the ferret first, then the conversation’s own title, then its first message', () => {
-  test('a conversation a ferret runs is found by the ferret’s name, and the name leads', async () => {
+describe('names: the owner’s title, then the conversation’s own, then one made from its first message', () => {
+  test('a pointer-only conversation of a ferret with no title goes by its folder, not by the pointer line', async () => {
+    const names = new Map([[`claude-code:${A}`, { ferret: 'scout', name: 'Scout' }]]);
+    const { index, owner } = setup(() => names);
+    const line =
+      'Read the file /home/x/.ferretry/state/ferrets/sessions/scout/turns/turn-001.md now, then carefully follow every instruction inside it. This is your complete task for this turn.';
+    owner.set(pathOf(A), talk(line, '2026-02-01T09:00:00.000Z'));
+    await index.refresh();
+    expect(index.query().conversations[0]?.row.name).toBe('app');
+  });
+
+  test('a conversation a ferret runs is found by the ferret’s name, and the CLI’s title is the name', async () => {
     const names = new Map([[`claude-code:${A}`, { ferret: 'scout', name: 'Scout the billing code' }]]);
     const { index, owner } = setup(() => names);
     owner.set(
@@ -384,14 +403,15 @@ describe('names: the ferret first, then the conversation’s own title, then its
       ferret: 'scout',
       ferretName: 'Scout the billing code',
       title: 'Invoice dig',
-      name: 'Scout the billing code — Invoice dig',
+      // The callsign never leads the name, and no "— title" is joined to it.
+      name: 'Invoice dig',
     });
-    // Its title is searchable too, and a conversation no ferret runs is named by its first message.
+    // Its title is searchable too, and a conversation no ferret runs is named by a title made from its first message.
     expect(index.query({ words: ['invoice', 'dig'] }).matched).toBe(1);
-    expect(index.query({ words: ['unrelated'] }).conversations[0]?.row.name).toBe('something unrelated');
+    expect(index.query({ words: ['unrelated'] }).conversations[0]?.row.name).toBe('Something Unrelated');
   });
 
-  test('when the title is the ferret’s name it is not said twice', async () => {
+  test('the ferret name is only a name: a title equal to it is said once', async () => {
     const names = new Map([[`claude-code:${A}`, { ferret: 'scout', name: 'Invoice dig' }]]);
     const { index, owner } = setup(() => names);
     owner.set(
@@ -403,13 +423,15 @@ describe('names: the ferret first, then the conversation’s own title, then its
     expect(index.query().conversations[0]?.row.name).toBe('Invoice dig');
   });
 
-  test('a renamed ferret’s new name is on the next listing, and the old one finds nothing', async () => {
-    let name = 'Scout one';
-    const { index, owner } = setup(() => new Map([[`claude-code:${A}`, { ferret: 'scout', name }]]));
+  test('a renamed ferret’s new title is on the next listing, and the old one finds nothing', async () => {
+    let title = 'Scout one';
+    const { index, owner } = setup(
+      () => new Map([[`claude-code:${A}`, { ferret: 'scout', name: 'Scout', title, titleSource: 'owner' as const }]]),
+    );
     owner.set(pathOf(A), talk('look at invoices', '2026-02-01T09:00:00.000Z'));
     await index.refresh();
     expect(index.query({ words: ['one'] }).conversations[0]?.row.name).toBe('Scout one');
-    name = 'Billing helper';
+    title = 'Billing helper';
     owner.resetReads();
     await index.refresh();
     expect(owner.bytesRead).toBe(0);

@@ -50,24 +50,23 @@ export const matchesSearch = (row: LinkableConversation, text: string, also = ''
   return words(text).every(word => haystack.includes(word));
 };
 
-/** The words a row's lines are made of. A name leads; the first message is the secondary line. */
+/** The words a row's lines are made of: the title leads, and nothing labels it with the opening message. */
 export interface ConversationHeadline {
   readonly headline: string;
-  /** What sits under the headline: the first real message, when a name heads the row. */
-  readonly secondary?: string;
-  /** Whether the headline is a name, as opposed to the first message standing in for one. */
+  /** Whether the headline is a title, as opposed to the first message standing in for one. */
   readonly named: boolean;
 }
 
 /**
- * A conversation's headline is what it is ABOUT: the CLI's name for it, and only a conversation with no
- * name at all is headed by its first message, cleaned. The ferret that keeps it is a mark of its own, so
- * a ferret's name never stands in for the subject.
+ * A conversation's headline is what it is ABOUT: its title (the owner's, the CLI's, else one made from the first exchange;
+ * the daemon names every row it can), and only a conversation with no name at all is headed by its first message, cleaned.
+ * The ferret that keeps it is a mark of its own, so a ferret's callsign never stands in for the subject and the first message
+ * is never printed under a title.
  */
 export const conversationHeadline = (row: LinkableConversation): ConversationHeadline => {
   const first = row.preview.trim() === '' ? undefined : row.preview;
   if (row.name === undefined) return { headline: first ?? 'No message preview', named: false };
-  return { headline: row.name, named: true, ...(first === undefined ? {} : { secondary: first }) };
+  return { headline: row.name, named: true };
 };
 
 /** The ferret that keeps a conversation: its name, and how it is when the app has read it. */
