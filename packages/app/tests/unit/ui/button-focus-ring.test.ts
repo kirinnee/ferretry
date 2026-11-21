@@ -14,7 +14,7 @@ describe('the shared Button', () => {
   it('draws the keyboard focus ring from the theme tokens, so every theme and its dark twin keep their own ring', () => {
     const ring = rule(/\n\.kt-btn:focus-visible \{[^}]*\}/u);
     expect(ring).toContain('outline: var(--focus-width) solid var(--focus-color);');
-    expect(ring).toContain('outline-offset: var(--focus-offset);');
+    expect(ring).toContain('outline-offset: calc(-1 * var(--focus-width));');
   });
 
   it('declares the ring after the base rule that resets outline, so the reset cannot hide it', () => {

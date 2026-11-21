@@ -299,6 +299,17 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # A keyboard focus ring is drawn inside its control, never outside it (an outward outline-offset is cut by any overflow
+    # ancestor). Reports until r11-3's gate flips it; see scripts/validate/no-outset-focus.sh.
+    a-no-outset-focus = {
+      enable = true;
+      name = "No outward focus ring offset in CSS";
+      entry = validator "scripts/validate/no-outset-focus.sh";
+      files = "^(packages/.*\\.css|scripts/validate/no-outset-focus\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # A selected or current item never carries an accent bar down its side (the owner: "VERY LLM"); it reads by fill and
     # weight. Scans every stylesheet; the ledger lists the style files whose bar an open r11 unit still owns. See
     # scripts/validate/no-accent-side-bar.sh.
