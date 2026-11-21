@@ -27,7 +27,7 @@ const PROMPTS: readonly (readonly [prompt: string, title: string])[] = [
     'Add a Dark Mode Toggle',
   ],
   [`Here is my key ${VAULT_VALUE} use it to call the billing api and list last month invoices`, 'Call the Billing Api'],
-  ['what is the difference between a worktree and a clone? explain briefly', 'Difference Between a Worktree'],
+  ['what is the difference between a worktree and a clone? explain briefly', 'Worktree vs Clone'],
   [
     'Refactor the payment retry logic so it uses exponential backoff, and add tests for the three failure modes we saw last week in production',
     'Refactor the Payment Retry Logic',
@@ -36,12 +36,12 @@ const PROMPTS: readonly (readonly [prompt: string, title: string])[] = [
     'ok so I want to rename the project folder cards to say Projects, can you do that and open a PR',
     'Rename the Project Folder Cards',
   ],
-  [`Use token ${FAKE_TOKEN} to push the branch then write release notes`, 'Push the Branch Then Write'],
+  [`Use token ${FAKE_TOKEN} to push the branch then write release notes`, 'Push the Branch'],
   [
     'Investigate the memory leak in the daemon after 6 hours uptime. Start with heap snapshots.',
     'Investigate the Memory Leak',
   ],
-  ['hi', 'Hi'],
+  ['hi', 'New conversation'],
 ];
 
 const JOINING_END =
@@ -62,6 +62,38 @@ describe('the fallback title of the ten gate prompts', () => {
       expect(title).not.toMatch(/redacted|ghp_|[[\]]/u);
     });
   }
+});
+
+describe('the three gate openers that read as tasks only after the clause rule', () => {
+  test('a request is cut where its first clause ends', () => {
+    expect(deriveTitle('push the branch then write release notes', NO_VAULT)).toBe('Push the Branch');
+    expect(deriveTitle('fix the login bug and add a regression test', NO_VAULT)).toBe('Fix the Login Bug');
+    expect(deriveTitle('search and replace the config', NO_VAULT)).toBe('Search and Replace the Config');
+  });
+
+  test('a question about two things is titled X vs Y', () => {
+    expect(deriveTitle('what is the difference between a worktree and a clone? explain briefly', NO_VAULT)).toBe(
+      'Worktree vs Clone',
+    );
+    expect(deriveTitle('difference between bun and node', NO_VAULT)).toBe('Bun vs Node');
+  });
+
+  test('a bare greeting is a new conversation, not a title', () => {
+    for (const greeting of ['hi', 'Hello!', 'hey, thanks', 'ok'])
+      expect(deriveTitle(greeting, NO_VAULT)).toBe('New conversation');
+    expect(deriveTitle('hi, can you fix the login test', NO_VAULT)).toBe('Fix the Login Test');
+  });
+});
+
+describe('a list item loses its marker and its opening filler', () => {
+  test.each([
+    ['- please fix the login test', 'Fix the Login Test'],
+    ['* hey can you fix the login test', 'Fix the Login Test'],
+    ['1. could you please fix the login test', 'Fix the Login Test'],
+    ['- [ ] I need you to fix the login test', 'Fix the Login Test'],
+  ])('“%s” reads as “%s”', (prompt, title) => {
+    expect(deriveTitle(prompt, NO_VAULT)).toBe(title);
+  });
 });
 
 describe('where a secret was scrubbed', () => {
