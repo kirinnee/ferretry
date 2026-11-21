@@ -188,6 +188,8 @@ export function describeConversation(
    * nothing (the index lists it, named by its ferret or title; a preview of it reads as the line the CLI was given).
    */
   pointersAsWritten = false,
+  /** The names of the whole transcript when the caller read it all and `text` is only some of it; else read from `text`. */
+  names = transcriptNames(candidate.harness, text),
 ): DescribedConversation | undefined {
   const head = conversationHead(candidate.harness, text);
   if (head === undefined) return undefined;
@@ -198,7 +200,6 @@ export function describeConversation(
   const spoken = said.length > 0 || !pointersAsWritten ? said : writtenSources(events);
   const first = spoken[0];
   if (first === undefined) return undefined;
-  const names = transcriptNames(candidate.harness, text);
   const generated =
     names.generated === undefined || isWrapperTitle(names.generated, wrapperOnlyWords(events, documents))
       ? undefined

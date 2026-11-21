@@ -2,6 +2,7 @@ import { taskTitleFor } from '@ferretry/core-ferrets/contract';
 import { SECRET_TOKEN_SOURCE, shownWord } from '@ferretry/std/credential-words';
 import { CONVERSATION_NAME_MAX, CONVERSATION_PREVIEW_MAX } from '../../../contract/index.ts';
 import { TITLE_BRIEF_MAX } from './conversation-text.ts';
+import { endOnContent } from './title-words.ts';
 
 /**
  * A CONVERSATION'S TITLE: the words a drawer row, a header, a notification and the Conversations list all show for it.
@@ -167,7 +168,7 @@ function credentialSpans(plain: string): readonly (readonly [number, number])[] 
 }
 
 /** `text` with the given spans of its PLAIN form blanked in the ORIGINAL (the glyphs around them untouched). */
-function blank(text: string, view: MatchView, spans: readonly (readonly [number, number])[]): string {
+function blank(text: string, view: MatchView, spans: readonly (readonly [number, number])[], hole: string): string {
   const cuts = spans
     .filter(([start, end]) => end > start)
     .map(([start, end]) => [view.from[start] ?? 0, view.to[end - 1] ?? text.length] as const)
@@ -176,7 +177,7 @@ function blank(text: string, view: MatchView, spans: readonly (readonly [number,
   let at = 0;
   for (const [start, end] of cuts) {
     if (end <= at) continue;
-    out += `${text.slice(at, Math.max(at, start))} `;
+    out += `${text.slice(at, Math.max(at, start))}${hole}`;
     at = end;
   }
   return out + text.slice(at);
@@ -188,8 +189,9 @@ function blank(text: string, view: MatchView, spans: readonly (readonly [number,
  * credential and word that has the SHAPE of a credential or follows the NAME of one (`API_KEY = …`, `password: …`,
  * `password is …`, `?token=…`), then the vault's own marks. Matching runs on the plain form; only the matches are cut, from the
  * original. A value the plain form reveals is masked in the plain form itself (the one case a glyph is not kept: it hid a secret).
+ * Each masked place becomes `hole` (a space unless the caller wants to SEE where a secret was, as a fallback title does).
  */
-export function maskText(text: string, scrub: ScrubText): string {
+export function maskText(text: string, scrub: ScrubText, hole = ' '): string {
   const masked = scrub(text);
   let view = matchViewOf(masked);
   let source = masked;
@@ -198,7 +200,7 @@ export function maskText(text: string, scrub: ScrubText): string {
     source = rescrubbed;
     view = matchViewOf(source);
   }
-  return blank(source, view, credentialSpans(view.plain)).replaceAll(MASK_MARKS, ' ');
+  return blank(source, view, credentialSpans(view.plain), hole).replaceAll(MASK_MARKS, hole);
 }
 
 const NO_SCRUB: ScrubText = text => text;
@@ -256,7 +258,7 @@ export const cleanTitle = (text: string, scrub: ScrubText): string | undefined =
  * asking, so these are cut from the start of each line before the title is made (a heading is left as written).
  */
 const LEAD_IN =
-  /^(?:(?:hey|hi|hello|ok|okay|so|um|well|right|alright|thanks|thank you)[\s,.!:-]+)*(?:(?:can|could|would|will) you (?:please |kindly )?|i (?:need|want|would like) you to |i(?:'d| would) like (?:you )?to |(?:please|pls|kindly)[\s,]+|(?:help me|let's|lets)[\s,]+(?:to )?|you should |we (?:need|have) to )*/iu;
+  /^(?:(?:hey|hi|hello|ok|okay|so|um|well|right|alright|thanks|thank you)[\s,.!:-]+)*(?:(?:can|could|would|will) you (?:please |kindly )?|(?:i|we) (?:need|want|would like|have) (?:you )?to |i(?:'d| would) like (?:you )?to |(?:please|pls|kindly)[\s,]+|(?:help me|let's|lets)[\s,]+(?:to )?|you should |here(?:'s| is) my |use (?:it|this|that|them) to |look (?:at|into) (?=(?:why|how|what|whether|if)\b)|(?:why|whether) (?:is |are |does |do )?|what (?:is|are) (?:the )?)*/iu;
 
 const withoutLeadIn = (brief: string): string =>
   brief
@@ -271,12 +273,34 @@ const withoutLeadIn = (brief: string): string =>
  */
 export function deriveTitle(firstMessage: string, scrub: ScrubText): string | undefined {
   // Masked from the WHOLE message, then cut to what a title reads: a value that crosses the cut is gone before it.
-  const brief = withoutControls(maskText(firstMessage, scrub))
+  const brief = withoutControls(maskText(firstMessage, scrub, HOLE))
     .slice(0, TITLE_BRIEF_MAX)
     .replace(/[\uD800-\uDBFF]$/u, '');
-  if (brief.replaceAll(/\s+/gu, '') === '') return undefined;
-  const made = taskTitleFor(withoutLeadIn(brief), FALLBACK_LABEL);
-  return FALLBACK_TITLE.test(made) ? undefined : cleanTitle(made, scrub);
+  if (brief.replaceAll(/[\s\uE000]+/gu, '') === '') return undefined;
+  // A place where a secret was is an edge, never a join: each side is read on its own, and the first that reads as work wins.
+  const pieces = brief
+    .split(HOLE)
+    .map(piece => piece.trim())
+    .filter(piece => piece !== '');
+  const split = brief.includes(HOLE);
+  const titles = pieces.flatMap(piece => {
+    const made = madeTitle(piece);
+    return made === undefined || (split && LONE_ASCII_WORD.test(made)) ? [] : [made];
+  });
+  const made = titles.find(title => title.split(' ').length >= 3) ?? titles[0];
+  return made === undefined ? undefined : cleanTitle(made, scrub);
+}
+
+/** One plain word: beside a scrubbed secret it says nothing (`Use`, `Key`). A script written without spaces is one word and still says something. */
+const LONE_ASCII_WORD = /^[\x21-\x7e]+$/u;
+
+/** Where a scrubbed secret was, while a title is made (a private-use character: never typed, never shown). */
+const HOLE = '\uE000';
+
+/** One stretch of the owner's words as a title: opening filler off, five words at most, ending on a content word. */
+function madeTitle(piece: string): string | undefined {
+  const made = taskTitleFor(withoutLeadIn(piece), FALLBACK_LABEL);
+  return FALLBACK_TITLE.test(made) ? undefined : endOnContent(made);
 }
 
 /**

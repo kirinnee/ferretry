@@ -247,7 +247,7 @@ describe('text over several lines', () => {
 describe('unicode', () => {
   test('full-width Latin spelling a token is the token', () => {
     const wide = 'ｇｈｐ＿ａＢ３ｄＥ６ｇＨ９ｊＫ２ｍＮ５ｐＱ８ｓＴ１ｖＷ４ｙＺ７ｂＣ０ｄＦ３ｈＪ６';
-    expect(deriveTitle(`Fix login ${wide} now`, NO_VAULT)).toBe('Fix Login Now');
+    expect(deriveTitle(`Fix login ${wide} now`, NO_VAULT)).toBe('Fix Login');
     expect(maskText(wide, NO_VAULT).trim()).toBe('');
   });
 

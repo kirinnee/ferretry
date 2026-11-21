@@ -11,7 +11,7 @@ import { CONVERSATION_NAME_MAX, type LinkableConversation } from '../../../contr
 import type { TranscriptEvent, TranscriptHarness } from '../../reader/lib/transcript/types.ts';
 import { describeConversation, type DescribedConversation } from './conversation-describer.ts';
 import { isOwnerMessage } from '../../reader/lib/transcript/owner.ts';
-import { codexIndexNames, transcriptNames } from './conversation-name.ts';
+import { codexIndexNames, type TranscriptNames, transcriptNames } from './conversation-name.ts';
 import { spokenMessages, spokenSources, truncateText, writtenSources } from './conversation-text.ts';
 import { cleanTitle, fileTitle, type ScrubText, scrubShown } from './conversation-title.ts';
 
@@ -63,6 +63,18 @@ const CODEX_INDEX_READ_MAX_BYTES = 1024 * 1024;
 const ROLLOUT_ID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/iu;
 /** Bump when a column or what a column holds changes: the cache is dropped and rebuilt. */
 const LAYOUT = '3';
+/**
+ * Bump when the RULE that makes a fallback title (`file_title`, from the first message) changes: every cached row is then read
+ * again once, so a conversation indexed under the old rule gets the new title. Unlike `LAYOUT` nothing is dropped: a row's ferret
+ * name and title (an owner's Rename included) are carried over. The row's title is made again with the precedence a fresh index
+ * gives it (a /rename, else a generated title, else the first message), from names found by one read of the WHOLE transcript
+ * (`#wholeNames`), so a /rename in the middle of a long transcript is found. A guess from the cached words is never made.
+ * A cached title is replaced ONLY past one guard (`#scanComplete`, shared by every way a stale row is read): the read reached the
+ * size the walk saw and the file still has that size and modified time. Otherwise the cached title stays and the row stays stale.
+ */
+const TITLE_RULE = '1';
+/** A row's `size` while its fallback title waits to be made again: no file can match it. */
+const STALE_SIZE = -1;
 const NAME_FALLBACK_MAX = 60;
 /** What a row is called when nothing readable is left to name it by (every word of it was masked). */
 const UNTITLED_NAME = 'Conversation';
@@ -368,6 +380,14 @@ export class ConversationIndex {
       'CREATE TABLE IF NOT EXISTS index_names (source TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (source, id))',
     );
     db.run("INSERT OR REPLACE INTO meta (k, v) VALUES ('layout', ?)", [LAYOUT]);
+    if (db.query<{ v: string }>("SELECT v FROM meta WHERE k = 'title_rule'")[0]?.v !== TITLE_RULE)
+      db.transaction(() => {
+        // No stamp can match a file again, and `scanned = 0` keeps an append from being folded onto the old title (`#delta`).
+        db.run('UPDATE conv SET size = ?, mtime_ms = -1, scanned = 0', [STALE_SIZE]);
+        db.run("INSERT OR REPLACE INTO meta (k, v) VALUES ('title_rule', ?)", [TITLE_RULE]);
+      });
+    // Rows written (or dropped) by a run that stopped before it settled the winners: they are settled by the next one.
+    this.#changed = db.query<{ v: string }>("SELECT v FROM meta WHERE k = 'winners_dirty'")[0]?.v === '1';
     this.#db = db;
     return db;
   }
@@ -377,11 +397,19 @@ export class ConversationIndex {
     return this.#open().query<{ v: string }>("SELECT v FROM meta WHERE k = 'built'")[0]?.v === '1';
   }
 
+  /** Rows are about to be dropped: the winners must be settled again, even by a later run if this one stops first. */
+  #markChanged(): void {
+    this.#changed = true;
+    this.#open().run("INSERT OR REPLACE INTO meta (k, v) VALUES ('winners_dirty', '1')");
+  }
+
   #write(rows: readonly RowInput[]): void {
     if (rows.length === 0) return;
     this.#changed = true;
     const db = this.#open();
     db.transaction(() => {
+      // In the transaction of the rows: they and the need to settle their winners are saved together, or neither is.
+      db.run("INSERT OR REPLACE INTO meta (k, v) VALUES ('winners_dirty', '1')");
       for (const input of rows) {
         const title = input.title ?? titleOf(input);
         const hay =
@@ -514,7 +542,7 @@ export class ConversationIndex {
       ? []
       : db.query<{ harness: string; kind: string; label: string }>('SELECT DISTINCT harness, kind, label FROM conv')) {
       if (harnesses.has(stale.harness) && !present.has(sourceKeyOf(stale))) {
-        this.#changed = true;
+        this.#markChanged();
         db.run('DELETE FROM conv WHERE harness = ? AND kind = ? AND label = ?', [
           stale.harness,
           stale.kind,
@@ -560,7 +588,7 @@ export class ConversationIndex {
       }
       for (const [path] of existing)
         if (only === undefined && !seen.has(path)) {
-          this.#changed = true;
+          this.#markChanged();
           db.run('DELETE FROM conv WHERE harness = ? AND kind = ? AND label = ? AND path = ?', [
             source.harness,
             source.kind,
@@ -670,6 +698,7 @@ export class ConversationIndex {
     if (
       old !== undefined &&
       old.ok === 1 &&
+      old.size !== STALE_SIZE &&
       old.scanned > 0 &&
       found.size > old.size &&
       found.size - old.scanned <= DELTA_READ_MAX_BYTES
@@ -706,12 +735,23 @@ export class ConversationIndex {
         result = await this.#describeText(source, found, wide);
       }
     }
+    // A row waiting on the title rule replaces its cached title ONLY from a COMPLETE scan (`#scanComplete`), whichever way the
+    // file was read: the names of one read of the whole file (`#wholeNames`) when what was read left the middle out, or the whole
+    // read itself (a file small enough, or a widened tail, that was taken whole).
+    const stale = old?.size === STALE_SIZE;
+    const scanned = stale && (result !== undefined || old.ok === 1);
+    const whole = scanned && read.partial ? await this.#wholeNames(source, found) : undefined;
+    const incomplete =
+      scanned && !(read.partial ? whole !== undefined : await this.#scanComplete(source, found, read.wholeBytes));
+    // The scan was not complete: the cached row stands untouched and keeps waiting, so the next refresh scans the file again.
+    if (incomplete && result === undefined) return undefined;
+    if (whole !== undefined) result = await this.#describeText(source, found, read, whole);
     const used = read;
     const common = {
       ...base,
-      size: found.size,
-      mtime_ms: found.mtimeMs,
-      scanned: used.scanned,
+      size: incomplete ? STALE_SIZE : found.size,
+      mtime_ms: incomplete ? -1 : found.mtimeMs,
+      scanned: incomplete ? 0 : used.scanned,
       head_sha: used.headSha,
       ferret_id: old?.ferret_id ?? null,
       ferret_name: old?.ferret_name ?? null,
@@ -736,16 +776,18 @@ export class ConversationIndex {
         turns_at_least: 0,
         model: null,
       };
+    const kept = incomplete ? (old?.file_title ?? undefined) : undefined;
     return {
       ...common,
       id: result.row.id,
       ok: 1,
       project: result.row.project,
       fresh: true as const,
-      file_title: null,
       // What the title is made from, scrubbed with its batch (`#titled`). A conversation that is only hand-off pointers has no
       // first message of its own: its ferret's title stands.
-      titleParts: { name: result.row.name, firstMessage: result.row.brief },
+      ...(kept === undefined
+        ? { file_title: null, titleParts: { name: result.row.name, firstMessage: result.row.brief } }
+        : { file_title: kept }),
       preview: result.row.preview,
       latest: result.row.latest ?? null,
       first_at: result.firstAt ?? Date.parse(result.row.lastActivityAt),
@@ -755,6 +797,50 @@ export class ConversationIndex {
       model: result.row.model ?? null,
       written: result.written ? 1 : 0,
     };
+  }
+
+  /**
+   * The names of a transcript read WHOLE, for a row waiting on the title rule (`STALE_SIZE`): the latest /rename and the latest
+   * generated title anywhere in the file, which the two ends of a long one may not hold. Read in runs, each cut to whole records;
+   * only the name records are parsed, so the file is never held. `undefined` when the scan is not complete: a run cannot be read,
+   * the file ends before the size the scan began with, or its size or time is no longer the one it began with.
+   */
+  async #wholeNames(source: IndexSource, found: Found): Promise<TranscriptNames | undefined> {
+    let chosen: string | undefined;
+    let generated: string | undefined;
+    let carry: Uint8Array = new Uint8Array(0);
+    let offset = 0;
+    while (offset < found.size) {
+      const run = await source.files.read(
+        found.path,
+        offset,
+        Math.min(found.size - offset, HARNESS_HISTORY_READ_MAX_BYTES),
+      );
+      // An early end (nothing left to read short of the size the scan began with) is not a whole read.
+      if (run === undefined || run.length === 0) return undefined;
+      offset += run.length;
+      const bytes = new Uint8Array(carry.length + run.length);
+      bytes.set(carry);
+      bytes.set(run, carry.length);
+      const end = offset >= found.size ? bytes.length : lastRecordEnd(bytes);
+      const names = transcriptNames(source.parser, decode(bytes.subarray(0, end)));
+      chosen = names.chosen ?? chosen;
+      generated = names.generated ?? generated;
+      carry = bytes.slice(end);
+    }
+    if (!(await this.#scanComplete(source, found, offset))) return undefined;
+    return { ...(chosen === undefined ? {} : { chosen }), ...(generated === undefined ? {} : { generated }) };
+  }
+
+  /**
+   * THE guard every path that replaces a cached title goes through (a row waiting on `TITLE_RULE` clears only past it): a scan is
+   * complete only when it read up to the size the walk saw (`readTo`: not an early end, not a failed read) AND the file still has
+   * that size and modified time (it did not change while it was read). Anything else keeps the cached title and the row waiting.
+   */
+  async #scanComplete(source: IndexSource, found: Found, readTo: number): Promise<boolean> {
+    if (readTo !== found.size) return false;
+    const after = await Promise.resolve(source.files.stat(found.path)).catch(() => undefined);
+    return after !== undefined && after.size === found.size && after.modifiedMs === found.mtimeMs;
   }
 
   /**
@@ -777,6 +863,7 @@ export class ConversationIndex {
         headText: undefined,
         tailText: undefined,
         partial: false,
+        wholeBytes: bytes.length,
         scanned: completeRecordsEnd(bytes),
         headSha: sha(bytes.subarray(0, Math.min(HASH_BYTES, bytes.length))),
       };
@@ -798,6 +885,7 @@ export class ConversationIndex {
       headText: headCut,
       tailText: tailCut,
       partial: true,
+      wholeBytes: 0,
       scanned: tailStart + completeRecordsEnd(tail),
       headSha: sha(head.subarray(0, Math.min(HASH_BYTES, head.length))),
     };
@@ -807,6 +895,7 @@ export class ConversationIndex {
     source: IndexSource,
     found: Found,
     read: Bounded,
+    names?: TranscriptNames,
   ): Promise<
     | {
         readonly row: DescribedConversation;
@@ -837,6 +926,7 @@ export class ConversationIndex {
       undefined,
       read.partial,
       true,
+      names,
     );
     return row === undefined
       ? undefined
@@ -897,11 +987,15 @@ export class ConversationIndex {
    */
   #settleWinners(): void {
     if (!this.#changed) return;
-    this.#open().run(
-      `UPDATE conv SET win = CASE WHEN ok = 1 AND NOT EXISTS (SELECT 1 FROM conv d WHERE d.harness = conv.harness AND d.id = conv.id
-         AND d.ok = 1 AND d.rowid <> conv.rowid AND (d.last_at > conv.last_at OR (d.last_at = conv.last_at AND d.rowid < conv.rowid)))
-         THEN 1 ELSE 0 END`,
-    );
+    const db = this.#open();
+    db.transaction(() => {
+      db.run(
+        `UPDATE conv SET win = CASE WHEN ok = 1 AND NOT EXISTS (SELECT 1 FROM conv d WHERE d.harness = conv.harness AND d.id = conv.id
+           AND d.ok = 1 AND d.rowid <> conv.rowid AND (d.last_at > conv.last_at OR (d.last_at = conv.last_at AND d.rowid < conv.rowid)))
+           THEN 1 ELSE 0 END`,
+      );
+      db.run("DELETE FROM meta WHERE k = 'winners_dirty'");
+    });
     this.#changed = false;
   }
 
@@ -1225,6 +1319,8 @@ interface Bounded {
   readonly headText: string | undefined;
   readonly tailText: string | undefined;
   readonly partial: boolean;
+  /** How many bytes of the file the read returned from its start, when it took the whole file (`partial` false); else 0. */
+  readonly wholeBytes: number;
   readonly scanned: number;
   readonly headSha: string;
 }

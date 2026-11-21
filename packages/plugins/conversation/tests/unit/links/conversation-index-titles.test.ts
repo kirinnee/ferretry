@@ -936,3 +936,74 @@ describe('what the index says when a look or an offer fails (r11 S11 CI coverage
     expect(attempts).toEqual(['ms-12:Fix flaky login test', 'ms-12:Fix flaky login test']);
   });
 });
+
+describe('an upgrade recomputes the fallback titles of the conversations already indexed, and only those', () => {
+  const OLD_FALLBACK = 'Look at Why the Deploy';
+  const NEW_FALLBACK = 'Deploy Script Keeps Failing';
+  const FIRST = 'Look at why the deploy script keeps failing on every push to main';
+
+  /** A cache an earlier build wrote: the rows as they stood, the title rule it knew not yet stamped, a fallback title it made. */
+  const upgraded = async (
+    options: { readonly names?: () => FerretConversationNames; readonly transcript?: string } = {},
+  ) => {
+    const sqlite = memorySqlite();
+    const owner = new MemoryHistory();
+    const make = () =>
+      new ConversationIndex({
+        sqlite: () => sqlite,
+        sources: async () => [
+          { harness: 'claude-code', parser: 'claude', kind: 'computer', label: 'owner', files: owner },
+        ],
+        ferretNames: async () => options.names?.() ?? new Map(),
+        parsers: PARSERS,
+        nowMs: () => 0,
+        scrubbing: vault(VALUES),
+      });
+    owner.set(pathOf(A), talk(FIRST) + (options.transcript ?? ''));
+    await make().refresh();
+    sqlite.database.run("DELETE FROM meta WHERE k = 'title_rule'");
+    sqlite.database.run('UPDATE conv SET file_title = ?, title = CASE WHEN index_title IS NULL THEN ? ELSE title END', [
+      OLD_FALLBACK,
+      OLD_FALLBACK,
+    ]);
+    return { sqlite, owner, fresh: make };
+  };
+
+  test('a row holding the old fallback title shows the new one after one refresh, and the next refresh reads nothing', async () => {
+    const { owner, fresh, sqlite } = await upgraded();
+    const index = fresh();
+    await index.refresh();
+    expect(index.query().conversations[0]?.row.title).toBe(NEW_FALLBACK);
+    expect(sqlite.database.query('SELECT file_title FROM conv').all()).toEqual([{ file_title: NEW_FALLBACK }]);
+    const read = owner.bytesRead;
+    await index.refresh();
+    expect(owner.bytesRead).toBe(read);
+  });
+
+  test('an append after the upgrade does not carry the old fallback title forward', async () => {
+    const { owner, fresh } = await upgraded();
+    owner.append(pathOf(A), talk('and then tidy the logs', '2026-02-01T09:30:00.000Z'));
+    const index = fresh();
+    await index.refresh();
+    expect(index.query().conversations[0]?.row.title).toBe(NEW_FALLBACK);
+  });
+
+  test('a title the harness wrote (/rename) survives the recompute byte for byte', async () => {
+    const written = 'Rotate the staging keys — Q3 (ünï)';
+    const { fresh } = await upgraded({ transcript: rec({ type: 'custom-title', customTitle: written }) });
+    const index = fresh();
+    await index.refresh();
+    expect(index.query().conversations[0]?.row.title).toBe(written);
+  });
+
+  test("an owner's Rename on the ferret survives the recompute byte for byte", async () => {
+    const renamed = 'My own words, here — v2';
+    const { fresh, sqlite } = await upgraded({ names: () => ferretOf({ title: renamed, titleSource: 'owner' }) });
+    const index = fresh();
+    await index.refresh();
+    expect(index.query().conversations[0]?.row.title).toBe(renamed);
+    expect(sqlite.database.query('SELECT ferret_title, ferret_title_owner FROM conv').all()).toEqual([
+      { ferret_title: renamed, ferret_title_owner: 1 },
+    ]);
+  });
+});

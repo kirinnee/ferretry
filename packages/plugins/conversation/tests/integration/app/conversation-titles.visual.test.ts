@@ -234,6 +234,8 @@ describe('conversation titles, as the card draws them', () => {
 
           // (b) no CLI title: a task-like title, not the message's own opening.
           const made = await card(B);
+          // The corrected title, as the card's DOM text: the parent's rule drew "Look at Why the Deploy" here.
+          expect(made.title).toBe('Deploy Script Fails on Mac');
           expect(made.title.split(' ').length).toBeLessThanOrEqual(5);
           expect(made.title.length).toBeLessThanOrEqual(60);
           expect(made.title).not.toContain('/');
