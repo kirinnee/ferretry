@@ -2,7 +2,8 @@
 import { daemonOfClient } from '@ferretry/app';
 import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
-import { AppearancePage, NamePage } from './shell-pages.tsx';
+import { AppearancePage } from './appearance-page.tsx';
+import { NamePage } from './shell-pages.tsx';
 
 export function createNamePanel(client: PluginClient) {
   return function NamePanel({ step }: PanelProps): ReactNode {

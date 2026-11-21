@@ -1,0 +1,236 @@
+/* ============================================================================
+   The onboarding Appearance step (appearance-page.tsx): three stacked lists of titles-only ChoiceCards on the left and ONE
+   mini-window demo in the frame's demo column. Theme tokens only. The window pops once per pick (it is re-mounted with
+   `data-moves`) and rests on its final picture otherwise.
+   ========================================================================== */
+
+.fy-astep {
+  display: flex;
+  flex-direction: column;
+  gap: 24px; /* between lists; the cards inside a list keep their own gap */
+  min-width: 0;
+}
+.fy-astep__row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.fy-astep__name {
+  color: var(--fg);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  margin: 0;
+}
+.fy-astep__note {
+  color: var(--muted);
+  font-size: calc(var(--font-size-base) - 1.5px);
+  margin: 0;
+}
+/* A card with a title only is a compact row: 44px (the touch floor), not the 64px a title-and-line card keeps. */
+.fy-astep .fy-cc[data-layout='stack'] .fy-cc__card:not(:has(.fy-cc__line)) {
+  min-height: 44px;
+  padding-block: 6px;
+}
+
+/* ---- the demo ---- */
+.fy-ad {
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-width: 0;
+}
+.fy-ad__window {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel, var(--radius-control));
+  box-shadow: var(--shadow-panel, none);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.fy-ad__bar {
+  background: var(--surface-2);
+  border-block-end: 1px solid var(--border);
+  display: flex;
+  gap: 5px;
+  padding: 8px 10px;
+}
+.fy-ad__bar i {
+  background: var(--muted);
+  border-radius: 50%;
+  block-size: 7px;
+  inline-size: 7px;
+  opacity: 0.6;
+}
+.fy-ad__body {
+  display: flex;
+  min-height: 0;
+}
+.fy-ad__side {
+  background: var(--surface-2);
+  border-inline-end: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  inline-size: 44px;
+  padding: 10px 8px;
+}
+.fy-ad__side span {
+  background: var(--surface-3, var(--border));
+  border-radius: var(--radius-control);
+  block-size: 8px;
+}
+.fy-ad__side span[data-on] {
+  background: var(--accent);
+}
+.fy-ad__main {
+  align-items: flex-start;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+}
+.fy-ad__display {
+  color: var(--fg);
+  font-family: var(--font-display, inherit);
+  font-size: 40px;
+  font-weight: var(--weight-display, 700);
+  line-height: 1;
+}
+.fy-ad__text {
+  color: var(--fg);
+}
+.fy-ad__label {
+  color: var(--muted);
+  font-family: var(--font-label, inherit);
+  font-size: 11px;
+  font-style: normal;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.fy-ad__button {
+  background: var(--accent);
+  border: var(--border-width, 1px) solid var(--accent);
+  border-radius: var(--radius-control);
+  block-size: 28px;
+  inline-size: 96px;
+}
+.fy-ad__input {
+  background: var(--surface-1, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  block-size: 28px;
+  inline-size: 100%;
+  max-inline-size: 220px;
+}
+.fy-ad__card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel, var(--radius-control));
+  block-size: 56px;
+  box-shadow: var(--shadow-panel, none);
+  inline-size: 100%;
+}
+.fy-ad__toggle {
+  background: var(--accent);
+  border-radius: 999px;
+  block-size: 16px;
+  inline-size: 30px;
+}
+.fy-ad__row {
+  background: var(--surface-3, var(--border));
+  border-radius: var(--radius-control);
+  block-size: 10px;
+  inline-size: 100%;
+}
+
+/* ON A PHONE the frame gives the demo at most 140px, so the window is a compact strip that shows every part of the look at once
+   (type, button, input, toggle) and the tall parts (card, list rows) are left out: nothing is cropped. Beside the choices
+   (a frame of 900px or more) the full window is drawn. */
+.fy-ad__card,
+.fy-ad__row {
+  display: none;
+}
+.fy-ad__bar {
+  padding: 5px 10px;
+}
+.fy-ad__side {
+  padding: 8px 6px;
+}
+.fy-ad__main {
+  align-content: center;
+  align-items: center;
+  display: grid;
+  gap: 6px 12px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 8px 12px;
+}
+.fy-ad__display {
+  font-size: 34px;
+  grid-row: span 2;
+}
+.fy-ad__label {
+  display: none;
+}
+.fy-ad__button,
+.fy-ad__input {
+  block-size: 24px;
+}
+.fy-ad__input {
+  grid-column: 1 / -1;
+  max-inline-size: none;
+}
+@container (min-width: 900px) {
+  .fy-ad__card,
+  .fy-ad__row {
+    display: block;
+  }
+  .fy-ad__label {
+    display: inline;
+  }
+  .fy-ad__bar {
+    padding: 8px 10px;
+  }
+  .fy-ad__side {
+    padding: 10px 8px;
+  }
+  .fy-ad__main {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+  }
+  .fy-ad__display {
+    font-size: 56px;
+    grid-row: auto;
+  }
+  .fy-ad__button,
+  .fy-ad__input {
+    block-size: 28px;
+  }
+  .fy-ad__input {
+    max-inline-size: 220px;
+  }
+}
+
+@keyframes fy-ad-pop {
+  from {
+    opacity: 0.6;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-ad__window[data-moves] {
+    animation: fy-ad-pop 240ms ease-out;
+  }
+}
+:root[data-motion='reduced'] .fy-ad__window {
+  animation: none;
+}
