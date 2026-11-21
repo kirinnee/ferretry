@@ -18,13 +18,21 @@ export const NEXT_SPINNER_LOG = `
     if (opacity >= 0.99 && fullAt < 0) fullAt = now;
     return true;
   };
+  let lastFrame = -1;
+  let widestGap = 0;
   const frame = () => {
-    if (!look() && shownAt >= 0) {
+    const now = performance.now();
+    const gap = lastFrame < 0 ? 0 : now - lastFrame;
+    lastFrame = now;
+    const there = look();
+    if (there || shownAt >= 0) widestGap = Math.max(widestGap, gap);
+    if (!there && shownAt >= 0) {
       const end = performance.now();
-      window.__nextSpinner.push({ ms: end - shownAt, fullMs: fullAt < 0 ? 0 : end - fullAt });
+      window.__nextSpinner.push({ ms: end - shownAt, fullMs: fullAt < 0 ? 0 : end - fullAt, gapMs: widestGap });
       shownAt = -1;
       fullAt = -1;
     }
+    if (!there) widestGap = 0;
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
@@ -35,4 +43,6 @@ export const NEXT_SPINNER_LOG = `
 export interface NextSpinnerRun {
   readonly ms: number;
   readonly fullMs: number;
+  /** The widest gap between two animation frames while the spinner was in the page: how late its first visible frame can have been sampled. */
+  readonly gapMs: number;
 }
