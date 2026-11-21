@@ -3,8 +3,9 @@
  * reading about it. It draws with the real shared classes (`kt-btn`, `kt-input`) and the same tokens the app reads, so
  * it can never drift from the app:
  *
- *   type · buttons at rest / hover / press · an input with its real focus ring · a panel and its shadow ·
- *   radius and border widths · spacing rulers · a toggle and a selected tile · a list row at both densities
+ *   type · buttons at rest / hover / press · an input with its real focus ring, and a disabled one · a panel and its shadow ·
+ *   radius and border widths · spacing rulers · a toggle and a selected tile · a list row at both densities ·
+ *   (r11 T13) markdown · a small hypermedia diagram · the style's spinner · the background and its grain
  *
  * It follows the page's own look by default; give it `look` and `scoped` to render a look of its own (a screenshot, the
  * matrix test). Picking anything replays it ONCE: the press, the toggle and the tile pop play when the look changes,
@@ -15,6 +16,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '../ui/primitives.tsx';
 import { useMotionAllowed } from '../ui/use-motion-allowed.ts';
 import { type Look, lookAttributes } from './appearance-pickers.tsx';
+import {
+  BackdropSample,
+  DisabledFieldSample,
+  HypermediaSample,
+  MarkdownSample,
+  SpinnerSample,
+} from './appearance-specimen-parts.tsx';
 import './appearance-specimen.css';
 
 export interface AppearanceSpecimenProps {
@@ -122,6 +130,7 @@ export function AppearanceSpecimen({ look, scoped = false }: AppearanceSpecimenP
           tabIndex={-1}
           aria-label="Specimen focused field"
         />
+        <DisabledFieldSample />
       </Section>
 
       <Section title="Panel">
@@ -171,6 +180,22 @@ export function AppearanceSpecimen({ look, scoped = false }: AppearanceSpecimenP
             Selected
           </span>
         </div>
+      </Section>
+
+      <Section title="Markdown">
+        <MarkdownSample />
+      </Section>
+
+      <Section title="Hypermedia">
+        <HypermediaSample />
+      </Section>
+
+      <Section title="Spinner">
+        <SpinnerSample />
+      </Section>
+
+      <Section title="Background">
+        <BackdropSample />
       </Section>
 
       <Section title="Rows">

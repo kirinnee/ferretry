@@ -171,3 +171,28 @@
 :root[data-motion='reduced'] .fy-ap-chip {
   transition: none;
 }
+
+/* ---- "Don't change my colours when I change style" (under the style grid) ---- */
+.fy-ap-keep {
+  align-items: center;
+  display: flex;
+  gap: var(--gap-md);
+}
+.fy-ap-keep__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.fy-ap-keep__name {
+  color: var(--fg);
+  font-size: var(--text-base);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
+.fy-ap-keep__hint {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-base);
+}

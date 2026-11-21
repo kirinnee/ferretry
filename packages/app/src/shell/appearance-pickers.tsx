@@ -6,6 +6,7 @@
  */
 import { type KeyboardEvent, useId, useRef } from 'react';
 import { ChoiceCards, revealChoice } from '../compose/choice-cards.tsx';
+import { SettingSwitch } from '../compose/setting-row.tsx';
 import type { PaletteEntry, PaletteId, StyleEntry, StyleId } from '../theme/catalog.ts';
 import type { ResolvedMode } from '../theme/preferences.ts';
 import './appearance-pickers.css';
@@ -51,16 +52,29 @@ function StyleMini({ look }: { readonly look: Look }) {
   );
 }
 
+/**
+ * The palette a style card is drawn in: the one a pick GIVES. That is the style's own default palette, unless the person
+ * kept their colours ("Don't change my colours when I change style"), when a pick leaves the palette alone and the card
+ * therefore shows the palette they have.
+ */
+export function cardPalette(style: StyleEntry, current: PaletteId, keepPalette: boolean): PaletteId {
+  return keepPalette ? current : style.defaultPalette;
+}
+
 export function StylePicker({
   styles,
   value,
   palette,
+  keepPalette = false,
   mode,
   onChange,
 }: {
   readonly styles: readonly StyleEntry[];
   readonly value: StyleId;
+  /** The palette in force: what a card wears when colours are kept. */
   readonly palette: PaletteId;
+  /** The device flag: a pick leaves the palette alone, so a card wears the palette in force. Off when left out. */
+  readonly keepPalette?: boolean;
   readonly mode: ResolvedMode;
   readonly onChange: (style: StyleId) => void;
 }) {
@@ -73,9 +87,33 @@ export function StylePicker({
         id: style.id,
         title: style.label,
         line: style.blurb,
-        demo: <StyleMini look={{ style: style.id, palette, mode }} />,
+        demo: <StyleMini look={{ style: style.id, palette: cardPalette(style, palette, keepPalette), mode }} />,
       }))}
     />
+  );
+}
+
+/** "Don't change my colours when I change style": the one flag under the style grid. */
+export function KeepPaletteSwitch({
+  checked,
+  onChange,
+}: {
+  readonly checked: boolean;
+  readonly onChange: (keep: boolean) => void;
+}) {
+  const id = useId();
+  return (
+    <div className="fy-ap-keep" data-keep-palette="">
+      <SettingSwitch checked={checked} onChange={onChange} labelledBy={`${id}-name`} describedBy={`${id}-hint`} />
+      <span className="fy-ap-keep__text">
+        <span id={`${id}-name`} className="fy-ap-keep__name">
+          Don't change my colours when I change style
+        </span>
+        <span id={`${id}-hint`} className="fy-ap-keep__hint">
+          {checked ? 'A new style keeps your palette.' : 'A new style brings its own palette. You can change it after.'}
+        </span>
+      </span>
+    </div>
   );
 }
 
