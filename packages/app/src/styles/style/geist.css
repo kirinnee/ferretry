@@ -198,6 +198,108 @@
   --shadow-lg: 0 2px 4px var(--shadow-lg-1), 0 20px 56px -10px var(--shadow-lg-2);
 }
 
+/* ═══ r11 T5 · THE COMPONENT STYLE CONTRACT, FILLED (see tokens/base-style.css) ═══
+   Geist is a dashboard, not a poster: every slot is a precision answer, drawn in hairlines and carried by structure.
+   Colour is the palette's; nothing here is a colour, a gradient or a side bar. */
+:root[data-style='geist'],
+[data-swatch][data-style='geist'] {
+  /* Background: a hairline grid in the palette's own ink (5% of the accent) every 48px, no grain — graph paper under an
+     engineering tool. The flat ground stays the surface; the grid is only the first layer of the body. */
+  --bg-pattern: var(--bg-pattern-grid);
+  --bg-pattern-size: 48px;
+  --grain-alpha: 0;
+
+  /* Markdown: a small, tight document. One hairline under the h1 only, a boxed code block on the family's 6px radius,
+     a plain indent for a quote (no bar), tables ruled across and never boxed, links weighted and underlined. */
+  --md-h1-size: 1.2em;
+  --md-h1-weight: 600;
+  --md-h1-rule: 1px solid var(--border);
+  --md-h1-rule-pad: 0.35em;
+  --md-h2-size: 1.06em;
+  --md-h2-weight: 600;
+  --md-code-border: 1px solid var(--border);
+  --md-code-bar: var(--md-code-border);
+  --md-code-radius: var(--radius-sm);
+  --md-code-shadow: none;
+  --md-quote-bar: 0 solid transparent;
+  --md-quote-pad: 1.1em;
+  --md-cell-border-x: 0 solid transparent;
+  --md-cell-border-y: 1px solid var(--border-soft);
+  --md-th-bg: transparent;
+  --md-th-weight: 500;
+  --md-zebra: transparent;
+  --md-link-weight: 500;
+  --md-ul-marker: square;
+  --md-list-marker-color: var(--muted);
+
+  /* Spinner: four hairline spokes (N, E, S, W) lit one after another, clockwise, on a linear second. The ring is
+     hidden and the mark itself does not turn: the light travels, the spokes stay. */
+  --spinner-ring: none;
+  --spinner-parts: inline;
+  --spinner-parts-speed: 1s;
+  --spinner-parts-timing: linear;
+
+  /* Motion: snappy and exact — short curves, a small pop, nothing shifts under the pointer. */
+  --motion-fast: 80ms;
+  --motion-base: 130ms;
+  --motion-slow: 220ms;
+  --motion-pop: 100ms;
+  --select-pop: 1.01;
+  --ease-standard: cubic-bezier(0.25, 0, 0.1, 1);
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --motion-loading-ring: 1.6s;
+  --motion-loading-run: 1s;
+  --motion-loading-shimmer: 1.8s;
+
+  /* Hypermedia (read by the renderer once r12 H5 lands): FLAT — outlined nodes with a hairline and no fill or shadow,
+     straight edges, a quiet label for a header. */
+  --hm-shape: flat;
+  --hm-radius: var(--radius-sm);
+  --hm-stroke: 1px;
+  --hm-font: var(--font-body);
+  --hm-node-fill-alpha: 0;
+  --hm-edge: straight;
+  --hm-header: label;
+}
+
+:root[data-style='geist'] .fy-spinner,
+[data-swatch][data-style='geist'] .fy-spinner {
+  animation: none;
+}
+:root[data-style='geist'] .fy-spinner__p1,
+:root[data-style='geist'] .fy-spinner__p2,
+:root[data-style='geist'] .fy-spinner__p3,
+:root[data-style='geist'] .fy-spinner__p4,
+[data-swatch][data-style='geist'] .fy-spinner__p1,
+[data-swatch][data-style='geist'] .fy-spinner__p2,
+[data-swatch][data-style='geist'] .fy-spinner__p3,
+[data-swatch][data-style='geist'] .fy-spinner__p4 {
+  height: 4.5px;
+  rx: 0.5px;
+  transform-origin: 8px 8px;
+  width: 1.25px;
+  x: 7.375px;
+  y: 1px;
+}
+:root[data-style='geist'] .fy-spinner__p2,
+[data-swatch][data-style='geist'] .fy-spinner__p2 {
+  /* The base `animation` shorthand (specificity 0,2,0) resets the delay, so each phase is restated here, above it. */
+  animation-delay: calc(var(--spinner-parts-speed) * 0.25);
+  transform: rotate(90deg);
+}
+:root[data-style='geist'] .fy-spinner__p4,
+[data-swatch][data-style='geist'] .fy-spinner__p4 {
+  /* The base `animation` shorthand (specificity 0,2,0) resets the delay, so each phase is restated here, above it. */
+  animation-delay: calc(var(--spinner-parts-speed) * 0.5);
+  transform: rotate(180deg);
+}
+:root[data-style='geist'] .fy-spinner__p3,
+[data-swatch][data-style='geist'] .fy-spinner__p3 {
+  /* The base `animation` shorthand (specificity 0,2,0) resets the delay, so each phase is restated here, above it. */
+  animation-delay: calc(var(--spinner-parts-speed) * 0.75);
+  transform: rotate(270deg);
+}
+
 @media (max-width: 640px) {
   :root[data-style='geist'] {
     --text-2xs: 12px;

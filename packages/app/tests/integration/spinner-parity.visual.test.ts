@@ -3,7 +3,7 @@
  * proves the drawing: the shared `.fy-spinner` rules, its turn / pulse keyframes, the reduced-motion answer and the
  * on-accent state all live in `ui/spinner.css`, and a stylesheet that kept the tokens but lost them leaves an arc with
  * `stroke: none` and `animation: none` (the r10 T1 regression). So this renders the actual `<Spinner>` markup under
- * `themes.css` + `spinner.css` and reads the computed style back, for the five real styles in both modes.
+ * `themes.css` + `spinner.css` and reads the computed style back, for the real ring styles in both modes (Geist draws four spokes instead, asserted in style-kit-studio-geist).
  */
 import { beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { join } from 'node:path';
@@ -35,7 +35,6 @@ const HAND = {
     dash: '1.6px, 1.54px',
   },
   neo: { stroke: '3.25px', cap: 'square', sweep: '28px, 100px', speed: '0.8s', timing: 'linear', dash: 'none' },
-  geist: { stroke: '1.5px', cap: 'round', sweep: '25px, 100px', speed: '0.75s', timing: 'linear', dash: 'none' },
 } as const;
 
 const read = (page: Page, style: string, mode: string) =>

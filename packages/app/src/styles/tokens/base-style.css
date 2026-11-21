@@ -339,6 +339,16 @@
   /* ---- surfaces: the two slots that were missing ---- */
   --focus-line: solid;
   --panel-edge-line: solid;
+  /* ---- hypermedia (r11 T5; the renderer reads these from the page in r12 H5) ----
+     Defaults are Studio's SHAPED set: filled, rounded nodes, curved edges and a banded header. A style overrides the set
+     in its own file (Geist: flat). */
+  --hm-shape: shaped;
+  --hm-radius: var(--radius-md);
+  --hm-stroke: 1px;
+  --hm-font: var(--font-body);
+  --hm-node-fill-alpha: 0.85;
+  --hm-edge: curve;
+  --hm-header: band;
 }
 
 :root[data-mode='dark'],
