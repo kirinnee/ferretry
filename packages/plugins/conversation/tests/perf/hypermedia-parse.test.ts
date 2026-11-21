@@ -68,4 +68,20 @@ describe('parsing an assistant message as hypermedia', () => {
     const best = fastest(() => parseMessage(text, 'dh-x-'));
     expect(best).toBeLessThan(BUDGET_MS);
   });
+
+  test('keeps the same budget when the literal-code token is on (a typed `&lt;` in the message)', () => {
+    const text = `Inline \`&lt;demo&gt;\` shows as typed.\n\n${message(50_000)}`;
+    parseMessage(text, 'dh-x-');
+    expect(fastest(() => parseMessage(text, 'dh-x-'))).toBeLessThan(BUDGET_MS);
+  });
+
+  test('a hostile message (thousands of unclosed tick runs, one entity at the end) stays bounded', () => {
+    // Durian's own lexer is already super-linear on this shape (measured on this machine, 50 KB: ~360 ms without the token,
+    // ~650 ms with it); the token must not make it unbounded, so it is held to a generous ceiling.
+    let text = '';
+    for (let n = 1; text.length < 50_000; n = (n % 40) + 1) text += `${'`'.repeat(n)}x `;
+    text += '`&lt;end&gt;`';
+    parseMessage(text, 'dh-x-');
+    expect(fastest(() => parseMessage(text, 'dh-x-'), 3)).toBeLessThan(2500);
+  });
 });

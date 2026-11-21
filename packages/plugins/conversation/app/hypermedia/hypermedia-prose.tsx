@@ -1,6 +1,8 @@
-import { DocumentView, type InlineDef, TerminalPart } from 'durian-hypermedia/react/strict';
+import { DocumentView, type InlineDef } from 'durian-hypermedia/react/strict';
 import { memo, useId, useMemo, useSyncExternalStore } from 'react';
 import { exceedsMessageCap } from './limits.ts';
+import { HumanSegment, TerminalWithLlmText } from './llm-text.tsx';
+import { LITERAL_CODE_INLINES } from './literal-code.tsx';
 import { parseMessage } from './parse-message.ts';
 import { ReferenceChip } from './reference-chip.tsx';
 import { ReferenceProofProvider } from './reference-proof.tsx';
@@ -20,6 +22,8 @@ import { REFERENCE_INLINE } from './with-references.ts';
  *    share a DOM id (and a `#anchor` link in a message reaches its own heading).
  *  - A PART DRAWN ONLY IF WE NAME IT. Only the parts in {@link PARTS} have a component here; any other part is drawn as
  *    the plain text an LLM reads for it, so a part we have not reviewed shows its content and runs nothing.
+ *  - AUTHOR TEXT STAYS VISIBLE. A `:::llm` text is always shown, collapsed under "LLM-only text" beside the part it
+ *    belongs to, and a `:::human` segment draws its body even with `llm=none` (`llm-text.tsx`, decision C7).
  *  - LINKS go through our URL policy (never an image, an app route or a reference envelope) and open through the
  *    shell's one outside link; code carries our colours and references (`slots.tsx`).
  *  - OVER THE CAP a message is shown as the text it is, never as Durian's error ({@link exceedsMessageCap}).
@@ -31,11 +35,20 @@ import { REFERENCE_INLINE } from './with-references.ts';
  * otherwise, and our root says `data-mode`, not `data-theme`.
  */
 
-/** The parts this build draws. Wider sets come with their own review (r12 H4); an absent part is shown as LLM text. */
-const PARTS = { terminal: TerminalPart } as const;
+/**
+ * The parts this build draws. Wider sets come with their own review (r12 H4); an absent part is shown as LLM text, which
+ * includes an author's `:::llm` text, so none is lost.
+ */
+const PARTS = { terminal: TerminalWithLlmText, human: HumanSegment } as const;
 
-/** Our one inline: the chip that draws a proved reference. Durian reads only its `Component` (it never tokenises one). */
-const INLINES: readonly InlineDef[] = [{ name: REFERENCE_INLINE, match: /(?!)/u, Component: ReferenceChip }];
+/**
+ * Our inlines: the chip that draws a proved reference (Durian reads only its `Component`; it never tokenises one), and the
+ * code span that keeps its literal bytes (`literal-code.tsx`, which the parser is given too).
+ */
+const INLINES: readonly InlineDef[] = [
+  { name: REFERENCE_INLINE, match: /(?!)/u, Component: ReferenceChip },
+  ...LITERAL_CODE_INLINES,
+];
 
 const subscribeToMode = (notify: () => void): (() => void) => {
   const observer = new MutationObserver(notify);

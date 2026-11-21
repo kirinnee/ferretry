@@ -150,7 +150,7 @@ function HypermediaCode({ lang, text }: CodeSlotProps) {
   );
 }
 
-function HypermediaInlineCode({ text }: InlineCodeSlotProps) {
+export function HypermediaInlineCode({ text }: InlineCodeSlotProps) {
   const proof = useReferenceProof();
   const nodes = decorated(proof, text, null);
   return <code>{nodes === null ? text : <CodeNodes nodes={nodes} path="inline" proof={proof} />}</code>;

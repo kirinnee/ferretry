@@ -13,3 +13,19 @@
   list-style: none;
   margin-inline-start: -1.5em;
 }
+
+/* The "LLM-only text" disclosure (`llm-text.tsx`): a quiet, collapsed line under its part; wrapped, never sideways. */
+.fy-hm .dh-doc details.llm-peek {
+  font-size: 0.85em;
+  margin-block: 0.5rem;
+}
+
+.fy-hm .dh-doc details.llm-peek > summary {
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.fy-hm .dh-doc details.llm-peek .pane-llm {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

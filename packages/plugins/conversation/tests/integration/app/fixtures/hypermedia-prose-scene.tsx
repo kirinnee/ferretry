@@ -51,9 +51,30 @@ const MESSAGE = [
   '> **Note:** nothing was deployed.',
 ].join('\n');
 
+/** Author text for an LLM stays visible, and inline code keeps its typed bytes (r12 H2 fix; its own message, so the first stays free of character references). */
+const AUTHOR_TEXT = [
+  'Second check, with text written for an LLM:',
+  '',
+  `${FENCE}terminal`,
+  '$ bun test --all',
+  'ok 30 tests',
+  FENCE,
+  '',
+  ':::llm',
+  'Tests pass: 12 of 12.',
+  ':::',
+  '',
+  'Inline code stays as typed: `&lt;demo&gt;` and `<demo>`.',
+  '',
+  ':::human llm=none',
+  'Only people read this line.',
+  ':::',
+].join('\n');
+
 const entries: readonly TranscriptEntry[] = [
   { id: 'u1', kind: 'user', text: 'Is the release ready?' },
   { id: 'a1', kind: 'assistant', text: MESSAGE },
+  { id: 'a2', kind: 'assistant', text: AUTHOR_TEXT },
 ];
 
 const surface = {

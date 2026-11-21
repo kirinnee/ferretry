@@ -181,13 +181,61 @@ describe('an assistant message as Durian Hypermedia', () => {
         }
       });
 
+  for (const { name } of VIEWPORTS)
+    it(`keeps author text visible and inline code literal (${name})`, async () => {
+      const { tab, close } = await open(name, 'light', 'light');
+      try {
+        const m = await tab.evaluate(() => {
+          const details = document.querySelector('.dh-doc details[data-fy-llm-only]') as HTMLDetailsElement;
+          const summary = details.querySelector('summary') as HTMLElement;
+          const box = summary.getBoundingClientRect();
+          const human = document.querySelector('.dh-doc section.human') as HTMLElement;
+          return {
+            disclosures: document.querySelectorAll('.dh-doc details[data-fy-llm-only]').length,
+            open: details.open,
+            summary: summary.textContent,
+            summaryWidth: box.width,
+            summaryHeight: box.height,
+            preShown: (details.querySelector('pre') as HTMLElement).checkVisibility(),
+            humanText: human.textContent,
+            humanHeight: human.getBoundingClientRect().height,
+            spans: [...document.querySelectorAll('.dh-doc p code')].map(c => c.textContent),
+            overflow: document.documentElement.scrollWidth - window.innerWidth,
+          };
+        });
+        expect(m.disclosures).toBe(1);
+        expect(m.open).toBe(false);
+        expect(m.summary).toBe('LLM-only text');
+        expect(m.summaryWidth).toBeGreaterThan(40);
+        expect(m.summaryHeight).toBeGreaterThan(10);
+        expect(m.preShown).toBe(false);
+        expect(m.humanText).toContain('Only people read this line.');
+        expect(m.humanHeight).toBeGreaterThan(10);
+        expect(m.spans).toEqual(['&lt;demo&gt;', '<demo>']);
+        expect(m.overflow).toBeLessThanOrEqual(0);
+        await tab.click('.dh-doc details[data-fy-llm-only] summary');
+        const opened = await tab.evaluate(() => {
+          const pre = document.querySelector('.dh-doc details[data-fy-llm-only] pre') as HTMLElement;
+          return {
+            shown: pre.checkVisibility(),
+            text: pre.textContent,
+            overflow: document.documentElement.scrollWidth - window.innerWidth,
+          };
+        });
+        expect(opened).toEqual({ shown: true, text: 'Tests pass: 12 of 12.', overflow: opened.overflow });
+        expect(opened.overflow).toBeLessThanOrEqual(0);
+      } finally {
+        await close();
+      }
+    });
+
   it('opens what a click on a proved reference asks for, and nothing for text', async () => {
     const { tab, close } = await open('desktop', 'light', 'light');
     try {
       await tab.click('.dh-doc a[data-fy-reference]:text("&F12")');
       await tab.click('.dh-doc a[data-fy-reference]:text("^A3")');
       expect(await tab.evaluate(() => window.__opened)).toEqual(['task:F12', 'attention:A3']);
-      expect(await tab.locator('.dh-doc').textContent()).toContain('&F99999');
+      expect(await tab.locator('.dh-doc').first().textContent()).toContain('&F99999');
     } finally {
       await close();
     }

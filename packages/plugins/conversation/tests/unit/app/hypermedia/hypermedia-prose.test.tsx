@@ -183,6 +183,98 @@ describe('proof before link', () => {
   });
 });
 
+describe('author text for an LLM stays visible (decision C7)', () => {
+  const llm = (...body: readonly string[]): string => [':::llm', ...body, ':::'].join('\n');
+  const disclosures = (root: ParentNode): Element[] => [...root.querySelectorAll('details[data-fy-llm-only]')];
+
+  it('draws a terminal AND its :::llm text as a collapsed "LLM-only text" disclosure', async () => {
+    const { container, unmount } = await draw(
+      [fence('terminal', '$ bun test', 'ok'), '', llm('Tests pass: 3 of 3.')].join('\n'),
+    );
+    expect(container.querySelectorAll('.dh-doc .term').length).toBe(1);
+    const [only, ...rest] = disclosures(container);
+    expect(rest).toEqual([]);
+    expect((only as HTMLDetailsElement).open).toBe(false);
+    expect(only?.querySelector('summary')?.textContent).toBe('LLM-only text');
+    expect(only?.querySelector('pre')?.textContent).toBe('Tests pass: 3 of 3.');
+    await unmount();
+  });
+
+  it('adds no disclosure to a terminal that has no :::llm text (its generated LLM view is not the author’s)', async () => {
+    const { container, unmount } = await draw(fence('terminal', '$ bun test', 'ok'));
+    expect(disclosures(container)).toEqual([]);
+    await unmount();
+  });
+
+  it('draws the body of a :::human llm=none segment', async () => {
+    const { container, unmount } = await draw([':::human llm=none', 'Only people read **this**.', ':::'].join('\n'));
+    const human = must(container.querySelector('section.human'), 'the human segment');
+    expect(human.textContent).toContain('Only people read this.');
+    expect(human.querySelector('strong')?.textContent).toBe('this');
+    expect(disclosures(container)).toEqual([]);
+    await unmount();
+  });
+
+  it('draws a :::human segment with its :::llm text beside it', async () => {
+    const { container, unmount } = await draw(
+      [':::human', 'For people: `@src/api.ts`', ':::', llm('Short form.')].join('\n'),
+    );
+    const human = must(container.querySelector('section.human'), 'the human segment');
+    expect(human.textContent).toContain('For people:');
+    expect(anchorTexts(human)).toEqual(['@src/api.ts']);
+    expect(disclosures(human).map(d => d.querySelector('pre')?.textContent)).toEqual(['Short form.']);
+    await unmount();
+  });
+
+  it('keeps the alternate text of a part we do not draw (shown as its LLM text, never dropped)', async () => {
+    const { container, unmount } = await draw(
+      [
+        fence('chart', 'type: bar', 'x: [a, b]', 'series:', '  - name: s', '    data: [1, 2]'),
+        '',
+        llm('Bars: a=1, b=2.'),
+      ].join('\n'),
+    );
+    expect(container.textContent).toContain('Bars: a=1, b=2.');
+    await unmount();
+  });
+});
+
+describe('inline code shows the literal bytes typed (reference-standard §7)', () => {
+  const codes = (root: ParentNode): (string | null)[] => [...root.querySelectorAll('p code')].map(c => c.textContent);
+
+  it('keeps a typed character reference literal and a typed tag literal', async () => {
+    const { container, unmount } = await draw('a `&lt;demo&gt;` b `<demo>` c `&amp;` d `x && y` e `&copy;`');
+    expect(codes(container)).toEqual(['&lt;demo&gt;', '<demo>', '&amp;', 'x && y', '&copy;']);
+    await unmount();
+  });
+
+  it('keeps every reference-style entity literal, in a longer-tick span and across a line end', async () => {
+    const { container, unmount } = await draw('``a`b &quot;q&quot; &#39; &#x27;`` and `one &lt;\ntwo`');
+    expect(codes(container)).toEqual(['a`b &quot;q&quot; &#39; &#x27;', 'one &lt; two']);
+    await unmount();
+  });
+
+  it('decorates a proved reference inside such a span without touching the bytes around it', async () => {
+    const { container, unmount } = await draw('see `&lt;x&gt; @src/api.ts &lt;y&gt;`');
+    expect(codes(container)).toEqual(['&lt;x&gt; @src/api.ts &lt;y&gt;']);
+    expect(anchorTexts(container)).toEqual(['@src/api.ts']);
+    await unmount();
+  });
+
+  it('leaves a fence and prose alone: a fence is verbatim, prose decodes its entities', async () => {
+    const { container, unmount } = await draw(['x &lt;p&gt; y', '', fence('', '&lt;demo&gt;')].join('\n'));
+    expect(container.querySelector('p')?.textContent).toBe('x <p> y');
+    expect(container.querySelector('pre code')?.textContent).toBe('&lt;demo&gt;');
+    await unmount();
+  });
+
+  it('pairs ticks the way CommonMark does: an escaped tick opens nothing, a run closes only on its own length', async () => {
+    const { container, unmount } = await draw('\\`&lt;a&gt;` and ``&lt;b&gt;` and `&lt;c&gt;`');
+    expect(codes(container)).toEqual([' and ``&lt;b&gt;', '&lt;c&gt;']);
+    await unmount();
+  });
+});
+
 describe('what an agent cannot forge', () => {
   it('leaves a hand-written reference-shaped link inert', async () => {
     const forged =

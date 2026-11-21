@@ -1,5 +1,6 @@
 import { type Document, parse } from 'durian-hypermedia';
 import { configureDurian } from './durian.ts';
+import { LITERAL_CODE_INLINES, mayHoldLiteralCode } from './literal-code.tsx';
 import { MESSAGE_LIMITS } from './limits.ts';
 import { hypermediaUrlPolicy } from './url-policy.ts';
 import { withReferences } from './with-references.ts';
@@ -13,6 +14,13 @@ import { withReferences } from './with-references.ts';
 export function parseMessage(text: string, idPrefix: string): Document {
   configureDurian();
   return withReferences(
-    parse(text, { frontMatter: false, idPrefix, limits: MESSAGE_LIMITS, urlPolicy: hypermediaUrlPolicy }),
+    parse(text, {
+      frontMatter: false,
+      idPrefix,
+      limits: MESSAGE_LIMITS,
+      urlPolicy: hypermediaUrlPolicy,
+      // Offered only to a message that can hold such a span: every other message is read by Durian's own lexer.
+      inlines: mayHoldLiteralCode(text) ? LITERAL_CODE_INLINES : undefined,
+    }),
   );
 }
