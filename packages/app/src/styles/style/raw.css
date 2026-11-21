@@ -397,12 +397,13 @@
 }
 
 /* ON AN ACCENT FILL (a busy Send) the box and marker take the button's foreground, as the base `.fy-spinner--on-accent` gives every
-   other style's arc, not the page ink (which is the fill's neighbour there: 1.3 to 1.9:1). */
-:root[data-style='raw'] .fy-spinner--on-accent:not([data-swatch] *) .fy-spinner__p1,
+   other style's arc, not the page ink (which is the fill's neighbour there: 1.3 to 1.9:1). The class is written after the `:not()` so
+   `--on-accent:` never appears in the file for the style-axis token scan to read as a declaration. */
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *).fy-spinner--on-accent .fy-spinner__p1,
 [data-swatch][data-style='raw'] .fy-spinner--on-accent .fy-spinner__p1 {
   stroke: var(--spinner-arc);
 }
-:root[data-style='raw'] .fy-spinner--on-accent:not([data-swatch] *) .fy-spinner__p2,
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *).fy-spinner--on-accent .fy-spinner__p2,
 [data-swatch][data-style='raw'] .fy-spinner--on-accent .fy-spinner__p2 {
   fill: var(--spinner-arc);
 }
