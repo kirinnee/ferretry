@@ -248,3 +248,13 @@ export const ringOf = async (tab: Page, selector: string, cap = 80): Promise<Foc
   const last = stops.at(-1);
   return last?.target === true ? last : null;
 };
+
+/**
+ * Measure the ring of whatever has focus RIGHT NOW (no Tab): for a control the keyboard reaches another way, such as the
+ * radios of a group (one Tab stop; the arrow keys move between them). Null when nothing visible is focused.
+ */
+export const ringOfFocused = async (tab: Page): Promise<FocusStop | null> => {
+  await tab.evaluate(COLOUR_TOOLS);
+  const measured = await tab.evaluate(measureActive, null);
+  return typeof measured === 'string' ? null : measured;
+};

@@ -18,7 +18,7 @@ import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bu
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sceneBuilder, sharedChromium, walkFocusRings } from '@ferretry/app/testing/browser';
+import { ringOfFocused, sceneBuilder, sharedChromium, walkFocusRings } from '@ferretry/app/testing/browser';
 
 setDefaultTimeout(60_000);
 
@@ -553,6 +553,24 @@ describe('r11-1b G3: the Voice and Speed-ups buttons and their focus ring', () =
             expect(walk.stops.length).toBeGreaterThan(3);
             if (query === VOICE) expect(walk.stops.some(stop => stop.label.includes('Show every engine'))).toBe(true);
             expect(walk.violations).toEqual([]);
+            if (query === VOICE) {
+              // r11-1c C2: the same walk AFTER "Show every engine" is open, plus every engine card by the arrow keys (the cards are
+              // one radio group: one Tab stop). The last cards' rings used to be cut at the bottom of the frame (5.4 px).
+              await tab.getByText('Show every engine').click();
+              await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length === 10);
+              const open = await walkFocusRings(tab, 150);
+              expect(open.violations).toEqual([]);
+              await tab.keyboard.press('Shift'); // keyboard modality, so :focus-visible draws on a scripted focus
+              await tab.locator('input.fy-engine-radio').first().focus();
+              const cut: string[] = [];
+              for (let card = 0; card < 10; card += 1) {
+                const ring = await ringOfFocused(tab);
+                expect(ring, `engine card ${String(card + 1)} holds focus`).not.toBeNull();
+                cut.push(...(ring?.violations ?? []));
+                if (card < 9) await tab.keyboard.press('ArrowDown');
+              }
+              expect(cut).toEqual([]);
+            }
           } finally {
             await close();
           }

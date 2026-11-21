@@ -26,7 +26,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from 'playwright-core';
 import { LOADING_FADE_MS, LOADING_MIN_MS } from '../../src/ui/loading-gate.ts';
-import { sceneServer, sharedChromium, walkFocusRings } from '../support/browser/index.ts';
+import { ringOfFocused, sceneServer, sharedChromium, walkFocusRings } from '../support/browser/index.ts';
 import { clippedBoxes, footerButtons, gapUnderTitle, underFooter } from '../support/browser/stepper-layout.ts';
 import { FAKE_CODE, MACHINE_A, MACHINE_B, pairLinkOf } from './fixtures/onboarding-e2e-daemon.ts';
 
@@ -1076,6 +1076,33 @@ describe('the first run, end to end', () => {
         expect(voiceRings.violations, 'Voice: no focus ring is cut by main.fy-main or div.fy-frame').toEqual([]);
         // r11 O12: "Show every engine" is a disclosure (a summary), not a button.
         await tab.getByText('Show every engine').click();
+        await tab.waitForFunction(() => document.querySelectorAll('.fy-engine-card').length > 4);
+        // r11-1c C2 (line 14): the same walk AFTER the list is open. The last engine card's radio ring used to cross the bottom of
+        // main.fy-main / div.fy-frame by 5.4 px at 1280, which the walk above (list closed) never reached.
+        const openRings = await walkFocusRings(tab, 150);
+        expect(['wrapped', 'left-page'], 'Voice (every engine): the walk came all the way round').toContain(
+          openRings.ended,
+        );
+        expect(
+          openRings.violations,
+          'Voice (every engine): no focus ring is cut by main.fy-main or div.fy-frame',
+        ).toEqual([]);
+        // The engine cards are one radio group (one Tab stop): the arrow keys reach the rest, so walk THEM too, each card's ring.
+        const cards = await tab.locator('.fy-engine-card').count();
+        await tab.keyboard.press('Shift'); // keyboard modality, so :focus-visible draws on a scripted focus
+        await tab.locator('input.fy-engine-radio').first().focus();
+        const radioRings: { violations: readonly string[] }[] = [];
+        for (let card = 0; card < cards; card += 1) {
+          const ring = await ringOfFocused(tab);
+          expect(ring, `Voice (every engine): card ${String(card + 1)} holds focus`).not.toBeNull();
+          if (ring !== null) radioRings.push(ring);
+          if (card < cards - 1) await tab.keyboard.press('ArrowDown');
+        }
+        expect(radioRings.length, 'Voice (every engine): every engine card was measured').toBe(cards);
+        expect(
+          radioRings.flatMap(ring => ring.violations),
+          'Voice (every engine): no engine card ring is cut by main.fy-main or div.fy-frame',
+        ).toEqual([]);
         // The Off card, on its own, so it can be seen in the picture (the page shot scrolls past it).
         const off = tab.locator('.fy-engine-card[data-engine="off"]');
         // Centred, so the footer bar does not sit over its lower half in the picture.

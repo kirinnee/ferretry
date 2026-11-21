@@ -50,6 +50,9 @@
   inset: 0;
   margin: 0;
   position: absolute;
+  /* The radio covers the card, and the card's focus ring is drawn 4 px outside it: when a key moves focus here the browser scrolls
+     THIS box flush with the frame's edge, so the margin keeps the ring inside the frame, never cut (r11-1c C2). */
+  scroll-margin-block: 8px;
   z-index: 1;
 }
 .fy-engine-body {
