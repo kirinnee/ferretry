@@ -34,16 +34,6 @@
    busy marks are ink like its status dots and edges, so a working row never reads as a link; what
    changes otherwise is the stroke — the same reason a Neo button is a hard block and a Geist one a hairline. */
 
-/* Mission Control: an instrument dial — a hairline square-cap needle over a ticked bezel. */
-:root[data-style='mission'],
-[data-swatch][data-style='mission'] {
-  --spinner-stroke: 1.5;
-  --spinner-cap: square;
-  --spinner-sweep: 22;
-  --spinner-speed: 1.2s;
-  --spinner-timing: linear;
-  --spinner-track-dash: 1.6 1.54;
-}
 /* Neo-Brutalism: a thick square-cap ink arc on a hard ink track. */
 :root[data-style='neo'],
 [data-swatch][data-style='neo'] {

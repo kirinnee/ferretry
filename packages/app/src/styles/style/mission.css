@@ -65,24 +65,16 @@
    tell; the panel now reads its identity from the grid texture and the seated
    hairline, not a gradient sheen. */
   --panel-bg: var(--surface);
-  /* THE TELEMETRY FIELD. The page itself is a ruled grid — a 96px major / 32px minor module — not a flat sheet with two
-   faint radial tints that vanish the moment hue is removed. `--body-wash` paints `body`, so it covers the whole
-   viewport including the regions no panel occupies (the gutters, the shell behind the sidebar, the area below a short
-   table), which is what makes the style read as an instrument. The GEOMETRY is this style's, so any palette can wear it;
-   the palette supplies only the inks (`--grid-ink-*`) and the ground's two stops (`--field-ground-*`, transparent unless
-   the palette grades its ground). `repeating-linear-gradient` on purpose rather than `linear-gradient` plus a
-   `background-size`: it tiles itself, and `body` already carries `background-attachment: fixed`. */
-  --body-wash:
-    repeating-linear-gradient(90deg, var(--grid-ink-major) 0 1px, transparent 1px 96px),
-    repeating-linear-gradient(180deg, var(--grid-ink-major) 0 1px, transparent 1px 96px),
-    repeating-linear-gradient(90deg, var(--grid-ink-minor) 0 1px, transparent 1px 32px),
-    repeating-linear-gradient(180deg, var(--grid-ink-minor) 0 1px, transparent 1px 32px),
-    linear-gradient(180deg, var(--field-ground-top) 0%, var(--field-ground-bottom) 100%);
-  /* 32px instrument grid on panels, aligned to the same module as the page grid
-   so a panel is a continuous piece of the ruled field, not a textured card. */
-  --panel-texture:
-    linear-gradient(90deg, var(--texture-ink) 1px, transparent 1px),
-    linear-gradient(180deg, var(--texture-ink) 1px, transparent 1px);
+  /* THE TELEMETRY FIELD. The page is a ruled measurement grid, drawn by the style contract's own grid tile
+   (`--bg-pattern: grid`, one 32px module, in the palette's `--texture-ink`), never a gradient wash: the page and the panels
+   hold no gradient at all. A panel is a flat piece of the same field (`--panel-texture: none`), seated by its hairline. No
+   grain: an instrument is read, not touched. */
+  --body-wash: none;
+  --bg-pattern: var(--bg-pattern-grid);
+  --bg-pattern-size: 32px;
+  --bg-pattern-alpha: 100%;
+  --grain-alpha: 0;
+  --panel-texture: none;
   --panel-texture-size: 32px 32px;
   --focus-shadow: none;
   --rule-inset: inset 0 1px 0 rgb(var(--accent-rgb) / 0.08);
@@ -128,6 +120,78 @@
   --overlay: none;
   --overlay-opacity: 0;
   --overlay-blend: normal;
+
+  /* ═══ the component contract (r11 T6): what carries Mission in every slot, in greyscale ═══ */
+  /* MARKDOWN: a technical sheet. Ruled uppercase headings, a registered double-line code frame, a dimension-line quote,
+     a full grid table with a mono header row, dotted links, square markers. */
+  --md-h1-size: 1.08em;
+  --md-h1-weight: 700;
+  --md-h1-case: uppercase;
+  --md-h1-rule: 1px solid var(--border-strong);
+  --md-h1-rule-pad: 0.3em;
+  --md-h2-size: 0.95em;
+  --md-h2-weight: 700;
+  --md-h2-case: uppercase;
+  --md-h2-rule: 1px dotted var(--border-strong);
+  --md-h2-rule-pad: 0.2em;
+  --md-code-border: 1px solid var(--border-strong);
+  --md-code-bar: var(--md-code-border);
+  --md-code-radius: 0px;
+  --md-code-shadow: inset 0 0 0 3px var(--code-bg), inset 0 0 0 4px var(--border);
+  --md-quote-bar: 1px dashed var(--border-strong);
+  --md-quote-pad: 0.95em;
+  --md-quote-bg: var(--surface-2);
+  --md-quote-radius: 0px;
+  --md-quote-font-style: normal;
+  --md-cell-border-x: 1px solid var(--border);
+  --md-cell-border-y: 1px solid var(--border);
+  --md-th-bg: var(--surface-2);
+  --md-th-case: uppercase;
+  --md-th-weight: 700;
+  --md-zebra: transparent;
+  --md-link-decoration: underline dotted;
+  --md-link-weight: 600;
+  --md-link-bg: transparent;
+  --md-link-pad: 0;
+  --md-link-radius: 0px;
+  --md-stack-radius: 0px;
+  --md-ul-marker: square;
+  --md-ol-marker: decimal-leading-zero;
+  --md-list-marker-color: var(--accent);
+  /* SPINNER: four corner brackets that turn (parts shown, ring hidden; shaped below the contract block). */
+  --spinner-ring: none;
+  --spinner-parts: inline;
+  --spinner-parts-speed: 2.4s;
+  --spinner-parts-timing: linear;
+  --spinner-speed: 2.4s;
+  --spinner-timing: steps(8, end);
+  /* MOTION: snappy and exact. A reading settles on its mark: no overshoot, no spring, and a press changes the fill, never
+     the position. */
+  --motion-fast: 70ms;
+  --motion-base: 120ms;
+  --motion-slow: 200ms;
+  --motion-pop: 120ms;
+  --ease-in: linear;
+  --ease-out: linear;
+  --ease-in-out: linear;
+  --ease-spring: linear;
+  --press-translate: 0px;
+  --motion-loading-ring: 2.4s;
+  --motion-loading-run: 1.6s;
+  --ease-loading-ring: linear;
+  --ease-loading-run: linear;
+  /* HYPERMEDIA (read by r12 H5; no renderer reads an --hm-* slot yet): flat outline nodes joined by orthogonal edges. */
+  --hm-shape: flat;
+  --hm-edge: orthogonal;
+  --hm-radius: 0px;
+  --hm-stroke: 1px;
+  --hm-font: var(--font-mono);
+  --hm-node-fill-alpha: 0;
+  --hm-header: label;
+  /* SURFACES: a hairline edge, square corners, the ring drawn inside the control. */
+  --panel-edge: line;
+  --panel-edge-line: solid;
+  --focus-line: solid;
 }
 
 :root[data-style='mission'][data-mode='light'],
@@ -159,4 +223,35 @@
     --text-display: 1.3rem;
     --label-size: 12.5px;
   }
+}
+
+/* THE MISSION SPINNER: four corner registration brackets that turn in whole eighth-turns, like an instrument's range finder
+   locking on. Each part is one of the four generic squares, drawn as an L (two adjacent sides of its perimeter, `dasharray`
+   on the 24-unit outline) instead of a filled block, and held at full ink: the figure moves, not the opacity. */
+:root[data-style='mission'] .fy-spinner [class*='fy-spinner__p'],
+[data-swatch][data-style='mission'] .fy-spinner [class*='fy-spinner__p'] {
+  animation: none;
+  fill: none;
+  opacity: 1;
+  stroke: var(--spinner-arc);
+  stroke-linecap: square;
+  stroke-width: 1.6;
+}
+:root[data-style='mission'] .fy-spinner .fy-spinner__p1,
+[data-swatch][data-style='mission'] .fy-spinner .fy-spinner__p1 {
+  stroke-dasharray: 6 12 6 0;
+}
+:root[data-style='mission'] .fy-spinner .fy-spinner__p2,
+[data-swatch][data-style='mission'] .fy-spinner .fy-spinner__p2 {
+  stroke-dasharray: 12 12;
+}
+:root[data-style='mission'] .fy-spinner .fy-spinner__p4,
+[data-swatch][data-style='mission'] .fy-spinner .fy-spinner__p4 {
+  stroke-dasharray: 12 12;
+  stroke-dashoffset: -6;
+}
+:root[data-style='mission'] .fy-spinner .fy-spinner__p3,
+[data-swatch][data-style='mission'] .fy-spinner .fy-spinner__p3 {
+  stroke-dasharray: 12 12;
+  stroke-dashoffset: -12;
 }

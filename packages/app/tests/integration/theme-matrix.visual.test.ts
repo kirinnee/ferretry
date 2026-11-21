@@ -174,7 +174,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['antiposh', 'genz', 'lucid', 'mission', 'neumorphism'],
+    styles: ['antiposh', 'genz', 'lucid', 'neumorphism'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'gradient',
@@ -201,7 +201,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['genz', 'glass', 'hud', 'lucid', 'mission', 'pixel', 'retro'],
+    styles: ['genz', 'glass', 'lucid', 'pixel', 'retro'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'gradient',
@@ -302,15 +302,6 @@ const KNOWN: readonly Known[] = [
     viewports: BOTH_WIDTHS,
     styles: ['genz'],
     palettes: ['vaporwave'],
-    modes: BOTH_MODES,
-    check: 'spinner',
-    what: 'spinner shared with another style',
-    why: WHY.spinner,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['hud'],
-    palettes: ['mission'],
     modes: BOTH_MODES,
     check: 'spinner',
     what: 'spinner shared with another style',

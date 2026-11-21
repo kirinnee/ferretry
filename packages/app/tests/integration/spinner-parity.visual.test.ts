@@ -26,14 +26,7 @@ const HAND = {
     timing: 'cubic-bezier(0.45, 0.15, 0.55, 0.85)',
     dash: 'none',
   },
-  mission: {
-    stroke: '1.5px',
-    cap: 'square',
-    sweep: '22px, 100px',
-    speed: '1.2s',
-    timing: 'linear',
-    dash: '1.6px, 1.54px',
-  },
+  // Mission and HUD draw their own marks from the generic parts (corner brackets; a radar): `mission-hud-kit.visual.test.ts`.
   neo: { stroke: '3.25px', cap: 'square', sweep: '28px, 100px', speed: '0.8s', timing: 'linear', dash: 'none' },
 } as const;
 
