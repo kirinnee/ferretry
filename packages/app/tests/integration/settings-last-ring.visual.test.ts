@@ -69,29 +69,35 @@ afterAll(async () => {
 });
 
 const VARIANTS = [
-  { name: '1280', width: 1_280, height: 900, phone: false },
-  { name: '768', width: 768, height: 900, phone: false },
+  /** The gate's geometry (r11-2): a 1000px-high desktop window, where Voice and Warden's last control sits flush on the edge. */
+  { name: '1280', width: 1_280, height: 1_000, phone: false },
+  { name: '768', width: 768, height: 1_000, phone: false },
   /** A short window: every tab's last control sits below the fold, so a native Tab has to scroll it into view. */
   { name: '1280x560', width: 1_280, height: 560, phone: false },
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 const SCHEMES = ['light', 'dark'] as const;
-/** The three tabs whose last control sat flush on the scroller's bottom edge: the route and what proves the page drew. */
+/** The three tabs whose last control sat flush on the scroller's bottom edge: the route, what proves the real controls drew, and the stops the gate saw cut. */
 const TABS = [
-  { name: 'layout', path: '/d/ws/settings/layouts/layout', ready: '.fy-ls-col' },
-  { name: 'voice', path: '/d/ws/settings/voice/voice', ready: 'input.fy-ar-range' },
+  { name: 'layout', path: '/d/ws/settings/layouts/layout', ready: '.fy-chips .fy-chip-main', affected: /fy-chip-main/ },
+  { name: 'voice', path: '/d/ws/settings/voice/voice', ready: 'input.fy-ar-range', affected: /fy-ar-range/ },
   {
     name: 'warden',
     path: '/d/ws/settings/warden/warden',
-    ready: '.fy-settings-page [role="radiogroup"], .fy-settings-page button',
+    ready: '.fy-settings-page .fy-wf-seg__opt input[type="radio"]',
+    /** The segmented choice's radio (a bare `input` stop: the LABEL paints its ring). */
+    affected: /^input$/,
   },
 ] as const;
+
+/** A walk far longer than any one Settings tab: reaching it means the Tab order never left the page, which the test refuses. */
+const WALK_CAP = 400;
 
 describe('the last control of a settings tab has its whole focus ring inside the scroller', () => {
   for (const tab of TABS)
     for (const variant of VARIANTS)
       for (const scheme of SCHEMES)
-        it(`${tab.name} at ${variant.name} ${scheme}: 0px of the last ring past the scroller`, async () => {
+        it(`${tab.name} at ${variant.name} ${scheme}: a complete Tab walk, 0px of any ring past the scroller`, async () => {
           const context = await browser.newContext({
             viewport: { width: variant.width, height: variant.height },
             deviceScaleFactor: variant.phone ? 2 : 1,
@@ -106,8 +112,10 @@ describe('the last control of a settings tab has its whole focus ring inside the
           const page = await context.newPage();
           try {
             await page.goto(`${origin}${tab.path}?theme=studio-${scheme}`);
-            await page.waitForSelector(tab.ready, { timeout: 15_000 });
-            // The last focusable control inside the panel: the walk must reach it, and it is where the defect was.
+            await page.waitForSelector(tab.ready, { state: 'visible', timeout: 15_000 });
+            await page.waitForTimeout(500);
+            // The last focusable control inside the panel, held by IDENTITY. A focus listener records every element the real keyboard
+            // reaches, so "the walk visited it" is a fact about that element, never a guess from a label.
             const last = await page.evaluate(() => {
               const focusable = [
                 ...document.querySelectorAll<HTMLElement>(
@@ -116,23 +124,44 @@ describe('the last control of a settings tab has its whole focus ring inside the
               ].filter(el => el.getBoundingClientRect().width > 0 && getComputedStyle(el).visibility !== 'hidden');
               const el = focusable.at(-1);
               if (el === undefined) return null;
-              el.setAttribute('data-last-control', '');
-              return { tag: el.tagName.toLowerCase(), text: (el.textContent ?? '').trim().slice(0, 24) };
+              const holder = window as unknown as { __last: Element; __reached: boolean };
+              holder.__last = el;
+              holder.__reached = false;
+              document.addEventListener(
+                'focusin',
+                event => {
+                  if (event.target === holder.__last) holder.__reached = true;
+                },
+                true,
+              );
+              const label = el.closest('label');
+              return {
+                tag: el.tagName.toLowerCase(),
+                text: ((label ?? el).textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 24),
+              };
             });
-            expect(last).not.toBeNull();
-            const walk = await walkFocusRings(page, 120);
+            expect(last, 'the panel has a last focusable control').not.toBeNull();
+            const walk = await walkFocusRings(page, WALK_CAP);
+            const reached = await page.evaluate(() => (window as unknown as { __reached: boolean }).__reached);
             if (shotsDir !== '') {
               // The picture is of the last control focused after keyboard use, where the browser leaves it.
-              await page.evaluate(() => (document.querySelector('[data-last-control]') as HTMLElement | null)?.focus());
+              await page.evaluate(() => (window as unknown as { __last: HTMLElement }).__last.focus());
               await page.screenshot({ path: join(shotsDir, `${variant.name}-${scheme}-${tab.name}.png`) });
             }
-            const reached = await page.evaluate(
-              () => document.activeElement?.hasAttribute('data-last-control') === true,
-            );
-            // The walk runs on past the panel, so the last control is checked by name among the stops, not by the final one.
+            // A COMPLETE native traversal: the Tab order left the page (or came back to its start), it did not stop at a cap or a trap.
+            expect(
+              walk.ended === 'left-page' || walk.ended === 'wrapped',
+              `walk ended by ${walk.ended} after ${walk.stops.length} stops`,
+            ).toBe(true);
             expect(walk.stops.length).toBeGreaterThan(1);
-            expect(reached || walk.stops.some(stop => stop.label.startsWith(`${last?.tag}`))).toBe(true);
+            // The marked last control was visited by the keyboard (element identity), and its own stop is judged below with the rest.
+            expect(reached, `the last control (${last?.tag} "${last?.text}") was visited`).toBe(true);
+            // The exact stops the gate saw cut (Layout's chips, Voice's range, Warden's segmented radio) were measured, one by one.
+            const own = walk.stops.filter(stop => tab.affected.test(stop.label));
+            expect(own.length, `the affected stops of ${tab.name} were measured`).toBeGreaterThan(0);
+            // Every stop's painted ring (the label's outline included, for a visually hidden radio) is inside every clipping ancestor.
             expect(walk.violations).toEqual([]);
+            expect(own.flatMap(stop => stop.violations)).toEqual([]);
           } finally {
             await context.close();
           }

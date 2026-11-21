@@ -180,8 +180,14 @@ label.fy-wf-seg__opt.fy-wf-seg__opt[data-selected='true'] {
 }
 .fy-wf-seg__opt input {
   position: absolute;
+  /* One pixel wide but as TALL as its label: the label paints the focus ring (outline 2px + offset 2px) around a radio that is itself
+     clipped away, and a native Tab scrolls the RADIO'S box into view. A 1px radio let the browser park the label's bottom edge flush
+     on the scroller, cutting the ring by 4px; the label's full height makes the scroller's scroll-padding keep the whole ring in. */
+  top: 0;
+  bottom: 0;
+  left: 0;
   width: 1px;
-  height: 1px;
+  height: auto;
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
