@@ -4,11 +4,18 @@
    dashed panel edges, a rough "highlighter" for what is selected and links that are underlined because nobody removed
    the underline. Nothing is rounded the same way twice.
 
+   NO GRADIENT (r11 T12). The graph-paper panel texture and the highlighter swipe were gradients; the paper is now the page's
+   own dot-free GRID tile (the style contract's) under photocopier grain, and the highlighter is a flat tinted fill.
+
    LOUD: it deliberately fights the readability rules (a typewriter face at body size, tight leading, a hard zine
-   shadow, a texture behind panels), so the contrast matrix reports a miss for it as a warning (`loud: true` in the catalogue).
-   What it never fights: the keyboard focus ring (a fat 3px ring, a field draws it too) and layout overflow. Faces are the
-   DEVICE'S own (Courier New / Liberation Mono for type, Impact / Arial Black for display): nothing is bundled, so there
-   is no font file or licence to carry, and no trademarked asset. Colour comes only from the palette's roles.
+   shadow, a grid behind the page), so the contrast matrix reports a miss for it as a warning (`loud: true` in the catalogue).
+   What it never fights: the keyboard focus ring (a fat 3px ring drawn INSIDE the control, a field draws it too), layout
+   overflow, and the High contrast palette. Faces are the DEVICE'S own (Courier New / Liberation Mono for type, Impact /
+   Arial Black for display): nothing is bundled, so there is no font file or licence to carry, and no trademarked asset. Colour
+   comes only from the palette's roles.
+
+   SCOPE. Every component rule below names the page (`:root[data-style='antiposh']`, outside any `[data-swatch]`) or a swatch of THIS
+   style, so a Look-picker preview of another style, drawn on an Anti-Posh page, keeps its own paint.
    ============================================================================ */
 :root[data-style='antiposh'],
 [data-swatch][data-style='antiposh'] {
@@ -77,11 +84,8 @@
   --tab-underline-width: 4px;
   --appnav-underline: var(--fg);
   --nav-sel-shadow: 3px 2px 0 var(--shadow-ink);
-  /* Faint graph-paper behind every panel, drawn in the page's own ink. Fights legibility a little, by design. */
-  --panel-texture:
-    repeating-linear-gradient(0deg, color-mix(in srgb, var(--fg) 7%, transparent) 0 1px, transparent 1px 14px),
-    repeating-linear-gradient(90deg, color-mix(in srgb, var(--fg) 7%, transparent) 0 1px, transparent 1px 14px);
-  --panel-texture-size: auto;
+  --panel-texture: none;
+  --body-wash: none;
   --underline-links: underline;
   /* Cramped, then oddly roomy: padding is deliberately uneven between controls and panels. */
   --control-h-desktop: 30px;
@@ -94,16 +98,99 @@
   --gap-xs: 5px;
   --gap-sm: 7px;
   --gap-md: 13px;
-  /* The keyboard ring is fat and hard, and stays that way. */
+  /* The keyboard ring is fat and hard, and stays that way: drawn INSIDE the control, so nothing can clip it. */
   --focus-width: 3px;
-  --focus-offset: 2px;
+  --focus-offset: calc(-1 * var(--focus-width));
   /* Janky on purpose: stepped, short and a big pop. The flipbook feel of a cheap animated gif. */
   --motion-fast: 80ms;
   --motion-base: 160ms;
   --motion-slow: 280ms;
+  --motion-pop: 120ms;
   --ease-standard: steps(4, end);
   --ease-emphasis: steps(6, end);
+  --ease-in: steps(4, end);
+  --ease-out: steps(4, end);
+  --ease-in-out: steps(4, end);
+  --ease-spring: steps(6, end);
   --select-pop: 1.12;
+  --motion-loading-ring: 1.2s;
+  --motion-loading-run: 0.9s;
+  --motion-loading-shimmer: 1.6s;
+
+  /* ═══ the component contract (r11 T12): what carries Anti-Posh in every slot ═══ */
+  /* BACKGROUND: graph paper (a 1px rule every 28px, the contract's own grid tile, in the page ink) under heavy photocopier
+     grain. Nothing here is a wash. */
+  --bg-pattern-ink: color-mix(in srgb, var(--fg) 8%, transparent);
+  --bg-pattern: var(--bg-pattern-grid);
+  --bg-pattern-size: 28px;
+  --bg-pattern-alpha: 100%;
+  --grain-image: var(--grain-noise);
+  --grain-alpha: 0.07;
+  --grain-scale: 1;
+  --grain-blend: soft-light;
+  /* MARKDOWN: a typed zine. A squashed all-caps display h1 under a DOUBLE ink rule, an h2 under a dashed one, code in a dashed
+     box with a mis-registered hard shadow, a quote that is a pasted-in highlighted note (no bar), a dashed-grid table under a
+     highlighted header, links as highlighted underlines. Every fill is an opaque mix with the surface. */
+  --md-h1-size: 1.55em;
+  --md-h1-weight: 800;
+  --md-h1-case: uppercase;
+  --md-h1-rule: 4px double var(--fg);
+  --md-h1-rule-pad: 0.15em;
+  --md-h2-size: 1.2em;
+  --md-h2-weight: 800;
+  --md-h2-case: uppercase;
+  --md-h2-rule: 2px dashed var(--fg);
+  --md-h2-rule-pad: 0.1em;
+  --md-code-border: 2px dashed var(--fg);
+  --md-code-bar: var(--md-code-border);
+  --md-code-radius: 2px 5px 3px 6px;
+  --md-code-shadow: 5px 4px 0 var(--shadow-ink);
+  --md-quote-bar: none;
+  --md-quote-pad: 1em;
+  --md-quote-bg: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  --md-quote-radius: 3px 9px 4px 10px;
+  --md-quote-font-style: normal;
+  --md-cell-border-x: 1px dashed var(--fg);
+  --md-cell-border-y: 1px dashed var(--fg);
+  --md-th-bg: color-mix(in srgb, var(--accent) 25%, var(--surface));
+  --md-th-case: uppercase;
+  --md-th-weight: 700;
+  --md-zebra: transparent;
+  --md-link-decoration: underline;
+  --md-link-weight: 700;
+  --md-link-bg: color-mix(in srgb, var(--accent) 20%, var(--surface));
+  --md-link-pad: 0 0.2em;
+  --md-link-radius: 1px 3px 2px 4px;
+  --md-stack-radius: 3px 9px 4px 10px;
+  --md-stack-frame: 2px dashed var(--fg);
+  --md-ul-marker: square;
+  --md-ol-marker: decimal-leading-zero;
+  --md-list-marker-color: var(--fg);
+  /* SPINNER: a TYPEWRITER FLIPBOOK. The four generic parts are the four strokes of the old `| / - \` text spinner, thin bars
+     through the centre of the mark, drawn ONE AT A TIME for a quarter of the cycle each (shapes below the contract block). The
+     mark itself does not turn and nothing fades: it is four frames of a cheap gif. The ring is hidden. */
+  --spinner-ring: none;
+  --spinner-parts: inline;
+  --spinner-parts-speed: 0.8s;
+  --spinner-parts-timing: linear;
+  /* HYPERMEDIA (read by r12 H5): INK, monochrome and thin-ruled, square-cornered, the typewriter face, straight edges, a label. */
+  --hm-shape: ink;
+  --hm-radius: 3px;
+  --hm-stroke: 2px;
+  --hm-font: var(--font-mono);
+  --hm-node-fill-alpha: 0.12;
+  --hm-edge: straight;
+  --hm-header: label;
+  /* SURFACES: a mis-registered hard offset under a dashed edge; the ring is drawn inside the control. */
+  --panel-edge: offset;
+  --focus-line: solid;
+}
+
+/* On a dark page the photocopier grain is visible light (soft light does nothing on near black). */
+:root[data-style='antiposh'][data-mode='dark'],
+[data-swatch][data-style='antiposh'][data-mode='dark'] {
+  --grain-alpha: 0.05;
+  --grain-blend: normal;
 }
 
 @media (max-width: 640px) {
@@ -119,55 +206,89 @@
   }
 }
 
-/* ---- component touches: the rough edges. Hard-coded round or thin utilities get the same cut-and-paste treatment. ---- */
+/* The OS asks for no see-through paint: the highlighter and the smudge become opaque mixes with the surface. */
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-style='antiposh'],
+  [data-swatch][data-style='antiposh'] {
+    --hover-fill: color-mix(in srgb, var(--fg) 12%, var(--surface));
+    --select-fill: color-mix(in srgb, var(--accent) 28%, var(--surface));
+  }
+}
+
+/* ---- component touches: the rough edges. Hard-coded round or thin utilities get the same cut-and-paste treatment.
+   Each rule names the page (`:where(:not([data-swatch] *))`, zero specificity so it ranks as the plain selector did) and its own
+   style's swatch. ---- */
 
 /* Panels are dashed, like a coupon you are meant to cut out. */
-:root[data-style='antiposh'] .kt-panel,
-:root[data-style='antiposh'] .kt-details {
+:root[data-style='antiposh'] .kt-panel:where(:not([data-swatch] *)),
+:root[data-style='antiposh'] .kt-details:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .kt-panel,
+[data-swatch][data-style='antiposh'] .kt-details {
   border-style: dashed;
   border-color: var(--fg);
+  box-shadow: var(--shadow-panel);
 }
 
 /* A button is a thick "outset" slab, the way a bare default button looked; the press flattens it into its shadow. */
-:root[data-style='antiposh'] .kt-btn {
+:root[data-style='antiposh'] .kt-btn:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .kt-btn {
   border-style: outset;
   border-color: var(--fg);
   letter-spacing: 0.04em;
 }
-:root[data-style='antiposh'] .kt-btn[data-variant='primary'] {
+:root[data-style='antiposh'] .kt-btn[data-variant='primary']:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .kt-btn[data-variant='primary'] {
   border-style: outset;
   border-color: var(--fg);
 }
-:root[data-style='antiposh'] .kt-btn:active:not(:disabled) {
+:root[data-style='antiposh'] .kt-btn:active:not(:disabled):where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .kt-btn:active:not(:disabled) {
   border-style: inset;
 }
+/* The keyboard ring is the page's own (inside the border box); a 2px `--surface` band keeps it off the slab's own colour. */
+:root[data-style='antiposh'] .kt-btn:focus-visible:not(:disabled):where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .kt-btn:focus-visible:not(:disabled) {
+  box-shadow:
+    inset 0 0 0 calc(var(--focus-width) + 2px) var(--surface),
+    var(--shadow-sm);
+}
 
-/* A text field is a sunken ruled box, and it draws a real hard ring on keyboard focus (like a button). */
-:root[data-style='antiposh'] .kt-input {
+/* A text field is a sunken ruled box, and it draws a real hard ring on keyboard focus (like a button): the shell's own, inside. */
+:root[data-style='antiposh'] .kt-input:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .kt-input {
   border-style: inset;
   border-color: var(--fg);
 }
-:root[data-style='antiposh'] .kt-input:focus-visible {
+:root[data-style='antiposh'] .kt-input:focus-visible:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .kt-input:focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: 1px;
+  outline-offset: calc(-1 * var(--focus-width));
   box-shadow: var(--shadow-sm);
 }
 
-/* The chosen choice card is the highlighter swipe, and it pops (stepped) once when picked. */
-:root[data-style='antiposh'] .fy-cc__card {
+/* The chosen choice card is the highlighter swipe (a flat tint, no gradient), and it pops (stepped) once when picked. */
+:root[data-style='antiposh'] .fy-cc__card:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .fy-cc__card {
   border-style: dashed;
   border-color: var(--fg);
   box-shadow: var(--shadow-control);
 }
-:root[data-style='antiposh'] .fy-cc__card[data-selected='true'] {
+:root[data-style='antiposh'] .fy-cc__card[data-selected='true']:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .fy-cc__card[data-selected='true'] {
   border-style: solid;
-  background:
-    linear-gradient(transparent 0 55%, color-mix(in srgb, var(--accent) 38%, transparent) 55% 92%, transparent 92%),
-    var(--select-fill);
+  background: var(--select-fill);
 }
-:root[data-style='antiposh'] .fy-cc__card:has(:focus-visible) {
+:root[data-style='antiposh'] .fy-cc__card:has(:focus-visible):where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .fy-cc__card:has(:focus-visible) {
   outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: 3px;
+  outline-offset: calc(-1 * var(--focus-width));
+}
+/* The tick on a chosen card: a square ink box with the accent in it, ruled like everything else. */
+:root[data-style='antiposh'] .fy-cc__check:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .fy-cc__check {
+  background: var(--accent);
+  border: var(--stroke-control) solid var(--fg);
+  border-radius: 1px 3px 2px 3px;
 }
 @keyframes fy-antiposh-wobble {
   0% {
@@ -181,25 +302,219 @@
   }
 }
 @media (prefers-reduced-motion: no-preference) {
-  :root[data-style='antiposh']:not([data-motion='reduced']) .fy-cc__card[data-pulse='true'] {
+  :root[data-style='antiposh']:not([data-motion='reduced'])
+    .fy-cc__card[data-pulse='true']:where(:not([data-swatch] *)),
+  [data-swatch][data-style='antiposh']:not([data-motion='reduced']) .fy-cc__card[data-pulse='true'] {
     animation: fy-antiposh-wobble var(--motion-slow) var(--ease-emphasis);
   }
 }
 
 /* A selected tab or chip takes the highlighter too, with a thick ink underline. */
-:root[data-style='antiposh'] .kt-tab[aria-pressed='true'],
-:root[data-style='antiposh'] .kt-tab[aria-selected='true'] {
+:root[data-style='antiposh'] .kt-tab[aria-pressed='true']:where(:not([data-swatch] *)),
+:root[data-style='antiposh'] .kt-tab[aria-selected='true']:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .kt-tab[aria-pressed='true'],
+[data-swatch][data-style='antiposh'] .kt-tab[aria-selected='true'] {
   background: var(--select-fill);
   border-color: var(--border-strong);
 }
 
+/* A badge is a rubber stamp: a double ink rule. */
+:root[data-style='antiposh'] .kt-badge:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .kt-badge {
+  border-color: var(--fg);
+  border-style: double;
+  border-width: 3px;
+}
+
+/* A menu is a cut-out too: a dashed ink edge and the hard mis-registered shadow. */
+:root[data-style='antiposh'] .kt-popover:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .kt-popover {
+  border: 2px dashed var(--fg);
+  box-shadow: var(--shadow-popover);
+}
+
+/* Switch: a ruled slab, square-cornered, the thumb a ruled block. */
+:root[data-style='antiposh'] [data-neo-switch-track]:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] [data-neo-switch-track] {
+  border: var(--stroke-control) solid var(--fg);
+  border-radius: 1px 3px 2px 3px;
+  box-shadow: var(--shadow-sm);
+}
+:root[data-style='antiposh'] [role='switch'][aria-checked='true'] [data-neo-switch-track]:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] [role='switch'][aria-checked='true'] [data-neo-switch-track] {
+  background: var(--accent);
+}
+:root[data-style='antiposh'] [data-neo-switch-thumb]:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] [data-neo-switch-thumb] {
+  background: var(--surface);
+  border: 2px solid var(--fg);
+  border-radius: 0;
+}
+/* Segmented control (`data-neo-segmented` only, never any radio group): a dashed tray; the chosen segment is the highlighter. */
+:root[data-style='antiposh'] [data-neo-segmented]:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] [data-neo-segmented] {
+  border-color: var(--fg);
+  border-style: dashed;
+  border-width: 2px;
+}
+:root[data-style='antiposh'] [data-neo-segmented] > label:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] [data-neo-segmented] > label {
+  border: 2px solid transparent;
+}
+:root[data-style='antiposh'] [data-neo-segmented] > label:has(:checked):where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] [data-neo-segmented] > label:has(:checked) {
+  background: var(--select-fill);
+  border-color: var(--fg);
+  box-shadow: var(--shadow-sm);
+}
+:root[data-style='antiposh'] [data-neo-segmented] > label:has(:focus-visible):where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] [data-neo-segmented] > label:has(:focus-visible) {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+/* Progress and bars: ruled in dashes. */
+:root[data-style='antiposh'] .fy-sp-progress__segment:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .fy-sp-progress__segment {
+  border: 2px dashed var(--fg);
+  border-radius: 1px 3px 2px 3px;
+  opacity: 1;
+}
+:root[data-style='antiposh'] .fy-sp-progress__segment[data-state='done']:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .fy-sp-progress__segment[data-state='done'] {
+  background: var(--fg);
+}
+:root[data-style='antiposh'] .fy-sp-progress__segment[data-state='current']:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .fy-sp-progress__segment[data-state='current'] {
+  background: var(--accent);
+}
+:root[data-style='antiposh'] [data-option-bar-track]:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] [data-option-bar-track] {
+  background: var(--surface);
+  border: 2px dashed var(--fg);
+  border-radius: 1px 3px 2px 3px;
+}
+
 /* Links keep the underline nobody removed, and a ghost button keeps a real ink edge (not a pale one). */
-:root[data-style='antiposh'] a,
-:root[data-style='antiposh'] .md a {
+:root[data-style='antiposh'] a:where(:not([data-swatch] *)),
+:root[data-style='antiposh'] .md a:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] a,
+[data-swatch][data-style='antiposh'] .md a {
   text-decoration-line: var(--underline-links);
   text-decoration-thickness: 2px;
   text-underline-offset: 2px;
 }
-:root[data-style='antiposh'] .kt-btn[data-variant='ghost'] {
+:root[data-style='antiposh'] .kt-btn[data-variant='ghost']:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .kt-btn[data-variant='ghost'] {
   border-color: var(--fg);
+}
+
+/* The settings nav: the selected item is the highlighter swipe in a ruled slab (the shell draws a soft accent pill with a
+   literal 6px radius there). The icon reads in the same ink. */
+:root[data-style='antiposh'] .fy-settings-nav .fy-tab:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .fy-settings-nav .fy-tab {
+  border-radius: var(--radius-tab);
+}
+:root[data-style='antiposh']
+  .fy-settings-nav
+  .fy-tab:is(.fy-tab--active, [aria-current='page']):where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']) {
+  background: var(--nav-sel-bg);
+  box-shadow:
+    inset 0 0 0 var(--stroke-control) var(--fg),
+    var(--nav-sel-shadow);
+  color: var(--nav-sel-fg);
+}
+:root[data-style='antiposh']
+  .fy-settings-nav
+  .fy-tab:is(.fy-tab--active, [aria-current='page']):where(:not([data-swatch] *))
+  .fy-icon,
+[data-swatch][data-style='antiposh'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']) .fy-icon {
+  color: var(--nav-sel-fg);
+}
+/* A FOCUS RING INSIDE A FILLED CONTROL is drawn in that fill's own ink and set in from the edge, so it reads against the fill: the
+   page's `--focus-color` IS the accent, which on Send is the fill itself (1:1) and on the selected link a near-miss. */
+:root[data-style='antiposh'] .fy-composer-send:focus-visible:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .fy-composer-send:focus-visible {
+  outline-color: var(--accent-fg);
+  outline-offset: calc(-1 * (var(--focus-width) + 2px));
+}
+:root[data-style='antiposh']
+  .fy-settings-nav
+  .fy-tab:is(.fy-tab--active, [aria-current='page']):focus-visible:where(:not([data-swatch] *)),
+[data-swatch][data-style='antiposh'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']):focus-visible {
+  outline-color: var(--nav-sel-fg);
+  outline-offset: calc(-1 * (var(--focus-width) + var(--stroke-control) + 2px));
+}
+
+/* THE ANTI-POSH SPINNER: A TYPEWRITER FLIPBOOK. The mark does not turn (`animation: none`) and the ring is hidden. Each of the four
+   parts is the same thin bar (1.8 x 12 units, square ends) through the centre of the mark, turned to a stroke of the old text
+   spinner: p1 upright `|`, p2 `/` (45deg), p3 flat `-` (90deg), p4 `\` (135deg). Each is drawn for ONE quarter of the 0.8s cycle
+   (opacity 1, then 0 in whole steps, no fade) and the quarters are staggered by NEGATIVE delays (the base `animation`
+   shorthand resets the delay, so each is restated here): at any moment exactly one stroke is on, in the order | / - \ and
+   round again. Every bar is filled with the arc colour, so a busy mark on a filled button keeps its on-accent foreground.
+   Reduced motion draws all four at once, an asterisk, and the whole mark pulses (the base rule).
+   SCOPE: element rules, so the page rule skips a spinner inside a `[data-swatch]` (a swatch preview draws its own style's
+   mark) and the swatch rule matches only a swatch of this style. */
+:root[data-style='antiposh'] .fy-spinner:not([data-swatch] *),
+[data-swatch][data-style='antiposh'] .fy-spinner {
+  animation: none;
+}
+:root[data-style='antiposh'] .fy-spinner:not([data-swatch] *) [class*='fy-spinner__p'],
+[data-swatch][data-style='antiposh'] .fy-spinner [class*='fy-spinner__p'] {
+  animation: fy-antiposh-flip var(--spinner-parts-speed) var(--spinner-parts-timing) infinite;
+  fill: var(--spinner-arc);
+  height: 12px;
+  opacity: 0;
+  rx: 0;
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  width: 1.8px;
+  x: 7.1px;
+  y: 2px;
+}
+:root[data-style='antiposh'] .fy-spinner:not([data-swatch] *) .fy-spinner__p1,
+[data-swatch][data-style='antiposh'] .fy-spinner .fy-spinner__p1 {
+  animation-delay: 0s;
+}
+:root[data-style='antiposh'] .fy-spinner:not([data-swatch] *) .fy-spinner__p2,
+[data-swatch][data-style='antiposh'] .fy-spinner .fy-spinner__p2 {
+  animation-delay: calc(var(--spinner-parts-speed) * -0.75);
+  transform: rotate(45deg);
+}
+:root[data-style='antiposh'] .fy-spinner:not([data-swatch] *) .fy-spinner__p3,
+[data-swatch][data-style='antiposh'] .fy-spinner .fy-spinner__p3 {
+  animation-delay: calc(var(--spinner-parts-speed) * -0.5);
+  transform: rotate(90deg);
+}
+:root[data-style='antiposh'] .fy-spinner:not([data-swatch] *) .fy-spinner__p4,
+[data-swatch][data-style='antiposh'] .fy-spinner .fy-spinner__p4 {
+  animation-delay: calc(var(--spinner-parts-speed) * -0.25);
+  transform: rotate(135deg);
+}
+@keyframes fy-antiposh-flip {
+  from {
+    opacity: 1;
+  }
+  24% {
+    opacity: 1;
+  }
+  25% {
+    opacity: 0;
+  }
+  to {
+    opacity: 0;
+  }
+}
+/* Reduced motion (the OS setting or Settings > Appearance > Motion): the flipbook stops, so all four strokes are drawn at once, an
+   asterisk. The base rule that does this sets `opacity: 1` at a lower specificity than the part rule above, so it is restated. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-style='antiposh'] .fy-spinner:not([data-swatch] *) [class*='fy-spinner__p'],
+  [data-swatch][data-style='antiposh'] .fy-spinner [class*='fy-spinner__p'] {
+    opacity: 1;
+  }
+}
+:root[data-style='antiposh'][data-motion='reduced'] .fy-spinner:not([data-swatch] *) [class*='fy-spinner__p'],
+[data-swatch][data-style='antiposh'][data-motion='reduced'] .fy-spinner [class*='fy-spinner__p'] {
+  opacity: 1;
 }

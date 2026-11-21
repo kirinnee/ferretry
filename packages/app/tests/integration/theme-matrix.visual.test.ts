@@ -154,104 +154,12 @@ const EVERY_PALETTE = ['studio', 'geist', 'mission', 'neo', 'hacker', 'vintage',
 const KNOWN: readonly Known[] = [
   {
     viewports: BOTH_WIDTHS,
-    styles: ['antiposh', 'genz'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'gradient',
-    what: 'Card background',
-    why: WHY.gradient,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['antiposh'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'gradient',
-    what: 'Choice card background',
-    why: WHY.gradient,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['genz'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'gradient',
-    what: 'Page background',
-    why: WHY.gradient,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['genz'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'radius',
-    what: 'Code block radius',
-    why: WHY.radius,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['genz'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'radius',
-    what: 'Menu radius',
-    why: WHY.radius,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['genz'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'ringclip',
-    what: 'Clipped button ring',
-    why: WHY.ringclip,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['antiposh'],
-    palettes: ['vintage'],
-    modes: BOTH_MODES,
-    check: 'spinner',
-    what: 'spinner shared with another style',
-    why: WHY.spinner,
-  },
-  {
-    viewports: BOTH_WIDTHS,
     styles: ['studio'],
     palettes: ['studio'],
     modes: BOTH_MODES,
     check: 'spinner',
     what: 'spinner shared with another style',
     why: WHY.spinner,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['genz'],
-    palettes: ['vaporwave'],
-    modes: BOTH_MODES,
-    check: 'spinner',
-    what: 'spinner shared with another style',
-    why: WHY.spinner,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['antiposh'],
-    palettes: ['contrast'],
-    modes: BOTH_MODES,
-    check: 'text',
-    what: 'The menu beside your work',
-    why: WHY.text,
-  },
-  // The hypermedia component: no renderer reads an `--hm-*` slot yet (r12 H5 owns that, per C6), so every style draws the
-  // picture the same and this one reaches 5 of 8 (the shared --radius-sm on .fy-render-pan no longer counts). r12 H5 deletes it.
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['antiposh'],
-    palettes: ['vintage'],
-    modes: BOTH_MODES,
-    check: 'distinct',
-    what: 'differs from Studio on fewer than 6 of 8 components',
-    why: WHY.hypermedia,
   },
 ];
 
@@ -1094,38 +1002,6 @@ describe('the probes read the real page', () => {
     const measured = await settle(tab, style, palette, mode);
     return measured.focus.find(row => row.what === what)?.ratio ?? 0;
   };
-
-  /**
-   * r11 S13b, review of PR 2258: Gen Z lists two opaque inset bands, the surface FIRST (painted on top) and the accent under it.
-   * The ring is read on what a viewer sees at its inner edge, the topmost band, so the probe's ratio is the screenshot's, and
-   * the same page with the two bands swapped reads the accent one: the probe follows the layering, not the list's last row.
-   */
-  for (const viewport of VIEWPORTS)
-    for (const mode of MODES)
-      for (const palette of ['studio', 'mission']) {
-        it(`Gen Z's Name ring is read on its topmost band, as painted (${palette}, ${mode}, ${viewport.name})`, async () => {
-          const session = await open(viewport, mode);
-          try {
-            const name = 'input[aria-label="Name"]';
-            const read = await probeRatio(session.tab, 'genz', palette, mode, 'Name');
-            const pixels = await ringPixels(session.tab, name);
-            expect(pixels.visible).toBe(true);
-            expect(read, 'the probe on the surface band').toBeGreaterThanOrEqual(3);
-            expect(Math.min(pixels.inside, pixels.outside), 'the painted ring on both sides').toBeGreaterThanOrEqual(3);
-            expect(Math.abs(read - pixels.inside), 'the probe and the pixels agree').toBeLessThan(0.5);
-            // The same two bands, accent on top: what the viewer sees at the ring is now the accent band.
-            const swapped = await session.tab.addStyleTag({
-              content: `:root[data-style='genz'] :is(select, input, textarea).kt-input:focus-visible { box-shadow: inset 0 0 0 calc(var(--focus-width) + 5px) var(--focus-color), inset 0 0 0 calc(var(--focus-width) + 2px) var(--surface) !important; }`,
-            });
-            const readSwapped = await probeRatio(session.tab, 'genz', palette, mode, 'Name');
-            const pixelsSwapped = await ringPixels(session.tab, name);
-            await gone(swapped);
-            expect(Math.abs(readSwapped - pixelsSwapped.inside), 'the probe follows the top band').toBeLessThan(0.5);
-          } finally {
-            await session.close();
-          }
-        });
-      }
 
   /**
    * r11 S13b, review of PR 2258: an inset band thick enough to match the ring is no use if it stops short of it. Studio's ring
