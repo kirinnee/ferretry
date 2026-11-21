@@ -57,7 +57,9 @@ const NO_IDENTITY_SSH =
  * Any generated key (a push key OR a signing-only one) closes ssh, because the account is Ferretry's to speak for; a
  * slot holding the person's OWN key is theirs and is never blocked here. Git reads `GIT_SSH_COMMAND` before
  * `core.sshCommand` before `GIT_SSH`, and a login's environment may set either variable, so the command is set in BOTH
- * places: this part is merged after the login (core ferrets), so `GIT_SSH_COMMAND` here is what git runs.
+ * places: this part is merged after the login (core ferrets), so `GIT_SSH_COMMAND` here is what git runs. Signing is
+ * switched off twice too: as settings, and as the END of `GIT_CONFIG_PARAMETERS` (git applies it last, so a login's own
+ * parameters cannot keep signing on).
  */
 export function noIdentityEnvironment(account: GitAccount): Readonly<Record<string, string>> {
   const { ssh, signing } = account.keys;
@@ -69,7 +71,12 @@ export function noIdentityEnvironment(account: GitAccount): Readonly<Record<stri
     settings.push(['core.sshCommand', NO_IDENTITY_SSH], ['url.git@github.com:.insteadOf', 'https://github.com/']);
     env['GIT_SSH_COMMAND'] = NO_IDENTITY_SSH;
   }
-  if (signing?.source !== 'own') settings.push(['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']);
+  if (signing?.source !== 'own') {
+    settings.push(['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']);
+    // Git applies GIT_CONFIG_PARAMETERS AFTER GIT_CONFIG_COUNT, and a login may set it to keep signing on. Core ferrets
+    // appends this value to the login's, so these entries come last, in git's own quoted `'key'='value'` form, and win.
+    env['GIT_CONFIG_PARAMETERS'] = `'commit.gpgsign'='false' 'tag.gpgsign'='false'`;
+  }
   env['GIT_CONFIG_COUNT'] = String(settings.length);
   settings.forEach(([key, value], index) => {
     env[`GIT_CONFIG_KEY_${String(index)}`] = key;

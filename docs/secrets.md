@@ -2179,7 +2179,9 @@ Ferretry made (a push key or a signing-only one) but its agent cannot be served 
 or the recorded key's sealed entry is gone), the ferret still starts, with one instruction sentence that its Git account
 key is unavailable; no error text is put in it. The pane's environment is then given the no-identity ssh command (no
 agent, no default key file, no password) as `GIT_SSH_COMMAND` AND as `core.sshCommand`, and `https://github.com/` is
-rewritten to ssh so a host credential helper is not used; signing is switched off. Git reads `GIT_SSH_COMMAND` before
+rewritten to ssh so a host credential helper is not used; signing is switched off (`commit.gpgsign` and `tag.gpgsign`
+`false`, as settings and as the END of `GIT_CONFIG_PARAMETERS`, which Ferrets appends to a login's own value and Git
+applies last, so a login's parameters cannot keep signing on). Git reads `GIT_SSH_COMMAND` before
 `core.sshCommand` before `GIT_SSH`, and the part is merged AFTER the login's environment, so a login's own
 `GIT_SSH_COMMAND` or `GIT_SSH` does not win. A `git push` run with that environment over ssh therefore fails
 instead of succeeding as this machine's own ssh identity. What this is not: it is the environment the pane is _given_,

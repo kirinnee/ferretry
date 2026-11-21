@@ -284,6 +284,37 @@ describe('a key that cannot be started says so in the pane, and runs with no ide
     expect([signingOnly['commit.gpgsign'], signingOnly['tag.gpgsign']]).toEqual(['false', 'false']);
   });
 
+  // Git applies GIT_CONFIG_PARAMETERS AFTER GIT_CONFIG_COUNT, and a configured login may set it to keep signing on; core
+  // ferrets APPENDS the part's value to the login's (pinned in core-ferrets launch-login-env.test.ts, with real git on the
+  // merged env). So the part must end the parameters with signing off, and real git must read it that way.
+  test('a login that turns signing ON through GIT_CONFIG_PARAMETERS: after the merge, real git reads signing off', async () => {
+    const login = `'commit.gpgsign'='true' 'tag.gpgsign'='true' 'user.signingkey'='/login/key.pub' 'http.proxy'='http://login.example.test'`;
+    for (const keys of [made('generated'), generatedKeys('ssh'), generatedKeys('signing')]) {
+      const part = paneEnv(await launch(account(1, 'alice', { keys }), unavailable));
+      expect(part.GIT_CONFIG_PARAMETERS).toBeDefined();
+      const git = (name: string): string =>
+        new TextDecoder()
+          .decode(
+            Bun.spawnSync(['git', 'config', '--get', name], {
+              env: {
+                PATH: process.env.PATH ?? '',
+                HOME: '/nonexistent-fy-home',
+                GIT_CONFIG_NOSYSTEM: '1',
+                GIT_CONFIG_GLOBAL: '/dev/null',
+                ...part,
+                // The merge rule core ferrets applies: the part's entries come last.
+                GIT_CONFIG_PARAMETERS: `${login} ${part.GIT_CONFIG_PARAMETERS ?? ''}`,
+              },
+            }).stdout,
+          )
+          .trim();
+      expect(git('commit.gpgsign')).toBe('false');
+      expect(git('tag.gpgsign')).toBe('false');
+      // What the part does not say is the login's own.
+      expect(git('http.proxy')).toBe('http://login.example.test');
+    }
+  });
+
   test('the person’s OWN ssh key beside a generated signing key: ssh is not blocked, signing is off', async () => {
     const keys: GitAccount['keys'] = {
       ssh: { title: 't', publicKey: PUB, source: 'own' },
