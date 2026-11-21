@@ -165,7 +165,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['lucid', 'neumorphism', 'retro'],
+    styles: ['lucid', 'neumorphism'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'gradient',
@@ -201,7 +201,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['genz', 'glass', 'lucid', 'pixel', 'retro'],
+    styles: ['genz', 'glass', 'lucid'],
     palettes: EVERY_PALETTE,
     modes: BOTH_MODES,
     check: 'gradient',
@@ -282,7 +282,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['briefing', 'retro', 'swiss'],
+    styles: ['briefing', 'swiss'],
     palettes: ['geist'],
     modes: BOTH_MODES,
     check: 'spinner',

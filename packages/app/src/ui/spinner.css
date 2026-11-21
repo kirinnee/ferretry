@@ -28,15 +28,7 @@
    changes otherwise is the stroke and the figure — the same reason a Neo button is a hard block and a Geist one a hairline. A style
    that draws the parts instead of the ring (Neo, Raw, Mission, HUD, Geist) shapes them in its own stylesheet. */
 
-/* Pixel art: a chunky square-cap arc that advances in whole frames, like a bitmap loader. */
-:root[data-style='pixel'],
-[data-swatch][data-style='pixel'] {
-  --spinner-stroke: 3.25;
-  --spinner-cap: square;
-  --spinner-sweep: 28;
-  --spinner-speed: 0.8s;
-  --spinner-timing: steps(8, end);
-}
+/* Pixel art draws its mark from the generic parts (four blocks lit in turn): styles/style/pixel.css. */
 
 .fy-spinner {
   animation: fy-spinner-turn var(--spinner-speed) var(--spinner-timing) infinite;

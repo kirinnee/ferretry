@@ -8,9 +8,13 @@
               OFL woff2 under `assets/fonts/`; none is a trademarked or platform face. `font-synthesis` is off so a bitmap
               face is never smeared into a fake bold or italic.
      edges    2px solid ink on every control and panel, radius 0, a hard 2px/4px offset shadow, no blur anywhere.
-     ground   a faint 8px pixel grid on the page, drawn in the palette's own `--texture-ink`.
-     motion   stepped: a press, a hover and a select land in 3-4 frames.
-     focus    a 3px ring on a 2px gap, the same hard rule as Neo's, so the keyboard is never lost in a busy block.
+     ground   a faint pixel grid on the page (the style contract's grid tile, a 1px rule every 8px, in the palette's own
+              `--texture-ink`); no wash and no grain.
+     motion   stepped: a press, a hover and a select land in 3-4 frames; the spinner is four blocks lit in turn.
+     focus    a 3px ring on a 2px gap on a block (a field's ring is drawn inside by the shell's one rule), so the keyboard is
+              never lost in a busy block. A choice card or segment keeps its outside ring: on the selected (inverted) fill an
+              inside ring is 1.65:1 against it in High contrast, short of the 3:1 the theme matrix holds.
+     r11 T10  every slot of the component contract: markdown, spinner, motion, hypermedia (`block`) and surfaces (`offset`).
 
    This style is NOT `loud`: it keeps the readability rules (every pair clears the contrast matrix). Colour comes only from
    roles; no colour value lives here (`tests/unit/theme-axes.test.ts`).
@@ -78,10 +82,13 @@
   --ghost-bg: var(--surface);
   --ghost-edge: var(--border);
   --ghost-shadow: var(--shadow-control);
-  /* The page is a faint pixel grid in the palette's own texture ink; panels stay flat so text never sits on a pattern. */
-  --body-wash:
-    repeating-linear-gradient(90deg, var(--texture-ink) 0 2px, transparent 2px 8px),
-    repeating-linear-gradient(180deg, var(--texture-ink) 0 2px, transparent 2px 8px);
+  /* The page is a faint pixel grid (the contract's grid tile, 1px rules every 8px) in the palette's own texture ink; panels
+     stay flat so text never sits on a pattern. No wash, no grain. */
+  --body-wash: none;
+  --bg-pattern: var(--bg-pattern-grid);
+  --bg-pattern-size: 8px;
+  --bg-pattern-alpha: 100%;
+  --grain-alpha: 0;
   --panel-texture: none;
   --panel-bg: var(--surface);
   /* Whole frames, not a tween. A bitmap does not scale smoothly, so the select "pop" is a small step up. */
@@ -113,6 +120,74 @@
   --gap-sm: 8px;
   --gap-md: 12px;
   --menu-item-h: 38px;
+
+  /* ═══ the component contract (r11 T10): what carries Pixel in every slot, in greyscale ═══ */
+  /* MARKDOWN: a bitmap page. Headings over a STEPPED (dashed) 4px rule, a square code block with a hard inset shadow (an outside offset sticks out of the column), a quote
+     in dashed blocks, a ruled grid table with a heavy header, links underlined 2px thick, square bullets. */
+  --md-h1-size: 1.3em;
+  --md-h1-weight: 700;
+  --md-h1-case: none;
+  --md-h1-rule: 4px dashed var(--border-strong);
+  --md-h1-rule-pad: 0.3em;
+  --md-h2-size: 1.12em;
+  --md-h2-weight: 700;
+  --md-h2-case: none;
+  --md-h2-rule: 2px dashed var(--border-strong);
+  --md-h2-rule-pad: 0.2em;
+  --md-code-border: 2px solid var(--border-strong);
+  --md-code-bar: var(--md-code-border);
+  --md-code-radius: 0px;
+  --md-code-shadow: inset -3px -3px 0 var(--shadow-ink);
+  --md-quote-bar: 4px dashed var(--border-strong);
+  --md-quote-pad: 0.95em;
+  --md-quote-bg: var(--surface-2);
+  --md-quote-radius: 0px;
+  --md-quote-font-style: normal;
+  --md-cell-border-x: 2px solid var(--border-strong);
+  --md-cell-border-y: 2px solid var(--border-strong);
+  --md-th-bg: var(--surface-3);
+  --md-th-case: none;
+  --md-th-weight: 700;
+  --md-zebra: transparent;
+  --md-link-decoration: underline solid 2px;
+  --md-link-weight: 700;
+  --md-link-bg: transparent;
+  --md-link-pad: 0;
+  --md-link-radius: 0px;
+  --md-stack-radius: 0px;
+  --md-stack-frame: 2px solid var(--border-strong);
+  --md-stack-row-rule: 2px solid var(--border-strong);
+  --md-ul-marker: '■  ';
+  --md-ol-marker: decimal-leading-zero;
+  --md-list-marker-color: var(--accent);
+  /* SPINNER: four blocks (the 2 x 2 of generic parts, ring hidden) lit in turn, clockwise, one quarter of a 1s cycle each, in
+     whole frames (`steps(1)`: lit or dim, never a fade). Drawn below. */
+  --spinner-ring: none;
+  --spinner-parts: inline;
+  --spinner-parts-speed: 1s;
+  --spinner-parts-timing: steps(1, end);
+  /* MOTION: whole frames. A press, a hover and a select land in 3-4 steps; the loaders count in steps. */
+  --motion-pop: 150ms;
+  --ease-in: steps(3, end);
+  --ease-out: steps(3, end);
+  --ease-in-out: steps(3, end);
+  --ease-spring: steps(4, end);
+  --motion-loading-ring: 0.8s;
+  --motion-loading-run: 1.2s;
+  --ease-loading-ring: steps(8, end);
+  --ease-loading-run: steps(10, end);
+  /* HYPERMEDIA (read by r12 H5; no renderer reads an --hm-* slot yet): hard `block` nodes, square, 2px ink, orthogonal edges. */
+  --hm-shape: block;
+  --hm-edge: orthogonal;
+  --hm-radius: 0px;
+  --hm-stroke: 2px;
+  --hm-font: var(--font-body);
+  --hm-node-fill-alpha: 1;
+  --hm-header: band;
+  /* SURFACES: a hard offset block under every panel (the shadow tokens above); the ring is drawn inside the control. */
+  --panel-edge: offset;
+  --panel-edge-line: solid;
+  --focus-line: solid;
 }
 
 @media (max-width: 640px) {
@@ -307,4 +382,44 @@
 :root[data-style='pixel'] .kt-badge,
 :root[data-style='pixel'] .kt-badge[data-tone] {
   border-color: var(--border-strong);
+}
+
+/* THE PIXEL SPINNER: four blocks lit in turn, clockwise (top-left, top-right, bottom-right, bottom-left = p1, p2, p4, p3), a
+   quarter of the 1s cycle apart. The figure itself does not turn (the mark's own turn is off): the blocks chase, each one
+   fully lit for a quarter and dim for the rest, in whole frames. The base shorthand on `.fy-spinner [class*='fy-spinner__p']`
+   resets every part's `animation-delay`, so the stagger is RESTATED here, at a specificity above it.
+   SCOPE: element rules, so the page rule skips a spinner inside a `[data-swatch]` (a swatch preview draws its own style's mark)
+   and the swatch rule matches only a swatch of this style. Reduced motion (ui/spinner.css) outranks all of it: the blocks
+   stay solid and the whole mark pulses. */
+:root[data-style='pixel'] .fy-spinner:not([data-swatch] *),
+[data-swatch][data-style='pixel'] .fy-spinner {
+  animation: none;
+}
+:root[data-style='pixel'] .fy-spinner:not([data-swatch] *) [class*='fy-spinner__p'],
+[data-swatch][data-style='pixel'] .fy-spinner [class*='fy-spinner__p'] {
+  animation-name: fy-pixel-chase;
+  shape-rendering: crispEdges;
+}
+:root[data-style='pixel'] .fy-spinner:not([data-swatch] *) .fy-spinner__p2,
+[data-swatch][data-style='pixel'] .fy-spinner .fy-spinner__p2 {
+  animation-delay: calc(var(--spinner-parts-speed) * 0.25);
+}
+:root[data-style='pixel'] .fy-spinner:not([data-swatch] *) .fy-spinner__p4,
+[data-swatch][data-style='pixel'] .fy-spinner .fy-spinner__p4 {
+  animation-delay: calc(var(--spinner-parts-speed) * 0.5);
+}
+:root[data-style='pixel'] .fy-spinner:not([data-swatch] *) .fy-spinner__p3,
+[data-swatch][data-style='pixel'] .fy-spinner .fy-spinner__p3 {
+  animation-delay: calc(var(--spinner-parts-speed) * 0.75);
+}
+@keyframes fy-pixel-chase {
+  0% {
+    opacity: 1;
+  }
+  25% {
+    opacity: 0.25;
+  }
+  100% {
+    opacity: 0.25;
+  }
 }

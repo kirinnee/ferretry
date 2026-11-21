@@ -109,7 +109,7 @@ beforeAll(async () => {
 }, 120_000);
 
 /** Styles whose kit (r11 T5-T12) deliberately dropped the old gradient field and panel texture; each unit adds its own styles. */
-const NO_GRADIENT_FIELD: ReadonlySet<string> = new Set(['mission', 'hud']);
+const NO_GRADIENT_FIELD: ReadonlySet<string> = new Set(['mission', 'hud', 'retro', 'pixel']);
 
 /** Styles whose kit (r11 T7) moved the focus ring INSIDE the control: `--focus-offset` is no longer the captured outward 0 or 2px. */
 const RING_INSIDE: ReadonlySet<string> = new Set(['neo']);
