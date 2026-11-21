@@ -765,8 +765,9 @@ const readOnPage = async (
   page: string,
   swatch: string,
   mode: 'light' | 'dark',
+  viewport: (typeof VIEWPORTS)[number] = VIEWPORTS[0],
 ): Promise<Record<string, Record<string, string>>> => {
-  const { tab, close } = await open(VIEWPORTS[0], mode, page);
+  const { tab, close } = await open(viewport, mode, page);
   try {
     return await readSwatchControls(tab, swatch, mode);
   } finally {
@@ -814,6 +815,33 @@ describe('a swatch keeps its own control paint on a page of another style (mixed
         );
       }
     });
+});
+
+/**
+ * THE PHONE TILT (PR 2279 review). The Gen Z badge tilts -3deg and sits straight at 390. That phone rule was written for the page alone, so
+ * at 390 a Gen Z swatch read -3deg on a Studio page and straight on a Gen Z one. Read at 390 (and at 1280, where the tilt is the style's
+ * own and must stay), the Gen Z swatch's badge reads the same on a page of every style, and a Studio swatch never takes the tilt.
+ */
+describe('the Gen Z badge tilt at 390 follows the swatch, not the page (mixed page x swatch)', () => {
+  for (const viewport of VIEWPORTS)
+    for (const mode of MODES)
+      it(`${viewport.name} ${mode}`, async () => {
+        const want = viewport.phone ? 'none' : '-3deg';
+        const tilts: Record<string, string> = {};
+        for (const page of ['studio', 'genz', 'antiposh'] as const) {
+          const genz = await readOnPage(page, 'genz', mode, viewport);
+          const studio = await readOnPage(page, 'studio', mode, viewport);
+          tilts[`genz swatch on ${page}`] = genz.badge?.rotate ?? '';
+          tilts[`studio swatch on ${page}`] = studio.badge?.rotate ?? '';
+        }
+        report[`badge-tilt:${viewport.name}:${mode}`] = tilts;
+        for (const page of ['studio', 'genz', 'antiposh'])
+          expect(tilts[`genz swatch on ${page}`], `a Gen Z swatch badge on a ${page} page at ${viewport.name}`).toBe(
+            want,
+          );
+        for (const page of ['studio', 'genz', 'antiposh'])
+          expect(tilts[`studio swatch on ${page}`], `a Studio swatch badge on a ${page} page`).toBe('none');
+      });
 });
 
 /**
@@ -1057,6 +1085,132 @@ describe('no focus ring of a kit sticks out of its control (a tight clipping box
           await close();
         }
       });
+});
+
+/**
+ * THE CHOSEN CONTROLS' RING IS PAINTED CLEAR OF THEIR RULE AND READS >= 3:1 (the PR 2279 review + the T13 recheck). The shell's focus
+ * colour is the accent, and the chosen segment of the Appearance Colour mode control and the chosen style card are filled with the
+ * selection colour and ruled in ink: a ring in the focus colour over that fill measured 1.00:1 (Neo dark) to 1.98:1 / 1.65:1 (High
+ * contrast light / dark), and a Gen Z style card's ring set on its own 3px rule measured 2.42:1 light. So each is read the way a viewer sees
+ * it: a real key press focuses it, a real screenshot row across its left edge gives the pixel ON the ring, the pixel just inside it and the
+ * pixel just outside it (grain held out of the sample, as in the theme matrix), and the ring must be 2px+, start 1px past the rule, and
+ * read >= 3:1 on BOTH sides. Both viewports, both modes, the style's default palette, Neo and High contrast.
+ */
+const SEGMENTED = `<div data-neo-segmented role="radiogroup" aria-label="Colour mode" style="display:inline-flex">
+  <label data-own><input class="sr-only" type="radio" name="cm" checked><span>Dark</span></label>
+  <label><input class="sr-only" type="radio" name="cm"><span>Light</span></label></div>`;
+const CHOSEN_CARD = `<label class="fy-cc__card" data-selected="true" data-own style="display:flex;width:160px"><input class="sr-only" type="radio" name="sc" checked><span class="fy-ap-mini"><span class="fy-ap-mini__top"><b class="fy-ap-mini__type">Ag</b></span><span class="fy-ap-mini__bottom"><i class="fy-ap-mini__button"></i><i class="fy-ap-mini__card"></i></span></span><span class="fy-cc__title">Style</span></label>`;
+const PLAIN_CARD = CHOSEN_CARD.replace(' data-selected="true"', '').replace(' checked', '');
+
+interface PaintedRing {
+  visible: boolean;
+  width: number;
+  offset: number;
+  rule: number;
+  inside: number;
+  outside: number;
+  ring: string;
+  gap: number;
+}
+const paintedRing = async (tab: Page, markup: string): Promise<PaintedRing> => {
+  await tab.evaluate(m => {
+    document.getElementById('paint-ring')?.remove();
+    const holder = document.createElement('div');
+    holder.id = 'paint-ring';
+    holder.style.cssText = 'position:absolute;left:24px;top:24px;padding:24px;background:var(--surface);z-index:9';
+    holder.innerHTML = m;
+    document.body.append(holder);
+  }, markup);
+  await tab.keyboard.press('Tab'); // a real key press, so a focus() draws :focus-visible
+  const geometry = await tab.evaluate(() => {
+    const owner = document.querySelector('#paint-ring [data-own]') as HTMLElement;
+    (owner.querySelector('input') as HTMLElement).focus({ focusVisible: true } as FocusOptions);
+    const css = getComputedStyle(owner);
+    const box = owner.getBoundingClientRect();
+    return {
+      visible: (owner.querySelector('input') as HTMLElement).matches(':focus-visible'),
+      width: Number.parseFloat(css.outlineWidth),
+      offset: Number.parseFloat(css.outlineOffset),
+      rule: Number.parseFloat(css.borderLeftWidth),
+      x: box.left + window.scrollX,
+      y: box.top + window.scrollY + box.height / 2,
+    };
+  });
+  expect(Math.abs(geometry.x - Math.round(geometry.x)), 'the control sits on a whole pixel').toBeLessThan(0.05);
+  const left = Math.round(geometry.x) - 4;
+  const png = (
+    await tab.screenshot({
+      clip: { x: left, y: Math.floor(geometry.y), width: 24, height: 1 },
+      fullPage: true,
+      scale: 'css',
+      type: 'png',
+    })
+  ).toString('base64');
+  const read = await tab.evaluate(
+    async ([data, inner, width]) => {
+      const bitmap = await createImageBitmap(
+        new Blob([Uint8Array.from(atob(data as string), c => c.charCodeAt(0))], { type: 'image/png' }),
+      );
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      const g = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D;
+      g.drawImage(bitmap, 0, 0);
+      const d = g.getImageData(0, 0, bitmap.width, 1).data;
+      // Depth `n` px inside the border box is the pixel at 4 + n.
+      const at = (depth: number): number[] => {
+        const i = (4 + Math.floor(depth)) * 4;
+        return [d[i] ?? 0, d[i + 1] ?? 0, d[i + 2] ?? 0];
+      };
+      const tools = (window as unknown as { __colour: ColourTools }).__colour;
+      const ring = at((inner as number) - (width as number) / 2);
+      const near = at(inner as number);
+      const far = at((inner as number) - (width as number) - 1);
+      return {
+        ring: `rgb(${ring.join(',')})`,
+        inside: tools.ratio(ring, near),
+        outside: tools.ratio(ring, far),
+      };
+    },
+    [png, -geometry.offset, geometry.width] as const,
+  );
+  return {
+    ...geometry,
+    ...read,
+    gap: -geometry.offset - geometry.width - geometry.rule,
+  };
+};
+
+describe('the focused chosen segment and style card draw a ring clear of their rule that reads >= 3:1 on both sides', () => {
+  for (const style of KITS)
+    for (const viewport of VIEWPORTS)
+      for (const mode of MODES)
+        for (const palette of [PALETTE[style], 'neo', 'contrast'])
+          it(`${style} ${viewport.name} ${mode} on ${palette}`, async () => {
+            const { tab, close } = await open(viewport, mode, style, palette);
+            try {
+              await tab.evaluate(COLOUR_TOOLS);
+              await tab.addStyleTag({ content: 'body::after { display: none !important; }' });
+              const reads: Record<string, PaintedRing> = {};
+              reads['chosen segment'] = await paintedRing(tab, SEGMENTED);
+              reads['chosen card'] = await paintedRing(tab, CHOSEN_CARD);
+              reads.card = await paintedRing(tab, PLAIN_CARD);
+              report[`painted-ring:${style}:${viewport.name}:${mode}:${palette}`] = reads;
+              for (const [name, read] of Object.entries(reads)) {
+                const said = `${style} ${viewport.name} ${mode} ${palette} ${name} (${JSON.stringify(read)})`;
+                expect(read.visible, `${said}: the keyboard focus draws :focus-visible`).toBe(true);
+                expect(read.width, `${said}: the ring is >= 2px`).toBeGreaterThanOrEqual(2);
+                // Gen Z's ring is clear of every rule it sits in; Anti-Posh's chosen segment too. Its cards keep the ring on their dashed
+                // ink rule (the page's own ring, read >= 3:1 on both sides below), so only the segment's clearance is pinned there.
+                if (style === 'genz' || name === 'chosen segment')
+                  expect(read.gap, `${said}: the ring starts 1px past the rule, never on it`).toBeGreaterThanOrEqual(1);
+                expect(read.inside, `${said}: the ring vs what is just inside it`).toBeGreaterThanOrEqual(3);
+                expect(read.outside, `${said}: the ring vs what is just outside it`).toBeGreaterThanOrEqual(3);
+              }
+            } finally {
+              await close();
+            }
+          });
 });
 
 /** Nothing is see-through when the OS asks for no transparency: every surface the kits paint is opaque or fully clear. */

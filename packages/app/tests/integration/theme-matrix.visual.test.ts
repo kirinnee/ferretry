@@ -972,6 +972,44 @@ describe('the probes read the real page', () => {
   };
 
   /**
+   * r11 S13b, review of PR 2258: Gen Z lists two opaque inset bands, the surface FIRST (painted on top) and the accent under it.
+   * The ring is read on what a viewer sees at its inner edge, the topmost band, so the probe's ratio is the screenshot's, and
+   * the same page with the two bands swapped reads the accent one: the probe follows the layering, not the list's last row.
+   *
+   * Gen Z paints a fine grain over the whole page (`body::after`, a few % of noise on top of every pixel); a pixel sample taken
+   * through it is the band's colour plus noise, which moves a 3:1 ring by more than the margin (Mission dark: the probe and the pixels
+   * disagree). The overlay is held OUT of the sample (the one rule below, removed with the page), so the sample is the band as painted
+   * and the coverage this test gave stays whole.
+   */
+  for (const viewport of VIEWPORTS)
+    for (const mode of MODES)
+      for (const palette of ['studio', 'mission']) {
+        it(`Gen Z's Name ring is read on its topmost band, as painted (${palette}, ${mode}, ${viewport.name})`, async () => {
+          const session = await open(viewport, mode);
+          try {
+            await session.tab.addStyleTag({ content: 'body::after { display: none !important; }' });
+            const name = 'input[aria-label="Name"]';
+            const read = await probeRatio(session.tab, 'genz', palette, mode, 'Name');
+            const pixels = await ringPixels(session.tab, name);
+            expect(pixels.visible).toBe(true);
+            expect(read, 'the probe on the surface band').toBeGreaterThanOrEqual(3);
+            expect(Math.min(pixels.inside, pixels.outside), 'the painted ring on both sides').toBeGreaterThanOrEqual(3);
+            expect(Math.abs(read - pixels.inside), 'the probe and the pixels agree').toBeLessThan(0.5);
+            // The same two bands, accent on top: what the viewer sees at the ring is now the accent band.
+            const swapped = await session.tab.addStyleTag({
+              content: `:root[data-style='genz'] :is(select, input, textarea).kt-input:focus-visible { box-shadow: inset 0 0 0 calc(var(--focus-width) + 5px) var(--focus-color), inset 0 0 0 calc(var(--focus-width) + 2px) var(--surface) !important; }`,
+            });
+            const readSwapped = await probeRatio(session.tab, 'genz', palette, mode, 'Name');
+            const pixelsSwapped = await ringPixels(session.tab, name);
+            await gone(swapped);
+            expect(Math.abs(readSwapped - pixelsSwapped.inside), 'the probe follows the top band').toBeLessThan(0.5);
+          } finally {
+            await session.close();
+          }
+        });
+      }
+
+  /**
    * r11 S13b, review of PR 2258: an inset band thick enough to match the ring is no use if it stops short of it. Studio's ring
    * at offset -8px with border 0 and a 2px surface band paints accent on accent on BOTH sides (the band is at the edge, the ring
    * 8px in): the probe must read that as a miss, as the pixels do.
