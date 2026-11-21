@@ -125,6 +125,11 @@ export interface SetupFlow {
   readonly at: Place;
   readonly direction: RunState['direction'];
   readonly page: FlowStep | undefined;
+  /**
+   * The next two pages `next` would move to from here, in order (what the screen draws in advance, hidden). Two, because a
+   * page that passes itself over (Shells, when nix is found) is gone in a frame and the page behind it is the one drawn.
+   */
+  readonly upcoming: readonly FlowStep[];
   readonly canBack: boolean;
   readonly progress: ProgressRead | undefined;
   /** Every answer the machine did not take, oldest first; one entry per step. */
@@ -408,6 +413,13 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
 
   const page = pages.find(candidate => candidate.key === run.at);
   const hidden = passedOver(run);
+  const firstAfter = page === undefined ? run : advance(run, pages, answered);
+  const upcoming = [firstAfter, advance(firstAfter, pages, answered)]
+    .map(state => pages.find(candidate => candidate.key === state.at))
+    .filter(
+      (step, index, all): step is FlowStep =>
+        step !== undefined && step.key !== page?.key && all.indexOf(step) === index,
+    );
   const progress =
     ready === undefined || page === undefined
       ? undefined
@@ -426,6 +438,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     at: run.at,
     direction: run.direction,
     page,
+    upcoming,
     canBack: run.trail.some(key => !hidden.has(key)),
     progress,
     unsaved: Object.values(failed),

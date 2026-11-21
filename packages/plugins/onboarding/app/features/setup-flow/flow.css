@@ -145,6 +145,12 @@
 .fy-sf-cover[data-flow-cover] .fy-loading--page {
   animation-delay: 0s;
 }
+/* The same under Settings > Motion > Reduced: the app's shared rule (ui/loading.css) restates the threshold with !important, which
+   would add a SECOND 300 ms here while the hold clock (useHeldLoading) already runs: a 340 ms answer sat behind a blank cover and the
+   loader showed ~130 ms. The loader and its hold share one delay (none), so this beats that rule on specificity. */
+:root[data-motion='reduced'] .fy-sf-cover[data-flow-cover] .fy-loading--page.fy-loading--page {
+  animation-delay: 0s !important;
+}
 
 /* r11 O1: a save Next could not make says so in the error colour (the theme's --err, light and dark). */
 .fy-sf-note[data-flow-commit-error] {

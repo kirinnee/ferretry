@@ -19,20 +19,29 @@
  *   ?case=commit-throw  the FIRST save throws while it is being prepared, before it returns its promise (then it works)
  *   ?case=commit-tall   a failing save on a page far over one screen, drawn in the shell's scroll box (where is the message?)
  *   ?case=discovery     the flow's machine-discovery cover (`data-flow-loading`), a different cover from the step page's
+ *   r11-1b G6: ?case=prefetch   a two-page wizard whose second page is a LAZY panel (the real `lazyComponent`, a 20 ms module load)
+ *     drawn in its own Suspense with the shell's bar as the fallback, as the slot does; the real `NextPagePrefetch` draws it
+ *     hidden while the first page shows. `window.__nextAt` / `__secondReadyAt` are performance.now() of the Next press and of the
+ *     second page's `ready()`.
+ *   ?motion=reduced   Settings > Appearance > Motion > Reduced (`<html data-motion="reduced">`), with any case
  *   ?case=late&ms=N   a page that says `ready()` N ms after it mounts; `window.__pageMountedAt` / `__readyAt` are performance.now()
  */
 import { LivingBackground, Loading } from '@ferretry/app/ui';
 import { ChoiceCards } from '@ferretry/app';
-import { useEffect, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useState, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { EndPage } from '../../../../app/features/setup-flow/end-page.tsx';
+import { NextPagePrefetch } from '../../../../app/features/setup-flow/next-page-prefetch.tsx';
 import { FlowPage } from '../../../../app/features/setup-flow/page-frame.tsx';
+import { lazyComponent } from '../../../../app/lazy.ts';
 import type { FlowStep } from '../../../../app/lib/index.ts';
 import type { StepHost } from '@ferretry/kernel/contract';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const scene = params.get('case') ?? 'choice';
+// r11-1b G6: ?motion=reduced is Settings > Appearance > Motion > Reduced (the shell writes it as <html data-motion="reduced">).
+if (params.get('motion') === 'reduced') document.documentElement.dataset.motion = 'reduced';
 
 const STEP: FlowStep = {
   key: 'fake-pack.choose',
@@ -160,6 +169,45 @@ function Late({ host, ms }: { readonly host: StepHost; readonly ms: number }): R
   return <p>A page that answers late.</p>;
 }
 
+/** r11-1b G6: a panel whose module loads in 20 ms, through the real `lazyComponent` (one load, shared by every draw). */
+const LazySecond = lazyComponent<{ readonly host: StepHost }>(async () => {
+  await new Promise(resolve => setTimeout(resolve, 20));
+  return function SecondPanel({ host }) {
+    useEffect(() => {
+      (window as unknown as { __secondReadyAt?: number }).__secondReadyAt = performance.now();
+      host.ready();
+    }, [host]);
+    return <p>The second page, from a lazy module.</p>;
+  };
+}) as (props: { readonly host: StepHost }) => ReactNode;
+/** The slot's shape: the panel under its own Suspense with the shell's bar for a fallback. */
+const secondPanel = (host: StepHost): ReactNode => (
+  <Suspense fallback={<Loading kind="bar" label="Loading step…" />}>
+    <LazySecond host={host} />
+  </Suspense>
+);
+const SECOND: FlowStep = { ...STEP, key: 'fake-pack.second', id: 'second', title: 'Second page' };
+
+function PrefetchWizard(): ReactNode {
+  const [second, setSecond] = useState(false);
+  if (second) return <FlowPage key="second" {...common} step={SECOND} render={secondPanel} silenceMs={600_000} />;
+  return (
+    <>
+      <FlowPage
+        key="first"
+        {...common}
+        onNext={() => {
+          (window as unknown as { __nextAt?: number }).__nextAt = performance.now();
+          setSecond(true);
+        }}
+        render={host => <Cards host={host} height={112} />}
+        silenceMs={600_000}
+      />
+      <NextPagePrefetch steps={[SECOND]} render={host => secondPanel(host)} />
+    </>
+  );
+}
+
 const noop = (): void => undefined;
 const common = {
   step: STEP,
@@ -215,6 +263,7 @@ function Scene(): ReactNode {
         <Loading kind="page" label="Looking at what this machine can set up…" />
       </div>
     );
+  if (scene === 'prefetch') return <PrefetchWizard />;
   if (WIZARD_CASES.includes(scene)) return <Wizard />;
   if (scene === 'end' || scene === 'end-unsaved')
     return (

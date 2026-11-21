@@ -5,10 +5,13 @@
  * It decides nothing about any plugin's page: `flow-model.ts` walks them, `use-setup-flow.ts` records the answers, and
  * `page-frame.tsx` draws one page under its loading cover.
  */
+import { PanelSlot } from '@ferretry/app';
 import { Button, LivingBackground, Loading } from '@ferretry/app/ui';
 import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
+import { ONBOARDING_STEP_SLOT } from '../../../contract/index.ts';
 import { type ReactNode, useLayoutEffect, useRef } from 'react';
 import { EndPage } from './end-page.tsx';
+import { NextPagePrefetch } from './next-page-prefetch.tsx';
 import { type FlowDeps, useSetupFlow } from './use-setup-flow.ts';
 import { FlowPage } from './page-frame.tsx';
 import { END } from './flow-model.ts';
@@ -91,10 +94,27 @@ export function createSetupFlow(client: PluginClient, deps: FlowDeps = {}) {
         />
       );
     })();
+    const { target, upcoming } = flow;
     return (
       <div className="fy-sf-root" ref={root} data-setup-flow="" data-journey={flow.journey}>
         <LivingBackground />
         {body}
+        {target === undefined ? null : (
+          // The next pages, drawn hidden while this one shows, so their first real draw does not wait out React's 300 ms hold.
+          <NextPagePrefetch
+            steps={upcoming}
+            render={(host, step) => (
+              <PanelSlot
+                daemon={
+                  step.appliesTo.some(row => row.daemon === target) ? target : (step.appliesTo[0]?.daemon ?? target)
+                }
+                slot={ONBOARDING_STEP_SLOT}
+                subject={step.key}
+                props={{ step: host }}
+              />
+            )}
+          />
+        )}
       </div>
     );
   };

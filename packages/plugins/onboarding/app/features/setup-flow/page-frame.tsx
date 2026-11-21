@@ -8,7 +8,8 @@
  *   2. after STEP_SILENCE_MS of silence the cover adds "Skip this step": a page that never answers never blocks;
  *   3. `busy(label)` locks the whole footer (Next, Back, Later) and says what is happening; `done()` is recorded once;
  *   4. (r11 O1) the cover draws NOTHING for its first LOADING_DELAY_MS (300 ms): it keeps the page's height and then shows the
- *      loader, so a page that answers inside that beat never flashes one;
+ *      loader, so a page that answers inside that beat never flashes one; once the loader is up it stays for its minimum
+ *      (fade + min, r11-1b G6), so an answer a few frames later does not blink it, and the page is drawn after it goes;
  *   5. (r11 O1) a page that registered `commit` is SAVED by Next (contract rule 8): the footer is busy 'Saving…', and a save that
  *      rejects (or throws while it is being prepared) keeps the page, shows the error in the footer line, where it stays on screen
  *      with Next, and leaves Next ready to run it again;
@@ -17,7 +18,7 @@
  * Next, Back and Later are the shell's and live in the frame's footer row (Back · Later · Next), so every page has the same footer.
  */
 import { PanelSlot, StepPageFrame, useSlotPanels } from '@ferretry/app';
-import { Badge, Button, LOADING_DELAY_MS, Loading, useMotionAllowed } from '@ferretry/app/ui';
+import { Badge, Button, LOADING_DELAY_MS, Loading, useHeldLoading, useMotionAllowed } from '@ferretry/app/ui';
 import type { StepHost } from '@ferretry/kernel/contract';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ONBOARDING_STEP_SLOT } from '../../../contract/index.ts';
@@ -98,6 +99,10 @@ export function FlowPage(props: FlowPageProps): ReactNode {
   const [silent, setSilent] = useState(false);
   // The loader is drawn only once the cover has waited COVER_DELAY_MS; before that the cover only holds the page's room.
   const [loaderDue, setLoaderDue] = useState(false);
+  // Once the loader is up it stays for its minimum (`delay: 0`: the cover's own 300 ms already waited), so an answer a few
+  // frames after it came up does not blink it (r11-1b G6). The page stays hidden, and Next off, until the cover goes.
+  const loaderHeld = useHeldLoading(loaderDue && !ready, { delay: 0 });
+  const covered = !ready || loaderHeld;
   const [saveError, setSaveError] = useState<string | null>(null);
   // What Next must save (contract rule 8), the act in flight, and whether the page is still on screen.
   const commit = useRef<(() => Promise<void>) | null>(null);
@@ -181,7 +186,7 @@ export function FlowPage(props: FlowPageProps): ReactNode {
     return () => clearTimeout(timer);
   }, [ready, props.silenceMs]);
   const missing = useCallback(() => latest.current.onSkip('not-needed'), []);
-  const locked = !ready || busy !== null;
+  const locked = covered || busy !== null;
   /** Next: a page with a save registered is saved first (rule 8); one without just moves on. Back and Later never save. */
   const pressNext = useCallback((): void => {
     const save = commit.current;
@@ -230,7 +235,7 @@ export function FlowPage(props: FlowPageProps): ReactNode {
               </p>
             ),
           })}
-      {...(ready
+      {...(!covered
         ? {
             later: {
               title: 'Come back to this from Settings',
@@ -246,13 +251,13 @@ export function FlowPage(props: FlowPageProps): ReactNode {
         data-direction={direction}
         data-motion={moving ? '' : undefined}
         data-flow-page={step.key}
-        data-ready={ready ? '' : undefined}
+        data-ready={covered ? undefined : ''}
       >
-        {ready ? <OnlyOnChip names={step.onlyOn} /> : null}
-        {ready ? null : (
+        {covered ? null : <OnlyOnChip names={step.onlyOn} />}
+        {covered ? (
           <div className="fy-sf-cover" data-flow-cover="">
             {loaderDue ? <Loading kind="page" label="Checking what this step needs…" /> : null}
-            {silent ? (
+            {silent && !ready ? (
               <div className="fy-sf-silent" data-flow-silent="">
                 <p className="fy-sf-note">Still checking…</p>
                 <Button variant="ghost" onClick={() => props.onSkip('not-needed')} data-flow-skip="">
@@ -261,8 +266,8 @@ export function FlowPage(props: FlowPageProps): ReactNode {
               </div>
             ) : null}
           </div>
-        )}
-        <div className="fy-sf-slot" hidden={!ready} data-flow-slot="">
+        ) : null}
+        <div className="fy-sf-slot" hidden={covered} data-flow-slot="">
           {props.render === undefined ? (
             <PluginPage step={step} daemon={daemon} host={host} onMissing={missing} />
           ) : (

@@ -494,3 +494,140 @@ describe('r11 O1: Next saves the choice and the loader waits 300 ms', () => {
       });
     }
 });
+
+// r11-1b G6 (owner line 4): the step cover never blinks, and the next page is drawn in advance.
+describe('r11-1b G6: no cover blink, no first-draw hold', () => {
+  const open = async (scheme: 'light' | 'dark', width: number, height: number) => {
+    const context = await browser.newContext({ viewport: { width, height }, colorScheme: scheme });
+    const origin = server?.url.origin ?? '';
+    await context.route('**/*', async route =>
+      new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+    );
+    return { context, origin, tab: await context.newPage() };
+  };
+  /** The cover holds its loader for fade + min = 460 ms from the moment the loader is mounted (a little slack for the timer). */
+  const HELD_AT_LEAST_MS = 450;
+  /** When the cover's loader is put into the document and when it leaves it (a MutationObserver, so a busy frame loop cannot skew it). */
+  const COVER_WATCH = `
+    window.__cover = { in: -1, out: -1 };
+    const look = () => {
+      const now = performance.now();
+      const there = document.querySelector('[data-flow-cover] [data-loading]') !== null;
+      if (there && window.__cover.in < 0) window.__cover.in = now;
+      if (!there && window.__cover.in >= 0 && window.__cover.out < 0) window.__cover.out = now;
+    };
+    new MutationObserver(look).observe(document, { childList: true, subtree: true });
+  `;
+
+  for (const scheme of ['light', 'dark'] as const)
+    for (const viewport of VIEWPORTS) {
+      // A page that answers 40 ms after the cover's loader came up (answers at 100 ms: 300 + 40): onboarding.name 36 ms,
+      // warden 39 ms at the gate. The loader must stay for its minimum, not vanish after those few frames.
+      it(`a cover that came up for a 340 ms answer stays for its minimum, then the page shows (${viewport.name}, ${scheme})`, async () => {
+        const { context, origin, tab } = await open(scheme, viewport.width, viewport.height);
+        try {
+          await tab.addInitScript(COVER_WATCH);
+          await tab.goto(`${origin}/?theme=studio-${scheme}&case=late&ms=340`);
+          await tab.waitForFunction(() => (window as unknown as { __readyAt?: number }).__readyAt !== undefined);
+          // The page has answered; the cover is still up (held for its minimum).
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-g6-cover-held.png`) });
+          await tab.waitForSelector('[data-flow-cover]', { state: 'detached' });
+          await tab.waitForTimeout(200);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-g6-page-after.png`) });
+          const seen = await tab.evaluate(
+            () => (window as unknown as { __cover: { in: number; out: number } }).__cover,
+          );
+          const shown = seen.out - seen.in;
+          console.info(
+            `G6 cover loader held ${shown.toFixed(0)} ms after a 340 ms answer (${viewport.name}, ${scheme})`,
+          );
+          expect(seen.in, 'the loader was mounted').toBeGreaterThan(0);
+          expect(seen.out, 'and then left').toBeGreaterThan(seen.in);
+          expect(shown, `the loader was held ${shown.toFixed(0)} ms: not a blink`).toBeGreaterThanOrEqual(
+            HELD_AT_LEAST_MS,
+          );
+          expect(await tab.$('[data-flow-page]:not([hidden]) [data-flow-slot]:not([hidden])')).not.toBeNull();
+          expect(await tab.$('[data-flow-page][data-ready]'), 'the page shows after the hold').not.toBeNull();
+        } finally {
+          await context.close();
+        }
+      });
+    }
+
+  // With Settings > Motion > Reduced the shared !important rule (ui/loading.css) used to add a SECOND 300 ms delay to the loader the
+  // cover had already waited for, while the hold clock ran from the loader's mount: a 340 ms answer sat behind a BLANK cover and the
+  // loader was visible for ~130 ms (440 ms in normal motion). Counted by what is on screen (opacity, every frame), not by DOM presence.
+  for (const scheme of ['light', 'dark'] as const)
+    for (const viewport of VIEWPORTS) {
+      it(`in reduced motion a 340 ms answer still has its loader on screen for its minimum, from 300 ms on (${viewport.name}, ${scheme})`, async () => {
+        const { context, origin, tab } = await open(scheme, viewport.width, viewport.height);
+        try {
+          await tab.addInitScript(LOADER_SAMPLER);
+          await tab.goto(`${origin}/?theme=studio-${scheme}&case=late&ms=340&motion=reduced`);
+          await tab.waitForFunction(() => (window as unknown as { __readyAt?: number }).__readyAt !== undefined);
+          await tab.waitForSelector('[data-flow-cover]', { state: 'detached' });
+          const seen = await tab.evaluate(() => {
+            const w = window as unknown as {
+              __loader: { first: number; last: number; frames: number };
+              __pageMountedAt: number;
+            };
+            return { ...w.__loader, mounted: w.__pageMountedAt };
+          });
+          expect(seen.frames, 'the loader was visible on some frame').toBeGreaterThan(0);
+          const from = seen.first - seen.mounted;
+          const shown = seen.last - seen.first;
+          console.info(
+            `G6 reduced motion: loader visible from ${from.toFixed(0)} ms for ${shown.toFixed(0)} ms (${viewport.name}, ${scheme})`,
+          );
+          expect(from, `the loader shows at ${from.toFixed(0)} ms: not before 300`).toBeGreaterThanOrEqual(295);
+          expect(
+            from,
+            `and at once after the cover's own wait, not a second 300 ms (${from.toFixed(0)} ms)`,
+          ).toBeLessThanOrEqual(420);
+          expect(shown, `the loader was on screen ${shown.toFixed(0)} ms: not a blink`).toBeGreaterThanOrEqual(
+            HELD_AT_LEAST_MS - 100,
+          );
+        } finally {
+          await context.close();
+        }
+      });
+    }
+
+  for (const scheme of ['light', 'dark'] as const)
+    for (const viewport of VIEWPORTS) {
+      it(`a lazy second page, drawn in advance, is ready in under 150 ms of Next with no loader (${viewport.name}, ${scheme})`, async () => {
+        const { context, origin, tab } = await open(scheme, viewport.width, viewport.height);
+        try {
+          await tab.addInitScript(LOADER_SAMPLER);
+          await tab.goto(`${origin}/?theme=studio-${scheme}&case=prefetch`);
+          await tab.waitForSelector('[data-flow-page="fake-pack.choose"][data-ready]');
+          // Long enough for the hidden pre-render to have loaded the module (20 ms) and settled.
+          await tab.waitForTimeout(700);
+          expect(
+            await tab.evaluate(() => (window as unknown as { __secondReadyAt?: number }).__secondReadyAt),
+            'the hidden pre-render runs no effect of the page',
+          ).toBeUndefined();
+          await tab.click('[data-step-next]');
+          await tab.waitForFunction(
+            () => (window as unknown as { __secondReadyAt?: number }).__secondReadyAt !== undefined,
+          );
+          const at = await tab.evaluate(() => {
+            const w = window as unknown as { __nextAt: number; __secondReadyAt: number; __loader: { frames: number } };
+            return { ms: w.__secondReadyAt - w.__nextAt, frames: w.__loader.frames };
+          });
+          await tab.waitForTimeout(300);
+          console.info(`G6 Next to ready on a lazy page ${at.ms.toFixed(0)} ms (${viewport.name}, ${scheme})`);
+          expect(at.ms, `Next to ready took ${at.ms.toFixed(0)} ms`).toBeLessThan(150);
+          const frames = await tab.evaluate(
+            () => (window as unknown as { __loader: { frames: number } }).__loader.frames,
+          );
+          expect(frames, 'no loader was ever drawn on this move').toBe(0);
+          expect(await tab.$('[data-flow-prefetch]'), 'the pre-render is never in the document').toBeNull();
+        } finally {
+          await context.close();
+        }
+      });
+    }
+});

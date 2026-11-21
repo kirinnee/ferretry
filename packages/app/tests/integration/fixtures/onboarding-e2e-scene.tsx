@@ -30,6 +30,8 @@ import { extraRoutes } from './onboarding-e2e-routes.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+// r11-1b G6: ?latency=N makes every machine read and write answer N ms late (the machines answer at once by default).
+const latencyMs = Number(params.get('latency') ?? 0);
 const surfaces = generated.surfaces;
 const paused = params.get('paused');
 const overrides = paused === null ? {} : { [paused]: { on: false } };
@@ -49,7 +51,8 @@ const transportOf = (id: string): FakeTransport => {
   if (fake === undefined) throw new Error(`no fake machine ${id}`);
   const made = new FakeTransport(request => {
     if (request.path === '/v1/plugins') return json(inventoryOf(surfaces, overrides));
-    return fake.answer(request, extraRoutes(fake));
+    if (latencyMs <= 0) return fake.answer(request, extraRoutes(fake));
+    return new Promise(resolve => window.setTimeout(() => resolve(fake.answer(request, extraRoutes(fake))), latencyMs));
   });
   transports.set(id, made);
   return made;
