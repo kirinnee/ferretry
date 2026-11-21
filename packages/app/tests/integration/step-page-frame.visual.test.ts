@@ -19,7 +19,8 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
-import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
+import { LOADING_FADE_MS, LOADING_MIN_MS } from '../../src/ui/loading-gate.ts';
+import { NEXT_SPINNER_LOG, type NextSpinnerRun, sceneBuilder, sharedChromium } from '../support/browser/index.ts';
 
 setDefaultTimeout(60_000);
 
@@ -348,4 +349,55 @@ describe('r11 O2: step page layout, stacked choices left and demo right', () => 
       await close();
     }
   });
+});
+
+/**
+ * r11-1c C3: the footer Next's busy spinner waits the loader threshold like a page loader. On the real frame, Next is pressed and
+ * stays busy for `busyMs`: at 1 ms and 100 ms (under the 300 ms threshold) the spinner is never visible; at 600 ms it appears and is
+ * then held for its minimum (fade + minimum, from the code's own constants) after the answer, never a blink. Red on base: the
+ * spinner was drawn at once, 15-38 ms at 1 ms answers and 200-260 ms at 100 ms.
+ */
+describe('r11-1c C3: the Next button spinner is gated like a page loader', () => {
+  const SLACK_MS = 100;
+  const sampled = async (busyMs: number, variant: Viewport): Promise<NextSpinnerRun[]> => {
+    const context = await browser.newContext({
+      viewport: { width: variant.width, height: variant.height },
+      colorScheme: variant.scheme,
+    });
+    const origin = server?.url.origin ?? '';
+    await context.route('**/*', async route =>
+      new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+    );
+    await context.addInitScript(NEXT_SPINNER_LOG);
+    try {
+      const tab = await context.newPage();
+      tab.setDefaultTimeout(8_000);
+      await tab.goto(`${origin}/?theme=studio-${variant.scheme}&scene=busy&busyMs=${busyMs}`);
+      await tab.waitForSelector('[data-step-next]');
+      await tab.locator('[data-step-next]').click();
+      await tab.waitForTimeout(busyMs + 1_200);
+      return await tab.evaluate(() => (window as unknown as { __nextSpinner: NextSpinnerRun[] }).__nextSpinner);
+    } finally {
+      await context.close();
+    }
+  };
+  for (const variant of [VARIANTS[0], VARIANTS[2]] as readonly Viewport[]) {
+    for (const busyMs of [1, 100])
+      it(`answers ${busyMs} ms late: the spinner is never visible (${variant.name})`, async () => {
+        const runs = await sampled(busyMs, variant);
+        console.info(
+          `C3 ${variant.name} ${busyMs} ms: ${runs.map(run => `${Math.round(run.ms)}/${Math.round(run.fullMs)} ms`).join(', ') || 'never drawn'}`,
+        );
+        expect(runs).toEqual([]);
+      });
+    it(`answers 600 ms late: it comes up after the threshold and stays for its minimum (${variant.name})`, async () => {
+      const runs = await sampled(600, variant);
+      console.info(
+        `C3 ${variant.name} 600 ms: ${runs.map(run => `${Math.round(run.ms)}/${Math.round(run.fullMs)} ms`).join(', ') || 'never drawn'}`,
+      );
+      expect(runs.length, 'the spinner was drawn once').toBe(1);
+      expect(runs[0]?.ms ?? 0).toBeGreaterThanOrEqual(LOADING_FADE_MS + LOADING_MIN_MS - SLACK_MS);
+      expect(runs[0]?.fullMs ?? 0).toBeGreaterThanOrEqual(LOADING_MIN_MS - SLACK_MS);
+    });
+  }
 });

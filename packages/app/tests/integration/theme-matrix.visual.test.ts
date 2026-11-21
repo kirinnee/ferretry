@@ -234,15 +234,6 @@ const KNOWN: readonly Known[] = [
     why: WHY.ringclip,
   },
   {
-    viewports: ['1280'],
-    styles: ['exaggerated'],
-    palettes: EVERY_PALETTE,
-    modes: BOTH_MODES,
-    check: 'size',
-    what: 'display heading',
-    why: WHY.size,
-  },
-  {
     viewports: BOTH_WIDTHS,
     styles: ['antiposh'],
     palettes: ['vintage'],
@@ -253,7 +244,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['retro', 'swiss'],
+    styles: ['retro'],
     palettes: ['geist'],
     modes: BOTH_MODES,
     check: 'spinner',
@@ -262,7 +253,7 @@ const KNOWN: readonly Known[] = [
   },
   {
     viewports: BOTH_WIDTHS,
-    styles: ['exaggerated', 'glass', 'neumorphism', 'studio'],
+    styles: ['glass', 'neumorphism', 'studio'],
     palettes: ['studio'],
     modes: BOTH_MODES,
     check: 'spinner',
@@ -306,29 +297,11 @@ const KNOWN: readonly Known[] = [
     why: WHY.text,
   },
   // The hypermedia component: no renderer reads an `--hm-*` slot yet (r12 H5 owns that, per C6), so every style draws the
-  // picture the same and these four reach 5 of 8 (the shared --radius-sm on .fy-render-pan no longer counts). r12 H5 deletes them.
+  // picture the same and this one reaches 5 of 8 (the shared --radius-sm on .fy-render-pan no longer counts). r12 H5 deletes it.
   {
     viewports: BOTH_WIDTHS,
     styles: ['antiposh'],
     palettes: ['vintage'],
-    modes: BOTH_MODES,
-    check: 'distinct',
-    what: 'differs from Studio on fewer than 6 of 8 components',
-    why: WHY.hypermedia,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['swiss'],
-    palettes: ['geist'],
-    modes: BOTH_MODES,
-    check: 'distinct',
-    what: 'differs from Studio on fewer than 6 of 8 components',
-    why: WHY.hypermedia,
-  },
-  {
-    viewports: BOTH_WIDTHS,
-    styles: ['exaggerated'],
-    palettes: ['studio'],
     modes: BOTH_MODES,
     check: 'distinct',
     what: 'differs from Studio on fewer than 6 of 8 components',

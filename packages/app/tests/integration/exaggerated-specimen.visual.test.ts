@@ -1,7 +1,7 @@
 /**
  * THE EXAGGERATED-MINIMALISM SPECIMEN (r10 T14) in a real browser over fake data. It reuses the Neo specimen page (every
  * component family the app draws, `fixtures/neo-specimen-scene.tsx`, which takes `?style=`) and holds the style to its own
- * promise on any palette and either mode, at 1280 and 390 wide: no rounded corner, no shadow, a hair-thin enormous title
+ * promise on any palette and either mode, at 1280 and 390 wide: no rounded corner, no shadow, a hair-thin large title (never over 3.25rem)
  * scale, doubled air, and the two checks every style must pass (no horizontal overflow, a drawn keyboard ring).
  *
  * Set `FY_EXAGGERATED_SHOTS_DIR` to keep `<width>-<palette>-<mode>.png`.
@@ -139,8 +139,10 @@ describe('the Exaggerated Minimalism specimen', () => {
             expect(report.displayWeight).toBe('200');
             // The exaggeration itself: the title is hair-thin and several times the 13px body.
             expect(report.titleWeight).toBe('200');
-            expect(report.titleSize).toBeGreaterThanOrEqual(width.phone ? 40 : 64);
-            expect(report.displaySize).toBe(width.phone ? '3rem' : '5rem');
+            // r11 T8: the owner found it too large: the display is capped at 3.25rem (52px) at 1280, so the title is the biggest thing on the page and no more.
+            expect(report.titleSize).toBeGreaterThanOrEqual(width.phone ? 40 : 48);
+            expect(report.titleSize).toBeLessThanOrEqual(52);
+            expect(report.displaySize).toBe(width.phone ? '2.6rem' : '3.2rem');
             expect(report.padPanel).toBe(width.phone ? '18px' : '28px');
             // The keyboard: a field takes a ring of at least 2px.
             await tab.keyboard.press('Tab');
