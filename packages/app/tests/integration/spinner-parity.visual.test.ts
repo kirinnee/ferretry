@@ -26,8 +26,7 @@ const HAND = {
     timing: 'cubic-bezier(0.45, 0.15, 0.55, 0.85)',
     dash: 'none',
   },
-  // Mission and HUD draw their own marks from the generic parts (corner brackets; a radar): `mission-hud-kit.visual.test.ts`.
-  neo: { stroke: '3.25px', cap: 'square', sweep: '28px, 100px', speed: '0.8s', timing: 'linear', dash: 'none' },
+  // Mission, HUD, Neo and Raw draw their own marks from the generic parts (corner brackets; a radar; a hopping square; a jumping corner marker): `mission-hud-kit.visual.test.ts`, `neo-raw-kit.visual.test.ts`.
 } as const;
 
 const read = (page: Page, style: string, mode: string) =>
@@ -90,10 +89,10 @@ describe('the real spinner under the real stylesheet', () => {
     }
   }
 
-  it('a swapped pair keeps the style’s hand: Neo style on the Magenta palette still draws a thick square arc', async () => {
+  it('a swapped pair keeps the style’s hand: Pixel style on the Magenta palette still draws a thick square arc', async () => {
     await page.evaluate(() => {
       const root = document.documentElement;
-      root.setAttribute('data-style', 'neo');
+      root.setAttribute('data-style', 'pixel');
       root.setAttribute('data-palette', 'vaporwave');
       root.setAttribute('data-mode', 'dark');
     });
@@ -117,7 +116,7 @@ describe('the real spinner under the real stylesheet', () => {
 
   it('reduced motion (Settings › Appearance › Motion) answers the same way', async () => {
     await page.evaluate(() => document.documentElement.setAttribute('data-motion', 'reduced'));
-    const now = await read(page, 'neo', 'light');
+    const now = await read(page, 'pixel', 'light');
     await page.evaluate(() => document.documentElement.removeAttribute('data-motion'));
     expect(now.animationName).toBe('fy-spinner-pulse');
     expect(now.arcDash).toBe('100px, 0px');

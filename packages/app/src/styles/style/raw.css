@@ -79,7 +79,7 @@
   --gap-md: 12px;
   /* A hard ring that sits right against the rule it marks. */
   --focus-width: 3px;
-  --focus-offset: 2px;
+  --focus-offset: calc(-1 * var(--focus-width));
   --focus-shadow: none;
   --underline-links: underline;
   /* The device's own faces, on purpose: a serif to read and a monospace to label. Nothing is downloaded. */
@@ -106,6 +106,81 @@
   --appnav-underline: var(--fg);
   --bubble-fg: var(--fg);
   --bubble-border: var(--border-strong);
+
+  /* ═══ the component contract (r11 T7): what carries Raw in every slot — the unstyled web, kept on purpose ═══ */
+  /* BACKGROUND: the plain page. No pattern, no grain, no wash: paper is flat (stated, not left to the default, so a future
+     base change cannot decorate it). */
+  --bg-pattern: var(--bg-pattern-none);
+  --grain-alpha: 0;
+  --body-wash: none;
+  --panel-texture: none;
+  /* MARKDOWN: a document as the browser would draw it, plus the ink rules this style puts on every edge. A mono h1 under a 2px
+     rule, a ruled box for code with NO shadow, a quote that is simply indented (no bar, no tint), a 2px grid table with a plain
+     header row, underlined links, the browser's own disc. */
+  --md-h1-size: 1.7em;
+  --md-h1-weight: 700;
+  --md-h1-case: none;
+  --md-h1-rule: var(--stroke-control) solid var(--border-strong);
+  --md-h1-rule-pad: 0.15em;
+  --md-h2-size: 1.3em;
+  --md-h2-weight: 700;
+  --md-h2-case: none;
+  --md-h2-rule: none;
+  --md-code-border: var(--stroke-control) solid var(--border-strong);
+  --md-code-bar: var(--md-code-border);
+  --md-code-radius: 0px;
+  --md-code-shadow: none;
+  --md-quote-bar: none;
+  --md-quote-pad: 2em;
+  --md-quote-bg: transparent;
+  --md-quote-radius: 0px;
+  --md-quote-font-style: normal;
+  --md-cell-border-x: var(--stroke-control) solid var(--border-strong);
+  --md-cell-border-y: var(--stroke-control) solid var(--border-strong);
+  --md-th-bg: transparent;
+  --md-th-case: none;
+  --md-th-weight: 700;
+  --md-zebra: transparent;
+  --md-link-decoration: underline;
+  --md-link-weight: inherit;
+  --md-link-bg: transparent;
+  --md-link-pad: 0;
+  --md-link-radius: 0px;
+  --md-stack-radius: 0px;
+  --md-stack-frame: var(--stroke-control) solid var(--border-strong);
+  --md-ul-marker: disc;
+  --md-ol-marker: decimal;
+  --md-list-marker-color: var(--fg);
+  /* SPINNER: a plain outlined square whose corner marker JUMPS from corner to corner (the ring is hidden; the whole mark turns
+     in four whole quarter-turns, nothing eases; shaped below the contract block). */
+  --spinner-ring: none;
+  --spinner-parts: inline;
+  --spinner-speed: 1.2s;
+  --spinner-timing: steps(4, end);
+  /* MOTION: none. A change simply happens: no duration, no easing, no pop, no travel (the tokens above carry the rest). */
+  --motion-pop: 0ms;
+  --ease-in: linear;
+  --ease-out: linear;
+  --ease-in-out: linear;
+  --ease-spring: linear;
+  --motion-loading-ring: 1.2s;
+  --motion-loading-run: 1s;
+  --motion-loading-shimmer: 1.6s;
+  --ease-loading-ring: steps(4, end);
+  --ease-loading-run: steps(10, end);
+  /* HYPERMEDIA (read by r12 H5; no renderer reads an --hm-* slot yet): INK — outlined nodes, a 2px ink rule, square corners,
+     orthogonal edges, a plain label for a header. Not `block`: Raw casts no offset and no shadow of any kind, so nothing is
+     filled in a hard offset; where Neo says block, Raw says box with a border. */
+  --hm-shape: ink;
+  --hm-radius: 0px;
+  --hm-stroke: 2px;
+  --hm-font: var(--font-mono);
+  --hm-node-fill-alpha: 0;
+  --hm-edge: orthogonal;
+  --hm-header: label;
+  /* SURFACES: a ruled box, no shadow; the ring is drawn inside the control. */
+  --panel-edge: line;
+  --focus-line: solid;
 }
 
 @media (max-width: 640px) {
@@ -147,7 +222,7 @@
    Raw draws the hard ring, hard against the rule. */
 :root[data-style='raw'] .kt-input:focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: 0;
+  outline-offset: calc(-1 * var(--focus-width));
 }
 
 /* A panel and a message are ruled in ink, not in the palette's pale hairline; the message is paper, never a tinted block. */
@@ -204,7 +279,7 @@
 }
 :root[data-style='raw'] [data-neo-segmented] > label:has(:focus-visible) {
   outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: 2px;
+  outline-offset: calc(-1 * var(--focus-width));
 }
 
 /* Choice cards: a ruled box; the chosen one is inverted, with no lift and no pop. */
@@ -227,7 +302,11 @@
 }
 :root[data-style='raw'] .fy-cc__card:has(:focus-visible) {
   outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: 3px;
+  outline-offset: calc(-1 * var(--focus-width));
+}
+/* A chosen card is inverted (ink fill), so its inside ring is drawn in paper, the colour that reads on it. */
+:root[data-style='raw'] .fy-cc__card[data-selected='true']:has(:focus-visible) {
+  outline-color: var(--bg);
 }
 :root[data-style='raw'] .fy-cc__check {
   background: var(--bg);
@@ -275,4 +354,57 @@
 :root[data-style='raw'] .kt-badge,
 :root[data-style='raw'] .kt-badge[data-tone] {
   border-color: var(--border-strong);
+}
+
+/* THE RAW SPINNER: a plain outlined square (`p1`, ink rule, no fill) with a small solid marker on one corner (`p2`); the WHOLE
+   mark turns in four whole quarter-turns (`steps(4, end)` on the base `.fy-spinner` animation), so the marker jumps from corner
+   to corner and nothing eases. Neither part animates on its own (`animation: none`, which also ends the base per-part stagger,
+   a delay the base `animation` shorthand resets anyway); `p3` and `p4` are not drawn. The ring is hidden.
+   SCOPE: element rules, so the page rule skips a spinner inside a `[data-swatch]` (a swatch preview draws ITS OWN style's
+   mark, not the page's), and the swatch rule matches only a swatch of this style. */
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *) .fy-spinner__p3,
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *) .fy-spinner__p4,
+[data-swatch][data-style='raw'] .fy-spinner .fy-spinner__p3,
+[data-swatch][data-style='raw'] .fy-spinner .fy-spinner__p4 {
+  display: none;
+}
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *) .fy-spinner__p1,
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *) .fy-spinner__p2,
+[data-swatch][data-style='raw'] .fy-spinner .fy-spinner__p1,
+[data-swatch][data-style='raw'] .fy-spinner .fy-spinner__p2 {
+  animation: none;
+  animation-delay: 0s;
+  opacity: 1;
+}
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *) .fy-spinner__p1,
+[data-swatch][data-style='raw'] .fy-spinner .fy-spinner__p1 {
+  fill: none;
+  height: 9px;
+  stroke: var(--fg);
+  stroke-linejoin: miter;
+  stroke-width: 2px;
+  width: 9px;
+  x: 3.5px;
+  y: 3.5px;
+}
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *) .fy-spinner__p2,
+[data-swatch][data-style='raw'] .fy-spinner .fy-spinner__p2 {
+  fill: var(--fg);
+  height: 3.5px;
+  width: 3.5px;
+  x: 1.5px;
+  y: 1.5px;
+}
+
+/* The settings nav: the selected item is INVERTED, ink on paper becoming paper on ink, ruled and square (the shell draws a soft
+   accent pill with a literal 6px radius; no radius, no pill here). The icon reads in the same paper. */
+:root[data-style='raw'] .fy-settings-nav .fy-tab {
+  border-radius: var(--radius-tab);
+}
+:root[data-style='raw'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']) {
+  background: var(--fg);
+  color: var(--bg);
+}
+:root[data-style='raw'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']) .fy-icon {
+  color: var(--bg);
 }
