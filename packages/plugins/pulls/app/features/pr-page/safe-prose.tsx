@@ -1,10 +1,13 @@
+import { ExternalLink } from '@ferretry/app/ui';
 import { type ReactNode, useMemo } from 'react';
+import { VisibleRuns } from '../diff/visible-text.tsx';
 import { type Block, type Inline, parseProse } from './prose-model.ts';
 
 /**
  * GitHub text, drawn inert (E4). It is built only from the tree `parseProse` makes, as React elements: there is no
- * `dangerouslySetInnerHTML`, no `<img>`, no script, no raw tag (React escapes the text), and a link is a plain anchor
- * that opens a NEW tab with `rel="noopener noreferrer"` (never through the in-app browser, never a Ferretry reference).
+ * `dangerouslySetInnerHTML`, no `<img>`, no script, no raw tag (React escapes the text), and a link is the app's one `ExternalLink`
+ * (a new tab, or wherever the "Open links in" setting says; never a Ferretry reference), and a hidden control character
+ * (a bidi override, a zero-width mark) is drawn as a visible chip, never passed on.
  *
  * An image is drawn as "image: <alt>" with a link to where the text lives on GitHub (`sourceUrl`), because opening a
  * stranger's picture address from here would make this app fetch it for them.
@@ -14,9 +17,13 @@ function drawInline(nodes: readonly Inline[], sourceUrl: string, key = ''): Reac
     const id = `${key}${String(index)}`;
     switch (node.kind) {
       case 'text':
-        return node.text;
+        return <VisibleRuns key={id} text={node.text} />;
       case 'code':
-        return <code key={id}>{node.text}</code>;
+        return (
+          <code key={id}>
+            <VisibleRuns text={node.text} />
+          </code>
+        );
       case 'bold':
         return <strong key={id}>{drawInline(node.children, sourceUrl, `${id}.`)}</strong>;
       case 'italic':
@@ -25,18 +32,18 @@ function drawInline(nodes: readonly Inline[], sourceUrl: string, key = ''): Reac
         return <s key={id}>{drawInline(node.children, sourceUrl, `${id}.`)}</s>;
       case 'link':
         return (
-          <a data-gh-link="" href={node.href} key={id} rel="noopener noreferrer" target="_blank" title={node.href}>
+          <ExternalLink data-gh-link="" href={node.href} key={id} title={node.href}>
             {drawInline(node.children, sourceUrl, `${id}.`)}
-          </a>
+          </ExternalLink>
         );
       default:
         // an image
         return (
           <span data-gh-image="" key={id}>
-            <span className="text-muted">image: {node.alt === '' ? '(no description)' : node.alt}</span>{' '}
-            <a href={sourceUrl} rel="noopener noreferrer" target="_blank">
-              Open on GitHub
-            </a>
+            <span className="text-muted">
+              image: {node.alt === '' ? '(no description)' : <VisibleRuns text={node.alt} />}
+            </span>{' '}
+            <ExternalLink href={sourceUrl}>Open on GitHub</ExternalLink>
           </span>
         );
     }
@@ -68,7 +75,9 @@ function drawBlocks(blocks: readonly Block[], sourceUrl: string, key = ''): Reac
       case 'code':
         return (
           <pre className="mono overflow-x-auto rounded-control bg-surface-2 p-sm text-meta" key={id}>
-            <code>{block.text}</code>
+            <code>
+              <VisibleRuns text={block.text} />
+            </code>
           </pre>
         );
       default:

@@ -1,4 +1,4 @@
-import { Badge } from '@ferretry/app/ui';
+import { Badge, ExternalLink } from '@ferretry/app/ui';
 import type { BadgeTone } from '@ferretry/app/ui';
 import type { CiState, PullDetail } from '../../../contract/index.ts';
 import { CI_WORDS, localTime, REVIEW_WORDS, STATE_WORDS } from './format.ts';
@@ -64,9 +64,7 @@ export function PullHeader({ pull }: { readonly pull: PullDetail }) {
           : ` · review requested from ${pull.requestedReviewers.join(', ')}`}
       </p>
       <p className="m-0 text-meta">
-        <a href={pull.url} rel="noopener noreferrer" target="_blank">
-          Open on GitHub
-        </a>
+        <ExternalLink href={pull.url}>Open on GitHub</ExternalLink>
       </p>
     </header>
   );

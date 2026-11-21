@@ -5,7 +5,7 @@
  *  - NO HTML. A tag is plain text (the drawing layer escapes it). `<!-- … -->` comments, which PR templates are full of
  *    and GitHub hides, are removed.
  *  - NO IMAGE IS EVER REQUESTED. `![alt](url)` becomes an `image` node holding its alt text only: the address is dropped.
- *  - A LINK is kept only for `http:` or `https:` with no credentials; anything else (`javascript:`, `data:`, `file:`,
+ *  - A LINK is kept only for `https:` with no credentials; anything else (`http:`, `javascript:`, `data:`, `file:`,
  *    `fy:`) is its text.
  *  - FERRETRY'S REFERENCES (`&F1`, `:agent`, `%terminal:x`, `^A3`, `@file`) are not read at all: they stay text.
  *  - A fence's language (`fy-render`, `html`) is never read either: every fence is code, shown as text.
@@ -33,12 +33,12 @@ export type Block =
 const MAX_QUOTE_DEPTH = 3;
 const MAX_INPUT = 70_000;
 
-/** `http(s)` with no credentials, else undefined. The one gate a link passes. */
+/** `https` with no credentials, else undefined. The one gate a link passes. */
 export function safeHref(value: string): string | undefined {
   const text = value.trim();
   if (text.length === 0 || text.length > 2000 || /[\s\p{Cc}]/u.test(text) || !URL.canParse(text)) return undefined;
   const url = new URL(text);
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined;
+  if (url.protocol !== 'https:') return undefined;
   if (url.username !== '' || url.password !== '') return undefined;
   return url.href;
 }
