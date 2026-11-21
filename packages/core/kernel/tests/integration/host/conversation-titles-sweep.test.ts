@@ -261,3 +261,63 @@ describe('r11 S11 round 3: the sweep reads only for a RUNNING ferret that is sti
     expect(await w.shown()).toEqual({ title: LATE, titleSource: 'auto' });
   });
 });
+
+describe('r11 S11 round 6: a refresh that runs before Ferrets has loaded its records never clears an owner title or a ferret', () => {
+  type Listed = { ferret?: string; ferretName?: string; title?: string; name?: string };
+  const listed = async (w: World): Promise<Listed | undefined> => {
+    const answer = (await w.h.request('GET', '/v1/links/conversations')).json<{ conversations: Listed[] }>();
+    return answer.conversations.find(row => row.ferret === w.id) ?? answer.conversations[0];
+  };
+
+  test('the owner title and the ferret association survive full refreshes that run while the registry is still loading', async () => {
+    const w = await boot();
+    await wind(w, 3_000);
+    expect((await w.h.request('POST', `/v1/ferrets/${w.id}/rename`, { body: { title: OWNERS } })).status).toBe(200);
+    await w.h.request('GET', '/v1/links/conversations');
+    await wind(w, 6_000);
+    const before = await listed(w);
+    expect(before).toMatchObject({ ferret: w.id, title: OWNERS });
+
+    // A daemon restart whose Ferrets records load slowly: its state listing is held until the test lets it go.
+    let release!: () => void;
+    const held = new Promise<void>(resolve => (release = resolve));
+    const folder = w.h.state('ferrets');
+    const realPort = folder.port.bind(folder);
+    folder.port = declared => {
+      const port = realPort(declared);
+      return {
+        ...port,
+        list: async (...args: Parameters<typeof port.list>) => {
+          await held;
+          return await port.list(...args);
+        },
+      };
+    };
+    const second = await w.h.restart();
+    const again: World = { ...w, h: second };
+
+    // The warm-up refresh runs while the registry holds no record yet. Nothing here waits for the host to settle: the registry
+    // read is held on purpose, so the refresh waits on it (driven time only passes).
+    const drive = async (ms: number): Promise<void> => {
+      for (let spent = 0; spent < ms; spent += 500) {
+        await second.clock.advance(500);
+        await Bun.sleep(5);
+      }
+    };
+    await drive(2_000);
+    // A listing asked in that window: it answers from the index (still catching up) with what the index held, and an empty
+    // registry is not "no ferrets" — the row keeps its ferret and the owner's title.
+    const duringLoad = second.request('GET', '/v1/links/conversations');
+    await drive(8_000);
+    const whileLoading = (await duringLoad).json<{ conversations: Listed[] }>().conversations[0];
+    release();
+    await second.settle();
+    expect(whileLoading).toMatchObject({ ferret: w.id, title: OWNERS });
+    await wind(again, 3_000);
+    await second.request('GET', '/v1/links/conversations');
+    await wind(again, 6_000);
+
+    expect(await listed(again)).toMatchObject({ ferret: w.id, title: OWNERS });
+    expect(await again.shown()).toEqual({ title: OWNERS, titleSource: 'owner' });
+  });
+});

@@ -636,6 +636,30 @@ describe('a scoped update touches only the conversations it was scoped to (r11 S
       expect(bRow(sqlite)).toMatchObject({ ferret_name: 'Ms-8-x', ferret_title: OWNER });
     });
 
+    test("a scoped refresh never reads another conversation's linked row at all (the cleanup is scoped in SQL)", async () => {
+      const snapshot = { value: both() };
+      const { index, codex, sqlite } = world(snapshot);
+      await index.refresh();
+      snapshot.value = new Map([...both()].filter(([key]) => key === `codex:${CODEX}`));
+      codex.set(
+        'session_index.jsonl',
+        rec({ id: CODEX, thread_name: 'Build one, renamed' }) + rec({ id: CODEX2, thread_name: 'Other CLI title' }),
+      );
+      // Every row any query returns during the scoped refresh is recorded: B's must never be among them.
+      const returned: string[] = [];
+      const query = sqlite.query;
+      sqlite.query = <Row>(sql: string, params: readonly unknown[] = []) => {
+        const rows = query<Row>(sql, params);
+        for (const row of rows as readonly Record<string, unknown>[])
+          if (row.id === CODEX2 && 'ferret_title' in row) returned.push(sql);
+        return rows;
+      };
+      await index.refreshConversations(new Set([`codex:${CODEX}`]));
+      sqlite.query = query;
+      expect(returned).toEqual([]);
+      expect(bRow(sqlite)).toMatchObject({ ferret_id: 'ms-8', ferret_title: OWNER, ferret_title_owner: 1 });
+    });
+
     test('a FULL refresh keeps an owner title while its ferret is in the snapshot or the snapshot cannot be read; it drops it only once the ferret is gone', async () => {
       const snapshot = { value: both() };
       let failing = false;

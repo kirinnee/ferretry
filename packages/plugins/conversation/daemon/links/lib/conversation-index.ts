@@ -982,7 +982,9 @@ export class ConversationIndex {
    * cleared of its ferret, nor offered a title, whatever the snapshot says about it. A FULL update treats the snapshot (Ferrets'
    * registry, read in one go) as the truth: a conversation whose ferret is not in it has lost its ferret, and only then does its
    * row drop the ferret's name and title (an owner's title included: it belonged to a ferret that is no longer there). A snapshot
-   * that could not be read changes nothing.
+   * that could not be read changes nothing. The snapshot is COMPLETE only once Ferrets has loaded its records: the port's `list()`
+   * waits for that (an empty registry that is merely still loading would otherwise look like "no ferrets" and clear every
+   * ferret name and owner title), and a scoped update selects only its own rows in SQL.
    */
   async #applyFerretNames(only?: ReadonlySet<string>): Promise<void> {
     const db = this.#open();
@@ -1034,11 +1036,19 @@ export class ConversationIndex {
         if (!ownerTitled && own !== null && own !== title && !offers.has(ferret.ferret)) offers.set(ferret.ferret, own);
       }
     }
-    for (const row of db.query<Row>('SELECT * FROM conv WHERE ferret_id IS NOT NULL'))
-      if (
-        (only === undefined || only.has(`${row.harness}:${row.id}`)) &&
-        !wanted.has(`${row.harness}\u0000${row.kind}\u0000${row.label}\u0000${row.path}`)
-      )
+    // A scoped update selects only its own rows in SQL, so a conversation outside it is never read at all.
+    const linked =
+      only === undefined
+        ? db.query<Row>('SELECT * FROM conv WHERE ferret_id IS NOT NULL')
+        : [...only].flatMap(key => {
+            const split = key.indexOf(':');
+            return db.query<Row>('SELECT * FROM conv WHERE ferret_id IS NOT NULL AND harness = ? AND id = ?', [
+              key.slice(0, split),
+              key.slice(split + 1),
+            ]);
+          });
+    for (const row of linked)
+      if (!wanted.has(`${row.harness}\u0000${row.kind}\u0000${row.label}\u0000${row.path}`))
         rows.push({
           ...row,
           ferret_id: null,

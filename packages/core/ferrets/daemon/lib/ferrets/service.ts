@@ -831,6 +831,9 @@ export class FerretsService implements FerretsApi {
   }
 
   async list(filter?: FerretFilter): Promise<readonly FerretSummary[]> {
+    // The registry is complete only once its records are loaded: a list read before that would look like "no ferrets" and
+    // make a reader (Conversation's name refresh) clear a name or title that a still-loading ferret owns.
+    await this.ports.ready?.();
     const pins = await this.pins();
     return this.registry.list(filter).map(summary => this.mark(summary, pins));
   }
