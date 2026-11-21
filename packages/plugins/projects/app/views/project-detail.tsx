@@ -134,7 +134,10 @@ function ProjectDetailView({
             )}
           </Section>
           <Section icon={<UserRound className="text-muted" size={16} aria-hidden="true" />} title="GitHub accounts">
+            {/* Keyed by project: same-daemon navigation reuses this tree, and an open editor's draft must not follow
+                the person to the next project (its save would write the previous project's picks to the new id). */}
             <ProjectAccountLinks
+              key={project.id}
               client={client}
               project={project}
               edit={{ projectId: project.id, onSaved: onAccountsSaved }}

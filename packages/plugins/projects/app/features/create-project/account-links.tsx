@@ -25,10 +25,20 @@ export interface AccountLinksViewProps {
 export function AccountLinksView({ project, existing, error, onConfirm }: AccountLinksViewProps) {
   const linked = project.accounts ?? [];
   if (linked.length === 0) {
+    // An unlinked project still needs the passkey press: the editor that links the FIRST account only opens once the
+    // account list has been read, so hiding the press here would leave that project with no way to be linked.
     return (
-      <p className="m-0 text-meta text-faint" data-project-accounts="none">
-        No GitHub account is linked to this project.
-      </p>
+      <div className="grid gap-xs">
+        <p className="m-0 text-meta text-faint" data-project-accounts="none">
+          No GitHub account is linked to this project.
+        </p>
+        {existing === null && onConfirm !== undefined && (
+          <ConfirmToSee
+            line="This machine wants your passkey before it shows its GitHub accounts, so one cannot be linked yet."
+            onConfirm={onConfirm}
+          />
+        )}
+      </div>
     );
   }
   if (existing === null && onConfirm !== undefined) {
