@@ -153,22 +153,22 @@ closed top-level block of a ferret's queued message). The chat reads a message a
 (`HypermediaProse`), and `fy-render` is one of its fences, drawn only where a surface lends the fence
 door (`ReferenceSurface.fences`, lent by the chat alone: the agenda, All queues and the shell's
 `Markdown` show a block as code),
-and **author code runs in two kinds of opaque-origin frame, and only one of them is hash-pinned** — `svg` and
+and **author code runs in exactly one kind of frame, the interactive shell; the other frame is hash-pinned** — `svg` and
 `image` become an `<img>`. `mermaid` and `lottie` are handed as **data** to a trusted library in the **library
-shell** (`fy-render-sandbox`): its `script-src` lists nothing but build-time hashes, and the parent fetches the one
-pinned library and transfers the bytes over a capability port, so author bytes cannot become code _there_. A
-compiled Mermaid diagram returns as SVG text and re-enters through the measured `<img>` sink; Lottie stays live
-because an animation must. `html` without script is a sanitized static fragment in a closed shadow root. `html`
-**with script runs author code** in a different frame, the **interactive shell** (`fy-render-html`): its policy is
-`script-src 'unsafe-inline'` with `default-src 'none'` and `connect-src 'none'`, so **no hash pins it and the
-author's own script executes** — the owner's stated decision, with the residual declared, because no browser-only
-boundary that bounds author JavaScript's CPU and memory survived measurement, so **handover row 65 stays open**.
-Both frames are opaque (`sandbox="allow-scripts"`, no `allow-same-origin`: no app storage, cookies, document or
-daemon token) and both are denied every ordinary **subresource**, which is not the same as having no network:
-self-navigation, prerender and WebRTC egress were measured from that frame shape and remain a declared residual.
-What a request from the interactive frame can carry is the page's own content, the reader's IP address and the
-theme paint the parent hands it (colours, type, radii, spacing, the colour scheme), so it is **not** "nothing of the
-app". The watchdogs bound **wall-clock lifetime only**, never CPU or memory. Chromium evidence is not Safari
+shell** (`fy-render-sandbox`): its `script-src` lists nothing but build-time hashes, and those pin only the trusted
+bootstrap and library code, so author bytes cannot become code _there_; the parent fetches the one pinned library and
+transfers the bytes over a capability port. A compiled Mermaid diagram returns as SVG text and re-enters through the
+measured `<img>` sink; Lottie stays live because an animation must. `html` without script is a sanitized static
+fragment in a closed shadow root. `html` **with script runs author code** in the other frame, the **interactive
+shell** (`fy-render-html`): its policy is `script-src 'unsafe-inline'` with `default-src 'none'` and
+`connect-src 'none'`, so **no hash pins it and the author's own script executes** — the owner's stated decision, with
+the residual declared, because no browser-only boundary that bounds author JavaScript's CPU and memory survived
+measurement, so **handover row 65 stays open**. Both frames are opaque (`sandbox="allow-scripts"`, no
+`allow-same-origin`: no app storage, cookies, document or daemon token) and both are denied every ordinary
+**subresource**, which is not the same as having no network: self-navigation, prerender and WebRTC egress were
+measured from that frame shape and remain a declared residual. What a request from the interactive frame can carry is
+the page's own content, the reader's IP address and the values the parent hands it — the theme paint (colours, type,
+radii, spacing, the colour scheme) and the fullscreen state — so it is **not** "nothing of the app". The watchdogs bound **wall-clock lifetime only**, never CPU or memory. Chromium evidence is not Safari
 evidence, and a real `macos-15` `safaridriver` job is a release gate. The grammar, the measured `<img>` result and
 its scope, and the declared gaps are [docs/fy-render.md](docs/fy-render.md). It is
 **conversation-only**: a fence opener in any durable file outside the three teaching files fails

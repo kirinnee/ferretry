@@ -482,8 +482,8 @@ between two dark themes repaints too, which a light/dark key would have missed.
 
 ### The `html` fragment
 
-**An `html` block is a STATIC FRAGMENT rendered directly in the message — nothing an author writes in
-it runs.** The owner's decision: "no need to render full HTML — just render HTML fragments that don't
+**A script-free `html` block is a STATIC FRAGMENT rendered directly in the message — nothing an author
+writes in it runs.** The owner's decision: "no need to render full HTML — just render HTML fragments that don't
 allow scripts, directly." A fragment has no frame, no shell and no message port of its own. The
 interactive-page frame is **not** deleted: an `html` block that carries script is routed away from this path
 to its own frame and static shell (`/fy-render-html.html`, with its own `_headers` rules and policy), which
@@ -587,7 +587,7 @@ every shell unframeable in production), both pinned by `pages-config.sh`.
 - **The theme contract** (`packages/app/src/fy-render/html-kit.ts` owns it). The parent reads a fixed list of
   app tokens (`FY_RENDER_HTML_TOKENS`: ink, surfaces, lines, accent, status tones, `--viz-1`…`--viz-8`,
   type, radii, spacing) plus the column's ink and font from the block's computed style and sends them in
-  `FyRenderHtmlPaint`; the shell admits each by one rule — a listed name and a bounded value that cannot
+  `FyRenderHtmlPaint` (the parent also sends the fullscreen state beside it, as `layout: { fullscreen }`); the shell admits each by one rule — a listed name and a bounded value that cannot
   name a resource (`url(`, `image-set(`, …), escape or leave its declaration — and sets it on its
   root under the **app's own name**, so `var(--accent)` means the same in a live page and in a static
   fragment (which inherits it). A token no longer sent is removed, so a repaint is one whole theme.
@@ -1151,8 +1151,9 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
     each of which carries a request from the reader's device. **What such a request can carry** is what the
     frame holds: the page's own authored content, the reader's IP address, and **the values the parent hands
     the frame** — the colour scheme and the app's theme paint (`FY_RENDER_HTML_TOKENS`: colours, type sizes,
-    radii, spacing, and the font stacks, plus the column's ink and font read from its computed style), which
-    the shell admits as bounded display values and author script can read. Those are what the reader already
+    radii, spacing, and the font stacks, plus the column's ink and font read from its computed style) and
+    the fullscreen state (`layout: { fullscreen }`, a boolean), which the shell admits as bounded display
+    values and author script can read. Those are what the reader already
     sees on screen, not credentials, but they are **not nothing**, and a page that reads them can send them out
     through any of the channels above. No storage, cookie, document, daemon token or session id is among what
     the frame is handed (measured for storage, cookies, the parent document and the token traces by
