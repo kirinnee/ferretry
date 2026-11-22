@@ -8,6 +8,8 @@
  *
  *   ?theme=<family>-<mode>   ?key=missing|set|off  (what the machine holds before the page opens)
  *   ?save=fail               the first write of warden.yaml is refused
+ *   ?row=none                no key row is placed (Voice off): the no-key question must not point at one
+ *   ?save=stepup            the first write is refused for want of the passkey step-up (the sentence and the unlock show)
  */
 import { StepPageFrame } from '@ferretry/app';
 import { SecretInput, useSecretField } from '@ferretry/app/ui';
@@ -21,6 +23,8 @@ const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const initial = params.get('key') ?? 'missing';
 const failFirstSave = params.get('save') === 'fail';
+/** The first write is refused for want of the passkey step-up (the daemon client's 403 grant_step_up_required). */
+const stepUpFirstSave = params.get('save') === 'stepup';
 
 interface Fake {
   puts: { name: string; length: number }[];
@@ -40,6 +44,7 @@ const fake: Fake = { puts: [], tests: [], writes: [], names: 0, done: 0, advance
 let stored = initial === 'set';
 let named = false;
 let refused = failFirstSave;
+let stepUp = stepUpFirstSave;
 
 const config = { enabled: true, layers: { jev: false, llm: false }, accounts: [] } as unknown as WardenConfig;
 const view = () => ({
@@ -77,6 +82,10 @@ const deps: WardenStepDeps = {
       if (refused) {
         refused = false;
         throw new Error('The machine refused the write.');
+      }
+      if (stepUp) {
+        stepUp = false;
+        throw Object.assign(new Error('grant_step_up_required'), { status: 403, code: 'grant_step_up_required' });
       }
       fake.writes.push({
         enabled: patch.enabled === true,
@@ -212,8 +221,13 @@ function Host() {
     done: () => {
       fake.done += 1;
     },
-    busy: () => undefined,
-    next: () => undefined,
+    busy: label => setBusy(label !== null),
+    // As in the real flow (`FlowPage`'s host): `next()` only NAVIGATES. The save is the footer Next's (`press`), which the page's
+    // own "Confirm it's you" must therefore run itself, through the registered commit, before it calls `next()`.
+    next: () => {
+      fake.advanced = true;
+      setMoved(true);
+    },
     back: () => undefined,
   };
   const press = () => {
@@ -224,8 +238,9 @@ function Host() {
     new Promise<void>(resolve => resolve(run()))
       .then(
         () => {
-          fake.advanced = true;
-          setMoved(true);
+          // What the real footer does after a save: the step is recorded done, then the flow moves on.
+          hostRef.current?.done();
+          hostRef.current?.next();
         },
         (cause: unknown) => setError(cause instanceof Error ? cause.message : 'That could not be saved.'),
       )
@@ -248,7 +263,11 @@ function Host() {
               ),
             })}
       >
-        <WardenStepPage deps={deps} step={hostRef.current} keyRow={<FakeVoiceKeyRow />} />
+        <WardenStepPage
+          deps={deps}
+          step={hostRef.current}
+          keyRow={params.get('row') === 'none' ? null : <FakeVoiceKeyRow />}
+        />
       </StepPageFrame>
     </div>
   );

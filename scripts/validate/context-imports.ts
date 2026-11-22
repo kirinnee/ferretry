@@ -10,7 +10,11 @@ import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
 import type { Area, ImportEdge } from '../gen/lib/imports.ts';
 
 /** The packages whose tests drive Onboarding's real setup flow (see the second exemption in `refusal`). */
-const FLOW_DRIVING_TESTS: ReadonlySet<string> = new Set(['@ferretry/plugin-claude-code', '@ferretry/plugin-codex']);
+const FLOW_DRIVING_TESTS: ReadonlySet<string> = new Set([
+  '@ferretry/plugin-claude-code',
+  '@ferretry/plugin-codex',
+  '@ferretry/plugin-warden',
+]);
 
 const CONTRACT_EXTERNALS = new Set(['zod']);
 const MANIFEST_EXTERNALS = new Set(['zod']);

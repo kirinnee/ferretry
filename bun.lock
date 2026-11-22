@@ -843,6 +843,7 @@
         "zod": "4.4.3",
       },
       "devDependencies": {
+        "@ferretry/plugin-onboarding": "workspace:*",
         "@happy-dom/global-registrator": "^20.11.1",
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
