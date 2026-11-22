@@ -1,9 +1,9 @@
 import { DocumentView, type InlineDef } from 'durian-hypermedia/react/strict';
 import { memo, useId, useMemo, useSyncExternalStore } from 'react';
-import { FY_RENDER_COMPONENT_BLOCKS } from './fy-render-host.tsx';
+import { DrawableFyRenderBodies, FY_RENDER_COMPONENT_BLOCKS } from './fy-render-host.tsx';
 import { exceedsMessageCap } from './limits.ts';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';
-import { parseMessage } from './parse-message.ts';
+import { readMessage } from './parse-message.ts';
 import { HYPERMEDIA_PART_SLOTS, HYPERMEDIA_PARTS } from './parts.tsx';
 import { ReferenceChip } from './reference-chip.tsx';
 import { ReferenceProofProvider } from './reference-proof.tsx';
@@ -62,24 +62,26 @@ export const HypermediaProse = memo(function HypermediaProse({ text, className }
   const mode = useSyncExternalStore(subscribeToMode, readMode, SERVER_MODE);
   // `useId` is unique per mounted message and stable across its re-renders; keep only what an id may hold.
   const idPrefix = `dh-${useId().replace(/[^\w-]/gu, '')}-`;
-  const doc = useMemo(() => (exceedsMessageCap(text) ? null : parseMessage(text, idPrefix)), [text, idPrefix]);
+  const read = useMemo(() => (exceedsMessageCap(text) ? null : readMessage(text, idPrefix)), [text, idPrefix]);
   return (
     <ReferenceProofProvider text={text}>
       <div className={`fy-hm min-w-0 max-w-full ${className ?? ''}`} data-fy-hypermedia="">
-        {doc === null ? (
+        {read === null ? (
           <pre className="fy-hm-plain" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
             {text}
           </pre>
         ) : (
-          <DocumentView
-            blocks={FY_RENDER_COMPONENT_BLOCKS}
-            components={HYPERMEDIA_PARTS}
-            doc={doc}
-            inlines={INLINES}
-            slots={HYPERMEDIA_PART_SLOTS}
-            theme={mode}
-            urlPolicy={hypermediaUrlPolicy}
-          />
+          <DrawableFyRenderBodies value={read.drawable}>
+            <DocumentView
+              blocks={FY_RENDER_COMPONENT_BLOCKS}
+              components={HYPERMEDIA_PARTS}
+              doc={read.doc}
+              inlines={INLINES}
+              slots={HYPERMEDIA_PART_SLOTS}
+              theme={mode}
+              urlPolicy={hypermediaUrlPolicy}
+            />
+          </DrawableFyRenderBodies>
         )}
       </div>
     </ReferenceProofProvider>
