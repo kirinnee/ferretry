@@ -87,8 +87,20 @@ will be operating a relay, and it bills to your account.
 
 ## Operating the hosted deployment
 
-`.github/workflows/relay-hosted.yaml` deploys the hosted Worker through the repository's nix shell,
-using `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. It publishes to the Worker's own
+`.github/workflows/relay-hosted.yaml` deploys the hosted Worker using `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID`. The job that holds them never runs this repository's code: a `build` job (nix shell, no
+secret) bundles the Worker, and the `deploy` job downloads that bundle and publishes it with an exactly-pinned
+`wrangler` (`scripts/validate/release-guards.sh` holds that). The `deploy` job does not trust what `build` hands it:
+before any step that has the token it checks that the hand-off is exactly the bundle, the configuration and the
+fingerprint, that the configuration holds only allow-listed keys (never a `build` command or a `data_blobs`,
+`wasm_modules` or `text_blobs` entry, which wrangler would run or read with the token in its environment), that it
+publishes `worker.js`, and that it names `ferretry-hosted-relay`. Two pushes build side by side and their deploys
+queue, so a deploy skips (with a `::warning::`, not a green line) when a NEWER run already published. Two edges follow
+from comparing run numbers: re-running an OLD run never rolls the Worker back (it is older than what is serving, so it
+skips; push a revert commit, which builds in a new run, or start a manual `deploy`, which always publishes), and if the
+workflow's run numbers ever restart (the workflow file is deleted and re-created, or the repository is recreated), every
+automatic deploy skips until the new numbers pass the one serving, so start a manual `deploy` once to recover. It
+publishes to the Worker's own
 `workers.dev` origin by default; set the `HOSTED_RELAY_ORIGIN` repository variable to advertise a
 custom origin instead. Manual `enable`, `disable` and `metrics` operations talk to the
 already-deployed control object; they do not deploy a release.

@@ -37,10 +37,16 @@ set -euo pipefail
 #      no other branch, every job's `if` OPENS with exactly that one-ref guard (only `&&` may follow it, never a
 #      top-level `||`), its signing and deploy jobs use environments of their own, and its deploy job refuses a stale
 #      commit (the run branch's head must equal GITHUB_SHA) in a step before `wrangler pages deploy`.
-#   5. The Cloudflare token never meets checkout code: a PWA deploy job that reads a CLOUDFLARE secret (spelled any way:
-#      any case, `secrets[...]`, `toJSON(secrets)`, `secrets: inherit`) has no checkout, no action but the SHA-pinned
-#      download/upload-artifact, no reusable workflow, no nix, bun, bunx, npx, npm exec, npm x or clone, and runs wrangler
-#      only from an exact-version, secret-free npm install, with the commit passed to `wrangler pages deploy`.
+#   5. The Cloudflare token never meets checkout code: a deploy job (the two PWA workflows AND the hosted relay and
+#      link-store workflows) that reads a CLOUDFLARE secret (spelled any way: any case, `secrets[...]`, `toJSON(secrets)`,
+#      `secrets: inherit`) has no checkout, no action but the SHA-pinned download/upload-artifact, no reusable workflow, no
+#      nix, bun, bunx, npx, npm exec, npm x or clone, and runs wrangler only from an exact-version, secret-free npm install,
+#      with the commit passed to `wrangler pages deploy` (a Worker `wrangler deploy` passes `--no-bundle`). In the two Worker
+#      workflows a job that has checkout code (their `build`) reads no secret at all, and the token job does not trust
+#      what `build` hands it: before any step with a secret it checks the hand-off directory (`ls -A` is exactly the
+#      expected files), the configuration's keys (a subset of an allow-list with no `build`, `data_blobs`, `wasm_modules`
+#      or `text_blobs`), `.main == "worker.js"` and the pinned Worker `.name`; it also runs no `bash`, `sh`, `source` or
+#      `node` on a file, and a wrangler `deploy` by path or through `node` needs `--no-bundle` like a bare one.
 #   6. Nothing but CD and the Release workflow's own steps names `Casks/` or semantic-release.
 
 root_dir="$(git rev-parse --show-toplevel)"
@@ -211,9 +217,95 @@ holder_re='secrets\.cloudflare|secrets\[|tojson\(\s*secrets|"secrets":"inherit"'
 any_secret_re='secrets\.|secrets\[|tojson\(\s*secrets'
 allowed_uses_re='^actions/(download|upload)-artifact@[0-9a-f]{40}$'
 forbidden_run_re='(^|[^A-Za-z0-9_./-])(nix|bun|bunx|npx|npm\s+(-\S+\s+)*(exec|x)|git\s+clone|gh\s+repo\s+clone)([^A-Za-z0-9_-]|$)'
+#   worker_workflows: the two hosted-Worker workflows (relay-hosted, link-store-hosted) hold the SAME token. Their `build` job
+#           has the checkout and holds no secret at all; their token jobs follow every rule above, and a `wrangler deploy` in
+#           one must publish the handed-over module as it is (`--no-bundle`), never bundle anything itself.
+#   wrangler_use_re: a wrangler INVOCATION, at the start of a line or after `;`, `&`, `|` or `(`: the bare
+#           word, a path to it (`"$RUNNER_TEMP/wrangler/node_modules/.bin/wrangler" deploy`, quoted or not) or `node` on
+#           its entry (`node .../wrangler.js deploy`, `node .../cli.js deploy`). Not the install's `wrangler@x`, and not
+#           the word in a message or as an argument.
+#   forbidden_exec_re: a token job runs nothing it did not install: no `bash`, `sh`, `dash`, `zsh`, `ksh`, `source`, `.` or
+#           `node` on a file (`env` in front changes nothing, a path to the shell neither). `node -p` / `node -e` (inline
+#           code, as the install's version check) are the only `node` it may use.
 pages_workflows=(.github/workflows/pwa-pages.yaml "${preview}")
+worker_workflows=(.github/workflows/relay-hosted.yaml .github/workflows/link-store-hosted.yaml)
+command_start="(^|[\n;&|(])[[:space:]]*(env[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?"
+wrangler_use_re="(^|[\n;&|(])[[:space:]]*(node[[:space:]]+)?[\"']?([^[:space:]\"';&|()]*/)?(wrangler(\\.js)?|cli\\.js)[\"']?[[:space:]]"
+forbidden_exec_re="${command_start}(([^[:space:]\"';&|()]*/)?(bash|sh|dash|zsh|ksh)|source|\\.)([[:space:]]|\$)|${command_start}([^[:space:]\"';&|()]*/)?node[[:space:]]+(?!-[pe][[:space:]]|--(print|eval)[[:space:]])"
+# THE HAND-OFF IS NOT TRUSTED. A Worker workflow's `build` job runs the pushed commit's code and hands `deploy` a directory;
+# the token job re-checks it BEFORE any step that has the token: exactly the expected files (`ls -A`: hidden ones too), a
+# configuration whose keys are a subset of this list, `main` the bundle, `name` the pinned Worker. Nothing on the list makes
+# wrangler run or read anything at deploy time: no `build` (a command), no `data_blobs` / `wasm_modules` / `text_blobs`
+# (which read any path), no `rules`, no `no_bundle`, no `site`, no `assets`.
+# shellcheck disable=SC2016 # a JSON key, not an expansion
+handoff_keys='["$schema","compatibility_date","durable_objects","main","migrations","name","observability","services","vars","workers_dev"]'
+handoff_worker_name() {
+  case "$1" in
+  .github/workflows/relay-hosted.yaml) echo ferretry-hosted-relay ;;
+  .github/workflows/link-store-hosted.yaml) echo ferretry-hosted-link-store ;;
+  esac
+}
+checkout_re='actions/checkout|\./\.github/actions|nix develop|(^|[^A-Za-z0-9_./-])(nix|bun|bunx|npx)([^A-Za-z0-9_-]|$)'
 wrangler_versions=()
-for workflow in "${pages_workflows[@]}"; do
+for workflow in "${worker_workflows[@]}"; do
+  if [[ ! -f ${workflow} ]]; then
+    fail "${workflow} is missing: it holds the production Cloudflare token, and this guard proves it never meets checkout code"
+    continue
+  fi
+  # A job that has the checkout (or a local action, nix, bun) holds NO secret at all: not the token, not the tunnel pool.
+  while IFS= read -r job; do
+    fail "${workflow}: job ${job} runs checkout code (actions/checkout, a local action, nix, bun) and also reads a secret; the build job must hold none"
+  done < <(json "${workflow}" | jq -r --arg checkout "${checkout_re}" --arg anysecret "${any_secret_re}" '
+    .jobs // {} | to_entries[]
+    | select(.value | tostring | test($checkout))
+    | select(.value | tostring | test($anysecret; "i"))
+    | .key')
+  # A token job publishes exactly the module `build` fingerprinted: no bundling of its own.
+  # Every deploy invocation (bare, by path, or `node` on its entry) carries `--no-bundle` on its own line: as many
+  # `--no-bundle` deploys as deploys.
+  json "${workflow}" | jq -e --arg holder "${holder_re}" --arg use "${wrangler_use_re}" '
+    [.jobs // {} | to_entries[] | select(.value | tostring | test($holder; "i")) | .value.steps[]? | (.run // "")
+     | select(test($use + "deploy"))]
+    | all(([match($use + "deploy([[:space:]]|$)"; "g")] | length) == ([match($use + "deploy[[:space:]][^\n]*--no-bundle"; "g")] | length))' >/dev/null ||
+    fail "${workflow}: a wrangler deploy in a token job must pass --no-bundle on the same line (it publishes the handed-over module as it is; a token job bundles nothing)"
+  # THE HAND-OFF IS NOT TRUSTED (see handoff_keys). (1) The allow-list in the workflow is exactly the one above and no job or
+  # step shadows it; (2) every token job that downloads the artifact verifies it in a step that comes after the download and
+  # before any step with a secret; (3) `build` projects onto the allow-list and never copies the configuration whole.
+  expected_name="$(handoff_worker_name "${workflow}")"
+  json "${workflow}" | jq -e --argjson keys "${handoff_keys}" '
+    (((.env.HANDOFF_CONFIG_KEYS // "") | try fromjson catch null) as $got
+      | ($got | type) == "array" and ($got | sort) == ($keys | sort))
+    and ([.jobs[] | ((.env // {}), (.steps[]? | .env // {})) | has("HANDOFF_CONFIG_KEYS")] | any | not)' >/dev/null ||
+    fail "${workflow}: env.HANDOFF_CONFIG_KEYS must be exactly ${handoff_keys} (no build, data_blobs, wasm_modules or text_blobs), and no job or step may override it"
+  json "${workflow}" | jq -e --arg name "${expected_name}" --arg anysecret "${any_secret_re}" '
+    [.jobs[] | select(any(.steps[]?; (.uses // "") | startswith("actions/download-artifact")))] as $jobs
+    | ($jobs | length) > 0 and ($jobs | all(
+        .steps as $steps
+        | ([$steps | to_entries[] | select((.value.uses // "") | startswith("actions/download-artifact")) | .key] | first) as $download_at
+        | ([$steps | to_entries[] | select(((.value.env // {}) | tostring | test($anysecret; "i"))) | .key] | first) as $token_at
+        | [$steps | to_entries[]
+           | select(.key > $download_at and ($token_at == null or .key < $token_at))
+           | select((.value.run // "") as $r
+               | ($r | contains("listing=\"$(ls -A | "))
+                 and ($r | contains("$HANDOFF_CONFIG_KEYS"))
+                 and ($r | contains("(keys - $keys) == []"))
+                 and ($r | contains(".main == \"worker.js\""))
+                 and ($r | contains(".name == $name"))
+                 and ($r | contains("--arg name " + $name + " "))
+                 and ($r | contains("exit 1")))]
+          | length > 0))' >/dev/null ||
+    fail "${workflow}: the token job that downloads the build artifact must verify it, in a step after the download and before any step with a secret: ls -A is exactly the expected files, the configuration keys are a subset of \$HANDOFF_CONFIG_KEYS, .main == \"worker.js\" and --arg name ${expected_name} (the pinned Worker); the artifact is the pushed commit's output and is not trusted"
+  json "${workflow}" | jq -e --arg checkout "${checkout_re}" '
+    ([.jobs[] | select(tostring | test($checkout))] | length > 0)
+    and ([.jobs[] | select(tostring | test($checkout))]
+         | all(any(.steps[]?; (.run // "") as $r
+             | ($r | contains("$HANDOFF_CONFIG_KEYS"))
+               and ($r | contains("with_entries(select(.key as $k | $keys | index($k)))"))
+               and ($r | contains(".main = \"worker.js\"")))))
+    and ([.jobs[].steps[]? | (.run // "") | select(contains("--arg main"))] | length == 0)' >/dev/null ||
+    fail "${workflow}: the build job must project the hosted configuration onto \$HANDOFF_CONFIG_KEYS (with_entries(select(.key as \$k | \$keys | index(\$k))) | .main = \"worker.js\"), never copy it whole"
+done
+for workflow in "${pages_workflows[@]}" "${worker_workflows[@]}"; do
   [[ -f ${workflow} ]] || continue
   holders="$(json "${workflow}" | jq -r --arg holder "${holder_re}" '
     .jobs // {} | to_entries[]
@@ -222,7 +314,7 @@ for workflow in "${pages_workflows[@]}"; do
   [[ -n ${holders} ]] || fail "${workflow}: no job reads a CLOUDFLARE secret, so the deploy token check has nothing to prove (renamed secret?)"
   while IFS=$'\t' read -r job why; do
     fail "${workflow}: job ${job} holds the Cloudflare token and ${why}; the token must never meet checkout code (a token job has no checkout, local or third-party action, reusable workflow, nix, bun, bunx, npx, npm exec or clone)"
-  done < <(json "${workflow}" | jq -r --arg holder "${holder_re}" --arg anysecret "${any_secret_re}" --arg allowed "${allowed_uses_re}" --arg runner "${forbidden_run_re}" '
+  done < <(json "${workflow}" | jq -r --arg holder "${holder_re}" --arg anysecret "${any_secret_re}" --arg allowed "${allowed_uses_re}" --arg runner "${forbidden_run_re}" --arg exec "${forbidden_exec_re}" '
     .jobs // {} | to_entries[]
     | select(.value | tostring | test($holder; "i"))
     | .key as $job
@@ -230,6 +322,7 @@ for workflow in "${pages_workflows[@]}"; do
       + [(.value.steps // [])[]
          | if ((.uses // "") != "" and ((.uses // "") | test($allowed) | not)) then "\($job)\tuses \(.uses), which is not on the allow-list (actions/download-artifact and actions/upload-artifact pinned by a full commit SHA, nothing else)"
            elif ((.run // "") | test($runner)) then "\($job)\truns nix, bun, bunx, npx, npm exec, npm x, git clone or gh repo clone"
+           elif ((.run // "") | test($exec)) then "\($job)\truns bash, sh, source or node on a file (a token job runs nothing it did not install)"
            else empty end]
       + (if ((.value.env // {}) | tostring | test($anysecret; "i")) then ["\($job)\tputs a secret in the job-level env (every step, the install included, would hold it)"] else [] end)
     | .[]')
@@ -244,9 +337,9 @@ for workflow in "${pages_workflows[@]}"; do
   json "${workflow}" | jq -e '[.jobs[].steps[]? | (.run // "") | select(test("wrangler pages deploy"))] | all(contains("--commit-hash=\"${GITHUB_SHA}\""))' >/dev/null ||
     fail "${workflow}: a wrangler pages deploy step must pass --commit-hash=\"\${GITHUB_SHA}\" (there is no checkout in the token job, so wrangler cannot read the commit itself)"
   while IFS= read -r job; do
-    json "${workflow}" | jq -e --arg job "${job}" --arg anysecret "${any_secret_re}" '
+    json "${workflow}" | jq -e --arg job "${job}" --arg anysecret "${any_secret_re}" --arg use "${wrangler_use_re}" '
       .jobs[$job].steps as $steps
-      | ([$steps | to_entries[] | select((.value.run // "") | test("wrangler pages")) | .key] | first) as $use_at
+      | ([$steps | to_entries[] | select((.value.run // "") | test($use)) | .key] | first) as $use_at
       | ([$steps | to_entries[]
           | select((.value.run // "") as $r
               | ($r | contains("npm install")) and ($r | contains("wrangler@${WRANGLER_VERSION}")) and ($r | contains("--ignore-scripts"))
@@ -259,7 +352,7 @@ for workflow in "${pages_workflows[@]}"; do
   done <<<"${holders}"
 done
 if [[ -n "$(printf '%s\n' "${wrangler_versions[@]}" | sort -u | sed -n '2p')" ]]; then
-  fail "the PWA deploy workflows pin different wrangler versions (${wrangler_versions[*]}); they must agree"
+  fail "the token-holding deploy workflows pin different wrangler versions (${wrangler_versions[*]}); they must agree"
 fi
 
 # 6. Casks/ and semantic-release are named only where they belong

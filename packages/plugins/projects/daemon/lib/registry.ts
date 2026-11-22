@@ -125,13 +125,19 @@ export class ProjectRegistry {
    * everything (`complete`), one no longer found is dropped with it; when it did not (a bound, a refusal, a read that
    * failed), what it did not see is NOT known to be gone, so every stored repository it did not find stays as it was, with
    * its account link, and only what was found is added or refreshed. Nothing is written when nothing changed.
+   *
+   * `listChanged` is called when THIS record step changed the stored list. That is decided inside the serial store update,
+   * against the list that step read, never against a snapshot taken before the scan: two scans that overlap each see the
+   * other's write, so the one that persists a change is the one that says so.
    */
   async recordRepos(
     id: ProjectId,
     found: readonly Omit<ProjectRepo, 'account'>[],
     complete: boolean,
+    listChanged: () => void = () => undefined,
   ): Promise<Result<ProjectInfo, ProjectRefusal>> {
-    return await this.change(id, project => {
+    let moved = false;
+    const kept = await this.change(id, project => {
       const before = project.repos ?? [];
       const seen = found.map(repo => {
         const account = before.find(known => known.path === repo.path)?.account;
@@ -145,9 +151,12 @@ export class ProjectRegistry {
       const repos = ordered
         .slice(0, MAX_PROJECT_REPOS)
         .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      moved = JSON.stringify(repos) !== JSON.stringify(before);
       const { repos: _before, ...rest } = project;
       return repos.length === 0 ? rest : { ...rest, repos };
     });
+    if (kept.ok && moved) listChanged();
+    return kept;
   }
 
   /** One project record rewritten in the one serial store step; the write is skipped when the record is unchanged. */

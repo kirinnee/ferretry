@@ -71,10 +71,25 @@ function stripComments(text: string): string {
   }
 }
 
-/** The text as blocks. */
+/**
+ * What a reader sees of `text`: capped, then with its comments gone. The collapsed head and the whole text are both cut
+ * and read from THIS, so a comment never moves where the head ends (a cut inside a comment once shortened a link).
+ */
+export function visibleText(text: string): string {
+  return stripComments(text.slice(0, MAX_INPUT));
+}
+
+/**
+ * Text that is ALREADY `visibleText` output, as blocks. Comments are stripped once, never again: removing a comment can
+ * join its neighbours into a literal `<!--` (`<<!-- x -->!-- y`), which is text, not a comment.
+ */
+export function parseVisible(visible: string): readonly Block[] {
+  return blocks(visible.split(/\r\n|\r|\n/u), 0);
+}
+
+/** Raw GitHub text as blocks. */
 export function parseProse(text: string): readonly Block[] {
-  const clean = stripComments(text.slice(0, MAX_INPUT));
-  return blocks(clean.split(/\r\n|\r|\n/u), 0);
+  return parseVisible(visibleText(text));
 }
 
 function blocks(lines: readonly string[], depth: number): readonly Block[] {

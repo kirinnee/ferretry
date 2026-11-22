@@ -342,6 +342,66 @@ describe('a page the wire allows at its limit is drawn in a bounded few nodes', 
     await mounted.unmount();
   });
 
+  it('cuts the text a reader sees, not the raw text: a comment never moves the collapsed head', async () => {
+    const hrefsOf = (root: Element): string[] =>
+      [...root.querySelectorAll('a[data-gh-link]')].map(a => a.getAttribute('href') ?? '');
+    // 1,100 characters of comment sit inside the address: the raw text is long, but the first 1,000 raw characters end
+    // inside the comment, so a raw cut would read `…/guide` where the whole text reads `…/guide/setup`
+    const text = `https://example.com/guide<!--${'x'.repeat(1_100)}-->/setup ${'tail '.repeat(300)}`;
+    const closed = await mount(<SafeProse sourceUrl={URL} text={text} />);
+    const shown = hrefsOf(closed.container);
+    expect(shown).toEqual(['https://example.com/guide/setup']);
+    // the count says what a reader can read, not the comment
+    // ('https://example.com/guide/setup ' is 32 characters, and 300 × 'tail ' is 1,500)
+    expect(must(closed.container.querySelector('[data-gh-collapsed] button'), 'Show all').textContent).toContain(
+      '1,532 characters',
+    );
+    await tap(must(closed.container.querySelector('[data-gh-collapsed] button'), 'Show all'));
+    expect(hrefsOf(closed.container)).toEqual(shown);
+    await closed.unmount();
+    // a text that is long only because of its comment is not collapsed at all
+    const quiet = await mount(<SafeProse sourceUrl={URL} text={`hello <!--${'y'.repeat(2_000)}--> world`} />);
+    expect(quiet.container.querySelectorAll('[data-gh-collapsed]').length).toBe(0);
+    expect(quiet.container.textContent).toContain('hello  world');
+    await quiet.unmount();
+  });
+
+  it('strips comments once: an opener formed by removing a comment is text, collapsed and after Show all', async () => {
+    // removing `<!-- maintainer note -->` joins `<` and `!-- after.` into a literal `<!--`, which is not a comment
+    const lead = 'Before <<!-- maintainer note -->!-- after. ';
+    const shortText = await mount(<SafeProse sourceUrl={URL} text={lead} />);
+    expect(shortText.container.textContent).toContain('Before <!-- after.');
+    await shortText.unmount();
+    const mounted = await mount(<SafeProse sourceUrl={URL} text={`${lead}${'tail '.repeat(300)}`} />);
+    expect(mounted.container.textContent).toContain('Before <!-- after. tail');
+    await tap(must(mounted.container.querySelector('[data-gh-collapsed] button'), 'Show all'));
+    expect(mounted.container.textContent).toContain('Before <!-- after. tail');
+    expect(mounted.container.querySelectorAll('[data-gh-collapsed]').length).toBe(0);
+    await mounted.unmount();
+  });
+
+  it('draws every block and span kind, and keeps a cut run in place inside a list item, a quote and a code block', async () => {
+    const rich = await mount(
+      <SafeProse
+        sourceUrl={URL}
+        text={
+          '`c` **b** *i* ~~s~~ ![pic](https://example.com/p.png) ![](https://example.com/q.png)\n\n- one\n\n1. two\n\n> quoted\n\n```\nfenced\n```\n\n---'
+        }
+      />,
+    );
+    const root = rich.container;
+    for (const tag of ['code', 'strong', 'em', 's', 'ul', 'ol', 'blockquote', 'pre', 'hr'])
+      expect(root.querySelector(tag)).not.toBeNull();
+    await rich.unmount();
+    const run = 'r'.repeat(COLLAPSED_CHARS + 50);
+    for (const lead of ['- ', '> ', '```\n', '---\n\n']) {
+      const mounted = await mount(<SafeProse sourceUrl={URL} text={`${lead}${run}`} />);
+      expect(mounted.container.textContent).toContain('r'.repeat(900));
+      expect(mounted.container.textContent?.includes('')).toBe(false);
+      await mounted.unmount();
+    }
+  });
+
   it('opens a long text whole when asked', async () => {
     const mounted = await mount(
       <Conversation

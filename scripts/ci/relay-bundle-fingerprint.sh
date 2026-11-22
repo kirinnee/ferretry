@@ -3,8 +3,8 @@ set -euo pipefail
 #
 # Fingerprints the hosted relay Worker, so the deploy workflow publishes only when it changed.
 #
-#   relay-bundle-fingerprint.sh             what a deploy WOULD publish, from the checkout
-#   relay-bundle-fingerprint.sh --deployed  what Cloudflare is serving now, or nothing if unknown
+#   relay-bundle-fingerprint.sh                  what a deploy WOULD publish, from the checkout
+#   relay-bundle-fingerprint.sh --outdir <dir>   the same, and keep the bundle Wrangler built in <dir>
 #
 # WHY THIS EXISTS. Every hosted Worker deploy restarts the Worker and its Durable Objects, and that
 # drops every live WebSocket on both ends: every daemon's rendezvous claim and every phone's session.
@@ -18,11 +18,12 @@ set -euo pipefail
 # beside the bundle rather than inside it. Source maps are left out (they carry paths, not behaviour),
 # and so is the README Wrangler writes into the output, which is stamped with the build time.
 #
-# The default mode needs the relay package's dependencies installed (`bun install --frozen-lockfile`
-# in the Connections plugin's Worker, packages/plugins/connections/worker) and reads no credentials and no network. `--deployed` reads Cloudflare with the
-# CLOUDFLARE_* environment and prints NOTHING whenever it cannot tell — the first deploy, an API
-# change, a version published by hand — because the caller treats unknown as "deploy": skipping on a
-# guess would leave a stale Worker serving, which is the worse mistake.
+# It needs the relay package's dependencies installed (`bun install --frozen-lockfile` in the
+# Connections plugin's Worker, packages/plugins/connections/worker) and reads no credentials and no
+# network. It runs the checkout's code, so it runs only in the workflow's `build` job, which holds no
+# secret; `--outdir` is how that job hands the very bundle it fingerprinted to the `deploy` job. What
+# Cloudflare is serving now is read by the `deploy` job itself, with the pinned Wrangler it installs,
+# because that is the job that holds the token and it runs no code from this repository.
 #
 # Output: one line, `bundle-` and 16 hex characters — short enough for a Worker version tag.
 
@@ -31,21 +32,16 @@ relay_dir="${root_dir}/packages/plugins/connections/worker"
 config="wrangler.hosted.json"
 cd "${relay_dir}"
 
-if [[ ${1-} == "--deployed" ]]; then
-  # The version carrying the most traffic is the one serving; during a gradual rollout that is still
-  # the old one, and redeploying over a rollout is not this script's decision to skip.
-  version="$(
-    wrangler deployments status --config "${config}" --json 2>/dev/null |
-      jq -r '[.versions[]?] | max_by(.percentage) | .version_id // empty' 2>/dev/null
-  )" || version=""
-  [[ -n ${version} ]] || exit 0
-  wrangler versions view "${version}" --config "${config}" --json 2>/dev/null |
-    jq -r '.annotations["workers/tag"] // empty | select(startswith("bundle-"))' 2>/dev/null || true
-  exit 0
+if [[ ${1-} == "--outdir" ]]; then
+  outdir="${2:?--outdir needs a directory}"
+  mkdir -p "${outdir}"
+elif [[ $# -eq 0 ]]; then
+  outdir="$(mktemp -d)"
+  trap 'rm -rf "${outdir}"' EXIT
+else
+  echo "usage: relay-bundle-fingerprint.sh [--outdir <dir>]" >&2
+  exit 2
 fi
-
-outdir="$(mktemp -d)"
-trap 'rm -rf "${outdir}"' EXIT
 
 wrangler deploy --dry-run --config "${config}" --outdir "${outdir}" >/dev/null
 
