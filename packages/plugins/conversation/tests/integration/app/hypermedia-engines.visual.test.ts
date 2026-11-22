@@ -374,7 +374,8 @@ const LIMITED = [
 
 describe('the plain-text fallback of a message over a pre-parse limit (r12 H11a)', () => {
   for (const [width, height, label] of [
-    [390, 900, '390'],
+    // Tall enough for the whole message (the log opens scrolled to its end, so the note would be cut off).
+    [390, 1_900, '390'],
     [1_280, 900, '1280'],
   ] as const)
     for (const theme of ['light', 'dark'] as const)
