@@ -29,11 +29,53 @@ if (params.get('motion') === 'reduced') document.documentElement.dataset.motion 
 const SEED = { daemonUrl: 'http://127.0.0.1:7617', daemonId: 'fy_daemon_9k3q2m7x4n8v1b6c5z0wd2f8', code: 'FAKE-0000' };
 const arrival = params.get('arrival') ?? 'link';
 
-// A machine whose first-passkey window closes in seven minutes (fake clock, fake view).
+// A stand-in daemon that keeps the name typed while pairing, as the real one does (the REAL Access half and host are
+// proved in `tests/integration/daemon/pairing/pair-machine-name.test.ts`; here the screen is what is under test). What it
+// was sent and the passkey it was asked to create are left on `window.__pairScene` for the browser test to read.
+const HOST_NAME = 'kirin-workstation';
+const pairScene = { sent: [] as { deviceName: string; machineName?: string }[], created: [] as unknown[] };
+(window as unknown as { __pairScene: typeof pairScene }).__pairScene = pairScene;
+let daemonName = HOST_NAME;
+let pairedAs = '';
+const b64 = (value: number) => btoa(String.fromCharCode(value)).replace(/=+$/u, '');
+
+// A machine whose first-passkey window closes in seven minutes (fake clock, fake view). Its passkey labels read the
+// name it now goes by: "<device> → <machine>", then "Ferretry: <device> → <machine>" (the daemon's own composition).
 const OFFER_NOW = Date.parse('2026-11-17T10:00:00.000Z');
+let passkeyReads = 0;
 const openWindow: StepUpClient = {
-  request: async <T,>(_path: string, schema: { parse: (value: unknown) => T }): Promise<T> =>
-    schema.parse({ passkeys: [], registration: 'first-window', registrationClosesAt: '2026-11-17T10:07:00.000Z' }),
+  request: async <T,>(path: string, schema: { parse: (value: unknown) => T }): Promise<T> => {
+    if (path === '/v1/passkeys/options')
+      return schema.parse({
+        challenge: b64(9),
+        rp: { id: 'ferretry.example', name: 'Ferretry' },
+        user: { id: b64(1), name: `${pairedAs} → ${daemonName}`, displayName: `Ferretry: ${pairedAs} → ${daemonName}` },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+        timeout: 60_000,
+        excludeCredentials: [],
+      });
+    passkeyReads += 1;
+    return schema.parse(
+      passkeyReads > 1
+        ? { id: b64(0xaa), createdAt: '2026-11-17T10:03:00.000Z', origin: 'https://ferretry.example' }
+        : { passkeys: [], registration: 'first-window', registrationClosesAt: '2026-11-17T10:07:00.000Z' },
+    );
+  },
+};
+const fakeCredentials = {
+  create: async (options: unknown) => {
+    pairScene.created.push(JSON.parse(JSON.stringify((options as { publicKey: unknown }).publicKey)));
+    return {
+      type: 'public-key',
+      rawId: Uint8Array.from([0xaa]).buffer,
+      response: {
+        clientDataJSON: Uint8Array.from([0x7b, 0x7d]).buffer,
+        attestationObject: Uint8Array.from([1]).buffer,
+        getTransports: () => [],
+      },
+    } as unknown as Credential;
+  },
+  get: async () => null,
 };
 const offering = params.get('offer') === 'open';
 
@@ -62,11 +104,14 @@ if (params.get('scene') === 'export') {
         ? { scanHost: { supported: true, scan: async () => await new Promise<string>(() => {}) } }
         : {})}
       defaultName={() => 'Chrome on Linux · 4f2a'}
-      onPair={async () => {
+      onPair={async (_seed, deviceName, machineName) => {
+        pairScene.sent.push({ deviceName, ...(machineName === undefined ? {} : { machineName }) });
         await new Promise(resolve => setTimeout(resolve, 300));
         if (arrival === 'broken') throw new Error('Nothing reached that daemon.');
+        pairedAs = deviceName;
+        daemonName = machineName ?? HOST_NAME;
         return {
-          machine: 'kirin-workstation',
+          machine: daemonName,
           via: 'relay' as const,
           connection: daemonConnection({
             daemonId: SEED.daemonId,
@@ -78,7 +123,12 @@ if (params.get('scene') === 'export') {
       {...(offering
         ? {
             passkeyClient: async () => openWindow,
-            passkeyOffer: { now: () => OFFER_NOW, supported: () => true, origin: () => 'https://ferretry.example' },
+            passkeyOffer: {
+              now: () => OFFER_NOW,
+              supported: () => true,
+              origin: () => 'https://ferretry.example',
+              credentials: () => fakeCredentials,
+            },
             onContinue: () => {},
           }
         : {})}

@@ -29,6 +29,8 @@ export interface NotInEffect {
   readonly held: ReadonlySet<string>;
   /** The owner's own items each reference's write created (by reference), for the import record to keep. */
   readonly created?: ReadonlyMap<string, readonly string[]>;
+  /** The etag each of those files was written at (by reference, then item name), so a later update can tell a hand-made one. */
+  readonly etags?: ReadonlyMap<string, Readonly<Record<string, string>>>;
 }
 
 const NOTHING_HELD: NotInEffect = { refused: new Set(), held: new Set() };
@@ -61,6 +63,8 @@ export async function composeOwned(input: {
   readonly touched?: readonly string[];
   /** The owner's own items an earlier import created through a component, by reference (the import record's). */
   readonly ownedOf?: (reference: string) => readonly string[];
+  /** The etag an earlier import left on each of the owner's files through a component, by reference (the record's). */
+  readonly etagsOf?: (reference: string) => Readonly<Record<string, string>>;
 }): Promise<{ readonly documents: readonly FleetDocumentWrite[]; readonly owners?: OwnedComponents }> {
   const { before, model } = input;
   const owned = input.enabled ? ownerReferences(before, model, input.touched) : [];
@@ -68,7 +72,15 @@ export async function composeOwned(input: {
   return {
     documents: await input.documents(withComponentsOf(model, before, owned), NOTHING_HELD),
     owners: {
-      writes: ownerWrites(before, model, input.assetText, input.assetFiles, input.touched, input.ownedOf),
+      writes: ownerWrites(
+        before,
+        model,
+        input.assetText,
+        input.assetFiles,
+        input.touched,
+        input.ownedOf,
+        input.etagsOf,
+      ),
       rebuild: async outcome => {
         const left = owned.filter(({ kind, name }) => outcome.refused.has(`${kind}/${name}`));
         const kept = owned.filter(({ kind, name }) => !outcome.refused.has(`${kind}/${name}`));
@@ -117,6 +129,7 @@ export async function handOver(input: {
   const left = new Set<string>();
   const heldReferences = new Set<string>();
   const created = new Map<string, readonly string[]>();
+  const etags = new Map<string, Readonly<Record<string, string>>>();
   for (const write of owners.writes) {
     const answer =
       write.text === undefined
@@ -126,6 +139,7 @@ export async function handOver(input: {
       (answer.outcome === 'written' ? written : held).push(write.file);
       if (answer.outcome === 'held') heldReferences.add(write.reference);
       if (answer.created !== undefined && answer.created.length > 0) created.set(write.reference, answer.created);
+      if (answer.etags !== undefined) etags.set(write.reference, answer.etags);
       for (const warning of answer.warnings ?? []) noted.push(`${write.file} (${say(warning)})`);
       if (write.skipped !== undefined)
         noted.push(`${write.file} (hidden files not handed over: ${say(write.skipped.join(', '))})`);
@@ -135,9 +149,9 @@ export async function handOver(input: {
     }
   }
   const rebuilt =
-    left.size === 0 && heldReferences.size === 0 && created.size === 0
+    left.size === 0 && heldReferences.size === 0 && created.size === 0 && etags.size === 0
       ? applied
-      : await owners.rebuild({ refused: left, held: heldReferences, created });
+      : await owners.rebuild({ refused: left, held: heldReferences, created, etags });
   // The fleet is built from what the owners report in effect, never from what the import asked for: a held component
   // is not in effect yet, an owner may have written less than it was given, and a prior version stays active.
   const taken = owners.writes.filter(write => !left.has(write.reference));
@@ -176,6 +190,7 @@ export async function handOver(input: {
             refused: new Set([...left, ...vanished.map(write => write.reference)]),
             held: heldReferences,
             created,
+            etags,
           })
         ).documents;
   return {
@@ -214,7 +229,9 @@ export function recordText(
       .filter(([reference]) => offered.has(reference) || !outcome.refused.has(reference))
       .map(([reference, entry]) => {
         const owned = [...new Set([...(entry.owned ?? []), ...(outcome.created?.get(reference) ?? [])])];
-        return [reference, owned.length === 0 ? entry : { ...entry, owned }];
+        const stamped = { ...entry.etags, ...outcome.etags?.get(reference) };
+        const withOwned = owned.length === 0 ? entry : { ...entry, owned };
+        return [reference, Object.keys(stamped).length === 0 ? withOwned : { ...withOwned, etags: stamped }];
       }),
   );
   return `${JSON.stringify({ ...merged, components }, null, 2)}\n`;

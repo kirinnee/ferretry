@@ -46,6 +46,8 @@ export const CARRIER_TAKERS: readonly string[] = Object.freeze(['connections']);
 /** The key a `pair` session registers: its SPKI and the private half that proves this browser holds it. */
 export interface PairingKey {
   readonly deviceName: string;
+  /** What the person called the machine on the pair screen: the daemon keeps it when the machine has no name yet. */
+  readonly machineName?: string;
   /** The Ed25519 SubjectPublicKeyInfo, base64url. */
   readonly publicKey: string;
   readonly key: PrivateKeyHandle;

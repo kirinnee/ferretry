@@ -136,6 +136,7 @@ import {
 } from './limits.ts';
 import { createIdentitySigner, signerFor } from './signer.ts';
 import * as refusal from './refusal-note.ts';
+import { answerWithMachineName } from './pair-name.ts';
 
 /** The kernel's route table, as the one function a session's request needs from it. */
 export type SessionDispatch = (request: ApiRequest) => Promise<ApiResponse>;
@@ -172,6 +173,11 @@ export interface SessionLayerDeps {
   readonly clock: Pick<Clock, 'nowMs' | 'after'>;
   /** The lease and its cap. Absent means {@link DEFAULT_ACCESS_LEASE_POLICY}. */
   readonly lease?: AccessLeasePolicy;
+  /**
+   * Keeps the name a person typed on the pair screen as this machine's name, when it has none of its owner's yet, and
+   * answers the name the machine goes by afterwards, whoever set it. Asked only after a code was accepted.
+   */
+  readonly nameMachine?: (name: string) => Promise<string>;
   /**
    * Where a session that ends on a record this daemon could not read says so (the kind and the shape of what was
    * wrong, never a value). Absent means silence, as before.
@@ -1063,11 +1069,13 @@ class SealedSession implements CarrierLink {
         )),
     );
     if (!this.#live()) return;
-    this.#queue(
-      redeemed !== undefined && redeemed.outcome === 'paired'
-        ? { t: 'paired', protocol: SESSION_PROTOCOL_ID, response: redeemed.fields['response'] }
-        : refused,
-    );
+    const paired = redeemed !== undefined && redeemed.outcome === 'paired';
+    // The name is kept only once the code was accepted, so the answer and the passkey made next already carry it.
+    const response = paired
+      ? await answerWithMachineName(redeemed.fields['response'], request.machineName, this.deps.nameMachine)
+      : undefined;
+    if (!this.#live()) return;
+    this.#queue(paired ? { t: 'paired', protocol: SESSION_PROTOCOL_ID, response } : refused);
     this.#conclude();
   }
 

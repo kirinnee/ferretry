@@ -2514,13 +2514,19 @@ the sentence that tells the app to update, never a `401` that reads as a wrong c
   "protocol": "ferretry-relay/2",
   "code": "XXXX-XXXX",
   "deviceName": "Ferretry PWA",
+  "machineName": "Studio box",
   "deviceKey": "<44-byte Ed25519 SPKI b64url>",
   "proof": "<§6's device-pair signature by that key>"
 }
 ```
 
 `code` and `deviceName` carry the pairing API's values, bounds and meaning; their formats belong to
-that API, not to this protocol. `deviceKey` is the public half of a key the browser generated for
+that API, not to this protocol. `machineName` is optional: what the person called the machine on the
+pair screen. It is not part of the proof and it is acted on only AFTER the code was accepted — never
+on a refusal — and only by a daemon whose `host.yaml` has no `name` yet and for a name its own
+machine-name rule takes; the daemon then keeps it and answers it as `daemonName`, so the answer and
+every passkey made next carry it. A daemon that already has a name, or refuses this one, ignores it and
+answers its own. `deviceKey` is the public half of a key the browser generated for
 this daemon and cannot export, and `proof` shows it holds the private half for THIS session. A proof
 that does not verify is treated exactly as a wrong code — it spends one attempt and is answered with
 the same `pair-refused` — so the proof adds no oracle of its own. On `paired` the daemon stores the

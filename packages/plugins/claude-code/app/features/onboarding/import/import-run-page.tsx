@@ -240,9 +240,10 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
                 icon={<span aria-hidden="true">↓</span>}
                 busy={working}
                 data-import-run=""
+                data-import-press=""
                 onClick={() => void bringIn()}
               >
-                Import
+                {imports.changes.refusal === null ? 'Import' : 'Try again'}
               </Button>
             }
           />

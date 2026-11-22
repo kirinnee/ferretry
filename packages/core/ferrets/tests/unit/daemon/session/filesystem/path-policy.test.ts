@@ -126,6 +126,31 @@ describe('isDeniedPath', () => {
     should(isDeniedPath('gcp-credentials-prod.json')).be.true();
   });
 
+  it('should deny the sign-in files the project folder explorer already hid (one list, not two)', () => {
+    // Arrange / Act / Assert
+    should(isDeniedPath('.config/gh/hosts.yml')).be.true();
+    should(isDeniedPath('.codex/auth.json')).be.true();
+    should(isDeniedPath('.claude/.credentials.json')).be.true();
+    should(isDeniedPath('Auth.JSON')).be.true();
+    should(isDeniedPath('docs/authors.json')).be.false();
+  });
+
+  it('should deny a key store folder wherever it sits, so a person who starts in the home cannot list ~/.ssh', () => {
+    // Arrange / Act / Assert
+    should(isDeniedPath('.ssh')).be.true();
+    should(isDeniedPath('.ssh/config')).be.true();
+    should(isDeniedPath('.SSH/known_hosts')).be.true();
+    should(isDeniedPath('.gnupg/pubring.kbx')).be.true();
+    should(isDeniedPath('.password-store/mail.gpg')).be.true();
+    should(rootIsDenied('/home/kirin/.ssh')).be.true();
+  });
+
+  it('should leave the folders a project keeps for itself', () => {
+    // Arrange / Act / Assert
+    should(isDeniedPath('.claude/skills/x/SKILL.md')).be.false();
+    should(isDeniedPath('.docker/compose.yaml')).be.false();
+  });
+
   it('should deny a DIRECTORY that matches a secret pattern, not just a leaf file', () => {
     // Arrange / Act / Assert
     should(isDeniedPath('foo.key/readme.md')).be.true();
