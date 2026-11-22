@@ -1,6 +1,6 @@
 ---
 name: fy-render-authoring
-description: Write a rich Ferretry chat message — Markdown with rich parts (terminal, chart, mermaid, animation, tabs…), references, and fy-render blocks for pictures, media, maps and live tasks. Use when you want to show an idea in a conversation instead of only saying it — and read the prohibition first, because fy-render must NEVER appear in documentation, handovers, READMEs, specs, source files, or exported artifacts.
+description: Write a rich Ferretry chat message — Markdown with a terminal part, references, and fy-render blocks for diagrams, charts, pictures, media, maps and live tasks. Use when you want to show an idea in a conversation instead of only saying it — and read the prohibition first, because fy-render must NEVER appear in documentation, handovers, READMEs, specs, source files, or exported artifacts.
 ---
 
 # Writing a rich chat message
@@ -22,9 +22,9 @@ Use it in **one** place: a message you are writing into a chat, right where the 
 
 There is one guide, and a ferret reads the same one you do:
 
-- **`fy render guide`** prints the overview; **`fy render guide <topic>`** prints one topic: `terminal`, `filetree`,
-  `editor`, `chart`, `mermaid`, `animation`, `tierlist`, `alignment`, `tabs`, `references`, `svg`, `html`, `map`,
-  `image`, `video`, `audio`, `pdf`, `lottie`, `task`, `board`.
+- **`fy render guide`** prints the overview; **`fy render guide <topic>`** prints one topic: `terminal`, `human`,
+  `chart`, `mermaid`, `references`, `svg`, `html`, `map`, `image`, `video`, `audio`, `pdf`, `lottie`, `task`, `board`.
+  Only what the app draws today is taught; the wider Durian parts come back with their renderers (r12 H4).
 - Its source is the `## Guide for agents` section of [docs/hypermedia.md](../../../docs/hypermedia.md#guide-for-agents).
   Edit it there, then run `bun packages/plugins/conversation/tests/support/guide-text/generate.ts`
   (`guide-drift.test.ts` fails a commit where the copy in the binary disagrees).
@@ -35,9 +35,9 @@ There is one guide, and a ferret reads the same one you do:
 
 1. **Markdown** — headings, lists, tables, code, links (`https://`, `mailto:` and `#heading` only). Raw HTML is shown as
    text and a Markdown image is not drawn.
-2. **A part** — a fence named for it: `terminal`, `filetree`, `editor`, `chart`, `mermaid`, `animation`, `tierlist`,
-   `alignment`; `:::tabs` and `:::accordion` hold prose. A part with a mistake shows as its source with the problem named.
-3. **An `fy-render` block** — for a picture, media, map, live task or interactive page: info string exactly `fy-render`,
+2. **A part** — a `terminal` fence; `:::human` text is for people and `:::llm` after a part is for another agent. A part
+   with a mistake shows as its source with the problem named.
+3. **An `fy-render` block** — for a diagram, chart, picture, media, map, live task or interactive page: info string exactly `fy-render`,
    `type:` the first line, a required one-line `alt:`, a line `---`, then the payload.
 
 ```fy-render

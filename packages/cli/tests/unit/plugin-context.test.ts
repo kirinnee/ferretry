@@ -72,10 +72,13 @@ const binaryFiles: Record<string, Uint8Array> = {
 function worldWithProbe(environment: Record<string, string | undefined> = {}) {
   const disk = state.createMemoryHostFs();
   const files: Record<string, string> = { '/work/recipe.txt': 'open the page' };
+  /** The bound each text read was asked for (`undefined`: none), file or standard input. */
+  const limits: (number | undefined)[] = [];
   const host = createPluginHost({
     home: '/h',
     fs: disk,
-    readFile: async path => {
+    readFile: async (path, limit) => {
+      limits.push(limit);
       const text = files[path];
       if (text === undefined) throw new Error(`no such file ${path}`);
       return text;
@@ -91,7 +94,10 @@ function worldWithProbe(environment: Record<string, string | undefined> = {}) {
         yield new Uint8Array([1, 2]);
         yield new Uint8Array([3]);
       })(),
-    readStdin: async () => 'typed on stdin',
+    readStdin: async limit => {
+      limits.push(limit);
+      return 'typed on stdin';
+    },
     cwd: () => '/work',
   });
   const probe = recordingProbe();
@@ -101,7 +107,7 @@ function worldWithProbe(environment: Record<string, string | undefined> = {}) {
     environment,
     host,
   });
-  return { ...made, disk, probe };
+  return { ...made, disk, probe, limits };
 }
 
 /** A working ferret as the daemon answers `GET /v1/ferrets/:id`. */
@@ -184,6 +190,16 @@ describe('the context every plugin cli half is handed', () => {
       () => should.fail(undefined, undefined, 'a missing file should be refused'),
       (reason: unknown) => should((reason as Error).message).containEql('no such file'),
     );
+  });
+
+  it('should hand a half’s byte bound to the reader of a file and of standard input alike', async () => {
+    const { world, probe, limits } = worldWithProbe();
+    await runFy(['probe'], world);
+    const { readText } = probe.context();
+    await readText?.('/work/recipe.txt', 64);
+    await readText?.('-', 64);
+    await readText?.('/work/recipe.txt');
+    should(limits).eql([64, 64, undefined]);
   });
 
   it('should read the raw bytes of a file by path and of standard input for -, undecoded (an attachment is bytes)', async () => {

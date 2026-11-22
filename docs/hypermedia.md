@@ -7,9 +7,12 @@ may — and should, when an idea is not straightforward — communicate that way
 
 This page is the contract for the switch, the instruction it injects, and the guide an agent reads to
 write the markup (`fy render guide`, `fy render check`). A message is Markdown with rich parts
-(Durian Hypermedia: a `terminal`, `chart`, `animation`… fence, `:::tabs`); pictures, media, maps and
-live tasks stay the `fy-render` fence, whose grammar, caps, sinks and declared
-gaps are owned by [docs/fy-render.md](fy-render.md). References (`@file`, `:agent`, …) stay owned by
+(Durian Hypermedia: a `terminal` fence, `:::human` and `:::llm` text); diagrams, charts, pictures, media, maps and
+live tasks are the `fy-render` fence, whose grammar, caps, sinks and declared
+gaps are owned by [docs/fy-render.md](fy-render.md). **The teaching names only what the app draws today**: the
+prompt and this guide must not present a part whose renderer has not landed, because it would show as text. The wider
+Durian parts (`filetree`, `editor`, `animation`, `tierlist`, `alignment`, `:::tabs`, and a `chart` or `mermaid` fence of
+their own) are added back to the teaching by r12 H4, in the same change that lands each renderer. References (`@file`, `:agent`, …) stay owned by
 [docs/reference-standard.md](reference-standard.md); a media `src: @path` uses the same `@path` form
 and the same filesystem proof.
 
@@ -65,8 +68,8 @@ next restart. A ferret should check before telling the owner a section is missin
 ## The injected instruction
 
 Exactly this, from `HYPERMEDIA_INSTRUCTION` in `packages/plugins/runtimes/daemon/lib/account/fixed-layer.ts` (with the
-binary's name for `fy`). It is in every turn's context, so it is at most 20 lines: it names the part fences, the
-`fy-render` fence and every reference sigil once, and every part's full spec is one `fy render guide <part>` away,
+binary's name for `fy`). It is in every turn's context, so it is at most 20 lines: it names the `terminal` part, the
+`fy-render` fence and its types and every reference sigil once, and every spec is one `fy render guide <part>` away,
 printed from the [guide below](#guide-for-agents). `fy render check <file|->` is the doccheck an agent can run on a
 message before sending it; nothing runs it for the agent. Its second line is the owner's explainer rule (2026-11-04: _"for explainers, make sure its ADHD Firendly
 (make sure you say that) and user hypermeida to walk user through things"_, _"give example to illustrate your
@@ -75,10 +78,10 @@ points etc"_). Change it there and here together.
 ````text
 Hypermedia: to teach, explain or compare anything not simple (a flow, a design, a change), show it, not just say it. Inline: never publish a page or link unless asked.
 Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Make it interactive: a visual the reader changes (sliders, toggles) that redraws live, no steppers; gentle motion (prefers-reduced-motion).
-Write Markdown. Rich parts are fences named for the part: ```terminal, ```filetree, ```editor, ```chart, ```mermaid, ```animation, ```tierlist, ```alignment; :::tabs holds prose in tabs.
+Write Markdown. The one rich part is a ```terminal fence (a shell session); `:::human` text is for people, `:::llm` after a part is for another agent.
+- Diagrams, charts, svg, interactive html, maps, media, live tasks: a fence whose info string is exactly fy-render: `type: mermaid|chart|svg|html|map|image|video|audio|pdf|lottie|task|board`, `alt: <one line>`, `---`, then the payload.
 - mermaid: flowchart TB, sequenceDiagram, …: top-down, short labels; auto-themed: no %%{init}%% or colours.
 - chart: YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; no colours.
-- Pictures, media, maps, live tasks, svg, interactive html: a fence whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, `---`, then the payload.
 References are plain text, never links: `:agent @file &F12 ^A3 /skill $skill %terminal:dev %browser:app`.
 Every spec: `fy render guide <part>`. Before you send a rich message, run `fy render check <file|->`: it prints `line N: …` for each problem and exits 1 on an error.
 Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.
@@ -86,19 +89,19 @@ Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.
 
 ## Guide for agents
 
-`fy render guide [topic]` prints this section and nothing else: the `### overview` body when no topic is named, or that topic's `###` body when one is. `image`, `video`, `audio` and `pdf` share the `### media` section, `task` and `board` share `### task`, and `tabs` also answers `accordion`, `human` and `llm`. `fy render check <file|->` is the doccheck: run it on a message before you send it. The CLI ships a byte-exact copy of this whole section in the binary (`RENDER_GUIDE_SECTION` in `packages/plugins/conversation/cli/reading/guide-text.ts`), written from this section by `tests/support/guide-text/generate.ts`, and `tests/unit/cli/guide-drift.test.ts` fails the commit that lets the copy disagree with it — so this section is the one owner of the text: edit it here, then run the generator.
+`fy render guide [topic]` prints this section and nothing else: the `### overview` body when no topic is named, or that topic's `###` body when one is. `image`, `video`, `audio` and `pdf` share the `### media` section, `task` and `board` share `### task`, and `human` also answers `llm`. `fy render check <file|->` is the doccheck: run it on a message before you send it. The CLI ships a byte-exact copy of this whole section in the binary (`RENDER_GUIDE_SECTION` in `packages/plugins/conversation/cli/reading/guide-text.ts`), written from this section by `tests/support/guide-text/generate.ts`, and `tests/unit/cli/guide-drift.test.ts` fails the commit that lets the copy disagree with it — so this section is the one owner of the text: edit it here, then run the generator.
 
 Two shapes are deliberately absent from this section. An example fence of the `fy-render` kind, because the copy ships in the CLI's TypeScript source, where `no-fy-render-in-docs.sh` refuses a fence opener. And the per-type detail of `fy-render`: [fy-render.md](fy-render.md) holds the contract, and where the two disagree the contract wins and this section is wrong.
 
 ### overview
 
-A message is Markdown (GitHub flavour: headings, lists, tables, task lists, code, links) with rich parts. A part is a fence named for it: `terminal`, `filetree`, `editor`, `chart`, `mermaid`, `animation`, `tierlist`, `alignment`. Prose parts are containers, a line `:::tabs` or `:::accordion` closed by a line `:::`. Any other fence (`ts`, `diff`, `sh`) is plain code. A part with a mistake in it is shown as its source with the problem named, so check that it drew.
+A message is Markdown (GitHub flavour: headings, lists, tables, task lists, code, links) with one rich part: a `terminal` fence, a shell session. A line `:::human` closed by a line `:::` is text for people, and `:::llm` after a part is the text another agent reads. Any other fence (`ts`, `diff`, `sh`) is plain code. A part with a mistake in it is shown as its source with the problem named, so check that it drew.
 
-Pictures, media, maps, live tasks and static or interactive pages are a different fence: its info string is exactly `fy-render`, line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload. Types: `svg`, `html`, `map`, `image`, `video`, `audio`, `pdf`, `lottie`, `task`, `board`. A broken block renders as an ordinary code fence with no warning.
+Diagrams, charts, pictures, media, maps, live tasks and static or interactive pages are a different fence: its info string is exactly `fy-render`, line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload. Types: `mermaid`, `chart`, `svg`, `html`, `map`, `image`, `video`, `audio`, `pdf`, `lottie`, `task`, `board`. A broken block renders as an ordinary code fence with no warning, so run `fy render check` on the message first.
 
 Raw HTML in Markdown is shown as text. A Markdown image is not drawn (use an `image` block); a link may go to `https://`, `mailto:` or a heading of the same message, and nothing else. A message has no front matter: a first line `---` is just a line. A message over 300,000 bytes is shown as text. Never write any of this into files, docs, commits or PRs: it is for chat messages and agenda items only.
 
-Reference things as plain text, never as links: see `### references`. For an explainer, show the idea: a `mermaid` flow, an `animation`, a `chart`, a `tierlist` or `alignment` grid, a `terminal` session, a `filetree` — and keep the words short.
+Reference things as plain text, never as links: see `### references`. For an explainer, show the idea: a `mermaid` flow, a `chart`, an interactive `html` page, a `terminal` session — and keep the words short.
 
 ### terminal
 
@@ -106,49 +109,23 @@ A shell session. A line starting `$ ` (or `% `, or `# ` for root) is a command; 
 
 Write `@step <title>` lines to set the steps yourself (then every line sits under a step; at least two steps, or none).
 
-### filetree
-
-Two spaces per level; a name ending in `/` is a folder. A word in brackets after a name is a mark from a fixed list: `(new)`, `(changed)`, `(removed)`, `(generated)`, `(conflict)`, and for folders `(open)` or `(closed)`. `# text` after a name is a note; a line `...` stands for entries left out. `@step <title>` lines show the tree before and after a change.
-
-### editor
-
-A file tree and one file pane. `@file <path>` makes a file up, right here; its lines follow; `(open)` after the path marks the file shown first. `@step <title>` is an edit: `@@ <path>` picks the file, then each line starts with `+` (added), `-` (removed) or a space (kept), followed by the file's line exactly as written, its own indentation included. A single `@step` is fine here: the files as they are come first.
-
 ### chart
 
-YAML. Keys: `kind` (bar, line, area, scatter, bubble, radar, pie, doughnut, polar), `title`, `x` (a list, or `{label, values}`), `y` (`{label, min, max, scale: linear|log}`), `series` (a list of `{name, data}`, each with an optional `kind`, `axis: y2` and `tone`), `stacked` (`true` or `percent`), `horizontal`. `null` in `data` is a gap; scatter data is `[x, y]` pairs and bubble `[x, y, size]`. No colours: a series' `tone` is `1`–`8`, `accent`, `good`, `warn`, `bad` or `muted`, and the reader's theme paints it. The numbers reach a screen reader as a table. An unknown key, or a series with no data, makes the chart a source block with the problem named. Caps: 5,000 data points on a chart.
+An `fy-render` block of `type: chart`. The payload is JSON/YAML {kind: bar, x: [Mon, Tue], y: {format: money}, series: [{name: Cost, data: [2, 3]}]}; kind line|bar|area|pie|doughnut|scatter|radar; format number|percent|money|duration|bytes; stacked; frames: [{label, series}] steps. No colours: tone accent|good|warn|bad|muted|1-8.
 
-Older messages hold a chart written as an `fy-render` block with `type: chart`; those are still drawn. Write the part above instead.
+Say what the chart says; the reader's theme paints it. `title:` is optional; `y` (and a scatter's `x`) take `{label, format, currency, min, max}` — `money` takes an ISO 4217 `currency`, default USD, `duration` takes seconds, `percent` takes the number itself. `stacked:` on line, area and bar; `horizontal:` on bar; a series `kind: line` draws a line over bars; `null` in `data` is a gap; scatter data is `[[x, y], …]` on a numeric x axis. The reader gets tooltips, a legend they can toggle, zoom on line and area, and `frames` steps with Previous/Next and a slider; the numbers reach a screen reader as a table. Any key the language does not name — `color:` included — makes the block fall back to its source. Caps: 64 KiB, 12 series, 500 points a series, 500 labels, 30 frames.
 
 ### mermaid
 
-Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels. It is auto-themed: `%%{init}%%`, front matter and `theme`/`themeVariables`/`themeCSS` are ignored, and `style`/`classDef` colours still apply and fight the reader's theme — leave colours out. ≤ 20,000 characters. A wide left-to-right flowchart is redrawn top-down on a phone by itself. A diagram that does not parse becomes a plain code fence. A `%% @step <title>` line makes the diagram build up step by step.
+An `fy-render` block of `type: mermaid`. The payload is Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels. It is auto-themed: `%%{init}%%`, front matter and `theme`/`themeVariables`/`themeCSS` are ignored, and `style`/`classDef` colours still apply and fight the reader's theme — leave colours out. ≤ 20,000 characters. A wide left-to-right flowchart is redrawn top-down on a phone by itself, and the reader can scroll it sideways. A diagram that does not parse becomes a plain code fence.
 
-### animation
-
-One engine: a stage of entities, connectors and steps. The lines before the first `@step` set the stage; each `@step <caption>` is a sentence the reader sees, followed by the changes that happen in it, one per line; step k shows the setup plus steps 1 to k. At least two steps. Add `3d` after the fence name to open the scene in 3D; the reader can switch either way, and a browser with no 3D shows the flat or text view.
-
-Things: `box`, `circle`, `pill`, `cylinder`, `cloud`, `person`, `diamond`, `text`, `dot`; frames `group "label" layout=row|column|grid|tree|graph`; data `array a: 5 2 8`, `list`, `stack`, `queue`; `token t "req" at api`. Write `<kind> <id> "label" [in <container>]`; ids are letters, digits, `-` `_` `.`, labels are in double quotes. Connectors: `a -> b`, `a --> b` (dashed), `a -- b`, `a <-> b`, with a label last: `app -> db "writes"`.
-
-In a step: `add <thing>`, `remove <id>`, `move <id> to <container>`, `swap a b`, `set <id> tone=warn`, `highlight <id>`, `say <id>: text`, `send "GET /" a -> b` (one hop per step), `zoom into <id>`, `camera <id>`. No colours, pixels or times: layouts place things, `tone=` is a role (plain, acc, good, warn, hot, muted), and the engine times the motion. Caps: 300 things, 200 steps. An animation with one step, an unknown word or a stage past the caps is shown as source with the problem named.
-
-### tierlist
-
-A ranking in rows, best first, one line per tier: the tier's name, a colon, then its items separated by commas. Tiers are `S`, `A`, `B`, `C`, `D` unless a first line `tiers: Must [good], Should [c6], Could, Won't [bad]` names others (colour `c1`–`c8`, `good`, `warn` or `bad`). A short note goes in brackets after an item; an item with a comma in its name goes in quotes. Each item sits in one tier, once. `title="…"` on the fence names the list.
-
-### alignment
-
-Two axes with a name at each end, drawn as a 2x2 or 3x3 grid. Line `x: low effort .. high effort`, line `y: high impact .. low impact` (two names or three, the same number on both). An item goes in a cell, `low effort / high impact "Do first": Fix the typo, Cleanup`, or at a point from 0 to 1, `Speed up the build @ 0.66, 0.2` (the first name of an axis is 0). The column comes first in a cell name. Each item is placed once.
-
-### tabs
-
-`:::tabs` holds prose in tabs and `:::accordion` in rows: every heading at the highest level used inside starts one tab or row, and the container is closed by a line `:::`. Containers do not nest and hold no other container; they may hold fenced parts. Keep them for parallel choices (two languages, two options), not for a story that reads top to bottom.
+### human
 
 `:::human` text is shown to people, and `:::llm` after a part or `:::human` is the text another agent reads instead of it. The reader sees an `:::llm` text too, collapsed under "LLM-only text", so write nothing there you would not say to them. A part whose own text is over about 400 tokens should have one.
 
 ### references
 
-A reference is a plain token in your text: `:agent` a fleet agent's session, `@path` a file (`@src/api.ts`, `@src/api.ts:120`, `@src/api.ts:120-140`), `&F12` a task, `^A3` an agenda item (the old `!A3` still reads), `/skill` or `$skill` a skill, `%terminal:dev` and `%browser:app` a live terminal or page by its name. Write them as bare words in prose; the reader's app proves each one and turns it into a link, and one that does not exist stays plain text. A Markdown link that imitates a reference is plain text. Inside a code span a reference is shown as written.
+A reference is a plain token in your text: `:agent` a fleet agent's session, `@path` a file (`@src/api.ts`, `@src/api.ts:120`, `@src/api.ts:120-140`), `&F12` a task, `^A3` an agenda item, `/skill` or `$skill` a skill, `%terminal:dev` and `%browser:app` a live terminal or page by its name. Write them as bare words in prose; the reader's app proves each one and turns it into a link, and one that does not exist stays plain text. A Markdown link that imitates a reference is plain text. Inside a code span a reference is shown as written.
 
 ### svg
 

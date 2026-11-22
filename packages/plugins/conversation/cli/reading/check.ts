@@ -16,7 +16,7 @@
  * passes here can still fall back to a code fence for one of those reasons. The check says what it can prove.
  */
 import { readConfigText } from '@ferretry/std/yaml';
-import { check, type ParseOptions, type Problem, parse, setYamlParser } from 'durian-hypermedia';
+import { check, type ParseOptions, type Problem, setYamlParser } from 'durian-hypermedia';
 import { FY_RENDER_LIMITS } from '../../contract/fy-render-caps.ts';
 import { parseFyRenderHeaders, validateHtml, validateSvg } from '../../contract/fy-render.ts';
 
@@ -33,6 +33,41 @@ export interface Finding {
  * two together.
  */
 const CHECK_LIMITS = { maxInputBytes: 300_000 } as const;
+
+/**
+ * How much of a message the command reads: one byte past the cap, so a message over it is known to be over without the
+ * rest of an arbitrarily large file or pipe being read into memory.
+ */
+export const CHECK_READ_BYTES = CHECK_LIMITS.maxInputBytes + 1;
+
+/** The whole answer for a message past the cap: the app shows it as text, so no part of it is read as a part. */
+const OVER_CAP_FINDING: Finding = {
+  line: 1,
+  level: 'error',
+  message: `the message is over ${CHECK_LIMITS.maxInputBytes.toLocaleString('en-US')} bytes, so it is shown as text`,
+};
+
+/** The longest a diagnostic's own words may run on a line of the terminal; message text is clipped to this. */
+const MAX_DIAGNOSTIC_CHARACTERS = 200;
+
+/** C0 and C1 controls, DEL, zero-width and bidi marks, line and paragraph separators and the byte order mark. */
+const UNSAFE_CHARACTER = new RegExp(
+  '[\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069\\ufeff]',
+  'gu',
+);
+
+/**
+ * Text that came from the message (or from a path on the command line), made safe to print: every character that could
+ * drive a terminal or hide the end of a line is shown as `\u{hex}`, and the result is clipped to
+ * {@link MAX_DIAGNOSTIC_CHARACTERS} with an ellipsis. Pure.
+ */
+export function diagnosticText(text: string): string {
+  const escaped = text.replace(UNSAFE_CHARACTER, each => `\\u{${(each.codePointAt(0) as number).toString(16)}}`);
+  const characters = [...escaped];
+  return characters.length <= MAX_DIAGNOSTIC_CHARACTERS
+    ? escaped
+    : `${characters.slice(0, MAX_DIAGNOSTIC_CHARACTERS - 1).join('')}…`;
+}
 
 /** The fence token whose whole info string makes a block ours; any longer info string is plain code. */
 const FY_RENDER_FENCE = 'fy-render';
@@ -89,7 +124,8 @@ function fyRenderRefusal(source: string): string | null {
 
 /** Every `fy-render` fence of a message, read by the rules above; a fence inside another fence is an example. */
 function fyRenderFindings(text: string): Finding[] {
-  const lines = text.split('\n');
+  // Durian ends a line at LF, CRLF or a bare CR; so does this scan, with the same line numbers (a CRLF is one break).
+  const lines = text.replace(/\r\n?/gu, '\n').split('\n');
   const found: Finding[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const open = FENCE_LINE.exec(lines[index] as string)?.groups;
@@ -134,8 +170,8 @@ function fyRenderFindings(text: string): Finding[] {
 /** Durian's problems for one message, as it is read in chat: no front matter, the message size cap. */
 function durianFindings(text: string): Finding[] {
   configureYaml();
-  const options = { frontMatter: false, limits: CHECK_LIMITS };
-  return problemsOf(text, options).map((problem: Problem) => ({
+  const options: ParseOptions = { frontMatter: false, limits: CHECK_LIMITS };
+  return check(text, options).map((problem: Problem) => ({
     line: problem.line,
     level: problem.level,
     message: problem.message,
@@ -143,26 +179,21 @@ function durianFindings(text: string): Finding[] {
 }
 
 /**
- * Durian's problems for `text`. A text past the size cap is refused by `parse` before it records what `check` needs
- * (Durian v0.5.1 then throws a TypeError from `check`), so that one case reads the problems `parse` itself reports:
- * the page is too big, which is the whole answer.
+ * Every problem of a message, in the order it appears. Pure over its input. A message past the size cap is answered by
+ * the size finding alone, before Durian or the `fy-render` scan reads a byte of it: it is shown as text, so nothing
+ * inside it is a part to check.
  */
-function problemsOf(text: string, options: ParseOptions): readonly Problem[] {
-  try {
-    return check(text, options);
-  } catch {
-    return parse(text, options).problems;
-  }
-}
-
-/** Every problem of a message, in the order it appears. Pure over its input. */
 export function checkMessage(text: string): readonly Finding[] {
+  if (byteLength(text) > CHECK_LIMITS.maxInputBytes) return [OVER_CAP_FINDING];
   return [...durianFindings(text), ...fyRenderFindings(text)]
     .map((finding, order) => ({ finding, order }))
     .sort((a, b) => a.finding.line - b.finding.line || a.order - b.order)
     .map(({ finding }) => finding);
 }
 
-/** `line 8: a code fence is never closed` — a warning says so before its words. */
+/**
+ * `line 8: a code fence is never closed` — a warning says so before its words. The words are escaped and bounded
+ * ({@link diagnosticText}): some carry text from the message itself, and a terminal must never obey it.
+ */
 export const findingLine = (finding: Finding): string =>
-  `line ${finding.line}: ${finding.level === 'warn' ? 'warning: ' : ''}${finding.message}`;
+  `line ${finding.line}: ${finding.level === 'warn' ? 'warning: ' : ''}${diagnosticText(finding.message)}`;

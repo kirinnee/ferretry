@@ -8,7 +8,7 @@ import type {
   WorkHit,
   WorkSearchResponse,
 } from '../../contract/index.ts';
-import { checkMessage, findingLine } from './check.ts';
+import { CHECK_READ_BYTES, checkMessage, diagnosticText, findingLine } from './check.ts';
 import { RENDER_GUIDE_TOPICS, renderGuideSection, renderGuideSectionName } from './guide.ts';
 import { RENDER_GUIDE_SECTION } from './guide-text.ts';
 
@@ -156,8 +156,9 @@ export function readingVerbs({ client, io, clock, readText }: Context) {
     const path = invocation.args[0];
     if (path === undefined) throw new Usage(`name the message: ${BIN} render check <file|->`);
     if (readText === undefined) throw new Error('this fy has no file reader for render check');
-    const text = await readText(path).catch(() => {
-      throw new Usage(`cannot read ${path}`);
+    // Bounded: a file or a pipe far past the cap is never held whole, and the path is escaped like any message text.
+    const text = await readText(path, CHECK_READ_BYTES).catch(() => {
+      throw new Usage(`cannot read ${diagnosticText(path)}`);
     });
     const findings = checkMessage(text);
     if (findings.length === 0) return print('no problems found');

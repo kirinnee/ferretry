@@ -13,11 +13,11 @@ export default fragment({
   cli: [
     verb('render', { summary: 'save a picture a ferret can show in a message', args: [] }),
     verb('render guide', {
-      summary: 'how to write a rich message: the parts, the references and the fy-render types',
+      summary: 'how to write a rich message: the terminal part, the references and the fy-render types',
       args: [
         {
           name: 'topic',
-          help: 'terminal, filetree, editor, chart, mermaid, animation, tierlist, alignment, tabs, references, svg, html, map, image, video, audio, pdf, lottie, task, board',
+          help: 'terminal, human, chart, mermaid, references, svg, html, map, image, video, audio, pdf, lottie, task, board',
           optional: true,
         },
       ],

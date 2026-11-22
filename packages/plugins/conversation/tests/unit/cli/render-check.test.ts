@@ -19,18 +19,21 @@ const harness = (files: Record<string, string>) => {
   const out: string[] = [];
   const err: string[] = [];
   const read: string[] = [];
+  const limits: (number | undefined)[] = [];
   const verbs = readingVerbs({
     client: { call: (async () => undefined) as never, subscribe: () => () => undefined },
     io: { out: (text: string) => void out.push(text), err: (text: string) => void err.push(text), isTty: false },
-    readText: async (path: string) => {
+    // Like the shell's reader: with a limit it hands back no more than that many bytes of the file.
+    readText: async (path: string, limit?: number) => {
       read.push(path);
+      limits.push(limit);
       const text = files[path];
       if (text === undefined) throw new Error(`no such file: ${path}`);
-      return text;
+      return limit === undefined ? text : new TextDecoder().decode(new TextEncoder().encode(text).slice(0, limit));
     },
   } as never);
   const check = (args: string[]) => verbs['render check']({ args, options: {} } as never);
-  return { check, out, err, read };
+  return { check, out, err, read, limits };
 };
 
 describe('fy render check', () => {
@@ -119,9 +122,82 @@ describe('fy render check: fy-render fences (our host block)', () => {
     expect(checkMessage(text)).toEqual([]);
   });
 
+  test('the same missing-alt block is reported on the same line whatever the line ending (LF, CRLF, bare CR)', () => {
+    const lines = ['intro', '', `${FENCE}fy-render`, 'type: mermaid', '---', 'flowchart TB', FENCE, ''];
+    const found = (eol: string) => checkMessage(lines.join(eol)).map(each => ({ line: each.line, level: each.level }));
+    expect(found('\n')).toEqual([{ line: 3, level: 'error' }]);
+    expect(found('\r\n')).toEqual([{ line: 3, level: 'error' }]);
+    expect(found('\r')).toEqual([{ line: 3, level: 'error' }]);
+  });
+
   test('warnings alone leave the exit code 0 and are still printed', async () => {
     const { check, out } = harness({ 'w.md': `${FENCE}fy-render notes\nx\n${FENCE}\n` });
     expect(await check(['w.md'])).toBe(0);
     expect(out.join('')).toContain('line 1: warning:');
+  });
+});
+
+describe('fy render check: input bounds', () => {
+  const cap = MESSAGE_LIMITS.maxInputBytes;
+  const badBlock = `${FENCE}fy-render\ntype: mermaid\n---\nflowchart TB\n${FENCE}\n`;
+
+  test('a file and standard input are both read with a bound of one byte past the cap, never whole', async () => {
+    const { check, limits } = harness({ 'a.md': 'hello\n', '-': 'hello\n' });
+    await check(['a.md']);
+    await check(['-']);
+    expect(limits).toEqual([cap + 1, cap + 1]);
+  });
+
+  test('a message past the cap answers with the size finding alone: no host scan reports a second problem', () => {
+    const found = checkMessage(`${badBlock}${'a'.repeat(cap)}`);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ level: 'error' });
+    expect(found[0]?.message).toContain('300,000');
+  });
+
+  test('an over-cap file exits 1 with the one size line, even though only the bounded prefix was read', async () => {
+    const { check, out } = harness({ 'big.md': `${badBlock}${'a'.repeat(cap * 2)}` });
+    expect(await check(['big.md'])).toBe(1);
+    const lines = out.join('').trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^line 1: .*300,000/u);
+  });
+
+  test('a message exactly at the cap is still read and scanned', () => {
+    const text = `${badBlock}${'a'.repeat(cap - badBlock.length)}`;
+    expect(new TextEncoder().encode(text).length).toBe(cap);
+    expect(checkMessage(text).map(found => found.message)).toEqual([expect.stringContaining('alt')]);
+  });
+});
+
+describe('fy render check: terminal-safe output', () => {
+  // Written as escapes in a string so no invisible character sits in this source.
+  const CONTROL = new RegExp(
+    '[\\u0000-\\u001f\\u007f-\\u009f\\u200b-\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069\\ufeff]',
+    'u',
+  );
+
+  test('control bytes from the message never reach the terminal: they are shown as escapes', async () => {
+    const hostile = `${FENCE}fy-render \u001b]0;pwned\u0007 \u001b[2J\u009b31m ‮\n---\n${FENCE}\n`;
+    const { check, out } = harness({ 'h.md': hostile });
+    await check(['h.md']);
+    const printed = out.join('').replace(/\n$/u, '');
+    expect(CONTROL.test(printed)).toBe(false);
+    expect(printed).toContain('\\u{1b}');
+  });
+
+  test('a finding message is bounded: a long info string is clipped with an ellipsis', () => {
+    const line = findingLine({ line: 1, level: 'warn', message: `x${'y'.repeat(5_000)}` });
+    expect(line.length).toBeLessThan(400);
+    expect(line.endsWith('…')).toBe(true);
+  });
+
+  test('a path with control bytes is escaped in the cannot-read error, which stays one short line', async () => {
+    const { check, err } = harness({});
+    expect(await check([`bad\u001b[2Jname${'z'.repeat(2_000)}`])).toBe(2);
+    const said = err.join('');
+    expect(CONTROL.test(said.replace(/\n$/u, ''))).toBe(false);
+    expect(said).toContain('\\u{1b}');
+    expect(said.length).toBeLessThan(400);
   });
 });
