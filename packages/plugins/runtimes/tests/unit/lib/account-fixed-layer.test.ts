@@ -705,8 +705,8 @@ describe('hypermedia teaching', () => {
     should(teaching).not.containEql('flowchart LR');
     // A reference is a token the reader's proof gate turns into a chip, never a link an agent writes.
     should(teaching).containEql('plain text, never links');
-    // In every prompt, so it is capped: 1,209 before r12 H6; the sigils and the check took it to 1,362 with one part, and teaching every part that draws to about 1,700.
-    should(teaching.length).be.below(1_800);
+    // In every prompt, so it is capped: 1,209 before r12 H6; the sigils and the check took it to 1,362 with one part, and teaching every part that draws to 1,593.
+    should(teaching.length).be.below(1_700);
   });
 });
 
