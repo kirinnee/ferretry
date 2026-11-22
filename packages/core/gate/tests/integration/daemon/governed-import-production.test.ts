@@ -88,6 +88,22 @@ const UNLOCKED: Mode = { perAct: false, minutes: 15 };
 
 const NOW_MS = Date.parse('2026-11-01T12:00:00.000Z');
 
+/** A door a case holds with an explicit deferred: once `armed`, the next `pass` parks until `release` resolves. */
+function hold() {
+  const door = {
+    armed: false,
+    entered: Promise.withResolvers<void>(),
+    release: Promise.withResolvers<void>(),
+    async pass(): Promise<void> {
+      if (!door.armed) return;
+      door.armed = false;
+      door.entered.resolve();
+      await door.release.promise;
+    },
+  };
+  return door;
+}
+
 /**
  * The machine: Gate's PRODUCTION admission over Access's REAL step-up service (its registry, window and settings), the
  * paired phone enrolled and unlocked, and the real Runtimes + Claude Code halves behind it.
@@ -145,6 +161,31 @@ async function machine(mode: Mode, settings: object = JSON.parse(OWNER_SETTINGS)
 
   const loginEnvImport = fakeLoginEnvImport();
   const loginChanges = fakeLoginChanges();
+  // Doors a case can hold by an explicit deferred (never a call count): armed, the NEXT call parks until released.
+  const holds = { stage: hold(), vault: hold(), stores: hold() };
+  const heldLoginChanges = {
+    ...loginChanges,
+    stage: async (...args: Parameters<typeof loginChanges.stage>) => {
+      await holds.stage.pass();
+      return await loginChanges.stage(...args);
+    },
+  };
+  const fakeVault = new FakeVault();
+  /** The names the Vault really took, in order. */
+  const filed: string[] = [];
+  const vault = new Proxy(fakeVault, {
+    get: (target, prop) => {
+      const member = Reflect.get(target, prop, target);
+      if (prop === 'putNew')
+        return async (name: string, value: string) => {
+          await holds.vault.pass();
+          const outcome = await target.putNew(name as never, value);
+          filed.push(name);
+          return outcome;
+        };
+      return typeof member === 'function' ? member.bind(target) : member;
+    },
+  });
   // The Logins door an import asks first (`createLogins`): a case can hold it, to keep an apply INSIDE the serialised
   // section, or make it throw.
   const inner = fakeLogins([]);
@@ -170,15 +211,20 @@ async function machine(mode: Mode, settings: object = JSON.parse(OWNER_SETTINGS)
       if (door.failure !== undefined) throw door.failure;
       return await inner.list();
     },
+    // Read while the model is prepared, once the login is created and just before the provisioner writes.
+    launchStores: async () => {
+      if (loginChanges.applied.length > 0) await holds.stores.pass();
+      return await inner.launchStores();
+    },
   };
   const host = await testHost({
     plugins: [overRealRoots, half('claude-code')],
     fakes: {
       ferrets: new FakeFerrets(),
       logins,
-      loginChanges,
+      loginChanges: heldLoginChanges,
       loginEnvImport,
-      vault: new FakeVault(),
+      vault,
     },
     gate,
     config: {},
@@ -197,7 +243,7 @@ async function machine(mode: Mode, settings: object = JSON.parse(OWNER_SETTINGS)
   const confirm = (): void => {
     access.registry.grant(subject, epochMs(instantFromEpochMs(NOW_MS)) - 1_000, false);
   };
-  return { host, access, subject, prove, confirm, loginEnvImport, loginChanges, door };
+  return { host, access, subject, prove, confirm, loginEnvImport, loginChanges, door, holds, filed };
 }
 
 const as = { as: device(phone.deviceId) } as const;
@@ -414,6 +460,58 @@ describe('C59 O5-10b R2 item 4b: an apply whose request ends once it has STARTED
     expect(notApplied(host).map(line => line.fields)).toEqual([
       { change: id, kind: 'setup.import', status: 499, code: 'request_aborted' },
     ]);
+  });
+});
+
+describe('C59 O5-10b R3: the request is rechecked after each await a write waits on (explicit deferreds, production admission)', () => {
+  /** Runs one apply; `held` parks it at that door, the request ends there, then the door opens. */
+  async function endedAt(m: Awaited<ReturnType<typeof machine>>, door: ReturnType<typeof hold>) {
+    const id = await stage(m);
+    m.prove(STEP_UP_ACTS.loosenConfig);
+    door.armed = true;
+    const caller = new AbortController();
+    const running = apply(m.host, id, { signal: caller.signal });
+    await door.entered.promise;
+    caller.abort();
+    door.release.resolve();
+    const answered = await running;
+    await m.host.settle();
+    return { id, answered };
+  }
+
+  test('(a) ended while Logins stages a login: the staged login is never applied', async () => {
+    const m = await machine(UNLOCKED);
+    const { answered, id } = await endedAt(m, m.holds.stage);
+
+    expect([answered.status, answered.json<{ code: string }>().code]).toEqual([499, 'request_aborted']);
+    expect(m.loginChanges.applied).toEqual([]);
+    expect(written(m.host)).toEqual([]);
+    expect(notApplied(m.host).map(line => line.fields)).toEqual([
+      { change: id, kind: 'setup.import', status: 499, code: 'request_aborted' },
+    ]);
+  });
+
+  test('(b) ended while the Vault takes the first key: the second key is never filed', async () => {
+    const env = {
+      ANTHROPIC_API_KEY: 'ghp_abcdefghijklmnopqrstuvwxyz0123456789',
+      OTHER_SERVICE_SECRET: 'ghp_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
+    };
+    const m = await machine(UNLOCKED, { ...JSON.parse(OWNER_SETTINGS), env });
+    const { answered } = await endedAt(m, m.holds.vault);
+
+    expect([answered.status, answered.json<{ code: string }>().code]).toEqual([499, 'request_aborted']);
+    // Exactly the key that was already in flight landed; the loop did not go on to the next.
+    expect(m.filed.length).toBe(1);
+    expect(m.loginChanges.staged).toEqual([]);
+    expect(written(m.host)).toEqual([]);
+  });
+
+  test('(c) ended while the model is prepared: the provisioner writes nothing', async () => {
+    const m = await machine(UNLOCKED);
+    const { answered } = await endedAt(m, m.holds.stores);
+
+    expect([answered.status, answered.json<{ code: string }>().code]).toEqual([499, 'request_aborted']);
+    expect(written(m.host).filter(path => path.startsWith('runtimes/') || path.startsWith('profiles/'))).toEqual([]);
   });
 });
 

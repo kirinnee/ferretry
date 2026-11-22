@@ -64,19 +64,28 @@ export async function createLogins(
   for (const login of wanted) {
     if (have.has(login.id)) continue;
     live?.();
+    const refused = (error: unknown): FleetCatalogRefusal =>
+      new FleetCatalogRefusal(
+        'fleet_change_failed',
+        `Logins could not create the login ${login.id}: ${errorMessage(error)}. Nothing else was changed${plan.secrets.length === 0 ? '' : '; the keys already added to the secret store stay there'}.`,
+      );
+    let staged: Awaited<ReturnType<typeof loginChanges.stage>>;
     try {
-      const view = await loginChanges.stage({
+      staged = await loginChanges.stage({
         kind: 'login.add',
         id: login.id,
         harness: harnessKey(login.harness),
         store: login.store as 'host' | 'ferretry' | 'environment',
       });
-      await loginChanges.apply(view.id);
     } catch (error) {
-      throw new FleetCatalogRefusal(
-        'fleet_change_failed',
-        `Logins could not create the login ${login.id}: ${errorMessage(error)}. Nothing else was changed${plan.secrets.length === 0 ? '' : '; the keys already added to the secret store stay there'}.`,
-      );
+      throw refused(error);
+    }
+    // Staging awaited Logins' door: a request that ended meanwhile never applies the login (the stage stays pending).
+    live?.();
+    try {
+      await loginChanges.apply(staged.id);
+    } catch (error) {
+      throw refused(error);
     }
   }
 }

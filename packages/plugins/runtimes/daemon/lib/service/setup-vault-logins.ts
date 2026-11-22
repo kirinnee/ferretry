@@ -18,7 +18,7 @@ export async function writeVaultAndLogins(
   // The Vault is written first: the caller's right to write it is settled before the first write.
   assertMayFileSecrets(composed.secrets, caller, 'apply');
   caller?.live?.();
-  await fileSecrets(deps.put, composed.secrets);
+  await fileSecrets(deps.put, composed.secrets, () => caller?.live?.());
   caller?.live?.();
   await createLogins(deps.catalog, composed, () => caller?.live?.());
   caller?.live?.();

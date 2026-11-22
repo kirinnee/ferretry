@@ -630,8 +630,7 @@ export class FleetSetupService {
       caller,
       landed,
     );
-    caller?.live?.();
-    await this.#applyModel(model, documents, landed);
+    await this.#applyModel(model, documents, landed, () => caller?.live?.());
     const envSentences = await importLoginEnvs(this.deps.loginEnvImport, composed, caller);
     const sentences = [
       composed.summary,
@@ -1477,6 +1476,7 @@ export class FleetSetupService {
     model: AccountModel,
     documents: readonly FleetDocumentWrite[],
     landed: readonly string[],
+    live?: () => void,
   ): Promise<void> {
     const { catalog } = this.deps;
     let plan: FleetModelApplyPlan;
@@ -1504,6 +1504,7 @@ export class FleetSetupService {
         landed.length === 0 ? errorMessage(error) : `${errorMessage(error)}; ${configurationLanded(landed)}`,
       );
     }
+    live?.(); // the model preparation above awaited: recheck the request right before the write
     try {
       await catalog.provisioner.apply(plan, documents);
     } catch (error) {
