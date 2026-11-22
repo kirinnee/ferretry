@@ -128,6 +128,10 @@ describe('the gh that gets a token is the real one, never a file in the state ho
     const answer = await world.gh(['pr', 'list'], root);
     expect(answer.status).toBe(200);
     expect(world.calls.map(call => call.program)).toEqual(['/usr/bin/gh']);
+    // The sealed child would otherwise inherit that PATH: it is given its own, with no state-home folder in it (L52).
+    const env = world.calls[0]?.options?.env as Record<string, string>;
+    expect(env.PATH).toBe('/usr/bin');
+    expect(env.PATH).not.toContain(SHIMS);
   });
 
   test('a daemon PATH with nothing but the shim refuses in a sentence: nothing runs and the token is never read', async () => {
