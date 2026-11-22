@@ -17,6 +17,7 @@ export { ImportPartialNote, type ImportPartialNoteProps } from './import-partial
 export { type ApplyImport, type ImportApplied, type ImportPartial, useApplyImport } from './use-apply-import.ts';
 export {
   createScanStore,
+  forgetSetupScanAhead,
   type HarnessScan,
   readSetupScanAhead,
   scanStoreFor,

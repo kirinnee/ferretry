@@ -194,7 +194,7 @@ describe('the scan is read once per client and shared', () => {
     expect(calls.filter(route => route === 'GET /v1/runtimes/setup/scan')).toHaveLength(4);
   });
 
-  it('C59 O8-4 a read ahead that failed is dropped: the page asks the machine itself', async () => {
+  it('C59 O8-4 a read ahead that failed is ONE page’s failed read (with its retry); the next store asks the machine', async () => {
     const calls: string[] = [];
     let fail = true;
     const client = {
@@ -206,10 +206,25 @@ describe('the scan is read once per client and shared', () => {
       },
     } as unknown as RuntimesClient;
     readSetupScanAhead(client);
+    await new Promise(resolve => setTimeout(resolve, 0));
     fail = false;
-    const store = createScanStore(client);
-    await store.scan(true, true);
-    expect(store.snapshot().kind).toBe('ready');
+    const first = createScanStore(client);
+    await first.scan(true, true);
+    expect(first.snapshot().kind).toBe('failed');
+    const second = createScanStore(client);
+    await second.scan(true, true);
+    expect(second.snapshot().kind).toBe('ready');
+    expect(calls.filter(route => route === 'GET /v1/runtimes/setup/scan')).toHaveLength(2);
+  });
+
+  it('C59 O8-4 each setup flow opening reads afresh (one in flight is shared), so a flow never shows an earlier read', async () => {
+    const calls: string[] = [];
+    const client = clientOf(calls, scanOf({ claude: CLAUDE_FULL }));
+    readSetupScanAhead(client);
+    readSetupScanAhead(client);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(calls.filter(route => route === 'GET /v1/runtimes/setup/scan')).toHaveLength(1);
+    readSetupScanAhead(client);
     expect(calls.filter(route => route === 'GET /v1/runtimes/setup/scan')).toHaveLength(2);
   });
 

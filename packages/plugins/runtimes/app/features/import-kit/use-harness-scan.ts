@@ -61,33 +61,55 @@ const readMachine = async (client: RuntimesClient, quiet: boolean): Promise<Mach
 };
 
 /**
- * C59 O8-4: THE SCAN READ AHEAD, once per machine, when the setup flow opens ({@link readSetupScanAhead}), so the Claude Code
- * and Codex pages find it already answered instead of each waiting on its own read. It is keyed by MACHINE, not by client or
- * run: every plugin's page talks through its own client, and each run has its own store, so one read here stands in for the
- * first read of every store on that machine for {@link AHEAD_MS}. Only a store's FIRST read takes it: Check again, a read
- * after an install or a sign-in and the Settings re-import (`refresh`) always ask the machine. A read that failed is
- * dropped, so the page's own read asks again.
+ * C59 O8-4: THE SCAN READ AHEAD, started when the setup flow opens ({@link readSetupScanAhead}), so the Claude Code and
+ * Codex pages find it already answered instead of each waiting on its own read. It is keyed by MACHINE, not by client or
+ * run: every plugin's page talks through its own client, and each run has its own store, so one read here stands in for
+ * the first read of every store on that machine, for {@link AHEAD_MS} after it started. Only a store's FIRST read takes it:
+ * Check again, a read after an install or a sign-in and the Settings re-import (`refresh`) always ask the machine.
+ *
+ * Each flow opening reads afresh (one already in flight is shared, never doubled) and forgets its read when it closes
+ * ({@link forgetSetupScanAhead}), so a flow never shows what an earlier one read. A read that FAILED is handed to exactly one page, which shows the failure and its retry as its own read would
+ * have; the next store asks the machine itself.
  */
 const AHEAD_MS = 10 * 60_000;
-const AHEAD = new Map<object | string, { readonly at: number; readonly read: Promise<MachineRead> }>();
+interface Ahead {
+  readonly at: number;
+  readonly read: Promise<MachineRead>;
+  /** Set once the read settles: `ok` or `failed`. */
+  settled?: 'ok' | 'failed';
+}
+const AHEAD = new Map<object | string, Ahead>();
 const machineOf = (client: RuntimesClient): object | string => daemonOfClient(client) ?? client;
 
-/** Start the scan for `client`'s machine now, quietly, unless one started within {@link AHEAD_MS}. Never throws. */
+/** Start the scan for `client`'s machine now, quietly (one still in flight is shared). Never throws. */
 export function readSetupScanAhead(client: RuntimesClient, nowMs: number = Date.now()): void {
   const machine = machineOf(client);
   const held = AHEAD.get(machine);
-  if (held !== undefined && nowMs - held.at < AHEAD_MS) return;
-  const read = readMachine(client, true);
-  AHEAD.set(machine, { at: nowMs, read });
-  read.catch(() => {
-    if (AHEAD.get(machine)?.read === read) AHEAD.delete(machine);
-  });
+  if (held !== undefined && held.settled === undefined) return;
+  const ahead: Ahead = { at: nowMs, read: readMachine(client, true) };
+  AHEAD.set(machine, ahead);
+  ahead.read.then(
+    () => {
+      ahead.settled = 'ok';
+    },
+    () => {
+      ahead.settled = 'failed';
+    },
+  );
 }
 
-/** The read started ahead for `client`'s machine, if it is still young enough to stand in for a first read. */
+/** The flow that started a read ahead has closed: no later store, and no later flow, takes what it read. */
+export function forgetSetupScanAhead(client: RuntimesClient): void {
+  AHEAD.delete(machineOf(client));
+}
+
+/** The read started ahead for `client`'s machine, if it may still stand in for a first read (a failed one, only once). */
 const aheadFor = (client: RuntimesClient, nowMs: number): Promise<MachineRead> | undefined => {
-  const held = AHEAD.get(machineOf(client));
-  return held !== undefined && nowMs - held.at < AHEAD_MS ? held.read : undefined;
+  const machine = machineOf(client);
+  const held = AHEAD.get(machine);
+  if (held === undefined || nowMs - held.at >= AHEAD_MS) return undefined;
+  if (held.settled === 'failed') AHEAD.delete(machine);
+  return held.read;
 };
 
 export function createScanStore(client: RuntimesClient): ScanStore {
@@ -106,10 +128,8 @@ export function createScanStore(client: RuntimesClient): ScanStore {
     // No blank-out: what is already read stays until the new answer is in.
     if (state.kind !== 'ready') set({ kind: 'reading' });
     try {
-      const { answer, claude, codex } =
-        started === undefined
-          ? await readMachine(client, quiet)
-          : await started.catch(async () => await readMachine(client, quiet));
+      // The read ahead IS this store's first read: its answer, or its failure (shown with the retry), never a second call.
+      const { answer, claude, codex } = await (started ?? readMachine(client, quiet));
       if (mine !== generation) return;
       const parsed = SetupScanSchema.safeParse(answer);
       if (!parsed.success && quiet) return set({ kind: 'confirm' });

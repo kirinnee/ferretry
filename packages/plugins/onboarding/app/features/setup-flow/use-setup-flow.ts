@@ -27,11 +27,11 @@
  */
 import { daemonOfClient, useEveryDaemon } from '@ferretry/app';
 import { readPress } from '@ferretry/app/ui';
-import { readSetupScanAhead } from '@ferretry/plugin-runtimes/import-kit';
+import { forgetSetupScanAhead, readSetupScanAhead } from '@ferretry/plugin-runtimes/import-kit';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { StepSegmentMemory } from '@ferretry/kernel/contract';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { StepState } from '../../../contract/index.ts';
 import {
   flattenFlow,
@@ -277,11 +277,15 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   // C59 O8-4: the machine's own Claude Code and Codex setup (tools, logins, runtimes, versions) is read ONCE, as soon as the
   // flow knows it has such pages to show, while the person is still on the first pages; those pages then open already
   // answered, because the shared scan store takes this read for its first read on this machine instead of asking again.
+  // A LAYOUT effect, so it starts before any page's own first read (pages read in a passive effect), and the read is
+  // forgotten when this flow closes, so a later flow never shows it.
   const readsHostSetup = pages.some(
     page => page.phase === 'daemon' && HOST_SETUP_PLUGINS.has(page.plugin) && !answered.has(page.key),
   );
-  useEffect(() => {
-    if (readsHostSetup) readSetupScanAhead(client);
+  useLayoutEffect(() => {
+    if (!readsHostSetup) return;
+    readSetupScanAhead(client);
+    return () => forgetSetupScanAhead(client);
   }, [client, readsHostSetup]);
 
   /**
