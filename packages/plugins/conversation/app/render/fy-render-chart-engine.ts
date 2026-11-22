@@ -32,7 +32,7 @@ import {
 } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
 import type { ChartSpec } from './fy-render-chart-model.ts';
-import { type ChartInteraction, chartConfiguration, chartDatasets } from './fy-render-chart-config.ts';
+import { CHART_ANIMATION, type ChartInteraction, chartConfiguration, chartDatasets } from './fy-render-chart-config.ts';
 import type { ResolvedTheme } from '@ferretry/app';
 
 Chart.register(
@@ -76,6 +76,8 @@ const sliced = (spec: ChartSpec): boolean => spec.kind === 'pie' || spec.kind ==
 export function mountChart(canvas: HTMLCanvasElement, mount: ChartMount): ChartHandle {
   const { spec, theme, interaction } = mount;
   const chart = new Chart(canvas, chartConfiguration(spec, mount.frame, theme, interaction));
+  // A repaint drew whole above; what the reader does next (a frame, a legend toggle) still animates.
+  if (interaction.animate && interaction.entrance === false) chart.options.animation = { ...CHART_ANIMATION };
 
   const setHidden = (hidden: ReadonlySet<number>): void => {
     if (sliced(spec)) {

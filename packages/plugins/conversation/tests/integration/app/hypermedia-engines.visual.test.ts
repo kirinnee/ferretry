@@ -128,6 +128,7 @@ const show = async (
     readonly width?: number;
     readonly height?: number;
     readonly theme?: string;
+    readonly palette?: string;
     readonly page?: (page: Page) => Promise<void>;
   } = {},
 ) => {
@@ -145,7 +146,9 @@ const show = async (
   });
   const page = await context.newPage();
   ledger.length = 0;
-  await page.goto(`${origin}/?theme=${options.theme ?? 'studio-light'}&text=${encodeURIComponent(body)}`);
+  await page.goto(
+    `${origin}/?theme=${options.theme ?? 'studio-light'}&palette=${options.palette ?? 'studio'}&text=${encodeURIComponent(body)}`,
+  );
   await page.waitForFunction(() => (window as unknown as { fyPartsReady?: boolean }).fyPartsReady === true, undefined, {
     timeout: 30_000,
   });
@@ -202,6 +205,138 @@ describe('what a message fetches', () => {
     expect(state.stages).toBeGreaterThan(0);
     expect(found).toEqual({ csp: [], errors: [] });
   }, 90_000);
+});
+
+/** A scene that OPENS in 3D: boxes on three layers, a toned one and a muted one among them, so the stage draws its edges. */
+const THREE_D = fence(
+  'animation 3d',
+  'layer app "application"',
+  'layer tcp "TCP"',
+  'layer link "link"',
+  'box a1 "browser" layer=app',
+  'box b1 "web server" layer=app tone=acc',
+  'box a2 "segments" layer=tcp',
+  'box b2 "segments" layer=tcp tone=good',
+  'box a3 "Wi-Fi" layer=link tone=muted',
+  'box b3 "Ethernet" layer=link tone=warn',
+  'a1 -> a2 -> a3',
+  'b3 -> b2 -> b1',
+  '@step Each machine has the same layers; a request goes down one stack and up the other.',
+  'split layers',
+  '@step TCP talks only to TCP on the other machine.',
+  'highlight a2 b2',
+);
+
+describe('the 3D picture (end-list L145: its edges read in dark as well as light)', () => {
+  for (const [width, height, label] of [
+    [390, 900, '390'],
+    [1_280, 900, '1280'],
+  ] as const)
+    for (const theme of ['light', 'dark'] as const)
+      it(`${label} ${theme}: opens the 3D stage on a WebGL canvas and fetches the 3D chunk only for it`, async () => {
+        const { context, page, found, state, requested } = await show(THREE_D, {
+          width,
+          height,
+          theme: `studio-${theme}`,
+        });
+        await page.waitForTimeout(1_500);
+        if (shotsDir !== '') {
+          await mkdir(shotsDir, { recursive: true });
+          await page.screenshot({ path: join(shotsDir, `edges-3d-${label}-${theme}.png`), fullPage: false });
+        }
+        const canvases = await page.evaluate(() => document.querySelectorAll('.scn3 canvas').length);
+        // THE PIXELS: the stage's own picture with its word labels hidden, read back from a real screenshot of the stage
+        // (the WebGL buffer is not readable). An edge is a pixel the stage's ground does not already hold: count those at
+        // >= 3:1 against it, the floor for a graphic.
+        await page.addStyleTag({ content: '.scn3-labels{display:none !important}' });
+        const stage = await page.locator('.scn-stage').first().screenshot();
+        const { edgePixels, whitePixels } = await page.evaluate(async (base64: string) => {
+          const image = new Image();
+          image.src = `data:image/png;base64,${base64}`;
+          await image.decode();
+          const canvas = document.createElement('canvas');
+          canvas.width = image.width;
+          canvas.height = image.height;
+          const g = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D;
+          g.drawImage(image, 0, 0);
+          const { data } = g.getImageData(0, 0, canvas.width, canvas.height);
+          const lum = (r: number, gr: number, b: number): number => {
+            const f = (v: number): number => {
+              const s = v / 255;
+              return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+            };
+            return 0.2126 * f(r) + 0.7152 * f(gr) + 0.0722 * f(b);
+          };
+          // The ground: the stage's most common pixel (a flat colour over most of it).
+          const seen = new Map<number, number>();
+          for (let at = 0; at < data.length; at += 4) {
+            const key = ((data[at] as number) << 16) | ((data[at + 1] as number) << 8) | (data[at + 2] as number);
+            seen.set(key, (seen.get(key) ?? 0) + 1);
+          }
+          const [ground] = [...seen.entries()].sort((a, b) => b[1] - a[1])[0] as [number, number];
+          const back = lum((ground >> 16) & 255, (ground >> 8) & 255, ground & 255);
+          let count = 0;
+          let white = 0;
+          for (let at = 0; at < data.length; at += 4) {
+            const own = lum(data[at] as number, data[at + 1] as number, data[at + 2] as number);
+            if (own > 0.85) white += 1;
+            const [hi, lo] = own > back ? [own, back] : [back, own];
+            if ((hi + 0.05) / (lo + 0.05) >= 3) count += 1;
+          }
+          return { edgePixels: count, whitePixels: white };
+        }, stage.toString('base64'));
+        await context.close();
+        expect(canvases).toBe(1);
+        // Measured on this build (dark, the owner's case: ~23,000 at 390 and ~39,000 at 1280 after the fix, ~17,000 and
+        // ~30,000 before; light ~850 and ~1,250 either way, where the edges were already strong). The floor only says the
+        // stage drew shapes the ground does not already hold; the per-pair 3:1 proof is `hypermedia-3d-edges.visual.test.ts`.
+        expect(edgePixels).toBeGreaterThan(400);
+        // THE WHITE FALLBACK (r2 review): a token three.js cannot parse draws white. On a dark stage nothing is white once the
+        // labels are hidden; before the stage colours were resolved to plain rgb, every mixed edge and soft fill was.
+        if (theme === 'dark') expect(whitePixels).toBe(0);
+        expect(fetched(requested, threeFile)).toBe(true);
+        expect(state.stages).toBeGreaterThan(0);
+        expect(found).toEqual({ csp: [], errors: [] });
+      }, 90_000);
+});
+
+/** A 3D scene with all eight families, so every `--c1`..`--c8` edge is on the stage (the 5th and 7th are the palettes' palest). */
+const FAMILIES = ['fam1', 'fam2', 'fam3', 'fam4', 'fam5', 'fam6', 'fam7', 'fam8'] as const;
+const THREE_D_FAMILIES = fence(
+  'animation 3d',
+  ...FAMILIES.map(name => `family ${name} "${name}"`),
+  ...FAMILIES.map((name, at) => `box ${name[0]}${at} "${name}" is=${name}`),
+  '@step Eight families, one colour each.',
+);
+
+describe('the family colours on the 3D stage (r2 review: every family edge >= 3:1 on its tint, light and dark)', () => {
+  for (const palette of ['briefing', 'vintage'] as const)
+    for (const [width, height, label] of [
+      [390, 900, '390'],
+      [1_280, 900, '1280'],
+    ] as const)
+      for (const theme of ['light', 'dark'] as const)
+        it(`${palette} ${label} ${theme}: the eight family boxes draw on a WebGL canvas`, async () => {
+          const { context, page, found, state } = await show(THREE_D_FAMILIES, {
+            width,
+            height,
+            theme: `studio-${theme}`,
+            palette,
+          });
+          await page.waitForTimeout(1_500);
+          if (shotsDir !== '') {
+            await mkdir(shotsDir, { recursive: true });
+            await page.screenshot({
+              path: join(shotsDir, `families-3d-${palette}-${label}-${theme}.png`),
+              fullPage: false,
+            });
+          }
+          const canvases = await page.evaluate(() => document.querySelectorAll('.scn3 canvas').length);
+          await context.close();
+          expect(canvases).toBe(1);
+          expect(state.stages).toBeGreaterThan(0);
+          expect(found).toEqual({ csp: [], errors: [] });
+        }, 90_000);
 });
 
 describe('the pictures: the 2D animation and parts', () => {

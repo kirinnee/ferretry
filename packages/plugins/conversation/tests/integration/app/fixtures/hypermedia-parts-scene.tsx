@@ -6,6 +6,7 @@
  *   ?fixture=<name>   a Durian fixture, `format/<file>` or `hostile/<file>`, as the server names it
  *   ?text=<message>   the message itself, instead of a fixture
  *   ?theme=<family>-<mode>
+ *   ?palette=<id>     the palette (default `studio`)
  *
  * It reports `window.fyPartsReady = true` once the message is on the page. Nothing here reads a network but its own origin.
  */
@@ -23,7 +24,7 @@ const theme = params.get('theme') ?? 'studio-light';
 // the asked mode. (`data-theme` is kept for the stale watchers that still read it.)
 document.documentElement.dataset.theme = theme;
 document.documentElement.dataset.style = 'studio';
-document.documentElement.dataset.palette = 'studio';
+document.documentElement.dataset.palette = params.get('palette') ?? 'studio';
 document.documentElement.dataset.mode = theme.endsWith('dark') ? 'dark' : 'light';
 
 const entriesOf = (text: string): readonly TranscriptEntry[] => [
