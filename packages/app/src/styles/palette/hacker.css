@@ -156,3 +156,11 @@
   --step-seg: #2d3a30;
   --step-seg-now: #029b29;
 }
+
+/* Chart series: Hacker's `--tool-patch` and `--err` are one colour and the default series 3 sits on series 6, so the
+   default order repeats a colour. These two slots name hues Hacker keeps apart (E14b). */
+:root[data-palette='hacker'],
+[data-swatch][data-palette='hacker'] {
+  --viz-3: var(--src-codex);
+  --viz-4: var(--src-computer);
+}

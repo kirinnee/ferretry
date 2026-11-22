@@ -156,3 +156,25 @@
   --step-seg: #2c3449;
   --step-seg-now: #4f58c0;
 }
+
+/* Chart series: `--tool-patch` and `--err` are one colour here and the default series 1 sits on series 5 in dark, so
+   the default order repeats a colour; its series 5 reads 1.68:1 and series 7 3.02:1 on the light page. These slots name
+   hues Briefing keeps apart and readable (E14b). Series 7 is a purple (light) and an orchid (dark), a clear step from the
+   teal series 6 beside it in a stacked bar (the old teal-grey mix sat 1.06:1 on it in light) and from the pink series 8. */
+:root[data-palette='briefing'],
+[data-swatch][data-palette='briefing'] {
+  --viz-1: var(--tool-read);
+  --viz-4: var(--src-computer);
+  --viz-5: color-mix(in srgb, var(--tool-bash), var(--tool-edit));
+}
+
+:root[data-palette='briefing'][data-mode='light'],
+[data-swatch][data-palette='briefing'][data-mode='light'] {
+  --viz-5: #857f10; /* a golden olive: the old green-brown mix sat as dark and dull as the teal series 6 beside it */
+  --viz-7: var(--tool-write);
+}
+
+:root[data-palette='briefing'][data-mode='dark'],
+[data-swatch][data-palette='briefing'][data-mode='dark'] {
+  --viz-7: #d58cf0;
+}
