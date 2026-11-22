@@ -35,8 +35,15 @@ const RENDER = 'packages/plugins/conversation/app/render';
 const productionSources = (): readonly string[] =>
   APP_SOURCES.flatMap(pattern => [...new Glob(pattern).scanSync(repoRoot)]).sort();
 
-const mentioning = (token: string): readonly string[] =>
-  productionSources().filter(path => readFileSync(join(packageDir, path), 'utf8').includes(token));
+/**
+ * A file names `token` as an identifier of its own: not as the tail of a longer one. `parseFyRenderBlock` (the Durian
+ * host's parser half, which draws nothing) ends in `FyRenderBlock` but is not the component, so a plain substring
+ * search would count it as a second mount site.
+ */
+const mentioning = (token: string): readonly string[] => {
+  const word = new RegExp(`(?<![A-Za-z0-9_$])${token}`, 'u');
+  return productionSources().filter(path => word.test(readFileSync(join(packageDir, path), 'utf8')));
+};
 
 describe('fy-render opt-in', () => {
   test('should be named by exactly one production surface, plus the renderer that declares it', () => {

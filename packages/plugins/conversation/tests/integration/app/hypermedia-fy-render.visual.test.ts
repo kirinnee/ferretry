@@ -260,3 +260,77 @@ describe('a fence still streaming into the SAME message', () => {
         }
       });
 });
+
+describe('nothing at or after an unclosed opener draws while the message streams (r12 H3 R2)', () => {
+  const TICKS = '`'.repeat(3);
+  const HTML = [`${TICKS}fy-render`, 'type: html', 'alt: An agenda', '---', '<p>partial</p><script>1</script>'];
+  const SVG = [
+    `${TICKS}fy-render`,
+    'type: svg',
+    'alt: A square',
+    '---',
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>',
+  ];
+  const quoted = (lines: readonly string[]): string[] => lines.map(line => `> ${line}`);
+  const listed = (lines: readonly string[]): string[] =>
+    lines.map((line, index) => (index === 0 ? `- ${line}` : `  ${line}`));
+  const VARIANTS: readonly { readonly name: string; readonly lines: string[]; readonly closer: string | null }[] = [
+    { name: 'four-space opener before it', lines: [`    ${TICKS}`, ...HTML], closer: null },
+    { name: 'tab opener before it', lines: [`\t${TICKS}`, ...HTML], closer: null },
+    { name: 'blockquote, partial html', lines: quoted(HTML), closer: `> ${TICKS}` },
+    { name: 'blockquote, complete svg body, no quoted closer', lines: quoted(SVG), closer: `> ${TICKS}` },
+    { name: 'list item, partial html', lines: listed(HTML), closer: `  ${TICKS}` },
+    { name: 'list item, complete svg body', lines: listed(SVG), closer: `  ${TICKS}` },
+  ];
+
+  for (const { name } of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`keeps the iframe count at 0 until the closer (${name}, ${scheme})`, async () => {
+        const { tab, close, foreign } = await open(name, scheme);
+        try {
+          const show = async (text: string) => {
+            await tab.evaluate(
+              text => (window as unknown as { fyStream: (text: string) => void }).fyStream(text),
+              text,
+            );
+            await tab.waitForTimeout(400);
+            return await tab.evaluate(() => {
+              const doc = document.querySelector('.dh-doc') as HTMLElement;
+              return {
+                frames: doc.querySelectorAll('iframe').length,
+                blocks: doc.querySelectorAll('[data-fy-render-type]').length,
+                images: doc.querySelectorAll('[data-fy-render-type] img').length,
+                errors: doc.querySelectorAll('.dh-error, [data-dh-missing]').length,
+                code: doc.querySelectorAll('.code-block').length,
+              };
+            });
+          };
+          const measured: Record<string, unknown> = {};
+          for (const variant of VARIANTS) {
+            const before = await show(`Here is the plan:\n\n${variant.lines.join('\n')}`);
+            measured[variant.name] = before;
+            expect({ variant: variant.name, ...before }).toMatchObject({
+              variant: variant.name,
+              frames: 0,
+              blocks: 0,
+              images: 0,
+              errors: 0,
+            });
+            expect(before.code).toBeGreaterThan(0);
+            if (variant.closer === null) continue;
+            // The closer arrives: it is a block now.
+            const after = await show(`Here is the plan:\n\n${[...variant.lines, variant.closer].join('\n')}`);
+            expect({ variant: variant.name, blocks: after.blocks, errors: after.errors }).toEqual({
+              variant: variant.name,
+              blocks: 1,
+              errors: 0,
+            });
+            expect(after.frames + after.images).toBe(1);
+          }
+          if (process.env.FY_MEASURE !== undefined) console.log(JSON.stringify(measured));
+          expect(foreign).toEqual([]);
+        } finally {
+          await close();
+        }
+      }, 60_000);
+});

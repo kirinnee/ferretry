@@ -422,3 +422,103 @@ describe('a fence still streaming in never tears down what is drawn', () => {
     await unmount();
   });
 });
+
+describe('NOTHING AT OR AFTER AN UNCLOSED OPENER DRAWS while the message streams (r12 H3 R2)', () => {
+  const PARTIAL_HTML = [`${FENCE}fy-render`, 'type: html', 'alt: An agenda', '---', '<p>partial</p><script>1</script>'];
+  const PARTIAL_SVG = [`${FENCE}fy-render`, 'type: svg', 'alt: A square', '---', SQUARE];
+  const quoted = (lines: readonly string[]): readonly string[] => lines.map(line => `> ${line}`);
+  const listed = (lines: readonly string[]): readonly string[] =>
+    lines.map((line, index) => (index === 0 ? `- ${line}` : `  ${line}`));
+
+  /** What a page draws of a text: frames and blocks, and whether anything is an error. */
+  const drawn = async (text: string) => {
+    const { container, unmount } = await draw(text);
+    const result = {
+      frames: container.querySelectorAll('iframe').length,
+      blocks: container.querySelectorAll('[data-fy-render-type]').length,
+      images: container.querySelectorAll('img').length,
+      errors: container.querySelectorAll('.dh-error, [data-dh-missing]').length,
+    };
+    await unmount();
+    return result;
+  };
+  const NOTHING = { frames: 0, blocks: 0, images: 0, errors: 0 };
+
+  const unclosed: readonly (readonly [string, string])[] = [
+    ['a four-space opener before it', ['    ' + FENCE, ...PARTIAL_HTML].join('\n')],
+    ['a tab-indented opener before it', ['\t' + FENCE, ...PARTIAL_HTML].join('\n')],
+    ['a four-space opener before a partial svg', ['    ' + FENCE, ...PARTIAL_SVG].join('\n')],
+    ['a four-space tilde opener before it', ['    ~~~', ...PARTIAL_HTML].join('\n')],
+    ['a blockquote fence, partial html', quoted(PARTIAL_HTML).join('\n')],
+    ['a blockquote fence, a complete svg body and no quoted closer', quoted(PARTIAL_SVG).join('\n')],
+    ['a list item fence on the marker line, partial html', listed(PARTIAL_HTML).join('\n')],
+    ['a list item fence on the marker line, a complete svg body', listed(PARTIAL_SVG).join('\n')],
+    ['a quote fence after drawn prose', ['Here:', '', ...quoted(PARTIAL_HTML)].join('\n')],
+    ['a quote fence whose quote ended before any closer', [...quoted(PARTIAL_SVG), '', 'afterwards'].join('\n')],
+  ];
+  for (const [name, text] of unclosed)
+    it(`draws no frame and no block for ${name}`, async () => {
+      expect(await drawn(text)).toEqual(NOTHING);
+    });
+
+  it('still shows the partial body as code', async () => {
+    const { container, unmount } = await draw(quoted(PARTIAL_SVG).join('\n'));
+    expect(container.querySelector('.code-block code')?.textContent).toContain('type: svg');
+    await unmount();
+  });
+
+  it('draws the block once its closer arrives, in a quote and in a list item', async () => {
+    expect(await drawn([...quoted(PARTIAL_SVG), `> ${FENCE}`].join('\n'))).toMatchObject({
+      blocks: 1,
+      images: 1,
+      errors: 0,
+    });
+    expect(await drawn([...listed(PARTIAL_SVG), `  ${FENCE}`].join('\n'))).toMatchObject({
+      blocks: 1,
+      images: 1,
+      errors: 0,
+    });
+    expect(await drawn([...quoted(PARTIAL_HTML), `> ${FENCE}`].join('\n'))).toMatchObject({ frames: 1, blocks: 1 });
+  });
+
+  it('does not take a closer from outside the quote or the list item', async () => {
+    expect(await drawn([...quoted(PARTIAL_SVG), '', FENCE].join('\n'))).toEqual(NOTHING);
+    expect(await drawn([...listed(PARTIAL_SVG), FENCE].join('\n'))).toEqual(NOTHING);
+  });
+
+  it('leaves a fy-render example inside an outer code fence as it was written', async () => {
+    const outer = [`${FENCE}markdown`, ...quoted(PARTIAL_SVG), FENCE].join('\n');
+    const { container, unmount } = await draw(outer);
+    expect(container.querySelectorAll('[data-fy-render-type]').length).toBe(0);
+    expect(container.querySelector('.code-block code')?.textContent).toContain(`> ${FENCE}fy-render\n`);
+    await unmount();
+  });
+});
+
+describe('a closer indented four spaces or more does not close a fence (CommonMark)', () => {
+  const closed = (closer: string): string =>
+    [`${FENCE}fy-render`, 'type: svg', 'alt: A square', '---', SQUARE, closer].join('\n');
+
+  it('draws nothing for a block whose only closer is indented four spaces or a tab', async () => {
+    for (const closer of [`    ${FENCE}`, `\t${FENCE}`, `        ${FENCE}`]) {
+      const { container, unmount } = await draw(closed(closer));
+      expect({ closer, blocks: container.querySelectorAll('[data-fy-render-type]').length }).toEqual({
+        closer,
+        blocks: 0,
+      });
+      expect({ closer, images: container.querySelectorAll('img').length }).toEqual({ closer, images: 0 });
+      await unmount();
+    }
+  });
+
+  it('still draws a block closed at an indent of zero to three spaces', async () => {
+    for (const closer of [FENCE, ` ${FENCE}`, `   ${FENCE}`]) {
+      const { container, unmount } = await draw(closed(closer));
+      expect({ closer, blocks: container.querySelectorAll('[data-fy-render-type="svg"]').length }).toEqual({
+        closer,
+        blocks: 1,
+      });
+      await unmount();
+    }
+  });
+});

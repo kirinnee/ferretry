@@ -4,6 +4,7 @@ import type { CodeSlotProps, Slots } from 'durian-hypermedia/react/strict';
 import { type ComponentType, useMemo } from 'react';
 import { FY_RENDER_FENCE_ATTRIBUTE, parseFyRender } from '../render/fy-render.ts';
 import { tolerateAuthoringNoise } from '../render/fences.tsx';
+import { DURIAN_FENCE, durianCloserIndex, isIndentedPastFence, linesOf } from './fence-lines.ts';
 import { LlmOnlyText } from './llm-text.tsx';
 import { HYPERMEDIA_SLOTS, HypermediaCode } from './slots.tsx';
 
@@ -48,23 +49,24 @@ export interface FyRenderHostData {
  */
 const EXACT_OPENER = /^ {0,3}(?:`{3,}|~{3,})\s*fy-render\s*$/u;
 
-/** Durian's own fence pattern (`src/core/dh-lib.ts`), which reads the opening line of every part. */
-const DURIAN_FENCE = /^(\s*)(`{3,}|~{3,})\s*([^\s`{]*)(.*)$/u;
-
-const linesOf = (source: string): readonly string[] => source.split(/\r\n|\r|\n/u);
-
 /**
  * Reads one `fy-render` fence. Total: never throws, never draws, never reaches a network. `opener` is the fence's own
- * opening line (what Durian dropped: its info string), `body` the lines between the delimiters.
+ * opening line (what Durian dropped: its info string), `body` the lines between the delimiters, and `closer` the line
+ * Durian ended it at (absent when the caller has none: a fence the code slot already read).
  */
 export function parseFyRenderBlock(
   opener: string | undefined,
   body: string,
   attrs: Readonly<Record<string, string>> = {},
+  closer?: string,
 ): FyRenderHostData {
   const generated = durianAsIs(opener, body, attrs);
   if (opener === undefined || !EXACT_OPENER.test(opener))
     return { ok: false, body, reason: 'the fence is not opened as exactly fy-render', alt: null, generated };
+  // Durian ends a fence at a closer of any indent; CommonMark does not end it at one indented four columns or more, so a
+  // block "closed" that way is not closed, and nothing in it draws.
+  if (closer !== undefined && isIndentedPastFence(closer))
+    return { ok: false, body, reason: 'the closing fence is indented four spaces or more', alt: null, generated };
   // CommonMark: a fence indented n spaces loses up to n spaces of indentation from each of its lines.
   const indent = /^ */u.exec(opener)?.[0].length ?? 0;
   const dedented =
@@ -129,7 +131,12 @@ export function fyRenderParseBlock(source: string): BlockDef<FyRenderHostData> {
     readonly body: string;
     readonly line: number;
     readonly attrs: Readonly<Record<string, string>>;
-  }): FyRenderHostData => parseFyRenderBlock(lines[input.line - 1], input.body, input.attrs);
+  }): FyRenderHostData => {
+    const open = input.line - 1;
+    const fence = DURIAN_FENCE.exec(lines[open] ?? '')?.[2];
+    const close = fence === undefined ? -1 : durianCloserIndex(lines, open, fence);
+    return parseFyRenderBlock(lines[open], input.body, input.attrs, close < 0 ? undefined : lines[close]);
+  };
   return {
     name: FY_RENDER_BLOCK_NAME,
     parse: read,
