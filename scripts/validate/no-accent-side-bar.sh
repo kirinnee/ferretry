@@ -80,7 +80,8 @@ case "${status}" in
   ;;
 esac
 # The awk turns each candidate file into `path:line:text` records with comments blanked (a `/* … */` block, also a JSX `{/* … */}`
-# one, may span lines; a line that starts with `//` or `*` is a comment line). It emits every line, and every element's opening tag
+# one, may span lines; a line that starts with `*` is a comment line, and a `//` outside a string, template or block comment, at
+# the start of a line or after code, is a comment to the end of that line). It emits every line, and every element's opening tag
 # as ONE record (from its `<` to the `>` that closes it outside any `{ }`, lines joined by a space), so a side class and its tone
 # class split across two lines of one string or one class list are read together while two neighbouring elements, or a closed tag
 # and the code after it, never are. A `<` inside an opening tag (a comparison) does not end it. A string ('"`) is read whole, so a
@@ -115,6 +116,7 @@ if [ -s "${tmp_dir}/tw-files" ]; then
           continue
         }
         if (c == "\"" || c == "\047" || c == "`") { instr = c; add(c); continue }
+        if (c == "/" && substr(line, i + 1, 1) == "/") break
         if (c == "/" && substr(line, i + 1, 1) == "*") {
           prev = (res == "") ? " " : substr(res, length(res), 1)
           if (prev ~ /[[:space:]{(;,}]/) { inblock = 1; i++; continue }

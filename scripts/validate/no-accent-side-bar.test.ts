@@ -111,6 +111,31 @@ describe('the accent side-bar gate, Tailwind classes in JSX (r11-2b K4)', () => 
       expect(result.stderr).toContain('packages/x/a.tsx');
     });
 
+  test('refuses a real bar above an inline // comment that holds a block-comment opener', () => {
+    const result = run({
+      'packages/x/a.tsx':
+        '<div\n  onClick={() => go() // Use /* to open a block comment.\n  }\n/>\n<div className="border-l-2 border-warn" />\n',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('packages/x/a.tsx');
+  });
+
+  test('refuses a bar after a // inside a string', () => {
+    const result = run({
+      'packages/x/a.tsx': '<a href="https://x.test/a" className="border-l-2 border-warn" />\n',
+    });
+    expect(result.status).toBe(1);
+  });
+
+  test('allows an inline // comment that names a tone class inside an opening tag', () => {
+    const result = run({
+      'packages/x/a.tsx':
+        '<div\n  className="border-l-2"\n  onClick={() => go() // border-warn is used for warnings.\n  }\n/>\n',
+    });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
   test('allows a bar named inside a multi-line comment', () => {
     const result = run({
       'packages/x/a.tsx': [
