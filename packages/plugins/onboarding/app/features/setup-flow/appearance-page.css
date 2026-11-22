@@ -1,7 +1,8 @@
 /* ============================================================================
-   The onboarding Appearance step (appearance-page.tsx): three stacked lists of titles-only ChoiceCards on the left and ONE
-   mini-window demo in the frame's demo column. Theme tokens only. The window pops once per pick (it is re-mounted with
-   `data-moves`) and rests on its final picture otherwise.
+   The onboarding Appearance step (appearance-page.tsx): THREE groups (Style; Colour = palette + light/dark; Size and motion =
+   text size + motion) of stacked titles-only ChoiceCards on the left and ONE mini-window demo in the frame's demo column.
+   Theme tokens only. The window pops once per pick (it is re-mounted with `data-moves`); the motion strip sweeps while the
+   screen may move (`[data-moving='true']`, the one answer `useMotionAllowed` gives) and stands still otherwise.
    ========================================================================== */
 
 .fy-astep {
@@ -10,11 +11,30 @@
   gap: 24px; /* between lists; the cards inside a list keep their own gap */
   min-width: 0;
 }
-.fy-astep__row {
+.fy-astep__group {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+}
+/* A group's two lists sit side by side when the column is wide enough for both, and stack when it is not. */
+.fy-astep__pair {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  min-width: 0;
+}
+.fy-astep__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.fy-astep__sub {
+  color: var(--muted);
+  font-size: calc(var(--font-size-base) - 1px);
+  font-weight: 600;
+  margin: 0;
 }
 .fy-astep__name {
   color: var(--fg);
@@ -110,20 +130,36 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+/* The button and the input carry real words at the body size, so the Text size pick reads on them (the box grows with the type). */
 .fy-ad__button {
+  align-items: center;
   background: var(--accent);
   border: var(--border-width, 1px) solid var(--accent);
   border-radius: var(--radius-control);
-  block-size: 28px;
-  inline-size: 96px;
+  box-sizing: border-box;
+  color: var(--accent-fg);
+  display: inline-flex;
+  font-family: var(--font-body, inherit);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  justify-content: center;
+  min-block-size: 28px;
+  min-inline-size: 96px;
+  padding-inline: 12px;
 }
 .fy-ad__input {
+  align-items: center;
   background: var(--surface-1, var(--bg));
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  block-size: 28px;
+  box-sizing: border-box;
+  color: var(--muted);
+  display: flex;
+  font-size: var(--font-size-base);
   inline-size: 100%;
   max-inline-size: 220px;
+  min-block-size: 28px;
+  padding-inline: 10px;
 }
 .fy-ad__card {
   background: var(--surface-2);
@@ -176,11 +212,14 @@
 }
 .fy-ad__button,
 .fy-ad__input {
-  block-size: 24px;
+  min-block-size: 24px;
 }
 .fy-ad__input {
   grid-column: 1 / -1;
   max-inline-size: none;
+}
+.fy-ad__motion {
+  grid-column: 1 / -1;
 }
 @container (min-width: 900px) {
   .fy-ad__card,
@@ -209,11 +248,51 @@
   }
   .fy-ad__button,
   .fy-ad__input {
-    block-size: 28px;
+    min-block-size: 28px;
   }
   .fy-ad__input {
     max-inline-size: 220px;
   }
+}
+
+/* ---- the motion strip: the style's own busy mark and a bar that sweeps; both are still when the screen may not move ---- */
+.fy-ad__motion {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  inline-size: 100%;
+}
+.fy-ad__run {
+  background: var(--surface-3, var(--border));
+  border-radius: 999px;
+  block-size: 6px;
+  flex: 1;
+  min-inline-size: 0;
+  overflow: hidden;
+  position: relative;
+}
+.fy-ad__run i {
+  background: var(--accent);
+  border-radius: inherit;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: 40%;
+  position: absolute;
+}
+@keyframes fy-ad-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+.fy-ad[data-moving='true'] .fy-ad__run i {
+  animation: fy-ad-sweep 1.4s ease-in-out infinite;
+}
+.fy-ad[data-moving='false'] .fy-ad__run i {
+  animation: none;
+  inset-inline-start: 30%;
 }
 
 @keyframes fy-ad-pop {

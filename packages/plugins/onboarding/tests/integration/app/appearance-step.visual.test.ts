@@ -129,6 +129,138 @@ const measure = async (tab: Page) =>
     };
   });
 
+/** The live sample's own facts: its words at their drawn size, and whether its motion strip is sweeping. */
+const sample = async (tab: Page) =>
+  await tab.evaluate(() => {
+    const demo = document.querySelector('[data-appearance-demo]') as HTMLElement;
+    const size = (selector: string) =>
+      Number.parseFloat(getComputedStyle(demo.querySelector(selector) as Element).fontSize);
+    const button = (demo.querySelector('.fy-ad__button') as HTMLElement).getBoundingClientRect();
+    return {
+      text: size('.fy-ad__text'),
+      button: size('.fy-ad__button'),
+      input: size('.fy-ad__input'),
+      buttonHeight: Math.round(button.height * 10) / 10,
+      moving: demo.dataset.moving ?? '',
+      sweep: getComputedStyle(demo.querySelector('.fy-ad__run i') as Element).animationName,
+      spinner: getComputedStyle(demo.querySelector('[data-spinner]') as Element).animationName,
+    };
+  });
+
+describe('the live sample shows text size and motion (C59 O6)', () => {
+  it("the three text sizes grow the sample's words, and each step is bigger than the one before (1280 light)", async () => {
+    const { tab, close } = await open(VARIANTS[0]);
+    try {
+      const sizes: Record<string, Awaited<ReturnType<typeof sample>>> = {};
+      for (const choice of ['default', 'large', 'larger']) {
+        await tab.locator(`[aria-label="Text size"] .fy-cc__card[data-choice="${choice}"]`).click();
+        await tab.waitForTimeout(250);
+        sizes[choice] = await sample(tab);
+      }
+      const [a, b, c] = [sizes.default, sizes.large, sizes.larger] as [
+        Awaited<ReturnType<typeof sample>>,
+        Awaited<ReturnType<typeof sample>>,
+        Awaited<ReturnType<typeof sample>>,
+      ];
+      for (const key of ['text', 'button', 'input'] as const) {
+        expect(b[key], `${key} large > default`).toBeGreaterThan(a[key]);
+        expect(c[key], `${key} larger > large`).toBeGreaterThan(b[key]);
+      }
+      console.log(
+        `MEASURED sample text size px: default=${a.text} large=${b.text} larger=${c.text}; button ${a.button}/${b.button}/${c.button}`,
+      );
+    } finally {
+      await close();
+    }
+  });
+
+  it('the motion strip sweeps and the busy mark turns, until Reduced is picked (1280 light)', async () => {
+    const { tab, close } = await open(VARIANTS[0]);
+    try {
+      const moving = await sample(tab);
+      expect(moving.moving).toBe('true');
+      expect(moving.sweep).toBe('fy-ad-sweep');
+      expect(moving.spinner).not.toBe('none');
+      // The sweep is live, not just named: the bar's transform changes between two frames.
+      const frame = async () =>
+        await tab.evaluate(
+          () => getComputedStyle(document.querySelector('[data-appearance-demo] .fy-ad__run i') as Element).transform,
+        );
+      const first = await frame();
+      await tab.waitForTimeout(350);
+      expect(await frame()).not.toBe(first);
+      await tab.locator('[aria-label="Motion"] .fy-cc__card[data-choice="reduced"]').click();
+      await tab.waitForTimeout(250);
+      const still = await sample(tab);
+      expect(still.moving).toBe('false');
+      expect(still.sweep).toBe('none');
+      const rest = await frame();
+      await tab.waitForTimeout(350);
+      expect(await frame()).toBe(rest);
+      console.log(
+        `MEASURED motion: sweep ${moving.sweep} -> ${still.sweep}; spinner ${moving.spinner} -> ${still.spinner}`,
+      );
+    } finally {
+      await close();
+    }
+  });
+
+  it('respects the OS prefers-reduced-motion setting too, with the motion pick left on Follow system (1280 light)', async () => {
+    const { tab, close } = await open(VARIANTS[0]);
+    try {
+      await tab.emulateMedia({ reducedMotion: 'reduce' });
+      await tab.waitForTimeout(250);
+      const still = await sample(tab);
+      expect(still.moving).toBe('false');
+      expect(still.sweep).toBe('none');
+    } finally {
+      await close();
+    }
+  });
+});
+
+describe('the new palettes on the Appearance page (C59 O6)', () => {
+  for (const variant of VARIANTS)
+    for (const palette of ['mesh', 'aurora', 'afterglow', 'briefing'])
+      it(`${palette} restyles the page and the sample, draws its own named card, and keeps the page readable (${variant.name})`, async () => {
+        const { tab, close } = await open(variant);
+        try {
+          const read = async () =>
+            await tab.evaluate(() => {
+              const demo = document.querySelector('[data-appearance-demo]') as HTMLElement;
+              return {
+                palette: document.documentElement.dataset.palette ?? '',
+                accent: getComputedStyle(demo.querySelector('[data-appearance-demo-accent]') as Element)
+                  .backgroundColor,
+                mesh: getComputedStyle(document.documentElement).getPropertyValue('--surface-mesh').trim(),
+                names: [...document.querySelectorAll('[aria-label="Palette"] .fy-cc__title')].map(
+                  node => node.textContent ?? '',
+                ),
+              };
+            });
+          const before = await read();
+          const card = tab.locator(`[aria-label="Palette"] .fy-cc__card[data-choice="${palette}"]`);
+          await card.scrollIntoViewIfNeeded();
+          await card.click();
+          await tab.waitForTimeout(500);
+          const after = await read();
+          expect(after.palette).toBe(palette);
+          expect(after.accent).not.toBe(before.accent);
+          expect(after.names).toContain(
+            { mesh: 'Gradient mesh', aurora: 'Aurora', afterglow: 'Afterglow', briefing: 'Briefing' }[
+              palette
+            ] as string,
+          );
+          if (palette !== 'briefing') expect(after.mesh).toContain('radial-gradient');
+          else expect(after.mesh).toBe('none');
+          await tab.evaluate(() => window.scrollTo(0, 0));
+          await shot(tab, variant, `palette-${palette}`);
+        } finally {
+          await close();
+        }
+      });
+});
+
 describe('the onboarding Appearance step (r11 G2)', () => {
   for (const variant of VARIANTS)
     it(`stacks the choices, puts the live demo beside them, and says little (${variant.name})`, async () => {
@@ -137,17 +269,10 @@ describe('the onboarding Appearance step (r11 G2)', () => {
         await shot(tab, variant, 'appearance');
         const seen = await measure(tab);
         // Stacked: every group is the stack layout, and each card sits under the one before it, in one column.
-        // Five lists: colour mode, palette, style, and the two the base step kept (text size, motion).
-        expect(seen.labels).toEqual(['Colour mode', 'Palette', 'Style', 'Text size', 'Motion']);
-        for (const [which, group] of seen.groups.entries()) {
+        // Five lists in three groups, in the order a person decides them (C59 O6): Style; Colour = Palette + Light or dark; Size and motion.
+        expect(seen.labels).toEqual(['Style', 'Palette', 'Light or dark', 'Text size', 'Motion']);
+        for (const group of seen.groups) {
           expect(group.layout).toBe('stack');
-          // C59 audit: on a phone the palette's compact cards are TWO columns (eight in one column pushed the page below the footer).
-          const palette = which === 1 && variant.phone;
-          if (palette) {
-            const [first, second] = group.cards as [Box, Box];
-            expect(second.x, 'the palette is two columns on a phone').toBeGreaterThan(first.x + 40);
-            continue;
-          }
           for (let index = 1; index < group.cards.length; index += 1) {
             const above = group.cards[index - 1] as Box;
             const card = group.cards[index] as Box;
@@ -208,7 +333,7 @@ describe('the onboarding Appearance step (r11 G2)', () => {
       expect(afterPalette.palette).toBe('vaporwave');
       expect(afterPalette.accent).not.toBe(before.accent);
       expect(afterPalette.checked).toContain('vaporwave');
-      await tab.locator('[aria-label="Colour mode"] .fy-cc__card[data-choice="dark"]').click();
+      await tab.locator('[aria-label="Light or dark"] .fy-cc__card[data-choice="dark"]').click();
       await tab.waitForTimeout(300);
       expect((await read()).mode).toBe('dark');
       await tab.locator('[aria-label="Style"] .fy-cc__card[data-choice="neo"]').click();

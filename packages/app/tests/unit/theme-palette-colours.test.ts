@@ -1,19 +1,22 @@
 /**
- * THE THREE SELF-CONTAINED COLOUR PALETTES (Magenta, Green and Rust: ids vaporwave, hacker, vintage; r11 T1 removed the
- * rest of the r10 set: Cyberpunk, Gradient mesh, Retro futurism, Briefing).
+ * THE SELF-CONTAINED COLOUR PALETTES (ids vaporwave, hacker, vintage; C59 O6 brought back mesh and briefing and added aurora and
+ * afterglow, so the gradient set is mesh, aurora, afterglow and the report set is briefing).
  * Each is a complete, self-contained colour file in BOTH modes, so these checks read the CSS itself, with no browser:
  *   - every role a theme needs is declared, so nothing falls back to Studio LIGHT in a dark mode (the bug the compact
  *     compact palettes had before they were removed);
  *   - the readability pairs clear WCAG (text 4.5:1, control edge and focus ring 3:1), so a style that draws these
  *     colours inherits a readable page;
- *   - no palette draws a `--surface-mesh` (a gradient background), and every one is the default of some style.
+ *   - a gradient palette (mesh, aurora, afterglow) draws a `--surface-mesh` of radial glows in BOTH modes, every other palette draws
+ *     none, and the three original palettes are each the default of some style.
  * The cross-style matrix (T3) renders them; this is the part that needs no renderer.
  */
 import { describe, expect, it } from 'bun:test';
 import { PALETTES, STYLES } from '../../src/theme/catalog.ts';
 import { readStyleFile } from '../../src/testing/theme-css.ts';
 
-const NEW_PALETTES = ['vaporwave', 'hacker', 'vintage'] as const;
+const NEW_PALETTES = ['vaporwave', 'hacker', 'vintage', 'mesh', 'aurora', 'afterglow', 'briefing'] as const;
+const STYLE_DEFAULTS = ['vaporwave', 'hacker', 'vintage'] as const;
+const GRADIENT_PALETTES = ['mesh', 'aurora', 'afterglow'] as const;
 const MODES = ['light', 'dark'] as const;
 
 const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//gu, '');
@@ -126,13 +129,12 @@ const ROLES = [
 
 describe('the self-contained palettes are in the catalogue', () => {
   it('lists each once, as the default palette of a style', () => {
-    for (const id of NEW_PALETTES) {
-      expect(PALETTES.filter(palette => palette.id === id).length, id).toBe(1);
+    for (const id of NEW_PALETTES) expect(PALETTES.filter(palette => palette.id === id).length, id).toBe(1);
+    for (const id of STYLE_DEFAULTS)
       expect(
         STYLES.some(style => style.defaultPalette === id),
         id,
       ).toBe(true);
-    }
   });
 });
 
@@ -185,12 +187,16 @@ for (const id of NEW_PALETTES)
           expect(ratio(hexOf(`tool-${tool}`), hexOf('surface')), `tool ${tool}`).toBeGreaterThanOrEqual(3);
       });
 
-      it('draws no gradient mesh (no gradient on a background)', () => {
-        expect(tokens['--surface-mesh']).toBeUndefined();
+      it('draws a gradient mesh only when it is a gradient palette', () => {
+        const mesh = tokens['--surface-mesh'];
+        if ((GRADIENT_PALETTES as readonly string[]).includes(id)) {
+          expect(mesh, 'a gradient palette says its mesh').toBeDefined();
+          expect(mesh?.match(/radial-gradient\(/gu)?.length, 'four glows').toBe(4);
+        } else expect(mesh).toBeUndefined();
       });
     });
 
-describe('the mesh token stays `none` (index.css still paints it under the page wash until the background contract replaces it)', () => {
+describe('the mesh token is `none` unless a gradient palette sets it (index.css paints it under the page wash, on the app background only)', () => {
   it('has a baseline of none, and the body paints the wash over the mesh', () => {
     expect(withoutComments(readStyleFile('tokens/base-palette.css'))).toContain('--surface-mesh: none;');
     expect(withoutComments(readStyleFile('index.css'))).toContain(

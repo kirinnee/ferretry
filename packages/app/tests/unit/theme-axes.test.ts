@@ -27,6 +27,7 @@ import {
   swatchAttributes,
   type PaletteId,
 } from '../../src/theme/catalog.ts';
+import { PALETTE_NAMES } from '../../src/theme/palette-names.ts';
 import { applyThemeAxes, ThemePreferenceStore } from '../../src/theme/preferences.ts';
 import { applyWindowColour } from '../../src/shell/context.tsx';
 import { readCssWithImports, readStyleFile, themeStylesDir } from '../../src/testing/theme-css.ts';
@@ -145,19 +146,42 @@ describe('the catalogue, the files and themes.css agree', () => {
     expect(STYLE_IDS as readonly string[]).not.toContain('contrast');
   });
 
-  it('has 8 palettes, each named for a colour, and none named after a style', () => {
+  it('has 12 palettes, each with its own proper name from the one map, and none a plain colour word', () => {
     expect(PALETTES.map(entry => entry.label)).toEqual([
-      'Indigo',
-      'Blue',
-      'Teal',
-      'Pop',
-      'Green',
-      'Rust',
-      'Magenta',
+      'Inkwell',
+      'Skyline',
+      'Sonar',
+      'Pop Art',
+      'Terminal',
+      'Rustbelt',
+      'Vaporwave',
+      'Gradient mesh',
+      'Aurora',
+      'Afterglow',
+      'Briefing',
       'High contrast',
     ]);
-    const styleWords = STYLES.flatMap(entry => [entry.id, ...entry.label.toLowerCase().split(/\s+/u)]);
-    for (const palette of PALETTES) expect(styleWords).not.toContain(palette.label.toLowerCase());
+    // The ONE map: the catalogue reads every label from it, so a rename is an edit to that file alone.
+    expect(PALETTES.map(entry => [entry.id, entry.label])).toEqual(Object.entries(PALETTE_NAMES));
+    expect(new Set(PALETTES.map(entry => entry.label)).size).toBe(PALETTES.length);
+    const COLOUR_WORDS = [
+      'indigo',
+      'blue',
+      'teal',
+      'pop',
+      'green',
+      'rust',
+      'magenta',
+      'red',
+      'orange',
+      'purple',
+      'pink',
+    ];
+    for (const palette of PALETTES) expect(COLOUR_WORDS).not.toContain(palette.label.toLowerCase());
+    // No palette is named after a style, except Briefing (the owner asked for the Briefing palette beside the Briefing style).
+    const styleNames = STYLES.map(entry => entry.label.toLowerCase());
+    for (const palette of PALETTES)
+      if (palette.id !== 'briefing') expect(styleNames).not.toContain(palette.label.toLowerCase());
   });
 
   it('gives every style the default palette the plan names', () => {
@@ -373,8 +397,8 @@ describe('a theme item may name a style and a palette', () => {
   it('reads a removed palette and the removed contrast style as the ones the migration names', () => {
     const item = { id: 'dusk', label: 'Dusk' };
     expect(ThemeSchema.parse({ ...item, palette: 'phosphor' }).palette).toBe('hacker');
-    expect(ThemeSchema.parse({ ...item, palette: 'mesh', style: 'contrast' })).toMatchObject({
-      palette: 'studio',
+    expect(ThemeSchema.parse({ ...item, palette: 'ma', style: 'contrast' })).toMatchObject({
+      palette: 'vaporwave',
       style: 'studio',
     });
   });

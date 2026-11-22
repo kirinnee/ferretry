@@ -16,7 +16,20 @@
   var KEY = 'fy:app:theme';
   // biome-ignore format: pre-paint.test.ts pins this exact one-line text, so the formatter must not wrap it
   var STYLES = ['studio', 'mission', 'neo', 'geist', 'glass', 'neumorphism', 'retro', 'lucid', 'hud', 'raw', 'swiss', 'pixel', 'antiposh', 'briefing', 'genz', 'exaggerated'];
-  var PALETTES = ['studio', 'geist', 'mission', 'neo', 'hacker', 'vintage', 'vaporwave', 'contrast'];
+  var PALETTES = [
+    'studio',
+    'geist',
+    'mission',
+    'neo',
+    'hacker',
+    'vintage',
+    'vaporwave',
+    'mesh',
+    'aurora',
+    'afterglow',
+    'briefing',
+    'contrast',
+  ];
   /* A palette id that no longer exists and the kept palette it reads as (`REMOVED_PALETTE_IDS` in the Layouts contract). */
   var REMOVED_PALETTES = {
     blueprint: 'mission',
@@ -27,8 +40,6 @@
     ma: 'vaporwave',
     retrofuture: 'vintage',
     cyberpunk: 'vaporwave',
-    mesh: 'studio',
-    briefing: 'geist',
   };
   /* The first style whose default palette this is (`lookOfPalette` in `catalog.ts`): the style a pre-split "family" read as. */
   var PALETTE_STYLE = {
@@ -39,6 +50,10 @@
     hacker: 'pixel',
     vintage: 'antiposh',
     vaporwave: 'genz',
+    mesh: 'studio',
+    aurora: 'studio',
+    afterglow: 'studio',
+    briefing: 'studio',
     contrast: 'studio',
   };
   /* The pre-split "family" ids a stored value may still carry (`THEME_FAMILY_IDS`, frozen): each is a palette id. */

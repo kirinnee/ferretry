@@ -19,6 +19,7 @@ import {
   THEME_FAMILY_IDS,
   type StyleId,
 } from '@ferretry/plugin-layouts/contract';
+import { PALETTE_NAMES } from './palette-names.ts';
 
 export { PALETTE_IDS, type PaletteId, STYLE_IDS, type StyleId };
 /** A single-pick look is a palette (with the style that comes with it): the family ids ARE the palette ids now. */
@@ -150,19 +151,23 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
 ] as const);
 
 /**
- * Order is the order shown. A palette is a COLOUR, so it is named for one (never for a style); the ids stay what they
- * were so nothing a device stored has to migrate, except the ten removed ones (`REMOVED_PALETTE_IDS`). High contrast is a
- * palette: it must pass on every style.
+ * Order is the order shown. A palette's display name lives in `palette-names.ts` (the one map; never a style's name); the
+ * ids stay what they were so nothing a device stored has to migrate, except the removed ones (`REMOVED_PALETTE_IDS`).
+ * High contrast is a palette: it must pass on every style. Four palettes paint a gradient mesh behind the page (`--surface-mesh`).
  */
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([
-  { id: 'studio', label: 'Indigo', blurb: 'Indigo on cool zinc.' },
-  { id: 'geist', label: 'Blue', blurb: 'Near-absolute black and white, one blue accent.' },
-  { id: 'mission', label: 'Teal', blurb: 'Cyan signal on near-black, deep teal on white.' },
-  { id: 'neo', label: 'Pop', blurb: 'Cream paper, black ink, one electric blue.' },
-  { id: 'hacker', label: 'Green', blurb: 'Matrix green on pure graphite.' },
-  { id: 'vintage', label: 'Rust', blurb: 'Sepia paper, rust and mustard.' },
-  { id: 'vaporwave', label: 'Magenta', blurb: 'Lilac haze, magenta and teal neon, night purple.' },
-  { id: 'contrast', label: 'High contrast', blurb: 'Pure black and white, AAA-targeted.' },
+  { id: 'studio', label: PALETTE_NAMES.studio, blurb: 'Indigo on cool zinc.' },
+  { id: 'geist', label: PALETTE_NAMES.geist, blurb: 'Near-absolute black and white, one blue accent.' },
+  { id: 'mission', label: PALETTE_NAMES.mission, blurb: 'Cyan signal on near-black, deep teal on white.' },
+  { id: 'neo', label: PALETTE_NAMES.neo, blurb: 'Cream paper, black ink, one electric blue.' },
+  { id: 'hacker', label: PALETTE_NAMES.hacker, blurb: 'Matrix green on pure graphite.' },
+  { id: 'vintage', label: PALETTE_NAMES.vintage, blurb: 'Sepia paper, rust and mustard.' },
+  { id: 'vaporwave', label: PALETTE_NAMES.vaporwave, blurb: 'Lilac haze, magenta and teal neon, night purple.' },
+  { id: 'mesh', label: PALETTE_NAMES.mesh, blurb: 'Violet, rose and sky glows blended behind the page.' },
+  { id: 'aurora', label: PALETTE_NAMES.aurora, blurb: 'Teal, green and blue glows, like northern lights.' },
+  { id: 'afterglow', label: PALETTE_NAMES.afterglow, blurb: 'Dusk orange, rose and gold glows behind the page.' },
+  { id: 'briefing', label: PALETTE_NAMES.briefing, blurb: 'Navy ink, indigo accent and one hot pink.' },
+  { id: 'contrast', label: PALETTE_NAMES.contrast, blurb: 'Pure black and white, AAA-targeted.' },
 ] as const);
 
 export const DEFAULT_STYLE: StyleId = 'studio';
