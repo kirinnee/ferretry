@@ -41,7 +41,7 @@ const stepUpRefusal = (): Error =>
   });
 
 /** A machine whose Warden step is the only step, and whose first `declines` writes of `warden.yaml` are refused for the passkey. */
-function machine(declines: number) {
+function machine(declines: number, hold?: Promise<void>) {
   const answers: string[] = [];
   const attempts: WardenConfigPatch[] = [];
   const written: WardenConfigPatch[] = [];
@@ -72,6 +72,7 @@ function machine(declines: number) {
       updateConfig: async patch => {
         attempts.push(patch);
         if (attempts.length <= declines) throw stepUpRefusal();
+        await hold; // a write the machine has not answered yet (when a test holds it)
         written.push(patch);
         return { config: wardenConfig(), accounts: [], warnings: [] };
       },
@@ -89,8 +90,8 @@ afterEach(async () => {
 });
 
 /** The real flow screen, with the real Warden page placed in the `onboarding.step` slot. */
-async function openFlow(declines: number) {
-  const gone = machine(declines);
+async function openFlow(declines: number, hold?: Promise<void>) {
+  const gone = machine(declines, hold);
   const harness = deviceViewHarness({ plugin: 'onboarding', fragments: [] });
   harness.setRows([fakeReachRow({ daemon: DAEMON, machine: 'Studio', client: gone.client })]);
   const panels = (manifest.ui?.panels ?? [])
@@ -163,5 +164,25 @@ describe('the Warden page inside the real setup flow', () => {
     expect(pageKey()).not.toBe('warden.warden'); // and the flow has left the Warden's page
     await settle();
     expect(machineSide.attempts).toEqual([PATCH, PATCH]); // nothing wrote again after the move
+  });
+
+  test('Confirm it’s you pressed while the footer’s Next is still saving writes once and advances once', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const machineSide = await openFlow(1, gate);
+    await press('[data-step-next]'); // refused for want of the passkey: Confirm is drawn
+    expect(machineSide.attempts).toEqual([PATCH]);
+    await press('[data-step-next]'); // Next again: its write is now pending (the machine has not answered)
+    expect(machineSide.attempts).toEqual([PATCH, PATCH]);
+    await press('[data-warden-unlock] button'); // Confirm while that save is in flight: it must not start another
+    expect(machineSide.attempts).toEqual([PATCH, PATCH]); // still only the one pending write
+    await interact(() => release());
+    await settle();
+    expect(machineSide.written).toEqual([PATCH]); // exactly one PATCH landed
+    expect(machineSide.attempts).toEqual([PATCH, PATCH]);
+    expect(machineSide.answers).toEqual(['done']); // exactly one advance
+    expect(pageKey()).not.toBe('warden.warden');
   });
 });

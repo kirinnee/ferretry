@@ -66,8 +66,13 @@ export function WardenStepPage({ deps, step, keyRow }: WardenStepPageProps) {
   const [stepUp, setStepUp] = useState(false);
   /** What the page registered for Next to save (the same function the shell's footer runs); `confirm` runs it too. */
   const commit = useRef<(() => Promise<void>) | null>(null);
-  /** Whether a "Confirm it's you" save is in flight, and what it was refused with when the footer does not already say it. */
-  const confirming = useRef(false);
+  /**
+   * The ONE save in flight, whoever started it (the footer's Next or "Confirm it's you"): both run `commit`, which joins
+   * this promise instead of starting a second write, and Confirm is ignored (and drawn disabled) while it is set.
+   */
+  const inflight = useRef<Promise<void> | null>(null);
+  const [saving, setSaving] = useState(false);
+  /** What a "Confirm it's you" save was refused with, when the footer does not already say it. */
   const [confirmError, setConfirmError] = useState<string | null>(null);
   /** Whether the person was already asked about going on without a Jev key (the next Next is their yes). */
   const asked = useRef(false);
@@ -126,7 +131,7 @@ export function WardenStepPage({ deps, step, keyRow }: WardenStepPageProps) {
       }
       said(await deps.client.updateConfig(patchFor(choice)));
     };
-    const registered = async (): Promise<void> => {
+    const attempt = async (): Promise<void> => {
       try {
         await save();
         setStepUp(false);
@@ -136,6 +141,19 @@ export function WardenStepPage({ deps, step, keyRow }: WardenStepPageProps) {
         setStepUp(true);
         throw new Error(STEP_UP_LINE);
       }
+    };
+    // One guard for every caller: a save already in flight is joined, never repeated (one write of the file).
+    const registered = (): Promise<void> => {
+      if (inflight.current !== null) return inflight.current;
+      setSaving(true);
+      const run = attempt();
+      inflight.current = run;
+      const clear = (): void => {
+        if (inflight.current === run) inflight.current = null;
+        setSaving(false);
+      };
+      run.then(clear, clear);
+      return run;
     };
     commit.current = registered;
     step.commit(registered);
@@ -149,8 +167,8 @@ export function WardenStepPage({ deps, step, keyRow }: WardenStepPageProps) {
    */
   const confirm = useCallback(async (): Promise<void> => {
     const run = commit.current;
-    if (run === null || step === undefined || confirming.current) return;
-    confirming.current = true;
+    // A save already in flight (the footer's Next, or an earlier Confirm) is the one save: this press does nothing.
+    if (run === null || step === undefined || inflight.current !== null) return;
     setConfirmError(null);
     step.busy('Saving…');
     try {
@@ -160,11 +178,9 @@ export function WardenStepPage({ deps, step, keyRow }: WardenStepPageProps) {
       const said = reasonOf(cause);
       setConfirmError(said === STEP_UP_LINE ? null : said);
       step.busy(null);
-      confirming.current = false;
       return;
     }
     step.busy(null);
-    confirming.current = false;
     step.done();
     step.next();
   }, [step]);
@@ -210,7 +226,7 @@ export function WardenStepPage({ deps, step, keyRow }: WardenStepPageProps) {
         <div className="wd-step__note" data-warden-unlock="">
           {/* The sentence is the footer's (the commit's error); this is its one action: the person's own press of Next, which
               runs the registered save again (and so the machine asks for the passkey) and goes on only once it is written. */}
-          <Button variant="primary" onClick={() => void confirm()}>
+          <Button variant="primary" disabled={saving} onClick={() => void confirm()}>
             {STEP_UP_PRESS}
           </Button>
           {confirmError === null ? null : (
