@@ -32,5 +32,15 @@ export function NamePage({
   );
   // The flow's own page title is "Name this machine", so the form draws no second one. A save in flight holds the footer: Next, Back and Later wait, so the page cannot be left under it.
   const working = useCallback((busy: boolean): void => step?.busy(busy ? 'Saving the name…' : null), [step]);
-  return <NameThisMachine daemon={daemon} onDecided={decided} onBusy={working} heading={false} />;
+  // The flow's footer carries the answers (Next saves the name, Later leaves it): the form draws no Not now / Save of its own.
+  const commit = useCallback((save: (() => Promise<void>) | null): void => step?.commit(save), [step]);
+  return (
+    <NameThisMachine
+      daemon={daemon}
+      onDecided={decided}
+      onBusy={working}
+      heading={false}
+      {...(step === undefined ? {} : { commit })}
+    />
+  );
 }

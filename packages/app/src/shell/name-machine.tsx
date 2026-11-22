@@ -38,6 +38,13 @@ interface NameThisMachineViewProps {
   readonly onSkip: () => void;
   /** False when the host already shows "Name this machine" as its own page heading (a flow page): the form then draws none. */
   readonly heading?: boolean;
+  /**
+   * True when the host's own footer carries the answers (a flow page: Next saves, Later leaves it): the form then draws no
+   * "Not now" / "Save name" / "Continue" of its own, so the page does not show two sets of actions for one step.
+   */
+  readonly footerAnswers?: boolean;
+  /** Tells the host what is typed, so the footer's Next saves the name on screen. */
+  readonly onValue?: (value: string) => void;
 }
 
 /** The step, drawn from plain values so every state can be rendered without a daemon. */
@@ -49,6 +56,8 @@ function NameThisMachineView({
   onSave,
   onSkip,
   heading = true,
+  footerAnswers = false,
+  onValue,
 }: NameThisMachineViewProps) {
   const [value, setValue] = useState(initial);
   const field = useRef<HTMLInputElement>(null);
@@ -89,26 +98,32 @@ function NameThisMachineView({
             autoComplete="off"
             spellCheck={false}
             aria-invalid={problem === undefined ? undefined : true}
-            onChange={event => setValue(event.target.value)}
+            onChange={event => {
+              setValue(event.target.value);
+              onValue?.(event.target.value);
+            }}
           />
           {problem === undefined ? null : (
             <p role="alert" className="m-0 text-meta font-semibold text-err">
               {problem}
             </p>
           )}
-          {/* The shared answer row: both answers the field's width on a phone, Not now left and Save right on a desktop. */}
-          <ActionRow
-            secondary={
-              <button type="button" className="kt-btn" disabled={busy} data-name-machine-skip="" onClick={onSkip}>
-                Not now
-              </button>
-            }
-            primary={
-              <button type="submit" className="kt-btn" data-variant="primary" disabled={busy}>
-                {busy ? 'Saving…' : 'Save name'}
-              </button>
-            }
-          />
+          {/* The shared answer row: both answers the field's width on a phone, Not now left and Save right on a desktop.
+              A flow page has its answers in the flow's footer (Next saves, Later leaves it), so none are drawn here. */}
+          {footerAnswers ? null : (
+            <ActionRow
+              secondary={
+                <button type="button" className="kt-btn" disabled={busy} data-name-machine-skip="" onClick={onSkip}>
+                  Not now
+                </button>
+              }
+              primary={
+                <button type="submit" className="kt-btn" data-variant="primary" disabled={busy}>
+                  {busy ? 'Saving…' : 'Save name'}
+                </button>
+              }
+            />
+          )}
         </form>
       ) : (
         <div className="mt-2 flex flex-col gap-2">
@@ -118,13 +133,15 @@ function NameThisMachineView({
           <p className="m-0 text-meta leading-base text-faint">
             It keeps its host name. Name it later in Settings › General › Name, from a device that may.
           </p>
-          <ActionRow
-            primary={
-              <button type="button" className="kt-btn" data-name-machine-skip="" onClick={onSkip}>
-                Continue
-              </button>
-            }
-          />
+          {footerAnswers ? null : (
+            <ActionRow
+              primary={
+                <button type="button" className="kt-btn" data-name-machine-skip="" onClick={onSkip}>
+                  Continue
+                </button>
+              }
+            />
+          )}
         </div>
       )}
     </section>
@@ -141,6 +158,7 @@ export function NameThisMachine({
   onDecided,
   onBusy,
   heading,
+  commit,
 }: {
   readonly daemon: string;
   readonly onDecided?: (decision: NameDecision) => void;
@@ -148,6 +166,12 @@ export function NameThisMachine({
   readonly onBusy?: (busy: boolean) => void;
   /** See {@link NameThisMachineViewProps.heading}. */
   readonly heading?: boolean;
+  /**
+   * A flow page's `step.commit`: when given, the flow's footer carries the answers (Next saves the name on screen, Later leaves
+   * it) and the form draws none of its own. A save that fails rejects with what went wrong, which the footer shows; a refusal
+   * is said once, and the next Next moves on with the host name (the daemon will not take a name from this device).
+   */
+  readonly commit?: (save: (() => Promise<void>) | null) => void;
 }) {
   const { runtime } = useShell();
   useRuntimeVersion(runtime);
@@ -193,8 +217,45 @@ export function NameThisMachine({
   useEffect(() => {
     if (shown) decided.current?.('asking');
   }, [shown]);
+  // The footer's Next saves what is typed: the flow calls the latest save, never one from an earlier render.
+  const typed = useRef<string | undefined>(undefined);
+  const footerSave = useRef<() => Promise<void>>(async () => undefined);
+  const footer = useRef(commit);
+  footer.current = commit;
+  useEffect(() => {
+    const register = footer.current;
+    if (!shown || register === undefined) return;
+    register(() => footerSave.current());
+    return () => register(null);
+  }, [shown]);
   if (client === undefined || paired === undefined) return null;
   if (chosen === undefined ? !ready : chosen.state !== 'failed') return null;
+  footerSave.current = async (): Promise<void> => {
+    if (refusal !== undefined) {
+      runtime.daemons.nameSettled(daemon);
+      return;
+    }
+    const parsed = MachineNameSchema.safeParse(typed.current ?? chosen?.name ?? daemonTitle(paired));
+    if (!parsed.success) {
+      setProblem(parsed.error.issues[0]?.message ?? 'That name cannot be used.');
+      throw new Error('Fix the machine name above, then press Next.');
+    }
+    setProblem(undefined);
+    let etag: string;
+    try {
+      etag = (await readHostFile(client)).etag;
+    } catch (cause) {
+      throw new Error(`This machine's current name could not be read: ${sentenceOf(cause)}`);
+    }
+    try {
+      await writeMachineName(client, parsed.data, etag);
+    } catch (cause) {
+      setRefusal(sentenceOf(cause));
+      throw new Error(`This device cannot name this machine: ${sentenceOf(cause)} Press Next to keep its host name.`);
+    }
+    runtime.daemons.learnMachine(daemon, parsed.data);
+    runtime.daemons.nameSettled(daemon);
+  };
   const save = async (typed: string): Promise<void> => {
     const parsed = MachineNameSchema.safeParse(typed);
     if (!parsed.success) {
@@ -229,6 +290,10 @@ export function NameThisMachine({
       {...(problem === undefined && chosen?.problem === undefined ? {} : { problem: problem ?? chosen?.problem })}
       onSave={name => void save(name)}
       onSkip={settle}
+      onValue={value => {
+        typed.current = value;
+      }}
+      {...(commit === undefined ? {} : { footerAnswers: true })}
       {...(heading === undefined ? {} : { heading })}
     />
   );

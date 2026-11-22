@@ -890,16 +890,19 @@ describe('the first run, end to end', () => {
           'Machine name: "Name this machine" is a heading once, not twice',
         ).toBe(1);
         await inspect(tab, variant, 'onboarding.name', { first: true });
-        // The name form's own buttons are the 44px, auto width buttons of the footer (not a 28px row of small ones).
-        for (const button of await tab.locator('[data-flow-page="onboarding.name"] form button').all()) {
-          const box = await button.boundingBox();
-          expect(box?.height ?? 0, 'Machine name: Save name / Not now are 44px tall').toBeGreaterThanOrEqual(43.5);
-          expect(box?.width ?? 0, 'Machine name: its buttons are auto width').toBeLessThan(0.5 * variant.width);
-        }
+        // C59 follow-up: ONE set of actions. The form draws no Save name / Not now of its own; the footer's Later and Next are the
+        // answers (Next saves the name on screen), so the page never shows two rows of buttons for one step.
+        expect(
+          await tab.locator('[data-flow-page="onboarding.name"] form button').count(),
+          'Machine name: the form has no buttons of its own',
+        ).toBe(0);
+        expect(await tab.getByRole('button', { name: 'Save name' }).count(), 'no second "Save name"').toBe(0);
+        expect(await tab.locator('[data-step-later]').count(), 'the footer carries Later').toBe(1);
+        expect(await tab.locator('[data-step-next]').count(), 'the footer carries Next').toBe(1);
         await shot(tab, variant, 'onboarding.name');
-        // Save the name: the machine takes it through the host file, and the flow goes on by itself.
+        // Next saves the name: the machine takes it through the host file, and the flow goes on by itself.
         await tab.getByLabel('Machine name').last().fill('studio-mac');
-        await tab.getByRole('button', { name: 'Save name' }).last().click();
+        await tab.locator('[data-step-next]').click();
         await reach(tab, 'claude-code.import-choice');
         expect(
           (await daemonOf(tab, A)).writes.some(write => write.route === 'PUT /v1/config/file'),

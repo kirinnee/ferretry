@@ -441,3 +441,59 @@ describe('audit row: Finish sign-in fills the width under the field, with a bala
         }
       });
 });
+
+describe('audit row: the Codex timeout alert wraps cleanly', () => {
+  for (const viewport of VIEWPORTS)
+    for (const theme of THEMES)
+      it(`the recovery actions are equal, inside the alert, with no clipped text (${viewport.name}, ${theme})`, async () => {
+        const { tab, close } = await open(viewport, theme, 'codex-timeout');
+        try {
+          await tab.locator('[role="alert"] .fy-action-stack button').first().waitFor({ state: 'visible' });
+          const facts = await tab.evaluate(() => {
+            const alert = document.querySelector('[role="alert"]') as HTMLElement;
+            const a = alert.getBoundingClientRect();
+            const buttons = [...alert.querySelectorAll<HTMLElement>('.fy-action-stack button')].map(button => {
+              const r = button.getBoundingClientRect();
+              return {
+                label: button.innerText.trim(),
+                left: r.left,
+                right: r.right,
+                top: r.top,
+                w: r.width,
+                h: r.height,
+                clipped: button.scrollWidth > button.clientWidth + 1 || button.scrollHeight > button.clientHeight + 1,
+                lines: Math.round(r.height / Number.parseFloat(getComputedStyle(button).lineHeight)),
+              };
+            });
+            return {
+              alert: { left: a.left, right: a.right, w: a.width },
+              pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+              textOverflow: alert.scrollWidth > alert.clientWidth + 1,
+              buttons,
+            };
+          });
+          measured[`timeout-${viewport.name}-${theme}`] = facts;
+          expect(facts.buttons.length).toBeGreaterThanOrEqual(2);
+          expect(facts.pageOverflow, 'no sideways scroll').toBe(false);
+          expect(facts.textOverflow, 'nothing spills out of the alert').toBe(false);
+          for (const button of facts.buttons) {
+            expect(button.clipped, `${button.label} is not clipped`).toBe(false);
+            expect(button.h, 'a 44 px target').toBeGreaterThanOrEqual(43.5);
+            expect(button.left).toBeGreaterThanOrEqual(facts.alert.left - 1);
+            expect(button.right).toBeLessThanOrEqual(facts.alert.right + 1);
+            expect(Math.abs(button.w - facts.buttons[0]!.w), 'equal widths').toBeLessThanOrEqual(1);
+          }
+          // Buttons that share a row are one height; on a phone they are one column, each the alert's inner width.
+          if (viewport.phone) {
+            const lefts = new Set(facts.buttons.map(button => Math.round(button.left)));
+            expect(lefts.size, 'phone: one column').toBe(1);
+          }
+          for (const button of facts.buttons)
+            for (const other of facts.buttons)
+              if (Math.abs(button.top - other.top) < 1) expect(Math.abs(button.h - other.h)).toBeLessThanOrEqual(1);
+          await shot(tab, viewport, theme, 'codex-timeout');
+        } finally {
+          await close();
+        }
+      });
+});
