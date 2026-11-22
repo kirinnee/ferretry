@@ -37,10 +37,12 @@ set -euo pipefail
 #      no other branch, every job's `if` OPENS with exactly that one-ref guard (only `&&` may follow it, never a
 #      top-level `||`), its signing and deploy jobs use environments of their own, and its deploy job refuses a stale
 #      commit (the run branch's head must equal GITHUB_SHA) in a step before `wrangler pages deploy`.
-#   5. The Cloudflare token never meets checkout code: a PWA deploy job that reads a CLOUDFLARE secret (spelled any way:
-#      any case, `secrets[...]`, `toJSON(secrets)`, `secrets: inherit`) has no checkout, no action but the SHA-pinned
-#      download/upload-artifact, no reusable workflow, no nix, bun, bunx, npx, npm exec, npm x or clone, and runs wrangler
-#      only from an exact-version, secret-free npm install, with the commit passed to `wrangler pages deploy`.
+#   5. The Cloudflare token never meets checkout code: a deploy job (the two PWA workflows AND the hosted relay and
+#      link-store workflows) that reads a CLOUDFLARE secret (spelled any way: any case, `secrets[...]`, `toJSON(secrets)`,
+#      `secrets: inherit`) has no checkout, no action but the SHA-pinned download/upload-artifact, no reusable workflow, no
+#      nix, bun, bunx, npx, npm exec, npm x or clone, and runs wrangler only from an exact-version, secret-free npm install,
+#      with the commit passed to `wrangler pages deploy` (a Worker `wrangler deploy` passes `--no-bundle`). In the two Worker
+#      workflows a job that has checkout code (their `build`) reads no secret at all.
 #   6. Nothing but CD and the Release workflow's own steps names `Casks/` or semantic-release.
 
 root_dir="$(git rev-parse --show-toplevel)"
@@ -211,9 +213,36 @@ holder_re='secrets\.cloudflare|secrets\[|tojson\(\s*secrets|"secrets":"inherit"'
 any_secret_re='secrets\.|secrets\[|tojson\(\s*secrets'
 allowed_uses_re='^actions/(download|upload)-artifact@[0-9a-f]{40}$'
 forbidden_run_re='(^|[^A-Za-z0-9_./-])(nix|bun|bunx|npx|npm\s+(-\S+\s+)*(exec|x)|git\s+clone|gh\s+repo\s+clone)([^A-Za-z0-9_-]|$)'
+#   worker_workflows: the two hosted-Worker workflows (relay-hosted, link-store-hosted) hold the SAME token. Their `build` job
+#           has the checkout and holds no secret at all; their token jobs follow every rule above, and a `wrangler deploy` in
+#           one must publish the handed-over module as it is (`--no-bundle`), never bundle anything itself.
+#   wrangler_use_re: a wrangler INVOCATION, at the start of a line or after `;`, `&`, `|` or `(` (so not the install's
+#           `wrangler@x`, a path, or the word in a message).
 pages_workflows=(.github/workflows/pwa-pages.yaml "${preview}")
+worker_workflows=(.github/workflows/relay-hosted.yaml .github/workflows/link-store-hosted.yaml)
+wrangler_use_re='(^|[\n;&|(])[[:space:]]*wrangler[[:space:]]'
+checkout_re='actions/checkout|\./\.github/actions|nix develop|(^|[^A-Za-z0-9_./-])(nix|bun|bunx|npx)([^A-Za-z0-9_-]|$)'
 wrangler_versions=()
-for workflow in "${pages_workflows[@]}"; do
+for workflow in "${worker_workflows[@]}"; do
+  if [[ ! -f ${workflow} ]]; then
+    fail "${workflow} is missing: it holds the production Cloudflare token, and this guard proves it never meets checkout code"
+    continue
+  fi
+  # A job that has the checkout (or a local action, nix, bun) holds NO secret at all: not the token, not the tunnel pool.
+  while IFS= read -r job; do
+    fail "${workflow}: job ${job} runs checkout code (actions/checkout, a local action, nix, bun) and also reads a secret; the build job must hold none"
+  done < <(json "${workflow}" | jq -r --arg checkout "${checkout_re}" --arg anysecret "${any_secret_re}" '
+    .jobs // {} | to_entries[]
+    | select(.value | tostring | test($checkout))
+    | select(.value | tostring | test($anysecret; "i"))
+    | .key')
+  # A token job publishes exactly the module `build` fingerprinted: no bundling of its own.
+  json "${workflow}" | jq -e --arg holder "${holder_re}" --arg use "${wrangler_use_re}" '
+    [.jobs // {} | to_entries[] | select(.value | tostring | test($holder; "i")) | .value.steps[]? | (.run // "")
+     | select(test($use + "deploy"))] | all(test("wrangler[[:space:]]+deploy[^\n]*--no-bundle"))' >/dev/null ||
+    fail "${workflow}: a wrangler deploy in a token job must pass --no-bundle on the same line (it publishes the handed-over module as it is; a token job bundles nothing)"
+done
+for workflow in "${pages_workflows[@]}" "${worker_workflows[@]}"; do
   [[ -f ${workflow} ]] || continue
   holders="$(json "${workflow}" | jq -r --arg holder "${holder_re}" '
     .jobs // {} | to_entries[]
@@ -244,9 +273,9 @@ for workflow in "${pages_workflows[@]}"; do
   json "${workflow}" | jq -e '[.jobs[].steps[]? | (.run // "") | select(test("wrangler pages deploy"))] | all(contains("--commit-hash=\"${GITHUB_SHA}\""))' >/dev/null ||
     fail "${workflow}: a wrangler pages deploy step must pass --commit-hash=\"\${GITHUB_SHA}\" (there is no checkout in the token job, so wrangler cannot read the commit itself)"
   while IFS= read -r job; do
-    json "${workflow}" | jq -e --arg job "${job}" --arg anysecret "${any_secret_re}" '
+    json "${workflow}" | jq -e --arg job "${job}" --arg anysecret "${any_secret_re}" --arg use "${wrangler_use_re}" '
       .jobs[$job].steps as $steps
-      | ([$steps | to_entries[] | select((.value.run // "") | test("wrangler pages")) | .key] | first) as $use_at
+      | ([$steps | to_entries[] | select((.value.run // "") | test($use)) | .key] | first) as $use_at
       | ([$steps | to_entries[]
           | select((.value.run // "") as $r
               | ($r | contains("npm install")) and ($r | contains("wrangler@${WRANGLER_VERSION}")) and ($r | contains("--ignore-scripts"))
@@ -259,7 +288,7 @@ for workflow in "${pages_workflows[@]}"; do
   done <<<"${holders}"
 done
 if [[ -n "$(printf '%s\n' "${wrangler_versions[@]}" | sort -u | sed -n '2p')" ]]; then
-  fail "the PWA deploy workflows pin different wrangler versions (${wrangler_versions[*]}); they must agree"
+  fail "the token-holding deploy workflows pin different wrangler versions (${wrangler_versions[*]}); they must agree"
 fi
 
 # 6. Casks/ and semantic-release are named only where they belong

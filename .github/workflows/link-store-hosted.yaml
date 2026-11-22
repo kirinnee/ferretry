@@ -36,11 +36,74 @@ on:
         required: false
         type: string
 
+env:
+  # The ONE wrangler version the token-holding job installs (exact, never a range or a tag): the version the
+  # devshell pins. scripts/validate/release-guards.sh holds that it is exact and equal in every workflow
+  # that holds a Cloudflare token.
+  WRANGLER_VERSION: 4.93.0
+
+# THE CLOUDFLARE TOKEN NEVER MEETS CHECKOUT CODE (the same rule as pwa-pages.yaml and relay-hosted.yaml, which holds the
+# full reasoning and the declared gap; scripts/validate/release-guards.sh holds it for every workflow that reads a
+# CLOUDFLARE secret). `build` checks out, installs and bundles in a nix shell and holds NO secret; `deploy` holds the token,
+# has no checkout, no nix and no bun, downloads the bundle and publishes it as it came with an exactly-pinned wrangler.
+# `control` reads and writes runtime state with curl and jq alone.
+#
 # Per job, as in relay-hosted.yaml: `disable` is the emergency stop and must never queue behind a deploy.
 jobs:
+  build:
+    timeout-minutes: 20
+    name: Build Worker bundle
+    # The same condition as `deploy`: a build nobody will publish is not made.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'deploy' &&
+      inputs.confirm_deploy == true
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-nix
+      - name: Validate hosted relay and link-store configuration
+        run: nix develop .#ci -c ./scripts/validate/relay-config.sh
+      # The hand-off holds exactly two files: the bundle and the configuration that points at it.
+      - name: Bundle the hosted link store
+        run: |
+          set -euo pipefail
+          handoff="${RUNNER_TEMP}/link-store-bundle"
+          built="${RUNNER_TEMP}/link-store-built"
+          mkdir -p "${handoff}" "${built}"
+          # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
+          LINK_STORE_BUILT="${built}" nix develop .#ci -c bash -c '
+            set -euo pipefail
+            cd packages/plugins/catalogs/worker
+            bun install --frozen-lockfile
+            wrangler deploy --dry-run --config wrangler.link-store.hosted.json --outdir "$LINK_STORE_BUILT/out" >/dev/null
+          '
+          # One module: the bundle Wrangler built from the Worker entry. Anything else in the output is a surprise.
+          bundles=("${built}"/out/*.js)
+          [[ ${#bundles[@]} -eq 1 && -f ${bundles[0]} ]] || {
+            echo "expected exactly one bundled module, found: ${bundles[*]}" >&2
+            exit 1
+          }
+          cp "${bundles[0]}" "${handoff}/worker.js"
+          jq --arg main worker.js '.main = $main' packages/plugins/catalogs/worker/wrangler.link-store.hosted.json >"${handoff}/wrangler.link-store.hosted.json"
+      # Uploaded under a name of its own and of this attempt: a re-run of `deploy` alone finds no earlier attempt's
+      # bundle and fails closed; re-run the whole workflow.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: link-store-hosted-bundle-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/link-store-bundle
+          if-no-files-found: error
+          retention-days: 1
+
   deploy:
     timeout-minutes: 20
     name: Deploy Worker and Durable Objects
+    needs: build
     # Main-only, and only when the operator ticked the box.
     if: >-
       github.ref == 'refs/heads/main' &&
@@ -54,12 +117,21 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          persist-credentials: false
-      - uses: ./.github/actions/install-nix
-      - name: Validate hosted relay and link-store configuration
-        run: nix develop .#ci -c ./scripts/validate/relay-config.sh
+          name: link-store-hosted-bundle-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/link-store-bundle
+      # No token in this step: the install scripts of wrangler's dependencies are not run at all (`--ignore-scripts`),
+      # and nothing is read from the repository (there is no checkout in this job).
+      - name: Install the pinned wrangler
+        run: |
+          set -euo pipefail
+          npm install --prefix "${RUNNER_TEMP}/wrangler" --ignore-scripts --no-audit --no-fund --save-exact "wrangler@${WRANGLER_VERSION}"
+          installed="$(node -p "require(process.argv[1]).version" "${RUNNER_TEMP}/wrangler/node_modules/wrangler/package.json")"
+          if [[ ${installed} != "${WRANGLER_VERSION}" ]]; then
+            echo "❌ installed wrangler ${installed}, not the pinned ${WRANGLER_VERSION}" >&2
+            exit 1
+          fi
       - name: Publish hosted link store
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -83,14 +155,14 @@ jobs:
           trap 'rm -f "$secrets_file"' EXIT
           # shellcheck disable=SC2016 # $token is a jq variable
           (umask 077 && jq -n --arg token "$operator_token" '{LINK_STORE_OPERATOR_TOKEN: $token}' >"$secrets_file")
-          # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
-          LINK_STORE_SECRETS_FILE="$secrets_file" nix develop .#ci -c bash -c '
-            set -euo pipefail
-            cd packages/plugins/catalogs/worker
-            bun install --frozen-lockfile
-            wrangler deploy --config wrangler.link-store.hosted.json \
-              --message "hosted link store" --secrets-file "$LINK_STORE_SECRETS_FILE"
-          '
+          # Wrangler runs from the pinned install, in the directory `build` handed over, and publishes the module there
+          # as it came (`--no-bundle`).
+          export PATH="${RUNNER_TEMP}/wrangler/node_modules/.bin:${PATH}"
+          (
+            cd "${RUNNER_TEMP}/link-store-bundle"
+            wrangler deploy --config wrangler.link-store.hosted.json --no-bundle \
+              --message "hosted link store" --secrets-file "$secrets_file"
+          )
           rm -f "$secrets_file"
 
           # The hosted Worker has no workers.dev origin (workers_dev is false); its address is the

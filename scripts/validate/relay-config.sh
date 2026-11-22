@@ -199,8 +199,15 @@ if ((relay_ported)); then
 fi
 rg -qF -- 'HOSTED_TUNNEL_ACCOUNTS: ${{ secrets.HOSTED_TUNNEL_ACCOUNTS }}' "${workflow}" ||
   fail "${workflow} must read the pool from the GitHub secret HOSTED_TUNNEL_ACCOUNTS"
-rg -qF -- 'wrangler secret put TUNNEL_ACCOUNTS --config wrangler.hosted.json' "${workflow}" ||
-  fail "${workflow} must reinstall TUNNEL_ACCOUNTS without a deploy (operation: tunnel-accounts)"
+# By NAME, not by `--config`: the job that holds the Cloudflare token has no checkout (scripts/validate/release-guards.sh),
+# so there is no configuration file beside it to read.
+worker_name="ferretry-hosted-relay"
+if ((relay_ported)); then
+  [[ "$(jq -r '.name' "${hosted_config}")" == "${worker_name}" ]] ||
+    fail "${hosted_config} no longer names the Worker ${worker_name}, which ${workflow} puts TUNNEL_ACCOUNTS on by name"
+fi
+rg -qF -- "wrangler secret put TUNNEL_ACCOUNTS --name ${worker_name}" "${workflow}" ||
+  fail "${workflow} must reinstall TUNNEL_ACCOUNTS without a deploy (operation: tunnel-accounts), by the Worker's name"
 rg -qF -- "inputs.operation == 'tunnel-accounts'" "${workflow}" ||
   fail "${workflow} must run the tunnel-accounts job only for that operation"
 if rg -q -- '(--arg|--argjson|echo|curl)[^|]*\$\{?HOSTED_TUNNEL_ACCOUNTS' "${workflow}"; then

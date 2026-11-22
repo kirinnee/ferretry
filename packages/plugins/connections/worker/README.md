@@ -87,8 +87,10 @@ will be operating a relay, and it bills to your account.
 
 ## Operating the hosted deployment
 
-`.github/workflows/relay-hosted.yaml` deploys the hosted Worker through the repository's nix shell,
-using `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. It publishes to the Worker's own
+`.github/workflows/relay-hosted.yaml` deploys the hosted Worker using `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID`. The job that holds them never runs this repository's code: a `build` job (nix shell, no
+secret) bundles the Worker, and the `deploy` job downloads that bundle and publishes it with an exactly-pinned
+`wrangler` (`scripts/validate/release-guards.sh` holds that). It publishes to the Worker's own
 `workers.dev` origin by default; set the `HOSTED_RELAY_ORIGIN` repository variable to advertise a
 custom origin instead. Manual `enable`, `disable` and `metrics` operations talk to the
 already-deployed control object; they do not deploy a release.

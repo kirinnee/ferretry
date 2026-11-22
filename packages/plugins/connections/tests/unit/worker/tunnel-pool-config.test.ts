@@ -28,7 +28,7 @@ const ALLOWED: readonly RegExp[] = [
   // jq reads it from ITS environment, with its own error output discarded.
   /env\.HOSTED_TUNNEL_ACCOUNTS/u,
   // The only place the value is expanded: a shell builtin into Wrangler's stdin.
-  /^\s*printf "%s" "\$HOSTED_TUNNEL_ACCOUNTS" \| wrangler secret put TUNNEL_ACCOUNTS --config wrangler\.hosted\.json\s*$/u,
+  /^\s*printf "%s" "\$HOSTED_TUNNEL_ACCOUNTS" \| wrangler secret put TUNNEL_ACCOUNTS --name ferretry-hosted-relay\s*$/u,
 ];
 
 /** Every non-comment line that names the pool and is none of the allowed shapes. */
@@ -115,7 +115,7 @@ describe('the tunnel pool secret in the hosted workflow', () => {
         '{"RELAY_OPERATOR_TOKEN":"t","TUNNEL_ACCOUNTS":"[{\\"name\\":\\"pool-1\\"}]"}',
       );
       // The file reaches Wrangler as a secrets file on the deploy, and nothing in the workflow deletes a secret.
-      expect(workflow).toContain('--secrets-file "$RELAY_SECRETS_FILE"');
+      expect(workflow).toContain('--secrets-file "$secrets_file"');
       expect(workflow).not.toMatch(/wrangler secret (delete|bulk)/u);
     },
   );

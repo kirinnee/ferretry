@@ -1208,3 +1208,138 @@ describe('the Pages project answer leaves the token job only as what the decisio
     expect(kept.result.canonical_deployment.deployment_trigger).toEqual({ metadata: {} });
   });
 });
+
+// End-list E11. The PRODUCTION token (repository-level CLOUDFLARE_API_TOKEN) is also read by the two hosted-Worker
+// workflows. Each of these mutations is the shape those workflows had before (a token job that checks out and runs
+// `nix develop`), or a one-step slide back to it; every one was GREEN under the PWA-only guard.
+describe('the Cloudflare token never meets checkout code (the hosted relay and link-store workflows)', () => {
+  const workers = [
+    { file: '.github/workflows/relay-hosted.yaml', tokenJob: 'deploy' },
+    { file: '.github/workflows/relay-hosted.yaml', tokenJob: 'tunnel-accounts' },
+    { file: '.github/workflows/link-store-hosted.yaml', tokenJob: 'deploy' },
+  ];
+  const message = 'the token must never meet checkout code';
+  const checkoutSha = 'actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09';
+
+  const refused = (file: string, mutate: (text: string) => string, expected: string) => {
+    const result = gate(
+      checkout(p => {
+        writeFileSync(p(file), mutate(readFileSync(p(file), 'utf8')));
+      }),
+    );
+    expect(result.status).toBe(1);
+    expect(result.err).toContain(expected);
+  };
+  const addStep = (job: string, step: string) => (text: string) => {
+    const at = text.indexOf(`\n  ${job}:\n`) + 1;
+    const steps = text.indexOf('    steps:\n', at) + '    steps:\n'.length;
+    return `${text.slice(0, steps)}${step}${text.slice(steps)}`;
+  };
+
+  test('this checkout passes: the jobs that hold the token have no checkout code, and the build jobs hold no secret', () => {
+    expect(gate(checkout())).toMatchObject({ status: 0 });
+    for (const file of new Set(workers.map(w => w.file))) {
+      const text = readFileSync(join(repository, file), 'utf8');
+      const jobs = text.split(/^ {2}(?=[a-z][a-z-]*:\n)/mu).filter(job => /secrets\.CLOUDFLARE/u.test(job));
+      expect(jobs.length).toBeGreaterThan(0);
+      for (const job of jobs) {
+        const code = job.replace(/^\s*#.*$/gmu, '');
+        expect(code).not.toMatch(/actions\/checkout|uses: \.\/|nix develop|\bbunx?\b|\bnpx\b/u);
+      }
+    }
+  });
+
+  for (const { file, tokenJob } of workers) {
+    const name = `${file} (${tokenJob})`;
+
+    test(`${name}: an actions/checkout step in the token job is refused`, () => {
+      refused(
+        file,
+        addStep(
+          tokenJob,
+          `      - uses: ${checkoutSha} # v5.1.0\n        with:\n          persist-credentials: false\n`,
+        ),
+        message,
+      );
+    });
+
+    test(`${name}: the nix installer in the token job is refused`, () => {
+      refused(file, addStep(tokenJob, '      - uses: ./.github/actions/install-nix\n'), message);
+    });
+
+    test(`${name}: nix develop, bun, bunx or npx in a token job's run step is refused`, () => {
+      for (const command of ['nix develop .#ci -c true', 'bun install', 'bunx wrangler --version', 'npx wrangler']) {
+        refused(file, addStep(tokenJob, `      - name: sneaky\n        run: ${command}\n`), message);
+      }
+    });
+
+    test(`${name}: wrangler that is not installed at the pinned version first is refused`, () => {
+      refused(
+        file,
+        text => text.replace(/--save-exact "wrangler@\$\{WRANGLER_VERSION\}"/gu, '--save-exact wrangler@latest'),
+        'WRANGLER_VERSION',
+      );
+      refused(file, text => text.replace(/ --ignore-scripts/gu, ''), 'without first installing');
+    });
+  }
+
+  test('a wrangler deploy in a token job without --no-bundle (it would bundle the handed-over module itself) is refused', () => {
+    for (const file of ['.github/workflows/relay-hosted.yaml', '.github/workflows/link-store-hosted.yaml']) {
+      refused(file, text => text.replace(/ --no-bundle/u, ''), '--no-bundle');
+    }
+  });
+
+  test('a build job that has the checkout and reads any secret is refused', () => {
+    for (const file of ['.github/workflows/relay-hosted.yaml', '.github/workflows/link-store-hosted.yaml']) {
+      refused(
+        file,
+        addStep(
+          'build',
+          '      - name: leak\n        env:\n          LEAK: ${{ secrets.HOSTED_TUNNEL_ACCOUNTS }}\n        run: echo leak\n',
+        ),
+        'the build job must hold none',
+      );
+    }
+  });
+
+  test('a secret in a token job-level env (so the install step holds it) is refused', () => {
+    for (const { file, tokenJob } of workers) {
+      refused(
+        file,
+        text => {
+          const at = text.indexOf(`\n  ${tokenJob}:\n`) + 1;
+          const runsOn = text.indexOf('    runs-on:', at);
+          return `${text.slice(0, runsOn)}    env:\n      LEAK: \${{ secrets.CLOUDFLARE_API_TOKEN }}\n${text.slice(runsOn)}`;
+        },
+        'job-level env',
+      );
+    }
+  });
+
+  test('every workflow that holds the token pins the same wrangler', () => {
+    refused(
+      '.github/workflows/relay-hosted.yaml',
+      text => text.replace(/WRANGLER_VERSION: [^\n]+/u, 'WRANGLER_VERSION: 4.92.0'),
+      'pin different wrangler versions',
+    );
+    refused(
+      '.github/workflows/link-store-hosted.yaml',
+      text => text.replace(/WRANGLER_VERSION: [^\n]+/u, 'WRANGLER_VERSION: 4.92.0'),
+      'pin different wrangler versions',
+    );
+  });
+
+  test('a hosted-Worker workflow that no longer reads the token at all fails instead of passing vacuously', () => {
+    refused(
+      '.github/workflows/link-store-hosted.yaml',
+      text => text.replace(/secrets\.CLOUDFLARE_/gu, 'secrets.RENAMED_'),
+      'no job reads a CLOUDFLARE secret',
+    );
+  });
+
+  test('a removed hosted-Worker workflow is refused, not skipped', () => {
+    const result = gate(checkout(p => rmSync(p('.github/workflows/link-store-hosted.yaml'))));
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('link-store-hosted.yaml is missing');
+  });
+});

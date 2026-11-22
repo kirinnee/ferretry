@@ -83,7 +83,7 @@ describe('R135 the operator bearer is sha256(prefix ‖ token), installed by the
     // The digest is registered with GitHub's log masker the moment it exists, in both jobs.
     expect(workflow.match(/::add-mask::\$operator_token/gu)).toHaveLength(2);
     // Wrangler receives it through the secrets file, not as an argument or a separate `secret put` of the bearer.
-    expect(workflow).toContain('--secrets-file "$RELAY_SECRETS_FILE"');
+    expect(workflow).toContain('--secrets-file "$secrets_file"');
     expect(workflow).not.toMatch(/wrangler secret put RELAY_OPERATOR_TOKEN/u);
   });
 
@@ -212,9 +212,11 @@ describe('R227 the relay deploy does not touch the link store', () => {
       .filter(line => !line.trim().startsWith('#'))
       .filter(line => /\bwrangler (deploy|secret|publish|delete|versions|rollback)/u.test(line));
     expect(calls.length).toBeGreaterThanOrEqual(2);
-    for (const line of calls) expect(line).toContain('--config wrangler.hosted.json');
+    // By the relay's configuration, or (in the job that holds the token and has no checkout, so no configuration file)
+    // by the relay Worker's own name.
+    for (const line of calls) expect(line).toMatch(/--config wrangler\.hosted\.json|--name ferretry-hosted-relay/u);
     // `--secrets-file` rides the relay deploy; its content is the operator bearer (+ the pool), nothing for the store.
-    expect(workflow()).toContain('--config wrangler.hosted.json --tag "$RELAY_BUNDLE"');
+    expect(workflow()).toContain('--config wrangler.hosted.json --no-bundle --tag "$built"');
   });
 
   it('R227 the deploy runs on changes to the relay package only, so a store change cannot trigger it', () => {

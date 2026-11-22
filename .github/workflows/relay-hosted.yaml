@@ -69,22 +69,45 @@ on:
         required: false
         type: string
 
+env:
+  # The ONE wrangler version the token-holding jobs install (exact, never a range or a tag): the version the
+  # devshell pins. scripts/validate/release-guards.sh holds that it is exact and equal in every workflow
+  # that holds a Cloudflare token.
+  WRANGLER_VERSION: 4.93.0
+
+# THE CLOUDFLARE TOKEN NEVER MEETS CHECKOUT CODE (the same rule as pwa-pages.yaml; scripts/validate/release-guards.sh
+# holds it for every workflow that reads a CLOUDFLARE secret). A job that holds the token has no `actions/checkout`,
+# no local action, no `nix`, no `bun`, no `bunx`, no `npx`: otherwise the checkout's flake shellHook, bun resolution or
+# a script from the pushed commit would run with the token in its environment.
+#
+#   build              checks out, installs and bundles with `wrangler deploy --dry-run` in a nix shell. It holds NO
+#                      secret, so whatever runs there can read none. It hands `deploy` ONE artifact: the bundle, the
+#                      hosted configuration pointing at it, and the fingerprint of both.
+#   deploy             holds the token and has NO checkout: it downloads that artifact, installs the exactly-pinned
+#                      wrangler (in a step with no token) and publishes the bundle as it came (`--no-bundle`).
+#   control            reads and writes runtime state with curl and jq alone.
+#   tunnel-accounts    holds the token and the pool, has no checkout: the pinned wrangler puts the secret by Worker name.
+#
+# A DECLARED GAP: the bytes `deploy` publishes are the ones `build` produced, and `build` runs the pushed commit's code.
+# That is the point of a deploy (the Worker IS that commit's code), but it means a compromised `build` can publish a
+# Worker of its choosing, which never sees the token. What it can no longer do is read the token itself. Wrangler's
+# dependencies come from npm at install time (there is no lockfile in a checkout-less job); their install scripts are
+# not run. Putting the token in a protected GitHub environment is still an owner setting, not something a workflow can do.
+#
 # Concurrency is deliberately per job rather than workflow-wide. A deploy publishes code; runtime
 # control flips one Durable Object value and touches no build artifact. Sharing a single group put
 # `disable` — the emergency stop — in a queue behind whatever deploy happened to be running. Each
 # group still serialises its own kind, so two deploys never race and two control writes never race.
+# A build is no part of that group (it has no side effect), so two pushes build side by side and their
+# deploys queue; `deploy` therefore refuses to publish over a version that a NEWER run already published.
 jobs:
-  deploy:
+  build:
     timeout-minutes: 20
-    name: Deploy Worker and Durable Objects
-    # Production operations are main-only. `push` is already filtered to main; the guard is what
-    # stops a workflow_dispatch on an arbitrary ref from deploying that ref to production.
+    name: Build Worker bundle
+    # The same condition as `deploy`: a build nobody will publish is not made.
     if: >-
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || inputs.operation == 'deploy')
-    concurrency:
-      group: hosted-relay-production-deploy
-      cancel-in-progress: false
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -97,8 +120,77 @@ jobs:
       # nobody can enable. It reads only files already in the checkout.
       - name: Validate hosted relay configuration
         run: nix develop .#ci -c ./scripts/validate/relay-config.sh
-      # This mirrors pwa-pages.yaml: Wrangler runs through the pinned nix shell rather than through
-      # a third-party action, and reads both Cloudflare credentials from the environment.
+      # Fingerprints go through files, not `$(nix develop …)`: whatever the dev shell prints on entry must never be
+      # mistaken for a fingerprint. The hand-off holds exactly three files: the bundle, the configuration that
+      # points at it, and the fingerprint of both.
+      - name: Bundle the hosted relay
+        run: |
+          set -euo pipefail
+          handoff="${RUNNER_TEMP}/relay-bundle"
+          built="${RUNNER_TEMP}/relay-built"
+          mkdir -p "${handoff}" "${built}"
+          # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
+          RELAY_BUILT="${built}" RELAY_FINGERPRINT="${GITHUB_WORKSPACE}/scripts/ci/relay-bundle-fingerprint.sh" nix develop .#ci -c bash -c '
+            set -euo pipefail
+            cd packages/plugins/connections/worker
+            bun install --frozen-lockfile
+            "$RELAY_FINGERPRINT" --outdir "$RELAY_BUILT/out" >"$RELAY_BUILT/fingerprint"
+          '
+          [[ "$(tr -d '[:space:]' <"${built}/fingerprint")" =~ ^bundle-[0-9a-f]{16}$ ]] || {
+            echo "could not fingerprint the hosted relay bundle" >&2
+            exit 1
+          }
+          # One module: the bundle Wrangler built from the Worker entry. Anything else in the output is a surprise.
+          bundles=("${built}"/out/*.js)
+          [[ ${#bundles[@]} -eq 1 && -f ${bundles[0]} ]] || {
+            echo "expected exactly one bundled module, found: ${bundles[*]}" >&2
+            exit 1
+          }
+          cp "${bundles[0]}" "${handoff}/worker.js"
+          cp "${built}/fingerprint" "${handoff}/fingerprint"
+          jq --arg main worker.js '.main = $main' packages/plugins/connections/worker/wrangler.hosted.json >"${handoff}/wrangler.hosted.json"
+      # Uploaded under a name of its own and of this attempt: a re-run of `deploy` alone finds no earlier attempt's
+      # bundle and fails closed; re-run the whole workflow.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: relay-hosted-bundle-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/relay-bundle
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    timeout-minutes: 20
+    name: Deploy Worker and Durable Objects
+    needs: build
+    # Production operations are main-only. `push` is already filtered to main; the guard is what
+    # stops a workflow_dispatch on an arbitrary ref from deploying that ref to production.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || inputs.operation == 'deploy')
+    concurrency:
+      group: hosted-relay-production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: relay-hosted-bundle-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/relay-bundle
+      # No token in this step: the install scripts of wrangler's dependencies are not run at all (`--ignore-scripts`),
+      # and nothing is read from the repository (there is no checkout in this job).
+      - name: Install the pinned wrangler
+        run: |
+          set -euo pipefail
+          npm install --prefix "${RUNNER_TEMP}/wrangler" --ignore-scripts --no-audit --no-fund --save-exact "wrangler@${WRANGLER_VERSION}"
+          installed="$(node -p "require(process.argv[1]).version" "${RUNNER_TEMP}/wrangler/node_modules/wrangler/package.json")"
+          if [[ ${installed} != "${WRANGLER_VERSION}" ]]; then
+            echo "❌ installed wrangler ${installed}, not the pinned ${WRANGLER_VERSION}" >&2
+            exit 1
+          fi
+      # Wrangler runs from that install, not through `nix develop` and not through a third-party action, and reads
+      # both Cloudflare credentials from the environment.
       - name: Publish hosted relay
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -112,27 +204,41 @@ jobs:
           FORCE_DEPLOY: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           set -euo pipefail
+          export PATH="${RUNNER_TEMP}/wrangler/node_modules/.bin:${PATH}"
+          # What `build` produced: the bundle, the configuration pointing at it, and the fingerprint of both.
+          cd "${RUNNER_TEMP}/relay-bundle"
 
-          # Fingerprints go through files, not `$(nix develop …)`: whatever the dev shell prints on
-          # entry must never be mistaken for a fingerprint.
-          # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
-          nix develop .#ci -c bash -c '
-            set -euo pipefail
-            cd packages/plugins/connections/worker
-            bun install --frozen-lockfile
-            ../../scripts/ci/relay-bundle-fingerprint.sh >"$RUNNER_TEMP/relay-built"
-            ../../scripts/ci/relay-bundle-fingerprint.sh --deployed >"$RUNNER_TEMP/relay-deployed"
-          '
-          built="$(tr -d '[:space:]' <"$RUNNER_TEMP/relay-built")"
-          deployed="$(tr -d '[:space:]' <"$RUNNER_TEMP/relay-deployed")"
+          built="$(tr -d '[:space:]' <fingerprint)"
           [[ "$built" =~ ^bundle-[0-9a-f]{16}$ ]] || {
             echo "could not fingerprint the hosted relay bundle (got '${built}')" >&2
             exit 1
           }
 
+          # What Cloudflare is serving now: the version carrying the most traffic (during a gradual rollout that is
+          # still the old one, and redeploying over a rollout is not this step's decision to skip). Anything this cannot
+          # tell comes back empty, and unknown means "deploy": skipping on a guess would leave a stale Worker serving.
+          serving="$(
+            wrangler deployments status --config wrangler.hosted.json --json 2>/dev/null |
+              jq -r '[.versions[]?] | max_by(.percentage) | .version_id // empty' 2>/dev/null
+          )" || serving=""
+          view=""
+          if [[ -n "$serving" ]]; then
+            view="$(wrangler versions view "$serving" --config wrangler.hosted.json --json 2>/dev/null)" || view=""
+          fi
+          deployed="$(jq -r '.annotations["workers/tag"] // empty | select(startswith("bundle-"))' <<<"${view:-null}" 2>/dev/null || true)"
+          serving_message="$(jq -r '.annotations["workers/message"] // empty' <<<"${view:-null}" 2>/dev/null || true)"
+          # Two pushes build side by side and their deploys queue, so an OLDER run can reach this step after a newer one
+          # published. Every version carries its run number in its message; an older run does not publish over a newer one.
+          serving_run=0
+          message_re='\(run ([0-9]+)\)$'
+          if [[ "$serving_message" =~ $message_re ]]; then serving_run="${BASH_REMATCH[1]}"; fi
+
           if [[ "$FORCE_DEPLOY" != "true" && "$built" == "$deployed" ]]; then
             echo "hosted relay ${built} is already serving; not redeploying, because a deploy drops" \
               "every live daemon and browser session"
+          elif [[ "$FORCE_DEPLOY" != "true" ]] && ((serving_run > GITHUB_RUN_NUMBER)); then
+            echo "run ${serving_run} already published a newer hosted relay than this run (${GITHUB_RUN_NUMBER});" \
+              "not publishing an older build over it"
           else
             echo "publishing hosted relay ${built} (serving: ${deployed:-unknown}; manual: ${FORCE_DEPLOY})"
 
@@ -162,13 +268,9 @@ jobs:
             (umask 077 && jq -n --arg token "$operator_token" \
               '{RELAY_OPERATOR_TOKEN: $token} + (if (env.HOSTED_TUNNEL_ACCOUNTS // "") == "" then {} else {TUNNEL_ACCOUNTS: env.HOSTED_TUNNEL_ACCOUNTS} end)' \
               >"$secrets_file")
-            # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
-            RELAY_BUNDLE="$built" RELAY_SECRETS_FILE="$secrets_file" nix develop .#ci -c bash -c '
-              set -euo pipefail
-              cd packages/plugins/connections/worker
-              wrangler deploy --config wrangler.hosted.json --tag "$RELAY_BUNDLE" \
-                --message "hosted relay $RELAY_BUNDLE" --secrets-file "$RELAY_SECRETS_FILE"
-            '
+            # `--no-bundle`: the module in this directory is published as `build` produced it and fingerprinted it.
+            wrangler deploy --config wrangler.hosted.json --no-bundle --tag "$built" \
+              --message "hosted relay $built (run $GITHUB_RUN_NUMBER)" --secrets-file "$secrets_file"
             rm -f "$secrets_file"
           fi
 
@@ -419,10 +521,18 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/install-nix
+      # No checkout and no nix: this job holds the token and the pool, so it runs nothing from the repository. The
+      # Worker is addressed by name (scripts/validate/relay-config.sh holds that the name is the hosted configuration's).
+      # No token in the install step: the install scripts of wrangler's dependencies are not run at all (`--ignore-scripts`).
+      - name: Install the pinned wrangler
+        run: |
+          set -euo pipefail
+          npm install --prefix "${RUNNER_TEMP}/wrangler" --ignore-scripts --no-audit --no-fund --save-exact "wrangler@${WRANGLER_VERSION}"
+          installed="$(node -p "require(process.argv[1]).version" "${RUNNER_TEMP}/wrangler/node_modules/wrangler/package.json")"
+          if [[ ${installed} != "${WRANGLER_VERSION}" ]]; then
+            echo "❌ installed wrangler ${installed}, not the pinned ${WRANGLER_VERSION}" >&2
+            exit 1
+          fi
       - name: Install the tunnel pool secret
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -444,10 +554,6 @@ jobs:
             exit 1
           fi
           # The value reaches Wrangler on stdin from a shell builtin: never an argument, never a file.
-          # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
-          nix develop .#ci -c bash -c '
-            set -euo pipefail
-            cd packages/plugins/connections/worker
-            printf "%s" "$HOSTED_TUNNEL_ACCOUNTS" | wrangler secret put TUNNEL_ACCOUNTS --config wrangler.hosted.json
-          '
+          export PATH="${RUNNER_TEMP}/wrangler/node_modules/.bin:${PATH}"
+          printf "%s" "$HOSTED_TUNNEL_ACCOUNTS" | wrangler secret put TUNNEL_ACCOUNTS --name ferretry-hosted-relay
           echo "installed TUNNEL_ACCOUNTS; run this workflow with operation: tunnels to read what the Worker made of it"
