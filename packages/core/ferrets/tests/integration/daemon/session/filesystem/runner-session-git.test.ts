@@ -878,7 +878,8 @@ describe('RunnerSessionGit.listFiles', () => {
         if (invocation.args.includes('config') || invocation.args[0] === 'var') {
           return Promise.resolve({
             exitCode: 0,
-            stdout: encode(''),
+            // `git var GIT_CONFIG_GLOBAL` names the files Git reads; a successful answer that names none is incomplete.
+            stdout: encode(invocation.args[0] === 'var' ? '/home/owner/.gitconfig\n' : ''),
             stderr: '',
             stdoutTruncated: false,
             stderrTruncated: false,
@@ -904,9 +905,9 @@ describe('RunnerSessionGit.listFiles', () => {
     should(failure).be.instanceof(GitCommandError);
     should((failure as GitCommandError).execution.timedOut).be.true();
     should((failure as Error).message).match(/timed out/u);
-    should(invocations.map(call => call.args[0])).eql(['config', 'var', 'ls-files']);
-    should(invocations[2]?.args).eql(['ls-files', '-z', '--cached', '--others', '--exclude-standard']);
-    should(invocations[2]?.maxStdoutBytes).eql(128);
+    should(invocations.map(call => call.args[0])).eql(['config', 'var', 'config', 'ls-files']);
+    should(invocations[3]?.args).eql(['ls-files', '-z', '--cached', '--others', '--exclude-standard']);
+    should(invocations[3]?.maxStdoutBytes).eql(128);
   });
 });
 

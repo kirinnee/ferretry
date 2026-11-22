@@ -54,6 +54,12 @@ const scripted = (answer: (invocation: TreeGitInvocation) => TreeGitExecution) =
 const isConfigRead = (invocation: TreeGitInvocation): boolean =>
   invocation.args.includes('config') || invocation.args[0] === 'var';
 
+/** A clean config read; and, to `git var GIT_CONFIG_GLOBAL`, the two files a Git that knows the variable names. */
+const quietConfig = (invocation: TreeGitInvocation): TreeGitExecution =>
+  invocation.args[0] === 'var'
+    ? executed({ stdout: encode('/home/owner/.config/git/config\n/home/owner/.gitconfig\n') })
+    : executed();
+
 /** What a call was, in a word: `config` (the global read), `var` (where the active config is), `file` (that one read), else the subcommand. */
 const kindOf = (call: TreeGitInvocation): string =>
   call.args[0] === 'var'
@@ -103,7 +109,7 @@ describe('establishGlobalConfig', () => {
 
   it('should ask Git to read the global config and everything it includes, and run nothing from it', async () => {
     // Arrange
-    const { runner, calls } = scripted(() => executed());
+    const { runner, calls } = scripted(quietConfig);
 
     // Act
     await establishGlobalConfig(runner, '/cwd', undefined);
@@ -131,10 +137,11 @@ describe('establishGlobalConfig', () => {
 
       await establishGlobalConfig(runner, '/cwd', undefined);
 
-      should(calls.map(kindOf)).eql(['config', 'var', 'file']);
+      should(calls.map(kindOf)).eql(['config', 'var', 'file', 'file']);
       should(calls[1]?.args).eql(['var', 'GIT_CONFIG_GLOBAL']);
       should(calls[2]?.args).eql(['config', '--file', XDG, '--includes', '--list', '-z']);
       should(calls[2]?.readsGlobalConfig).be.true();
+      should(calls[3]?.readsGlobalConfig).be.true();
       for (const call of calls) should(call.args).not.containEql('include.path=~/.config/git/config');
     });
 
@@ -182,6 +189,59 @@ describe('establishGlobalConfig', () => {
 
       should(failure).be.instanceof(Error);
       should(calls.map(kindOf)).eql(['config', 'var']);
+    });
+
+    it('should read EVERY file Git names, each by absolute path, and fail when a later one is unreadable', async () => {
+      const HOME_CONFIG = '/home/owner/.gitconfig';
+      const { runner, calls } = knowing(invocation =>
+        kindOf(invocation) === 'file' && invocation.args[2] === HOME_CONFIG
+          ? executed({
+              exitCode: 128,
+              stderr: `warning: unable to access '${HOME_CONFIG}': Permission denied\nfatal: unable to read config file '${HOME_CONFIG}': Permission denied\n`,
+            })
+          : undefined,
+      );
+
+      const failure = await establishGlobalConfig(runner, '/cwd', undefined).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      should(calls.map(kindOf)).eql(['config', 'var', 'file', 'file']);
+      should(calls[2]?.args).eql(['config', '--file', XDG, '--includes', '--list', '-z']);
+      should(calls[3]?.args).eql(['config', '--file', HOME_CONFIG, '--includes', '--list', '-z']);
+      should(failure).be.instanceof(Error);
+      should((failure as Error).message).match(/^git config failed:/);
+    });
+
+    it('should refuse a relative path on any line, not only the first, and read nothing from that answer', async () => {
+      const { runner, calls } = scripted(invocation =>
+        invocation.args[0] === 'var' ? executed({ stdout: encode(`${XDG}\nrel/.gitconfig\n`) }) : executed(),
+      );
+
+      const failure = await establishGlobalConfig(runner, '/cwd', undefined).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      should(failure).be.instanceof(Error);
+      should(calls.map(kindOf)).eql(['config', 'var']);
+    });
+
+    it('should call an empty successful answer incomplete: no file was named, so none was proved readable', async () => {
+      for (const stdout of ['', '\n', '  \n\n']) {
+        const { runner, calls } = scripted(invocation =>
+          invocation.args[0] === 'var' ? executed({ stdout: encode(stdout) }) : executed(),
+        );
+
+        const failure = await establishGlobalConfig(runner, '/cwd', undefined).then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+        should(failure).be.instanceof(Error);
+        should(calls.map(kindOf)).eql(['config', 'var']);
+      }
     });
 
     it('should make only the global read when this Git cannot say where its config is (before 2.46)', async () => {
@@ -259,7 +319,9 @@ describe('treeGit.listFiles', () => {
   it('should let Git resolve the owner’s exclusions: no -c override, the owner’s global config readable', async () => {
     // Arrange
     const { runner, calls } = scripted(invocation =>
-      isConfigRead(invocation) ? executed() : executed({ stdout: encode(`a.ts${NUL}b.ts${NUL}a.ts${NUL}`) }),
+      isConfigRead(invocation)
+        ? quietConfig(invocation)
+        : executed({ stdout: encode(`a.ts${NUL}b.ts${NUL}a.ts${NUL}`) }),
     );
 
     // Act
@@ -278,7 +340,7 @@ describe('treeGit.listFiles', () => {
     // Arrange
     const { runner } = scripted(invocation =>
       isConfigRead(invocation)
-        ? executed()
+        ? quietConfig(invocation)
         : executed({
             stdout: encode(`a.ts${NUL}`),
             stderr: "warning: unable to access '/h/.config/git/ignore': Permission denied",
@@ -343,20 +405,21 @@ describe('treeGit.listFiles', () => {
 
   it('should hand the runner what is left of the budget as the timeout, rounded up', async () => {
     // Arrange
-    const { runner, calls } = scripted(() => executed());
+    const { runner, calls } = scripted(quietConfig);
 
     // Act
     await treeGit(runner).listFiles('/cwd', 1024, { expired: () => false, remainingMs: () => 12.2 });
 
     // Assert
-    should(calls.map(call => call.timeoutMs)).eql([13, 13, 13]);
+    // The global read, the locating child, one read per file Git named (two), and the list.
+    should(calls.map(call => call.timeoutMs)).eql([13, 13, 13, 13, 13]);
   });
 
   it('should throw the caller’s own error type when the list fails', async () => {
     // Arrange
     class Mine extends Error {}
     const { runner } = scripted(invocation =>
-      isConfigRead(invocation) ? executed() : executed({ exitCode: 128, stderr: 'boom' }),
+      isConfigRead(invocation) ? quietConfig(invocation) : executed({ exitCode: 128, stderr: 'boom' }),
     );
 
     // Act

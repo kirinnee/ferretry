@@ -184,11 +184,12 @@ const UNREADABLE_RULES = /unable to access|permission denied|could not open|cann
  * `--global` lists `~/.gitconfig` ALONE whenever that file exists, and Git skips an unreadable
  * XDG config (`$XDG_CONFIG_HOME/git/config`, else `~/.config/git/config`) in silence — while `ls-files` still reads it. A
  * readable `~/.gitconfig` next to a mode-000 XDG config would therefore pass the read above and list a name the owner
- * ignores globally. So the ACTIVE XDG config is also read on its own, by absolute path
- * (`git config --file <abs> --includes --list -z`): only a clean read or a missing file passes. Which file is active is
- * decided by the Git child itself, from its own environment (`git var GIT_CONFIG_GLOBAL`, whose first line is the XDG
- * path): no plugin reads the environment, and a daemon with a custom `XDG_CONFIG_HOME` is covered while an unreadable
- * INACTIVE default location blocks nothing. A relative path is refused (Git would resolve it against the repository).
+ * ignores globally. So EVERY file Git names is also read on its own, by absolute path
+ * (`git config --file <abs> --includes --list -z`): only a clean read or a missing file passes. Which files are active
+ * is decided by the Git child itself, from its own environment (`git var GIT_CONFIG_GLOBAL`: the XDG path, then
+ * `~/.gitconfig`, one per line): no plugin reads the environment, and a daemon with a custom `XDG_CONFIG_HOME` is
+ * covered while an unreadable INACTIVE default location blocks nothing. A relative path on ANY line is refused (Git
+ * would resolve it against the repository), and a successful answer naming no file is incomplete, not a pass.
  * GAP: a Git that does not know `git var GIT_CONFIG_GLOBAL` (before 2.46) answers non-zero, and then only the global read
  * above is made.
  */
@@ -223,20 +224,29 @@ export async function establishGlobalConfig(
   });
   if (located.timedOut || located.stdoutTruncated) throw failure('git var', located);
   if (located.exitCode !== 0) return;
-  const active = new TextDecoder().decode(located.stdout).split('\n')[0]?.trim() ?? '';
-  if (active === '') return;
-  if (!active.startsWith('/'))
-    throw failure('git var', { ...located, stderr: `relative global config path: ${active}` });
+  // EVERY line is a file Git reads (the XDG config, then ~/.gitconfig): each must be absolute and each must read clean.
+  // A successful answer that names none proved nothing was readable, so it is incomplete rather than a pass.
+  const named = new TextDecoder()
+    .decode(located.stdout)
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line !== '');
+  if (named.length === 0) throw failure('git var', { ...located, stderr: 'no global config path reported' });
+  const relative = named.find(path => !path.startsWith('/'));
+  if (relative !== undefined)
+    throw failure('git var', { ...located, stderr: `relative global config path: ${relative}` });
 
-  if (budget?.expired() === true) return;
-  const read = await runner.run({
-    args: ['config', '--file', active, '--includes', '--list', '-z'],
-    cwd,
-    readsGlobalConfig: true,
-    maxStdoutBytes: 1024 * 1024,
-    ...bound(),
-  });
-  assertConfigRead(read, failure);
+  for (const active of named) {
+    if (budget?.expired() === true) return;
+    const read = await runner.run({
+      args: ['config', '--file', active, '--includes', '--list', '-z'],
+      cwd,
+      readsGlobalConfig: true,
+      maxStdoutBytes: 1024 * 1024,
+      ...bound(),
+    });
+    assertConfigRead(read, failure);
+  }
 }
 
 /** A config read that was clean, or whose only complaint is that the file is not there; anything else THROWS. */
