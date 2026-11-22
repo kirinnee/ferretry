@@ -119,11 +119,11 @@ export function InstalledPage({ client, step }: { readonly client: OnboardingCli
       )}
       <StepCommand>{plan.command}</StepCommand>
       {plan.kind === 'runnable' ? (
-        <StepActions>
+        <div className="ob-actions cx-actions--stretch">
           <Button variant="primary" disabled={installing} data-install-run="" onClick={() => void install()}>
             {installing ? 'Installing…' : 'Install Codex'}
           </Button>
-        </StepActions>
+        </div>
       ) : null}
       {view.note === undefined ? null : (
         <StepLine role="alert" data-install-note="">

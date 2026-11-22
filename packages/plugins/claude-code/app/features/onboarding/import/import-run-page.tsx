@@ -12,15 +12,20 @@
  *     (the r9 wizard's own rule; the daemon derives the models from them).
  *   - missing (a reload dropped the run's memory, owner add 5): it asks again: what was found, or nothing now. "What was
  *     found" is still a SELECTIVE import: it leaves out whatever the kind pages shown after the reload had unticked.
+ * The page lists every item with a tick and a fold (`import-items.tsx`, C59 O5): a tick the person changes HERE joins the ones the kind
+ * pages left out, and only the ticked items are brought: the same `skip` list the request already carries.
  * Back and Later are never held. Next is not held either (the contract has no way to hold Next alone): before Import is
  * pressed the page says that Next leaves the import for later, so a Next press never records "done" over an import the
  * page did not name.
  */
 import { Button, ChoiceCards, type ChoiceOption } from '@ferretry/app';
+import { ActionRow } from '@ferretry/app/ui';
+import { ImportItems, selectedItems, WorkingBar } from './import-items.tsx';
 import {
   buildImportChange,
   ImportResultList,
   IMPORT_KINDS,
+  type ImportKind,
   kindItemIds,
   NEXT_LEAVES,
   nameProblem,
@@ -32,7 +37,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ClaudeCodeClient } from '../../../lib/client.ts';
 import { importModeOf } from '../import-choice-page.tsx';
 import type { StepPageProps } from '../props.ts';
-import { allLeft, HARNESS, SCAN_RUN, tickedEnvOf } from './segment.ts';
+import { allLeft, HARNESS, leftPatch, runPickOf, runPickPatch, SCAN_RUN, tickedEnvOf } from './segment.ts';
 
 const ASK: readonly ChoiceOption[] = [
   {
@@ -60,6 +65,10 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
   const [end, setEnd] = useState<'imported' | 'already-in' | 'left' | null>(null);
   const [sentences, setSentences] = useState<readonly string[]>([]);
   const [working, setWorking] = useState(false);
+  /** What the person unticked on THIS page, over what the kind pages left out; `null` until they touch a tick. */
+  const [picked, setPicked] = useState<ReadonlySet<ImportItemId> | null>(() =>
+    mode === 'everything' ? runPickOf(step?.segment ?? {}) : null,
+  );
   const decided = useRef(false);
 
   useEffect(() => {
@@ -84,10 +93,11 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
   const plan: 'everything' | 'choose' | 'nothing' | null =
     mode === undefined ? (asked === 'everything' ? 'choose' : asked) : mode;
   const everything = plan === 'everything';
-  const left = everything ? new Set<ImportItemId>() : allLeft(step?.segment ?? {});
+  const left = picked ?? (everything ? new Set<ImportItemId>() : allLeft(step?.segment ?? {}));
   const skip = skipOf(left);
   const ids = model === null ? [] : [...new Set(IMPORT_KINDS.flatMap(kind => kindItemIds(model, kind)))];
-  const leaving = ids.filter(id => skip.includes(id)).length;
+  const bringing = selectedItems(ids, skip).length;
+  const leaving = ids.length - bringing;
   const name = typed ?? model?.suggestedName ?? `${HARNESS}-default`;
   const named = model !== null && model.duplicateOf === null;
   const invalid = named ? nameProblem(name) : null;
@@ -110,6 +120,21 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
     step?.done();
   };
 
+  /** A tick on this page: kept for the run, and told to the kind page it belongs to, so Back shows the same choice. */
+  const toggle = (id: ImportItemId, on: boolean): void => {
+    if (model === null) return;
+    const next = new Set(left);
+    if (on) next.delete(id);
+    else next.add(id);
+    setPicked(next);
+    // "Import everything" never shows the kind pages, so Back + return would drop this tick: keep it for the run.
+    if (mode === 'everything') step?.remember(runPickPatch(next));
+    for (const kind of IMPORT_KINDS as readonly ImportKind[]) {
+      if (!kindItemIds(model, kind).includes(id)) continue;
+      step?.remember(leftPatch(kind, new Set(kindItemIds(model, kind).filter(item => next.has(item)))));
+    }
+  };
+
   const leave = (): void => {
     setEnd('left');
     step?.done();
@@ -118,16 +143,24 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
   return (
     <div className="cc-step" data-onboarding-step="claude-code.import-run">
       {read.kind !== 'ready' || model === null ? (
-        <div className="cc-actions">
+        <div className="cc-confirm">
           <p role={read.kind === 'failed' ? 'alert' : undefined} className="cc-step__line">
             {read.kind === 'failed'
               ? read.sentence
               : 'Ferretry needs your OK before it reads what Claude Code keeps on this computer.'}
           </p>
-          <Button variant={read.kind === 'confirm' ? 'primary' : undefined} onClick={() => void look()}>
-            {read.kind === 'confirm' ? 'Show what is there' : 'Try again'}
-          </Button>
-          <Button onClick={leave}>Skip the import</Button>
+          <ActionRow
+            secondary={
+              <Button data-import-skip="" onClick={leave}>
+                Skip the import
+              </Button>
+            }
+            primary={
+              <Button variant={read.kind === 'confirm' ? 'primary' : undefined} onClick={() => void look()}>
+                {read.kind === 'confirm' ? 'Show what is there' : 'Try again'}
+              </Button>
+            }
+          />
         </div>
       ) : end === 'imported' || end === 'already-in' ? (
         <div role="status" data-import-answer={end}>
@@ -157,10 +190,13 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
           ) : null}
           {plan === 'everything' || plan === 'choose' ? (
             <p className="cc-step__line" data-import-count="">
-              {`Bringing ${String(ids.length - leaving)} ${ids.length - leaving === 1 ? 'item' : 'items'}${
+              {`Bringing ${String(bringing)} ${bringing === 1 ? 'item' : 'items'}${
                 leaving === 0 ? '' : `, leaving out ${String(leaving)}`
               }. Hooks are never imported.`}
             </p>
+          ) : null}
+          {plan === 'everything' || plan === 'choose' ? (
+            <ImportItems model={model} skip={skip} working={working} onToggle={toggle} />
           ) : null}
           <p className="cc-step__line" data-import-next="">
             {NEXT_LEAVES}
@@ -193,19 +229,28 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
               {imports.changes.refusal}
             </p>
           )}
-          {working ? (
-            <p role="status" className="cc-step__line">
-              Importing…
-            </p>
-          ) : null}
-          <div className="cc-actions">
-            <Button variant="primary" disabled={!canImport} onClick={() => void bringIn()} data-import-press="">
-              {imports.changes.refusal === null ? 'Import' : 'Try again'}
-            </Button>
-            <Button disabled={working} onClick={leave}>
-              Skip the import
-            </Button>
-          </div>
+          {plan === 'everything' || plan === 'choose' ? <WorkingBar working={working} /> : null}
+          <ActionRow
+            data-import-actions=""
+            secondary={
+              <Button disabled={working} data-import-skip="" onClick={leave}>
+                Skip the import
+              </Button>
+            }
+            primary={
+              <Button
+                variant="primary"
+                disabled={!canImport}
+                icon={<span aria-hidden="true">↓</span>}
+                busy={working}
+                data-import-run=""
+                data-import-press=""
+                onClick={() => void bringIn()}
+              >
+                {imports.changes.refusal === null ? 'Import' : 'Try again'}
+              </Button>
+            }
+          />
         </>
       )}
     </div>

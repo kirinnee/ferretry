@@ -139,8 +139,15 @@ describe('the onboarding Appearance step (r11 G2)', () => {
         // Stacked: every group is the stack layout, and each card sits under the one before it, in one column.
         // Five lists: colour mode, palette, style, and the two the base step kept (text size, motion).
         expect(seen.labels).toEqual(['Colour mode', 'Palette', 'Style', 'Text size', 'Motion']);
-        for (const group of seen.groups) {
+        for (const [which, group] of seen.groups.entries()) {
           expect(group.layout).toBe('stack');
+          // C59 audit: on a phone the palette's compact cards are TWO columns (eight in one column pushed the page below the footer).
+          const palette = which === 1 && variant.phone;
+          if (palette) {
+            const [first, second] = group.cards as [Box, Box];
+            expect(second.x, 'the palette is two columns on a phone').toBeGreaterThan(first.x + 40);
+            continue;
+          }
           for (let index = 1; index < group.cards.length; index += 1) {
             const above = group.cards[index - 1] as Box;
             const card = group.cards[index] as Box;

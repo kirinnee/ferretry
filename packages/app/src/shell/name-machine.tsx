@@ -1,5 +1,6 @@
 import { MachineNameSchema } from '@ferretry/kernel/contract';
 import { useEffect, useRef, useState } from 'react';
+import { ActionRow } from '../ui/action-row.tsx';
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import { hostFileIsNamed, readHostFile, sentenceOf, writeMachineName } from './machine-name-file.ts';
@@ -95,20 +96,19 @@ function NameThisMachineView({
               {problem}
             </p>
           )}
-          <div className="flex flex-wrap gap-2">
-            <button type="submit" className="kt-btn min-h-[44px]" data-variant="primary" disabled={busy}>
-              {busy ? 'Saving…' : 'Save name'}
-            </button>
-            <button
-              type="button"
-              className="kt-btn min-h-[44px]"
-              disabled={busy}
-              data-name-machine-skip=""
-              onClick={onSkip}
-            >
-              Not now
-            </button>
-          </div>
+          {/* The shared answer row: both answers the field's width on a phone, Not now left and Save right on a desktop. */}
+          <ActionRow
+            secondary={
+              <button type="button" className="kt-btn" disabled={busy} data-name-machine-skip="" onClick={onSkip}>
+                Not now
+              </button>
+            }
+            primary={
+              <button type="submit" className="kt-btn" data-variant="primary" disabled={busy}>
+                {busy ? 'Saving…' : 'Save name'}
+              </button>
+            }
+          />
         </form>
       ) : (
         <div className="mt-2 flex flex-col gap-2">
@@ -118,9 +118,13 @@ function NameThisMachineView({
           <p className="m-0 text-meta leading-base text-faint">
             It keeps its host name. Name it later in Settings › General › Name, from a device that may.
           </p>
-          <button type="button" className="kt-btn min-h-[44px] self-start" data-name-machine-skip="" onClick={onSkip}>
-            Continue
-          </button>
+          <ActionRow
+            primary={
+              <button type="button" className="kt-btn" data-name-machine-skip="" onClick={onSkip}>
+                Continue
+              </button>
+            }
+          />
         </div>
       )}
     </section>

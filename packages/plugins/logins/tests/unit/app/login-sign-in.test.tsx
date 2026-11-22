@@ -153,7 +153,7 @@ describe('LoginSignIn', () => {
       view.container.querySelector('[data-claude-login-identity]')?.getAttribute('data-claude-login-identity'),
     ).toBe('claude-work');
     expect(view.container.querySelector('h3')?.textContent).toBe('you@example.com (work)');
-    const field = must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'the code field');
+    const field = must(view.container.querySelector<HTMLInputElement>('input[type="password"]'), 'the code field');
     await type(field, 'the-code-on-the-page');
     await click(button(view.container, 'Finish sign-in'), 'Finish sign-in');
 
@@ -175,7 +175,7 @@ describe('LoginSignIn', () => {
     );
     expect(view.container.textContent).toContain('(3 runtimes)');
     await click(view.container.querySelector('[data-change-submit]'), 'the start button');
-    const field = must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'the code field');
+    const field = must(view.container.querySelector<HTMLInputElement>('input[type="password"]'), 'the code field');
     await type(field, 'wrong');
     await click(button(view.container, 'Finish sign-in for 3 runtimes'), 'the finish button');
     expect(text(view.container, '[role="alert"]')).toBe('Claude didn’t take that code. Copy all of it.');
@@ -613,7 +613,7 @@ describe('LoginSignIn with a Codex link', () => {
     );
     await click(view.container.querySelector('[data-change-submit]'), 'the start button');
     await type(
-      must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'the code field'),
+      must(view.container.querySelector<HTMLInputElement>('input[type="password"]'), 'the code field'),
       'fake-unsent-code',
     );
     // Waits for the failure to show rather than for a fixed time, so a slow machine cannot outrun it.
@@ -622,7 +622,9 @@ describe('LoginSignIn with a Codex link', () => {
     expect(state(view.container)).toBe('failed');
     await click(button(view.container, 'Start a new sign-in'), 'Start a new sign-in');
     expect(state(view.container)).toBe('awaiting-code');
-    expect(must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'the code field').value).toBe('');
+    expect(must(view.container.querySelector<HTMLInputElement>('input[type="password"]'), 'the code field').value).toBe(
+      '',
+    );
     await view.unmount();
   });
 

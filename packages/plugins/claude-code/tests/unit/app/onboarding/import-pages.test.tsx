@@ -16,6 +16,7 @@ import {
 } from '../../../../app/features/onboarding/import/kind-page.tsx';
 import type { ClaudeCodeClient } from '../../../../app/lib/client.ts';
 import type { StepPageProps } from '../../../../app/features/onboarding/props.ts';
+import { itemStatus, selectedItems } from '../../../../app/features/onboarding/import/import-items.tsx';
 import { allLeft } from '../../../../app/features/onboarding/import/segment.ts';
 import { type Call, scripted, stepHarness } from '../../../fixtures/onboarding/harness.ts';
 import { importRoutes, scanOf } from '../../../fixtures/onboarding/scan.ts';
@@ -150,7 +151,7 @@ describe('the import run', () => {
     const { view, run, calls } = await open(ImportRunPage, { importMode: 'everything' });
     expect(run.events).toEqual(['ready']);
     expect(proposals(calls)).toHaveLength(0);
-    await click(view, '.cc-actions button');
+    await click(view, '[data-import-run]');
     await settle();
     expect(proposals(calls).map(call => call.init?.body)).toEqual([
       { change: { kind: 'setup.import', include: ['claude-code'], names: { 'claude-code': 'claude-code-default' } } },
@@ -174,7 +175,7 @@ describe('the import run', () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(name, 'work-claude');
       name.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await click(view, '.cc-actions button');
+    await click(view, '[data-import-run]');
     await settle();
     const [sent] = proposals(calls).map(call => call.init?.body as { change: { skip: string[] } });
     expect(sent?.change).toMatchObject({
@@ -211,9 +212,24 @@ describe('the import run', () => {
     const run = await open(ImportRunPage, mcp.run.step.segment);
     await click(run.view, 'input[value="everything"]');
     expect(run.view.container.querySelector('[data-import-count]')?.textContent).toContain('leaving out 1');
-    await click(run.view, '.cc-actions button');
+    await click(run.view, '[data-import-run]');
     await settle();
     const [sent] = proposals(run.calls).map(call => call.init?.body as { change: { skip?: string[] } });
+    expect(sent?.change.skip).toEqual(['claude-code:mcp:issues']);
+  });
+
+  it('"Import everything": an item unticked on the final page stays unticked after Back and return, and is not sent', async () => {
+    const first = await open(ImportRunPage, { importMode: 'everything' });
+    const box = '[data-import-item="claude-code:mcp:issues"] input';
+    await click(first.view, box);
+    expect(must(first.view.container.querySelector<HTMLInputElement>(box), 'box').checked).toBe(false);
+    // Back and return: the page mounts again over the memory the first visit left.
+    const again = await open(ImportRunPage, first.run.step.segment);
+    expect(must(again.view.container.querySelector<HTMLInputElement>(box), 'box').checked).toBe(false);
+    expect(again.view.container.querySelector('[data-import-count]')?.textContent).toContain('leaving out 1');
+    await click(again.view, '[data-import-run]');
+    await settle();
+    const [sent] = proposals(again.calls).map(call => call.init?.body as { change: { skip?: string[] } });
     expect(sent?.change.skip).toEqual(['claude-code:mcp:issues']);
   });
 
@@ -228,12 +244,12 @@ describe('the import run', () => {
     const { view, run, calls } = await open(ImportRunPage, {});
     expect(run.events[0]).toBe('ready');
     expect(view.container.querySelector('[data-import-lost]')).not.toBeNull();
-    const button = must(view.container.querySelector<HTMLButtonElement>('.cc-actions button'), 'import');
+    const button = must(view.container.querySelector<HTMLButtonElement>('[data-import-run]'), 'import');
     expect(button.disabled).toBe(true);
     await click(view, 'input[value="everything"]');
     expect(proposals(calls)).toHaveLength(0);
     expect(button.disabled).toBe(false);
-    await click(view, '.cc-actions button');
+    await click(view, '[data-import-run]');
     await settle();
     expect(proposals(calls)).toHaveLength(1);
     const [only] = proposals(calls).map(call => call.init?.body as { change: { skip?: unknown } });
@@ -242,8 +258,7 @@ describe('the import run', () => {
 
   it('"Skip the import" records done and sends nothing', async () => {
     const { view, run, calls } = await open(ImportRunPage, { importMode: 'everything' });
-    const buttons = view.container.querySelectorAll<HTMLButtonElement>('.cc-actions button');
-    await interact(() => must(buttons[1], 'skip').click());
+    await interact(() => must(view.container.querySelector<HTMLButtonElement>('[data-import-skip]'), 'skip').click());
     expect(writes(calls)).toEqual([]);
     expect(run.events.slice(-2)).toEqual(['ready', 'done']);
   });
@@ -252,7 +267,7 @@ describe('the import run', () => {
     const routes = importRoutes(scanOf());
     routes['POST /v1/runtimes/proposals'] = new Error('This machine is busy.');
     const { view, run } = await open(ImportRunPage, { importMode: 'everything' }, routes);
-    await click(view, '.cc-actions button');
+    await click(view, '[data-import-run]');
     await settle();
     expect(view.container.querySelector('[data-import-refusal]')?.textContent).toContain('busy');
     expect(run.events.at(-1)).toBe('busy:null');
@@ -273,11 +288,11 @@ describe('the import run', () => {
     };
     const { view, run, calls } = await open(ImportRunPage, { importMode: 'everything' }, routes);
     const press = () => must(view.container.querySelector<HTMLButtonElement>('[data-import-press]'), 'press');
-    expect(press().textContent).toBe('Import');
+    expect((press().textContent ?? '').replace('↓', '')).toBe('Import');
     await click(view, '[data-import-press]');
     await settle();
     expect(view.container.querySelector('[data-import-refusal]')?.textContent).toContain('locked');
-    expect(press().textContent).toBe('Try again');
+    expect((press().textContent ?? '').replace('↓', '')).toBe('Try again');
     expect(press().disabled).toBe(false);
     await click(view, '[data-import-press]');
     await settle();
@@ -288,8 +303,172 @@ describe('the import run', () => {
   it('writes nothing to localStorage or sessionStorage', async () => {
     const before = [localStorage.length, sessionStorage.length];
     const { view } = await open(ImportRunPage, { importMode: 'everything' });
-    await click(view, '.cc-actions button');
+    await click(view, '[data-import-run]');
     await settle();
     expect([localStorage.length, sessionStorage.length]).toEqual(before);
+  });
+});
+
+describe('C59 O5 item 8: every item can be opened and chosen on the import page', () => {
+  const rows = (view: Mounted): HTMLElement[] => [
+    ...view.container.querySelectorAll<HTMLElement>('[data-import-item]'),
+  ];
+  const box = (view: Mounted, id: string): HTMLInputElement =>
+    must(view.container.querySelector<HTMLInputElement>(`[data-import-item="${id}"] input[type="checkbox"]`), id);
+  const sent = (calls: readonly Call[]) =>
+    proposals(calls).map(call => call.init?.body as { change: { skip?: string[]; kind: string } });
+
+  it('lists each item found with a tick (all ticked by default) and a fold that opens to what it becomes', async () => {
+    const { view } = await open(ImportRunPage, { importMode: 'everything' });
+    const found = rows(view);
+    expect(found.map(row => row.getAttribute('data-import-item'))).toEqual(
+      expect.arrayContaining([
+        'claude-code:settings',
+        'claude-code:model-set',
+        'claude-code:instructions',
+        'claude-code:mcp:notes',
+        'claude-code:mcp:issues',
+        'claude-code:skill:review',
+        'claude-code:skill:release-notes',
+      ]),
+    );
+    for (const row of found) {
+      expect(row.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(true);
+      const fold = must(row.querySelector<HTMLDetailsElement>('details'), 'fold');
+      expect(fold.open).toBe(false);
+      expect(row.querySelector('summary')?.textContent?.length).toBeGreaterThan(0);
+      expect(row.querySelector('[data-import-item-more]')?.textContent).toContain('Becomes:');
+    }
+    // The fold opens by its summary: a real <details>, so the keyboard and a screen reader get it free.
+    const first = must(found[0]?.querySelector<HTMLElement>('summary'), 'summary');
+    await interact(() => first.click());
+    expect(found[0]?.querySelector<HTMLDetailsElement>('details')?.open).toBe(true);
+  });
+
+  it('unticking an item here leaves it out of the request, and only the ticked ones are brought', async () => {
+    const { view, calls, run } = await open(ImportRunPage, { importMode: 'everything' });
+    expect(view.container.querySelector('[data-import-count]')?.textContent).toContain('Bringing 8 items');
+    await interact(() => box(view, 'claude-code:mcp:issues').click());
+    await interact(() => box(view, 'claude-code:skill:release-notes').click());
+    expect(box(view, 'claude-code:mcp:issues').checked).toBe(false);
+    expect(view.container.querySelector('[data-import-count]')?.textContent).toContain(
+      'Bringing 6 items, leaving out 2',
+    );
+    // Told to the kind page it belongs to, so Back shows the same choice.
+    expect(run.events.filter(event => event === 'remember').length).toBeGreaterThanOrEqual(2);
+    await click(view, '[data-import-run]');
+    await settle();
+    expect(sent(calls)[0]?.change.skip).toEqual(['claude-code:mcp:issues', 'claude-code:skill:release-notes']);
+    // An item the person unticked and ticked again is brought again.
+  });
+
+  it('ticking an unticked item again brings it again; with nothing changed the request carries no skip list', async () => {
+    const { view, calls } = await open(ImportRunPage, { importMode: 'everything' });
+    await interact(() => box(view, 'claude-code:mcp:issues').click());
+    await interact(() => box(view, 'claude-code:mcp:issues').click());
+    expect(box(view, 'claude-code:mcp:issues').checked).toBe(true);
+    await click(view, '[data-import-run]');
+    await settle();
+    expect(sent(calls)[0]?.change.skip).toBeUndefined();
+  });
+
+  it('what the kind pages left out starts unticked here, and the model set follows a settings item that is left out', async () => {
+    const { view, calls } = await open(ImportRunPage, {
+      importMode: 'choose',
+      'skip:mcp': JSON.stringify(['claude-code:mcp:issues']),
+    });
+    expect(box(view, 'claude-code:mcp:issues').checked).toBe(false);
+    await interact(() => box(view, 'claude-code:settings').click());
+    // Settings out: the models those settings name go with them, and say why.
+    expect(box(view, 'claude-code:model-set').checked).toBe(false);
+    expect(box(view, 'claude-code:model-set').disabled).toBe(true);
+    expect(view.container.querySelector('[data-import-item="claude-code:model-set"]')?.textContent).toContain(
+      'come from your settings',
+    );
+    await click(view, '[data-import-run]');
+    await settle();
+    expect(sent(calls)[0]?.change.skip).toEqual([
+      'claude-code:mcp:issues',
+      'claude-code:settings',
+      'claude-code:model-set',
+    ]);
+  });
+
+  it('selectedItems is the ids that are not on the skip list', () => {
+    const a = importItemId('claude-code', 'settings');
+    const b = importItemId('claude-code', 'instructions');
+    expect(selectedItems([a, b], [b])).toEqual([a]);
+    expect(selectedItems([a, b], [])).toEqual([a, b]);
+    expect(selectedItems([a, b], [a, b])).toEqual([]);
+  });
+});
+
+describe('C59 O5 item 9: the import shows it is working, with one status line per item', () => {
+  it('draws one working bar and one line per item while the request is in flight, and says "Importing…" nowhere on the page', async () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const routes = importRoutes(scanOf());
+    const apply = routes['POST /v1/runtimes/proposals/:proposalId/apply'];
+    routes['POST /v1/runtimes/proposals/:proposalId/apply'] = async () => {
+      await held;
+      return apply;
+    };
+    const { view, run } = await open(ImportRunPage, { importMode: 'everything' }, routes);
+    const bar = (): HTMLElement =>
+      must(view.container.querySelector<HTMLElement>('[role="progressbar"]'), 'the working bar');
+    expect(bar().getAttribute('data-working')).toBe('false');
+    expect(bar().getAttribute('aria-busy')).toBe('false');
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLInputElement>('[data-import-item="claude-code:mcp:issues"] input'),
+        'box',
+      ).click(),
+    );
+    await click(view, '[data-import-run]');
+    await interact(async () => {
+      for (let turn = 0; turn < 10; turn += 1) await new Promise(resolve => setTimeout(resolve, 0));
+    });
+
+    expect(run.events.at(-1)).toBe('busy:Importing…');
+    expect(view.container.querySelectorAll('[role="progressbar"]')).toHaveLength(1);
+    expect(bar().getAttribute('data-working')).toBe('true');
+    expect(bar().getAttribute('aria-busy')).toBe('true');
+    const lines = [...view.container.querySelectorAll<HTMLElement>('[data-import-item]')].map(row => ({
+      id: row.getAttribute('data-import-item'),
+      status: row.querySelectorAll('[data-import-item-status]').length,
+      text: row.querySelector('[data-import-item-status]')?.textContent,
+    }));
+    for (const line of lines) expect(line.status).toBe(1);
+    expect(lines.find(line => line.id === 'claude-code:mcp:issues')?.text).toBe('Left out');
+    expect(lines.filter(line => line.text === 'Bringing in…')).toHaveLength(lines.length - 1);
+    // The footer's hold line is the one "Importing…"; the page itself never repeats it.
+    expect(view.container.textContent).not.toContain('Importing…');
+    // Nothing can be changed or pressed twice while it works.
+    for (const input of view.container.querySelectorAll<HTMLInputElement>('[data-import-item] input'))
+      expect(input.disabled).toBe(true);
+    const importButton = must(view.container.querySelector<HTMLButtonElement>('[data-import-run]'), 'Import');
+    expect(importButton.disabled).toBe(true);
+    expect(importButton.getAttribute('aria-busy')).toBe('true');
+    expect(importButton.querySelector('[data-spinner]')).not.toBeNull();
+
+    release();
+    await settle();
+    expect(view.container.querySelector('[data-import-answer]')).not.toBeNull();
+    expect(view.container.querySelector('[role="progressbar"]')).toBeNull();
+  });
+
+  it('says nothing is happening to an item before the import starts: no status lines at rest', async () => {
+    const { view } = await open(ImportRunPage, { importMode: 'everything' });
+    for (const status of view.container.querySelectorAll<HTMLElement>('[data-import-item-status]'))
+      expect(status.textContent).toBe('');
+  });
+
+  it('itemStatus: a ticked row is being brought and an unticked one is left out, only while it works', () => {
+    expect(itemStatus(true, true)).toBe('bringing');
+    expect(itemStatus(false, true)).toBe('left-out');
+    expect(itemStatus(true, false)).toBeNull();
+    expect(itemStatus(false, false)).toBeNull();
   });
 });

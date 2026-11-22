@@ -12,13 +12,13 @@
  * It names any kind whose checklist was never shown in this run (those are NOT left out, since nobody left them out).
  */
 import { Button } from '@ferretry/app';
+import { ActionRow } from '@ferretry/app/ui';
 import {
   IMPORT_KINDS,
   ImportResultList,
   kindItemIds,
   NEXT_LEAVES,
   RuntimeNameField,
-  StepActions,
   StepBody,
   StepLine,
   useApplyImport,
@@ -164,21 +164,25 @@ function RunBody({
               </StepLine>
             )}
             {changes.busy ? <StepLine role="status">Importing…</StepLine> : null}
-            <StepActions>
-              {nothingToImport ? null : (
-                <Button
-                  variant="primary"
-                  disabled={changes.busy || problem !== null}
-                  data-import-run=""
-                  onClick={() => void run()}
-                >
-                  Import
+            <ActionRow
+              secondary={
+                <Button disabled={changes.busy} data-import-skip="" onClick={leave}>
+                  Skip the import
                 </Button>
-              )}
-              <Button disabled={changes.busy} data-import-skip="" onClick={leave}>
-                Skip the import
-              </Button>
-            </StepActions>
+              }
+              primary={
+                nothingToImport ? undefined : (
+                  <Button
+                    variant="primary"
+                    disabled={changes.busy || problem !== null}
+                    data-import-run=""
+                    onClick={() => void run()}
+                  >
+                    Import
+                  </Button>
+                )
+              }
+            />
           </>
         )
       ) : null}

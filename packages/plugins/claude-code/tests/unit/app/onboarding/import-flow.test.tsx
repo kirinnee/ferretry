@@ -224,7 +224,7 @@ describe('the Claude import pages inside the real setup flow', () => {
     await next();
     await next();
     expect(pageKey()).toBe(pageOf('import-run'));
-    expect(root().querySelector('.cc-actions button')).not.toBeNull();
+    expect(root().querySelector('[data-import-run]')).not.toBeNull();
   });
 
   test('(b) after a reload mid-run, a left-out MCP server is in the skip list the import sends', async () => {
@@ -240,7 +240,7 @@ describe('the Claude import pages inside the real setup flow', () => {
       await next(); // the final page
       expect(pageKey()).toBe(pageOf('import-run'));
       await press('input[value="everything"]');
-      await press('.cc-actions button');
+      await press('[data-import-run]');
       const [sent] = proposals(wire).map(call => call.body as { change: { skip?: string[] } });
       expect(sent?.change.skip).toEqual(['claude-code:mcp:issues']);
     });
@@ -264,7 +264,7 @@ describe('the Claude import pages inside the real setup flow', () => {
     expect(disabled('[data-step-back]')).toBe(false);
     expect(disabled('[data-flow-later]')).toBe(false);
     await press('input[value="everything"]');
-    await press('.cc-actions button');
+    await press('[data-import-run]');
     expect(proposals(wire)).toHaveLength(1);
     expect(root().querySelector('[data-import-refusal]')?.textContent).toContain('busy');
     expect(disabled('[data-step-back]')).toBe(false);

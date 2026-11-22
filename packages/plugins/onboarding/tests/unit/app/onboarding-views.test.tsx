@@ -194,9 +194,10 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     );
     const open = view.container.querySelector<HTMLElement>('[data-onboarding-open-pair]');
     expect(open).not.toBeNull();
-    // G2: auto width (not stretched across the row) and at least 44px tall, like the footer buttons.
-    expect(open?.className).toContain('self-start');
-    expect(open?.className).toContain('min-h-[44px]');
+    // C59: its size and place are the shared answer row's (full width on a phone, one 12 rem end of the row on a desktop, 44px tall:
+    // `action-row.css`, measured in the browser), so the button carries no sizing of its own and sits inside that row.
+    expect(open?.closest('[data-action-row]')).not.toBeNull();
+    expect(open?.className).not.toContain('self-start');
     await interact(() => {
       open?.click();
     });
