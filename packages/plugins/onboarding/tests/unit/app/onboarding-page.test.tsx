@@ -56,7 +56,7 @@ const screenOf = (container: HTMLElement): string | null => root(container).getA
 
 const routeOf = (container: HTMLElement): string | null => root(container).getAttribute('data-onboarding-route');
 
-/** The command block on the glass, as distinct from the agent brief folded below it. */
+/** The command block on the glass, as distinct from the check folded below it. */
 const visibleCommand = (container: HTMLElement): string =>
   must(container.querySelector('pre'), 'the command block').textContent ?? '';
 interface PageOptions {
@@ -123,14 +123,9 @@ const answerTarget = async (container: HTMLElement, target: string): Promise<voi
  *
  * The target card is chosen when this device ASKS it, and taken through the install page's escape when this device
  * ASSUMED it — which is exactly how a real reader gets there, and therefore proof that the escape is reachable at all. A
- * phone offers neither, because the hardware already answered. "Let an agent do it" is the quiet link on the first page.
+ * phone offers neither, because the hardware already answered.
  */
-const enter = async (
-  container: HTMLElement,
-  route: string,
-  doer = 'self',
-  target: 'this' | 'other' = 'this',
-): Promise<void> => {
+const enter = async (container: HTMLElement, route: string, target: 'this' | 'other' = 'this'): Promise<void> => {
   await answerEntry(container, route);
   if (route === 'add-client') return;
   if (screenOf(container) === 'target') await answerTarget(container, target);
@@ -138,7 +133,6 @@ const enter = async (
     const wayOut = container.querySelector('[data-onboarding-other-machine]');
     if (wayOut !== null) await click(wayOut);
   }
-  if (doer === 'agent') await click(buttonWith(container, '[data-onboarding-agent-instead]'));
 };
 
 const next = async (container: HTMLElement): Promise<void> => {
@@ -150,7 +144,6 @@ const walking = (options: {
   readonly device?: DeviceKind;
   readonly route?: 'first-time' | 'add-daemon' | 'add-client';
   readonly target?: 'this' | 'other';
-  readonly doer?: 'self' | 'agent';
   readonly step: OnboardingStepId;
   readonly storage?: OnboardingProgressStorage;
 }): OnboardingProgressStore => {
@@ -162,7 +155,6 @@ const walking = (options: {
   store.choose(route);
   if (route !== 'add-client') {
     store.chooseTarget(options.target ?? 'this', route);
-    if (options.doer === 'agent') store.switchDoer('agent');
   }
   store.goTo(options.step);
   return store;
@@ -316,7 +308,7 @@ describe('which computer runs the daemon', () => {
     // A control that undoes a deliberate choice reads as the page doubting them,
     // and Back already reaches the question they answered.
     const chosen = await pageWith();
-    await enter(chosen.view.container, 'add-daemon', 'self', 'this');
+    await enter(chosen.view.container, 'add-daemon', 'this');
     expect(chosen.view.container.querySelector('[data-onboarding-other-machine]')).toBeNull();
     await chosen.view.unmount();
 
@@ -328,30 +320,27 @@ describe('which computer runs the daemon', () => {
 });
 
 describe('who installs it', () => {
-  it('is no question: the install page opens on the commands, with "Let an agent do it" as a quiet link', async () => {
-    // r10 O5 (decision D1): the screen that asked "Who installs it?" is gone. There is no heading, no card and no
-    // `data-onboarding-doer` anywhere on the way to the commands.
+  it('is no question and no option: the install page opens on the commands, with no agent entry point (C59 O7)', async () => {
+    // r10 O5 (decision D1) removed the screen that asked "Who installs it?"; C59 O7 removed the "Let an agent do it" link
+    // that replaced it, because installing needs permissions an agent usually does not have.
     const { view } = await pageWith();
     await answerEntry(view.container, 'first-time');
 
     expect(screenOf(view.container)).toBe('install');
     expect(view.container.textContent).not.toContain('Who installs it?');
     expect(view.container.querySelector('[data-onboarding-doer]')).toBeNull();
-    const link = buttonWith(view.container, '[data-onboarding-agent-instead]');
-    expect(link.textContent).toBe('Let an agent do it');
-    expect(link.className).not.toContain('w-full');
-    await click(link);
-    expect(screenOf(view.container)).toBe('brief');
+    expect(view.container.querySelector('[data-onboarding-agent-link], [data-onboarding-agent-instead]')).toBeNull();
+    expect(view.container.textContent).not.toMatch(/let an agent do it|have claude or codex open|setup prompt/i);
     await view.unmount();
   });
 
-  it("offers the same link on the other computer's page, so a phone can still hand the job to an agent", async () => {
+  it("has no agent entry point on the other computer's page either, on a phone", async () => {
     const { view } = await pageWith({ device: 'mobile' });
     await answerEntry(view.container, 'first-time');
 
     expect(screenOf(view.container)).toBe('elsewhere');
-    await click(buttonWith(view.container, '[data-onboarding-agent-instead]'));
-    expect(screenOf(view.container)).toBe('brief');
+    expect(view.container.querySelector('[data-onboarding-agent-link], [data-onboarding-agent-instead]')).toBeNull();
+    expect(view.container.textContent).not.toMatch(/let an agent do it|setup prompt/i);
     await view.unmount();
   });
 
@@ -380,18 +369,6 @@ describe('who installs it', () => {
     await assumed.view.unmount();
   });
 
-  it("is what Back reaches from the agent's prompt: the commands the link came from", async () => {
-    const { view } = await pageWith();
-    await enter(view.container, 'first-time', 'agent');
-    expect(screenOf(view.container)).toBe('brief');
-
-    const back = buttonWith(view.container, '[data-onboarding-back]');
-    expect(back.getAttribute('data-onboarding-back')).toBe('commands');
-    await click(back);
-    expect(screenOf(view.container)).toBe('install');
-    await view.unmount();
-  });
-
   it('remembers every answer and the step across a reload of the whole page', async () => {
     const storage = new MemoryStorage();
     const firstVisit = await pageWith({ progress: new OnboardingProgressStore({ storage, device: 'desktop' }) });
@@ -408,110 +385,26 @@ describe('who installs it', () => {
   });
 });
 
-describe('an agent doing it', () => {
-  it('is two steps that read the same wherever the reader is standing', async () => {
-    for (const device of ['desktop', 'mobile'] as const) {
-      const { view } = await pageWith({ device });
-      await enter(view.container, 'first-time', 'agent', device === 'mobile' ? 'other' : 'this');
-
-      expect(view.container.textContent).toContain('Get a daemon running · step 1 of 2');
-      expect(must(view.container.querySelector('h2'), 'the step heading').textContent).toBe(
-        'Give your agent the prompt',
+describe('a journey that was stored inside the removed agent steps', () => {
+  it('opens the start screen instead of a screen that no longer exists (C59 O7)', async () => {
+    for (const current of ['brief', 'agent-pair']) {
+      const storage = new MemoryStorage();
+      storage.setItem(
+        'fy:onboarding:progress',
+        JSON.stringify({
+          format: 1,
+          stage: 'walk',
+          route: 'first-time',
+          target: 'this',
+          doer: 'agent',
+          current,
+          furthest: current,
+        }),
       );
-      // No platform picker and no carrier question: the agent detects and chooses
-      // on the machine it is already on. The prompt is the ONLY block on the
-      // glass — it legitimately lists every documented install command, which is
-      // what makes it a brief an agent can follow.
-      expect(view.container.querySelector('[data-onboarding-channel]')).toBeNull();
-      expect(view.container.querySelector('[data-onboarding-connection]')).toBeNull();
-      expect(view.container.querySelectorAll('pre')).toHaveLength(1);
-
-      expect(view.container.querySelector('[data-onboarding-copy="Copy setup prompt"]')).not.toBeNull();
-      const prompt = must(view.container.querySelector('[data-onboarding-prompt]'), 'the prompt');
-      expect(prompt.textContent).toContain('Set up Ferretry on this machine');
-      // It no longer makes the agent ASK where the human is reading this page.
-      expect(prompt.textContent).not.toContain('Ask me whether');
-      // And no track: a rail of two says nothing.
-      expect(view.container.querySelector('[aria-label="Setup steps"]')).toBeNull();
+      const { view } = await pageWith({ progress: new OnboardingProgressStore({ storage, device: 'desktop' }) });
+      expect(screenOf(view.container)).toBe('entry');
       await view.unmount();
     }
-  });
-
-  it('sends the prompt to the other machine, because a clipboard does not go there', async () => {
-    const shared: unknown[] = [];
-    const share: SetupSharePort = async payload => {
-      shared.push(payload.text);
-    };
-    const { view } = await pageWith({ device: 'mobile', share });
-    await enter(view.container, 'first-time', 'agent');
-
-    // The gap the previous release declared honestly. There is no QR in this
-    // direction — nothing on a desk points a camera at a phone.
-    const handoff = must(view.container.querySelector('[data-onboarding-prompt-handoff]'), 'the prompt hand-off');
-    expect(handoff.textContent).toContain('another computer');
-    expect(handoff.textContent).toContain(HREF);
-    await click(buttonWith(view.container, '[data-onboarding-share-prompt]'));
-    expect(shared).toHaveLength(1);
-    expect(String(shared[0])).toContain('Set up Ferretry on this machine');
-    await view.unmount();
-  });
-
-  it('keeps the prompt to itself when the agent is on this machine', async () => {
-    const { view } = await pageWith({ share: async () => {} });
-    await enter(view.container, 'first-time', 'agent');
-
-    expect(view.container.textContent).toContain('on this computer');
-    expect(view.container.querySelector('[data-onboarding-prompt-handoff]')).toBeNull();
-    expect(view.container.querySelector('[data-onboarding-share-prompt]')).toBeNull();
-    await view.unmount();
-  });
-
-  it('pairs with what the agent printed, and hands the person to the setup flow when the daemon answers', async () => {
-    const { view, handedOff } = await pageWith();
-    await enter(view.container, 'first-time', 'agent');
-    await next(view.container);
-
-    expect(screenOf(view.container)).toBe('agent-pair');
-    // The pairing surface itself, unforked — and no `Next`, because this is the
-    // one step the page can actually verify.
-    expect(view.container.querySelector('[data-test-pair]')).not.toBeNull();
-    expect(view.container.querySelector('[data-onboarding-next]')).toBeNull();
-    // The daemon is on this machine, so the agent may already have opened a
-    // paired tab — and somebody staring at a pairing field beside a finished app
-    // concludes the setup failed.
-    expect(view.container.textContent).toContain('fy pair --open');
-
-    await click(buttonWith(view.container, '[data-test-pair]'));
-    expect(handedOff).toEqual(['first-time']);
-    // No "you are set up" page of its own: the host takes the person into the setup flow.
-    expect(view.container.textContent).not.toContain('You are set up');
-    await view.unmount();
-  });
-
-  it('claims nothing about an already-open tab when the daemon is elsewhere', async () => {
-    // `fy pair --open` opens a browser on the DAEMON's machine, which the reader
-    // is not sitting at — whether this device is a phone or a second computer.
-    for (const device of ['mobile', 'desktop'] as const) {
-      const { view } = await pageWith({ device });
-      await enter(view.container, 'first-time', 'agent', 'other');
-      await next(view.container);
-
-      expect(screenOf(view.container)).toBe('agent-pair');
-      expect(view.container.querySelector('[data-onboarding-agent-opened]')).toBeNull();
-      await view.unmount();
-    }
-  });
-
-  it('resumes mid-journey across a reload, like every other answer', async () => {
-    const storage = new MemoryStorage();
-    const first = await pageWith({ progress: new OnboardingProgressStore({ storage, device: 'mobile' }) });
-    await enter(first.view.container, 'first-time', 'agent');
-    await next(first.view.container);
-    await first.view.unmount();
-
-    const second = await pageWith({ progress: new OnboardingProgressStore({ storage, device: 'mobile' }) });
-    expect(screenOf(second.view.container)).toBe('agent-pair');
-    await second.view.unmount();
   });
 });
 
@@ -625,7 +518,7 @@ describe('another computer, by hand', () => {
     // written about somebody else's keyboard is a copy that goes wrong.
     for (const device of ['mobile', 'desktop'] as const) {
       const { view } = await pageWith({ device });
-      await enter(view.container, 'first-time', 'self', 'other');
+      await enter(view.container, 'first-time', 'other');
 
       expect(screenOf(view.container)).toBe('elsewhere');
       expect(must(view.container.querySelector('h2'), 'the step heading').textContent).toBe(
@@ -646,14 +539,14 @@ describe('another computer, by hand', () => {
       ).toBe('computer');
       expect(
         must(view.container.querySelector('[data-onboarding-handoff-url]'), 'the printed link').textContent,
-      ).toContain('#fy-setup=f1;route=first-time;target=this;doer=self;step=install');
+      ).toContain('#fy-setup=f1;route=first-time;target=this;step=install');
       await view.unmount();
     }
   });
 
   it('comes back to this device to finish pairing, then hands on to the setup flow', async () => {
     const { view, handedOff } = await pageWith({ device: 'mobile' });
-    await enter(view.container, 'first-time', 'self', 'other');
+    await enter(view.container, 'first-time', 'other');
 
     await next(view.container);
     // The reader's own half: that computer prints a code and this device uses it.
@@ -670,10 +563,10 @@ describe('another computer, by hand', () => {
       shared.push(payload.url);
     };
     const { view } = await pageWith({ device: 'mobile', share });
-    await enter(view.container, 'first-time', 'self', 'other');
+    await enter(view.container, 'first-time', 'other');
 
     await click(buttonWith(view.container, '[data-onboarding-share]'));
-    expect(shared).toEqual([`${HREF}#fy-setup=f1;route=first-time;target=this;doer=self;step=install`]);
+    expect(shared).toEqual([`${HREF}#fy-setup=f1;route=first-time;target=this;step=install`]);
     await view.unmount();
   });
 
@@ -681,7 +574,7 @@ describe('another computer, by hand', () => {
     // A button that throws `NotAllowedError` when pressed is worse than one that
     // was never drawn, and copy plus the printed link are still there.
     const { view } = await pageWith({ device: 'mobile' });
-    await enter(view.container, 'first-time', 'self', 'other');
+    await enter(view.container, 'first-time', 'other');
 
     expect(view.container.querySelector('[data-onboarding-share]')).toBeNull();
     expect(view.container.querySelector('[data-onboarding-copy="Copy setup link"]')).not.toBeNull();
@@ -690,7 +583,7 @@ describe('another computer, by hand', () => {
 
   it('offers the other thing the reader may have meant, one tap away', async () => {
     const { view } = await pageWith({ device: 'mobile' });
-    await enter(view.container, 'add-daemon', 'self', 'other');
+    await enter(view.container, 'add-daemon', 'other');
 
     expect(screenOf(view.container)).toBe('elsewhere');
     await click(buttonWith(view.container, '[data-onboarding-add-client]'));
@@ -754,7 +647,7 @@ describe('the install step', () => {
     await view.unmount();
   });
 
-  it('offers both changes of answer rather than a second copy of either', async () => {
+  it('offers the commands and the machine escape, and no agent prompt', async () => {
     const { view } = await pageWith();
     await enter(view.container, 'first-time');
     const labels = [...view.container.querySelectorAll('[data-onboarding-copy]')].map(node =>
@@ -763,12 +656,10 @@ describe('the install step', () => {
 
     expect(labels).toContain('Copy install command');
     expect(labels).toContain('Copy check');
-    // The prompt lives on the agent answer's own step, where it is the whole
-    // screen. Two copies of it would be two things to keep true.
     expect(labels).not.toContain('Copy setup prompt');
     expect(view.container.querySelector('[data-onboarding-prompt]')).toBeNull();
-    expect(view.container.querySelector('[data-onboarding-agent-link]')).not.toBeNull();
-    expect(view.container.querySelector('[data-onboarding-agent-instead]')).not.toBeNull();
+    expect(view.container.querySelector('[data-onboarding-agent-link]')).toBeNull();
+    expect(view.container.querySelector('[data-onboarding-agent-instead]')).toBeNull();
     // And the machine, because these commands are addressed to one.
     expect(view.container.querySelector('[data-onboarding-aside="Setting up a different machine?"]')).not.toBeNull();
     expect(view.container.textContent).toContain('fy --version');
@@ -822,7 +713,6 @@ describe('the steps that are gone', () => {
         stage: 'walk',
         route: 'first-time',
         target: 'this',
-        doer: 'self',
         current: 'done',
         furthest: 'done',
       }),

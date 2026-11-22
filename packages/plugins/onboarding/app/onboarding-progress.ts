@@ -8,8 +8,8 @@
  * The document carries `format: 1` inside, and the key carries no version.
  *
  * ONE READER, ONE FORMAT. A document that does not say exactly `format: 1`, or
- * that names a route without saying which computer runs the daemon or who
- * installs it, is not guessed at: it reads as the first question. That is a lost
+ * that names a route without saying which computer runs the daemon, is not
+ * guessed at: it reads as the first question. That is a lost
  * place, not lost work: nothing on this page is state the daemon does not
  * already hold.
  *
@@ -35,14 +35,12 @@ import {
   firstOnboardingStep,
   furthestOnboardingStep,
   isDaemonRouteId,
-  isOnboardingDoerId,
   isOnboardingRouteId,
   isOnboardingStepId,
   isSetupTargetId,
   isStepOfRoute,
   isTargetPossible,
   type OnboardingDaemonRouteId,
-  type OnboardingDoerId,
   type OnboardingJourney,
   type OnboardingPath,
   type OnboardingRouteId,
@@ -115,13 +113,12 @@ export const targetQuestion = (route: OnboardingDaemonRouteId): OnboardingTarget
  * The pairing entry has nothing left to ask, so it opens its steps immediately. A
  * daemon entry asks which computer only when this device has not already settled
  * that — a phone never can, and a computer setting up for the first time is
- * assumed to mean itself — and otherwise opens the install commands (who installs
- * it is a link on that page, not a question).
+ * assumed to mean itself — and otherwise opens the install commands.
  */
 export const enterOnboardingRoute = (route: OnboardingRouteId, device: DeviceKind): OnboardingProgress => {
   if (!isDaemonRouteId(route)) return walk({ route }, device);
   const target = presumedTarget(route, device);
-  return target === undefined ? targetQuestion(route) : walk({ route, target, doer: 'self' }, device);
+  return target === undefined ? targetQuestion(route) : walk({ route, target }, device);
 };
 
 /** Opening a journey on its own first step, with nothing remembered from any other. */
@@ -184,10 +181,10 @@ const parseQuestion = (fields: Record<string, unknown>, device: DeviceKind): Onb
 
 /** A stored journey, refused unless every answer on it is one this device could hold. */
 const parseWalk = (fields: Record<string, unknown>, device: DeviceKind): OnboardingProgress => {
-  const { route, current, furthest, target, doer } = fields;
+  const { route, current, furthest, target } = fields;
   if (!isOnboardingRouteId(route)) return fresh();
   if (!isOnboardingStepId(current) || !isOnboardingStepId(furthest)) return fresh();
-  const journey = parseJourney(route, device, target, doer);
+  const journey = parseJourney(route, device, target);
   if (journey === undefined) return fresh();
   const path: OnboardingPath = { ...journey, device };
   /* A step from another journey's list is not this reader's place; it is a mismatch. */
@@ -197,19 +194,13 @@ const parseWalk = (fields: Record<string, unknown>, device: DeviceKind): Onboard
 };
 
 /** The stored answers as a journey, or nothing when they do not make one. */
-const parseJourney = (
-  route: OnboardingRouteId,
-  device: DeviceKind,
-  target: unknown,
-  doer: unknown,
-): OnboardingJourney | undefined => {
+const parseJourney = (route: OnboardingRouteId, device: DeviceKind, target: unknown): OnboardingJourney | undefined => {
   if (!isDaemonRouteId(route)) {
-    /* The pairing entry answers neither question, so a document holding one is not this. */
-    return target === undefined && doer === undefined ? { route } : undefined;
+    /* The pairing entry answers no question, so a document holding an answer is not this. */
+    return target === undefined ? { route } : undefined;
   }
   if (!isSetupTargetId(target) || !isTargetPossible(target, device)) return undefined;
-  if (!isOnboardingDoerId(doer)) return undefined;
-  return { route, target, doer };
+  return { route, target };
 };
 
 export interface OnboardingProgressStorage {
@@ -334,7 +325,7 @@ export class OnboardingProgressStore {
   path(at: OnboardingWalking): OnboardingPath {
     return at.route === 'add-client'
       ? { route: 'add-client', device: this.#device }
-      : { route: at.route, target: at.target, doer: at.doer, device: this.#device };
+      : { route: at.route, target: at.target, device: this.#device };
   }
 
   snapshot = (): OnboardingProgress => {
@@ -365,35 +356,16 @@ export class OnboardingProgressStore {
     const at = this.snapshot();
     const on = route ?? routeOf(at);
     if (on === undefined || !isTargetPossible(target, this.#device)) return at;
-    return this.#commit(walk({ route: on, target, doer: 'self' }, this.#device));
+    return this.#commit(walk({ route: on, target }, this.#device));
   }
 
   /**
-   * CHANGES THE ANSWER FROM INSIDE THE JOURNEY, which is a different act from
-   * answering the question.
-   *
-   * A reader looking at commands they did not want should not have to find their
-   * way back to a question and re-answer it.
-   */
-  switchDoer(doer: OnboardingDoerId): OnboardingProgress {
-    const at = this.snapshot();
-    if (at.stage !== 'walk' || at.route === 'add-client') return at;
-    return this.#commit(walk({ route: at.route, target: at.target, doer }, this.#device));
-  }
-
-  /**
-   * Back out of a journey, to WHICHEVER QUESTION OPENED IT.
-   *
-   * The agent's prompt was reached from the install page's link, so Back from it lands on the install page again (the
-   * same machine, commands by hand), not on a question. From the first page of the commands it is the target question
+   * Back out of a journey, to WHICHEVER QUESTION OPENED IT: the target question
    * when one was asked, and the start screen otherwise.
    */
   leaveRoute(): OnboardingProgress {
     const at = this.snapshot();
     if (at.stage !== 'walk') return at;
-    if (at.route !== 'add-client' && at.doer === 'agent') {
-      return this.#commit(walk({ route: at.route, target: at.target, doer: 'self' }, this.#device));
-    }
     if (at.route !== 'add-client' && questionBehindRoute(at.route, this.#device) === 'target') {
       return this.#commit(targetQuestion(at.route));
     }

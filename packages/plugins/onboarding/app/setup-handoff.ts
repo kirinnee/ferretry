@@ -36,14 +36,12 @@ import type { DeviceKind } from './device-kind.ts';
 import {
   firstOnboardingStep,
   isDaemonRouteId,
-  isOnboardingDoerId,
   isOnboardingRouteId,
   isOnboardingStepId,
   isSetupTargetId,
   isStepOfRoute,
   isTargetPossible,
   type OnboardingDaemonRouteId,
-  type OnboardingDoerId,
   type OnboardingJourney,
   type OnboardingPath,
   type OnboardingRouteId,
@@ -67,29 +65,26 @@ export interface SetupHandoff {
   readonly step: OnboardingStepId;
   /** Which computer runs the daemon. Only the daemon subflow has one. */
   readonly target?: SetupTargetId | undefined;
-  /** Who installs it. Only the daemon subflow has one. */
-  readonly doer?: OnboardingDoerId | undefined;
 }
 
 /** The keys a payload may carry, so an unknown one is refused rather than ignored. */
-const FIELDS = ['route', 'step', 'target', 'doer'] as const;
+const FIELDS = ['route', 'step', 'target'] as const;
 
 /**
  * The payload, as it appears after the `=`.
  *
  * Semicolons rather than JSON: this is read aloud, typed by hand and printed
  * inside a QR whose size grows with every character, and a base64 blob is three
- * of those things done badly. NAMED rather than positional — five
- * fields of which three are optional cannot be read by counting, and the reader
- * about to open this on their laptop can still see that it says `first-time`,
- * `this`, `self` and `install` and nothing else.
+ * of those things done badly. NAMED rather than positional — fields of which one
+ * is optional cannot be read by counting, and the reader about to open this on
+ * their laptop can still see that it says `first-time`, `this` and `install` and
+ * nothing else.
  */
 export const encodeSetupHandoff = (handoff: SetupHandoff): string =>
   [
     SETUP_HANDOFF_FORMAT,
     `route=${handoff.route}`,
     ...(handoff.target === undefined ? [] : [`target=${handoff.target}`]),
-    ...(handoff.doer === undefined ? [] : [`doer=${handoff.doer}`]),
     `step=${handoff.step}`,
   ].join(';');
 
@@ -116,7 +111,7 @@ const payloadFields = (raw: string): Map<string, string> | undefined => {
  * reader somewhere nobody chose. The entry chooser is always a correct answer here.
  *
  * A FIELD THAT COULD NOT MATTER IS A REFUSAL, not something to drop quietly. The
- * pairing entry has no target and no doer — so a payload carrying one of those
+ * pairing entry has no target — so a payload carrying one
  * was not produced by this page, and the honest reading of a payload
  * nobody here wrote is that it is not a hand-off.
  */
@@ -128,15 +123,8 @@ export const parseSetupHandoff = (raw: string | null | undefined): SetupHandoff 
   const step = fields.get('step');
   if (!isOnboardingRouteId(route) || !isOnboardingStepId(step)) return undefined;
   const target = fields.get('target');
-  const doer = fields.get('doer');
   if (target !== undefined && (!isSetupTargetId(target) || !isDaemonRouteId(route))) return undefined;
-  if (doer !== undefined && (!isOnboardingDoerId(doer) || !isDaemonRouteId(route))) return undefined;
-  return {
-    route,
-    step,
-    ...(target === undefined ? {} : { target }),
-    ...(doer === undefined ? {} : { doer }),
-  };
+  return { route, step, ...(target === undefined ? {} : { target }) };
 };
 
 /**
@@ -175,7 +163,7 @@ export const setupHandoffUrl = (href: string, handoff: SetupHandoff): string => 
  * The same link with the place stripped off — the one a human can retype.
  *
  * A reader who is copying this off a phone screen onto a laptop keyboard should
- * not have to transcribe `#fy-setup=f1;route=first-time;target=this;doer=self;step=install`
+ * not have to transcribe `#fy-setup=f1;route=first-time;target=this;step=install`
  * correctly, and they do not need to: the bare setup page asks the same question,
  * and answering it by hand costs two taps. Offered BESIDE the full link, never
  * instead of it.
@@ -196,8 +184,7 @@ export const setupPageUrl = (href: string): string => new URL('/setup', href).to
  * - A LINK THAT DOES NOT SAY WHICH COMPUTER ASKS. A payload with no machine names
  *   a journey whose steps are not decided yet, and inventing one would be exactly
  *   the damaged-state-as-empty-state mistake — so the reader is asked that
- *   question. A link with no doer is NOT incomplete: who installs it is no longer
- *   a question (r10 O5), so it lands on the commands, "I do it myself".
+ *   question.
  */
 export type SetupLanding =
   | { readonly kind: 'walk'; readonly journey: OnboardingJourney; readonly step: OnboardingStepId }
@@ -220,5 +207,5 @@ export const landSetupHandoff = (handoff: SetupHandoff, device: DeviceKind): Set
   /* The device's own answer wins whenever the proposed one is impossible here. */
   const target = handoff.target !== undefined && isTargetPossible(handoff.target, device) ? handoff.target : presumed;
   if (target === undefined) return { kind: 'ask', question: 'target', route };
-  return walkFrom({ route, target, doer: handoff.doer ?? 'self' }, device, handoff.step);
+  return walkFrom({ route, target }, device, handoff.step);
 };

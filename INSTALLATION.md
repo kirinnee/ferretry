@@ -505,6 +505,6 @@ fy daemon reset
 ```
 
 The landing page's `/get-started` guide (`packages/pwa/get-started/index.html`) shows commands from
-this document, and its "Let your agent set it up" prompt is assembled from those same lines in the browser. Every command it shows must appear here, in a fenced block, exactly as written —
+this document. Every command it shows must appear here, in a fenced block, exactly as written —
 `scripts/validate/cli-contracts.sh installation-parity` refuses one that does not, so change a
 command here first.

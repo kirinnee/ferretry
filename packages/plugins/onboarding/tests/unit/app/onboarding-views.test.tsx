@@ -244,7 +244,7 @@ describe('S14 the first-run route’s pairing hand-off', () => {
         <OnboardingRoute
           params={{}}
           navigate={to => moves.push(to)}
-          location={() => `https://f.invalid/onboarding#fy-setup=f1;route=${route};target=other;doer=self;step=scan`}
+          location={() => `https://f.invalid/onboarding#fy-setup=f1;route=${route};target=other;step=scan`}
           chooseDaemon={async () => undefined}
         />,
       );
@@ -498,7 +498,7 @@ describe('S14 the first-run route’s pairing hand-off', () => {
   });
 
   /** A first-run journey that stands on the daemon step, where the connection note is drawn. */
-  const ON_DAEMON_STEP = 'https://f.invalid/onboarding#fy-setup=f1;route=first-time;target=this;doer=self;step=daemon';
+  const ON_DAEMON_STEP = 'https://f.invalid/onboarding#fy-setup=f1;route=first-time;target=this;step=daemon';
   const noteOf = (view: { container: HTMLElement }) =>
     view.container.querySelector('[data-onboarding-fallback]')?.getAttribute('data-onboarding-fallback');
   const settleTurn = async (): Promise<void> => {
