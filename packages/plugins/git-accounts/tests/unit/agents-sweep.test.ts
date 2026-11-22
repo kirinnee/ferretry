@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { ChildHandle, Clock, SpawnPort, SpawnResult } from '@ferretry/kernel/contract';
 import { bunSpawn } from '@ferretry/kernel/host';
@@ -13,7 +13,7 @@ import {
   ownAgentAccount,
   sweepLeftoverAgents,
 } from '../../daemon/features/ssh-keys/sweep.ts';
-import { tmpRunFolder } from './run-folder.ts';
+import { bareNames, tmpRunFolder } from './run-folder.ts';
 
 const FOLDER = '/fy/state/git-accounts/downloads';
 const ME = 1000;
@@ -29,6 +29,7 @@ function machine(initial: readonly AgentProcess[], signalable: (pid: number) => 
   const signalled: number[] = [];
   const table: AgentProcessTable = {
     list: async () => live,
+    read: async pid => live.find(entry => entry.pid === pid),
     terminate: pid => {
       signalled.push(pid);
       if (!signalable(pid)) return false;
@@ -117,6 +118,7 @@ describe('the boot sweep (fake processes)', () => {
     const warned: string[] = [];
     const table: AgentProcessTable = {
       list: async () => undefined,
+      read: async () => undefined,
       terminate: () => {
         throw new Error('must not signal');
       },
@@ -139,6 +141,7 @@ describe('the boot sweep (fake processes)', () => {
       list: async () => {
         throw new Error('boom');
       },
+      read: async () => undefined,
       terminate: () => false,
     };
     await expect(sweep(table)).resolves.toBe(0);
@@ -150,6 +153,7 @@ describe('the boot sweep (fake processes)', () => {
     const table: AgentProcessTable = {
       // The agent is still listed on the first look after the signal, and gone on the next.
       list: async () => (++lists <= 2 ? [agent(5001, OWN)] : []),
+      read: async () => agent(5001, OWN),
       terminate: pid => (events.push(`terminate ${String(pid)}`), true),
     };
     await sweepLeftoverAgents({
@@ -184,6 +188,7 @@ describe('the supervisor ends leftovers BEFORE its first agent starts (boot)', (
       let live = [agent(5001, own), agent(5002, `ssh-agent -D -a /elsewhere/${ID}.sock`)];
       const table: AgentProcessTable = {
         list: async () => live,
+        read: async pid => live.find(entry => entry.pid === pid),
         terminate: pid => {
           events.push(
             `terminate ${String(pid)} stale-socket-present=${String(existsSync(`${folder.path}/${ID}.sock`))}`,
@@ -214,6 +219,7 @@ describe('the supervisor ends leftovers BEFORE its first agent starts (boot)', (
         folder,
         { after: () => () => undefined, sleep: async () => undefined },
         quiet,
+        bareNames,
         {
           table,
           uid: ME,
@@ -234,6 +240,134 @@ describe('the supervisor ends leftovers BEFORE its first agent starts (boot)', (
     } finally {
       folder.destroy();
     }
+  });
+});
+
+describe('the pid is read again just before the signal (pid reuse)', () => {
+  const sweep = (table: AgentProcessTable) =>
+    sweepLeftoverAgents({
+      leftovers: { table, uid: ME, self: SELF },
+      folder: FOLDER,
+      remove: async () => undefined,
+      clock: instant,
+      log: quiet,
+    });
+  const withRead = (now: AgentProcess | undefined) => {
+    const signalled: number[] = [];
+    const table: AgentProcessTable = {
+      list: async () => [agent(5001, OWN)],
+      read: async () => now,
+      terminate: pid => (signalled.push(pid), true),
+    };
+    return { table, signalled };
+  };
+
+  test.each([
+    ['the pid is gone', undefined],
+    ['the pid now runs another program', agent(5001, 'sleep 300')],
+    ['the pid now runs another agent line', agent(5001, `ssh-agent -D -a ${FOLDER}/gha_99.sock`)],
+    ['the pid now belongs to another user', agent(5001, OWN, ME + 1)],
+  ])('%s: it is NOT signalled', async (_name, now) => {
+    const { table, signalled } = withRead(now);
+    expect(await sweep(table)).toBe(0);
+    expect(signalled).toEqual([]);
+  });
+
+  test('still the same agent of this uid: it is signalled', async () => {
+    const { table, signalled } = withRead(agent(5001, OWN));
+    expect(await sweep(table)).toBe(1);
+    expect(signalled).toEqual([5001]);
+  });
+});
+
+describe('the table is read without running ps on Linux, and with an absolute system ps elsewhere', () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+  const tmp = () => {
+    const root = mkdtempSync(`${tmpdir()}/e6-fake-`);
+    roots.push(root);
+    return root;
+  };
+  const neverRun = (calls: string[]): Pick<SpawnPort, 'run'> => ({
+    run: async program => {
+      calls.push(program);
+      throw new Error('nothing may be run');
+    },
+  });
+
+  test('Linux lists /proc entries (numeric names, a real command line, a plain uid) and runs nothing', async () => {
+    const proc = tmp();
+    const put = (pid: string, cmdline: string, uids: string) => {
+      mkdirSync(`${proc}/${pid}`);
+      writeFileSync(`${proc}/${pid}/cmdline`, cmdline);
+      writeFileSync(`${proc}/${pid}/status`, `Name:\tx\nUid:\t${uids}\nGid:\t1\t1\t1\t1\n`);
+    };
+    put('4242', 'ssh-agent\0-D\0-a\0/my folder/gha_7.sock\0', '1000\t1000\t1000\t1000');
+    put('4243', '', '1000\t1000\t1000\t1000');
+    put('4244', 'su\0-c\0x\0', '1000\t0\t0\t0');
+    mkdirSync(`${proc}/self`);
+    const calls: string[] = [];
+    const table = psAgentProcesses(neverRun(calls), { platform: 'linux', procRoot: proc });
+    expect(await table.list()).toEqual([{ pid: 4242, uid: 1000, args: 'ssh-agent -D -a /my folder/gha_7.sock' }]);
+    expect(await table.read(4242)).toEqual({ pid: 4242, uid: 1000, args: 'ssh-agent -D -a /my folder/gha_7.sock' });
+    expect(await table.read(4244)).toBeUndefined();
+    expect(await table.read(9999)).toBeUndefined();
+    expect(calls).toEqual([]);
+  });
+
+  test('Linux with no /proc answers undefined, never a ps', async () => {
+    const calls: string[] = [];
+    const table = psAgentProcesses(neverRun(calls), { platform: 'linux', procRoot: `${tmp()}/missing` });
+    expect(await table.list()).toBeUndefined();
+    expect(calls).toEqual([]);
+  });
+
+  test('macOS runs only an absolute system ps, never the bare name', async () => {
+    const root = tmp();
+    writeFileSync(`${root}/ps`, '#!/bin/sh\n');
+    chmodSync(`${root}/ps`, 0o755);
+    const runs: string[] = [];
+    const table = psAgentProcesses(
+      {
+        run: async program => {
+          runs.push(program);
+          return { exitCode: 0, signal: null, stdout: ' 77 501 ssh-agent -D -a /x/gha_1.sock\n', stderr: '' };
+        },
+      },
+      { platform: 'darwin', systemPs: [`${root}/missing-ps`, `${root}/ps`] },
+    );
+    expect(await table.list()).toEqual([{ pid: 77, uid: 501, args: 'ssh-agent -D -a /x/gha_1.sock' }]);
+    expect(await table.read(77)).toEqual({ pid: 77, uid: 501, args: 'ssh-agent -D -a /x/gha_1.sock' });
+    expect(runs).toEqual([`${root}/ps`, `${root}/ps`]);
+  });
+
+  test('macOS with no system ps fails closed: undefined, nothing run', async () => {
+    const calls: string[] = [];
+    const table = psAgentProcesses(neverRun(calls), { platform: 'darwin', systemPs: [`${tmp()}/nope`] });
+    expect(await table.list()).toBeUndefined();
+    expect(await table.read(77)).toBeUndefined();
+    expect(calls).toEqual([]);
+  });
+
+  test('a pid of 0 or 1 is never signalled, and a signal that throws answers false', () => {
+    const sent: number[] = [];
+    const table = psAgentProcesses(neverRun([]), {
+      platform: 'linux',
+      kill: pid => {
+        sent.push(pid);
+        if (pid === 9) throw new Error('ESRCH');
+      },
+    });
+    expect([
+      table.terminate(0),
+      table.terminate(1),
+      table.terminate(-5),
+      table.terminate(9),
+      table.terminate(10),
+    ]).toEqual([false, false, false, false, true]);
+    expect(sent).toEqual([9, 10]);
   });
 });
 
@@ -327,6 +461,7 @@ describe.skipIf(!HAVE || getuid === undefined || process.platform !== 'linux')(
         folder,
         { after: () => () => undefined, sleep: delay => new Promise(resolve => setTimeout(resolve, delay)) },
         quiet,
+        bareNames,
         { table, uid: getuid?.() ?? -1, self: process.pid },
       );
       await swept.sweepLeftovers();
@@ -338,6 +473,54 @@ describe.skipIf(!HAVE || getuid === undefined || process.platform !== 'linux')(
       expect(theirs.signalCode).toBeNull();
       expect(existsSync(`${strangers}/gha_77.sock`)).toBe(true);
       expect(((await table.list()) ?? []).some(entry => entry.pid === theirs.pid)).toBe(true);
+    }, 30_000);
+  },
+);
+
+/**
+ * A `ps` planted EARLIER on the daemon's `PATH` (a shim folder, another install's shims, a symlink alias) must never be
+ * run: it would name any same-user pid as "ours" and the sweep would SIGTERM it. Everything here is a temp folder and a
+ * decoy this test started itself; no process of the machine is ever signalled.
+ */
+describe.skipIf(!HAVE || getuid === undefined || process.platform !== 'linux')(
+  'a planted ps earlier on PATH is not used (Linux reads /proc, runs nothing)',
+  () => {
+    const cleanup: Array<() => void> = [];
+    afterEach(() => {
+      for (const undo of cleanup.splice(0)) undo();
+    });
+
+    test('the sweep does not run the planted ps and the decoy it names is NOT signalled', async () => {
+      const folder = tmpRunFolder();
+      const planted = mkdtempSync(`${tmpdir()}/e6-plant-`);
+      // The decoy: a process of ours that is NOT an agent (its command line is plain `sleep`).
+      const decoy = Bun.spawn(['sleep', '300'], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
+      cleanup.push(() => {
+        decoy.kill('SIGKILL');
+        folder.destroy();
+        rmSync(planted, { recursive: true, force: true });
+      });
+      const marker = `${planted}/ran`;
+      // The fake `ps` records that it ran and claims the decoy is this plugin's own agent.
+      writeFileSync(
+        `${planted}/ps`,
+        `#!/bin/sh\n: > '${marker}'\nprintf '%s %s %s\\n' ${decoy.pid} ${getuid?.() ?? 0} 'ssh-agent -D -a ${folder.path}/gha_77.sock'\n`,
+      );
+      chmodSync(`${planted}/ps`, 0o755);
+      const path = `${planted}:${process.env.PATH ?? ''}`;
+      const real = bunSpawn({ PATH: path }, () => undefined, {}, { PATH: path });
+      const table = psAgentProcesses({ run: real.run.bind(real) });
+      const swept = await sweepLeftoverAgents({
+        leftovers: { table, uid: getuid?.() ?? -1, self: process.pid },
+        folder: folder.path,
+        remove: async () => undefined,
+        clock: { sleep: async () => undefined },
+        log: quiet,
+      });
+      expect(existsSync(marker)).toBe(false);
+      expect(swept).toBe(0);
+      expect(decoy.exitCode).toBeNull();
+      expect(decoy.signalCode).toBeNull();
     }, 30_000);
   },
 );

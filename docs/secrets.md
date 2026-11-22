@@ -2133,13 +2133,24 @@ key, as for every secret here ([threat model](#threat-model)).
 
 **An unclean daemon death, and the boot sweep.** The agent is a child of the daemon. After a `SIGKILL` nothing stops it: it
 keeps the key in its memory, behind a `0600` socket in a `0700` folder of this user. The next boot ends it, before any new
-agent starts: it lists the machine's processes once (`ps`) and sends `SIGTERM`, by pid, to each process that is **all of**
+agent starts: it lists the machine's processes once and sends `SIGTERM`, by pid, to each process that is **all of**
 `ssh-agent -D -a <this plugin's own folder>/gha_<digits>.sock` (the exact command line the daemon starts, in its own
 folder, so another install's agents, the person's login agent and any other `ssh-agent` have other paths), owned by the
 daemon's own uid, and not the daemon itself; it waits for each to exit, then removes its socket. A list that cannot be
-read ends the sweep with a warning (nothing is guessed). **GAP:** the sweep cannot tell a leftover from the live agent of a
+read ends the sweep with a warning (nothing is guessed). **The process table is never read through a program found on
+`PATH`.** A `ps` planted earlier on the daemon's `PATH` (a shim folder, another install's shims) could name any same-user pid
+as "ours" and have it signalled. On Linux the sweep reads `/proc/<pid>/cmdline` and `/proc/<pid>/status` directly and runs
+nothing; elsewhere (macOS) it runs only the absolute system `ps` (`/bin/ps`, then `/usr/bin/ps`), sealed, and with neither
+present the sweep does nothing. The pid is **read again just before the signal** and is signalled only while its command line
+is still word for word the same and its owner is still this uid. **GAP — pid reuse:** between that second read and the
+`SIGTERM` there is still a window of microseconds in which an exited agent's pid could be handed to another process of the
+same user; the re-check shrinks it from "however long the listing took" to that instant and cannot close it (a signal by
+pid has no handle to hold). **GAP:** the sweep cannot tell a leftover from the live agent of a
 second daemon sharing the same state home, which cannot work anyway (one socket per account); and a power loss takes the
-agents with the machine. A clean stop ends every agent; the folder stays (a surviving ferret's paths must keep their meaning), holding no key.
+agents with the machine. **`ssh-agent` and `ssh-add` are found like `gh`** (below): the `PATH` folders inside the state home
+are dropped, the kernel resolves the name in what is left, an answer still inside the state home is refused, and the
+program is run by that absolute path. `ssh-add -` receives the account's PRIVATE KEY on stdin, so a planted `ssh-add` would
+read it; with no trusted `ssh-agent` or `ssh-add` found no agent starts, the key is sent nowhere and the ask answers 503. A clean stop ends every agent; the folder stays (a surviving ferret's paths must keep their meaning), holding no key.
 
 **GAP — a predictable socket name.** The socket is `<state>/git-accounts/downloads/gha_<id>.sock`: any process of the
 same OS user can connect to it (the folder is `0700` and the socket `0600`, so no other user can). That is "use", above.
@@ -2316,8 +2327,11 @@ plugin.
 (it runs as the ferret) and adds `--head <branch>`. In a linked **worktree** `.git` is a file; its `gitdir:` line is read
 as text and the `HEAD` there is the worktree's own branch (never the main checkout's). Each of those files is `lstat`ed
 first and read only when it is a regular file (a symbolic link counts when it points at one): opening a FIFO named
-`.git/HEAD` would block the verb for good, so such a name adds nothing and the argv goes on unchanged. The daemon never
-opens a file in an agent's folder.
+`.git/HEAD` would block the verb for good, so such a name adds nothing and the argv goes on unchanged. **GAP — `lstat` then
+open:** the ferret can swap the file for a FIFO between the `lstat` and the `open`, and that one `fy gh` then blocks. It
+is a self-denial of service (the ferret hangs its own verb, which runs as the ferret; the daemon and every other caller are
+unaffected, and no data is read from anywhere the ferret could not already read), so it is declared rather than closed.
+The daemon never opens a file in an agent's folder.
 
 `fy gh` sends the daemon `gh`'s argv alone: its own `--account <login>` and the outer `--` are removed, and everything
 after the first `--` is passed byte for byte. It waits for the daemon's own budget (5 minutes for a followed

@@ -14,7 +14,8 @@
  * - its owner is this daemon's own uid;
  * - it is not this daemon, nor pid 0 or 1.
  *
- * Signalled by pid and by SIGTERM only; nothing is matched by name alone. A table that cannot be read ends the sweep
+ * Signalled by pid and by SIGTERM only; nothing is matched by name alone, and the pid is read again just before the
+ * signal (a pid that exited and was reused since the listing is left alone). A table that cannot be read ends the sweep
  * with a warning (nothing is guessed).
  */
 import type { Clock, Log } from '@ferretry/kernel/contract';
@@ -33,6 +34,8 @@ export interface AgentProcess {
 export interface AgentProcessTable {
   /** Every process the host can list; `undefined` when it cannot be listed. */
   list(): Promise<readonly AgentProcess[] | undefined>;
+  /** One pid read FRESH (its command line and owner now); `undefined` when it is gone or cannot be read. */
+  read(pid: number): Promise<AgentProcess | undefined>;
   /** SIGTERM to one pid; `false` when it was already gone or may not be signalled. */
   terminate(pid: number): boolean;
 }
@@ -96,7 +99,14 @@ export async function sweepLeftoverAgents(ports: SweepPorts): Promise<number> {
     }
     const found = ours(listed);
     if (found.length === 0) return 0;
-    const ended = found.filter(entry => table.terminate(entry.pid));
+    const ended: AgentProcess[] = [];
+    for (const entry of found) {
+      // The listing is older than this moment, and a pid that has exited may since belong to someone else: read it AGAIN
+      // and signal it only while it is still, word for word, the same agent of this uid.
+      const now = await table.read(entry.pid);
+      if (now === undefined || now.args !== entry.args || ours([now]).length === 0) continue;
+      if (table.terminate(entry.pid)) ended.push(entry);
+    }
     // Each agent removes its own socket as it exits, and would remove a NEW agent's at that path: wait until they are gone.
     const pids = new Set(ended.map(entry => entry.pid));
     for (let waited = 0; waited < GONE_WAIT_MS && pids.size > 0; waited += GONE_POLL_MS) {

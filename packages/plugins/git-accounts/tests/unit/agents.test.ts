@@ -6,7 +6,8 @@ import type { ChildHandle, Clock, SpawnOptions, SpawnPort, SpawnResult } from '@
 import { bunSpawn } from '@ferretry/kernel/host';
 import type { GitAccountId } from '../../contract/index.ts';
 import { AgentSupervisor } from '../../daemon/features/ssh-keys/agents.ts';
-import { tmpRunFolder } from './run-folder.ts';
+import { programLocator } from '../../daemon/lib/program-locator.ts';
+import { bareNames, tmpRunFolder } from './run-folder.ts';
 
 const ID = 'gha_77' as GitAccountId;
 const HAVE_TOOLS = ['ssh-agent', 'ssh-add', 'ssh-keygen'].every(
@@ -92,7 +93,7 @@ describe('an agent that is slow, hung or in the way of a stop (fake processes)',
       if (probes === 1) throw new Error('could not spawn');
       return result(probes === 2 ? 2 : 1);
     });
-    const supervisor = new AgentSupervisor(tools, folder, stubClock(false).clock, quiet);
+    const supervisor = new AgentSupervisor(tools, folder, stubClock(false).clock, quiet, bareNames);
     expect(await supervisor.socketFor(ID, key)).toBe(`${folder.path}/gha_77.sock`);
     expect(probes).toBe(3);
     await supervisor.stopAll();
@@ -101,7 +102,7 @@ describe('an agent that is slow, hung or in the way of a stop (fake processes)',
   test('an agent that never listens ends the whole wait at the deadline: 503, the child killed, the key never sent', async () => {
     const { tools, runs, killed } = scripted(() => result(2));
     const time = stubClock(true);
-    const supervisor = new AgentSupervisor(tools, folder, time.clock, quiet);
+    const supervisor = new AgentSupervisor(tools, folder, time.clock, quiet, bareNames);
     const asked = supervisor.socketFor(ID, key);
     const outcome = asked.then(
       () => undefined,
@@ -119,7 +120,7 @@ describe('an agent that is slow, hung or in the way of a stop (fake processes)',
   test('a probe that never returns cannot hold the wait past the deadline either', async () => {
     const { tools, runs, killed } = scripted(() => new Promise<SpawnResult>(() => undefined));
     const time = stubClock(true);
-    const supervisor = new AgentSupervisor(tools, folder, time.clock, quiet);
+    const supervisor = new AgentSupervisor(tools, folder, time.clock, quiet, bareNames);
     const asked = supervisor.socketFor(ID, key);
     const outcome = asked.then(
       () => undefined,
@@ -137,7 +138,7 @@ describe('an agent that is slow, hung or in the way of a stop (fake processes)',
     const { tools, runs, killed } = scripted(async (_program, args) =>
       args[0] === '-l' ? await gate.promise : result(0),
     );
-    const supervisor = new AgentSupervisor(tools, folder, stubClock(false).clock, quiet);
+    const supervisor = new AgentSupervisor(tools, folder, stubClock(false).clock, quiet, bareNames);
     const asked = supervisor.socketFor(ID, key);
     const outcome = asked.then(
       () => undefined,
@@ -156,7 +157,7 @@ describe('an agent that is slow, hung or in the way of a stop (fake processes)',
     const { tools, runs, killed } = scripted(async (_program, args) =>
       args[0] === '-' ? await gate.promise : result(1),
     );
-    const supervisor = new AgentSupervisor(tools, folder, stubClock(false).clock, quiet);
+    const supervisor = new AgentSupervisor(tools, folder, stubClock(false).clock, quiet, bareNames);
     const asked = supervisor.socketFor(ID, key);
     const outcome = asked.then(
       () => undefined,
@@ -201,7 +202,7 @@ describe.skipIf(!HAVE_TOOLS)('the real kernel spawn with a real ssh-agent (skipp
     const privateKey = await keyText();
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const { tools, started } = realSpawn();
-      const supervisor = new AgentSupervisor(tools, folder, realClock, quiet);
+      const supervisor = new AgentSupervisor(tools, folder, realClock, quiet, bareNames);
       try {
         const socket = await supervisor.socketFor(ID, () => Promise.resolve(privateKey));
         expect(socket).toBeDefined();
@@ -215,7 +216,7 @@ describe.skipIf(!HAVE_TOOLS)('the real kernel spawn with a real ssh-agent (skipp
   test('an agent killed uncleanly leaves its socket behind and the next start binds the SAME path again', async () => {
     const privateKey = await keyText();
     const { tools, started } = realSpawn();
-    const supervisor = new AgentSupervisor(tools, folder, realClock, quiet);
+    const supervisor = new AgentSupervisor(tools, folder, realClock, quiet, bareNames);
     try {
       const first = (await supervisor.socketFor(ID, () => Promise.resolve(privateKey))) as string;
       started[0]?.kill('SIGKILL');
@@ -233,7 +234,7 @@ describe.skipIf(!HAVE_TOOLS)('the real kernel spawn with a real ssh-agent (skipp
   test('a daemon restart or update: the new supervisor serves the same socket path, and the old ferret’s ssh-add still works', async () => {
     const privateKey = await keyText();
     const first = realSpawn();
-    const one = new AgentSupervisor(first.tools, folder, realClock, quiet);
+    const one = new AgentSupervisor(first.tools, folder, realClock, quiet, bareNames);
     const socket = (await one.socketFor(ID, () => Promise.resolve(privateKey))) as string;
     const known = await one.knownHostsFile();
     await one.stopAll();
@@ -241,7 +242,7 @@ describe.skipIf(!HAVE_TOOLS)('the real kernel spawn with a real ssh-agent (skipp
       2,
     );
     const second = realSpawn();
-    const two = new AgentSupervisor(second.tools, folder, realClock, quiet);
+    const two = new AgentSupervisor(second.tools, folder, realClock, quiet, bareNames);
     try {
       expect(await two.socketFor(ID, () => Promise.resolve(privateKey))).toBe(socket);
       expect(await two.knownHostsFile()).toBe(known);
@@ -260,7 +261,7 @@ describe.skipIf(!HAVE_TOOLS)('the real kernel spawn with a real ssh-agent (skipp
 describe('a stable path (fake processes)', () => {
   test('the socket, the known_hosts and the public key sit in one private folder at the same path on every run', async () => {
     const { tools } = scripted((_program, args) => result(args[0] === '-' ? 0 : 1));
-    const first = new AgentSupervisor(tools, folder, stubClock(false).clock, quiet);
+    const first = new AgentSupervisor(tools, folder, stubClock(false).clock, quiet, bareNames);
     const socket = await first.socketFor(ID, key);
     const known = await first.knownHostsFile();
     const pub = await first.publicKeyFile(ID, 'ssh-ed25519 AAAA key');
@@ -274,7 +275,7 @@ describe('a stable path (fake processes)', () => {
     expect(existsSync(known)).toBe(true);
     expect(statSync(known).mode & 0o777).toBe(0o600);
     expect(statSync(folder.path).mode & 0o777).toBe(0o700);
-    const second = new AgentSupervisor(tools, folder, stubClock(false).clock, quiet);
+    const second = new AgentSupervisor(tools, folder, stubClock(false).clock, quiet, bareNames);
     expect(await second.socketFor(ID, key)).toBe(socket);
     expect(await second.knownHostsFile()).toBe(known);
     await second.stopAll();
@@ -303,7 +304,7 @@ describe('a stable path (fake processes)', () => {
         };
       },
     };
-    const supervisor = new AgentSupervisor(tools, folder, stubClock(true).clock, quiet);
+    const supervisor = new AgentSupervisor(tools, folder, stubClock(true).clock, quiet, bareNames);
     await supervisor.socketFor(ID, key);
     supervisor.stop(ID);
     const again = supervisor.socketFor(ID, key);
@@ -316,10 +317,111 @@ describe('a stable path (fake processes)', () => {
 
   test('a folder that is not private, or a path too long for a socket, starts nothing', async () => {
     const { tools, runs } = scripted(() => result(1));
-    const open = new AgentSupervisor(tools, { ...folder, isPrivate: async () => false }, stubClock(false).clock, quiet);
+    const open = new AgentSupervisor(
+      tools,
+      { ...folder, isPrivate: async () => false },
+      stubClock(false).clock,
+      quiet,
+      bareNames,
+    );
     await expect(open.socketFor(ID, key)).rejects.toMatchObject({ status: 503 });
-    const long = new AgentSupervisor(tools, { ...folder, path: `/${'x'.repeat(120)}` }, stubClock(false).clock, quiet);
+    const long = new AgentSupervisor(
+      tools,
+      { ...folder, path: `/${'x'.repeat(120)}` },
+      stubClock(false).clock,
+      quiet,
+      bareNames,
+    );
     await expect(long.socketFor(ID, key)).rejects.toMatchObject({ status: 503 });
     expect(runs).toHaveLength(0);
+  });
+});
+
+describe('ssh-agent and ssh-add are the trusted ones, never a planted file (the private key rides ssh-add -)', () => {
+  const HOME = '/h/.fy';
+  /** Tools that record every program started or run and what went in on stdin. */
+  function recording() {
+    const calls: Array<{ program: string; args: readonly string[]; stdin?: unknown }> = [];
+    const empty = () => new ReadableStream<Uint8Array>({ start: c => c.close() });
+    const tools: Tools = {
+      run: async (program, args, options) => {
+        calls.push({ program, args, stdin: options?.stdin });
+        return result(args[0] === '-l' ? 1 : 0);
+      },
+      start: (program, args): ChildHandle => {
+        calls.push({ program, args });
+        return {
+          pid: 1,
+          stdout: empty(),
+          stderr: empty(),
+          write: () => undefined,
+          kill: () => undefined,
+          exited: new Promise(() => undefined),
+          pipes: [],
+          closePipes: () => undefined,
+        };
+      },
+    };
+    return { tools, calls };
+  }
+  /** The real locator over a made-up machine: `PATH` has a planted state-home folder first, and the real programs after it. */
+  const locate = (hasProgram: (dir: string) => boolean) => {
+    const ports = {
+      daemonPath: () => `${HOME}/shims:/other/plant:/usr/bin`,
+      which: async (name: string, options: { readonly directories: readonly string[] }) => {
+        // The kernel's own fallback: the folders given first, then the WHOLE daemon `PATH` (the planted folder included).
+        const dir = [...options.directories, ...`${HOME}/shims:/other/plant:/usr/bin`.split(':')].find(hasProgram);
+        return dir === undefined ? undefined : `${dir}/${name}`;
+      },
+      stateHomeHolding: async (path: string) => (path === HOME || path.startsWith(`${HOME}/`) ? HOME : undefined),
+    };
+    return async (name: 'ssh-agent' | 'ssh-add') =>
+      (await programLocator({ name, trustedWith: 'an account key' }, ports)()).program;
+  };
+
+  test('a planted ssh-add earlier in PATH (in the state home) is not run: the key goes to the real one, by absolute path', async () => {
+    const { tools, calls } = recording();
+    const supervisor = new AgentSupervisor(
+      tools,
+      folder,
+      stubClock(false).clock,
+      quiet,
+      locate(dir => dir === `${HOME}/shims` || dir === '/usr/bin'),
+    );
+    await supervisor.socketFor(ID, key);
+    expect(calls.map(call => call.program)).toEqual(['/usr/bin/ssh-agent', '/usr/bin/ssh-add', '/usr/bin/ssh-add']);
+    expect(calls.some(call => call.program.startsWith(HOME))).toBe(false);
+    expect(calls.find(call => call.args[0] === '-')?.stdin).toBe(PRIVATE);
+    await supervisor.stopAll();
+  });
+
+  test('no trusted ssh-add (only a state-home one): 503, nothing started, the key is sent nowhere', async () => {
+    const { tools, calls } = recording();
+    const warned: string[] = [];
+    const supervisor = new AgentSupervisor(
+      tools,
+      folder,
+      stubClock(false).clock,
+      { warn: message => void warned.push(message) },
+      locate(dir => dir === `${HOME}/shims`),
+    );
+    await expect(supervisor.socketFor(ID, key)).rejects.toMatchObject({ status: 503, code: 'agent_unavailable' });
+    expect(calls).toEqual([]);
+    expect(warned).toHaveLength(1);
+    await supervisor.stopAll();
+  });
+
+  test('no ssh-agent anywhere: 503 and nothing runs', async () => {
+    const { tools, calls } = recording();
+    const supervisor = new AgentSupervisor(
+      tools,
+      folder,
+      stubClock(false).clock,
+      quiet,
+      locate(() => false),
+    );
+    await expect(supervisor.socketFor(ID, key)).rejects.toMatchObject({ status: 503 });
+    expect(calls).toEqual([]);
+    await supervisor.stopAll();
   });
 });
