@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { DEFAULT_LAYOUT } from '@ferretry/plugin-layouts/contract';
 import {
+  addressNamesFile,
   CHAT_TAB,
   newTabChoices,
   nextTab,
@@ -147,5 +148,13 @@ describe('asking for another panel of the page (a panel that links to a sibling)
     } finally {
       column.remove();
     }
+  });
+});
+
+describe('addressNamesFile', () => {
+  test('is true only for an address carrying a non-empty ?file=', () => {
+    expect(addressNamesFile('?file=src%2Fentry-ts')).toBe(true);
+    expect(addressNamesFile('?find=a&file=a.ts')).toBe(true);
+    for (const search of ['', '?file=', '?find=entry', '?files=a.ts']) expect(addressNamesFile(search)).toBe(false);
   });
 });

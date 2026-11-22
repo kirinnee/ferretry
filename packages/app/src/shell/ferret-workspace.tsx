@@ -19,6 +19,7 @@ import { useLayoutMode } from '../ui/hooks/use-layout-mode.ts';
 import { useAppHook } from './app-hooks.ts';
 import { FerretWorkspaceActionsProvider } from './ferret-workspace-actions.tsx';
 import {
+  addressNamesFile,
   CHAT_TAB,
   type NewTabChoice,
   newTabChoices,
@@ -109,6 +110,13 @@ export function FerretWorkspace({ daemon, subject, chat, canControl = true }: Fe
     [panels],
   );
   const shows = useCallback((panelId: string): boolean => panelPlaced(panels, panelId), [panels]);
+  // An address that names a file (`?file=`, from Projects' file finder) opens the closed side column on Files, once.
+  const fileWanted = useRef(addressNamesFile(globalThis.location?.search ?? ''));
+  useEffect(() => {
+    if (!fileWanted.current || (phone && panels.length > 0) || !panelPlaced(panels, 'files')) return;
+    fileWanted.current = false;
+    reveal('files');
+  }, [phone, panels, reveal]);
   if (!phone || panels.length === 0)
     return (
       <FerretWorkspaceActionsProvider
@@ -206,6 +214,13 @@ function PhoneWorkspace({ daemon, subject, chat, canControl = true }: FerretWork
     [panels],
   );
   const shows = useCallback((panelId: string): boolean => panelPlaced(panels, panelId), [panels]);
+  // An address that names a file (`?file=`) lands on the Files chip, once.
+  const fileWanted = useRef(addressNamesFile(globalThis.location?.search ?? ''));
+  useEffect(() => {
+    if (!fileWanted.current || !panelPlaced(panels, 'files')) return;
+    fileWanted.current = false;
+    showPanel('files');
+  }, [panels, showPanel]);
 
   return (
     <FerretWorkspaceActionsProvider
