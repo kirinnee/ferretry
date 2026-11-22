@@ -342,6 +342,30 @@ describe('a page the wire allows at its limit is drawn in a bounded few nodes', 
     await mounted.unmount();
   });
 
+  it('cuts the text a reader sees, not the raw text: a comment never moves the collapsed head', async () => {
+    const hrefsOf = (root: Element): string[] =>
+      [...root.querySelectorAll('a[data-gh-link]')].map(a => a.getAttribute('href') ?? '');
+    // 1,100 characters of comment sit inside the address: the raw text is long, but the first 1,000 raw characters end
+    // inside the comment, so a raw cut would read `…/guide` where the whole text reads `…/guide/setup`
+    const text = `https://example.com/guide<!--${'x'.repeat(1_100)}-->/setup ${'tail '.repeat(300)}`;
+    const closed = await mount(<SafeProse sourceUrl={URL} text={text} />);
+    const shown = hrefsOf(closed.container);
+    expect(shown).toEqual(['https://example.com/guide/setup']);
+    // the count says what a reader can read, not the comment
+    // ('https://example.com/guide/setup ' is 32 characters, and 300 × 'tail ' is 1,500)
+    expect(must(closed.container.querySelector('[data-gh-collapsed] button'), 'Show all').textContent).toContain(
+      '1,532 characters',
+    );
+    await tap(must(closed.container.querySelector('[data-gh-collapsed] button'), 'Show all'));
+    expect(hrefsOf(closed.container)).toEqual(shown);
+    await closed.unmount();
+    // a text that is long only because of its comment is not collapsed at all
+    const quiet = await mount(<SafeProse sourceUrl={URL} text={`hello <!--${'y'.repeat(2_000)}--> world`} />);
+    expect(quiet.container.querySelectorAll('[data-gh-collapsed]').length).toBe(0);
+    expect(quiet.container.textContent).toContain('hello  world');
+    await quiet.unmount();
+  });
+
   it('opens a long text whole when asked', async () => {
     const mounted = await mount(
       <Conversation

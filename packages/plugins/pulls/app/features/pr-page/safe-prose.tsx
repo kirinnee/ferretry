@@ -1,7 +1,7 @@
 import { Button, ExternalLink } from '@ferretry/app/ui';
 import { type ReactNode, useMemo, useState } from 'react';
 import { VisibleRuns } from '../diff/visible-text.tsx';
-import { type Block, type Inline, parseProse } from './prose-model.ts';
+import { type Block, type Inline, parseProse, visibleText } from './prose-model.ts';
 
 /**
  * GitHub text, drawn inert (E4). It is built only from the tree `parseProse` makes, as React elements: there is no
@@ -171,15 +171,16 @@ function collapsed(text: string): readonly Block[] {
 
 export function SafeProse({ text, sourceUrl }: { readonly text: string; readonly sourceUrl: string }) {
   const [open, setOpen] = useState(false);
-  const long = text.length > COLLAPSED_CHARS;
-  const blocks = useMemo(() => (long && !open ? collapsed(text) : parseProse(text)), [long, open, text]);
+  const visible = useMemo(() => visibleText(text), [text]);
+  const long = visible.length > COLLAPSED_CHARS;
+  const blocks = useMemo(() => (long && !open ? collapsed(visible) : parseProse(visible)), [long, open, visible]);
   return (
     <div className="md fy-seg min-w-0 break-words" data-gh-text="">
       {drawBlocks(blocks, sourceUrl)}
       {long && !open && (
         <p className="m-0" data-gh-collapsed="">
           <Button onClick={() => setOpen(true)} size="sm" type="button">
-            Show all {text.length.toLocaleString('en-US')} characters
+            Show all {visible.length.toLocaleString('en-US')} characters
           </Button>
         </p>
       )}
