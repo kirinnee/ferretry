@@ -1,7 +1,7 @@
 import { Button, ExternalLink } from '@ferretry/app/ui';
 import { type ReactNode, useMemo, useState } from 'react';
 import { VisibleRuns } from '../diff/visible-text.tsx';
-import { type Block, type Inline, parseProse, visibleText } from './prose-model.ts';
+import { type Block, type Inline, parseVisible, visibleText } from './prose-model.ts';
 
 /**
  * GitHub text, drawn inert (E4). It is built only from the tree `parseProse` makes, as React elements: there is no
@@ -164,16 +164,16 @@ function putBlocks(blocks: readonly Block[], from: string, run: string): readonl
 /** The collapsed head, read: the body as usual, then the cut run as text (the stand-in keeps the run in its place, in its paragraph or list item). */
 function collapsed(text: string): readonly Block[] {
   const { body, run } = head(text, COLLAPSED_CHARS);
-  if (run === '') return parseProse(body);
+  if (run === '') return parseVisible(body);
   const mark = stand(body);
-  return putBlocks(parseProse(`${body}${mark}`), mark, run);
+  return putBlocks(parseVisible(`${body}${mark}`), mark, run);
 }
 
 export function SafeProse({ text, sourceUrl }: { readonly text: string; readonly sourceUrl: string }) {
   const [open, setOpen] = useState(false);
   const visible = useMemo(() => visibleText(text), [text]);
   const long = visible.length > COLLAPSED_CHARS;
-  const blocks = useMemo(() => (long && !open ? collapsed(visible) : parseProse(visible)), [long, open, visible]);
+  const blocks = useMemo(() => (long && !open ? collapsed(visible) : parseVisible(visible)), [long, open, visible]);
   return (
     <div className="md fy-seg min-w-0 break-words" data-gh-text="">
       {drawBlocks(blocks, sourceUrl)}

@@ -79,9 +79,17 @@ export function visibleText(text: string): string {
   return stripComments(text.slice(0, MAX_INPUT));
 }
 
-/** The text as blocks. */
+/**
+ * Text that is ALREADY `visibleText` output, as blocks. Comments are stripped once, never again: removing a comment can
+ * join its neighbours into a literal `<!--` (`<<!-- x -->!-- y`), which is text, not a comment.
+ */
+export function parseVisible(visible: string): readonly Block[] {
+  return blocks(visible.split(/\r\n|\r|\n/u), 0);
+}
+
+/** Raw GitHub text as blocks. */
 export function parseProse(text: string): readonly Block[] {
-  return blocks(visibleText(text).split(/\r\n|\r|\n/u), 0);
+  return parseVisible(visibleText(text));
 }
 
 function blocks(lines: readonly string[], depth: number): readonly Block[] {
