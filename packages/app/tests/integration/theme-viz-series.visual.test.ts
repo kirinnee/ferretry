@@ -7,7 +7,10 @@
  *
  * This resolves the REAL stylesheet in Chromium, for every palette in both modes, and requires:
  *  - the first five slots at least 60 apart in RGB (of 441) and all eight at least 30 (what `base-palette.css` claims);
- *  - every series 3:1 against the page surface it is drawn on (a graphic object, WCAG 1.4.11).
+ *  - every series 3:1 against the page surface it is drawn on (a graphic object, WCAG 1.4.11);
+ *  - every NEIGHBOUR pair (viz-n, viz-n+1) at least ADJACENT_FLOOR (20) apart in CIELAB distance (ΔE76): a stacked bar and a
+ *    stacked area draw series n and n+1 edge to edge, where RGB distance alone passes two fills that read as ONE band
+ *    (Briefing light 6/7 was 59 apart in RGB and ΔE 9.6, WCAG ratio 1.06:1 to each other).
  */
 import { beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import type { Page } from 'playwright-core';
@@ -15,6 +18,9 @@ import { ALL_PALETTE_IDS, sharedChromium } from '../support/browser/index.ts';
 import { readThemeCss } from '../../src/testing/theme-css.ts';
 
 setDefaultTimeout(60_000);
+
+/** The least CIELAB distance (ΔE76) two series drawn edge to edge may have: a clear step, not two shades of one band. */
+const ADJACENT_FLOOR = 20;
 
 const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 
@@ -66,6 +72,24 @@ const looksOf = async (palette: string, mode: string): Promise<Look> =>
 const distance = (a: readonly number[], b: readonly number[]): number =>
   Math.hypot(...[0, 1, 2].map(at => (a[at] ?? 0) - (b[at] ?? 0)));
 
+const lab = (colour: readonly number[]): readonly [number, number, number] => {
+  const [r, g, b] = colour.map(channel => {
+    const unit = channel / 255;
+    return unit <= 0.04045 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+  });
+  const x = (0.4124 * (r ?? 0) + 0.3576 * (g ?? 0) + 0.1805 * (b ?? 0)) / 0.95047;
+  const y = 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
+  const z = (0.0193 * (r ?? 0) + 0.1192 * (g ?? 0) + 0.9505 * (b ?? 0)) / 1.08883;
+  const f = (t: number): number => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+  return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+};
+
+const deltaE = (a: readonly number[], b: readonly number[]): number => {
+  const [l1, a1, b1] = lab(a);
+  const [l2, a2, b2] = lab(b);
+  return Math.hypot(l1 - l2, a1 - a2, b1 - b2);
+};
+
 const luminance = (colour: readonly number[]): number => {
   const [r, g, b] = colour.map(channel => {
     const unit = channel / 255;
@@ -82,7 +106,7 @@ const contrast = (a: readonly number[], b: readonly number[]): number => {
 describe('the chart series', () => {
   for (const mode of ['light', 'dark'] as const) {
     for (const palette of ALL_PALETTE_IDS) {
-      it(`${palette}-${mode}: no two series are near-duplicates, and each reads 3:1 on the page`, async () => {
+      it(`${palette}-${mode}: no two series are near-duplicates, neighbours stay a clear step apart, and each reads 3:1 on the page`, async () => {
         const look = await looksOf(palette, mode);
         expect(look.series.length).toBe(SLOTS.length);
         const near: string[] = [];
@@ -93,6 +117,13 @@ describe('the chart series', () => {
             if (apart < floor) near.push(`viz-${a + 1} ~ viz-${b + 1} (${Math.round(apart)})`);
           }
         expect({ palette, mode, near }).toEqual({ palette, mode, near: [] });
+
+        const merged: string[] = [];
+        for (let n = 0; n + 1 < look.series.length; n += 1) {
+          const step = deltaE(look.series[n] ?? [], look.series[n + 1] ?? []);
+          if (step < ADJACENT_FLOOR) merged.push(`viz-${n + 1} | viz-${n + 2} (ΔE ${step.toFixed(1)})`);
+        }
+        expect({ palette, mode, merged }).toEqual({ palette, mode, merged: [] });
 
         const faint: string[] = [];
         for (const [index, colour] of look.series.entries()) {

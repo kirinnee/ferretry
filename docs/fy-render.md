@@ -372,8 +372,9 @@ browser's own colour parser, so a `color-mix()` or `oklch()` token works. Series
 mode (the per-tool hues, the keyword violet, the Claude orange, the error red), so a new palette gets
 series without writing any. A palette whose own hues collide under that default (seven of them did: two hues
 were one colour) restates the slots it needs in its own file. Their order is measured, not chosen: across all
-24 palette-and-mode looks the first five stay at least 60 apart in RGB (of 441) and all eight at least 30, and
-every series reads 3:1 on the page, which `packages/app/tests/integration/theme-viz-series.visual.test.ts`
+24 palette-and-mode looks the first five stay at least 60 apart in RGB (of 441) and all eight at least 30, two
+series drawn edge to edge in a stacked chart (n and n+1) stay at least 20 apart in CIELAB (ΔE76: RGB distance alone
+passes two fills that read as one band), and every series reads 3:1 on the page, which `packages/app/tests/integration/theme-viz-series.visual.test.ts`
 re-checks against the real sheet. The accent is deliberately not a slot — in several families it _is_ one of those hues — so a
 chart that wants the brand colour says `tone: accent`. Grid, ticks, tooltip, font and corner radius
 (`--radius-xs`, so a Neo bar is square) come from tokens too. `packages/plugins/conversation/app/render/fy-render-chart-config.ts` is the one
