@@ -96,6 +96,13 @@ describe('the accent side-bar gate, Tailwind classes in JSX (r11-2b K4)', () => 
     'a bar and its tone class in two entries of one class list':
       "<div className={[\n  'border-l-2',\n  'border-accent',\n].join(' ')} />\n",
     'a bar after a comment that closed earlier on the line': '<div className="border-l-2 border-warn" /> {/* ok */}\n',
+    'a bar after a string that holds a block-comment opener':
+      'export const help = "Start with /* for a block comment";\nexport const View = () => <div className="border-l-2 border-warn" />;\n',
+    'a bar after an apostrophe in JSX text': '<p>Don\'t</p>\n<div className="border-l-2 border-warn" />\n',
+    'a bar split around a less-than comparison in an opening tag':
+      '<div\n  className="border-l-2"\n  data-tone={count < 3 ? "border-warn" : "x"}\n/>\n',
+    'a bar split around a compact less-than comparison in an opening tag':
+      '<div\n  className="border-l-2"\n  data-tone={a <b ? "border-warn" : "x"}\n/>\n',
   };
   for (const [name, tsx] of Object.entries(TAILWIND_BARS))
     test(`refuses ${name}`, () => {
@@ -123,6 +130,20 @@ describe('the accent side-bar gate, Tailwind classes in JSX (r11-2b K4)', () => 
         '<li className="border-warn" />\n',
         '<li\n  className="border-l-2\n    border-border-strong"\n/>\n',
         '<li className="border-accent" />\n',
+      ].join(''),
+    });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
+  test('does not join the classes of a closed tag with the code after it', () => {
+    const result = run({
+      'packages/x/a.tsx': [
+        'export const View = () => <div className="border-l-2 border-border-strong" />;\n',
+        'export const tone = "border-warn";\n',
+        '<div className="border-l-2 border-border-strong">\n',
+        '</div>\n',
+        'export const other = "border-accent";\n',
       ].join(''),
     });
     expect(result.stderr).toBe('');

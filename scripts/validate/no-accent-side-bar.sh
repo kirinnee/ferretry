@@ -81,49 +81,60 @@ case "${status}" in
 esac
 # The awk turns each candidate file into `path:line:text` records with comments blanked (a `/* … */` block, also a JSX `{/* … */}`
 # one, may span lines; a line that starts with `//` or `*` is a comment line). It emits every line, and every element's opening tag
-# as ONE record (text from a `<` to the next `<`, lines joined by a space), so a side class and its tone class split across two lines of
-# one string or one class list are read together while two neighbouring elements never are. `/*` opens a comment only after the start of
-# a line, a space or `{(;,}`, so a glob such as "src/**/*.ts" in a string is not one.
+# as ONE record (from its `<` to the `>` that closes it outside any `{ }`, lines joined by a space), so a side class and its tone
+# class split across two lines of one string or one class list are read together while two neighbouring elements, or a closed tag
+# and the code after it, never are. A `<` inside an opening tag (a comparison) does not end it. A string ('"`) is read whole, so a
+# `/*` inside one is no comment; outside strings `/*` opens a comment only after the start of a line, a space or `{(;,}`.
 if [ -s "${tmp_dir}/tw-files" ]; then
   # shellcheck disable=SC2016 # the awk program is single-quoted on purpose: its `$0` is awk's, not the shell's
   tr '\n' '\0' <"${tmp_dir}/tw-files" | xargs -0 awk '
+    # `res` is the current line without its comments, `seg` the opening tag being read. Both are fed by add().
+    function add(s) {
+      res = res s
+      if (intag) seg = seg s
+    }
     function flush() {
       if (seg != "" && segline != segend) print file ":" segline ":" seg
       seg = ""
     }
-    FNR == 1 { flush(); file = FILENAME; inblock = 0; segline = 1; segend = 1 }
+    FNR == 1 { flush(); file = FILENAME; inblock = 0; instr = ""; intag = 0 }
     {
-      rest = $0
+      line = $0
       res = ""
-      while (1) {
+      if (!inblock && instr == "" && line ~ /^[[:space:]]*(\/\/|\*)/) next
+      for (i = 1; i <= length(line); i++) {
+        c = substr(line, i, 1)
         if (inblock) {
-          i = index(rest, "*/")
-          if (!i) { rest = ""; break }
-          rest = substr(rest, i + 2)
-          inblock = 0
-          res = res " "
+          if (c == "*" && substr(line, i + 1, 1) == "/") { inblock = 0; i++; add(" ") }
           continue
         }
-        i = index(rest, "/*")
-        if (!i) { res = res rest; break }
-        res = res substr(rest, 1, i - 1)
-        prev = (res == "") ? " " : substr(res, length(res), 1)
-        rest = substr(rest, i + 2)
-        if (prev ~ /[[:space:]{(;,}]/) inblock = 1
-        else res = res "/*"
+        if (instr != "") {
+          add(c)
+          if (c == "\\") { i++; add(substr(line, i, 1)) }
+          else if (c == instr) instr = ""
+          continue
+        }
+        if (c == "\"" || c == "\047" || c == "`") { instr = c; add(c); continue }
+        if (c == "/" && substr(line, i + 1, 1) == "*") {
+          prev = (res == "") ? " " : substr(res, length(res), 1)
+          if (prev ~ /[[:space:]{(;,}]/) { inblock = 1; i++; continue }
+        }
+        if (intag) {
+          if (c == "{") depth++
+          else if (c == "}" && depth > 0) depth--
+          add(c)
+          if (c == ">" && depth == 0) { segend = FNR; flush(); intag = 0 }
+          continue
+        }
+        if (c == "<" && substr(line, i + 1, 1) ~ /[A-Za-z>]/ &&
+            (res !~ /[A-Za-z0-9_)\]][[:space:]]*$/ || res ~ /(^|[^A-Za-z0-9_$])return[[:space:]]*$/)) {
+          intag = 1; depth = 0; seg = ""; segline = FNR
+        }
+        add(c)
       }
-      if (res ~ /^[[:space:]]*(\/\/|\*)/) res = ""
+      if (instr == "\047" || instr == "\"") { if (!intag) instr = "" }
+      if (intag) { seg = seg " "; segend = FNR }
       if (res != "") print file ":" FNR ":" res
-      n = split(res, part, "<")
-      if (seg == "") segline = FNR
-      seg = seg " " part[1]
-      segend = FNR
-      for (k = 2; k <= n; k++) {
-        flush()
-        segline = FNR
-        segend = FNR
-        seg = "<" part[k]
-      }
     }
     END { flush() }
   ' >"${tmp_dir}/tw"

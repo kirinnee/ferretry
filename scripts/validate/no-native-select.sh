@@ -35,13 +35,15 @@ git grep -n -E '<select([[:space:]/>]|$)' -- \
 [ "${status}" -gt 1 ] && echo "❌ git grep failed (exit ${status}) while searching for native selects" >&2 && exit 2
 
 # Drop a hit whose line is only a comment: the closed `/* … */` blocks at its start are removed first, so `/* x */ <select>`
-# still counts (code follows the comment) while `/* <select/> */`, `// <select>` and ` * <select>` do not.
+# still counts (code follows the comment) while `/* <select/> */`, `// <select>` and ` * <select>` do not. What remains must
+# still hold the element: `/* use SelectBox, not <select> */ <SelectBox />` names it only in the comment, so it is dropped.
 awk '
   {
     text = $0
     sub(/^[^:]*:[0-9]+:/, "", text)
     while (match(text, /^[[:space:]]*\/\*([^*]|\*+[^*\/])*\*+\//)) text = substr(text, RLENGTH + 1)
     if (text ~ /^[[:space:]]*(\*|\/\/|\/\*|$)/) next
+    if (text !~ /<select([[:space:]\/>]|$)/) next
     print
   }
 ' "${hits}.raw" >"${hits}"
