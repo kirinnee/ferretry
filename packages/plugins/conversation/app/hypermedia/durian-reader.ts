@@ -27,8 +27,13 @@ import { type ReadRequest, isWorkerMessage, type WorkerMessage } from './durian-
  * at all (the build did not make one, or the browser refused it) a message is shown as text, never as nothing.
  */
 
-/** How long a parse may run, from the moment the worker is asked, before the worker is terminated. */
-export const PARSE_BUDGET_MS = 150;
+/**
+ * How long a parse may run, from the moment the worker is asked, before the worker is terminated. The page's main thread is free
+ * the whole time (the parse is in the worker), so the budget is not a frame budget: it is how long a reader may be left on the
+ * plain text of one message. 150 ms turned honest messages of ~140 KB into plain text on a laptop and would turn far smaller
+ * ones on a phone; 500 ms leaves those alone and still ends a parse that does not return in about half a second.
+ */
+export const PARSE_BUDGET_MS = 500;
 /** How long a worker may take to say it is loaded before it is given up on. */
 export const STARTUP_BUDGET_MS = 5_000;
 /** The least time between two asks for the same streaming message. */

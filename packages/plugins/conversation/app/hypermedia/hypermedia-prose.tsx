@@ -115,7 +115,7 @@ export const HypermediaProse = memo(function HypermediaProse({
               {text}
             </pre>
             {reading.kind === 'plain' ? (
-              <p className="fy-hm-plain-note" data-fy-plain-note={reading.reason} role="status">
+              <p className="fy-hm-plain-note" data-fy-plain-note={reading.reason}>
                 {PLAIN_NOTE}
               </p>
             ) : null}

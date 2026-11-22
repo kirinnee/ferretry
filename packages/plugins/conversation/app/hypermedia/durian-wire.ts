@@ -2,7 +2,7 @@ import type { Document } from 'durian-hypermedia';
 
 /**
  * WHAT CROSSES BETWEEN THE PAGE AND THE DURIAN WORKER: plain data, nothing else (structured-clone safe, which
- * `tests/unit/app/hypermedia/durian-wire.test.ts` proves on real documents). The page asks for one message to be read; the
+ * `tests/unit/app/hypermedia/durian-worker.test.ts` proves on real documents). The page asks for one message to be read; the
  * worker answers with the document, or with "show it as text", or with "it failed". Neither side sends a function, a
  * class instance or a React node. This file imports no Durian code (a type only), so the page can import it.
  */

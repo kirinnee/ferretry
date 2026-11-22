@@ -52,6 +52,29 @@ const productionBuild = async (options: object): Promise<readonly Output[]> => {
   }
 };
 
+/**
+ * A WORKER BUILT THE WAY THE APP BUILDS IT (r12 H11): `entry` as one ES-module chunk by the shell's Vite, with the Durian plugin
+ * (`app/vite-durian.ts`), as the shell's `worker` build does. Returns the chunk's code; it fails if the build made more than one
+ * file, because a worker the page starts from one script could not fetch a second.
+ */
+export const buildWorkerChunk = async (entry: string): Promise<string> => {
+  const output = await productionBuild({
+    root: conversation,
+    plugins: [durianBuild.plugin, durianBuild.workerPlugin],
+    build: {
+      write: false,
+      minify: true,
+      target: 'es2022',
+      rollupOptions: { input: entry, output: { format: 'es', entryFileNames: 'worker.js' } },
+    },
+  });
+  const chunks = output.filter((file): file is Chunk => file.type === 'chunk');
+  const [only] = chunks;
+  if (chunks.length !== 1 || only === undefined)
+    throw new Error(`the worker built to ${chunks.length} chunks, not one`);
+  return only.code;
+};
+
 export interface ViteScene {
   /** Every output file by its name under `/` (`assets/x.js`), text or bytes. */
   readonly files: ReadonlyMap<string, string | Blob>;

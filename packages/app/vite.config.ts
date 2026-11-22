@@ -105,7 +105,10 @@ export default defineConfig({
   // workers with the Vosk glue made eval-free, and `onnxruntime-web` pinned to its WASM-only build.
   // Conversation's DURIAN WORKER (`plugins/conversation/app/hypermedia/durian-worker.ts`) is built by the same worker build,
   // so it needs Durian's source resolution (`vite-durian.ts`): workers are bundled apart from the page, with their own plugins.
-  worker: { ...voiceBuild.worker, plugins: () => [...voiceBuild.worker.plugins(), durianBuild.plugin] },
+  worker: {
+    ...voiceBuild.worker,
+    plugins: () => [...voiceBuild.worker.plugins(), durianBuild.plugin, durianBuild.workerPlugin],
+  },
   resolve: { alias: voiceBuild.alias },
   build: {
     outDir: 'dist',
