@@ -162,7 +162,16 @@ that is not there). Three rules, in order:
 
    Gate's judge spends a remote device's one step-up proof on the first loosening it lets through, so a set with
    **two** loosening documents is held for a remote device (the second ask finds the proof spent). It fails
-   closed; judging a set as one act is Gate's to add (declared GAP).
+   closed. **An import and a clone are ONE act** (Gate's `openLooseningAct`, opened by
+   `POST /v1/runtimes/proposals/:proposalId/apply` for `setup.import` and `clone.import`): they write several owners'
+   files (a login, Claude Code's settings, Runtimes' own set), so a remote device's passkey proof is claimed **before
+   anything is written** and covers every loosening of that one request until it ends. A device with no fresh proof
+   (an unlock is never one) is answered `403 grant_step_up_required` with the `loosen-config` act and nothing written,
+   so the app asks for the passkey and sends the same apply again. Before this, a phone's import wrote the settings,
+   then Runtimes' set (a new instructions item loosens) was held and thrown: a `409` after a partial write. Every
+   refused, held or unfinished apply is one daemon log line (`runtimes: a change was not fully applied`, the change
+   id, its kind, the status and a code; never a sentence or a value). Any other request that writes two loosening
+   documents still holds the second (declared GAP).
 
 What is in effect is recorded in the state home (`state/config-accepted.json`), file by file with its text,
 so a last good version survives a restart and a confirmed loosening is not asked about again. A missing or

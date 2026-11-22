@@ -139,6 +139,18 @@ export function refusal(edge: ImportEdge): string | undefined {
   )
     return undefined;
 
+  // THIRD EXEMPTION: Gate's loosening judge decides what a remote device's import may put into effect, and the proof that one
+  // import is ONE act on one passkey (C59 O5-10b) needs that judge over the REAL halves that write (Runtimes, Claude Code).
+  // Only Gate's tests may load halves, and only through the generated daemon registry, never a half's own path.
+  if (
+    from === 'tests' &&
+    edge.fromPkg.name === '@ferretry/core-gate' &&
+    toPkg.id === 'kernel' &&
+    to === 'generated' &&
+    /\/src\/generated\/plugins\.ts$/u.test(edge.specifier)
+  )
+    return undefined;
+
   // Another package.
   switch (to) {
     case 'kernel-contract':

@@ -26,10 +26,12 @@ import {
   type ApiResponse,
   decodeParameter,
   jsonResponse,
+  type Log,
   type RouteHandler,
 } from '@ferretry/kernel/contract';
 import type { z } from 'zod';
 import {
+  type AccountChangeOutcome,
   AccountChangeOutcomeSchema,
   AccountChangeRequestSchema,
   AccountChangeViewSchema,
@@ -46,6 +48,7 @@ import {
   FleetCatalogRefusal,
   type FleetCatalogService,
 } from '../lib/service/catalog-service.ts';
+import { applyAsOneAct } from './apply-act.ts';
 import { parseBody, parseOptionalBody } from './body.ts';
 import { UNAVAILABLE } from '../lib/service/assembly.ts';
 import { CONFIG_WRITE_UNAVAILABLE } from '../lib/service/ports.ts';
@@ -101,7 +104,7 @@ function freshStepUpRefusal(message: string): ApiResponse {
  * This subsystem's handlers, keyed by the manifest's route keys. Who may call, and what the audit log records, are
  * the manifest's descriptors now; a handler only does the work.
  */
-export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem) {
+export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem, log?: Log) {
   return {
     'GET /v1/runtimes/machine': async call => await answer(MachineViewSchema, () => subsystem.machine(call.governance)),
     'GET /v1/runtimes/components': async () => await answer(ComponentCatalogSchema, () => subsystem.components()),
@@ -127,17 +130,27 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem) {
     'POST /v1/runtimes/proposals/:proposalId/apply': async call => {
       // An empty strict body: a field an older client still sends is refused, not ignored.
       await parseOptionalBody(call.request, ProposalApplyRequestSchema);
-      try {
-        return await answer(AccountChangeOutcomeSchema, () =>
-          subsystem.apply(proposalId(call.params), call.governance, {
-            claim: () => call.claimFreshStepUp?.() === true,
-            agent: isFerretCall(call),
-          }),
-        );
-      } catch (error) {
-        if (error instanceof FleetCatalogFreshStepUpRequired) return freshStepUpRefusal(error.message);
-        throw error;
-      }
+      const id = proposalId(call.params);
+      let outcome: AccountChangeOutcome | undefined;
+      // An import or a clone is ONE act on one passkey, and every refused or held apply is a log line (`apply-act.ts`).
+      return await applyAsOneAct({
+        call,
+        id,
+        subsystem,
+        log,
+        answered: () => outcome,
+        work: async claim => {
+          try {
+            return await answer(AccountChangeOutcomeSchema, async () => {
+              outcome = await subsystem.apply(id, call.governance, { claim, agent: isFerretCall(call) });
+              return outcome;
+            });
+          } catch (error) {
+            if (error instanceof FleetCatalogFreshStepUpRequired) return freshStepUpRefusal(error.message);
+            throw error;
+          }
+        },
+      });
     },
   } satisfies Record<string, RouteHandler>;
 }

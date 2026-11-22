@@ -410,6 +410,26 @@ describe('context-imports', () => {
     expect(found).toContain('other/tests/flow.test.ts:1: @ferretry/plugin-onboarding/app');
   });
 
+  test("only Gate's tests may load halves through the kernel's generated daemon registry: Gate's daemon and any other package's tests are still refused", async () => {
+    const f = ws([
+      KERNEL_PACKAGE,
+      {
+        id: 'gate',
+        core: true,
+        files: {
+          'tests/import.test.ts': `import '../../kernel/src/generated/plugins.ts';\n`,
+          'daemon/host.ts': `import '../../kernel/src/generated/plugins.ts';\n`,
+        },
+      },
+      { id: 'other', files: { 'tests/import.test.ts': `import '../../../core/kernel/src/generated/plugins.ts';\n` } },
+    ]);
+    f.write('packages/core/kernel/src/generated/plugins.ts', 'export const daemonImplementations = [];\n');
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('gate/tests/import.test.ts');
+    expect(found).toContain('gate/daemon/host.ts:1: ../../kernel/src/generated/plugins.ts');
+    expect(found).toContain('other/tests/import.test.ts:1: ../../../core/kernel/src/generated/plugins.ts');
+  });
+
   test('a cli half may import its own generated verb list and no other generated file', async () => {
     const f = ws([
       {
