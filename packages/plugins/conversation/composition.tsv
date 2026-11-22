@@ -1,6 +1,7 @@
 kind	path	limit	expires	reason
 oversize	app/composer/composer.tsx	1766	2026-12-16	the composer component; split by feature when next touched
 oversize	app/hypermedia/hypermedia-prose.tsx	150	2026-12-20	hot (6 of the last 80 merges, churn not size); r12 H11a and H11 each touch the plain-text branch, which moves to plain-fallback.tsx
+oversize	app/hypermedia/parse-message.ts	120	2026-12-20	hot (6 of the last 80 merges, churn not size): H11a and H11 each changed the one read of a message; it runs only in the Durian worker now
 composition	daemon/features/compose.ts	-	-	composes the features' sections: tools, hooks, subscribers, scrubbed routes and stops beside the kernel kit's routes, sockets and port
 composition	daemon/features/types.ts	-	-	the feature context, late bindings and contribution: a new field is a plugin contract change
 composition	daemon/index.ts	-	-	implementDaemon shell over composeConversation: callsign addressing, the secret mask and the 503 fallback
