@@ -17,10 +17,15 @@ export interface FerretChange {
   readonly gone?: true | undefined;
 }
 
-/** What the refresh reads: the registered projects, and the folder a ferret was started in (none when it is unknown). */
+/**
+ * What the refresh reads: the registered projects, the folder a ferret was started in (none when it is unknown, and the
+ * spelling it was recorded with), and where a folder REALLY is (the fenced path API the file routes use; none when nothing
+ * is there).
+ */
 export interface RefreshSources {
   readonly projects: () => Promise<readonly { readonly id: string; readonly path: string }[]>;
   readonly folderOf: (ferret: string) => Promise<string | undefined>;
+  readonly resolve: (path: string) => Promise<string | undefined>;
 }
 
 /**
@@ -35,11 +40,17 @@ export class FilesRefresh {
     private readonly sources: RefreshSources,
   ) {}
 
-  /** A ferret changed state: when it stopped working, every project whose folder holds it is marked out of date. */
+  /**
+   * A ferret changed state: when it stopped working, every project whose folder holds it is marked out of date. The folder
+   * is matched where it REALLY is, not by its spelling: a ferret started in a link that points into one project is in that
+   * project, and the project whose folder the link merely sits in is not touched. A folder that resolves to nothing (gone)
+   * is judged by its spelling, which only ever refreshes more, never less.
+   */
   async ferretChanged(change: FerretChange): Promise<void> {
     if (change.gone === true || (change.state !== 'idle' && change.state !== 'stopped')) return;
-    const folder = await this.sources.folderOf(change.ferret);
-    if (folder === undefined) return;
+    const spelled = await this.sources.folderOf(change.ferret);
+    if (spelled === undefined) return;
+    const folder = (await this.sources.resolve(spelled)) ?? spelled;
     for (const project of await this.sources.projects()) {
       if (folderInProject(folder, project.path)) this.cache.invalidate(project.id);
     }

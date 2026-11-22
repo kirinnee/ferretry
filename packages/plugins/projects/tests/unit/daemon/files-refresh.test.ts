@@ -141,7 +141,16 @@ describe('FilesRefresh (fake ferrets events, fake clock)', () => {
         { id: 'beta', path: '/work/beta' },
       ],
       folderOf: async ferret =>
-        ({ a: '/work/alpha/src', b: '/work/beta/.worktrees/x', c: '/elsewhere' })[ferret as 'a' | 'b' | 'c'],
+        ({
+          a: '/work/alpha/src',
+          b: '/work/beta/.worktrees/x',
+          c: '/elsewhere',
+          l: '/work/alpha/link',
+          g: '/work/alpha/gone',
+        })[ferret as 'a' | 'b' | 'c' | 'l' | 'g'],
+      // `alpha/link` is a symlink to the registered beta folder; `alpha/gone` resolves to nothing.
+      resolve: async path =>
+        path === '/work/alpha/link' ? '/work/beta' : path === '/work/alpha/gone' ? undefined : path,
     });
     for (const id of ['alpha', 'beta']) {
       const first = cache.read(id, `/work/${id}`);
@@ -172,6 +181,22 @@ describe('FilesRefresh (fake ferrets events, fake clock)', () => {
     await refresh.ferretChanged({ ferret: 'b', state: 'stopped' });
 
     expect(await probe()).toEqual(['beta']);
+  });
+
+  test('a ferret started in a link that points at project beta refreshes beta, not the project the link sits in (alias)', async () => {
+    const { refresh, probe } = await world();
+
+    await refresh.ferretChanged({ ferret: 'l', state: 'idle' });
+
+    expect(await probe()).toEqual(['beta']);
+  });
+
+  test('a ferret folder that resolves to nothing is judged by its spelling', async () => {
+    const { refresh, probe } = await world();
+
+    await refresh.ferretChanged({ ferret: 'g', state: 'idle' });
+
+    expect(await probe()).toEqual(['alpha']);
   });
 
   test('working, a gone ferret, a ferret outside every project and an unknown ferret refresh nothing', async () => {

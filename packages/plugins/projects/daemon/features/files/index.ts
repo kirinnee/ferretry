@@ -51,6 +51,10 @@ export function filesRoutes(
       'GET /v1/projects/:id/files/status': filesStatusRoute(registry, cache, place),
       'POST /v1/projects/:id/files/rescan': filesRescanRoute(registry, cache, place),
     },
-    refresh: new FilesRefresh(cache, { projects: () => registry.list(), folderOf }),
+    refresh: new FilesRefresh(cache, {
+      projects: () => registry.list(),
+      folderOf,
+      resolve: path => place.resolve(path),
+    }),
   };
 }

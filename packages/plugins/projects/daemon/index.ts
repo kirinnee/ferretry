@@ -31,6 +31,8 @@ export const implementProjects = (folders?: ProjectFolders, repoScan?: ScanDeps,
         newId: () => crypto.randomUUID(),
         registered: id => kernel.events.publish(ProjectRegistered, { id }),
         removed: id => kernel.events.publish(ProjectRemoved, { id }),
+        // A repeat registration announces nothing new (idempotent) but the folder was named again: its held index is stale.
+        reregistered: id => files.refresh.registered(id),
       });
       const files = filesRoutes(kernel, registry, fileIndex, async ferret => {
         const summary = await uses.ferrets.current()?.get(ferret as FerretId);
@@ -42,7 +44,7 @@ export const implementProjects = (folders?: ProjectFolders, repoScan?: ScanDeps,
           'POST /v1/projects': registerRoute(registry),
           'DELETE /v1/projects/:id': removeRoute(registry),
           ...foldersRoutes(kernel, machine),
-          ...reposRoutes(kernel, registry, repoScan),
+          ...reposRoutes(kernel, registry, repoScan, id => files.refresh.registered(id)),
           ...files.routes,
         },
         // No watcher (D5): a ferret that stops working in a project, a project registered again or removed refreshes its index.
