@@ -83,7 +83,7 @@ import {
 import { CloneRefusal } from '../account/clone-parts.ts';
 import { EMPTY_RUNTIME_IDS } from '../account/ids.ts';
 import type { FleetDocumentWrite, FleetModelApplyPlan } from '../provisioning.ts';
-import { abortedAfterWriting } from './apply-bracket.ts';
+import { namingWhatLanded, notingLanded } from './apply-bracket.ts';
 import { configurationLanded, failedApplySentence } from './failed-apply.ts';
 import { writeConfigFiles } from './setup-config-files.ts';
 import { reportLeft, writeVaultAndLogins } from './setup-vault-logins.ts';
@@ -592,18 +592,8 @@ export class FleetSetupService {
     return composed.lines.join(' ');
   }
 
-  /**
-   * Carries the change out. A request that ends once some files landed is answered with exactly those paths
-   * (`abortedAfterWriting`), so the boundary can tell the owner what landed instead of only logging it.
-   */
   async #execute(change: object, composed: Composed, caller?: ExecutorCaller): Promise<string> {
-    // The owner and settings files that really landed (a held one did not): a later failure must say they are on disk.
-    const landed: string[] = [];
-    try {
-      return await this.#carryOut(change, composed, landed, caller);
-    } catch (error) {
-      throw abortedAfterWriting(error, landed);
-    }
+    return await namingWhatLanded(landed => this.#carryOut(change, composed, landed, caller));
   }
 
   async #carryOut(change: object, composed: Composed, landed: string[], caller?: ExecutorCaller): Promise<string> {
@@ -623,21 +613,9 @@ export class FleetSetupService {
     // is held unless the caller is at this machine (`governed: false`); a remote caller confirms it as for any
     // other held edit.
     const mayLoosen = caller?.governance?.governed === false;
-    let held = 0;
     // The imported components another plugin owns go to that plugin, each on its own: NOT all-or-none across owners.
-    const components = this.deps.components;
     const handed = await handOver({
-      // Each owner file that lands is noted as it does, so a request that ends before the next owner still names it.
-      writer:
-        components === undefined
-          ? undefined
-          : {
-              put: async write => {
-                const answer = await components.put(write);
-                if (answer.outcome === 'written') landed.push(write.file);
-                return answer;
-              },
-            },
+      writer: notingLanded(this.deps.components, landed),
       owners: composed.owners,
       applied: { model: composed.model, documents: composed.documents },
       secretValues: composed.secrets.map(secret => secret.value),
@@ -645,10 +623,9 @@ export class FleetSetupService {
       // The fleet is built from what the owners report in effect after they wrote, not from the import's own model.
       inEffect: async () => (await this.#read()).model,
     });
-    for (const file of handed.landed) if (!landed.includes(file)) landed.push(file);
     reportLeft(caller, handed.held, handed.refused);
     const { model, documents } = handed.applied;
-    held += await writeConfigFiles(
+    const held = await writeConfigFiles(
       composed.configWrites ?? [],
       write => this.#writeConfigFile(write, mayLoosen),
       caller,

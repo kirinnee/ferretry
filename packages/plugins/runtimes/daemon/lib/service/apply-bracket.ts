@@ -1,4 +1,5 @@
 import { ApiError } from '@ferretry/kernel/contract';
+import type { ComponentWriter } from '../account/owner-components.ts';
 
 /** The error an apply whose request already ended is answered with (nothing was written, the change stays pending). */
 export function assertRequestLive(bracket: ApplyBracket | undefined): void {
@@ -26,7 +27,7 @@ export function partlyAppliedSentence(landed: readonly string[]): string {
  * and as `extra.landed` (what the boundary keeps, so a re-read of the spent change says what landed). Any other error,
  * and an abort before any write, is returned as it is.
  */
-export function abortedAfterWriting(error: unknown, landed: readonly string[]): unknown {
+function abortedAfterWriting(error: unknown, landed: readonly string[]): unknown {
   const written = [...new Set(landed)];
   if (!(error instanceof ApiError) || error.code !== 'request_aborted' || written.length === 0) return error;
   return new ApiError(
@@ -36,6 +37,31 @@ export function abortedAfterWriting(error: unknown, landed: readonly string[]): 
     undefined,
     { landed: written },
   );
+}
+
+/**
+ * Runs a change's writes with the list of files that really landed (a held one did not): a later failure must say they
+ * are on disk, and a request that ends after some landed is answered with them (`abortedAfterWriting`).
+ */
+export async function namingWhatLanded<T>(work: (landed: string[]) => Promise<T>): Promise<T> {
+  const landed: string[] = [];
+  try {
+    return await work(landed);
+  } catch (error) {
+    throw abortedAfterWriting(error, landed);
+  }
+}
+
+/** The door to the owners of imported components, noting each file as it lands so a request that ends next still names it. */
+export function notingLanded(writer: ComponentWriter | undefined, landed: string[]): ComponentWriter | undefined {
+  if (writer === undefined) return undefined;
+  return {
+    put: async write => {
+      const answer = await writer.put(write);
+      if (answer.outcome === 'written') landed.push(write.file);
+      return answer;
+    },
+  };
 }
 
 /** The paths an `abortedAfterWriting` answer names; none for any other error. */
