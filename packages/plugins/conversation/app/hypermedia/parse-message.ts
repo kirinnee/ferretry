@@ -2,6 +2,7 @@ import { type Document, parse } from 'durian-hypermedia';
 import { configureDurian } from './durian.ts';
 import { settleFences } from './fence-boundaries.ts';
 import { drawableBodies, fyRenderParseBlock } from './fy-render-host.tsx';
+import { heldFenceParseBlocks, holdFences } from './held-fences.tsx';
 import { LITERAL_CODE_INLINES, mayHoldLiteralCode } from './literal-code.tsx';
 import { MESSAGE_LIMITS } from './limits.ts';
 import { hypermediaUrlPolicy } from './url-policy.ts';
@@ -32,14 +33,16 @@ export interface ReadMessage {
 export function readMessage(source: string, idPrefix: string, arriving = false): ReadMessage {
   configureDurian();
   const settled = settleFences(source, arriving);
-  const doc = parse(settled.text, {
-    blocks: [fyRenderParseBlock(settled)],
+  // A chart (unbounded formulas) and a code walk are held as code before Durian can read them (`held-fences.tsx`).
+  const text = holdFences(settled.text);
+  const doc = parse(text, {
+    blocks: [fyRenderParseBlock(settled), ...heldFenceParseBlocks(text)],
     frontMatter: false,
     idPrefix,
     limits: MESSAGE_LIMITS,
     urlPolicy: hypermediaUrlPolicy,
     // Offered only to a message that can hold such a span: every other message is read by Durian's own lexer.
-    inlines: mayHoldLiteralCode(settled.text) ? LITERAL_CODE_INLINES : undefined,
+    inlines: mayHoldLiteralCode(text) ? LITERAL_CODE_INLINES : undefined,
   });
   return { doc: withReferences(doc), drawable: drawableBodies(settled) };
 }
