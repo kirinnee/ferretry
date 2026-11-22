@@ -31,7 +31,8 @@ specs, source files, or exported artifacts.** Use the document's native format a
 assets instead — a Mermaid diagram in a document is an ordinary `mermaid` fenced block, rendered by
 whatever that document's own renderer supports or left as text, never an `fy-render` block. This is
 not a convention: `scripts/validate/no-fy-render-in-docs.sh` fails the commit that puts a fence
-opener anywhere outside the two files that teach the syntax — this one and
+opener anywhere outside the **three** files that teach the syntax — this one,
+[the hypermedia teaching page](hypermedia.md) (which quotes the instruction every ferret is given) and
 [the authoring skill](../.claude/skills/fy-render-authoring/SKILL.md).
 
 ---
@@ -44,12 +45,17 @@ highlight-or-escape path, untouched.
 
 The **delimiter** may be any form CommonMark accepts — three or more backticks, three or more tildes,
 and any of those nested inside a blockquote or list item — because remark produces the same node for
-all of them and the renderer therefore treats them alike.
-`scripts/validate/no-fy-render-in-docs.sh` matches that same set. The agreement is pinned in both
-directions: the gate against planted openers in
-`packages/plugins/conversation/tests/integration/app/fy-render-docs-gate.test.ts`, and the reader against the same
-forms in `packages/plugins/conversation/tests/unit/app/hypermedia/fy-render-fence-decisions.test.tsx`. A form that
-renders must be a form the gate finds.
+all of them and the renderer therefore treats them alike. **Spaces or a tab may sit between the delimiter and
+the token** (CommonMark leaves them out of the info string, and the reader's opener,
+`FY_RENDER_OPENER` in `packages/plugins/conversation/app/hypermedia/fence-boundaries.ts`, takes `[ \t]*` there), so
+a spaced opener is an opener.
+`scripts/validate/no-fy-render-in-docs.sh` matches that same set, spaced form included. The gate's half is
+pinned against planted openers in
+`packages/plugins/conversation/tests/integration/app/fy-render-docs-gate.test.ts`, each form red before the gate
+took it. The reader's half is pinned in
+`packages/plugins/conversation/tests/unit/app/hypermedia/fy-render-fence-decisions.test.tsx` for the delimiter
+forms, indents and list or quote leads it lists; **it does not test the spaced form**, which is read from the
+two sources above and not measured. A form that renders must be a form the gate finds.
 
 The body is a **header block**, a **boundary line**, then a **payload**:
 
@@ -240,7 +246,7 @@ saved message is never rewritten. Everything written now says `task`.
   "N more on the board."; tasks that could not be shown (missing, unreadable) follow as notes, last.
 
 Each task is the real `BoardTask` the Board page draws, read-only: its title, lane, progress and the
-PRs it links. It reads as it does on the Board (the task's padding and the gap between tasks are the Board's own tokens, in chat and in the agenda alike), and the whole task opens it. The ferret is
+PRs it links. It reads as it does on the Board (the task's padding and the gap between tasks are the Board's own tokens, in the chat), and the whole task opens it. The ferret is
 named by its callsign (from the app's fleet, or the surface's own list), and every age ticks on a local
 clock every 30 seconds — a clock, not a daemon read. Clicking it opens the task exactly as a written `&F12` does (`onTaskOpen`), because
 the daemon's answer is the proof the reference standard asks for
@@ -260,8 +266,10 @@ the daemon's answer is the proof the reference standard asks for
   never polls.
 - **One renderer.** It draws only where a surface lends the fence door **and** a board to read
   (`cardEmbed`) — today the chat's, so a chat message and a ferret's queue panel
-  ([Where a block renders](#where-a-block-renders-and-where-it-cannot)); on the agenda, All queues and the Board's own
-  task detail the block is a code fence. Spec: `packages/plugins/conversation/app/render/fy-render-embed.ts`; component:
+  ([Where a block renders](#where-a-block-renders-and-where-it-cannot)); on the agenda and All queues the block is a
+  code fence. The Board's own task detail has **no fence reading at all** (its small `taskProse` renderer reads
+  only paragraphs, lists, inline `code`, bold, links and a `&F12` link, so the lines of a fenced block come out as
+  ordinary text), which is not the same as a code fence ([board.md](board.md#how-a-task-reads)). Spec: `packages/plugins/conversation/app/render/fy-render-embed.ts`; component:
   `packages/plugins/conversation/app/render/fy-render-task-embed.tsx`.
 
 ### Maps
@@ -476,9 +484,10 @@ between two dark themes repaints too, which a light/dark key would have missed.
 
 **An `html` block is a STATIC FRAGMENT rendered directly in the message — nothing an author writes in
 it runs.** The owner's decision: "no need to render full HTML — just render HTML fragments that don't
-allow scripts, directly." There is no frame, no shell and no message port (the interactive-page frame
-that used to stand here is deleted, with its static shell, its `_headers` rules and its pins).
-`fy-render-fragment.tsx` sanitizes the markup with DOMPurify (pinned, bundled, its own instance) and
+allow scripts, directly." A fragment has no frame, no shell and no message port of its own. The
+interactive-page frame is **not** deleted: an `html` block that carries script is routed away from this path
+to its own frame and static shell (`/fy-render-html.html`, with its own `_headers` rules and policy), which
+[the next section](#the-interactive-html-frame) states. `fy-render-fragment.tsx` sanitizes the markup with DOMPurify (pinned, bundled, its own instance) and
 appends the result as DOM nodes into a **closed shadow root** in the message.
 
 **What is stripped**, by the sanitizer's configuration and hooks rather than by review:
@@ -488,14 +497,18 @@ appends the result as DOM nodes into a **closed shadow root** in the message.
   `link`, `template`, `noscript` — plus SVG's `foreignObject`, `use` and SMIL animation, and the
   page's own players (`audio`, `video`; a recording is a `src:` block);
 - every `on*` handler, and `action`, `formaction`, `srcset`, `ping`, `background`, `poster`, `srcdoc`
-  and every author `data-*` attribute;
-- every URL that is not one of exactly three shapes: an `https:` link on an `<a>`, which opens a new tab
-  `noopener noreferrer`; a `data:image/` picture; or `media:<file>` from the session's media folder,
+  and every author `data-*` attribute except `data-tone`, `data-label` and `data-value` (plain words the
+  kit's components read);
+- on `href`, `xlink:href` and `src`, every URL that is not one of exactly three shapes: an `https:` link
+  on an `<a>`, which carries `target="_blank"` and `rel="noopener noreferrer"`; a `data:image/` picture (png,
+  jpeg, gif, webp or svg) on an `<img>`; or `media:<file>` on an `<img>`, from the session's media folder,
   read through the reader's grant, admitted like any other picture and shown as a `blob:` this page
-  minted. `javascript:`, every other `data:`, and every relative or same-origin URL are dropped — a
-  fragment has no business addressing the app;
+  minted. `javascript:`, every other `data:`, and every relative URL are dropped. **The `https:` link is
+  not narrowed to an origin:** the rule is the scheme and nothing else, so a link may name any HTTPS
+  address, the app's own origin included (nothing here checks the destination);
 - in CSS, inline and in `<style>`: `@import`, and every `url(…)` or `image-set(…)` that is not a
-  `data:image/`, which become `none`.
+  `data:image/`, which become `none`. This is a **regular-expression rewrite, not a CSS parser**, which is why
+  the page's policy below stays the backstop for it.
 
 **What is kept**: structure and text, tables, `<details>`/`<summary>`, lists, code, inline SVG with
 its filters, `style` attributes and `<style>` elements.
@@ -505,15 +518,20 @@ app and the app's selectors from reaching the fragment; custom properties still 
 the theme tokens arrive (a small baseline stylesheet inside the root uses them). The host carries
 `contain: layout paint`, so a `position: fixed` overlay is fixed to the fragment and clipped by it
 rather than covering the app, and its height is bounded (`min(70dvh, 900px)`, then it scrolls). The
-page's own policy is the backstop under all of it: `img-src`, `font-src` and `connect-src` refuse a
-remote load the sanitizer missed, and `require-trusted-types-for 'script'` refuses any string at a
-script sink. DOMPurify's own parse runs under the one dedicated `fy-fragment` Trusted Types policy
+page's own policy (`/*` in `_headers`) is a backstop only for the loads it names, and **not for every load**:
+`img-src` is `'self' data: blob:` plus the one map-tile origin `https://tile.openstreetmap.org`, so it refuses a
+remote picture from any other host but **admits a same-origin one and the tile origin**; `font-src` is `'self'
+data:`, so it refuses a remote font; `media-src` admits `https:`, so it is no backstop for a remote
+audio or video (the fragment strips those elements instead). **`connect-src` is no backstop here**: it admits
+`'self'`, `https:`, `wss:` and the local development origins, so the fragment relies on its own strips (`ping`, every
+script and handler) and not on this directive. `require-trusted-types-for 'script'` refuses any
+string at a script sink. DOMPurify's own parse runs under the one dedicated `fy-fragment` Trusted Types policy
 (`packages/app/src/security/trusted-types.ts`, added to the `_headers` allowlist), which
 `packages/plugins/conversation/tests/unit/app/render/fy-render-opt-in.test.ts` holds to a single user, and the result never reaches a sink as a string.
 
 **Measured in real Chromium** (`packages/plugins/conversation/tests/integration/app/fy-render-fragment.security.test.ts`, the shipped
 block under the exact `/*` policy from `_headers`, Trusted Types included, and a server-side request
-ledger): a corpus — free of `<script>` and `on…` handlers, since either one now routes a block to the
+ledger **of the test server's own requests: a request to any other origin would not show in it**): a corpus — free of `<script>` and `on…` handlers, since either one now routes a block to the
 interactive frame — of a `javascript:` link, a relative link, an inline-style `url()`, a `<style>` with `@import` and `url()` and rules aimed at the
 HOST page's `body` and `#outside`, a form with an action, an `iframe srcdoc`, an `object`, an `embed`, a
 meta refresh, a `link` stylesheet, a `base`, an SVG `foreignObject`, a `use`, a remote image and a
@@ -1008,10 +1026,12 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
    differential, or a browser feature it does not know to strip, would put author markup in the page
    as live DOM. Mitigated by: DOMPurify's own allowlist plus this build's narrower one, the URL and CSS
    rules, the closed shadow root and paint containment, a pinned DOMPurify version, and the page's
-   policy underneath — `require-trusted-types-for 'script'` refuses a string at any script sink, and
-   `img-src`/`font-src`/`connect-src` refuse a remote load. **Not eliminated.** Same-origin `url()` loads
-   are refused by the CSS rewrite, not by the policy (`img-src 'self'` would allow them); the security
-   test fails if that rewrite is ever removed. Anyone who considers this unacceptable should map
+   policy underneath — `require-trusted-types-for 'script'` refuses a string at any script sink, `img-src`
+   refuses a picture from any host but the app's own origin and the map-tile origin, and `font-src` a remote
+   font (`connect-src` and `media-src` admit `https:` and are no backstop). **Not eliminated.** Same-origin
+   `url()` loads are refused by the CSS rewrite, not by the policy (`img-src 'self'` would allow them), and an
+   `https:` link is kept whatever origin it names; the security test fails if the rewrite is ever removed, and
+   its ledger sees only the test server's own requests. Anyone who considers this unacceptable should map
    `html` to source-only; nothing else depends on it.
 
 2. **`type: mermaid` and `type: lottie` carry a residual risk that is not eliminated.** No
@@ -1128,12 +1148,19 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
     navigation tears the frame down; the page runs only near the viewport, stops when it stops
     responding, and lives at most ten minutes. **Accepted, and what it can cost:** author script can
     rebuild a prerender link, reach WebRTC through a path the deletion missed, or navigate the frame —
-    each of which carries a request from the reader's device. **The worst case leaks only what the page
-    itself holds — its own authored content and the reader's IP address — never anything of the app**,
-    plus a convincing page shown for the instant before a navigation is torn down (a phishing surface).
-    Accepted because the owner asked for interaction, the author is the owner's own ferret (which already
-    has network access on its host), nothing of the app is reachable to put in such a request, and the
-    agent is told to prefer static HTML and to use script only when interaction genuinely helps. No
+    each of which carries a request from the reader's device. **What such a request can carry** is what the
+    frame holds: the page's own authored content, the reader's IP address, and **the values the parent hands
+    the frame** — the colour scheme and the app's theme paint (`FY_RENDER_HTML_TOKENS`: colours, type sizes,
+    radii, spacing, and the font stacks, plus the column's ink and font read from its computed style), which
+    the shell admits as bounded display values and author script can read. Those are what the reader already
+    sees on screen, not credentials, but they are **not nothing**, and a page that reads them can send them out
+    through any of the channels above. No storage, cookie, document, daemon token or session id is among what
+    the frame is handed (measured for storage, cookies, the parent document and the token traces by
+    `fy-render-html.security.test.ts`; the rest read from `fy-render-html-frame.tsx`, whose props carry none).
+    The worst case also includes a convincing page shown for the instant before a navigation is torn down
+    (a phishing surface). Accepted because the owner asked for interaction, the author is the owner's own
+    ferret (which already has network access on its host), no credential or app state is reachable to put in
+    such a request beyond that theme paint, and the agent is told to prefer static HTML and to use script only when interaction genuinely helps. No
     browser offers a per-frame CPU or memory quota, so the stall guard and the lifetime are proven
     against shortened windows in `packages/plugins/conversation/tests/unit/app/render/fy-render-html-frame.test.tsx`, not by waiting in a browser.
     Anyone who considers this unacceptable can route every `html` block to the fragment by making

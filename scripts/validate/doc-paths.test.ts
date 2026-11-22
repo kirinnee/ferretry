@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { CONTRACT_DOCS, missingPaths } from './doc-paths.ts';
+import { CONTRACT_DOCS, main, missingPaths } from './doc-paths.ts';
 
 const root = join(import.meta.dir, '../..');
 
@@ -96,5 +96,51 @@ describe('the doc-paths check', () => {
     const dir = repo({ 'docs/a.md': 'See `packages/app/src/later.ts`.\n', 'packages/app/src/real.ts': 'export {};\n' });
     writeFileSync(join(dir, 'packages/app/src/later.ts'), 'export {};\n');
     expect(missingPaths(dir, ['docs/a.md']).map(found => found.path)).toEqual(['packages/app/src/later.ts']);
+  });
+});
+
+describe('the doc-paths gate, as the pre-commit hook runs it', () => {
+  /** `main` with its output captured, so a red run does not print into the test log. */
+  function run(dir: string): { readonly code: number; readonly out: string; readonly err: string } {
+    const out: string[] = [];
+    const err: string[] = [];
+    const log = spyOn(console, 'log').mockImplementation((...parts: unknown[]) => void out.push(parts.join(' ')));
+    const error = spyOn(console, 'error').mockImplementation((...parts: unknown[]) => void err.push(parts.join(' ')));
+    try {
+      return { code: main(dir), out: out.join('\n'), err: err.join('\n') };
+    } finally {
+      log.mockRestore();
+      error.mockRestore();
+    }
+  }
+
+  test('exits 0 when both contract documents name only tracked paths, and 1 naming the document, line and path otherwise', () => {
+    const green = repo({
+      'packages/app/src/real.ts': 'export {};\n',
+      'docs/fy-render.md': 'See `packages/app/src/real.ts`.\n',
+      'docs/reference-standard.md': 'Nothing named.\n',
+    });
+    expect(run(green)).toMatchObject({ code: 0 });
+
+    const red = repo({
+      'packages/app/src/real.ts': 'export {};\n',
+      'docs/fy-render.md': 'See `packages/app/src/real.ts`.\n',
+      'docs/reference-standard.md': 'Line one.\nGone: `packages/app/src/ghost.ts`.\n',
+    });
+    const failed = run(red);
+    expect(failed.code).toBe(1);
+    expect(failed.err).toContain('docs/reference-standard.md:2');
+    expect(failed.err).toContain('packages/app/src/ghost.ts');
+  });
+
+  test('exits 2, a broken gate and not a clean tree, when a contract document cannot be read', () => {
+    const dir = repo({ 'docs/fy-render.md': 'Nothing named.\n' });
+    expect(run(dir).code).toBe(2);
+  });
+
+  test('is an executable entry point named by the contract registry', () => {
+    const script = join(root, 'scripts/validate/doc-paths.sh');
+    expect(readFileSync(script, 'utf8')).toContain('scripts/validate/doc-paths.ts');
+    expect(statSync(script).mode & 0o111).not.toBe(0);
   });
 });

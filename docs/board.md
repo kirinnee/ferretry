@@ -682,11 +682,14 @@ fy task patch F12 --file f12.yaml    # one atomic edit; --file - reads stdin; JS
 ## How a task reads
 
 Every text a ferret writes on a task — `summary`, `status`, `premise`, `context`, `brief` and `howToTest` — is Markdown,
-drawn by the Board's own small renderer (`packages/plugins/board/app/views/prose.tsx`: paragraphs, lists, `code`, bold,
-links and a `&F12` task link), so an `fy-render` block there is a code fence, not an illustration — the chat's richer
-reading belongs to Conversation ([fy-render.md](fy-render.md#where-a-block-renders-and-where-it-cannot)), and the
-reference grammar with its proof-before-link gate ([reference-standard.md](reference-standard.md)) is the chat's and the
-shell's, which this renderer does not run. The task detail reads top to bottom
+drawn by the Board's own small renderer (`taskProse` in `packages/plugins/board/app/views/prose.tsx`): paragraphs, bullet
+and numbered lists, inline `code`, bold, `[text](url)` links and a `&F12` task link. It has **no code-fence reading at
+all** — the lines of a fenced block are read as ordinary lines (a paragraph, joined with spaces, or a list where a
+line starts like a list item), and only an inline `` `span` `` is code — so an `fy-render` fence written in a task is
+never an illustration and never a code block either; it reads as flattened text. The chat's richer reading belongs to Conversation
+([fy-render.md](fy-render.md#where-a-block-renders-and-where-it-cannot)). The reference grammar's proof-before-link gate
+([reference-standard.md](reference-standard.md)) is not run here either: this renderer links every well-formed
+`&B`, `&F`, `&I` or `&C` id to its Board path without asking the daemon. The task detail reads top to bottom
 as an agenda item does, with nothing folded:
 
 1. the title, with the **summary** as one line under it, then the **Status** ([The task's Status](#the-tasks-status)) when
@@ -1603,11 +1606,12 @@ wherever it appears ([reference-standard.md](reference-standard.md)). It is **re
   that lane file as damaged, and a cached older app cannot load the board. No template uses them; add one to a lane
   only once every machine and app runs this release.
 
-- **Only `&F412` is a link in a task's text.** The task detail sits outside any session, and the reference
-  surface is assembled per session (`components/reference-surface.tsx`), so `^A48` and `@file` in a task's Markdown
-  stay prose until the Board builds a surface of its own — the same as an agenda item read in the Inbox. A task
-  reference links on both, through `DaemonTaskReferences`: any task on the machine, per
-  [reference-standard.md](reference-standard.md) §6.
+- **Only `&F412` is a link in a task's text, and it is not proved.** The task detail sits outside any session and draws
+  its text with the Board's own `taskProse` (`packages/plugins/board/app/views/prose.tsx`), not through a reference
+  surface, so `^A48` and `@file` in a task's Markdown stay plain text. A well-formed task id (`&B`, `&F`, `&I` or
+  `&C` and up to nine digits) is turned into a link to that task's Board path with **no daemon read**: an id that names no
+  task is still a link, which is a declared exception to the proof-before-link rule in
+  [reference-standard.md](reference-standard.md) §6, held until the Board draws through a reference surface of its own.
 - **Another machine's tasks.** The `&F412@mac` spelling for a task on a different machine is not wired. A `parent`
   or `dependsOn` that names a task on another machine resolves to nothing, so it neither blocks nor rolls up.
 - **Some messages bypass the pending-context carrier.** Quiet board events ride the next message, but agenda answer

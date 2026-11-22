@@ -26,7 +26,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { dirname, join, normalize } from 'node:path';
+import { dirname, join, normalize, resolve } from 'node:path';
 
 /** The documents whose named paths are held to the tree. */
 export const CONTRACT_DOCS: readonly string[] = ['docs/fy-render.md', 'docs/reference-standard.md'];
@@ -128,3 +128,30 @@ export function missingPaths(root: string, docs: readonly string[] = CONTRACT_DO
   }
   return missing;
 }
+
+/**
+ * The gate: 0 when every path the contract documents name is tracked, 1 naming each one that is not, 2 when the check
+ * itself could not run (no git, an unreadable document). Exit codes follow the repo convention for `scripts/validate/`.
+ */
+export function main(root: string): number {
+  let missing: readonly MissingPath[];
+  try {
+    missing = missingPaths(root);
+  } catch (error) {
+    console.error(`❌ the doc-paths check could not run: ${error instanceof Error ? error.message : String(error)}`);
+    return 2;
+  }
+  if (missing.length === 0) {
+    console.log(`✅ every repository path ${CONTRACT_DOCS.join(' and ')} name is tracked`);
+    return 0;
+  }
+  for (const { doc, line, path } of missing)
+    console.error(`❌ ${doc}:${line} names a path that is not tracked: ${path}`);
+  console.error(
+    '\nA contract document tells an implementer where the code is; a moved or deleted path turns that sentence into a trap.\n' +
+      "Fix the path in the document (or the document's claim), not the check. See scripts/validate/doc-paths.ts.",
+  );
+  return 1;
+}
+
+if (import.meta.main) process.exit(main(resolve(process.argv[2] ?? '.')));
