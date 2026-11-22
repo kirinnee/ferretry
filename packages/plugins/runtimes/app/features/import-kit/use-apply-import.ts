@@ -60,11 +60,20 @@ export function useApplyImport(client: RuntimesClient, options: ApplyImportOptio
   const schedule = options.schedule;
   const apply = useCallback(
     async (change: AccountChange, label: string): Promise<ImportApplied | null> => {
+      // One controller per attempt: the deadline aborts THIS attempt's requests (a stage that answers after the abort
+      // never sends its apply), and `abandon` makes its late answer unable to touch the screen or the next attempt.
+      const attempt = new AbortController();
       let result: ChangeResult;
       try {
-        result = await withDeadline(changes.apply(change), deadlineMs, schedule ?? realSchedule);
+        result = await withDeadline(
+          changes.apply(change, { signal: attempt.signal }),
+          deadlineMs,
+          schedule ?? realSchedule,
+        );
       } catch (error) {
         // `changes.apply` never throws (a failure is a refusal), so the deadline is the only way here.
+        attempt.abort();
+        changes.abandon();
         changes.refuse(
           error instanceof MachineDeadlineError ? importTimedOutSentence(label, deadlineMs) : String(error),
         );

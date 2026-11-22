@@ -11,7 +11,7 @@
 import { useViewPlace } from '@ferretry/app';
 import { changeAuthorityFrom, InlineCode } from '@ferretry/app/ui';
 import type { AccountChange, AccountChangeView } from '../../../../contract/index.ts';
-import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
+import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { RuntimesClient } from '../../../lib/client.ts';
 import { fleetRefusalExplanation } from '../../../lib/shell-ports.ts';
 import { Button } from '../../../ui.ts';
@@ -32,8 +32,16 @@ export interface AccountChanges {
   readonly busy: boolean;
   /** The last refusal, as one sentence, or `null`. */
   readonly refusal: string | null;
-  /** Stage and apply one change. */
-  readonly apply: (change: AccountChange) => Promise<ChangeResult>;
+  /**
+   * Stage and apply one change. A caller that may stop waiting passes a `signal`: it reaches both requests, and an
+   * apply is never sent once it has aborted.
+   */
+  readonly apply: (change: AccountChange, options?: { readonly signal?: AbortSignal }) => Promise<ChangeResult>;
+  /**
+   * Stop waiting for the attempt in flight (its deadline passed): `busy` clears now, and whatever that attempt answers
+   * later changes neither the busy state nor the refusal. The next attempt starts clean.
+   */
+  readonly abandon: () => void;
   /** Stage only, for a confirm card that shows the daemon's consequences first. */
   readonly stage: (change: AccountChange) => Promise<StageResult>;
   /** Apply a change {@link stage} returned. */
@@ -79,25 +87,35 @@ export function useAccountChanges({ client }: UseAccountChangesOptions): Account
     };
   }, [client, placed]);
 
+  /**
+   * The newest attempt's number. An attempt whose number is no longer the newest (it was abandoned, or a later one
+   * started) answers its caller but never touches `busy` or `refusal`: a late reply of an old attempt cannot change
+   * the screen or clear the new attempt's busy.
+   */
+  const newest = useRef(0);
+
   const run = useCallback(
     async <R extends ChangeResult | StageResult>(
       work: (client: RuntimesClient) => Promise<R>,
     ): Promise<R | Extract<ChangeResult, { kind: 'refused' }>> => {
+      newest.current += 1;
+      const mine = newest.current;
+      const current = (): boolean => newest.current === mine;
       setBusy(true);
       setRefusal(null);
       try {
         const result = await work(client);
         // A rolled-back or half-restored apply is not a save: it shows where a refusal shows, in the same alert.
-        if (result.kind !== 'applied' && result.kind !== 'staged') setRefusal(result.sentence);
+        if (current() && result.kind !== 'applied' && result.kind !== 'staged') setRefusal(result.sentence);
         return result;
       } catch (error) {
         // A change's own failure is already a result, so this is only an unexpected throw, and that says why rather
         // than claiming the machine was silent.
         const sentence = changeRefusalSentence(error);
-        setRefusal(sentence);
+        if (current()) setRefusal(sentence);
         return { kind: 'refused', sentence };
       } finally {
-        setBusy(false);
+        if (current()) setBusy(false);
       }
     },
     [client],
@@ -107,7 +125,11 @@ export function useAccountChanges({ client }: UseAccountChangesOptions): Account
     authority,
     busy,
     refusal,
-    apply: change => run(client => applyAccountChange(client, change)),
+    apply: (change, options) => run(client => applyAccountChange(client, change, options?.signal)),
+    abandon: () => {
+      newest.current += 1;
+      setBusy(false);
+    },
     stage: change => run(client => stageAccountChange(client, change)),
     applyStaged: staged => run(client => applyStagedChange(client, staged)),
     clear: () => setRefusal(null),

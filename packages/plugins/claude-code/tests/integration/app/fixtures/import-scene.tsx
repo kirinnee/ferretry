@@ -2,9 +2,11 @@
  * The browser entry for the Claude IMPORT pages: the REAL pages over a fixed fake daemon and a fake host scan, inside a plain
  * stand-in for the step frame (the real frame is O4's). Nothing reads a network; every name is made up.
  *
- *   ?page=settings|model-set|instructions|skills|mcp|conversations|run|run-everything|run-lost   ?theme=<family>-<mode>
+ *   ?page=settings|model-set|instructions|skills|mcp|conversations|run|run-everything|run-lost|run-slow|run-locked   ?theme=<family>-<mode>
  *   `run` is "Choose" mode with some items left out; `run-everything` is the everything mode's single page;
- *   `run-lost` is what a reload leaves (no memory of the choice).
+ *   `run-lost` is what a reload leaves (no memory of the choice); `run-slow` holds the first import's first POST
+ *   (it never answers, and ignores the abort) until `window.__import.releaseFirst()`; `run-locked` refuses every POST
+ *   with `401 unlock_required` and raises an unlock prompt until `window.__import.unlock()`.
  */
 import type { StepHost, StepSegmentMemory } from '@ferretry/kernel/contract';
 import { createRoot } from 'react-dom/client';
@@ -35,6 +37,8 @@ const TITLES: Record<string, string> = {
   run: 'Bring it over',
   'run-everything': 'Bring it over',
   'run-lost': 'Bring it over',
+  'run-slow': 'Bring it over',
+  'run-locked': 'Bring it over',
 };
 
 const table: Record<string, unknown> = {
@@ -47,11 +51,63 @@ const table: Record<string, unknown> = {
   },
   'PUT /v1/config/file': { path: 'harness-claude-code.yaml', etag: 'e2', outcome: 'applied' },
 };
+const answerOf = (route: string, init?: unknown): unknown => {
+  const answer = table[route];
+  if (answer === undefined) throw new Error(`no route ${route}`);
+  return typeof answer === 'function' ? (answer as (init?: unknown) => unknown)(init) : answer;
+};
+
+/** What the C59 O5-10 timeout and unlock cases let the test see and drive (a browser fact, not a scene detail). */
+interface ImportProbe {
+  /** Every POST the page sent, in order, with whether its signal had aborted by now. */
+  sent: { route: string; signal: AbortSignal | undefined }[];
+  /** `run-slow`: answers the FIRST attempt's held stage POST late. */
+  releaseFirst: () => void;
+  /** `run-locked`: how many times the machine asked for the unlock. */
+  unlockPrompts: number;
+  /** `run-locked`: the person confirms with the passkey: POSTs go through from here on. */
+  unlock: () => void;
+}
+const probe: ImportProbe = {
+  sent: [],
+  releaseFirst: () => undefined,
+  unlockPrompts: 0,
+  unlock: () => undefined,
+};
+(window as unknown as { __import: ImportProbe }).__import = probe;
+
+const isPost = (route: string): boolean => route.startsWith('POST ');
+
+/** `run-slow`: the first POST never answers until `releaseFirst` (and ignores the abort, the worst case); later ones answer. */
+let firstHeld = true;
+/** `run-locked`: every POST raises the unlock prompt and is refused until the person unlocks. */
+let locked = page === 'run-locked';
+probe.unlock = () => {
+  locked = false;
+};
+
 const client = {
-  call: async (route: string, init?: unknown) => {
-    const answer = table[route];
-    if (answer === undefined) throw new Error(`no route ${route}`);
-    return typeof answer === 'function' ? (answer as (init?: unknown) => unknown)(init) : answer;
+  call: async (route: string, init?: { readonly signal?: AbortSignal }) => {
+    if (!isPost(route)) return answerOf(route, init);
+    probe.sent.push({ route, signal: init?.signal });
+    if (locked) {
+      probe.unlockPrompts += 1;
+      const prompt = document.createElement('div');
+      prompt.setAttribute('role', 'dialog');
+      prompt.setAttribute('data-unlock-prompt', String(probe.unlockPrompts));
+      document.body.append(prompt);
+      throw Object.assign(new Error('this machine asks you to confirm it is you with a passkey'), {
+        status: 401,
+        code: 'unlock_required',
+      });
+    }
+    if (page === 'run-slow' && firstHeld) {
+      firstHeld = false;
+      return await new Promise(resolve => {
+        probe.releaseFirst = () => resolve(answerOf(route, init));
+      });
+    }
+    return answerOf(route, init);
   },
   subscribe: () => () => undefined,
 } as never;
@@ -62,7 +118,11 @@ const CHOOSE: StepSegmentMemory = {
   'skip:skills': JSON.stringify(['claude-code:skill:release-notes']),
 };
 const segment: StepSegmentMemory =
-  page === 'run-everything' ? { importMode: 'everything' } : page === 'run-lost' ? {} : CHOOSE;
+  page === 'run-everything' || page === 'run-slow' || page === 'run-locked'
+    ? { importMode: 'everything' }
+    : page === 'run-lost'
+      ? {}
+      : CHOOSE;
 
 const step: StepHost = {
   phase: 'daemon',

@@ -97,8 +97,15 @@ const newContext = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 
   return context;
 };
 
-const open = async (context: BrowserContext, page: string, mode: 'light' | 'dark'): Promise<Page> => {
+const open = async (
+  context: BrowserContext,
+  page: string,
+  mode: 'light' | 'dark',
+  options: { readonly fakeClock?: boolean } = {},
+): Promise<Page> => {
   const tab = await context.newPage();
+  // The 90 s import deadline is fast-forwarded on the page's clock, never waited for.
+  if (options.fakeClock === true) await tab.clock.install();
   await tab.goto(`${server?.url.origin ?? ''}/?page=${page}&theme=studio-${mode}`);
   await tab.waitForSelector('[data-onboarding-step]');
   // Let the one-shot demos and the card animation finish: a shot shows the last frame.
@@ -157,6 +164,82 @@ describe('the Claude import pages', () => {
             fullPage: true,
             path: join(shotsDir, `conversations-pick-${viewport.name}-${mode}.png`),
           });
+        await context.close();
+      }, 60_000);
+
+      it(`run: an import that never answers ends at 90 s, Try again is enabled, a late reply of the old attempt changes nothing at ${viewport.name}, ${mode}`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'run-slow', mode, { fakeClock: true });
+        const sent = async () =>
+          await tab.evaluate(() =>
+            (
+              window as unknown as {
+                __import: { sent: { route: string; signal?: AbortSignal }[] };
+              }
+            ).__import.sent.map(entry => ({ route: entry.route, aborted: entry.signal?.aborted === true })),
+          );
+        const press = tab.locator('[data-import-press]');
+        await press.click();
+        await tab.waitForSelector('[role="status"]:has-text("Importing…")');
+        // Waiting: the press is disabled and the first stage POST is in flight with a live signal.
+        expect(await press.isDisabled()).toBe(true);
+        expect(await sent()).toEqual([{ route: 'POST /v1/runtimes/proposals', aborted: false }]);
+
+        await tab.clock.fastForward(91_000);
+        await tab.waitForSelector('[data-import-refusal]');
+        const refusal = await tab.locator('[data-import-refusal]').innerText();
+        expect(refusal).toContain('Claude Code import did not answer within 90 s');
+        expect(await tab.getByText('Importing…').count()).toBe(0);
+        expect(await press.innerText()).toBe('Try again');
+        expect(await press.isEnabled()).toBe(true);
+        // The deadline aborted the request that was waiting.
+        expect(await sent()).toEqual([{ route: 'POST /v1/runtimes/proposals', aborted: true }]);
+
+        // Try again: a fresh attempt goes out and finishes.
+        await press.click();
+        await tab.waitForSelector('[data-import-answer]');
+        expect(await tab.locator('[data-import-answer]').innerText()).toContain('Claude Code is set up here.');
+
+        // The OLD attempt now answers, late: nothing on the page changes and its apply is never sent.
+        await tab.evaluate(() =>
+          (window as unknown as { __import: { releaseFirst: () => void } }).__import.releaseFirst(),
+        );
+        await tab.waitForTimeout(300);
+        expect(await tab.locator('[data-import-answer]').innerText()).toContain('Claude Code is set up here.');
+        expect(await tab.locator('[data-import-refusal]').count()).toBe(0);
+        const routes = (await sent()).map(entry => entry.route);
+        expect(routes).toEqual([
+          'POST /v1/runtimes/proposals',
+          'POST /v1/runtimes/proposals',
+          'POST /v1/runtimes/proposals/:proposalId/apply',
+        ]);
+        await context.close();
+      }, 60_000);
+
+      it(`run: a locked machine reads as locked, Try again asks for the unlock again, and unlocking finishes at ${viewport.name}, ${mode}`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'run-locked', mode);
+        const press = tab.locator('[data-import-press]');
+        const prompts = async () =>
+          await tab.evaluate(
+            () => (window as unknown as { __import: { unlockPrompts: number } }).__import.unlockPrompts,
+          );
+        await press.click();
+        await tab.waitForSelector('[data-import-refusal]');
+        expect(await tab.locator('[data-import-refusal]').innerText()).toContain('This machine is locked');
+        expect(await prompts()).toBe(1);
+        expect(await tab.locator('[data-unlock-prompt]').count()).toBe(1);
+        expect(await press.innerText()).toBe('Try again');
+        expect(await press.isEnabled()).toBe(true);
+        // Try again is a POST, so the machine asks for the unlock again.
+        await press.click();
+        await tab.waitForFunction(() => document.querySelectorAll('[data-unlock-prompt]').length === 2);
+        expect(await prompts()).toBe(2);
+        // The person confirms: the next press goes through.
+        await tab.evaluate(() => (window as unknown as { __import: { unlock: () => void } }).__import.unlock());
+        await tab.locator('[data-import-press]').click();
+        await tab.waitForSelector('[data-import-answer]');
+        expect(await tab.locator('[data-import-refusal]').count()).toBe(0);
         await context.close();
       }, 60_000);
 
