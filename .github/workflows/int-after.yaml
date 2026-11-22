@@ -23,7 +23,8 @@ concurrency:
 jobs:
   int:
     name: Integration Tests
-    timeout-minutes: 20
+    # 40 minutes, the same as ci.yaml's `int` job: six shards of ~1,560 s each run six at a time (see ci.yaml).
+    timeout-minutes: 40
     permissions:
       contents: read
     # The runner shape of ci.yaml's `int` job.

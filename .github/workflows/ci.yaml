@@ -326,7 +326,10 @@ jobs:
     name: Integration Tests
     needs: proof
     if: ${{ !cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
-    timeout-minutes: 20
+    # 40 minutes, up from 20: the six shards hold ~9,400 s of test time (880 files; 208 visual files ~37 s each in Chrome),
+    # so six parallel streams need ~26 min even perfectly balanced. The old single `all` group never got past 31 files in
+    # 20 min (run 45041640864). Shrinking it needs more parallel streams (a bigger runner), not a different split.
+    timeout-minutes: 40
     permissions:
       contents: read
     runs-on:

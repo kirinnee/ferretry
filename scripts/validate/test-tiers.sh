@@ -123,6 +123,21 @@ for tier in $(jq -r 'keys[] | select(. != "schemaVersion")' "${groups}"); do
               | ([$groups[] | select(any(.prefixes[]; . as $prefix | $file | startswith($prefix)))][0].name) == $group.name)) | length) == 0
          then "group \"\($group.name)\" owns no \($tier)-tier test file" else empty end)
       )')
+  # THE INTEGRATION GROUPS PARTITION THE TIER: every integration test file starts with a prefix of EXACTLY ONE group. Unit
+  # groups nest on purpose (first match wins), but an integration group is a share of one 8x16 job's parallel run, so a
+  # file that two shares claim would run twice and one that none claims would never run (its ledger share silently gone).
+  if [[ ${tier} == int ]]; then
+    while IFS= read -r problem; do
+      [[ -n ${problem} ]] && refuse "${groups}: int ${problem}; the int groups must partition the tier (every file in exactly one group)"
+    done < <(jq -n -r --rawfile files <(printf '%s' "${tier_files}") --slurpfile config "${groups}" '
+      ($files | split("\n") | map(select(. != ""))) as $files
+      | $config[0].int as $groups
+      | $files[] as $file
+      | ([$groups[] | select(any(.prefixes[]; . as $prefix | $file | startswith($prefix))) | .name]) as $owners
+      | if ($owners | length) == 0 then "file \($file) is in no group"
+        elif ($owners | length) > 1 then "file \($file) is in \($owners | length) groups (\($owners | join(", ")))"
+        else empty end')
+  fi
 done
 
 # A group's "processes" (scripts/ci/test.sh runs its files in that many isolated bun processes inside its
