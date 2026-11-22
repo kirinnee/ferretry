@@ -74,6 +74,17 @@ describe('the no-native-select gate', () => {
     expect(result.status).toBe(0);
   });
 
+  for (const [name, source] of [
+    ['an element after a closed block comment', '/* x */ <select>\n'],
+    ['an element after two closed block comments', '/* a */ /* b */ <select/>\n'],
+    ['an element after a closed doc comment', '/** why */ <select value={v}></select>\n'],
+  ] as const)
+    test(`refuses ${name}`, () => {
+      const result = run({ 'packages/plugins/usage/app/a.tsx': source });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('packages/plugins/usage/app/a.tsx');
+    });
+
   test('allows a comment-only line and the shared SelectBox', () => {
     const result = run({
       'packages/plugins/usage/app/a.tsx':

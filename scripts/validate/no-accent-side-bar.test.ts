@@ -91,6 +91,11 @@ describe('the accent side-bar gate, Tailwind classes in JSX (r11-2b K4)', () => 
     'an arbitrary colour': '<div className="border-l-2 border-[var(--accent)]" />\n',
     'a variant-prefixed bar': '<div className="hover:border-l-4 hover:border-ok" />\n',
     'a colour that comes first': '<div className="border-warn border-l-2" />\n',
+    'a bar and its tone class split across two lines of one string':
+      '<div className="flex border-l-2\n  border-warn pl-3" />\n',
+    'a bar and its tone class in two entries of one class list':
+      "<div className={[\n  'border-l-2',\n  'border-accent',\n].join(' ')} />\n",
+    'a bar after a comment that closed earlier on the line': '<div className="border-l-2 border-warn" /> {/* ok */}\n',
   };
   for (const [name, tsx] of Object.entries(TAILWIND_BARS))
     test(`refuses ${name}`, () => {
@@ -98,6 +103,31 @@ describe('the accent side-bar gate, Tailwind classes in JSX (r11-2b K4)', () => 
       expect(result.status).toBe(1);
       expect(result.stderr).toContain('packages/x/a.tsx');
     });
+
+  test('allows a bar named inside a multi-line comment', () => {
+    const result = run({
+      'packages/x/a.tsx': [
+        '<div>\n  {/*\n    was border-l-2 border-warn\n    border-s-4 border-accent\n  */}\n</div>\n',
+        '/**\n * border-l-2 border-err\n */\n',
+        '/*\nborder-l-4 border-accent\n*/\n',
+      ].join(''),
+    });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
+  test('does not pair a bar with a tone class of the next element', () => {
+    const result = run({
+      'packages/x/a.tsx': [
+        '<li className="border-l-2 border-border-strong" />\n',
+        '<li className="border-warn" />\n',
+        '<li\n  className="border-l-2\n    border-border-strong"\n/>\n',
+        '<li className="border-accent" />\n',
+      ].join(''),
+    });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
 
   test('allows a neutral divider, a 1px rule, an accent top border and a comment that names a bar', () => {
     const result = run({

@@ -62,14 +62,15 @@ git ls-files -- '*.css' | while IFS= read -r file; do
   ' "${file}"
 done >>"${tmp_dir}/lines"
 
-# Shape 4: Tailwind utility classes in JSX, which the stylesheet greps above cannot see. `git grep` finds a 2-6px side-border class,
-# `grep` keeps the lines that also name an accent / tone colour, and the awk drops lines that are only a comment.
+# Shape 4: Tailwind utility classes in JSX, which the stylesheet greps above cannot see. `git grep -l` finds the files that name a
+# 2-6px side-border class, the awk below reads each one with its comments blanked, and `grep` keeps the records (a line, or an
+# element's opening tag across lines) that name both that class and an accent / tone colour.
 cls_end='([^A-Za-z0-9_-]|$)'
 cls_start='(^|[^A-Za-z0-9_-])([a-z0-9_&>[\]-]+:)*'
 side="${cls_start}border-(l|s)-(\\[-?[2-6](\\.[0-9]+)?px\\]|[2-6]|heavy)${cls_end}"
 hue="${cls_start}border-(accent|tone|warn|err|ok)(-[a-z]+)?(/[0-9]+)?${cls_end}|border-\\[[^]]*var\\(--(accent|tone|warn|err|ok)"
 status=0
-git grep -n -I -E -e "${side}" -- '*.tsx' >"${tmp_dir}/tw" 2>"${tmp_dir}/err" || status=$?
+git grep -l -I -E -e "${side}" -- '*.tsx' >"${tmp_dir}/tw-files" 2>"${tmp_dir}/err" || status=$?
 case "${status}" in
 0 | 1) ;;
 *)
@@ -78,8 +79,56 @@ case "${status}" in
   exit 2
   ;;
 esac
-{ grep -E -e "${hue}" "${tmp_dir}/tw" || true; } |
-  awk '{ text = $0; sub(/^[^:]*:[0-9]+:/, "", text) } text !~ /^[[:space:]]*(\/\/|\*|\/\*|\{\/\*)/' >>"${tmp_dir}/lines"
+# The awk turns each candidate file into `path:line:text` records with comments blanked (a `/* … */` block, also a JSX `{/* … */}`
+# one, may span lines; a line that starts with `//` or `*` is a comment line). It emits every line, and every element's opening tag
+# as ONE record (text from a `<` to the next `<`, lines joined by a space), so a side class and its tone class split across two lines of
+# one string or one class list are read together while two neighbouring elements never are. `/*` opens a comment only after the start of
+# a line, a space or `{(;,}`, so a glob such as "src/**/*.ts" in a string is not one.
+if [ -s "${tmp_dir}/tw-files" ]; then
+  # shellcheck disable=SC2016 # the awk program is single-quoted on purpose: its `$0` is awk's, not the shell's
+  tr '\n' '\0' <"${tmp_dir}/tw-files" | xargs -0 awk '
+    function flush() {
+      if (seg != "" && segline != segend) print file ":" segline ":" seg
+      seg = ""
+    }
+    FNR == 1 { flush(); file = FILENAME; inblock = 0; segline = 1; segend = 1 }
+    {
+      rest = $0
+      res = ""
+      while (1) {
+        if (inblock) {
+          i = index(rest, "*/")
+          if (!i) { rest = ""; break }
+          rest = substr(rest, i + 2)
+          inblock = 0
+          res = res " "
+          continue
+        }
+        i = index(rest, "/*")
+        if (!i) { res = res rest; break }
+        res = res substr(rest, 1, i - 1)
+        prev = (res == "") ? " " : substr(res, length(res), 1)
+        rest = substr(rest, i + 2)
+        if (prev ~ /[[:space:]{(;,}]/) inblock = 1
+        else res = res "/*"
+      }
+      if (res ~ /^[[:space:]]*(\/\/|\*)/) res = ""
+      if (res != "") print file ":" FNR ":" res
+      n = split(res, part, "<")
+      if (seg == "") segline = FNR
+      seg = seg " " part[1]
+      segend = FNR
+      for (k = 2; k <= n; k++) {
+        flush()
+        segline = FNR
+        segend = FNR
+        seg = "<" part[k]
+      }
+    }
+    END { flush() }
+  ' >"${tmp_dir}/tw"
+  { grep -E -e "${side}" "${tmp_dir}/tw" || true; } | { grep -E -e "${hue}" || true; } >>"${tmp_dir}/lines"
+fi
 
 sort -u "${tmp_dir}/lines" -o "${tmp_dir}/lines"
 sed -E 's/^([^:]+):.*/\1/' "${tmp_dir}/lines" | sort -u >"${tmp_dir}/hit-files"
