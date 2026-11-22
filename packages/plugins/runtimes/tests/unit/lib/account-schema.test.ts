@@ -125,6 +125,25 @@ describe('AccountModelSchema', () => {
     should(actual).matchAny(/agnet/);
   });
 
+  it('should read a runtime written before the agent flag was removed, and drop that key', () => {
+    // Act
+    const parsed = AccountModelSchema.safeParse(
+      documentWith({ runtimes: { a: { credential: 'claude-you', profile: 'default', agent: true } } }),
+    );
+
+    // Assert
+    should(parsed.success).be.true();
+    should(parsed.success ? parsed.data.runtimes.a : undefined).eql({ credential: 'claude-you', profile: 'default' });
+  });
+
+  it('should refuse a runtime that is not a mapping', () => {
+    // Act
+    const actual = messagesOf(documentWith({ runtimes: { a: 'claude-you' } }));
+
+    // Assert
+    should(actual).have.length(1);
+  });
+
   it.each(['has space', '-leading', 'trailing-', 'dot.ted', 'under_score', ''])(
     'should refuse runtime name %p',
     name => {

@@ -1657,6 +1657,24 @@ describe('planClone default runtime for new agents', () => {
     should(plan.defaultRuntime).deepEqual({ kind: 'chosen', runtime: 'claude-liftoff-2' });
   });
 
+  it('should refuse a default the copy does not bring', () => {
+    // Act
+    const run = () => planClone(targetWithDefault(), agentBundle(), options({ defaultRuntime: 'nobody' }));
+
+    // Assert
+    should(run).throw(/nobody can't be the default runtime/);
+  });
+
+  it('should say a replaced default is left unset when the copy brings no runtime to take its place', () => {
+    // Act
+    const bundle = agentBundle({ runtimes: {} });
+    const plan = planClone(targetWithDefault(), bundle, options({ mode: 'replace', sourceName: 'Liftoff EC2' }));
+
+    // Assert
+    should(plan.defaultRuntime).deepEqual({ kind: 'repaired', was: 'claude-kirin' });
+    should(describeClone(plan, bundle, 'Liftoff MBP', 'Liftoff EC2').join('\n')).containEql('so it is left unset');
+  });
+
   it('should leave the default unset when the person asks for none', () => {
     // Act
     const plan = planClone(targetWithDefault(), agentBundle(), options({ mode: 'replace', defaultRuntime: null }));
