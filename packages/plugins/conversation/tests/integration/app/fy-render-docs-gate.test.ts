@@ -108,15 +108,51 @@ describe('no-fy-render-in-docs gate', () => {
     should(runGate({ 'docs/listed.md': listed }).code).equal(1);
   });
 
+  test('should fire on an opener with spaces or a tab between the delimiter and the token', () => {
+    // Arrange — CommonMark lets whitespace sit between the delimiter run and the info string, and the reader's
+    // opener (`FY_RENDER_OPENER`, `[ \t]*`) accepts it, so each of these renders; a matcher that required the token to
+    // touch the delimiter would pass every one of them into a durable file.
+    for (const [name, text] of [
+      ['one space', `${FENCE} fy-render\ntype: svg\n${FENCE}\n`],
+      ['three spaces', `${FENCE}   fy-render\ntype: svg\n${FENCE}\n`],
+      ['a tab', `${FENCE}\tfy-render\ntype: svg\n${FENCE}\n`],
+      ['tildes and a space', `${TILDE} fy-render\ntype: svg\n${TILDE}\n`],
+      ['four backticks and a space, trailing space', `${LONG_FENCE} fy-render \ntype: svg\n${LONG_FENCE}\n`],
+      ['a space, nested in a quote', `> ${FENCE} fy-render\n> type: svg\n> ${FENCE}\n`],
+      ['a space, nested in a list item', `- an illustration:\n\n  ${FENCE} fy-render\n  type: svg\n  ${FENCE}\n`],
+    ] as const) {
+      // Act
+      const run = runGate({ 'docs/spaced.md': text });
+
+      // Assert — red before the matcher took the leading whitespace: exit 0 for every one of these.
+      should(run.code).equal(1);
+      should(run.output).containEql('docs/spaced.md');
+      should(name).be.a.String();
+    }
+  });
+
+  test('should still not fire on a spaced fence that is a different language', () => {
+    // Arrange — whitespace before the token must not widen the match to a longer info string.
+    const near = {
+      'docs/a.md': `${FENCE} fy-render-notes\nnot this one\n${FENCE}\n`,
+      'docs/b.md': `${FENCE} fy-render notes\nnor this one\n${FENCE}\n`,
+      'docs/c.md': `${FENCE}  my-fy-render\nnor this\n${FENCE}\n`,
+    };
+
+    // Assert
+    should(runGate(near).code).equal(0);
+  });
+
   test('should fire wherever the opener is, not only in documentation', () => {
     should(runGate({ 'packages/pwa/src/thing.ts': `// ${FENCE}fy-render\n` }).code).equal(1);
     should(runGate({ 'README.md': opener(FENCE) }).code).equal(1);
   });
 
-  test('should allow the two files whose job is to teach the syntax', () => {
+  test('should allow the three files whose job is to teach the syntax', () => {
     // Act
     const run = runGate({
       'docs/fy-render.md': opener(FENCE),
+      'docs/hypermedia.md': opener(FENCE),
       '.claude/skills/fy-render-authoring/SKILL.md': opener(FENCE),
     });
 

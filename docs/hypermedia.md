@@ -78,6 +78,12 @@ message before sending it; nothing runs it for the agent. Its second line is the
 (make sure you say that) and user hypermeida to walk user through things"_, _"give example to illustrate your
 points etc"_). Change it there and here together.
 
+**Known mismatch, in the shipped text and not fixed here.** The last line below, and the guide's `task`/`board`
+paragraph, say a block renders in "agenda tabs" / "agenda bodies". The surface table in
+[fy-render.md](fy-render.md#where-a-block-renders-and-where-it-cannot) is what the code does: the agenda lends no
+`fy-render` door, so a block there stays a code fence, and it draws in a chat message. The text a ferret is given
+(`fixed-layer.ts`, `guide-text.ts`) is owed a code change to say so; this page quotes it as shipped.
+
 ````text
 Hypermedia: to teach, explain or compare anything not simple (a flow, a design, a change), show it, not just say it. Inline: never publish a page or link unless asked.
 Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Make it interactive: a visual the reader changes (sliders, toggles) that redraws live, no steppers; gentle motion (prefers-reduced-motion).
@@ -338,8 +344,9 @@ painted from the same theme tokens; the reader's theme decides what each looks l
 repaints them. A `chart` that names a colour is refused, and a Mermaid `%%{init}%%` that sets `theme`,
 `themeVariables` or `themeCSS` is ignored ([fy-render.md § Charts](fy-render.md#charts)).
 
-**An interactive `html` page looks like the app.** It is transparent — it sits on the chat or agenda
-surface — and gets the app's theme tokens (`var(--fg)`, `var(--accent)`, `var(--viz-1)` …, light and dark,
+**An interactive `html` page looks like the app.** It draws in a chat message only (the agenda, All
+queues and the shell's `Markdown` show an `fy-render` block as code). It is transparent — it sits on the
+chat column's own surface — and gets the app's theme tokens (`var(--fg)`, `var(--accent)`, `var(--viz-1)` …, light and dark,
 following a theme switch live) and a small component kit (`.fy-btn`, `.fy-range`, `.fy-toggle`,
 `.fy-bars`, `.fy-table`, …) inside its sandbox. It grows to its own height and never scrolls inside
 itself inline. Interactive means a visualization the reader changes and it redraws, never a stepper.

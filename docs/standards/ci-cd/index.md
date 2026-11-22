@@ -400,15 +400,16 @@ vars.MACOS_SMOKE=skip (owner); darwin binary released unproven`.
 
 ## Workflow split
 
-| Workflow                      | Trigger                                                                                                   | Responsibility                                                                        |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| CI                            | PR opened/pushed/reopened; `full-ci` labeled; base changed; `main`; dispatch                              | Quick every push; Full on labeled PRs and every non-PR run; exact-head Full CI status |
-| E2E Slow                      | nightly, dispatch, relevant PRs with `full-ci`                                                            | slow journeys, existing advisory summary                                              |
-| Realworld                     | nightly, dispatch (timing tests); `main` and relevant PRs with `full-ci` (macOS and tmux 3.8 proofs only) | machine budgets (nightly), macOS proofs and pinned harness contract; advisory         |
-| Harness Contract (latest)     | nightly, dispatch                                                                                         | upstream drift and issue reports                                                      |
-| Smoke darwin-arm64 (reusable) | called by CI and CD                                                                                       | existing advisory PR / required release policy                                        |
-| Release                       | successful CI on `main`                                                                                   | version, changelog and release tag                                                    |
-| CD                            | release tag                                                                                               | compile, required darwin smoke, publish                                               |
+| Workflow                      | Trigger                                                                                                   | Responsibility                                                                              |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| CI                            | PR opened/pushed/reopened; `full-ci` labeled; base changed; `main`; dispatch                              | Quick every push; Full on labeled PRs and every non-PR run; exact-head Full CI status       |
+| Integration (5.0-after)       | push to `rebuild/5.0-after` (`int-after.yaml`)                                                            | integration group `all` and its ledger on the rebuild branch, which `main`'s run never sees |
+| E2E Slow                      | nightly, dispatch, relevant PRs with `full-ci`                                                            | slow journeys, existing advisory summary                                                    |
+| Realworld                     | nightly, dispatch (timing tests); `main` and relevant PRs with `full-ci` (macOS and tmux 3.8 proofs only) | machine budgets (nightly), macOS proofs and pinned harness contract; advisory               |
+| Harness Contract (latest)     | nightly, dispatch                                                                                         | upstream drift and issue reports                                                            |
+| Smoke darwin-arm64 (reusable) | called by CI and CD                                                                                       | existing advisory PR / required release policy                                              |
+| Release                       | successful CI on `main`                                                                                   | version, changelog and release tag                                                          |
+| CD                            | release tag                                                                                               | compile, required darwin smoke, publish                                                     |
 
 The fast E2E jobs now live in `ci.yaml`; there is no separate `e2e.yaml`.
 Realworld and Slow remain advisory and outside the Full CI verdict. Release still
