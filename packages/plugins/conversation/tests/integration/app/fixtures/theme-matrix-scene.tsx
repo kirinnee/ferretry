@@ -16,10 +16,9 @@
  */
 import { Check } from 'lucide-react';
 import { createRoot } from 'react-dom/client';
-import { ChoiceCards } from '@ferretry/app';
+import { ChoiceCards, ReferenceSurfaceProvider, ScreenHrefProvider } from '@ferretry/app';
 import { Badge, Button, Card, ContextMenu, PanelBody, PanelHeader, Spinner } from '@ferretry/app/ui';
-import { FyRenderBlock } from '../../../../app/render/fy-render-block.tsx';
-import { type FyRenderWorkspaceReader, isFyRenderEmbedBlock, parseFyRender } from '../../../../app/render/fy-render.ts';
+import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
 
 const params = new URLSearchParams(window.location.search);
 const root = document.documentElement;
@@ -30,26 +29,21 @@ root.setAttribute('data-mode', params.get('mode') === 'dark' ? 'dark' : 'light')
 const noop = () => undefined;
 
 /**
- * A representative hypermedia block: the REAL `FyRenderBlock` over a parsed `fy-render` fence (an `svg` picture, which needs no
- * sandbox library and no network), so the style probe measures what the renderer actually draws and not what a token declares
- * (r11 T14, review of PR 2226). The renderer reads its slots (`--hm-*`, r11 T4) through its own stylesheet.
+ * A representative hypermedia message: the REAL `HypermediaProse` over one terminal and one callout (no network, no sandbox
+ * library), so the style probe measures what the renderer actually draws and not what a token declares (r11 T14, review of PR
+ * 2226). The renderer reads its slots (`--hm-*`, r11 T4) through `dh-theme.css` (r12 H5), which is why the probe reads
+ * `.dh-doc .term` and `.dh-doc .callout`.
  */
-const hypermedia = parseFyRender(
-  [
-    'type: svg',
-    'alt: A two-node diagram',
-    '---',
-    '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="64" viewBox="0 0 160 64">',
-    '<rect x="4" y="12" width="56" height="40" rx="8" fill="#888" stroke="#444" stroke-width="2"/>',
-    '<rect x="100" y="12" width="56" height="40" rx="8" fill="#888" stroke="#444" stroke-width="2"/>',
-    '<path d="M60 32 H100" stroke="#444" stroke-width="2" fill="none"/>',
-    '</svg>',
-  ].join('\n'),
-);
-if (!hypermedia.ok) throw new Error(`the hypermedia specimen did not parse: ${hypermedia.reason}`);
-if (isFyRenderEmbedBlock(hypermedia.block)) throw new Error('the hypermedia specimen is an embed block');
-const hypermediaBlock = hypermedia.block;
-const readNothing: FyRenderWorkspaceReader = async () => ({ ok: false, reason: 'missing' });
+const FENCE = '`'.repeat(3);
+const HYPERMEDIA_SPECIMEN = [
+  `${FENCE}terminal`,
+  '$ bun test',
+  'ok 12 tests',
+  FENCE,
+  '',
+  '> **Note:** the style draws this callout.',
+].join('\n');
+const referenceSurface = {};
 
 const OPTIONS = [
   { id: 'left', title: 'Left', line: 'The menu beside your work' },
@@ -159,8 +153,12 @@ createRoot(document.getElementById('root') as HTMLElement).render(
         </tbody>
       </table>
     </div>
-    <div className="md" data-probe="hypermedia" style={{ margin: '12px 0', maxWidth: 240 }}>
-      <FyRenderBlock block={hypermediaBlock} readWorkspaceMedia={readNothing} />
+    <div data-probe="hypermedia" style={{ margin: '12px 0', maxWidth: 280 }}>
+      <ScreenHrefProvider href={(daemon, plugin, screen) => `/${daemon}/${plugin}/${screen}`}>
+        <ReferenceSurfaceProvider surface={referenceSurface}>
+          <HypermediaProse text={HYPERMEDIA_SPECIMEN} />
+        </ReferenceSurfaceProvider>
+      </ScreenHrefProvider>
     </div>
     <p data-probe="spinner" style={{ margin: '12px 0' }}>
       <Spinner size={24} />

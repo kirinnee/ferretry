@@ -24,6 +24,10 @@ const params = new URLSearchParams(window.location.search);
 const theme = params.get('theme') ?? 'studio-light';
 document.documentElement.dataset.theme = theme;
 document.documentElement.dataset.mode = theme.endsWith('dark') ? 'dark' : 'light';
+// r12 H5: the three axes the app's root carries (`theme/preferences.ts`), for the theme audit; the matrix test then re-sets
+// them in place for every combination. A scene opened with `?theme=` alone has the default style and palette, as before.
+if (params.has('style')) document.documentElement.dataset.style = params.get('style') ?? 'studio';
+if (params.has('palette')) document.documentElement.dataset.palette = params.get('palette') ?? 'studio';
 
 const FENCE = '`'.repeat(3);
 const MESSAGE = [

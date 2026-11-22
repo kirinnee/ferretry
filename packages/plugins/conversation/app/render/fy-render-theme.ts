@@ -72,16 +72,35 @@ function backdropOf(element: Element, canvas: CanvasRenderingContext2D | null): 
   return '';
 }
 
-/** The app's theme name, from the document root. */
+/**
+ * THE ATTRIBUTES THAT SAY WHICH THEME THE PAGE WEARS: the three axes the app's root carries (`data-style`, `data-palette`,
+ * `data-mode`) and the older single `data-theme` (the palette and the mode). A watcher must hear ALL of them: switching
+ * only the STYLE changes the corners and the face a diagram is drawn with but not `data-theme`, so a watcher of that one
+ * attribute (what this file watched) left a chart and a diagram in the previous style until something else repainted them.
+ */
+export const THEME_ATTRIBUTES: readonly string[] = ['data-theme', 'data-style', 'data-palette', 'data-mode'];
+
+/** What a theme switch changes, as one string: it differs after a change of any axis, so a repaint can be keyed on it. */
 export const documentThemeName = (): string =>
-  typeof document === 'undefined' ? '' : (document.documentElement.getAttribute('data-theme') ?? '');
+  typeof document === 'undefined'
+    ? ''
+    : THEME_ATTRIBUTES.map(attribute => document.documentElement.getAttribute(attribute) ?? '').join('|');
+
+/** The reader's mode: the root's `data-mode`, or, on a page that carries only the older `data-theme`, its `-light` / `-dark` end. */
+export const documentMode = (): 'light' | 'dark' => {
+  if (typeof document === 'undefined') return 'dark';
+  const root = document.documentElement;
+  const mode = root.getAttribute('data-mode');
+  if (mode === 'light' || mode === 'dark') return mode;
+  return (root.getAttribute('data-theme') ?? '').includes('light') ? 'light' : 'dark';
+};
 
 /**
  * The page's theme as an illustration sees it, read from `element` (or the document root). `canvas` is the
  * pixel colours are resolved on — the shared one, unless a test hands it a recorder or `null`.
  */
 export function readTheme(element: Element | null, canvas: CanvasRenderingContext2D | null = context()): ResolvedTheme {
-  const mode = documentThemeName().includes('light') ? 'light' : 'dark';
+  const mode = documentMode();
   const colors = Object.fromEntries(THEME_TOKENS.map(token => [token, ''])) as Record<FyRenderThemeToken, string>;
   const unread: ResolvedTheme = { backdrop: '', colors, font: '', mode, radius: 0 };
   const target = element ?? (typeof document === 'undefined' ? null : document.documentElement);

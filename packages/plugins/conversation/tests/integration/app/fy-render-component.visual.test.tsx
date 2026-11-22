@@ -1017,6 +1017,33 @@ describe('fy-render component evidence — Chart', () => {
     }
   }, 120_000);
 
+  test('should repaint when ONLY the style changes (the root’s data-theme does not), on screen', async () => {
+    // Arrange
+    const scene = await openScene('chart-bar', VIEWPORTS[1], { themeName: 'studio-dark' });
+    const { page } = scene;
+
+    try {
+      await waitForChart(page, true);
+      const before = await page.locator('[data-fy-render-chart]').getAttribute('data-fy-render-chart-palette');
+
+      // Act — the real shell writes `data-style` on its own and leaves `data-theme` (the palette and the mode) alone: a
+      // watcher of `data-theme` heard nothing. The corners and the face a chart is drawn with are the style's.
+      await page.evaluate(() => document.documentElement.setAttribute('data-style', 'neo'));
+      await page.waitForFunction(
+        previous =>
+          document.querySelector('[data-fy-render-chart]')?.getAttribute('data-fy-render-chart-palette') !== previous,
+        before,
+        { timeout: 2_000 },
+      );
+      await waitForCanvasSettled(page);
+
+      // Assert
+      should(await pixelsOf(page, await resolvedToken(page, 'viz-1'))).be.above(200);
+    } finally {
+      await scene.close();
+    }
+  }, 120_000);
+
   test('should fall back to its source, quietly, when the author tried to colour it', async () => {
     // Arrange
     const scene = await openScene('chart-painted', VIEWPORTS[0]);
