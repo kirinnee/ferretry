@@ -38,6 +38,14 @@ export interface HostFiles {
   lstat(path: string): Promise<HostEntry | undefined>;
   /** The names in a directory, or `undefined` when nothing is at the path. */
   list(path: string): Promise<readonly string[] | undefined>;
+  /**
+   * The names in a directory WITH each leaf's own kind (a link is `link`, never followed), in ONE look; `undefined` when
+   * nothing is at the path. Optional: a host without it is walked with {@link list} and one {@link lstat} per name. `modified`
+   * is the leaf's own modified time, when the host knows it.
+   */
+  entries?(
+    path: string,
+  ): Promise<readonly (HostEntry & { readonly name: string; readonly modified?: string })[] | undefined>;
 }
 
 /** Looking a bare command name up on this machine's `PATH` (`kernel.paths.which`, resolved before it is asked). */

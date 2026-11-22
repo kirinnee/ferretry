@@ -116,11 +116,13 @@ export class HeldFastCatalog {
       .then(() => {
         this.#failing = false;
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (this.#failing) return;
         this.#failing = true;
+        // The child's own reason (its last stderr line, or the deadline) is what makes this warning fixable from the log.
+        const why = error instanceof Error && error.message !== '' ? ` (${error.message})` : '';
         this.ports.warn(
-          'the Codex model catalog could not be read; fast starts on Codex are refused until it can be, or kept from the last good read',
+          `the Codex model catalog could not be read${why}; fast starts on Codex are refused until it can be, or kept from the last good read`,
         );
       })
       .finally(() => {
@@ -134,11 +136,16 @@ export class HeldFastCatalog {
     this.#unlocated = location.outcome !== 'located';
     if (location.outcome !== 'located') return;
     const home = this.ports.workspace.resolve('home');
+    // The child's CODEX_HOME (`probeEnvironment`: `<home>/.codex`). Codex refuses to start at all when it is not there
+    // ("CODEX_HOME points to ..., but that path does not exist"), which is why no read ever landed before O8-4.
+    const codexHome = this.ports.workspace.resolve('home/.codex');
     const work = this.ports.workspace.resolve('work');
     if (!home.ok) throw new Error(`Codex's catalog home could not be placed: ${home.error}`);
     if (!work.ok) throw new Error(`Codex's catalog folder could not be placed: ${work.error}`);
+    if (!codexHome.ok) throw new Error(`Codex's catalog CODEX_HOME could not be placed: ${codexHome.error}`);
     // Created here, because a child started in a folder that is not there does not start at all.
     await this.ports.workspace.makeDirectory(home.value);
+    await this.ports.workspace.makeDirectory(codexHome.value);
     await this.ports.workspace.makeDirectory(work.value);
     const [path, lang] = await Promise.all([this.ports.environment('PATH'), this.ports.environment('LANG')]);
     const env = probeEnvironment(location.path, home.value, { PATH: path, LANG: lang });

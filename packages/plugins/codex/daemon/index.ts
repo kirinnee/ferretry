@@ -1,7 +1,7 @@
 import type { RuntimeModelChoice } from '@ferretry/core-ferrets/contract';
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
-import { milliseconds } from '@ferretry/std';
+import { milliseconds, seconds } from '@ferretry/std';
 import { harnessFallbackDirectories, selectedComponents } from '@ferretry/plugin-runtimes/contract';
 import manifest from '../manifest.ts';
 import {
@@ -42,6 +42,12 @@ import { codexSettingsPut } from './features/host-import/index.ts';
 
 /** The one job that reads the held catalog: once at boot, then each time a fast start finds it missing or stale. */
 const CATALOG_JOB = 'codex-fast-catalog';
+/**
+ * When the boot read starts: a few seconds after serve, on the MAIN lane (O8-4). It used to wait for the worker lane, which
+ * opens two minutes after serve, so every fast Codex start in a boot's first two minutes was refused as "still loading".
+ * The read is one short child (about a second; the app-server exchange is capped at 10 s), so it does not need to wait.
+ */
+const CATALOG_BOOT_DELAY = seconds(5);
 
 export default implementDaemon(manifest, {
   build(ctx) {
@@ -128,7 +134,7 @@ export default implementDaemon(manifest, {
     // The live model catalog a fast start is judged against, HELD so a start never waits for it. The last good read is
     // kept in this plugin's own state (the model list only) and loaded here, so a start right after a boot decides from it
     // at once. It is read at boot and then only when a fast start finds the held copy missing or older than five minutes
-    // (the job is kicked, fire and forget); the child runs on the worker lane, honours the stop signal, and lives in its own
+    // (the job is kicked, fire and forget); the child runs on the main lane a few seconds after serve, honours the stop signal, and lives in its own
     // created folder under `agent-homes` with a scrubbed environment and a throwaway HOME — never the daemon user's real
     // HOME, so never `~/.codex` (GAP(codex): it is the login-less catalog, declared in ports-pending.json).
     const appServer = new CodexAppServerCatalog({
@@ -157,8 +163,7 @@ export default implementDaemon(manifest, {
     void catalog.loaded();
     kernel.jobs.add({
       id: CATALOG_JOB,
-      schedule: { onceAfterStart: true },
-      lane: 'worker',
+      schedule: { onceAfterStart: true, delay: CATALOG_BOOT_DELAY },
       run: async signal => await catalog.refresh(signal),
     });
 

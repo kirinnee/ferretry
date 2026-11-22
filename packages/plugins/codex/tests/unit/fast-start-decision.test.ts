@@ -52,7 +52,7 @@ describe('codex takes start.decide', () => {
     const none = (): undefined => undefined;
     const refused = {
       allow: false,
-      reason: "Codex's model list is still loading; try again in about two minutes",
+      reason: "Codex's model list is still loading; try again in a few seconds",
       code: 'unservable_model',
     };
     expect(CATALOG_LOADING).toBe(refused.reason);

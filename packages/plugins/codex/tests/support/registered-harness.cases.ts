@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { RunSpec } from '@ferretry/core-ferrets/contract';
 import { registeredCodex } from './registered.ts';
+import { seconds } from '@ferretry/std';
 
 /** ONE body, registered by two tiers: `lib/transcript/rollout.ts` (unit ledger) and the harness adapter (integration ledger). */
 export function registeredHarnessCases(): void {
@@ -26,7 +27,7 @@ export function registeredHarnessCases(): void {
     line('response_item', { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
 
   describe('the registered Codex harness', () => {
-    const LOADING = "Codex's model list is still loading; try again in about two minutes";
+    const LOADING = "Codex's model list is still loading; try again in a few seconds";
     const fastInput = (more: Record<string, unknown> = {}) => ({
       ferret: 'f1',
       name: 'wren',
@@ -66,11 +67,12 @@ export function registeredHarnessCases(): void {
       expect(box.warnings).toEqual([]);
     });
 
-    test('(no guarantees row) the held fast-start catalog is read by ONE job on the worker lane, once after start; there is no timer', () => {
+    test('(no guarantees row) O8-4 the held fast-start catalog is read by ONE job on the MAIN lane, five seconds after start (never the two-minute worker lane); there is no timer', () => {
       const box = fixture();
       box.buildHalf();
       expect(box.jobs.map(job => job.id)).toEqual(['codex-fast-catalog']);
-      expect(box.jobs[0]).toMatchObject({ schedule: { onceAfterStart: true }, lane: 'worker' });
+      expect(box.jobs[0]).toMatchObject({ schedule: { onceAfterStart: true, delay: seconds(5) } });
+      expect(box.jobs[0]).not.toHaveProperty('lane');
     });
 
     test('(no guarantees row) #35 with NOTHING persisted and no read landed, a fast Codex start is refused at once; a start that did not ask for fast is not', async () => {
