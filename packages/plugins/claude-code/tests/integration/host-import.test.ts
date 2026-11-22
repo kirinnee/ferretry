@@ -47,7 +47,7 @@ describe('claude-code settings put (r9 A6)', () => {
         flags: ['--verbose'],
       }),
     );
-    expect(answer).toEqual({ ok: true });
+    expect(answer).toMatchObject({ ok: true });
     expect(await source.list()).toEqual(['imported']);
     expect(await source.read('imported')).toEqual({
       harness: 'claude-code',

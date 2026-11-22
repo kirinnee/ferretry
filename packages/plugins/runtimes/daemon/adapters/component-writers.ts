@@ -24,7 +24,7 @@ export function componentWriters(lookup: ComponentSourceLookup, within: Within):
             write.name,
             write.text,
             write.files,
-            write.replace === true ? { replace: true, owned: write.owned ?? [] } : undefined,
+            write.replace === true ? { replace: true, owned: write.owned ?? [], etags: write.etags ?? {} } : undefined,
           ),
         );
         if (answered === TIMED_OUT) return refused('the part of Ferretry that owns them did not answer in time');
@@ -33,7 +33,9 @@ export function componentWriters(lookup: ComponentSourceLookup, within: Within):
           answered.warnings === undefined || answered.warnings.length === 0 ? {} : { warnings: answered.warnings };
         const created =
           answered.created === undefined || answered.created.length === 0 ? {} : { created: answered.created };
-        return { outcome: answered.held === true ? 'held' : 'written', ...warnings, ...created };
+        const etags =
+          answered.etags === undefined || Object.keys(answered.etags).length === 0 ? {} : { etags: answered.etags };
+        return { outcome: answered.held === true ? 'held' : 'written', ...warnings, ...created, ...etags };
       } catch (error) {
         return refused(error instanceof Error && error.message.length > 0 ? error.message : 'it could not be written');
       }
