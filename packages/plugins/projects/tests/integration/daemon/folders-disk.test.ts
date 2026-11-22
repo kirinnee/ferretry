@@ -7,7 +7,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { KernelPorts, SpawnPort } from '@ferretry/kernel/contract';
+import { ApiError, type KernelPorts, type SpawnPort } from '@ferretry/kernel/contract';
 import { nodeFs } from '../../../../../core/kernel/host/adapters/node-fs.ts';
 import { platformRootPinner } from '../../../../../core/kernel/host/adapters/pinned/index.ts';
 import { restrictSpawn } from '../../../../../core/kernel/host/permissions.ts';
@@ -97,6 +97,11 @@ async function world() {
     });
   return { user, parent, ferretryHome, outside, real, explorerOver, explorer: explorerOver() };
 }
+
+/** The outside-home gate of a caller who may not (a use-only remote device): it refuses. */
+const deny = async () => {
+  throw new ApiError(403, 'needs configure', 'grant_step_up_required');
+};
 
 const failure = async (run: () => Promise<unknown>) => {
   try {
@@ -205,12 +210,11 @@ describe('the explorer over the real imports root', () => {
     );
   });
 
-  test('a link out of the home, a link to a file out there, a dangling link, an outside path: one answer', async () => {
+  test('a caller that fails the gate: a link out of the home, an outside path, whether or not it exists, is one answer; a dangling link is the one refusal', async () => {
     const w = await world();
     const paths = [
       '~/to-outside',
       '~/to-outside-file',
-      '~/to-absent',
       w.outside,
       `${w.outside}/deep`,
       `${w.outside}/file.txt`,
@@ -221,10 +225,14 @@ describe('the explorer over the real imports root', () => {
     ];
     const answers = [];
     for (const path of paths) {
-      const refused = await failure(() => w.explorer.list(path, false));
+      const refused = await failure(() => w.explorer.list(path, false, deny));
       answers.push(`${refused.status} ${refused.code} ${refused.message}`);
     }
-    expect(new Set(answers)).toEqual(new Set(['403 folder_refused that folder is not there, or cannot be listed']));
+    expect(new Set(answers)).toEqual(new Set(['403 grant_step_up_required needs configure']));
+    // A dangling link never resolves, so it never reaches the gate (GAP stated in `browse.ts`).
+    expect((await failure(() => w.explorer.list('~/to-absent', false, deny))).code).toBe('folder_refused');
+    // Nothing the gate refused was read: the outside folder is still whole.
+    expect(await readdir(w.outside)).toEqual(['deep', 'file.txt']);
     // A link to a private folder is refused as one; a link that stays inside the home is listed by where it really is.
     expect((await failure(() => w.explorer.list('~/to-ssh', false))).code).toBe('folder_refused');
     expect((await w.explorer.list('~/to-code', false)).path).toBe(join(w.user, 'code'));
@@ -261,7 +269,8 @@ describe('the explorer over the real imports root', () => {
         },
       }),
     );
-    expect((await failure(() => racing.list('~/Documents', false))).code).toBe('folder_refused');
+    // For a caller that fails the gate the swap is the gate's refusal; for the owner at the machine it is a listing of the outside folder only because the policy allows it.
+    expect((await failure(() => racing.list('~/Documents', false, deny))).code).toBe('grant_step_up_required');
   });
 
   test('a folder swapped for a link to an outside file, or for nothing, after the check is the one refusal, never "not a folder"', async () => {
@@ -275,7 +284,7 @@ describe('the explorer over the real imports root', () => {
         },
       }),
     );
-    expect((await failure(() => asFile.list('~/Documents', false))).code).toBe('folder_refused');
+    expect((await failure(() => asFile.list('~/Documents', false, deny))).code).toBe('folder_refused');
     const gone = w.explorerOver(
       meddling(w.real, {
         afterFirstJudgment: async () => {

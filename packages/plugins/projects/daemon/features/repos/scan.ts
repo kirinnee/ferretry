@@ -1,20 +1,17 @@
 import { MAX_PROJECT_REPOS, type ProjectRepo } from '../../../contract/index.ts';
-import { belowHome, isAtOrUnder } from '../folders/fence.ts';
+import { isAtOrUnder } from '../folders/fence.ts';
 import { folderPolicy } from '../folders/policy.ts';
 import type { FolderBrowser, FolderVerdict } from '../folders/port.ts';
 import { describeRemote, remoteUrlOfConfig } from './remote.ts';
 
 /** How far below the project folder a repository is looked for: a repository at most this many names down (the folder itself is 0). */
-const MAX_SCAN_DEPTH = 3;
+const MAX_SCAN_DEPTH = 5;
 /** The most folders one scan opens: the bound that keeps a huge tree from holding the daemon. */
-export const MAX_SCAN_FOLDERS = 400;
+export const MAX_SCAN_FOLDERS = 4000;
 /** The most names read from one folder. */
 const READ_LIMIT = 2000;
 /** The most of a `.git/config` that is read. */
 const CONFIG_READ_LIMIT = 64 * 1024;
-
-/** What a scan of a project folder outside the home folder answers: the home fence is kept, and the reply says so. */
-const OUTSIDE_HOME_SENTENCE = 'outside your home folder, not scanned';
 
 /** Folders never entered: a dependency tree holds repositories that are not the owner's. */
 const SKIPPED = new Set(['node_modules']);
@@ -27,13 +24,11 @@ export interface ScanDeps {
 export interface ScanResult {
   readonly repos: readonly Omit<ProjectRepo, 'account'>[];
   /**
-   * The scan did not see everything: a bound was reached, the project folder was refused or is not there, or a folder
-   * could not be read. What it found is true, but what it did not find is NOT known to be gone, so it must never be taken
-   * as the whole list.
+   * The scan did not see everything: a bound was reached, the project folder was refused (the skip list, a private or
+   * sign-in folder) or is not there, a folder could not be read, or a folder on another disk was left out. What it found is
+   * true, but what it did not find is NOT known to be gone, so it must never be taken as the whole list.
    */
   readonly truncated: boolean;
-  /** Set when the project folder was not scanned on principle: it is outside the home folder (the fence), not merely cut short. */
-  readonly notScanned?: string;
 }
 
 /** A repository found and the text of its `.git/config`, read through the held folder it was found in. */
@@ -48,10 +43,12 @@ interface Found {
  *
  * The privacy policy is B6's, the one the folder explorer uses (`folders/policy.ts`), applied to the project folder and to
  * EVERY child before anything of it is looked at (not even for a `.git`): a folder whose real place is outside the project,
- * is a private folder (a link to `~/.ssh` included) or holds a sign-in file is skipped unprobed. A project folder that is
- * itself a link is refused, and no link below it is ever listed. Hidden folders and `node_modules` are not entered, and a
- * repository is not entered either (a project folder that is itself a repository answers just itself). Each `.git/config`
- * is read through the folder the repository was found in, never by name again.
+ * is in a tree no project is read from (`/proc`, the nix store, …), is a private folder (a link to `~/.ssh` included) or
+ * another user's home, or holds a sign-in file is skipped unprobed. A project can be anywhere on the disk, but it stays on
+ * ONE disk, as `find -xdev` does: a child folder on another device than the project folder is not entered, and the answer
+ * is `truncated`. A project folder that is itself a link is refused, and no link below it is ever listed. Hidden folders and
+ * `node_modules` are not entered, and a repository is not entered either (a project folder that is itself a repository
+ * answers just itself). Each `.git/config` is read through the folder the repository was found in, never by name again.
  */
 export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResult> {
   const { browser } = deps;
@@ -60,10 +57,7 @@ export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResul
   if ((await browser.leaf(root)) !== 'present') return nothing;
   const [rootReal] = await browser.realPaths([root]);
   if (rootReal === undefined) return nothing;
-  const home = await browser.home();
-  // The home fence is a decision, not a cut-off: say it, and open and probe nothing.
-  if (belowHome(rootReal, home) === undefined) return { repos: [], truncated: true, notScanned: OUTSIDE_HOME_SENTENCE };
-  const policy = await folderPolicy(browser, home);
+  const policy = await folderPolicy(browser, await browser.home());
   const inside =
     (judge: FolderVerdict): FolderVerdict =>
     async real =>
@@ -74,6 +68,7 @@ export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResul
   const found: Found[] = [];
   let truncated = false;
   let opened = 0;
+  let rootDevice: string | undefined;
   let queue: { abs: string; rel: string }[] = [{ abs: rootReal, rel: '.' }];
   for (let depth = 0; depth < MAX_SCAN_DEPTH && queue.length > 0 && !truncated; depth++) {
     const next: { abs: string; rel: string }[] = [];
@@ -85,12 +80,20 @@ export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResul
       opened++;
       const held = await browser.open(item.abs, verdict);
       if (!held.ok) {
-        // Refused on principle (outside, private) is a decision; any other refusal is a folder that could not be read.
-        if (held.reason !== 'outside' && held.reason !== 'private') truncated = true;
+        // A child refused on principle (outside, private) is a decision; any other refusal is a folder that could not be
+        // read. The PROJECT folder refused for any reason is a scan that saw nothing, never "an empty project".
+        if (depth === 0 || (held.reason !== 'outside' && held.reason !== 'private')) truncated = true;
         continue;
       }
       const folder = held.folder;
       try {
+        if (depth === 0) {
+          rootDevice = await folder.device('');
+          if (rootDevice === undefined) {
+            truncated = true;
+            continue;
+          }
+        }
         if (depth === 0 && (await folder.lookup('.git')) === 'present') {
           found.push({ rel: '.', config: await folder.readText('.git/config', CONFIG_READ_LIMIT) });
           break;
@@ -106,6 +109,12 @@ export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResul
           const abs = `${folder.real === '/' ? '' : folder.real}/${entry.name}`;
           // The policy first: nothing is probed (not even for a `.git`) in a folder it does not accept.
           if ((await childVerdict(abs)) !== undefined) continue;
+          // One disk only: a folder on another device (a mount, a network or cloud drive) is not entered, and not probed.
+          const device = await folder.device(entry.name);
+          if (device !== rootDevice) {
+            truncated = true;
+            continue;
+          }
           const rel = item.rel === '.' ? entry.name : `${item.rel}/${entry.name}`;
           if (await folder.hasGit(entry.name)) {
             if (found.length === MAX_PROJECT_REPOS) {

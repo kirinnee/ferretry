@@ -24,8 +24,8 @@ const failure = async (run: () => Promise<unknown>) => {
 };
 
 const at = '2026-11-19T00:00:00.000Z' as Instant;
-/** A machine whose only folder is `/work/alpha`, holding one repository `app`. */
-const browser: FolderBrowser = {
+/** A machine whose only folder is `root`, holding one repository `app`. */
+const browserAt = (root: string): FolderBrowser => ({
   home: async () => '/home/me',
   holdsSignIn: async () => false,
   leaf: async () => 'present',
@@ -37,24 +37,26 @@ const browser: FolderBrowser = {
       folder: {
         real: path,
         entries: async () => ({
-          entries: path === '/home/me/work/alpha' ? [{ name: 'app', kind: 'directory' as const, modified: at }] : [],
+          entries: path === root ? [{ name: 'app', kind: 'directory' as const, modified: at }] : [],
           more: false,
         }),
         lookup: async () => 'missing',
         readText: async () => '[remote "origin"]\n\turl = https://tok:en@github.com/o/app.git\n',
         hasGit: async name => name === 'app',
+        device: async () => 'd1',
         makeLeaf: async () => ({ kind: 'failed' }),
         close: async () => undefined,
       },
     };
   },
-};
+});
+const browser = browserAt('/home/me/work/alpha');
 
-const setup = async () => {
-  const world = registryOver(fakeMachine(['/home/me/work/alpha']));
-  const made = await world.registry.register({ kind: 'existing-folder', path: '/home/me/work/alpha' });
+const setup = async (root = '/home/me/work/alpha') => {
+  const world = registryOver(fakeMachine([root]));
+  const made = await world.registry.register({ kind: 'existing-folder', path: root });
   if (!made.ok) throw new Error('not registered');
-  const scan = { browser };
+  const scan = { browser: browserAt(root) };
   return { ...world, id: made.value.id, scan };
 };
 
@@ -89,11 +91,31 @@ describe('GET /v1/projects/:id/repos', () => {
     });
     expect(store.file.projects[0]?.repos?.[0]?.account).toBe('work');
   });
-  test('a project folder outside the home folder answers "outside your home folder, not scanned", not just truncated', async () => {
-    const { registry, id } = await setup();
-    const elsewhere: FolderBrowser = { ...browser, home: async () => '/other/home' };
+  test('a project folder outside the home folder is scanned, and the answer has no field about the home', async () => {
+    const { registry, id, store } = await setup('/srv/alpha');
+    const elsewhere: FolderBrowser = { ...browserAt('/srv/alpha'), home: async () => '/home/me' };
     const got = answer(await reposRoute(registry, { browser: elsewhere })(callWith(undefined, { id })));
-    expect(got.json).toEqual({ repos: [], truncated: true, notScanned: 'outside your home folder, not scanned' });
+    expect(got.json).toEqual({
+      repos: [{ path: 'app', remote: 'https://github.com/o/app', provider: 'github' }],
+      truncated: false,
+    });
+    expect(store.file.projects[0]?.repos?.[0]?.path).toBe('app');
+  });
+  test('a project folder the skip list refuses answers truncated and keeps the stored repositories and their accounts', async () => {
+    const { registry, id, store } = await setup();
+    await registry.recordRepos(id, [{ path: 'kept' }], true);
+    await store.update(file => ({
+      ...file,
+      projects: file.projects.map(project => ({
+        ...project,
+        repos: project.repos?.map(repo => ({ ...repo, account: 'work' })),
+      })),
+    }));
+    // the owner's home is somewhere else and this project sits in ANOTHER user's home: refused on principle
+    const other: FolderBrowser = { ...browser, home: async () => '/home/someone' };
+    const got = answer(await reposRoute(registry, { browser: other })(callWith(undefined, { id })));
+    expect(got.json).toEqual({ repos: [{ path: 'kept', account: 'work' }], truncated: true });
+    expect(store.file.projects[0]?.repos).toEqual([{ path: 'kept', account: 'work' }]);
   });
   test('an unknown project is 404 and a bad id is 400', async () => {
     const { registry, scan } = await setup();

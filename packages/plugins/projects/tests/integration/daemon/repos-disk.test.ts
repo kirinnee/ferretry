@@ -45,7 +45,8 @@ async function world() {
     join(project, 'app', '.git'),
     join(project, 'group', 'lib', '.git'),
     join(project, 'group', 'plain'),
-    join(project, 'a', 'b', 'c', 'too-deep', '.git'),
+    join(project, 'p', 'q', 'r', 's', 't', '.git'),
+    join(project, 'a', 'b', 'c', 'd', 'e', 'too-deep', '.git'),
     join(project, 'node_modules', 'dep', '.git'),
     join(project, '.hidden', 'r', '.git'),
     join(project, 'worktree'),
@@ -78,12 +79,13 @@ async function world() {
 }
 
 describe('the repository scan over the real imports root', () => {
-  test('finds repositories to depth three, reads their remotes, and keeps the token out', async () => {
+  test('finds repositories to depth five, reads their remotes, and keeps the token out', async () => {
     const w = await world();
     const found = await scanRepos(w.project, w.deps);
     expect(found.repos).toEqual([
       { path: 'app', remote: 'https://github.com/me/app', provider: 'github' },
       { path: 'group/lib', remote: 'https://gitlab.example.com/team/lib' },
+      { path: 'p/q/r/s/t' },
       { path: 'worktree' },
     ]);
     expect(found.truncated).toBe(false);
@@ -92,7 +94,7 @@ describe('the repository scan over the real imports root', () => {
   test('never follows a link out of the project, into a private folder, or under node_modules and hidden folders', async () => {
     const w = await world();
     const paths = (await scanRepos(w.project, w.deps)).repos.map(repo => repo.path);
-    for (const never of ['linked-out', 'to-ssh', 'node_modules/dep', '.hidden/r', 'a/b/c/too-deep'])
+    for (const never of ['linked-out', 'to-ssh', 'node_modules/dep', '.hidden/r', 'a/b/c/d/e/too-deep'])
       expect(paths).not.toContain(never);
     expect(JSON.stringify(paths)).not.toContain('stolen');
   });
@@ -107,6 +109,19 @@ describe('the repository scan over the real imports root', () => {
     expect((await scanRepos(join(w.project, 'app'), w.deps)).repos).toEqual([
       { path: '.', remote: 'https://github.com/me/app', provider: 'github' },
     ]);
+  });
+  test('a project outside the home is scanned; a link from it into a private folder is not followed; a skipped tree answers truncated', async () => {
+    const w = await world();
+    await mkdir(join(w.outside, 'srv', 'svc', '.git'), { recursive: true });
+    await writeFile(join(w.outside, 'srv', 'svc', '.git', 'config'), CONFIG('https://github.com/me/svc'));
+    await symlink(join(w.user, '.ssh'), join(w.outside, 'srv', 'to-ssh'));
+    const found = await scanRepos(join(w.outside, 'srv'), w.deps);
+    expect(found).toEqual({
+      repos: [{ path: 'svc', remote: 'https://github.com/me/svc', provider: 'github' }],
+      truncated: false,
+    });
+    // `/proc` is a pseudo filesystem: a project there is refused on the real path, nothing is opened, and it is not "empty".
+    expect(await scanRepos('/proc', w.deps)).toEqual({ repos: [], truncated: true });
   });
   test('a link where `.git/config` should be is not read: the repository shows no remote', async () => {
     const w = await world();

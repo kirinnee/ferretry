@@ -8,7 +8,7 @@ import {
   type MakeFolderResult,
 } from '../../../contract/index.ts';
 import type { ProjectFolders } from '../../lib/ports.ts';
-import { belowHome, holdsSignIn, isPrivateFolder, parsePath } from './fence.ts';
+import { belowHome, holdsSignIn, isBroadRoot, isPrivateBelowHome, parsePath } from './fence.ts';
 import { type FolderPolicy, folderPolicy } from './policy.ts';
 import type { FolderBrowser, HeldFolder, RawFolderEntry } from './port.ts';
 
@@ -25,19 +25,26 @@ const refused = (): ApiError => new ApiError(403, REFUSED_MESSAGE, 'folder_refus
 const priv = (): ApiError => new ApiError(403, PRIVATE_MESSAGE, 'private_folder');
 
 /**
- * The folder explorer: lists the folders under the owner's home so one can be picked as a project, and makes one new
- * folder. It reads names, kinds and times only: never a file's content, never a link's target. It lists nothing outside
- * the home, nothing private (see `fence.ts`) and nothing through a link that leaves the home.
+ * The folder explorer: lists folders so one can be picked as a project, and makes one new folder under the home. It reads
+ * names, kinds and times only: never a file's content, never a link's target. It lists nothing private (see `fence.ts`),
+ * nothing in a tree no project is read from, and no link.
+ *
+ * It lists ANYWHERE on the disk, but a place outside the owner's home is only for a caller who passes the `outsideHome` gate
+ * (`outside-gate.ts`: `filesystem.configure`, a passkey step-up for a remote device): the gate is asked before the disk is
+ * touched for a name spelled outside the home, and again for a link inside the home that leads out. A folder is only ever
+ * MADE under the home. GAP (stated, not closed): a name inside the home that is a link to an existing folder outside it
+ * answers the gate's refusal where a missing name answers `folder_refused`; a use-only device could learn that such a link
+ * exists, by guessing its name (a link is never listed).
  *
  * A private name is judged by its spelling only BEFORE the disk is touched (that answer is `private_folder` and says nothing
  * about what exists). Everything the disk decided (a sign-in folder, a link into a private folder, a folder under either)
  * answers the one `folder_refused`, so a guess cannot tell an existing private place from a missing one.
  *
- * ONE policy judges every folder it touches: the real path (never the spelling alone) is the home or below it, is not
- * a private folder (by name, and by where each private folder REALLY is: `~/.gnupg` linked to `~/dotfiles/gnupg` makes
- * both private), and neither it nor any ancestor below the home holds a sign-in file. It judges the folder being
- * listed, each folder listed, every ancestor, the parent a folder is made in and the place it is made. A folder is held
- * open once and everything is read or made through that held object (see `adapter.ts`).
+ * ONE policy judges every folder it touches (`policy.ts`): the real path (never the spelling alone) is not in a skipped
+ * tree, is not a private folder (by name, and by where each private folder REALLY is: `~/.gnupg` linked to `~/dotfiles/gnupg`
+ * makes both private) or another user's home, and neither it nor any ancestor holds a sign-in file. It judges the folder
+ * being listed, each folder listed, every ancestor, the parent a folder is made in and the place it is made. A folder is
+ * held open once and everything is read or made through that held object (see `adapter.ts`).
  */
 export class FolderExplorer {
   constructor(
@@ -48,25 +55,32 @@ export class FolderExplorer {
     },
   ) {}
 
-  /** The listing of `path` (default `~`). */
-  async list(path: string, hidden: boolean): Promise<FolderListing> {
+  /**
+   * The listing of `path` (default `~`). `outsideHome` is the gate a caller who is not the owner at the machine must pass for
+   * a place outside the home (it throws the refusal); without one, every place the policy accepts is listed.
+   */
+  async list(path: string, hidden: boolean, outsideHome?: () => Promise<void>): Promise<FolderListing> {
     const { browser } = this.deps;
     const home = await browser.home();
-    const policy = await folderPolicy(this.deps.browser, home);
-    const { folder, below } = await this.hold(path, home, policy);
+    const policy = await folderPolicy(browser, home, outsideHome);
+    const { folder, below } = await this.hold(path, home, policy, 'anywhere');
     try {
       const read = await folder.entries(READ_LIMIT);
       if (read === undefined) throw refused();
-      // The held folder's own names are checked too: the home itself often holds a few and is the starting point.
-      if (below.length > 0 && holdsSignIn(read.entries.map(entry => entry.name))) throw refused();
+      // The held folder's own names are checked too: the home itself often holds a few and is the starting point, `/` has none.
+      const anchor = below === undefined ? folder.real === '/' : below.length === 0;
+      if (!anchor && holdsSignIn(read.entries.map(entry => entry.name))) throw refused();
 
+      const base = folder.real === '/' ? '' : folder.real;
       const kept = read.entries
         .filter(entry => hidden || !entry.name.startsWith('.'))
-        .filter(entry => entry.kind !== 'directory' || !isPrivateFolder([...below, entry.name]))
+        .filter(
+          entry => entry.kind !== 'directory' || below === undefined || !isPrivateBelowHome([...below, entry.name]),
+        )
         .filter(
           entry =>
             entry.kind !== 'directory' ||
-            !policy.isPrivateReal(`${folder.real === '/' ? '' : folder.real}/${entry.name}`),
+            !(policy.isPrivateReal(`${base}/${entry.name}`) || policy.isSkippedReal(`${base}/${entry.name}`)),
         )
         .sort(byKindThenName);
       const shown = await this.firstShown(kept, folder.real);
@@ -83,9 +97,10 @@ export class FolderExplorer {
       }
       return {
         path: folder.real,
-        crumbs: crumbsOf(home, below),
+        crumbs: crumbsOf(home, folder.real, below),
         entries: listed,
         truncated: read.more || shown.cut,
+        ...(isBroadRoot(folder.real, home) ? { broad: true as const } : {}),
       };
     } finally {
       await folder.close();
@@ -101,14 +116,16 @@ export class FolderExplorer {
     const parsed = parsePath(request.parent, home);
     if (parsed.ok) {
       const named = belowHome(parsed.absolute, home);
-      if (named !== undefined && isPrivateFolder([...named, request.name])) throw priv();
+      if (named !== undefined && isPrivateBelowHome([...named, request.name])) throw priv();
     }
-    const policy = await folderPolicy(this.deps.browser, home);
-    const { folder, below } = await this.hold(request.parent, home, policy);
+    const policy = await folderPolicy(browser, home);
+    const { folder, below } = await this.hold(request.parent, home, policy, 'home');
     try {
+      // A folder is only made under the home: the hold refused anything else.
+      if (below === undefined) throw refused();
       // The destination against the private names BEFORE the existence test, so it cannot be probed through it. The parent
       // is a real path by now: this is the disk's answer, so it is the one refusal.
-      if (isPrivateFolder([...below, request.name])) throw refused();
+      if (isPrivateBelowHome([...below, request.name])) throw refused();
       const target = `${folder.real === '/' ? '' : folder.real}/${request.name}`;
       if (policy.isPrivateReal(target)) throw refused();
       // What is already there is looked at WITHOUT following it: a link (to anywhere) is only "already there" and nothing
@@ -119,7 +136,7 @@ export class FolderExplorer {
       // A real folder that already exists and holds a sign-in marker (any spelling) is refused as the folder it is, BEFORE
       // "already there" can say so.
       if (found === 'present' && (await browser.holdsSignIn(target))) throw refused();
-      const made = await folder.makeLeaf(request.name, policy.verdict);
+      const made = await folder.makeLeaf(request.name, policy.confined);
       switch (made.kind) {
         case 'made':
           return { path: made.path };
@@ -135,20 +152,27 @@ export class FolderExplorer {
     }
   }
 
-  /** `path` named, held open, and proved by where it REALLY is to be the home or inside it and not private. */
+  /**
+   * `path` named, held open, and proved by where it REALLY is to be a place the policy accepts: `anywhere` on the disk
+   * (outside the home only through the gate), or only `home` or inside it. `below` is where the real folder sits below the
+   * home, `undefined` outside it.
+   */
   private async hold(
     path: string,
     home: string,
     policy: FolderPolicy,
-  ): Promise<{ folder: HeldFolder; below: readonly string[] }> {
+    scope: 'anywhere' | 'home',
+  ): Promise<{ folder: HeldFolder; below: readonly string[] | undefined }> {
     const parsed = parsePath(path, home);
     if (!parsed.ok) throw new ApiError(400, parsed.message, 'invalid_path');
-    // The home boundary and the private names, by the spelling, BEFORE any probe: a place outside the home, or a private
-    // one, answers the same whether or not it exists.
+    // The home boundary (when confined), the gate for a place outside it, and the private names, by the spelling, BEFORE any
+    // probe: a place outside the home, or a private one, answers the same whether or not it exists.
     const named = belowHome(parsed.absolute, home);
-    if (named === undefined) throw refused();
-    if (isPrivateFolder(named)) throw priv();
-    const opened = await this.deps.browser.open(parsed.absolute, policy.verdict);
+    if (named === undefined) {
+      if (scope === 'home') throw refused();
+      await policy.enterOutside();
+    } else if (isPrivateBelowHome(named)) throw priv();
+    const opened = await this.deps.browser.open(parsed.absolute, scope === 'home' ? policy.confined : policy.verdict);
     if (!opened.ok) {
       switch (opened.reason) {
         case 'not_folder':
@@ -158,7 +182,7 @@ export class FolderExplorer {
       }
     }
     const below = belowHome(opened.folder.real, home);
-    if (below === undefined) {
+    if (below === undefined && scope === 'home') {
       await opened.folder.close();
       throw refused();
     }
@@ -194,11 +218,11 @@ const byKindThenName = (a: RawFolderEntry, b: RawFolderEntry): number => {
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 };
 
-/** From the home (`~`) down to the folder, each with its absolute path. */
-function crumbsOf(home: string, below: readonly string[]): FolderCrumb[] {
-  const crumbs: FolderCrumb[] = [{ name: '~', path: home }];
-  let path = home.replace(/\/+$/, '');
-  for (const segment of below) {
+/** From the home (`~`), or from `/` for a folder outside it, down to the folder, each with its absolute path. */
+function crumbsOf(home: string, real: string, below: readonly string[] | undefined): FolderCrumb[] {
+  const crumbs: FolderCrumb[] = [below === undefined ? { name: '/', path: '/' } : { name: '~', path: home }];
+  let path = below === undefined ? '' : home.replace(/\/+$/, '');
+  for (const segment of below ?? real.split('/').filter(part => part !== '')) {
     path = `${path}/${segment}`;
     crumbs.push({ name: segment, path });
   }

@@ -169,6 +169,10 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
           return false;
         }
       },
+      device: async rel => {
+        const identity = await identityAt(pinned, rel);
+        return identity === undefined ? undefined : identity.slice(0, identity.indexOf(':'));
+      },
       makeLeaf: async (name, verdict): Promise<LeafMade> => {
         let made: boolean;
         try {

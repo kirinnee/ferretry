@@ -25,7 +25,7 @@ function browserOf(
   tree: Record<string, readonly string[]>,
   git: readonly string[],
   links: Record<string, string> = {},
-  more: { signIn?: readonly string[]; configs?: Record<string, string> } = {},
+  more: { signIn?: readonly string[]; configs?: Record<string, string>; devices?: Record<string, string> } = {},
 ): { browser: FolderBrowser; opened: string[]; probed: string[] } {
   const opened: string[] = [];
   const probed: string[] = [];
@@ -62,6 +62,8 @@ function browserOf(
           probed.push(`${real}/${name}`);
           return git.includes(`${real}/${name}`);
         },
+        // Every folder is on disk `d1` unless `devices` says another (a mount point).
+        device: async rel => more.devices?.[rel === '' ? real : `${real}/${rel}`] ?? 'd1',
         makeLeaf: async () => ({ kind: 'failed' }),
         close: async () => undefined,
       };
@@ -101,17 +103,25 @@ describe('remote parsing', () => {
 
 describe('scanning a project folder for repositories', () => {
   const P = `${HOME}/work`;
-  test('finds repositories at most three names down, never enters one, skips hidden folders and node_modules', async () => {
+  test('finds repositories at most five names down, never enters one, skips hidden folders and node_modules', async () => {
     const { browser } = browserOf(
       {
-        [P]: ['a', 'group', 'node_modules', '.hid', 'plain'],
+        [P]: ['a', 'group', 'node_modules', '.hid', 'plain', 'chain'],
+        [`${P}/chain`]: ['l2'],
+        [`${P}/chain/l2`]: ['l3'],
+        [`${P}/chain/l2/l3`]: ['l4'],
+        [`${P}/chain/l2/l3/l4`]: ['l5'],
+        [`${P}/chain/l2/l3/l4/l5`]: ['l6'],
+        [`${P}/chain/l2/l3/l4/l5/l6`]: [],
         [`${P}/a`]: ['inside'],
         [`${P}/a/inside`]: [],
         [`${P}/group`]: ['b', 'deep'],
         [`${P}/group/b`]: [],
         [`${P}/group/deep`]: ['x'],
-        [`${P}/group/deep/x`]: ['too-deep'],
-        [`${P}/group/deep/x/too-deep`]: [],
+        [`${P}/group/deep/x`]: ['four'],
+        [`${P}/group/deep/x/four`]: ['five'],
+        [`${P}/group/deep/x/four/five`]: ['six'],
+        [`${P}/group/deep/x/four/five/six`]: [],
         [`${P}/node_modules`]: ['dep'],
         [`${P}/.hid`]: ['r'],
         [`${P}/plain`]: [],
@@ -120,8 +130,10 @@ describe('scanning a project folder for repositories', () => {
         `${P}/a`,
         `${P}/a/inside`,
         `${P}/group/b`,
-        `${P}/group/deep/x`,
-        `${P}/group/deep/x/too-deep`,
+        `${P}/group/deep/x/four/five`,
+        `${P}/group/deep/x/four/five/six`,
+        // six names down: past the depth bound
+        `${P}/chain/l2/l3/l4/l5/l6`,
         `${P}/node_modules/dep`,
         `${P}/.hid/r`,
       ],
@@ -132,7 +144,7 @@ describe('scanning a project folder for repositories', () => {
     expect(found.repos).toEqual([
       { path: 'a', remote: 'https://github.com/me/a', provider: 'github' },
       { path: 'group/b' },
-      { path: 'group/deep/x' },
+      { path: 'group/deep/x/four/five' },
     ]);
     expect(found.truncated).toBe(false);
   });
@@ -153,9 +165,9 @@ describe('scanning a project folder for repositories', () => {
     expect(opened).toEqual([P]);
   });
   test('stops at the folder bound and at the repository bound, and says so', async () => {
-    const wide: Record<string, readonly string[]> = { [P]: Array.from({ length: 30 }, (_, i) => `d${i}`) };
-    for (let i = 0; i < 30; i++) wide[`${P}/d${i}`] = Array.from({ length: 20 }, (_, j) => `e${j}`);
-    for (let i = 0; i < 30; i++) for (let j = 0; j < 20; j++) wide[`${P}/d${i}/e${j}`] = [];
+    const wide: Record<string, readonly string[]> = { [P]: Array.from({ length: 70 }, (_, i) => `d${i}`) };
+    for (let i = 0; i < 70; i++) wide[`${P}/d${i}`] = Array.from({ length: 60 }, (_, j) => `e${j}`);
+    for (let i = 0; i < 70; i++) for (let j = 0; j < 60; j++) wide[`${P}/d${i}/e${j}`] = [];
     const folders = await scanRepos(P, { browser: browserOf(wide, []).browser });
     expect(folders.truncated).toBe(true);
     const bound = browserOf(wide, []);
@@ -174,15 +186,68 @@ describe('scanning a project folder for repositories', () => {
     const found = await scanRepos('/nowhere', { browser: browserOf({}, []).browser });
     expect(found).toEqual({ repos: [], truncated: true });
   });
-  test('a project folder outside the home folder is not scanned, and the answer says exactly that', async () => {
-    const world = browserOf({ '/srv/work': ['r'], '/srv/work/r': [] }, ['/srv/work/r']);
+  test('a project folder outside the home folder is scanned like any other, and answers nothing but what it found', async () => {
+    const world = browserOf({ '/srv/work': ['r', 'plain'], '/srv/work/r': [], '/srv/work/plain': [] }, ['/srv/work/r']);
     expect(await scanRepos('/srv/work', { browser: world.browser })).toEqual({
-      repos: [],
-      truncated: true,
-      notScanned: 'outside your home folder, not scanned',
+      repos: [{ path: 'r' }],
+      truncated: false,
     });
-    expect(world.opened).toEqual([]);
-    expect(world.probed).toEqual([]);
+    expect(world.opened).toEqual(['/srv/work', '/srv/work/plain']);
+  });
+  test("a project folder in a skipped tree, another user's home, or a key store answers truncated, opens and probes nothing", async () => {
+    for (const root of [
+      '/proc/1',
+      '/sys/x',
+      '/dev/shm',
+      '/run/user/1',
+      '/nix/store/abc',
+      '/home/other/work',
+      '/Users/bob/w',
+      '/root/w',
+      `${HOME}/Library/Mail`,
+    ]) {
+      const world = browserOf({ [root]: ['r'], [`${root}/r`]: [] }, [`${root}/r`]);
+      expect(await scanRepos(root, { browser: world.browser })).toEqual({ repos: [], truncated: true });
+      expect(world.opened).toEqual([]);
+      expect(world.probed).toEqual([]);
+    }
+  });
+  test('a child on another disk is not entered or probed, and the scan says it did not see everything', async () => {
+    const world = browserOf(
+      { [P]: ['mnt', 'ok'], [`${P}/mnt`]: ['r'], [`${P}/mnt/r`]: [], [`${P}/ok`]: [] },
+      [`${P}/mnt`, `${P}/mnt/r`, `${P}/ok`],
+      {},
+      { devices: { [`${P}/mnt`]: 'd2' } },
+    );
+    const found = await scanRepos(P, { browser: world.browser });
+    expect(found).toEqual({ repos: [{ path: 'ok' }], truncated: true });
+    expect(world.opened).toEqual([P]);
+    expect(world.probed.filter(path => path.includes('/mnt'))).toEqual([]);
+  });
+  test('a project folder on its own disk is the one disk: a mount deeper down is left out, the folder itself is not', async () => {
+    const world = browserOf(
+      { '/mnt/data': ['r'], '/mnt/data/r': [] },
+      ['/mnt/data/r'],
+      {},
+      { devices: { '/mnt/data': 'd9', '/mnt/data/r': 'd9' } },
+    );
+    expect(await scanRepos('/mnt/data', { browser: world.browser })).toEqual({
+      repos: [{ path: 'r' }],
+      truncated: false,
+    });
+  });
+  test('a folder whose disk cannot be told is not entered, and says so', async () => {
+    const world = browserOf({ [P]: ['a'], [`${P}/a`]: [] }, [`${P}/a`]);
+    const blind: FolderBrowser = {
+      ...world.browser,
+      open: async (path, verdict) => {
+        const held = await world.browser.open(path, verdict);
+        return held.ok
+          ? { ok: true, folder: { ...held.folder, device: async rel => (rel === 'a' ? undefined : 'd1') } }
+          : held;
+      },
+    };
+    expect(await scanRepos(P, { browser: blind })).toEqual({ repos: [], truncated: true });
   });
   test('a project folder that is itself a link is refused and nothing in or behind it is touched', async () => {
     const world = browserOf(
@@ -224,7 +289,8 @@ describe('scanning a project folder for repositories', () => {
     expect((await scanRepos(P, { browser: world.browser })).repos.map(repo => repo.path)).toEqual(['ok']);
     expect(world.probed).not.toContain(`${P}/keys`);
     const marked = browserOf({ [P]: ['ok'], [`${P}/ok`]: [] }, [`${P}/ok`], {}, { signIn: [P] });
-    expect(await scanRepos(P, { browser: marked.browser })).toEqual({ repos: [], truncated: false });
+    // the project folder itself refused is a scan that saw nothing, never an empty project (it must not drop stored repos)
+    expect(await scanRepos(P, { browser: marked.browser })).toEqual({ repos: [], truncated: true });
     expect(marked.probed).toEqual([]);
   });
   test('a folder that could not be read says the scan did not see everything', async () => {

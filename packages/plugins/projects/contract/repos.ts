@@ -59,8 +59,6 @@ export const ProjectReposAnswerSchema = z.strictObject({
   repos: z.array(ProjectRepoSchema).max(MAX_PROJECT_REPOS),
   /** The scan stopped at a bound (too many repositories or folders): there may be more. */
   truncated: z.boolean(),
-  /** Present when the project folder was not scanned because it is outside the home folder (the fence is kept). */
-  notScanned: z.string().optional(),
 });
 export type ProjectReposAnswer = z.infer<typeof ProjectReposAnswerSchema>;
 

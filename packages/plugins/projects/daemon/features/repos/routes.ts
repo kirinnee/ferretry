@@ -24,11 +24,7 @@ export const reposRoute =
     const result = await scanRepos(project.path, scan);
     const kept = await registry.recordRepos(id, result.repos, !result.truncated);
     if (!kept.ok) throw new ApiError(404, kept.error.message, 'not-found');
-    return jsonResponse({
-      repos: kept.value.repos ?? [],
-      truncated: result.truncated,
-      ...(result.notScanned === undefined ? {} : { notScanned: result.notScanned }),
-    });
+    return jsonResponse({ repos: kept.value.repos ?? [], truncated: result.truncated });
   };
 
 /** `PUT /v1/projects/:id/accounts` `{accounts}`: the whole list, in order. Answers the project. */

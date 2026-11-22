@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ApiRequest, CallContext } from '@ferretry/kernel/contract';
+import { ApiError, type ApiRequest, type CallContext } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import { MakeFolderRequestSchema } from '../../../contract/index.ts';
 import { FolderExplorer } from '../../../daemon/features/folders/browse.ts';
@@ -86,6 +86,7 @@ function machine(tree: Tree, options: Machine = {}) {
         },
         readText: async () => undefined,
         hasGit: async name => git.includes(`${real}/${name}`),
+        device: async () => 'd1',
         makeLeaf: async (name, judge): Promise<LeafMade> => {
           const target = `${real}/${name}`;
           if (names(real).includes(name)) return { kind: 'exists' };
@@ -284,7 +285,7 @@ describe('FolderExplorer.list', () => {
     const swapped = machine(BASE, { swapped: { [`${HOME}/code`]: `${HOME}/.ssh` } });
     expect((await failure(() => swapped.explorer.list('~/code', true))).code).toBe('folder_refused');
     expect(swapped.calls.some(call => call.startsWith('entries'))).toBe(false);
-    const out = machine(BASE, { swapped: { [`${HOME}/code`]: '/etc' } });
+    const out = machine(BASE, { swapped: { [`${HOME}/code`]: '/proc/1' } });
     expect((await failure(() => out.explorer.list('~/code', true))).code).toBe('folder_refused');
     expect(out.calls.some(call => call.startsWith('entries'))).toBe(false);
     // Listed from the real path of what was held.
@@ -294,24 +295,83 @@ describe('FolderExplorer.list', () => {
     expect(listing.entries.map(entry => entry.name)).toContain('app');
   });
 
-  test('outside the home answers ONE way, without touching the machine, whether or not it exists', async () => {
+  test("outside the home, a caller that fails the gate gets the gate's answer before the machine is touched, whether or not it exists", async () => {
     const { explorer, calls } = machine(BASE, {
       links: { [`${HOME}/escape`]: '/etc', [`${HOME}/escape-missing`]: '/nowhere', [`${HOME}/dev`]: '/dev/null' },
     });
-    const answers: [number, string, string][] = [];
-    for (const path of ['/etc', '/etc/passwd', '/nonexistent', '/home/mee', '/home', '/']) {
+    const deny = async () => {
+      throw new ApiError(403, 'needs configure', 'grant_step_up_required');
+    };
+    for (const path of ['/etc', '/etc/passwd', '/nonexistent', '/home/mee', '/home', '/', '/proc', '/home/other']) {
       calls.length = 0;
-      const refused = await failure(() => explorer.list(path, false));
+      const refused = await failure(() => explorer.list(path, false, deny));
+      expect([refused.status, refused.code]).toEqual([403, 'grant_step_up_required']);
       expect(calls.filter(call => call.startsWith('open'))).toEqual([]);
-      answers.push([refused.status, refused.code, refused.message]);
     }
-    expect(answers.every(answer => answer.join() === answers[0]?.join())).toBe(true);
-    expect(answers[0]).toEqual([403, 'folder_refused', 'that folder is not there, or cannot be listed']);
-    // A link out of the home is refused after it resolves, with the very same answer, and so is a device.
-    for (const link of ['~/escape', '~/escape-missing', '~/dev']) {
-      const refused = await failure(() => explorer.list(link, false));
-      expect([refused.status, refused.code, refused.message]).toEqual(answers[0] as [number, string, string]);
+    // A link in the home that leads out is gated after it resolves, and nothing is read from there.
+    for (const link of ['~/escape']) {
+      calls.length = 0;
+      expect((await failure(() => explorer.list(link, false, deny))).code).toBe('grant_step_up_required');
+      expect(calls.some(call => call.startsWith('entries'))).toBe(false);
     }
+    // GAP (stated in browse.ts): a link that leads nowhere never reaches the gate.
+    expect((await failure(() => explorer.list('~/escape-missing', false, deny))).code).toBe('folder_refused');
+    // The home is never gated.
+    let asked = 0;
+    const count = async () => {
+      asked++;
+    };
+    await explorer.list('~/code', false, count);
+    await explorer.list('~', false, count);
+    expect(asked).toBe(0);
+  });
+
+  test('a caller that passes the gate lists outside the home: crumbs from /, the gate asked once, other homes and pseudo trees left out', async () => {
+    const world = machine({
+      ...BASE,
+      '/': ['etc', 'proc', 'home', 'srv', 'dev', 'run', 'nix'],
+      '/etc': ['passwd'],
+      '/home': ['me', 'other', 'shared.txt'],
+      '/srv': ['www', 'app', 'keys'],
+      '/srv/www': ['site'],
+      '/srv/www/site': [],
+      '/srv/keys': ['id_rsa'],
+    });
+    let asked = 0;
+    const allow = async () => {
+      asked++;
+    };
+    const root = await world.explorer.list('/', false, allow);
+    expect(root.path).toBe('/');
+    expect(root.crumbs).toEqual([{ name: '/', path: '/' }]);
+    expect(root.entries.map(entry => entry.name)).toEqual(['etc', 'home', 'nix', 'srv']);
+    expect(root.broad).toBe(true);
+    expect(asked).toBe(1);
+    const home = await world.explorer.list('/home', false, allow);
+    expect(home.entries.map(entry => entry.name)).toEqual(['me', 'shared.txt']);
+    expect(home.broad).toBe(true);
+    const site = await world.explorer.list('/srv/www/site', false, allow);
+    expect(site.crumbs).toEqual([
+      { name: '/', path: '/' },
+      { name: 'srv', path: '/srv' },
+      { name: 'www', path: '/srv/www' },
+      { name: 'site', path: '/srv/www/site' },
+    ]);
+    expect(site.broad).toBeUndefined();
+    // each request asks the gate ONCE however many real paths it judges (the spelling, the first look, the held object)
+    asked = 0;
+    await world.explorer.list('/srv/www', false, allow);
+    expect(asked).toBe(1);
+    // the same fence applies out there: a folder that holds a sign-in file is refused as the one it is, and so are the trees
+    expect((await failure(() => world.explorer.list('/srv/keys', false, allow))).code).toBe('folder_refused');
+    for (const path of ['/proc', '/dev', '/run', '/home/other', '/home/other/x'])
+      expect((await failure(() => world.explorer.list(path, false, allow))).code).toBe('folder_refused');
+  });
+
+  test('without a gate (the caller at the machine) every place the policy accepts is listed, and a missing one is the one refusal', async () => {
+    const { explorer } = machine({ ...BASE, '/srv': ['a'], '/srv/a': [] });
+    expect((await explorer.list('/srv', false)).entries.map(entry => entry.name)).toEqual(['a']);
+    expect((await failure(() => explorer.list('/nonexistent', false))).code).toBe('folder_refused');
   });
 
   test('a listing is bounded at 500 and says so, counting only what is shown', async () => {
@@ -527,6 +587,31 @@ describe('routes', () => {
     expect(body.path).toBe(HOME);
     expect((await failure(() => list(call({ x: '1' })))).status).toBe(400);
     expect((await failure(() => list(call({ hidden: 'yes' })))).status).toBe(400);
+  });
+
+  test('GET through a governed device: the home needs only what the route declares; a place outside it needs filesystem.configure', async () => {
+    const { explorer } = machine({ ...BASE, '/': ['etc', 'srv'], '/etc': [], '/srv': [] });
+    const list = listFoldersRoute(explorer);
+    const governed = (configure: boolean): CallContext =>
+      ({
+        ...call({ path: '/' }),
+        governance: {
+          governed: true,
+          decide: () =>
+            configure ? { allowed: true, refusal: 'granted' } : { allowed: false, refusal: 'step-up-required' },
+        },
+      }) as unknown as CallContext;
+    const useOnly = governed(false);
+    const home = { ...useOnly, request: call({}).request } as CallContext;
+    expect(JSON.parse(String((await list(home)).body)).path).toBe(HOME);
+    const refused = await failure(() => list(useOnly));
+    expect([refused.status, refused.code]).toEqual([403, 'grant_step_up_required']);
+    const allowed = JSON.parse(String((await list(governed(true))).body)) as {
+      path: string;
+      crumbs: { name: string }[];
+    };
+    expect(allowed.path).toBe('/');
+    expect(allowed.crumbs[0]?.name).toBe('/');
   });
 
   test('POST makes a folder and refuses a bad body', async () => {

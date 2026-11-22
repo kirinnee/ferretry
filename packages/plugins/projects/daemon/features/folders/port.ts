@@ -9,7 +9,8 @@ export interface RawFolderEntry {
 
 /**
  * Why a folder was not opened: the machine refused it (or the fence did, or nothing verified is there), it is a file, or the
- * explorer's own judgment of where it REALLY is said no (`outside` the home, `private`).
+ * policy's own judgment of where it REALLY is said no (`outside`: a tree no project is read from, or outside the project a
+ * scan reads; `private`: keys, sign-ins, another user's home).
  */
 export type FolderOpenFailure = 'refused' | 'not_folder' | 'outside' | 'private';
 
@@ -50,6 +51,12 @@ export interface HeldFolder {
   readText(rel: string, limit: number): Promise<string | undefined>;
   /** Whether `<held>/<name>/.git` exists (a folder, or the file a work tree keeps). */
   hasGit(name: string): Promise<boolean>;
+  /**
+   * The device (`st_dev`) of the folder `<held>/<rel>` (`''` is the held folder itself): the disk it is on, so a reader can
+   * stay on one disk the way `find -xdev` does. `undefined` when it is not a folder there now or cannot be looked at; a
+   * link is never followed.
+   */
+  device(rel: string): Promise<string | undefined>;
   /**
    * Makes ONE new folder `name` (owner-only, not recursive, never over anything) inside the held folder, then proves it
    * is a real folder at `<real>/<name>` that `verdict` accepts; when it is not, only that just-made empty folder is
