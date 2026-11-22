@@ -1,3 +1,4 @@
+import type { ProseProps } from '@ferretry/app';
 import { DocumentView, type InlineDef } from 'durian-hypermedia/react/strict';
 import { memo, useId, useMemo, useSyncExternalStore } from 'react';
 import { exceedsMessageCap } from './limits.ts';
@@ -57,6 +58,15 @@ const subscribeToMode = (notify: () => void): (() => void) => {
 };
 const readMode = (): 'light' | 'dark' => (document.documentElement.dataset.mode === 'dark' ? 'dark' : 'light');
 const SERVER_MODE = (): 'light' | 'dark' => 'light';
+
+/**
+ * What Conversation hands the shell as `shell.prose`: this, for a surface that is not the chat's (the agenda). A plain
+ * function, because the shell calls it as a view; `copyable` and `demoteHeadings` are Markdown's and a part has its own
+ * copy, so they are not read. Headings are the surface's to restyle (`.dh-doc h1…h6`), as the agenda card does.
+ */
+export function ProvidedProse({ text, className }: ProseProps) {
+  return <HypermediaProse text={text} {...(className === undefined ? {} : { className })} />;
+}
 
 export interface HypermediaProseProps {
   readonly text: string;

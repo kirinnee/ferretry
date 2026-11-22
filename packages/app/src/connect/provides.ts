@@ -15,6 +15,7 @@ import type { OwnerPayload, PrivateKeyHandle, RelayCrypto } from '../session/wir
 import type { ShellPluginClient } from '../client/daemon-client.ts';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
 import type { LinkProvision } from '../ui/external-link.tsx';
+import type { ProseProvision } from '../prose/prose-view.tsx';
 import { PASSKEY_TAKERS, type PasskeyPorts, type PasskeyProvision } from '../passkey/passkey.ts';
 
 /**
@@ -40,6 +41,8 @@ import { PASSKEY_TAKERS, type PasskeyPorts, type PasskeyProvision } from '../pas
 export const CLAIM_TAKERS: readonly string[] = Object.freeze(['access']);
 /** The one plugin whose link behaviour the shell takes (S7): where a link opens is Browsers'. */
 export const LINK_TAKERS: readonly string[] = Object.freeze(['browsers']);
+/** The one plugin whose prose view the shell takes: how a ferret's text is drawn is Conversation's. */
+export const PROSE_TAKERS: readonly string[] = Object.freeze(['conversation']);
 /** The one plugin whose carriers the shell takes (§4.8: the carrier choice is Connections'). */
 export const CARRIER_TAKERS: readonly string[] = Object.freeze(['connections']);
 
@@ -331,6 +334,13 @@ export interface ShellProvides {
    * is ignored.
    */
   readonly links?: (ctx: AppHookContext) => LinkProvision;
+  /**
+   * Conversation only (`PROSE_TAKERS`): how agent-written text is drawn — Durian hypermedia, parts and all. It is the
+   * view behind the shell's one `ProseView`, so a surface that is not Conversation's (the agenda) draws a ferret's text
+   * the way the chat does without importing Conversation. It is a view, not a factory: it needs no daemon, no client. It
+   * may suspend while it loads (the shell shows its Markdown meanwhile). Any other provider is ignored.
+   */
+  readonly prose?: ProseProvision;
   /** Access only. */
   readonly claims?: (ports: ConnectPorts) => DeviceClaims;
   /** Connections only. */
@@ -681,6 +691,15 @@ export function registeredLinkProvider(
   for (const entry of surfaces) {
     const provide = shellProvidesOf(entry)?.links;
     if (provide !== undefined && LINK_TAKERS.includes(entry.id)) return { plugin: entry.id, provide };
+  }
+  return undefined;
+}
+
+/** The prose view Conversation gave (any other plugin's is ignored), or `undefined`. */
+export function registeredProse(surfaces: readonly SurfaceEntry[]): ProseProvision | undefined {
+  for (const entry of surfaces) {
+    const prose = shellProvidesOf(entry)?.prose;
+    if (prose !== undefined && PROSE_TAKERS.includes(entry.id)) return prose;
   }
   return undefined;
 }

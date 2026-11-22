@@ -6,7 +6,7 @@ import type {
   ScreenProps,
   SettingsProps,
 } from '@ferretry/kernel/manifest';
-import { type BackgroundViewProps, provideToShell, type ShellProvides } from '@ferretry/app';
+import { type BackgroundViewProps, type ProseProps, provideToShell, type ShellProvides } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { CONVERSATION_ADD_TO_CHAT_HOOK, CONVERSATION_DEVICE_OUTBOX_HOOK } from '../contract/app-hooks.ts';
@@ -126,6 +126,13 @@ export default provideToShell(
         async () => (await import('./composer/outbox-host.ts')).OutboxHost,
       ) as NonNullable<ShellProvides['background']>[string],
     },
+    // How a ferret's text is drawn for a surface that is not the chat's (the agenda): Durian hypermedia, loaded on
+    // first draw so this file still holds no view code. The shell shows its Markdown until it arrives.
+    // Durian's stylesheet comes with it: it is otherwise loaded by the chat's surfaces, which an agenda may open first.
+    prose: lazyComponent<ProseProps>(async () => {
+      await import('./hypermedia/dh-styles.ts');
+      return (await import('./hypermedia/hypermedia-prose.tsx')).ProvidedProse;
+    }) as NonNullable<ShellProvides['prose']>,
     // Settings › Appearance (S4): this device's conversation width and the key to a message's marks. No machine, no client.
     deviceSettings: {
       'chat-width': deviceSetting('chat-width'),

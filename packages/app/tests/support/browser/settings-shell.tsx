@@ -25,6 +25,7 @@ import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import type { PasskeyHandler, PasskeyProvision } from '../../../src/passkey/passkey.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
+import { ShellContext } from '../../../src/shell/context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { PlacedPanel } from '../../../src/testing/slot-panels.tsx';
@@ -167,6 +168,19 @@ export function renderSettingsShellOf(
  */
 export { noteClientDaemon } from '../../../src/connect/daemon-of.ts';
 export { type PlacedPanel, WithSlotPanels } from '../../../src/testing/slot-panels.tsx';
+
+/**
+ * FOR A SCENE THAT DRAWS A FERRET'S TEXT THE WAY THE SHELL DOES (`ProseView`, which asks the shell what Conversation
+ * provides as `shell.prose`): the shell's context over the registry's REAL halves, or over `none` (the shell's own Markdown,
+ * a baseline). No router, no machine: `ProseView` reads the surfaces and nothing else.
+ */
+export function WithRegisteredSurfaces({ children, none = false }: { children: ReactNode; none?: boolean }) {
+  return (
+    <ShellContext.Provider value={{ runtime: { surfaces: none ? [] : generated.surfaces } } as never}>
+      {children}
+    </ShellContext.Provider>
+  );
+}
 
 /** One panel a plugin REGISTERS, as the shell builds it over `client`, placed under the plugin's own id. */
 export function registeredPanel(plugin: string, id: string, client: unknown): PlacedPanel {
