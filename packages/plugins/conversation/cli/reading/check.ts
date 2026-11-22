@@ -72,6 +72,17 @@ export function diagnosticText(text: string): string {
 /** The fence token whose whole info string makes a block ours; any longer info string is plain code. */
 const FY_RENDER_FENCE = 'fy-render';
 
+/**
+ * The Durian parts the app does NOT draw (`app/hypermedia/held-fences.tsx`): a chart's formulas have no bound on their
+ * work and the code walk's notes are set as HTML, so each is shown as the code it is. The guide never teaches them; an agent
+ * that writes one anyway is told here. The two halves cannot share the list (a CLI half may not import an app half);
+ * `tests/unit/cli/render-check.test.ts` pins the words to the app's own held fences.
+ */
+const HELD_PART_FENCES: ReadonlyMap<string, string> = new Map([
+  ['chart', 'a chart is an fy-render block of type chart'],
+  ['codewalk', 'show the code in a plain fence with the notes in prose'],
+]);
+
 /** A fence line, wherever it sits: after quote marks and a list marker, a run of three or more backticks or tildes. */
 const FENCE_LINE = /^(?<prefix>[ \t>]*(?:[-*+]\s+|\d+[.)]\s+)?)(?<run>`{3,}|~{3,})(?<info>.*)$/u;
 
@@ -152,6 +163,12 @@ function fyRenderFindings(text: string): Finding[] {
         line: index + 1,
         level: 'warn',
         message: `the info string "${info}" is not exactly "${FY_RENDER_FENCE}", so this fence is shown as plain code`,
+      });
+    } else if (HELD_PART_FENCES.has(first as string)) {
+      found.push({
+        line: index + 1,
+        level: 'warn',
+        message: `a ${first} fence is not drawn by the app, so it is shown as plain code; ${HELD_PART_FENCES.get(first as string)}`,
       });
     } else if (info === FY_RENDER_FENCE && end < lines.length) {
       const prefix = open.prefix as string;

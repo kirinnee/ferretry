@@ -280,11 +280,13 @@ export { PASSIVE_LEARNING_ENV };
 export { HYPERMEDIA_ENV };
 
 /**
- * The hypermedia teaching. Short on purpose — it is in every prompt (at most 20 lines), so it names the `terminal` part,
- * the `fy-render` fence with its types and the reference sigils once, and every spec is one `render guide <part>` away;
- * the check an agent can run before sending is `render check`. It teaches ONLY what the app draws today (r12 H2: `terminal`
- * and `:::human`; H3: the fy-render types): a part whose renderer has not landed would show as text, so r12 H4 adds each
- * back here in the same change that lands its renderer. Its second line is the owner's explainer rule (2026-11-04: "for explainers,
+ * The hypermedia teaching. Short on purpose — it is in every prompt (at most 20 lines), so it names the part fences, the
+ * `fy-render` fence with its types and the reference sigils once, and every spec is one `render guide <part>` away;
+ * the check an agent can run before sending is `render check`. It teaches ONLY what the app draws today: the Durian parts
+ * H4 landed (terminal, filetree, editor, tierlist, alignment, mermaid, animation 2D and 3D, tabs, accordion) and the
+ * fy-render types. Durian's `chart` fence and the `codewalk` are held as code, so they are NOT taught: a chart is the
+ * fy-render chart (`tests/unit/app/hypermedia/teaching-examples.test.tsx` in the conversation plugin fails a teaching the
+ * app does not draw). Its second line is the owner's explainer rule (2026-11-04: "for explainers,
  * make sure its ADHD Firendly (make sure you say that) and user hypermeida to walk user through things", "give example
  * to illustrate your points etc"). docs/hypermedia.md quotes it, and its `## Guide for agents` section is what
  * `render guide` prints.
@@ -293,10 +295,10 @@ export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
   [
     'Hypermedia: to teach, explain or compare anything not simple (a flow, a design, a change), show it, not just say it. Inline: never publish a page or link unless asked.',
     'Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Make it interactive: a visual the reader changes (sliders, toggles) that redraws live, no steppers; gentle motion (prefers-reduced-motion).',
-    'Write Markdown. The one rich part is a ```terminal fence (a shell session); `:::human` text is for people, `:::llm` after a part is for another agent.',
-    '- Diagrams, charts, svg, interactive html, maps, media, live tasks: a fence whose info string is exactly fy-render: `type: mermaid|chart|svg|html|map|image|video|audio|pdf|lottie|task|board`, `alt: <one line>`, `---`, then the payload.',
+    'Write Markdown. Rich parts are fences named for the part: ```terminal, ```filetree, ```editor, ```tierlist, ```alignment, ```mermaid, ```animation (add `3d` to open it in 3D); `@step <caption>` lines give a part steps; :::tabs and :::accordion hold prose under headings; `:::human` text is for people, `:::llm` after a part is for another agent.',
     '- mermaid: flowchart TB, sequenceDiagram, …: top-down, short labels; auto-themed: no %%{init}%% or colours.',
-    '- chart: YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; no colours.',
+    '- Charts, svg, interactive html, maps, media, live tasks: a fence whose info string is exactly fy-render: `type: chart|svg|html|map|image|video|audio|pdf|lottie|task|board`, `alt: <one line>`, `---`, then the payload.',
+    '- chart (fy-render only; a part named chart is shown as code): YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; no colours.',
     'References are plain text, never links: `:agent @file &F12 ^A3 /skill $skill %terminal:dev %browser:app`.',
     `Every spec: \`${fy} render guide <part>\`. Before you send a rich message, run \`${fy} render check <file|->\`: it prints \`line N: …\` for each problem and exits 1 on an error.`,
     'Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.',

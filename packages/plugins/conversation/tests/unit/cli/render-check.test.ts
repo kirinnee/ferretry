@@ -4,6 +4,7 @@
  * `fy-render` fence, and exits 1 on any error, 0 otherwise.
  */
 import { describe, expect, test } from 'bun:test';
+import { holdFences } from '../../../app/hypermedia/held-fences.tsx';
 import { MESSAGE_LIMITS } from '../../../app/hypermedia/limits.ts';
 import { checkMessage, findingLine } from '../../../cli/reading/check.ts';
 import { readingVerbs } from '../../../cli/reading/verbs.ts';
@@ -134,6 +135,30 @@ describe('fy render check: fy-render fences (our host block)', () => {
     const { check, out } = harness({ 'w.md': `${FENCE}fy-render notes\nx\n${FENCE}\n` });
     expect(await check(['w.md'])).toBe(0);
     expect(out.join('')).toContain('line 1: warning:');
+  });
+});
+
+describe('fy render check: parts the app does not draw, and the parts it does', () => {
+  test('a chart or codewalk fence is a warning: the app shows it as code, and the chart to write is the fy-render one', () => {
+    for (const word of ['chart', 'codewalk']) {
+      const text = `Intro\n\n${FENCE}${word}\nkind: bar\n${FENCE}\n`;
+      // The app really holds this fence as code (the two halves agree on the words).
+      expect(holdFences(text)).not.toBe(text);
+      const found = checkMessage(text).filter(each => each.message.includes(`a ${word} fence`));
+      expect(found).toHaveLength(1);
+      expect(found[0]).toMatchObject({ line: 3, level: 'warn' });
+      expect(found[0]?.message).toContain('shown as plain code');
+    }
+    expect(
+      checkMessage(`${FENCE}chart\nkind: bar\n${FENCE}\n`)
+        .map(each => each.message)
+        .join(' '),
+    ).toContain('fy-render block of type chart');
+  });
+
+  test('a chart fence inside a tab is found too, on its own line', () => {
+    const text = [':::tabs', '#### A', `${FENCE}chart`, 'kind: bar', FENCE, '#### B', 'x', ':::'].join('\n');
+    expect(checkMessage(text).filter(each => each.message.includes('a chart fence'))).toMatchObject([{ line: 3 }]);
   });
 });
 
