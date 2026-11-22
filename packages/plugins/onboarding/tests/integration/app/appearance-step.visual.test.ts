@@ -293,8 +293,7 @@ describe('the new palettes on the Appearance page (C59 O6)', () => {
               palette
             ] as string,
           );
-          if (palette !== 'briefing') expect(after.mesh).toContain('radial-gradient');
-          else expect(after.mesh).toBe('none');
+          expect(after.mesh).toContain('radial-gradient');
           // The mesh is a LIST of glows, so it is several background layers: each one must be untiled (size auto, no-repeat). It was
           // tiled in the pattern's 32px squares (a pink checkerboard over the page) when the body's size and repeat lists were too short.
           const layers = await tab.evaluate(() => {
@@ -324,7 +323,7 @@ describe('the new palettes on the Appearance page (C59 O6)', () => {
             }));
           });
           const glows = layers.filter(layer => layer.glow);
-          expect(glows.length, 'a mesh palette draws its glows').toBe(palette === 'briefing' ? 0 : 4);
+          expect(glows.length, 'a mesh palette draws its glows').toBe(4);
           for (const glow of glows)
             expect(glow, 'an untiled glow').toEqual({ glow: true, size: 'auto', repeat: 'no-repeat' });
           await tab.evaluate(() => window.scrollTo(0, 0));
@@ -437,7 +436,7 @@ describe('the Appearance page works in every style and every palette (C59 O6c)',
 
 describe("the Briefing style and palette match the owner's reference (C59 O6b)", () => {
   for (const variant of VARIANTS)
-    it(`Poppins 600 headings over a Poppins 400 body, a flat page, indigo on lavender-grey (${variant.name})`, async () => {
+    it(`Poppins 600 headings over a Poppins 400 body, blue and pink on navy / lavender-grey (${variant.name})`, async () => {
       const { tab, close } = await open(variant);
       try {
         await tab.locator('[aria-label="Style"] .fy-cc__card[data-choice="briefing"]').click();
@@ -459,6 +458,7 @@ describe("the Briefing style and palette match the owner's reference (C59 O6b)",
             bg: getComputedStyle(document.body).backgroundColor,
             accent: root.getPropertyValue('--accent').trim(),
             focus: root.getPropertyValue('--focus-color').trim(),
+            mesh: root.getPropertyValue('--surface-mesh').trim(),
             radiusPanel: getComputedStyle(document.documentElement).getPropertyValue('--radius-panel').trim(),
             demoButtonColour: getComputedStyle(demoButton).backgroundColor,
           };
@@ -470,10 +470,13 @@ describe("the Briefing style and palette match the owner's reference (C59 O6b)",
         expect(read.bodyWeight).toBe('400');
         expect(Number(read.grain), 'no paper grain').toBe(0);
         expect(read.radiusPanel).toBe('16px');
-        // The reference's own colours: lavender-grey page / navy ground, indigo accent.
+        // The reference's own colours: lavender-grey page / navy ground, a bright blue accent (the reference's #555FFF by day, held
+        // at 4.5:1 as text; its #8A92FF at night) and hot-pink glows (#F91974) behind the page.
         expect(read.bg).toBe(variant.scheme === 'light' ? 'rgb(233, 235, 244)' : 'rgb(14, 18, 32)');
-        expect(read.accent).toBe(variant.scheme === 'light' ? '#3b44e0' : '#a9afff');
-        expect(read.focus).toBe(variant.scheme === 'light' ? '#3b44e0' : '#8a92ff');
+        expect(read.accent).toBe(variant.scheme === 'light' ? '#424cec' : '#9aa1ff');
+        expect(read.focus).toBe(variant.scheme === 'light' ? '#424cec' : '#8a92ff');
+        // The page carries the document's glows (blue and hot pink): four of them, drawn behind the page.
+        expect(read.mesh.match(/radial-gradient\(/gu)?.length, 'four glows').toBe(4);
         await tab.evaluate(() => window.scrollTo(0, 0));
         await shot(tab, variant, 'briefing');
         console.log(`MEASURED briefing ${variant.name}: ${JSON.stringify(read)}`);
