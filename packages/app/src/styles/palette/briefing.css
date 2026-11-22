@@ -162,8 +162,8 @@
    hues Briefing keeps apart and readable (E14b). */
 :root[data-palette='briefing'],
 [data-swatch][data-palette='briefing'] {
-  --viz-1: var(--src-codex);
+  --viz-1: var(--tool-read);
   --viz-4: var(--src-computer);
-  --viz-5: var(--tool-read);
-  --viz-7: var(--tool-write);
+  --viz-5: color-mix(in srgb, var(--tool-bash), var(--tool-edit));
+  --viz-7: color-mix(in srgb, var(--tool-bash), var(--src-computer));
 }

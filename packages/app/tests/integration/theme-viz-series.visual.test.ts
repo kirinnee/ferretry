@@ -18,6 +18,9 @@ setDefaultTimeout(60_000);
 
 const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 
+/** The palettes whose own file restates series slots (E14b): they were built to a tighter bar, every pair 45 apart, and keep it. */
+const REPAIRED = new Set(['hacker', 'vintage', 'vaporwave', 'mesh', 'aurora', 'afterglow', 'briefing']);
+
 interface Look {
   readonly series: readonly (readonly number[])[];
   readonly surface: readonly number[];
@@ -86,7 +89,8 @@ describe('the chart series', () => {
         for (let a = 0; a < look.series.length; a += 1)
           for (let b = a + 1; b < look.series.length; b += 1) {
             const apart = distance(look.series[a] ?? [], look.series[b] ?? []);
-            if (apart < (a < 5 && b < 5 ? 60 : 30)) near.push(`viz-${a + 1} ~ viz-${b + 1} (${Math.round(apart)})`);
+            const floor = a < 5 && b < 5 ? 60 : REPAIRED.has(palette) ? 45 : 30;
+            if (apart < floor) near.push(`viz-${a + 1} ~ viz-${b + 1} (${Math.round(apart)})`);
           }
         expect({ palette, mode, near }).toEqual({ palette, mode, near: [] });
 

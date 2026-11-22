@@ -163,6 +163,7 @@
 :root[data-palette='vintage'],
 [data-swatch][data-palette='vintage'] {
   --viz-1: var(--src-codex);
+  --viz-3: color-mix(in srgb, var(--tool-bash), var(--src-claude));
   --viz-4: var(--src-computer);
-  --viz-7: color-mix(in srgb, var(--tool-bash), var(--tool-read));
+  --viz-7: color-mix(in srgb, var(--tool-bash), var(--tool-write));
 }

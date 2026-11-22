@@ -173,4 +173,5 @@
 [data-swatch][data-palette='afterglow'] {
   --viz-1: var(--src-codex);
   --viz-4: var(--src-computer);
+  --viz-5: color-mix(in srgb, var(--tool-bash), var(--tool-edit));
 }
