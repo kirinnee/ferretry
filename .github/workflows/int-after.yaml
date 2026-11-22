@@ -1,0 +1,53 @@
+name: Integration (5.0-after)
+
+# THE INTEGRATION GROUP `all` (config/test-groups.json) RUNS ONLY ON `main` PUSHES AND `full-ci` PULL REQUESTS (ci.yaml's
+# `int` job), and `rebuild/5.0-after` gets neither: its pull requests are scoped Quick runs and `main` is not where the
+# rebuild lands. A red integration file could therefore sit unseen on the branch every rebuild PR merges into (E12 swept
+# the branch and found some). This workflow is the guard: ONE job, the same `integration.sh` as ci.yaml's `int` job (every
+# group, then the 100% ledger and the guarantee proof), on every push to `rebuild/5.0-after`.
+#
+# NOT ci.yaml: a `rebuild/5.0-after` entry in its `push` trigger would also start compile, the smokes, the darwin smoke
+# and the strict report on every merge, and its `main`-only steps (the Nix store prune) are guarded on the ref, not the
+# workflow. This file has no deploy, no release and no secret: `contents: read` and nothing else, and Release listens
+# to the CI workflow on `main` only. ci.yaml's triggers are unchanged: pull requests stay as they were.
+on:
+  push:
+    branches: [rebuild/5.0-after]
+
+# A push waits for the run before it, and only the NEWEST waiting push is kept: a merge burst never queues a run per merge
+# on the 8x16 pool, and a run already in progress is never cancelled, so its verdict is never lost.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  int:
+    name: Integration Tests
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    # The runner shape of ci.yaml's `int` job.
+    runs-on:
+      [
+        nscloud-ubuntu-24.04-amd64-8x16-with-cache,
+        nscloud-cache-tag-ferretry-nix,
+        nscloud-cache-size-10gb,
+        nscloud-cache-allow-commit-from-main,
+      ]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-nix
+      - name: Run every integration group and its ledger
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/integration.sh
+      - name: Upload integration part results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: integration-parts
+          path: |
+            coverage/ci/int/*.log
+            coverage/ci/int/*.tsv
+          if-no-files-found: warn
