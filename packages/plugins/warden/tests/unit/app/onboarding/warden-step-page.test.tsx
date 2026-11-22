@@ -296,15 +296,33 @@ describe('the Warden step page', () => {
       'Confirm it’s you',
     );
     expect(page.container.textContent).not.toContain('grant_step_up_required');
-    // The button is the person's own press of Next: it asks the shell to run the save again (and so the passkey).
+    // The button is the person's own press of Next. `step.next()` only navigates in the real flow, so it runs the registered
+    // save ITSELF (the machine asks for the passkey there) and goes on only once that is written: done, then next.
+    expect(run.events.filter(event => event === 'next' || event === 'done')).toEqual([]);
     await interact(() =>
       must(page.container.querySelector<HTMLButtonElement>('[data-warden-unlock] button'), 'unlock').click(),
     );
-    expect(run.events.filter(event => event === 'next')).toEqual(['next']);
-    // Once the save goes through, the unlock goes away; a new pick clears it too.
-    await interact(() => run.runCommit());
+    await settle();
     expect(patches).toEqual([{ enabled: true, layers: { jev: true, llm: false } }]);
+    expect(run.events.slice(-4)).toEqual(['busy:Saving…', 'busy:null', 'done', 'next']);
     expect(page.container.querySelector('[data-warden-unlock]')).toBeNull();
+  });
+
+  it('stays on the step, writes nothing and does not advance when the passkey is declined on Confirm', async () => {
+    const { page, run, patches } = await open({ key: 'off', refuse: stepUpRefusal() });
+    await pick(page, 'jev');
+    await expect(interact(() => run.runCommit())).rejects.toThrow('confirm it’s you');
+    await settle();
+    await interact(() =>
+      must(page.container.querySelector<HTMLButtonElement>('[data-warden-unlock] button'), 'unlock').click(),
+    );
+    await settle();
+    expect(patches).toEqual([]);
+    expect(run.events.filter(event => event === 'next' || event === 'done')).toEqual([]);
+    expect(run.events.slice(-2)).toEqual(['busy:Saving…', 'busy:null']);
+    // Still there to press again; the footer's own sentence is the one that says why, so the page does not repeat it.
+    expect(page.container.querySelector('[data-warden-unlock] button')).not.toBeNull();
+    expect(page.container.querySelector('[data-warden-unlock] [role=alert]')).toBeNull();
   });
 
   it('shows any other refusal as it is, with no unlock offered', async () => {

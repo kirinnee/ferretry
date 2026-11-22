@@ -221,12 +221,15 @@ function Host() {
     done: () => {
       fake.done += 1;
     },
-    busy: () => undefined,
-    // The page's own "Confirm it's you" is the person's press of Next.
-    next: () => pressRef.current(),
+    busy: label => setBusy(label !== null),
+    // As in the real flow (`FlowPage`'s host): `next()` only NAVIGATES. The save is the footer Next's (`press`), which the page's
+    // own "Confirm it's you" must therefore run itself, through the registered commit, before it calls `next()`.
+    next: () => {
+      fake.advanced = true;
+      setMoved(true);
+    },
     back: () => undefined,
   };
-  const pressRef = useRef<() => void>(() => undefined);
   const press = () => {
     const run = save.current;
     if (run === null || busy) return;
@@ -235,14 +238,14 @@ function Host() {
     new Promise<void>(resolve => resolve(run()))
       .then(
         () => {
-          fake.advanced = true;
-          setMoved(true);
+          // What the real footer does after a save: the step is recorded done, then the flow moves on.
+          hostRef.current?.done();
+          hostRef.current?.next();
         },
         (cause: unknown) => setError(cause instanceof Error ? cause.message : 'That could not be saved.'),
       )
       .finally(() => setBusy(false));
   };
-  pressRef.current = press;
   if (moved) return <main data-next-page="">The next page</main>;
   return (
     <div style={{ height: '100vh', overflow: 'auto' }}>

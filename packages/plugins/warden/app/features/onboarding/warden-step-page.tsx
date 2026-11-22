@@ -64,6 +64,11 @@ export function WardenStepPage({ deps, step, keyRow }: WardenStepPageProps) {
   const [failed, setFailed] = useState<string | null>(null);
   /** Whether the last save was refused for want of the passkey step-up: the line and its one button are drawn. */
   const [stepUp, setStepUp] = useState(false);
+  /** What the page registered for Next to save (the same function the shell's footer runs); `confirm` runs it too. */
+  const commit = useRef<(() => Promise<void>) | null>(null);
+  /** Whether a "Confirm it's you" save is in flight, and what it was refused with when the footer does not already say it. */
+  const confirming = useRef(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   /** Whether the person was already asked about going on without a Jev key (the next Next is their yes). */
   const asked = useRef(false);
   /** Whether the last save was held for the owner and said so (the next Next goes on and does not write again). */
@@ -121,7 +126,7 @@ export function WardenStepPage({ deps, step, keyRow }: WardenStepPageProps) {
       }
       said(await deps.client.updateConfig(patchFor(choice)));
     };
-    step.commit(async () => {
+    const registered = async (): Promise<void> => {
       try {
         await save();
         setStepUp(false);
@@ -131,8 +136,38 @@ export function WardenStepPage({ deps, step, keyRow }: WardenStepPageProps) {
         setStepUp(true);
         throw new Error(STEP_UP_LINE);
       }
-    });
+    };
+    commit.current = registered;
+    step.commit(registered);
   }, [choice, deps, step]);
+
+  /**
+   * "Confirm it's you": the person's own press of Next. `step.next()` only navigates (the shell's footer Next is what saves),
+   * so this runs the SAME registered save the footer runs, under the same `busy('Saving…')`, and on success does what the
+   * footer does after a save: `done()` then `next()`. A refusal stays on the page, so a declined passkey writes nothing and
+   * does not advance.
+   */
+  const confirm = useCallback(async (): Promise<void> => {
+    const run = commit.current;
+    if (run === null || step === undefined || confirming.current) return;
+    confirming.current = true;
+    setConfirmError(null);
+    step.busy('Saving…');
+    try {
+      await run();
+    } catch (cause) {
+      // The footer already says the passkey sentence; any other refusal is said here, as it is.
+      const said = reasonOf(cause);
+      setConfirmError(said === STEP_UP_LINE ? null : said);
+      step.busy(null);
+      confirming.current = false;
+      return;
+    }
+    step.busy(null);
+    confirming.current = false;
+    step.done();
+    step.next();
+  }, [step]);
 
   if (failed !== null)
     return (
@@ -159,6 +194,7 @@ export function WardenStepPage({ deps, step, keyRow }: WardenStepPageProps) {
           asked.current = false;
           heldSaid.current = false;
           setStepUp(false);
+          setConfirmError(null);
           setChoice(next as WardenChoice);
         }}
       />
@@ -172,11 +208,16 @@ export function WardenStepPage({ deps, step, keyRow }: WardenStepPageProps) {
       )}
       {stepUp ? (
         <div className="wd-step__note" data-warden-unlock="">
-          {/* The sentence is the footer's (the commit's error); this is its one action: the person's own press of Next, so
-              the shell runs the save again and the machine asks for the passkey. */}
-          <Button variant="primary" onClick={() => step?.next()}>
+          {/* The sentence is the footer's (the commit's error); this is its one action: the person's own press of Next, which
+              runs the registered save again (and so the machine asks for the passkey) and goes on only once it is written. */}
+          <Button variant="primary" onClick={() => void confirm()}>
             {STEP_UP_PRESS}
           </Button>
+          {confirmError === null ? null : (
+            <p role="alert" className="wd-step__line">
+              {confirmError}
+            </p>
+          )}
         </div>
       ) : null}
     </div>
