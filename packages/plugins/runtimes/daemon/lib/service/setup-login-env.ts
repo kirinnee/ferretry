@@ -108,11 +108,14 @@ export async function importLoginEnvs(
         ticked: plan.tickedEnv ?? [],
       });
     } catch (error) {
+      caller?.left?.('refused');
       sentences.push(
         `The variables of your ${label} settings were not added to login ${env.login}: ${errorMessage(error)}.`,
       );
       continue;
     }
+    if (outcome.outcome === 'refused') caller?.left?.('refused');
+    else if (outcome.outcome === 'held') caller?.left?.('held');
     sentences.push(...loginEnvSentences(label, env.login, outcome));
   }
   return sentences;

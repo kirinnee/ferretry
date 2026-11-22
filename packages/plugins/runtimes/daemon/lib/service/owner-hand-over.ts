@@ -99,6 +99,9 @@ export interface HandOver {
   readonly applied: { readonly model: AccountModel; readonly documents: readonly FleetDocumentWrite[] };
   readonly landed: readonly string[];
   readonly sentences: readonly string[];
+  /** How many files an owner HELD for the owner's confirmation, and how many it refused (structured, for the log). */
+  readonly held: number;
+  readonly refused: number;
 }
 
 /**
@@ -115,7 +118,7 @@ export async function handOver(input: {
 }): Promise<HandOver> {
   const { writer, owners, applied } = input;
   if (owners === undefined || writer === undefined || owners.writes.length === 0) {
-    return { applied, landed: [], sentences: [] };
+    return { applied, landed: [], sentences: [], held: 0, refused: 0 };
   }
   const values = input.secretValues.filter(value => value.length > 0);
   const say = (reason: string): string => {
@@ -196,6 +199,8 @@ export async function handOver(input: {
   return {
     applied: { model: effective, documents },
     landed: written,
+    held: held.length,
+    refused: refused.length,
     sentences: [
       ...(written.length === 0 ? [] : [`Written by the parts that own them: ${written.join(', ')}.`]),
       ...(held.length === 0 ? [] : [`Held until you confirm: ${held.join(', ')}.`]),

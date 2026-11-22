@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { Actor, CallStanding, ConfigWriteJudgement } from '@ferretry/kernel/contract';
-import { openLooseningAct, type OwnerOnlyCall } from '../../../../contract/index.ts';
+import { openLooseningAct, type OwnerOnlyCall, STEP_UP_ACTS } from '../../../../contract/index.ts';
 import { CLIENT_HEADER } from '../../../../daemon/lib/api/admission.ts';
 import { judgeLooseningWrite } from '../../../../daemon/lib/policy/config-judge.ts';
 import { ADMIN, admit, descriptor, FERRET_TOKEN, local, type World, world } from '../support.ts';
@@ -58,10 +58,22 @@ describe('C59 O5-10b one import is one loosening act on one passkey', () => {
     expect(taken()).toBe(0);
   });
 
-  test('with one fresh proof the act claims it once, and every loosening of the act applies on it', () => {
+  test('a fresh proof for ANOTHER act, or for none, is not the named one: refused, and it stays where it is', () => {
+    for (const act of [STEP_UP_ACTS.addDevice, undefined]) {
+      const w = world();
+      w.enrol('phone');
+      w.stepUps.grant(subjectOf('phone'), true, act as never);
+      const opened = openLooseningAct(callOf(standingOf(w, { device: 'phone' })), 'import this setup');
+      expect('refused' in opened ? opened.refused.status : 0).toBe(403);
+      // Nothing was taken: the proof is still there for the act it was proved for.
+      expect(w.stepUps.freshlyHeld(subjectOf('phone'))).toBe(true);
+    }
+  });
+
+  test('with one fresh proof for loosen-config the act claims it once, and every loosening of the act applies on it', () => {
     const w = world();
     w.enrol('phone');
-    w.stepUps.grant(subjectOf('phone'));
+    w.stepUps.grant(subjectOf('phone'), true, STEP_UP_ACTS.loosenConfig);
     const taken = counted(w);
     const standing = standingOf(w, { device: 'phone' });
     const act = openLooseningAct(callOf(standing), 'import this setup');

@@ -28,7 +28,8 @@ export interface LooseningActRefused {
  *
  * - A ferret is refused outright (an agent never confirms a loosening).
  * - Somebody at the machine (`governed: false`) claims nothing: the judge lets their loosening through anyway.
- * - A governed caller without a fresh proof that already existed at admission is answered
+ * - A governed caller without a fresh proof PROVED FOR `loosen-config` that already existed at admission (a proof for
+ *   another act, or for none, is not one) is answered
  *   `403 grant_step_up_required` with the `loosen-config` act BEFORE anything is written, so the carrier asks for the
  *   passkey and sends the same request again. An unlock alone is never a fresh proof.
  *
@@ -39,7 +40,9 @@ export function openLooseningAct(call: OwnerOnlyCall, act: string): LooseningAct
   if (isFerretCall(call)) throw new ApiError(403, `a ferret cannot ${act}; the owner does`, 'forbidden');
   if (call.governance?.governed !== true) return { covered: false, end: () => undefined };
   const claim = call.claimFreshStepUp;
-  if (claim?.() !== true)
+  // The NAMED proof: a passkey proved for another act (or for none) never confirms an import (Access takes a stamped proof
+  // only for the act it names; an unstamped claim would take any).
+  if (claim?.(STEP_UP_ACTS.loosenConfig) !== true)
     return {
       refused: jsonResponse(
         {

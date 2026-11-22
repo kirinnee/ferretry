@@ -151,6 +151,18 @@ export function refusal(edge: ImportEdge): string | undefined {
   )
     return undefined;
 
+  // FOURTH EXEMPTION: the same proof needs Gate's PRODUCTION admission over Access's REAL step-up service, and a stand-in
+  // witness could not tell a passkey proved for the named act from any other, nor a spent window from a held one (C59 O5-10b
+  // R1). Only Gate's tests may reach exactly two Access files: the witness adapter Access itself provides to Gate, and the
+  // step-up fixture Access's own tests build the real service with.
+  if (
+    from === 'tests' &&
+    edge.fromPkg.name === '@ferretry/core-gate' &&
+    toPkg.id === 'access' &&
+    /\/access\/(daemon\/step-up-provider|tests\/support\/daemon\/step-up-fixture)\.ts$/u.test(edge.specifier)
+  )
+    return undefined;
+
   // Another package.
   switch (to) {
     case 'kernel-contract':

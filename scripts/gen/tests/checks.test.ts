@@ -430,6 +430,34 @@ describe('context-imports', () => {
     expect(found).toContain('other/tests/import.test.ts:1: ../../../core/kernel/src/generated/plugins.ts');
   });
 
+  test("only Gate's tests may reach Access's step-up witness adapter and fixture, and no other Access file", async () => {
+    const f = ws([
+      {
+        id: 'gate',
+        core: true,
+        files: {
+          'tests/witness.test.ts': `import '../../../plugins/access/daemon/step-up-provider.ts';\nimport '../../../plugins/access/tests/support/daemon/step-up-fixture.ts';\n`,
+          'tests/other.test.ts': `import '../../../plugins/access/daemon/runtime.ts';\n`,
+          'daemon/host.ts': `import '../../../plugins/access/daemon/step-up-provider.ts';\n`,
+        },
+      },
+      {
+        id: 'access',
+        files: {
+          'daemon/step-up-provider.ts': 'export {};\n',
+          'daemon/runtime.ts': 'export {};\n',
+          'tests/support/daemon/step-up-fixture.ts': 'export {};\n',
+        },
+      },
+      { id: 'other', files: { 'tests/witness.test.ts': `import '../../access/daemon/step-up-provider.ts';\n` } },
+    ]);
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('gate/tests/witness.test.ts');
+    expect(found).toContain('gate/tests/other.test.ts:1: ../../../plugins/access/daemon/runtime.ts');
+    expect(found).toContain('gate/daemon/host.ts:1: ../../../plugins/access/daemon/step-up-provider.ts');
+    expect(found).toContain('other/tests/witness.test.ts:1: ../../access/daemon/step-up-provider.ts');
+  });
+
   test('a cli half may import its own generated verb list and no other generated file', async () => {
     const f = ws([
       {

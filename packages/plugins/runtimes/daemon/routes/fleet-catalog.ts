@@ -136,13 +136,17 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem, log?: Log) 
       return await applyAsOneAct({
         call,
         id,
-        subsystem,
         log,
         answered: () => outcome,
-        work: async claim => {
+        work: async bracket => {
           try {
             return await answer(AccountChangeOutcomeSchema, async () => {
-              outcome = await subsystem.apply(id, call.governance, { claim, agent: isFerretCall(call) });
+              outcome = await subsystem.apply(
+                id,
+                call.governance,
+                { claim: () => call.claimFreshStepUp?.() === true, agent: isFerretCall(call) },
+                bracket,
+              );
               return outcome;
             });
           } catch (error) {

@@ -211,6 +211,45 @@ export interface ExecutorCaller {
    * agent control. Asked once, before the widening is written; `false` for a caller with no proof to take.
    */
   claim(): boolean;
+  /**
+   * Told, by name, what an executor left unfinished or waiting while it still answered `200` (a file held for the
+   * owner, a file or a login's variables refused): structured state the boundary logs, so no sentence is ever parsed.
+   * Absent: nobody listens.
+   */
+  left?(state: ApplyLeft): void;
+}
+
+/** The error an apply whose request already ended is answered with (nothing was written, the change stays pending). */
+function assertRequestLive(bracket: ApplyBracket | undefined): void {
+  if (bracket?.signal?.aborted === true)
+    throw new ApiError(499, 'the request ended before this change was applied; nothing was written', 'request_aborted');
+}
+
+/** What a finished apply left behind: waiting for the owner, not written, or cut short. */
+export type ApplyLeft = 'held' | 'refused' | 'unfinished';
+
+/** One loosening act the boundary opened for an apply (`openLooseningAct`): its proof covers every file of the change. */
+export interface ApplyAct {
+  /** Whether a governed caller's one proof covers each loosening the change writes. */
+  readonly covered: boolean;
+  /** Closes the act (idempotent); always called when the apply ends, whatever it did. */
+  end(): void;
+}
+
+/**
+ * What the boundary lends ONE apply, used inside the serialised section: the proposal is resolved there, so the act
+ * is decided from the change as it is THEN, never from a read that raced an apply in flight (C59 O5-10b R1).
+ */
+export interface ApplyBracket {
+  /** The request's own lifecycle: an apply whose request already ended writes nothing. */
+  readonly signal?: AbortSignal;
+  /**
+   * Called once the change is resolved (consumed) and before any work, with its kind. Answers the act to run it in, or
+   * `undefined` when the kind is not an act; THROWS to refuse (the change is put back, nothing was written).
+   */
+  readonly open?: (kind: string) => ApplyAct | undefined;
+  /** Told what the executor left held, refused or unfinished (see {@link ExecutorCaller.left}). */
+  readonly left?: (state: ApplyLeft, kind: string) => void;
 }
 
 /** A first-run import or a clone, carried out by its own executor (U15). */
@@ -684,8 +723,9 @@ export class FleetCatalogService {
     id: string,
     governance: CallerGovernance | undefined,
     freshStepUp?: FreshStepUpContext,
+    bracket?: ApplyBracket,
   ): Promise<AccountChangeOutcome> {
-    return await this.#exclusively(async () => await this.#applyReviewed(id, governance, freshStepUp));
+    return await this.#exclusively(async () => await this.#applyReviewed(id, governance, freshStepUp, bracket));
   }
 
   /**
@@ -715,14 +755,23 @@ export class FleetCatalogService {
     id: string,
     governance: CallerGovernance | undefined,
     freshStepUp?: FreshStepUpContext,
+    bracket?: ApplyBracket,
   ): Promise<AccountChangeOutcome> {
     if (governance === undefined) {
       throw new ApiError(403, 'this daemon cannot say whether this caller may change the fleet', 'forbidden');
     }
+    // A request that ended while it waited its turn writes nothing and consumes nothing.
+    assertRequestLive(bracket);
     const record = this.#proposals(() => this.#changes.consume(id));
+    const kind = record.mutation.kind;
+    let act: ApplyAct | undefined;
     let widensAgentControl = false;
     try {
+      // The act opens HERE, in the serialised section, on the change as it is now: before any work, and before the
+      // current-model check, so no path runs an import outside it.
+      act = bracket?.open?.(kind);
       const model = await this.#assertCurrent(record);
+      assertRequestLive(bracket);
       if (record.mutation.kind === 'machine.settings') {
         widensAgentControl = agentControlWidened(model.machine.agentControl, record.mutation.agentControl);
         if (widensAgentControl && freshStepUp?.agent === true)
@@ -738,13 +787,15 @@ export class FleetCatalogService {
         }
       }
     } catch (error) {
+      act?.end();
       this.#changes.restore(record);
       throw error;
     }
     const caller: ExecutorCaller = {
       governance,
       agent: freshStepUp?.agent === true,
-      claim: () => freshStepUp?.claim() === true,
+      claim: () => act?.covered === true || freshStepUp?.claim() === true,
+      ...(bracket?.left === undefined ? {} : { left: (state: ApplyLeft) => bracket.left?.(state, kind) }),
     };
     let outcome: AccountChangeOutcome;
     try {
@@ -769,6 +820,8 @@ export class FleetCatalogService {
       )
         this.#changes.restore(record);
       throw error;
+    } finally {
+      act?.end();
     }
     return outcome;
   }

@@ -618,6 +618,8 @@ export class FleetSetupService {
       inEffect: async () => (await this.#read()).model,
     });
     landed.push(...handed.landed);
+    if (handed.held > 0) caller?.left?.('held');
+    if (handed.refused > 0) caller?.left?.('refused');
     const { model, documents } = handed.applied;
     for (const write of composed.configWrites ?? []) {
       try {
@@ -642,6 +644,7 @@ export class FleetSetupService {
       ...handed.sentences,
       ...envSentences,
     ];
+    if (held > 0) caller?.left?.('held');
     if (held > 0)
       sentences.push(`${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`);
     return sentences.join(' ');

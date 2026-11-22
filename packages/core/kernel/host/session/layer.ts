@@ -360,6 +360,8 @@ class SealedSession implements CarrierLink {
   #receive: ReceiveWindow = newReceiveWindow();
   readonly #answered = new Set<number>();
   #running = 0;
+  /** Aborted when the session ends: the carried request's signal (`sessionApiRequest`), so a queued apply sees the caller left. */
+  readonly #requestsEnded = new AbortController();
   readonly #backlog: WaitingRequest[] = [];
   /** Records waiting for credit, in order. */
   readonly #waiting: PendingRecord[] = [];
@@ -986,7 +988,13 @@ class SealedSession implements CarrierLink {
       let response: ApiResponse;
       try {
         response = await this.deps.dispatch(
-          sessionApiRequest({ ...request, body }, standing.principal, this.#origin(), this.#transcript),
+          sessionApiRequest(
+            { ...request, body },
+            standing.principal,
+            this.#origin(),
+            this.#transcript,
+            this.#requestsEnded.signal,
+          ),
         );
       } catch {
         response = jsonResponse(
@@ -1306,6 +1314,8 @@ class SealedSession implements CarrierLink {
   /** Everything a session holds beyond its record state. THE PHASE GOES FIRST, so no send path queues again. */
   #forget(): void {
     this.#phase = 'concluding';
+    // Whatever the session's requests still run or wait for belongs to a caller that is gone.
+    this.#requestsEnded.abort();
     this.#credentialDeadline?.();
     this.#credentialDeadline = undefined;
     this.#lease?.();
