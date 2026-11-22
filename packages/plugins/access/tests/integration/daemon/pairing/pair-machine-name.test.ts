@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { AsksPort } from '@ferretry/core-asks/contract';
+import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { AdmissionPort } from '@ferretry/core-gate/contract';
 import { deviceStanding, FakeGate, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { GatePort } from '@ferretry/core-gate/contract';
@@ -42,6 +44,17 @@ const gate = definePlugin({
   provides: { admission: AdmissionPort, gate: GatePort },
 });
 
+/** Access NEEDS core Asks (the ask buzz is Access's); without a provider the host leaves Access's routes unmounted. */
+const asks = definePlugin({
+  id: 'asks',
+  title: 'Asks',
+  version: '5.0.0',
+  api: 5,
+  core: true,
+  kinds: [],
+  provides: { asks: AsksPort },
+});
+
 const homes: string[] = [];
 const running: RunningHost[] = [];
 afterEach(async () => {
@@ -65,6 +78,7 @@ async function boot(): Promise<{ readonly host: RunningHost; readonly home: stri
     version: '5.0.0',
     implementations: [
       implementDaemon(gate, { build: () => ({ provides: { admission, gate: new FakeGate() } }) }),
+      implementDaemon(asks, { build: () => ({ provides: { asks: new FakeAsks() } }) }),
       access,
     ],
     adapters: { ...realAdapters(home, () => {}, { binary: 'fy' }), hostname: () => HOSTNAME },
