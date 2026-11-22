@@ -368,11 +368,13 @@ frames:                      # optional step-through: Previous / Next, a slider,
 **The theme, and only the theme, paints it.** The block reads the app's tokens from its own element and
 resolves each to a hex literal through a one-pixel canvas (`packages/plugins/conversation/app/render/fy-render-theme.ts`) — the
 browser's own colour parser, so a `color-mix()` or `oklch()` token works. Series colours come from
-`--viz-1` … `--viz-8` in `packages/app/src/styles/tokens/base-style.css`; each slot NAMES a hue every family already restates per
-mode (the per-tool hues, the keyword violet, the Claude orange, the error red), so a new family gets a
-palette without writing one. Their order is measured, not chosen: across all 22 themes the first five stay
-at least 70 apart in RGB (of 441) and all eight at least 40, and the browser suite re-checks that against
-the sheet. The accent is deliberately not a slot — in several families it _is_ one of those hues — so a
+`--viz-1` … `--viz-8` in `packages/app/src/styles/tokens/base-palette.css`; each slot NAMES a hue every palette already restates per
+mode (the per-tool hues, the keyword violet, the Claude orange, the error red), so a new palette gets
+series without writing any. A palette whose own hues collide under that default (seven of them did: two hues
+were one colour) restates the slots it needs in its own file. Their order is measured, not chosen: across all
+24 palette-and-mode looks the first five stay at least 60 apart in RGB (of 441) and all eight at least 30, and
+every series reads 3:1 on the page, which `packages/app/tests/integration/theme-viz-series.visual.test.ts`
+re-checks against the real sheet. The accent is deliberately not a slot — in several families it _is_ one of those hues — so a
 chart that wants the brand colour says `tone: accent`. Grid, ticks, tooltip, font and corner radius
 (`--radius-xs`, so a Neo bar is square) come from tokens too. `packages/plugins/conversation/app/render/fy-render-chart-config.ts` is the one
 place a spec meets Chart.js, and a unit test walks every kind's configuration and finds no colour the theme

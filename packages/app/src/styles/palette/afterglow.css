@@ -166,3 +166,11 @@
     radial-gradient(70% 60% at 80% 94%, rgba(219, 39, 119, 0.4), transparent 72%),
     radial-gradient(55% 50% at 14% 88%, rgba(217, 119, 6, 0.42), transparent 72%);
 }
+
+/* Chart series: `--tool-patch` and `--err` are one colour here and the default series 1, 2, 4 and 5 sit too close, so
+   the default order repeats a colour. These slots name hues Afterglow keeps apart (E14b). */
+:root[data-palette='afterglow'],
+[data-swatch][data-palette='afterglow'] {
+  --viz-1: var(--src-codex);
+  --viz-4: var(--src-computer);
+}

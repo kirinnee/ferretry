@@ -166,3 +166,11 @@
     radial-gradient(70% 60% at 80% 94%, rgba(37, 99, 235, 0.5), transparent 72%),
     radial-gradient(55% 50% at 14% 88%, rgba(6, 182, 212, 0.38), transparent 72%);
 }
+
+/* Chart series: `--tool-patch` and `--err` are one colour here and the default series 1 sits on series 5, so the
+   default order repeats a colour. Series 4 is the midpoint of two hues Aurora keeps apart (E14b). */
+:root[data-palette='aurora'],
+[data-swatch][data-palette='aurora'] {
+  --viz-1: var(--src-computer);
+  --viz-4: color-mix(in srgb, var(--tool-bash), var(--tool-edit));
+}
