@@ -1,9 +1,12 @@
+import { type BuzzableAsk } from '@ferretry/core-asks/contract';
 import { CORE_IDS } from '@ferretry/kernel/contract';
 import { implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
 import { HOSTED_APP_ORIGIN, StepUpStages } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { type AccessHost, AccessRuntime } from './runtime.ts';
 import { pairingRedirectBoot } from './adapters/pairing/boot-redirect-sweep.ts';
+import { StateAskBuzzLedger } from './adapters/push/state-ask-buzz-ledger.ts';
+import { AskBuzzer } from './lib/push/ask-buzz.ts';
 import { notificationsDoctor } from './lib/push/health.ts';
 import { accessPortFor } from './lib/push/reach.ts';
 
@@ -42,6 +45,12 @@ export default implementDaemon(manifest, {
       },
     });
     const route = (key: string) => access.handler(key);
+    const askBuzzer = new AskBuzzer({
+      ledger: new StateAskBuzzLedger(ctx.kernel.state),
+      buzz: async words => await access.port.buzz(words),
+      now: () => ctx.kernel.clock.now(),
+      warn: message => ctx.kernel.log.warn(message),
+    });
     return {
       ...pairingRedirectBoot(),
       routes: {
@@ -65,6 +74,16 @@ export default implementDaemon(manifest, {
         'POST /v1/step-up/options': route('POST /v1/step-up/options'),
         'POST /v1/unlock': route('POST /v1/unlock'),
         'POST /v1/unlock/options': route('POST /v1/unlock/options'),
+      },
+      subscribers: {
+        // A raise, a close or a change: an ask that is a buzzing moment (a card's ask, a notice that asked for the phone) makes its one buzz.
+        'asks.changed': async ({ ferret, askId, state }) => {
+          if (state !== 'open') return void (await askBuzzer.settle(ferret, askId));
+          const ask = (await ctx.needs.asks.get({ ferret, id: askId }).catch(() => undefined)) as
+            | BuzzableAsk
+            | undefined;
+          if (ask !== undefined) await askBuzzer.buzz({ ...ask, ferret: ask.ferret ?? ferret });
+        },
       },
       // Whether this daemon can buzz a phone (today's `notifications` row): enrolled devices and the newest push.
       doctor: { notifications: notificationsDoctor(() => access.pushHealth()) },

@@ -1,7 +1,8 @@
 /**
- * The item verbs: `fy agenda add|edit|answer|…`, v4's word for word and Agenda's. Each speaks the per-ferret item routes
- * (`/v1/ferrets/:ferretId/agenda…`: raise, patch, reply, versions, conversation, seen), which are ASKS', not declared here:
- * answering is a security act (§2.2). They consume those routes through `needs`, as the ferret the verb runs inside.
+ * The item verbs: `fy agenda add|edit|answer|…`, v4's word for word and Asks'. Each speaks the per-ferret item routes
+ * (`/v1/ferrets/:ferretId/agenda…`: raise, patch, reply, versions, conversation, seen), which are Asks' own: answering is a
+ * security act (§2.2). Asks is core, so a ferret can raise, follow and answer its owner with the Agenda plugin off; the Agenda
+ * plugin adds only its own views (`fy agenda`, `open`, `mode`, `clear`).
  */
 import { manifestFragment, verb } from '@ferretry/kernel/manifest';
 import type { VerbArgDecl, VerbOptionDecl } from '@ferretry/kernel/manifest';

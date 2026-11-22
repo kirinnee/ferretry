@@ -12,6 +12,7 @@ import {
   AsksPort,
   AskVersionsFiles,
 } from './contract/index.ts';
+import generated from './manifest/generated/actions.ts';
 
 /**
  * Asks' private state (§9.2, lead decision 2026-11-07): ONE LEDGER PER FERRET, as today's engine keeps it, under
@@ -108,6 +109,7 @@ export default definePlugin({
   },
   hooks: { offers: [{ hook: AskSources }, { hook: AskDeliveries }, { hook: AskOwnerChats }, { hook: AgendaContext }] },
   actions: {
+    ...generated,
     routes: [
       route('GET /v1/ferrets/:ferretId/agenda/:id', read),
       route('GET /v1/ferrets/:ferretId/agenda', read),
@@ -123,7 +125,11 @@ export default definePlugin({
         guard: { none: 'the version number this device last opened' },
       }),
       route('POST /v1/ferrets/:ferretId/agenda/replies', { ...read, caller: 'person' }),
+      ...generated.routes,
     ],
   },
-  instructions: [{ id: 'asks', text: 'instructions/asks.md', when: { role: 'lead' } }],
+  instructions: [
+    { id: 'asks', text: 'instructions/asks.md', when: { role: 'lead' } },
+    { id: 'notify', text: 'instructions/notify.md', when: { role: 'lead' } },
+  ],
 });

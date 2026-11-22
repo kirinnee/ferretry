@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { type AgendaItem, AgendaEditRequestSchema, agendaItemRevision } from '@ferretry/core-asks/contract';
 import should from 'should';
-import { AgendaController } from '../../../cli/lib/controller.ts';
+import { AsksController } from '../../../cli/lib/controller.ts';
 import { agendaPatchDocument, composeAgendaPatch, parseAgendaPatch } from '../../../cli/lib/patch.ts';
 import { documentYaml } from '@ferretry/std/yaml';
 import { agentItem, CapturingOutput, RecordingAgendaGateway, SESSION, snapshot } from './fixtures.ts';
@@ -171,7 +171,7 @@ describe('agenda patch command', () => {
     const gateway = new RecordingAgendaGateway(board, board);
     const out = new CapturingOutput();
     const input = { read: async (path: string) => files[path] ?? '' };
-    return { gateway, out, controller: new AgendaController(gateway, out, SESSION, input, () => NOW) };
+    return { gateway, out, controller: new AsksController(gateway, out, SESSION, input, () => NOW) };
   };
 
   it('should apply one edit carrying the revision, read from stdin by default', async () => {
