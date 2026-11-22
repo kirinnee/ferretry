@@ -1,10 +1,10 @@
 import { DocumentView, type InlineDef } from 'durian-hypermedia/react/strict';
 import { memo, useId, useMemo, useSyncExternalStore } from 'react';
-import { FY_RENDER_COMPONENT_BLOCKS, FY_RENDER_SLOTS } from './fy-render-host.tsx';
+import { FY_RENDER_COMPONENT_BLOCKS } from './fy-render-host.tsx';
 import { exceedsMessageCap } from './limits.ts';
-import { HumanSegment, TerminalWithLlmText } from './llm-text.tsx';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';
 import { parseMessage } from './parse-message.ts';
+import { HYPERMEDIA_PART_SLOTS, HYPERMEDIA_PARTS } from './parts.tsx';
 import { ReferenceChip } from './reference-chip.tsx';
 import { ReferenceProofProvider } from './reference-proof.tsx';
 import { hypermediaUrlPolicy } from './url-policy.ts';
@@ -20,8 +20,9 @@ import { REFERENCE_INLINE } from './with-references.ts';
  *    the app's own chrome, and a leading YAML block would be eaten.
  *  - ONE ID PER MESSAGE. Heading ids carry a prefix made for this message, so two messages with the same heading never
  *    share a DOM id (and a `#anchor` link in a message reaches its own heading).
- *  - A PART DRAWN ONLY IF WE NAME IT. Only the parts in {@link PARTS} have a component here; any other part is drawn as
- *    the plain text an LLM reads for it, so a part we have not reviewed shows its content and runs nothing.
+ *  - A PART DRAWN ONLY IF WE NAME IT. Only the parts in `HYPERMEDIA_PARTS` (`parts.tsx`) have a component here, each
+ *    under our policy (a chart and an animation draw, a mermaid diagram goes to our sandbox renderer, `codewalk` is the
+ *    plain text an LLM reads for it), so a part we have not reviewed shows its content and runs nothing.
  *  - AUTHOR TEXT STAYS VISIBLE. A `:::llm` text is always shown, collapsed under "LLM-only text" beside the part it
  *    belongs to, and a `:::human` segment draws its body even with `llm=none` (`llm-text.tsx`, decision C7).
  *  - LINKS go through our URL policy (never an image, an app route or a reference envelope) and open through the
@@ -34,12 +35,6 @@ import { REFERENCE_INLINE } from './with-references.ts';
  * The theme is the app's own mode, always passed: Durian's stylesheet goes dark on the system setting unless told
  * otherwise, and our root says `data-mode`, not `data-theme`.
  */
-
-/**
- * The parts this build draws. Wider sets come with their own review (r12 H4); an absent part is shown as LLM text, which
- * includes an author's `:::llm` text, so none is lost.
- */
-const PARTS = { terminal: TerminalWithLlmText, human: HumanSegment } as const;
 
 /**
  * Our inlines: the chip that draws a proved reference (Durian reads only its `Component`; it never tokenises one), and the
@@ -78,10 +73,10 @@ export const HypermediaProse = memo(function HypermediaProse({ text, className }
         ) : (
           <DocumentView
             blocks={FY_RENDER_COMPONENT_BLOCKS}
-            components={PARTS}
+            components={HYPERMEDIA_PARTS}
             doc={doc}
             inlines={INLINES}
-            slots={FY_RENDER_SLOTS}
+            slots={HYPERMEDIA_PART_SLOTS}
             theme={mode}
             urlPolicy={hypermediaUrlPolicy}
           />

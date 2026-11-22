@@ -14,6 +14,19 @@
   margin-inline-start: -1.5em;
 }
 
+/* One quiet line under an animation whose 3D view lost its graphics context (`animation-part.tsx`), and a diagram's source
+   when nothing can draw it (`mermaid-slot.tsx`): wrapped, never sideways. */
+.fy-hm .dh-doc .fy-hm-note {
+  font-size: 0.85em;
+  margin-block: 0.25rem;
+  opacity: 0.8;
+}
+
+.fy-hm .dh-doc pre.fy-hm-mermaid-source {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 /* The "LLM-only text" disclosure (`llm-text.tsx`): a quiet, collapsed line under its part; wrapped, never sideways. */
 .fy-hm .dh-doc details.llm-peek {
   font-size: 0.85em;
