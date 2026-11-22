@@ -20,6 +20,7 @@ import type { ScratchPort, SpawnPort } from '@ferretry/kernel/contract';
 import { checkGhArgs, scrubCut, scrubToken } from './gh-guard.ts';
 import type { GithubHttp } from './github-http.ts';
 import type { AccountBook } from './accounts.ts';
+import type { GhLaunch } from './gh-locator.ts';
 
 const MAX_BODY_BYTES = 256 * 1024;
 
@@ -33,8 +34,8 @@ export class GitAccountsService {
     private readonly removed: (id: GitAccountId) => unknown,
     /** Runs once an account is on its way out, after its keys are off GitHub and before its token goes (B3: stops its agent, drops its private key). */
     private readonly beforeForget: (id: GitAccountId) => Promise<void>,
-    /** The `gh` program to run with a token: an absolute path that is not in the state home (`gh-locator.ts`), or a refusal. */
-    private readonly ghProgram: () => Promise<string>,
+    /** The `gh` to run with a token and the `PATH` it runs with: an absolute path and folders outside the state home (`gh-locator.ts`), or a refusal. */
+    private readonly ghProgram: () => Promise<GhLaunch>,
   ) {}
 
   list(): Promise<readonly GitAccount[]> {
@@ -84,7 +85,7 @@ export class GitAccountsService {
       throw new ApiError(403, 'only gh runs with an account', GIT_ACCOUNT_CODES.invalidRequest);
     checkGhArgs(spec.args);
     // Which program runs is settled BEFORE the token is read: a `gh` that cannot be trusted never sees one.
-    const program = await this.ghProgram();
+    const { program, path } = await this.ghProgram();
     const token = await this.#tokenOf(id);
     const timeout = milliseconds(Math.min(Math.max(spec.timeoutMs ?? 60_000, 1_000), 300_000));
     const folder = await this.scratch.open();
@@ -104,6 +105,8 @@ export class GitAccountsService {
       const home = `${folder.path}/home`;
       const refuse = `${folder.path}/refuse`;
       const env: Record<string, string> = {
+        // Not the daemon's own `PATH` (a sealed child would inherit it, shim folder and all): the locator's filtered one.
+        PATH: path,
         GH_TOKEN: token,
         GH_HOST: 'github.com',
         GH_CONFIG_DIR: `${home}/config`,

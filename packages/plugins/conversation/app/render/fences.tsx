@@ -1,17 +1,13 @@
 /**
- * CONVERSATION'S FENCE KIND for Markdown: a fenced `fy-render` block draws as an illustration INSTEAD of the code fence.
+ * CONVERSATION'S FENCE DOOR: a fenced `fy-render` block draws as an illustration INSTEAD of the code fence.
  *
- * Markdown (`@ferretry/app`) is a shell facility that holds no feature, so the fence is handed to it as a
- * {@link MarkdownFences}: `remark` marks the fences whose info string is EXACTLY the token (the one place mdast still
- * holds the metadata hast drops), and `draw` replaces the `<pre>` of a marked, parseable fence with its block. A fence
- * that does not parse, an opt-in that is off, or any other language falls through to the ordinary fence, where `code`
- * still highlights or escapes it. There is no partial state: a bad block is indistinguishable from a plain fence.
- *
- * Exactly one production call site opts in (the transcript); every other Markdown reader gets the inert escaped fence by
- * not passing `enableFyRender`.
+ * The hypermedia reader (`../hypermedia/fy-render-host.tsx`) decides which fences are blocks and hands each one's body to
+ * `draw`, which answers the block, or `null` where the surface cannot honour it (a `task` with no board to ask) or the
+ * body does not parse: that fence stays plain code. There is no partial state: a bad block is indistinguishable from a
+ * plain fence. Markdown (`@ferretry/app`) never draws one, so every other reader shows the inert escaped fence.
  */
 
-import type { MarkdownAstFenceNode, MarkdownFences } from '@ferretry/app';
+import type { MarkdownAstFenceNode, ReferenceFences } from '@ferretry/app';
 import { FyRenderBlock } from './fy-render-block.tsx';
 import { FyRenderTaskEmbed, type FyRenderTaskEmbedHost } from './fy-render-task-embed.tsx';
 import {
@@ -19,19 +15,16 @@ import {
   type FyRenderWorkspaceReader,
   isFyRenderEmbedBlock,
   parseFyRender,
-  remarkFyRenderFences,
 } from './fy-render.ts';
 
 /**
- * The authored body of a fence `remarkFyRenderFences` marked, or null for every other `<pre>`.
+ * The authored body of a fence the hypermedia reader marked, or null for every other node.
  *
  * TRUSTS THE MARK, NOT THE CLASS NAME. `class="language-fy-render"` is also what a fence opened as `fy-render notes`
- * arrives wearing, because hast keeps the language and drops the metadata. The exact-token decision is made in the
- * remark plugin, where both halves are still visible, and this reads its answer.
+ * would wear. The exact-token decision is made by the reader (CommonMark's own boundaries), where both halves are still
+ * visible, and this reads its answer.
  *
- * Read off the `<pre>` rather than the `<code>` because the block replaces the whole fence, and `<figure>` inside `<pre>`
- * is not a tree a browser will keep. When this answers null the `<pre>` renders untouched, which is what makes the
- * failure path free.
+ * When this answers null the fence is drawn as plain code, which is what makes the failure path free.
  *
  * @internal Exported so the mark has a focused regression of its own.
  */
@@ -88,10 +81,9 @@ export interface FyRenderFenceHost {
   readonly cardEmbed?: FyRenderTaskEmbedHost | undefined;
 }
 
-/** The fences Conversation's surfaces hand to `<Markdown enableFyRender fences={…}>`. Build once per host; keep it stable. */
-export function fyRenderFences(host: FyRenderFenceHost = {}): MarkdownFences {
+/** The door Conversation's surfaces lend (`ReferenceSurface.fences`). Build once per host; keep it stable. */
+export function fyRenderFences(host: FyRenderFenceHost = {}): ReferenceFences {
   return {
-    remark: [remarkFyRenderFences],
     draw: ({ node, onTaskOpen }) => {
       const body = fyRenderFenceBody(node);
       const parsed = body === null ? null : parseFyRender(body);

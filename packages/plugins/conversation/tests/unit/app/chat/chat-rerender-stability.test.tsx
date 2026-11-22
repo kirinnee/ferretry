@@ -19,6 +19,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { Markdown, ReferenceSurfaceProvider } from '@ferretry/app';
 import type { TranscriptEntry } from '../../../../app/chat/transcript-entries.ts';
 import { chatReferenceSurface } from '../../../../app/chat/reference-surface.ts';
+import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
 import { fyRenderFences } from '../../../../app/render/fences.tsx';
 import { transcriptEntriesFromLog } from '../../../../app/chat/chat-refresh.ts';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
@@ -116,14 +117,16 @@ describe('Markdown keeps what it drew across a re-render', () => {
     // Arrange — the session's reference surface is rebuilt whenever a terminal, page or task changes,
     // which hands every message new opener functions.
     const text = ['Here is the agenda:', '', ...HTML_BLOCK].join('\n');
-    const view = await mountTracked(
-      <Markdown enableFyRender fences={FENCES} onTaskOpen={() => undefined} text={text} />,
+    const message = () => (
+      <ReferenceSurfaceProvider surface={{ fences: FENCES, onTaskOpen: () => undefined }}>
+        <HypermediaProse text={text} />
+      </ReferenceSurfaceProvider>
     );
+    const view = await mountTracked(message());
     const frame = htmlFrame(view);
 
     // Act
-    for (let round = 0; round < 5; round++)
-      await view.render(<Markdown enableFyRender fences={FENCES} onTaskOpen={() => undefined} text={text} />);
+    for (let round = 0; round < 5; round++) await view.render(message());
 
     // Assert — the same element, started once: the page inside it, and its state, were never thrown away.
     expect(htmlFrame(view)).toBe(frame);

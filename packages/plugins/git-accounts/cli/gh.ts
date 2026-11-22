@@ -10,6 +10,7 @@
 import type { CliContext, VerbHandler, VerbInvocation } from '@ferretry/kernel/manifest';
 import { type GhRunAnswer, GhRunAnswerSchema } from '../contract/index.ts';
 import type manifest from '../manifest.ts';
+import { isRegularFile } from './adapters/regular-file.ts';
 
 const OK = 0;
 const FAILED = 1;
@@ -76,11 +77,31 @@ const GITDIR_LINE = /^gitdir: (.+)$/mu;
 /** A `.git` file or a `HEAD` is a line or two: read no more than this much of either. */
 const MAX_GIT_TEXT = 4096;
 
+/**
+ * What `withHead` asks of the disk beyond the context's own reads: whether a path is a regular file. A `.git` file or a
+ * `HEAD` that is a FIFO would block the read for good (opening one waits for a writer), so only a regular file is read.
+ */
+export interface GhPorts {
+  readonly isRegularFile: (path: string) => Promise<boolean>;
+}
+
+const REAL_PORTS: GhPorts = { isRegularFile };
+
+/** `path` read as text (at most {@link MAX_GIT_TEXT} bytes), or `''` when it is not a regular file or cannot be read. */
+const gitText = async (
+  path: string,
+  files: Pick<CliContext<typeof manifest>, 'readText'>,
+  ports: GhPorts,
+): Promise<string> => {
+  if (!(await ports.isRegularFile(path))) return '';
+  return ((await files.readText?.(path, MAX_GIT_TEXT).catch(() => '')) ?? '').slice(0, MAX_GIT_TEXT);
+};
+
 const branchIn = async (
   head: string,
   files: Pick<CliContext<typeof manifest>, 'readText'>,
-): Promise<string | undefined> =>
-  BRANCH.exec(((await files.readText?.(head).catch(() => '')) ?? '').slice(0, MAX_GIT_TEXT).trim())?.[1];
+  ports: GhPorts,
+): Promise<string | undefined> => BRANCH.exec((await gitText(head, files, ports)).trim())?.[1];
 
 /**
  * `gh pr create` runs in an empty folder on the daemon and cannot see the ferret's branch (B9), so THIS side, which runs as
@@ -91,6 +112,7 @@ async function withHead(
   argv: readonly string[],
   cwd: string,
   files: Pick<CliContext<typeof manifest>, 'exists' | 'readText'>,
+  ports: GhPorts,
 ): Promise<readonly string[]> {
   if (argv[0] !== 'pr' || argv[1] !== 'create' || NAMES_HEAD(argv)) return argv;
   if (files.exists === undefined || files.readText === undefined) return argv;
@@ -98,15 +120,15 @@ async function withHead(
   for (let up = 0; up < 8; up += 1) {
     const dot = `${folder === '/' ? '' : folder}/.git`;
     if (await files.exists(`${dot}/HEAD`)) {
-      const branch = await branchIn(`${dot}/HEAD`, files);
+      const branch = await branchIn(`${dot}/HEAD`, files, ports);
       return branch === undefined ? argv : [...argv, '--head', branch];
     }
     // A linked WORKTREE has a `.git` FILE: `gitdir: <main>/.git/worktrees/<name>`, and that folder's `HEAD` is THIS worktree's branch
     // (never the main checkout's, which is what climbing to the parent would name). Read as text, no `git` run.
-    const pointer = GITDIR_LINE.exec((await files.readText(dot).catch(() => '')).slice(0, MAX_GIT_TEXT))?.[1]?.trim();
+    const pointer = GITDIR_LINE.exec(await gitText(dot, files, ports))?.[1]?.trim();
     if (pointer !== undefined) {
       const gitdir = pointer.startsWith('/') ? pointer : `${folder === '/' ? '' : folder}/${pointer}`;
-      const branch = await branchIn(`${gitdir.replace(/\/+$/u, '')}/HEAD`, files);
+      const branch = await branchIn(`${gitdir.replace(/\/+$/u, '')}/HEAD`, files, ports);
       return branch === undefined ? argv : [...argv, '--head', branch];
     }
     if (folder === '/' || folder === '') break;
@@ -115,7 +137,10 @@ async function withHead(
   return argv;
 }
 
-export function ghVerbs(context: CliContext<typeof manifest>): {
+export function ghVerbs(
+  context: CliContext<typeof manifest>,
+  ports: GhPorts = REAL_PORTS,
+): {
   readonly gh: VerbHandler;
   readonly 'gh-doctor': VerbHandler;
 } {
@@ -132,7 +157,7 @@ export function ghVerbs(context: CliContext<typeof manifest>): {
         io.err("Ferretry's gh could not tell which folder you are in, so it cannot choose an account.\n");
         return FAILED;
       }
-      const argv = await withHead(typedArgv, cwd, context);
+      const argv = await withHead(typedArgv, cwd, context, ports);
       const answer: GhRunAnswer = GhRunAnswerSchema.parse(
         await client.call<unknown>('POST /v1/git-accounts/gh/run', {
           body: { argv, cwd, ...(account === undefined ? {} : { account }) },

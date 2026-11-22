@@ -32,14 +32,26 @@ describe('the shipped guide equals the doc section', () => {
 
   test('the section names the per-part topics `fy render guide <topic>` answers, and carries no fy-render fence opener', () => {
     const section = guideSectionOf(DOC) as string;
-    for (const topic of ['overview', 'terminal', 'chart', 'mermaid', 'human', 'references'])
+    for (const topic of [
+      'overview',
+      'terminal',
+      'filetree',
+      'editor',
+      'chart',
+      'mermaid',
+      'animation',
+      'tierlist',
+      'alignment',
+      'tabs',
+      'human',
+      'references',
+    ])
       expect(section).toContain(`### ${topic}\n`);
-    // Taught only once the app draws it (r12 H4 adds each back with its renderer): no section, no mention.
-    for (const pending of ['filetree', 'editor', 'animation', 'tierlist', 'alignment', 'tabs', 'accordion']) {
-      expect(section).not.toContain(`### ${pending}\n`);
-      expect(section).not.toContain(`\`${pending}\``);
-    }
-    expect(section).not.toContain(':::tabs');
+    // Every part the app draws is taught (`teaching-examples.test.tsx` draws each example); the two it holds as code are not.
+    expect(section).toContain(':::tabs');
+    expect(section).toContain(':::accordion');
+    expect(section).not.toContain('### codewalk');
+    expect(section).not.toMatch(/^```(chart|codewalk)\b/mu);
     // The legacy agenda sigil is never spelled out: no guide, prompt or doc teaches it (ask-reference-sigil guard).
     expect(section).not.toContain('!A3');
     // guide-text.ts is source, where no-fy-render-in-docs.sh refuses an opener.

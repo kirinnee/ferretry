@@ -650,24 +650,31 @@ describe('hypermedia teaching', () => {
     // Every reference sigil (docs/reference-standard.md §2), written as plain text.
     for (const sigil of [':agent', '@file', '&F12', '^A3', '/skill', '$skill', '%terminal:dev', '%browser:app'])
       should(teaching).containEql(sigil);
-    // Only what the app draws today is taught (r12 H2 draws `terminal` and `:::human`; H3 draws the fy-render types). A part
-    // whose renderer has not landed would show as text, so it is not named: H4 adds each back with its renderer.
-    should(teaching).containEql('```terminal');
-    should(teaching).containEql(':::human');
-    for (const pending of [
-      'filetree',
-      'editor',
-      'animation',
-      'tierlist',
-      'alignment',
-      ':::tabs',
-      '```chart',
+    // Only what the app draws today is taught: every Durian part r12 H4 landed (`teaching-examples.test.tsx` in the
+    // conversation plugin draws the guide's examples) and `:::human`.
+    for (const part of [
+      '```terminal',
+      '```filetree',
+      '```editor',
+      '```tierlist',
+      '```alignment',
       '```mermaid',
+      '```animation',
+      '`3d`',
+      '@step',
+      ':::tabs',
+      ':::accordion',
+      ':::human',
     ])
-      should(teaching).not.containEql(pending);
-    // Diagrams, charts, pictures, media, maps and live tasks are one fence kind, every type named.
+      should(teaching).containEql(part);
+    // Durian's `chart` fence and the `codewalk` are held as code, so neither is taught as a part (the chart that draws is the
+    // fy-render one, which the prompt says in so many words).
+    should(teaching).not.containEql('```chart');
+    should(teaching).not.containEql('codewalk');
+    // Charts, pictures, media, maps and live tasks are one fence kind, every type named (a diagram is the mermaid part).
     should(teaching).containEql('fy-render');
-    should(teaching).containEql('`type: mermaid|chart|svg|html|map|image|video|audio|pdf|lottie|task|board`');
+    should(teaching).containEql('`type: chart|svg|html|map|image|video|audio|pdf|lottie|task|board`');
+    should(teaching).containEql('a part named chart is shown as code');
     // The spec is one command away, and so is the check; both are named with the binary.
     should(teaching).containEql('`zz render guide <part>`');
     should(teaching).containEql('`zz render check <file|->`');
@@ -698,8 +705,10 @@ describe('hypermedia teaching', () => {
     should(teaching).not.containEql('flowchart LR');
     // A reference is a token the reader's proof gate turns into a chip, never a link an agent writes.
     should(teaching).containEql('plain text, never links');
-    // In every prompt, so it is capped: 1,209 before r12 H6; the part fences, the sigils and the check took it to 1,330, and teaching only what renders (the fy-render type list) to 1,362.
-    should(teaching.length).be.below(1_400);
+    // In every prompt, so it is capped: 1,209 before r12 H6; the sigils and the check took it to 1,362 with one part, and teaching every part that draws (with Mermaid's own `%% @step`) to 1,542, under the integration cap of 1,550.
+    should(teaching.length).be.below(1_550);
+    // Mermaid's step marker is a comment line; a bare `@step` inside a mermaid fence is one frame, not a step.
+    should(teaching).containEql('mermaid: `%% @step <caption>`');
   });
 });
 

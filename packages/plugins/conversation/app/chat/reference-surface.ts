@@ -17,8 +17,8 @@
  *     `reference.catalog`); not proved by the chat itself.
  *
  * `%terminal:` / `%browser:` keep the surface resolver with NO listing, which answers nothing either way — the one
- * honest state with no evidence. fy-render blocks draw through Conversation's own fences — only where `ChatProse`, the one
- * opt-in, names the capability; this surface never does, because it is spread into every Markdown in the chat — and a `card` block asks this
+ * honest state with no evidence. fy-render blocks draw through Conversation's own fences — only where `HypermediaProse`
+ * reads this surface's `fences`; Markdown never draws one, though this surface is spread into every Markdown in the chat — and a `card` block asks this
  * daemon's board; a media block's `src: @path` is read through the same client and the same grants an `@file` is proved
  * with. Every destination is in this daemon, so a reference cannot open another daemon's anything.
  */

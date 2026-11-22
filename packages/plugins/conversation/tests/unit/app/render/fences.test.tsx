@@ -1,21 +1,21 @@
 import { describe, test } from 'bun:test';
-import { Markdown } from '@ferretry/app';
-import { render } from '@ferretry/app/testing';
-import type { ReactTestInstance } from 'react-test-renderer';
+import { ensureDom, render } from '@ferretry/app/testing';
+import type { ReactNode } from 'react';
 import should from 'should';
 import { FyRenderBlock } from '../../../../app/render/fy-render-block.tsx';
 import { fyRenderFenceBody, fyRenderFences, tolerateAuthoringNoise } from '../../../../app/render/fences.tsx';
-import { parseFyRender } from '../../../../app/render/fy-render.ts';
+import { FY_RENDER_FENCE_ATTRIBUTE, parseFyRender } from '../../../../app/render/fy-render.ts';
 
 /**
- * Conversation's fence kind, drawn by the shell's Markdown: every assertion goes through the real react-markdown
- * pipeline (remark-gfm → remarkTableLabels → the fence's own mark → remarkReferences) and inspects the elements it produced.
+ * Conversation's fence door, drawn the way the hypermedia reader uses it: a fence node holding a body goes in, the block
+ * (or null, which is plain code) comes out. The reader's own decisions about WHICH fences are blocks are
+ * `hypermedia/fy-render-host.test.tsx` and `fy-render-fence-decisions.test.tsx`; these are the door's.
  */
 
-const FENCES = fyRenderFences();
+// A block reads `document` when it mounts, so the DOM is this file's own, as in `reference-surface.test.tsx`.
+ensureDom();
 
-const textOf = (node: ReactTestInstance): string =>
-  node.children.map(child => (typeof child === 'string' ? child : textOf(child as ReactTestInstance))).join('');
+const FENCES = fyRenderFences();
 
 /**
  * Built from a backtick run on purpose: `scripts/validate/no-fy-render-in-docs.sh` fails a commit containing the literal
@@ -25,61 +25,98 @@ const FENCE = '`'.repeat(3);
 const fence = (info: string, ...body: readonly string[]): string => [`${FENCE}${info}`, ...body, FENCE].join('\n');
 
 const SQUARE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>';
-const squareFence = (info = 'fy-render'): string =>
-  fence(info, 'type: svg', 'alt: A ten by ten square', '---', SQUARE_SVG);
+const squareBody = ['type: svg', 'alt: A ten by ten square', '---', SQUARE_SVG].join('\n');
 
-describe('Markdown task and board blocks', () => {
-  const cardFence = fence('fy-render', 'type: task', 'alt: The task', '---', '&F12');
+/** The node the reader hands the door for a fence body: what hast makes of a marked fence. */
+const nodeOf = (body: string) => ({
+  children: [
+    {
+      type: 'element',
+      tagName: 'code',
+      properties: { [FY_RENDER_FENCE_ATTRIBUTE]: 'true' },
+      children: [{ type: 'text', value: `${body}\n` }],
+    },
+  ],
+});
+
+/** What the door draws for a body, rendered; `null` where the door answered null (the fence stays plain code). */
+const drawnOf = (doors: typeof FENCES, body: string) => {
+  const drawn: ReactNode | null = doors.draw({ node: nodeOf(body), onTaskOpen: undefined });
+  return drawn === null ? null : render(<>{drawn}</>);
+};
+
+describe('the fence door draws task and board blocks', () => {
+  const cardBody = ['type: task', 'alt: The task', '---', '&F12'].join('\n');
   // A message saved before the rename holds the old spelling of the type; it is read for good.
-  const oldSpellingFence = fence('fy-render', 'type: card', 'alt: The task', '---', '&F12');
-  const badCardFence = fence('fy-render', 'type: task', 'alt: The task', '---', 'nope');
+  const oldSpellingBody = ['type: card', 'alt: The task', '---', '&F12'].join('\n');
+  const badCardBody = ['type: task', 'alt: The task', '---', 'nope'].join('\n');
   const cardFences = fyRenderFences({ cardEmbed: { daemon: 'daemon-a' } });
 
   test('should draw a task block only where the surface lent it a board to read', () => {
     // Act
-    const lent = render(<Markdown enableFyRender fences={cardFences} text={cardFence} />);
-    const bare = render(<Markdown enableFyRender fences={FENCES} text={cardFence} />);
+    const lent = drawnOf(cardFences, cardBody);
+    const bare = drawnOf(FENCES, cardBody);
 
-    // Assert — without a board the block is the ordinary escaped fence, as any block this build cannot draw is.
-    should(lent.root.findAllByProps({ 'data-fy-card-embed': 'task' })).have.length(1);
-    should(lent.root.findAllByType('pre')).be.empty();
-    should(bare.root.findAllByProps({ 'data-fy-card-embed': 'task' })).be.empty();
-    should(textOf(bare.root.findByType('code'))).containEql('type: task');
+    // Assert — without a board the door answers null: the block is the ordinary fence, as any block this build cannot draw is.
+    should(lent?.root.findAllByProps({ 'data-fy-card-embed': 'task' })).have.length(1);
+    should(bare).be.null();
   });
 
   test('should draw an old transcript whose block says card, as the task block it became', () => {
-    // Act
-    const lent = render(<Markdown enableFyRender fences={cardFences} text={oldSpellingFence} />);
-
     // Assert — the saved message is never rewritten, so the old type is read forever.
-    should(lent.root.findAllByProps({ 'data-fy-card-embed': 'task' })).have.length(1);
-    should(lent.root.findAllByType('pre')).be.empty();
+    should(drawnOf(cardFences, oldSpellingBody)?.root.findAllByProps({ 'data-fy-card-embed': 'task' })).have.length(1);
   });
 
   test('should leave a task block with a bad payload as an ordinary fence even where it could draw', () => {
-    const tree = render(<Markdown enableFyRender fences={cardFences} text={badCardFence} />);
-    should(tree.root.findAllByProps({ 'data-fy-card-embed': 'task' })).be.empty();
-    should(textOf(tree.root.findByType('code'))).containEql('nope');
+    should(drawnOf(cardFences, badCardBody)).be.null();
   });
 });
 
-describe('Markdown fy-render fences authored with noise (B162)', () => {
+describe('the fence door draws an illustration', () => {
+  test('should draw a parseable body as a figure, never a pre', () => {
+    // Act
+    const tree = drawnOf(FENCES, squareBody);
+
+    // Assert — `<figure>` inside `<pre>` is not a tree a browser keeps.
+    should(tree?.root.findAllByProps({ 'data-fy-render-type': 'svg' })).have.length(1);
+    should(tree?.root.findAllByType('pre')).be.empty();
+  });
+
+  test('should leave an unparseable body to be drawn as plain code', () => {
+    // Arrange — no boundary line, so the grammar refuses it.
+    const body = ['type: html', '<script>failed()</script>'].join('\n');
+
+    // Assert — no partial state and no error chrome: the door answers null.
+    should(drawnOf(FENCES, body)).be.null();
+  });
+
+  test('should refuse a fence node the reader did not mark', () => {
+    should(
+      FENCES.draw({
+        node: {
+          children: [
+            {
+              type: 'element',
+              tagName: 'code',
+              properties: { className: ['language-fy-render'] },
+              children: [{ type: 'text', value: `${squareBody}\n` }],
+            },
+          ],
+        },
+        onTaskOpen: undefined,
+      }),
+    ).be.null();
+  });
+});
+
+describe('fy-render fences authored with noise (B162)', () => {
   // The body the renderer would hand the grammar for a fence authored as `text`, parsed.
   const drawn = (text: string): number => {
     const inner = text.replace(/^```fy-render\r?\n/u, '').replace(/\r?\n```$/u, '');
-    const node = {
-      children: [
-        {
-          type: 'element',
-          tagName: 'code',
-          properties: { 'data-fy-render-fence': 'true' },
-          children: [{ type: 'text', value: `${inner}\n` }],
-        },
-      ],
-    };
-    const body = fyRenderFenceBody(node);
+    const body = fyRenderFenceBody(nodeOf(inner));
     return body !== null && parseFyRender(body).ok ? 1 : 0;
   };
+  const squareFence = (): string => fence('fy-render', 'type: svg', 'alt: A ten by ten square', '---', SQUARE_SVG);
 
   test('should draw a block whose lines end in CRLF', () => {
     should(drawn(squareFence().replace(/\n/gu, '\r\n'))).equal(1);
@@ -129,136 +166,6 @@ describe('Markdown fy-render fences authored with noise (B162)', () => {
   });
 });
 
-describe('Markdown fy-render fences', () => {
-  test('should render an illustration only where the surface opted in', () => {
-    // Act
-    const enabled = render(<Markdown enableFyRender fences={FENCES} text={squareFence()} />);
-    const inert = render(<Markdown text={squareFence()} />);
-
-    // Assert — the SAME document, read by two surfaces. The inert one is not a
-    // degraded render: it is the ordinary escaped fence, with no block at all.
-    should(enabled.root.findAllByProps({ 'data-fy-render-type': 'svg' })).have.length(1);
-    should(inert.root.findAllByProps({ 'data-fy-render-type': 'svg' })).be.empty();
-    should(textOf(inert.root.findByType('code'))).containEql('type: svg');
-    should(inert.root.findAllByType('img')).be.empty();
-  });
-
-  test('should replace the fence rather than nest a figure inside a pre', () => {
-    // Act
-    const tree = render(<Markdown enableFyRender fences={FENCES} text={squareFence()} />);
-
-    // Assert — `<figure>` inside `<pre>` is not a tree a browser keeps, and
-    // `white-space: pre` is not a layout an illustration survives.
-    should(tree.root.findAllByType('pre')).be.empty();
-    should(tree.root.findAllByType('figure')).have.length(1);
-  });
-
-  test('should treat a fence carrying metadata as a different language entirely', () => {
-    // Arrange — mdast splits the info string into lang and meta, and hast keeps
-    // only the lang, so `fy-render notes` arrives wearing `language-fy-render`.
-    // Exactness has to be decided where the metadata is still visible.
-    const tree = render(<Markdown enableFyRender fences={FENCES} text={squareFence('fy-render notes')} />);
-
-    // Assert
-    should(tree.root.findAllByProps({ 'data-fy-render-type': 'svg' })).be.empty();
-    should(textOf(tree.root.findByType('code'))).containEql('type: svg');
-  });
-
-  test('should leave a differently named fence alone', () => {
-    // Act
-    const tree = render(<Markdown enableFyRender fences={FENCES} text={squareFence('fy-render-notes')} />);
-
-    // Assert
-    should(tree.root.findAllByProps({ 'data-fy-render-type': 'svg' })).be.empty();
-  });
-
-  test('should render an unparseable opted-in fence as an ordinary escaped fence', () => {
-    // Arrange — no boundary line, so the grammar refuses it.
-    const text = fence('fy-render', 'type: html', '<script>failed()</script>');
-
-    // Act
-    const tree = render(<Markdown enableFyRender fences={FENCES} text={text} />);
-
-    // Assert — indistinguishable from a plain fence, exactly like an unknown
-    // fence language. There is no partial-render state and no error chrome.
-    should(tree.root.findAllByType('figure')).be.empty();
-    should(tree.root.findAllByType('script')).be.empty();
-    should(textOf(tree.root.findByType('code'))).containEql('<script>failed()</script>');
-  });
-
-  test('should keep raw HTML in prose inert, which this feature must not change', () => {
-    // Act
-    const tree = render(
-      <Markdown enableFyRender fences={FENCES} text={'<script>globalThis.pwned = true</script><b>text</b>'} />,
-    );
-
-    // Assert — there is no `rehype-raw` in the pipeline, and adding one would
-    // execute a literal `<script>` typed into any chat message.
-    should(tree.root.findAllByType('script')).be.empty();
-    should(tree.root.findAllByType('b')).be.empty();
-  });
-
-  /**
-   * THE GATE AND THE RENDERER MUST AGREE ON WHAT AN OPENER IS.
-   *
-   * remark produces the same `code` node for every CommonMark fence form, so all
-   * of these activate. `scripts/validate/no-fy-render-in-docs.sh` therefore has
-   * to find all of them too — a gate that only knew about exactly three
-   * backticks at column zero would wave three renderable forms into a durable
-   * file. These cases exist to make that agreement fail loudly if either side
-   * narrows: if a form below stops rendering, delete it from the gate as well.
-   */
-  test('should render every CommonMark delimiter form the parser accepts', () => {
-    for (const delimiter of [FENCE, `${FENCE}${'`'}`, '~'.repeat(3), '~'.repeat(5)]) {
-      // Arrange
-      const text = [
-        `${delimiter}fy-render`,
-        'type: svg',
-        'alt: A ten by ten square',
-        '---',
-        SQUARE_SVG,
-        delimiter,
-      ].join('\n');
-
-      // Act
-      const tree = render(<Markdown enableFyRender fences={FENCES} text={text} />);
-
-      // Assert
-      should(tree.root.findAllByProps({ 'data-fy-render-type': 'svg' })).have.length(1);
-    }
-  });
-
-  test('should render an illustration opened inside a blockquote', () => {
-    // Arrange — the delimiter is not at column zero here, which is the form a
-    // line-anchored gate would miss.
-    const text = squareFence()
-      .split('\n')
-      .map(line => `> ${line}`)
-      .join('\n');
-
-    // Act
-    const tree = render(<Markdown enableFyRender fences={FENCES} text={text} />);
-
-    // Assert
-    should(tree.root.findAllByProps({ 'data-fy-render-type': 'svg' })).have.length(1);
-  });
-
-  test('should find an illustration nested inside a list item', () => {
-    // Arrange — a fence is not always a top-level child, so the mark has to be
-    // stamped by a full walk rather than a scan of the document's own children.
-    const indented = squareFence()
-      .split('\n')
-      .map(line => `  ${line}`)
-      .join('\n');
-
-    // Act
-    const tree = render(<Markdown enableFyRender fences={FENCES} text={`- an illustration:\n\n${indented}\n`} />);
-
-    // Assert
-    should(tree.root.findAllByProps({ 'data-fy-render-type': 'svg' })).have.length(1);
-  });
-});
-
 describe('fyRenderFenceBody', () => {
   const codeNode = (properties: Record<string, unknown>, value: unknown = 'type: svg\n') => ({
     children: [{ type: 'element', tagName: 'code', properties, children: [{ type: 'text', value }] }],
@@ -268,7 +175,7 @@ describe('fyRenderFenceBody', () => {
     should(fyRenderFenceBody(codeNode({ 'data-fy-render-fence': 'true' }))).equal('type: svg');
   });
 
-  test('should refuse a fence the remark plugin did not mark', () => {
+  test('should refuse a fence the reader did not mark', () => {
     // Assert — the class name is deliberately not enough, because a fence with
     // metadata arrives wearing exactly this one.
     should(fyRenderFenceBody(codeNode({ className: ['language-fy-render'] }))).be.null();
@@ -289,18 +196,18 @@ describe('fyRenderFenceBody', () => {
   });
 });
 
-describe('Markdown fy-render workspace media', () => {
+describe('fy-render workspace media', () => {
   test('should hand the workspace reader it was given to the block a media fence renders', () => {
     // Arrange
     const readWorkspaceMedia = async () => ({ ok: false, reason: 'missing' }) as const;
-    const text = fence('fy-render', 'type: video', 'alt: A recording', 'src: @clip.mp4', '---');
+    const body = ['type: video', 'alt: A recording', 'src: @clip.mp4', '---'].join('\n');
 
     // Act
-    const tree = render(<Markdown enableFyRender fences={fyRenderFences({ readWorkspaceMedia })} text={text} />);
+    const tree = drawnOf(fyRenderFences({ readWorkspaceMedia }), body);
 
     // Assert — the very function, not a copy; reduced to booleans so a failure cannot walk a fiber.
     should(
-      tree.root.findAllByType(FyRenderBlock).map(block => block.props.readWorkspaceMedia === readWorkspaceMedia),
+      tree?.root.findAllByType(FyRenderBlock).map(block => block.props.readWorkspaceMedia === readWorkspaceMedia),
     ).deepEqual([true]);
   });
 });
