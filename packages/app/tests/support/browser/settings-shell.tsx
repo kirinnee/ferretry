@@ -25,7 +25,9 @@ import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import type { PasskeyHandler, PasskeyProvision } from '../../../src/passkey/passkey.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
+import { ShellContext } from '../../../src/shell/context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
+import { WithViewPlace } from '../../../src/shell/view-place.tsx';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { PlacedPanel } from '../../../src/testing/slot-panels.tsx';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
@@ -168,6 +170,38 @@ export function renderSettingsShellOf(
  */
 export { noteClientDaemon } from '../../../src/connect/daemon-of.ts';
 export { type PlacedPanel, WithSlotPanels } from '../../../src/testing/slot-panels.tsx';
+
+/**
+ * FOR A SCENE THAT DRAWS A FERRET'S TEXT THE WAY THE SHELL DOES (`ProseView`, which asks the shell what Conversation
+ * provides as `shell.prose`): the shell's context over the registry's REAL halves, or over `none` (the shell's own Markdown,
+ * a baseline). No router, no connection: `ProseView` reads the surfaces and the standing the viewing machine `daemon` has
+ * for each, which here is `allowed` for every plugin unless `blocked` names it (a daemon whose inventory turned it off).
+ */
+export function WithRegisteredSurfaces({
+  children,
+  none = false,
+  daemon = 'scene-machine',
+  blocked = [],
+}: {
+  children: ReactNode;
+  none?: boolean;
+  daemon?: string;
+  blocked?: readonly string[];
+}) {
+  const runtime = {
+    surfaces: none ? [] : generated.surfaces,
+    standing: (_daemon: string, id: string) =>
+      blocked.includes(id) ? { state: 'blocked', reason: 'off' } : { state: 'allowed' },
+    // No plugin's app hook is provided here: a surface that reads one (Board's, for the agenda) is drawn without it.
+    appHook: (): unknown => undefined,
+    subscribe: () => () => undefined,
+  };
+  return (
+    <ShellContext.Provider value={{ runtime } as never}>
+      <WithViewPlace place={{ daemon, machine: 'Scene machine' } as never}>{children}</WithViewPlace>
+    </ShellContext.Provider>
+  );
+}
 
 /** One panel a plugin REGISTERS, as the shell builds it over `client`, placed under the plugin's own id. */
 export function registeredPanel(plugin: string, id: string, client: unknown): PlacedPanel {

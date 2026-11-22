@@ -44,8 +44,11 @@ export interface PluginHost {
   readonly clock: NonNullable<CliContext<Manifest>['clock']>;
   /** Waits, and ends early (rejecting with the signal's reason) when the signal aborts. */
   sleep(delay: Duration, signal?: AbortSignal): Promise<void>;
-  /** As today's `readRecipe`: UTF-8 text from a path relative to the working directory; `-` reads standard input. No size cap. */
-  readText(path: string): Promise<string>;
+  /**
+   * As today's `readRecipe`: UTF-8 text from a path relative to the working directory; `-` reads standard input. No size
+   * cap unless `limitBytes` is given: then at most that many bytes are read and the rest is never taken.
+   */
+  readText(path: string, limitBytes?: number): Promise<string>;
   /** The raw bytes of a path by the same rules as `readText` (relative to the working directory, `-` is standard input, no size cap). */
   readBytes(path: string): Promise<Uint8Array>;
   /** As today's `existsSync(resolve(cwd, path))`: a directory or an unreadable file exists; `-` is a file name. */

@@ -356,7 +356,7 @@ async function runPluginVerb(
     // The whole context, for every half (lead ruling): a facility left out fails the verb that needs it in the real binary.
     clock: world.host.clock,
     sleep: (delay, signal) => world.host.sleep(delay, signal),
-    readText: path => world.host.readText(path),
+    readText: (path, limitBytes) => world.host.readText(path, limitBytes),
     readBytes: path => world.host.readBytes(path),
     exists: path => world.host.exists(path),
     stdin: () => world.host.stdin(),

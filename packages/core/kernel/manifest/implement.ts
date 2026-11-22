@@ -548,10 +548,12 @@ export interface CliContext<M extends Manifest> {
   readonly io: TerminalIo;
   /**
    * UTF-8 text from a path (relative to the CLI working directory); '-' reads stdin.
-   * As today's readRecipe (Bun.file/Bun.stdin.text): no reader size cap. The caller validates length
-   * (a sign-in recipe, for example, must be 1–4000 characters).
+   * As today's readRecipe (Bun.file/Bun.stdin.text): no reader size cap unless the caller names one. The caller
+   * validates length (a sign-in recipe, for example, must be 1–4000 characters).
+   * `limitBytes`: read at most that many bytes and stop (the rest of the file or pipe is never read); a caller that must
+   * know a text is over its cap asks for the cap plus one byte.
    */
-  readText?(path: string): Promise<string>;
+  readText?(path: string, limitBytes?: number): Promise<string>;
   /**
    * The raw bytes of a path (an image, a PDF, a document), by the same rules as `readText`: relative to the CLI working
    * directory, '-' reads stdin, no reader size cap (the receiving route bounds what it takes). Nothing is decoded.

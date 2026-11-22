@@ -11,12 +11,13 @@
  *   - a `device` view on a skeleton half fails: a half that implements nothing has no view to mount;
  *   - a declaration in no known form fails;
  *   - a `links` provider outside `LINK_TAKERS` fails (S7): where a link opens is Browsers';
+ *   - a `prose` view outside `PROSE_TAKERS` fails: how a ferret's text is drawn is Conversation's;
  *   - a `navBadges` key that is not one of the plugin's own screens with a `nav` entry fails (S4);
  *   - a `deviceSettings` key that is not a panel the plugin declares in `device.settings` fails, and so does a
  *     `device.settings` panel with no `deviceSettings` view; the same for `navPanels` and the `nav` slot (S4, MJ3);
  *   - a `background` or `navBadges` entry on a skeleton half fails: nothing mounts it (S5, S4).
  */
-import { LINK_TAKERS } from '../../packages/app/src/connect/provides.ts';
+import { LINK_TAKERS, PROSE_TAKERS } from '../../packages/app/src/connect/provides.ts';
 import { FRAGMENT_KEY } from '../../packages/app/src/router/address.ts';
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
 import { loadHalf } from '../gen/lib/workspace.ts';
@@ -41,6 +42,8 @@ export interface ShellProvidesHalf {
   readonly navBadges?: readonly string[];
   /** Whether the half provides `shell.links` (S7). */
   readonly links?: boolean;
+  /** Whether the half provides `shell.prose`. */
+  readonly prose?: boolean;
 }
 
 /** The two device-level slots, the `shell` section that holds their views, and what a missing view is called. */
@@ -59,6 +62,13 @@ function shellSectionFindings(half: ShellProvidesHalf, add: (where: string, mess
       half.plugin,
       `provides \`shell.links\`, but only ${LINK_TAKERS.join(', ')} may: where a link opens is not this plugin's`,
     );
+  if (half.prose === true && !PROSE_TAKERS.includes(half.plugin))
+    add(
+      half.plugin,
+      `provides \`shell.prose\`, but only ${PROSE_TAKERS.join(', ')} may: how a ferret's text is drawn is not this plugin's`,
+    );
+  if (half.prose === true && half.skeleton)
+    add(half.plugin, 'is a skeleton half with a `shell.prose` view: nothing mounts it');
   for (const key of half.navBadges ?? []) {
     const screen = half.screens.find(each => each.id === key);
     if (screen === undefined)
@@ -148,6 +158,7 @@ interface LoadedHalf {
     readonly navPanels?: Readonly<Record<string, unknown>>;
     readonly navBadges?: Readonly<Record<string, unknown>>;
     readonly links?: unknown;
+    readonly prose?: unknown;
   };
 }
 
@@ -173,6 +184,7 @@ export const check: Check = {
           navPanels: Object.keys(half.shell?.navPanels ?? {}),
           navBadges: Object.keys(half.shell?.navBadges ?? {}),
           links: half.shell?.links !== undefined,
+          prose: half.shell?.prose !== undefined,
         });
       } catch (error) {
         failures.push({
