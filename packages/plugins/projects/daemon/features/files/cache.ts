@@ -64,7 +64,7 @@ export class ProjectIndexCache {
   }[] = [];
 
   constructor(
-    private readonly build: (path: string) => Promise<ProjectIndex>,
+    private readonly build: (path: string, holdSlot: (work: Promise<unknown>) => void) => Promise<ProjectIndex>,
     private readonly nowMs: () => number,
     private readonly staleMs: number = STALE_AFTER_MS,
   ) {}
@@ -149,13 +149,16 @@ export class ProjectIndexCache {
         });
       });
     this.building += 1;
-    const release = (): void => {
+    // Work the build leaves running behind its answer (a read in flight at its deadline): the slot is not free until it stops.
+    const outliving: Promise<unknown>[] = [];
+    const release = async (): Promise<void> => {
+      for (let work = outliving.splice(0); work.length > 0; work = outliving.splice(0)) await Promise.allSettled(work);
       this.building -= 1;
       this.waiting.shift()?.begin();
     };
     let started: Promise<ProjectIndex>;
     try {
-      started = this.build(path);
+      started = this.build(path, work => void outliving.push(work));
     } catch (error) {
       started = Promise.reject(error);
     }

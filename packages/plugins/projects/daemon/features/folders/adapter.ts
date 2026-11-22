@@ -239,7 +239,7 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
       const held = await hold(path, verdict);
       return held.ok ? { ok: true, folder: heldFolder(held.pinned) } : held;
     },
-    holdsSignIn: async path => {
+    holdsSignIn: async (path, budget) => {
       const root = handle(path);
       // Not a folder the root will answer for (a file, a refusal): nothing to hold a sign-in, and opening it is refused anyway.
       const self = root.resolve('');
@@ -252,6 +252,8 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
       // First, bounded BY CONSTRUCTION: each KNOWN marker is asked for by name (one lstat apiece, a link counts and is not
       // followed), so how many names the folder holds decides nothing. A name the machine will not answer for is not proved free.
       for (const marker of SIGN_IN_FILES) if ((await leafAt(path, marker)) !== 'missing') return true;
+      // No new I/O once the caller's time is gone: the listing below is the costly part, and it is not started.
+      if (budget?.expired() === true) return 'partial';
       try {
         // Then every name the folder holds, a link included, judged by the SAME fold as everywhere else (`fence.ts`): a marker
         // spelled `ID_RSA`, `Auth.JSON` or in full-width letters is a marker. Read through the held folder with a bound; a
@@ -261,7 +263,7 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
         try {
           const target = await pinned.open('', { wantDirectory: true });
           try {
-            const listing = await target.list(SIGN_IN_READ_LIMIT);
+            const listing = await target.list(SIGN_IN_READ_LIMIT, budget);
             if (holdsSignIn(listing.entries.map(entry => entry.name))) return true;
             // Not listed to the end: a marker spelled differently past the bound is not ruled out, and that is said, not hidden.
             return listing.truncated ? 'partial' : false;

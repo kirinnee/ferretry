@@ -81,6 +81,11 @@ export interface ProjectIndexDeps {
   readonly nowMs: () => number;
   readonly instant: () => Instant;
   readonly limits?: ProjectIndexLimits;
+  /**
+   * Tells the owner of this build's concurrency slot about work that outlives the answer (a read the pins had in flight at
+   * the deadline): the slot stays held until it has stopped. The cache passes it; a caller with no slots omits it.
+   */
+  readonly holdSlot?: (work: Promise<unknown>) => void;
 }
 
 /** A finished build: the summary the app shows, and every name held for searching. */
@@ -274,8 +279,24 @@ export async function buildProjectIndex(path: string, deps: ProjectIndexDeps): P
   // ONE deadline for the whole build, started BEFORE anything is held: reading the privacy policy and holding the folder can
   // list whole folders, and that time is spent from the same budget the walk has.
   const deadline = new Deadline(deps.nowMs, limits.budgetMs);
-  const state: State = { files: [], skips: new Map(), worktrees: [], opened: 0, candidates: 0 };
   const pins = await deps.pins(deadline);
+  try {
+    return await indexProject(path, deps, limits, deadline, pins);
+  } finally {
+    // The answer may come back at the deadline while a read the pins started is still in flight. It starts nothing more and
+    // closes what it was handed, but until it stops the build's slot is not free: say so to whoever owns the slot.
+    if (pins.settled !== undefined) deps.holdSlot?.(pins.settled());
+  }
+}
+
+async function indexProject(
+  path: string,
+  deps: ProjectIndexDeps,
+  limits: ProjectIndexLimits,
+  deadline: Deadline,
+  pins: FolderPins,
+): Promise<ProjectIndex> {
+  const state: State = { files: [], skips: new Map(), worktrees: [], opened: 0, candidates: 0 };
   const held = await pins.project(path);
   // The time ran out before the folder could be held: an empty answer that says so, never a claim that it is not there.
   if (!held.ok && held.reason === 'spent') {

@@ -82,3 +82,218 @@ describe('the pins are spent from the build’s deadline', () => {
     expect(await pins.descendant('/h/p/x')).toBeUndefined();
   }, 2_000);
 });
+
+/** A promise the test settles by hand: "the disk answers late" made deterministic. */
+function pending<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+/** Lets every queued continuation run (a late answer's whole chain), without a timer the build's deadline could race. */
+const flush = async (): Promise<void> => {
+  for (let turn = 0; turn < 20; turn++) await new Promise(done => setTimeout(done, 0));
+};
+
+/**
+ * A kernel whose `realPath` and `pin` are held by the test, and which records every folder it was asked to hold and every
+ * descriptor it closed. `expiresNow()` spends the budget at a moment the test picks, so nothing races a timer.
+ */
+function controlled() {
+  const realPath = pending<string>();
+  const pin = pending<{ rootReal: string; close: () => Promise<void> }>();
+  const log = { realPaths: 0, pins: 0, closed: 0 };
+  const clock = {
+    after: (_delay: number, _fn: () => void) => () => undefined,
+  };
+  const roots = {
+    root: () => ({
+      resolve: () => ({ ok: true, value: '' }),
+      realPath: async () => {
+        log.realPaths += 1;
+        return await realPath.promise;
+      },
+      pin: async () => {
+        log.pins += 1;
+        const held = await pin.promise;
+        return {
+          ...held,
+          close: async () => {
+            log.closed += 1;
+          },
+        };
+      },
+    }),
+  };
+  let spent = false;
+  const budget: SpawnBudget = { expired: () => spent, remainingMs: () => (spent ? 0 : 1_000) };
+  return {
+    kernel: { clock, roots } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'spawn' | 'clock'>,
+    realPath,
+    pin,
+    log,
+    budget,
+    expiresNow: () => {
+      spent = true;
+    },
+  };
+}
+
+/** A clock that fires the deadline when the test says so (the build's own `after`), so `within` stops waiting on cue. */
+function cuedClock() {
+  const timers: (() => void)[] = [];
+  return {
+    clock: {
+      after: (_delay: number, fn: () => void) => {
+        timers.push(fn);
+        return () => undefined;
+      },
+    },
+    fire: () => {
+      for (const fn of timers.splice(0)) fn();
+    },
+  };
+}
+
+describe('no new work starts after the deadline, whichever stage of it was pending when the time ran out (R3)', () => {
+  test('a realPath that arrives after the deadline starts no sign-in verdict and no pin', async () => {
+    const world = controlled();
+    const cue = cuedClock();
+    const signIn: string[] = [];
+    const pins = await kernelPins(
+      { ...world.kernel, clock: cue.clock } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'spawn' | 'clock'>,
+      browser({
+        holdsSignIn: async path => {
+          signIn.push(path);
+          return false;
+        },
+      }),
+    )(world.budget);
+
+    const held = pins.project('/h/a/b');
+    await flush();
+    expect(world.log.realPaths).toBe(1);
+    world.expiresNow();
+    cue.fire();
+    expect(await held).toEqual({ ok: false, reason: 'spent' });
+    // The folder resolves only now, after the time is gone.
+    world.realPath.resolve('/h/a/b');
+    await flush();
+
+    expect(signIn).toEqual([]);
+    expect(world.log.pins).toBe(0);
+  }, 2_000);
+
+  test('a sign-in verdict that arrives after the deadline starts no further verdict and no pin', async () => {
+    const world = controlled();
+    const cue = cuedClock();
+    const first = pending<boolean>();
+    const signIn: string[] = [];
+    const pins = await kernelPins(
+      { ...world.kernel, clock: cue.clock } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'spawn' | 'clock'>,
+      browser({
+        holdsSignIn: async path => {
+          signIn.push(path);
+          return await first.promise;
+        },
+      }),
+    )(world.budget);
+
+    const held = pins.project('/h/a/b');
+    world.realPath.resolve('/h/a/b');
+    await flush();
+    expect(signIn).toEqual(['/h/a']);
+    world.expiresNow();
+    cue.fire();
+    expect(await held).toEqual({ ok: false, reason: 'spent' });
+    first.resolve(false);
+    await flush();
+
+    // `/h/a/b` (the next ancestor) is not looked at, and nothing is pinned.
+    expect(signIn).toEqual(['/h/a']);
+    expect(world.log.pins).toBe(0);
+  }, 2_000);
+
+  test('a descriptor that arrives after the deadline is closed, and the held folder is not judged again', async () => {
+    const world = controlled();
+    const cue = cuedClock();
+    const signIn: string[] = [];
+    const pins = await kernelPins(
+      { ...world.kernel, clock: cue.clock } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'spawn' | 'clock'>,
+      browser({
+        holdsSignIn: async path => {
+          signIn.push(path);
+          return false;
+        },
+      }),
+    )(world.budget);
+
+    const held = pins.project('/h/p');
+    world.realPath.resolve('/h/p');
+    await flush();
+    expect(world.log.pins).toBe(1);
+    const verdicts = signIn.length;
+    world.expiresNow();
+    cue.fire();
+    expect(await held).toEqual({ ok: false, reason: 'spent' });
+    world.pin.resolve({ rootReal: '/h/p', close: async () => undefined });
+    await flush();
+
+    expect(world.log.closed).toBe(1);
+    expect(signIn.length).toBe(verdicts);
+  }, 2_000);
+
+  test('a home that arrives after the deadline starts no read of where the private folders are', async () => {
+    const world = controlled();
+    const cue = cuedClock();
+    const home = pending<string>();
+    const realPaths: (readonly string[])[] = [];
+    const reading = kernelPins(
+      { ...world.kernel, clock: cue.clock } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'spawn' | 'clock'>,
+      browser({
+        home: async () => await home.promise,
+        realPaths: async paths => {
+          realPaths.push(paths);
+          return [];
+        },
+      }),
+    )(world.budget);
+    await flush();
+    world.expiresNow();
+    cue.fire();
+    const pins = await reading;
+    expect(await pins.project('/h/p')).toEqual({ ok: false, reason: 'spent' });
+    home.resolve('/h');
+    await flush();
+
+    expect(realPaths).toEqual([]);
+  }, 2_000);
+
+  test('a build that stopped waiting is still counted as running until the work it started has actually stopped', async () => {
+    const world = controlled();
+    const cue = cuedClock();
+    const pins = await kernelPins(
+      { ...world.kernel, clock: cue.clock } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'spawn' | 'clock'>,
+      browser({}),
+    )(world.budget);
+    const held = pins.project('/h/p');
+    await flush();
+    world.expiresNow();
+    cue.fire();
+    await held;
+
+    let stopped = false;
+    void pins.settled?.().then(() => {
+      stopped = true;
+    });
+    await flush();
+    expect(pins.settled).toBeDefined();
+    expect(stopped).toBe(false);
+
+    world.realPath.resolve('/h/p');
+    await flush();
+    expect(stopped).toBe(true);
+  }, 2_000);
+});

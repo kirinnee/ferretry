@@ -297,6 +297,33 @@ describe('a Git child that runs out of the build’s time is the budget, not dam
   });
 });
 
+describe('the build hands the cache slot the work its pins still have running (R3)', () => {
+  test('an answer given while pin work is outstanding says so: the slot is held until that work has stopped', async () => {
+    const outstanding = new Promise<void>(() => undefined);
+    const held: Promise<unknown>[] = [];
+    const deps = {
+      pins: async () => ({
+        project: async () => ({ ok: false, reason: 'spent' }),
+        nested: async () => ({ ok: false, reason: 'spent' }),
+        descendant: async () => 'spent',
+        settled: () => outstanding,
+      }),
+      git: NOT_A_REPO,
+      nowMs: () => 0,
+      instant: () => '2026-11-22T00:00:00.000Z' as Instant,
+      holdSlot: (work: Promise<unknown>) => void held.push(work),
+    } as unknown as ProjectIndexDeps;
+
+    const index = await buildProjectIndex('/p', deps);
+
+    expect(skip(index, 'truncated')).toBe(1);
+    expect(held.length).toBe(1);
+    // It is the pins' own outstanding work, not a settled stand-in.
+    const marker = Symbol('settled');
+    expect(await Promise.race([held[0], Promise.resolve(marker)])).toBe(marker);
+  });
+});
+
 describe('one candidate allowance covers the nested folders Git names and the files, together', () => {
   test('folders past the allowance are not inspected at all (no `.git` is asked of them) and the answer is partial', async () => {
     const names = ['a', 'b', 'c', 'd', 'e', 'f'];

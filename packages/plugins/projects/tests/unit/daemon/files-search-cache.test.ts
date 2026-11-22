@@ -254,6 +254,34 @@ describe('ProjectIndexCache bounds', () => {
     expect(cache.size()).toBe(MAX_CONCURRENT_BUILDS);
   });
 
+  test('a build that answered while work it started still runs keeps its slot until that work stops (R3)', async () => {
+    const stray: { finish: () => void }[] = [];
+    const started: string[] = [];
+    const build = async (path: string, hold?: (work: Promise<unknown>) => void): Promise<ProjectIndex> => {
+      started.push(path);
+      if (path !== '/p2')
+        hold?.(
+          new Promise<void>(resolve => {
+            stray.push({ finish: resolve });
+          }),
+        );
+      return index(path);
+    };
+    const cache = new ProjectIndexCache(build, () => 0);
+    // Both slots answer at once but leave work running behind the answer.
+    await cache.read('p0', '/p0');
+    await cache.read('p1', '/p1');
+    const third = cache.read('p2', '/p2');
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // Their answers are out, yet neither slot is free: the third build has not started.
+    expect(started).toEqual(['/p0', '/p1']);
+
+    stray[0]?.finish();
+    await third;
+    expect(started).toEqual(['/p0', '/p1', '/p2']);
+  });
+
   test('evict forgets a project at once', async () => {
     const cache = new ProjectIndexCache(
       async () => index('x'),

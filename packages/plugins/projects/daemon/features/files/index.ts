@@ -9,7 +9,7 @@ import { type FilePlace, filesRescanRoute, filesRoute, filesStatusRoute } from '
 
 /** What a test replaces: how one project folder becomes an index. The real one reads through the kernel's `imports` root. */
 export interface FileIndexDeps {
-  readonly build: (path: string) => Promise<ProjectIndex>;
+  readonly build: (path: string, holdSlot: (work: Promise<unknown>) => void) => Promise<ProjectIndex>;
   /** Where a registered path really is (its home, what it resolves to); a test with no disk names its own. The real one asks the kernel. */
   readonly place?: FilePlace;
 }
@@ -29,8 +29,9 @@ export function filesRoutes(
 > {
   const build =
     deps?.build ??
-    ((path: string) =>
+    ((path: string, holdSlot: (work: Promise<unknown>) => void) =>
       buildProjectIndex(path, {
+        holdSlot,
         pins: kernelPins(kernel, kernelBrowser(kernel)),
         git: kernelGit(kernel),
         nowMs: () => kernel.clock.nowMs(),
