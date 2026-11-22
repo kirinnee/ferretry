@@ -379,11 +379,8 @@ describe('import-run', () => {
       /^Bringing \d+ items?\. Hooks are never imported\.$/u,
     );
     expect(container.querySelector('[data-import-next]')?.textContent).toContain('Next leaves the import for later');
-    expect([...container.querySelectorAll('button')].map(button => button.textContent)).toEqual([
-      // The shared answer row draws the way out, then the way on (its DOM follows the picture, so on a phone it is the other way).
-      'Skip the import',
-      'Import',
-    ]);
+    // One action: leaving is the flow footer's Later / Next, so the page draws no second "skip" button.
+    expect([...container.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Import']);
     expect(calls.some(call => call.route === 'POST /v1/runtimes/proposals')).toBe(false);
     await press(container, '[data-import-run]');
     const change = proposal(calls);

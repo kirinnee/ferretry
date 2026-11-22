@@ -256,11 +256,14 @@ describe('the import run', () => {
     expect(only?.change.skip).toBeUndefined();
   });
 
-  it('"Skip the import" records done and sends nothing', async () => {
+  it('the page has ONE action, Import: leaving is the footer’s Later / Next, so no second "skip" button; nothing is sent or recorded by arriving', async () => {
     const { view, run, calls } = await open(ImportRunPage, { importMode: 'everything' });
-    await interact(() => must(view.container.querySelector<HTMLButtonElement>('[data-import-skip]'), 'skip').click());
+    expect(view.container.querySelector('[data-import-skip]')).toBeNull();
+    expect(
+      [...view.container.querySelectorAll('[data-import-actions] button')].map(button => button.textContent),
+    ).toEqual(['↓Import']);
     expect(writes(calls)).toEqual([]);
-    expect(run.events.slice(-2)).toEqual(['ready', 'done']);
+    expect(run.events).not.toContain('done');
   });
 
   it('a refused import shows the reason, frees the footer, and can be tried again', async () => {

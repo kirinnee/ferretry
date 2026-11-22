@@ -6,8 +6,9 @@
  * going Back.
  * Everything the person chose on the kind pages is one `setup.import` change built by the kit; nothing is brought over until the
  * person presses Import. The same page, words and buttons as Claude Code's: how many items come over and how many are left out,
- * what Next does, the runtime's name (prefilled; none when Codex already has a runtime here), Import and Skip the import, and
- * afterwards each file written or refused in the daemon's own words. The machine may ask for the passkey; that is the carrier's prompt.
+ * what Next does, the runtime's name (prefilled; none when Codex already has a runtime here), the one Import action (the flow's
+ * footer Later / Next is how a person leaves the import, so the page draws no second "skip" row), and afterwards each file written
+ * or refused in the daemon's own words. The machine may ask for the passkey; that is the carrier's prompt.
  *
  * It names any kind whose checklist was never shown in this run (those are NOT left out, since nobody left them out).
  */
@@ -60,7 +61,6 @@ function RunBody({
   const { changes, applied, apply } = useApplyImport(client);
   const { model } = scan;
   const [name, setName] = useState<string | null>(null);
-  const [left, setLeft] = useState(false);
   const told = useRef<'none' | 'ready' | 'skipped'>('none');
 
   const typed = name ?? model?.suggestedName ?? '';
@@ -105,12 +105,6 @@ function RunBody({
     if (result !== null) step.done();
   };
 
-  /** Skip the import: nothing is brought over, and the step is answered (what Next would have left for later). */
-  const leave = (): void => {
-    setLeft(true);
-    step.done();
-  };
-
   const nothingToImport = total === 0 && (plan?.updates ?? 0) === 0;
   return (
     <StepBody step="codex.import-run" label="Bring Codex over" data-codex-step="import-run">
@@ -125,10 +119,6 @@ function RunBody({
             </StepLine>
             <ImportResultList sentences={applied.sentences} />
           </div>
-        ) : left ? (
-          <StepLine data-import-left="">
-            Nothing was imported. You can import later from Settings › Runtimes › Import.
-          </StepLine>
         ) : (
           <>
             <StepLine data-import-count="" data-import-summary="">
@@ -164,14 +154,10 @@ function RunBody({
               </StepLine>
             )}
             {changes.busy ? <StepLine role="status">Importing…</StepLine> : null}
-            <ActionRow
-              secondary={
-                <Button disabled={changes.busy} data-import-skip="" onClick={leave}>
-                  Skip the import
-                </Button>
-              }
-              primary={
-                nothingToImport ? undefined : (
+            {/* One way on here: the footer's Later (and Next) are the way to leave the import, so no second "skip" row. */}
+            {nothingToImport ? null : (
+              <ActionRow
+                primary={
                   <Button
                     variant="primary"
                     disabled={changes.busy || problem !== null}
@@ -180,9 +166,9 @@ function RunBody({
                   >
                     Import
                   </Button>
-                )
-              }
-            />
+                }
+              />
+            )}
           </>
         )
       ) : null}

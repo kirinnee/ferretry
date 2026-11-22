@@ -283,9 +283,7 @@ describe('C59 O5: the import page lists every item, and working moves nothing', 
               const r = (el as HTMLElement).getBoundingClientRect();
               return { top: r.top, left: r.left, right: r.right, w: r.width, h: r.height };
             };
-            const buttons = ['[data-import-run]', '[data-import-skip]'].map(selector =>
-              box(document.querySelector(selector)),
-            );
+            const buttons = ['[data-import-run]'].map(selector => box(document.querySelector(selector)));
             return {
               rows: [...document.querySelectorAll('[data-import-item]')].map(box),
               bar: box(document.querySelector('[role="progressbar"]')),
@@ -321,9 +319,8 @@ describe('C59 O5: the import page lists every item, and working moves nothing', 
         const offsets = during.rows.map((row, index) => row.top - (before.rows[index]?.top ?? 0));
         const importBefore = before.buttons[0]!;
         const importDuring = during.buttons[0]!;
-        const skip = during.buttons[1]!;
-        // The shared answer row: a phone stacks them (the way on above, each the whole width); a desktop puts the way out at the left end and the way on at the right.
-        const gap = viewport.phone ? skip.top - (importDuring.top + importDuring.h) : importDuring.left - skip.right;
+        // C59 follow-up: ONE answer on the page (the flow's footer Later / Next leave the import): no second "skip" button.
+        expect(await tab.locator('[data-import-skip]').count()).toBe(0);
         const row = await tab.evaluate(() => {
           const rect = (selector: string) => (document.querySelector(selector) as HTMLElement).getBoundingClientRect();
           const bar = rect('[data-import-actions]');
@@ -336,30 +333,23 @@ describe('C59 O5: the import page lists every item, and working moves nothing', 
           barOffset: during.bar.top - before.bar.top,
           buttonsOffset: importDuring.top - importBefore.top,
           importSize: { idle: [importBefore.w, importBefore.h], busy: [importDuring.w, importDuring.h] },
-          gapToSkip: gap,
           statusLines,
         };
         measured[`import-${viewport.name}-${mode}`] = {
           ...(measured[`import-${viewport.name}-${mode}`] as object),
           row,
-          skip: [skip.left, skip.right, skip.w],
           run: [importDuring.left, importDuring.right, importDuring.w],
         };
         if (viewport.phone) {
           expect(Math.abs(importDuring.w - (row.barRight - row.barLeft))).toBeLessThanOrEqual(1);
-          expect(Math.abs(skip.w - (row.barRight - row.barLeft))).toBeLessThanOrEqual(1);
-          expect(importDuring.top).toBeLessThan(skip.top);
         } else {
-          expect(Math.abs(skip.left - row.barLeft)).toBeLessThanOrEqual(1);
           expect(Math.abs(importDuring.right - row.barRight)).toBeLessThanOrEqual(1);
-          expect(Math.abs(skip.w - importDuring.w)).toBeLessThanOrEqual(1);
         }
         for (const offset of offsets) expect(Math.abs(offset)).toBeLessThanOrEqual(0.5);
         expect(Math.abs(during.bar.top - before.bar.top)).toBeLessThanOrEqual(0.5);
         expect(Math.abs(importDuring.top - importBefore.top)).toBeLessThanOrEqual(0.5);
         expect(Math.abs(importDuring.w - importBefore.w)).toBeLessThanOrEqual(0.5);
         expect(Math.abs(importDuring.h - importBefore.h)).toBeLessThanOrEqual(0.5);
-        expect(gap).toBeGreaterThanOrEqual(12);
         expect(statusLines).toBe(before.rows.length);
         expect(during.scrollX).toBeLessThanOrEqual(0);
         await tab.waitForSelector('[data-import-answer]');
