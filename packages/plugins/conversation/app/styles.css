@@ -2,3 +2,4 @@
    every plugin's list through the generated `packages/app/src/generated/plugin-styles.css`. */
 @import './chat/chat.css';
 @import './chat/compaction-card.css';
+@import './hypermedia/hypermedia.css';

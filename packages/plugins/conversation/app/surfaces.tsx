@@ -20,6 +20,7 @@ import { ChatScreen } from './chat/chat-screen.tsx';
 import { MessageMarksLegend } from './chat/message-marks-legend.tsx';
 import { ChatWidthPanel } from './chat-width-control.tsx';
 import { ConversationClientProvider } from './client.ts';
+import './hypermedia/dh-styles.ts';
 import { ComposerAttachPanel } from './composer/composer-attach.tsx';
 import { ConversationSettings } from './composer/conversation-settings.tsx';
 import { CompactAtPanel } from './compact-at/compact-at-panel.tsx';

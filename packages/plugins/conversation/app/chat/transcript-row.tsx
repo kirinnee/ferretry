@@ -22,7 +22,6 @@ import {
   PeerMessageRow,
   SystemNoticeRow,
 } from '../transcript/agent-message-rows.tsx';
-import { ChatProse } from '@ferretry/app';
 import { CommandRow } from '@ferretry/app';
 import {
   HandoffBody,
@@ -32,6 +31,7 @@ import {
   HandoffView,
   useHandoffReading,
 } from './handoff-message.tsx';
+import { HypermediaProse } from '../hypermedia/hypermedia-prose.tsx';
 import { HarnessEventRow } from '../transcript/harness-event-row.tsx';
 import {
   type LedgerActions,
@@ -576,7 +576,7 @@ function speakerOf(entry: TranscriptEntry): string | undefined {
  * can prove a callsign or a path.
  */
 function AssistantProse({ text }: { readonly text: string }) {
-  return <ChatProse text={text} />;
+  return <HypermediaProse text={text} />;
 }
 
 /** What a row with no label of its own is headed by. */

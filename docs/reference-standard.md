@@ -335,6 +335,11 @@ Rules:
 4. A reference-shaped Markdown link inside code is still not a reference (section 1).
 5. A proved-CLOSED surface stays literal inside code rather than becoming a tombstone: striking a
    token through would misrepresent the snippet as containing a `<del>`, and code is verbatim.
+6. An inline span shows the bytes the author typed, character references included: `` `&lt;demo&gt;` `` reads
+   `&lt;demo&gt;` and `` `<demo>` `` reads `<demo>`. Decoration therefore sees the author's own token, never a
+   decoded stand-in. (Hypermedia's parser decodes the six common references before the reader sees a span, so the
+   reader claims exactly the spans that hold one and draws their source text; a span over 400 characters that holds
+   one is read decoded, a declared GAP until the parser hands over literal code.)
 
 ## 8. Adding a new reference kind
 
