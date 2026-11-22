@@ -21,6 +21,7 @@ import { gitAccountsDaemon } from '../../daemon/index.ts';
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import { fingerprintOfBlob, generateEd25519, parsePublicKey } from '../../daemon/features/ssh-keys/openssh.ts';
 import { FAKE_TOKEN, FakeGithub } from './fake-github.ts';
+import { ghHost } from './gh-host.ts';
 import { tmpRunFolder } from './run-folder.ts';
 
 const folders: Array<ReturnType<typeof tmpRunFolder>> = [];
@@ -28,6 +29,7 @@ afterAll(() => {
   for (const folder of folders) folder.destroy();
 });
 
+const baseName = (program: string) => program.slice(program.lastIndexOf('/') + 1);
 const CLIENT = 'Ov23FAKECLIENTID';
 const ACCOUNT = 'gha_4242';
 const HAVE_TOOLS = ['ssh-agent', 'ssh-add', 'ssh-keygen'].every(
@@ -209,8 +211,11 @@ async function boot(
     fakes: { sealed, gate },
     uses: { projects: { list: async () => projects } },
     fetch: github.keyFetch,
-    spawn: tools.spawn,
-    start: tools.start,
+    // The supervisor runs the ssh programs by the absolute path the kernel found (`/usr/bin/ssh-add`); the tools here
+    // answer by program NAME, so the folder is dropped on the way in.
+    ...ghHost('/usr/bin', ['/usr/bin/ssh-agent', '/usr/bin/ssh-add']),
+    spawn: (program, args, options) => tools.spawn(baseName(program), args, options),
+    start: (program, args, options) => tools.start(baseName(program), args, options),
     config: { 'git-accounts.yaml': { github: { clientId: CLIENT } } },
   });
   const responses: string[] = [];

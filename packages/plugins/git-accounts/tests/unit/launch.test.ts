@@ -17,7 +17,7 @@ import {
 import { accountLaunchParts } from '../../daemon/features/launch/parts.ts';
 import { AgentSupervisor, type RunFolder } from '../../daemon/features/ssh-keys/agents.ts';
 import { SshKeyService } from '../../daemon/features/ssh-keys/service.ts';
-import { tmpRunFolder } from './run-folder.ts';
+import { bareNames, tmpRunFolder } from './run-folder.ts';
 
 const account = (id: number, login: string, extra: Partial<GitAccount> = {}): GitAccount => ({
   id: `gha_${String(id)}` as GitAccount['id'],
@@ -407,6 +407,7 @@ describe('a key that cannot be started says so in the pane, and runs with no ide
       folder,
       { after: () => () => undefined, sleep: () => new Promise<void>(() => undefined) },
       { warn: () => undefined },
+      bareNames,
     );
     const who = account(1, 'alice', { keys: made('generated') });
     const service = new SshKeyService(
@@ -491,7 +492,7 @@ describe('the key service hands a launch its kit, and brings the agents back at 
       },
     };
     const clock = { after: () => () => undefined, sleep: () => new Promise<void>(() => undefined) };
-    const agents = new AgentSupervisor(tools, folder, clock, { warn: () => undefined });
+    const agents = new AgentSupervisor(tools, folder, clock, { warn: () => undefined }, bareNames);
     const sealed = {
       get: async () => JSON.stringify({ privateKey: 'k', publicKey: PUBLIC, fingerprint: 'SHA256:x' }),
     } as unknown as SealedDocumentHandle;

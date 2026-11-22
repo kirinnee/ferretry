@@ -21,7 +21,6 @@ const surfaceWith = (drawn: string[]): ReferenceSurface => {
   return {
     ...f.surface,
     fences: {
-      remark: [],
       draw: ({ node }): ReactNode => {
         // The fence node holds one `<code>` element with one text child: the body the reader would read.
         const code = node?.children?.[0] as { children?: readonly { value?: string }[] } | undefined;

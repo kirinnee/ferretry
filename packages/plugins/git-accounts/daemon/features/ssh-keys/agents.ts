@@ -8,21 +8,23 @@
  *   still mean the same thing afterwards (a fresh temp folder per run left them pointing at nothing, and a push failed
  *   with "Host key verification failed"). The path is bounded to fit a unix socket; the agent makes each socket 0600.
  * - The private key reaches the agent on `ssh-add -`'s STDIN and nowhere else: not an argument, not an environment
- *   variable, not a file.
+ *   variable, not a file. And it reaches only the REAL `ssh-add`: both programs run by the absolute path the locator
+ *   found outside the state home, and with none found nothing starts.
  * - Agents start lazily, on the first ask for an account's socket (and at boot for the accounts that have a key, so a
  *   ferret that outlived a restart finds its socket again), and stop when the account is removed or the daemon stops.
  * - A socket name is the account's, never reused for another account. A stale file left by an agent that died unclean is
  *   removed before the new one binds; an agent that is still stopping is waited for first, because it removes its own
  *   socket path when it exits and would otherwise remove the new agent's.
  *
- * DECLARED GAP: an agent is a child of the daemon. After an UNCLEAN daemon death (SIGKILL, power loss) it is not stopped
- * by anyone; it keeps the key in its memory, behind a 0600 socket in a 0700 folder of this user, until it is killed or
- * the machine restarts. A clean stop kills every agent.
+ * - An agent is a child of the daemon, so a clean stop kills every one. After an UNCLEAN daemon death (SIGKILL) nobody
+ *   stopped them: the next boot finds this daemon's own leftovers (an `ssh-agent -D -a <this folder>/gha_<id>.sock` of its
+ *   own uid, `sweep.ts`) and ends them BEFORE the first new agent starts. A power loss takes them with the machine.
  */
 import type { ChildHandle, Clock, Log, SpawnPort } from '@ferretry/kernel/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { GIT_ACCOUNT_CODES, type GitAccountId, githubKnownHosts } from '../../../contract/index.ts';
+import { type LeftoverAgents, sweepLeftoverAgents } from './sweep.ts';
 
 /** The whole wait for an agent to listen: it holds the account's queue, so it is bounded in wall-clock time. */
 const READY_DEADLINE_MS = 5_000;
@@ -59,6 +61,7 @@ export class AgentSupervisor {
   readonly #stopping = new Map<GitAccountId, Promise<unknown>>();
   readonly #starting = new Map<GitAccountId, Promise<string | undefined>>();
   #knownHosts: Promise<string> | undefined;
+  #swept: Promise<unknown> | undefined;
   #stopped = false;
 
   constructor(
@@ -66,7 +69,33 @@ export class AgentSupervisor {
     private readonly folder: RunFolder,
     private readonly clock: Pick<Clock, 'sleep' | 'after'>,
     private readonly log: Pick<Log, 'warn'>,
+    /**
+     * The ABSOLUTE path of `ssh-agent` / `ssh-add` (`../../lib/program-locator.ts`: never a file in the state home, never a
+     * bare name): `ssh-add -` gets the account's PRIVATE KEY on stdin. It throws when there is no trusted one, and then
+     * nothing starts and no key is read.
+     */
+    private readonly programs: (name: 'ssh-agent' | 'ssh-add') => Promise<string>,
+    /** The host's process table, to end agents an earlier unclean death left behind. Absent: nothing is swept. */
+    private readonly leftovers?: LeftoverAgents,
   ) {}
+
+  /**
+   * Ends this daemon's own agents that an earlier run left behind (`sweep.ts`). Runs once, and every start waits for it,
+   * so it can never end an agent THIS run started. Never throws.
+   */
+  sweepLeftovers(): Promise<unknown> {
+    this.#swept ??=
+      this.leftovers === undefined
+        ? Promise.resolve()
+        : sweepLeftoverAgents({
+            leftovers: this.leftovers,
+            folder: this.folder.path,
+            remove: name => this.folder.remove(name),
+            clock: this.clock,
+            log: this.log,
+          });
+    return this.#swept;
+  }
 
   /** The socket of the account's agent, starting it and loading `privateKey` into it when it is not running. */
   socketFor(id: GitAccountId, privateKey: () => Promise<string | undefined>): Promise<string | undefined> {
@@ -139,6 +168,21 @@ export class AgentSupervisor {
 
   async #start(id: GitAccountId, privateKey: string): Promise<string> {
     await this.#ready();
+    // Which programs run is settled BEFORE anything starts: an `ssh-add` that cannot be trusted never sees the key.
+    let agentProgram: string;
+    let addProgram: string;
+    try {
+      agentProgram = await this.programs('ssh-agent');
+      addProgram = await this.programs('ssh-add');
+    } catch (error) {
+      this.log.warn('git-accounts: no trusted ssh-agent / ssh-add was found, so no account agent was started', {
+        account: id,
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
+      throw unavailable();
+    }
+    // An agent an earlier run left behind is ended first (it would run on, unreachable, once its socket is replaced).
+    await this.sweepLeftovers();
     // The last agent of this account is gone before the next binds: it removes its socket path as it exits.
     const leaving = this.#stopping.get(id);
     if (leaving !== undefined)
@@ -148,7 +192,7 @@ export class AgentSupervisor {
     await this.folder.remove(`${id}.sock`);
     if (this.#stopped) throw unavailable();
     // `-D`: stay in the foreground, so the daemon owns the process; `-a`: this socket and no other.
-    const child = this.spawn.start('ssh-agent', ['-D', '-a', socket], { sealed: true, ownGroup: true });
+    const child = this.spawn.start(agentProgram, ['-D', '-a', socket], { sealed: true, ownGroup: true });
     // Nothing the agent says is worth keeping, but it must be READ: a closed read end kills the agent with SIGPIPE when it
     // prints `SSH_AUTH_SOCK`, and a stream nobody reads can stall it.
     void child.stdout.pipeTo(new WritableStream()).catch(() => undefined);
@@ -157,11 +201,11 @@ export class AgentSupervisor {
       if (this.#running.get(id)?.child === child) this.#running.delete(id);
     });
     try {
-      await this.#untilReady(socket);
+      await this.#untilReady(socket, addProgram);
       // A daemon that stopped while this agent was coming up must not hand it the key.
       if (this.#stopped) throw unavailable();
       // The key goes in on stdin. `SSH_AUTH_SOCK` is a path, not a secret; nothing else rides along (`sealed`).
-      const added = await this.spawn.run('ssh-add', ['-'], {
+      const added = await this.spawn.run(addProgram, ['-'], {
         sealed: true,
         env: { SSH_AUTH_SOCK: socket },
         stdin: privateKey,
@@ -181,7 +225,7 @@ export class AgentSupervisor {
    * `ssh-add -l` answers 0 (keys) or 1 (none) once the agent listens, and 2 while it cannot be reached. The WHOLE wait,
    * probes included, ends at {@link READY_DEADLINE_MS}: this runs inside the account's start, which others queue behind.
    */
-  async #untilReady(socket: string): Promise<void> {
+  async #untilReady(socket: string, addProgram: string): Promise<void> {
     const over = new AbortController();
     const cancel = this.clock.after(milliseconds(READY_DEADLINE_MS), () => over.abort());
     const late = new Promise<undefined>(resolve => over.signal.addEventListener('abort', () => resolve(undefined)));
@@ -189,7 +233,7 @@ export class AgentSupervisor {
       while (!over.signal.aborted) {
         const probe = await Promise.race([
           this.spawn
-            .run('ssh-add', ['-l'], {
+            .run(addProgram, ['-l'], {
               sealed: true,
               env: { SSH_AUTH_SOCK: socket },
               timeout: milliseconds(READY_PROBE_MS),

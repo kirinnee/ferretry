@@ -20,10 +20,24 @@
  */
 
 import { createContext, type ReactNode, useContext } from 'react';
-import type { MarkdownProps } from '../prose/markdown.tsx';
+import type { MarkdownAstFenceNode, MarkdownProps } from '../prose/markdown.tsx';
+
+/**
+ * The door a surface lends for a fence kind it draws by itself (Conversation's `fy-render` blocks, drawn by its hypermedia
+ * reader, never by Markdown): `draw` returns what to put in place of the plain code, or `null` to leave it code. The
+ * object must be stable between renders.
+ */
+export interface ReferenceFences {
+  readonly draw: (fence: {
+    readonly node: MarkdownAstFenceNode | undefined;
+    readonly onTaskOpen: ((id: string, opener?: HTMLElement | null) => void) | undefined;
+  }) => ReactNode | null;
+}
 
 /** Everything a Markdown reader needs to prove and to open a reference. */
-export type ReferenceSurface = Omit<MarkdownProps, 'text' | 'className' | 'copyable'>;
+export type ReferenceSurface = Omit<MarkdownProps, 'text' | 'className' | 'copyable'> & {
+  readonly fences?: ReferenceFences;
+};
 
 /** Nothing proved and nothing openable: reference-shaped text stays prose. */
 const NO_SURFACE: ReferenceSurface = {};

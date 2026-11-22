@@ -593,7 +593,7 @@ const describeTable = (table: MdNode): string => {
 type ProseKind = 'text' | 'quote' | 'list';
 
 const describeFence = (node: MdNode): Pick<Block, 'kind' | 'text'> => {
-  // Exactly the renderer's test (`remarkFyRenderFences`): the language, and nothing after it.
+  // Exactly the renderer's test (Conversation's `fy-render-host.tsx`): the language, and nothing after it.
   if (node.lang === FY_RENDER_FENCE_LANGUAGE && (node.meta ?? '') === '') {
     const described = describeFyRender(node.value ?? '');
     return described === null

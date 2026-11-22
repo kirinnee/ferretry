@@ -51,7 +51,7 @@ export interface FyRenderHostData {
  * by a real closing delimiter. CommonMark decided both (`fence-boundaries.ts`: indent, containers, tabs, a closer
  * indented four columns, a fence a container or the end of the text cut off); nothing here looks at a line again.
  */
-const isClosedFyRender = (fence: CommonMarkFence | undefined): fence is CommonMarkFence =>
+export const isClosedFyRender = (fence: CommonMarkFence | undefined): fence is CommonMarkFence =>
   fence !== undefined && fence.info === FY_RENDER_BLOCK_NAME && fence.meta === '' && fence.close !== null;
 
 /**
@@ -103,10 +103,10 @@ export function durianAsIs(
 }
 
 /**
- * The fence node `remarkFyRenderFences` would have made for this body, which is the one shape the surface's fences read:
+ * The fence node the door (`render/fences.tsx`) reads for this body, which is the one shape the surface's fences read:
  * their `draw` is the host's door (it holds the board and the file reader), and only it may open it.
  */
-function synthesizedFence(body: string): MarkdownAstFenceNode {
+export function synthesizedFence(body: string): MarkdownAstFenceNode {
   return {
     children: [
       {
