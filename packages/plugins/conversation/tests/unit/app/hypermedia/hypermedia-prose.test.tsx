@@ -226,15 +226,12 @@ describe('author text for an LLM stays visible (decision C7)', () => {
     await unmount();
   });
 
-  it('keeps the alternate text of a part we do not draw (shown as its LLM text, never dropped)', async () => {
+  it('keeps the alternate text of a part we do not draw (a disclosure beside it, never dropped)', async () => {
     const { container, unmount } = await draw(
-      [
-        fence('chart', 'type: bar', 'x: [a, b]', 'series:', '  - name: s', '    data: [1, 2]'),
-        '',
-        llm('Bars: a=1, b=2.'),
-      ].join('\n'),
+      [fence('codewalk', '- file: src/api.ts', '  note: the entry'), '', llm('Walks the entry point.')].join('\n'),
     );
-    expect(container.textContent).toContain('Bars: a=1, b=2.');
+    expect(container.textContent).toContain('Walks the entry point.');
+    expect(disclosures(container).length).toBe(1);
     await unmount();
   });
 });

@@ -1,0 +1,63 @@
+/**
+ * Builds one scene as a SPLIT bundle (an entry and its lazy chunks), in a CHILD PROCESS into `--out <absolute-dir>`, and
+ * prints one JSON line: `{ "entry": "<file>", "chunks": ["<file>", …] }`, names relative to the directory.
+ *
+ * WHY NOT THE SHARED SCENE BUILDER. `@ferretry/app/testing/browser`'s builder makes ONE script, with every dynamic
+ * `import()` folded in, which is right for a picture and wrong for a claim about WHEN a module is fetched. The 3D stage of an
+ * animation is a lazy module (decision C4: "no 3D chunk request on a page without a 3D block"), and only a split build has
+ * a chunk to be requested or not. Bun's `splitting` makes one per `import()`.
+ *
+ * A child, never `Bun.build` in the test runner (`build-fy-render-integration-fixture.ts` says why).
+ * Usage: `bun hypermedia-split-build.ts --out <absolute-dir> --entry <absolute-scene>`.
+ */
+import { mkdir } from 'node:fs/promises';
+import { isAbsolute, relative, resolve } from 'node:path';
+const argument = (name: string): string => {
+  const at = Bun.argv.indexOf(name);
+  const value = at === -1 ? undefined : Bun.argv[at + 1];
+  if (value === undefined || !isAbsolute(value)) throw new Error(`❌ ${name} <absolute-path> is required`);
+  return value;
+};
+
+const out = argument('--out');
+const entry = argument('--entry');
+const conversation = resolve(import.meta.dir, '../../../..');
+
+/** Vite's asset queries (`x.wasm?url`) are the bundler's own: a scene runs no on-device engine, so each is an empty URL. */
+const viteAssetUrls: Bun.BunPlugin = {
+  name: 'vite-asset-urls',
+  setup(build) {
+    build.onResolve({ filter: /\?(worker&)?url$/u }, args => ({ path: args.path, namespace: 'vite-asset-url' }));
+    build.onLoad({ filter: /.*/u, namespace: 'vite-asset-url' }, () => ({
+      contents: "export default '';",
+      loader: 'js',
+    }));
+  },
+};
+
+/** `durian-hypermedia` arrives as source under the `bun` condition; a browser-target build does not read it (see `build-scene.ts`). */
+const durianSource: Bun.BunPlugin = {
+  name: 'durian-hypermedia-source',
+  setup(build) {
+    build.onResolve({ filter: /^durian-hypermedia(?:\/[a-z/-]+)?$/u }, args => ({
+      path: Bun.resolveSync(args.path, conversation),
+    }));
+  },
+};
+
+await mkdir(out, { recursive: true });
+const result = await Bun.build({
+  entrypoints: [entry],
+  outdir: out,
+  target: 'browser',
+  format: 'esm',
+  splitting: true,
+  throw: false,
+  plugins: [viteAssetUrls, durianSource],
+  naming: { entry: 'scene.[ext]', chunk: 'chunk-[hash].js', asset: '[name]-[hash].[ext]' },
+  metafile: true,
+} as Bun.BuildConfig);
+if (!result.success) throw new Error(`❌ the split scene did not build:\n${result.logs.join('\n')}`);
+const files = result.outputs.map(output => relative(out, output.path)).filter(name => name.endsWith('.js'));
+const inputs = Object.keys((result as unknown as { metafile: { inputs: Record<string, unknown> } }).metafile.inputs);
+console.log(JSON.stringify({ entry: 'scene.js', chunks: files.filter(name => name !== 'scene.js'), inputs }));
