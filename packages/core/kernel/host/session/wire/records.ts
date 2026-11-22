@@ -540,9 +540,10 @@ export function sessionApiRequest(
   /** The carrying session's transcript hash, which a step-up or a key rotation is bound to. */
   transcriptHash?: Uint8Array,
   /**
-   * Aborted when the session carrying this request ends (the peer left, the lease ended, the session was closed): the
-   * request's own lifecycle, which a handler that queues or runs long work reads (`ApiRequest.signal`). A session has no
-   * per-request cancel record, so the session's end is the only way a carried caller can leave.
+   * Aborted when the session carrying this request ends (the peer left, the lease ended, the session was closed) or when
+   * this request settles (`CarriedRequests.settled`): the request's own lifecycle, which a handler that queues or runs
+   * long work reads (`ApiRequest.signal`). A session has no per-request cancel record, so the session's end is the only
+   * way a carried caller can leave; the settle ends only this request, never the session.
    */
   signal?: AbortSignal,
 ): ApiRequest {
