@@ -11,8 +11,8 @@ import should from 'should';
  * Only the hypermedia reader (`HypermediaProse`) draws a `fy-render` block; the shell's
  * Markdown is inert on every surface. That is a structural property, not a
  * documented rule — but it is only worth anything while the number of places
- * mounting the reader stays at two (the transcript, and the view the agenda is
- * given). A third is how "conversation-only" becomes "wherever somebody found it
+ * mounting the reader stays at three (the transcript, the per-ferret Queue panel,
+ * and the view the agenda is given). A third is how "conversation-only" becomes "wherever somebody found it
  * convenient", and it would arrive in a diff that looks like it is about
  * something else entirely. So the count is asserted here rather than trusted,
  * against the real source tree.
@@ -48,15 +48,21 @@ const mentioning = (token: string): readonly string[] => {
 };
 
 describe('fy-render opt-in', () => {
-  test('should be drawn by exactly two <HypermediaProse> call sites: the transcript and the view the agenda is given', () => {
+  test('should be drawn by exactly three <HypermediaProse> call sites: the transcript, the per-ferret Queue panel and the view the agenda is given', () => {
     // Act — a JSX mount of the hypermedia reader, the only reader that draws a `fy-render` block.
     const files = productionSources().filter(path =>
       /<HypermediaProse(?![A-Za-z0-9_$])/u.test(readFileSync(join(packageDir, path), 'utf8')),
     );
 
-    // Assert — the transcript row, and `ProvidedProse`, which Conversation hands the shell for the agenda. A third
+    // Assert — the transcript row; `ProvidedProse`, which Conversation hands the shell for the agenda; and the Queue
+    // panel's message body (r12 H7 fix: the per-ferret panel inherits the chat surface and drew a queued block before
+    // H7, so it keeps drawing it; the standalone All-queues screen lends no fence door, so it draws code). A fourth
     // entry is a new execution surface and needs the threat model re-read, not a test update.
-    should(files).eql([`${CONVERSATION}/chat/transcript-row.tsx`, `${CONVERSATION}/hypermedia/hypermedia-prose.tsx`]);
+    should(files).eql([
+      `${CONVERSATION}/chat/transcript-row.tsx`,
+      `${CONVERSATION}/hypermedia/hypermedia-prose.tsx`,
+      `${CONVERSATION}/queue/queue-page.tsx`,
+    ]);
   });
 
   test('should leave the shell Markdown with no way to draw an illustration', () => {

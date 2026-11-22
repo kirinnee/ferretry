@@ -6,20 +6,14 @@
 
 import type { ReactNode } from 'react';
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import {
-  absoluteTime,
-  clockOfInstant,
-  Markdown,
-  useOptionalRouter,
-  useReferenceSurface,
-  useScreenHref,
-} from '@ferretry/app';
+import { absoluteTime, clockOfInstant, useOptionalRouter, useScreenHref } from '@ferretry/app';
 import { Loading } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import { useConversationClient, useConversationDaemon } from '../client.ts';
 import type { SendOutbox } from '../composer/send-outbox.ts';
 import { useSendOutbox } from '../composer/send-outbox-wiring.ts';
+import { HypermediaProse } from '../hypermedia/hypermedia-prose.tsx';
 import {
   DUE_NOW_COPY,
   ferretRows,
@@ -95,7 +89,6 @@ export interface QueueRowHandlers {
 function QueueBody({ text }: { readonly text: string }) {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
-  const surface = useReferenceSurface();
   const clamped = needsClamp(text);
   return (
     <div className="fy-queue-message">
@@ -105,7 +98,7 @@ function QueueBody({ text }: { readonly text: string }) {
         data-queue-clamped={clamped && !open ? '' : undefined}
         id={bodyId}
       >
-        <Markdown text={text} {...surface} />
+        <HypermediaProse text={text} />
       </div>
       {clamped ? (
         <button

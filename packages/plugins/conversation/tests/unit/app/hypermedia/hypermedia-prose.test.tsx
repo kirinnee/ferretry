@@ -380,6 +380,21 @@ describe('a streaming message', () => {
   });
 });
 
+describe('raw HTML in prose', () => {
+  // Replaces the `Markdown` test of the same name (r12 H7 deleted the path it covered): the reader has no `rehype-raw`,
+  // and adding one would execute a literal `<script>` typed into any chat message.
+  it('stays inert: no script, no element, only the text', async () => {
+    const { container, unmount } = await draw(
+      '<script>globalThis.pwned = true</script><b>text</b> and <img src=x onerror=1>',
+    );
+    expect(container.querySelectorAll('script').length).toBe(0);
+    expect(container.querySelectorAll('b').length).toBe(0);
+    expect(container.querySelectorAll('img').length).toBe(0);
+    expect((globalThis as { pwned?: boolean }).pwned).toBeUndefined();
+    await unmount();
+  });
+});
+
 describe('a message over the size cap', () => {
   it('shows the text itself, not an error', async () => {
     const big = `${'word '.repeat(70_000)}END`;
