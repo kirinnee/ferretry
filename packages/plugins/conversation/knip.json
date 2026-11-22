@@ -2,6 +2,7 @@
   "entry": [
     "tests/**/*.test.{ts,tsx}",
     "tests/**/fixtures/**/*.{ts,tsx}",
+    "tests/safari/durian-page.ts",
     "app/surfaces.tsx",
     "daemon/features/*.feature.ts",
     "manifest/actions/*.actions.ts"

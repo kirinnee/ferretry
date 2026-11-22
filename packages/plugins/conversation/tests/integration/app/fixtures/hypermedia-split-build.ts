@@ -8,7 +8,11 @@
  * a chunk to be requested or not. Bun's `splitting` makes one per `import()`.
  *
  * A child, never `Bun.build` in the test runner (`build-fy-render-integration-fixture.ts` says why).
- * Usage: `bun hypermedia-split-build.ts --out <absolute-dir> --entry <absolute-scene>`.
+ * `--first <absolute-module>` (optional) is built ALONE, with no splitting, as `first.js`, for a page to load as a module script
+ * BEFORE `scene.js`. Bun's splitting runs the code of shared chunks before the entry's own body, so a module imported first by
+ * the scene (the app's `zod-jitless`, which must run before any schema is built) would run after the schemas of every shared
+ * chunk; as its own script it runs first, the way the app's real build orders it.
+ * Usage: `bun hypermedia-split-build.ts --out <absolute-dir> --entry <absolute-scene> [--first <absolute-module>]`.
  */
 import { mkdir } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
@@ -58,6 +62,17 @@ const result = await Bun.build({
   metafile: true,
 } as Bun.BuildConfig);
 if (!result.success) throw new Error(`❌ the split scene did not build:\n${result.logs.join('\n')}`);
+if (Bun.argv.includes('--first')) {
+  const first = await Bun.build({
+    entrypoints: [argument('--first')],
+    outdir: out,
+    target: 'browser',
+    format: 'esm',
+    throw: false,
+    naming: { entry: 'first.[ext]' },
+  });
+  if (!first.success) throw new Error(`❌ the first script did not build:\n${first.logs.join('\n')}`);
+}
 const files = result.outputs.map(output => relative(out, output.path)).filter(name => name.endsWith('.js'));
 const inputs = Object.keys((result as unknown as { metafile: { inputs: Record<string, unknown> } }).metafile.inputs);
 console.log(JSON.stringify({ entry: 'scene.js', chunks: files.filter(name => name !== 'scene.js'), inputs }));

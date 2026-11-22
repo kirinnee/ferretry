@@ -105,6 +105,9 @@ beforeAll(async () => {
     directory,
     '--entry',
     resolve(packageRoot, 'fixtures/hypermedia-parts-scene.tsx'),
+    // The app's own start-up module, run before the scene's first schema (see the split build's `--first`).
+    '--first',
+    resolve(packageRoot, '../../../../../app/src/security/zod-jitless.ts'),
   ]);
   bundleInputs = built.inputs;
   for (const chunk of built.chunks)
@@ -124,7 +127,7 @@ beforeAll(async () => {
         new Response(body, { headers: { 'content-security-policy': policy, 'content-type': type } });
       if (path === '/') {
         return secured(
-          `<!doctype html><html lang="en" data-theme="studio-light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/app.css"></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/scene.js"></script></body></html>`,
+          `<!doctype html><html lang="en" data-theme="studio-light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/app.css"></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/first.js"></script><script type="module" src="/scene.js"></script></body></html>`,
           'text/html; charset=utf-8',
         );
       }
@@ -167,20 +170,9 @@ afterAll(async () => {
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
-/**
- * THE ONE KNOWN, NOT-OURS VIOLATION, named exactly so nothing else can hide behind it. zod 4 decides whether it may compile
- * a schema with `new Function("")` (`allowsEval` in its core, behind a cache), and under `require-trusted-types-for 'script'`
- * that probe throws, is caught, and is reported once per page as a Trusted Types violation of `Function`. It is in the app
- * today with no Durian or hypermedia code on the page (the app never sets zod's `jitless`); fixing it is a one-line zod
- * setting at the app's start, outside this unit. It is the exact sink (`Function`, an empty body) and at most once.
- */
-const ZOD_EVAL_PROBE = /^require-trusted-types-for trusted-types-sink \S+ Function\|\(\n\) \{\n\n\}\)$/u;
-
 interface Report {
-  /** Every violation but the zod probe above. */
+  /** Every violation, none tolerated: zod's `new Function` probe is off (`@ferretry/app/zod-jitless`, r12 H8). */
   readonly csp: string[];
-  /** How many times the zod probe was reported (once per page, at most). */
-  readonly evalProbes: number;
   readonly trustedTypes: string[];
   readonly errors: string[];
   readonly foreign: string[];
@@ -257,11 +249,9 @@ const open = async (
   await until(page, 'window.fyPartsReady === true', 20_000);
   const collected = async (): Promise<Report> => {
     const seen = await page.evaluate(() => (window as unknown as { __h4: { csp: string[]; errors: string[] } }).__h4);
-    const violations = seen.csp.filter(entry => !ZOD_EVAL_PROBE.test(entry));
     return {
-      csp: violations,
-      evalProbes: seen.csp.length - violations.length,
-      trustedTypes: violations.filter(
+      csp: seen.csp,
+      trustedTypes: seen.csp.filter(
         entry => entry.startsWith('require-trusted-types-for') || entry.startsWith('trusted-types'),
       ),
       errors: [...seen.errors, ...errors],
@@ -330,7 +320,6 @@ const expectClean = async (visit: Visit, label: string): Promise<void> => {
   const danger = await visit.page.evaluate(DANGER);
   expect({ label, csp: report.csp }).toEqual({ label, csp: [] });
   expect({ label, trustedTypes: report.trustedTypes }).toEqual({ label, trustedTypes: [] });
-  expect({ label, evalProbes: report.evalProbes <= 1 }).toEqual({ label, evalProbes: true });
   expect({ label, errors: report.errors }).toEqual({ label, errors: [] });
   expect({ label, foreign: report.foreign }).toEqual({ label, foreign: [] });
   expect({ label, danger: danger as string[] }).toEqual({ label, danger: [] });

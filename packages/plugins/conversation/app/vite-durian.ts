@@ -30,6 +30,15 @@ import { fileURLToPath } from 'node:url';
  * THE PIN IS A DECISION, NOT A RANGE (owner choice C8): a newer Durian comes in by a PR that reads its CHANGELOG and
  * re-runs the hostile and format fixtures. `DURIAN_PIN` is the record, and the build refuses an installed version
  * that is not the pinned tag's.
+ *
+ * THE PIN-BUMP CHECKLIST (every item is in the PR that moves `DURIAN_PIN`, `package.json` and `bun.lock` together):
+ *   1. read the new tag's CHANGELOG; any API change in the slots and blocks `app/hypermedia/` uses is handled in the same PR;
+ *   2. re-run `hypermedia-csp.visual.test.ts` (every format and hostile fixture: 0 violations, 0 Trusted Types errors);
+ *   3. READ `scripts/build-css.ts` IN THE NEW TAG: this build runs it, as code, in a child process on every Vite build
+ *      (`runStyleBuild`), with `PATH` and no other environment. A new line there that reads the environment, the network or
+ *      anything outside the package is a supply-chain change: the PR names it, and the reviewer reads it as code that runs
+ *      on every developer machine and CI runner;
+ *   4. re-measure `tests/perf/hypermedia-size.test.ts` and say what moved.
  */
 
 /** The reviewed release: tag `v0.5.1` (signed), the commit it points at, and the tag object. MIT. */
@@ -76,16 +85,31 @@ function insideDurian(importer: string | undefined, root: string): boolean {
   return importer !== undefined && importer.startsWith(root + sep);
 }
 
-let styles: string | undefined;
+/**
+ * What the stylesheet child may see of the build's environment: `PATH` (to find `bun`) and nothing else. The child runs a
+ * script that arrives from a git dependency, in every Vite build, in a process that inherits whatever the build was started
+ * with (a CI job's tokens, a developer's credentials); it needs none of it, so it is handed none (r12 H8, Opus review of H1).
+ */
+export const styleBuildEnvironment = (env: NodeJS.ProcessEnv): Record<string, string> =>
+  env.PATH === undefined ? {} : { PATH: env.PATH };
+
 /**
  * The stylesheet, built by the package's own script (`prepare` would write it to `dist/styles.css`). The script is
  * TypeScript inside `node_modules`, which Node will not import and Bun will, so it runs in a `bun` child that prints
- * the CSS; nothing is written into the package.
+ * the CSS; nothing is written into the package. The child gets {@link styleBuildEnvironment}, not the build's environment.
  */
-function buildStyles(root: string): string {
-  if (styles !== undefined) return styles;
+export function runStyleBuild(root: string, env: NodeJS.ProcessEnv = process.env): string {
   const script = `import { buildCss } from ${JSON.stringify(join(root, 'scripts/build-css.ts'))}; process.stdout.write(buildCss());`;
-  styles = execFileSync('bun', ['--eval', script], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  return execFileSync('bun', ['--eval', script], {
+    encoding: 'utf8',
+    env: styleBuildEnvironment(env),
+    maxBuffer: 16 * 1024 * 1024,
+  });
+}
+
+let styles: string | undefined;
+function buildStyles(root: string): string {
+  styles ??= runStyleBuild(root);
   return styles;
 }
 
