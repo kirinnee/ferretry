@@ -239,8 +239,8 @@ describe('the working-tree reads', () => {
   /** A Git stand-in that answers the viewer's commands for a repository with no commits: a.txt and src/b.txt are untracked. */
   const repoGit = async (_program: string, args: readonly string[]): Promise<Spawned> => {
     if (args.includes('--is-inside-work-tree')) return done(0, `true\n${REPO_ROOT}\n\n`);
-    // The file list first reads the owner's global exclude file (&F6061 U2); exit 1 is "none set".
-    if (args.includes('config')) return done(1);
+    // The file list first establishes the owner's global config is readable (&F6061 U2); exit 0 is "readable".
+    if (args.includes('config')) return done(0);
     if (args.includes('--verify')) return done(1);
     if (args.includes('--error-unmatch')) return done(1);
     if (args.includes('ls-files')) return done(0, `a.txt${NUL}src/b.txt${NUL}`);

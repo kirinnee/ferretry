@@ -3,10 +3,11 @@ import should from 'should';
 import {
   checkTreeIndexBounds,
   gitEnvironment,
-  globalExcludesArguments,
+  establishGlobalConfig,
   indexPinnedTree,
   MAX_INDEX_FILES,
   parseFileList,
+  TreeRootDeniedError,
   type TreeGitExecution,
   type TreeGitInvocation,
   type TreeGitRunner,
@@ -51,7 +52,7 @@ const scripted = (answer: (invocation: TreeGitInvocation) => TreeGitExecution) =
 const isConfigRead = (invocation: TreeGitInvocation): boolean => invocation.args[0] === 'config';
 
 describe('gitEnvironment', () => {
-  it('should close the global config unless the command asks to read one value from it', () => {
+  it('should close the global config unless the command asks to see the owner’s exclusions', () => {
     // Act
     const closed = gitEnvironment({}, true);
     const open = gitEnvironment({}, true, true);
@@ -78,59 +79,79 @@ describe('gitEnvironment', () => {
   });
 });
 
-describe('globalExcludesArguments', () => {
-  it('should hand back one -c core.excludesFile for the path Git expanded', async () => {
+describe('establishGlobalConfig', () => {
+  const failureOf = async (execution: TreeGitExecution): Promise<unknown> => {
+    const { runner } = scripted(() => execution);
+    return establishGlobalConfig(runner, '/cwd', undefined).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+  };
+
+  it('should ask Git to read the global config and everything it includes, and run nothing from it', async () => {
     // Arrange
-    const { runner, calls } = scripted(() => executed({ stdout: encode('/home/owner/.gitignore_global\n') }));
+    const { runner, calls } = scripted(() => executed());
 
     // Act
-    const args = await globalExcludesArguments(runner, '/cwd', undefined);
+    await establishGlobalConfig(runner, '/cwd', undefined);
 
     // Assert
-    should(args).eql(['-c', 'core.excludesFile=/home/owner/.gitignore_global']);
-    should(calls[0]?.args).eql(['config', '--global', '--type=path', '--get', 'core.excludesFile']);
+    should(calls[0]?.args).eql(['config', '--global', '--includes', '--list', '-z']);
     should(calls[0]?.readsGlobalConfig).be.true();
   });
 
-  it('should add nothing when the owner set none (exit 1)', async () => {
-    // Arrange
-    const { runner } = scripted(() => executed({ exitCode: 1 }));
-
-    // Act / Assert
-    should(await globalExcludesArguments(runner, '/cwd', undefined)).eql([]);
+  it('should accept a global config that is absent: no file, no rules', async () => {
+    // Arrange / Act / Assert
+    should(
+      await failureOf(
+        executed({
+          exitCode: 128,
+          stderr: "fatal: unable to read config file '/h/.gitconfig': No such file or directory\n",
+        }),
+      ),
+    ).be.undefined();
   });
 
-  it('should throw when Git cannot read the global config, rather than list what the owner told it to hide', async () => {
+  it('should throw when the global config is unreadable (permission denied), rather than list what it hides', async () => {
     // Arrange
-    const { runner } = scripted(() => executed({ exitCode: 128, stderr: 'fatal: bad config line 3' }));
+    const execution = executed({
+      exitCode: 128,
+      stderr: "warning: unable to access '/h/.gitconfig': Permission denied\nfatal: unable to read config file\n",
+    });
 
     // Act
-    const failure = await globalExcludesArguments(runner, '/cwd', undefined).catch((error: unknown) => error);
+    const failure = await failureOf(execution);
 
     // Assert
     should(failure).be.instanceof(Error);
-    should((failure as Error).message).match(/git config failed: fatal: bad config line 3/);
+    should((failure as Error).message).match(/^git config failed:/);
   });
 
-  it('should throw on a timeout', async () => {
-    // Arrange
-    const { runner } = scripted(() => executed({ exitCode: -1, timedOut: true }));
+  it('should throw for a malformed config, an unreadable include, and a warning on a zero exit', async () => {
+    should(
+      await failureOf(executed({ exitCode: 128, stderr: 'fatal: bad config line 3 in file /h/.gitconfig' })),
+    ).be.instanceof(Error);
+    should(
+      await failureOf(executed({ exitCode: 128, stderr: "fatal: unable to access '/h/inc': Permission denied" })),
+    ).be.instanceof(Error);
+    should(
+      await failureOf(executed({ exitCode: 0, stderr: "warning: unable to access '/h/.config/git/config'" })),
+    ).be.instanceof(Error);
+  });
 
-    // Act
-    const failure = await globalExcludesArguments(runner, '/cwd', 5).catch((error: unknown) => error);
-
-    // Assert
-    should((failure as Error).message).eql('git config timed out');
+  it('should throw on a timeout and on an answer cut by the byte cap', async () => {
+    should(((await failureOf(executed({ exitCode: -1, timedOut: true }))) as Error).message).eql(
+      'git config timed out',
+    );
+    should(await failureOf(executed({ stdoutTruncated: true }))).be.instanceof(Error);
   });
 });
 
 describe('treeGit.listFiles', () => {
-  it('should put the excludes before the subcommand and ask for the list through the same runner', async () => {
+  it('should let Git resolve the owner’s exclusions: no -c override, the owner’s global config readable', async () => {
     // Arrange
     const { runner, calls } = scripted(invocation =>
-      isConfigRead(invocation)
-        ? executed({ stdout: encode('/x/ignore\n') })
-        : executed({ stdout: encode(`a.ts${NUL}b.ts${NUL}a.ts${NUL}`) }),
+      isConfigRead(invocation) ? executed() : executed({ stdout: encode(`a.ts${NUL}b.ts${NUL}a.ts${NUL}`) }),
     );
 
     // Act
@@ -138,17 +159,45 @@ describe('treeGit.listFiles', () => {
 
     // Assert
     should(listed).eql({ paths: ['a.ts', 'b.ts'], truncated: false });
-    should(calls[1]?.args).eql([
-      '-c',
-      'core.excludesFile=/x/ignore',
-      'ls-files',
-      '-z',
-      '--cached',
-      '--others',
-      '--exclude-standard',
-    ]);
+    should(calls[1]?.args).eql(['ls-files', '-z', '--cached', '--others', '--exclude-standard']);
+    should(calls[1]?.args).not.containEql('-c');
     should(calls[1]?.maxStdoutBytes).eql(1024);
-    should(calls[1]?.readsGlobalConfig).be.undefined();
+    should(calls[1]?.readsGlobalConfig).be.true();
+  });
+
+  it('should throw when Git warns it could not read an ignore file, even on a zero exit', async () => {
+    // Arrange
+    const { runner } = scripted(invocation =>
+      isConfigRead(invocation)
+        ? executed()
+        : executed({
+            stdout: encode(`a.ts${NUL}`),
+            stderr: "warning: unable to access '/h/.config/git/ignore': Permission denied",
+          }),
+    );
+
+    // Act
+    const failure = await treeGit(runner)
+      .listFiles('/cwd', 1024)
+      .catch((error: unknown) => error);
+
+    // Assert
+    should(failure).be.instanceof(Error);
+    should((failure as Error).message).match(/^git ls-files failed:/);
+  });
+
+  it('should throw when the global config cannot be established, and never ask for the list', async () => {
+    // Arrange
+    const { runner, calls } = scripted(() => executed({ exitCode: 128, stderr: 'fatal: bad config line 1' }));
+
+    // Act
+    const failure = await treeGit(runner)
+      .listFiles('/cwd', 1024)
+      .catch((error: unknown) => error);
+
+    // Assert
+    should(failure).be.instanceof(Error);
+    should(calls.map(call => call.args[0])).eql(['config']);
   });
 
   it('should answer an expired budget with an incomplete empty list and spawn nothing', async () => {
@@ -173,7 +222,7 @@ describe('treeGit.listFiles', () => {
       },
       remainingMs: () => 100,
     };
-    const { runner, calls } = scripted(() => executed({ exitCode: 1 }));
+    const { runner, calls } = scripted(() => executed());
 
     // Act
     const listed = await treeGit(runner).listFiles('/cwd', 1024, budget);
@@ -185,7 +234,7 @@ describe('treeGit.listFiles', () => {
 
   it('should hand the runner what is left of the budget as the timeout, rounded up', async () => {
     // Arrange
-    const { runner, calls } = scripted(invocation => executed({ exitCode: isConfigRead(invocation) ? 1 : 0 }));
+    const { runner, calls } = scripted(() => executed());
 
     // Act
     await treeGit(runner).listFiles('/cwd', 1024, { expired: () => false, remainingMs: () => 12.2 });
@@ -198,7 +247,7 @@ describe('treeGit.listFiles', () => {
     // Arrange
     class Mine extends Error {}
     const { runner } = scripted(invocation =>
-      isConfigRead(invocation) ? executed({ exitCode: 1 }) : executed({ exitCode: 128, stderr: 'boom' }),
+      isConfigRead(invocation) ? executed() : executed({ exitCode: 128, stderr: 'boom' }),
     );
 
     // Act
@@ -276,6 +325,98 @@ describe('indexPinnedTree with another caller’s secret rule', () => {
     should(index.skipped).eql([{ reason: 'denied', count: 1 }]);
     should(index.coverage).eql('complete');
     should(index.root).eql(root.rootReal);
+  });
+
+  it('should withhold the shared secret names even from a caller whose own rule withholds nothing', async () => {
+    // Arrange: a permissive caller, both for a Git tree and for a walked one.
+    const names = ['a.ts', '.env', 'deploy/prod.pem', '.ssh/known_hosts', 'id_work.key'];
+    const pinner = new FakeRootPinner({ tree: treeOf(...names.map(name => [name, textFile('x')] as const)) });
+    const root = await pinner.pin('/ignored');
+
+    // Act
+    const index = await indexPinnedTree(root, {
+      git: gitListing(names),
+      policy: policy(() => false),
+      nowMs: () => 0,
+    });
+
+    // Assert
+    should(index.files.map(file => file.path)).eql(['a.ts']);
+    should(index.skipped).eql([{ reason: 'denied', count: 4 }]);
+  });
+
+  it('should withhold the shared secret names from a walked tree too', async () => {
+    // Arrange
+    const pinner = new FakeRootPinner({
+      tree: treeOf([
+        '',
+        {
+          type: 'dir',
+          entries: [
+            { name: 'a.ts', type: 'file' },
+            { name: '.env', type: 'file' },
+            { name: '.ssh', type: 'dir' },
+          ],
+        },
+      ]),
+    });
+    const root = await pinner.pin('/ignored');
+
+    // Act
+    const index = await indexPinnedTree(root, {
+      git: { isInsideWorkTree: async () => false, listFiles: async () => ({ paths: [], truncated: false }) },
+      policy: policy(() => false),
+      nowMs: () => 0,
+    });
+
+    // Assert
+    should(index.files.map(file => file.path)).eql(['a.ts']);
+    should(index.skipped).eql([{ reason: 'denied', count: 2 }]);
+  });
+
+  it('should refuse a root that is itself a key store, whatever the caller’s rule, and ask Git nothing', async () => {
+    // Arrange: `known_hosts` is innocent when judged relative to its folder; `.env` is a folder named like a secret file.
+    for (const rootReal of ['/home/owner/.ssh', '/home/owner/.gnupg', '/srv/app/.env', '/home/owner/.ssh/deep/er']) {
+      const pinner = new FakeRootPinner({ rootReal, tree: treeOf(['known_hosts', textFile('x')]) });
+      const root = await pinner.pin('/ignored');
+      const asked: string[] = [];
+
+      // Act
+      const failure = await indexPinnedTree(root, {
+        git: {
+          isInsideWorkTree: async () => {
+            asked.push('rev-parse');
+            return true;
+          },
+          listFiles: async () => {
+            asked.push('ls-files');
+            return { paths: ['known_hosts'], truncated: false };
+          },
+        },
+        policy: policy(() => false),
+        nowMs: () => 0,
+      }).catch((error: unknown) => error);
+
+      // Assert
+      should(failure).be.instanceof(TreeRootDeniedError);
+      should(asked).eql([]);
+    }
+  });
+
+  it('should still serve an ordinary root', async () => {
+    // Arrange
+    const pinner = new FakeRootPinner({ rootReal: '/home/owner/project', tree: treeOf(['a.ts', textFile('x')]) });
+    const root = await pinner.pin('/ignored');
+
+    // Act
+    const index = await indexPinnedTree(root, {
+      git: gitListing(['a.ts']),
+      policy: policy(() => false),
+      nowMs: () => 0,
+    });
+
+    // Assert
+    should(index.files.map(file => file.path)).eql(['a.ts']);
   });
 
   it('should hand Git the held directory, never a name', async () => {

@@ -41,10 +41,11 @@ export const HARDENED_GIT_ARGUMENTS: readonly string[] = [
 /**
  * The environment of a Git child: the caller's own, minus every `GIT_*` name, with the configuration closed.
  *
- * `GIT_CONFIG_GLOBAL` is `/dev/null` so a hostile global config can run nothing, which is also why a custom
- * `core.excludesFile` is read separately and on purpose ({@link globalExcludesArguments}). `readsGlobalConfig` is the
- * one question that may see the owner's global config: `git config --global --get core.excludesFile`, which reads a
- * value and runs nothing.
+ * `GIT_CONFIG_GLOBAL` is `/dev/null` so a hostile global config can run nothing. `readsGlobalConfig` is for the questions
+ * that must see the owner's exclusions (the file list and the read that proves the config readable): Git then reads the
+ * global config itself. That stays safe because every key that can run a program (`core.fsmonitor`, `core.hooksPath`,
+ * `core.pager`, `diff.external`) is pinned by `-c` ({@link HARDENED_GIT_ARGUMENTS}), which outranks any config file, and
+ * a repository's own config — the more hostile of the two — is read regardless.
  */
 export function gitEnvironment(
   inherited: Readonly<Record<string, string | undefined>>,
@@ -162,32 +163,43 @@ export function parseFileList(stdout: string, truncated: boolean): readonly stri
 }
 
 /**
- * The `-c` arguments that give `ls-files` the owner's global exclude file, or none.
+ * Git's own words for "I could not read a file that holds a rule": a config, an include, an ignore or exclude file.
  *
- * Git finds `~/.config/git/ignore` by itself (it needs only `HOME`, which the kernel's child has). A `core.excludesFile`
- * set in `~/.gitconfig` is dropped by the closed environment, so it is read here with `git config --global --type=path
- * --get`, which expands `~` as Git does, and handed back as one `-c core.excludesFile=<path>`. Exit 1 means "not set".
- * Any other failure THROWS: a global rule that cannot be established must not turn into a list that shows what the owner
- * told Git to hide.
+ * Git reports these as a WARNING and carries on, so an `ls-files` that exits 0 can still have applied none of the rules
+ * in the file it could not read. That is a list showing exactly what the owner told Git to hide, so it is a failure.
  */
-export async function globalExcludesArguments(
+const UNREADABLE_RULES = /unable to access|permission denied|could not open|cannot open|bad config|fatal:/i;
+
+/**
+ * Establishes that the owner's global configuration — and everything it includes — can be read, or THROWS.
+ *
+ * Git itself resolves `core.excludesFile` (and its default `~/.config/git/ignore`): a repository's own setting beats the
+ * global one, `include.path` is honoured, `~` is expanded. Nothing here re-implements that, because a second
+ * implementation is a second place for precedence to be wrong. What Git does NOT do is fail when it cannot read a file:
+ * an unreadable `~/.gitconfig` is skipped without a word. So the one thing asked here is whether it was read.
+ * `git config --global --includes --list` exits 0 when it was, 128 with only "No such file or directory" when there is
+ * none (no file, no rules: not an error), and anything else — a permission error, a malformed line, an unreadable
+ * include — means a rule may exist that cannot be applied.
+ */
+export async function establishGlobalConfig(
   runner: TreeGitRunner,
   cwd: TreeGitDirectory,
   timeoutMs: number | undefined,
   failure: TreeGitFailure = defaultFailure,
-): Promise<readonly string[]> {
+): Promise<void> {
   const execution = await runner.run({
-    args: ['config', '--global', '--type=path', '--get', 'core.excludesFile'],
+    args: ['config', '--global', '--includes', '--list', '-z'],
     cwd,
     readsGlobalConfig: true,
-    maxStdoutBytes: 8 * 1024,
+    maxStdoutBytes: 1024 * 1024,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   });
-  if (execution.timedOut) throw failure('git config', execution);
-  if (execution.exitCode === 1) return [];
-  if (execution.exitCode !== 0 || execution.stdoutTruncated) throw failure('git config', execution);
-  const value = new TextDecoder().decode(execution.stdout).replace(/\n$/, '');
-  return value === '' ? [] : ['-c', `core.excludesFile=${value}`];
+  if (execution.timedOut || execution.stdoutTruncated) throw failure('git config', execution);
+  const lines = execution.stderr.split('\n').filter(line => line.trim() !== '');
+  const clean = execution.exitCode === 0 && lines.length === 0;
+  const absent =
+    execution.exitCode === 128 && lines.length > 0 && lines.every(line => line.includes('No such file or directory'));
+  if (!clean && !absent) throw failure('git config', execution);
 }
 
 /** What is left of a budget, as the runner's own timeout; nothing without one. Rounded up: zero would mean "kill now". */
@@ -198,8 +210,8 @@ function spawnBound(budget: TreeGitBudget | undefined): number | undefined {
 /**
  * The Git questions a file index asks, over a runner.
  *
- * Stateless: the global exclude file is read on every list (one cheap `git config`), so an edit to `~/.gitconfig` is
- * seen by the next index rather than after a restart.
+ * Stateless: Git reads the owner's config on every list, so an edit to `~/.gitconfig` is seen by the next index rather
+ * than after a restart.
  */
 export function treeGit(runner: TreeGitRunner, failure: TreeGitFailure = defaultFailure): TreeGit {
   return {
@@ -222,17 +234,21 @@ export function treeGit(runner: TreeGitRunner, failure: TreeGitFailure = default
     async listFiles(cwd, maxBytes, budget) {
       // No command was asked, so the empty list is explicitly incomplete rather than confidently empty.
       if (budget?.expired() === true) return { paths: [], truncated: true };
-      const excludes = await globalExcludesArguments(runner, cwd, spawnBound(budget), failure);
+      await establishGlobalConfig(runner, cwd, spawnBound(budget), failure);
       // The budget is asked again: the config read took some of it, and an expired one starts no second child.
       if (budget?.expired() === true) return { paths: [], truncated: true };
       const timeoutMs = spawnBound(budget);
+      // Git resolves the owner's exclusions itself, from the owner's own HOME and XDG variables. No `-c core.excludesFile`
+      // is ever passed: such an override outranks a repository's own setting, which is not Git's precedence.
       const execution = await runner.run({
-        args: [...excludes, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+        args: ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
         cwd,
+        readsGlobalConfig: true,
         maxStdoutBytes: maxBytes,
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
       });
-      if (execution.timedOut || execution.exitCode !== 0) throw failure('git ls-files', execution);
+      if (execution.timedOut || execution.exitCode !== 0 || UNREADABLE_RULES.test(execution.stderr))
+        throw failure('git ls-files', execution);
       return {
         paths: parseFileList(new TextDecoder().decode(execution.stdout), execution.stdoutTruncated),
         truncated: execution.stdoutTruncated,

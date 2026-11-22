@@ -1,5 +1,5 @@
 import { afterAll, describe, it } from 'bun:test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
 import { RunnerSessionGit } from '../../../../../daemon/adapters/session/filesystem/index.ts';
@@ -10,9 +10,10 @@ import { cleanupTempDirectories, setupGit, tempDirectory, tempRepository } from 
 /**
  * The owner's GLOBAL ignore rules reach the file list (&F6061 F3).
  *
- * The hardened Git environment points `GIT_CONFIG_GLOBAL` at `/dev/null` so a hostile global config can run nothing,
- * which also drops a custom `core.excludesFile` set in `~/.gitconfig`. A file the owner told Git to ignore everywhere
- * must not turn up in a project's file list. Every case builds a fake host home in a temp folder and hands it to the
+ * The hardened Git environment points `GIT_CONFIG_GLOBAL` at `/dev/null`, which would drop a custom `core.excludesFile`
+ * set in `~/.gitconfig`. The list therefore lets Git read the owner's own config (the program-running keys stay pinned
+ * by `-c`), so Git's own precedence, includes and defaults apply, and a rule Git cannot read FAILS the list rather than
+ * passing it. A file the owner told Git to ignore everywhere must not turn up in a project's file list. Every case builds a fake host home in a temp folder and hands it to the
  * Git child exactly as the kernel does (`HOME`, and `XDG_CONFIG_HOME` where set); nothing reads the real `~`.
  */
 
@@ -93,6 +94,118 @@ describe('the file list and the owner’s global ignore rules', () => {
 
     // Assert
     should(listed.paths).not.containEql('scratch.tmp');
+  });
+
+  it('should keep Git’s precedence: a repository’s own core.excludesFile beats the global one', async () => {
+    // Arrange: the global file hides global.tmp; the repository's own hides local.tmp. Plain Git lists global.tmp only.
+    const home = await tempDirectory('home-both-scopes');
+    await writeFile(path.join(home, 'global-ignore'), 'global.tmp\n');
+    await writeFile(path.join(home, '.gitconfig'), `[core]\n\texcludesFile = ${path.join(home, 'global-ignore')}\n`);
+    const root = await tempRepository('both-scopes').then(repository => repository.root);
+    await writeFile(path.join(root, 'wanted.ts'), 'x\n');
+    await writeFile(path.join(root, 'global.tmp'), 'y\n');
+    await writeFile(path.join(root, 'local.tmp'), 'z\n');
+    await writeFile(path.join(home, 'local-ignore'), 'local.tmp\n');
+    await setupGit(root, 'config', 'core.excludesFile', path.join(home, 'local-ignore'));
+
+    // Act
+    const listed = await gitWith({ HOME: home }).listFiles(root, 1024 * 1024);
+
+    // Assert
+    should(listed.paths).containEql('wanted.ts');
+    should(listed.paths).containEql('global.tmp');
+    should(listed.paths).not.containEql('local.tmp');
+  });
+
+  it('should honour a core.excludesFile reached through include.path in ~/.gitconfig', async () => {
+    // Arrange
+    const home = await tempDirectory('home-include');
+    await writeFile(path.join(home, 'my-ignore'), '*.tmp\n');
+    await writeFile(path.join(home, 'split.gitconfig'), `[core]\n\texcludesFile = ${path.join(home, 'my-ignore')}\n`);
+    await writeFile(path.join(home, '.gitconfig'), `[include]\n\tpath = ${path.join(home, 'split.gitconfig')}\n`);
+    const root = await repositoryWithScratch('global-ignore-include');
+
+    // Act
+    const listed = await gitWith({ HOME: home }).listFiles(root, 1024 * 1024);
+
+    // Assert
+    should(listed.paths).containEql('wanted.ts');
+    should(listed.paths).not.containEql('scratch.tmp');
+  });
+
+  describe('when the owner’s rules cannot be established or read', () => {
+    /** Runs `act` with `file` unreadable, and puts the mode back so the temp folder can be removed. */
+    const unreadable = async (file: string, act: () => Promise<unknown>): Promise<unknown> => {
+      await chmod(file, 0o000);
+      try {
+        return await act().then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      } finally {
+        await chmod(file, 0o644);
+      }
+    };
+
+    it('should refuse the list when ~/.gitconfig cannot be read, instead of listing what it hides', async () => {
+      // Arrange
+      const home = await tempDirectory('home-config-denied');
+      await writeFile(path.join(home, 'my-ignore'), '*.tmp\n');
+      const config = path.join(home, '.gitconfig');
+      await writeFile(config, `[core]\n\texcludesFile = ${path.join(home, 'my-ignore')}\n`);
+      const root = await repositoryWithScratch('global-config-denied');
+
+      // Act
+      const failure = await unreadable(config, () => gitWith({ HOME: home }).listFiles(root, 1024 * 1024));
+
+      // Assert
+      should(failure).be.instanceof(Error);
+    });
+
+    it('should refuse the list when the ignore file itself cannot be read', async () => {
+      // Arrange
+      const home = await tempDirectory('home-ignore-denied');
+      await mkdir(path.join(home, '.config', 'git'), { recursive: true });
+      const ignore = path.join(home, '.config', 'git', 'ignore');
+      await writeFile(ignore, '*.tmp\n');
+      const root = await repositoryWithScratch('global-ignore-denied');
+
+      // Act
+      const failure = await unreadable(ignore, () => gitWith({ HOME: home }).listFiles(root, 1024 * 1024));
+
+      // Assert
+      should(failure).be.instanceof(Error);
+    });
+
+    it('should refuse the list when an included config cannot be read', async () => {
+      // Arrange
+      const home = await tempDirectory('home-include-denied');
+      const included = path.join(home, 'split.gitconfig');
+      await writeFile(included, '[core]\n\texcludesFile = /nowhere\n');
+      await writeFile(path.join(home, '.gitconfig'), `[include]\n\tpath = ${included}\n`);
+      const root = await repositoryWithScratch('global-include-denied');
+
+      // Act
+      const failure = await unreadable(included, () => gitWith({ HOME: home }).listFiles(root, 1024 * 1024));
+
+      // Assert
+      should(failure).be.instanceof(Error);
+    });
+
+    it('should refuse the list when ~/.gitconfig is malformed', async () => {
+      // Arrange
+      const home = await tempDirectory('home-config-malformed');
+      await writeFile(path.join(home, '.gitconfig'), '[core\n');
+      const root = await repositoryWithScratch('global-config-malformed');
+
+      // Act
+      const failure = await gitWith({ HOME: home })
+        .listFiles(root, 1024 * 1024)
+        .catch((error: unknown) => error);
+
+      // Assert
+      should(failure).be.instanceof(Error);
+    });
   });
 
   it('should list the file when the owner has no global rule at all', async () => {

@@ -1,4 +1,5 @@
 import type { PinnedFileKind, PinnedRoot, PinnedTarget, SpawnBudget, WorkBudget } from '@ferretry/kernel/contract';
+import { isSecretFileName, isSecretFolderName } from '@ferretry/std';
 import type { TreeGit } from './tree-git.ts';
 import {
   type SessionFileIndex,
@@ -84,17 +85,47 @@ export interface TreeIndexBounds {
 }
 
 /**
- * The secret-name rule the index applies, as the caller's own pure functions.
+ * Does any segment of this path name a secret by the ONE shared rule (`secret-names.ts` in `@ferretry/std`)?
  *
- * Two, because there are two questions a name meets: is it spelled as something no read route would accept, and does
- * it name a secret. The rule is the caller's, not this file's, so the one list of secret names is owned elsewhere and
- * both indexes follow it.
+ * This is the contract's own floor and it is unconditional: it is applied to every name an index returns and to the
+ * root's own real path, whatever a caller's {@link TreePolicy} says. A caller cannot lower it by handing in a lax
+ * policy, which is the point of owning it here rather than asking each caller for it.
+ */
+export function isSharedSecretPath(rel: string): boolean {
+  return rel.split('/').some(segment => segment !== '' && (isSecretFileName(segment) || isSecretFolderName(segment)));
+}
+
+/**
+ * The root a tree index was asked to read is itself a key store or a secret name (`~/.ssh`, a folder called `.env`).
+ *
+ * Every name beneath such a root is innocent when judged relative to it, so the root is refused before anything under it
+ * is asked. The caller maps this to its own refusal.
+ */
+export class TreeRootDeniedError extends Error {
+  constructor() {
+    super('the folder is a secret store and is not indexed');
+    this.name = 'TreeRootDeniedError';
+  }
+}
+
+/**
+ * The caller's secret-name rule, which is ADDITIVE to {@link isSharedSecretPath}.
+ *
+ * Two functions, because there are two questions a name meets: is it spelled as something no read route would accept,
+ * and does the caller withhold it beyond the shared rule (a ferret's own `.git` and `node_modules`, for one). A caller
+ * that withholds nothing extra passes `() => false`; it never has to restate the shared secret names, and could not
+ * remove them by trying.
  */
 export interface TreePolicy {
   /** The syntactic gate a read route applies: forward slashes, no `..`, no control characters. Throws on a bad path. */
   normalize(rel: string): string;
-  /** Is any segment of this path on the unconditional denylist? */
+  /** Is this path withheld by the caller's own rule, in addition to the shared secret names? */
   isDenied(rel: string): boolean;
+}
+
+/** Is this name withheld: by the shared secret rule, or by anything the caller adds. */
+function isWithheld(policy: TreePolicy, rel: string): boolean {
+  return isSharedSecretPath(rel) || policy.isDenied(rel);
 }
 
 /** The held root an index reads: the kernel's pin, plus its optional state-home verdict. */
@@ -306,6 +337,9 @@ export async function indexPinnedTree(
   bounds: TreeIndexBounds = {},
 ): Promise<SessionFileIndex> {
   const { maxFiles, maxCandidates, maxDirectories, budgetMs } = resolveBounds(bounds);
+  // First, before any budget answer: a root that is a key store is refused whatever the caller's policy or fence says.
+  // The pinned REAL path is judged, so a symlink to a key store cannot launder it.
+  if (isSharedSecretPath(pinned.rootReal.split('/').filter(Boolean).join('/'))) throw new TreeRootDeniedError();
   const budget = new IndexBudget(deps.nowMs, budgetMs, bounds.signal);
   const skips: SkipTally = new Map();
   // A caller who has already gone away gets the shape of an answer and none of the work. The pin is still taken,
@@ -390,14 +424,14 @@ async function indexTracked(
           excluded += 1;
           continue;
         }
-        if (policy.isDenied(path)) {
+        if (isWithheld(policy, path)) {
           denied += 1;
           continue;
         }
         const entry = indexEntry(policy, path);
         // The gates are asked again of the name the walk will prove, because normalising is what could turn an
         // innocent spelling into a gated one.
-        if (entry === undefined || isIndexExcludedPath(entry.path) || policy.isDenied(entry.path)) unsupported += 1;
+        if (entry === undefined || isIndexExcludedPath(entry.path) || isWithheld(policy, entry.path)) unsupported += 1;
         else batch.push(entry);
       }
       if (batch.length === 0) continue;
@@ -506,7 +540,7 @@ async function indexWalk(
           excluded += 1;
           continue;
         }
-        if (policy.isDenied(childRel) || fencedChildren.has(childRel)) {
+        if (isWithheld(policy, childRel) || fencedChildren.has(childRel)) {
           denied += 1;
           continue;
         }

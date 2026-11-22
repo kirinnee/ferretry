@@ -873,10 +873,10 @@ describe('RunnerSessionGit.listFiles', () => {
     const runner: GitRunner = {
       run: invocation => {
         invocations.push(invocation);
-        // The owner's global exclude file is read first (&F6061 U2); "none set" lets the list itself be asked.
+        // The owner's global config is established first (&F6061 U2); a readable one lets the list itself be asked.
         if (invocation.args[0] === 'config') {
           return Promise.resolve({
-            exitCode: 1,
+            exitCode: 0,
             stdout: encode(''),
             stderr: '',
             stdoutTruncated: false,
