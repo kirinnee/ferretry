@@ -16,7 +16,7 @@
  * passes here can still fall back to a code fence for one of those reasons. The check says what it can prove.
  */
 import { readConfigText } from '@ferretry/std/yaml';
-import { check, type ParseOptions, type Problem, setYamlParser } from 'durian-hypermedia';
+import { check, type ParseOptions, type Problem, setYamlParser, UNTRUSTED_LIMITS } from 'durian-hypermedia';
 import { FY_RENDER_LIMITS } from '../../contract/fy-render-caps.ts';
 import { parseFyRenderHeaders, validateHtml, validateSvg } from '../../contract/fy-render.ts';
 
@@ -212,10 +212,15 @@ function scanFences(text: string): FenceScan {
   return { found, held };
 }
 
-/** Durian's problems for one message, as it is read in chat: no front matter, the message size cap. */
+/**
+ * Durian's problems for one message, as it is read in chat: no front matter, the message size cap, and Durian's
+ * `UNTRUSTED_LIMITS` (the caps the chat reads every message with, `app/hypermedia/parse-message.ts`), so a message over one of its
+ * YAML or animation caps is told so here and is not drawn there. THIS COMMAND READS AN AGENT'S MESSAGE, NOT AN AUTHORED PAGE:
+ * no Durian call in the product uses the default `LIMITS` (sized for authored pages), this one included.
+ */
 function durianFindings(text: string): Finding[] {
   configureYaml();
-  const options: ParseOptions = { frontMatter: false, limits: CHECK_LIMITS };
+  const options: ParseOptions = { frontMatter: false, limits: { ...UNTRUSTED_LIMITS, ...CHECK_LIMITS } };
   return check(text, options).map((problem: Problem) => ({
     line: problem.line,
     level: problem.level,

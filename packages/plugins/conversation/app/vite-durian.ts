@@ -22,7 +22,8 @@ import { fileURLToPath } from 'node:url';
  * this package instead of from Durian's own `node_modules`. Vite's `resolve.dedupe` cannot do this: it resolves from
  * the app's root, which declares neither library.
  *
- * `three` (the 3D scene), `marked`, `codehike` and `github-slugger` are Durian's alone and resolve from its install.
+ * `three` (the 3D scene), `codehike`, `github-slugger` and the libraries its vendored markdown-it imports (`entities`,
+ * `linkify-it`, `mdurl`, `punycode.js`, `uc.micro`) are Durian's alone and resolve from its install (`marked` is gone since 0.6.2).
  * The 3D chunk is lazy because Durian imports it with `import()`; `packages/app/tests/integration/durian-bundle.test.ts` holds
  * the bundle to that. The strict React entry (`durian-hypermedia/react/strict`) is the only one to import: it has no
  * mermaid and no DOMPurify drawing.
@@ -41,11 +42,11 @@ import { fileURLToPath } from 'node:url';
  *   4. re-measure `tests/perf/hypermedia-size.test.ts` and say what moved.
  */
 
-/** The reviewed release: tag `v0.5.1` (signed), the commit it points at, and the tag object. MIT. */
+/** The reviewed release: tag `v0.6.2` (signed), the commit it points at, and the tag object. MIT. */
 const DURIAN_PIN = {
-  tag: 'v0.5.1',
-  tagObject: '6e8bb8e013cc2e797ae8a3655f02677d5a0135ea',
-  commit: '951c81c7d537249073724c83a2266166e12f593b',
+  tag: 'v0.6.2',
+  tagObject: 'c0a189a837a59219c9a927f13e8bc2cf7445ee77',
+  commit: '635b083de304070660d0df104df5a2055f63e944',
 } as const;
 
 const PACKAGE = 'durian-hypermedia';
@@ -91,9 +92,11 @@ function installedPackage(): Installed {
 /** Our stand-ins for two of Durian's own modules (`hypermedia/durian-shims/`, header there). */
 const CHART_HELD = fileURLToPath(new URL('./hypermedia/durian-shims/chart-held.ts', import.meta.url));
 const SCENE_LATE = fileURLToPath(new URL('./hypermedia/durian-shims/scene-late.ts', import.meta.url));
+const TEXT_WIDTH = fileURLToPath(new URL('./hypermedia/durian-shims/text-width.ts', import.meta.url));
 
 /**
- * WHICH DURIAN IMPORTS ARE REDIRECTED (r12 H8 fix): the PARSER's, and only the parser's (`core/dh-lib.ts`, `document.ts`).
+ * WHICH DURIAN IMPORTS ARE REDIRECTED (r12 H8 fix; `core/chipw.ts` added at 0.6.2): the PARSER's (`core/dh-lib.ts`, `document.ts`), and the one
+ * line of the alignment renderer's chip widths that reaches the compiler for `textW` (`text-width.ts`).
  *  - its chart reader and the expression engine under it (`./chart`, `./chart-llm`): H4 holds every chart fence as code, so the
  *    evaluator is never reached and is not shipped either (`chart-held.ts`);
  *  - its scene compiler (`./scene`, `./core/scene`): the real one stays in the 2D animation's lazy chunk, and the parser reaches
@@ -110,6 +113,9 @@ export function redirectedImport(source: string, importer: string | undefined, r
     if (source === './scene') return SCENE_LATE;
   }
   if (importer === join(src, 'document.ts') && source === './core/scene') return SCENE_LATE;
+  // Since 0.6.0 the alignment grid's chip widths (`core/chipw.ts`) import the compiler for ONE function, `textW`: without this the
+  // compiler is in every first load (+81 KB gzip). The stand-in holds that one line, tested equal to Durian's.
+  if (importer === join(src, 'core/chipw.ts') && source === './scene') return TEXT_WIDTH;
   return null;
 }
 

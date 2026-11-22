@@ -27,6 +27,11 @@ describe('redirectedImport', () => {
     expect(redirectedImport('./core/scene', join(root, 'src/document.ts'), root)).toBe(shim('scene-late.ts'));
   });
 
+  it('sends the chip widths’ one import of the compiler (`textW`) to the stand-in, so the alignment grid does not pull the compiler', () => {
+    expect(redirectedImport('./scene', join(root, 'src/core/chipw.ts'), root)).toBe(shim('text-width.ts'));
+    expect(redirectedImport('./other', join(root, 'src/core/chipw.ts'), root)).toBeNull();
+  });
+
   it('leaves the renderer’s own imports alone: the compiler lives in the animation chunk, the chart renderer is unused', () => {
     expect(redirectedImport('../core/scene', join(root, 'src/ui/anim.tsx'), root)).toBeNull();
     expect(redirectedImport('../core/chart', join(root, 'src/ui/chart.tsx'), root)).toBeNull();
@@ -45,6 +50,10 @@ describe('the installed Durian still makes the imports that are redirected', () 
 
   it('document imports the scene compiler by this specifier', () => {
     expect(source('document.ts')).toContain('from "./core/scene"');
+  });
+
+  it('the chip widths import `textW` from the compiler, and nothing else from it', () => {
+    expect(source('core/chipw.ts')).toMatch(/^import \{ textW \} from "\.\/scene";$/mu);
   });
 
   it('the scene compiler exports what the door binds', () => {
