@@ -2131,9 +2131,15 @@ opens every repository the account can reach, not one. That is the point of "use
 socket, but a process running as the owner that can read the daemon's memory or its state folder can reach the sealed
 key, as for every secret here ([threat model](#threat-model)).
 
-**GAP — an unclean daemon death.** The agent is a child of the daemon. After a `SIGKILL` or a power loss nothing stops
-it: it keeps the key in its memory, behind a `0600` socket in a `0700` folder of this user, until it is killed or the
-machine restarts. A clean stop ends every agent; the folder stays (a surviving ferret's paths must keep their meaning), holding no key.
+**An unclean daemon death, and the boot sweep.** The agent is a child of the daemon. After a `SIGKILL` nothing stops it: it
+keeps the key in its memory, behind a `0600` socket in a `0700` folder of this user. The next boot ends it, before any new
+agent starts: it lists the machine's processes once (`ps`) and sends `SIGTERM`, by pid, to each process that is **all of**
+`ssh-agent -D -a <this plugin's own folder>/gha_<digits>.sock` (the exact command line the daemon starts, in its own
+folder, so another install's agents, the person's login agent and any other `ssh-agent` have other paths), owned by the
+daemon's own uid, and not the daemon itself; it waits for each to exit, then removes its socket. A list that cannot be
+read ends the sweep with a warning (nothing is guessed). **GAP:** the sweep cannot tell a leftover from the live agent of a
+second daemon sharing the same state home, which cannot work anyway (one socket per account); and a power loss takes the
+agents with the machine. A clean stop ends every agent; the folder stays (a surviving ferret's paths must keep their meaning), holding no key.
 
 **GAP — a predictable socket name.** The socket is `<state>/git-accounts/downloads/gha_<id>.sock`: any process of the
 same OS user can connect to it (the folder is `0700` and the socket `0600`, so no other user can). That is "use", above.
@@ -2308,8 +2314,10 @@ plugin.
 
 `fy gh` also names the ferret's branch for `gh pr create`: it reads `.git/HEAD` as _text_ from the ferret's own folder
 (it runs as the ferret) and adds `--head <branch>`. In a linked **worktree** `.git` is a file; its `gitdir:` line is read
-as text and the `HEAD` there is the worktree's own branch (never the main checkout's). The daemon never opens a file in an
-agent's folder.
+as text and the `HEAD` there is the worktree's own branch (never the main checkout's). Each of those files is `lstat`ed
+first and read only when it is a regular file (a symbolic link counts when it points at one): opening a FIFO named
+`.git/HEAD` would block the verb for good, so such a name adds nothing and the argv goes on unchanged. The daemon never
+opens a file in an agent's folder.
 
 `fy gh` sends the daemon `gh`'s argv alone: its own `--account <login>` and the outer `--` are removed, and everything
 after the first `--` is passed byte for byte. It waits for the daemon's own budget (5 minutes for a followed
@@ -2320,10 +2328,10 @@ folder inside the state home removed, runs the answer by absolute path, and refu
 state home or a fence that cannot be built. The reason: a ferret pane's `PATH` starts with the shim folder, a file the
 ferret can rewrite, and `fy daemon start|restart|update` run from a pane would write that `PATH` into the service unit.
 The CLI therefore also drops every state-home folder from the `PATH` it writes into the unit, plist or direct-start
-environment. The locator protects **the `gh` executable** only: a descendant `gh` starts (a `git`, an editor it was
-refused) still inherits the sealed daemon `PATH`, and only the normal service launch strips state-home folders from it.
-Neither guard alone makes every descendant safe: the locator keeps the token from a ferret-writable `gh`, and the
-stripped `PATH` keeps a daemon started from a pane from carrying a ferret-writable folder at all.
+environment. The `gh` child is also handed that same filtered folder list as its own `PATH` (plus the folder `gh` was found in),
+not the sealed daemon `PATH`, so a descendant it starts (a `git`, an editor it was refused) never searches the shim
+folder or any other state-home folder. The stripped `PATH` in the service unit still keeps a daemon started from a pane
+from carrying a ferret-writable folder at all; the two guards cover different starts and neither replaces the other.
 
 **`fy gh-doctor`** (run in a pane) warns when `command -v gh` is not the shim (the first `gh` on `PATH` is somewhere
 else: a shell rc moved `PATH`), when the pane was not started with the shim, or when a GitHub token variable is set in
