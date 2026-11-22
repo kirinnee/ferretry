@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { ActionRow } from '../../../src/ui/action-row.tsx';
 import { mount } from '../../support/dom.ts';
 
+/** The DOM's own `matchMedia`, put back after every test: the unit tier shares one process and later files read it. */
+const originalMatchMedia = window.matchMedia;
+
 /** Keyboard order is visual order: primary first while stacked (a phone), secondary first in a row (a desktop). */
 const setStacked = (stacked: boolean | undefined): void => {
   (window as unknown as { matchMedia: unknown }).matchMedia =
@@ -29,7 +32,9 @@ const row = (
 );
 
 describe('ActionRow', () => {
-  afterEach(() => setStacked(undefined));
+  afterEach(() => {
+    (window as unknown as { matchMedia: unknown }).matchMedia = originalMatchMedia;
+  });
 
   it('writes the primary first while stacked, so Tab reaches the top button first', async () => {
     setStacked(true);
