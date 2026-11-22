@@ -60,6 +60,8 @@ export interface RequestOptions {
    */
   readonly appSession?: string;
   readonly clientAddress?: string;
+  /** The request's own lifecycle (`ApiRequest.signal`): abort it to end the request. Absent: never aborted. */
+  readonly signal?: AbortSignal;
 }
 
 /** A call; reading its body throws, so a test proves a refusal came before the body was read. */
@@ -86,6 +88,7 @@ export function request(options: RequestOptions = {}): ApiRequest & { bodyRead: 
     arrival: options.arrival ?? (principal === undefined ? local() : carried()),
     ...(principal === undefined ? {} : { principal }),
     ...(options.clientAddress === undefined ? {} : { clientAddress: options.clientAddress }),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
     text: async () => {
       read = true;
       throw new Error('a refusal must come before the body is read');

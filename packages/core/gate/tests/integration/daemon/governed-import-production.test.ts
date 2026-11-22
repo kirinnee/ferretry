@@ -191,9 +191,11 @@ async function machine(mode: Mode, settings: object = JSON.parse(OWNER_SETTINGS)
   const inner = fakeLogins([]);
   const door = {
     armed: false,
-    /** How many `list` calls to let through once armed, before the door holds: later calls are the apply's own writes. */
-    skip: 0,
-    calls: 0,
+    /**
+     * Hold only the read `createLogins` makes (the apply's own write path), not the review's reads or the scans.
+     * Keyed on the act that asks, never on how many reads came first, so one more harmless read in front moves nothing.
+     */
+    onlyCreateLogins: false,
     failure: undefined as Error | undefined,
     entered: Promise.withResolvers<void>(),
     release: Promise.withResolvers<void>(),
@@ -201,9 +203,7 @@ async function machine(mode: Mode, settings: object = JSON.parse(OWNER_SETTINGS)
   const logins = {
     ...inner,
     list: async () => {
-      door.calls += 1;
-      if (door.armed && door.skip > 0) door.skip -= 1;
-      else if (door.armed) {
+      if (door.armed && (!door.onlyCreateLogins || /\bcreateLogins\b/.test(new Error().stack ?? ''))) {
         door.armed = false;
         door.entered.resolve();
         await door.release.promise;
@@ -442,9 +442,9 @@ describe('C59 O5-10b R2 item 4b: an apply whose request ends once it has STARTED
     prove(STEP_UP_ACTS.loosenConfig);
 
     // The apply is INSIDE execution (Logins' door is held in `createLogins`, after the Vault was filed) when its request
-    // ends. Its first three reads of Logins are the review's (current model, two scans), so the fourth is the write path.
+    // ends. Only the read `createLogins` makes is held: the review's and the scans' reads before it pass.
     door.armed = true;
-    door.skip = 3;
+    door.onlyCreateLogins = true;
     const caller = new AbortController();
     const running = apply(host, id, { signal: caller.signal });
     await door.entered.promise;
