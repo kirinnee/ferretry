@@ -152,6 +152,25 @@ type SessionInspection =
 
 const JOURNAL_READ_CHUNK_BYTES = 64 * 1024;
 
+/**
+ * How many of an indexed session's pointers a document write re-reads from the journal before it trusts the row.
+ *
+ * A fingerprint (device, inode, size, mtime) plus the last pointer is only IDENTITY: an in-place restore or edit
+ * that keeps all four and the final event leaves every earlier pointer stale, and the row would go on serving them.
+ * Identity cannot prove content, so the fast path also re-reads a spread of pointers — the first, the last, and a
+ * random handful between — each a few hundred bytes. A journal with at most this many events is verified whole.
+ */
+const JOURNAL_PROOF_SAMPLE = 32;
+
+/**
+ * How long the fast path may run before a full read of the journal is owed anyway (five minutes).
+ *
+ * The sample is a spot check, not a proof, so a change it missed must not last: the next full read after this
+ * window rebuilds every pointer from the bytes. Counted from this process's first look at the session or its
+ * last full read of it, whichever is later; a session never touched by a document write keeps no clock.
+ */
+const JOURNAL_FULL_READ_BACKSTOP_MS = 5 * 60 * 1000;
+
 function sameFingerprint(left: JournalFingerprint | null, right: JournalFingerprint | null): boolean {
   return (
     left === right ||
@@ -379,6 +398,8 @@ export class DaemonStorage {
   private registryWrites: Promise<void> = Promise.resolve();
   /** Config writes and archive commits share root lanes, always taken before document lanes. */
   private readonly lineages = new KeyedSerialExecutor();
+  /** When this process last read each session's whole journal (or first vouched for its row): the fast path's backstop clock. */
+  private readonly journalVerifiedAt = new Map<SessionId, number>();
   /** A keep published during verification or registry IO cancels that finite archive commit. */
   private retentionChanges = 0;
 
@@ -663,9 +684,11 @@ export class DaemonStorage {
     const session = plan.sessions[0];
     if (session === undefined) {
       this.index.removeSession(source.id);
+      this.journalVerifiedAt.delete(source.id);
       return { eventCount: 0, problems: plan.problems };
     }
     this.index.replaceSession(session, plan.events);
+    this.journalVerifiedAt.set(source.id, this.clockMs());
     return { session, eventCount: plan.events.length, problems: plan.problems };
   }
 
@@ -701,7 +724,9 @@ export class DaemonStorage {
         observation?.journal !== undefined &&
         decideSessionMarker(observation.marker.text) === 'proceed' &&
         sameFingerprint(current.journal, observation.journal.fingerprint) &&
-        (await this.pointerMatches(id, current, observation))
+        this.journalProofIsFresh(id) &&
+        (await this.pointerMatches(id, current, observation)) &&
+        (await this.sampledPointersMatch(id, current, observation))
       ) {
         this.assertExpectedJournal(id, observation.marker.text, current, true);
         const session = planIndexRebuild([this.metadataSource(observation, current)]).sessions[0];
@@ -818,6 +843,62 @@ export class DaemonStorage {
     });
   }
 
+  private clockMs(): number {
+    return Date.parse(this.clock.now());
+  }
+
+  /** Whether the fast path's backstop window is still open for this session (first look starts it). */
+  private journalProofIsFresh(id: SessionId): boolean {
+    const now = this.clockMs();
+    const verifiedAt = this.journalVerifiedAt.get(id);
+    if (verifiedAt === undefined) {
+      this.journalVerifiedAt.set(id, now);
+      return true;
+    }
+    // An unreadable clock or one that stepped backwards is "unsure": read the journal.
+    return Number.isFinite(now) && now >= verifiedAt && now - verifiedAt < JOURNAL_FULL_READ_BACKSTOP_MS;
+  }
+
+  /** Whether the journal still holds, at the pointer's bytes, the event the pointer names. */
+  private async pointerNamesEvent(id: SessionId, file: string, pointer: EventPointer): Promise<boolean> {
+    const bytes = await this.fileSystem.readSlice(file, pointer.byteOffset, pointer.byteLength);
+    if (bytes === undefined) return false;
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    } catch {
+      return false;
+    }
+    const event = parseSessionEvent(decoded, id);
+    return event?.sequence === pointer.sequence && event.time === pointer.time && event.type === pointer.type;
+  }
+
+  /**
+   * A spread of the row's pointers re-read from the journal, beyond the last one {@link pointerMatches} checks.
+   *
+   * The first and the last are always read, and the rest are random so repeated writes cover the whole journal
+   * over time. Fewer events than the sample size are all read. A pointer the journal no longer holds as written
+   * (or that the index no longer has) is a journal the row cannot vouch for: the caller rescans.
+   */
+  private async sampledPointersMatch(
+    id: SessionId,
+    indexed: IndexedSession,
+    source: { readonly journal?: JournalObservation },
+  ): Promise<boolean> {
+    if (source.journal === undefined) return false;
+    if (indexed.lastSequence <= 1) return true;
+    const span = indexed.lastSequence;
+    const targets = new Set<number>([0]);
+    if (span <= JOURNAL_PROOF_SAMPLE) for (let after = 0; after < span; after += 1) targets.add(after);
+    else while (targets.size < JOURNAL_PROOF_SAMPLE) targets.add(Math.floor(Math.random() * span));
+    for (const after of targets) {
+      const pointer = this.index.eventPointers(id, after, 1)[0];
+      if (pointer === undefined || !(await this.pointerNamesEvent(id, source.journal.file, pointer))) return false;
+    }
+    const finish = await this.fileSystem.information(source.journal.file);
+    return finish !== undefined && sameFingerprint(source.journal.fingerprint, finish);
+  }
+
   private async pointerMatches(
     id: SessionId,
     indexed: IndexedSession,
@@ -830,17 +911,7 @@ export class DaemonStorage {
     }
     const pointer = this.index.eventPointers(id, indexed.lastSequence - 1, 1)[0];
     if (pointer === undefined || pointer.sequence !== indexed.lastSequence) return false;
-    const bytes = await this.fileSystem.readSlice(source.journal.file, pointer.byteOffset, pointer.byteLength);
-    if (bytes === undefined) return false;
-    let decoded: unknown;
-    try {
-      decoded = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-    } catch {
-      return false;
-    }
-    const event = parseSessionEvent(decoded, id);
-    if (event?.sequence !== pointer.sequence || event.time !== pointer.time || event.type !== pointer.type)
-      return false;
+    if (!(await this.pointerNamesEvent(id, source.journal.file, pointer))) return false;
     const after = await this.fileSystem.information(source.journal.file);
     return after !== undefined && sameFingerprint(source.journal.fingerprint, after);
   }

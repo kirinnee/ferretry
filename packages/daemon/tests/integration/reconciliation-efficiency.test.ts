@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { appendFile, mkdtemp, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -87,8 +87,12 @@ async function createTemporaryHome(): Promise<string> {
   return home;
 }
 
-async function openStorage(home: string, fileSystems: CountingFileSystemFactory): Promise<OpenedDaemonStorage> {
-  const clock = new SystemClock(() => new Date('2026-07-30T12:00:00.000Z'));
+async function openStorage(
+  home: string,
+  fileSystems: CountingFileSystemFactory,
+  clockOverride?: SystemClock,
+): Promise<OpenedDaemonStorage> {
+  const clock = clockOverride ?? new SystemClock(() => new Date('2026-07-30T12:00:00.000Z'));
   const factory = new DaemonStorageFactory(
     new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
     fileSystems,
@@ -337,6 +341,63 @@ describe('document writes', () => {
     should(chunkReads?.length).be.above(0);
     should(opened.storage.findSession(id)?.lastSequence).equal(second.sequence);
     should((await opened.storage.replay(id)).events.map(event => event.type)).deepEqual(['first', 'second']);
+    await closeStorage(opened.storage);
+  });
+});
+
+describe('document writes over a journal restored in place', () => {
+  it('should rescan, not trust the row, when an earlier event was rewritten with the fingerprint and last event kept', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const fileSystems = new CountingFileSystemFactory();
+    const opened = await openStorage(home, fileSystems);
+    const id = parseSessionId('restored-in-place');
+    const journal = createSessionPaths(opened.paths, id).events;
+    await opened.storage.append(id, 'first', {});
+    const second = createSessionEvent(id, 1, '2026-07-30T12:00:02.000Z', 'second', {});
+    await appendFile(journal, `${encodeSessionEvent(second)}\n`);
+    await opened.storage.syncSession(id);
+    const before = await stat(journal);
+    const text = await Bun.file(journal).text();
+    // Same inode, same length, same mtime, same final event: only the earlier event's time moved.
+    await writeFile(journal, text.replace('2026-07-30T12:00:00.000Z', '2026-07-30T12:00:09.000Z'));
+    await utimes(journal, before.atime, before.mtime);
+    should((await stat(journal)).ino).equal(before.ino);
+    should((await stat(journal)).size).equal(before.size);
+
+    // Act
+    await opened.storage.writeState(id, { status: 'finished' });
+    const newest = await opened.storage.tailEvents(1);
+
+    // Assert
+    should(newest.map(event => event.sequence)).deepEqual([1]);
+    should(newest[0]?.time).equal('2026-07-30T12:00:09.000Z');
+    await closeStorage(opened.storage);
+  });
+
+  it('should owe a full journal read once the backstop window passed, even when every sampled pointer still matches', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const fileSystems = new CountingFileSystemFactory();
+    let now = new Date('2026-07-30T12:00:00.000Z');
+    const opened = await openStorage(home, fileSystems, new SystemClock(() => now));
+    const fileSystem = fileSystems.instance;
+    const id = parseSessionId('backstop');
+    await opened.storage.writeState(id, { status: 'running' });
+    for (let index = 0; index < 3; index += 1) await opened.storage.append(id, 'tick', { index });
+    await opened.storage.writeState(id, { status: 'a' });
+    fileSystem?.resetJournalReads();
+
+    // Act
+    await opened.storage.writeState(id, { status: 'b' });
+    const withinWindow = fileSystem?.chunkReads.length;
+    now = new Date(now.getTime() + 6 * 60 * 1000);
+    await opened.storage.writeState(id, { status: 'c' });
+    const afterWindow = fileSystem?.chunkReads.length;
+
+    // Assert
+    should(withinWindow).equal(0);
+    should(afterWindow).be.above(0);
     await closeStorage(opened.storage);
   });
 });
