@@ -56,8 +56,12 @@ export interface FleetProposalRecord<Payload, Mutation> {
   /** One-line, server-derived description of what this change does, for the person reviewing it. */
   readonly summary: string;
   state: FleetProposalState;
-  /** Set once an apply was cut short after these paths had landed: the change is spent, but only in part. */
+  /** Set once an apply was cut short after these writes had landed: the change is spent, but only in part. */
   landed?: readonly string[];
+  /** What a cut-short apply meant to write and did not (with {@link landed}). */
+  notLanded?: readonly string[];
+  /** True from the moment the change is spent until its apply ends: a read in between is told it is in progress. */
+  applying?: boolean;
 }
 
 /** What a caller may see about a proposal. */
@@ -75,12 +79,14 @@ interface FleetProposalView<View, Mutation> {
  * Why a staged change cannot be used. EVERY MEMBER IS A FACT ABOUT THE CHANGE, never about the
  * caller — `unauthorized` used to sit here, and its removal is the whole point of this file's split.
  */
-type FleetProposalProblem = 'unknown' | 'expired' | 'consumed' | 'exhausted';
+type FleetProposalProblem = 'unknown' | 'expired' | 'consumed' | 'exhausted' | 'applying';
 
 export class FleetProposalRefusal extends Error {
   constructor(
     readonly problem: FleetProposalProblem,
     message: string,
+    /** What a spent change tells beside its sentence: the lists of a partly applied one, or that it is in progress. */
+    readonly extra?: Readonly<Record<string, unknown>>,
   ) {
     super(message);
     this.name = 'FleetProposalRefusal';
@@ -163,7 +169,9 @@ export class FleetProposalStore<Payload, Mutation> {
    */
   require(id: string): FleetProposalRecord<Payload, Mutation> {
     const record = this.#proposals.get(id);
-    if (record !== undefined && record.expiresAt <= this.options.now()) {
+    // "Expired before it was applied" is only ever true of a change nobody spent: a spent one (whole, partly, or being
+    // applied now) says what it is.
+    if (record !== undefined && record.state === 'pending' && record.expiresAt <= this.options.now()) {
       this.#proposals.delete(id);
       throw new FleetProposalRefusal(
         'expired',
@@ -175,12 +183,20 @@ export class FleetProposalStore<Payload, Mutation> {
       throw new FleetProposalRefusal('unknown', `no open fleet proposal with id "${id}" on this daemon`);
     }
     if (record.state === 'consumed') {
+      if (record.applying === true)
+        throw new FleetProposalRefusal(
+          'applying',
+          `fleet proposal "${id}" is being applied right now; read it again in a moment to see what landed`,
+          { applying: true },
+        );
       // A change cut short mid-way is spent but was NOT applied whole: say what landed, never "already applied".
+      const landed = record.landed ?? [];
       throw new FleetProposalRefusal(
         'consumed',
-        record.landed === undefined || record.landed.length === 0
+        landed.length === 0
           ? `fleet proposal "${id}" has already been applied`
-          : `fleet proposal "${id}" was only partly applied. ${partlyAppliedSentence(record.landed)} Review the change again to finish it.`,
+          : `fleet proposal "${id}" was only partly applied. ${partlyAppliedSentence(landed, record.notLanded)} Review the change again to finish it.`,
+        landed.length === 0 ? undefined : { landed, notLanded: record.notLanded ?? [] },
       );
     }
     return record;
@@ -198,13 +214,20 @@ export class FleetProposalStore<Payload, Mutation> {
   consume(id: string): FleetProposalRecord<Payload, Mutation> {
     const record = this.require(id);
     record.state = 'consumed';
+    record.applying = true;
     this.retireOldestConsumed();
     return record;
   }
 
   /** Put a consumed proposal back, when the apply it authorised never reached the host. */
   restore(record: FleetProposalRecord<Payload, Mutation>): void {
+    record.applying = false;
     if (this.#proposals.has(record.id)) record.state = 'pending';
+  }
+
+  /** The apply of a spent proposal has ended (whatever it did): a read is no longer told it is in progress. */
+  settle(record: FleetProposalRecord<Payload, Mutation>): void {
+    record.applying = false;
   }
 
   /** How many changes are still applicable. Consumed records are history, not capacity. */
@@ -234,7 +257,10 @@ export class FleetProposalStore<Payload, Mutation> {
   private retireExpired(): void {
     const now = this.options.now();
     for (const [id, record] of this.#proposals) {
-      if (record.expiresAt <= now) this.#proposals.delete(id);
+      // A change being applied, or left partly applied, is kept (bounded by the tombstone cap): a person asking what
+      // landed must not be told it is unknown. (The receipt does not survive a daemon restart: deferred.)
+      const speaking = record.state === 'consumed' && (record.applying === true || (record.landed?.length ?? 0) > 0);
+      if (record.expiresAt <= now && !speaking) this.#proposals.delete(id);
     }
   }
 }

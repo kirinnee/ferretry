@@ -1,3 +1,4 @@
+import type { WriteNotes } from './apply-ledger.ts';
 import { type ExecutorCaller, type FleetCatalogServiceDeps } from './catalog-service.ts';
 import { createLogins, type LoginEnvPlan } from './setup-login-env.ts';
 import { assertMayFileSecrets, fileSecrets, type FiledSecret } from './setup-secrets.ts';
@@ -14,13 +15,20 @@ export async function writeVaultAndLogins(
   },
   composed: LoginEnvPlan & { readonly secrets: readonly FiledSecret[] },
   caller: ExecutorCaller | undefined,
+  /** The apply's ledger: told each key and login as it lands, so a later failure names them. */
+  notes?: WriteNotes,
 ): Promise<void> {
   // The Vault is written first: the caller's right to write it is settled before the first write.
   assertMayFileSecrets(composed.secrets, caller, 'apply');
   caller?.live?.();
-  await fileSecrets(deps.put, composed.secrets, () => caller?.live?.());
+  await fileSecrets(
+    deps.put,
+    composed.secrets,
+    () => caller?.live?.(),
+    name => notes?.secret(name),
+  );
   caller?.live?.();
-  await createLogins(deps.catalog, composed, () => caller?.live?.());
+  await createLogins(deps.catalog, composed, () => caller?.live?.(), notes);
   caller?.live?.();
 }
 

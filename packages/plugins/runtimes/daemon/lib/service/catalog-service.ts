@@ -76,7 +76,7 @@ import {
   type ApplyLeft,
   assertRequestLive,
   assertRequestLiveBetweenWrites,
-  landedBeforeAbort,
+  partlyAppliedOf,
 } from './apply-bracket.ts';
 import {
   type CatalogFacts,
@@ -132,6 +132,8 @@ export class FleetCatalogRefusal extends Error {
   constructor(
     readonly code: CatalogRefusalCode,
     message: string,
+    /** Facts the answer carries beside its sentence (`landed` / `notLanded` of a partly applied change, `applying`). */
+    readonly extra?: Readonly<Record<string, unknown>>,
   ) {
     super(message);
     this.name = 'FleetCatalogRefusal';
@@ -446,6 +448,7 @@ const PROPOSAL_CODES = {
   expired: 'fleet_change_expired',
   consumed: 'fleet_change_consumed',
   exhausted: 'fleet_change_refused',
+  applying: 'fleet_change_consumed',
 } as const satisfies Record<FleetProposalRefusal['problem'], CatalogRefusalCode>;
 
 const COMMITTED: ReadonlySet<string> = new Set(['committed', 'committed-with-history-failure']);
@@ -786,9 +789,12 @@ export class FleetCatalogService {
     try {
       outcome = await this.#execute(record, caller);
     } catch (error) {
-      // Cut short after some files landed: the change stays spent, and what a re-read of it says is what landed.
-      const landed = landedBeforeAbort(error);
-      if (landed.length > 0) record.landed = landed;
+      // Cut short after some of it landed, for ANY reason: the change stays spent, and a re-read says what landed and what did not.
+      const partial = partlyAppliedOf(error);
+      if (partial !== undefined) {
+        record.landed = partial.landed;
+        record.notLanded = partial.notLanded;
+      }
       // Refused before anything was written, asking for a passkey: the same change can be applied once it is proved.
       if (error instanceof FleetCatalogFreshStepUpRequired) this.#changes.restore(record);
       // Logins refused the change it held (it keeps it reviewable), and no runtime had moved: so does this one.
@@ -809,6 +815,7 @@ export class FleetCatalogService {
         this.#changes.restore(record);
       throw error;
     } finally {
+      this.#changes.settle(record);
       act?.end();
     }
     return outcome;
@@ -1467,7 +1474,7 @@ export class FleetCatalogService {
       return work();
     } catch (error) {
       throw error instanceof FleetProposalRefusal
-        ? new FleetCatalogRefusal(PROPOSAL_CODES[error.problem], error.message)
+        ? new FleetCatalogRefusal(PROPOSAL_CODES[error.problem], error.message, error.extra)
         : error;
     }
   }

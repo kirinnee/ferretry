@@ -17,39 +17,28 @@ export function assertRequestLiveBetweenWrites(bracket: ApplyBracket | undefined
     );
 }
 
-/** What a person is told about a change that was cut short after some files landed (the page shows this word for word). */
-export function partlyAppliedSentence(landed: readonly string[]): string {
-  return `Part of this change was applied: ${landed.join(', ')}. The rest was not.`;
+/**
+ * What a person is told about a change that was cut short after some of it landed (the page shows this word for word):
+ * what landed and, when the apply knows it, what did not.
+ */
+export function partlyAppliedSentence(landed: readonly string[], notLanded: readonly string[] = []): string {
+  return `Part of this change was applied: ${landed.join(', ')}. The rest was not${notLanded.length === 0 ? '' : `: ${notLanded.join(', ')}`}.`;
 }
 
-/**
- * An apply stopped by its request ending (`request_aborted`) AFTER files landed is answered with those paths, in words
- * and as `extra.landed` (what the boundary keeps, so a re-read of the spent change says what landed). Any other error,
- * and an abort before any write, is returned as it is.
- */
-function abortedAfterWriting(error: unknown, landed: readonly string[]): unknown {
-  const written = [...new Set(landed)];
-  if (!(error instanceof ApiError) || error.code !== 'request_aborted' || written.length === 0) return error;
-  return new ApiError(
-    error.status,
-    `${error.message}. ${partlyAppliedSentence(written)}`,
-    'request_aborted',
-    undefined,
-    { landed: written },
-  );
+/** The lists a partly applied answer carries beside its sentence, so a re-read and the page need no parsing. */
+export interface PartlyApplied {
+  readonly landed: readonly string[];
+  readonly notLanded: readonly string[];
 }
 
-/**
- * Runs a change's writes with the list of files that really landed (a held one did not): a later failure must say they
- * are on disk, and a request that ends after some landed is answered with them (`abortedAfterWriting`).
- */
-export async function namingWhatLanded<T>(work: (landed: string[]) => Promise<T>): Promise<T> {
-  const landed: string[] = [];
-  try {
-    return await work(landed);
-  } catch (error) {
-    throw abortedAfterWriting(error, landed);
-  }
+/** The lists a partly applied answer carries (`extra.landed`, `extra.notLanded`), from the error it was thrown as; none for any other. */
+export function partlyAppliedOf(error: unknown): PartlyApplied | undefined {
+  const extra = error instanceof Error ? (error as { extra?: unknown }).extra : undefined;
+  if (typeof extra !== 'object' || extra === null) return undefined;
+  const words = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  const landed = words((extra as { landed?: unknown }).landed);
+  return landed.length === 0 ? undefined : { landed, notLanded: words((extra as { notLanded?: unknown }).notLanded) };
 }
 
 /** The door to the owners of imported components, noting each file as it lands so a request that ends next still names it. */
@@ -62,12 +51,6 @@ export function notingLanded(writer: ComponentWriter | undefined, landed: string
       return answer;
     },
   };
-}
-
-/** The paths an `abortedAfterWriting` answer names; none for any other error. */
-export function landedBeforeAbort(error: unknown): readonly string[] {
-  const landed = error instanceof ApiError && error.code === 'request_aborted' ? error.extra?.landed : undefined;
-  return Array.isArray(landed) ? landed.filter((path): path is string => typeof path === 'string') : [];
 }
 
 /** What a finished apply left behind: waiting for the owner, not written, or cut short. */

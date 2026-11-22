@@ -730,6 +730,80 @@ describe('the first-run executors', () => {
     should((reread as Error).message).not.containEql('has already been applied');
   });
 
+  it('E3 tells a re-read of a change that failed (not aborted) after a first write what landed and what did not', async () => {
+    const failed = new FleetCatalogRefusal(
+      'fleet_change_failed',
+      'the disk is full. Part of this change was applied.',
+      {
+        landed: ['learning.yaml'],
+        notLanded: ['voice.yaml', 'the runtimes and fleet files'],
+      },
+    );
+    const { service } = world({
+      overrides: {
+        executors: {
+          setup: {
+            describe: async () => 'Import Claude Code.',
+            execute: async () => {
+              throw failed;
+            },
+          },
+        },
+      },
+    });
+    const staged = await service.propose(setup);
+
+    should(await rejection(service.apply(staged.id, OWNER))).equal(failed);
+
+    const reread = await rejection(service.read(staged.id));
+    should(reread).match({ code: 'fleet_change_consumed' });
+    should((reread as FleetCatalogRefusal).extra).eql({
+      landed: ['learning.yaml'],
+      notLanded: ['voice.yaml', 'the runtimes and fleet files'],
+    });
+    should((reread as Error).message).containEql(
+      'Part of this change was applied: learning.yaml. The rest was not: voice.yaml, the runtimes and fleet files.',
+    );
+    should((reread as Error).message).not.containEql('has already been applied');
+  });
+
+  it('E3 says "being applied right now" to a read DURING the apply, and the truth once it ended', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const { service } = world({
+      overrides: {
+        executors: {
+          setup: {
+            describe: async () => 'Import Claude Code.',
+            execute: async () => {
+              await gate;
+              throw new FleetCatalogRefusal('fleet_change_failed', 'the disk is full.', {
+                landed: ['learning.yaml'],
+                notLanded: ['voice.yaml'],
+              });
+            },
+          },
+        },
+      },
+    });
+    const staged = await service.propose(setup);
+    const applying = rejection(service.apply(staged.id, OWNER));
+    await new Promise(resolve => setTimeout(resolve, 5)); // the apply has spent the change and is waiting on the gate
+
+    const during = await rejection(service.read(staged.id));
+    should((during as Error).message).containEql('is being applied right now');
+    should((during as Error).message).not.containEql('already been applied');
+    should((during as FleetCatalogRefusal).extra).eql({ applying: true });
+
+    release();
+    await applying;
+    const after = await rejection(service.read(staged.id));
+    should((after as Error).message).containEql('was only partly applied');
+    should((after as FleetCatalogRefusal).extra).eql({ landed: ['learning.yaml'], notLanded: ['voice.yaml'] });
+  });
+
   it('E3 keeps saying "already applied" for a change that was spent whole', async () => {
     const { service } = world({
       overrides: { executors: { setup: { describe: async () => 'x', execute: async () => 'Done.' } } },
