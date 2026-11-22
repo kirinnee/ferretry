@@ -235,6 +235,47 @@ without_pool="$(env -u HOSTED_TUNNEL_ACCOUNTS jq -cn --arg token t "${secrets_pr
 [[ ${without_pool} == '{"RELAY_OPERATOR_TOKEN":"t"}' ]] ||
   fail "the deploy secrets file must leave TUNNEL_ACCOUNTS out when the pool secret is unset"
 
+# ─── a Worker configuration carries nothing that runs or reads anything at deploy time ───────
+#
+# The token job of a hosted-Worker workflow publishes a configuration handed over by `build`, which ran the pushed
+# commit's code, so the token job checks that configuration against an allow-list of keys (the workflow's
+# `HANDOFF_CONFIG_KEYS`, which scripts/validate/release-guards.sh pins) and names the Worker it may publish to. The
+# repository's own configurations must therefore already sit inside it: a `build` command, `data_blobs`,
+# `wasm_modules` or `text_blobs` (which read any path of the deploying machine) is never an acceptable key, and a
+# configuration outside the list would make every deploy refuse. The workflow's pinned Worker name is the configuration's.
+# shellcheck disable=SC2016 # jq variables, not shell expansions
+assert_handoff_config() {
+  local config="$1" wf="$2" what="$3" allowed name
+  # The workflow's value is a JSON array held in a YAML string.
+  allowed="$(yq -o=json '.env.HANDOFF_CONFIG_KEYS' "${wf}" | jq -c 'fromjson? // empty' 2>/dev/null || true)"
+  [[ -n ${allowed} ]] || fail "${wf} no longer declares env.HANDOFF_CONFIG_KEYS, the keys a handed-over configuration may carry"
+  if jq -e '[.[] | select(. == "build" or . == "data_blobs" or . == "wasm_modules" or . == "text_blobs")] | length > 0' <<<"${allowed}" >/dev/null; then
+    fail "${wf}: HANDOFF_CONFIG_KEYS must not allow build, data_blobs, wasm_modules or text_blobs"
+  fi
+  jq -e --argjson allowed "${allowed}" '(keys - $allowed) == []' "${config}" >/dev/null 2>&1 ||
+    fail "${config}: carries a key outside ${wf}'s HANDOFF_CONFIG_KEYS (${allowed}); a build command or a blob key would run or read at deploy time"
+  if jq -e 'has("build") or has("data_blobs") or has("wasm_modules") or has("text_blobs")' "${config}" >/dev/null 2>&1; then
+    fail "${config}: must carry no build, data_blobs, wasm_modules or text_blobs key (${what})"
+  fi
+  name="$(jq -r '.name' "${config}")"
+  rg -qF -- "--arg name ${name} " "${wf}" ||
+    fail "${wf} must pin the handed-over configuration's name to ${name}, the Worker ${config} deploys"
+}
+if ((relay_ported)); then
+  assert_handoff_config "${hosted_config}" "${workflow}" 'the hosted relay'
+fi
+if ((link_store_ported)); then
+  assert_handoff_config "${link_store_dir}/wrangler.link-store.hosted.json" ".github/workflows/link-store-hosted.yaml" 'the hosted link store'
+fi
+# The self-hosted configurations (JSONC, so searched rather than parsed) are an operator's own, but the same keys have no
+# business in a configuration this repository ships.
+for jsonc in "${byo_config}" "${link_store_dir}/wrangler.link-store.jsonc"; do
+  [[ -f ${jsonc} ]] || continue
+  if rg -q '^\s*"(build|data_blobs|wasm_modules|text_blobs)"\s*:' "${jsonc}"; then
+    fail "${jsonc}: must carry no build, data_blobs, wasm_modules or text_blobs key"
+  fi
+done
+
 # ─── both ends must read the SAME advertisement, from the same path ───────────────────────────
 #
 # A session crosses a relay only if BOTH ends are on it: the Worker serves the advertisement, and the

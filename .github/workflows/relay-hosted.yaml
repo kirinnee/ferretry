@@ -74,6 +74,12 @@ env:
   # devshell pins. scripts/validate/release-guards.sh holds that it is exact and equal in every workflow
   # that holds a Cloudflare token.
   WRANGLER_VERSION: 4.93.0
+  # The ONLY keys a handed-over wrangler configuration may carry (a JSON array, never a secret). `build` projects the
+  # repository's configuration onto them and `deploy` re-checks the handed-over file against them BEFORE any step that
+  # has the token. Nothing that makes wrangler run or read something at deploy time is on it: no `build`, no
+  # `data_blobs`, `wasm_modules`, `text_blobs`, `rules` or `no_bundle`. scripts/validate/release-guards.sh holds the
+  # exact list, and scripts/validate/relay-config.sh holds that the repository's configurations stay inside it.
+  HANDOFF_CONFIG_KEYS: '["$schema","compatibility_date","durable_objects","main","migrations","name","observability","services","vars","workers_dev"]'
 
 # THE CLOUDFLARE TOKEN NEVER MEETS CHECKOUT CODE (the same rule as pwa-pages.yaml; scripts/validate/release-guards.sh
 # holds it for every workflow that reads a CLOUDFLARE secret). A job that holds the token has no `actions/checkout`,
@@ -83,8 +89,13 @@ env:
 #   build              checks out, installs and bundles with `wrangler deploy --dry-run` in a nix shell. It holds NO
 #                      secret, so whatever runs there can read none. It hands `deploy` ONE artifact: the bundle, the
 #                      hosted configuration pointing at it, and the fingerprint of both.
-#   deploy             holds the token and has NO checkout: it downloads that artifact, installs the exactly-pinned
-#                      wrangler (in a step with no token) and publishes the bundle as it came (`--no-bundle`).
+#   deploy             holds the token and has NO checkout: it downloads that artifact, VERIFIES it (in a step with no token:
+#                      exactly the three files, a configuration whose keys are the allow-list `HANDOFF_CONFIG_KEYS`, whose
+#                      `main` is the bundle and whose `name` is the pinned Worker), installs the exactly-pinned wrangler
+#                      (in a step with no token) and publishes the bundle as it came (`--no-bundle`). The artifact is
+#                      NOT trusted: a configuration's `build` command, `data_blobs`/`wasm_modules`/`text_blobs` (which
+#                      read any path, `/proc/self/environ` included) or a different `name` would otherwise act with the
+#                      token in the environment, and build-time code can rewrite the file before it is copied.
 #   control            reads and writes runtime state with curl and jq alone.
 #   tunnel-accounts    holds the token and the pool, has no checkout: the pinned wrangler puts the secret by Worker name.
 #
@@ -148,7 +159,14 @@ jobs:
           }
           cp "${bundles[0]}" "${handoff}/worker.js"
           cp "${built}/fingerprint" "${handoff}/fingerprint"
-          jq --arg main worker.js '.main = $main' packages/plugins/connections/worker/wrangler.hosted.json >"${handoff}/wrangler.hosted.json"
+      # The configuration is PROJECTED onto the allow-list, never copied whole: a key outside it does not leave this job.
+      # (`deploy` re-checks the file anyway; build-time code can rewrite the repository's copy before this step.)
+      - name: Hand over the hosted configuration
+        run: |
+          set -euo pipefail
+          jq --argjson keys "$HANDOFF_CONFIG_KEYS" \
+            'with_entries(select(.key as $k | $keys | index($k))) | .main = "worker.js"' \
+            packages/plugins/connections/worker/wrangler.hosted.json >"${RUNNER_TEMP}/relay-bundle/wrangler.hosted.json"
       # Uploaded under a name of its own and of this attempt: a re-run of `deploy` alone finds no earlier attempt's
       # bundle and fails closed; re-run the whole workflow.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -178,6 +196,31 @@ jobs:
         with:
           name: relay-hosted-bundle-${{ github.run_attempt }}
           path: ${{ runner.temp }}/relay-bundle
+      # No token in this step, and it runs before every step that has one. The artifact came from a job that ran the
+      # pushed commit's code, so NOTHING in it is trusted: the directory holds exactly the bundle, the configuration and
+      # the fingerprint (hidden files included: wrangler reads a `.env` or a `.dev.vars` beside the configuration), and
+      # the configuration holds only allow-listed keys, publishes `worker.js` and names the pinned Worker.
+      - name: Verify the handed-over bundle
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/relay-bundle"
+          # shellcheck disable=SC2012 # `ls -A` is the exact listing release-guards.sh pins: hidden files count
+          listing="$(ls -A | LC_ALL=C sort | tr '\n' ' ')"
+          if [[ ${listing} != 'fingerprint worker.js wrangler.hosted.json ' ]]; then
+            echo "❌ the hand-off must hold exactly fingerprint, worker.js and wrangler.hosted.json, found: ${listing}" >&2
+            exit 1
+          fi
+          if [[ -n "$(find . -mindepth 1 -maxdepth 1 ! -type f -print)" ]]; then
+            echo "❌ every entry of the hand-off must be a regular file" >&2
+            exit 1
+          fi
+          # shellcheck disable=SC2016 # jq variables, not shell expansions
+          if ! jq -e --argjson keys "$HANDOFF_CONFIG_KEYS" --arg name ferretry-hosted-relay \
+            'type == "object" and ((keys - $keys) == []) and .main == "worker.js" and .name == $name' \
+            wrangler.hosted.json >/dev/null 2>&1; then
+            echo "❌ wrangler.hosted.json must hold only allow-listed keys, main worker.js and the name ferretry-hosted-relay" >&2
+            exit 1
+          fi
       # No token in this step: the install scripts of wrangler's dependencies are not run at all (`--ignore-scripts`),
       # and nothing is read from the repository (there is no checkout in this job).
       - name: Install the pinned wrangler
@@ -237,7 +280,10 @@ jobs:
             echo "hosted relay ${built} is already serving; not redeploying, because a deploy drops" \
               "every live daemon and browser session"
           elif [[ "$FORCE_DEPLOY" != "true" ]] && ((serving_run > GITHUB_RUN_NUMBER)); then
-            echo "run ${serving_run} already published a newer hosted relay than this run (${GITHUB_RUN_NUMBER});" \
+            # A warning, not a green echo: a skipped publish is a decision an operator may need to see in the summary
+            # (re-running an old run never rolls back, and a reset run number skips every automatic deploy until a manual
+            # `deploy`: packages/plugins/connections/worker/README.md, "Operating the hosted deployment").
+            echo "::warning::run ${serving_run} already published a newer hosted relay than this run (${GITHUB_RUN_NUMBER});" \
               "not publishing an older build over it"
           else
             echo "publishing hosted relay ${built} (serving: ${deployed:-unknown}; manual: ${FORCE_DEPLOY})"

