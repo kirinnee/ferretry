@@ -1,5 +1,5 @@
 import { ApiError, decodeParameter, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
-import { ProjectIdSchema, SetProjectAccountsRequestSchema } from '../../../contract/index.ts';
+import { type ProjectId, ProjectIdSchema, SetProjectAccountsRequestSchema } from '../../../contract/index.ts';
 import { parseBody } from '../../lib/body.ts';
 import type { ProjectRegistry } from '../../lib/registry.ts';
 import { belowHome } from '../folders/fence.ts';
@@ -24,7 +24,7 @@ const projectId = (raw: string | undefined) => {
  * whole list), with no I/O and nothing written. A call with no standing at all is refused, never read on a guess.
  */
 export const reposRoute =
-  (registry: ProjectRegistry, scan: ScanDeps): RouteHandler =>
+  (registry: ProjectRegistry, scan: ScanDeps, listChanged: (id: ProjectId) => void = () => undefined): RouteHandler =>
   async call => {
     const id = projectId(call.params.get('id'));
     const project = await registry.find(id);
@@ -56,6 +56,8 @@ export const reposRoute =
     }
     const kept = await registry.recordRepos(id, result.repos, !result.truncated);
     if (!kept.ok) throw new ApiError(404, kept.error.message, 'not-found');
+    // A scan that changed the list means the folder changed under what the file index holds (plan §3.5): it is out of date.
+    if (JSON.stringify(kept.value.repos ?? []) !== JSON.stringify(project.repos ?? [])) listChanged(id);
     return jsonResponse({ repos: kept.value.repos ?? [], truncated: result.truncated });
   };
 

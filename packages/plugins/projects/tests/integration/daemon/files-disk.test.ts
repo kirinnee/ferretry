@@ -8,7 +8,9 @@ import { join } from 'node:path';
 import { DEFAULT_PROJECT_INDEX_LIMITS, ProjectFolderRefused } from '../../../daemon/features/files/build.ts';
 import { ProjectIndexSummarySchema } from '../../../contract/index.ts';
 import { kernelBrowser } from '../../../daemon/features/folders/adapter.ts';
+import { ProjectIndexCache } from '../../../daemon/features/files/cache.ts';
 import { placeOf } from '../../../daemon/features/files/pins.ts';
+import { FilesRefresh } from '../../../daemon/features/files/refresh.ts';
 import { cleanUp, git, put, world } from './files-support.ts';
 
 afterEach(cleanUp);
@@ -283,6 +285,36 @@ describe('the project folder is the registered place, not wherever its spelling 
     expect(await itself(join(w.user, 'link', 'work'))).toBe(false);
     expect(await itself(join(w.user, 'missing'))).toBe(false);
     expect(await place.home()).toBe(w.user);
+  });
+
+  test('a ferret idle in a REAL symlink alias of project beta (the link sits inside alpha) refreshes beta and leaves alpha alone', async () => {
+    const w = await world();
+    const alpha = join(w.user, 'alpha');
+    const beta = join(w.user, 'beta');
+    await put(w.user, { 'alpha/a.txt': '', 'beta/b.txt': '' });
+    await symlink(beta, join(alpha, 'link'));
+    const cache = new ProjectIndexCache(
+      async path => ({ files: [], summary: (await w.build(path)).summary }),
+      () => Date.now(),
+    );
+    const refresh = new FilesRefresh(cache, {
+      projects: async () => [
+        { id: 'alpha', path: alpha },
+        { id: 'beta', path: beta },
+      ],
+      folderOf: async () => join(alpha, 'link'),
+      resolve: path => placeOf(kernelBrowser(w.kernel)).resolve(path),
+    });
+    for (const [id, path] of [
+      ['alpha', alpha],
+      ['beta', beta],
+    ] as const)
+      await cache.read(id, path);
+
+    await refresh.ferretChanged({ ferret: 'f', state: 'idle' });
+
+    expect((await cache.read('alpha', alpha)).rebuilding).toBe(false);
+    expect((await cache.read('beta', beta)).rebuilding).toBe(true);
   });
 });
 
