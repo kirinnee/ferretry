@@ -24,10 +24,14 @@ export interface ReadMessage {
  * micromark's tokens, once. A fence still arriving, or one Durian and CommonMark would end in different places, makes the
  * message plain code from that fence on, so nothing at or after it draws and a partial body is never run; a block draws
  * only where its parsed fence has a real closing delimiter. Durian is given that one decision, not asked again.
+ *
+ * `arriving` is true for the tail of a message still streaming in: a closing delimiter that is its last line is not yet
+ * one (the rest of that line may turn it into content), so that fence stays open and inert until the line ends. A final
+ * message is read as written.
  */
-export function readMessage(source: string, idPrefix: string): ReadMessage {
+export function readMessage(source: string, idPrefix: string, arriving = false): ReadMessage {
   configureDurian();
-  const settled = settleFences(source);
+  const settled = settleFences(source, arriving);
   const doc = parse(settled.text, {
     blocks: [fyRenderParseBlock(settled)],
     frontMatter: false,

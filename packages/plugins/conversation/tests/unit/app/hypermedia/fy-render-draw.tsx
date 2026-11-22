@@ -52,12 +52,13 @@ export const FENCE = '`'.repeat(3);
 export const SQUARE =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>';
 
-const draw = async (text: string, withBoard = true) => {
+/** `arriving`: the text is the tail of a message still streaming in (what a live, last transcript row passes). */
+export const draw = async (text: string, withBoard = true, arriving = false) => {
   const f = fixture();
   const surface = { ...f.surface, fences: fyRenderFences(withBoard ? { cardEmbed: { daemon: 'd1' } } : {}) };
   const tree = inShell(
     <ReferenceSurfaceProvider surface={surface}>
-      <HypermediaProse text={text} />
+      <HypermediaProse arriving={arriving} text={text} />
     </ReferenceSurfaceProvider>,
   ) as ReactNode;
   const mounted = await mount(tree as never);
@@ -66,8 +67,8 @@ const draw = async (text: string, withBoard = true) => {
 };
 
 /** What a page draws of a text: frames, blocks and pictures, and whether anything is an error. */
-export const drawn = async (text: string) => {
-  const { container, unmount } = await draw(text);
+export const drawn = async (text: string, arriving = false) => {
+  const { container, unmount } = await draw(text, true, arriving);
   const result = {
     frames: container.querySelectorAll('iframe').length,
     blocks: container.querySelectorAll('[data-fy-render-type]').length,

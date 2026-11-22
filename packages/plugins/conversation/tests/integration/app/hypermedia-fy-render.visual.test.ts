@@ -369,3 +369,83 @@ describe('nothing at or after an unclosed opener draws while the message streams
         }
       }, 60_000);
 });
+
+describe('a closing delimiter that is the last line of a message still arriving does not run the partial body (r12 H3 R4)', () => {
+  const TICKS = '`'.repeat(3);
+  const TILDES = '~'.repeat(3);
+  const HTML = (open: string): string[] => [
+    open,
+    'type: html',
+    'alt: An agenda',
+    '---',
+    '<p>partial</p><script>1</script>',
+  ];
+  const CUTS: readonly { readonly name: string; readonly lines: string[]; readonly closer: string }[] = [
+    { name: 'backticks', lines: HTML(`${TICKS}fy-render`), closer: TICKS },
+    { name: 'tildes', lines: HTML(`${TILDES}fy-render`), closer: TILDES },
+    { name: 'quoted', lines: HTML(`${TICKS}fy-render`).map(line => `> ${line}`), closer: `> ${TICKS}` },
+  ];
+
+  for (const { name } of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`keeps the iframe count at 0 while the closer is the last line, then draws it (${name}, ${scheme})`, async () => {
+        const { tab, close, foreign } = await open(name, scheme);
+        try {
+          const show = async (text: string, busy: boolean) => {
+            await tab.evaluate(
+              ([text, busy]) =>
+                (window as unknown as { fyStream: (text: string, busy: boolean) => void }).fyStream(
+                  text as string,
+                  busy as boolean,
+                ),
+              [text, busy] as const,
+            );
+            await tab.waitForTimeout(400);
+            return await tab.evaluate(() => {
+              const doc = document.querySelector('.dh-doc') as HTMLElement;
+              return {
+                frames: doc.querySelectorAll('iframe').length,
+                blocks: doc.querySelectorAll('[data-fy-render-type]').length,
+                errors: doc.querySelectorAll('.dh-error, [data-dh-missing]').length,
+                code: [...doc.querySelectorAll('.code-block code')].some(code =>
+                  (code.textContent ?? '').includes('<script>1</script>'),
+                ),
+              };
+            });
+          };
+          for (const cut of CUTS) {
+            const head = ['Here is the plan:', '', ...cut.lines];
+            const at = await show([...head, cut.closer].join('\n'), true);
+            // The next token turns the line into content: still nothing runs.
+            const next = await show([...head, `${cut.closer}js`].join('\n'), true);
+            // The line ends: it was a closer, and the block draws.
+            const ended = await show([...head, `${cut.closer}\n`].join('\n'), true);
+            // The same text as a FINAL message (not arriving) is drawn as it always was.
+            const final = await show([...head, cut.closer].join('\n'), false);
+            if (process.env.FY_MEASURE !== undefined)
+              console.log(JSON.stringify({ cut: cut.name, at, next, ended, final }));
+            expect({ cut: cut.name, ...at }).toMatchObject({
+              cut: cut.name,
+              frames: 0,
+              blocks: 0,
+              errors: 0,
+              code: true,
+            });
+            expect({ cut: cut.name, ...next }).toMatchObject({ cut: cut.name, frames: 0, blocks: 0, errors: 0 });
+            expect({ cut: cut.name, frames: ended.frames, errors: ended.errors }).toEqual({
+              cut: cut.name,
+              frames: 1,
+              errors: 0,
+            });
+            expect({ cut: cut.name, frames: final.frames, errors: final.errors }).toEqual({
+              cut: cut.name,
+              frames: 1,
+              errors: 0,
+            });
+          }
+          expect(foreign).toEqual([]);
+        } finally {
+          await close();
+        }
+      }, 90_000);
+});
