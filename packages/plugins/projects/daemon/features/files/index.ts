@@ -5,6 +5,7 @@ import { kernelBrowser } from '../folders/adapter.ts';
 import { buildProjectIndex, type ProjectIndex } from './build.ts';
 import { ProjectIndexCache } from './cache.ts';
 import { kernelGit, kernelPins, placeOf } from './pins.ts';
+import { FilesRefresh } from './refresh.ts';
 import { type FilePlace, filesRescanRoute, filesRoute, filesStatusRoute } from './routes.ts';
 
 /** What a test replaces: how one project folder becomes an index. The real one reads through the kernel's `imports` root. */
@@ -15,18 +16,23 @@ export interface FileIndexDeps {
 }
 
 /**
- * The three routes of a project's file finder (&F6061 U5), over one in-memory cache per daemon.
+ * The three routes of a project's file finder (&F6061 U5), over one in-memory cache per daemon, and the `refresh` that
+ * marks that cache out of date (&F6061 U6). `folderOf` says where a ferret works (none: no early refresh).
  */
 export function filesRoutes(
   kernel: Pick<KernelPorts, 'roots' | 'paths' | 'spawn' | 'clock'>,
   registry: ProjectRegistry,
   deps?: FileIndexDeps,
-): Readonly<
-  Record<
-    'GET /v1/projects/:id/files' | 'GET /v1/projects/:id/files/status' | 'POST /v1/projects/:id/files/rescan',
-    RouteHandler
-  >
-> {
+  folderOf: (ferret: string) => Promise<string | undefined> = async () => undefined,
+): {
+  readonly routes: Readonly<
+    Record<
+      'GET /v1/projects/:id/files' | 'GET /v1/projects/:id/files/status' | 'POST /v1/projects/:id/files/rescan',
+      RouteHandler
+    >
+  >;
+  readonly refresh: FilesRefresh;
+} {
   const build =
     deps?.build ??
     ((path: string, holdSlot: (work: Promise<unknown>) => void) =>
@@ -40,8 +46,11 @@ export function filesRoutes(
   const cache = new ProjectIndexCache(build, () => kernel.clock.nowMs());
   const place = deps?.place ?? placeOf(kernelBrowser(kernel));
   return {
-    'GET /v1/projects/:id/files': filesRoute(registry, cache, place),
-    'GET /v1/projects/:id/files/status': filesStatusRoute(registry, cache, place),
-    'POST /v1/projects/:id/files/rescan': filesRescanRoute(registry, cache, place),
+    routes: {
+      'GET /v1/projects/:id/files': filesRoute(registry, cache, place),
+      'GET /v1/projects/:id/files/status': filesStatusRoute(registry, cache, place),
+      'POST /v1/projects/:id/files/rescan': filesRescanRoute(registry, cache, place),
+    },
+    refresh: new FilesRefresh(cache, { projects: () => registry.list(), folderOf }),
   };
 }

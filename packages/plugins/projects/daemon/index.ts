@@ -1,9 +1,11 @@
+import type { FerretId } from '@ferretry/core-ferrets/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { ProjectRegistered, ProjectRemoved } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { kernelFolders } from './adapters/folders.ts';
 import { kernelStore } from './adapters/store.ts';
 import { type FileIndexDeps, filesRoutes } from './features/files/index.ts';
+import type { FerretChange } from './features/files/refresh.ts';
 import { foldersRoutes } from './features/folders/index.ts';
 import { reposRoutes } from './features/repos/index.ts';
 import type { ScanDeps } from './features/repos/scan.ts';
@@ -20,7 +22,7 @@ import { listRoute, registerRoute, removeRoute } from './lib/routes.ts';
  */
 export const implementProjects = (folders?: ProjectFolders, repoScan?: ScanDeps, fileIndex?: FileIndexDeps) =>
   implementDaemon(manifest, {
-    build: ({ kernel }) => {
+    build: ({ kernel, uses }) => {
       const machine = folders ?? kernelFolders(kernel);
       const registry = new ProjectRegistry({
         store: kernelStore(kernel.state),
@@ -30,6 +32,10 @@ export const implementProjects = (folders?: ProjectFolders, repoScan?: ScanDeps,
         registered: id => kernel.events.publish(ProjectRegistered, { id }),
         removed: id => kernel.events.publish(ProjectRemoved, { id }),
       });
+      const files = filesRoutes(kernel, registry, fileIndex, async ferret => {
+        const summary = await uses.ferrets.current()?.get(ferret as FerretId);
+        return summary?.folder;
+      });
       return {
         routes: {
           'GET /v1/projects': listRoute(registry),
@@ -37,7 +43,13 @@ export const implementProjects = (folders?: ProjectFolders, repoScan?: ScanDeps,
           'DELETE /v1/projects/:id': removeRoute(registry),
           ...foldersRoutes(kernel, machine),
           ...reposRoutes(kernel, registry, repoScan),
-          ...filesRoutes(kernel, registry, fileIndex),
+          ...files.routes,
+        },
+        // No watcher (D5): a ferret that stops working in a project, a project registered again or removed refreshes its index.
+        subscribers: {
+          'ferrets.changed': async change => await files.refresh.ferretChanged(change as FerretChange),
+          'projects.registered': payload => files.refresh.registered((payload as { id: string }).id),
+          'projects.removed': payload => files.refresh.removed((payload as { id: string }).id),
         },
         // The folders a governed device may start a ferret in as an ordinary act (Ferrets reads this, never the registry).
         hooks: { 'launch.roots:projects': { roots: async () => (await registry.list()).map(project => project.path) } },
