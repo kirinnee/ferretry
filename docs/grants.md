@@ -1087,16 +1087,22 @@ command says so at the moment somebody might be tempted to do that instead.
   outside it — `GET /v1/projects/folders?path=/…`, `GET /v1/projects/:id/repos` and the three file-index routes
   below, when the project folder (as registered, or where a link makes it really resolve) is outside the home — also
   asks `filesystem.configure`, so a use-only or `--limited` device cannot map the disk, and a remote device needs
-  the passkey step-up that registering a project already needs. The decision is made once per request, before the disk
-  is touched or an answer is given from memory. The owner's `fy` with the admin token over loopback is ungoverned, as
-  everywhere; a call the daemon cannot decide is refused (`503 folder_gate_unavailable`), never read on a guess.
+  the passkey step-up that registering a project already needs. The decision is made once per request, and admission
+  comes before any listing, scan or file-index cache access (for a spelling inside the home the canonical path is
+  resolved first, to ask where the folder really is; that reads nothing of it). What a refused caller gets differs by
+  route: the folder picker and the three file-index routes answer the gate's `403`; the repository scan answers `200`
+  with the project's **saved** repositories and `truncated: true` and scans nothing (only the gate's own `403` becomes
+  that answer). The owner's `fy` with the admin token over loopback is ungoverned, as everywhere; a call the daemon
+  cannot decide is refused (`503 folder_gate_unavailable`), never read on a guess.
 - **The project file index (`GET /v1/projects/:id/files`, `…/files/status`, `POST …/files/rescan`) is
   `filesystem.use`**, at the `operator` minimum, `caller: person`, `noStore`, audit skipped (a read of file NAMES;
   the rescan rebuilds an in-memory list and writes nothing on the host). It returns names, never content, and drops
   secret-looking names. What it means, what it caps and what it cannot promise is [project-index.md](project-index.md).
-  Declared here: **a use-only device reads file NAMES across whatever the owner registered**, so registering a broad
-  root (`/`, the home, `/home`) widens what every such device sees; the app warns before it is registered, and
-  `filesystem.configure` (which registering already needs) is the only gate on that choice.
+  Declared here: **a use-only device reads file NAMES across a project registered at or below the home**, so registering
+  the home folder itself widens what every such device sees; the app warns before it is registered, and
+  `filesystem.configure` (which registering already needs) is the only gate on that choice. Registering `/` or `/home`
+  does **not** widen it: those are outside the home, so the three file routes refuse a use-only device with the
+  outside-home gate's `403` (the file routes never answer a partial index for a refused caller).
 - ~~The audit journal has no read surface.~~ **Closed.** `GET /v1/grants/audit` and
   `fy daemon config history` (alias `log`) read the tail of `state/grant-audit.jsonl`. The read is
   `admin` scope rather than the grant read’s `warden`, because it names DEVICES; it is bounded to a
