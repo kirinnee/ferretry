@@ -1,5 +1,6 @@
 import { type Document, parse } from 'durian-hypermedia';
 import { configureDurian } from './durian.ts';
+import { fyRenderParseBlock } from './fy-render-host.tsx';
 import { LITERAL_CODE_INLINES, mayHoldLiteralCode } from './literal-code.tsx';
 import { MESSAGE_LIMITS } from './limits.ts';
 import { hypermediaUrlPolicy } from './url-policy.ts';
@@ -15,6 +16,7 @@ export function parseMessage(text: string, idPrefix: string): Document {
   configureDurian();
   return withReferences(
     parse(text, {
+      blocks: [fyRenderParseBlock(text)],
       frontMatter: false,
       idPrefix,
       limits: MESSAGE_LIMITS,

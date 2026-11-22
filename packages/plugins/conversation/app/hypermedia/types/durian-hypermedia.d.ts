@@ -332,6 +332,8 @@ export interface ParseOptions {
    * carrying its raw text. Pass the same array every time (Durian caches the lexer by its identity).
    */
   readonly inlines?: readonly InlineDef[];
+  /** Host blocks for this call, added to the ones registered process-wide. */
+  readonly blocks?: readonly BlockDef<any, any>[];
 }
 
 /** The host's URL hook: the URL to use, or `null` to drop it (the text stays, without a link). */
@@ -347,3 +349,24 @@ export interface InlineDef {
 export declare function parse(text: string, options?: ParseOptions): Document;
 export declare function check(doc: Document | string, options?: ParseOptions): Problem[];
 export declare function llmView(doc: Document | string, options?: ParseOptions): string;
+
+/** What the parser hands a host block: the lines inside the fence, the fence's `key=value` attributes and its line. */
+export interface BlockInput {
+  readonly body: string;
+  readonly attrs: Readonly<Record<string, string>>;
+  readonly line: number;
+}
+
+/** A host's own fenced part: one definition serves the parser (`parse`, `llm`, `check`) and the renderer (`Component`). */
+export interface BlockDef<D = unknown, C = unknown> {
+  readonly name: string;
+  /** Body to data. Throwing shows Durian's error block, so a host that wants plain code answers instead. */
+  readonly parse?: (input: BlockInput) => D;
+  /** What an LLM reads in place of the block. */
+  readonly llm?: (data: D, input: BlockInput) => string;
+  readonly check?: (
+    data: D,
+    input: BlockInput,
+  ) => { readonly line?: number; readonly level?: 'error' | 'warn'; readonly message: string }[];
+  readonly Component?: C;
+}

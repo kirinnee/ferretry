@@ -1,5 +1,6 @@
 import { DocumentView, type InlineDef } from 'durian-hypermedia/react/strict';
 import { memo, useId, useMemo, useSyncExternalStore } from 'react';
+import { FY_RENDER_COMPONENT_BLOCKS } from './fy-render-host.tsx';
 import { exceedsMessageCap } from './limits.ts';
 import { HumanSegment, TerminalWithLlmText } from './llm-text.tsx';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';
@@ -77,6 +78,7 @@ export const HypermediaProse = memo(function HypermediaProse({ text, className }
           </pre>
         ) : (
           <DocumentView
+            blocks={FY_RENDER_COMPONENT_BLOCKS}
             components={PARTS}
             doc={doc}
             inlines={INLINES}
