@@ -321,11 +321,33 @@ describe('the first pairing screen draws the same progress bar (C59 O3)', () => 
           const bar = await box(tab, '[data-step-progress]');
           expect(bar.width, 'the bar is drawn').toBeGreaterThan(40);
           expect(bar.right, 'the bar fits the viewport').toBeLessThanOrEqual(variant.width + 1);
-          if (shotsDir !== '')
+          // Everything under the bar is still reachable: the last control (paste's "Use this link") scrolls into view and
+          // takes a click where it is drawn, so the bar did not push it out of the page.
+          const submit = tab.getByRole('button', { name: 'Use this link' });
+          if ((await submit.count()) > 0) {
+            await submit.scrollIntoViewIfNeeded();
+            const hit = await submit.evaluate(node => {
+              const r = node.getBoundingClientRect();
+              const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+              return {
+                reachable: top !== null && (top === node || node.contains(top)),
+                bottom: r.bottom,
+                viewport: window.innerHeight,
+                scrollHeight: document.documentElement.scrollHeight,
+                bodyHeight: document.body.getBoundingClientRect().height,
+              };
+            });
+            expect(hit.reachable, 'Use this link takes a click where it is drawn').toBe(true);
+            expect(hit.bottom, 'and sits inside the viewport').toBeLessThanOrEqual(hit.viewport + 1);
+          }
+          if (shotsDir !== '') {
+            // The page scrolls inside the scene, which a full-page capture does not follow: shoot it with the room it needs.
+            await tab.setViewportSize({ width: variant.width, height: 1_100 });
             await tab.screenshot({
               path: join(shotsDir, `${variant.name}-first-${state.name.replace(/\W+/g, '-')}.png`),
               fullPage: true,
             });
+          }
         } finally {
           await context.close();
         }
