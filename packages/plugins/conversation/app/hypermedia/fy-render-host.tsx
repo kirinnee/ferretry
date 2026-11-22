@@ -189,8 +189,13 @@ function FyRenderPart({ block, data }: { readonly block: HostBlock; readonly dat
   );
 }
 
-/** What the code slot is told is drawable ({@link drawableBodies}): a key that ignores whitespace, and the body it stands for. */
-const DrawableBodies = createContext<ReadonlyMap<string, string>>(new Map());
+/**
+ * What the code slot is told is drawable ({@link drawableBodies}): a key that ignores indentation, and the bodies that
+ * share it, each once, in the order their fences were written.
+ */
+export type DrawableFyRenderBodiesMap = ReadonlyMap<string, readonly string[]>;
+
+const DrawableBodies = createContext<DrawableFyRenderBodiesMap>(new Map());
 
 /** The provider a message hands its drawable bodies through. */
 export const DrawableFyRenderBodies = DrawableBodies.Provider;
@@ -208,21 +213,60 @@ const bodyKey = (text: string): string =>
     .join('\n');
 
 /**
- * The bodies of the fences of one message that may be drawn: opened as exactly `fy-render` and really closed. A key two
- * DIFFERENT bodies share (they differ only by their indent) is left out: neither is drawn and each stays the code it
- * is, so no block's content is ever replaced by another's.
+ * The bodies of the fences of one message that may be drawn: opened as exactly `fy-render` and really closed, grouped by
+ * {@link bodyKey} and each body once, in fence order. Bodies that differ only by their indent share a key; the slot
+ * tells them apart by {@link bodyFor}.
  */
-export const drawableBodies = (settled: SettledFences): ReadonlyMap<string, string> => {
-  const bodies = new Map<string, string>();
-  const ambiguous = new Set<string>();
+export const drawableBodies = (settled: SettledFences): DrawableFyRenderBodiesMap => {
+  const bodies = new Map<string, string[]>();
   for (const fence of settled.fences.filter(isClosedFyRender)) {
     const key = bodyKey(fence.body);
     const known = bodies.get(key);
-    if (known !== undefined && known !== fence.body) ambiguous.add(key);
-    bodies.set(key, fence.body);
+    if (known === undefined) bodies.set(key, [fence.body]);
+    else if (!known.includes(fence.body)) known.push(fence.body);
   }
-  for (const key of ambiguous) bodies.delete(key);
   return bodies;
+};
+
+/** A text without the newlines that end it: how the renderer ends a fence's text, which the author did not type. */
+const withoutTrailingNewlines = (text: string): string => text.replace(/\n+$/u, '');
+
+/** The whitespace a line begins with. */
+const indentOf = (line: string): string => /^[ \t]*/u.exec(line)?.[0] ?? '';
+
+/**
+ * Could the Markdown renderer have spelled `candidate` as `text`? Line for line the same, but for the indent of a line that
+ * begins with a TAB in the candidate: the renderer keeps a tab in one place (a quote) and expands it to spaces in another
+ * (a quoted list), where it cannot be told from the spaces an author typed. Every other line must be spelled exactly.
+ */
+function couldBeSpelled(candidate: string, text: string): boolean {
+  const written = withoutTrailingNewlines(candidate).split('\n');
+  const seen = withoutTrailingNewlines(text).split('\n');
+  return (
+    written.length === seen.length &&
+    written.every((line, index) => {
+      const other = seen[index] ?? '';
+      if (line === other) return true;
+      const lead = indentOf(line);
+      return lead.includes('\t') && !indentOf(other).includes('\t') && line.slice(lead.length) === other.trimStart();
+    })
+  );
+}
+
+/**
+ * The body a code slot's text stands for, or `undefined` when it is not provably one of this message's. Bodies that differ
+ * only by indentation are told apart by the text itself: the slot's text is the one of them it could be the spelling of
+ * ({@link couldBeSpelled}: the Markdown renderer keeps a fence's own indentation; it only re-spells a tab-indented line).
+ * A text that could be the spelling of none of several, or of more than one (a tab-indented body and its space-indented
+ * twin: the renderer's expansion of the first IS the second), is AMBIGUOUS and stays plain code, so no block's content is
+ * ever replaced by another's and no body is drawn under the wrong fence or twice.
+ */
+const bodyFor = (drawable: DrawableFyRenderBodiesMap, text: string): string | undefined => {
+  const candidates = drawable.get(bodyKey(text));
+  if (candidates === undefined) return undefined;
+  if (candidates.length === 1) return candidates[0];
+  const spelled = candidates.filter(candidate => couldBeSpelled(candidate, text));
+  return spelled.length === 1 ? spelled[0] : undefined;
 };
 
 /**
@@ -235,8 +279,7 @@ export const drawableBodies = (settled: SettledFences): ReadonlyMap<string, stri
 function CodeOrFyRender(props: CodeSlotProps) {
   const drawable = useContext(DrawableBodies);
   const data = useMemo(() => {
-    const body =
-      props.lang === FY_RENDER_BLOCK_NAME && props.meta === '' ? drawable.get(bodyKey(props.text)) : undefined;
+    const body = props.lang === FY_RENDER_BLOCK_NAME && props.meta === '' ? bodyFor(drawable, props.text) : undefined;
     return body === undefined ? null : readBody(body, null);
   }, [props.lang, props.meta, props.text, drawable]);
   return data === null ? <HypermediaCode {...props} /> : <FyRenderBody data={data} />;
