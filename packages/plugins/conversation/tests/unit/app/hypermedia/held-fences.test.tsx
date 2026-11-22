@@ -11,7 +11,8 @@ import { ReferenceSurfaceProvider } from '@ferretry/app';
 import { interact, mount } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
 import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
-import { holdFences } from '../../../../app/hypermedia/held-fences.tsx';
+import { loadAnimationEngine } from '../../../../app/hypermedia/animation-engine.ts';
+import { ANIMATION_DRAWS, holdFences } from '../../../../app/hypermedia/held-fences.tsx';
 import { mustRead } from './must-read.ts';
 import { fixture, inShell } from './surface-fixture.tsx';
 
@@ -95,7 +96,9 @@ describe('a chart is held as code, never evaluated (S1)', () => {
     const { doc } = mustRead(text, 'p-');
     expect(JSON.stringify(doc.blocks)).not.toContain('"type":"chart"');
     expect(JSON.stringify(doc.blocks)).not.toContain('"initial"');
-    expect(JSON.stringify(doc.blocks).match(/"name":"fy-chart-held"/gu)?.length).toBe(5);
+    // The chart in the tabs is inside the held container's own text, not a second block: four charts, one held container.
+    expect(JSON.stringify(doc.blocks).match(/"name":"fy-chart-held"/gu)?.length).toBe(4);
+    expect(JSON.stringify(doc.blocks).match(/"name":"fy-tabs-held"/gu)?.length).toBe(1);
   });
 
   it('renames only a fence Durian reads as a chart: not a longer word, not a fence inside another fence, not fy-render', () => {
@@ -155,6 +158,107 @@ describe('a code walk keeps its source and notes beside the :::llm disclosure (G
       '- file: src/api.ts\n  note: the entry point',
     );
     expect(disclosures(container)).toEqual([]);
+    await unmount();
+  });
+});
+
+const TABS = [
+  ':::tabs',
+  '',
+  '#### npm',
+  '',
+  'Run `npm install`.',
+  '',
+  '#### pip',
+  '',
+  'Run `pip install`.',
+  ':::',
+].join('\n');
+
+describe('a :::tabs container is held as code (r12 H11a)', () => {
+  it('is read as ONE host block, never a tabs part, with line numbers unmoved', () => {
+    const text = ['Intro.', '', TABS, '', 'After.'].join('\n');
+    const held = holdFences(text);
+    expect(held.split('\n')).toHaveLength(text.split('\n').length);
+    expect(held).toContain(`${FENCE}fy-tabs-held`);
+    const { doc } = mustRead(text, 'p-');
+    expect(doc.blocks.map(block => block.type)).toEqual(['markdown', 'host', 'markdown']);
+    expect(doc.blocks[1]).toMatchObject({ type: 'host', name: 'fy-tabs-held' });
+    expect(doc.problems).toEqual([]);
+  });
+
+  it('is drawn as readable code (its own :::tabs lines included), with no tab and no error', async () => {
+    const { container, unmount } = await draw(TABS);
+    const [block, ...rest] = [...container.querySelectorAll('.dh-doc .code-block')];
+    expect(rest).toEqual([]);
+    expect(block?.querySelector('.code-lang')?.textContent).toBe('md');
+    expect(block?.querySelector('pre')?.textContent).toBe(TABS);
+    expect(container.querySelector('.dh-doc .tabs, .dh-doc [role="tab"]')).toBeNull();
+    expect(container.querySelector('.dh-error')).toBeNull();
+    await unmount();
+  });
+
+  it('keeps what follows the name, and what is inside it as written (a longer fence, a chart, a ```` run)', async () => {
+    const inner = ['#### A', fence('chart', 'kind: line'), '````', 'x', '````', '#### B', 'b'];
+    const text = [':::tabs id=pick', ...inner, ':::'].join('\n');
+    const { container, unmount } = await draw(text);
+    expect(container.querySelector('.dh-doc .code-block pre')?.textContent).toBe(text);
+    expect(container.querySelectorAll('.dh-doc .code-block')).toHaveLength(1);
+    expect(mustRead(text, 'p-').doc.blocks.map(block => block.type)).toEqual(['host']);
+    await unmount();
+  });
+
+  it('keeps an author’s :::llm text after it as the disclosure beside the code', async () => {
+    const { container, unmount } = await draw([TABS, '', llm('Two install commands.')].join('\n'));
+    const [only, ...rest] = disclosures(container);
+    expect(rest).toEqual([]);
+    expect(only?.querySelector('pre')?.textContent).toBe('Two install commands.');
+    expect(container.querySelector('.dh-error')).toBeNull();
+    await unmount();
+  });
+
+  it('holds every container in a message, and only :::tabs: not an accordion, a :::human segment or a longer name', () => {
+    const accordion = [':::accordion', '#### One', 'x', ':::'].join('\n');
+    const human = [':::human', 'for people', ':::'].join('\n');
+    const longer = [':::tabs-x', '#### One', 'x', ':::'].join('\n');
+    const text = [TABS, accordion, human, longer, TABS].join('\n\n');
+    expect(holdFences(text).match(/fy-tabs-held/gu)).toHaveLength(2);
+    expect(holdFences([accordion, human, longer].join('\n\n'))).toBe([accordion, human, longer].join('\n\n'));
+  });
+
+  it('reads containers the way Durian does: a fence holds a :::tabs line as text, a container with a fence in it still closes', () => {
+    const quoted = fence('md', ':::tabs', '#### A', ':::');
+    expect(holdFences(quoted)).toBe(quoted);
+    const withFence = [':::tabs', '#### A', fence('ts', ':::', 'x'), '#### B', 'b', ':::'].join('\n');
+    expect(holdFences(withFence).match(/fy-tabs-held/gu)).toHaveLength(1);
+    expect(mustRead(withFence, 'p-').doc.blocks.map(block => block.type)).toEqual(['host']);
+  });
+
+  it('leaves a container Durian refuses to Durian: never closed, nested in another, or after a fence never closed', () => {
+    const unclosed = [':::tabs', '#### A', 'x'].join('\n');
+    expect(holdFences(unclosed)).toBe(unclosed);
+    const nested = [':::tabs', '#### A', ':::human', 'x', ':::', ':::'].join('\n');
+    expect(holdFences(nested)).toBe(nested);
+    const openFence = [`${FENCE}ts`, 'x', ':::tabs', '#### A', ':::'].join('\n');
+    expect(holdFences(openFence)).toBe(openFence);
+    const stray = [':::human', 'x', ':::', '', ':::tabs', '#### A', ':::', `${FENCE}ts`, 'open'].join('\n');
+    expect(holdFences(stray).match(/fy-tabs-held/gu)).toHaveLength(1);
+    // A fence inside a container that never closes does not close it either.
+    const inside = [':::tabs', `${FENCE}ts`, 'x'].join('\n');
+    expect(holdFences(inside)).toBe(inside);
+  });
+});
+
+describe('an animation is held as code, even once its engine has arrived (r12 H11a)', () => {
+  const animation = fence('animation', 'array a: 5 2 8 1', '@step 5 and 2 swap.', 'swap a.0 a.1');
+
+  it('is a host block that shows the source', async () => {
+    expect(ANIMATION_DRAWS).toBe(false);
+    await loadAnimationEngine();
+    expect(mustRead(animation, 'p-', false, true).doc.blocks.map(block => block.type)).toEqual(['host']);
+    const { container, unmount } = await draw(animation);
+    expect(container.querySelector('.dh-doc .code-block .code-lang')?.textContent).toBe('animation');
+    expect(container.querySelector('[data-fy-animation], .scn')).toBeNull();
     await unmount();
   });
 });

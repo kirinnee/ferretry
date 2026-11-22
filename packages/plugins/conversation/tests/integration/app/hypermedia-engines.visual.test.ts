@@ -197,12 +197,16 @@ describe('what a message fetches', () => {
     expect(found).toEqual({ csp: [], errors: [] });
   }, 90_000);
 
-  it('an animation fetches the 2D engine (not the 3D stage) and draws, with 0 violations', async () => {
+  // r12 H11a: an animation is held as code until the parser runs off the main thread (`ANIMATION_DRAWS`), so it fetches
+  // no engine. The test that it fetches the 2D engine and draws returns with the flag.
+  it('an animation is its source as code (r12 H11a): no engine, no 3D stage, no stage drawn, with 0 violations', async () => {
     const { context, found, state, requested } = await show(ANIMATION);
     await context.close();
-    expect(fetched(requested, engineFile)).toBe(true);
+    expect(state.shown).toContain('array a: 5 2 8 1');
+    expect(fetched(requested, engineFile)).toBe(false);
     expect(fetched(requested, threeFile)).toBe(false);
-    expect(state.stages).toBeGreaterThan(0);
+    expect(state.stages).toBe(0);
+    expect(state.canvases).toBe(0);
     expect(found).toEqual({ csp: [], errors: [] });
   }, 90_000);
 });
@@ -227,7 +231,8 @@ const THREE_D = fence(
   'highlight a2 b2',
 );
 
-describe('the 3D picture (end-list L145: its edges read in dark as well as light)', () => {
+// r12 H11a: skipped while animations are held as code (`ANIMATION_DRAWS` is false); re-enabled with the flag.
+describe.skip('the 3D picture (end-list L145: its edges read in dark as well as light)', () => {
   for (const [width, height, label] of [
     [390, 900, '390'],
     [1_280, 900, '1280'],
@@ -309,7 +314,8 @@ const THREE_D_FAMILIES = fence(
   '@step Eight families, one colour each.',
 );
 
-describe('the family colours on the 3D stage (r2 review: every family edge >= 3:1 on its tint, light and dark)', () => {
+// r12 H11a: skipped while animations are held as code (`ANIMATION_DRAWS` is false); re-enabled with the flag.
+describe.skip('the family colours on the 3D stage (r2 review: every family edge >= 3:1 on its tint, light and dark)', () => {
   for (const palette of ['briefing', 'vintage'] as const)
     for (const [width, height, label] of [
       [390, 900, '390'],
@@ -339,21 +345,58 @@ describe('the family colours on the 3D stage (r2 review: every family edge >= 3:
         }, 90_000);
 });
 
-describe('the pictures: the 2D animation and parts', () => {
+describe('the pictures: the held animation and tabs beside the parts that draw', () => {
   for (const [width, height, label] of [
     // Tall enough for the whole message (the log opens scrolled to its end, so the first lines would be cut off).
     [390, 1_900, '390'],
     [1_280, 1_300, '1280'],
   ] as const)
     for (const theme of ['light', 'dark'] as const)
-      it(`${label} ${theme}: draws the animation and the parts beside it`, async () => {
+      it(`${label} ${theme}: shows the animation and the tabs as code, and draws the parts beside them`, async () => {
         const { context, page, found, state } = await show(SHOWCASE, { width, height, theme: `studio-${theme}` });
         if (shotsDir !== '') {
           await mkdir(shotsDir, { recursive: true });
           await page.screenshot({ path: join(shotsDir, `engines-${label}-${theme}.png`), fullPage: false });
         }
         await context.close();
-        expect(state.stages).toBeGreaterThan(0);
+        expect(state.stages).toBe(0);
+        expect(state.shown).toContain(':::tabs');
+        expect(state.shown).toContain('array a: 5 2 8 1');
+        expect(found).toEqual({ csp: [], errors: [] });
+      }, 90_000);
+});
+
+/** A message over a pre-parse limit (fake data: a reading list of 60 links, all one paragraph). */
+const LIMITED = [
+  'A reading list, as one paragraph:',
+  Array.from({ length: 60 }, (_, at) => `[item ${at + 1}](https://example.com/${at + 1})`).join(' '),
+].join('\n');
+
+describe('the plain-text fallback of a message over a pre-parse limit (r12 H11a)', () => {
+  for (const [width, height, label] of [
+    [390, 900, '390'],
+    [1_280, 900, '1280'],
+  ] as const)
+    for (const theme of ['light', 'dark'] as const)
+      it(`${label} ${theme}: shows the message as text under its note, draws nothing, with 0 violations`, async () => {
+        const { context, page, found } = await show(LIMITED, { width, height, theme: `studio-${theme}` });
+        if (shotsDir !== '') {
+          await mkdir(shotsDir, { recursive: true });
+          await page.screenshot({ path: join(shotsDir, `plain-${label}-${theme}.png`), fullPage: false });
+        }
+        const drawn = await page.evaluate(() => ({
+          note: document.querySelector('[data-fy-plain-note]')?.textContent ?? null,
+          text: document.querySelector('pre.fy-hm-plain')?.textContent ?? '',
+          links: document.querySelectorAll('.fy-hm a').length,
+          docs: document.querySelectorAll('.dh-doc').length,
+          wide: document.documentElement.scrollWidth > window.innerWidth + 1,
+        }));
+        await context.close();
+        expect(drawn.note).toBe('shown as plain text');
+        expect(drawn.text).toBe(LIMITED);
+        expect(drawn.links).toBe(0);
+        expect(drawn.docs).toBe(0);
+        expect(drawn.wide).toBe(false);
         expect(found).toEqual({ csp: [], errors: [] });
       }, 90_000);
 });

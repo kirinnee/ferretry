@@ -3,9 +3,9 @@ import { animationEngineReady } from './animation-engine.ts';
 import { configureDurian } from './durian.ts';
 import { settleFences } from './fence-boundaries.ts';
 import { type DrawableFyRenderBodiesMap, drawableBodies, fyRenderParseBlock } from './fy-render-host.tsx';
-import { heldFenceParseBlocks, holdFences } from './held-fences.tsx';
+import { ANIMATION_DRAWS, heldFenceParseBlocks, holdFences } from './held-fences.tsx';
 import { LITERAL_CODE_INLINES, mayHoldLiteralCode } from './literal-code.tsx';
-import { exceedsMessageCap, exceedsParserBudget, PARSER_LIMITS } from './limits.ts';
+import { exceedsMessageCap, exceedsParserBudget, exceedsPreParseLimits, PARSER_LIMITS } from './limits.ts';
 import { hypermediaUrlPolicy } from './url-policy.ts';
 import { withReferences } from './with-references.ts';
 
@@ -34,7 +34,8 @@ export interface ReadMessage {
  * one (the rest of that line may turn it into content), so that fence stays open and inert until the line ends. A final
  * message is read as written.
  *
- * `null` MEANS "SHOW THE TEXT": the message is over the author's cap (`exceedsMessageCap`, counted on the bytes written), or
+ * `null` MEANS "SHOW THE TEXT": the message is over a pre-parse limit (`exceedsPreParseLimits`, shown with a note: see
+ * `plain-fallback.tsx`), or over the author's cap (`exceedsMessageCap`, counted on the bytes written), or
  * the text Durian would be given is over the parser's fixed budget (`exceedsParserBudget`: normalising line endings and NULs
  * and holding fences all change the size). Either way the message is shown as the text it is, never answered with Durian's
  * own "the page is too big" error (`limits.ts`).
@@ -47,11 +48,13 @@ export function readMessage(
   animationReady = animationEngineReady(),
 ): ReadMessage | null {
   if (exceedsMessageCap(source)) return null;
+  // THE PRE-PARSE LIMITS come first, before anything reads the text but the limit check itself (`exceedsPreParseLimits`).
+  if (exceedsPreParseLimits(source)) return null;
   configureDurian();
   const settled = settleFences(source, arriving);
-  // A chart (unbounded formulas) and a code walk are held as code before Durian can read them (`held-fences.tsx`), and so is
-  // an animation until its lazy engine has arrived (`animation-engine.ts`).
-  const text = holdFences(settled.text, !animationReady);
+  // A chart (unbounded formulas), a code walk and a `:::tabs` container are held as code before Durian can read them
+  // (`held-fences.tsx`), and so is an animation until it draws again (`ANIMATION_DRAWS`, then its lazy engine).
+  const text = holdFences(settled.text, !(ANIMATION_DRAWS && animationReady));
   if (exceedsParserBudget(text)) return null;
   const doc = parse(text, {
     blocks: [fyRenderParseBlock(settled), ...heldFenceParseBlocks(text)],

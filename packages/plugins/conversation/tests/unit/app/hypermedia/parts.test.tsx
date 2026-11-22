@@ -43,19 +43,17 @@ const draw = async (text: string, surface = fixture().surface) => {
 };
 
 describe('the parts a message draws', () => {
-  it('draws a file tree, an editor, a tier list, an alignment grid, tabs and an accordion as Durian parts', async () => {
+  it('draws a file tree, an editor, a tier list, an alignment grid and an accordion as Durian parts (tabs are held: held-fences.test.tsx)', async () => {
     const text = [
       fence('filetree', 'app/', '  main.ts  (new)'),
       fence('editor', 'file: a.ts', '---', 'const a = 1;'),
       fence('tierlist', 'S: [a, b]', 'A: [c]'),
       fence('alignment', 'x: [low, high]', 'y: [cheap, dear]', 'items:', '  - name: one', '    at: [0.2, 0.7]'),
-      [':::tabs', '#### Node', 'npm i', '#### Python', 'pip install', ':::'].join('\n'),
       [':::accordion', '#### One', 'first', '#### Two', 'second', ':::'].join('\n'),
     ].join('\n\n');
     const { container, unmount } = await draw(text);
     const parts = [...container.querySelectorAll('.dh-doc [data-dh-part]')].map(p => p.getAttribute('data-dh-part'));
     expect(parts).toContain('filetree');
-    expect(container.querySelectorAll('.dh-doc .tabs [role="tab"]').length).toBe(2);
     expect(container.querySelectorAll('.dh-doc .accordion details').length).toBe(2);
     expect(container.querySelector('[data-dh-missing]')).toBeNull();
     await unmount();
