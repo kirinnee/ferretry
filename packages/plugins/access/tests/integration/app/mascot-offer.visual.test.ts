@@ -157,12 +157,14 @@ const markedAnimations = async (tab: Page): Promise<string[]> =>
 /** Where the pupils are looking: the translation of the eyes' look layer (SVG units), after a transition has finished. */
 const look = async (tab: Page): Promise<{ x: number; y: number }> =>
   await tab.evaluate(async () => {
-    await Promise.all(
-      document
-        .getAnimations()
-        .filter(animation => animation instanceof CSSTransition)
-        .map(animation => animation.finished),
-    );
+    // A transition that is RETARGETED (the poke ends while the pupils are still easing back) is cancelled, and a cancelled
+    // transition's `finished` rejects with an AbortError: that is the look moving on, not a failure. So wait for every
+    // transition to settle (finished or cancelled) and look again, until none is left running.
+    for (let round = 0; round < 10; round += 1) {
+      const running = document.getAnimations().filter(animation => animation instanceof CSSTransition);
+      if (running.length === 0) break;
+      await Promise.allSettled(running.map(animation => animation.finished));
+    }
     const node = document.querySelector('[data-mascot-look]');
     if (node === null) return { x: Number.NaN, y: Number.NaN };
     const matrix = new DOMMatrixReadOnly(getComputedStyle(node).transform);
