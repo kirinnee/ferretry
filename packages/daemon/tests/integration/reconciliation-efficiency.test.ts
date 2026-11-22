@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { appendFile, mkdtemp, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -87,8 +87,12 @@ async function createTemporaryHome(): Promise<string> {
   return home;
 }
 
-async function openStorage(home: string, fileSystems: CountingFileSystemFactory): Promise<OpenedDaemonStorage> {
-  const clock = new SystemClock(() => new Date('2026-07-30T12:00:00.000Z'));
+async function openStorage(
+  home: string,
+  fileSystems: CountingFileSystemFactory,
+  clockOverride?: SystemClock,
+): Promise<OpenedDaemonStorage> {
+  const clock = clockOverride ?? new SystemClock(() => new Date('2026-07-30T12:00:00.000Z'));
   const factory = new DaemonStorageFactory(
     new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
     fileSystems,
@@ -285,6 +289,135 @@ describe('incremental reconciliation', () => {
     ]);
     should(opened.storage.findSession(failed)).deepEqual(failedBefore);
     should(opened.storage.findSession(healthy)?.status).equal('updated');
+    await closeStorage(opened.storage);
+  });
+});
+
+describe('document writes', () => {
+  it('should refresh the index row from a state or config write without reading the unchanged journal', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const fileSystems = new CountingFileSystemFactory();
+    const opened = await openStorage(home, fileSystems);
+    const fileSystem = fileSystems.instance;
+    should(fileSystem).not.be.undefined();
+    const id = parseSessionId('busy-session');
+    await opened.storage.writeState(id, { status: 'running' });
+    for (let index = 0; index < 5; index += 1) await opened.storage.append(id, 'tick', { index });
+    fileSystem?.resetJournalReads();
+
+    // Act
+    await opened.storage.writeState(id, { status: 'finished' });
+    await opened.storage.updateState(id, () => ({ status: 'stopped' }));
+    await opened.storage.writeConfig(id, { id, title: 'renamed' });
+    const chunkReads = fileSystem?.chunkReads.slice();
+
+    // Assert
+    should(chunkReads).deepEqual([]);
+    should(opened.storage.findSession(id)?.status).equal('stopped');
+    should(opened.storage.findSession(id)?.lastSequence).equal(5);
+    should((await opened.storage.replay(id)).events.map(event => event.type)).deepEqual(Array(5).fill('tick'));
+    await closeStorage(opened.storage);
+  });
+
+  it('should still rescan the journal on a document write when the journal changed behind the index', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const fileSystems = new CountingFileSystemFactory();
+    const opened = await openStorage(home, fileSystems);
+    const fileSystem = fileSystems.instance;
+    should(fileSystem).not.be.undefined();
+    const id = parseSessionId('changed-behind');
+    const first = await opened.storage.append(id, 'first', {});
+    const second = createSessionEvent(id, first.sequence + 1, '2026-07-30T12:00:02.000Z', 'second', {});
+    await appendFile(createSessionPaths(opened.paths, id).events, `${encodeSessionEvent(second)}\n`);
+    fileSystem?.resetJournalReads();
+
+    // Act
+    await opened.storage.writeState(id, { status: 'running' });
+    const chunkReads = fileSystem?.chunkReads.slice();
+
+    // Assert
+    should(chunkReads?.length).be.above(0);
+    should(opened.storage.findSession(id)?.lastSequence).equal(second.sequence);
+    should((await opened.storage.replay(id)).events.map(event => event.type)).deepEqual(['first', 'second']);
+    await closeStorage(opened.storage);
+  });
+});
+
+describe('document writes over a journal restored in place', () => {
+  it('should rescan, not trust the row, when an earlier event was rewritten with the fingerprint and last event kept', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const fileSystems = new CountingFileSystemFactory();
+    const opened = await openStorage(home, fileSystems);
+    const id = parseSessionId('restored-in-place');
+    const journal = createSessionPaths(opened.paths, id).events;
+    await opened.storage.append(id, 'first', {});
+    const second = createSessionEvent(id, 1, '2026-07-30T12:00:02.000Z', 'second', {});
+    await appendFile(journal, `${encodeSessionEvent(second)}\n`);
+    await opened.storage.syncSession(id);
+    const before = await stat(journal);
+    const text = await Bun.file(journal).text();
+    // Same inode, same length, same mtime, same final event: only the earlier event's time moved.
+    await writeFile(journal, text.replace('2026-07-30T12:00:00.000Z', '2026-07-30T12:00:09.000Z'));
+    await utimes(journal, before.atime, before.mtime);
+    should((await stat(journal)).ino).equal(before.ino);
+    should((await stat(journal)).size).equal(before.size);
+
+    // Act
+    await opened.storage.writeState(id, { status: 'finished' });
+    const newest = await opened.storage.tailEvents(1);
+
+    // Assert
+    should(newest.map(event => event.sequence)).deepEqual([1]);
+    should(newest[0]?.time).equal('2026-07-30T12:00:09.000Z');
+    await closeStorage(opened.storage);
+  });
+
+  it('should vouch for a long journal from a bounded sample of its pointers, never a full read', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const fileSystems = new CountingFileSystemFactory();
+    const opened = await openStorage(home, fileSystems);
+    const fileSystem = fileSystems.instance;
+    const id = parseSessionId('long-journal');
+    for (let index = 0; index < 120; index += 1) await opened.storage.append(id, 'tick', { index });
+    fileSystem?.resetJournalReads();
+
+    // Act
+    await opened.storage.writeState(id, { status: 'finished' });
+
+    // Assert: one slice for the last pointer and the sample, far fewer than the 120 events, and no chunk streamed.
+    should(fileSystem?.chunkReads).deepEqual([]);
+    should(fileSystem?.sliceReads.length).be.within(2, 40);
+    should(opened.storage.findSession(id)?.lastSequence).equal(120);
+    await closeStorage(opened.storage);
+  });
+
+  it('should owe a full journal read once the backstop window passed, even when every sampled pointer still matches', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const fileSystems = new CountingFileSystemFactory();
+    let now = new Date('2026-07-30T12:00:00.000Z');
+    const opened = await openStorage(home, fileSystems, new SystemClock(() => now));
+    const fileSystem = fileSystems.instance;
+    const id = parseSessionId('backstop');
+    await opened.storage.writeState(id, { status: 'running' });
+    for (let index = 0; index < 3; index += 1) await opened.storage.append(id, 'tick', { index });
+    await opened.storage.writeState(id, { status: 'a' });
+    fileSystem?.resetJournalReads();
+
+    // Act
+    await opened.storage.writeState(id, { status: 'b' });
+    const withinWindow = fileSystem?.chunkReads.length;
+    now = new Date(now.getTime() + 6 * 60 * 1000);
+    await opened.storage.writeState(id, { status: 'c' });
+    const afterWindow = fileSystem?.chunkReads.length;
+
+    // Assert
+    should(withinWindow).equal(0);
+    should(afterWindow).be.above(0);
     await closeStorage(opened.storage);
   });
 });

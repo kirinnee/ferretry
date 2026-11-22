@@ -1551,7 +1551,11 @@ describe('daemon boot lifecycle', () => {
     const devicesPath = join(home, 'state', 'devices.json');
     const { daemonId } = JSON.parse(await readFile(devicesPath, 'utf8')) as { daemonId: string };
     const fixture = await readFile(join(import.meta.dir, '../../fixtures/pairing/devices-v4.172.json'), 'utf8');
-    await writeFile(devicesPath, fixture.replaceAll('__DAEMON_ID__', daemonId), { mode: 0o600 });
+    // Seen just now: a fixed date ages past the idle expiry (30 days) and the boot would prune both devices.
+    const seen = fixture
+      .replaceAll('__DAEMON_ID__', daemonId)
+      .replace(/"lastSeenAt": "[^"]+"/gu, `"lastSeenAt": "${new Date().toISOString()}"`);
+    await writeFile(devicesPath, seen, { mode: 0o600 });
 
     // Act
     const said = recordingNotices();

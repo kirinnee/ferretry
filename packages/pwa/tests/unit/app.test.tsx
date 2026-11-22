@@ -79,6 +79,7 @@ import { type DaemonCarrierRouter, DEVICE_NOT_ACCEPTED_SENTENCE } from '../../sr
 import { RouterProvider } from '../../src/lib/router.tsx';
 import { SCROLL_MEMORY_KEY, type ScrollMemoryStorage } from '../../src/lib/scroll-memory.ts';
 import { SessionCache, type SessionCacheBackend } from '../../src/lib/session-cache.ts';
+import { AGENDA_SAFETY_NET_MS } from '../../src/lib/spaced-read.ts';
 import { type AppStore, createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { openWorkspaceTab, workspaceTab } from '../../src/lib/workspace-layout.ts';
 import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
@@ -431,7 +432,7 @@ interface ShellOptions {
   /** Daemon-owned normalized transcript tail returned by `logs`. */
   readonly transcript?: string | ((daemonId: DaemonId, sessionId: string) => string);
   /** Complete Agenda board returned by this daemon/session route. */
-  readonly attention?: (sessionId: string) => AgendaSnapshot;
+  readonly attention?: (sessionId: string) => AgendaSnapshot | Promise<AgendaSnapshot>;
   /**
    * What this daemon answers `/v1/tunnel` with: told `undefined` on a read and the requested switch on a
    * change. Absent, the path answers an empty document and no machine says anything about its tunnel.
@@ -551,7 +552,7 @@ const appStore = async (
     if (agendaRoute?.[1] !== undefined) {
       const sessionId = decodeURIComponent(agendaRoute[1]);
       if (init?.method === 'POST') options.agendaPosts?.push(`${sessionId}:${String(init.body)}`);
-      return Response.json(options.attention?.(sessionId) ?? agendaSnapshot(sessionId));
+      return Response.json((await options.attention?.(sessionId)) ?? agendaSnapshot(sessionId));
     }
     // The Processes tab's list, which the open session reads for the count on its tab: nothing runs.
     const processesRoute = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/processes$/u);
@@ -2479,8 +2480,20 @@ describe('AppShell', () => {
 
         const initialAgendaReads = agendaReads;
         items = [externalAgendaItem];
+        // Inside the spacing a poll tick re-reads the transcript, not the complete board (`lib/spaced-read.ts`).
         await interact(() => refresh?.());
         await settle();
+        expect(agendaReads).toBe(initialAgendaReads);
+        expect(store.attention.store.count(scope)).toBe(0);
+        // Past it, the tick's transcript read takes the board along again.
+        const realNow = Date.now.bind(Date);
+        const restoreNow = patchGlobal(Date, 'now', () => realNow() + AGENDA_SAFETY_NET_MS);
+        try {
+          await interact(() => refresh?.());
+          await settle();
+        } finally {
+          restoreNow();
+        }
         expect(agendaReads).toBeGreaterThan(initialAgendaReads);
         expect(store.attention.store.count(scope)).toBe(1);
 
@@ -2496,6 +2509,75 @@ describe('AppShell', () => {
     } finally {
       restoreClearInterval();
       restoreInterval();
+    }
+  });
+
+  it('reads the board again after an agenda change that arrived while an older board read was on the wire', async () => {
+    let items: AgendaSnapshot['items'] = [];
+    let agendaReads = 0;
+    let hold: Promise<void> | undefined;
+    let release: (() => void) | undefined;
+    let restoreNow: (() => void) | undefined;
+    const { liveFeeds, store, transcriptReads, view } = await renderShell(
+      `/d/${ALPHA}/session/shared`,
+      [alpha.daemonId],
+      {
+        transcript: 'assistant/message: Review !A3 before continuing.',
+        sessionState: {
+          agenda: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z', agendaMode: true },
+        },
+        attention: async sessionId => {
+          if (sessionId === 'shared') agendaReads += 1;
+          // The board as it stood when the request was sent: the answer is older than anything raised after.
+          const answer = agendaSnapshot(sessionId, items);
+          if (hold !== undefined) await hold;
+          return answer;
+        },
+      },
+    );
+    try {
+      await settle();
+      const scope = daemonSessionScope(alpha, 'shared');
+      await settleUntil(() => store.attention.store.status(scope) === 'ready', 'the first board read', interact);
+      await interact(async () => {
+        await store.carrier.send(alpha, `${alpha.baseUrl}/v1/health`);
+      });
+      await settle();
+      const feed = must(liveFeeds[0], 'the live event subscription');
+
+      // A board read goes out with the OLD board, and is held on the wire.
+      hold = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      // The spacing is on a clock that must not move here: the safety-net beat would otherwise answer for the fix.
+      const frozenAt = Date.now();
+      restoreNow = patchGlobal(Date, 'now', () => frozenAt);
+      const readsBefore = agendaReads;
+      const heldRead = store.attention.revalidate(alpha, scope);
+      // Wait until the old board is actually on the wire: only then is the read older than the change.
+      await settleUntil(() => agendaReads === readsBefore + 1, 'the held board read to be sent', interact);
+      const readsWhileHeld = agendaReads;
+
+      // Act: the item is raised and announced while that read is still held; the nudge's read runs in the middle.
+      items = [externalAgendaItem];
+      const logsBefore = transcriptReads.length;
+      await interact(() => feed.emit({ ...liveEvent(10), type: 'agenda.changed' }));
+      await interact(() => new Promise(resolve => setTimeout(resolve, NUDGE_SETTLE_MS + 20)));
+      await settleUntil(() => transcriptReads.length > logsBefore, 'the nudge to re-read the transcript', interact);
+      await settle();
+      release?.();
+      hold = undefined;
+      await interact(() => heldRead);
+      await settle();
+      await settle();
+
+      // Assert: the answer that applied is the fresh one, not the older one that was on the wire.
+      expect(agendaReads).toBeGreaterThan(readsWhileHeld);
+      expect(store.attention.store.count(scope)).toBe(1);
+    } finally {
+      release?.();
+      restoreNow?.();
+      await view.unmount();
     }
   });
 

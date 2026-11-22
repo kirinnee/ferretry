@@ -206,6 +206,54 @@ describe('DaemonAgendaClient', () => {
     should(client.store.agenda(scopeA)?.updatedAt).equal('2026-07-31T01:00:00.000Z');
   });
 
+  it('reads again after a board read already on the wire when the caller knows the board changed since', async () => {
+    // Arrange: the read in flight carries the OLD board; the item is raised while it is held.
+    const held = deferred<Response>();
+    let calls = 0;
+    const client = new DaemonAgendaClient(undefined, async () => {
+      calls += 1;
+      if (calls === 1) return response(snapshot('same/session'));
+      if (calls === 2) return held.promise;
+      return response(snapshot('same/session', '2026-07-31T02:00:00.000Z', 1));
+    });
+    await client.hydrate(daemonA, scopeA);
+    const older = client.revalidate(daemonA, scopeA);
+
+    // Act
+    const fresh = client.revalidate(daemonA, scopeA, { fresh: true });
+    const sharedFresh = client.revalidate(daemonA, scopeA, { fresh: true });
+    held.resolve(response(snapshot('same/session', '2026-07-31T01:00:00.000Z', 0)));
+    await older;
+    await fresh;
+
+    // Assert: one more read, shared by every fresh caller, and it is the one that shows the new item.
+    should(sharedFresh).equal(fresh);
+    should(calls).equal(3);
+    should(client.store.count(scopeA)).equal(1);
+    should(client.store.agenda(scopeA)?.updatedAt).equal('2026-07-31T02:00:00.000Z');
+  });
+
+  it('joins the read in flight, with no extra read, when the caller does not need a newer board than it', async () => {
+    // Arrange
+    const held = deferred<Response>();
+    let calls = 0;
+    const client = new DaemonAgendaClient(undefined, async () => {
+      calls += 1;
+      return calls === 1 ? response(snapshot('same/session')) : held.promise;
+    });
+    await client.hydrate(daemonA, scopeA);
+    const older = client.revalidate(daemonA, scopeA);
+
+    // Act
+    const joined = client.revalidate(daemonA, scopeA);
+    held.resolve(response(snapshot('same/session')));
+    await older;
+
+    // Assert
+    should(joined).equal(older);
+    should(calls).equal(2);
+  });
+
   it('keeps badge hydration distinct from full readiness and leaves failures unknown', async () => {
     const responses = [
       response(snapshot('same/session', '2026-07-31T00:30:00.000Z', 4)),
