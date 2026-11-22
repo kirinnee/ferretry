@@ -7,7 +7,8 @@
  *  - The card does not change size for the swap: a text-only item is as tall drawn by Durian as by the shell's Markdown
  *    (the baseline, `?plain=1`), so a card, and the REAL swipe deck holding it (the top card and the one peeking out
  *    behind it), keeps the height it had. A heading the ferret wrote in a segment is still a bold line at the segment's
- *    size, never an h1–h6.
+ *    size, never an h1–h6: the card's own title is the heading, so an `h2` the ferret wrote would sit above it in the outline
+ *    (R3: it was styled down, but it was still an `h2`).
  *  - Conversation REGISTERED but turned OFF on this machine's daemon (`?off=1`) draws the shell's Markdown, not Durian.
  *
  * The scene is the REAL Inbox page opened on an item (the real `AgendaItemView` in the real deck) with the REAL `agendaProse`,
@@ -354,11 +355,14 @@ describe('an agenda item drawn as Durian hypermedia', () => {
               each => (each.textContent ?? '').includes('First, the short'),
             ) as HTMLElement;
             const inSegments = [...segment.querySelectorAll('*')];
-            // Durian's heading is an h2 holding its (hidden) anchor and the words; the Markdown's is a bold line.
-            const heading = inSegments.find(
-              each =>
-                (each.textContent ?? '').trim().endsWith('Plan') && !each.querySelector('p, h1, h2, h3, h4, h5, h6'),
-            );
+            // The heading line is the innermost element that holds the words: the `strong` of the demoted `p` (the same in the
+            // Markdown draw), where it used to be Durian's `h2` holding its (hidden) anchor and the words.
+            const heading = inSegments
+              .filter(
+                each =>
+                  (each.textContent ?? '').trim().endsWith('Plan') && !each.querySelector('p, h1, h2, h3, h4, h5, h6'),
+              )
+              .at(-1);
             const paragraph = inSegments.find(
               each => each.tagName === 'P' && (each.textContent ?? '').startsWith('First'),
             );
@@ -366,6 +370,13 @@ describe('an agenda item drawn as Durian hypermedia', () => {
             const own = getComputedStyle(heading);
             return {
               found: true,
+              // The outline: the card's own labels are its headings, so no segment (words the ferret wrote) holds one.
+              headings: [
+                ...document.querySelectorAll(
+                  '.fy-attn-deck__top .fy-item-view__body .fy-seg :is(h1, h2, h3, h4, h5, h6)',
+                ),
+              ].map(each => each.tagName),
+              line: heading.closest('p, h1, h2, h3, h4, h5, h6')?.tagName ?? heading.tagName,
               size: own.fontSize,
               paragraphSize: getComputedStyle(paragraph).fontSize,
               weight: Number(own.fontWeight),
@@ -376,6 +387,8 @@ describe('an agenda item drawn as Durian hypermedia', () => {
             `the heading and the paragraph are in the segment: ${'html' in plan ? plan.html : ''}`,
           ).toBe(true);
           if (plan.found) {
+            expect(plan.headings, `no heading element inside a segment: ${said}`).toEqual([]);
+            expect(plan.line, 'the ferret’s heading is a bold line, not a heading').toBe('P');
             expect(plan.size, 'a heading is drawn at the segment size').toBe(plan.paragraphSize);
             expect(plan.weight, 'and bold').toBeGreaterThanOrEqual(600);
           }

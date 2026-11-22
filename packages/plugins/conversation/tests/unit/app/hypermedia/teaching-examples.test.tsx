@@ -123,7 +123,9 @@ describe('every example of the guide passes `fy render check` and draws', () => 
     it(`${label}: is read as the part it teaches, with no problem and no error block`, async () => {
       await loadAnimationEngine();
       expect(animationEngineReady()).toBe(true);
-      const { doc } = readMessage(messageOf(example), 'teach-');
+      const read = readMessage(messageOf(example), 'teach-');
+      if (read === null) throw new Error('a teaching example is over the message cap');
+      const { doc } = read;
       expect(doc.problems).toEqual([]);
       const types = doc.blocks.map(block => block.type);
       expect(types).not.toContain('error');

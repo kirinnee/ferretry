@@ -36,8 +36,18 @@ describe('which gh runs with a token', () => {
       [`${HOME}/shims`, '/usr/bin'],
       inHome,
     );
-    expect(await run()).toBe('/usr/bin/gh');
+    // The child's `PATH` is the same filtered list: no state-home folder (the shim folder) in it.
+    expect(await run()).toEqual({ program: '/usr/bin/gh', path: '/opt/bin:/usr/bin' });
     expect(asked[0]?.directories).toEqual(['/opt/bin', '/usr/bin']);
+  });
+
+  test('the folder gh was found in is always on the child PATH, even one the kernel reached by its own fallback', async () => {
+    const run = ghLocator({
+      daemonPath: () => `${HOME}/shims`,
+      which: async () => '/opt/gh/bin/gh',
+      stateHomeHolding: async candidate => inHome(candidate),
+    });
+    expect(await run()).toEqual({ program: '/opt/gh/bin/gh', path: '/opt/gh/bin' });
   });
 
   test('a PATH the daemon does not have still searches (the kernel falls back to its own list)', async () => {

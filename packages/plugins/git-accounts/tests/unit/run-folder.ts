@@ -55,3 +55,6 @@ export function tmpRunFolder(): RunFolder & { destroy(): void } {
     },
   };
 }
+
+/** A test locator: the program names as they are (the supervisor's real one answers an absolute path, `program-locator.ts`). */
+export const bareNames = async (name: 'ssh-agent' | 'ssh-add'): Promise<string> => name;
