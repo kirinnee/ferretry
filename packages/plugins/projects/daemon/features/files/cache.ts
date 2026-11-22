@@ -25,7 +25,15 @@ interface Entry {
   /** When `index` was last built, or a rebuild last failed (so a broken project is not retried on every read). */
   checkedMs: number;
   running: Promise<ProjectIndex> | undefined;
+  /** Bumped each time something is known to have changed the folder ({@link ProjectIndexCache.invalidate}). */
+  changes: number;
+  /** The `changes` value the last finished build started under: an index built under an older one is already out of date. */
+  builtAt: number;
 }
+
+/** Whether a build is due: the index is old, or something changed the folder after the build that made it began. */
+const due = (entry: Entry, nowMs: number, staleMs: number): boolean =>
+  entry.builtAt !== entry.changes || nowMs - entry.checkedMs >= staleMs;
 
 /** What a reader gets: an index, and whether a newer one is being built behind it. */
 export interface CachedIndex {
@@ -88,6 +96,18 @@ export class ProjectIndexCache {
   }
 
   /**
+   * Marks a project's index out of date: something (a ferret's turn ended in it) may have changed its files. Nothing is
+   * built now — the next read answers the old index at once and rebuilds behind it, so a burst of turn ends costs one
+   * build, not one each. A build already running began before this change, so it does not clear it: it is answered, then
+   * the next read rebuilds. A project not held has nothing to mark (its first read builds anyway) and is NOT created here,
+   * so a quiet project is never held in memory by a ferret's activity.
+   */
+  invalidate(key: string): void {
+    const entry = this.entries.get(key);
+    if (entry !== undefined) entry.changes += 1;
+  }
+
+  /**
    * The index to answer with. The FIRST read waits for the build (and throws what it throws: a refused folder); a later
    * one never waits — an old index is answered at once and, when it is stale, rebuilt behind the answer.
    */
@@ -97,15 +117,14 @@ export class ProjectIndexCache {
       const index = await this.run(key, entry, path);
       return { index, rebuilding: false };
     }
-    if (entry.running === undefined && this.nowMs() - entry.checkedMs >= this.staleMs)
-      this.background(key, entry, path);
+    if (entry.running === undefined && due(entry, this.nowMs(), this.staleMs)) this.background(key, entry, path);
     return { index: entry.index, rebuilding: entry.running !== undefined };
   }
 
   /** The state without waiting: a project never built starts its first build and answers none yet. */
   status(key: string, path: string): CachedStatus {
     const entry = this.entry(key);
-    if (entry.index === undefined || (entry.running === undefined && this.nowMs() - entry.checkedMs >= this.staleMs))
+    if (entry.index === undefined || (entry.running === undefined && due(entry, this.nowMs(), this.staleMs)))
       this.background(key, entry, path);
     return { index: entry.index, rebuilding: entry.running !== undefined };
   }
@@ -131,7 +150,7 @@ export class ProjectIndexCache {
       if (candidate.running === undefined) this.entries.delete(other);
     }
     if (this.entries.size >= MAX_CACHED_PROJECTS) throw new IndexCacheBusy();
-    const entry: Entry = { index: undefined, checkedMs: 0, running: undefined };
+    const entry: Entry = { index: undefined, checkedMs: 0, running: undefined, changes: 0, builtAt: 0 };
     this.entries.set(key, entry);
     return entry;
   }
@@ -169,14 +188,19 @@ export class ProjectIndexCache {
 
   /** One build per project: a second caller gets the promise already running. */
   private run(key: string, entry: Entry, path: string): Promise<ProjectIndex> {
+    // What the build is told it is building for: a change that arrives after this is not covered by it.
+    const changes = entry.changes;
     entry.running ??= this.start(path, entry)
       .then(
         index => {
           entry.index = index;
           entry.checkedMs = this.nowMs();
+          entry.builtAt = changes;
           return index;
         },
         (error: unknown) => {
+          // A failed rebuild is not retried on every read until something else changes (the stale interval holds it off).
+          entry.builtAt = changes;
           // What the privacy policy refuses is not answered from memory any longer; a hiccup keeps what there is.
           if (error instanceof ProjectFolderRefused && error.reason === 'private') {
             entry.index = undefined;

@@ -1,4 +1,4 @@
-import { LaunchRoots, NEW_FERRET_PROJECT_SLOT } from '@ferretry/core-ferrets/contract';
+import { FerretsChanged, FerretsPort, LaunchRoots, NEW_FERRET_PROJECT_SLOT } from '@ferretry/core-ferrets/contract';
 import { appAction, definePlugin, panel, route, screen, verb } from '@ferretry/kernel/manifest';
 import {
   filesystemConfigure,
@@ -171,7 +171,12 @@ export default definePlugin({
     state: [PROJECTS_STATE],
     readModels: ['projects'],
     publishes: [ProjectRegistered, ProjectRemoved],
+    // The file finder's index is refreshed when a ferret stops working in a project, or a project is registered or removed.
+    subscribes: [FerretsChanged, ProjectRegistered, ProjectRemoved],
   },
+
+  // Which folder a ferret works in, to tell which project a turn end touched. Soft: with no Ferrets, nothing refreshes early.
+  uses: { ferrets: FerretsPort },
 
   // Registering touches only the folder the owner named, once (`imports` root, §7.7); `git` clones and initialises.
   permissions: { roots: ['imports'], spawn: ['git', 'mkdir', 'rmdir'] },
