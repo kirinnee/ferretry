@@ -157,7 +157,7 @@ describe('the Runtimes Settings tab the half builds', () => {
       'codex-kirin',
       'claude-plain',
     ]);
-    expect(text(root, '[data-add-runtime]')).toBe('Add runtime');
+    expect(text(root, '[data-add-runtime]')).toBe('Advanced');
     expect(text(root, '[data-runtime-card="claude-default"] [data-runtime-default-badge]')).toBe('Default');
     const control = must(root.querySelector('[data-default-runtime]'), 'the default runtime control');
     expect(control.textContent).toContain('Default for new agents');

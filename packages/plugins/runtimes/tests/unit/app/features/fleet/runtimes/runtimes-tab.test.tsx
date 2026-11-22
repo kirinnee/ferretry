@@ -107,14 +107,10 @@ describe('Runtimes tab list', () => {
     expect(view.container.querySelector('[data-runtime-row="claude-default"]')?.getAttribute('href')).toBe(
       '#machines/studio-mac/runtimes/claude-default',
     );
-    const card = (name: string) =>
-      must(view.container.querySelector<HTMLElement>(`[data-runtime-card="${name}"]`), name);
-    // "Agent" says nothing on a list of agent runtimes; only the exceptions are marked.
-    expect(card('claude-agent').textContent).not.toMatch(/\bAgent\b(?! work)/);
-    expect(card('claude-agent').querySelector('[data-runtime-kind-badge]')).toBeNull();
-    expect(card('claude-default').querySelector('[data-runtime-kind-badge]')?.textContent).toBe('Not agent');
+    // A runtime carries no autonomous/interactive property, so no row is marked for it.
+    expect(view.container.querySelector('[data-runtime-kind-badge]')).toBeNull();
     expect(view.container.querySelector('[data-runtime-missing-harness]')).toBeNull();
-    expect(text(view.container, '[data-add-runtime]')).toBe('Add runtime');
+    expect(text(view.container, '[data-add-runtime]')).toBe('Advanced');
     await view.unmount();
   });
 
@@ -154,12 +150,12 @@ describe('Runtimes tab list', () => {
     const view = await open({ routes: reads([]) });
     expect(text(view.container, '[data-runtimes-empty] h3')).toBe('No runtimes on studio-mac yet');
     expect(text(view.container, '[data-runtimes-empty] p')).toBe(
-      'A runtime is a login plus a profile. It’s the thing you launch.',
+      'Add a login and its runtime appears here by itself. Or build one by hand under Advanced.',
     );
-    expect(text(view.container, '[data-runtimes-empty] button')).toBe('Add your first runtime');
+    expect(text(view.container, '[data-runtimes-empty] button')).toBe('Advanced: add a runtime');
     expect(view.container.querySelector('[data-runtime-row]')).toBeNull();
     await click(view.container, '[data-add-runtime]');
-    expect(text(view.container, '[data-add-runtime] h3')).toBe('Add a runtime');
+    expect(text(view.container, '[data-add-runtime] h3')).toBe('Advanced: add a runtime');
     await view.unmount();
   });
 
@@ -169,11 +165,11 @@ describe('Runtimes tab list', () => {
     expect(text(note, 'h3')).toBe('No runtimes on studio-mac yet');
     expect(note.textContent).toContain('Finish setting it up above to bring in your Claude Code and Codex setup');
     // A machine with no host login to import has no other way to its first runtime, so the card offers it.
-    expect(text(note, 'button')).toBe('Add a runtime');
+    expect(text(note, 'button')).toBe('Advanced: add a runtime');
     expect(note.querySelector('a')).toBeNull();
     expect(view.container.querySelector('[data-runtimes-tab]')).toBeNull();
     await click(view.container, '[data-runtimes-not-set-up] [data-add-runtime]');
-    expect(text(view.container, '[data-add-runtime] h3')).toBe('Add a runtime');
+    expect(text(view.container, '[data-add-runtime] h3')).toBe('Advanced: add a runtime');
     expect(view.container.querySelector('[data-runtimes-not-set-up]')).toBeNull();
     await view.unmount();
   });
@@ -204,8 +200,6 @@ describe('Runtimes tab list', () => {
 describe('Add runtime from the tab', () => {
   const journey = async (view: Awaited<ReturnType<typeof open>>): Promise<void> => {
     await click(view.container, '[data-add-runtime]');
-    await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
-    await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
     expect(must(view.container.querySelector<HTMLInputElement>('#add-runtime-name'), 'name').value).toBe(
       'claude-claude-hooks',
     );
@@ -216,7 +210,7 @@ describe('Add runtime from the tab', () => {
   it('opens the one form in place of the list, and its way back returns to the list', async () => {
     const view = await open();
     await click(view.container, '[data-add-runtime]');
-    expect(text(view.container, 'h3')).toBe('Add a runtime');
+    expect(text(view.container, 'h3')).toBe('Advanced: add a runtime');
     expect(view.container.querySelector('[data-runtimes-tab]')).toBeNull();
     await click(view.container, '[data-page-back]');
     expect(view.container.querySelectorAll('[data-runtime-row]')).toHaveLength(5);
@@ -434,11 +428,10 @@ describe('a runtime’s own page', () => {
     await none.unmount();
   });
 
-  it('E24: an agent runtime shows its locked fixed layer and what it overrides', async () => {
+  it('E24: a runtime with a fixed layer shows its locked fixed layer and what it overrides', async () => {
     const view = await page('claude-agent');
-    expect(text(view.container, '[data-runtime-page] p')).toContain('Agent runtime');
     const fixed = must(view.container.querySelector('[data-runtime-fixed-layer]'), 'fixed layer');
-    expect(fixed.textContent).toContain('Ferretry launches claude-agent as an agent, so it adds a locked layer last.');
+    expect(fixed.textContent).toContain('When Ferretry launches claude-agent it adds a locked layer last.');
     expect(fixed.textContent).toContain('You can’t edit it here.');
     expect(fixed.textContent).toContain('permissions.defaultMode = auto');
     expect(fixed.textContent).toContain('trust prompt = off');

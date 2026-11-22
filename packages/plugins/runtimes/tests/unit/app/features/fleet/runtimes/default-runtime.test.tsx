@@ -147,7 +147,7 @@ const machineChanges = (calls: readonly Call[]): unknown[] =>
   calls.filter(call => call.route === PROPOSE).map(call => (call.body as { change: unknown }).change);
 
 describe('Default for new agents on the Runtimes tab', () => {
-  it('is one labelled row: a select of the agent runtimes, each by name, the picked one’s state as a badge, and the hint', async () => {
+  it('is one labelled row: a select of the runtimes, each by name, the picked one’s state as a badge, and the hint', async () => {
     const view = await open();
 
     const control = must(view.container.querySelector('[data-default-runtime]'), 'control');
@@ -158,7 +158,13 @@ describe('Default for new agents on the Runtimes tab', () => {
     expect(control.querySelector('[data-default-runtime-hint]')?.textContent).toBe(
       'Used when a start names no runtime.',
     );
-    expect(await optionTexts(view.container)).toEqual(['claude-default', 'claude-work', 'claude-atomi', 'codex-kirin']);
+    expect(await optionTexts(view.container)).toEqual([
+      'claude-default',
+      'claude-work',
+      'claude-atomi',
+      'codex-kirin',
+      'claude-plain',
+    ]);
     expect(shown(view.container)).toBe('claude-default');
     expect(view.container.querySelector('[data-change-apply]')).toBeNull();
   });
@@ -193,15 +199,6 @@ describe('Default for new agents on the Runtimes tab', () => {
 
     expect(await optionTexts(view.container)).toContain('codex-kirin');
     expect(view.container.querySelector('[data-default-runtime-state]')?.textContent).toBe('Codex not installed');
-  });
-
-  it('says there is no agent runtime yet when none of the runtimes is one', async () => {
-    const view = await open({ runtimes: { format: 'present', runtimes: [runtime({ name: 'claude-plain' })] } });
-
-    expect(must(view.container.querySelector('[data-default-runtime-empty]'), 'empty').textContent).toContain(
-      'has no agent runtime yet',
-    );
-    expect(view.container.querySelector('[data-default-runtime-select]')).toBeNull();
   });
 
   it('is not shown while the machine has not answered', async () => {
@@ -310,7 +307,7 @@ describe('The Default badge and Make default on the runtimes list', () => {
     ).not.toBeNull();
   });
 
-  it('puts the Default and Not agent badges after the name, wrapping under it instead of cutting it, and badges no switched-off runtime', async () => {
+  it('puts the Default badge after the name, wrapping under it instead of cutting it, and badges no switched-off runtime', async () => {
     const view = await open();
     const card = (name: string) =>
       must(view.container.querySelector<HTMLElement>(`[data-runtime-card="${name}"]`), name);
@@ -325,7 +322,8 @@ describe('The Default badge and Make default on the runtimes list', () => {
       return element;
     };
     expect(badgesOn('claude-default', 'data-runtime-default-badge').textContent).toBe('Default');
-    expect(badgesOn('claude-plain', 'data-runtime-kind-badge').textContent).toBe('Not agent');
+    // A runtime has no autonomous/interactive property, so nothing is badged for it.
+    expect(view.container.querySelector('[data-runtime-kind-badge]')).toBeNull();
     // A switched-off runtime carries no badge: the off switch and the off note already say it.
     expect(card('claude-atomi').querySelector('[data-runtime-disabled-badge]')).toBeNull();
     expect(card('claude-atomi').textContent).not.toMatch(/disabled/i);
@@ -349,12 +347,12 @@ describe('The Default badge and Make default on the runtimes list', () => {
     expect(card('claude-atomi').querySelector('[data-disable-note]')).not.toBeNull();
   });
 
-  it('offers Make default in the ⋯ menu of each non-default agent runtime, not on the default, a plain runtime or a switched-off one', async () => {
+  it('offers Make default in the ⋯ menu of each non-default runtime, not on the default or a switched-off one', async () => {
     const view = await open();
 
-    for (const name of ['claude-default', 'claude-plain', 'claude-atomi'])
+    for (const name of ['claude-default', 'claude-atomi'])
       expect((await openRuntimeMenu(view.container, name)).has('make-default')).toBe(false);
-    for (const name of ['claude-work', 'codex-kirin'])
+    for (const name of ['claude-work', 'codex-kirin', 'claude-plain'])
       expect((await openRuntimeMenu(view.container, name)).get('make-default')?.textContent).toContain('Make default');
   });
 

@@ -214,3 +214,36 @@ describe('fleetHarnessLabel', () => {
     expect(fleetHarnessLabel('codex')).toBe('Codex');
   });
 });
+
+describe('the New ferret runtime list: one runtime per ready login (O8-9)', () => {
+  const four = ['atomi', 'llm1', 'llm2', 'personal'].map(login =>
+    claudeAccount({ id: `rt-${login}`, wrapper: login, displayName: login, credentialId: login }),
+  );
+
+  it('offers every runtime a login yields, because no runtime is filtered on an autonomous/interactive property', () => {
+    // A runtime the app reads carries no such property any more: the one onboarding made for the owner's single login
+    // is offered exactly like any other, and is the one pre-filled.
+    const options = accountPickerOptions([claudeAccount({ wrapper: 'claude-default' })], [], new Map());
+
+    expect(options?.map(option => option.wrapper)).toEqual(['claude-default']);
+    expect(firstUsableAccountOption(options)?.wrapper).toBe('claude-default');
+  });
+
+  it('lists four ready Claude logins as four runtimes, pre-filling the first, then Codex after them', () => {
+    const options = accountPickerOptions([...four, codexAccount({ wrapper: 'codex-personal' })], [], new Map());
+
+    expect(options?.map(option => option.wrapper)).toEqual(['atomi', 'llm1', 'llm2', 'personal', 'codex-personal']);
+    expect(options?.map(option => option.kind)).toEqual([
+      'claude-code',
+      'claude-code',
+      'claude-code',
+      'claude-code',
+      'codex',
+    ]);
+    expect(firstUsableAccountOption(options)?.wrapper).toBe('atomi');
+  });
+
+  it('says nothing is startable only when there is truly no ready login', () => {
+    expect(firstUsableAccountOption(accountPickerOptions([], [], new Map()))).toBeNull();
+  });
+});

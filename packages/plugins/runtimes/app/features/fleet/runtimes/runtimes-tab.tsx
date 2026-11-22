@@ -339,8 +339,8 @@ function RuntimePage({
         >
           <div data-runtime-fixed-layer="" className="flex flex-col gap-2">
             <p className="m-0 text-cell leading-base text-fg">
-              Ferretry launches <span className="font-mono">{runtime.name}</span> as an agent, so it adds a locked layer
-              last. You can’t edit it here.
+              When Ferretry launches <span className="font-mono">{runtime.name}</span> it adds a locked layer last. You
+              can’t edit it here.
             </p>
             <ul className="m-0 flex list-none flex-col gap-1 p-0">
               {runtime.fixedLayer.entries.map(entry => (
@@ -539,10 +539,11 @@ export function RuntimesTab({
       <div className="kt-panel flex flex-col items-start gap-2 p-panel" data-runtimes-not-set-up="">
         <h3 className="m-0 text-row font-semibold text-fg">No runtimes on {machineName} yet</h3>
         <p className="m-0 text-cell leading-base text-muted">
-          Finish setting it up above to bring in your Claude Code and Codex setup, or add a runtime yourself.
+          Finish setting it up above to bring in your Claude Code and Codex setup. Every ready login gets a runtime by
+          itself.
         </p>
         <Button type="button" variant="primary" data-add-runtime="" onClick={start}>
-          Add a runtime
+          Advanced: add a runtime
         </Button>
       </div>
     );
@@ -655,10 +656,10 @@ export function RuntimesTab({
         <div className="kt-panel flex flex-col items-start gap-2 p-panel" data-runtimes-empty="">
           <h3 className="m-0 text-row font-semibold text-fg">No runtimes on {machineName} yet</h3>
           <p className="m-0 text-cell leading-base text-muted">
-            A runtime is a login plus a profile. It’s the thing you launch.
+            Add a login and its runtime appears here by itself. Or build one by hand under Advanced.
           </p>
           <Button type="button" variant="primary" data-add-runtime="" onClick={start}>
-            Add your first runtime
+            Advanced: add a runtime
           </Button>
         </div>
       ) : (
@@ -684,9 +685,9 @@ export function RuntimesTab({
               {runtimes.length} {runtimes.length === 1 ? 'runtime' : 'runtimes'} on {machineName}
             </p>
             <span className="flex flex-wrap gap-2">
-              <Button type="button" variant="primary" data-add-runtime="" onClick={start}>
+              <Button type="button" variant="ghost" data-add-runtime="" onClick={start}>
                 <Plus size={16} aria-hidden="true" />
-                Add runtime
+                Advanced
               </Button>
               <a
                 className="inline-flex min-h-control items-center text-cell font-semibold text-accent underline"
