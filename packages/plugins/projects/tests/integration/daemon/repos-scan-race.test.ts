@@ -20,6 +20,8 @@ async function setup(options: { readonly scan?: (browser: FolderBrowser, alpha: 
   const link = join(alpha, 'link');
   await put(disk.user, { 'alpha/a.txt': 'a', 'beta/b.txt': 'b' });
   const built: string[] = [];
+  // Every build the injected builder has started and not yet finished: `warm` waits on exactly these, never on a clock.
+  const running = new Set<Promise<unknown>>();
   const browser = kernelBrowser(disk.kernel);
   const host = await testHost({
     plugins: [
@@ -29,7 +31,13 @@ async function setup(options: { readonly scan?: (browser: FolderBrowser, alpha: 
         {
           build: async path => {
             built.push(path);
-            return await disk.build(path);
+            const work = disk.build(path);
+            running.add(work);
+            try {
+              return await work;
+            } finally {
+              running.delete(work);
+            }
           },
           place: placeOf(browser),
         },
@@ -46,13 +54,14 @@ async function setup(options: { readonly scan?: (browser: FolderBrowser, alpha: 
     ).json<ProjectInfo>();
   const read = async (id: string) =>
     (await host.request('GET', '/v1/projects/' + id + '/files', { as: owner() })).json<ProjectFilesAnswer>();
+  // Completion is controlled through the injected builder: wait for the builds it has in flight (no timed polling), then
+  // let the cache's own promise chain (all microtasks) clear its "running" mark before the answer is read.
   const warm = async (id: string) => {
-    for (let attempt = 0; attempt < 100; attempt++) {
-      const result = await read(id);
-      if (!result.rebuilding) return result;
-      await Bun.sleep(10);
-    }
-    throw new Error('index failed to settle');
+    while (running.size > 0) await Promise.allSettled([...running]);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const result = await read(id);
+    if (result.rebuilding) throw new Error('index still rebuilding after every build finished');
+    return result;
   };
   const scan = async (id: string) =>
     (await host.request('GET', '/v1/projects/' + id + '/repos', { as: owner() })).json<{
