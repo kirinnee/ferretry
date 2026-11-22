@@ -91,7 +91,7 @@
 }
 .fy-sf-hint {
   color: var(--muted);
-  font-size: calc(var(--font-size-base) * 0.875);
+  font-size: max(13px, calc(var(--font-size-base) * 0.875));
 }
 .fy-sf-note {
   color: var(--muted);
