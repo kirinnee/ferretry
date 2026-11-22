@@ -4,8 +4,9 @@
  * shell's Markdown draws the segment until it loads), over the segment with its lines kept (`segmentMarkdown`), inside
  * `.fy-seg`, the one rule that gives every segment the same spacing, bullets and numbering. A heading the ferret wrote
  * inside a segment (`## Plan`) is drawn as bold body text, never an h1–h6: the card's own labels are the only headings
- * on it. This inbox has no reference surface of its own, so a reference reads as the plain text it is. A host passes
- * this as `renderProse`; a segment is never drawn any other way.
+ * on it. A reference reads through the reference surface the card is drawn in (the Inbox's Board proof scope: `&F12` is a
+ * link when Board proves the task, and the plain text it is when it does not). A host passes this as `renderProse`; a
+ * segment is never drawn any other way.
  */
 
 import type { ReactNode } from 'react';

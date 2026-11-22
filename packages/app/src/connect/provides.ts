@@ -695,11 +695,22 @@ export function registeredLinkProvider(
   return undefined;
 }
 
-/** The prose view Conversation gave (any other plugin's is ignored), or `undefined`. */
-export function registeredProse(surfaces: readonly SurfaceEntry[]): ProseProvision | undefined {
+/**
+ * The prose view Conversation gave (any other plugin's is ignored) and the plugin that gave it, or `undefined`. The
+ * plugin is named because registered is not allowed: the half stays compiled in when a daemon's inventory turns the
+ * plugin off, so whether the view may draw is that machine's standing for `plugin`.
+ */
+export function registeredProseProvider(
+  surfaces: readonly SurfaceEntry[],
+): { readonly plugin: string; readonly prose: ProseProvision } | undefined {
   for (const entry of surfaces) {
     const prose = shellProvidesOf(entry)?.prose;
-    if (prose !== undefined && PROSE_TAKERS.includes(entry.id)) return prose;
+    if (prose !== undefined && PROSE_TAKERS.includes(entry.id)) return { plugin: entry.id, prose };
   }
   return undefined;
+}
+
+/** The prose view Conversation gave (any other plugin's is ignored), or `undefined`. */
+export function registeredProse(surfaces: readonly SurfaceEntry[]): ProseProvision | undefined {
+  return registeredProseProvider(surfaces)?.prose;
 }
