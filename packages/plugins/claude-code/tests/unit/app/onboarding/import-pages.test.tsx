@@ -151,7 +151,7 @@ describe('the import run', () => {
     const { view, run, calls } = await open(ImportRunPage, { importMode: 'everything' });
     expect(run.events).toEqual(['ready']);
     expect(proposals(calls)).toHaveLength(0);
-    await click(view, '.cc-actions button');
+    await click(view, '[data-import-run]');
     await settle();
     expect(proposals(calls).map(call => call.init?.body)).toEqual([
       { change: { kind: 'setup.import', include: ['claude-code'], names: { 'claude-code': 'claude-code-default' } } },
@@ -175,7 +175,7 @@ describe('the import run', () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(name, 'work-claude');
       name.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await click(view, '.cc-actions button');
+    await click(view, '[data-import-run]');
     await settle();
     const [sent] = proposals(calls).map(call => call.init?.body as { change: { skip: string[] } });
     expect(sent?.change).toMatchObject({
@@ -212,7 +212,7 @@ describe('the import run', () => {
     const run = await open(ImportRunPage, mcp.run.step.segment);
     await click(run.view, 'input[value="everything"]');
     expect(run.view.container.querySelector('[data-import-count]')?.textContent).toContain('leaving out 1');
-    await click(run.view, '.cc-actions button');
+    await click(run.view, '[data-import-run]');
     await settle();
     const [sent] = proposals(run.calls).map(call => call.init?.body as { change: { skip?: string[] } });
     expect(sent?.change.skip).toEqual(['claude-code:mcp:issues']);
@@ -229,12 +229,12 @@ describe('the import run', () => {
     const { view, run, calls } = await open(ImportRunPage, {});
     expect(run.events[0]).toBe('ready');
     expect(view.container.querySelector('[data-import-lost]')).not.toBeNull();
-    const button = must(view.container.querySelector<HTMLButtonElement>('.cc-actions button'), 'import');
+    const button = must(view.container.querySelector<HTMLButtonElement>('[data-import-run]'), 'import');
     expect(button.disabled).toBe(true);
     await click(view, 'input[value="everything"]');
     expect(proposals(calls)).toHaveLength(0);
     expect(button.disabled).toBe(false);
-    await click(view, '.cc-actions button');
+    await click(view, '[data-import-run]');
     await settle();
     expect(proposals(calls)).toHaveLength(1);
     const [only] = proposals(calls).map(call => call.init?.body as { change: { skip?: unknown } });
@@ -243,8 +243,7 @@ describe('the import run', () => {
 
   it('"Skip the import" records done and sends nothing', async () => {
     const { view, run, calls } = await open(ImportRunPage, { importMode: 'everything' });
-    const buttons = view.container.querySelectorAll<HTMLButtonElement>('.cc-actions button');
-    await interact(() => must(buttons[1], 'skip').click());
+    await interact(() => must(view.container.querySelector<HTMLButtonElement>('[data-import-skip]'), 'skip').click());
     expect(writes(calls)).toEqual([]);
     expect(run.events.slice(-2)).toEqual(['ready', 'done']);
   });
@@ -253,7 +252,7 @@ describe('the import run', () => {
     const routes = importRoutes(scanOf());
     routes['POST /v1/runtimes/proposals'] = new Error('This machine is busy.');
     const { view, run } = await open(ImportRunPage, { importMode: 'everything' }, routes);
-    await click(view, '.cc-actions button');
+    await click(view, '[data-import-run]');
     await settle();
     expect(view.container.querySelector('[data-import-refusal]')?.textContent).toContain('busy');
     expect(run.events.at(-1)).toBe('busy:null');
@@ -263,7 +262,7 @@ describe('the import run', () => {
   it('writes nothing to localStorage or sessionStorage', async () => {
     const before = [localStorage.length, sessionStorage.length];
     const { view } = await open(ImportRunPage, { importMode: 'everything' });
-    await click(view, '.cc-actions button');
+    await click(view, '[data-import-run]');
     await settle();
     expect([localStorage.length, sessionStorage.length]).toEqual(before);
   });
@@ -316,7 +315,7 @@ describe('C59 O5 item 8: every item can be opened and chosen on the import page'
     );
     // Told to the kind page it belongs to, so Back shows the same choice.
     expect(run.events.filter(event => event === 'remember').length).toBeGreaterThanOrEqual(2);
-    await click(view, '.cc-actions button');
+    await click(view, '[data-import-run]');
     await settle();
     expect(sent(calls)[0]?.change.skip).toEqual(['claude-code:mcp:issues', 'claude-code:skill:release-notes']);
     // An item the person unticked and ticked again is brought again.
@@ -327,7 +326,7 @@ describe('C59 O5 item 8: every item can be opened and chosen on the import page'
     await interact(() => box(view, 'claude-code:mcp:issues').click());
     await interact(() => box(view, 'claude-code:mcp:issues').click());
     expect(box(view, 'claude-code:mcp:issues').checked).toBe(true);
-    await click(view, '.cc-actions button');
+    await click(view, '[data-import-run]');
     await settle();
     expect(sent(calls)[0]?.change.skip).toBeUndefined();
   });
@@ -345,7 +344,7 @@ describe('C59 O5 item 8: every item can be opened and chosen on the import page'
     expect(view.container.querySelector('[data-import-item="claude-code:model-set"]')?.textContent).toContain(
       'come from your settings',
     );
-    await click(view, '.cc-actions button');
+    await click(view, '[data-import-run]');
     await settle();
     expect(sent(calls)[0]?.change.skip).toEqual([
       'claude-code:mcp:issues',
@@ -386,7 +385,7 @@ describe('C59 O5 item 9: the import shows it is working, with one status line pe
         'box',
       ).click(),
     );
-    await click(view, '.cc-actions button');
+    await click(view, '[data-import-run]');
     await interact(async () => {
       for (let turn = 0; turn < 10; turn += 1) await new Promise(resolve => setTimeout(resolve, 0));
     });
@@ -408,7 +407,7 @@ describe('C59 O5 item 9: the import shows it is working, with one status line pe
     // Nothing can be changed or pressed twice while it works.
     for (const input of view.container.querySelectorAll<HTMLInputElement>('[data-import-item] input'))
       expect(input.disabled).toBe(true);
-    const importButton = must(view.container.querySelector<HTMLButtonElement>('.cc-actions button'), 'Import');
+    const importButton = must(view.container.querySelector<HTMLButtonElement>('[data-import-run]'), 'Import');
     expect(importButton.disabled).toBe(true);
     expect(importButton.getAttribute('aria-busy')).toBe('true');
     expect(importButton.querySelector('[data-spinner]')).not.toBeNull();

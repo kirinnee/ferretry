@@ -19,6 +19,7 @@
  * page did not name.
  */
 import { Button, ChoiceCards, type ChoiceOption } from '@ferretry/app';
+import { ActionRow } from '@ferretry/app/ui';
 import { ImportItems, selectedItems, WorkingBar } from './import-items.tsx';
 import {
   buildImportChange,
@@ -138,16 +139,24 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
   return (
     <div className="cc-step" data-onboarding-step="claude-code.import-run">
       {read.kind !== 'ready' || model === null ? (
-        <div className="cc-actions">
+        <div className="cc-confirm">
           <p role={read.kind === 'failed' ? 'alert' : undefined} className="cc-step__line">
             {read.kind === 'failed'
               ? read.sentence
               : 'Ferretry needs your OK before it reads what Claude Code keeps on this computer.'}
           </p>
-          <Button variant={read.kind === 'confirm' ? 'primary' : undefined} onClick={() => void look()}>
-            {read.kind === 'confirm' ? 'Show what is there' : 'Try again'}
-          </Button>
-          <Button onClick={leave}>Skip the import</Button>
+          <ActionRow
+            secondary={
+              <Button data-import-skip="" onClick={leave}>
+                Skip the import
+              </Button>
+            }
+            primary={
+              <Button variant={read.kind === 'confirm' ? 'primary' : undefined} onClick={() => void look()}>
+                {read.kind === 'confirm' ? 'Show what is there' : 'Try again'}
+              </Button>
+            }
+          />
         </div>
       ) : end === 'imported' || end === 'already-in' ? (
         <div role="status" data-import-answer={end}>
@@ -217,20 +226,26 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
             </p>
           )}
           {plan === 'everything' || plan === 'choose' ? <WorkingBar working={working} /> : null}
-          <div className="cc-actions">
-            <Button
-              variant="primary"
-              disabled={!canImport}
-              icon={<span aria-hidden="true">↓</span>}
-              busy={working}
-              onClick={() => void bringIn()}
-            >
-              Import
-            </Button>
-            <Button disabled={working} onClick={leave}>
-              Skip the import
-            </Button>
-          </div>
+          <ActionRow
+            data-import-actions=""
+            secondary={
+              <Button disabled={working} data-import-skip="" onClick={leave}>
+                Skip the import
+              </Button>
+            }
+            primary={
+              <Button
+                variant="primary"
+                disabled={!canImport}
+                icon={<span aria-hidden="true">↓</span>}
+                busy={working}
+                data-import-run=""
+                onClick={() => void bringIn()}
+              >
+                Import
+              </Button>
+            }
+          />
         </>
       )}
     </div>

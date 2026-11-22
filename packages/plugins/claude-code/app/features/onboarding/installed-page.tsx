@@ -202,8 +202,8 @@ export function InstalledPage({ client, step }: StepPageProps<ClaudeCodeClient>)
           <pre className="cc-command" data-install-command="">
             {read.plan.command}
           </pre>
-          <div className="cc-actions">
-            <Button variant="primary" disabled={working} onClick={() => void install(shownCommand)}>
+          <div className="cc-actions cc-actions--stretch">
+            <Button variant="primary" disabled={working} data-install-run="" onClick={() => void install(shownCommand)}>
               {working ? 'Installing…' : 'Install Claude Code'}
             </Button>
           </div>

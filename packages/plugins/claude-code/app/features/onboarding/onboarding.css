@@ -40,6 +40,10 @@
   padding: 12px 16px;
   width: auto;
 }
+/* An action that stands alone under a command is as wide as the command (C59 audit: Install). */
+.cc-actions--stretch > button {
+  flex: 1 1 100%;
+}
 .cc-step__warn {
   color: var(--fg);
 }

@@ -98,6 +98,8 @@ const open = async (
 };
 
 const shot = async (tab: Page, viewport: Viewport, theme: string, name: string): Promise<void> => {
+  // The picture's first frame fades in over 240 ms: a still is taken once it is up.
+  await tab.waitForTimeout(500);
   if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${theme}-${name}.png`) });
 };
 
@@ -399,6 +401,41 @@ describe('item 3: the long link is one line until "Show full" opens it', () => {
           expect(full.height).toBeGreaterThanOrEqual(short.height + short.lineHeight - 1);
           expect(Math.abs(again.height - short.height)).toBeLessThanOrEqual(0.5);
           expect(full.scrollX).toBeLessThanOrEqual(0);
+        } finally {
+          await close();
+        }
+      });
+});
+
+describe('audit row: Finish sign-in fills the width under the field, with a balanced secondary row', () => {
+  for (const viewport of VIEWPORTS)
+    for (const theme of THEMES)
+      it(`Finish is the field's width; Start over and Cancel are equal halves (${viewport.name}, ${theme})`, async () => {
+        const { tab, close } = await open(viewport, theme, 'claude-code');
+        try {
+          await tab.locator(CODE_FIELD).waitFor({ state: 'visible' });
+          const facts = await tab.evaluate(field => {
+            const box = (el: Element | null) => {
+              const r = (el as HTMLElement).getBoundingClientRect();
+              return { left: r.left, right: r.right, top: r.top, w: r.width };
+            };
+            const secondary = [...document.querySelectorAll('[data-sign-in-secondary] button')].map(box);
+            return {
+              field: box(document.querySelector(field)),
+              finish: box(document.querySelector('form button[type="submit"]')),
+              secondary,
+            };
+          }, CODE_FIELD);
+          measured[`actions-${viewport.name}-${theme}`] = facts;
+          expect(Math.abs(facts.finish.w - facts.field.w)).toBeLessThanOrEqual(1);
+          expect(Math.abs(facts.finish.left - facts.field.left)).toBeLessThanOrEqual(1);
+          expect(facts.secondary).toHaveLength(2);
+          expect(Math.abs(facts.secondary[0]!.w - facts.secondary[1]!.w)).toBeLessThanOrEqual(1);
+          expect(Math.abs(facts.secondary[0]!.left - facts.field.left)).toBeLessThanOrEqual(1);
+          expect(Math.abs(facts.secondary[1]!.right - facts.field.right)).toBeLessThanOrEqual(1);
+          expect(facts.secondary[0]!.top).toBeGreaterThan(facts.finish.top);
+          expect(facts.secondary[1]!.left - facts.secondary[0]!.right).toBeGreaterThanOrEqual(12 - 1);
+          await shot(tab, viewport, theme, 'claude-actions');
         } finally {
           await close();
         }

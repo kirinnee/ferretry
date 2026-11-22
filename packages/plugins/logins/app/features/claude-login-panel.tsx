@@ -256,7 +256,7 @@ export function ClaudeLoginPanel({
                     className="kt-input w-full font-mono text-meta"
                     required
                   />
-                  <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex flex-col gap-3" data-sign-in-actions="">
                     <Button
                       type="submit"
                       variant="primary"
@@ -267,10 +267,15 @@ export function ClaudeLoginPanel({
                     >
                       {wording.finishLabel ?? 'Finish sign-in'}
                     </Button>
-                    <StartOverButton onStartOver={onStartOver} busy={busy} />
-                    <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
-                      Cancel
-                    </Button>
+                    <div
+                      className={cn('grid gap-3', onStartOver === undefined ? 'grid-cols-1' : 'grid-cols-2')}
+                      data-sign-in-secondary=""
+                    >
+                      <StartOverButton onStartOver={onStartOver} busy={busy} />
+                      <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+                        Cancel
+                      </Button>
+                    </div>
                   </div>
                   <p className="m-0 text-meta leading-base text-faint">
                     Goes straight to Claude on this machine. Kept nowhere, never shown back.

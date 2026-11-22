@@ -316,6 +316,12 @@
   gap: 8px;
   min-block-size: 4.25rem;
 }
+/* Wide: the message is one line, so one line's room is kept (the picture is then as tall as the options you can see, not taller). */
+@container (min-width: 560px) {
+  .fy-sd-notes {
+    min-block-size: 2.5rem;
+  }
+}
 /* A refused code shakes its message once: transform only, never under reduced motion (the OS setting or the app's own). */
 @keyframes fy-shake {
   0%,
