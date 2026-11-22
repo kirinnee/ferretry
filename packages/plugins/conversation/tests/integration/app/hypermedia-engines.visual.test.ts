@@ -128,6 +128,7 @@ const show = async (
     readonly width?: number;
     readonly height?: number;
     readonly theme?: string;
+    readonly palette?: string;
     readonly page?: (page: Page) => Promise<void>;
   } = {},
 ) => {
@@ -145,7 +146,9 @@ const show = async (
   });
   const page = await context.newPage();
   ledger.length = 0;
-  await page.goto(`${origin}/?theme=${options.theme ?? 'studio-light'}&text=${encodeURIComponent(body)}`);
+  await page.goto(
+    `${origin}/?theme=${options.theme ?? 'studio-light'}&palette=${options.palette ?? 'studio'}&text=${encodeURIComponent(body)}`,
+  );
   await page.waitForFunction(() => (window as unknown as { fyPartsReady?: boolean }).fyPartsReady === true, undefined, {
     timeout: 30_000,
   });
@@ -295,6 +298,45 @@ describe('the 3D picture (end-list L145: its edges read in dark as well as light
         expect(state.stages).toBeGreaterThan(0);
         expect(found).toEqual({ csp: [], errors: [] });
       }, 90_000);
+});
+
+/** A 3D scene with all eight families, so every `--c1`..`--c8` edge is on the stage (the 5th and 7th are the palettes' palest). */
+const FAMILIES = ['fam1', 'fam2', 'fam3', 'fam4', 'fam5', 'fam6', 'fam7', 'fam8'] as const;
+const THREE_D_FAMILIES = fence(
+  'animation 3d',
+  ...FAMILIES.map(name => `family ${name} "${name}"`),
+  ...FAMILIES.map((name, at) => `box ${name[0]}${at} "${name}" is=${name}`),
+  '@step Eight families, one colour each.',
+);
+
+describe('the family colours on the 3D stage (r2 review: every family edge >= 3:1 on its tint, light and dark)', () => {
+  for (const palette of ['briefing', 'vintage'] as const)
+    for (const [width, height, label] of [
+      [390, 900, '390'],
+      [1_280, 900, '1280'],
+    ] as const)
+      for (const theme of ['light', 'dark'] as const)
+        it(`${palette} ${label} ${theme}: the eight family boxes draw on a WebGL canvas`, async () => {
+          const { context, page, found, state } = await show(THREE_D_FAMILIES, {
+            width,
+            height,
+            theme: `studio-${theme}`,
+            palette,
+          });
+          await page.waitForTimeout(1_500);
+          if (shotsDir !== '') {
+            await mkdir(shotsDir, { recursive: true });
+            await page.screenshot({
+              path: join(shotsDir, `families-3d-${palette}-${label}-${theme}.png`),
+              fullPage: false,
+            });
+          }
+          const canvases = await page.evaluate(() => document.querySelectorAll('.scn3 canvas').length);
+          await context.close();
+          expect(canvases).toBe(1);
+          expect(state.stages).toBeGreaterThan(0);
+          expect(found).toEqual({ csp: [], errors: [] });
+        }, 90_000);
 });
 
 describe('the pictures: the 2D animation and parts', () => {

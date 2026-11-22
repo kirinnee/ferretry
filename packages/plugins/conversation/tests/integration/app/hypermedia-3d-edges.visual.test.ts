@@ -205,10 +205,9 @@ describe('the 3D stage colours, as three.js reads them', () => {
     ).toEqual([]);
     expect(wrong.length).toBe(0);
 
-    // 2. The edges, on three.js's colours. DARK is the owner-visible failure and is held for every pair. In LIGHT the grey
-    // and status edges are held too; the eight family colours (`--c1`..`--c8`, the palette's own data-visualisation ramp) are
-    // not: a pale ramp colour (the Briefing yellow) sits at or under 3:1 on its own tint, a palette decision this item does
-    // not change (the family colours are the charts' too).
+    // 2. The edges, on three.js's colours. EVERY pair is held, in light AND dark, family colours included (`--c1`..`--c8`,
+    // the palette's own data-visualisation ramp): a pale ramp colour (the Briefing yellow) on its own tint was under 3:1, so
+    // the stage draws a family edge from a deepened copy of the ramp colour (`--stage-src-cK`), never the pale one.
     const byCombo = new Map<string, Map<string, ReturnType<typeof threeRgb>>>();
     for (const read of reads) {
       const tokens = byCombo.get(read.combo) ?? new Map();
@@ -220,7 +219,6 @@ describe('the 3D stage colours, as three.js reads them', () => {
     for (const [combo, tokens] of byCombo) {
       const ground = tokens.get('surface-2') as ReturnType<typeof threeRgb>;
       for (const [edge, fill] of PAIRS) {
-        const held = combo.endsWith('/dark') || !/^c\d$/u.test(edge);
         const e = tokens.get(edge) as ReturnType<typeof threeRgb>;
         for (const [against, other] of [
           [fill, tokens.get(fill) as ReturnType<typeof threeRgb>],
@@ -228,7 +226,7 @@ describe('the 3D stage colours, as three.js reads them', () => {
         ] as const) {
           measured += 1;
           const value = ratio(e, other);
-          if (held && value < 3) failing.push(`${combo} --${edge} on ${against}: ${value.toFixed(2)}`);
+          if (value < 3) failing.push(`${combo} --${edge} on ${against}: ${value.toFixed(2)}`);
         }
       }
     }

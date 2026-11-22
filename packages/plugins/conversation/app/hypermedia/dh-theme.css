@@ -524,6 +524,15 @@
   --stage-src-c6-soft: var(--c6-soft);
   --stage-src-c7-soft: var(--c7-soft);
   --stage-src-c8-soft: var(--c8-soft);
+  /* The family EDGES: the ramp colour itself (dark holds >= 3:1 on every tint already). Light deepens them just below. */
+  --stage-src-c1: var(--c1);
+  --stage-src-c2: var(--c2);
+  --stage-src-c3: var(--c3);
+  --stage-src-c4: var(--c4);
+  --stage-src-c5: var(--c5);
+  --stage-src-c6: var(--c6);
+  --stage-src-c7: var(--c7);
+  --stage-src-c8: var(--c8);
 }
 
 /* In light the translucent border was ALREADY drawn as the near-black ink it is made of, and the stage read well; keep the
@@ -531,6 +540,16 @@
 :root[data-mode='light'] .fy-hm .dh-doc [data-fy-animation] {
   --stage-src-line-2: color-mix(in srgb, var(--fg) 92%, var(--surface-2));
   --stage-src-line: color-mix(in srgb, var(--fg) 80%, var(--surface-2));
+  /* The pale ramp colours (the Briefing yellow, the Vintage orange) sit under 3:1 on their own tint and on the stage ground
+     in light, so the stage draws a family edge as the ramp colour deepened toward the ink. It is the same hue, stronger. */
+  --stage-src-c1: color-mix(in srgb, var(--c1) 60%, var(--fg));
+  --stage-src-c2: color-mix(in srgb, var(--c2) 60%, var(--fg));
+  --stage-src-c3: color-mix(in srgb, var(--c3) 60%, var(--fg));
+  --stage-src-c4: color-mix(in srgb, var(--c4) 60%, var(--fg));
+  --stage-src-c5: color-mix(in srgb, var(--c5) 60%, var(--fg));
+  --stage-src-c6: color-mix(in srgb, var(--c6) 60%, var(--fg));
+  --stage-src-c7: color-mix(in srgb, var(--c7) 60%, var(--fg));
+  --stage-src-c8: color-mix(in srgb, var(--c8) 60%, var(--fg));
 }
 
 .fy-hm .dh-doc .scn3 {
@@ -549,4 +568,12 @@
   --c6-soft: var(--stage-c6-soft, var(--stage-src-c6-soft));
   --c7-soft: var(--stage-c7-soft, var(--stage-src-c7-soft));
   --c8-soft: var(--stage-c8-soft, var(--stage-src-c8-soft));
+  --c1: var(--stage-c1, var(--stage-src-c1));
+  --c2: var(--stage-c2, var(--stage-src-c2));
+  --c3: var(--stage-c3, var(--stage-src-c3));
+  --c4: var(--stage-c4, var(--stage-src-c4));
+  --c5: var(--stage-c5, var(--stage-src-c5));
+  --c6: var(--stage-c6, var(--stage-src-c6));
+  --c7: var(--stage-c7, var(--stage-src-c7));
+  --c8: var(--stage-c8, var(--stage-src-c8));
 }

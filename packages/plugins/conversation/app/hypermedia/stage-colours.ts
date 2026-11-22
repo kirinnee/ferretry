@@ -30,6 +30,14 @@ const STAGE_MIXED_TOKENS = [
   'c6-soft',
   'c7-soft',
   'c8-soft',
+  'c1',
+  'c2',
+  'c3',
+  'c4',
+  'c5',
+  'c6',
+  'c7',
+  'c8',
 ] as const;
 
 /** The attributes the look lives in (the app's three axes, and the ones Durian's own stage watches). */
