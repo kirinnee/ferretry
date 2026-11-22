@@ -54,10 +54,10 @@ export const reposRoute =
     } catch (refusal) {
       return savedOnly(refusal);
     }
-    const kept = await registry.recordRepos(id, result.repos, !result.truncated);
-    if (!kept.ok) throw new ApiError(404, kept.error.message, 'not-found');
     // A scan that changed the list means the folder changed under what the file index holds (plan §3.5): it is out of date.
-    if (JSON.stringify(kept.value.repos ?? []) !== JSON.stringify(project.repos ?? [])) listChanged(id);
+    // The registry says so from inside its serial update: a scan that overlapped another is judged against what that one wrote.
+    const kept = await registry.recordRepos(id, result.repos, !result.truncated, () => listChanged(id));
+    if (!kept.ok) throw new ApiError(404, kept.error.message, 'not-found');
     return jsonResponse({ repos: kept.value.repos ?? [], truncated: result.truncated });
   };
 
