@@ -76,7 +76,7 @@ import type {
   ToolResult,
 } from '../manifest/implement.ts';
 import type { Manifest, Needer, ToolDecl } from '../manifest/types.ts';
-import kernelManifest, { HostConfigFile, PluginsConfig, type PluginsYaml } from '../plugin.ts';
+import kernelManifest, { HostConfigFile, PluginsConfig, pluginsYamlSaysOn, type PluginsYaml } from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import { bindDirectory } from './bound-directory.ts';
@@ -608,7 +608,7 @@ async function bootLocked(
   // 1. Check the enabled graph.
   phases.mark('check');
   const yamlEnabled = (id: string): boolean =>
-    isCore(id) || (options.enabled?.(id) ?? pluginsYaml?.plugins[id] !== 'off');
+    isCore(id) || (options.enabled?.(id) ?? pluginsYamlSaysOn(pluginsYaml, id));
   const planWith = (on: (id: string) => boolean) => {
     const planned = HookEngine.plan(
       manifests.filter(manifest => on(manifest.id)),

@@ -218,7 +218,7 @@ leaves, so a standing Ferrets would refuse is a rejection there too (keep live).
 - **A quarantined task keeps nobody.** A task Board cannot read is not in its snapshot, so it is not answered and keeps
   nobody, as today. Agenda's unparsed entries, by contrast, keep their ferret (above), so the two treat damaged data
   differently: Board's way keeps the archive working while any task is quarantined.
-- **A switched-off Board or Agenda stops the archive quietly.** `config/plugins.yaml` can turn either plugin off; no pass
+- **A switched-off Board or Agenda stops the archive quietly.** Board and Agenda are off unless `config/plugins.yaml` says `work: on`, and it can turn either off on its own line; no pass
   then runs (fail safe), and only a debug log says so, so an owner who names `afterHours` sees nothing happen.
 - **Who answers is not checked.** The hook says which KIND of keep a contribution is, not which plugin sent it: the
   kernel names no contributor, so any plugin that contributes `kind: 'board'` counts as Board for "both have answered".
