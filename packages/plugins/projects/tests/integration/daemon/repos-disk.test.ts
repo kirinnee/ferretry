@@ -4,7 +4,7 @@
  * folder, and a remote that carries a token. Linux only for the held-folder reach, as `folders-disk.test.ts`.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { KernelPorts, SpawnPort } from '@ferretry/kernel/contract';
@@ -13,7 +13,7 @@ import { platformRootPinner } from '../../../../../core/kernel/host/adapters/pin
 import { restrictSpawn } from '../../../../../core/kernel/host/permissions.ts';
 import { PinRegistry } from '../../../../../core/kernel/host/pins.ts';
 import { rootsPortFor } from '../../../../../core/kernel/host/roots.ts';
-import { kernelBrowser, SIGN_IN_READ_LIMIT } from '../../../daemon/features/folders/adapter.ts';
+import { kernelBrowser } from '../../../daemon/features/folders/adapter.ts';
 import { scanRepos } from '../../../daemon/features/repos/scan.ts';
 
 const parents: string[] = [];
@@ -116,16 +116,46 @@ describe('the repository scan over the real imports root', () => {
     await writeFile(join(w.outside, 'srv', 'svc', '.git', 'config'), CONFIG('https://github.com/me/svc'));
     await symlink(join(w.user, '.ssh'), join(w.outside, 'srv', 'to-ssh'));
     const found = await scanRepos(join(w.outside, 'srv'), w.deps);
-    // Every folder above a project outside the home is looked at for a sign-in file, with a bound that fails closed: when the
-    // machine's temp folder holds more names than that bound, it cannot be proved free of one and the scan saw nothing.
-    const crowded = (await readdir(tmpdir())).length > SIGN_IN_READ_LIMIT;
-    expect(found).toEqual(
-      crowded
-        ? { repos: [], truncated: true }
-        : { repos: [{ path: 'svc', remote: 'https://github.com/me/svc', provider: 'github' }], truncated: false },
-    );
+    // Every folder above a project outside the home is looked at for a sign-in file by NAME (a stat of each marker), so how
+    // wide an ancestor is (this machine's temp folder included) decides nothing: the answer is the same on any machine.
+    expect(found).toEqual({
+      repos: [{ path: 'svc', remote: 'https://github.com/me/svc', provider: 'github' }],
+      truncated: false,
+    });
     // `/proc` is a pseudo filesystem: a project there is refused on the real path, nothing is opened, and it is not "empty".
     expect(await scanRepos('/proc', w.deps)).toEqual({ repos: [], truncated: true });
+  });
+  /** `count` empty files in `folder`, made by the shell: the count is the point, not thousands of promises. */
+  const fill = async (folder: string, count: number) => {
+    await mkdir(folder, { recursive: true });
+    const made = Bun.spawn(['sh', '-c', `seq -f n%g ${count} | xargs touch`], { cwd: folder });
+    expect(await made.exited).toBe(0);
+  };
+  test('how WIDE a folder is decides nothing about it: a repository in a 5,001-name folder is found and the answer is whole', async () => {
+    const w = await world();
+    await mkdir(join(w.project, 'wide', 'proj', '.git'), { recursive: true });
+    await writeFile(join(w.project, 'wide', 'proj', '.git', 'config'), CONFIG('https://github.com/me/proj'));
+    await fill(join(w.project, 'wide', 'proj'), 5001);
+    // a project folder below a wide ordinary ancestor
+    await mkdir(join(w.outside, 'srv', 'svc', '.git'), { recursive: true });
+    await fill(w.outside, 5001);
+    const inside = await scanRepos(w.project, w.deps);
+    expect(inside.repos.map(repo => repo.path)).toContain('wide/proj');
+    const below = await scanRepos(join(w.outside, 'srv'), w.deps);
+    expect(below).toEqual({ repos: [{ path: 'svc' }], truncated: false });
+    // a repository that is itself 5,001 names wide
+    expect(await scanRepos(join(w.project, 'wide', 'proj'), w.deps)).toEqual({
+      repos: [{ path: '.', remote: 'https://github.com/me/proj', provider: 'github' }],
+      truncated: false,
+    });
+  });
+  test('a sign-in file is still found by name in a wide folder: that child is skipped, wide or not', async () => {
+    const w = await world();
+    await mkdir(join(w.project, 'keys', '.git'), { recursive: true });
+    await fill(join(w.project, 'keys'), 5001);
+    await writeFile(join(w.project, 'keys', 'id_ed25519'), 'not a key');
+    const found = await scanRepos(w.project, w.deps);
+    expect(found.repos.map(repo => repo.path)).not.toContain('keys');
   });
   test('a link where `.git/config` should be is not read: the repository shows no remote', async () => {
     const w = await world();

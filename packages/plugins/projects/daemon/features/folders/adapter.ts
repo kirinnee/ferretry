@@ -1,15 +1,15 @@
 import type { HeldRoot, KernelPorts, RootHandle } from '@ferretry/kernel/contract';
-import type { Instant } from '@ferretry/std';
+import { type Instant, SIGN_IN_FILES } from '@ferretry/std';
 import { holdsSignIn } from './fence.ts';
 import type { FolderBrowser, FolderOpen, FolderVerdict, HeldFolder, LeafMade, RawFolderEntry } from './port.ts';
 
 type Kernel = Pick<KernelPorts, 'roots' | 'paths' | 'spawn'>;
 
 /**
- * The most names read from one folder to look for a sign-in file. A folder with more cannot be proved free of one, so the
- * look answers "holds one" (fail closed): no folder, however wide, is read without a bound.
+ * The most names read from one folder for the spelling-fold look at a sign-in file (the known markers are asked for by NAME
+ * first, which needs no listing). No folder, however wide, is read without a bound, and none is refused for its width.
  */
-export const SIGN_IN_READ_LIMIT = 5000;
+const SIGN_IN_READ_LIMIT = 5000;
 
 const EPOCH = '1970-01-01T00:00:00.000Z' as Instant;
 const instantOf = (text: string | undefined): Instant => {
@@ -249,16 +249,20 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
       } catch {
         return false;
       }
+      // First, bounded BY CONSTRUCTION: each KNOWN marker is asked for by name (one lstat apiece, a link counts and is not
+      // followed), so how many names the folder holds decides nothing. A name the machine will not answer for is not proved free.
+      for (const marker of SIGN_IN_FILES) if ((await leafAt(path, marker)) !== 'missing') return true;
       try {
-        // Every name the folder holds, a link included, judged by the SAME fold as everywhere else (`fence.ts`): a marker
-        // spelled `ID_RSA`, `Auth.JSON` or in full-width letters is a marker. Read through the held folder with a bound:
-        // more names than {@link SIGN_IN_READ_LIMIT} cannot be proved free of a marker, so they answer "holds one".
+        // Then every name the folder holds, a link included, judged by the SAME fold as everywhere else (`fence.ts`): a marker
+        // spelled `ID_RSA`, `Auth.JSON` or in full-width letters is a marker. Read through the held folder with a bound; a
+        // folder with more names than {@link SIGN_IN_READ_LIMIT} is not listed to the end and is NOT refused for it: the
+        // known markers above were already asked for by name, so width alone never makes a folder private.
         const pinned = await root.pin(self.value, { fence: 'none' });
         try {
           const target = await pinned.open('', { wantDirectory: true });
           try {
             const listing = await target.list(SIGN_IN_READ_LIMIT);
-            return listing.truncated || holdsSignIn(listing.entries.map(entry => entry.name));
+            return holdsSignIn(listing.entries.map(entry => entry.name));
           } finally {
             await target.close();
           }

@@ -1,5 +1,5 @@
 import { MAX_PROJECT_REPOS, type ProjectRepo } from '../../../contract/index.ts';
-import { isAtOrUnder } from '../folders/fence.ts';
+import { belowHome, isAtOrUnder } from '../folders/fence.ts';
 import { folderPolicy } from '../folders/policy.ts';
 import type { FolderBrowser, FolderVerdict } from '../folders/port.ts';
 import { describeRemote, remoteUrlOfConfig } from './remote.ts';
@@ -19,6 +19,12 @@ const SKIPPED = new Set(['node_modules']);
 export interface ScanDeps {
   /** B6's folder port: holds folders open, never lists a link, refuses a folder the verdict does not accept. */
   readonly browser: FolderBrowser;
+  /**
+   * The outside-home decision (`outside-gate.ts`), made on the project folder's RESOLVED real place before anything is held or
+   * walked: a refusal is the error it throws and nothing is read. Asked once per scan, and only when the resolved folder is
+   * outside the home. Without one, a project folder anywhere is scanned (an owner-side caller that is already ungoverned).
+   */
+  readonly outsideHome?: () => Promise<void>;
 }
 
 export interface ScanResult {
@@ -57,7 +63,10 @@ export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResul
   if ((await browser.leaf(root)) !== 'present') return nothing;
   const [rootReal] = await browser.realPaths([root]);
   if (rootReal === undefined) return nothing;
-  const policy = await folderPolicy(browser, await browser.home());
+  const home = await browser.home();
+  const policy = await folderPolicy(browser, home, deps.outsideHome);
+  // The decision is on where the folder REALLY is, not how it was spelled: a stored spelling under the home can resolve out of it.
+  if (belowHome(rootReal, home) === undefined) await policy.enterOutside();
   const inside =
     (judge: FolderVerdict): FolderVerdict =>
     async real =>

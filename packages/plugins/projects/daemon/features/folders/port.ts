@@ -79,9 +79,10 @@ export interface FolderBrowser {
    */
   open(path: string, verdict: FolderVerdict): Promise<FolderOpen>;
   /**
-   * Whether the real folder `path` directly holds a sign-in or key file: every name it holds (a link counts, not
-   * followed) is judged by the one fold in `fence.ts`, so a differently spelled marker is a marker. A folder whose names
-   * cannot be read answers `true`; a file or a missing name, `false`.
+   * Whether the real folder `path` directly holds a sign-in or key file: each known marker is asked for by name (a link
+   * counts, not followed), so the width of the folder never matters, and the names it holds are judged by the one fold in
+   * `fence.ts`, so a differently spelled marker is a marker. A folder whose names cannot be asked for answers `true`; a
+   * file or a missing name, `false`. A folder is never "private" for being wide.
    */
   holdsSignIn(path: string): Promise<boolean>;
   /** What is AT the absolute `path`, the leaf never followed (a link anywhere above it is the machine's to resolve): nothing, a link, or something else. */

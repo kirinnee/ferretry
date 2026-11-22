@@ -29,16 +29,31 @@ export const reposRoute =
     const id = projectId(call.params.get('id'));
     const project = await registry.find(id);
     if (project === undefined) throw new ApiError(404, `no project ${id}`, 'not-found');
+    // ONE decision per call (a step-up is spent once): asked here for a stored spelling outside the home, and by the scan for
+    // where the folder RESOLVES to, which a spelling under the home can differ from.
+    let decided: Promise<void> | undefined;
+    const gate = (): Promise<void> => {
+      decided ??= outsideHomeGate(call)();
+      return decided;
+    };
+    // Only the gate's own refusal means "saved results only"; a daemon that cannot decide (503) stays an error.
+    const savedOnly = (refusal: unknown) => {
+      if (!(refusal instanceof ApiError) || refusal.status !== 403) throw refusal;
+      return jsonResponse({ repos: project.repos ?? [], truncated: true });
+    };
     if (belowHome(project.path, await scan.browser.home()) === undefined) {
       try {
-        await outsideHomeGate(call)();
+        await gate();
       } catch (refusal) {
-        // Only the gate's own refusal means "saved results only"; a daemon that cannot decide (503) stays an error.
-        if (!(refusal instanceof ApiError) || refusal.status !== 403) throw refusal;
-        return jsonResponse({ repos: project.repos ?? [], truncated: true });
+        return savedOnly(refusal);
       }
     }
-    const result = await scanRepos(project.path, scan);
+    let result: Awaited<ReturnType<typeof scanRepos>>;
+    try {
+      result = await scanRepos(project.path, { ...scan, outsideHome: gate });
+    } catch (refusal) {
+      return savedOnly(refusal);
+    }
     const kept = await registry.recordRepos(id, result.repos, !result.truncated);
     if (!kept.ok) throw new ApiError(404, kept.error.message, 'not-found');
     return jsonResponse({ repos: kept.value.repos ?? [], truncated: result.truncated });

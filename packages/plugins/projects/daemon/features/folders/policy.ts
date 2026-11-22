@@ -42,8 +42,8 @@ export interface FolderPolicy {
  *
  * It does not fence the home: a project can be anywhere. `outsideHome` is what a reader that is NOT the owner at the
  * machine must pass to look at a place outside it (a remote device needs `filesystem.configure`): it is asked once per
- * request, before anything else is said about a real path outside the home, and a refusal is the error it throws. A reader
- * with no gate (the repository scan of a project somebody already registered) has none.
+ * request, before anything else is said about a real path outside the home, and a refusal is the error it throws. The
+ * repository scan hands it the same gate for the project folder's RESOLVED place; a reader with no gate has none.
  */
 export async function folderPolicy(
   browser: FolderBrowser,

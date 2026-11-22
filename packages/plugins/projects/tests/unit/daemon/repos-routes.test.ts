@@ -105,6 +105,29 @@ describe('GET /v1/projects/:id/repos', () => {
     });
     expect(store.file.projects[0]?.repos?.[0]?.account).toBe('work');
   });
+  test('a folder too wide to read to the end is truncated, never silently dropped: what was stored, and its account link, stay', async () => {
+    const { registry, id, store } = await setup();
+    await registry.recordRepos(id, [{ path: 'wide-one' }], true);
+    await store.update(file => ({
+      ...file,
+      projects: file.projects.map(project => ({
+        ...project,
+        repos: project.repos?.map(repo => ({ ...repo, account: 'work' })),
+      })),
+    }));
+    const base = browserAt('/home/me/work/alpha');
+    const wide: FolderBrowser = {
+      ...base,
+      open: async (path, verdict) => {
+        const held = await base.open(path, verdict);
+        if (!held.ok) return held;
+        return { ok: true, folder: { ...held.folder, entries: async () => ({ entries: [], more: true }) } };
+      },
+    };
+    const got = answer(await reposRoute(registry, { browser: wide })(callWith(undefined, { id })));
+    expect(got.json).toEqual({ repos: [{ path: 'wide-one', account: 'work' }], truncated: true });
+    expect(store.file.projects[0]?.repos).toEqual([{ path: 'wide-one', account: 'work' }]);
+  });
   test('a project folder outside the home folder is scanned, and the answer has no field about the home', async () => {
     const { registry, id, store } = await setup('/srv/alpha');
     const elsewhere: FolderBrowser = { ...browserAt('/srv/alpha'), home: async () => '/home/me' };
@@ -189,6 +212,76 @@ describe('GET /v1/projects/:id/repos', () => {
       const refused = await failure(() => reposRoute(registry, scan)(callWith(undefined, { id })));
       expect(refused.code).toBe('folder_gate_unavailable');
       expect(opened).toEqual([]);
+    });
+    describe('a stored spelling INSIDE the home that resolves OUTSIDE it (R2 item 3: the decision is on the resolved, held location)', () => {
+      /** A project registered at `/home/me/work/alpha` that really is `/srv/real`, one repository already saved. */
+      const linked = async () => {
+        const world = await setup();
+        await world.registry.recordRepos(world.id, [{ path: 'saved', remote: 'https://github.com/o/saved' }], true);
+        const opened: string[] = [];
+        const base = browserAt('/srv/real');
+        const scan = {
+          browser: {
+            ...base,
+            // only the project's own spelling resolves elsewhere (the private spellings stay where they are)
+            realPaths: async (paths: readonly string[]) =>
+              paths.map(path => (path === '/home/me/work/alpha' ? '/srv/real' : path)),
+            open: async (path: string, verdict: Parameters<FolderBrowser['open']>[1]) => {
+              opened.push(path);
+              return base.open(path, verdict);
+            },
+          } as FolderBrowser,
+        };
+        return { ...world, scan, opened };
+      };
+      test('a use-only device reads what was saved, starts no walk, and nothing is written', async () => {
+        const { registry, id, scan, opened, store } = await linked();
+        const before = JSON.stringify(store.file);
+        const got = answer(
+          await reposRoute(
+            registry,
+            scan,
+          )(callWith(undefined, { id }, governed({ allowed: false, refusal: 'device-not-granted' }))),
+        );
+        expect([got.status, got.json]).toEqual([200, SAVED]);
+        expect(opened).toEqual([]);
+        expect(JSON.stringify(store.file)).toBe(before);
+      });
+      test('a device that has not stepped up is held to saved results too', async () => {
+        const { registry, id, scan, opened } = await linked();
+        const got = answer(
+          await reposRoute(
+            registry,
+            scan,
+          )(callWith(undefined, { id }, governed({ allowed: false, refusal: 'step-up-required' }))),
+        );
+        expect(got.json).toEqual(SAVED);
+        expect(opened).toEqual([]);
+      });
+      test('a stepped-up device walks it and spends the step-up exactly once; the owner at the machine walks it', async () => {
+        const { registry, id, scan, opened } = await linked();
+        let spent = 0;
+        const call = {
+          ...callWith(undefined, { id }, governed({ allowed: true, refusal: 'granted', steppedUp: true })),
+          spendStepUp: () => {
+            spent++;
+          },
+        } as unknown as CallContext;
+        expect(answer(await reposRoute(registry, scan)(call)).json.truncated).toBe(false);
+        expect(spent).toBe(1);
+        expect(opened.length).toBeGreaterThan(0);
+        const owner = await linked();
+        expect(
+          answer(await reposRoute(owner.registry, owner.scan)(callWith(undefined, { id: owner.id }, OWNER))).json
+            .truncated,
+        ).toBe(false);
+      });
+      test('a call with no standing is refused and walks nothing', async () => {
+        const { registry, id, scan, opened } = await linked();
+        const refused = await failure(() => reposRoute(registry, scan)(callWith(undefined, { id })));
+        expect(refused.code).toBe('folder_gate_unavailable');
+        expect(opened).toEqual([]);
+      });
     });
     test('a project INSIDE the home needs only use: a use-only device scans it, and the configure decision is never asked', async () => {
       const { registry, id, scan } = await setup();

@@ -199,6 +199,56 @@ describe('scanning a project folder for repositories', () => {
     });
     expect(world.opened).toEqual(['/srv/work', '/srv/work/plain']);
   });
+  describe('the outside-home decision is made on the RESOLVED, held location, before anything is walked (F6061 U4 R2 item 3)', () => {
+    /**
+     * A project the owner spells under the home (`~/via/work`, a folder whose ANCESTOR is a link) that really is `/srv/real`:
+     * the spelling's own leaf is a plain folder, so the scan accepts it as a project folder and only its resolved place is outside.
+     */
+    const linked = (names: readonly string[] = ['r']) => {
+      const world = browserOf(
+        { [`${HOME}/via/work`]: [], '/srv/real': names, '/srv/real/r': [], '/srv/real/plain': [] },
+        ['/srv/real/r'],
+        { [`${HOME}/via/work`]: '/srv/real' },
+      );
+      return { ...world, browser: { ...world.browser, leaf: async () => 'present' as const } };
+    };
+    test('a stored spelling under the home that resolves OUTSIDE it asks the gate once, before the folder is held; a refusal walks nothing', async () => {
+      const world = linked();
+      let asked = 0;
+      const refusal = new Error('needs filesystem.configure');
+      const outsideHome = async () => {
+        asked++;
+        expect(world.opened).toEqual([]);
+        throw refusal;
+      };
+      await expect(scanRepos(`${HOME}/via/work`, { browser: world.browser, outsideHome })).rejects.toBe(refusal);
+      expect(asked).toBe(1);
+      expect(world.opened).toEqual([]);
+      expect(world.probed).toEqual([]);
+    });
+    test('an accepted gate walks the resolved folder, and is asked once for the whole walk', async () => {
+      const world = linked(['r', 'plain']);
+      let asked = 0;
+      const found = await scanRepos(`${HOME}/via/work`, {
+        browser: world.browser,
+        outsideHome: async () => {
+          asked++;
+        },
+      });
+      expect(found).toEqual({ repos: [{ path: 'r' }], truncated: false });
+      expect(asked).toBe(1);
+    });
+    test('a folder that really is inside the home never asks the gate', async () => {
+      const world = browserOf({ [P]: ['r'], [`${P}/r`]: [] }, [`${P}/r`]);
+      const found = await scanRepos(P, {
+        browser: world.browser,
+        outsideHome: async () => {
+          throw new Error('must not be asked');
+        },
+      });
+      expect(found).toEqual({ repos: [{ path: 'r' }], truncated: false });
+    });
+  });
   test("a project folder in a skipped tree, another user's home, or a key store answers truncated, opens and probes nothing", async () => {
     for (const root of [
       '/proc/1',
