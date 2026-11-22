@@ -274,13 +274,47 @@ describe('nothing at or after an unclosed opener draws while the message streams
   const quoted = (lines: readonly string[]): string[] => lines.map(line => `> ${line}`);
   const listed = (lines: readonly string[]): string[] =>
     lines.map((line, index) => (index === 0 ? `- ${line}` : `  ${line}`));
-  const VARIANTS: readonly { readonly name: string; readonly lines: string[]; readonly closer: string | null }[] = [
+  /** A fence behind a list marker and a TAB (content at column 4): the rest of its lines sit four spaces in. */
+  const tabbed = (lead: string, lines: readonly string[]): string[] =>
+    lines.map((line, index) => (index === 0 ? `${lead}${line}` : `    ${line}`));
+  const COMPLETE_HTML = [...HTML, TICKS];
+  const VARIANTS: readonly {
+    readonly name: string;
+    readonly lines: string[];
+    readonly closer: string | null;
+    readonly eol?: string;
+  }[] = [
     { name: 'four-space opener before it', lines: [`    ${TICKS}`, ...HTML], closer: null },
     { name: 'tab opener before it', lines: [`\t${TICKS}`, ...HTML], closer: null },
     { name: 'blockquote, partial html', lines: quoted(HTML), closer: `> ${TICKS}` },
     { name: 'blockquote, complete svg body, no quoted closer', lines: quoted(SVG), closer: `> ${TICKS}` },
     { name: 'list item, partial html', lines: listed(HTML), closer: `  ${TICKS}` },
     { name: 'list item, complete svg body', lines: listed(SVG), closer: `  ${TICKS}` },
+    // r12 H3 R3: a list marker followed by a TAB, every marker, partial html and a complete svg body.
+    ...['-\t', '*\t', '+\t', '1.\t', '1)\t', ' -\t'].flatMap(lead => [
+      { name: `${JSON.stringify(lead)} then partial html`, lines: tabbed(lead, HTML), closer: `    ${TICKS}` },
+      { name: `${JSON.stringify(lead)} then a complete svg body`, lines: tabbed(lead, SVG), closer: `    ${TICKS}` },
+    ]),
+    // gpt R2: an open top-level block, a four-space line that is no closer, then a COMPLETE quoted block.
+    {
+      name: 'open block, a four-space line, a complete quoted block',
+      lines: [...HTML, `    ${TICKS}`, '', ...quoted(COMPLETE_HTML)],
+      closer: null,
+    },
+    // Opus R2 low: a js fence "closed" by a four-space line (Durian) and a complete block after it.
+    {
+      name: 'js fence with a four-space closer, then a complete block',
+      lines: [`${TICKS}js`, 'x', `    ${TICKS}`, '', ...COMPLETE_HTML],
+      closer: null,
+    },
+    {
+      name: 'js fence with a no-break-space closer, then a complete block',
+      lines: [`${TICKS}js`, 'x', ` ${TICKS}`, '', ...COMPLETE_HTML],
+      closer: null,
+    },
+    // Every line ending reads the same.
+    { name: 'open block, CRLF', lines: HTML, closer: TICKS, eol: '\r\n' },
+    { name: 'open block in a quote, lone CR', lines: quoted(HTML), closer: `> ${TICKS}`, eol: '\r' },
   ];
 
   for (const { name } of VIEWPORTS)
@@ -307,7 +341,8 @@ describe('nothing at or after an unclosed opener draws while the message streams
           };
           const measured: Record<string, unknown> = {};
           for (const variant of VARIANTS) {
-            const before = await show(`Here is the plan:\n\n${variant.lines.join('\n')}`);
+            const eol = variant.eol ?? '\n';
+            const before = await show(['Here is the plan:', '', ...variant.lines].join(eol));
             measured[variant.name] = before;
             expect({ variant: variant.name, ...before }).toMatchObject({
               variant: variant.name,
@@ -319,7 +354,7 @@ describe('nothing at or after an unclosed opener draws while the message streams
             expect(before.code).toBeGreaterThan(0);
             if (variant.closer === null) continue;
             // The closer arrives: it is a block now.
-            const after = await show(`Here is the plan:\n\n${[...variant.lines, variant.closer].join('\n')}`);
+            const after = await show(['Here is the plan:', '', ...variant.lines, variant.closer].join(eol));
             expect({ variant: variant.name, blocks: after.blocks, errors: after.errors }).toEqual({
               variant: variant.name,
               blocks: 1,

@@ -9,7 +9,8 @@ import { ensureDom, interact, mount, must } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
 import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
 import { parse } from 'durian-hypermedia';
-import { fyRenderParseBlock, parseFyRenderBlock } from '../../../../app/hypermedia/fy-render-host.tsx';
+import { settleFences } from '../../../../app/hypermedia/fence-boundaries.ts';
+import { fyRenderParseBlock } from '../../../../app/hypermedia/fy-render-host.tsx';
 import { fyRenderFences } from '../../../../app/render/fences.tsx';
 import { fixture, inShell } from './surface-fixture.tsx';
 
@@ -64,6 +65,13 @@ const FIXTURES: Readonly<Record<string, string>> = {
   html: block('type: html', 'alt: An agenda', '---', '<button id="t">Day 2</button><script>t.onclick=()=>1</script>'),
   task: block('type: task', 'alt: The task', '---', '&F12'),
   board: block('type: board', 'alt: Open work', '---', '&F1 &F2'),
+};
+
+/** A message as Durian is given it (every fence's boundaries decided by CommonMark first), and its host blocks' data. */
+const readHost = (source: string) => {
+  const settled = settleFences(source);
+  const doc = parse(settled.text, { blocks: [fyRenderParseBlock(settled)], frontMatter: false });
+  return { doc, hosts: doc.blocks.filter(b => b.type === 'host') };
 };
 
 const draw = async (text: string, withBoard = true) => {
@@ -191,24 +199,22 @@ describe('the parser half is total and tells another agent what the block shows'
   const source = block('type: svg', 'alt: A square', '---', SQUARE);
 
   it('reads its fence from the message it is built for, and never throws', () => {
-    const doc = parse(source, { blocks: [fyRenderParseBlock(source)], frontMatter: false });
-    const host = doc.blocks.find(b => b.type === 'host');
-    expect(host?.data).toMatchObject({ ok: true, alt: 'A square' });
+    const { doc, hosts } = readHost(source);
+    expect(hosts[0]?.data).toMatchObject({ ok: true, alt: 'A square' });
     expect(doc.problems).toEqual([]);
     expect(doc.llm).toContain('A square');
   });
 
   it('answers ok: false, not an error block, for a body the grammar refuses', () => {
-    const bad = block('type: nope', '---', 'x');
-    const doc = parse(bad, { blocks: [fyRenderParseBlock(bad)], frontMatter: false });
+    const { doc } = readHost(block('type: nope', '---', 'x'));
     expect(doc.blocks.map(b => b.type)).toEqual(['host']);
     expect(doc.problems).toEqual([]);
   });
 
-  it('says why an opener is not exact, and nothing else', () => {
-    expect(parseFyRenderBlock('```fy-render notes', 'x').ok).toBe(false);
-    expect(parseFyRenderBlock(undefined, 'x').ok).toBe(false);
-    expect(parseFyRenderBlock('  ~~~~ fy-render  ', 'type: nope\n---\nx').reason).not.toContain('exactly');
+  it('says why a fence is not a block, and nothing else', () => {
+    const reason = (text: string) => (readHost(text).hosts[0]?.data as { reason: string | null } | undefined)?.reason;
+    expect(reason(fence('fy-render notes', 'x'))).toContain('exactly fy-render');
+    expect(reason(`  ~~~~ fy-render  \ntype: nope\n---\nx\n  ~~~~`)).not.toContain('exactly');
   });
 });
 
@@ -275,8 +281,7 @@ describe('AUTHOR TEXT STAYS VISIBLE: a :::llm after a fy-render fence is drawn, 
 
   it('keeps the author’s text on the block for any reader of the document', () => {
     const source = `${FIXTURES.svg as string}\n\n${llm(SECRET)}`;
-    const doc = parse(source, { blocks: [fyRenderParseBlock(source)], frontMatter: false });
-    expect(doc.blocks.find(b => b.type === 'host')?.llm).toBe(SECRET);
+    expect(readHost(source).hosts[0]?.llm).toBe(SECRET);
   });
 });
 
@@ -285,11 +290,12 @@ describe('the opener may be indented by at most three spaces (CommonMark)', () =
 
   it('reads an opener indented 0 to 3 spaces as exact, and 4 or a tab as not', () => {
     const body = ['type: svg', 'alt: A square', '---', SQUARE].join('\n');
-    for (const indent of [0, 1, 2, 3])
-      expect({ indent, ok: parseFyRenderBlock(opener(indent), body).ok }).toEqual({ indent, ok: true });
-    expect(parseFyRenderBlock(opener(4), body).ok).toBe(false);
-    expect(parseFyRenderBlock(opener(8), body).ok).toBe(false);
-    expect(parseFyRenderBlock(`\t${FENCE}fy-render`, body).ok).toBe(false);
+    const ok = (head: string): boolean | undefined =>
+      (readHost(`${head}\n${body}\n${FENCE}`).hosts[0]?.data as { ok: boolean } | undefined)?.ok;
+    for (const indent of [0, 1, 2, 3]) expect({ indent, ok: ok(opener(indent)) }).toEqual({ indent, ok: true });
+    expect(ok(opener(4))).not.toBe(true);
+    expect(ok(opener(8))).not.toBe(true);
+    expect(ok(`\t${FENCE}fy-render`)).not.toBe(true);
   });
 
   it('draws a fence indented four spaces as code, though its body is a good block', async () => {
