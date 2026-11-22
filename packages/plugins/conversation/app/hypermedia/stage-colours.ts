@@ -35,8 +35,6 @@ const STAGE_MIXED_TOKENS = [
 /** The attributes the look lives in (the app's three axes, and the ones Durian's own stage watches). */
 const LOOK_ATTRIBUTES = ['data-theme', 'data-palette', 'data-mode', 'data-style', 'class', 'style'];
 
-const SENTINEL = '#010203';
-
 let probeContext: CanvasRenderingContext2D | null | undefined;
 
 const probe = (): CanvasRenderingContext2D | null => {
@@ -48,15 +46,14 @@ const probe = (): CanvasRenderingContext2D | null => {
   return probeContext;
 };
 
-/** What the canvas draws for a CSS colour, as `rgb(r, g, b)`; null when it is not a colour or is not opaque. */
+/** What the canvas draws for a CSS colour, as `rgb(r, g, b)`; null when it is not a colour (the canvas then keeps what it held) or is not opaque. */
 function resolveToRgb(css: string): string | null {
   const context = probe();
   if (context === null || css.trim() === '') return null;
   context.clearRect(0, 0, 1, 1);
-  context.fillStyle = SENTINEL;
+  // Transparent first: a value the canvas cannot parse leaves it in place and the pixel stays empty (alpha 0), like a translucent one.
+  context.fillStyle = 'transparent';
   context.fillStyle = css;
-  // An unparsable value leaves the sentinel in place.
-  if (String(context.fillStyle) === SENTINEL && css.trim().toLowerCase() !== SENTINEL) return null;
   context.fillRect(0, 0, 1, 1);
   const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data;
   if (r === undefined || g === undefined || b === undefined || a !== 255) return null;

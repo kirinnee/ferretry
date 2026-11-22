@@ -33,11 +33,20 @@ const LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(
 
 describe('the hypermedia folder draws no colour of its own', () => {
   const sources = readdirSync(folder).filter(name => /\.(?:css|tsx?)$/u.test(name));
+  // `stage-colours.ts` writes the FORMAT `rgb(r, g, b)` around channels it reads from the page; it holds no colour. It is read below.
+  const own = 'stage-colours.ts';
   it('has the files it is checking', () => {
     expect(sources).toContain('dh-theme.css');
     expect(sources).toContain('hypermedia.css');
   });
-  for (const name of sources)
+  it(`${own} holds no colour: no hex, hsl() or named colour, and its only rgb() is the template that writes one resolved`, () => {
+    const lines = withoutComments(readFileSync(join(folder, own), 'utf8'))
+      .split('\n')
+      .filter(line => /:\s|['"`]/u.test(line))
+      .filter(line => !line.includes('`rgb(${r}, ${g}, ${b})`'));
+    expect(lines.filter(line => LITERAL.test(line))).toEqual([]);
+  });
+  for (const name of sources.filter(each => each !== own))
     it(`${name} has no hex, rgb(), hsl() or named colour`, () => {
       const text = withoutComments(readFileSync(join(folder, name), 'utf8'))
         // A `#anchor`, a CSS id selector or an entity is not a colour: only declarations and string literals are read.
