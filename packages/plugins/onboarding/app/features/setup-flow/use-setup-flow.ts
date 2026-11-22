@@ -215,6 +215,11 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   useEffect(() => {
     if (target === undefined || !targetReady) return;
     let live = true;
+    // O8-15: the machine's own Claude Code and Codex setup is read AT ONCE, beside the steps list, not after it: a machine being
+    // set up (not one a device is only pairing to) has such pages, so the read is the first thing the flow asks. Never throws.
+    const scanned =
+      address.journey === 'pair' ? undefined : env.current.rows.find(row => row.daemon === target)?.client;
+    if (scanned !== undefined) readSetupScanAhead(scanned);
     setLoading({ kind: 'loading' });
     // Try again is the person's own act: its read may raise the passkey prompt a first, quiet read must not. Only the
     // machine being set up is ever asked that way; the others are read quietly and never hold the run.
@@ -267,6 +272,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     });
     return () => {
       live = false;
+      if (scanned !== undefined) forgetSetupScanAhead(scanned);
     };
   }, [target, targetReady, attempt, address.journey]);
 

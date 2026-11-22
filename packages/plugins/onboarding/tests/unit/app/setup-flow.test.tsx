@@ -209,11 +209,18 @@ function setup(options: {
   const machines = options.machines ?? [fakeDaemon(A, 'Studio')];
   const answers: { daemon: string; plugin: string; step: string; state: string }[] = [];
   const reads: { daemon: string; init: unknown }[] = [];
+  /** Every quiet scan the flow started, and how many steps-list reads had been asked when it started. */
+  const scans: { daemon: string; at: number }[] = [];
   const arrived: { step: string; state: string }[] = [];
   const clients = new Map<string, PluginClient>();
   for (const machine of machines) {
     const client = {
       async call(route: string, request?: { params?: { plugin: string; stepId: string }; body?: { state: string } }) {
+        if (route.startsWith('GET /v1/runtimes/setup/scan')) {
+          scans.push({ daemon: machine.id, at: reads.length });
+          return {};
+        }
+        if (route === 'GET /v1/claude-code/update' || route === 'GET /v1/codex/update') return null;
         if (route === 'GET /v1/onboarding') {
           reads.push({ daemon: machine.id, init: request });
           if (options.hangReads?.has(machine.id) === true) return new Promise(() => undefined);
@@ -274,7 +281,7 @@ function setup(options: {
       </WithSlotPanels>
     </harness.Harness>
   );
-  return { tree, answers, arrived, reads, writes, store };
+  return { tree, answers, arrived, reads, scans, writes, store };
 }
 
 let view: Mounted | undefined;
@@ -1078,5 +1085,22 @@ describe('Next saves the choice (contract rule 8, r11 O1)', () => {
     await settle();
     expect(pageKey()).toBe('fake-pack.after');
     expect(saves.runs).toBe(0);
+  });
+});
+describe("the machine's own setup is read the moment the flow opens (C59 O8-15)", () => {
+  it('a first-time setup starts the scan before the steps list has answered, once', async () => {
+    const run = setup({ hangReads: new Set([A]) });
+    view = await mount(run.tree);
+    await settle();
+    // The steps list never answers, and the scan has been asked once, no later than the first steps read.
+    expect(run.reads).toHaveLength(1);
+    expect(run.scans).toEqual([{ daemon: A, at: 0 }]);
+  });
+
+  it('a device only pairing to an already set up machine reads no scan', async () => {
+    const run = setup({ hangReads: new Set([A]), search: '?journey=pair' });
+    view = await mount(run.tree);
+    await settle();
+    expect(run.scans).toEqual([]);
   });
 });
