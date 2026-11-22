@@ -1,22 +1,19 @@
-import type { AskSummary } from '@ferretry/core-asks/contract';
-import { agendaAskBuzzTag, agendaStopBuzzTag, askBuzzPath, type BuzzKind } from '../../contract/index.ts';
-import { buzzBody, buzzTitle, clipAtWord, oneLine, STOPPED_NAME_LENGTH } from './words.ts';
+import {
+  askBuzzPath,
+  type BuzzableAsk,
+  type BuzzWords,
+  buzzBody,
+  buzzTitle,
+  clipAtWord,
+  oneLine,
+} from '@ferretry/core-asks/contract';
+import { agendaStopBuzzTag } from '../../contract/index.ts';
 
-/** An ask as the buzz policy reads it: the summary Asks gives, plus the one flag a notice may carry (`--buzz`). */
-export type BuzzableAsk = AskSummary & { readonly blocking?: boolean };
+/** The longest ferret name a stop's title carries whole; the count after it must survive a lock screen. */
+const STOPPED_NAME_LENGTH = 24;
 
-/** What a buzz says and where a tap opens: words only, never a secret. */
-export interface BuzzWords {
-  readonly tag: string;
-  readonly title: string;
-  readonly body: string;
-  readonly url: string;
-  /** Names the ONE event the buzz is about (never the `tag`, which a later event of the same ferret shares); absent: never skipped as a twin. */
-  readonly eventKey?: string;
-}
+export type { BuzzableAsk, BuzzWords };
 
-/** The ledger key of an ask's own buzz: at most one per ask (a notice's `--buzz`, a card's ask). */
-export const askBuzzKey = (ferret: string, ask: string): string => `ask:${ferret}:${ask}`;
 /** The ledger key of a stop's buzz, named by the instant the idle period began: one per stop. */
 export const stopBuzzKey = (ferret: string, stoppedAt: string): string => `stop:${ferret}:${stoppedAt}`;
 
@@ -25,25 +22,6 @@ export const waitingOnOwner = (asks: readonly BuzzableAsk[]): readonly BuzzableA
   asks
     .filter(ask => ask.state === 'open' && ask.kind !== 'notice' && ask.source !== 'card')
     .sort((a, b) => Number(b.blocking === true) - Number(a.blocking === true) || a.raisedAt.localeCompare(b.raisedAt));
-
-/** Which moment an ask's own buzz is, or `undefined` when the ask makes none (everything else waits for the stop). */
-export function askBuzzKind(ask: BuzzableAsk): BuzzKind | undefined {
-  if (ask.state !== 'open') return undefined;
-  if (ask.source === 'card') return 'card-ask';
-  if (ask.kind === 'notice' && ask.blocking === true) return 'notice';
-  return undefined;
-}
-
-/** What the one buzz for an ask says: its subject as title and body, a tap opens the ask. */
-export function askBuzzWords(ask: BuzzableAsk): BuzzWords {
-  const ferret = ask.ferret ?? '';
-  return {
-    tag: agendaAskBuzzTag(ferret, ask.id),
-    title: buzzTitle(ask.subject),
-    body: buzzBody(ask.subject),
-    url: askBuzzPath(ferret, ask.id),
-  };
-}
 
 /**
  * What the ONE buzz a stop makes says: "<ferret> is stopped · 3 need you". The count is in the title, never clipped away

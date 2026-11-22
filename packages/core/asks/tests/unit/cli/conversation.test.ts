@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { AgendaController } from '../../../cli/lib/controller.ts';
+import { AsksController } from '../../../cli/lib/controller.ts';
 import { CapturingOutput, humanItem, RecordingAgendaGateway, SESSION, snapshot } from './fixtures.ts';
 
 const board = snapshot([humanItem('A1', 'which region'), humanItem('A2', 'which region again')]);
@@ -8,7 +8,7 @@ const board = snapshot([humanItem('A1', 'which region'), humanItem('A2', 'which 
 function build() {
   const gateway = new RecordingAgendaGateway(board);
   const out = new CapturingOutput();
-  return { gateway, out, controller: new AgendaController(gateway, out, SESSION) };
+  return { gateway, out, controller: new AsksController(gateway, out, SESSION) };
 }
 
 describe('agenda log', () => {
@@ -56,7 +56,7 @@ describe('agenda split', () => {
     const after = snapshot([...board.items, humanItem('A3', 'Which cache?')]);
     const gateway = new RecordingAgendaGateway(board, after);
     const out = new CapturingOutput();
-    const controller = new AgendaController(gateway, out, SESSION);
+    const controller = new AsksController(gateway, out, SESSION);
     await controller.split('^A1', ['Which cache?'], {
       title: 'Cache',
       premise: ['A cache is needed.'],

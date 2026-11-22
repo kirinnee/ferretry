@@ -1,7 +1,7 @@
 /** The buzz policy: a ferret that goes idle with asks waiting is stopped on the owner, and gets one buzz for the stop. */
 import { manifestFragment } from '@ferretry/kernel/manifest';
 import { AgendaBuzzed } from '../../contract/index.ts';
-import { AskAnswered, AsksChanged } from '@ferretry/core-asks/contract';
+import { AskAnswered } from '@ferretry/core-asks/contract';
 import { FerretChanged } from '@ferretry/core-ferrets/contract';
 import { TurnEnded } from '@ferretry/plugin-conversation/contract';
 
@@ -13,5 +13,5 @@ export default manifestFragment({
       { hook: TurnEnded },
     ],
   },
-  data: { publishes: [AgendaBuzzed], subscribes: [AskAnswered, AsksChanged] },
+  data: { publishes: [AgendaBuzzed], subscribes: [AskAnswered] },
 });

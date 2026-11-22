@@ -19,7 +19,7 @@ import {
 } from './agents-model.ts';
 
 const ROW =
-  'kt-panel flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel hover:border-accent has-[input:disabled]:cursor-default has-[input:disabled]:opacity-60 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus';
+  'kt-panel flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 p-panel hover:border-accent has-[input:disabled]:cursor-default has-[input:disabled]:opacity-80 has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus';
 const BOX = 'mt-1 h-4 w-4 shrink-0 accent-[var(--accent)]';
 
 /** What the catalog read came to: still reading, failed, or the providers. */
@@ -86,13 +86,10 @@ function HarnessChoice({
 }): ReactNode {
   const group = useId();
   return (
-    <fieldset
-      className="m-0 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 border-0 p-0 pl-8"
-      data-agent-harness={provider.id}
-    >
-      <legend className="float-left mr-3 p-0 text-cell text-muted">Which harness runs it?</legend>
+    <fieldset className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0 pl-4" data-agent-harness={provider.id}>
+      <legend className="mb-1 p-0 text-cell font-semibold text-fg">Which harness runs it?</legend>
       {provider.harnesses.map(key => (
-        <label key={key} className="inline-flex min-h-[32px] cursor-pointer items-center gap-2 text-cell text-fg">
+        <label key={key} className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 text-cell text-fg">
           <input
             type="radio"
             name={group}
@@ -147,7 +144,7 @@ function AgentsChoices({
         }}
       >
         {othersOpen ? (
-          <div className="flex min-w-0 flex-col gap-2 pl-0 sm:pl-6" data-agent-providers="">
+          <div className="flex min-w-0 flex-col gap-2 border-l-2 border-border-soft pl-4" data-agent-providers="">
             {read.kind === 'reading' ? (
               <p className="m-0 text-cell text-muted" role="status" data-agent-providers-reading="">
                 Looking at the providers this machine offers…

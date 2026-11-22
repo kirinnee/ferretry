@@ -1,4 +1,4 @@
 {
-  "entry": ["bin/*.ts", "tests/**/*.test.ts"],
+  "entry": ["bin/*.ts", "tests/**/*.test.ts", "tests/integration/support/*-preload.ts"],
   "project": ["**/*.ts"]
 }

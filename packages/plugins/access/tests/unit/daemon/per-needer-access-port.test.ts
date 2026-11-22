@@ -6,6 +6,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { FULL_DEVICE_GRANTS } from '@ferretry/core-gate/contract';
+import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeGate } from '@ferretry/core-gate/contract/testing';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
@@ -37,7 +38,7 @@ async function world() {
   const pushes: string[] = [];
   const host = await testHost({
     plugins: [daemon, tenant('accounts', seen), tenant('agenda', seen), tenant('stranger', seen)],
-    fakes: { gate: new FakeGate() },
+    fakes: { gate: new FakeGate(), asks: new FakeAsks() },
     fetch: url => {
       pushes.push(url.href);
       return new Response(null, { status: 201 });
