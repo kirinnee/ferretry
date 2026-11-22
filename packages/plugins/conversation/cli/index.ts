@@ -144,7 +144,12 @@ export default implementCli(manifest, {
     return {
       verbs: {
         ...mine,
-        ...readingVerbs({ client: ctx.client, io: ctx.io, ...(ctx.clock === undefined ? {} : { clock: ctx.clock }) }),
+        ...readingVerbs({
+          client: ctx.client,
+          io: ctx.io,
+          ...(ctx.clock === undefined ? {} : { clock: ctx.clock }),
+          ...(ctx.readText === undefined ? {} : { readText: ctx.readText }),
+        }),
       },
     };
   },

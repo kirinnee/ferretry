@@ -13,10 +13,12 @@ export interface PluginHostInputs {
   readonly home: string;
   /** Production leaves these out; tests pass fakes so no test touches the real disk or terminal. */
   readonly fs?: state.HostFs;
-  readonly readFile?: (path: string) => Promise<string>;
+  /** `limitBytes`, when given, is the most the reader may take: the rest of the file is never read. */
+  readonly readFile?: (path: string, limitBytes?: number) => Promise<string>;
   /** Whether an absolute path exists (default: `fs.access`, i.e. today's `existsSync`). */
   readonly pathExists?: (absolute: string) => Promise<boolean>;
-  readonly readStdin?: () => Promise<string>;
+  /** As `readFile`: `limitBytes` bounds how much of standard input is taken; the pipe is not drained past it. */
+  readonly readStdin?: (limitBytes?: number) => Promise<string>;
   readonly readBytes?: (path: string) => Promise<Uint8Array>;
   readonly readStdinBytes?: () => Promise<Uint8Array>;
   /** Standard input as a stream of chunks (default: `Bun.stdin.stream()`). */
@@ -24,11 +26,36 @@ export interface PluginHostInputs {
   readonly cwd?: () => string;
 }
 
+/** The first `limit` bytes of a stream as text; the stream is abandoned (its iterator closed) once they are in hand. */
+async function readBounded(stream: AsyncIterable<Uint8Array>, limit: number): Promise<string> {
+  const taken: Uint8Array[] = [];
+  let have = 0;
+  for await (const chunk of stream) {
+    const piece = chunk.subarray(0, limit - have);
+    taken.push(piece);
+    have += piece.length;
+    if (have >= limit) break;
+  }
+  const whole = new Uint8Array(have);
+  let at = 0;
+  for (const piece of taken) {
+    whole.set(piece, at);
+    at += piece.length;
+  }
+  return new TextDecoder().decode(whole);
+}
+
 export function createPluginHost(inputs: PluginHostInputs): PluginHost {
   const clock = systemClock();
   const fs = inputs.fs ?? state.createNodeHostFs();
-  const readFile = inputs.readFile ?? (path => Bun.file(path).text());
-  const readStdin = inputs.readStdin ?? (() => Bun.stdin.text());
+  const stdinStream = inputs.stdinStream ?? (() => Bun.stdin.stream());
+  const readFile =
+    inputs.readFile ??
+    (async (path, limit) =>
+      limit === undefined ? await Bun.file(path).text() : await Bun.file(path).slice(0, limit).text());
+  const readStdin =
+    inputs.readStdin ??
+    (async limit => (limit === undefined ? await Bun.stdin.text() : await readBounded(stdinStream(), limit)));
   const readBytes = inputs.readBytes ?? (async path => new Uint8Array(await Bun.file(path).arrayBuffer()));
   const readStdinBytes = inputs.readStdinBytes ?? (async () => new Uint8Array(await Bun.stdin.arrayBuffer()));
   const cwd = inputs.cwd ?? (() => process.cwd());
@@ -43,13 +70,13 @@ export function createPluginHost(inputs: PluginHostInputs): PluginHost {
     cwd,
     clock: { now: () => clock.now(), nowMs: () => clock.nowMs() },
     sleep: (delay, signal) => clock.sleep(delay, signal),
-    // As today's `readRecipe`: no size cap; a relative path is relative to the working directory.
-    readText: async path => (path === '-' ? await readStdin() : await readFile(path)),
+    // As today's `readRecipe`: no size cap unless the caller names one; a relative path is relative to the working directory.
+    readText: async (path, limit) => (path === '-' ? await readStdin(limit) : await readFile(path, limit)),
     // The same rules, undecoded: an attachment is bytes, and UTF-8 would corrupt an image.
     readBytes: async path => (path === '-' ? await readStdinBytes() : await readBytes(path)),
     // As today's `existsSync(resolve(cwd, path))` (system-poller): no read, no stdin, a directory counts.
     exists: async path => await pathExists(resolve(cwd(), path)),
-    stdin: inputs.stdinStream ?? (() => Bun.stdin.stream()),
+    stdin: stdinStream,
     ownState(manifest: Manifest) {
       // Only this plugin's own declared opaque files are ever visible to the port; anything else is refused.
       const files = (manifest.data?.state ?? []).filter(file => file.store === 'opaque');
