@@ -6,7 +6,7 @@
 
 import type { ReactNode } from 'react';
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { absoluteTime, ChatProse, clockOfInstant, useOptionalRouter, useScreenHref } from '@ferretry/app';
+import { absoluteTime, clockOfInstant, useOptionalRouter, useScreenHref } from '@ferretry/app';
 import { Loading } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
@@ -39,6 +39,7 @@ import {
   readFerretQueuePage,
   refreshQueueHistory,
 } from './send-queue.ts';
+import { QueueProse } from './queue-prose.tsx';
 import './queue-page.css';
 
 /** Where a message is, in words; a queued one is on the machine's queue, which is what this page is. */
@@ -97,7 +98,7 @@ function QueueBody({ text }: { readonly text: string }) {
         data-queue-clamped={clamped && !open ? '' : undefined}
         id={bodyId}
       >
-        <ChatProse text={text} />
+        <QueueProse text={text} />
       </div>
       {clamped ? (
         <button

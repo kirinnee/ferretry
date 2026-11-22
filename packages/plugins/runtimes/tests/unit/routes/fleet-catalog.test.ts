@@ -366,6 +366,28 @@ describe('the fleet catalogue mount', () => {
     should(json(stale).code).equal('fleet_change_stale');
   });
 
+  it('E3 carries the landed and not-landed lists of a partly applied change on the answer, beside its sentence', async () => {
+    // Arrange
+    const extra = { landed: ['learning.yaml'], notLanded: ['voice.yaml', 'the runtimes and fleet files'] };
+    const { assembly } = stub({
+      read: async () => {
+        throw new FleetCatalogRefusal('fleet_change_consumed', 'was only partly applied', extra);
+      },
+    });
+    const hosted = await hostRuntimes(assembly);
+
+    // Act
+    const answer = await hosted.host.request('GET', `/v1/runtimes/proposals/${ID}`);
+
+    // Assert
+    should(answer.status).equal(409);
+    should(json(answer)).deepEqual({
+      ...extra,
+      error: 'was only partly applied',
+      code: 'fleet_change_consumed',
+    });
+  });
+
   it('should refuse a catalog.install on the public route however it is spelled: only the installer produces one', async () => {
     // Arrange — a forged install: a path out of the skill's folder, and a made-up provenance.
     const { assembly, calls } = stub();

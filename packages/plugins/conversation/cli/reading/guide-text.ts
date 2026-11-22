@@ -11,25 +11,61 @@
 export const RENDER_GUIDE_SECTION = `
 ## Guide for agents
 
-\`fy render guide [topic]\` prints this section and nothing else: the \`### overview\` body when no topic is named, or that topic's \`###\` body when one is. \`image\`, \`video\`, \`audio\` and \`pdf\` share the \`### media\` section, \`task\` and \`board\` share \`### task\`, and \`human\` also answers \`llm\`. \`fy render check <file|->\` is the doccheck: run it on a message before you send it. The CLI ships a byte-exact copy of this whole section in the binary (\`RENDER_GUIDE_SECTION\` in \`packages/plugins/conversation/cli/reading/guide-text.ts\`), written from this section by \`tests/support/guide-text/generate.ts\`, and \`tests/unit/cli/guide-drift.test.ts\` fails the commit that lets the copy disagree with it — so this section is the one owner of the text: edit it here, then run the generator.
+\`fy render guide [topic]\` prints this section and nothing else: the \`### overview\` body when no topic is named, or that topic's \`###\` body when one is. \`image\`, \`video\`, \`audio\` and \`pdf\` share the \`### media\` section, \`task\` and \`board\` share \`### task\`, \`tabs\` also answers \`accordion\`, and \`human\` also answers \`llm\`. \`fy render check <file|->\` is the doccheck: run it on a message before you send it. The CLI ships a byte-exact copy of this whole section in the binary (\`RENDER_GUIDE_SECTION\` in \`packages/plugins/conversation/cli/reading/guide-text.ts\`), written from this section by \`tests/support/guide-text/generate.ts\`, and \`tests/unit/cli/guide-drift.test.ts\` fails the commit that lets the copy disagree with it — so this section is the one owner of the text: edit it here, then run the generator.
 
 Two shapes are deliberately absent from this section. An example fence of the \`fy-render\` kind, because the copy ships in the CLI's TypeScript source, where \`no-fy-render-in-docs.sh\` refuses a fence opener. And the per-type detail of \`fy-render\`: [fy-render.md](fy-render.md) holds the contract, and where the two disagree the contract wins and this section is wrong.
 
 ### overview
 
-A message is Markdown (GitHub flavour: headings, lists, tables, task lists, code, links) with one rich part: a \`terminal\` fence, a shell session. A line \`:::human\` closed by a line \`:::\` is text for people, and \`:::llm\` after a part is the text another agent reads. Any other fence (\`ts\`, \`diff\`, \`sh\`) is plain code. A part with a mistake in it is shown as its source with the problem named, so check that it drew.
+A message is Markdown (GitHub flavour: headings, lists, tables, task lists, code, links) with rich parts. A part is a fence named for it: \`terminal\`, \`filetree\`, \`editor\`, \`tierlist\`, \`alignment\`, \`mermaid\`, \`animation\`. Prose parts are containers, a line \`:::tabs\` or \`:::accordion\` closed by a line \`:::\`. A line \`:::human\` closed by a line \`:::\` is text for people, and \`:::llm\` after a part is the text another agent reads. Any other fence (\`ts\`, \`diff\`, \`sh\`) is plain code — and so is a \`chart\` or \`codewalk\` fence, which the app does not draw: a chart is an \`fy-render\` block (below). A part with a mistake in it is shown as its source with the problem named, so check that it drew.
 
-Diagrams, charts, pictures, media, maps, live tasks and static or interactive pages are a different fence: its info string is exactly \`fy-render\`, line 1 \`type: <type>\`, line 2 \`alt: <one-line description>\`, then a line \`---\`, then the payload. Types: \`mermaid\`, \`chart\`, \`svg\`, \`html\`, \`map\`, \`image\`, \`video\`, \`audio\`, \`pdf\`, \`lottie\`, \`task\`, \`board\`. A broken block renders as an ordinary code fence with no warning, so run \`fy render check\` on the message first.
+Charts, pictures, media, maps, live tasks and static or interactive pages are a different fence: its info string is exactly \`fy-render\`, line 1 \`type: <type>\`, line 2 \`alt: <one-line description>\`, then a line \`---\`, then the payload. Types: \`chart\`, \`svg\`, \`html\`, \`map\`, \`image\`, \`video\`, \`audio\`, \`pdf\`, \`lottie\`, \`task\`, \`board\`. A broken block renders as an ordinary code fence with no warning, so run \`fy render check\` on the message first.
 
 Raw HTML in Markdown is shown as text. A Markdown image is not drawn (use an \`image\` block); a link may go to \`https://\`, \`mailto:\` or a heading of the same message, and nothing else. A message has no front matter: a first line \`---\` is just a line. A message over 300,000 bytes is shown as text. Never write any of this into files, docs, commits or PRs: it is for chat messages and agenda items only.
 
-Reference things as plain text, never as links: see \`### references\`. For an explainer, show the idea: a \`mermaid\` flow, a \`chart\`, an interactive \`html\` page, a \`terminal\` session — and keep the words short.
+Reference things as plain text, never as links: see \`### references\`. For an explainer, show the idea: a \`mermaid\` flow, an \`animation\`, a \`chart\`, a \`tierlist\` or \`alignment\` grid, an interactive \`html\` page, a \`terminal\` session, a \`filetree\` — and keep the words short.
 
 ### terminal
 
 A shell session. A line starting \`$ \` (or \`% \`, or \`# \` for root) is a command; every other line is its output, shown as it is. Each command is one step. Info string: \` \`\`\`terminal title="two words" \`. \`console\` and \`shellsession\` mean the same part. A \` \`\`\`sh \` block is plain code and stays still.
 
 Write \`@step <title>\` lines to set the steps yourself (then every line sits under a step; at least two steps, or none).
+
+\`\`\`terminal title="run the tests"
+$ bun test
+12 pass
+$ git push
+Everything up-to-date
+\`\`\`
+
+### filetree
+
+Two spaces per level; a name ending in \`/\` is a folder. A word in brackets after a name is a mark from a fixed list: \`(new)\`, \`(changed)\`, \`(removed)\`, \`(generated)\`, \`(conflict)\`, and for folders \`(open)\` or \`(closed)\`. \`# text\` after a name is a note; a line \`...\` stands for entries left out. \`@step <title>\` lines show the tree before and after a change.
+
+\`\`\`filetree
+@step Before
+app/
+  main.ts
+@step After
+app/
+  main.ts  (changed)
+  util.ts  (new)  # shared helpers
+\`\`\`
+
+### editor
+
+A file tree and one file pane. A message has no repository, so write every file yourself: \`@file <path>\` makes a file up, right here; its lines follow; \`(open)\` after the path marks the file shown first. \`@step <title>\` is an edit: \`@@ <path>\` picks the file, then each line starts with \`+\` (added), \`-\` (removed) or a space (kept), followed by the file's line exactly as written, its own indentation included. A single \`@step\` is fine here: the files as they are come first.
+
+\`\`\`editor
+@file src/greet.ts (open)
+export function greet(name: string) {
+  return 'Hi ' + name;
+}
+@step Add an exclamation mark
+@@ src/greet.ts
+-  return 'Hi ' + name;
++  return 'Hi ' + name + '!';
+\`\`\`
 
 ### chart
 
@@ -39,7 +75,98 @@ Say what the chart says; the reader's theme paints it. \`title:\` is optional; \
 
 ### mermaid
 
-An \`fy-render\` block of \`type: mermaid\`. The payload is Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels. It is auto-themed: \`%%{init}%%\`, front matter and \`theme\`/\`themeVariables\`/\`themeCSS\` are ignored, and \`style\`/\`classDef\` colours still apply and fight the reader's theme — leave colours out. ≤ 20,000 characters. A wide left-to-right flowchart is redrawn top-down on a phone by itself, and the reader can scroll it sideways. A diagram that does not parse becomes a plain code fence.
+A fence named \`mermaid\`. The body is Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels. It is auto-themed: \`%%{init}%%\`, front matter and \`theme\`/\`themeVariables\`/\`themeCSS\` are ignored, and \`style\`/\`classDef\` colours still apply and fight the reader's theme — leave colours out. ≤ 20,000 characters. A wide left-to-right flowchart is redrawn top-down on a phone by itself, and the reader can scroll it sideways. A diagram that does not parse becomes a plain code fence. A line \`%% @step <title>\` (a Mermaid comment) makes the diagram build up: step k draws every line up to the end of its step; at least two steps, or none.
+
+\`\`\`mermaid
+flowchart TB
+  A[Request] --> B{Cached?}
+  B -->|yes| C[Serve it]
+  B -->|no| D[Fetch it]
+\`\`\`
+
+### animation
+
+One engine: a stage of entities, connectors and steps. The lines before the first \`@step\` set the stage; each \`@step <caption>\` is a sentence the reader sees, followed by the changes that happen in it, one per line; step k shows the setup plus steps 1 to k. At least two steps. Add \`3d\` after the fence name to open the scene in 3D; the reader can switch either way, and a browser with no 3D (or that loses it) shows the flat view.
+
+Things: \`box\`, \`circle\`, \`pill\`, \`cylinder\`, \`cloud\`, \`person\`, \`diamond\`, \`text\`, \`dot\`; frames \`group "label" layout=row|column|grid|tree|graph\`; data \`array a: 5 2 8\`, \`list\`, \`stack\`, \`queue\`; \`token t "req" at api\`. Write \`<kind> <id> "label" [in <container>]\`; ids are letters, digits, \`-\` \`_\` \`.\`, labels are in double quotes. Connectors: \`a -> b\`, \`a --> b\` (dashed), \`a -- b\`, \`a <-> b\`, with a label last: \`app -> db "writes"\`.
+
+In a step: \`add <thing>\`, \`remove <id>\`, \`move <id> to <container>\`, \`swap a b\`, \`set <id> tone=warn\`, \`highlight <id>\`, \`say <id>: text\`, \`send "GET /" a -> b\` (one hop per step), \`zoom into <id>\`, \`camera <id>\`. No colours, pixels or times: layouts place things, \`tone=\` is a role (plain, acc, good, warn, hot, muted), and the engine times the motion. Caps: 300 things, 200 steps. An animation with one step, an unknown word or a stage past the caps is shown as source with the problem named.
+
+\`\`\`animation
+pill router "router"
+group s1 "shard 1" layout=column
+group s2 "shard 2" layout=column
+pill k3 "users 201-300" in s2
+router -> s1
+router -> s2
+@step The router sends each request to the shard that holds the key.
+send "user 250" router -> s2
+@step A third shard joins and takes a range.
+add group s3 "shard 3" layout=column
+router -> s3
+move k3 to s3
+\`\`\`
+
+\`\`\`animation 3d
+box web "web"
+cylinder db "database"
+web -> db
+@step The web tier writes to the database.
+send "INSERT" web -> db
+@step The database answers.
+send "ok" db -> web
+\`\`\`
+
+### tierlist
+
+A ranking in rows, best first, one line per tier: the tier's name, a colon, then its items separated by commas. Tiers are \`S\`, \`A\`, \`B\`, \`C\`, \`D\` unless a first line \`tiers: Must [good], Should [c6], Could, Won't [bad]\` names others (colour \`c1\`–\`c8\`, \`good\`, \`warn\` or \`bad\`). A short note goes in brackets after an item; an item with a comma in its name goes in quotes. Each item sits in one tier, once. \`title="…"\` on the fence names the list.
+
+\`\`\`tierlist title="Databases for a small team"
+S: Postgres (does almost everything), SQLite (no server to run)
+A: MySQL, "Redis, as a cache" (fast, but memory is dear)
+D: A spreadsheet
+\`\`\`
+
+### alignment
+
+Two axes with a name at each end, drawn as a 2x2 or 3x3 grid. Line \`x: low effort .. high effort\`, line \`y: high impact .. low impact\` (two names or three, the same number on both). An item goes in a cell, \`low effort / high impact "Do first": Fix the typo, Cleanup\`, or at a point from 0 to 1, \`Speed up the build @ 0.66, 0.2\` (the first name of an axis is 0). The column comes first in a cell name. Each item is placed once.
+
+\`\`\`alignment title="Which task first?"
+x: low effort .. high effort
+y: high impact .. low impact
+low effort / high impact "Do first": Fix the typo, Cleanup
+Speed up the build @ 0.66, 0.2
+\`\`\`
+
+### tabs
+
+\`:::tabs\` holds prose in tabs and \`:::accordion\` in rows: every heading at the highest level used inside starts one tab or row, and the container is closed by a line \`:::\`. Containers do not nest and hold no other container; they may hold fenced parts. Keep them for parallel choices (two languages, two options), not for a story that reads top to bottom.
+
+\`\`\`md
+:::tabs
+
+#### npm
+
+Run \`npm install\`.
+
+#### pip
+
+Run \`pip install\`.
+:::
+\`\`\`
+
+\`\`\`md
+:::accordion
+
+#### Why steps?
+
+One idea at a time.
+
+#### Why a title?
+
+The reader sees it under the part.
+:::
+\`\`\`
 
 ### human
 

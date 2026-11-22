@@ -1,4 +1,5 @@
 import { ApiError } from '@ferretry/kernel/contract';
+import type { ComponentWriter } from '../account/owner-components.ts';
 
 /** The error an apply whose request already ended is answered with (nothing was written, the change stays pending). */
 export function assertRequestLive(bracket: ApplyBracket | undefined): void {
@@ -14,6 +15,42 @@ export function assertRequestLiveBetweenWrites(bracket: ApplyBracket | undefined
       'the request ended while this change was being applied; it stopped before its next write, and what was already written stays',
       'request_aborted',
     );
+}
+
+/**
+ * What a person is told about a change that was cut short after some of it landed (the page shows this word for word):
+ * what landed and, when the apply knows it, what did not.
+ */
+export function partlyAppliedSentence(landed: readonly string[], notLanded: readonly string[] = []): string {
+  return `Part of this change was applied: ${landed.join(', ')}. The rest was not${notLanded.length === 0 ? '' : `: ${notLanded.join(', ')}`}.`;
+}
+
+/** The lists a partly applied answer carries beside its sentence, so a re-read and the page need no parsing. */
+export interface PartlyApplied {
+  readonly landed: readonly string[];
+  readonly notLanded: readonly string[];
+}
+
+/** The lists a partly applied answer carries (`extra.landed`, `extra.notLanded`), from the error it was thrown as; none for any other. */
+export function partlyAppliedOf(error: unknown): PartlyApplied | undefined {
+  const extra = error instanceof Error ? (error as { extra?: unknown }).extra : undefined;
+  if (typeof extra !== 'object' || extra === null) return undefined;
+  const words = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  const landed = words((extra as { landed?: unknown }).landed);
+  return landed.length === 0 ? undefined : { landed, notLanded: words((extra as { notLanded?: unknown }).notLanded) };
+}
+
+/** The door to the owners of imported components, noting each file as it lands so a request that ends next still names it. */
+export function notingLanded(writer: ComponentWriter | undefined, landed: string[]): ComponentWriter | undefined {
+  if (writer === undefined) return undefined;
+  return {
+    put: async write => {
+      const answer = await writer.put(write);
+      if (answer.outcome === 'written') landed.push(write.file);
+      return answer;
+    },
+  };
 }
 
 /** What a finished apply left behind: waiting for the owner, not written, or cut short. */

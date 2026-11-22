@@ -72,6 +72,17 @@ export function diagnosticText(text: string): string {
 /** The fence token whose whole info string makes a block ours; any longer info string is plain code. */
 const FY_RENDER_FENCE = 'fy-render';
 
+/**
+ * The Durian parts the app does NOT draw (`app/hypermedia/held-fences.tsx`): a chart's formulas have no bound on their
+ * work and the code walk's notes are set as HTML, so each is shown as the code it is. The guide never teaches them; an agent
+ * that writes one anyway is told here. The two halves cannot share the list (a CLI half may not import an app half);
+ * `tests/unit/cli/render-check.test.ts` pins the words to the app's own held fences.
+ */
+const HELD_PART_FENCES: ReadonlyMap<string, string> = new Map([
+  ['chart', 'a chart is an fy-render block of type chart'],
+  ['codewalk', 'show the code in a plain fence with the notes in prose'],
+]);
+
 /** A fence line, wherever it sits: after quote marks and a list marker, a run of three or more backticks or tildes. */
 const FENCE_LINE = /^(?<prefix>[ \t>]*(?:[-*+]\s+|\d+[.)]\s+)?)(?<run>`{3,}|~{3,})(?<info>.*)$/u;
 
@@ -125,11 +136,24 @@ function fyRenderRefusal(source: string): string | null {
   }
 }
 
+/** A line that opens a step the way a part's own marker does: `@step` first on the line, then a space or the end. */
+const BARE_STEP = /^\s*@step(?:\s|$)/u;
+
+/**
+ * What one scan of a message's fences found: the problems of its `fy-render` fences, the held parts, and the 1-based
+ * lines each held part spans (Durian reads those as parts and may call them errors the app never raises).
+ */
+interface FenceScan {
+  readonly found: Finding[];
+  readonly held: readonly { readonly from: number; readonly to: number }[];
+}
+
 /** Every `fy-render` fence of a message, read by the rules above; a fence inside another fence is an example. */
-function fyRenderFindings(text: string): Finding[] {
+function scanFences(text: string): FenceScan {
   // Durian ends a line at LF, CRLF or a bare CR; so does this scan, with the same line numbers (a CRLF is one break).
   const lines = text.replace(/\r\n?/gu, '\n').split('\n');
   const found: Finding[] = [];
+  const held: { from: number; to: number }[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const open = FENCE_LINE.exec(lines[index] as string)?.groups;
     if (open === undefined) continue;
@@ -156,6 +180,15 @@ function fyRenderFindings(text: string): Finding[] {
         level: 'warn',
         message: `the info string "${info}" is not exactly "${FY_RENDER_FENCE}", so this fence is shown as plain code`,
       });
+    } else if (HELD_PART_FENCES.has(first as string)) {
+      // Only a CLOSED part is held: Durian's complaints about the body of a part the app never draws are not the message's
+      // problems. An UNCLOSED one keeps every Durian error, the missing closing fence first: that is a broken message.
+      if (end < lines.length) held.push({ from: index + 1, to: end + 1 });
+      found.push({
+        line: index + 1,
+        level: 'warn',
+        message: `a ${first} fence is not drawn by the app, so it is shown as plain code; ${HELD_PART_FENCES.get(first as string)}`,
+      });
     } else if (info === FY_RENDER_FENCE && end < lines.length) {
       const prefix = open.prefix as string;
       const body = lines
@@ -164,10 +197,19 @@ function fyRenderFindings(text: string): Finding[] {
       const reason = fyRenderRefusal(body.join('\n'));
       if (reason !== null)
         found.push({ line: index + 1, level: 'error', message: `${reason}; the block is shown as a plain code fence` });
+    } else if (first === 'mermaid') {
+      // Mermaid's step marker is a comment, `%% @step <title>`; a bare `@step` is not one, so the diagram is a single frame.
+      for (let at = index + 1; at < end; at += 1)
+        if (BARE_STEP.test(lines[at] as string))
+          found.push({
+            line: at + 1,
+            level: 'warn',
+            message: 'a bare @step is not a step in a mermaid diagram (it stays one frame); write `%% @step <caption>`',
+          });
     }
     index = end;
   }
-  return found;
+  return { found, held };
 }
 
 /** Durian's problems for one message, as it is read in chat: no front matter, the message size cap. */
@@ -194,7 +236,13 @@ function durianFindings(text: string): Finding[] {
 export function checkMessage(read: string): readonly Finding[] {
   if (byteLength(read) > CHECK_LIMITS.maxInputBytes) return [OVER_CAP_FINDING];
   const text = read.startsWith(BYTE_ORDER_MARK) ? read.slice(BYTE_ORDER_MARK.length) : read;
-  return [...durianFindings(text), ...fyRenderFindings(text)]
+  const { found, held } = scanFences(text);
+  // A CLOSED held part is shown as code and the scan above already says so as a warning: Durian's own errors on its body
+  // (a chart with no series) are about a part the app never draws, so they are not the message's problems.
+  const durian = durianFindings(text).filter(
+    finding => finding.level !== 'error' || !held.some(span => finding.line >= span.from && finding.line <= span.to),
+  );
+  return [...durian, ...found]
     .map((finding, order) => ({ finding, order }))
     .sort((a, b) => a.finding.line - b.finding.line || a.order - b.order)
     .map(({ finding }) => finding);

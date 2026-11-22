@@ -11,6 +11,7 @@
  *   ?view=changed    a re-import: CLAUDE.md and a skill changed since the last time (ticked by default)
  *   ?view=signin     installed, not signed in
  *   ?view=retry      a retry on an import that already made its runtime: no new name is asked for
+ *   ?view=timeout    Claude Code found everything; the import never answers, and what the machine then says landed is listed
  *   ?theme=<family>-<mode>
  */
 import { createRoot } from 'react-dom/client';
@@ -72,15 +73,41 @@ const client = scripted({
     ...stagedFrom(call),
     preview: { kind: 'executor', executor: 'setup', description: 'Import.' },
   }),
-  [`POST /v1/runtimes/proposals/${CHANGE_ID}/apply`]: {
-    outcome: 'executed',
-    executor: 'setup',
-    summary:
-      'Runtimes: claude-code-default. Written by the parts that own them: mcp/notes.yaml, mcp/issues.yaml, skills/review.yaml, claude-code/settings/default.yaml. Not written: skills/release-notes.yaml (a name it does not accept).',
-  },
+  // `?view=timeout`: the apply never answers (the page gives up at its short deadline), and the machine, asked once, says
+  // the change stopped part-way: the two lists the daemon keeps for it (names only, made up).
+  [`POST /v1/runtimes/proposals/${CHANGE_ID}/apply`]:
+    view === 'timeout'
+      ? () => new Promise(() => undefined)
+      : {
+          outcome: 'executed',
+          executor: 'setup',
+          summary:
+            'Runtimes: claude-code-default. Written by the parts that own them: mcp/notes.yaml, mcp/issues.yaml, skills/review.yaml, claude-code/settings/default.yaml. Not written: skills/release-notes.yaml (a name it does not accept).',
+        },
+  [`GET /v1/runtimes/proposals/${CHANGE_ID}`]: Object.assign(
+    new Error(
+      `fleet proposal "${CHANGE_ID}" was only partly applied. Part of this change was applied: secret-store key ANTHROPIC_API_KEY, login claude-default, claude-code/settings/default.yaml. The rest was not: skills/review.yaml, the runtimes and fleet files, variables of login claude-default. Review the change again to finish it.`,
+    ),
+    {
+      status: 409,
+      code: 'fleet_change_consumed',
+      body: {
+        error: 'was only partly applied',
+        code: 'fleet_change_consumed',
+        landed: ['secret-store key ANTHROPIC_API_KEY', 'login claude-default', 'claude-code/settings/default.yaml'],
+        notLanded: ['skills/review.yaml', 'the runtimes and fleet files', 'variables of login claude-default'],
+      },
+    },
+  ),
   'POST /v1/onboarding/steps/:plugin/:stepId': { ok: true },
 });
 
 const root = document.getElementById('root') as HTMLElement;
 root.className = 'mx-auto max-w-[640px] p-4';
-createRoot(root).render(<ImportStep client={client} machineName="studio-mac" />);
+createRoot(root).render(
+  <ImportStep
+    client={client}
+    machineName="studio-mac"
+    {...(view === 'timeout' ? { applyOptions: { deadlineMs: 1_000 } } : {})}
+  />,
+);

@@ -56,9 +56,7 @@ import {
   useMemo,
   useState,
 } from 'react';
-import ReactMarkdown, { type Components, type ExtraProps, type Options } from 'react-markdown';
-
-type PluggableList = NonNullable<Options['remarkPlugins']>;
+import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type CodeNode, decoratedCodeNodes } from '../references/code-spans.ts';
 import {
@@ -125,20 +123,6 @@ export interface MarkdownAstFenceNode {
 }
 
 /**
- * A FENCE KIND A SURFACE DRAWS BY ITSELF. Markdown is a shell facility and holds no feature, so a plugin that has a
- * fence kind of its own (Conversation's `fy-render` blocks) brings it here: `remark` marks the fences the document
- * holds, `draw` returns what to put INSTEAD of the `<pre>`, or `null` to leave the ordinary fence. The object must be
- * stable between renders (Markdown is memoised on it). It is acted on only where `enableFyRender` is set.
- */
-export interface MarkdownFences {
-  readonly remark: PluggableList;
-  readonly draw: (fence: {
-    readonly node: MarkdownAstFenceNode | undefined;
-    readonly onTaskOpen: ((id: string, opener?: HTMLElement | null) => void) | undefined;
-  }) => ReactNode | null;
-}
-
-/**
  * The authored body of an `fy-location` fence, or null for every other `<pre>`.
  * Read from the language class: unlike `fy-render` this block does no harm when an
  * author writes one, because the chip draws only numbers and one cleaned label.
@@ -186,19 +170,6 @@ export interface MarkdownProps {
   readonly text: string;
   readonly className?: string;
   /**
-   * Opts this surface into rendering `fy-render` fences, and DEFAULTS TO FALSE.
-   *
-   * This prop is the whole answer to "how does an illustration stay
-   * conversation-only": not a documented rule but a defaulted-off capability
-   * that a surface has to name deliberately. Every other `<Markdown>` consumer —
-   * file previews, reports, and the composer's preview when it lands — gets the
-   * inert escaped fence automatically by not passing it, with no code of its own.
-   * Exactly one production call site sets it, and a unit test holds it to one.
-   */
-  readonly enableFyRender?: boolean;
-  /** The fence kinds this surface draws by itself (see {@link MarkdownFences}); acted on only with `enableFyRender`. */
-  readonly fences?: MarkdownFences;
-  /**
    * Draws a Markdown heading (`#` … `######`) as bold body text, never as an h1–h6. For prose that sits inside a
    * card's own structure (an agenda segment), where a pasted heading would out-shout the card's labels. Off by default.
    */
@@ -237,10 +208,7 @@ export interface MarkdownProps {
  * renderers in place; only a change of the renderer FUNCTIONS would remount what they drew.
  */
 interface MarkdownRendering {
-  readonly enableFyRender: boolean;
   readonly copyable: ClipboardWriter | undefined;
-  readonly fences: MarkdownFences | undefined;
-  readonly onTaskOpen: ((id: string, opener?: HTMLElement | null) => void) | undefined;
   readonly trustedResolvers: ReferenceResolvers;
   readonly hasOpener: (target: ResolvedReference) => boolean;
   readonly destination: (target: ResolvedReference) => string;
@@ -370,21 +338,12 @@ function MarkdownCode({ node: _node, className: fenceClassName, children, ...res
 }
 
 /**
- * THE ONE PLACE AN ILLUSTRATION CAN APPEAR, and it is a replacement rather than
- * an addition: a matched fence renders as the block INSTEAD of the `<pre>`,
- * because `<figure>` inside `<pre>` is not a tree a browser keeps and
- * `white-space: pre` is not a layout an illustration survives. Everything else —
- * the opt-in off, a different info string, an unparseable body — falls through to
- * the ordinary fence below, where `code` still highlights or escapes it exactly as
- * before. There is no partial state: a bad block is indistinguishable from a plain
- * fence, which is the same rule an unknown fence language already has.
+ * A fence: a location block draws as its chip, every other fence is the ordinary `<pre>` (highlighted or escaped by
+ * `code`), with a Copy button where the surface asked for one. Markdown draws NO illustration: a `fy-render` fence is
+ * code here, on every surface; Conversation's `HypermediaProse` is the one reader that draws them.
  */
 function MarkdownPre({ node, children, ...rest }: ElementProps<'pre'>) {
-  const { enableFyRender, fences, copyable, onTaskOpen } = useMarkdownRendering();
-  const drawn = enableFyRender
-    ? (fences?.draw({ node: node as MarkdownAstFenceNode | undefined, onTaskOpen }) ?? null)
-    : null;
-  if (drawn !== null) return <>{drawn}</>;
+  const { copyable } = useMarkdownRendering();
   const locationBody = locationFenceBody(node as MarkdownAstFenceNode | undefined);
   const fix = locationBody === null ? null : parseLocationBlock(locationBody);
   if (fix !== null) return <LocationChip fix={fix} />;
@@ -441,8 +400,6 @@ const DEMOTED_HEADING_COMPONENTS: Components = {
 export const Markdown = memo(function Markdown({
   text,
   className,
-  enableFyRender = false,
-  fences,
   demoteHeadings = false,
   copyable,
   agentReferenceResolver,
@@ -588,10 +545,7 @@ export const Markdown = memo(function Markdown({
   const rendering: MarkdownRendering = {
     copyable,
     destination,
-    enableFyRender,
     hasOpener,
-    fences,
-    onTaskOpen,
     referenceClick,
     trustedResolvers,
   };
@@ -604,17 +558,7 @@ export const Markdown = memo(function Markdown({
           // remarkTableLabels stamps each body cell with its column header as
           // `data-label`, which the mobile stacked-card layout prints. It must run
           // after remark-gfm has produced the table nodes.
-          // remarkFyRenderFences marks fences whose info string is EXACTLY the
-          // token — the one place mdast still holds the metadata hast drops.
-          // Marking unconditionally rather than behind `enableFyRender` keeps the
-          // mark a statement about the DOCUMENT; whether it is acted on is the
-          // surface's decision, made in `MarkdownPre`.
-          remarkPlugins={[
-            remarkGfm,
-            remarkTableLabels,
-            ...(enableFyRender ? (fences?.remark ?? []) : []),
-            [remarkReferences, { resolvers: transformResolvers }],
-          ]}
+          remarkPlugins={[remarkGfm, remarkTableLabels, [remarkReferences, { resolvers: transformResolvers }]]}
         >
           {text}
         </ReactMarkdown>

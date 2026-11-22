@@ -83,8 +83,10 @@ import {
 import { CloneRefusal } from '../account/clone-parts.ts';
 import { EMPTY_RUNTIME_IDS } from '../account/ids.ts';
 import type { FleetDocumentWrite, FleetModelApplyPlan } from '../provisioning.ts';
-import { configurationLanded, failedApplySentence } from './failed-apply.ts';
-import { writeConfigFiles } from './setup-config-files.ts';
+import { notingLanded } from './apply-bracket.ts';
+import { type ApplyLedger, namingWhatLanded } from './apply-ledger.ts';
+import { configurationLanded, failedApplySentence, landedWithCommittedFleet } from './failed-apply.ts';
+import { putConfigFile, writeConfigFiles } from './setup-config-files.ts';
 import { reportLeft, writeVaultAndLogins } from './setup-vault-logins.ts';
 import {
   freeName,
@@ -128,7 +130,7 @@ import type { ConfigText } from '../ports.ts';
 import { CREDENTIALS_DIRECTORY, harnessKey, harnessKind } from './foreign.ts';
 import type { ModelCatalogSources } from '../models/catalog.ts';
 import { expandAssetPath } from '../paths.ts';
-import { ConfigWriteConflict, ConfigWriteInvalid, configFileWriteRefusal } from './ports.ts';
+import { configFileWriteRefusal } from './ports.ts';
 import {
   type AccountChangeExecutor,
   type AccountDocumentReading,
@@ -592,6 +594,18 @@ export class FleetSetupService {
   }
 
   async #execute(change: object, composed: Composed, caller?: ExecutorCaller): Promise<string> {
+    return await namingWhatLanded(composed, (landed, ledger) =>
+      this.#carryOut(change, composed, landed, ledger, caller),
+    );
+  }
+
+  async #carryOut(
+    change: object,
+    composed: Composed,
+    landed: string[],
+    ledger: ApplyLedger,
+    caller?: ExecutorCaller,
+  ): Promise<string> {
     if (this.#described.get(change) !== composed.fingerprint) {
       throw new FleetCatalogRefusal(
         'fleet_change_stale',
@@ -602,18 +616,15 @@ export class FleetSetupService {
       { put: (name, value) => this.deps.secrets.put(name, value), catalog: this.deps.catalog },
       composed,
       caller,
+      ledger,
     );
-    // Settings files go first, each through the owner's door and against the version it was compared with. The
-    // record rides the batch after them, so it can only claim less than landed, never more. A write that loosens
-    // is held unless the caller is at this machine (`governed: false`); a remote caller confirms it as for any
-    // other held edit.
+    // Settings files go first, each through the owner's door against the version it was compared with; the record rides
+    // the batch after them (it can only claim less than landed). A write that loosens is held unless the caller is at
+    // this machine (`governed: false`); a remote caller confirms it as for any other held edit.
     const mayLoosen = caller?.governance?.governed === false;
-    let held = 0;
-    // The settings files that really landed (a held one did not): a later failure must say they are on disk.
-    const landed: string[] = [];
     // The imported components another plugin owns go to that plugin, each on its own: NOT all-or-none across owners.
     const handed = await handOver({
-      writer: this.deps.components,
+      writer: notingLanded(this.deps.components, landed),
       owners: composed.owners,
       applied: { model: composed.model, documents: composed.documents },
       secretValues: composed.secrets.map(secret => secret.value),
@@ -621,17 +632,17 @@ export class FleetSetupService {
       // The fleet is built from what the owners report in effect after they wrote, not from the import's own model.
       inEffect: async () => (await this.#read()).model,
     });
-    landed.push(...handed.landed);
     reportLeft(caller, handed.held, handed.refused);
     const { model, documents } = handed.applied;
-    held += await writeConfigFiles(
+    const held = await writeConfigFiles(
       composed.configWrites ?? [],
-      write => this.#writeConfigFile(write, mayLoosen),
+      write => putConfigFile(write, mayLoosen),
       caller,
       landed,
     );
-    await this.#applyModel(model, documents, landed, () => caller?.live?.());
-    const envSentences = await importLoginEnvs(this.deps.loginEnvImport, composed, caller);
+    await this.#applyModel(model, documents, landed, ledger, () => caller?.live?.());
+    ledger.fleet();
+    const envSentences = await importLoginEnvs(this.deps.loginEnvImport, composed, caller, ledger);
     const sentences = [
       composed.summary,
       ...secretSentences(
@@ -645,27 +656,6 @@ export class FleetSetupService {
     if (held > 0)
       sentences.push(`${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`);
     return sentences.join(' ');
-  }
-
-  /** One settings file through `PUT /v1/config/file`'s semantics. Answers 1 when the write was held. */
-  async #writeConfigFile(write: ConfigWrite, mayLoosen: boolean): Promise<number> {
-    try {
-      return (await write.put(write.path, write.text, write.etag, mayLoosen)).outcome === 'pending' ? 1 : 0;
-    } catch (error) {
-      if (error instanceof ConfigWriteConflict) {
-        throw new FleetCatalogRefusal(
-          'fleet_change_stale',
-          `${write.path} changed on this machine after it was reviewed; review it again`,
-        );
-      }
-      if (error instanceof ConfigWriteInvalid) {
-        throw new FleetCatalogRefusal(
-          'fleet_change_refused',
-          `${write.path} would not check on this machine, so it was not written: ${errorMessage(error)}`,
-        );
-      }
-      throw error;
-    }
   }
 
   // ── Import ─────────────────────────────────────────────────────────────────────────────────────
@@ -1475,7 +1465,8 @@ export class FleetSetupService {
   async #applyModel(
     model: AccountModel,
     documents: readonly FleetDocumentWrite[],
-    landed: readonly string[],
+    landed: string[],
+    ledger: ApplyLedger,
     live?: () => void,
   ): Promise<void> {
     const { catalog } = this.deps;
@@ -1508,6 +1499,13 @@ export class FleetSetupService {
     try {
       await catalog.provisioner.apply(plan, documents);
     } catch (error) {
+      // A fleet that committed (its manifest is published) and only failed its history afterwards HAS landed, with
+      // the configuration files the adapter wrote first: the ledger says so.
+      const committed = landedWithCommittedFleet(error);
+      if (committed !== undefined) {
+        ledger.fleet();
+        landed.push(...committed);
+      }
       throw new FleetCatalogRefusal('fleet_change_failed', failedApplySentence(error, landed));
     }
   }

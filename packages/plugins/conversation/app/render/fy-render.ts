@@ -87,52 +87,12 @@ export { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS };
 export { FY_RENDER_IMAGE_MIMES, FY_RENDER_MEDIA_TYPES } from '../../contract/index.ts';
 export type { FyRenderImageMime, FyRenderMediaType } from '../../contract/index.ts';
 
-/** The fence info string that opts a block into this grammar, and nothing else. */
-export const FY_RENDER_FENCE_LANGUAGE = 'fy-render';
-
-/** The attribute `remarkFyRenderFences` stamps, and the only mark the renderer trusts. */
+/**
+ * The attribute on the `<code>` of the fence node the hypermedia reader hands the fence door (`fences.tsx`): the only
+ * mark the door trusts. The reader decides a fence is exactly `fy-render` (CommonMark's own boundaries,
+ * `hypermedia/fence-boundaries.ts`) before it makes the node.
+ */
 export const FY_RENDER_FENCE_ATTRIBUTE = 'data-fy-render-fence';
-
-/**
- * Minimal structural mdast, in the same spirit as `remark-table-labels.ts`: only
- * the fields a `code` node actually exposes, so the full mdast typings stay a
- * transitive detail rather than a direct dependency.
- */
-interface MdNode {
-  type: string;
-  lang?: string | null;
-  meta?: string | null;
-  children?: MdNode[];
-  data?: { hProperties?: Record<string, unknown> };
-}
-
-/**
- * remark plugin: mark the fences whose info string is EXACTLY `fy-render`.
- *
- * WHY A PLUGIN AND NOT A CLASS-NAME TEST. mdast splits a fence's info string
- * into `lang` and `meta`, and `mdast-util-to-hast` renders only `lang` into
- * `class="language-…"`. A fence opened as `fy-render notes` therefore arrives in
- * hast wearing `language-fy-render` and its metadata gone — indistinguishable
- * downstream from the real thing. The exactness the contract promises has to be
- * decided where both halves are still visible, which is here.
- *
- * The mark rides `data.hProperties`, the mdast→hast contract, so it reaches the
- * rendered element with no DOM walking — the same mechanism `data-label` uses.
- */
-const markFences = (node: MdNode): void => {
-  // `meta` is everything after the language token. Anything at all there means a
-  // different fence, so `fy-render notes` and `fy-render {x}` both stay ordinary.
-  if (node.type === 'code' && node.lang === FY_RENDER_FENCE_LANGUAGE && (node.meta ?? '') === '') {
-    node.data ??= {};
-    node.data.hProperties ??= {};
-    node.data.hProperties[FY_RENDER_FENCE_ATTRIBUTE] = 'true';
-  }
-  // A fence can sit at any depth — inside a list item or a blockquote — so the
-  // walk is full rather than a scan of the root's own children.
-  for (const child of node.children ?? []) markFences(child);
-};
-
-export const remarkFyRenderFences = () => markFences;
 
 /**
  * Where a media block's bytes live, and nothing else.

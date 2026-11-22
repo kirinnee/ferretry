@@ -35,7 +35,6 @@ export {
 } from '@ferretry/app/ui';
 export {
   browserListRefreshEnvironment,
-  ChatProse,
   clockOfInstant,
   composerQuoteTarget,
   daemonOfClient,

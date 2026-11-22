@@ -53,6 +53,8 @@ export async function fileSecrets(
   secrets: readonly FiledSecret[],
   /** Called before EACH put: throws once the request has ended, so the next key is never filed (what landed stays). */
   live?: () => void,
+  /** Told each name as it is filed (the apply's ledger). */
+  filed?: (name: string) => void,
 ): Promise<void> {
   const created: string[] = [];
   for (const secret of secrets) {
@@ -60,6 +62,7 @@ export async function fileSecrets(
     try {
       await put(secret.name, secret.value);
       created.push(secret.name);
+      filed?.(secret.name);
     } catch (error) {
       const why = error instanceof Error && error.message.length > 0 ? error.message : String(error);
       throw new FleetCatalogRefusal(

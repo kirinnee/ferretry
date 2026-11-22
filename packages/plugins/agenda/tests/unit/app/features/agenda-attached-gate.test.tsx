@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaItem } from '@ferretry/core-asks/contract';
-import { ChatProse } from '../../../../app/shell.ts';
+import { ProseView } from '../../../../app/shell.ts';
 import { AgendaItemCard } from '../../../../app/features/agenda/agenda-item-card.tsx';
 import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
@@ -39,7 +39,7 @@ const draw = async (item: AgendaItem, acted: unknown[] = []): Promise<HTMLElemen
       item={item}
       now={Date.parse('2026-08-01T12:00:00.000Z')}
       onAct={action => acted.push(action)}
-      renderProse={text => <ChatProse text={text} />}
+      renderProse={text => <ProseView text={text} />}
       swipeable={false}
     />,
   );
