@@ -15,15 +15,21 @@ import { FY_RENDER_FORMER_TYPES } from '../../contract/fy-render.ts';
 const RENDER_GUIDE_HEADING = '## Guide for agents';
 
 /**
- * Every topic `fy render guide <topic>` answers, in the order the overview lists them: the part the app draws, the
- * human/LLM text and the references first, then the `fy-render` types (diagrams, charts, pictures, media, maps, live
- * tasks). A part whose renderer has not landed is not a topic (r12 H4 adds each with its renderer).
+ * Every topic `fy render guide <topic>` answers, in the order the overview lists them: the parts the app draws, the
+ * human/LLM text and the references first, then the `fy-render` types (charts, pictures, media, maps, live tasks).
+ * A part the app holds as code (Durian's `chart`, the `codewalk`) is not a topic: `chart` is the `fy-render` chart.
  */
 export const RENDER_GUIDE_TOPICS = [
   'terminal',
+  'filetree',
+  'editor',
+  'animation',
+  'tierlist',
+  'alignment',
+  'tabs',
+  'mermaid',
   'human',
   'chart',
-  'mermaid',
   'references',
   'svg',
   'html',
@@ -46,9 +52,15 @@ type RenderGuideTopic = (typeof RENDER_GUIDE_TOPICS)[number];
  */
 const SECTION_FOR_TOPIC: Record<RenderGuideTopic, string> = {
   terminal: 'terminal',
+  filetree: 'filetree',
+  editor: 'editor',
+  animation: 'animation',
+  tierlist: 'tierlist',
+  alignment: 'alignment',
+  tabs: 'tabs',
+  mermaid: 'mermaid',
   human: 'human',
   chart: 'chart',
-  mermaid: 'mermaid',
   references: 'references',
   svg: 'svg',
   html: 'html',
@@ -62,15 +74,18 @@ const SECTION_FOR_TOPIC: Record<RenderGuideTopic, string> = {
   board: 'task',
 };
 
-/** The other text container: `human` answers for `llm`, because one section holds what the two are for. */
-const CONTAINER_NAMES: ReadonlySet<string> = new Set(['llm']);
+/** The other containers: `human` answers for `llm` (one section holds what the two are for), `tabs` for `accordion`. */
+const CONTAINER_NAMES: ReadonlyMap<string, string> = new Map([
+  ['llm', 'human'],
+  ['accordion', 'tabs'],
+]);
 
 /**
  * The section that answers `topic`, or `undefined` when `fy render guide` refuses it. An agent that still types the
  * type a fence had before the rename (`FY_RENDER_FORMER_TYPES`) is answered with the new type's section.
  */
 export function renderGuideSectionName(topic: string): string | undefined {
-  const named = CONTAINER_NAMES.has(topic) ? 'human' : (FY_RENDER_FORMER_TYPES.get(topic) ?? topic);
+  const named = CONTAINER_NAMES.get(topic) ?? FY_RENDER_FORMER_TYPES.get(topic) ?? topic;
   return named in SECTION_FOR_TOPIC ? SECTION_FOR_TOPIC[named as RenderGuideTopic] : undefined;
 }
 

@@ -111,16 +111,26 @@ describe('the reading verbs', () => {
     expect(out.join('')).toBe(human);
   });
 
-  test('render guide teaches only what the app draws: a part whose renderer has not landed is not a topic', async () => {
+  test('render guide teaches the parts the app draws, accordion answers with tabs, and no topic for a part held as code', async () => {
     const { verbs, out, err } = harness();
     expect(await run(verbs['render guide'], [])).toBe(0);
     const overview = out.join('');
-    for (const pending of ['filetree', 'editor', 'animation', 'tierlist', 'alignment', 'tabs', 'accordion']) {
-      expect(RENDER_GUIDE_TOPICS as readonly string[]).not.toContain(pending);
-      expect(overview).not.toContain(pending);
-      expect(await run(verbs['render guide'], [pending])).toBe(2);
+    for (const part of ['filetree', 'editor', 'animation', 'tierlist', 'alignment', 'tabs', 'mermaid']) {
+      expect(RENDER_GUIDE_TOPICS as readonly string[]).toContain(part);
+      expect(overview).toContain(`fy render guide ${part}`);
     }
-    expect(err.join('')).toContain('no topic tabs');
+    out.length = 0;
+    await run(verbs['render guide'], ['tabs']);
+    const tabs = out.join('');
+    out.length = 0;
+    expect(await run(verbs['render guide'], ['accordion'])).toBe(0);
+    expect(out.join('')).toBe(tabs);
+    // Durian's chart fence and the code walk are drawn as code: no topic of their own ("chart" is the fy-render chart).
+    expect(await run(verbs['render guide'], ['codewalk'])).toBe(2);
+    expect(err.join('')).toContain('no topic codewalk');
+    out.length = 0;
+    await run(verbs['render guide'], ['chart']);
+    expect(out.join('')).toContain('fy-render');
   });
 
   test('render guide answers for the task type, and still for the card name an older agent types', async () => {

@@ -4,6 +4,7 @@
  * `fy-render` fence, and exits 1 on any error, 0 otherwise.
  */
 import { describe, expect, test } from 'bun:test';
+import { holdFences } from '../../../app/hypermedia/held-fences.tsx';
 import { MESSAGE_LIMITS } from '../../../app/hypermedia/limits.ts';
 import { checkMessage, findingLine } from '../../../cli/reading/check.ts';
 import { readingVerbs } from '../../../cli/reading/verbs.ts';
@@ -58,7 +59,7 @@ describe('fy render check', () => {
   });
 
   test('`-` reads standard input through the shell, and a missing argument is a usage error', async () => {
-    const { check, read, err } = harness({ '-': `${FENCE}chart\nkind: bar\n${FENCE}\n` });
+    const { check, read, err } = harness({ '-': `${FENCE}fy-render\ntype: mermaid\n---\nflowchart TB\n${FENCE}\n` });
     expect(await check(['-'])).toBe(1);
     expect(read).toEqual(['-']);
     expect(await check([])).toBe(2);
@@ -137,6 +138,86 @@ describe('fy render check: fy-render fences (our host block)', () => {
     const { check, out } = harness({ 'w.md': `${FENCE}fy-render notes\nx\n${FENCE}\n` });
     expect(await check(['w.md'])).toBe(0);
     expect(out.join('')).toContain('line 1: warning:');
+  });
+});
+
+describe('fy render check: parts the app does not draw, and the parts it does', () => {
+  test('a chart or codewalk fence is a warning: the app shows it as code, and the chart to write is the fy-render one', () => {
+    for (const word of ['chart', 'codewalk']) {
+      const text = `Intro\n\n${FENCE}${word}\nkind: bar\n${FENCE}\n`;
+      // The app really holds this fence as code (the two halves agree on the words).
+      expect(holdFences(text)).not.toBe(text);
+      const found = checkMessage(text).filter(each => each.message.includes(`a ${word} fence`));
+      expect(found).toHaveLength(1);
+      expect(found[0]).toMatchObject({ line: 3, level: 'warn' });
+      expect(found[0]?.message).toContain('shown as plain code');
+    }
+    expect(
+      checkMessage(`${FENCE}chart\nkind: bar\n${FENCE}\n`)
+        .map(each => each.message)
+        .join(' '),
+    ).toContain('fy-render block of type chart');
+  });
+
+  test('a closed chart or codewalk fence makes the CLI exit 0 with the warning: the app shows it as code, never as a failure', async () => {
+    // Durian alone would call this chart an error (no series, a bar with no data); the app never draws it, so it is not one.
+    for (const word of ['chart', 'codewalk']) {
+      const { check, out } = harness({ 'held.md': `Intro\n\n${FENCE}${word}\nkind: bar\n${FENCE}\n` });
+      expect(await check(['held.md'])).toBe(0);
+      const printed = out.join('');
+      expect(printed).toContain(`line 3: warning: a ${word} fence is not drawn by the app`);
+      expect(printed).not.toMatch(/^line \d+: (?!warning)/mu);
+    }
+  });
+
+  test('an UNCLOSED chart or codewalk fence keeps the missing-closing-fence error: the CLI exits 1', async () => {
+    // Only a closed held part is suppressed; a fence with no closing delimiter is a broken message whatever its word is.
+    for (const word of ['chart', 'codewalk']) {
+      const { check, out } = harness({ 'open.md': `Intro\n\n${FENCE}${word}\nkind: bar\n` });
+      expect(await check(['open.md'])).toBe(1);
+      const printed = out.join('');
+      expect(printed).toContain('a code fence is never closed');
+      expect(printed).toContain(`line 3: warning: a ${word} fence is not drawn by the app`);
+    }
+    // The same fence, closed, is the warning alone.
+    const closed = harness({ 'closed.md': `Intro\n\n${FENCE}chart\nkind: bar\n${FENCE}\n` });
+    expect(await closed.check(['closed.md'])).toBe(0);
+  });
+
+  test('a held fence does not hide a real error elsewhere in the message', async () => {
+    const text = `${FENCE}chart\nkind: bar\n${FENCE}\n\n${FENCE}fy-render\ntype: mermaid\n---\nflowchart TB\n${FENCE}\n`;
+    const { check } = harness({ 'both.md': text });
+    expect(await check(['both.md'])).toBe(1);
+  });
+
+  test('a chart fence inside a tab is found too, on its own line', () => {
+    const text = [':::tabs', '#### A', `${FENCE}chart`, 'kind: bar', FENCE, '#### B', 'x', ':::'].join('\n');
+    expect(checkMessage(text).filter(each => each.message.includes('a chart fence'))).toMatchObject([{ line: 3 }]);
+  });
+});
+
+describe('fy render check: a mermaid diagram’s steps', () => {
+  // The pinned parser reads `%% @step <title>` as a step (two make a stepped diagram); a bare `@step` line is one frame.
+  test('a bare @step inside a mermaid fence is a warning that names the real marker; `%% @step` is clean', async () => {
+    const bare = `${FENCE}mermaid\nflowchart LR\n@step First\n  A --> B\n@step Second\n  B --> C\n${FENCE}\n`;
+    const found = checkMessage(bare).filter(each => each.message.includes('@step'));
+    expect(found.map(each => each.line)).toEqual([3, 5]);
+    expect(found[0]).toMatchObject({ level: 'warn' });
+    expect(found[0]?.message).toContain('%% @step');
+    const { check, out } = harness({ 'bare.md': bare });
+    expect(await check(['bare.md'])).toBe(0);
+    expect(out.join('')).toContain('line 3: warning:');
+    const marked = `${FENCE}mermaid\nflowchart LR\n%% @step First\n  A --> B\n%% @step Second\n  B --> C\n${FENCE}\n`;
+    expect(checkMessage(marked)).toEqual([]);
+  });
+
+  test('a bare @step in an animation or a terminal is the right marker and is left alone', () => {
+    for (const part of ['animation', 'terminal'])
+      expect(
+        checkMessage(`${FENCE}${part}\n@step One\n$ ls\n@step Two\n${FENCE}\n`).filter(each =>
+          each.message.includes('@step'),
+        ),
+      ).toEqual([]);
   });
 });
 
