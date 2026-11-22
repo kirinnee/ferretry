@@ -1369,3 +1369,46 @@ describe('secretNamesOver: the name listing is the only thing the setup is hande
     expect(true).toBe(true);
   });
 });
+
+describe('the first-run scan over a synthetic Claude and Codex setup (C59 O8-15)', () => {
+  /** Every path under a directory with the BYTES of each file (base64; a directory is `null`): a rewrite in place shows. */
+  const listing = async (directory: string): Promise<Record<string, string | null>> => {
+    const found: Record<string, string | null> = {};
+    for (const path of (await readdir(directory, { recursive: true })).sort())
+      found[path] = (await stat(join(directory, path))).isFile()
+        ? (await readFile(join(directory, path))).toString('base64')
+        : null;
+    return found;
+  };
+
+  it('finds Claude and Codex ready to import, and writes nothing until the person confirms', async () => {
+    const { host, world } = await compose();
+    const claude = join(world.person, '.claude');
+    const codex = join(world.person, '.codex');
+    await writeFile(join(claude, 'CLAUDE.md'), '# rules\nBe brief.');
+    await writeFile(join(claude, 'settings.json'), JSON.stringify({ model: 'claude-opus-5-5', env: {} }));
+    for (let index = 0; index < 20; index += 1) {
+      const skill = join(claude, 'skills', `skill-${index}`);
+      await mkdir(skill, { recursive: true });
+      await writeFile(join(skill, 'SKILL.md'), `---\nname: skill-${index}\n---\nDo thing ${index}.`);
+    }
+    await writeFile(join(codex, 'config.toml'), 'model = "gpt-6.1-sol"\n');
+    await writeFile(join(codex, 'AGENTS.md'), '# rules\nBe brief.');
+    for (let index = 0; index < 10; index += 1) {
+      const skill = join(codex, 'skills', `tool-${index}`);
+      await mkdir(skill, { recursive: true });
+      await writeFile(join(skill, 'SKILL.md'), `---\nname: tool-${index}\n---\nUse tool ${index}.`);
+    }
+    const before = { fleet: await listing(world.fleet), person: await listing(world.person) };
+
+    const scan = await host.request('GET', '/v1/runtimes/setup/scan');
+    expect(scan.status).toBe(200);
+    const body = JSON.stringify(scan.json());
+
+    // Both tools' setup is found, so the import is ready to apply; the scan is a read and left both folders as they were.
+    expect(body).toContain('skill-19');
+    expect(body).toContain('tool-9');
+    expect(body).toContain('CLAUDE.md');
+    expect({ fleet: await listing(world.fleet), person: await listing(world.person) }).toEqual(before);
+  });
+});
