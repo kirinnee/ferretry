@@ -596,3 +596,38 @@ describe('the demos say what they show', () => {
     }
   });
 });
+
+describe('C59 O5 item 6: the sign-in block sits in the vertical middle of a desktop page', () => {
+  for (const theme of THEMES)
+    it(`the free room above and below the block is the same, desktop only (1280, ${theme}); a phone keeps it at the top`, async () => {
+      const measure = async (viewport: (typeof VIEWPORTS)[number]) => {
+        const { tab, close } = await open(viewport, theme, '&page=sign-in');
+        try {
+          await tab.waitForTimeout(300);
+          return await tab.evaluate(() => {
+            const head = document.querySelector('.fy-spf__head') as HTMLElement;
+            const main = document.querySelector('.fy-spf__main') as HTMLElement;
+            const page = document.querySelector('.fy-spf__page') as HTMLElement;
+            const style = getComputedStyle(page);
+            const gap = Number.parseFloat(style.rowGap);
+            const above = main.getBoundingClientRect().top - head.getBoundingClientRect().bottom - gap;
+            const below =
+              page.getBoundingClientRect().bottom -
+              Number.parseFloat(style.paddingBottom) -
+              main.getBoundingClientRect().bottom;
+            return { above, below };
+          });
+        } finally {
+          await close();
+        }
+      };
+      const desktop = await measure(VIEWPORTS[0]);
+      const phone = await measure(VIEWPORTS[1]);
+      console.log(
+        `O5 sign-in centring ${theme}: desktop above ${String(desktop.above)} below ${String(desktop.below)}; phone above ${String(phone.above)} below ${String(phone.below)}`,
+      );
+      expect(desktop.above).toBeGreaterThan(8);
+      expect(Math.abs(desktop.above - desktop.below)).toBeLessThanOrEqual(2);
+      expect(phone.above).toBeLessThanOrEqual(1);
+    });
+});

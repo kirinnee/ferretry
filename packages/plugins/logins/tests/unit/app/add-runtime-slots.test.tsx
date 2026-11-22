@@ -66,9 +66,9 @@ describe('the sign-in slot panel', () => {
     const start = must(view.container.querySelector<HTMLButtonElement>('[data-change-submit]'), 'start');
     await interact(() => start.click());
     await wait(30);
-    const field = must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'the code field');
+    const field = must(view.container.querySelector<HTMLInputElement>('input[type="password"]'), 'the code field');
     await interact(() => {
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(field, 'the-code-on-the-page');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, 'the-code-on-the-page');
       field.dispatchEvent(new Event('input', { bubbles: true }));
     });
     const finish = [...view.container.querySelectorAll('button')].find(item =>

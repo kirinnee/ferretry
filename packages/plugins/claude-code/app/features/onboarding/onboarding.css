@@ -157,3 +157,10 @@
     opacity: 0;
   }
 }
+/* C59 O5 item 6: on a desktop the sign-in block (the card and its picture) sits in the vertical middle of the page, between the
+   title and the footer. A phone keeps it at the top so a state change never moves what is under the thumb. */
+@container (min-width: 900px) {
+  .fy-spf__main:has([data-onboarding-step='claude-code.sign-in']) {
+    margin-block: auto;
+  }
+}

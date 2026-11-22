@@ -6,6 +6,7 @@
  */
 
 import { Loading } from '@ferretry/app/ui';
+import { CheckCircle2 } from 'lucide-react';
 import { createElement, type ReactElement, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { LoginList } from '../../contract/index.ts';
 import { type LoginsClient, refusalSentence } from '../lib/client.ts';
@@ -139,9 +140,20 @@ export function HarnessSignInEmbed({
 
   if (usable(list, harness))
     return (
-      <p className="m-0 text-cell leading-base text-muted" data-harness-sign-in="done">
-        {name} is signed in on {list.machine}.
-      </p>
+      // C59 O5: the end of a sign-in is a clear, visible "Signed in" (a mark and a green edge), not one more grey line.
+      <div
+        role="status"
+        data-harness-sign-in="done"
+        className="flex items-start gap-3 rounded-control border border-ok/40 bg-ok-bg p-3 text-ui leading-base text-fg"
+      >
+        <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
+        <div className="min-w-0">
+          <p className="m-0 font-semibold">Signed in</p>
+          <p className="m-0 text-cell text-muted">
+            {name} is signed in on {list.machine}.
+          </p>
+        </div>
+      </div>
     );
 
   // The machine has not finished checking: that is not "signed in", and not "signed out" either. Say so, and offer to look again.

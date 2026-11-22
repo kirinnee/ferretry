@@ -97,9 +97,9 @@ const newContext = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 
   return context;
 };
 
-const open = async (context: BrowserContext, page: string, mode: 'light' | 'dark'): Promise<Page> => {
+const open = async (context: BrowserContext, page: string, mode: 'light' | 'dark', extra = ''): Promise<Page> => {
   const tab = await context.newPage();
-  await tab.goto(`${server?.url.origin ?? ''}/?page=${page}&theme=studio-${mode}`);
+  await tab.goto(`${server?.url.origin ?? ''}/?page=${page}&theme=studio-${mode}${extra}`);
   await tab.waitForSelector('[data-onboarding-step]');
   // Let the one-shot demos and the card animation finish: a shot shows the last frame.
   await tab.waitForTimeout(1_600);
@@ -172,4 +172,88 @@ describe('the Claude import pages', () => {
         await context.close();
       }, 60_000);
     }
+});
+
+/** C59 O5 items 1, 8, 9 on the import page: a row for each item, nothing moves when the import starts, the Import button keeps its size. */
+const measured: Record<string, unknown> = {};
+describe('C59 O5: the import page lists every item, and working moves nothing', () => {
+  for (const viewport of VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`run-everything: rows inside the screen; the page does not shift or resize its Import button while it works (${viewport.name}, ${mode})`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'run-everything', mode, '&hold=1500');
+        const facts = () =>
+          tab.evaluate(() => {
+            const box = (el: Element | null) => {
+              const r = (el as HTMLElement).getBoundingClientRect();
+              return { top: r.top, left: r.left, right: r.right, w: r.width, h: r.height };
+            };
+            const buttons = [...document.querySelectorAll('.cc-actions button')].map(box);
+            return {
+              rows: [...document.querySelectorAll('[data-import-item]')].map(box),
+              bar: box(document.querySelector('[role="progressbar"]')),
+              buttons,
+              count: box(document.querySelector('[data-import-count]')),
+              scrollX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            };
+          });
+        const idle = await facts();
+        expect(idle.rows.length).toBeGreaterThanOrEqual(7);
+        for (const row of idle.rows) {
+          expect(row.left).toBeGreaterThanOrEqual(0);
+          expect(row.right).toBeLessThanOrEqual(viewport.width);
+          expect(row.h).toBeGreaterThanOrEqual(44);
+        }
+        expect(idle.scrollX).toBeLessThanOrEqual(0);
+        // Open one item: its fold shows what it becomes and stays inside the screen.
+        await tab.locator('[data-import-item] summary').first().click();
+        const opened = await tab.locator('[data-import-item] [data-import-item-more]').first().boundingBox();
+        expect((opened?.x ?? 0) + (opened?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
+        await tab.locator('[data-import-item] summary').first().click();
+        if (shotsDir !== '')
+          await tab.screenshot({ fullPage: true, path: join(shotsDir, `run-items-${viewport.name}-${mode}.png`) });
+        // A full-page shot moves the scroll: it is taken first, and every top is measured after a scroll back to the top.
+        await tab.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+        const before = await facts();
+        // Pressed from the page itself, so the browser never scrolls to the button and every top is measured from the same scroll.
+        await tab.evaluate(() => {
+          (document.querySelector('.cc-actions button') as HTMLButtonElement).click();
+        });
+        await tab.waitForSelector('[data-import-item-status="bringing"]');
+        const during = await facts();
+        if (shotsDir !== '')
+          await tab.screenshot({ fullPage: true, path: join(shotsDir, `run-working-${viewport.name}-${mode}.png`) });
+        const offsets = during.rows.map((row, index) => row.top - (before.rows[index]?.top ?? 0));
+        const importBefore = before.buttons[0]!;
+        const importDuring = during.buttons[0]!;
+        const skip = during.buttons[1]!;
+        const gap =
+          viewport.phone && skip.top > importDuring.top + importDuring.h - 1
+            ? skip.top - (importDuring.top + importDuring.h)
+            : skip.left - importDuring.right;
+        const statusLines = await tab.locator('[data-import-item-status="bringing"]').count();
+        measured[`import-${viewport.name}-${mode}`] = {
+          rows: before.rows.length,
+          maxRowOffset: Math.max(...offsets.map(Math.abs)),
+          barOffset: during.bar.top - before.bar.top,
+          buttonsOffset: importDuring.top - importBefore.top,
+          importSize: { idle: [importBefore.w, importBefore.h], busy: [importDuring.w, importDuring.h] },
+          gapToSkip: gap,
+          statusLines,
+        };
+        for (const offset of offsets) expect(Math.abs(offset)).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(during.bar.top - before.bar.top)).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(importDuring.top - importBefore.top)).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(importDuring.w - importBefore.w)).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(importDuring.h - importBefore.h)).toBeLessThanOrEqual(0.5);
+        expect(gap).toBeGreaterThanOrEqual(12);
+        expect(statusLines).toBe(before.rows.length);
+        expect(during.scrollX).toBeLessThanOrEqual(0);
+        await tab.waitForSelector('[data-import-answer]');
+        await context.close();
+      }, 60_000);
+});
+
+afterAll(async () => {
+  if (shotsDir !== '') await Bun.write(join(shotsDir, 'measured.json'), JSON.stringify(measured, null, 2));
 });
