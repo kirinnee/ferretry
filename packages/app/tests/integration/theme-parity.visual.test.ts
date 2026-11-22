@@ -236,8 +236,8 @@ describe('the shell page heading takes its weight from the style, and only Brief
       expect(await headingWeight(style)).toBe('400');
     });
 
-  it('Briefing draws it in its display weight (700, Gelasio), not the 400 that falls to the 300 face', async () => {
-    expect(await headingWeight('briefing')).toBe('700');
+  it("Briefing draws it in its display weight (600, Poppins as the owner's reference does)", async () => {
+    expect(await headingWeight('briefing')).toBe('600');
   });
 
   it('Neumorphism draws it heavy and round (800), its signature weight', async () => {

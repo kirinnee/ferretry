@@ -32,6 +32,7 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import postcss from 'postcss';
 import tailwindcss from 'tailwindcss';
 import { cachedText, cacheRootFor, hashFixtureInputs, sceneInputEnv, sceneInputPatterns } from './fixture-inputs.ts';
+import { textScalePostcss } from '../../../scripts/text-scale-postcss.ts';
 import { legacyThemeBanner } from './legacy-theme-shim.ts';
 import { sceneTailwindConfig } from './scene-tailwind.ts';
 
@@ -156,6 +157,8 @@ const scene = (): ReturnType<typeof bundleOf> => (built ??= bundleOf(entry, `the
 const js = await cached(`${sceneName}.js`, async () => (await scene()).js);
 const sceneCss = await cached(`${sceneName}.css`, async () => (await scene()).css);
 const manifest = { css: resolve(out, 'app.css'), js: resolve(out, 'app.js') };
-await writeFile(manifest.css, `${css}\n${sceneCss}`, 'utf8');
+// The app's Vite build runs the text-scale rule over EVERY sheet (`vite.config.ts`): so does the scene, or a Text size pick would not move a plugin's own type.
+const scaledCss = (await postcss([textScalePostcss()]).process(`${css}\n${sceneCss}`, { from: undefined })).css;
+await writeFile(manifest.css, scaledCss, 'utf8');
 await writeFile(manifest.js, js, 'utf8');
 console.log(JSON.stringify(manifest));

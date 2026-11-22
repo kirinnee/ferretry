@@ -30,14 +30,22 @@ body {
   margin: 0;
   background-color: var(--bg);
   /* The pattern is the first layer (tiled every `--bg-pattern-size`; `none` in Studio, so it draws nothing); the wash and the mesh
-     keep their own size and no-repeat. The grain is `body::after` below. (r11 T2; tokens in tokens/base-style.css) */
+     keep their own size and no-repeat. The grain is `body::after` below. (r11 T2; tokens in tokens/base-style.css)
+     `--surface-mesh` is a LIST of glows (a palette draws four), so it is several layers, not one: every list below is written out for
+     pattern + wash + up to six glows. A shorter list would REPEAT from its start and tile the second glow in the pattern's
+     32px squares (a pink checkerboard over the page); a list longer than the layers is harmless. */
   background-image: var(--bg-pattern), var(--body-wash), var(--surface-mesh);
   background-size:
     var(--bg-pattern-size) var(--bg-pattern-size),
     auto,
+    auto,
+    auto,
+    auto,
+    auto,
+    auto,
     auto;
   background-attachment: fixed;
-  background-repeat: repeat, no-repeat, no-repeat;
+  background-repeat: repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat;
   color: var(--fg);
   font-family: var(--font-body);
   font-size: var(--font-size-base);
