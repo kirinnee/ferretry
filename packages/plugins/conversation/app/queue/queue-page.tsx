@@ -13,7 +13,6 @@ import { z } from 'zod';
 import { useConversationClient, useConversationDaemon } from '../client.ts';
 import type { SendOutbox } from '../composer/send-outbox.ts';
 import { useSendOutbox } from '../composer/send-outbox-wiring.ts';
-import { HypermediaProse } from '../hypermedia/hypermedia-prose.tsx';
 import {
   DUE_NOW_COPY,
   ferretRows,
@@ -40,6 +39,7 @@ import {
   readFerretQueuePage,
   refreshQueueHistory,
 } from './send-queue.ts';
+import { QueueProse } from './queue-prose.tsx';
 import './queue-page.css';
 
 /** Where a message is, in words; a queued one is on the machine's queue, which is what this page is. */
@@ -98,7 +98,7 @@ function QueueBody({ text }: { readonly text: string }) {
         data-queue-clamped={clamped && !open ? '' : undefined}
         id={bodyId}
       >
-        <HypermediaProse text={text} />
+        <QueueProse text={text} />
       </div>
       {clamped ? (
         <button
