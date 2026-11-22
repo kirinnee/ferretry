@@ -199,8 +199,8 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
             </p>
           ) : null}
           <div className="cc-actions">
-            <Button variant="primary" disabled={!canImport} onClick={() => void bringIn()}>
-              Import
+            <Button variant="primary" disabled={!canImport} onClick={() => void bringIn()} data-import-press="">
+              {imports.changes.refusal === null ? 'Import' : 'Try again'}
             </Button>
             <Button disabled={working} onClick={leave}>
               Skip the import

@@ -259,6 +259,32 @@ describe('the import run', () => {
     expect(run.events).not.toContain('done');
   });
 
+  it('after a failed import the press reads Try again, and it sends the import once more (C59 O5-10)', async () => {
+    const routes = importRoutes(scanOf());
+    const ok = routes['POST /v1/runtimes/proposals'];
+    let first = true;
+    routes['POST /v1/runtimes/proposals'] = (init: unknown) => {
+      if (!first) return typeof ok === 'function' ? (ok as (init: unknown) => unknown)(init) : ok;
+      first = false;
+      return Object.assign(new Error('this machine asks you to confirm it is you with a passkey'), {
+        status: 401,
+        code: 'unlock_required',
+      });
+    };
+    const { view, run, calls } = await open(ImportRunPage, { importMode: 'everything' }, routes);
+    const press = () => must(view.container.querySelector<HTMLButtonElement>('[data-import-press]'), 'press');
+    expect(press().textContent).toBe('Import');
+    await click(view, '[data-import-press]');
+    await settle();
+    expect(view.container.querySelector('[data-import-refusal]')?.textContent).toContain('locked');
+    expect(press().textContent).toBe('Try again');
+    expect(press().disabled).toBe(false);
+    await click(view, '[data-import-press]');
+    await settle();
+    expect(proposals(calls)).toHaveLength(2);
+    expect(run.events.at(-1)).toBe('done');
+  });
+
   it('writes nothing to localStorage or sessionStorage', async () => {
     const before = [localStorage.length, sessionStorage.length];
     const { view } = await open(ImportRunPage, { importMode: 'everything' });
