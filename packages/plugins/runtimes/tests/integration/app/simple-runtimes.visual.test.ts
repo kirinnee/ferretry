@@ -122,6 +122,7 @@ for (const mode of ['light', 'dark'] as const)
         const { tab, close } = await openScene(size, mode, 'view=advanced&logins=4');
         try {
           await tab.waitForSelector('#add-runtime-name');
+          await tab.waitForTimeout(600);
           await shot(tab, `${size.name}-${mode}-advanced`);
           expect(await tab.locator('[data-add-runtime-part]').count()).toBe(3);
           expect(await tab.locator('[data-add-runtime-more]').count()).toBe(0);
