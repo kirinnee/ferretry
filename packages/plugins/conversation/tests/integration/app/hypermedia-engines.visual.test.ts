@@ -206,8 +206,9 @@ describe('what a message fetches', () => {
 
 describe('the pictures: the 2D animation and parts', () => {
   for (const [width, height, label] of [
-    [390, 844, '390'],
-    [1_280, 900, '1280'],
+    // Tall enough for the whole message (the log opens scrolled to its end, so the first lines would be cut off).
+    [390, 1_900, '390'],
+    [1_280, 1_300, '1280'],
   ] as const)
     for (const theme of ['light', 'dark'] as const)
       it(`${label} ${theme}: draws the animation and the parts beside it`, async () => {
