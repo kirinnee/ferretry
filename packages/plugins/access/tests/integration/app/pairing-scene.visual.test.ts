@@ -255,6 +255,53 @@ describe('The pair page: mascot and night sky', () => {
   }
 
   for (const variant of VARIANTS) {
+    it(`${variant.name}: the machine name typed on the confirm screen is sent, shown on Connected and on both first-passkey labels`, async () => {
+      const { tab, problems, close } = await open(variant, '&offer=open');
+      try {
+        // Typed for real: the name field, not a query flag, and the device name left as the page proposes it.
+        await tab.locator('[data-pair-machine-name]').fill('Studio box');
+        await pair(tab);
+        expect(await tab.locator('main').innerText()).toContain('Paired with Studio box, through the relay.');
+        expect(await tab.locator('main').innerText()).not.toContain('kirin-workstation');
+        const scene = () =>
+          tab.evaluate(
+            () =>
+              (
+                window as unknown as {
+                  __pairScene: { sent: { deviceName: string; machineName?: string }[]; created: unknown[] };
+                }
+              ).__pairScene,
+          );
+        expect((await scene()).sent.map(sent => sent.machineName)).toEqual(['Studio box']);
+        await tab.waitForSelector('[data-first-passkey-offer]');
+        await tab.getByRole('button', { name: 'Add a passkey now' }).click();
+        await tab.waitForFunction(
+          () => (window as unknown as { __pairScene: { created: unknown[] } }).__pairScene.created.length > 0,
+        );
+        const [created] = (await scene()).created as { user: { name: string; displayName: string } }[];
+        expect(created?.user.name).toBe('Chrome on Linux · 4f2a → Studio box');
+        expect(created?.user.displayName).toBe('Ferretry: Chrome on Linux · 4f2a → Studio box');
+        expect(`${created?.user.name}${created?.user.displayName}`).not.toContain('kirin-workstation');
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+
+    it(`${variant.name}: with no name typed, Connected and the labels fall back to the host name`, async () => {
+      const { tab, close } = await open(variant, '&offer=open');
+      try {
+        await pair(tab);
+        expect(await tab.locator('main').innerText()).toContain('Paired with kirin-workstation, through the relay.');
+        const sent = await tab.evaluate(
+          () => (window as unknown as { __pairScene: { sent: object[] } }).__pairScene.sent,
+        );
+        expect(sent).toEqual([{ deviceName: 'Chrome on Linux · 4f2a' }]);
+      } finally {
+        await close();
+      }
+    });
+
     it(`${variant.name}: the success screen offers "Add a passkey now" with the minutes left, one clear way on, readable on the sky`, async () => {
       for (const how of ['normal', 'reduced'] as const) {
         const { tab, problems, close } = await open(

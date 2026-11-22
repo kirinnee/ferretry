@@ -216,6 +216,9 @@ export const ClientRecordSchema = z.union([
       // code, never as a parse failure a guesser could tell apart.
       code: z.string().min(1).max(64),
       deviceName: z.string().min(1).max(256),
+      // What the person called this machine on the pair screen. Optional, and only bounded here: the host applies its own
+      // name rule and keeps it only when the machine has no name of the owner's yet.
+      machineName: z.string().min(1).max(256).optional(),
       deviceKey: z.string().min(1).max(128),
       proof: z.string().min(1).max(128),
     }),
