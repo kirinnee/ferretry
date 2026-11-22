@@ -26,8 +26,16 @@ const UNCHECKED = "Ferretry's gh cannot run: Ferretry could not check where the 
 
 const refuse = (message: string): ApiError => new ApiError(403, message, GIT_ACCOUNT_CODES.invalidRequest);
 
-/** The absolute path of the `gh` to run, or a refusal (a 403 `invalid_request` `ApiError`) saying why there is none. */
-export function ghLocator(ports: GhLocatorPorts): () => Promise<string> {
+/** What a `gh` that gets a token is started with: the program, and the `PATH` its own children (`git`, a pager) search. */
+export interface GhLaunch {
+  /** The absolute path of the `gh` to run. */
+  readonly program: string;
+  /** The `PATH` of that child: the folders searched, with every state-home folder (the shim folder included) left out. */
+  readonly path: string;
+}
+
+/** The `gh` to run and the `PATH` to run it with, or a refusal (a 403 `invalid_request` `ApiError`) saying why there is none. */
+export function ghLocator(ports: GhLocatorPorts): () => Promise<GhLaunch> {
   return async () => {
     try {
       const folders: string[] = [];
@@ -38,7 +46,10 @@ export function ghLocator(ports: GhLocatorPorts): () => Promise<string> {
       const found = await ports.which('gh', { directories: folders });
       if (found === undefined) throw refuse(NOT_FOUND);
       if ((await ports.stateHomeHolding(found)) !== undefined) throw refuse(UNSAFE);
-      return found;
+      // A sealed child inherits the daemon's whole `PATH`, and that can name the shim folder (a pane's `PATH` written into
+      // the unit): the child is given the filtered list instead, and the folder `gh` was found in is always on it.
+      const home = found.slice(0, found.lastIndexOf('/')) || '/';
+      return { program: found, path: (folders.includes(home) ? folders : [...folders, home]).join(':') };
     } catch (error) {
       throw error instanceof ApiError ? error : refuse(UNCHECKED);
     }

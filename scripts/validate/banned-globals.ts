@@ -219,6 +219,12 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
         'fy at the person terminal writes the signed catalog file to the path the person named, outside every declared root: create-exclusive, or a temp file renamed over, a symbolic link refused; the file holds only what the daemon signed (v4 FileCatalogWriter; same owner-ruled gap as the Browsers screenshot: the CLI half has no file-write port)',
     },
     {
+      pkg: 'git-accounts',
+      folder: 'cli/adapters/regular-file.ts',
+      reason:
+        "fy at the ferret's terminal asks `lstat`/`stat` (never an open) whether a `.git` file or `HEAD` in the folder it runs in is a regular file before `fy gh` reads it, because opening a FIFO there blocks for good; it reads no content, and the CliContext has no stat or non-blocking read (E6 L52, end-list plan)",
+    },
+    {
       pkg: 'terminals',
       folder: 'cli/adapters/jobs/process-ports.ts',
       reason:

@@ -15,14 +15,15 @@
  *   removed before the new one binds; an agent that is still stopping is waited for first, because it removes its own
  *   socket path when it exits and would otherwise remove the new agent's.
  *
- * DECLARED GAP: an agent is a child of the daemon. After an UNCLEAN daemon death (SIGKILL, power loss) it is not stopped
- * by anyone; it keeps the key in its memory, behind a 0600 socket in a 0700 folder of this user, until it is killed or
- * the machine restarts. A clean stop kills every agent.
+ * - An agent is a child of the daemon, so a clean stop kills every one. After an UNCLEAN daemon death (SIGKILL) nobody
+ *   stopped them: the next boot finds this daemon's own leftovers (an `ssh-agent -D -a <this folder>/gha_<id>.sock` of its
+ *   own uid, `sweep.ts`) and ends them BEFORE the first new agent starts. A power loss takes them with the machine.
  */
 import type { ChildHandle, Clock, Log, SpawnPort } from '@ferretry/kernel/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { GIT_ACCOUNT_CODES, type GitAccountId, githubKnownHosts } from '../../../contract/index.ts';
+import { type LeftoverAgents, sweepLeftoverAgents } from './sweep.ts';
 
 /** The whole wait for an agent to listen: it holds the account's queue, so it is bounded in wall-clock time. */
 const READY_DEADLINE_MS = 5_000;
@@ -59,6 +60,7 @@ export class AgentSupervisor {
   readonly #stopping = new Map<GitAccountId, Promise<unknown>>();
   readonly #starting = new Map<GitAccountId, Promise<string | undefined>>();
   #knownHosts: Promise<string> | undefined;
+  #swept: Promise<unknown> | undefined;
   #stopped = false;
 
   constructor(
@@ -66,7 +68,27 @@ export class AgentSupervisor {
     private readonly folder: RunFolder,
     private readonly clock: Pick<Clock, 'sleep' | 'after'>,
     private readonly log: Pick<Log, 'warn'>,
+    /** The host's process table, to end agents an earlier unclean death left behind. Absent: nothing is swept. */
+    private readonly leftovers?: LeftoverAgents,
   ) {}
+
+  /**
+   * Ends this daemon's own agents that an earlier run left behind (`sweep.ts`). Runs once, and every start waits for it,
+   * so it can never end an agent THIS run started. Never throws.
+   */
+  sweepLeftovers(): Promise<unknown> {
+    this.#swept ??=
+      this.leftovers === undefined
+        ? Promise.resolve()
+        : sweepLeftoverAgents({
+            leftovers: this.leftovers,
+            folder: this.folder.path,
+            remove: name => this.folder.remove(name),
+            clock: this.clock,
+            log: this.log,
+          });
+    return this.#swept;
+  }
 
   /** The socket of the account's agent, starting it and loading `privateKey` into it when it is not running. */
   socketFor(id: GitAccountId, privateKey: () => Promise<string | undefined>): Promise<string | undefined> {
@@ -139,6 +161,8 @@ export class AgentSupervisor {
 
   async #start(id: GitAccountId, privateKey: string): Promise<string> {
     await this.#ready();
+    // An agent an earlier run left behind is ended first (it would run on, unreachable, once its socket is replaced).
+    await this.sweepLeftovers();
     // The last agent of this account is gone before the next binds: it removes its socket path as it exits.
     const leaving = this.#stopping.get(id);
     if (leaving !== undefined)
