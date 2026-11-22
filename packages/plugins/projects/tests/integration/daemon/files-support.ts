@@ -77,9 +77,15 @@ export async function world(limits?: ProjectIndexLimits, overrides: Partial<Proj
     undefined,
     pins,
   );
-  const kernel = { roots, paths: { home: () => user }, spawn } as unknown as Pick<
+  const clock = {
+    after: (delay: number, fn: () => void) => {
+      const timer = setTimeout(fn, Number(delay));
+      return () => clearTimeout(timer);
+    },
+  };
+  const kernel = { roots, paths: { home: () => user }, spawn, clock } as unknown as Pick<
     KernelPorts,
-    'roots' | 'paths' | 'spawn'
+    'roots' | 'paths' | 'spawn' | 'clock'
   >;
   let tick = 0;
   const deps: ProjectIndexDeps = {

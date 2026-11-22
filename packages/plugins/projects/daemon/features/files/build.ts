@@ -26,7 +26,7 @@ import {
   type ProjectFolderCount,
   type ProjectIndexSummary,
 } from '../../../contract/index.ts';
-import type { FolderPins, PinRefusal } from './pins.ts';
+import { GitTimedOut, type FolderPins, type PinRefusal } from './pins.ts';
 
 /**
  * Builds a project's file index (&F6061 U5): every file name in the project folder that Git does not ignore, once, with
@@ -75,8 +75,8 @@ export const DEFAULT_PROJECT_INDEX_LIMITS: ProjectIndexLimits = {
 
 /** What a build needs from outside: the held folders, Git, a clock and the limits. */
 export interface ProjectIndexDeps {
-  /** The pins for ONE build (the privacy policy is read once, inside). */
-  readonly pins: () => Promise<FolderPins>;
+  /** The pins for ONE build (the privacy policy is read once, inside), spent from the build's own deadline. */
+  readonly pins: (budget: SpawnBudget) => Promise<FolderPins>;
   readonly git: Pick<TreeGit, 'isInsideWorkTree' | 'listFiles'>;
   readonly nowMs: () => number;
   readonly instant: () => Instant;
@@ -92,7 +92,7 @@ export interface ProjectIndex {
 
 /** The project folder cannot be indexed at all: nothing verified is there, or the privacy policy refuses it. */
 export class ProjectFolderRefused extends Error {
-  constructor(readonly reason: PinRefusal) {
+  constructor(readonly reason: Exclude<PinRefusal, 'spent'>) {
     super(
       reason === 'private' ? 'the project folder is private and is not indexed' : 'the project folder is not available',
     );
@@ -271,11 +271,16 @@ export async function buildProjectIndex(path: string, deps: ProjectIndexDeps): P
   // ONE deadline for the whole build, started BEFORE anything is held: reading the privacy policy and holding the folder can
   // list whole folders, and that time is spent from the same budget the walk has.
   const deadline = new Deadline(deps.nowMs, limits.budgetMs);
-  const pins = await deps.pins();
-  const held = await pins.project(path);
-  if (!held.ok) throw new ProjectFolderRefused(held.reason);
-  const root = held.root;
   const state: State = { files: [], skips: new Map(), worktrees: [], opened: 0, candidates: 0 };
+  const pins = await deps.pins(deadline);
+  const held = await pins.project(path);
+  // The time ran out before the folder could be held: an empty answer that says so, never a claim that it is not there.
+  if (!held.ok && held.reason === 'spent') {
+    tally(state.skips, 'truncated', 1);
+    return finish(state, limits, deps.instant());
+  }
+  if (!held.ok) throw new ProjectFolderRefused(held.reason as Exclude<PinRefusal, 'spent'>);
+  const root = held.root;
   try {
     // The folder itself is a key store or a secret name (`~/.ssh`, a folder called `.env`): nothing beneath it is innocent.
     if (isSharedSecretPath(root.rootReal.split('/').filter(Boolean).join('/')))
@@ -287,9 +292,10 @@ export async function buildProjectIndex(path: string, deps: ProjectIndexDeps): P
     let inside: boolean | undefined;
     try {
       inside = await deps.git.isInsideWorkTree(root.policyCwd, deadline);
-    } catch {
-      // Git cannot say (unsafe ownership, a broken repository): never walk what its ignore rules might close.
-      tally(state.skips, 'unreadable', 1);
+    } catch (error) {
+      // Git cannot say (unsafe ownership, a broken repository): never walk what its ignore rules might close. A child that
+      // ran out of the build's time is the budget, not damage: it is counted as cut short.
+      tally(state.skips, error instanceof GitTimedOut || deadline.expired() ? 'truncated' : 'unreadable', 1);
     }
     // A spent budget answers `false` without a child; the walk then stops at its first step and says so.
     if (inside === true) await indexRepository(root, '', run);
@@ -317,10 +323,24 @@ async function indexRepository(pinned: HeldRoot, prefix: string, run: Run): Prom
     // Established by the caller: a `.git` folder is there, or Git already said so for the project folder.
     isInsideWorkTree: async () => true,
     listFiles: async (cwd, maxBytes, budget) => {
-      const listed = await deps.git.listFiles(cwd, maxBytes, budget);
-      state.candidates += listed.paths.length;
-      nested.push(...listed.paths.filter(name => name.endsWith('/')).map(name => name.slice(0, -1)));
-      return { paths: listed.paths.filter(name => !name.endsWith('/')), truncated: listed.truncated };
+      let listed: Awaited<ReturnType<typeof deps.git.listFiles>>;
+      try {
+        listed = await deps.git.listFiles(cwd, maxBytes, budget);
+      } catch (error) {
+        // A child that ran out of the build's time is the budget being spent, not an unreadable repository.
+        if (error instanceof GitTimedOut || deadline.expired()) return { paths: [], truncated: true };
+        throw error;
+      }
+      // ONE allowance for every name looked at, nested repositories and plain files alike: what the shared candidate budget
+      // has left is taken shallow first BEFORE either kind is admitted, so a folder past it is never inspected.
+      const kept =
+        listed.paths.length > room ? [...listed.paths].sort(compareShallowFirst).slice(0, room) : listed.paths;
+      state.candidates += kept.length;
+      nested.push(...kept.filter(name => name.endsWith('/')).map(name => name.slice(0, -1)));
+      return {
+        paths: kept.filter(name => !name.endsWith('/')),
+        truncated: listed.truncated || kept.length < listed.paths.length,
+      };
     },
   };
   const bounds: TreeIndexBounds = {
@@ -389,7 +409,12 @@ async function indexHeld(parent: HeldRoot, folder: string, rel: string, run: Run
   const { state } = run;
   state.opened += 1;
   const held = await run.pins.nested(below(parent.rootReal, folder));
-  if (!held.ok) return void tally(state.skips, held.reason === 'private' ? 'denied' : 'unreadable', 1);
+  if (!held.ok)
+    return void tally(
+      state.skips,
+      held.reason === 'private' ? 'denied' : held.reason === 'spent' ? 'truncated' : 'unreadable',
+      1,
+    );
   try {
     // The held object must be the very folder that was judged: a name swapped for a link or a mount lands somewhere else.
     if (held.root.rootReal !== below(parent.rootReal, folder)) return void tally(state.skips, 'denied', 1);

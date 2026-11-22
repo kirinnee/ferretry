@@ -5,8 +5,12 @@
 import { describe, expect, test } from 'bun:test';
 import { FsError, type HeldRoot } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
-import { buildProjectIndex, type ProjectIndexDeps } from '../../../daemon/features/files/build.ts';
-import type { FolderPins } from '../../../daemon/features/files/pins.ts';
+import {
+  buildProjectIndex,
+  DEFAULT_PROJECT_INDEX_LIMITS,
+  type ProjectIndexDeps,
+} from '../../../daemon/features/files/build.ts';
+import { GitTimedOut, type FolderPins } from '../../../daemon/features/files/pins.ts';
 
 interface Node {
   readonly type: 'dir' | 'file';
@@ -19,6 +23,8 @@ interface Disk {
   readonly capped: Map<string, readonly string[]>;
   /** Names the held root refuses to open for a reason that is not "not there". */
   readonly refused: Set<string>;
+  /** Every path the held root was asked to open, in order. */
+  readonly asked: string[];
 }
 
 const dir = (dev = 1n): Node => ({ type: 'dir', dev });
@@ -29,6 +35,7 @@ const disk = (nodes: Readonly<Record<string, Node>>): Disk => ({
   nodes: new Map<string, Node>([['', dir()], ...Object.entries(nodes)]),
   capped: new Map(),
   refused: new Set(),
+  asked: [],
 });
 
 const parentOf = (rel: string): string => (rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '');
@@ -40,6 +47,7 @@ function heldRoot(world: Disk, rootReal = '/p'): HeldRoot {
     policyCwd: 'cwd',
     fenced: async (rels: readonly string[]) => rels.map(() => false),
     open: async (rel: string, options?: { readonly wantDirectory?: boolean }) => {
+      world.asked.push(rel);
       if (world.refused.has(rel)) throw new FsError('denied', 'refused');
       const node = world.nodes.get(rel);
       if (node === undefined) throw new FsError('not_found', 'not there');
@@ -73,6 +81,7 @@ interface Setup {
   readonly pins?: Partial<FolderPins>;
   readonly git?: ProjectIndexDeps['git'];
   readonly nowMs?: () => number;
+  readonly limits?: ProjectIndexDeps['limits'];
 }
 
 const NOT_A_REPO: ProjectIndexDeps['git'] = {
@@ -90,6 +99,7 @@ const build = (world: Disk, setup: Setup = {}) =>
     }),
     git: setup.git ?? NOT_A_REPO,
     nowMs: setup.nowMs ?? (() => 0),
+    ...(setup.limits === undefined ? {} : { limits: setup.limits }),
     instant: () => '2026-11-22T00:00:00.000Z' as Instant,
   } as unknown as ProjectIndexDeps);
 
@@ -204,6 +214,83 @@ describe('one deadline covers the whole build, pinning included', () => {
     });
 
     expect(paths(index)).toEqual([]);
+    expect(index.summary.coverage).toBe('partial');
+    expect(skip(index, 'truncated')).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('a Git child that runs out of the build’s time is the budget, not damage', () => {
+  test('a list that timed out is counted as cut short (truncated), never as unreadable', async () => {
+    const world = disk({ 'a.ts': file() });
+    const git: ProjectIndexDeps['git'] = {
+      isInsideWorkTree: async () => true,
+      listFiles: async () => {
+        throw new GitTimedOut('git ls-files');
+      },
+    };
+
+    const index = await build(world, { git });
+
+    expect(skip(index, 'truncated')).toBeGreaterThanOrEqual(1);
+    expect(skip(index, 'unreadable')).toBe(0);
+    expect(index.summary.coverage).toBe('partial');
+  });
+
+  test('a list that failed after the deadline passed is the deadline, whatever Git said', async () => {
+    const clock = { now: 0 };
+    const world = disk({ 'a.ts': file() });
+    const git: ProjectIndexDeps['git'] = {
+      isInsideWorkTree: async () => true,
+      listFiles: async () => {
+        clock.now += 60_000;
+        throw new Error('git ls-files failed: killed');
+      },
+    };
+
+    const index = await build(world, { git, nowMs: () => clock.now });
+
+    expect(skip(index, 'truncated')).toBeGreaterThanOrEqual(1);
+    expect(skip(index, 'unreadable')).toBe(0);
+  });
+
+  test('the same for the question "is this a repository": a timeout is truncated, not unreadable', async () => {
+    const world = disk({ 'a.ts': file() });
+    const git: ProjectIndexDeps['git'] = {
+      isInsideWorkTree: async () => {
+        throw new GitTimedOut('git rev-parse');
+      },
+      listFiles: async () => ({ paths: [], truncated: false }),
+    };
+
+    const index = await build(world, { git });
+
+    expect(skip(index, 'truncated')).toBeGreaterThanOrEqual(1);
+    expect(skip(index, 'unreadable')).toBe(0);
+  });
+});
+
+describe('one candidate allowance covers the nested folders Git names and the files, together', () => {
+  test('folders past the allowance are not inspected at all (no `.git` is asked of them) and the answer is partial', async () => {
+    const names = ['a', 'b', 'c', 'd', 'e', 'f'];
+    const world = disk({
+      ...Object.fromEntries(
+        names.flatMap(name => [
+          [name, dir()],
+          [`${name}/.git`, file()],
+        ]),
+      ),
+    });
+    const git: ProjectIndexDeps['git'] = {
+      isInsideWorkTree: async () => true,
+      listFiles: async () => ({ paths: names.map(name => `${name}/`), truncated: false }),
+    };
+
+    const index = await build(world, { git, limits: { ...DEFAULT_PROJECT_INDEX_LIMITS, maxCandidates: 3 } });
+
+    // A marker is asked as a folder and then as a file, so folders are counted, not questions.
+    const markers = [...new Set(world.asked.filter(path => path.endsWith('/.git')))];
+    expect(markers.length).toBeLessThanOrEqual(3);
+    expect(index.summary.nestedWorktrees.length).toBeLessThanOrEqual(3);
     expect(index.summary.coverage).toBe('partial');
     expect(skip(index, 'truncated')).toBeGreaterThanOrEqual(1);
   });

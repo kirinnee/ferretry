@@ -1,4 +1,4 @@
-import type { FencedPath, HeldRoot, KernelPorts, PinnedWorkingDirectory } from '@ferretry/kernel/contract';
+import type { FencedPath, HeldRoot, KernelPorts, PinnedWorkingDirectory, SpawnBudget } from '@ferretry/kernel/contract';
 import {
   gitEnvironment,
   HARDENED_GIT_ARGUMENTS,
@@ -10,8 +10,41 @@ import { milliseconds } from '@ferretry/std';
 import { folderPolicy } from '../folders/policy.ts';
 import type { FolderBrowser, FolderVerdict } from '../folders/port.ts';
 
-/** Why a folder was not held: nothing verified is there, or the privacy policy said no. */
-export type PinRefusal = 'unavailable' | 'private';
+/** Why a folder was not held: nothing verified is there, the privacy policy said no, or the build's time ran out first. */
+export type PinRefusal = 'unavailable' | 'private' | 'spent';
+
+/** What a read that may outlast the budget gave: its answer, or nothing because the budget ran out first. */
+type Timed<T> = { readonly done: true; readonly value: T } | { readonly done: false };
+
+/**
+ * Runs `work` only while `budget` has time, and stops WAITING for it when the time is gone. The kernel's folder reads (a
+ * whole-folder listing for a sign-in file, a pin) take no budget of their own, so the budget is enforced here, from the
+ * outside: a late answer is handed to `late` (a held descriptor it must close) and never reaches the caller.
+ */
+async function within<T>(
+  clock: Pick<KernelPorts['clock'], 'after'>,
+  budget: SpawnBudget,
+  work: () => Promise<T>,
+  late: (value: T) => void = () => undefined,
+): Promise<Timed<T>> {
+  if (budget.expired()) return { done: false };
+  let cancel: () => void = () => undefined;
+  const spent = new Promise<Timed<T>>(resolve => {
+    cancel = clock.after(milliseconds(Math.max(1, Math.ceil(budget.remainingMs()))), () => resolve({ done: false }));
+  });
+  const running = work().then((value): Timed<T> => ({ done: true, value }));
+  try {
+    const outcome = await Promise.race([running, spent]);
+    if (!outcome.done)
+      running.then(
+        result => result.done && late(result.value),
+        () => undefined,
+      );
+    return outcome;
+  } finally {
+    cancel();
+  }
+}
 
 type PinResult = { readonly ok: true; readonly root: HeldRoot } | { readonly ok: false; readonly reason: PinRefusal };
 
@@ -30,10 +63,10 @@ export interface FolderPins {
    * be proved either way. A descendant is judged exactly like a nested repository, so a folder's privacy does not depend on
    * whether Git happens to know it.
    */
-  descendant(real: string): Promise<'private' | 'unreadable' | undefined>;
+  descendant(real: string): Promise<'private' | 'unreadable' | 'spent' | undefined>;
 }
 
-type Kernel = Pick<KernelPorts, 'roots' | 'paths' | 'spawn'>;
+type Kernel = Pick<KernelPorts, 'roots' | 'paths' | 'spawn' | 'clock'>;
 
 /**
  * Holds a folder open through the kernel's `imports` root and judges what is REALLY held.
@@ -43,7 +76,29 @@ type Kernel = Pick<KernelPorts, 'roots' | 'paths' | 'spawn'>;
  * not shared with the explorer because that one hands back a listing object and this one needs the held root itself (its
  * descriptor is what Git is started in).
  */
-function holder(kernel: Pick<KernelPorts, 'roots'>, verdict: FolderVerdict, mustBeNamed: boolean) {
+function holder(
+  kernel: Pick<KernelPorts, 'roots' | 'clock'>,
+  verdict: FolderVerdict,
+  mustBeNamed: boolean,
+  budget: SpawnBudget,
+) {
+  const hold = holdWith(kernel, verdict, mustBeNamed);
+  return async (path: string): Promise<PinResult> => {
+    // The whole hold (resolve, judge, pin, judge again) is one budgeted read: a folder pinned after the time is gone is
+    // closed again, and the build is told the time ran out rather than that the folder was not there.
+    const timed = await within(
+      kernel.clock,
+      budget,
+      () => hold(path),
+      late => {
+        if (late.ok) void late.root.close().catch(() => undefined);
+      },
+    );
+    return timed.done ? timed.value : { ok: false, reason: 'spent' };
+  };
+}
+
+function holdWith(kernel: Pick<KernelPorts, 'roots'>, verdict: FolderVerdict, mustBeNamed: boolean) {
   return async (path: string): Promise<PinResult> => {
     const named = kernel.roots.root('imports', { subfolder: path });
     const fenced = named.resolve('');
@@ -82,18 +137,34 @@ function holder(kernel: Pick<KernelPorts, 'roots'>, verdict: FolderVerdict, must
  * The pins one build uses, over the kernel. The policy is read once per build (where each private folder really is),
  * not once per folder.
  */
-export function kernelPins(kernel: Kernel, browser: FolderBrowser): () => Promise<FolderPins> {
-  return async () => {
-    const policy = await folderPolicy(browser, await browser.home());
+export function kernelPins(kernel: Kernel, browser: FolderBrowser): (budget: SpawnBudget) => Promise<FolderPins> {
+  return async budget => {
+    // Reading the policy lists folders (where each private one really is), so it is spent from the build's own budget too.
+    const read = await within(kernel.clock, budget, async () => await folderPolicy(browser, await browser.home()));
+    if (!read.done) {
+      const spent = async (): Promise<{ ok: false; reason: 'spent' }> => ({ ok: false, reason: 'spent' });
+      return { project: spent, nested: spent, descendant: async () => 'spent' };
+    }
+    const policy = read.value;
     return {
-      project: holder(kernel, policy.verdict, true),
-      nested: holder(kernel, policy.child, false),
+      project: holder(kernel, policy.verdict, true, budget),
+      nested: holder(kernel, policy.child, false, budget),
       descendant: async real => {
-        const verdict = await policy.child(real);
-        return verdict === undefined ? undefined : verdict === 'private' ? 'private' : 'unreadable';
+        // One look at a folder (it lists every name for a sign-in file) is bounded by what is left of the build's time.
+        const timed = await within(kernel.clock, budget, () => policy.child(real));
+        if (!timed.done) return 'spent';
+        return timed.value === undefined ? undefined : timed.value === 'private' ? 'private' : 'unreadable';
       },
     };
   };
+}
+
+/** A Git child that ran out of time, told apart from one that failed: the index reports the first as the budget, not as damage. */
+export class GitTimedOut extends Error {
+  constructor(action: string) {
+    super(`${action} timed out`);
+    this.name = 'GitTimedOut';
+  }
 }
 
 /**
@@ -127,5 +198,9 @@ export function kernelGit(kernel: Pick<KernelPorts, 'spawn'>): TreeGit {
         maxStderrBytes: GIT_STDERR_BYTES,
       }),
   };
-  return treeGit(runner);
+  return treeGit(runner, (action, execution) =>
+    execution.timedOut
+      ? new GitTimedOut(action)
+      : new Error(`${action} failed: ${execution.stderr.trim() || `exit ${String(execution.exitCode)}`}`),
+  );
 }

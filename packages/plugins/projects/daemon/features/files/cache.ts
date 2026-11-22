@@ -56,7 +56,12 @@ export interface CachedStatus {
 export class ProjectIndexCache {
   private readonly entries = new Map<string, Entry>();
   private building = 0;
-  private readonly waiting: (() => void)[] = [];
+  /** Builds queued for a slot, each remembering the entry it was asked for, so evicting that entry can cancel it. */
+  private readonly waiting: {
+    readonly entry: Entry;
+    readonly begin: () => void;
+    readonly cancel: (e: Error) => void;
+  }[] = [];
 
   constructor(
     private readonly build: (path: string) => Promise<ProjectIndex>,
@@ -69,9 +74,17 @@ export class ProjectIndexCache {
     return this.entries.size;
   }
 
-  /** Forgets a project's index at once: what the place was is no longer what is registered. */
+  /**
+   * Forgets a project's index at once: what the place was is no longer what is registered. A build of it still WAITING
+   * for a slot is cancelled (its waiting readers are told the folder is unavailable) rather than left in the queue, which
+   * would let evicted work pile up past the bound; one already RUNNING keeps its slot until it ends, so it stays counted.
+   */
   evict(key: string): void {
+    const entry = this.entries.get(key);
+    if (entry === undefined) return;
     this.entries.delete(key);
+    const queued = this.waiting.findIndex(waiter => waiter.entry === entry);
+    if (queued >= 0) this.waiting.splice(queued, 1)[0]?.cancel(new ProjectFolderRefused('unavailable'));
   }
 
   /**
@@ -124,17 +137,21 @@ export class ProjectIndexCache {
   }
 
   /** Starts the build now when one of the {@link MAX_CONCURRENT_BUILDS} slots is free (synchronously), else when one is. */
-  private start(path: string): Promise<ProjectIndex> {
+  private start(path: string, entry: Entry): Promise<ProjectIndex> {
     if (this.building >= MAX_CONCURRENT_BUILDS)
       return new Promise<ProjectIndex>((resolve, reject) => {
-        this.waiting.push(() => {
-          this.start(path).then(resolve, reject);
+        this.waiting.push({
+          entry,
+          begin: () => {
+            this.start(path, entry).then(resolve, reject);
+          },
+          cancel: reject,
         });
       });
     this.building += 1;
     const release = (): void => {
       this.building -= 1;
-      this.waiting.shift()?.();
+      this.waiting.shift()?.begin();
     };
     let started: Promise<ProjectIndex>;
     try {
@@ -149,7 +166,7 @@ export class ProjectIndexCache {
 
   /** One build per project: a second caller gets the promise already running. */
   private run(key: string, entry: Entry, path: string): Promise<ProjectIndex> {
-    entry.running ??= this.start(path)
+    entry.running ??= this.start(path, entry)
       .then(
         index => {
           entry.index = index;

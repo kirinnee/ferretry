@@ -235,6 +235,25 @@ describe('ProjectIndexCache bounds', () => {
     expect(cache.status('p', '/p').index).toBeUndefined();
   });
 
+  test('evicting a project whose build is still waiting for a slot cancels that build; it never starts later', async () => {
+    const { build, calls } = manualBuild();
+    const cache = new ProjectIndexCache(build, () => 0);
+    for (let number = 0; number < MAX_CONCURRENT_BUILDS; number++) void cache.read(`p${number}`, `/p${number}`);
+    const queued = cache.read('queued', '/queued').catch((error: unknown) => error);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(calls.length).toBe(MAX_CONCURRENT_BUILDS);
+
+    cache.evict('queued');
+    calls[0]?.finish(index('one'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // The freed slot is not given to the evicted build, and whoever waited for it is told the folder is unavailable.
+    expect(calls.length).toBe(MAX_CONCURRENT_BUILDS);
+    expect(calls.map(call => call.path)).not.toContain('/queued');
+    expect(await queued).toMatchObject({ name: 'ProjectFolderRefused', reason: 'unavailable' });
+    expect(cache.size()).toBe(MAX_CONCURRENT_BUILDS);
+  });
+
   test('evict forgets a project at once', async () => {
     const cache = new ProjectIndexCache(
       async () => index('x'),
