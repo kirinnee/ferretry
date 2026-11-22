@@ -1,0 +1,27 @@
+# One Durian page in real Safari, on a real Mac (r12 H8): the chat's Transcript over one assistant message of five
+# Durian parts, served under the app's real Content-Security-Policy, driven by `safaridriver`. It passes only when the parts
+# are drawn and the page reports 0 policy violations, 0 errors, 0 failed loads and 0 console.error/console.warn calls
+# (packages/plugins/conversation/tests/safari/durian-page.ts says what Safari can and cannot report, and why this is a program
+# and not a `bun test` file: a test that skips where there is no Safari reads as a pass).
+#
+# It runs AFTER kernel-darwin in the same attempt, which installed the pinned toolchain and the dependencies, so a macOS
+# runner that never starts is read by the one policy in smoke-darwin.yaml (docs/standards/ci-cd, "macOS runner shortage").
+# `safaridriver` has no headless mode and Safari hosts one WebDriver session at a time: this runs in the runner's own GUI session,
+# alone. The `timeout` ends a hung driver as a FAILED step (a composite step has no `timeout-minutes` of its own).
+# Chromium evidence is not Safari evidence, and this is not iOS Safari: a narrow Mac window makes no phone claim.
+name: Safari Durian page
+description: Open one Durian page in real Safari through safaridriver and fail on any violation, error or console error.
+runs:
+  using: composite
+  steps:
+    - name: Allow Safari remote automation
+      shell: bash
+      run: sudo safaridriver --enable
+    - name: Durian page in Safari
+      shell: bash
+      env:
+        FY_MODEL_CATALOG: 'off'
+        FY_LOCAL_MODELS: 'off'
+        FY_RELAY_DIRECTORY_ORIGIN: 'off'
+        FY_UPDATE_CHECK: 'off'
+      run: ./scripts/ci/in-devshell.sh timeout --kill-after=15 420 bun packages/plugins/conversation/tests/safari/durian-page.ts

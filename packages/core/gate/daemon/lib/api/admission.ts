@@ -591,7 +591,7 @@ export class GateAdmission implements Admission {
       spendFreshStepUp: () => {
         if (subject !== undefined) this.deps.stepUps.spendFresh(subject);
       },
-      claimFreshStepUp: this.#claimFresh(subject, now, spentStepUp),
+      claimFreshStepUp: this.#claimFresh(subject, now, spentStepUp, request.signal),
       claimStoredProof: this.#claimStored(subject),
     };
     return { outcome: 'admitted', standing, actor: actOf(authentication, actor) };
@@ -602,8 +602,22 @@ export class GateAdmission implements Admission {
    * The claim takes only a proof that ALREADY EXISTED when the call was admitted (`admittedAt`): a passkey proved
    * after that instant is never taken by this standing, however long its continuations outlive the request, and stays
    * where it is for the act it was given for.
+   *
+   * `spentAtAdmission` (a window of 0 spent the step-up this call rode on) lasts only for the admitting request: once
+   * `requestEnded` aborts, a continuation claim of the same standing is asked as any other caller's, which a spent
+   * window answers `false`. A request that carries no signal keeps the right for its own claims.
+   *
+   * `requestEnded` is the request's OWN signal. A device (the only caller with a step-up subject) arrives on a session,
+   * and the kernel (`CarriedRequests`) joins the session's end with the request's own settle: the signal aborts when
+   * the handler answered or failed, even while the session stays open. It is never the session's signal alone, which
+   * outlives every request it carries.
    */
-  #claimFresh(subject: StepUpSubject | undefined, admittedAt: Instant, spentAtAdmission: boolean): ClaimFreshStepUp {
+  #claimFresh(
+    subject: StepUpSubject | undefined,
+    admittedAt: Instant,
+    spentAtAdmission: boolean,
+    requestEnded?: AbortSignal,
+  ): ClaimFreshStepUp {
     const registry = this.deps.stepUps;
     const notAfterMs = epochMs(admittedAt);
     return ((act?: StepUpAct, bound?: string): boolean => {
@@ -620,7 +634,7 @@ export class GateAdmission implements Admission {
         act as MachineSkippableStepUpAct | undefined,
         undefined,
         notAfterMs,
-        spentAtAdmission,
+        spentAtAdmission && requestEnded?.aborted !== true,
       );
     }) as ClaimFreshStepUp;
   }

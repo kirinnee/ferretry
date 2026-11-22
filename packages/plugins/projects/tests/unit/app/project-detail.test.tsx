@@ -5,6 +5,7 @@ import type { ProjectsClient } from '../../../app/lib/client.ts';
 import type { FerretRow } from '../../../app/lib/ferrets.ts';
 import { ProjectDetailPage } from '../../../app/views/project-detail.tsx';
 import { ANSWERED, type Call, clickEvent, ferret, PROJECT, refusal, SWITCH_OFF, scripted } from './support/client.ts';
+import { answerFor, FILES, summaryOf } from './support/finder-fixtures.ts';
 
 const LIST = 'GET /v1/projects';
 const FERRETS = 'GET /v1/ferrets';
@@ -18,7 +19,17 @@ const detail = (client: ProjectsClient, projectId: string = PROJECT.id, daemon =
 );
 
 const client = (ferrets: readonly FerretRow[] | Error = [], extra: Record<string, unknown> = {}, calls?: Call[]) =>
-  scripted({ [LIST]: [PROJECT], [FERRETS]: ferrets, [SWITCH]: SWITCH_OFF, ...extra }, calls);
+  scripted(
+    {
+      [LIST]: [PROJECT],
+      [FERRETS]: ferrets,
+      [SWITCH]: SWITCH_OFF,
+      // The project's file finder (&F6061 U7) reads the folder, not the ferret list: it answers whatever the ferrets do.
+      [FILES]: (call: Call) => answerFor(summaryOf(), call.query?.q, Number(call.query?.limit ?? 50)),
+      ...extra,
+    },
+    calls,
+  );
 
 const settled = async (mounted: Mounted, ready: (container: HTMLElement) => boolean, what: string): Promise<void> => {
   await settleUntil(() => ready(mounted.container), what, interact);
@@ -106,60 +117,67 @@ describe('ProjectDetailPage', () => {
     const sections = [...mounted.container.querySelectorAll('section[aria-label]')].map(node =>
       node.getAttribute('aria-label'),
     );
-    expect(sections).toEqual([
-      'Provenance',
-      'GitHub accounts',
-      'Board',
-      'Active ferrets',
-      'Files of this project’s ferrets',
-    ]);
+    expect(sections).toEqual(['Provenance', 'GitHub accounts', 'Board', 'Active ferrets', 'Files']);
     expect(must(mounted.container.querySelector('h1'), 'the title').textContent).toBe('ferretry');
     expect(mounted.container.querySelector('[data-project-provenance="/work/ferretry"]')).not.toBeNull();
     expect(must(mounted.container.querySelector('[data-project-agents="ready"]'), 'the ferrets').textContent).toContain(
       'hayden',
     );
+    await settled(mounted, c => c.querySelector('[data-finder-row]') !== null, 'the finder rows');
     expect(
-      must(mounted.container.querySelector('[data-project-files="f-1"] a'), 'the files link').getAttribute('href'),
+      must(mounted.container.querySelector('[data-project-files-ferret="f-1"] a'), 'the ferret link').getAttribute(
+        'href',
+      ),
     ).toBe('/d/workstation/ferrets/f-1');
     await mounted.unmount();
   });
 
-  it('says a project with no ferret has no files to browse', async () => {
-    const mounted = await mount(detail(client([])));
-    await settled(mounted, c => c.querySelector('[data-project-files="unavailable"]') !== null, 'the files state');
+  it('draws the project’s file finder over the project folder, with or without a ferret there', async () => {
+    const calls: Call[] = [];
+    const mounted = await mount(detail(client([], {}, calls)));
+    await settled(mounted, c => c.querySelector('[data-finder-row]') !== null, 'the finder rows');
 
     expect(mounted.container.querySelector('[data-project-agents="empty"]')).not.toBeNull();
+    expect(mounted.container.querySelector('[data-project-files-ferret]')).toBeNull();
+    const read = must(
+      calls.find(call => call.route === FILES),
+      'the files read',
+    );
+    expect(read.params).toEqual({ id: PROJECT.id });
     await mounted.unmount();
   });
 
-  it('does not count a stopped ferret as one still working here', async () => {
+  it('does not count a stopped ferret as one still working here, and still links its files', async () => {
     const mounted = await mount(detail(client([ferret('done', '/work/ferretry', { state: 'stopped' })])));
     await settled(mounted, c => c.querySelector('[data-project-agents="empty"]') !== null, 'the empty ferret list');
 
-    // Its files are still the newest ferret's, stopped or not.
-    expect(mounted.container.querySelector('[data-project-files="done"]')).not.toBeNull();
+    // The newest ferret's browser is still where a file is opened, stopped or not.
+    await settled(mounted, c => c.querySelector('[data-project-files-ferret="done"]') !== null, 'the ferret link');
     await mounted.unmount();
   });
 
-  it('keeps an unread ferret list loading rather than claiming the project is idle', async () => {
+  it('keeps an unread ferret list loading rather than claiming the project is idle; the finder does not wait for it', async () => {
     const pending = new Promise<readonly FerretRow[]>(() => undefined);
     const mounted = await mount(detail(client([], { [FERRETS]: () => pending })));
     await shown(mounted);
 
     expect(mounted.container.querySelector('[data-loading="background"]')).not.toBeNull();
-    expect(mounted.container.querySelector('[data-project-files="unread"]')).not.toBeNull();
+    await settled(mounted, c => c.querySelector('[data-finder-row]') !== null, 'the finder rows');
+    // An unread list is not an absent ferret, and not a present one either: no link is offered.
+    expect(mounted.container.querySelector('[data-project-files-ferret]')).toBeNull();
     expect(mounted.container.querySelector('[data-project-agents="empty"]')).toBeNull();
     await mounted.unmount();
   });
 
-  it('names a failed ferret read instead of spinning on it forever', async () => {
+  it('names a failed ferret read instead of spinning on it forever, and the finder still works', async () => {
     const mounted = await mount(detail(client(new Error('daemon is offline'))));
     await settled(mounted, c => c.querySelector('[data-project-agents="failed"]') !== null, 'the failed read');
 
     expect(mounted.container.querySelector('[data-project-agents="failed"]')?.textContent).toContain(
       'daemon is offline',
     );
-    expect(mounted.container.querySelector('[data-project-files="failed"]')).not.toBeNull();
+    await settled(mounted, c => c.querySelector('[data-finder-row]') !== null, 'the finder rows');
+    expect(mounted.container.querySelector('[data-project-files-ferret]')).toBeNull();
     await mounted.unmount();
   });
 

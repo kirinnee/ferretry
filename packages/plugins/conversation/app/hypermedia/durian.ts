@@ -1,20 +1,24 @@
-import { readConfigText } from '@ferretry/std/yaml';
 import { setYamlParser } from 'durian-hypermedia';
 
 /**
- * DURIAN'S ONE HOST SETTING. The format reads YAML (front matter, chart and animation data) through a parser the host
- * gives it: the browser has no `Bun.YAML`, and Durian ships none of its own (`durian-hypermedia/src/host/yaml.ts`).
- * Ours is the repository's shared BOUNDED reader (`@ferretry/std/yaml`: a size cap, an alias budget, no YAML 1.1 tags,
- * duplicate keys refused), the only door text a person or an agent wrote may go through. A text it refuses throws, and
- * Durian turns the throw into a problem on that part, so the part is not drawn from it. Agent output is untrusted input;
- * Durian also refuses an alias bomb before it gets here, and this is the second lock on the same door.
+ * DURIAN'S ONE HOST SETTING: no YAML is read in a message (r12 H8 fix, lead decision on size).
+ *
+ * Durian reads YAML through a parser the host gives it (`durian-hypermedia/src/host/yaml.ts`: the browser has no `Bun.YAML`,
+ * and Durian ships none). Measured on the pinned release, the only things in a message that reach it are a leading front
+ * matter block (this app reads none: `frontMatter: false`) and a ```chart fence's data, and every chart fence is held as code
+ * before Durian reads it (`held-fences.tsx`). The alignment, tier list, animation, terminal, file tree, editor, tabs, accordion
+ * and mermaid parts have readers of their own. So no part we draw needs a YAML parser, and the repository's bounded reader
+ * (`@ferretry/std/yaml`: a size cap, an alias budget, no YAML 1.1 tags) was ~29 KB gzip of every first load for a call nothing
+ * makes.
+ *
+ * The parser Durian is given REFUSES, which is the stricter form of the same lock: if an upstream release (or an author) ever
+ * reaches it, the throw becomes a problem on that part, which is not drawn from it. A part that truly needs YAML brings its
+ * reader with it, lazily, in the PR that draws that part.
  *
  * Call it once before the first `parse`; calling it again is harmless.
  */
 export function configureDurian(): void {
-  setYamlParser(text => {
-    const read = readConfigText(text);
-    if (!read.ok) throw new Error(read.errors[0]?.message ?? 'the YAML could not be read');
-    return read.read.value;
+  setYamlParser(() => {
+    throw new Error('YAML is not read in a message');
   });
 }

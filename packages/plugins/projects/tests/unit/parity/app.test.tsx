@@ -107,7 +107,11 @@ describe('app parity', () => {
     await settled(detail, c => c.querySelector('[data-project-agents="ready"]') !== null, 'the ferret list');
     expect(
       [...detail.container.querySelectorAll('section[aria-label]')].map(node => node.getAttribute('aria-label')),
-    ).toEqual(['Provenance', 'GitHub accounts', 'Board', 'Active ferrets', 'Files of this project’s ferrets']);
+    ).toEqual(['Provenance', 'GitHub accounts', 'Board', 'Active ferrets', 'Files']);
+    // The Files section is the finder over the project's folder, and it draws (here: failing to read, since this daemon
+    // scripts no file routes) rather than being an older ferret-only list.
+    await settled(detail, c => c.querySelector('[data-finder-state]') !== null, 'the file finder');
+    expect(detail.container.querySelector('section[aria-label="Files"] [data-project-files]')).not.toBeNull();
     await detail.unmount();
 
     const hub = await mount(routed(<ProjectsPage client={scripted(ROUTES)} daemon="workstation" />));

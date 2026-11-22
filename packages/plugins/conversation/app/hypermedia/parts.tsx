@@ -2,7 +2,6 @@ import type { Block } from 'durian-hypermedia';
 import {
   AccordionPart,
   AlignmentPart,
-  ChartPart,
   EditorPart,
   FileTreePart,
   HostMermaidPart,
@@ -29,9 +28,12 @@ import { HypermediaMermaid } from './mermaid-slot.tsx';
  *   human                                             ours (`llm-text.tsx`): the body is drawn whatever `llm=` says.
  *   chart                                             NOT drawn by Durian (r12 H4 review R1): its formulas have no bound on
  *                                                     their work, so a ```chart fence is held as code before Durian parses
- *                                                     it (`held-fences.tsx`) and this component is registered but never
- *                                                     reached, until upstream bounds the evaluator. Our `fy-render` chart
- *                                                     is the chart that draws.
+ *                                                     it (`held-fences.tsx`) and this component is `UndrawnPart`, never
+ *                                                     reached, until upstream bounds the evaluator. Durian's chart renderer
+ *                                                     is NOT imported here (r12 H8: it and the evaluator were ~9 KB of every
+ *                                                     first load), and the build resolves the parser's own chart reader to a
+ *                                                     stub (`durian-shims/chart-held.ts`). Our `fy-render` chart is the chart
+ *                                                     that draws.
  *   animation                                         Durian's engine, 2D and 3D (decision C4: 3D on). The 3D module is
  *                                                     a lazy chunk, loaded when a reader opens a 3D view, and a lost
  *                                                     WebGL context falls back to the flat view (`animation-part.tsx`).
@@ -59,7 +61,7 @@ export const HYPERMEDIA_PARTS: Required<Pick<Components, PartName>> = {
   tabs: withLlmText(TabsPart),
   accordion: withLlmText(AccordionPart),
   human: HumanSegment,
-  chart: withLlmText(ChartPart),
+  chart: UndrawnPart,
   animation: withLlmText(GuardedAnimation),
   mermaid: withLlmText(HostMermaidPart),
   codewalk: UndrawnPart,

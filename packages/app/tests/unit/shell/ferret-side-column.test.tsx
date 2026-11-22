@@ -51,7 +51,10 @@ const manifest = manifestOf('ferretpage', {
       { id: 'page', path: 'page', nav: { label: 'Page', order: 1 } },
       { id: 'other', path: 'other', nav: { label: 'Other', order: 2 } },
     ],
-    panels: [{ id: 'note', slot: 'ferret.side', order: 10 }],
+    panels: [
+      { id: 'note', slot: 'ferret.side', order: 10 },
+      { id: 'files', slot: 'ferret.side', order: 20 },
+    ],
   },
 });
 const plugin = entryOf(
@@ -63,7 +66,7 @@ const plugin = entryOf(
           page: () => <FerretWorkspace chat={<Chat words="the chat" />} daemon="d1" subject="zoe" />,
           other: () => <FerretWorkspace chat={<Chat words="the other chat" />} daemon="d1" subject="kai" />,
         },
-        panels: { note: Note },
+        panels: { note: Note, files: () => <p data-testid="side-files">files</p> },
       }),
     }),
     {
@@ -97,7 +100,7 @@ const layout = () => {
       nav: { style: 'list', items: ['page', 'other'] },
       side: { holds: 'panels' },
       phone: { nav: { side: 'bottom', items: ['page'] } },
-      panels: { 'ferret.side': ['note'] },
+      panels: { 'ferret.side': ['note', 'files'] },
       'composer.tools': [],
     }),
   );
@@ -172,6 +175,19 @@ describe('the ferret page opens on the chat, with the side column one click away
     await settle();
     expect(shown(page)).toBe(true);
     expect(page.querySelector('[data-testid="side-note"]')).not.toBeNull();
+  });
+
+  test('an address that names a file (`?file=`, from Projects’ file finder) opens the closed column on that panel', async () => {
+    const page = await open('/d/d1/page?file=src%2Fentry-ts');
+    await settle();
+    expect(shown(page)).toBe(true);
+    expect(page.querySelector('[data-testid="side-files"]')).not.toBeNull();
+  });
+
+  test('an address with no file leaves the column closed', async () => {
+    const page = await open('/d/d1/page?find=entry');
+    await settle();
+    expect(column(page)).toBeNull();
   });
 
   test('a panel the layout did not place is not asked for, so a refused ask leaves the column closed', async () => {

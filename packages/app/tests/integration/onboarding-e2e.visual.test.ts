@@ -471,13 +471,58 @@ const stagePage = async (tab: Page, variant: Variant, key: string): Promise<void
     expect(height, `${key}: every choice and footer button is 44px tall`).toBeGreaterThanOrEqual(43.5);
 };
 
-/** Collects a button that is the row wide or under 44px tall (read by the gap below, not asserted here). */
-const measureButton = async (tab: Page, variant: Variant, label: string, selector: string): Promise<void> => {
-  const box = await tab.locator(selector).first().boundingBox();
-  if (box === null) return;
-  const limit = (variant.width < 600 ? 0.7 : 0.5) * variant.width;
-  if (box.width >= limit || box.height < 43.5)
-    seen.badButtons.push(`${variant.name}:${label} (${Math.round(box.width)}x${Math.round(box.height)})`);
+/**
+ * Collects a pairing button of the wrong shape (read by the gap below, not asserted here): on a phone it is FULL width,
+ * at least 0.9 of the page's content width (its `<main>` minus padding, not its action row's), and its `answers` action-row
+ * answers are STACKED one under another (the owner's words, since #2296); on a desktop it is under half the page width.
+ * Either way it is at least 44px tall, and a button, page or row that cannot be measured is collected as a failure.
+ */
+const measureButton = async (
+  tab: Page,
+  variant: Variant,
+  label: string,
+  selector: string,
+  answers: number,
+): Promise<void> => {
+  const measured = await tab
+    .locator(selector)
+    .first()
+    .evaluate((node, expected) => {
+      const box = node.getBoundingClientRect();
+      // The STABLE page content width: the page's own <main> minus its padding. The button's parent (the action row) is
+      // never the reference, because a row that shrank with its button would make a half-width button look "full width".
+      const page = node.closest('main');
+      const style = page === null ? null : getComputedStyle(page);
+      const content =
+        page === null || style === null
+          ? Number.NaN
+          : page.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+      // Every answer of the button's action row, with its place on the glass (the button itself included).
+      const row = node.closest('[data-action-row]');
+      const rects = [...(row?.children ?? [])].map(child => {
+        const rect = child.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right };
+      });
+      const sorted = [...rects].sort((a, b) => a.top - b.top);
+      // Stacked: each answer starts at or below the bottom of the one above it (a 0.5px rounding allowance) and none is
+      // beside another, so no two share a horizontal band.
+      const stacked = sorted.every((rect, index) => index === 0 || rect.top >= (sorted[index - 1]?.bottom ?? 0) - 0.5);
+      return { width: box.width, height: box.height, content, answers: rects.length, stacked, expected };
+    }, answers)
+    .catch(() => null);
+  const name = `${variant.name}:${label}`;
+  if (measured === null || !Number.isFinite(measured.content) || measured.content <= 0) {
+    // An absent measurement is a failure, never a pass: no element, no page <main>, or a zero-width page.
+    seen.badButtons.push(`${name} (could not be measured)`);
+    return;
+  }
+  const phone = variant.width < 600;
+  const wrongWidth = phone ? measured.width < 0.9 * measured.content : measured.width >= 0.5 * variant.width;
+  const notStacked = phone && (measured.answers !== measured.expected || !measured.stacked);
+  if (wrongWidth || notStacked || measured.height < 44)
+    seen.badButtons.push(
+      `${name} (${Math.round(measured.width * 100) / 100}x${Math.round(measured.height * 100) / 100} of ${Math.round(measured.content)} content, ${measured.answers} answers ${measured.stacked ? 'stacked' : 'side by side'})`,
+    );
 };
 
 /** Presses Next and waits for `to` (a page key, or `end`). */
@@ -885,7 +930,7 @@ describe('the first run, end to end', () => {
         await tab.getByText('Use this link').click();
         await tab.locator('[data-pair-confirm]').waitFor();
         await shot(tab, variant, 'pair-confirm');
-        await measureButton(tab, variant, 'Pair this device', '[data-pair-confirm]');
+        await measureButton(tab, variant, 'Pair this device', '[data-pair-confirm]', 2);
         // Item 4: "Not now" is a real, bordered 44px button, not an underlined text link.
         const notNow = await tab.getByRole('button', { name: 'Not now' }).evaluate(node => {
           const style = getComputedStyle(node);
@@ -1440,7 +1485,7 @@ describe('the first run, end to end', () => {
         // ── a SECOND machine: the Pair journey from inside the app ─────────────────────────────────────────────────
         await navigate('/onboarding?journey=pair');
         await tab.waitForSelector('[data-onboarding-open-pair]');
-        await measureButton(tab, variant, 'Open the pairing page', '[data-onboarding-open-pair]');
+        await measureButton(tab, variant, 'Open the pairing page', '[data-onboarding-open-pair]', 1);
         expect(await tab.locator(CHROME).count(), 'the Pair start has no app chrome').toBe(0);
         await shot(tab, variant, 'pair-journey');
         await tab.locator('[data-onboarding-open-pair]').click();
@@ -1713,7 +1758,7 @@ describe('the gaps the gate found, now closed', () => {
       expect(seen.footerOffScreen).toEqual([]);
     },
   );
-  it('the pairing page buttons are auto width and 44px tall', () => {
+  it('the pairing page buttons are full width on a phone, under half the page on a desktop, and 44px tall', () => {
     expect(seen.badButtons).toEqual([]);
   });
   it('the pairing page reached from the first run has no sidebar or app chrome', () => {
