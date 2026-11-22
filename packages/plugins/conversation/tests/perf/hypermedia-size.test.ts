@@ -114,7 +114,7 @@ describe('the transcript bundle', () => {
     expect(real.firstModules.filter(path => /\/node_modules\/yaml\//u.test(path))).toEqual([]);
   });
 
-  test('Durian’s stylesheet IS in the first load: the bare import survives the side-effect-free package', () => {
+  test('Durian’s stylesheet IS in the first load: the plugin keeps the bare import of a side-effect-free package', () => {
     // Durian's own selectors, not ours: the animation stage's mode button and the part chrome.
     const css = real.firstStyles.map(style => style.text).join('\n');
     expect(css).toContain('.dh-doc');

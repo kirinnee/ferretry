@@ -10,8 +10,8 @@
  * So this builds the REAL app (the shell's own `vite.config.ts`, every plugin it registers), serves the build with the exact
  * `Content-Security-Policy` of `public/_headers`, loads `/app/` in real Chromium, and counts `securitypolicyviolation` events
  * and `new Function('')` calls made before zod's JIT was off. Both must be none. The same build is held to ship Durian's
- * stylesheet (the app's own stylesheet has no `.dh-doc` rule of Durian's unless the package's bare CSS import survived its
- * side-effect-free flag).
+ * stylesheet (the app's own stylesheet has no `.dh-doc` rule of Durian's unless the bare CSS import survived the Conversation
+ * package's `"sideEffects": false`, which the Durian plugin sees to).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { readFile } from 'node:fs/promises';

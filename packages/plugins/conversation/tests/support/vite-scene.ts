@@ -7,7 +7,7 @@ import { durianBuild } from '../../app/vite-durian.ts';
  * A SCENE BUILT THE WAY THE APP IS BUILT (r12 H8 fix): by the app shell's own Vite, in production mode, with the Durian plugin the
  * shell registers. The Bun-bundled scenes the other visual tests use are the right tool for a picture, and the wrong one for a
  * claim about what SHIPS: Bun reads Durian's own scene compiler and chart reader where the shell's build redirects them
- * (`app/vite-durian.ts`), orders chunks its own way, and takes no stylesheet from a `sideEffects` list. This builds the scene
+ * (`app/vite-durian.ts`), orders chunks its own way, and does not keep the stylesheet's import the way the plugin does. This builds the scene
  * with the shell's Vite, so the chunks, their order and the stylesheet are the ones a page is given.
  *
  * It is loaded from the shell's install rather than declared here, because Conversation ships no build tool of its own.
@@ -74,7 +74,7 @@ export const buildViteScene = async (): Promise<ViteScene> => {
     plugins: [
       durianBuild.plugin,
       {
-        // The package is `sideEffects`-free but for the stylesheet; this one scene file RUNS (it mounts the page), so the build is
+        // The package is `sideEffects`-free (the stylesheet import is kept by the Durian plugin); this one scene file RUNS (it mounts the page), so the build is
         // told it has effects, or its bare import is dropped and the scene is an empty file.
         name: 'scene-has-effects',
         enforce: 'pre' as const,

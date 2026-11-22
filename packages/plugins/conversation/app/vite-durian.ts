@@ -61,6 +61,14 @@ interface ResolveContext {
   resolve(source: string, importer?: string, options?: { skipSelf?: boolean }): Promise<{ id: string } | null>;
 }
 
+/**
+ * THE STYLESHEET'S OWN IMPORT (`app/hypermedia/dh-styles.ts`, loaded by the Conversation surfaces) HAS A SIDE EFFECT, and this
+ * package declares none (`"sideEffects": false`, which the hosted-relay guard `scripts/validate/relay-config.sh` requires of every
+ * workspace package a Worker could import). A bare import of a side-effect-free module is dropped, and the app shipped no Durian
+ * CSS (r12 H8 review, item 3). The plugin that builds Durian says so for this one module, where the stylesheet is made.
+ */
+const STYLES_MODULE = /(^|\/)hypermedia\/dh-styles\.ts$/u;
+
 interface Installed {
   readonly root: string;
   readonly exports: Record<string, string | { bun?: string }>;
@@ -154,8 +162,16 @@ const plugin = {
           'move the pin only by a PR that reads its CHANGELOG and re-runs the Durian fixtures (docs/hypermedia.md).',
       );
   },
-  async resolveId(this: ResolveContext, source: string, importer?: string): Promise<string | { id: string } | null> {
+  async resolveId(
+    this: ResolveContext,
+    source: string,
+    importer?: string,
+  ): Promise<string | { id: string; moduleSideEffects?: boolean } | null> {
     if (source === STYLES) return STYLES_ID;
+    if (STYLES_MODULE.test(source)) {
+      const resolved = await this.resolve(source, importer, { skipSelf: true });
+      return resolved === null ? null : { id: resolved.id, moduleSideEffects: true };
+    }
     const { root, exports } = installedPackage();
     const redirected = redirectedImport(source, importer, root);
     if (redirected !== null) return redirected;
