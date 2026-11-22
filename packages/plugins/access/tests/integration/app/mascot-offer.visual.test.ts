@@ -516,7 +516,7 @@ describe('r11 O10: the passkey offer buttons are one fixed size', () => {
         expect(later.height).toBeCloseTo(add.height, 0);
         const sideBySide = Math.abs(add.y - later.y) < 4;
         if (sideBySide) {
-          expect(later.x, 'Not now at the left end').toBeCloseTo(offerBox.x, 0);
+          expect(add.x - (later.x + later.width), 'Not now sits right beside Add (one 12px gap)').toBeCloseTo(12, 0);
           expect(add.x + add.width, 'Add at the right end').toBeCloseTo(offerBox.x + offerBox.width, 0);
         } else {
           expect(later.x, 'stacked: both on one column').toBeCloseTo(add.x, 0);

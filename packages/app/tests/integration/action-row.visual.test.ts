@@ -1,13 +1,12 @@
 /**
  * C59: THE SHARED ANSWER-ROW RULES in a real browser over fake data (`fixtures/action-row-scene.tsx`), the ONE place the
  * audit's many "narrow, unequal, ragged buttons" are fixed. Computed geometry, 390 and 1280, light and dark:
- *   - `ActionRow`: a phone stacks both answers at the container's full width, the way on above; a desktop puts the secondary at
- *     the container's left edge and the primary at the right edge of ONE row, both the same size. A lone primary takes the right
- *     end on a desktop, a lone secondary stays at the left; on a phone either is the container's full width.
+ *   - `ActionRow`: a phone stacks both answers at the container's full width, the way on above; a desktop puts the two answers
+ *     side by side as ONE group at the container's right edge (C59 O8-2), both the same size. A lone answer is the same group of one at the right end; on a phone either is the container's full width.
  *   - `fy-action-stack`: every recovery action is one size; on a phone the column's full width.
  *   - `fy-inline-action`: sits on the sentence's line without making it taller (and is no taller than a text line).
  *   - the step frame's footer on a phone: one button is the row's full width, two split it, three are thirds (it was always a
- *     narrow third), and the way back is at the LEFT end on a desktop.
+ *     narrow third), and on a desktop Back is grouped with Later and Next at the right end (C59 O8-2).
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -120,8 +119,13 @@ describe('C59 the shared answer row', () => {
           expect(primary.y, 'phone: the way on is above').toBeLessThan(secondary.y);
         } else {
           expect(Math.abs(primary.y - secondary.y), 'desktop: one row').toBeLessThanOrEqual(1);
-          expect(Math.abs(secondary.x - container.x), 'secondary at the left end').toBeLessThanOrEqual(1);
+          // C59 O8-2: ONE group at the right edge: the way out right beside the way on (a 12px gap), not on the far edge.
           expect(Math.abs(primary.right - container.right), 'primary at the right end').toBeLessThanOrEqual(1);
+          expect(
+            Math.abs(primary.x - (secondary.right + 12)),
+            'the answers are one group (12px apart)',
+          ).toBeLessThanOrEqual(1);
+          expect(secondary.x - container.x, 'the way out is NOT at the far left').toBeGreaterThan(40);
         }
         const [lonePrimary] = await boxes(tab, '[data-sample="lone-primary"] button');
         const [loneContainer] = await boxes(tab, '[data-sample="lone-primary"]');
@@ -141,9 +145,10 @@ describe('C59 the shared answer row', () => {
             Math.abs(lonePrimary.right - loneContainer.right),
             'a lone primary takes the right end',
           ).toBeLessThanOrEqual(1);
-          expect(Math.abs(loneSecondary.x - loneContainer.x), 'a lone secondary stays at the left').toBeLessThanOrEqual(
-            1,
-          );
+          expect(
+            Math.abs(loneSecondary.right - loneContainer.right),
+            'a lone secondary is the same group of one, at the right end',
+          ).toBeLessThanOrEqual(1);
         }
       } finally {
         await close();
@@ -251,7 +256,7 @@ describe('C59 the shared answer row', () => {
       ['footer2', 2],
       ['footer3', 3],
     ] as const)
-      it(`${variant.name}: the step footer with ${count} button(s) ${variant.phone ? 'splits the row in equal tracks' : 'keeps the way back at the left end'}`, async () => {
+      it(`${variant.name}: the step footer with ${count} button(s) ${variant.phone ? 'splits the row in equal tracks' : 'groups Back with the buttons that move on, at the right end'}`, async () => {
         const { tab, close } = await open(variant, scene);
         try {
           const buttons = await boxes(tab, '.fy-spf__footer .fy-spf__button');
@@ -270,7 +275,10 @@ describe('C59 the shared answer row', () => {
             const first = buttons[0];
             const second = buttons[1];
             if (first === undefined || second === undefined) throw new Error('buttons');
-            expect(second.x - first.right, 'Back is away from the buttons that move on').toBeGreaterThan(40);
+            expect(
+              Math.abs(second.x - first.right - 12),
+              'Back is beside the buttons that move on (12px)',
+            ).toBeLessThanOrEqual(1);
           }
         } finally {
           await close();

@@ -195,10 +195,19 @@ describe('The pair page: mascot and night sky', () => {
         if (variant.phone) expect(titleBox, 'phone: the heading is centred').toBeGreaterThan(notNowBox.x + 24);
         else {
           expect(column.width, 'desktop: a reading column').toBeLessThanOrEqual(640);
+          // C59 O8-2: the two answers are ONE group at the column's right edge (Not now beside Pair this device), under a
+          // heading and a field that start at the column's left edge: no answer on each edge of the page.
+          const pairBox = must(await tab.getByRole('button', { name: 'Pair this device' }).boundingBox(), 'Pair');
+          const field = must(await tab.locator('main input').first().boundingBox(), 'the name field');
+          expect(Math.abs(titleBox - field.x), 'desktop: heading and field share the left edge').toBeLessThanOrEqual(2);
           expect(
-            Math.abs(titleBox - notNowBox.x),
-            'desktop: heading and Not now share the left edge',
-          ).toBeLessThanOrEqual(2);
+            Math.abs(pairBox.x + pairBox.width - (field.x + field.width)),
+            'desktop: Pair this device ends at the column right edge',
+          ).toBeLessThanOrEqual(1);
+          expect(
+            pairBox.x - (notNowBox.x + notNowBox.width),
+            'desktop: Not now sits right beside it, one 12px gap',
+          ).toBeCloseTo(12, 0);
         }
         await shot(tab, variant, 'pair');
         await tab.locator('[data-pair-details] button', { hasText: 'Details' }).click();
@@ -352,7 +361,7 @@ describe('The pair page: mascot and night sky', () => {
           expect(await tab.locator('[data-variant="primary"]').allInnerTexts()).toEqual(['Add a passkey now']);
           expect(await tab.locator('#pairing-title').innerText()).toBe('Connected');
           // C59 O3: the shared answer row. Each answer is at least 44 px tall; on a phone both are the card's width and stacked;
-          // on a desktop Not now is at the left end and Add a passkey now at the right end of one row.
+          // on a desktop Not now and Add a passkey now are one group at the right end of one row.
           const add = must(await tab.getByRole('button', { name: 'Add a passkey now' }).boundingBox(), 'add');
           const later = must(await tab.getByRole('button', { name: 'Not now' }).boundingBox(), 'later');
           for (const box of [add, later]) expect(box.height, 'at least 44 px tall').toBeGreaterThanOrEqual(43.5);
@@ -370,7 +379,8 @@ describe('The pair page: mascot and night sky', () => {
             expect(add.y, 'phone: stacked, the way on above').toBeLessThan(later.y);
           } else {
             expect(Math.abs(add.y - later.y), 'desktop: one row').toBeLessThanOrEqual(1);
-            expect(Math.abs(later.x - row.x), 'Not now at the left end').toBeLessThanOrEqual(1);
+            expect(later.x - row.x, 'Not now is beside Add, not at the far left end').toBeGreaterThan(40);
+            expect(add.x - (later.x + later.width), 'Not now sits right beside Add (one 12px gap)').toBeCloseTo(12, 0);
             expect(
               Math.abs(add.x + add.width - (row.x + row.width)),
               'Add a passkey now at the right end',
