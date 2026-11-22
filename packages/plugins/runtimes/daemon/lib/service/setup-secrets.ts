@@ -51,9 +51,12 @@ export const uniqueByName = <Secret extends FiledSecret>(secrets: readonly Secre
 export async function fileSecrets(
   put: (name: string, value: string) => Promise<void>,
   secrets: readonly FiledSecret[],
+  /** Called before EACH put: throws once the request has ended, so the next key is never filed (what landed stays). */
+  live?: () => void,
 ): Promise<void> {
   const created: string[] = [];
   for (const secret of secrets) {
+    live?.();
     try {
       await put(secret.name, secret.value);
       created.push(secret.name);

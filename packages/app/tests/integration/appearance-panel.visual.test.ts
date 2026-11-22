@@ -204,19 +204,22 @@ describe('Settings › This device › Look: a keyboard move shows the card it l
     [390, '390', true],
     [768, '768', false],
   ] as const) {
-    it(`${name}: End on the selected Style card checks the last style AND brings its card into the window`, async () => {
+    it(`${name}: End on the selected Style card moves focus to the last style AND brings its card into the window (Enter then chooses it)`, async () => {
       const { tab, close } = await open({ name, width, height: 700, phone, scheme: 'light' });
       try {
         await tab.locator('[data-choice] input:checked').focus();
         await tab.keyboard.press('End');
         const last = await tab.locator('[data-choice]').last().getAttribute('data-choice');
-        expect(await tab.locator(`[data-choice="${last}"] input`).isChecked()).toBe(true);
+        // The arrows, Home and End move the focus only (2129): nothing is chosen until Enter, Space or a click.
         expect(await tab.evaluate(() => document.activeElement?.getAttribute('value'))).toBe(last);
+        expect(await tab.locator(`[data-choice="${last}"] input`).isChecked()).toBe(false);
         await tab.waitForTimeout(800); // a smooth scroll settles
         const box = await labelInWindow(tab, `[data-choice="${last}"] input`);
         expect(box.top, 'the last card starts inside the window').toBeGreaterThanOrEqual(-4);
         // 4px of slack: the card was scaled 0.98 by its select pulse when it was scrolled to.
         expect(box.bottom, 'the last card ends inside the window').toBeLessThanOrEqual(box.height + 4);
+        await tab.keyboard.press('Enter');
+        expect(await tab.locator(`[data-choice="${last}"] input`).isChecked()).toBe(true);
       } finally {
         await close();
       }

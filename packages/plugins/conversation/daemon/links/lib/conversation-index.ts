@@ -13,7 +13,14 @@ import { describeConversation, type DescribedConversation } from './conversation
 import { isOwnerMessage } from '../../reader/lib/transcript/owner.ts';
 import { codexIndexNames, type TranscriptNames, transcriptNames } from './conversation-name.ts';
 import { spokenMessages, spokenSources, truncateText, writtenSources } from './conversation-text.ts';
-import { cleanTitle, fileTitle, type ScrubText, scrubShown } from './conversation-title.ts';
+import {
+  cleanTitle,
+  fileTitle,
+  hasCredentialCue,
+  type ScrubText,
+  scrubShown,
+  type TitleAuthor,
+} from './conversation-title.ts';
 
 /**
  * THE CONVERSATION INDEX (shared-history design §3.3): one row per transcript file of every history Conversation lists,
@@ -177,7 +184,13 @@ interface Row {
 
 type RowInput = Omit<Row, 'hay' | 'title' | 'written'> & {
   /** What a title is made from, not yet scrubbed: scrubbed with the rest of its batch, then written as `file_title`. */
-  readonly titleParts?: { readonly name?: string | undefined; readonly firstMessage?: string | undefined } | undefined;
+  readonly titleParts?:
+    | {
+        readonly name?: string | undefined;
+        readonly nameBy?: TitleAuthor | undefined;
+        readonly firstMessage?: string | undefined;
+      }
+    | undefined;
   /**
    * `preview` and `latest` are the messages AS WRITTEN (lines kept, not cut short): they are masked with the batch too, because a row
    * is shown wherever a title is, and only then made one line and cut to the preview length.
@@ -338,7 +351,9 @@ const untitledName = (row: {
   readonly preview: string;
 }): string => {
   const folder = row.project.split(/[\\/]/u).findLast(part => part !== '') ?? '';
-  return row.written === 1 && folder !== '' ? folder : truncateText(row.preview, NAME_FALLBACK_MAX);
+  if (row.written === 1 && folder !== '') return folder;
+  // An opening that names a credential is not shown as the name either: the words after the cue may be the secret's.
+  return hasCredentialCue(row.preview) ? UNTITLED_NAME : truncateText(row.preview, NAME_FALLBACK_MAX);
 };
 
 export class ConversationIndex {
@@ -786,7 +801,10 @@ export class ConversationIndex {
       // What the title is made from, scrubbed with its batch (`#titled`). A conversation that is only hand-off pointers has no
       // first message of its own: its ferret's title stands.
       ...(kept === undefined
-        ? { file_title: null, titleParts: { name: result.row.name, firstMessage: result.row.brief } }
+        ? {
+            file_title: null,
+            titleParts: { name: result.row.name, nameBy: result.row.nameBy, firstMessage: result.row.brief },
+          }
         : { file_title: kept }),
       preview: result.row.preview,
       latest: result.row.latest ?? null,
@@ -1034,7 +1052,9 @@ export class ConversationIndex {
         await this.#scrub(scrub =>
           [...named].flatMap(([id, name]) => {
             if (!inScope(id)) return [];
-            const title = cleanTitle(name, scrub);
+            // A Codex manual name and its automatic title are the same record, so neither is known to be the owner's:
+            // the credential cue applies (`transcriptNames` reads them as `generated` too).
+            const title = cleanTitle(name, scrub, 'generated');
             return title === undefined ? [] : [[id, title] as const];
           }),
         ),
@@ -1101,7 +1121,9 @@ export class ConversationIndex {
         new Map(
           [...names].map(([key, ferret]) => [
             key,
-            ferret.title === undefined ? null : (cleanTitle(ferret.title, scrub) ?? null),
+            ferret.title === undefined
+              ? null
+              : (cleanTitle(ferret.title, scrub, ferret.titleSource === 'auto' ? 'generated' : 'owner') ?? null),
           ]),
         ),
     );

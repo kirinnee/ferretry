@@ -20,7 +20,7 @@ const click = async (target: Element): Promise<void> => {
 };
 
 /** The longest journey there is: a daemon standing up here, installed by hand (install, daemon, open: pairing is the last step). */
-const DESKTOP: OnboardingPath = { route: 'first-time', target: 'this', doer: 'self', device: 'desktop' };
+const DESKTOP: OnboardingPath = { route: 'first-time', target: 'this', device: 'desktop' };
 
 describe('the step track', () => {
   it('is a real ordered list with one current step', async () => {

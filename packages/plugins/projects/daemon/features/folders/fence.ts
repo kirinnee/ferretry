@@ -1,72 +1,79 @@
+import { foldName, isPrivateFolder, isSecretFileName, isSecretFolderName, PRIVATE_FOLDERS } from '@ferretry/std';
 import { MAX_FOLDER_PATH_LENGTH } from '../../../contract/index.ts';
 
 /**
- * One name as a filesystem would compare it: Unicode-compatibility-normalized (macOS stores names decomposed, and `ﬁ`
- * or a full-width letter can read as the plain one), marks and invisible code points dropped (an HFS+ volume ignores
- * them), then lower-cased. It over-matches on purpose: on a case-sensitive Linux disk `.SSH` is a different folder, but
- * refusing it costs nothing and a private folder that slips through on a case-insensitive disk costs everything.
+ * What a name means — the fold, the private folders, the sign-in files — is `secret-names.ts` in `@ferretry/std`, the one list
+ * this fence and the ferret file reader (`core/ferrets` `path-policy.ts`) both read. Re-exported so the explorer reads
+ * its fence from one place; a name is never decided here.
  */
-export const foldName = (name: string): string =>
-  name
-    .normalize('NFKD')
-    .replace(/[\p{M}\p{Default_Ignorable_Code_Point}]/gu, '')
-    .toLowerCase();
+export { foldName, holdsSignIn, isPrivateFolder } from '@ferretry/std';
 
 /**
- * Folders under the home that hold keys or sign-ins. They are never listed, never entered and never named in a
- * listing of their parent (a name such as `id_work_ed25519` would leak what is there). Relative to the home, by
- * path segment, compared as {@link foldName} folds them: `.config/gh` also refuses `.config/gh/anything` and
- * `.Config/GH`.
+ * What a PROJECT reader keeps out under the home beyond that list: the macOS `~/Library` (Mail, Messages, Keychains, browser
+ * profiles). Applied by name on every platform: a Linux home that has a `~/Library` loses one folder, a Mac that slipped
+ * loses its mail. The ferret file reader has its own say about it.
  */
-const PRIVATE_FOLDERS: readonly (readonly string[])[] = [
-  ['.ssh'],
-  ['.gnupg'],
-  ['.claude'],
-  ['.codex'],
-  ['.config', 'gh'],
-  ['.aws'],
-  ['.kube'],
-  ['.docker'],
-  ['.config', 'gcloud'],
-  ['.password-store'],
-  ['.local', 'share', 'keyrings'],
-];
+const LIBRARY = 'Library';
+
+/** Whether a path relative to a home (segments) is, or is inside, a private folder or the macOS `~/Library`. */
+export const isPrivateBelowHome = (relative: readonly string[]): boolean =>
+  isPrivateFolder(relative) || (relative[0] !== undefined && foldName(relative[0]) === foldName(LIBRARY));
+
+/**
+ * Whether ONE name is denied wherever it sits, with no home to anchor it: a key store by name (`.ssh`, `.gnupg`,
+ * `.password-store`) or anything that names a secret (`.env`, `*.pem`, `id_ed25519*`, …). The shared list in `@ferretry/std`
+ * decides; it over-matches on purpose. Applied to every real path component and to every name a listing would return, so a
+ * place outside the home is no softer than one inside it.
+ */
+export const isDeniedName = (name: string): boolean => isSecretFolderName(name) || isSecretFileName(name);
 
 /** Every private folder as an absolute spelling under `home`: the paths whose REAL location is then looked up per request. */
 export const privateSpellings = (home: string): readonly string[] => {
   const base = home.replace(/\/+$/, '');
-  return PRIVATE_FOLDERS.map(folder => `${base}/${folder.join('/')}`);
+  return [...PRIVATE_FOLDERS.map(folder => folder.join('/')), LIBRARY].map(folder => `${base}/${folder}`);
 };
+
+/**
+ * Trees a project is never read from on any machine: runtime and pseudo filesystems (other processes' memory, endless
+ * names) and the huge read-only trees no one keeps a project in. Judged on the real path.
+ */
+const SKIPPED_TREES: readonly string[] = [
+  '/proc',
+  '/sys',
+  '/dev',
+  '/run',
+  '/var/run',
+  '/nix/store',
+  '/System',
+  '/private/var',
+];
+
+/** Folders that are somebody's home, whole. */
+const HOME_FOLDERS: readonly string[] = ['/root', '/var/root'];
+/** Folders whose every child is somebody's home. */
+const HOME_PARENTS: readonly string[] = ['/home', '/Users'];
 
 /** Whether the real path `real` is `root` or inside it. */
 export const isAtOrUnder = (real: string, root: string): boolean =>
   real === root || real.startsWith(root.endsWith('/') ? root : `${root}/`);
 
-/** A folder that directly holds one of these is a sign-in or key folder wherever it sits, and is not listed. */
-const SIGN_IN_FILES: readonly string[] = [
-  '.credentials.json',
-  'auth.json',
-  'hosts.yml',
-  'id_rsa',
-  'id_dsa',
-  'id_ecdsa',
-  'id_ed25519',
-  'id_ecdsa_sk',
-  'id_ed25519_sk',
-];
-const FOLDED_SIGN_IN: ReadonlySet<string> = new Set(SIGN_IN_FILES.map(foldName));
-const FOLDED_PRIVATE: readonly (readonly string[])[] = PRIVATE_FOLDERS.map(folder => folder.map(foldName));
+/** Whether the real path is in a tree a project is never read from (never the owner's own home, wherever it sits). */
+export const isSkippedTree = (real: string, home: string): boolean =>
+  !isAtOrUnder(real, home) && SKIPPED_TREES.some(tree => isAtOrUnder(real, tree));
 
-const startsWith = (segments: readonly string[], prefix: readonly string[]): boolean =>
-  prefix.every((part, index) => segments[index] !== undefined && foldName(segments[index] as string) === part);
+/**
+ * Whether the real path is in ANOTHER user's home: `/home/<x>`, `/Users/<x>`, `/root`, `/var/root`, below the owner's own
+ * (which may be any of them). `/home` and `/Users` themselves are not: they are only the folder the homes are in.
+ */
+export const isOtherHome = (real: string, home: string): boolean => {
+  if (isAtOrUnder(real, home)) return false;
+  if (HOME_FOLDERS.some(folder => isAtOrUnder(real, folder))) return true;
+  return HOME_PARENTS.some(parent => real.startsWith(`${parent}/`));
+};
 
-/** Whether a path relative to the home (segments) is, or is inside, a private folder. */
-export const isPrivateFolder = (relative: readonly string[]): boolean =>
-  FOLDED_PRIVATE.some(folder => startsWith(relative, folder));
-
-/** Whether a folder's own names show it holds a sign-in or a key. */
-export const holdsSignIn = (names: readonly string[]): boolean =>
-  names.some(name => FOLDED_SIGN_IN.has(foldName(name)));
+/** Whether the real path is a place so wide that a project there is "your whole disk or home": `/`, a home's parent, the home. */
+export const isBroadRoot = (real: string, home: string): boolean =>
+  real === '/' || real === home || HOME_PARENTS.includes(real);
 
 export type PathParse =
   | { readonly ok: true; readonly absolute: string }

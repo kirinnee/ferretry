@@ -51,9 +51,9 @@ export function InstalledPage({ client, step }: { readonly client: OnboardingCli
           step.done();
           return;
         }
-        setView({ kind: 'missing', facts: { state: 'missing', plan: await readInstallPlan(client) } });
+        setView({ kind: 'missing', facts: { state: 'missing', plan: await readInstallPlan(client, !first) } });
       } catch (cause) {
-        const plan = await readInstallPlan(client);
+        const plan = await readInstallPlan(client, !first);
         setView({ kind: 'missing', facts: { state: 'missing', plan }, note: refusalWords(cause) });
       }
       if (first) {
@@ -119,11 +119,11 @@ export function InstalledPage({ client, step }: { readonly client: OnboardingCli
       )}
       <StepCommand>{plan.command}</StepCommand>
       {plan.kind === 'runnable' ? (
-        <StepActions>
+        <div className="ob-actions cx-actions--stretch">
           <Button variant="primary" disabled={installing} data-install-run="" onClick={() => void install()}>
             {installing ? 'Installing…' : 'Install Codex'}
           </Button>
-        </StepActions>
+        </div>
       ) : null}
       {view.note === undefined ? null : (
         <StepLine role="alert" data-install-note="">

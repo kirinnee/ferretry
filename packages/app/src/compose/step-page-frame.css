@@ -145,6 +145,11 @@
     max-width: 1080px;
   }
 }
+/* C59 O3, the same rule as the answer row (`ui/action-row.css`): the way back is at the LEFT end of the footer, the way on (Later,
+   Next) at the right. A phone keeps its equal thirds below (full width, one size). */
+.fy-spf__footer [data-step-back] {
+  margin-inline-end: auto;
+}
 /* Fixed width, never stretched or shrunk to the label; 44px tall. */
 .fy-spf__footer .fy-spf__button {
   flex: 0 0 auto;
@@ -159,21 +164,18 @@
     bottom: 0;
     padding-bottom: env(safe-area-inset-bottom, 0px);
     position: sticky;
-    z-index: 1;
+    /* Above any page control that is its own layer (Voice's Install is z-index 2), so a control scrolled under the footer is never drawn over it. */
+    z-index: 10;
   }
-  /* Three equal thirds: Back, Later, Next. */
+  /* Equal tracks for the buttons THERE ARE, in DOM order (Back, Later, Next): one button takes the row, two split it, three are thirds
+     (C59 audit: a lone Next or Continue was one narrow third of the row). */
   .fy-spf__actions {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
   }
   .fy-spf__footer [data-step-back] {
-    grid-column: 1;
-  }
-  .fy-spf__footer [data-step-later] {
-    grid-column: 2;
-  }
-  .fy-spf__footer [data-step-next] {
-    grid-column: 3;
+    margin-inline-end: 0;
   }
   .fy-spf__footer .fy-spf__button {
     inline-size: auto;

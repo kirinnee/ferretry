@@ -533,9 +533,26 @@ describe('r11-1b G3: the Voice and Speed-ups buttons and their focus ring', () =
             /^(Save|Test|Remove)/.test(button.label),
           );
           expect(buttons.length).toBe(6);
+          // C59 audit: on a phone a key card's Save, Test and Remove are ONE row of three equal tracks (Remove no longer alone on a
+          // second row), so each is a third of the card, not the 136 px a roomier page keeps.
+          const floor = viewport.width < 520 ? 100 : BUTTON_MIN_WIDTH;
           for (const button of buttons) {
-            expect(button.w >= BUTTON_MIN_WIDTH ? '' : `${button.label}: ${button.w}px`).toBe('');
+            expect(button.w >= floor ? '' : `${button.label}: ${button.w}px`).toBe('');
             expect(button.h).toBeGreaterThanOrEqual(44);
+          }
+          if (viewport.width < 520) {
+            const rows = await tab.evaluate(() =>
+              Array.from(document.querySelectorAll('.fy-voice-step [data-device-key] .fy-vs-field')).map(field => {
+                const tops = Array.from(field.querySelectorAll(':scope > button')).map(b =>
+                  Math.round(b.getBoundingClientRect().top),
+                );
+                return new Set(tops).size;
+              }),
+            );
+            expect(
+              rows.every(count => count === 1),
+              'Save, Test and Remove share one row on a phone',
+            ).toBe(true);
           }
           const scrollX = await tab.evaluate(
             () => document.documentElement.scrollWidth - document.documentElement.clientWidth,

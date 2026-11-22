@@ -173,6 +173,21 @@ describe('the CI run page', () => {
         expect(seen.height).toBeGreaterThan(8);
         // A running activity is feedback, not a wait: nothing holds it back for the 300 ms threshold.
         for (const opacity of seen.opacity) expect(opacity).toBeGreaterThan(0.99);
+        // A job's title is never squeezed to a sliver by its header (at 390 the running job's name was 22px wide and six lines tall).
+        const titles = await page.evaluate(() =>
+          [...document.querySelectorAll('[data-ci-job] button[aria-expanded] .font-medium')].map(title => {
+            const box = title.getBoundingClientRect();
+            return {
+              name: title.textContent ?? '',
+              width: box.width,
+              lines: box.height / Number.parseFloat(getComputedStyle(title).lineHeight),
+            };
+          }),
+        );
+        expect(titles.length, 'every job title was measured').toBeGreaterThanOrEqual(3);
+        for (const title of titles) {
+          expect(title.lines, `${title.name} is not squeezed into a tall sliver`).toBeLessThanOrEqual(1.5);
+        }
         await noSidewaysScroll(page);
         await shot(page, variant, 'running');
         expect(problems).toEqual([]);

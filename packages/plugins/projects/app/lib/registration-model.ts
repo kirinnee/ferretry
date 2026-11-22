@@ -129,6 +129,32 @@ export const CLONE_PATIENCE =
 export const NEW_FOLDER_ONE_LEVEL =
   'Exactly one folder is created, owner-only. The parent must already exist — a path whose parent is missing is refused, not created.';
 
+/**
+ * Said BEFORE a broad root is registered (the disk, a home folder, the folder every home sits in): registering one is allowed,
+ * and this is what it means. The daemon's bounds keep a scan and an index finite, so the index is partial; and a device that
+ * may use files on this machine reads names across whatever is registered, so a broad root widens what every such device sees.
+ */
+export const BROAD_ROOT_WARNING =
+  'This is your whole disk or home folder — the index will be partial. Every device that can use files on this machine will be able to see names across it.';
+
+/**
+ * Whether a typed absolute path is spelled as a broad root: `/`, the folder every home sits in (`/home`, `/Users`), or one home
+ * folder (`/home/<name>`, `/Users/<name>`, `/root`, `/var/root`). The daemon decides for real on the resolved path and says so
+ * on a listing (`broad`); this is only the sentence for a path typed into a text box, where nothing has been listed.
+ */
+export const isBroadRootSpelling = (path: string): boolean => {
+  const segments = path
+    .trim()
+    .split('/')
+    .filter(segment => segment !== '');
+  if (!path.trim().startsWith('/')) return false;
+  if (segments.length === 0) return true;
+  const [first, second] = segments;
+  if ((first === 'home' || first === 'Users') && segments.length <= 2) return true;
+  if (first === 'root' && second === undefined) return true;
+  return first === 'var' && second === 'root' && segments.length === 2;
+};
+
 /** The sentence that keeps a discovery list from reading as a list of projects. */
 export const DISCOVERY_PROMISE =
   'Folders sessions on this daemon have worked in. Ferretry registers none of them on its own — confirming one is what enrols it.';

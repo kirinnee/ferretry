@@ -200,3 +200,17 @@
 .fy-end .fy-sf-unsaved button {
   min-block-size: 44px;
 }
+
+/* C59 audit, a phone: the two optional ways to start come BEFORE the long checklist (they were pushed below the first screen,
+   with the first button's edge just visible over the footer), and the decorative ferret is a shorter strip. */
+@container (max-width: 599.98px) {
+  .fy-end__start {
+    order: 1;
+  }
+  .fy-end__summary {
+    order: 2;
+  }
+  .fy-end__mascot .fy-ferret {
+    max-height: 96px;
+  }
+}

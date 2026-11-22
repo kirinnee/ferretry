@@ -33,7 +33,7 @@ describe('transcriptNames for Codex', () => {
     payload: { type: 'thread_name_updated', thread_name: name },
   });
 
-  test('takes the latest thread name as the owner’s, and ignores every other record', () => {
+  test('takes the latest thread name as a generated one (Codex’s automatic title is the same record), and ignores every other record', () => {
     const text = lines(
       rename('Old name'),
       { type: 'event_msg', payload: { type: 'other', thread_name: 'No' } },
@@ -43,7 +43,7 @@ describe('transcriptNames for Codex', () => {
       rename(''),
       { type: 'ai-title', aiTitle: 'A Claude record is not a Codex one' },
     );
-    expect(transcriptNames('codex', text)).toEqual({ chosen: 'New name' });
+    expect(transcriptNames('codex', text)).toEqual({ generated: 'New name' });
   });
 });
 

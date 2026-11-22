@@ -9,7 +9,7 @@ export function kernelConfigWrite(config: ConfigPort, def: ConfigCollectionDef<M
   return {
     taken: name => config.fileState(def, name).state !== 'absent',
     create: async (name, documentText) => await config.writeAsCaller(def, name, documentText, { ifMatch: 'absent' }),
-    replace: async (name, documentText) =>
-      await config.writeAsCaller(def, name, documentText, { ifMatch: await config.etag(def, name) }),
+    etag: async name => await config.etag(def, name),
+    replace: async (name, documentText, ifMatch) => await config.writeAsCaller(def, name, documentText, { ifMatch }),
   };
 }

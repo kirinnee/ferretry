@@ -36,6 +36,8 @@ export async function locateCodex(
   paths: HarnessPaths,
   executables: ExecutableResolverPort,
   homeDirectory: string,
+  /** Where installers put `codex`, tried after the inherited `PATH` (Runtimes' one list); none: not searched. */
+  fallbackDirectories: readonly string[] = [],
 ): Promise<HarnessLocation> {
   const binary = paths.binary?.trim();
   if (binary !== undefined && binary !== '') {
@@ -58,5 +60,10 @@ export async function locateCodex(
   const inherited = await executables.resolve('codex');
   if (inherited !== undefined)
     return { outcome: 'located', path: inherited, rule: 'inherited environment', declaredBy: 'PATH' };
-  return { outcome: 'absent', searched: directories };
+  for (const directory of fallbackDirectories) {
+    const candidate = candidateIn(directory, 'codex');
+    if (await executables.runnable(candidate))
+      return { outcome: 'located', path: candidate, rule: 'extra search path', declaredBy: 'built-in install folders' };
+  }
+  return { outcome: 'absent', searched: [...directories, ...fallbackDirectories] };
 }

@@ -58,7 +58,7 @@ describe('MCP owner writes an imported server', () => {
       doc({ command: 'github-mcp', env: { TOKEN: '${secret:GITHUB_TOKEN}' } }),
     );
 
-    expect(result).toEqual({ ok: true, held: true });
+    expect(result).toMatchObject({ ok: true, held: true });
     expect(await owner().read('github')).toBeUndefined();
   });
 
@@ -102,12 +102,29 @@ describe('MCP owner writes an imported server', () => {
 
   test('an update the person accepted replaces the server it made, pinned to the current file', async () => {
     const { owner } = await world();
-    await owner().put?.('once', doc({ command: 'first' }));
+    const made = await owner().put?.('once', doc({ command: 'first' }));
 
-    const replaced = await owner().put?.('once', doc({ command: 'second' }), undefined, { replace: true });
+    const replaced = await owner().put?.('once', doc({ command: 'second' }), undefined, {
+      replace: true,
+      etags: made?.ok === true ? made.etags : {},
+    });
 
     expect(replaced?.ok).toBe(true);
     expect(await owner().read('once')).toEqual({ command: 'second' });
+  });
+
+  test('an update leaves a server the person deleted and made again by hand under the same name as it is', async () => {
+    const { owner } = await world();
+    // The server there now is not the file the import wrote: the record's etag is the old file's, not this one's.
+    await owner().put?.('once', doc({ command: 'by-hand' }));
+
+    const replaced = await owner().put?.('once', doc({ command: 'second' }), undefined, {
+      replace: true,
+      etags: { once: 'the-etag-of-the-file-the-import-wrote' },
+    });
+
+    expect(replaced?.ok).toBe(false);
+    expect(await owner().read('once')).toEqual({ command: 'by-hand' });
   });
 
   test('a raw secret in the environment is refused by the config service, without echoing it', async () => {
@@ -141,7 +158,7 @@ describe('the harness id of an imported server', () => {
 
     const result = await owner().put?.('claude-only', doc({ command: 'tool', harness: 'claude' }));
 
-    expect(result).toEqual({ ok: true });
+    expect(result).toMatchObject({ ok: true });
     expect(await owner().read('claude-only')).toEqual({ command: 'tool', harness: 'claude-code' });
   });
 

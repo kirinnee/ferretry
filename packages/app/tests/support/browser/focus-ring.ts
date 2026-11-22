@@ -215,6 +215,35 @@ const measureActive = (arg: { target: string | null; scroll: boolean }): FocusSt
   };
 };
 
+/**
+ * Wait until the page has stopped moving after a key press: the focused element's box and every scroller's position and height read the
+ * same on three frames running (at most ~90 frames). A smooth scroll or a late layout under load otherwise left the ring measured
+ * mid-move, a flake that came and went with the machine's load (end B5).
+ */
+const settled = async (tab: Page): Promise<void> => {
+  await tab.evaluate(
+    () =>
+      new Promise<void>(done => {
+        let last = '';
+        let same = 0;
+        let frames = 0;
+        const tick = (): void => {
+          const box = document.activeElement?.getBoundingClientRect();
+          const scrollers = [...document.querySelectorAll('main, [data-scroll], .fy-main')]
+            .map(node => `${node.scrollTop}/${node.scrollHeight}`)
+            .join(',');
+          const key = `${box?.top}|${box?.height}|${document.scrollingElement?.scrollTop}|${scrollers}`;
+          same = key === last ? same + 1 : 0;
+          last = key;
+          frames += 1;
+          if (same >= 3 || frames > 90) done();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+};
+
 /** Press Tab until `stop` says to end (or `cap`), measuring each stop. The walk ends on ELEMENT identity, never on a label. */
 const tabThrough = async (
   tab: Page,
@@ -234,6 +263,7 @@ const tabThrough = async (
   const stops: FocusStop[] = [];
   for (let index = 0; index < cap; index += 1) {
     await tab.keyboard.press('Tab');
+    await settled(tab);
     let measured = await tab.evaluate(measureActive, { target, scroll: true });
     // A control that keeps Tab for itself (an autocomplete accepting a suggestion): Escape closes it, one more Tab moves on.
     if (typeof measured !== 'string' && measured.stuck) {

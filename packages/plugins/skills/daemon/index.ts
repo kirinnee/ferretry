@@ -205,6 +205,7 @@ export default implementDaemon(manifest, {
           ...skillsComponentSource(items, listener => kernel.config.watch(SKILLS_CONFIG, listener)),
           put: skillsImportPut({
             has: name => items().has(name),
+            etag: async name => await kernel.config.etag(SKILLS_CONFIG, name),
             create: createSkillsItem(kernel.config),
             replace: replaceSkillsItem(kernel.config),
             store,

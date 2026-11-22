@@ -31,16 +31,31 @@ async function world(judge: boolean) {
 describe('claudeSettingsPut over the real config writer', () => {
   test('an update the person accepted replaces the item; a first import never does', async () => {
     const { config, put } = await world(true);
-    await put('mine', text({ harness: 'claude', document: { model: 'opus' } }));
+    const made = await put('mine', text({ harness: 'claude', document: { model: 'opus' } }));
+    const etags = made.ok ? (made.etags ?? {}) : {};
 
     const refused = await put('mine', text({ harness: 'claude', document: { model: 'sonnet' } }));
     const replaced = await put('mine', text({ harness: 'claude', document: { model: 'sonnet' } }), undefined, {
       replace: true,
+      etags,
     });
 
     expect(refused.ok).toBe(false);
-    expect(replaced).toEqual({ ok: true });
+    expect(replaced).toMatchObject({ ok: true });
     expect(config.collection(DEF).get('mine')).toEqual({ settings: { model: 'sonnet' } });
+  });
+
+  test('an update leaves an item made again by hand under the same name as it is', async () => {
+    const { config, put } = await world(true);
+    await put('mine', text({ harness: 'claude', document: { model: 'by-hand' } }));
+
+    const answer = await put('mine', text({ harness: 'claude', document: { model: 'sonnet' } }), undefined, {
+      replace: true,
+      etags: { mine: 'the-etag-of-the-file-the-import-wrote' },
+    });
+
+    expect(answer.ok).toBe(false);
+    expect(config.collection(DEF).get('mine')).toEqual({ settings: { model: 'by-hand' } });
   });
 
   test('writes the file, warns what it kept out (keys only), and never the values', async () => {
@@ -106,13 +121,13 @@ describe('claudeSettingsPut over the real config writer', () => {
       'loose',
       text({ harness: 'claude', document: { model: 'opus' }, flags: ['--dangerously-skip-permissions'] }),
     );
-    expect(answer).toEqual({ ok: true, held: true });
+    expect(answer).toMatchObject({ ok: true, held: true });
     expect(config.collection(DEF).has('loose')).toBe(false);
   });
 
   test('never replaces an item that is there', async () => {
     const { config, put } = await world(true);
-    expect(await put('one', text({ harness: 'claude', document: { model: 'a' } }))).toEqual({ ok: true });
+    expect(await put('one', text({ harness: 'claude', document: { model: 'a' } }))).toMatchObject({ ok: true });
     const again = await put('one', text({ harness: 'claude', document: { model: 'b' } }));
     expect(again.ok).toBe(false);
     expect(config.collection(DEF).get('one')).toEqual({ settings: { model: 'a' } });

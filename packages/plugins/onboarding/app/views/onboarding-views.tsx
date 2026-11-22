@@ -12,7 +12,7 @@ export { createSetupFlow } from '../features/setup-flow/setup-flow.tsx';
 export { createAppearancePanel, createNamePanel } from '../features/setup-flow/shell-pages-panels.tsx';
 
 import type { DaemonlessPorts, DaemonlessScreenProps } from '@ferretry/app';
-import { browserClipboardWriter, Button } from '@ferretry/app/ui';
+import { ActionRow, browserClipboardWriter, Button } from '@ferretry/app/ui';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { detectDeviceKind } from '../device-kind.ts';
 import { flowHrefAfterPairing, entryFromHref } from '../onboarding-entry.ts';
@@ -105,21 +105,24 @@ function PairingHandoff({
       <p className="m-0 text-cell text-muted">
         Open the pairing page, then scan the code <code>fy pair</code> shows, or paste the link it prints.
       </p>
-      <Button
-        type="button"
-        variant="primary"
-        onClick={() => {
-          trip.baseline = pairingMarks(ports.daemons.snapshot().daemons);
-          rememberPairTrip(trip.baseline, storage);
-          // The place is kept before leaving (a hand-off arrival is otherwise never written), so the return finds it.
-          progress.remember();
-          navigate(PAIR_AND_RETURN);
-        }}
-        data-onboarding-open-pair=""
-        className="min-h-[44px] self-start px-6 py-3"
-      >
-        Open the pairing page
-      </Button>
+      <ActionRow
+        primary={
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => {
+              trip.baseline = pairingMarks(ports.daemons.snapshot().daemons);
+              rememberPairTrip(trip.baseline, storage);
+              // The place is kept before leaving (a hand-off arrival is otherwise never written), so the return finds it.
+              progress.remember();
+              navigate(PAIR_AND_RETURN);
+            }}
+            data-onboarding-open-pair=""
+          >
+            Open the pairing page
+          </Button>
+        }
+      />
     </div>
   );
 }

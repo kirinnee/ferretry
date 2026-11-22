@@ -209,6 +209,10 @@ describe('a failed older page', () => {
         await framesSettled(tab);
         const retry = tab.getByRole('button', { name: /try again/iu });
         expect(await retry.count()).toBe(1);
+        if (width === 390)
+          expect((await retry.boundingBox())?.height ?? 0, 'the retry is a 44px target at 390').toBeGreaterThanOrEqual(
+            44,
+          );
         await shoot(tab, `retry-${name}-${scheme}-failed`);
         // The failed read was the page's own (the reader scrolled): no press yet.
         expect(await tab.evaluate(() => window.__olderPresses)).toEqual([null]);

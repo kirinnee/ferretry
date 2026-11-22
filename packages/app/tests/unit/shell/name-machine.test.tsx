@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { useState } from 'react';
 import { implementApp, type Manifest } from '@ferretry/kernel/manifest';
 import type { TransportAnswer, TransportRequest } from '../../../src/client/transport.ts';
 import { type DaemonlessPorts, registeredDaemonless } from '../../../src/connect/provides.ts';
@@ -13,6 +14,7 @@ import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
+import { NameThisMachine } from '../../../src/shell/name-machine.tsx';
 import { interact, must, mount } from '../../support/dom.ts';
 import { CORE, FakeTransport, inventoryOf, json } from '../client/fixtures.ts';
 
@@ -37,14 +39,38 @@ const setupManifest = {
     screens: [
       { id: 'flow', path: 'flow', chrome: 'none' },
       { id: 'plain', path: 'plain' },
+      { id: 'name', path: 'name', chrome: 'none' },
     ],
   },
 } as unknown as Manifest;
+/** What the flow's footer holds for the name page: the save its Next runs (`step.commit`), as the page registered it. */
+const footer: { save: (() => Promise<void>) | null } = { save: null };
+/** A flow page for the step: Later leaves it (the page unmounts), as the setup flow does. */
+function NameFlowPage() {
+  const [left, setLeft] = useState(false);
+  return (
+    <>
+      <button type="button" data-testid="later" onClick={() => setLeft(true)}>
+        Later
+      </button>
+      {left ? null : (
+        <NameThisMachine
+          daemon="ws"
+          heading={false}
+          commit={save => {
+            footer.save = save;
+          }}
+        />
+      )}
+    </>
+  );
+}
 const setupApp = implementApp(setupManifest, {
   build: () => ({
     screens: {
       flow: () => <p data-testid="flow">the flow</p>,
       plain: () => <p data-testid="plain">a plain page</p>,
+      name: () => <NameFlowPage />,
     },
   }),
 });
@@ -90,13 +116,15 @@ interface Options {
   readonly path?: string;
   /** Reads of the file answer with no revision (a machine that could not read it) until the test says it recovered. */
   readonly unreadableAtFirst?: boolean;
+  /** How long the machine takes to answer the write, so a save can be caught while it is running. */
+  readonly writeDelayMs?: number;
 }
 
 async function boot(options: Options = {}) {
   window.history.replaceState(null, '', options.path ?? '/d/ws');
   // Until the test says the machine recovered, a machine set to `unreadableAtFirst` answers every read with no revision.
   const machine = { recovered: options.unreadableAtFirst !== true };
-  const transport = new FakeTransport((request: TransportRequest): TransportAnswer => {
+  const transport = new FakeTransport(async (request: TransportRequest): Promise<TransportAnswer> => {
     const path = request.path.split('?')[0];
     if (path === '/v1/plugins')
       return options.learned === undefined
@@ -112,8 +140,10 @@ async function boot(options: Options = {}) {
         etag: machine.recovered ? 'e1' : '',
       });
     }
-    if (path === '/v1/config/file' && request.method === 'PUT')
+    if (path === '/v1/config/file' && request.method === 'PUT') {
+      if (options.writeDelayMs !== undefined) await new Promise(resolve => setTimeout(resolve, options.writeDelayMs));
       return options.writeAnswer ?? json({ path: 'host.yaml', etag: 'e2', outcome: 'applied' });
+    }
     return json({ ok: true });
   });
   const list = new DaemonList({ storage: memoryStore(), now: () => 1 });
@@ -302,6 +332,47 @@ describe('Name this machine', () => {
     open = await boot({ path: '/d/ws/plain', pairing: { askName: true } });
     expect(open.view.container.querySelector('[data-testid="plain"]')).not.toBeNull();
     expect(open.view.container.querySelectorAll('[data-name-machine]')).toHaveLength(1);
+  });
+
+  test('on a flow page, Enter in the field while Next is saving writes the name once', async () => {
+    open = await boot({ path: '/d/ws/name', pairing: { askName: true }, writeDelayMs: 60 });
+    await open.typeName('Studio box');
+    const saving = must(footer.save, 'the footer save')();
+    await settle();
+    // The field stays enabled while Next saves: Enter submits its form.
+    await interact(() =>
+      must(open?.view.container.querySelector<HTMLFormElement>('[data-name-machine] form'), 'the form').requestSubmit(),
+    );
+    await saving;
+    await interact(() => new Promise(resolve => setTimeout(resolve, 150)));
+    await settle();
+    expect(open.writes().map(write => write.body)).toEqual([
+      { path: 'host.yaml', text: 'name: "Studio box"\n', etag: 'e1' },
+    ]);
+  });
+
+  test('on a flow page, Enter in the field saves through the same guarded save and the step is settled', async () => {
+    open = await boot({ path: '/d/ws/name', pairing: { askName: true } });
+    await open.typeName('Studio box');
+    await interact(() =>
+      must(open?.view.container.querySelector<HTMLFormElement>('[data-name-machine] form'), 'the form').requestSubmit(),
+    );
+    await settle();
+    expect(open.writes().map(write => write.body)).toEqual([
+      { path: 'host.yaml', text: 'name: "Studio box"\n', etag: 'e1' },
+    ]);
+    expect(open.list.get('ws')?.machine).toBe('Studio box');
+    expect(open.list.namePending('ws')).toBe(false);
+  });
+
+  test('on a flow page, leaving the step with Later clears the pending-name flag, so the machine home asks nothing', async () => {
+    open = await boot({ path: '/d/ws/name', pairing: { askName: true } });
+    expect(open.step()).not.toBeNull();
+    expect(open.list.namePending('ws')).toBe(true);
+    await open.press('[data-testid="later"]');
+    expect(open.step()).toBeNull();
+    expect(open.writes()).toEqual([]);
+    expect(open.list.namePending('ws')).toBe(false);
   });
 
   test('a machine that already has a name of the owner’s is not asked', async () => {

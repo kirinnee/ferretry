@@ -22,15 +22,7 @@ import { mount, must } from '../support/dom.ts';
  * is that no step anywhere is missing its sentence. A route's own step list is
  * the model's business and is tested there.
  */
-const EVERY_STEP: readonly OnboardingStepId[] = [
-  'brief',
-  'agent-pair',
-  'install',
-  'daemon',
-  'local',
-  'elsewhere',
-  'scan',
-];
+const EVERY_STEP: readonly OnboardingStepId[] = ['install', 'daemon', 'local', 'elsewhere', 'scan'];
 
 const figureOf = (container: HTMLElement): HTMLElement =>
   must(container.querySelector<HTMLElement>('[data-onboarding-diagram]'), 'the diagram');

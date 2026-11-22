@@ -82,6 +82,7 @@ describe('the lanes page when the projects cannot be read', () => {
         const box = await button.boundingBox();
         expect(box).not.toBeNull();
         expect((box?.x ?? -1) >= 0 && (box?.x ?? 0) + (box?.width ?? 0) <= width).toBe(true);
+        if (width === 390) expect(box?.height ?? 0, 'the Try again is a 44px target at 390').toBeGreaterThanOrEqual(44);
         if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name}-${scheme}-failed.png`) });
         // Nothing the page read by itself was a press.
         expect(

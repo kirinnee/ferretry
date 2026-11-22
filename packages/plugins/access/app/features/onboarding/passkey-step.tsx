@@ -25,6 +25,7 @@ import {
   MACHINE_READ_DEADLINE_MS,
   withDeadline,
 } from '@ferretry/app';
+import { ActionRow } from '@ferretry/app/ui';
 import type { StepHost } from '@ferretry/kernel/contract';
 import type { PasskeysView } from '../../../contract/index.ts';
 import { holdInlinePasskeyOffer } from '../../lib/inline-passkey-offer.ts';
@@ -158,30 +159,22 @@ export function PasskeyStep({
         </p>
       )}
       {added ? null : (
-        // STACKED, one fixed width (`.fy-pair-answer`, 12 rem), 12 px apart: the page's two answers read as a set. They stay
-        // two explicit buttons around WebAuthn (never a choice a key can move, never a commit): the ceremony needs a press.
-        <div className="flex flex-col items-start gap-3">
-          <Button
-            type="button"
-            variant="primary"
-            data-passkey-add=""
-            disabled={adding}
-            onClick={addNow}
-            className="fy-pair-answer min-h-11"
-          >
-            <Fingerprint size={18} aria-hidden="true" />
-            Add a passkey
-          </Button>
-          <Button
-            type="button"
-            data-passkey-later=""
-            disabled={adding}
-            onClick={notNow}
-            className="fy-pair-answer min-h-11"
-          >
-            Not now
-          </Button>
-        </div>
+        // The shared answer row: Not now at the left end and Add a passkey at the right on a desktop, stacked full width on a
+        // phone. They stay two explicit buttons around WebAuthn (never a choice a key can move, never a commit): the ceremony
+        // needs a press.
+        <ActionRow
+          secondary={
+            <Button type="button" data-passkey-later="" disabled={adding} onClick={notNow}>
+              Not now
+            </Button>
+          }
+          primary={
+            <Button type="button" variant="primary" data-passkey-add="" disabled={adding} onClick={addNow}>
+              <Fingerprint size={18} aria-hidden="true" />
+              Add a passkey
+            </Button>
+          }
+        />
       )}
       {added ? null : (
         <p className="m-0 text-ui leading-base text-muted">

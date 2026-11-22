@@ -73,6 +73,8 @@ export type DescribedConversation = Omit<LinkableConversation, 'harness' | 'kept
    * Absent when the conversation is only hand-off pointers. It stays inside the daemon and is never listed.
    */
   readonly brief?: string;
+  /** Who gave `name`: the owner (`/rename`) or the CLI. An owner's name is the owner's data and is not run through the credential cue. */
+  readonly nameBy?: 'owner' | 'generated';
 };
 
 /** Describes the conversation one transcript holds; where its read and parse run is the adapter's choice. */
@@ -220,7 +222,9 @@ export function describeConversation(
     id,
     harness: candidate.harness,
     project,
-    ...(name === undefined ? {} : { name }),
+    ...(name === undefined
+      ? {}
+      : { name, nameBy: names.chosen === undefined ? ('generated' as const) : ('owner' as const) }),
     ...(brief === undefined ? {} : { brief }),
     // The words AS WRITTEN (lines kept, not cut to a preview): the index masks the secrets in them first, then collapses and cuts.
     preview: first,
