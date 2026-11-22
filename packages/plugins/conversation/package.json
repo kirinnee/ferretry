@@ -34,6 +34,7 @@
     "durian-hypermedia": "github:ProtoDurian/durian-hypermedia#951c81c7d537249073724c83a2266166e12f593b",
     "leaflet": "1.9.4",
     "lucide-react": "^0.468.0",
+    "micromark": "4.0.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "yaml": "2.9.0"

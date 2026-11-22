@@ -14,7 +14,7 @@ import type { ReactElement } from 'react';
 const attachedText = (block: { readonly llm: string | null; readonly llmKind: string }): string | null =>
   block.llmKind === 'text' && block.llm !== null && block.llm !== '' ? block.llm : null;
 
-function LlmOnlyText({ text }: { readonly text: string }): ReactElement {
+export function LlmOnlyText({ text }: { readonly text: string }): ReactElement {
   return (
     <details className="llm-peek" data-fy-llm-only="">
       <summary>LLM-only text</summary>

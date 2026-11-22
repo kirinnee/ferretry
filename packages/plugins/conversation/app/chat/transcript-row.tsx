@@ -174,7 +174,7 @@ export function TranscriptRow({
       <SystemNoticeRow entry={{ ...entry, text: parseFerretryNotice(entry.text) ?? entry.text }} rhythm={rhythm} />
     );
   if (entry.kind === 'user') return <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm} />;
-  return <TranscriptTextRow entry={entry} rhythm={rhythm} run={run} />;
+  return <TranscriptTextRow arriving={live && isLast} entry={entry} rhythm={rhythm} run={run} />;
 }
 
 /**
@@ -454,8 +454,11 @@ function TranscriptTextRow({
   run,
   body,
   aside,
+  arriving = false,
 }: {
   readonly entry: TranscriptEntry;
+  /** This is the live session's last row, whose text may still be growing: a closing fence on its last line is not yet one. */
+  readonly arriving?: boolean;
   readonly rhythm: Record<string, string | undefined>;
   readonly run?: AgentRunMark | undefined;
   /** What the message says, drawn by the caller instead of the chat's prose. */
@@ -484,7 +487,11 @@ function TranscriptTextRow({
         <EntryBody
           entry={entry}
           prose={
-            entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{stripFraming(entry.text).body}</p>
+            entry.kind === 'assistant' ? (
+              <AssistantProse arriving={arriving} text={entry.text} />
+            ) : (
+              <p>{stripFraming(entry.text).body}</p>
+            )
           }
           speaker={entry.kind === 'assistant' ? 'assistant' : undefined}
         />
@@ -575,8 +582,8 @@ function speakerOf(entry: TranscriptEntry): string | undefined {
  * is empty and reference-shaped text stays prose, which is correct: nothing there
  * can prove a callsign or a path.
  */
-function AssistantProse({ text }: { readonly text: string }) {
-  return <HypermediaProse text={text} />;
+function AssistantProse({ text, arriving }: { readonly text: string; readonly arriving: boolean }) {
+  return <HypermediaProse arriving={arriving} text={text} />;
 }
 
 /** What a row with no label of its own is headed by. */
