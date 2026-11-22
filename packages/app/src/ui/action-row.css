@@ -1,10 +1,10 @@
 /* THE ANSWER ROW (`action-row.tsx`): layout only, no colour, so every style family keeps its own buttons.
-   Phone: stacked, each answer the full container width, the way on first (the DOM order is secondary, primary, so a
-   column-reverse puts the primary on top without changing what a screen reader or Tab reads). Desktop: one row,
-   space-between, both answers one width. */
+   Phone: stacked, each answer the full container width, the way on first. The component puts the answers in the DOM in the
+   order they are drawn (phone: primary, secondary; desktop: secondary, primary), so Tab and a screen reader follow the
+   picture: nothing here reverses a direction. Desktop: one row, space-between, both answers one width. */
 .fy-action-row {
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
   gap: 12px;
   inline-size: 100%;
   min-inline-size: 0;

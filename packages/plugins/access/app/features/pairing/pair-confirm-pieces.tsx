@@ -17,6 +17,8 @@ const PAIR_SEGMENTS = [
   { id: 'setup', label: 'Set up' },
 ] as const;
 const PROGRESS_AT: Readonly<Record<string, string | undefined>> = {
+  // The first screen ("Connect a daemon": scan, upload or paste a link) is step 1 too.
+  browse: 'pair',
   confirm: 'pair',
   pairing: 'pair',
   failed: 'pair',

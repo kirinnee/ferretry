@@ -218,6 +218,21 @@ describe('the import run', () => {
     expect(sent?.change.skip).toEqual(['claude-code:mcp:issues']);
   });
 
+  it('"Import everything": an item unticked on the final page stays unticked after Back and return, and is not sent', async () => {
+    const first = await open(ImportRunPage, { importMode: 'everything' });
+    const box = '[data-import-item="claude-code:mcp:issues"] input';
+    await click(first.view, box);
+    expect(must(first.view.container.querySelector<HTMLInputElement>(box), 'box').checked).toBe(false);
+    // Back and return: the page mounts again over the memory the first visit left.
+    const again = await open(ImportRunPage, first.run.step.segment);
+    expect(must(again.view.container.querySelector<HTMLInputElement>(box), 'box').checked).toBe(false);
+    expect(again.view.container.querySelector('[data-import-count]')?.textContent).toContain('leaving out 1');
+    await click(again.view, '[data-import-run]');
+    await settle();
+    const [sent] = proposals(again.calls).map(call => call.init?.body as { change: { skip?: string[] } });
+    expect(sent?.change.skip).toEqual(['claude-code:mcp:issues']);
+  });
+
   it('the run never holds the footer before a write: busy is only for the request in flight', async () => {
     const { run } = await open(ImportRunPage, { importMode: 'choose' });
     expect(run.events).toEqual(['ready']);

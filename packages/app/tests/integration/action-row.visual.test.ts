@@ -108,7 +108,8 @@ describe('C59 the shared answer row', () => {
       const { tab, close } = await open(variant, 'row');
       try {
         const [container] = await boxes(tab, '[data-sample="two"]');
-        const [secondary, primary] = await boxes(tab, '[data-sample="two"] button');
+        const [secondary] = await boxes(tab, '[data-sample="two"] [data-b="secondary"]');
+        const [primary] = await boxes(tab, '[data-sample="two"] [data-b="primary"]');
         expect(container && secondary && primary).toBeTruthy();
         if (container === undefined || secondary === undefined || primary === undefined) return;
         expect(Math.abs(secondary.w - primary.w), 'one width').toBeLessThanOrEqual(1);
@@ -144,6 +145,26 @@ describe('C59 the shared answer row', () => {
             1,
           );
         }
+      } finally {
+        await close();
+      }
+    });
+
+    it(`${variant.name}: ActionRow, Tab visits the answers in the order they are drawn (phone: the way on first; desktop: the way out first)`, async () => {
+      const { tab, close } = await open(variant, 'row');
+      try {
+        // Focus lands on the first control of the sample, then Tab walks on; each stop must be below / right of the last.
+        await tab.locator('[data-sample="two"] button').first().focus();
+        const first = await tab.evaluate(() => document.activeElement?.getAttribute('data-b'));
+        await tab.keyboard.press('Tab');
+        const second = await tab.evaluate(() => document.activeElement?.getAttribute('data-b'));
+        const [one] = await boxes(tab, `[data-sample="two"] [data-b="${first}"]`);
+        const [two] = await boxes(tab, `[data-sample="two"] [data-b="${second}"]`);
+        if (one === undefined || two === undefined) throw new Error('tab stops');
+        expect([first, second]).toEqual(variant.phone ? ['primary', 'secondary'] : ['secondary', 'primary']);
+        // The picture agrees with the keys: Tab goes down on a phone (the way on is on top) and right on a desktop.
+        if (variant.phone) expect(two.y, 'phone: the second stop is lower').toBeGreaterThan(one.y);
+        else expect(two.x, 'desktop: the second stop is further right').toBeGreaterThan(one.x);
       } finally {
         await close();
       }

@@ -265,6 +265,52 @@ describe('the Connected screen is balanced (C59 O3)', () => {
   }
 });
 
+describe('the FIRST pairing screen draws the same progress bar (C59 O3 review)', () => {
+  for (const variant of VARIANTS) {
+    it(`${variant.name}: "Pair · 1 of 3" on the cold open, the paste state and the camera state`, async () => {
+      const context = await browser.newContext({
+        viewport: { width: variant.width, height: variant.height },
+        deviceScaleFactor: variant.phone ? 2 : 1,
+        hasTouch: variant.phone,
+        isMobile: variant.phone,
+        colorScheme: variant.scheme,
+        reducedMotion: 'reduce',
+      });
+      const origin = server?.url.origin ?? '';
+      await context.route('**/*', async route =>
+        new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+      );
+      const tab = await context.newPage();
+      try {
+        await tab.goto(`${origin}/?theme=studio-${variant.scheme}&motion=reduced&arrival=cold&scan=camera&back=1`);
+        await tab.waitForSelector('[data-pair-ways]');
+        const progress = tab.locator('[data-step-progress]');
+        expect(await progress.count(), 'progress on the cold open').toBe(1);
+        expect(await progress.innerText()).toContain('Pair · 1 of 3');
+        // The bar is above the heading, inside the screen.
+        const bar = (await progress.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
+        const heading = (await tab.locator('main h1').boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
+        expect(bar.y, 'the bar is above the heading').toBeLessThan(heading.y);
+        expect(bar.x + bar.width, 'inside the screen').toBeLessThanOrEqual(variant.width);
+        // The paste state.
+        await tab.locator('[data-pair-ways] label').nth(2).click();
+        await tab.waitForSelector('input[aria-label="Pairing link"]');
+        expect(await progress.count(), 'progress on the paste state').toBe(1);
+        expect(await progress.innerText()).toContain('Pair · 1 of 3');
+        // The camera (scan) state.
+        await tab.reload();
+        await tab.waitForSelector('[data-pair-ways]');
+        await tab.locator('[data-pair-ways] label').nth(0).click();
+        await tab.waitForTimeout(300);
+        expect(await progress.count(), 'progress on the scan state').toBe(1);
+        expect(await progress.innerText()).toContain('Pair · 1 of 3');
+      } finally {
+        await context.close();
+      }
+    });
+  }
+});
+
 describe('the confirm answers fit the first screen with the hosted Back row (C59 audit)', () => {
   for (const variant of VARIANTS.filter(item => item.phone)) {
     it(`${variant.name}: both answers end above the fold at 390 x 844, also while Rename is open`, async () => {

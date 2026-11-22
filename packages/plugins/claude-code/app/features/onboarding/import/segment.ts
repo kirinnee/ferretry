@@ -40,6 +40,26 @@ export const leftOf = (segment: StepSegmentMemory, kind: ImportKind): ReadonlySe
 export const allLeft = (segment: StepSegmentMemory): ReadonlySet<ImportItemId> =>
   new Set(IMPORT_KINDS.flatMap(kind => [...leftOf(segment, kind)]));
 
+const RUN_PICK_KEY = 'pickedRun';
+
+/**
+ * What the person unticked on the FINAL page of an "Import everything" run, kept apart from the kind pages' memory (that
+ * route never shows them, so an earlier one-by-one detour must not leak into it). `null` = nothing was unticked here.
+ */
+export const runPickOf = (segment: StepSegmentMemory): ReadonlySet<ImportItemId> | null => {
+  if (typeof segment[RUN_PICK_KEY] !== 'string') return null;
+  return new Set(
+    stringsOf(segment, RUN_PICK_KEY).flatMap(id => {
+      const parsed = ImportItemIdSchema.safeParse(id);
+      return parsed.success ? [parsed.data] : [];
+    }),
+  );
+};
+
+export const runPickPatch = (left: ReadonlySet<ImportItemId>): Record<string, string> => ({
+  [RUN_PICK_KEY]: JSON.stringify([...left]),
+});
+
 export const tickedEnvOf = (segment: StepSegmentMemory): ReadonlySet<string> => new Set(stringsOf(segment, TICKED_KEY));
 
 export const leftPatch = (kind: ImportKind, left: ReadonlySet<ImportItemId>): Record<string, string> => ({

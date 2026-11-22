@@ -380,8 +380,9 @@ describe('import-run', () => {
     );
     expect(container.querySelector('[data-import-next]')?.textContent).toContain('Next leaves the import for later');
     expect([...container.querySelectorAll('button')].map(button => button.textContent)).toEqual([
-      'Import',
+      // The shared answer row draws the way out, then the way on (its DOM follows the picture, so on a phone it is the other way).
       'Skip the import',
+      'Import',
     ]);
     expect(calls.some(call => call.route === 'POST /v1/runtimes/proposals')).toBe(false);
     await press(container, '[data-import-run]');

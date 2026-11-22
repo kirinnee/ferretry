@@ -37,7 +37,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ClaudeCodeClient } from '../../../lib/client.ts';
 import { importModeOf } from '../import-choice-page.tsx';
 import type { StepPageProps } from '../props.ts';
-import { allLeft, HARNESS, leftPatch, SCAN_RUN, tickedEnvOf } from './segment.ts';
+import { allLeft, HARNESS, leftPatch, runPickOf, runPickPatch, SCAN_RUN, tickedEnvOf } from './segment.ts';
 
 const ASK: readonly ChoiceOption[] = [
   {
@@ -66,7 +66,9 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
   const [sentences, setSentences] = useState<readonly string[]>([]);
   const [working, setWorking] = useState(false);
   /** What the person unticked on THIS page, over what the kind pages left out; `null` until they touch a tick. */
-  const [picked, setPicked] = useState<ReadonlySet<ImportItemId> | null>(null);
+  const [picked, setPicked] = useState<ReadonlySet<ImportItemId> | null>(() =>
+    mode === 'everything' ? runPickOf(step?.segment ?? {}) : null,
+  );
   const decided = useRef(false);
 
   useEffect(() => {
@@ -125,6 +127,8 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
     if (on) next.delete(id);
     else next.add(id);
     setPicked(next);
+    // "Import everything" never shows the kind pages, so Back + return would drop this tick: keep it for the run.
+    if (mode === 'everything') step?.remember(runPickPatch(next));
     for (const kind of IMPORT_KINDS as readonly ImportKind[]) {
       if (!kindItemIds(model, kind).includes(id)) continue;
       step?.remember(leftPatch(kind, new Set(kindItemIds(model, kind).filter(item => next.has(item)))));

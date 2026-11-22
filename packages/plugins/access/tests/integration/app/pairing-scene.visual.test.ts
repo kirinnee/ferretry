@@ -324,7 +324,10 @@ describe('The pair page: mascot and night sky', () => {
           expect(words).not.toContain('through the relay');
           expect(await tab.getByRole('button', { name: 'Add a passkey now' }).isVisible()).toBe(true);
           // ONE primary action: the passkey. "Not now" is the quiet way on; nothing else asks for a press.
-          expect(await tab.locator('main button:visible').allInnerTexts()).toEqual(['Not now', 'Add a passkey now']);
+          // The DOM follows the picture (Tab too): the way on first on a phone, where it is on top; the way out first on a desktop.
+          expect(await tab.locator('main button:visible').allInnerTexts()).toEqual(
+            variant.phone ? ['Add a passkey now', 'Not now'] : ['Not now', 'Add a passkey now'],
+          );
           expect(await tab.locator('[data-variant="primary"]').allInnerTexts()).toEqual(['Add a passkey now']);
           expect(await tab.locator('#pairing-title').innerText()).toBe('Connected');
           // C59 O3: the shared answer row. Each answer is at least 44 px tall; on a phone both are the card's width and stacked;

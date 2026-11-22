@@ -327,7 +327,7 @@ export function PairingScreen({
 
   const first = connections.length === 0;
   return (
-    <PairingFrame embedded={embedded} stage="browse" onClose={onClose}>
+    <PairingFrame embedded={embedded} stage="browse" onClose={onClose} progress={first}>
       {!embedded && (
         <header className="min-w-0 text-center">
           <div className="flex items-center justify-center gap-2 text-accent">
@@ -478,6 +478,8 @@ interface PairingFrameProps {
   readonly announce?: string;
   /** Where the Back control goes; none is drawn when absent, embedded, or on the success screen. */
   readonly onClose?: (() => void) | undefined;
+  /** False on "Your daemons" (a list of what is already paired is not step 1 of a run); every other stage draws the bar. */
+  readonly progress?: boolean;
   readonly children: ReactNode;
 }
 
@@ -540,7 +542,7 @@ function FailureMessage({ message, cause }: { readonly message: string; readonly
 }
 
 /** The housing, and the only thing the embedded seam actually changes. */
-function PairingFrame({ embedded, stage, announce = '', onClose, children }: PairingFrameProps) {
+function PairingFrame({ embedded, stage, announce = '', onClose, progress = true, children }: PairingFrameProps) {
   const status = (
     <p className="sr-only" role="status">
       {announce}
@@ -560,7 +562,7 @@ function PairingFrame({ embedded, stage, announce = '', onClose, children }: Pai
       <PairingSky celebrating={stage === 'paired'} />
       <main className={SHELL} aria-labelledby="pairing-title" data-pairing-stage={stage}>
         {onClose !== undefined && stage !== 'paired' && <PairingBack onClose={onClose} />}
-        <PairProgress stage={stage} />
+        {progress && <PairProgress stage={stage} />}
         {pose !== undefined && (
           <div className="fy-pair-hero">
             <FerretMascot pose={pose} />
