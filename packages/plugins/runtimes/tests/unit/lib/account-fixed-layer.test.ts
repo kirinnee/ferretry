@@ -693,9 +693,16 @@ describe('hypermedia teaching', () => {
     should(teaching).containEql(
       'Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point.',
     );
-    // fy-render draws in chat, agenda tabs and tasks, so "chat only" no longer contradicts the agenda's tabs.
-    should(teaching).containEql('Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.');
+    // fy-render draws in the chat and in that ferret's Queue panel (docs/fy-render.md "Where a block renders"): the
+    // agenda, tasks, the Board, PR text and the standalone All-queues page show the block as code, so the teaching
+    // names the Queue panel and must not promise any of the others.
+    should(teaching).containEql(
+      "Draws in chat and the ferret's Queue panel; agenda, tasks, Board, PRs, All queues show code; never in files, docs, commits.",
+    );
+    should(teaching).containEql('Queue panel');
     should(teaching).not.containEql('Chat only');
+    should(teaching).not.containEql('agenda tabs');
+    should(teaching).not.containEql('Renders in chat, agenda');
     // The theme is the reader's: a ferret never paints a chart or a diagram.
     should(teaching).containEql('no colours');
     should(teaching).containEql('auto-themed: no %%{init}%% or colours');

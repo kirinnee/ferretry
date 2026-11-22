@@ -139,8 +139,8 @@ The owner's board-and-agenda teaching (&C48, 2026-11-04) then added five rules a
 - **Hypermedia** (1,320 → 1,209): the owner's explainer rule — ADHD-friendly, said in those words, an example for each
   point, and interactive visuals the reader changes, never steppers (_"interactive should not be steppers -- there's no
   need for steppers"_) — paid for by tightening the section's first lines and its
-  mermaid, svg and html lines. Its last line now says where fy-render draws (chat, agenda tabs and tasks), which the
-  old "Chat only" contradicted.
+  mermaid, svg and html lines. Its last line says where fy-render draws: a chat message and that ferret's Queue panel, while agenda, task, Board,
+  PR text and the All-queues page stay code (docs/fy-render.md "Where a block renders").
 
 The cap now **counts the blank line between sections** (14 characters), as the composed prompt has it — every earlier
 figure above left them out. The measured total is 7,993 with them, so the **whole-prompt cap is now `8_000`**: the 8 KB
