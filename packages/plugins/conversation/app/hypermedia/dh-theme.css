@@ -493,3 +493,28 @@
   border-color: var(--fg);
   box-shadow: var(--shadow-md);
 }
+
+/* THE 3D STAGE'S COLOURS (r12 H4 follow-up, end-list L145). Durian's 3D stage reads these tokens from its own host
+   (`.scn3`, drawn over the stage ground `--surface-2`) and turns each into a three.js colour, which keeps the RGB and drops
+   the alpha. So here a hairline rule (`--line`, `--line-2`: the app's `--border`, translucent) drew as its solid, loudest
+   colour in light and nearly vanished against a soft tint in dark, and a soft fill (a `color-mix(…, transparent)` of the
+   status colour) drew as the status colour itself, the same as the edge on top of it. On the stage's own host they are
+   OPAQUE, composited over the stage ground, and the two edge greys are the ink mixed into it to a floor of 3:1 against
+   every fill (`tests/integration/app/hypermedia-3d-edges.visual.test.ts` holds it for every style, palette and mode). The
+   labels inside the host read the same tokens, which only strengthens their rules. */
+.fy-hm .dh-doc .scn3 {
+  --line-2: color-mix(in srgb, var(--fg) 66%, var(--surface-2));
+  --line: color-mix(in srgb, var(--fg) 58%, var(--surface-2));
+  --acc-soft: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+  --acc-softer: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+  --hot-soft: color-mix(in srgb, var(--err) 16%, var(--surface-2));
+  --good-soft: color-mix(in srgb, var(--ok) 16%, var(--surface-2));
+  --warn-soft: color-mix(in srgb, var(--fyhm-warn) 16%, var(--surface-2));
+}
+
+/* In light the translucent border was ALREADY drawn as the near-black ink it is made of, and the stage read well; keep the
+   edges that strong there rather than easing them to the dark-mode grey. */
+:root[data-mode='light'] .fy-hm .dh-doc .scn3 {
+  --line-2: color-mix(in srgb, var(--fg) 92%, var(--surface-2));
+  --line: color-mix(in srgb, var(--fg) 80%, var(--surface-2));
+}

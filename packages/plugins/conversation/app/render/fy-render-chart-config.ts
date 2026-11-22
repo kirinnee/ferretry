@@ -20,6 +20,12 @@ import { paletteColors, type ResolvedTheme, toneColor } from '@ferretry/app';
 export interface ChartInteraction {
   /** Animate a draw and a frame change. Off under `prefers-reduced-motion: reduce`. */
   readonly animate: boolean;
+  /**
+   * Whether the FIRST draw grows in (default true). A repaint of a chart already on screen (a style or palette switch,
+   * a fullscreen toggle) sets it false: the canvas is redrawn whole in the same frame the old one goes, not blanked and
+   * grown back over {@link CHART_ANIMATION}'s 420 ms. Later frame steps still animate when `animate` is on.
+   */
+  readonly entrance?: boolean;
   /** In the fullscreen overlay, where the chart may take a finger or the wheel without trapping the page. */
   readonly fullscreen: boolean;
   /** A coarse pointer: a finger on the canvas inline belongs to the page's scroll. */
@@ -27,6 +33,9 @@ export interface ChartInteraction {
   /** Told when the reader zooms or resets, so the component can offer Reset. */
   readonly onZoom?: (zoomed: boolean) => void;
 }
+
+/** How a draw and a frame change animate when `animate` is on. */
+export const CHART_ANIMATION = { duration: 420, easing: 'easeOutCubic' } as const;
 
 /** Kinds that draw on a category axis and may zoom along it. */
 export const ZOOMABLE_KINDS: ReadonlySet<ChartSpec['kind']> = new Set(['line', 'area']);
@@ -239,7 +248,7 @@ export function chartConfiguration(
       labels: spec.kind === 'scatter' ? [] : [...frame.labels],
     },
     options: {
-      animation: interaction.animate ? { duration: 420, easing: 'easeOutCubic' } : false,
+      animation: interaction.animate && interaction.entrance !== false ? CHART_ANIMATION : false,
       color: or(c['fg-soft']),
       cutout: spec.kind === 'doughnut' ? '58%' : undefined,
       font,

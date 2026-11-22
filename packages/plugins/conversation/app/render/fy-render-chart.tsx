@@ -24,7 +24,7 @@
  */
 
 import { ChevronLeft, ChevronRight, ZoomOut } from 'lucide-react';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { ChartSpec, readChart as ReadChart } from './fy-render-chart-model.ts';
 import { ZOOMABLE_KINDS } from './fy-render-chart-config.ts';
 import { formatChartValue } from './fy-render-chart-format.ts';
@@ -79,6 +79,8 @@ export function FyRenderChart({
 }: FyRenderChartProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const handle = useRef<ChartHandle | null>(null);
+  /** Whether these bytes have been drawn once: the first draw grows in, a repaint does not (see `ChartInteraction.entrance`). */
+  const entered = useRef(false);
   const tableId = useId();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [frame, setFrame] = useState(0);
@@ -104,6 +106,8 @@ export function FyRenderChart({
         }
         setFrame(0);
         setHidden(new Set());
+        // New bytes grow in once; every redraw after that (a theme switch, fullscreen) is whole at once.
+        entered.current = false;
         setLoaded({ mountChart: modules.mountChart, spec: reading.spec });
       },
       () => {
@@ -131,11 +135,14 @@ export function FyRenderChart({
    * remount it — the interaction mode decides which gestures the zoom plugin binds, and it binds them at
    * creation — carrying the frame and the hidden series across.
    */
-  useEffect(() => {
+  // A LAYOUT effect: the old chart goes and the new one is drawn before the browser paints, never one frame apart.
+  useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (loaded === null || paint === null || canvas === null) return;
     setZoomed(false);
     let mounted: ChartHandle | null = null;
+    const entrance = !entered.current;
+    entered.current = true;
     try {
       mounted = loaded.mountChart(canvas, {
         frame: state.current.frame,
@@ -143,6 +150,7 @@ export function FyRenderChart({
         interaction: {
           animate: !matches('(prefers-reduced-motion: reduce)'),
           coarse: matches('(pointer: coarse)'),
+          entrance,
           fullscreen,
           onZoom: setZoomed,
         },

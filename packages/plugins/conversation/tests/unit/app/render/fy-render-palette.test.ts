@@ -242,6 +242,16 @@ describe('fy-render chart configuration', () => {
     ]);
   });
 
+  test('should grow in on the first draw only: a repaint (entrance false) draws whole', () => {
+    should(chartConfiguration(spec(BAR), 0, theme(), interaction).options?.animation).eql({
+      duration: 420,
+      easing: 'easeOutCubic',
+    });
+    should(
+      chartConfiguration(spec(BAR), 0, theme(), { ...interaction, entrance: false }).options?.animation,
+    ).be.false();
+  });
+
   test('should not animate under reduced motion, and should swap the axes for a horizontal bar', () => {
     const still = chartConfiguration(spec(BAR), 0, theme(), { ...interaction, animate: false });
     should(still.options?.animation).be.false();
