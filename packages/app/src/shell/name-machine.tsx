@@ -66,7 +66,7 @@ function NameThisMachineView({
   }, [refusal]);
   return (
     <section
-      className="kt-panel p-panel m-3"
+      className={heading ? 'kt-panel p-panel m-3' : 'kt-panel p-panel'}
       {...(heading ? { 'aria-labelledby': 'name-machine-heading' } : { 'aria-label': 'Name this machine' })}
       data-name-machine=""
     >

@@ -899,6 +899,16 @@ describe('the first run, end to end', () => {
         expect(await tab.getByRole('button', { name: 'Save name' }).count(), 'no second "Save name"').toBe(0);
         expect(await tab.locator('[data-step-later]').count(), 'the footer carries Later').toBe(1);
         expect(await tab.locator('[data-step-next]').count(), 'the footer carries Next').toBe(1);
+        // The card sits on the page's own edges (it was inset 12 px on each side of the title and the progress bar).
+        const edges = await tab.evaluate(() => {
+          const card = (document.querySelector('[data-name-machine]') as HTMLElement).getBoundingClientRect();
+          const title = (document.querySelector('h1') as HTMLElement).getBoundingClientRect();
+          return { cardLeft: card.left, titleLeft: title.left };
+        });
+        expect(
+          Math.abs(edges.cardLeft - edges.titleLeft),
+          'Machine name: the card shares the title’s left edge',
+        ).toBeLessThanOrEqual(1);
         await shot(tab, variant, 'onboarding.name');
         // Next saves the name: the machine takes it through the host file, and the flow goes on by itself.
         await tab.getByLabel('Machine name').last().fill('studio-mac');
