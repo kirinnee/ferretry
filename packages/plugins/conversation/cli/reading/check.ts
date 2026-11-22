@@ -178,7 +178,9 @@ function scanFences(text: string): FenceScan {
         message: `the info string "${info}" is not exactly "${FY_RENDER_FENCE}", so this fence is shown as plain code`,
       });
     } else if (HELD_PART_FENCES.has(first as string)) {
-      held.push({ from: index + 1, to: end + 1 });
+      // Only a CLOSED part is held: Durian's complaints about the body of a part the app never draws are not the message's
+      // problems. An UNCLOSED one keeps every Durian error, the missing closing fence first: that is a broken message.
+      if (end < lines.length) held.push({ from: index + 1, to: end + 1 });
       found.push({
         line: index + 1,
         level: 'warn',

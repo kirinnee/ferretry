@@ -167,6 +167,20 @@ describe('fy render check: parts the app does not draw, and the parts it does', 
     }
   });
 
+  test('an UNCLOSED chart or codewalk fence keeps the missing-closing-fence error: the CLI exits 1', async () => {
+    // Only a closed held part is suppressed; a fence with no closing delimiter is a broken message whatever its word is.
+    for (const word of ['chart', 'codewalk']) {
+      const { check, out } = harness({ 'open.md': `Intro\n\n${FENCE}${word}\nkind: bar\n` });
+      expect(await check(['open.md'])).toBe(1);
+      const printed = out.join('');
+      expect(printed).toContain('a code fence is never closed');
+      expect(printed).toContain(`line 3: warning: a ${word} fence is not drawn by the app`);
+    }
+    // The same fence, closed, is the warning alone.
+    const closed = harness({ 'closed.md': `Intro\n\n${FENCE}chart\nkind: bar\n${FENCE}\n` });
+    expect(await closed.check(['closed.md'])).toBe(0);
+  });
+
   test('a held fence does not hide a real error elsewhere in the message', async () => {
     const text = `${FENCE}chart\nkind: bar\n${FENCE}\n\n${FENCE}fy-render\ntype: mermaid\n---\nflowchart TB\n${FENCE}\n`;
     const { check } = harness({ 'both.md': text });
