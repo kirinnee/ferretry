@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import type { CallerGovernance, GrantRefusal } from '@ferretry/core-gate/contract';
+import { ApiError } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import { fakeLoginChanges } from '@ferretry/plugin-logins/contract/testing';
@@ -43,6 +44,7 @@ import {
   FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
 } from '../../../daemon/lib/service/catalog-service.ts';
+import { assertRequestLiveBetweenWrites } from '../../../daemon/lib/service/apply-bracket.ts';
 import { failedApplySentence } from '../../../daemon/lib/service/failed-apply.ts';
 import { ConfigWriteConflict, ConfigWriteInvalid } from '../../../daemon/lib/service/ports.ts';
 import {
@@ -1425,7 +1427,12 @@ describe('the setup.import executor', () => {
     const change = IMPORT();
     await service.executors.setup.describe(change, MACHINE);
     const failure = await catalogRefusal(service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
-    should(failure.message).equal('the manifest could not be written');
+    should(failure.message).startWith('the manifest could not be written.');
+    // E3: a key was filed before the fleet failed, so the answer says what landed and what did not.
+    should(failure.extra).eql({
+      landed: ['secret-store key ANTHROPIC_API_KEY'],
+      notLanded: ['the runtimes and fleet files', 'variables of login claude-you'],
+    });
   });
 
   it('should refuse an import that would leave a configuration this machine cannot read', async () => {
@@ -1477,6 +1484,53 @@ describe('the setup.import executor', () => {
     should(rolled).containEql('/state/config/model.yaml');
     should(rolled).containEql('NOT rolled back');
     should(rolled).not.containEql('nothing was left half-changed');
+  });
+
+  it('E3 fix2 lists the committed fleet AND the adapter-written configuration files as landed when only the shared history failed', async () => {
+    const config = ['/state/config/model.yaml', '/state/config/runtimes.yaml'];
+    const committed = (): FleetApplyFailureError =>
+      new FleetApplyFailureError({
+        kind: 'history-failed-after-commit',
+        failedHarness: 'claude',
+        reason: 'history is locked',
+        committed: { manifestPath: '/f/manifest.json' } as never,
+      });
+    const outcomeOf = async (build: () => Error): Promise<FleetCatalogRefusal> => {
+      const { service, state } = world();
+      state.apply = async () => {
+        throw build();
+      };
+      const change = IMPORT();
+      await service.executors.setup.describe(change, MACHINE);
+      return await catalogRefusal(service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
+    };
+
+    // The adapter wrote the configuration files, then the fleet committed, then its history failed.
+    const wrapped = await outcomeOf(() => new FleetApplyAfterConfigError(config, committed()));
+    const landed = (wrapped.extra as { landed: string[] }).landed;
+    const notLanded = (wrapped.extra as { notLanded: string[] }).notLanded;
+    should(landed).containEql('the runtimes and fleet files');
+    for (const path of config) should(landed).containEql(path);
+    should(notLanded).not.containEql('the runtimes and fleet files');
+    for (const path of config) should(notLanded).not.containEql(path);
+    should(wrapped.message).containEql('its manifest published');
+
+    // The same with no configuration file to write: the committed fleet is still what landed.
+    const bare = await outcomeOf(committed);
+    should((bare.extra as { landed: string[] }).landed).containEql('the runtimes and fleet files');
+    should((bare.extra as { notLanded: string[] }).notLanded).not.containEql('the runtimes and fleet files');
+
+    // A rollback is NOT a commit: the fleet did not land.
+    const rolled = await outcomeOf(
+      () =>
+        new FleetApplyAfterConfigError(
+          config,
+          new FleetApplyFailureError({ kind: 'rolled-back', failedOperation: 'copy', reason: 'disk full' }),
+        ),
+    );
+    const rolledExtra = (rolled.extra ?? {}) as { landed?: string[]; notLanded?: string[] };
+    should(rolledExtra.landed ?? []).not.containEql('the runtimes and fleet files');
+    should(rolledExtra.notLanded ?? ['the runtimes and fleet files']).containEql('the runtimes and fleet files');
   });
 
   it('R2-M1 failedApplySentence is true for every failure shape and says "nothing was left half-changed" only for a clean rollback', () => {
@@ -2850,6 +2904,145 @@ intervalMinutes: 5
 
     should(refusal.message).containEql('changed on this machine after it was reviewed');
     should(refusal.message).containEql('was made first and is NOT rolled back with the fleet');
+    should(w.applied).deepEqual([]);
+  });
+
+  it('E3 answers a DISK ERROR on the second of three settings files with the landed and not-landed lists, not a bare 500', async () => {
+    const own = files({});
+    const write = own.port.write;
+    own.port.write = async (path, body, ifMatch, mayLoosen) => {
+      if (path === 'voice.yaml') throw new Error('no space left on device');
+      return await write(path, body, ifMatch, mayLoosen);
+    };
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [
+      { path: 'learning.yaml' as const, text: 'enabled: false\n' },
+      { path: 'voice.yaml' as const, text: 'postProcessing:\n  provider: off\n' },
+      { path: 'warden.yaml' as const, text: WARDEN },
+    ];
+
+    const failure = await catalogRefusal(
+      apply(w, bundle, settings, undefined, callerFor(REMOTE)),
+      'fleet_change_failed',
+    );
+
+    should(own.writes.map(entry => entry.path)).deepEqual(['learning.yaml']);
+    should(failure.extra).deepEqual({
+      landed: ['learning.yaml'],
+      notLanded: ['voice.yaml', 'warden.yaml', 'the runtimes and fleet files'],
+    });
+    should(failure.message).containEql('no space left on device');
+    should(failure.message).containEql(
+      'Part of this change was applied: learning.yaml. The rest was not: voice.yaml, warden.yaml, the runtimes and fleet files.',
+    );
+  });
+
+  describe('E3 names every kind of write an import made before it stopped', () => {
+    const stopped = (error: unknown): ApiError => {
+      should(error).be.instanceOf(ApiError);
+      return error as ApiError;
+    };
+    const listed = (error: ApiError, list: 'landed' | 'notLanded'): string[] => {
+      const words = error.extra?.[list];
+      return Array.isArray(words) ? words.map(String) : [];
+    };
+    const cut = (): never => {
+      throw new ApiError(499, 'the request ended', 'request_aborted');
+    };
+
+    it('a key in the secret store, when the request ends right after it', async () => {
+      const w = world();
+      let ended = false;
+      w.state.putSecret = async () => {
+        ended = true;
+      };
+      const caller: ExecutorCaller = { ...MACHINE, live: () => (ended ? cut() : undefined) };
+      const change = IMPORT();
+      await w.service.executors.setup.describe(change, MACHINE);
+
+      const aborted = stopped(await thrown(w.service.executors.setup.execute(change, caller)));
+
+      should(aborted.code).equal('request_aborted');
+      should(listed(aborted, 'landed')[0]).startWith('secret-store key ');
+      should(aborted.extra?.notLanded).containEql('the runtimes and fleet files');
+      should(aborted.message).containEql('Part of this change was applied: secret-store key ');
+    });
+
+    it('a login it created, when the request ends right after it', async () => {
+      const changes = fakeLoginChanges();
+      let ended = false;
+      const w = world({
+        catalog: {
+          loginChanges: {
+            ...changes,
+            apply: async id => {
+              const answer = await changes.apply(id);
+              ended = true;
+              return answer;
+            },
+          },
+        },
+      });
+      w.state.emails = async () => [];
+      const caller: ExecutorCaller = { ...MACHINE, live: () => (ended ? cut() : undefined) };
+      const change = IMPORT();
+      await w.service.executors.setup.describe(change, MACHINE);
+
+      const aborted = stopped(await thrown(w.service.executors.setup.execute(change, caller)));
+
+      should(listed(aborted, 'landed').some(word => word.startsWith('login '))).be.true();
+      should(aborted.extra?.notLanded).containEql('the runtimes and fleet files');
+    });
+
+    it('nothing at all, when it stopped before any write (no lists, the answer as it was)', async () => {
+      const w = world();
+      const caller: ExecutorCaller = { ...MACHINE, live: cut };
+      const change = IMPORT();
+      await w.service.executors.setup.describe(change, MACHINE);
+
+      const aborted = stopped(await thrown(w.service.executors.setup.execute(change, caller)));
+
+      should(aborted.extra).be.undefined();
+      should(aborted.message).equal('the request ended');
+    });
+  });
+
+  it('E3 answers a request that ended after the first of three settings files with exactly that file, not a bare 499', async () => {
+    const own = files({});
+    const write = own.port.write;
+    const controller = new AbortController();
+    own.port.write = async (path, body, ifMatch, mayLoosen) => {
+      const answer = await write(path, body, ifMatch, mayLoosen);
+      controller.abort(); // the request ends right after the first file landed
+      return answer;
+    };
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [
+      { path: 'learning.yaml' as const, text: 'enabled: false\n' },
+      { path: 'voice.yaml' as const, text: 'postProcessing:\n  provider: off\n' },
+      { path: 'warden.yaml' as const, text: WARDEN },
+    ];
+    const caller: ExecutorCaller = {
+      ...callerFor(REMOTE),
+      live: () => assertRequestLiveBetweenWrites({ signal: controller.signal }),
+    };
+
+    const error = await thrown(apply(w, bundle, settings, undefined, caller));
+
+    should(error).be.instanceOf(ApiError);
+    const aborted = error as ApiError;
+    should(aborted.status).equal(499);
+    should(aborted.code).equal('request_aborted');
+    should(own.writes.map(entry => entry.path)).deepEqual(['learning.yaml']);
+    should(aborted.extra).deepEqual({
+      landed: ['learning.yaml'],
+      notLanded: ['voice.yaml', 'warden.yaml', 'the runtimes and fleet files'],
+    });
+    should(aborted.message).containEql(
+      'Part of this change was applied: learning.yaml. The rest was not: voice.yaml, warden.yaml, the runtimes and fleet files.',
+    );
     should(w.applied).deepEqual([]);
   });
 
@@ -4274,6 +4467,34 @@ describe('the setup.import executor adds the harness env to the login the apply 
       },
     };
   };
+
+  it('E3 names the published fleet as landed, and the login variables as not, when the request ends between them', async () => {
+    const fake = fakePort();
+    const w = world({ overrides: { loginEnvImport: fake.port } });
+    w.state.scans = envScan();
+    let ended = false;
+    w.state.apply = async () => {
+      ended = true;
+      return RUN_RESULT;
+    };
+    const caller: ExecutorCaller = {
+      ...MACHINE,
+      live: () => {
+        if (ended) throw new ApiError(499, 'the request ended', 'request_aborted');
+      },
+    };
+    const change = IMPORT();
+    await w.service.executors.setup.describe(change, MACHINE);
+
+    const aborted = (await thrown(w.service.executors.setup.execute(change, caller))) as ApiError;
+
+    should(aborted.code).equal('request_aborted');
+    should(aborted.extra?.landed).containEql('the runtimes and fleet files');
+    should(aborted.extra?.notLanded).eql(['variables of login claude-you']);
+    should(fake.asked).have.length(0);
+    should(JSON.stringify(aborted.extra)).not.containEql(SECRET_VALUE);
+    should(aborted.message).not.containEql(SECRET_VALUE);
+  });
 
   it('should hand the port the caller, the login, host text and the keys this apply filed, after the fleet is applied', async () => {
     const fake = fakePort();
