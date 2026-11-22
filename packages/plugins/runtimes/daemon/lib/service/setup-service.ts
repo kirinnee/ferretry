@@ -82,7 +82,12 @@ import {
 } from '../account/clone.ts';
 import { CloneRefusal } from '../account/clone-parts.ts';
 import { EMPTY_RUNTIME_IDS } from '../account/ids.ts';
-import type { FleetDocumentWrite, FleetModelApplyPlan } from '../provisioning.ts';
+import {
+  FleetApplyAfterConfigError,
+  FleetApplyFailureError,
+  type FleetDocumentWrite,
+  type FleetModelApplyPlan,
+} from '../provisioning.ts';
 import { notingLanded } from './apply-bracket.ts';
 import { type ApplyLedger, namingWhatLanded } from './apply-ledger.ts';
 import { configurationLanded, failedApplySentence } from './failed-apply.ts';
@@ -640,7 +645,7 @@ export class FleetSetupService {
       caller,
       landed,
     );
-    await this.#applyModel(model, documents, landed, () => caller?.live?.());
+    await this.#applyModel(model, documents, landed, ledger, () => caller?.live?.());
     ledger.fleet();
     const envSentences = await importLoginEnvs(this.deps.loginEnvImport, composed, caller, ledger);
     const sentences = [
@@ -1465,7 +1470,8 @@ export class FleetSetupService {
   async #applyModel(
     model: AccountModel,
     documents: readonly FleetDocumentWrite[],
-    landed: readonly string[],
+    landed: string[],
+    ledger: ApplyLedger,
     live?: () => void,
   ): Promise<void> {
     const { catalog } = this.deps;
@@ -1498,6 +1504,14 @@ export class FleetSetupService {
     try {
       await catalog.provisioner.apply(plan, documents);
     } catch (error) {
+      // The fleet committed and only its shared history failed afterwards: the manifest IS published, so the fleet and
+      // the configuration files the adapter wrote first have landed, and the ledger must say so like the sentence does.
+      const cause = error instanceof FleetApplyAfterConfigError ? error.failure : error;
+      if (cause instanceof FleetApplyFailureError && cause.failure.kind === 'history-failed-after-commit') {
+        ledger.fleet();
+        if (error instanceof FleetApplyAfterConfigError)
+          landed.push(...error.written.filter(path => !landed.includes(path)));
+      }
       throw new FleetCatalogRefusal('fleet_change_failed', failedApplySentence(error, landed));
     }
   }

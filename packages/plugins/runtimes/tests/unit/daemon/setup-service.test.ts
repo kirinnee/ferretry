@@ -1486,6 +1486,53 @@ describe('the setup.import executor', () => {
     should(rolled).not.containEql('nothing was left half-changed');
   });
 
+  it('E3 fix2 lists the committed fleet AND the adapter-written configuration files as landed when only the shared history failed', async () => {
+    const config = ['/state/config/model.yaml', '/state/config/runtimes.yaml'];
+    const committed = (): FleetApplyFailureError =>
+      new FleetApplyFailureError({
+        kind: 'history-failed-after-commit',
+        failedHarness: 'claude',
+        reason: 'history is locked',
+        committed: { manifestPath: '/f/manifest.json' } as never,
+      });
+    const outcomeOf = async (build: () => Error): Promise<FleetCatalogRefusal> => {
+      const { service, state } = world();
+      state.apply = async () => {
+        throw build();
+      };
+      const change = IMPORT();
+      await service.executors.setup.describe(change, MACHINE);
+      return await catalogRefusal(service.executors.setup.execute(change, MACHINE), 'fleet_change_failed');
+    };
+
+    // The adapter wrote the configuration files, then the fleet committed, then its history failed.
+    const wrapped = await outcomeOf(() => new FleetApplyAfterConfigError(config, committed()));
+    const landed = (wrapped.extra as { landed: string[] }).landed;
+    const notLanded = (wrapped.extra as { notLanded: string[] }).notLanded;
+    should(landed).containEql('the runtimes and fleet files');
+    for (const path of config) should(landed).containEql(path);
+    should(notLanded).not.containEql('the runtimes and fleet files');
+    for (const path of config) should(notLanded).not.containEql(path);
+    should(wrapped.message).containEql('its manifest published');
+
+    // The same with no configuration file to write: the committed fleet is still what landed.
+    const bare = await outcomeOf(committed);
+    should((bare.extra as { landed: string[] }).landed).containEql('the runtimes and fleet files');
+    should((bare.extra as { notLanded: string[] }).notLanded).not.containEql('the runtimes and fleet files');
+
+    // A rollback is NOT a commit: the fleet did not land.
+    const rolled = await outcomeOf(
+      () =>
+        new FleetApplyAfterConfigError(
+          config,
+          new FleetApplyFailureError({ kind: 'rolled-back', failedOperation: 'copy', reason: 'disk full' }),
+        ),
+    );
+    const rolledExtra = (rolled.extra ?? {}) as { landed?: string[]; notLanded?: string[] };
+    should(rolledExtra.landed ?? []).not.containEql('the runtimes and fleet files');
+    should(rolledExtra.notLanded ?? ['the runtimes and fleet files']).containEql('the runtimes and fleet files');
+  });
+
   it('R2-M1 failedApplySentence is true for every failure shape and says "nothing was left half-changed" only for a clean rollback', () => {
     const rolledBack = new FleetApplyFailureError({
       kind: 'rolled-back',

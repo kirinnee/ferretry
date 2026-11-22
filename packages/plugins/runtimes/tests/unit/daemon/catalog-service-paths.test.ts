@@ -9,6 +9,8 @@ import { describe, it } from 'bun:test';
 import { ApiError } from '@ferretry/kernel/contract';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import should from 'should';
+import { readChangeRecovery } from '../../../app/features/fleet/shell/apply-change.ts';
+import type { RuntimesClient } from '../../../app/lib/client.ts';
 import type { AccountChange } from '../../../contract/index.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { RuntimeIds } from '../../../daemon/lib/account/ids.ts';
@@ -802,6 +804,55 @@ describe('the first-run executors', () => {
     const after = await rejection(service.read(staged.id));
     should((after as Error).message).containEql('was only partly applied');
     should((after as FleetCatalogRefusal).extra).eql({ landed: ['learning.yaml'], notLanded: ['voice.yaml'] });
+  });
+
+  it('E3 fix2 settles an abort BEFORE the first write as not applied, so a re-read never says "already applied"', async () => {
+    const controller = new AbortController();
+    let attempts = 0;
+    const { service } = world({
+      overrides: {
+        executors: {
+          setup: {
+            describe: async () => 'Import Claude Code.',
+            execute: async (_change, caller) => {
+              attempts += 1;
+              // The request ends while the executor starts, then the first write's own check runs: nothing was written.
+              if (attempts === 1) controller.abort();
+              caller?.live?.();
+              return 'Imported Claude Code.';
+            },
+          },
+        },
+      },
+    });
+    const staged = await service.propose(setup);
+    // What the daemon says on the wire, read through the page's own recovery read.
+    const client = {
+      call: async (_route: string, init?: { params?: Record<string, string> }) => {
+        try {
+          return await service.read(init?.params?.proposalId ?? '');
+        } catch (error) {
+          const failure = error as FleetCatalogRefusal;
+          throw Object.assign(new Error(failure.message), {
+            status: 409,
+            code: failure.code,
+            body: { error: failure.message, code: failure.code, ...failure.extra },
+          });
+        }
+      },
+    } as unknown as RuntimesClient;
+
+    const aborted = await rejection(service.apply(staged.id, OWNER, undefined, { signal: controller.signal }));
+    should(aborted).match({ status: 499, code: 'request_aborted' });
+
+    should(await readChangeRecovery(client, staged.id)).eql({ kind: 'not-applied' });
+    // Nothing was spent: the same change applies on a retry.
+    should(await service.apply(staged.id, OWNER)).eql({
+      outcome: 'executed',
+      executor: 'setup',
+      summary: 'Imported Claude Code.',
+    });
+    should(await readChangeRecovery(client, staged.id)).eql({ kind: 'applied' });
   });
 
   it('E3 keeps saying "already applied" for a change that was spent whole', async () => {

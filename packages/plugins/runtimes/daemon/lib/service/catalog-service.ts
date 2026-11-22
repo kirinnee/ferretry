@@ -797,6 +797,10 @@ export class FleetCatalogService {
       }
       // Refused before anything was written, asking for a passkey: the same change can be applied once it is proved.
       if (error instanceof FleetCatalogFreshStepUpRequired) this.#changes.restore(record);
+      // The request ended and no write had landed (a failure after a first write always names what landed, above): the
+      // change is NOT spent. A re-read says it was not applied and a retry may run it; it is never "already applied".
+      if (partial === undefined && error instanceof ApiError && error.code === 'request_aborted')
+        this.#changes.restore(record);
       // Logins refused the change it held (it keeps it reviewable), and no runtime had moved: so does this one.
       if (
         error instanceof FleetCatalogRefusal &&
