@@ -78,11 +78,9 @@ message before sending it; nothing runs it for the agent. Its second line is the
 (make sure you say that) and user hypermeida to walk user through things"_, _"give example to illustrate your
 points etc"_). Change it there and here together.
 
-**Known mismatch, in the shipped text and not fixed here.** The last line below, and the guide's `task`/`board`
-paragraph, say a block renders in "agenda tabs" / "agenda bodies". The surface table in
-[fy-render.md](fy-render.md#where-a-block-renders-and-where-it-cannot) is what the code does: the agenda lends no
-`fy-render` door, so a block there stays a code fence, and it draws in a chat message. The text a ferret is given
-(`fixed-layer.ts`, `guide-text.ts`) is owed a code change to say so; this page quotes it as shipped.
+The last line below says where a block draws, and it agrees with the surface table in
+[fy-render.md](fy-render.md#where-a-block-renders-and-where-it-cannot): a chat message only. The agenda lends no
+`fy-render` door and a task's own text has no fence reading, so a block in either is not drawn.
 
 ````text
 Hypermedia: to teach, explain or compare anything not simple (a flow, a design, a change), show it, not just say it. Inline: never publish a page or link unless asked.
@@ -93,7 +91,7 @@ Write Markdown. Parts are fences: ```terminal, ```filetree, ```editor, ```tierli
 - chart (fy-render only; a part named chart is shown as code): YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; no colours.
 References are plain text, never links: `:agent @file &F12 ^A3 /skill $skill %terminal:dev %browser:app`.
 Every spec: `fy render guide <part>`. Before sending, run `fy render check <file|->`: it prints `line N: …` per problem; exit 1 on an error.
-Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.
+Chat only: agenda/task text stay code; never in files, docs, commits, PRs.
 ````
 
 ## Guide for agents
@@ -273,7 +271,7 @@ A fragment with inline CSS — tables, lists, `<details>`/`<summary>`, code, inl
 
 **Interactive means a visualization the reader changes.** Draw something — bars, a curve, a grid, a diagram — and give it parameters (sliders, toggles, a select, segmented buttons); every change redraws it at once. Never a stepper, a slideshow, a quiz or Next/Back pages: a sequence is prose.
 
-**It looks native when it uses the app's theme.** The page sits on the chat or agenda surface, so leave its background transparent and set no colour of your own unless the colour is the content (a swatch). Every colour comes from a theme token; light, dark and a theme switch while it runs follow by themselves.
+**It looks native when it uses the app's theme.** The page sits on the chat surface, so leave its background transparent and set no colour of your own unless the colour is the content (a swatch). Every colour comes from a theme token; light, dark and a theme switch while it runs follow by themselves.
 
 - Tokens, as `var(--name)`, the same in a static fragment: ink `--fg` `--fg-soft` `--muted` `--faint`; surfaces `--bg` `--surface` `--surface-2` `--surface-3`; lines `--border` `--border-soft` `--border-strong`; accent `--accent` `--accent-soft` `--accent-fg`; status `--ok` `--warn` `--err` and `--ok-bg` `--warn-bg` `--err-bg`; series `--viz-1` … `--viz-8`; type `--font-body` `--font-mono` `--text-xs` `--text-sm` `--text-base` `--text-lg`; shape `--radius-sm` `--radius-md` `--radius-pill`; space `--gap-xs` `--gap-sm` `--gap-md`.
 - Plain `<button>`, `<input>`, `<select>`, `<table>`, headings and text are already styled in a live page. Classes add the rest, live or static: `fy-btn` (`fy-btn--primary`, `fy-btn--quiet`; `aria-pressed="true"` marks one on), `fy-segmented` (a row of `fy-btn`), `fy-range` (a slider), `fy-toggle` (`<label class="fy-toggle"><input type="checkbox"> Label</label>`), `fy-input`, `fy-select`, `fy-field` (`<label class="fy-field">Rate <input class="fy-range" type="range"> <output>3</output></label>`), `fy-card`, `fy-row`, `fy-stack`, `fy-grid`, `fy-muted`, `fy-num`, `fy-chip`, `fy-stat` (`<div class="fy-stat">Cost <b>$42</b></div>`), `fy-table`, `fy-legend` with `fy-swatch`.
@@ -326,7 +324,7 @@ That is `image`, `video`, `audio` and `pdf` — they name bytes instead of carry
 
 ### task
 
-`task` and `board` point at tasks on the board and show them live; they draw no picture and carry no bytes. `task`: the payload is one reference, `&F12`. `board`: references one per line or separated by spaces (at most 12, none twice), or a single line `parent: &F12` to show that task's children. Either form draws a framed mini board grouped by lane. The reader sees the real board task — title, lane, progress, its PRs — and it redraws by itself when the task moves; you write no title or status, so there is nothing to keep true. Prefer one block to pasting a status that goes stale. A task that does not exist or cannot be read shows as a quiet note, never a link. Chat messages and agenda bodies only. Caps: 2 KiB, 12 listed tasks, 24 children shown. A repeated or non-task reference, a `parent:` mixed with a list, or `parent:` on a `task` makes the block a plain code fence.
+`task` and `board` point at tasks on the board and show them live; they draw no picture and carry no bytes. `task`: the payload is one reference, `&F12`. `board`: references one per line or separated by spaces (at most 12, none twice), or a single line `parent: &F12` to show that task's children. Either form draws a framed mini board grouped by lane. The reader sees the real board task — title, lane, progress, its PRs — and it redraws by itself when the task moves; you write no title or status, so there is nothing to keep true. Prefer one block to pasting a status that goes stale. A task that does not exist or cannot be read shows as a quiet note, never a link. Chat messages only: an agenda item or a task description shows the block as code. Caps: 2 KiB, 12 listed tasks, 24 children shown. A repeated or non-task reference, a `parent:` mixed with a list, or `parent:` on a `task` makes the block a plain code fence.
 
 ### lottie
 

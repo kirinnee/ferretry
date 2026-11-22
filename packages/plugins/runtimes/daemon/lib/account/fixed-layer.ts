@@ -301,7 +301,7 @@ export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
     '- chart (fy-render only; a part named chart is shown as code): YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; no colours.',
     'References are plain text, never links: `:agent @file &F12 ^A3 /skill $skill %terminal:dev %browser:app`.',
     `Every spec: \`${fy} render guide <part>\`. Before sending, run \`${fy} render check <file|->\`: it prints \`line N: …\` per problem; exit 1 on an error.`,
-    'Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.',
+    'Chat only: agenda/task text stay code; never in files, docs, commits, PRs.',
   ].join('\n');
 
 /**
