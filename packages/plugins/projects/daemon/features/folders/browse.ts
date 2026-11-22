@@ -21,6 +21,10 @@ const READ_LIMIT = 5000;
 /** How many child folders are checked for a sign-in file at once. */
 const CHECK_BATCH = 16;
 
+/** The one fixed reason for a place whose sign-in look could not see every name: a size, never a hint of what is inside. */
+const TOO_LARGE_MESSAGE = 'this folder is too large to check for private files';
+
+const tooLarge = (): ApiError => new ApiError(403, TOO_LARGE_MESSAGE, 'folder_too_large');
 const refused = (): ApiError => new ApiError(403, REFUSED_MESSAGE, 'folder_refused');
 const priv = (): ApiError => new ApiError(403, PRIVATE_MESSAGE, 'private_folder');
 
@@ -65,6 +69,9 @@ export class FolderExplorer {
     const policy = await folderPolicy(browser, home, outsideHome);
     const { folder, below } = await this.hold(path, home, policy, 'anywhere');
     try {
+      // A folder, or an ancestor, whose sign-in look saw only part of its names is not proved free of a marker: nothing of it
+      // is listed (a listing would expose names and metadata under a possible sign-in folder). Fails closed, in plain words.
+      if (!(await policy.look(folder.real)).complete) throw tooLarge();
       const read = await folder.entries(READ_LIMIT);
       if (read === undefined) throw refused();
       // The held folder's own names are checked too: the home itself often holds a few and is the starting point, `/` has none.

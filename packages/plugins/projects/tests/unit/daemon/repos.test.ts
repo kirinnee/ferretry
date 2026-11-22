@@ -398,6 +398,35 @@ describe('scanning a project folder for repositories', () => {
     expect(world.opened).not.toContain(`${P}/wide`);
     expect(world.probed.filter(path => path.startsWith(`${P}/wide`))).toEqual([]);
   });
+  test('a project folder, or an ancestor, whose sign-in look saw only part of its names reads nothing new: the answer is truncated and nothing was opened or probed (R4)', async () => {
+    const tree = {
+      [HOME]: ['work'],
+      [P]: ['app'],
+      [`${P}/app`]: [],
+      '/srv': ['wide'],
+      '/srv/wide': ['proj'],
+      '/srv/wide/proj': ['app'],
+      '/srv/wide/proj/app': [],
+    };
+    const git = [`${P}/app`, '/srv/wide/proj/app'];
+    const cases: [string, readonly string[]][] = [
+      ['/srv/wide/proj', ['/srv/wide']], // below a partially screened ancestor
+      ['/srv/wide/proj', ['/srv/wide/proj']], // the project folder itself
+      [P, [P]],
+      [P, [HOME]], // the owner's own home is the anchor: never looked at, so it stays as today
+    ];
+    for (const [root, partial] of cases) {
+      const world = browserOf(tree, git, {}, { partial });
+      const found = await scanRepos(root, { browser: world.browser });
+      if (partial[0] === HOME) {
+        expect(found).toEqual({ repos: [{ path: 'app' }], truncated: false });
+        continue;
+      }
+      expect([root, partial, found]).toEqual([root, partial, { repos: [], truncated: true }]);
+      expect(world.opened).toEqual([]);
+      expect(world.probed).toEqual([]);
+    }
+  });
   test('a folder that could not be read says the scan did not see everything', async () => {
     const world = browserOf({ [P]: ['a'], [`${P}/a`]: [] }, []);
     const flaky: FolderBrowser = {

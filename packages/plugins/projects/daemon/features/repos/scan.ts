@@ -67,6 +67,11 @@ export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResul
   const policy = await folderPolicy(browser, home, deps.outsideHome);
   // The decision is on where the folder REALLY is, not how it was spelled: a stored spelling under the home can resolve out of it.
   if (belowHome(rootReal, home) === undefined) await policy.enterOutside();
+  // The project folder and every ancestor down from the anchor are screened BEFORE the folder is opened or listed: one whose
+  // sign-in look saw only part of its names is not proved safe, so nothing new is read from below it and the answer is the
+  // truncated "saw nothing" one (stored repositories and account links are kept, never pruned). The owner's home is the
+  // anchor and is not looked at.
+  if (!(await policy.look(rootReal)).complete) return nothing;
   const inside =
     (judge: FolderVerdict): FolderVerdict =>
     async real =>

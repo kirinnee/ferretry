@@ -25,6 +25,13 @@ export interface FolderPolicy {
    */
   readonly verdict: FolderVerdict;
   /**
+   * `verdict`, with what the sign-in look could NOT see said too, over the folder AND every ancestor: `complete: false` is a
+   * folder on the way (or the folder itself) with more names than were read for the spelling-fold look. `verdict` accepts such
+   * a place (width alone never makes one private); a reader that must not open an unproved place (the repository scan and the
+   * explorer's listing) asks this and fails closed. The owner's own home is the anchor and is never looked at, so it is complete.
+   */
+  readonly look: (real: string) => Promise<ChildLook>;
+  /**
    * The verdict for a folder directly inside one that `verdict` already accepted: the same judgment, with the ancestors not
    * asked again (they are the parent's, already proved), so a wide folder costs one sign-in look per child, not one per
    * ancestor per child.
@@ -91,23 +98,22 @@ export async function folderPolicy(
       ? { verdict: 'private', complete: true }
       : { verdict: undefined, complete: signIn !== 'partial' };
   };
-  const verdict: FolderVerdict = async real =>
-    (
-      await judge(real, async (segments, anchor) => {
-        let path = anchor;
-        let partial = false;
-        for (const segment of segments) {
-          path = `${path}/${segment}`;
-          const look = await browser.holdsSignIn(path);
-          if (look === true) return true;
-          if (look === 'partial') partial = true;
-        }
-        return partial ? 'partial' : false;
-      })
-    ).verdict;
+  const look = (real: string): Promise<ChildLook> =>
+    judge(real, async (segments, anchor) => {
+      let path = anchor;
+      let partial = false;
+      for (const segment of segments) {
+        path = `${path}/${segment}`;
+        const seen = await browser.holdsSignIn(path);
+        if (seen === true) return true;
+        if (seen === 'partial') partial = true;
+      }
+      return partial ? 'partial' : false;
+    });
+  const verdict: FolderVerdict = async real => (await look(real)).verdict;
   const childLook = (real: string): Promise<ChildLook> =>
     judge(real, async segments => (segments.length > 0 ? await browser.holdsSignIn(real) : false));
   const child: FolderVerdict = async real => (await childLook(real)).verdict;
   const confined: FolderVerdict = async real => (belowHome(real, home) === undefined ? 'outside' : verdict(real));
-  return { verdict, child, childLook, confined, isPrivateReal, isSkippedReal, enterOutside };
+  return { verdict, look, child, childLook, confined, isPrivateReal, isSkippedReal, enterOutside };
 }

@@ -29,13 +29,15 @@ interface Machine {
   /** Folders (by path as named) whose held object turns out to be another: the swap between the check and the hold. */
   readonly swapped?: Record<string, string>;
   readonly git?: readonly string[];
+  /** Folders whose sign-in look reads only part of their names (no marker seen, none ruled out). */
+  readonly partial?: readonly string[];
   /** What the new folder turns out to be after it is made: a path it really reaches. */
   readonly madeReaches?: Record<string, string>;
 }
 
 /** A machine of folders in a map. */
 function machine(tree: Tree, options: Machine = {}) {
-  const { links = {}, swapped = {}, git = [], madeReaches = {} } = options;
+  const { links = {}, swapped = {}, git = [], madeReaches = {}, partial = [] } = options;
   const calls: string[] = [];
   const made: string[] = [];
   const removed: string[] = [];
@@ -49,7 +51,7 @@ function machine(tree: Tree, options: Machine = {}) {
     home: async () => HOME,
     holdsSignIn: async path => {
       calls.push(`holdsSignIn ${path}`);
-      return holdsSignIn(names(path));
+      return holdsSignIn(names(path)) || (partial.includes(path) ? 'partial' : false);
     },
     leaf: async path => (path in links ? 'link' : path in tree ? 'present' : 'missing'),
     realPaths: async paths =>
@@ -407,6 +409,39 @@ describe('FolderExplorer.list', () => {
       true,
     );
     expect(code.entries.map(entry => entry.name)).toEqual(['app', 'readme.md']);
+  });
+
+  test('a folder, or an ancestor, whose sign-in look saw only part of its names is refused with one fixed reason and nothing of it is read (R4)', async () => {
+    const tree: Tree = {
+      ...BASE,
+      '/srv': ['wide', 'plain'],
+      '/srv/wide': ['inner'],
+      '/srv/wide/inner': ['leaf'],
+      '/srv/wide/inner/leaf': [],
+      '/srv/plain': ['sub'],
+      '/srv/plain/sub': [],
+      [`${HOME}/code/big`]: ['x'],
+      [`${HOME}/code`]: ['big', 'app'],
+    };
+    const allow = async () => undefined;
+    const world = machine(tree, { partial: ['/srv/wide', `${HOME}/code/big`] });
+    // the folder itself, a folder BELOW the wide ancestor, and the same inside the home
+    for (const path of ['/srv/wide', '/srv/wide/inner', '/srv/wide/inner/leaf', '~/code/big']) {
+      const refusal = await failure(() => world.explorer.list(path, true, allow));
+      expect([path, refusal.status, refusal.code, refusal.message]).toEqual([
+        path,
+        403,
+        'folder_too_large',
+        'this folder is too large to check for private files',
+      ]);
+    }
+    // nothing of those folders was read
+    expect(
+      world.calls.filter(call => call.startsWith('entries /srv/wide') || call === `entries ${HOME}/code/big`),
+    ).toEqual([]);
+    // a sibling that was fully looked at, and the home itself (the anchor, never looked at), still list
+    expect((await world.explorer.list('/srv/plain', true, allow)).entries.map(entry => entry.name)).toEqual(['sub']);
+    expect((await world.explorer.list('~', true)).path).toBe(HOME);
   });
 
   test('a listing is bounded at 500 and says so, counting only what is shown', async () => {
