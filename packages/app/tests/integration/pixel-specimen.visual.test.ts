@@ -114,7 +114,9 @@ describe('the Pixel art specimen', () => {
               for (const element of document.querySelectorAll<HTMLElement>('[data-specimen] *')) {
                 const style = getComputedStyle(element);
                 const label = `${element.tagName.toLowerCase()}.${element.className}`.slice(0, 60);
-                if (style.borderTopLeftRadius !== '0px' && element.getBoundingClientRect().width > 0)
+                // A visually hidden 1px box (`sr-only`: a segmented control's radios) draws nothing, so its UA radio rounding is no corner.
+                const box = element.getBoundingClientRect();
+                if (style.borderTopLeftRadius !== '0px' && (box.width > 1 || box.height > 1))
                   rounded.push(`${label} ${style.borderTopLeftRadius}`);
                 if (
                   style.boxShadow !== 'none' &&
