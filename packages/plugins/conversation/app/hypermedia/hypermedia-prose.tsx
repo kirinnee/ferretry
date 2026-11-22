@@ -4,6 +4,7 @@ import { memo, useEffect, useId, useMemo, useSyncExternalStore } from 'react';
 import { animationEngineReady, loadAnimationEngine, onAnimationEngine } from './animation-engine.ts';
 import { holdsAnimation } from './held-fences.tsx';
 import { DrawableFyRenderBodies } from './fy-render-host.tsx';
+import { exceedsMessageCap } from './limits.ts';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';
 import { readLook, serverLook, subscribeToLook, variantOf } from './look.ts';
 import { readMessage } from './parse-message.ts';
@@ -30,7 +31,7 @@ import { REFERENCE_INLINE } from './with-references.ts';
  *    belongs to, and a `:::human` segment draws its body even with `llm=none` (`llm-text.tsx`, decision C7).
  *  - LINKS go through our URL policy (never an image, an app route or a reference envelope) and open through the
  *    shell's one outside link; code carries our colours and references (`slots.tsx`).
- *  - OVER THE CAP a message is shown as the text it is, never as Durian's error (`readMessage` answers `null`).
+ *  - OVER THE CAP a message is shown as the text it is, never as Durian's error ({@link exceedsMessageCap}).
  *
  * Streaming: a message grows one parse at a time; `DocumentView` keys its blocks by position and every component below
  * is module-level, so what is already drawn is updated in place, never remounted.
@@ -83,7 +84,10 @@ export const HypermediaProse = memo(function HypermediaProse({
   useEffect(() => {
     if (wantsEngine) loadAnimationEngine().catch(() => undefined);
   }, [wantsEngine]);
-  const read = useMemo(() => readMessage(text, idPrefix, arriving, engine), [text, idPrefix, arriving, engine]);
+  const read = useMemo(
+    () => (exceedsMessageCap(text) ? null : readMessage(text, idPrefix, arriving, engine)),
+    [text, idPrefix, arriving, engine],
+  );
   return (
     <ReferenceProofProvider text={text}>
       <div className={`fy-hm min-w-0 max-w-full ${className ?? ''}`} data-fy-hypermedia="" data-hm-header={header}>
