@@ -96,9 +96,10 @@ describe('a chart is held as code, never evaluated (S1)', () => {
     const { doc } = mustRead(text, 'p-');
     expect(JSON.stringify(doc.blocks)).not.toContain('"type":"chart"');
     expect(JSON.stringify(doc.blocks)).not.toContain('"initial"');
-    // The chart in the tabs is inside the held container's own text, not a second block: four charts, one held container.
-    expect(JSON.stringify(doc.blocks).match(/"name":"fy-chart-held"/gu)?.length).toBe(4);
+    // A chart in a held container is inside the container's own text, not a second block: three charts, two held containers.
+    expect(JSON.stringify(doc.blocks).match(/"name":"fy-chart-held"/gu)?.length).toBe(3);
     expect(JSON.stringify(doc.blocks).match(/"name":"fy-tabs-held"/gu)?.length).toBe(1);
+    expect(JSON.stringify(doc.blocks).match(/"name":"fy-accordion-held"/gu)?.length).toBe(1);
   });
 
   it('renames only a fence Durian reads as a chart: not a longer word, not a fence inside another fence, not fy-render', () => {
@@ -217,13 +218,38 @@ describe('a :::tabs container is held as code (r12 H11a)', () => {
     await unmount();
   });
 
-  it('holds every container in a message, and only :::tabs: not an accordion, a :::human segment or a longer name', () => {
+  it('holds every container in a message, tabs and accordion: not a :::human segment or a longer name', () => {
     const accordion = [':::accordion', '#### One', 'x', ':::'].join('\n');
     const human = [':::human', 'for people', ':::'].join('\n');
     const longer = [':::tabs-x', '#### One', 'x', ':::'].join('\n');
     const text = [TABS, accordion, human, longer, TABS].join('\n\n');
-    expect(holdFences(text).match(/fy-tabs-held/gu)).toHaveLength(2);
-    expect(holdFences([accordion, human, longer].join('\n\n'))).toBe([accordion, human, longer].join('\n\n'));
+    const held = holdFences(text);
+    expect(held.match(/fy-tabs-held/gu)).toHaveLength(2);
+    expect(held.match(/fy-accordion-held/gu)).toHaveLength(1);
+    expect(holdFences([human, longer].join('\n\n'))).toBe([human, longer].join('\n\n'));
+  });
+
+  it('holds an accordion as the code it is: one host block, its own lines shown, no row drawn', async () => {
+    const accordion = [':::accordion', '#### One', 'first', '#### Two', 'second', ':::'].join('\n');
+    expect(mustRead(accordion, 'p-').doc.blocks.map(block => block.type)).toEqual(['host']);
+    const { container, unmount } = await draw(accordion);
+    expect(container.querySelector('.dh-doc .code-block pre')?.textContent).toBe(accordion);
+    expect(container.querySelector('.dh-doc .accordion, .dh-error')).toBeNull();
+    await unmount();
+  });
+
+  it('holds a container whose name follows spaces after the colons, tabs and accordion alike', async () => {
+    for (const name of ['tabs', 'accordion']) {
+      for (const gap of [' ', '   ', '\t']) {
+        const text = [`:::${gap}${name}`, '#### One', 'x', ':::'].join('\n');
+        expect(holdFences(text)).toContain(`${FENCE}fy-${name}-held`);
+        expect(mustRead(text, 'p-').doc.blocks.map(block => block.type)).toEqual(['host']);
+      }
+    }
+    const { container, unmount } = await draw(['::: accordion', '#### One', 'x', ':::'].join('\n'));
+    expect(container.querySelector('.dh-doc .code-block pre')?.textContent).toBe(':::accordion\n#### One\nx\n:::');
+    expect(container.querySelector('.dh-doc .accordion, .dh-doc .tabs')).toBeNull();
+    await unmount();
   });
 
   it('reads containers the way Durian does: a fence holds a :::tabs line as text, a container with a fence in it still closes', () => {

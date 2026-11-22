@@ -52,7 +52,7 @@ export function readMessage(
   if (exceedsPreParseLimits(source)) return null;
   configureDurian();
   const settled = settleFences(source, arriving);
-  // A chart (unbounded formulas), a code walk and a `:::tabs` container are held as code before Durian can read them
+  // A chart (unbounded formulas), a code walk and a `:::tabs` or `:::accordion` container are held as code before Durian can read them
   // (`held-fences.tsx`), and so is an animation until it draws again (`ANIMATION_DRAWS`, then its lazy engine).
   const text = holdFences(settled.text, !(ANIMATION_DRAWS && animationReady));
   if (exceedsParserBudget(text)) return null;

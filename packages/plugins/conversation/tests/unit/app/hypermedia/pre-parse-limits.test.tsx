@@ -1,7 +1,7 @@
 /**
- * r12 H11a — THE PRE-PARSE LIMITS. A message over a per-paragraph or per-line limit is not handed to the parser: it is shown
- * as plain text with a one-line note. Every test builds its message from COUNTS of neutral filler, at each limit and one
- * past it. The speed claim (one linear pass over a 300 KB message in about 20 ms) is the last test.
+ * r12 H11a — THE PRE-PARSE LIMITS. A message over a pre-parse limit is not handed to the parser: it is shown as plain text
+ * with a one-line note. Every test builds its message from COUNTS of neutral filler, at each limit and one past it. The speed
+ * claim (one linear pass over a 300 KB message in about 20 ms) is `tests/perf/app/hypermedia/pre-parse-limits.test.ts`.
  */
 import { describe, expect, it } from 'bun:test';
 import { ReferenceSurfaceProvider } from '@ferretry/app';
@@ -13,13 +13,96 @@ import { readMessage } from '../../../../app/hypermedia/parse-message.ts';
 import { PLAIN_TEXT_NOTE } from '../../../../app/hypermedia/plain-fallback.tsx';
 import { fixture, inShell } from './surface-fixture.tsx';
 
-const { linkOpeners, emphasisRuns, longLine, spaceRun } = PRE_PARSE_LIMITS;
+const { linkOpeners, emphasisRuns, longLine, spaceRun, paragraphWork, messageOpeners, messageEmphasisRuns } =
+  PRE_PARSE_LIMITS;
 const times = (unit: string, count: number): string => unit.repeat(count);
 const FENCE = '`'.repeat(3);
+/** `head`, then rows of neutral filler on following lines, as one paragraph of exactly `length` characters. */
+const padded = (head: string, length: number): string => {
+  let body = head;
+  while (body.length < length) body += `\n${'x'.repeat(Math.min(99, length - body.length - 1))}`;
+  return body;
+};
 
-describe('the limits are the ones the brief names', () => {
-  it('are 50 link openers, 50 emphasis runs, a 2,000-character line with a run of 64', () => {
-    expect(PRE_PARSE_LIMITS).toEqual({ linkOpeners: 50, emphasisRuns: 50, longLine: 2_000, spaceRun: 64 });
+describe('the limits are the ones chosen', () => {
+  it('are the counts the code names', () => {
+    expect(PRE_PARSE_LIMITS).toEqual({
+      linkOpeners: 50,
+      emphasisRuns: 50,
+      longLine: 2_000,
+      spaceRun: 64,
+      paragraphWork: 100_000,
+      messageOpeners: 5_000,
+      messageEmphasisRuns: 10_000,
+    });
+  });
+});
+
+describe('the work a paragraph may ask of the parser: its openers times its length', () => {
+  const head = times('[a](b) ', 10); // 20 openers
+  const openers = 20;
+
+  it('passes at the limit and is over one character past it', () => {
+    const atLimit = paragraphWork / openers;
+    expect(padded(head, atLimit)).toHaveLength(atLimit);
+    expect(exceedsPreParseLimits(padded(head, atLimit))).toBe(false);
+    expect(exceedsPreParseLimits(padded(head, atLimit + 1))).toBe(true);
+  });
+
+  it('is a per-paragraph product: a blank line starts it again, and the length counts every line of the paragraph', () => {
+    const atLimit = padded(head, paragraphWork / openers);
+    expect(exceedsPreParseLimits([atLimit, atLimit, atLimit].join('\n\n'))).toBe(false);
+    // Each half alone is well under; with no blank line between them they are one paragraph.
+    const first = padded(head, 3_000);
+    const second = padded('y', 2_100);
+    expect(exceedsPreParseLimits(first)).toBe(false);
+    expect(exceedsPreParseLimits(second)).toBe(false);
+    expect(exceedsPreParseLimits([first, second].join('\n'))).toBe(true);
+    expect(exceedsPreParseLimits([first, second].join('\n\n'))).toBe(false);
+    // Characters after a blank line are another paragraph's, and cost nothing here.
+    expect(exceedsPreParseLimits([head, padded('', 10 * paragraphWork)].join('\n\n'))).toBe(false);
+  });
+
+  it('allows a short paragraph its full 50 links and a paragraph with no opener any length', () => {
+    expect(exceedsPreParseLimits(times('[a](b) ', linkOpeners))).toBe(false);
+    expect(exceedsPreParseLimits(padded('', 10 * paragraphWork))).toBe(false);
+  });
+
+  it('measures at the end of text and at a CR line end as it does at an LF', () => {
+    const over = padded(head, paragraphWork / openers + 1);
+    expect(exceedsPreParseLimits(`${over}\r\n`)).toBe(true);
+    expect(exceedsPreParseLimits(`${over}\r`)).toBe(true);
+    expect(exceedsPreParseLimits(`${over}\n`)).toBe(true);
+  });
+});
+
+describe('the whole message', () => {
+  it('passes the opener total at its limit and is over one past it, brackets and destinations together', () => {
+    expect(exceedsPreParseLimits(times('[a]\n\n', messageOpeners))).toBe(false);
+    expect(exceedsPreParseLimits(times('[a]\n\n', messageOpeners + 1))).toBe(true);
+    expect(exceedsPreParseLimits(times('[a](b)\n\n', messageOpeners / 2))).toBe(false);
+    expect(exceedsPreParseLimits(times('[a](b)\n\n', messageOpeners / 2 + 1))).toBe(true);
+    expect(exceedsPreParseLimits(times('](b)\n\n', messageOpeners))).toBe(false);
+    expect(exceedsPreParseLimits(times('](b)\n\n', messageOpeners + 1))).toBe(true);
+  });
+
+  it('passes the emphasis-run total at its limit and is over one past it, each mark counted', () => {
+    for (const mark of ['*', '_', '~']) {
+      expect(exceedsPreParseLimits(times(`${mark}\n\n`, messageEmphasisRuns))).toBe(false);
+      expect(exceedsPreParseLimits(times(`${mark}\n\n`, messageEmphasisRuns + 1))).toBe(true);
+    }
+    // The three kinds share the one total.
+    const half = messageEmphasisRuns / 2;
+    expect(exceedsPreParseLimits(`${times('*\n\n', half)}${times('~\n\n', half)}`)).toBe(false);
+    expect(exceedsPreParseLimits(`${times('*\n\n', half)}${times('~\n\n', half + 1)}`)).toBe(true);
+  });
+
+  it('draws a long document of ordinary paragraphs, far under every total', () => {
+    const paragraph =
+      'A **bold** and an _italic_ word, a [link](https://example.com), ~~struck~~ text, and more words.';
+    const text = times(`${paragraph}\n\n`, 300);
+    expect(exceedsPreParseLimits(text)).toBe(false);
+    expect(readMessage(text, 'p-')).not.toBeNull();
   });
 });
 
@@ -69,6 +152,17 @@ describe('emphasis marks, per paragraph', () => {
     expect(exceedsPreParseLimits(times('**a ', emphasisRuns))).toBe(false);
     expect(exceedsPreParseLimits(times('*_', emphasisRuns / 2))).toBe(false);
     expect(exceedsPreParseLimits(times('*_', emphasisRuns / 2 + 1))).toBe(true);
+  });
+
+  it('counts the third mark with the other two: 50 runs pass and 51 are over, whatever the mix', () => {
+    expect(exceedsPreParseLimits(times('~ a ', emphasisRuns))).toBe(false);
+    expect(exceedsPreParseLimits(times('~ a ', emphasisRuns + 1))).toBe(true);
+    expect(exceedsPreParseLimits(times('~~a ', emphasisRuns))).toBe(false);
+    expect(exceedsPreParseLimits(times('~~~~~~~~', 1_000))).toBe(false);
+    expect(exceedsPreParseLimits(`${times('* a ', 20)}${times('_ a ', 20)}${times('~ a ', 10)}`)).toBe(false);
+    expect(exceedsPreParseLimits(`${times('* a ', 20)}${times('_ a ', 20)}${times('~ a ', 11)}`)).toBe(true);
+    expect(exceedsPreParseLimits(times('*~', emphasisRuns / 2 + 1))).toBe(true);
+    expect(exceedsPreParseLimits(times('~ a\n\n', emphasisRuns + 1))).toBe(false);
   });
 
   it('does not carry a run over a line end', () => {

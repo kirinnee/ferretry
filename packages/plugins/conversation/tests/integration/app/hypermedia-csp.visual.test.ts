@@ -673,11 +673,11 @@ describe('the parts at a phone and a desktop width, light and dark', () => {
           expect(m.chartCanvases).toBe(0);
           expect(m.heldCharts).toBeGreaterThan(0);
           expect(m.images).toBe(1);
-          for (const part of ['terminal', 'filetree', 'mermaid', 'tierlist', 'accordion'])
-            expect(m.parts).toContain(part);
-          // r12 H11a: tabs and an animation are held as code, like a chart.
+          for (const part of ['terminal', 'filetree', 'mermaid', 'tierlist']) expect(m.parts).toContain(part);
+          // r12 H11a: tabs, an accordion and an animation are held as code, like a chart.
           expect(m.parts).not.toContain('chart');
           expect(m.parts).not.toContain('tabs');
+          expect(m.parts).not.toContain('accordion');
           expect(m.parts).not.toContain('animation');
           await expectClean(visit, `showcase ${viewport} ${scheme}`);
           if (shotsDir !== '') await visit.page.screenshot({ path: join(shotsDir, `parts-${viewport}-${scheme}.png`) });
