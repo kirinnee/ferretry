@@ -2,7 +2,7 @@ import { type Document, parse } from 'durian-hypermedia';
 import { animationEngineReady } from './animation-engine.ts';
 import { configureDurian } from './durian.ts';
 import { settleFences } from './fence-boundaries.ts';
-import { drawableBodies, fyRenderParseBlock } from './fy-render-host.tsx';
+import { type DrawableFyRenderBodiesMap, drawableBodies, fyRenderParseBlock } from './fy-render-host.tsx';
 import { heldFenceParseBlocks, holdFences } from './held-fences.tsx';
 import { LITERAL_CODE_INLINES, mayHoldLiteralCode } from './literal-code.tsx';
 import { MESSAGE_LIMITS } from './limits.ts';
@@ -13,7 +13,21 @@ import { withReferences } from './with-references.ts';
 export interface ReadMessage {
   readonly doc: Document;
   /** The bodies the code slot may draw as blocks ({@link drawableBodies}). */
-  readonly drawable: ReadonlyMap<string, string>;
+  readonly drawable: DrawableFyRenderBodiesMap;
+}
+
+const encoder = new TextEncoder();
+
+/**
+ * The size cap is about the message the author wrote (`exceedsMessageCap`, checked before a message is read), but Durian
+ * counts the text it is GIVEN, and holding a chart or a code walk renames its opener to something a few bytes longer.
+ * A message at the cap with such fences in it must never be answered with Durian's own "the page is too big" error
+ * (`limits.ts`), so Durian's cap is the message cap plus exactly what the renaming added. Pure.
+ */
+function parsedLimits(source: string, parsed: string): typeof MESSAGE_LIMITS | { readonly maxInputBytes: number } {
+  if (parsed.length === source.length) return MESSAGE_LIMITS;
+  const added = encoder.encode(parsed).length - encoder.encode(source).length;
+  return added <= 0 ? MESSAGE_LIMITS : { maxInputBytes: MESSAGE_LIMITS.maxInputBytes + added };
 }
 
 /**
@@ -50,7 +64,7 @@ export function readMessage(
     blocks: [fyRenderParseBlock(settled), ...heldFenceParseBlocks(text)],
     frontMatter: false,
     idPrefix,
-    limits: MESSAGE_LIMITS,
+    limits: parsedLimits(source, text),
     urlPolicy: hypermediaUrlPolicy,
     // Offered only to a message that can hold such a span: every other message is read by Durian's own lexer.
     inlines: mayHoldLiteralCode(text) ? LITERAL_CODE_INLINES : undefined,
