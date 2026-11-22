@@ -25,6 +25,14 @@ export const ferretPath = (daemon: string, ferretId: string): string =>
   `/d/${encodeURIComponent(daemon)}/ferrets/${encodeURIComponent(ferretId)}`;
 
 /**
+ * A ferret's page with one file of its folder named (`?file=<path relative to the folder>`): the ferret page's Files panel
+ * opens exactly that file through its own gated read, so what may be read is still the daemon's call. Projects names the
+ * file; it never reads it.
+ */
+export const ferretFilePath = (daemon: string, ferretId: string, relativePath: string): string =>
+  `${ferretPath(daemon, ferretId)}?file=${encodeURIComponent(relativePath)}`;
+
+/**
  * Where a project's lanes are edited. The lane editor draws Board's data and is Board's screen; this is the one address
  * Projects needs from it (`/d/<daemon>/board/<project>`), the project's own board.
  */

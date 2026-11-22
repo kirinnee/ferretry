@@ -155,7 +155,9 @@ function ProjectDetailView({
             </Section>
           )}
         </div>
-        <div className="grid gap-panel">
+        {/* `content-start`, as the column beside it: when the left column is the taller one, these cards keep their own
+            height instead of being stretched to fill it (a stretched card centres its content and the heading drifts). */}
+        <div className="grid content-start gap-panel">
           <Section icon={<Bot className="text-muted" size={16} aria-hidden="true" />} title="Active ferrets">
             {reading === 'unread' ? (
               <Loading kind="bar" label="Loading this daemon’s ferrets…" />
@@ -204,25 +206,17 @@ function ProjectDetailView({
               </>
             )}
           </Section>
-          <Section
-            icon={<FolderTree className="text-muted" size={16} aria-hidden="true" />}
-            title="Files of this project’s ferrets"
-          >
-            {/* AN UNREAD LIST IS NOT AN ABSENT FERRET. `ProjectFiles` says "this project has no ferret", which is a
-                conclusion only a SUCCESSFUL read supports; handing it the collapsed empty set turned "not known yet"
-                into that claim. */}
-            {reading === 'unread' ? (
-              <p className="m-0 text-meta text-muted" aria-busy="true" data-project-files="unread">
-                Files are unknown until this daemon’s ferret list is read.
-              </p>
-            ) : reading === 'failed' ? (
-              <p className="m-0 text-meta text-warn" role="status" data-project-files="failed">
-                Could not read this daemon’s ferrets, so this project’s files are unknown:{' '}
-                {read.failure ?? 'the read failed'}.
-              </p>
-            ) : (
-              <ProjectFiles daemon={daemon} ferret={set[0] ?? null} onNavigate={onNavigate} />
-            )}
+          <Section icon={<FolderTree className="text-muted" size={16} aria-hidden="true" />} title="Files">
+            {/* THE FINDER READS THE PROJECT'S FOLDER, NOT THE FERRET LIST, so a failed or unread ferret list no longer
+                hides it. Only the link into a ferret's browser depends on that list, and an UNREAD or FAILED list is
+                not an absent ferret: the link is offered only when the list was read and holds one. */}
+            <ProjectFiles
+              client={client}
+              project={project}
+              daemon={daemon}
+              ferret={reading === 'ready' || reading === 'stale' ? (set[0] ?? null) : null}
+              onNavigate={onNavigate}
+            />
           </Section>
         </div>
       </div>

@@ -136,3 +136,9 @@ export function revealPanel(panels: readonly PanelRef[], panelId: string): void 
     .querySelector(`[data-slot="ferret.side"] [data-panel="${panelKey(panel)}"]`)
     ?.scrollIntoView?.({ block: 'nearest' });
 }
+
+/**
+ * Whether an address asks the ferret page to show one of the ferret's files (`?file=<path>`, how Projects' file finder
+ * lands on a file). The Files panel reads and checks the path itself; the page only needs to bring that panel on screen.
+ */
+export const addressNamesFile = (search: string): boolean => (new URLSearchParams(search).get('file') ?? '') !== '';
