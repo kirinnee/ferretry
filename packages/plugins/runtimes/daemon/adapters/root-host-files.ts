@@ -115,6 +115,20 @@ export function rootHostFiles(mounts: HostMounts): HostFiles {
         (await target.root.lstat(at)) === undefined ? undefined : await target.root.list(at),
       );
     },
+    entries: async path => {
+      const target = mount(path);
+      if (target.kind === 'file') throw new Error(`${path} is one file; its folder is not listable`);
+      const at = resolveIn(target.root, target.inside, path);
+      return await orAbsent(target, async () =>
+        (await target.root.lstat(at)) === undefined
+          ? undefined
+          : (await target.root.entries(at)).map(entry => ({
+              name: entry.name,
+              ...entryOf(entry),
+              modified: String(entry.modified),
+            })),
+      );
+    },
   };
 }
 
