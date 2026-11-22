@@ -114,6 +114,17 @@ const failure = (run: () => unknown): FleetMaterialiseError => {
 };
 
 describe('materialiseFleet', () => {
+  it('should launch every runtime with the fixed layer: nothing on a runtime marks it an agent', () => {
+    // Arrange / Act
+    const result = plan(modelOf());
+
+    // Assert
+    for (const name of ['claude-default', 'codex-default']) {
+      should(/permission|sandbox_mode/.test(wrapperOf(result, name))).be.true();
+      should(wrapperOf(result, name)).containEql('$_fy_sections');
+    }
+  });
+
   it('should mint an id per runtime and write ids.json inside the same plan', () => {
     // Arrange / Act
     const result = plan(modelOf());
@@ -212,6 +223,7 @@ describe('materialiseFleet', () => {
       ['prune-directory', '/skills'],
       ['settings', '/settings.json'],
       ['settings', '/.claude.json'],
+      ['file', '/.fy/fixed.json'],
       ['file', '/.fy/materialised.json'],
     ]);
     should(inHome[3]).eql({
@@ -221,7 +233,11 @@ describe('materialiseFleet', () => {
       only: ['hooks'],
       record: `${HOME_A}/${RUNTIME_STATE_DIRECTORY}/${MATERIALISED_RECORD_FILE}`,
     });
-    should(inHome[2]).eql({ kind: 'prune-directory', path: `${HOME_A}/.fy`, keep: ['materialised.json'] });
+    should(inHome[2]).eql({
+      kind: 'prune-directory',
+      path: `${HOME_A}/.fy`,
+      keep: ['materialised.json', 'fixed.json'],
+    });
     should(inHome[4]).eql({
       kind: 'symlink',
       source: '/fy/fleet/assets/components/instructions/main.md',
@@ -237,7 +253,17 @@ describe('materialiseFleet', () => {
       kind: 'settings',
       path: `${HOME_A}/settings.json`,
       format: 'json',
-      layers: [{ from: 'inline', settings: { statusLine: { type: 'command', command: "'fy' statusline" } } }],
+      layers: [
+        {
+          from: 'inline',
+          settings: {
+            permissions: { defaultMode: 'bypassPermissions' },
+            skipDangerousModePermissionPrompt: true,
+            remoteControlAtStartup: false,
+            statusLine: { type: 'command', command: "'fy' statusline" },
+          },
+        },
+      ],
       mode: 0o600,
       preserveExisting: true,
     });
@@ -264,7 +290,8 @@ describe('materialiseFleet', () => {
       preserveExisting: true,
       replaceKeys: ['mcpServers'],
     });
-    should(inHome[10]).eql({
+    should(inHome[10]).match({ kind: 'file', path: `${HOME_A}/.fy/fixed.json` });
+    should(inHome[11]).eql({
       kind: 'file',
       path: `${HOME_A}/.fy/materialised.json`,
       content: '{"version":1,"entries":["CLAUDE.md"]}\n',
@@ -358,10 +385,10 @@ describe('materialiseFleet', () => {
     should(wrapper).containEql('[ -z "${GITHUB_TOKEN:-}" ]').and.containEql('ferretry: GITHUB_TOKEN is not set');
     should(wrapper).not.match(/export HOME=/);
     should(wrapper).containEql("'/opt/ferretry/bin/fy' history claim --harness claude --pid $$ --from-arguments");
-    // A runtime that is not an agent behaves like the person's own CLI: no mode, no seeding.
-    should(wrapper).not.containEql('--permission-mode');
-    should(wrapper).not.containEql('FY_SEED_FIRST_RUN');
-    should(wrapper).endWith(`exec claude '--model' 'claude-opus-5-5' "$@"\n`);
+    // Every runtime carries the fixed layer: the permission mode and the Ferretry sections.
+    should(wrapper).containEql("'--permission-mode'");
+    should(wrapper).containEql("'--model' 'claude-opus-5-5'");
+    should(wrapper).endWith('"$@"\n');
   });
 
   it("should export a Ferretry-kept Claude login's own store and the Codex SQLite pool", () => {
@@ -382,7 +409,7 @@ describe('materialiseFleet', () => {
     );
     should(at(result, '/fy/fleet/credentials/claude-you')).be.empty();
     should(wrapperOf(result, 'codex-default')).containEql("export CODEX_SQLITE_HOME='/fy/fleet/shared/codex/sqlite'");
-    should(wrapperOf(result, 'codex-default')).containEql(`exec codex '-c' 'model="gpt-6"' "$@"`);
+    should(wrapperOf(result, 'codex-default')).containEql(`'-c' 'model="gpt-6"'`);
   });
 
   it("should export an environment credential's variables and publish only the secret references", () => {
@@ -427,7 +454,7 @@ describe('materialiseFleet', () => {
         modelSets: { ...COMPONENTS.modelSets, 'kimi-models': { models: ['kimi-k3'], default: 'kimi-k3' } },
       },
       profiles: { kimi: { layers: ['modelSets/claude', 'modelSets/kimi-models'] } },
-      runtimes: { 'claude-kimi': { credential: 'claude-you', profile: 'kimi', agent: true } },
+      runtimes: { 'claude-kimi': { credential: 'claude-you', profile: 'kimi' } },
     });
 
     // Act
@@ -534,9 +561,7 @@ describe('materialiseFleet', () => {
 
   it('should publish each runtime and a version-1 account row beside it', () => {
     // Act
-    const result = plan(
-      modelOf({ runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: true } } }),
-    );
+    const result = plan(modelOf({ runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default' } } }));
 
     // Assert
     should(result.manifest.runtimes).eql([
@@ -546,7 +571,6 @@ describe('materialiseFleet', () => {
         harness: 'claude',
         credential: 'claude-you',
         profile: 'default',
-        agent: true,
         wrapper: '/fy/fleet/bin/claude-default',
         models: [
           { id: 'claude-opus-5-5', available: true },
@@ -659,7 +683,7 @@ describe('materialiseFleet', () => {
       available: false,
       unavailableReason: 'profile "default" names no model it can use',
     });
-    should(wrapperOf(result, 'claude-default')).endWith('exec claude "$@"\n');
+    should(wrapperOf(result, 'claude-default')).containEql('exec claude ').and.endWith('"$@"\n');
   });
 
   it('should have each wrapper exec the harness path the caller resolved, per harness', () => {
@@ -748,8 +772,8 @@ describe('materialiseFleet', () => {
       modelOf({
         machine: { agentPermissions },
         runtimes: {
-          'claude-agent': { credential: 'claude-you', profile: 'default', agent: true },
-          'codex-agent': { credential: 'codex-work', profile: 'default', agent: true },
+          'claude-agent': { credential: 'claude-you', profile: 'default' },
+          'codex-agent': { credential: 'codex-work', profile: 'default' },
         },
       });
 
@@ -826,8 +850,8 @@ describe('materialiseFleet', () => {
       // Arrange — a fresh machine: nothing in `machine` names agentPermissions (a v4 home without it parses the same way)
       const model = modelOf({
         runtimes: {
-          'claude-agent': { credential: 'claude-you', profile: 'default', agent: true },
-          'codex-agent': { credential: 'codex-work', profile: 'default', agent: true },
+          'claude-agent': { credential: 'claude-you', profile: 'default' },
+          'codex-agent': { credential: 'codex-work', profile: 'default' },
         },
       });
 
@@ -867,7 +891,11 @@ describe('materialiseFleet', () => {
     const OVERLAY = `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`;
     const SECRET_VALUE = 'FIXTURE-LOGIN-TOKEN-4471';
 
-    const login = (agent: boolean, env: Record<string, string>, claudeEnv: Record<string, string> = {}): AccountModel =>
+    const login = (
+      _agent: boolean,
+      env: Record<string, string>,
+      claudeEnv: Record<string, string> = {},
+    ): AccountModel =>
       modelOf({
         credentials: {
           loge: {
@@ -877,7 +905,7 @@ describe('materialiseFleet', () => {
             ...(Object.keys(claudeEnv).length === 0 ? {} : { claude: { env: claudeEnv } }),
           },
         },
-        runtimes: { 'claude-loge': { credential: 'loge', profile: 'default', ...(agent ? { agent: true } : {}) } },
+        runtimes: { 'claude-loge': { credential: 'loge', profile: 'default' } },
       });
 
     const wrapperExports = (wrapper: string): Record<string, string> =>
@@ -892,10 +920,7 @@ describe('materialiseFleet', () => {
       return operation?.kind === 'file' ? operation.content : undefined;
     };
 
-    describe.each([
-      ['an agent runtime', true],
-      ['an interactive runtime', false],
-    ] as const)('%s', (_label, agent) => {
+    describe.each([['a runtime', true]] as const)('%s', (_label, agent) => {
       it('should leave a login’s plain env (FOO=1) in the process environment only, with no env in fixed.json', () => {
         // Act
         const result = plan(login(agent, { FOO: '1', ANTHROPIC_AUTH_TOKEN: SECRET_VALUE }));
@@ -950,18 +975,6 @@ describe('materialiseFleet', () => {
       });
     });
 
-    it('should not write a fixed.json for an interactive runtime, and pass no --settings', () => {
-      // Act
-      const result = plan(login(false, { ANTHROPIC_BASE_URL: 'https://loge.example/anthropic' }));
-
-      // Assert — v4 before afec015e34: an interactive runtime launches with only what its profile passes.
-      should(at(result, OVERLAY)).have.length(0);
-      should(wrapperOf(result, 'claude-loge')).not.containEql('--settings');
-      should(
-        result.operations.find(operation => operation.path === `${HOME_A}/.fy` && operation.kind === 'prune-directory'),
-      ).not.eql({ kind: 'prune-directory', path: `${HOME_A}/.fy`, keep: ['materialised.json', 'fixed.json'] });
-    });
-
     it('should leave an agent runtime’s fixed.json to the fixed layer alone (no env, whatever the login holds)', () => {
       // Act
       const result = plan(login(true, { ANTHROPIC_BASE_URL: 'https://loge.example/anthropic', FOO: '1' }));
@@ -970,46 +983,6 @@ describe('materialiseFleet', () => {
       const document = JSON.parse(fixedText(result) as string) as Record<string, unknown>;
       should(document).not.have.property('env');
       should(Object.keys(document).length).be.above(0);
-    });
-
-    it('should apply an interactive runtime whose profile passes its own --settings (nothing is pinned, so nothing clashes)', () => {
-      // Arrange
-      const model = modelOf({
-        components: {
-          ...COMPONENTS,
-          settings: { own: { harness: 'claude', flags: ['--settings', '/home/person/own.json'] } },
-        },
-        credentials: {
-          loge: { harness: 'claude', store: 'environment', env: { ANTHROPIC_BASE_URL: 'https://loge.example' } },
-        },
-        profiles: { default: { layers: [...DEFAULT_LAYERS, 'settings/own'] } },
-        runtimes: { 'claude-loge': { credential: 'loge', profile: 'default' } },
-      });
-
-      // Act
-      const result = plan(model);
-
-      // Assert — the profile's own flag is the only --settings
-      should(wrapperOf(result, 'claude-loge')).containEql("'--settings' '/home/person/own.json'");
-      should(wrapperOf(result, 'claude-loge')).not.containEql(FIXED_SETTINGS_FILE);
-    });
-
-    it('should pin nothing for a host login or for Codex', () => {
-      // Act
-      const host = plan(modelOf());
-      const codex = plan(
-        modelOf({
-          credentials: {
-            'codex-work': { harness: 'codex', store: 'environment', env: { OPENAI_BASE_URL: 'https://x.example/v1' } },
-          },
-          runtimes: { 'codex-default': { credential: 'codex-work', profile: 'default' } },
-        }),
-      );
-
-      // Assert
-      should(at(host, OVERLAY)).have.length(0);
-      should(wrapperOf(host, 'claude-default')).not.containEql("'--settings'");
-      should(at(codex, OVERLAY)).have.length(0);
     });
   });
 
@@ -1057,7 +1030,7 @@ describe('materialiseFleet', () => {
       // Assert
       const wrapper = wrapperOf(result, 'claude-default');
       should(wrapper).containEql("export LOG_LEVEL='debug'");
-      should(wrapper).endWith(`exec claude '--model' 'claude-opus-5-5' '--verbose' "$@"\n`);
+      should(wrapper).containEql("'--model' 'claude-opus-5-5'").and.containEql("'--verbose'");
       should(only(result, `${HOME_A}/settings.json`)).match({ layers: [{ settings: { theme: 'dark' } }] });
     });
 
@@ -1184,7 +1157,7 @@ describe('materialiseFleet', () => {
         .containEql('[ -z "${ANTHROPIC_AUTH_TOKEN:-}" ]')
         .and.containEql('ferretry: ANTHROPIC_AUTH_TOKEN is not set');
       should(claudeWrapper).not.containEql('OPENROUTER_API_KEY');
-      should(claudeWrapper).endWith(`exec claude '--model' 'claude-opus-5-5' "$@"\n`);
+      should(claudeWrapper).containEql("'--model' 'claude-opus-5-5'").and.endWith('"$@"\n');
 
       const codexWrapper = wrapperOf(result, 'codex-default');
       should(codexWrapper)
@@ -1201,7 +1174,7 @@ describe('materialiseFleet', () => {
       // Arrange: the schema refuses this, so only a model built without parsing can get here.
       const model = {
         ...modelOf(),
-        runtimes: { 'claude-default': { credential: 'claude-you', profile: 'gone', agent: false } },
+        runtimes: { 'claude-default': { credential: 'claude-you', profile: 'gone' } },
       };
 
       // Act

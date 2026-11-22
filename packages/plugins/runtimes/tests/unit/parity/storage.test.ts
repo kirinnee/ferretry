@@ -81,7 +81,6 @@ describe('storage parity: runtimes configuration files', () => {
     const shape = {
       login: 'claude-you',
       profile: 'default',
-      agent: true,
       disabled: { reason: 'quota', until: '2030-01-01' },
     };
     const write = await written(RUNTIME_ITEMS, 'claude-work', shape);
@@ -143,7 +142,7 @@ describe('the fleet folder a real apply writes', () => {
   afterEach(cleanupWorlds);
 
   const CONFIG = {
-    runtimes: { 'claude-default': { login: 'claude-you', profile: 'default', agent: true } },
+    runtimes: { 'claude-default': { login: 'claude-you', profile: 'default' } },
     profiles: { default: { contents: ['modelSets/heavy'] } },
     'model-sets': { heavy: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } },
   };
@@ -153,7 +152,6 @@ describe('the fleet folder a real apply writes', () => {
       name,
       credential: 'claude-you',
       profile: 'default',
-      agent: true,
       create: true,
       addAnother: true,
     },

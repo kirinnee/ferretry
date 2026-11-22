@@ -89,7 +89,6 @@ function healthyMachine() {
       harness: 'claude-code',
       login: 'work-login',
       profile: 'default',
-      agent: true,
       launch: { available: true },
     },
   ]);

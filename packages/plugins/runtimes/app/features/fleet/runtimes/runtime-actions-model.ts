@@ -47,9 +47,9 @@ export const runtimeActionRefusal = (authority: FleetApplyAuthority | null): str
 export const blocksAsDefault = (runtime: RuntimeView, machine: MachineView | null): boolean =>
   machine?.defaultRuntime === runtime.name;
 
-/** The agent runtimes that could become the default instead of this one. */
+/** The runtimes that could become the default instead of this one. */
 export const defaultCandidates = (runtime: RuntimeView, runtimes: readonly RuntimeView[]): readonly RuntimeView[] =>
-  runtimes.filter(other => other.name !== runtime.name && other.agent);
+  runtimes.filter(other => other.name !== runtime.name);
 
 /**
  * The runtimes the ferrets on this one could move to: every other runtime that can launch, the ones on

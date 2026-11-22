@@ -453,7 +453,6 @@ describe('a runtime’s own page', () => {
 
     const quiet = await pageWith({
       name: 'claude-quiet',
-      agent: true,
       fixedLayer: { agentPermissions: 'auto', entries: [{ key: 'trust prompt', value: 'off' }], overridden: [] },
     });
     expect(quiet.container.querySelector('[data-runtime-fixed-layer]')).not.toBeNull();
@@ -476,7 +475,6 @@ describe('a runtime’s own page', () => {
       };
       const view = await pageWith({
         name: 'claude-twin',
-        agent: true,
         fixedLayer: { agentPermissions: 'auto', entries: [], overridden: [withheld, withheld] },
       });
       expect(view.container.querySelectorAll('[data-runtime-overridden] li')).toHaveLength(2);

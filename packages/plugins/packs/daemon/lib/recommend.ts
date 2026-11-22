@@ -70,12 +70,6 @@ export function runtimeRefusal(
   facts: PackFleetFacts,
 ): PackRefusal | undefined {
   const name = runtime.name;
-  if (!runtime.agent)
-    return refusal(
-      'not_agent',
-      `${name} is for using its CLI yourself and cannot run helpers.`,
-      'Pick an agent runtime.',
-    );
   const tool = facts.tools.find(candidate => candidate.harness === runtime.harness);
   if (tool !== undefined && !tool.installed)
     return refusal(
@@ -168,7 +162,6 @@ interface Offer {
 
 /** What an agent runtime offers: its catalog's choices, else its model set's available models. */
 function offersOf(runtime: RuntimeView): readonly Offer[] {
-  if (!runtime.agent) return [];
   if (runtime.models !== undefined)
     return runtime.models.choices.map(choice => ({
       runtime,

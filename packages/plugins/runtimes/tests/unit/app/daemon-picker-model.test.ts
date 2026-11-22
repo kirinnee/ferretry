@@ -10,7 +10,6 @@ import {
   normalizedModelSelection,
   sameHarnessAccountOptions,
   sessionAccountLabel,
-  sessionCapableAccountOptions,
 } from '../../../app/lib/daemon-picker-model.ts';
 import type { PickerAccount } from '../../../app/lib/account-picker-catalog.ts';
 import { pickerHealth } from './support/picker.ts';
@@ -23,7 +22,6 @@ type Account = PickerAccount;
 const claudeAccount = (overrides: Partial<Account> = {}): Account => ({
   id: CLAUDE_ID,
   kind: 'claude-code',
-  agent: true,
   credentialId: 'claude-login',
   wrapper: 'claude-auto-atelier',
   displayName: 'Claude Atelier',
@@ -37,7 +35,6 @@ const claudeAccount = (overrides: Partial<Account> = {}): Account => ({
 const codexAccount = (overrides: Partial<Account> = {}): Account => ({
   id: CODEX_ID,
   kind: 'codex',
-  agent: true,
   credentialId: 'codex-login',
   wrapper: 'codex-auto-forge',
   displayName: 'Codex Forge',
@@ -134,24 +131,6 @@ describe('accountPickerOptions', () => {
 
     expect(sameHarnessAccountOptions(options, 'codex')?.map(option => option.wrapper)).toEqual(['codex-auto-forge']);
     expect(sameHarnessAccountOptions(null, 'codex')).toBeNull();
-  });
-
-  it('offers a new session only agent runtimes, never the person’s own CLI', () => {
-    // The default fleet's own shape: the terminal account is published FIRST.
-    const terminal = claudeAccount({
-      id: '33333333-3333-4333-8333-333333333333',
-      agent: false,
-      wrapper: 'claude-default',
-      displayName: 'Claude (default)',
-    });
-    const options = accountPickerOptions([terminal, claudeAccount(), codexAccount()], [], null);
-
-    expect(sessionCapableAccountOptions(options)?.map(option => option.wrapper)).toEqual([
-      'claude-auto-atelier',
-      'codex-auto-forge',
-    ]);
-    expect(sessionCapableAccountOptions(accountPickerOptions([terminal], [], null))).toEqual([]);
-    expect(sessionCapableAccountOptions(null)).toBeNull();
   });
 
   it('pre-fills the first usable account in the daemon order and nothing when none is usable', () => {

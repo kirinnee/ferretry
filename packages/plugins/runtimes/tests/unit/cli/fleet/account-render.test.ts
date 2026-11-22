@@ -66,7 +66,6 @@ describe('account-model words', () => {
               {
                 name: 'codex-a',
                 harness: 'codex',
-                agent: false,
                 launch: { available: false, reason: 'Sign in to launch' },
               },
             ],

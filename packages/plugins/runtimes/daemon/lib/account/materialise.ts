@@ -193,7 +193,6 @@ interface PlannedRuntime {
   readonly harness: HarnessKind;
   readonly credential: string;
   readonly profile: string;
-  readonly agent: boolean;
   readonly home: string;
   readonly wrapper: string;
   readonly models: readonly FleetManifestModel[];
@@ -358,27 +357,25 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       problems.push({ runtime: name, message: `settings "${unread}" could not be read` });
     }
 
-    // The fixed layer, for an agent: computed for a placeholder folder, which never reaches a file.
+    // The fixed layer: computed for a placeholder folder, which never reaches a file.
     let fixed: FixedLayer | undefined;
-    if (runtime.agent) {
-      const result =
-        harness === 'claude'
-          ? fixedLayerFor({
-              harness,
-              agentPermissions: model.machine.agentPermissions,
-              cwd: LAUNCH_FOLDER_PLACEHOLDER,
-              acceptsAutoPermissionMode: input.acceptsAutoPermissionMode,
-              fyCommand: input.fyCommand,
-            })
-          : fixedLayerFor({
-              harness,
-              agentPermissions: model.machine.agentPermissions,
-              cwd: LAUNCH_FOLDER_PLACEHOLDER,
-              fyCommand: input.fyCommand,
-            });
-      if (result.ok) fixed = withoutLaunchFolder(result.layer);
-      else reasons.push(result.refusal.message);
-    }
+    const result =
+      harness === 'claude'
+        ? fixedLayerFor({
+            harness,
+            agentPermissions: model.machine.agentPermissions,
+            cwd: LAUNCH_FOLDER_PLACEHOLDER,
+            acceptsAutoPermissionMode: input.acceptsAutoPermissionMode,
+            fyCommand: input.fyCommand,
+          })
+        : fixedLayerFor({
+            harness,
+            agentPermissions: model.machine.agentPermissions,
+            cwd: LAUNCH_FOLDER_PLACEHOLDER,
+            fyCommand: input.fyCommand,
+          });
+    if (result.ok) fixed = withoutLaunchFolder(result.layer);
+    else reasons.push(result.refusal.message);
     const launch = fixed === undefined ? undefined : applyFixedLayer(resolved, fixed);
 
     const adapted = adaptProfile({
@@ -472,7 +469,6 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         name,
         id: entry.id,
         harness,
-        agent: runtime.agent,
         configDirectory: home,
         env,
         args: [
@@ -481,8 +477,8 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
           ...(launch === undefined ? resolved.flags.map(flag => flag.flag) : [...launch.args, ...fixedSettingsArgs]),
         ],
         defaultModel: defaultModel ?? undefined,
-        seedFirstRun: runtime.agent && harness === 'claude',
-        trustLaunchFolder: runtime.agent && harness === 'codex',
+        seedFirstRun: harness === 'claude',
+        trustLaunchFolder: harness === 'codex',
         fyCommand: input.fyCommand,
         secretsFile: model.advanced.secretsFile,
         harnessCommand: input.harnessCommands?.[harness],
@@ -498,7 +494,6 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       harness,
       credential: runtime.credential,
       profile: runtime.profile,
-      agent: runtime.agent,
       home,
       wrapper,
       models,
@@ -537,7 +532,8 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       return {
         id: runtime.id,
         kind: runtime.harness,
-        mode: runtime.agent ? 'auto' : 'interactive',
+        // Every runtime is launched by Ferretry; the session's own mode (auto | interactive) is chosen per launch.
+        mode: 'auto',
         wrapper: runtime.wrapper,
         home: runtime.home,
         displayName: runtime.name,
@@ -558,7 +554,6 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       harness: runtime.harness,
       credential: runtime.credential,
       profile: runtime.profile,
-      agent: runtime.agent,
       wrapper: runtime.wrapper,
       models: runtime.models,
       defaultModel: runtime.defaultModel,

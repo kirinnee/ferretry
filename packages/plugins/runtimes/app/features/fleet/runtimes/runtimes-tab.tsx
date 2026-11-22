@@ -182,7 +182,6 @@ function RuntimePage({
         <h3 className="m-0 mt-2 break-all font-mono text-title font-semibold text-fg">{runtime.name}</h3>
         <p className="m-0 mt-1 flex items-center gap-2 text-cell text-muted">
           <AccountStatus word={word} showLabel />
-          {runtime.agent ? <span>· Agent runtime</span> : null}
         </p>
         <div className="mt-3 flex flex-col gap-1">
           <RuntimeActionButtons
@@ -416,10 +415,7 @@ function RuntimeRow({
   readonly reload: () => Promise<unknown>;
 }) {
   const showMakeDefault =
-    onMakeDefault !== undefined &&
-    runtime.agent &&
-    runtime.disabled === undefined &&
-    !isDefaultRuntime(machine, runtime);
+    onMakeDefault !== undefined && runtime.disabled === undefined && !isDefaultRuntime(machine, runtime);
   const detailsLine = `${loginLine(runtime, data)} · ${runtime.profile} profile · ${runtimeDefaultModel(runtime)}`;
   return (
     <div className="flex flex-col gap-1">
@@ -463,11 +459,6 @@ function RuntimeRow({
                         Default
                       </Badge>
                     ) : null}
-                    {runtime.agent ? null : (
-                      <Badge className="shrink-0" data-runtime-kind-badge="">
-                        Not agent
-                      </Badge>
-                    )}
                   </span>
                 </a>
                 <span className="ml-auto flex items-center gap-2">

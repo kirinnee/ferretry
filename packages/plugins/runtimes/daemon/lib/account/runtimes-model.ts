@@ -30,6 +30,7 @@ import {
   type RuntimesFile,
 } from '../../../contract/index.ts';
 import { harnessKindOfKey, type HarnessKind } from '../manifest.ts';
+import { deriveRuntimes, withDerived } from './derived-runtimes.ts';
 import {
   type AccountModel,
   AccountModelSchema,
@@ -214,7 +215,6 @@ function runtimeOf(file: RuntimeFile): Runtime {
     profile: file.profile,
     ...(file.harness === undefined ? {} : { harness: harnessKindOfKey(file.harness) }),
     ...(file.shell === undefined ? {} : { shell: file.shell }),
-    agent: file.agent,
     ...(file.disabled === undefined ? {} : { disabled: file.disabled }),
     ...(file.compactAt === undefined ? {} : { compactAt: file.compactAt }),
     ...(file.clonedFromKey === undefined ? {} : { clonedFromKey: file.clonedFromKey }),
@@ -252,7 +252,15 @@ function foreignLayers(
  * profile that is not there, a layer naming a component its owner does not have): the caller words it as the files' own
  * problem.
  */
-export function assembleRuntimesModel(files: RuntimesFiles): RuntimesModel {
+export function assembleRuntimesModel(explicit: RuntimesFiles): RuntimesModel {
+  // A ready login with no runtime of its own has one derived beside the files (`derived-runtimes.ts`); the files win.
+  const derived = deriveRuntimes(explicit);
+  const files: RuntimesFiles = {
+    ...explicit,
+    runtimes: withDerived(explicit.runtimes, derived.runtimes),
+    profiles: withDerived(explicit.profiles, derived.profiles),
+    modelSets: withDerived(explicit.modelSets, derived.modelSets),
+  };
   const unreadable: string[] = [];
   const credentials: Record<string, Credential> = {};
   // A login whose variables stand in blocks only a model that names it (see `standInsNamedBy`), so it is kept apart from
@@ -340,11 +348,11 @@ export function assembleRuntimesModel(files: RuntimesFiles): RuntimesModel {
     unreadable,
     stoodInLogins,
     sources:
-      files.runtimes.size +
-      files.profiles.size +
-      files.modelSets.size +
-      files.logins.length +
-      (files.settings === undefined ? 0 : 1),
+      explicit.runtimes.size +
+      explicit.profiles.size +
+      explicit.modelSets.size +
+      explicit.logins.length +
+      (explicit.settings === undefined ? 0 : 1),
     revision: createHash('sha256').update(JSON.stringify(model)).digest('hex'),
   };
 }

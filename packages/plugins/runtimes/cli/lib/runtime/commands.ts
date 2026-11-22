@@ -1,7 +1,7 @@
 import type { VerbInvocation } from '@ferretry/kernel/manifest';
 import type { RuntimeView } from '../../../contract/index.ts';
 import { runChange } from '../fleet/account-change.ts';
-import { flagOn, flagSet, flagText, positional, writeFlags } from '../fleet/account-commands.ts';
+import { flagOn, flagText, positional, writeFlags } from '../fleet/account-commands.ts';
 import { type AccountCommandDeps, AccountCommandError } from '../fleet/account-ports.ts';
 import { parseReason, parseUntil } from '../fleet/disable-until.ts';
 import { renderRuntime, renderRuntimeList } from './render.ts';
@@ -25,7 +25,7 @@ export async function runtimeLs(deps: AccountCommandDeps, invocation: VerbInvoca
   );
 }
 
-/** `runtime add <name> --login <id> --profile <name> [--agent] [--add-another]`. */
+/** `runtime add <name> --login <id> --profile <name> [--add-another]`. */
 export async function runtimeAdd(deps: AccountCommandDeps, invocation: VerbInvocation): Promise<void> {
   const { options } = invocation;
   const name = positional(invocation, 0, 'runtime to add');
@@ -39,7 +39,6 @@ export async function runtimeAdd(deps: AccountCommandDeps, invocation: VerbInvoc
       name,
       credential: login,
       profile,
-      agent: flagOn(options, 'agent'),
       create: true,
       ...(flagOn(options, 'add-another') ? { addAnother: true } : {}),
     },
@@ -54,15 +53,14 @@ export async function runtimeShow(deps: AccountCommandDeps, invocation: VerbInvo
   deps.out.report(flagOn(invocation.options, 'json') ? JSON.stringify(found, null, 2) : renderRuntime(found));
 }
 
-/** `runtime set <name> [--login <id>] [--profile <name>] [--agent | --no-agent]`. */
+/** `runtime set <name> [--login <id>] [--profile <name>] `. */
 export async function runtimeSet(deps: AccountCommandDeps, invocation: VerbInvocation): Promise<void> {
   const { options } = invocation;
   const name = positional(invocation, 0, 'runtime to change');
   const login = flagText(options, 'login');
   const profile = flagText(options, 'profile');
-  const agent = flagSet(options, 'agent');
-  if (login === undefined && profile === undefined && agent === undefined) {
-    throw new AccountCommandError('Say what to change: --login, --profile, --agent or --no-agent.');
+  if (login === undefined && profile === undefined) {
+    throw new AccountCommandError('Say what to change: --login or --profile.');
   }
   const current = await findRuntime(deps, name);
   await runChange(deps, {
@@ -71,7 +69,6 @@ export async function runtimeSet(deps: AccountCommandDeps, invocation: VerbInvoc
       name,
       credential: login ?? current.credential.id,
       profile: profile ?? current.profile,
-      agent: agent ?? current.agent,
       create: false,
     },
     destructive: true,

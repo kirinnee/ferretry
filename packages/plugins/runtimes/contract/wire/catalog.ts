@@ -579,7 +579,6 @@ export const RuntimeViewSchema = z.strictObject({
     status: CredentialStatusWordSchema.optional(),
   }),
   profile: NonEmptyStringSchema,
-  agent: z.boolean(),
   stack: StackViewSchema,
   modelSet: RuntimeModelSetSchema,
   /** What the runtime offers from its login's model catalog, when the login reads one. Wins over `modelSet`. */
@@ -702,7 +701,6 @@ export const AccountChangeSchema = z.discriminatedUnion('kind', [
      * profile is scoped to, else the login's own.
      */
     harness: HarnessKeySchema.optional(),
-    agent: z.boolean(),
     create: z.boolean(),
     /** E15: the person saw "already uses this login and profile" and chose to add another anyway. */
     addAnother: z.boolean().optional(),
@@ -916,7 +914,6 @@ export type AccountChangeRequest = z.infer<typeof AccountChangeRequestSchema>;
 export const ChangedRuntimeSchema = z.strictObject({
   name: NonEmptyStringSchema,
   harness: HarnessKeySchema,
-  agent: z.boolean(),
   launch: CatalogActSchema,
 });
 

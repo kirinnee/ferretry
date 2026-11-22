@@ -39,7 +39,6 @@ import {
   fleetHarnessLabel,
   hintedAccountOption,
   sameHarnessAccountOptions,
-  sessionCapableAccountOptions,
 } from '../lib/daemon-picker-model.ts';
 
 /** The harnesses a runtime can drive, in the order their groups are drawn. */
@@ -189,10 +188,10 @@ export function RuntimeSelect({
   const slice = useAccountPickerSlice(store, client);
   const published = slice.catalog?.accounts ?? null;
   const health = slice.health;
-  // Only an agent runtime can run a session; the person's own CLI is published too and is refused.
+  // Every runtime can run a ferret: the mode (auto | interactive) is chosen per launch, never built into a runtime.
   const offered = useMemo(() => {
-    const capable = sessionCapableAccountOptions(accountPickerOptions(published, usage, health));
-    return harness === undefined ? capable : sameHarnessAccountOptions(capable, harness);
+    const all = accountPickerOptions(published, usage, health);
+    return harness === undefined ? all : sameHarnessAccountOptions(all, harness);
   }, [published, usage, health, harness]);
   const suggested = hintedAccountOption(offered, preferred) ?? firstUsableAccountOption(offered);
   const selected = useMemo(

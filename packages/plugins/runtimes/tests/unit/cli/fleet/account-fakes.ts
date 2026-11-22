@@ -71,7 +71,7 @@ export const changeView = (change: AccountChange, overrides: Partial<AccountChan
       kind: 'apply',
       operations: [{ kind: 'directory', path: '/fy/fleet/homes/x' }],
       documents: [{ path: 'config.yaml', bytes: 120 }],
-      runtimes: [{ name: 'claude-work', harness: 'claude-code', agent: true, launch: { available: true } }],
+      runtimes: [{ name: 'claude-work', harness: 'claude-code', launch: { available: true } }],
     },
     ...overrides,
   }) as AccountChangeView;
@@ -102,7 +102,6 @@ export const runtime = (overrides: Partial<RuntimeView> = {}): RuntimeView => ({
   harness: 'claude-code',
   credential: { id: 'claude-you', store: 'host', status: 'needs_sign_in' },
   profile: 'default',
-  agent: false,
   stack: stack(),
   modelSet: { source: 'harness-default' },
   launch: { available: true },

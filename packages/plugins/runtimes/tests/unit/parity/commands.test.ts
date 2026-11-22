@@ -55,7 +55,7 @@ async function staged(verb: Verb, args: readonly string[], options: Options, gat
 
 const LISTS = {
   profiles: () => ({ format: 'present' as const, profiles: [profile({ name: 'work' })] }),
-  runtimes: () => ({ format: 'present' as const, runtimes: [runtime({ name: 'claude-work', agent: true })] }),
+  runtimes: () => ({ format: 'present' as const, runtimes: [runtime({ name: 'claude-work' })] }),
   components: () => ({
     format: 'present' as const,
     kinds: [
@@ -74,7 +74,7 @@ describe('commands parity: runtimes', () => {
     expect(declared.has('runtimes')).toBe(true);
     const words = fakeWorld({ gateway: LISTS });
     await runVerb(words, 'runtimes');
-    expect(words.out.text('report')).toMatch(/claude-work {2}Claude Code, agent/);
+    expect(words.out.text('report')).toMatch(/claude-work {2}Claude Code/);
     const json = fakeWorld({ gateway: LISTS });
     await runVerb(json, 'runtimes', [], { json: true });
     expect(JSON.parse(json.out.text('report')).runtimes[0].name).toBe('claude-work');
@@ -104,13 +104,12 @@ describe('commands parity: runtimes', () => {
     expect(declared.has('runtime')).toBe(false);
   });
 
-  it('V-0387 fy runtime add <name> --login <id> --profile <name> --agent --add-another stages one new runtime', async () => {
+  it('V-0387 fy runtime add <name> --login <id> --profile <name> --add-another stages one new runtime', async () => {
     await declaredAndRefusesWithoutName('runtime add');
     expect(
       await staged('runtime add', ['claude-work'], {
         login: 'claude-you',
         profile: 'default',
-        agent: true,
         'add-another': true,
       }),
     ).toEqual([
@@ -119,7 +118,6 @@ describe('commands parity: runtimes', () => {
         name: 'claude-work',
         credential: 'claude-you',
         profile: 'default',
-        agent: true,
         create: true,
         addAnother: true,
       },
@@ -140,16 +138,14 @@ describe('commands parity: runtimes', () => {
     expect(err.join('')).toMatch(/There is no runtime called "nope"\. See them all with `fy runtime ls`\./);
   });
 
-  it('V-0393 fy runtime set <name> --login --profile --agent/--no-agent changes the one named, and needs one of them', async () => {
+  it('V-0393 fy runtime set <name> --login --profile changes the one named, and needs one of them', async () => {
     await declaredAndRefusesWithoutName('runtime set');
     const gateway = LISTS;
-    expect(
-      await staged('runtime set', ['claude-work'], { login: 'other', profile: 'work', agent: false }, gateway),
-    ).toEqual([
-      { kind: 'runtime.put', name: 'claude-work', credential: 'other', profile: 'work', agent: false, create: false },
+    expect(await staged('runtime set', ['claude-work'], { login: 'other', profile: 'work' }, gateway)).toEqual([
+      { kind: 'runtime.put', name: 'claude-work', credential: 'other', profile: 'work', create: false },
     ]);
     await expect(runVerb(fakeWorld({ gateway }), 'runtime set', ['claude-work'])).rejects.toThrow(
-      /--agent or --no-agent/,
+      /--login or --profile/,
     );
   });
 

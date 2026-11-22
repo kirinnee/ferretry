@@ -50,19 +50,17 @@ const ENVS: readonly (readonly [string, Readonly<Record<string, string>>])[] = [
 
 const runtime = (
   harness: HarnessKind,
-  agent: boolean,
   env: Readonly<Record<string, string>>,
   secretsFile: string | undefined,
 ): RuntimeWrapperInput => ({
-  name: `${harness}-${agent ? 'auto' : 'plain'}`,
+  name: `${harness}-auto`,
   id: ID,
   harness,
-  agent,
   configDirectory: '$HOME/.state/fleet/homes/x',
   env,
   args: [],
-  seedFirstRun: harness === 'claude' && agent,
-  trustLaunchFolder: harness === 'codex' && agent,
+  seedFirstRun: harness === 'claude',
+  trustLaunchFolder: harness === 'codex',
   fyCommand: 'fy',
   defaultModel: 'a-model',
   secretsFile,
@@ -71,16 +69,15 @@ const runtime = (
 const launchers = (): readonly (readonly [string, string])[] => {
   const out: [string, string][] = [];
   for (const harness of ['claude', 'codex'] as const)
-    for (const agent of [true, false])
-      for (const [envLabel, env] of ENVS)
-        for (const file of SECRET_FILES)
-          out.push([
-            `${harness} ${agent ? 'agent' : 'plain'} / ${envLabel} / secretsFile ${JSON.stringify(file)}`,
-            renderRuntimeWrapperScript(runtime(harness, agent, env, file)),
-          ]);
+    for (const [envLabel, env] of ENVS)
+      for (const file of SECRET_FILES)
+        out.push([
+          `${harness} / ${envLabel} / secretsFile ${JSON.stringify(file)}`,
+          renderRuntimeWrapperScript(runtime(harness, env, file)),
+        ]);
   out.push([
     'refused runtime',
-    renderRuntimeWrapperScript({ ...runtime('claude', true, {}, undefined), refusal: "it's refused" }),
+    renderRuntimeWrapperScript({ ...runtime('claude', {}, undefined), refusal: "it's refused" }),
   ]);
   out.push([
     'command',
@@ -125,7 +122,7 @@ describe('every generated launcher parses', () => {
 
 describe('a guard-only launcher', () => {
   const guardOnly = (env: Readonly<Record<string, string>>, secretsFile?: string): string =>
-    renderRuntimeWrapperScript(runtime('claude', false, env, secretsFile))
+    renderRuntimeWrapperScript(runtime('claude', env, secretsFile))
       .split('\n')
       .filter(line => !line.startsWith('export ') && !line.startsWith('exec '))
       .join('\n');

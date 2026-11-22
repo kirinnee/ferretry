@@ -48,17 +48,15 @@ import {
   text,
 } from '../app/features/fleet/components/view-support.tsx';
 
-/** Agent runtimes (the default's candidates), one plain runtime, on a machine whose default is `claude-default`. */
+/** Four runtimes, on a machine whose default is `claude-default`. */
 const LISTED: readonly RuntimeView[] = [
-  runtime({ name: 'claude-default', agent: true }),
+  runtime({ name: 'claude-default' }),
   runtime({
     name: 'claude-work',
-    agent: true,
     credential: { id: 'claude-work', store: 'ferretry', label: 'work', status: 'ready' },
   }),
   runtime({
     name: 'codex-kirin',
-    agent: true,
     harness: 'codex',
     credential: { id: 'codex', store: 'host', status: 'ready' },
   }),
@@ -166,7 +164,7 @@ describe('the Runtimes Settings tab the half builds', () => {
     expect(text(control, '[data-default-runtime-hint]')).toBe('Used when a start names no runtime.');
     const select = must(control.querySelector('[data-default-runtime-select]'), 'the select');
     await openBox(select);
-    expect(optionsOpen().map(labelOf)).toEqual(['claude-default', 'claude-work', 'codex-kirin']);
+    expect(optionsOpen().map(labelOf)).toEqual(['claude-default', 'claude-work', 'codex-kirin', 'claude-plain']);
     await closeBox(select);
     expect(shownBy(select)).toBe('claude-default');
     expect(control.querySelector('[data-change-submit]')).toBeNull();
@@ -269,7 +267,6 @@ describe('a runtime page on the Runtimes tab', () => {
     const page = must(root.querySelector('[data-runtime-page="claude-agent"]'), 'the runtime page');
     expect(text(page, 'h3')).toBe('claude-agent');
     expect(text(page, '[data-page-back]')).toBe('Runtimes');
-    expect(page.textContent).toContain('Agent runtime');
     expect(page.querySelector('[data-runtime-rename="claude-agent"]')).not.toBeNull();
     expect(page.querySelector('[data-runtime-remove="claude-agent"]')).not.toBeNull();
     expect(page.querySelector('[data-runtimes-tab]')).toBeNull();

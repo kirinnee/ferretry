@@ -23,6 +23,7 @@ import {
   type RuntimesApi,
   type RuntimeSummary,
 } from '../../../contract/index.ts';
+import { deriveRuntimes, withDerived } from '../account/derived-runtimes.ts';
 import { disabledUntilMs } from '../account/disabled.ts';
 import type { LoginView, LoginsApi } from '@ferretry/plugin-logins/contract';
 
@@ -79,7 +80,27 @@ export function createRuntimesApi(
 ): Omit<RuntimesApi, keyof RuntimeHomesApi | keyof RuntimeLayersApi | keyof RuntimeFactsApi> {
   type Read = { readonly summary: RuntimeSummary } | { readonly refusal: Extract<ResolveResult, { ok: false }> };
 
-  const read = (name: string, file: RuntimeFile, logins: ReadonlyMap<string, LoginView>, now: number): Read => {
+  /** The files' runtimes and profile names with the ones derived from ready logins beside them (`derived-runtimes.ts`). */
+  const effective = (logins: ReadonlyMap<string, LoginView>) => {
+    const derived = deriveRuntimes({
+      runtimes: deps.runtimes(),
+      profiles: deps.profiles(),
+      modelSets: new Map(),
+      logins: [...logins.values()],
+    });
+    return {
+      runtimes: withDerived(deps.runtimes(), derived.runtimes),
+      hasProfile: (name: string): boolean => deps.profiles().has(name) || derived.profiles.has(name),
+    };
+  };
+
+  const read = (
+    name: string,
+    file: RuntimeFile,
+    logins: ReadonlyMap<string, LoginView>,
+    now: number,
+    hasProfile: (name: string) => boolean,
+  ): Read => {
     const id = RuntimeIdSchema.parse(name);
     const login = logins.get(file.login);
     const harness = file.harness ?? login?.harness;
@@ -95,7 +116,7 @@ export function createRuntimesApi(
     const own = activeBlock(file.disabled, now);
     const viaLogin = login === undefined ? undefined : activeBlock(login.disabled, now);
     const off = own ?? viaLogin;
-    const profile = deps.profiles().has(file.profile);
+    const profile = hasProfile(file.profile);
     let launch: RuntimeSummary['launch'] = { available: true };
     if (off !== undefined) {
       launch = {
@@ -117,7 +138,6 @@ export function createRuntimesApi(
         harness,
         login: file.login,
         profile: file.profile,
-        agent: file.agent,
         launch,
         ...(off === undefined ? {} : { disabled: off }),
       },
@@ -127,9 +147,10 @@ export function createRuntimesApi(
   const all = async (): Promise<readonly Read[]> => {
     const logins = await loginsById(deps.logins);
     const now = deps.now();
-    return [...deps.runtimes()]
+    const { runtimes, hasProfile } = effective(logins);
+    return [...runtimes]
       .toSorted(([left], [right]) => left.localeCompare(right))
-      .map(([name, file]) => read(name, file, logins, now));
+      .map(([name, file]) => read(name, file, logins, now, hasProfile));
   };
 
   const summaries = async (): Promise<readonly RuntimeSummary[]> =>
@@ -138,8 +159,14 @@ export function createRuntimesApi(
   const defaultRuntime = async (): Promise<RuntimeId | undefined> => {
     const named = deps.defaultSetting();
     if (named !== undefined) return RuntimeIdSchema.parse(named);
-    const fallback = deps.runtimes().get(FALLBACK_DEFAULT_RUNTIME);
-    return fallback?.agent === true ? RuntimeIdSchema.parse(FALLBACK_DEFAULT_RUNTIME) : undefined;
+    const ready = await summaries();
+    const fallback = ready.find(summary => summary.id === FALLBACK_DEFAULT_RUNTIME);
+    // No default named: the first runtime that can launch, Claude Code's before Codex's.
+    return (
+      fallback ??
+      ready.find(summary => summary.harness === 'claude-code' && summary.launch.available) ??
+      ready.find(summary => summary.launch.available)
+    )?.id;
   };
 
   return {
@@ -156,18 +183,19 @@ export function createRuntimesApi(
         };
       }
       let wanted = named;
-      let file = deps.runtimes().get(wanted);
+      const logins = await loginsById(deps.logins);
+      const { runtimes, hasProfile } = effective(logins);
+      let file = runtimes.get(wanted);
       if (file === undefined) {
         const current = await deps.currentName?.(named).catch(() => undefined);
-        const renamed = current === undefined ? undefined : deps.runtimes().get(current);
+        const renamed = current === undefined ? undefined : runtimes.get(current);
         if (current === undefined || renamed === undefined) {
           return { ok: false, refusal: 'unknown', sentence: `no runtime ${named} exists on this machine` };
         }
         wanted = RuntimeIdSchema.parse(current);
         file = renamed;
       }
-      const logins = await loginsById(deps.logins);
-      const entry = read(wanted, file, logins, deps.now());
+      const entry = read(wanted, file, logins, deps.now(), hasProfile);
       if ('refusal' in entry) return entry.refusal;
       if (!logins.has(file.login)) {
         return { ok: false, refusal: 'no_login', sentence: `Login ${file.login} does not exist` };
@@ -180,7 +208,7 @@ export function createRuntimesApi(
           sentence: summary.launch.available ? `${wanted} is switched off` : summary.launch.reason,
         };
       }
-      if (!deps.profiles().has(file.profile)) {
+      if (!hasProfile(file.profile)) {
         return { ok: false, refusal: 'no_profile', sentence: `Profile ${file.profile} does not exist` };
       }
       if (!summary.launch.available) {

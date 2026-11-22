@@ -19,7 +19,7 @@ import { adaptProfile } from '../../../daemon/lib/account/adapt.ts';
 import { resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { claudeStatuslineFor } from '../../../daemon/lib/account/statusline.ts';
 
-const runtime = (login: string): RuntimeFile => ({ login, profile: 'default', agent: false }) as RuntimeFile;
+const runtime = (login: string): RuntimeFile => ({ login, profile: 'default' }) as RuntimeFile;
 const profile = (contents: readonly string[]): ProfileFile => ({ contents: [...contents] }) as ProfileFile;
 
 const read = (components: Record<string, unknown>): ComponentReading['mcp'] => ({

@@ -58,20 +58,17 @@ const choose = async (select: Element, value: string): Promise<void> => {
 const AGENTS: RuntimeCatalog = {
   format: 'present',
   runtimes: [
-    runtime({ name: 'claude-default', agent: true }),
+    runtime({ name: 'claude-default' }),
     runtime({
       name: 'claude-work',
-      agent: true,
       credential: { id: 'claude-work', store: 'ferretry', label: 'work', status: 'needs_sign_in' },
     }),
     runtime({
       name: 'claude-atomi',
-      agent: true,
       disabled: { source: 'runtime', until: InstantSchema.parse('2026-11-04T00:00:00.000Z') },
     }),
     runtime({
       name: 'codex-kirin',
-      agent: true,
       harness: 'codex',
       credential: { id: 'codex', store: 'host', status: 'ready' },
     }),

@@ -16,7 +16,6 @@ import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-pan
 import { Block, FleetGroup } from '../shell/fleet-group.tsx';
 import {
   AUTOMATIC_DEFAULT,
-  agentRuntimes,
   DEFAULT_RUNTIME_HINT,
   DEFAULT_RUNTIME_LABEL,
   defaultOptionLabel,
@@ -46,7 +45,7 @@ export function DefaultRuntimeControl({
   onSaved,
 }: DefaultRuntimeControlProps) {
   const id = useId();
-  const candidates = agentRuntimes(runtimes);
+  const candidates = runtimes;
   const current = machine.defaultRuntime;
   const shown = picked ?? current ?? '';
   const pending = picked !== null && picked !== current;
@@ -64,7 +63,7 @@ export function DefaultRuntimeControl({
   if (candidates.length === 0)
     return (
       <p className="m-0 text-cell text-muted" data-default-runtime-empty="">
-        {machineName} has no agent runtime yet. Add an agent runtime, then pick it here.
+        {machineName} has no runtime yet. Add a login, then pick its runtime here.
       </p>
     );
 

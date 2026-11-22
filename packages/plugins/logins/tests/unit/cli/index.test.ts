@@ -338,11 +338,10 @@ describe('the logins cli half', () => {
       consequences: ['Nothing running is stopped.'],
       saves: ['logins/work.yaml'],
       runtimes: [
-        { name: 'alpha', harness: 'claude-code', agent: true, launch: { available: true } },
+        { name: 'alpha', harness: 'claude-code', launch: { available: true } },
         {
           name: 'beta',
           harness: 'codex',
-          agent: false,
           launch: { available: false, reason: 'its login "work" is disabled. Use "gamma" instead' },
         },
         { name: 'gamma' },
@@ -360,7 +359,7 @@ describe('the logins cli half', () => {
     await cli.build?.(ctx).verbs['login disable']({ args: ['work'], options: {} });
 
     should(out.join('')).match(/Saves:\n {2}logins\/work\.yaml\nRuntimes after this change:\n/);
-    should(out.join('')).match(/ {2}alpha \(Claude Code, agent\) — ready to launch\n/);
+    should(out.join('')).match(/ {2}alpha \(Claude Code\) — ready to launch\n/);
     should(out.join('')).match(/ {2}beta \(Codex\) — its login "work" is disabled\. Use "gamma" instead\n/);
     should(out.join('')).match(/ {2}gamma\n/);
     should(out.join('')).match(/ {2}delta — ready to launch\n/);

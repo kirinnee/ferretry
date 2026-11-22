@@ -147,7 +147,6 @@ const normalised = (
       return {
         login: identityOf(`login/${String(value.credential)}`),
         profile: identityOf(`profile/${String(value.profile)}`),
-        agent: value.agent === true,
         harness: value.harness,
         compactAt: value.compactAt,
       };

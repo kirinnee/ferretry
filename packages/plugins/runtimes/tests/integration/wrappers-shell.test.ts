@@ -41,7 +41,6 @@ const account = (overrides: RuntimeFacts = {}): RuntimeWrapperInput => {
     name: overrides.wrapper ?? 'claude-auto-kirin',
     id: overrides.id ?? ID_ONE,
     harness,
-    agent: true,
     configDirectory: overrides.home ?? '$HOME/.state/fleet/homes/auto-kirin',
     env: overrides.env ?? {},
     args: overrides.flags ?? [],
@@ -98,22 +97,6 @@ describe('the question tool, per ferret (O3)', () => {
     should(wrapper).not.containEql('FY_SESSION_MODE');
     for (const mode of ['interactive', 'auto', undefined] as const)
       should(argumentsAfterQuestionLine(wrapper, mode, ['do the thing'])).deepEqual([...OFF, 'do the thing']);
-  });
-
-  it("should leave a non-agent Codex runtime without the OFF: it behaves like the person's own CLI", () => {
-    // Arrange
-    const wrapper = render({ ...account({ kind: 'codex' }), agent: false });
-
-    // Act + Assert
-    should(wrapper).not.containEql('default_mode_request_user_input');
-  });
-
-  it("should leave a non-agent runtime alone: it behaves like the person's own CLI", () => {
-    // Arrange
-    const wrapper = render({ ...account(), agent: false });
-
-    // Act + Assert
-    should(argumentsAfterQuestionLine(wrapper, 'auto', ['task'])).be.undefined();
   });
 });
 
@@ -196,20 +179,18 @@ describe("a resumed conversation hears this launch's sections", () => {
     should(args.at(-1)).equal('the task');
   });
 
-  it('should ask the harness the wrapper execs, and leave Codex and a non-agent runtime alone', () => {
+  it('should ask the harness the wrapper execs, and leave Codex alone', () => {
     // Arrange
     const agent = account({ flags: [`--append-system-prompt=${BASE}`] });
 
     // Act
     const resolved = render({ ...agent, harnessCommand: '/opt/harnesses/claude' });
     const codex = render(account({ kind: 'codex', flags: ['-c', `developer_instructions="${BASE}"`] }));
-    const person = render({ ...agent, agent: false });
 
     // Assert
     should(resolved).containEql("_fy_help=\"$({ '/opt/harnesses/claude' --help </dev/null");
     should(launchArguments(codex, {}, RECORDING_HARNESS)).not.containEql('--system-prompt-snapshot=off');
     should(codex).not.containEql('system-prompt-snapshot');
-    should(person).not.containEql('system-prompt-snapshot');
   });
 });
 
@@ -320,13 +301,12 @@ describe("each ferret's sections of the appended system prompt", () => {
     should(JSON.parse(hostile?.slice('developer_instructions='.length) ?? '')).endWith('\nabcde');
   });
 
-  it('should name the binary the runtime launches, and leave every other argument and a non-agent alone', () => {
+  it('should name the binary the runtime launches, and leave every other argument alone', () => {
     // Arrange
     const agent = {
       ...account({ flags: [`--append-system-prompt=${BASE}`, '--other=x'] }),
       fyCommand: '/opt/f/bin/zz',
     };
-    const person = { ...agent, agent: false };
 
     // Act
     const prompt = launchArguments(render(agent), { FY_PACK: '1' }).find(arg => arg.startsWith('--append'));
@@ -334,7 +314,6 @@ describe("each ferret's sections of the appended system prompt", () => {
     // Assert
     should(prompt).containEql('`zz recommend');
     should(launchArguments(render(agent), {})).containEql('--other=x');
-    should(render(person)).not.containEql('_fy_sections');
   });
 });
 

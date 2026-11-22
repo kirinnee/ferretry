@@ -16,7 +16,7 @@ describe('R2 layers — a lattice of shared bases is judged at once', () => {
   it('R2 should resolve a 20-deep lattice (about a million paths) at once', async () => {
     // Arrange
     const { port: runtimes } = await world({
-      runtimes: { work: { login: 'claude-you', profile: 'a0', agent: true } },
+      runtimes: { work: { login: 'claude-you', profile: 'a0' } },
       profiles: lattice(20),
     });
 
@@ -35,7 +35,7 @@ describe('R2 layers — a lattice of shared bases is judged at once', () => {
   it('R2 should list the profiles and change one of a 20-deep lattice (about a million paths) at once', async () => {
     // Arrange
     const { port: runtimes } = await world({
-      runtimes: { work: { login: 'claude-you', profile: 'a0', agent: true } },
+      runtimes: { work: { login: 'claude-you', profile: 'a0' } },
       profiles: lattice(20),
     });
 

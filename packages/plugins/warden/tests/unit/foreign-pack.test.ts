@@ -20,7 +20,6 @@ const credential = (overrides: Partial<FleetCredentialView> = {}): FleetCredenti
 const runtime = (overrides: Partial<FleetRuntimeView> = {}): FleetRuntimeView => ({
   name: 'Claude Atelier',
   wrapper: 'claude-auto-a',
-  agent: true,
   harness: 'claude',
   credential: { id: 'login-a', status: 'ready' },
   launch: { available: true },
@@ -115,10 +114,6 @@ describe('why a runtime cannot start a ferret', () => {
 
   it('should accept a runtime that is ready', () => {
     should(refusal(runtime(), undefined, facts())).be.undefined();
-  });
-
-  it('should refuse a runtime that is not an agent', () => {
-    should(refusal(runtime({ agent: false }), undefined, facts())).match({ code: 'not_agent' });
   });
 
   it('should refuse a runtime whose CLI is not installed', () => {

@@ -81,7 +81,6 @@ describe('runtimes contract', () => {
     harness: 'claude-code',
     login: 'work',
     profile: 'default',
-    agent: true,
     launch: { available: true },
     ...extra,
   });
@@ -211,7 +210,11 @@ describe('runtimes contract', () => {
   });
 
   test('a runtime file names a login and refuses a raw field', () => {
-    expect(RuntimeFileSchema.parse({ login: 'work', profile: 'default' }).agent).toBe(false);
+    // An old file that still says `agent` is read, and the field is dropped (no migration).
+    expect(RuntimeFileSchema.parse({ login: 'work', profile: 'default', agent: true })).toEqual({
+      login: 'work',
+      profile: 'default',
+    });
     expect(RuntimeFileSchema.safeParse({ login: 'work', profile: 'default', credential: 'work' }).success).toBe(false);
   });
 

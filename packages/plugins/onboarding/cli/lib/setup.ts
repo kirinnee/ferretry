@@ -101,7 +101,7 @@ function renderChangeView(view: AccountChangeView): string {
       'Runtimes after this change:',
       ...view.preview.runtimes.map(
         runtime =>
-          `  ${runtime.name} (${LABEL[runtime.harness]}${runtime.agent ? ', agent' : ''}) — ${runtime.launch.available ? 'ready to launch' : runtime.launch.reason}`,
+          `  ${runtime.name} (${LABEL[runtime.harness]}) — ${runtime.launch.available ? 'ready to launch' : runtime.launch.reason}`,
       ),
     );
   return lines.join('\n');

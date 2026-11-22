@@ -639,7 +639,7 @@ describe('the readers of the manifest', () => {
 // ── the composed daemon: boot repair, then a start resolves its runtime ─────────────────────────────────────────────
 
 const CONFIG = {
-  runtimes: { 'claude-default': { login: 'claude-you', profile: 'default', agent: true } },
+  runtimes: { 'claude-default': { login: 'claude-you', profile: 'default' } },
   profiles: { default: { contents: ['modelSets/heavy'] } },
   'model-sets': { heavy: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } },
 };
@@ -650,7 +650,7 @@ const CONFIG = {
  */
 const UNPUBLISHABLE = {
   ...CONFIG,
-  runtimes: { 'claude-default': { login: 'claude-you', profile: 'nowhere', agent: true } },
+  runtimes: { 'claude-default': { login: 'claude-you', profile: 'nowhere' } },
 };
 
 async function compose(
@@ -689,7 +689,6 @@ const publishOnce = async (host: TestHost): Promise<void> => {
         name: 'claude-work',
         credential: 'claude-you',
         profile: 'default',
-        agent: true,
         create: true,
         addAnother: true,
       },
@@ -795,8 +794,8 @@ describe('the composed daemon rebuilds an unreadable manifest after start', () =
     await host.runJob(REPAIR);
 
     host.setConfig('runtimes', {
-      'claude-default': { login: 'claude-you', profile: 'default', agent: true },
-      'claude-extra': { login: 'claude-you', profile: 'default', agent: true },
+      'claude-default': { login: 'claude-you', profile: 'default' },
+      'claude-extra': { login: 'claude-you', profile: 'default' },
     });
     await host.settle();
     await until(

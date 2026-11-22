@@ -91,7 +91,6 @@ const summary = {
   harness: 'claude-code',
   login: 'work',
   profile: 'full',
-  agent: false,
   launch: { available: true },
 } as RuntimeSummary;
 

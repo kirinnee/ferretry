@@ -25,10 +25,6 @@ const LOGIN_WORDS: Readonly<Record<NonNullable<RuntimeView['credential']['status
   checking: 'checking',
 };
 
-/** The runtimes that can be the default: the agent ones, in the order the list shows them. */
-export const agentRuntimes = (runtimes: readonly RuntimeView[]): readonly RuntimeView[] =>
-  runtimes.filter(runtime => runtime.agent);
-
 /** One runtime's state in a few words: "ready", "disabled until 4 Nov 2026", "Codex not installed". */
 export const runtimeStateWords = (runtime: RuntimeView, machine: MachineView | null): string => {
   if (runtime.disabled !== undefined)

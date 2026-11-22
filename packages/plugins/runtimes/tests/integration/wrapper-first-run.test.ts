@@ -18,7 +18,6 @@ const account = (home: string, env: Record<string, string> = {}): RuntimeWrapper
   name: 'claude-auto-work',
   id: '00000000-0000-4000-8000-000000000001',
   harness: 'claude',
-  agent: true,
   configDirectory: home,
   env,
   args: [],

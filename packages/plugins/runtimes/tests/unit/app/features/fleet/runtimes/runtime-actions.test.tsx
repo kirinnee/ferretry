@@ -707,7 +707,6 @@ describe('Runtime actions: Remove', () => {
           format: 'present',
           runtimes: [...(READS()['GET /v1/runtimes'] as { runtimes: unknown[] }).runtimes].map(entry => ({
             ...(entry as object),
-            agent: true,
           })),
         },
       },
@@ -761,7 +760,6 @@ describe('Runtime actions: Remove', () => {
           format: 'present',
           runtimes: [...(READS()['GET /v1/runtimes'] as { runtimes: unknown[] }).runtimes].map(entry => ({
             ...(entry as object),
-            agent: true,
           })),
         },
       },

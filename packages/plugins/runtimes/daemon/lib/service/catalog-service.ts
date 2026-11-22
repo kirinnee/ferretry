@@ -528,7 +528,6 @@ export class FleetCatalogService {
       .map(runtime => ({
         name: runtime.name,
         harness: runtime.harness,
-        agent: runtime.agent,
         launch: runtime.launch.available
           ? { available: true }
           : { available: false, ...(runtime.launch.reason === undefined ? {} : { reason: runtime.launch.reason }) },
@@ -1145,7 +1144,7 @@ export class FleetCatalogService {
     const after = runtimeCatalog(candidate, await this.#facts({ ...reading, model: candidate }, bodies));
     return after.runtimes
       .filter(runtime => textUsers.has(runtime.name) || before.get(runtime.name) !== JSON.stringify(runtime))
-      .map(runtime => ({ name: runtime.name, harness: runtime.harness, agent: runtime.agent, launch: runtime.launch }));
+      .map(runtime => ({ name: runtime.name, harness: runtime.harness, launch: runtime.launch }));
   }
 
   /**
@@ -1238,7 +1237,6 @@ export class FleetCatalogService {
       runtimes: rows.map(runtime => ({
         name: runtime.name,
         harness: runtime.harness,
-        agent: runtime.agent,
         launch: runtime.launch,
       })),
       ...orphanedSecrets,

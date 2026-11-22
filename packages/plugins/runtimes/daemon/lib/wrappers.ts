@@ -348,8 +348,6 @@ export interface RuntimeWrapperInput {
   readonly name: string;
   readonly id: string;
   readonly harness: HarnessKind;
-  /** "Ferretry launches this as an agent" (R3). */
-  readonly agent: boolean;
   /** Absolute path of the runtime's config directory. */
   readonly configDirectory: string;
   /**
@@ -489,12 +487,7 @@ const tomlBasicString = (value: string): string => `"${value.replace(/[\\"]/gu, 
  * it behaves like the person's own CLI.
  */
 export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
-  const header = [
-    '#!/bin/sh',
-    MANAGED_MARKER,
-    `# runtime ${input.name} ${input.id} (${input.harness}${input.agent ? ', agent' : ''})`,
-    '',
-  ];
+  const header = ['#!/bin/sh', MANAGED_MARKER, `# runtime ${input.name} ${input.id} (${input.harness})`, ''];
   if (input.refusal !== undefined) {
     return [
       ...header,
@@ -504,7 +497,7 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
     ].join('\n');
   }
   const environment = environmentLines(input.env, input.secretsFile);
-  const sections = input.agent ? ferretSectionLines(input.harness, input.fyCommand) : [];
+  const sections = ferretSectionLines(input.harness, input.fyCommand);
   const harness =
     input.harnessCommand === undefined ? HARNESS_BINARIES[input.harness] : shellPath(input.harnessCommand);
   const args = [...defaultModelArgs(input.harness, input.defaultModel), ...input.args]
@@ -521,7 +514,7 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
     ...(input.seedFirstRun === true ? firstRunSeedLines(input.harness) : []),
     ...historyClaimLines(input.harness, input.fyCommand),
     ...(input.trustLaunchFolder === true ? codexTrustLines() : []),
-    ...(input.agent ? questionLines(input.harness) : []),
+    ...questionLines(input.harness),
     ...sections,
     ...(sections.length > 0 ? promptSnapshotLines(input.harness, harness) : []),
     '',

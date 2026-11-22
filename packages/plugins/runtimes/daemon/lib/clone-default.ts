@@ -24,7 +24,7 @@ const recordOf = (value: unknown): Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
 /**
- * The agent runtimes in a bundle, by the source's name, sorted. Only an agent runtime can be the default.
+ * The runtimes in a bundle, by the source's name, sorted: each can be the default.
  * A runtime's harness is its own `harness`, else the one its login drives.
  */
 export function cloneAgentRuntimes(bundle: CloneBundle): readonly CloneAgentRuntime[] {
@@ -34,7 +34,6 @@ export function cloneAgentRuntimes(bundle: CloneBundle): readonly CloneAgentRunt
   return Object.entries(bundle.runtimes)
     .flatMap(([name, value]): CloneAgentRuntime[] => {
       const runtime = recordOf(value);
-      if (runtime.agent !== true) return [];
       const own = runtime.harness === 'claude' || runtime.harness === 'codex' ? runtime.harness : undefined;
       const login = typeof runtime.credential === 'string' ? harnesses.get(runtime.credential) : undefined;
       const harness = own ?? login;

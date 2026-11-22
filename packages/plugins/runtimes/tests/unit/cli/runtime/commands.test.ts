@@ -6,7 +6,6 @@ import { fakeWorld, runtime, runVerb, stack } from '../fleet/account-fakes.ts';
 
 const agent = runtime({
   name: 'claude-agent',
-  agent: true,
   credential: { id: 'claude-you', store: 'host', label: 'mine' },
   stack: stack({
     available: { available: false, reason: 'Some layers do not apply.' },
@@ -51,7 +50,7 @@ describe('runtime renderings', () => {
     should(text).match(
       /claude-default {2}Claude Code {2}— ready to launch\n {2}Login: claude-you \(needs sign in\) · Profile: default/,
     );
-    should(text).match(/claude-agent {2}Claude Code, agent {2}— Sign in to launch\n {2}Login: mine ·/);
+    should(text).match(/claude-agent {2}Claude Code {2}— Sign in to launch\n {2}Login: mine ·/);
   });
 
   it('should say how to get a first runtime', () => {
@@ -101,7 +100,6 @@ describe('runtime verbs', () => {
     await runVerb(world, 'runtime add', ['claude-agent'], {
       login: 'claude-you',
       profile: 'default',
-      agent: true,
       'add-another': true,
     });
     should(world.gateway.called('stage')[0]?.args[0]).eql({
@@ -109,7 +107,6 @@ describe('runtime verbs', () => {
       name: 'claude-agent',
       credential: 'claude-you',
       profile: 'default',
-      agent: true,
       create: true,
       addAnother: true,
     });
@@ -117,7 +114,7 @@ describe('runtime verbs', () => {
 
     const plain = fakeWorld();
     await runVerb(plain, 'runtime add', ['x'], { login: 'c', profile: 'p' });
-    should(plain.gateway.called('stage')[0]?.args[0]).match({ agent: false, create: true });
+    should(plain.gateway.called('stage')[0]?.args[0]).match({ create: true });
   });
 
   it('should refuse an add that does not say which login and profile', async () => {
@@ -142,18 +139,11 @@ describe('runtime verbs', () => {
       answers: ['y', 'y'],
       gateway: { runtimes: () => ({ format: 'present', runtimes: [runtime()] }) },
     });
-    await runVerb(world, 'runtime set', ['claude-default'], { agent: true });
-    await runVerb(world, 'runtime set', ['claude-default'], { login: 'c2', profile: 'p2', agent: false });
+    await runVerb(world, 'runtime set', ['claude-default'], { login: 'c2' });
+    await runVerb(world, 'runtime set', ['claude-default'], { login: 'c2', profile: 'p2' });
     should(world.gateway.called('stage').map(call => call.args[0])).eql([
-      {
-        kind: 'runtime.put',
-        name: 'claude-default',
-        credential: 'claude-you',
-        profile: 'default',
-        agent: true,
-        create: false,
-      },
-      { kind: 'runtime.put', name: 'claude-default', credential: 'c2', profile: 'p2', agent: false, create: false },
+      { kind: 'runtime.put', name: 'claude-default', credential: 'c2', profile: 'default', create: false },
+      { kind: 'runtime.put', name: 'claude-default', credential: 'c2', profile: 'p2', create: false },
     ]);
     await should(runVerb(world, 'runtime set', ['claude-default'])).be.rejectedWith(/Say what to change/);
   });

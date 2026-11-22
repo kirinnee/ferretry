@@ -47,7 +47,6 @@ interface AddRuntimeDraft {
   readonly profile: string | null;
   /** The name typed; `null` while the suggestion is used. */
   readonly name: string | null;
-  readonly agent: boolean;
   /** E15: "Add another anyway". */
   readonly addAnother: boolean;
   /** **Runs**: the CLI the person chose for a login that drives both. `null`: not chosen. */
@@ -58,7 +57,6 @@ const EMPTY: AddRuntimeDraft = {
   credentialId: null,
   profile: null,
   name: null,
-  agent: false,
   addAnother: false,
   runs: null,
 };
@@ -133,12 +131,7 @@ function Part({
 }
 
 export function AddRuntime({ data, reload, changes, machine, machineName, online, onFinish }: AddRuntimeProps) {
-  // Ferrets only start on an agent runtime, so a machine that has none offers the first one as an agent: left unticked it
-  // would end at "No runtime can run a ferret yet".
-  const [draft, setDraft] = useState<AddRuntimeDraft>(() => ({
-    ...EMPTY,
-    agent: !data.runtimes.runtimes.some(item => item.agent),
-  }));
+  const [draft, setDraft] = useState<AddRuntimeDraft>(EMPTY);
   const [made, setMade] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const credentials = data.credentials.logins;
@@ -229,7 +222,6 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
       credential: credential.id,
       profile: draft.profile,
       ...(dual && harness !== undefined ? { harness } : {}),
-      agent: draft.agent,
       create: true,
       ...(draft.addAnother ? { addAnother: true } : {}),
     });
@@ -423,23 +415,6 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
               )}
             </span>
           )}
-          <label
-            className="kt-panel flex min-h-control cursor-pointer items-start gap-3 p-panel"
-            data-add-runtime-agent=""
-          >
-            <input
-              type="checkbox"
-              className="mt-1"
-              checked={draft.agent}
-              onChange={event => set({ agent: event.target.checked })}
-            />
-            <span className="flex min-w-0 flex-col">
-              <span className="text-row font-semibold text-fg">Ferretry launches this as an agent</span>
-              <span className="text-cell leading-base text-muted">
-                Adds Ferretry’s fixed layer last: no trust or onboarding prompts, and the machine’s agent permissions.
-              </span>
-            </span>
-          </label>
         </Part>
       )}
 

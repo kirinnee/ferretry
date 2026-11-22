@@ -33,7 +33,6 @@ const account = (overrides: RuntimeFacts = {}): RuntimeWrapperInput => {
     name: overrides.wrapper ?? 'claude-auto-kirin',
     id: overrides.id ?? ID_ONE,
     harness,
-    agent: true,
     configDirectory: overrides.home ?? '$HOME/.state/fleet/homes/auto-kirin',
     env: overrides.env ?? {},
     args: overrides.flags ?? [],
@@ -135,7 +134,7 @@ describe('renderRuntimeWrapperScript', () => {
     // Assert
     should(actual.startsWith('#!/bin/sh\n')).be.true();
     should(actual).containEql(MANAGED_MARKER);
-    should(actual).containEql(`# runtime claude-auto-kirin ${ID_ONE} (claude, agent)`);
+    should(actual).containEql(`# runtime claude-auto-kirin ${ID_ONE} (claude)`);
     should(actual).containEql('export CLAUDE_CONFIG_DIR="$HOME/.state/fleet/homes/auto-kirin"');
     should(actual.trimEnd().endsWith('exec claude "$@"')).be.true();
   });

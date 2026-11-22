@@ -87,7 +87,7 @@ const documentWith = (layers: readonly string[]): AccountModelDocument => ({
   },
   profiles: { default: { layers: [...layers, 'modelSets/models'] } },
   runtimes: {
-    'claude-agent': { credential: 'claude-you', profile: 'default', agent: true },
+    'claude-agent': { credential: 'claude-you', profile: 'default' },
     'codex-default': { credential: 'codex-slot', profile: 'default' },
   },
 });
@@ -388,7 +388,6 @@ describe('a runtime wrapper, run', () => {
         name: 'claude-default',
         id: ID_CLAUDE,
         harness: 'claude',
-        agent: false,
         configDirectory: path.join(root, 'home'),
         env: {},
         args: [],
@@ -520,13 +519,13 @@ describe('a runtime wrapper, run', () => {
     const result = await run();
 
     // Assert
-    should(result.harness).match(/^HOME=.*\/person\n$/);
+    should(result.harness).match(/^HOME=.*\/person\n/);
   });
 
   it('should trust the physical launch folder with exactly the measured Codex override, quotes and backslashes included', async () => {
     // Arrange
     const { run, cwd } = await withWrapper(
-      { harness: 'codex', agent: true, trustLaunchFolder: true, args: ['--no-alt-screen'] },
+      { harness: 'codex', trustLaunchFolder: true, args: ['--no-alt-screen'] },
       { cwdName: 'we"ird\\dir' },
     );
 
