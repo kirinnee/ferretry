@@ -76,6 +76,7 @@ import {
   type ApplyLeft,
   assertRequestLive,
   assertRequestLiveBetweenWrites,
+  landedBeforeAbort,
 } from './apply-bracket.ts';
 import {
   type CatalogFacts,
@@ -785,6 +786,9 @@ export class FleetCatalogService {
     try {
       outcome = await this.#execute(record, caller);
     } catch (error) {
+      // Cut short after some files landed: the change stays spent, and what a re-read of it says is what landed.
+      const landed = landedBeforeAbort(error);
+      if (landed.length > 0) record.landed = landed;
       // Refused before anything was written, asking for a passkey: the same change can be applied once it is proved.
       if (error instanceof FleetCatalogFreshStepUpRequired) this.#changes.restore(record);
       // Logins refused the change it held (it keeps it reviewable), and no runtime had moved: so does this one.

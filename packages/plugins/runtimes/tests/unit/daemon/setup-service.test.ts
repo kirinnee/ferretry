@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import type { CallerGovernance, GrantRefusal } from '@ferretry/core-gate/contract';
+import { ApiError } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import { fakeLoginChanges } from '@ferretry/plugin-logins/contract/testing';
@@ -43,6 +44,7 @@ import {
   FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
 } from '../../../daemon/lib/service/catalog-service.ts';
+import { assertRequestLiveBetweenWrites } from '../../../daemon/lib/service/apply-bracket.ts';
 import { failedApplySentence } from '../../../daemon/lib/service/failed-apply.ts';
 import { ConfigWriteConflict, ConfigWriteInvalid } from '../../../daemon/lib/service/ports.ts';
 import {
@@ -2850,6 +2852,39 @@ intervalMinutes: 5
 
     should(refusal.message).containEql('changed on this machine after it was reviewed');
     should(refusal.message).containEql('was made first and is NOT rolled back with the fleet');
+    should(w.applied).deepEqual([]);
+  });
+
+  it('E3 answers a request that ended after the first of three settings files with exactly that file, not a bare 499', async () => {
+    const own = files({});
+    const write = own.port.write;
+    const controller = new AbortController();
+    own.port.write = async (path, body, ifMatch, mayLoosen) => {
+      const answer = await write(path, body, ifMatch, mayLoosen);
+      controller.abort(); // the request ends right after the first file landed
+      return answer;
+    };
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [
+      { path: 'learning.yaml' as const, text: 'enabled: false\n' },
+      { path: 'voice.yaml' as const, text: 'postProcessing:\n  provider: off\n' },
+      { path: 'warden.yaml' as const, text: WARDEN },
+    ];
+    const caller: ExecutorCaller = {
+      ...callerFor(REMOTE),
+      live: () => assertRequestLiveBetweenWrites({ signal: controller.signal }),
+    };
+
+    const error = await thrown(apply(w, bundle, settings, undefined, caller));
+
+    should(error).be.instanceOf(ApiError);
+    const aborted = error as ApiError;
+    should(aborted.status).equal(499);
+    should(aborted.code).equal('request_aborted');
+    should(own.writes.map(entry => entry.path)).deepEqual(['learning.yaml']);
+    should(aborted.extra).deepEqual({ landed: ['learning.yaml'] });
+    should(aborted.message).containEql('Part of this change was applied: learning.yaml. The rest was not.');
     should(w.applied).deepEqual([]);
   });
 

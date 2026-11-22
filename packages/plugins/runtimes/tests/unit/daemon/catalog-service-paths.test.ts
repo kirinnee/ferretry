@@ -701,6 +701,46 @@ describe('the first-run executors', () => {
     });
     should(calls).eql(['describe', 'execute agent=false']);
   });
+
+  it('E3 tells a re-read of a change cut short mid-way what landed, not just that it was already applied', async () => {
+    const aborted = new ApiError(499, 'the request ended', 'request_aborted', undefined, {
+      landed: ['learning.yaml'],
+    });
+    const { service } = world({
+      overrides: {
+        executors: {
+          setup: {
+            describe: async () => 'Import Claude Code.',
+            execute: async () => {
+              throw aborted;
+            },
+          },
+        },
+      },
+    });
+    const staged = await service.propose(setup);
+
+    should(await rejection(service.apply(staged.id, OWNER))).equal(aborted);
+
+    const reread = await rejection(service.read(staged.id));
+    should(reread).match({ code: 'fleet_change_consumed' });
+    should((reread as Error).message).containEql(
+      'Part of this change was applied: learning.yaml. The rest was not. Review the change again to finish it.',
+    );
+    should((reread as Error).message).not.containEql('has already been applied');
+  });
+
+  it('E3 keeps saying "already applied" for a change that was spent whole', async () => {
+    const { service } = world({
+      overrides: { executors: { setup: { describe: async () => 'x', execute: async () => 'Done.' } } },
+    });
+    const staged = await service.propose(setup);
+    await service.apply(staged.id, OWNER);
+    should(await rejection(service.read(staged.id))).match({
+      code: 'fleet_change_consumed',
+      message: `fleet proposal "${staged.id}" has already been applied`,
+    });
+  });
 });
 
 describe('a change to one login', () => {

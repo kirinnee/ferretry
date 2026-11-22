@@ -16,6 +16,34 @@ export function assertRequestLiveBetweenWrites(bracket: ApplyBracket | undefined
     );
 }
 
+/** What a person is told about a change that was cut short after some files landed (the page shows this word for word). */
+export function partlyAppliedSentence(landed: readonly string[]): string {
+  return `Part of this change was applied: ${landed.join(', ')}. The rest was not.`;
+}
+
+/**
+ * An apply stopped by its request ending (`request_aborted`) AFTER files landed is answered with those paths, in words
+ * and as `extra.landed` (what the boundary keeps, so a re-read of the spent change says what landed). Any other error,
+ * and an abort before any write, is returned as it is.
+ */
+export function abortedAfterWriting(error: unknown, landed: readonly string[]): unknown {
+  const written = [...new Set(landed)];
+  if (!(error instanceof ApiError) || error.code !== 'request_aborted' || written.length === 0) return error;
+  return new ApiError(
+    error.status,
+    `${error.message}. ${partlyAppliedSentence(written)}`,
+    'request_aborted',
+    undefined,
+    { landed: written },
+  );
+}
+
+/** The paths an `abortedAfterWriting` answer names; none for any other error. */
+export function landedBeforeAbort(error: unknown): readonly string[] {
+  const landed = error instanceof ApiError && error.code === 'request_aborted' ? error.extra?.landed : undefined;
+  return Array.isArray(landed) ? landed.filter((path): path is string => typeof path === 'string') : [];
+}
+
 /** What a finished apply left behind: waiting for the owner, not written, or cut short. */
 export type ApplyLeft = 'held' | 'refused' | 'unfinished';
 

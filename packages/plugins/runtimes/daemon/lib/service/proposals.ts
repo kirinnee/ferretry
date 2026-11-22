@@ -25,6 +25,7 @@
  * Pure apart from injected identity and time.
  */
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
+import { partlyAppliedSentence } from './apply-bracket.ts';
 
 /** How many proposals one daemon will hold at once, across every client. */
 const MAX_OPEN_PROPOSALS = 8;
@@ -55,6 +56,8 @@ export interface FleetProposalRecord<Payload, Mutation> {
   /** One-line, server-derived description of what this change does, for the person reviewing it. */
   readonly summary: string;
   state: FleetProposalState;
+  /** Set once an apply was cut short after these paths had landed: the change is spent, but only in part. */
+  landed?: readonly string[];
 }
 
 /** What a caller may see about a proposal. */
@@ -172,7 +175,13 @@ export class FleetProposalStore<Payload, Mutation> {
       throw new FleetProposalRefusal('unknown', `no open fleet proposal with id "${id}" on this daemon`);
     }
     if (record.state === 'consumed') {
-      throw new FleetProposalRefusal('consumed', `fleet proposal "${id}" has already been applied`);
+      // A change cut short mid-way is spent but was NOT applied whole: say what landed, never "already applied".
+      throw new FleetProposalRefusal(
+        'consumed',
+        record.landed === undefined || record.landed.length === 0
+          ? `fleet proposal "${id}" has already been applied`
+          : `fleet proposal "${id}" was only partly applied. ${partlyAppliedSentence(record.landed)} Review the change again to finish it.`,
+      );
     }
     return record;
   }
