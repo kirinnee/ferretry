@@ -428,10 +428,14 @@ export function PairingScreen({
               {linkError}
             </p>
           )}
-          <PairButton type="submit" className="self-start px-6 py-3" disabled={!link.filled}>
-            <Link2 size={16} aria-hidden="true" />
-            Use this link
-          </PairButton>
+          <ActionRow
+            primary={
+              <PairButton type="submit" disabled={!link.filled}>
+                <Link2 size={16} aria-hidden="true" />
+                Use this link
+              </PairButton>
+            }
+          />
         </form>
       ) : null}
 
@@ -594,6 +598,17 @@ const PROGRESS_AT: Readonly<Record<string, string | undefined>> = {
   paired: 'connected',
 };
 
+/** The device name as typed; only a wrap is steered: the "·" stays with the suffix after it (same text, so nothing reads or copies differently). */
+function DeviceNameText({ name }: { readonly name: string }) {
+  const at = name.indexOf(' · ');
+  if (at < 0) return <>{name}</>;
+  return (
+    <>
+      {name.slice(0, at)} <span className="whitespace-nowrap">{name.slice(at + 1)}</span>
+    </>
+  );
+}
+
 /** No page spacing, no max width, no safe-area padding: the host owns all three. */
 const EMBEDDED_SHELL = 'flex min-w-0 flex-col gap-4';
 
@@ -608,7 +623,7 @@ const SHELL =
  */
 function HowThisWorks() {
   return (
-    <details className="mt-auto rounded-control border border-border bg-surface-2 px-control-x py-2">
+    <details className="mt-2 rounded-control border border-border bg-surface-2 px-control-x py-2">
       <summary className="min-h-[44px] cursor-pointer list-none py-2 text-ui font-medium text-muted marker:content-none">
         <span className="inline-flex items-center gap-2">
           <ShieldCheck size={16} aria-hidden="true" />
@@ -800,7 +815,7 @@ function PairingFocus({
         <p className="m-0 mt-1 text-meta text-faint" data-name-after-pairing="">
           Its name shows once paired.
         </p>
-        <details className="-mb-3 mt-1" data-pair-details="">
+        <details className="-mb-3 mt-1 open:mb-0 open:pb-3" data-pair-details="">
           {/* The 44 px target is the summary's own padding, so the label sits in the middle of it and the card ends one row under it, not a blank band lower. */}
           <summary className="cursor-pointer py-3 text-ui font-medium text-muted hover:text-accent">Details</summary>
           <p className="m-0 break-all font-mono text-meta text-faint">
@@ -834,11 +849,16 @@ function PairingFocus({
       ) : (
         <p className="m-0 min-w-0 break-words text-ui leading-base text-muted" data-pair-device-label="">
           <span>
-            This device will be called <span className="font-semibold text-fg">{deviceName}</span>.
+            This device will be called{' '}
+            {/* A wrap never strands the "·" at the end of a line: the dot stays with what follows it. */}
+            <span className="font-semibold text-fg">
+              <DeviceNameText name={deviceName} />
+            </span>
+            .
           </span>{' '}
           <button
             type="button"
-            className="fy-pair-inline"
+            className="fy-inline-action"
             data-pair-device-rename=""
             onClick={() => setRenaming(true)}
             disabled={busy}

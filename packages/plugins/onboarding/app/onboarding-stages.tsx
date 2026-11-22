@@ -86,12 +86,14 @@ function Aside({ summary, children }: { readonly summary: string; readonly child
  */
 function AgentInstead({ onAgentInstead }: { readonly onAgentInstead: () => void }) {
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-2" data-onboarding-agent-link="">
-      <p className="m-0 min-w-0 text-meta leading-base text-muted">Have Claude or Codex open?</p>
-      <button type="button" className="kt-btn min-h-[44px]" onClick={onAgentInstead} data-onboarding-agent-instead="">
+    <p className="m-0 min-w-0 text-meta leading-base text-muted" data-onboarding-agent-link="">
+      Have Claude or Codex open?{' '}
+      {/* One text flow with a quiet inline action (C59 audit): the outlined 44 px button was twice as tall as the sentence and
+          competed with Next. Its 44 px hit area is an invisible layer, so the line never grows. */}
+      <button type="button" className="fy-inline-action" onClick={onAgentInstead} data-onboarding-agent-instead="">
         Let an agent do it
       </button>
-    </div>
+    </p>
   );
 }
 

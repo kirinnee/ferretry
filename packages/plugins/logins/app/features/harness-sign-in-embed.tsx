@@ -13,7 +13,7 @@ import { type LoginsClient, refusalSentence } from '../lib/client.ts';
 import { useLoginChanges } from '../lib/login-changes.ts';
 import { readLogins } from '../lib/logins-api.ts';
 import { HARNESS_NAMES, type HarnessKind, suggestLoginId } from '../lib/logins-view.ts';
-import { Button, ChangeApplyPanel } from '../ui.ts';
+import { ActionRow, Button, ChangeApplyPanel } from '../ui.ts';
 import { LoginSignIn } from './login-sign-in.tsx';
 
 export interface HarnessSignInEmbedProps {
@@ -163,9 +163,7 @@ export function HarnessSignInEmbed({
         <p role="status" className="m-0 text-cell leading-base text-muted">
           Checking the {name} sign-in on {list.machine}…
         </p>
-        <div>
-          <Button onClick={() => void reload()}>Check again</Button>
-        </div>
+        <ActionRow secondary={<Button onClick={() => void reload()}>Check again</Button>} />
       </section>
     );
 
@@ -209,6 +207,7 @@ export function HarnessSignInEmbed({
         refusal={changes.refusal}
         submitLabel={`Sign in to ${name}`}
         onSubmit={() => void make()}
+        answerRow
       />
     </section>
   );

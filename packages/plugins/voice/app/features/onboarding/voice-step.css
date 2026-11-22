@@ -234,3 +234,29 @@
 .fy-voice-step .fy-engine-none:empty {
   display: none;
 }
+
+/* C59 audit, a phone: the key card's Save, Test and Remove are ONE row of three equal tracks under the key (Remove no longer sits
+   alone on a second row), and the demo is a short strip that starts with its example text, not a 140 px block holding one microphone. */
+@media (max-width: 520px) {
+  .fy-voice-step [data-device-key] .fy-vs-field {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .fy-voice-step [data-device-key] .fy-vs-field > .fy-vs-input {
+    grid-column: 1 / -1;
+    max-width: none;
+  }
+  .fy-voice-step [data-device-key] .fy-vs-field > button {
+    min-inline-size: 0;
+  }
+  .fy-vd {
+    gap: 6px;
+    min-height: 72px;
+    padding: 12px;
+  }
+  .fy-vd__mic {
+    height: 32px;
+    width: 32px;
+  }
+}

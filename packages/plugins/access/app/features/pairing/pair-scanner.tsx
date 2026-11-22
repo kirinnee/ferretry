@@ -19,6 +19,7 @@ import { Camera, ImageUp, Link2, QrCode, X } from 'lucide-react';
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ChoiceCards, type ChoiceOption } from '@ferretry/app';
+import { ActionRow } from '@ferretry/app/ui';
 
 import { useDeviceFacts } from '../../hooks/use-device-permissions.ts';
 import { useQrScan } from '../../hooks/use-qr-scan.ts';
@@ -124,7 +125,7 @@ export function PairScanner({
         <div className="relative overflow-hidden rounded-panel border border-border-strong bg-surface-3">
           <video
             ref={video}
-            className="block aspect-square w-full object-cover"
+            className="block aspect-square max-h-[48vh] w-full object-cover"
             autoPlay
             muted
             playsInline
@@ -144,10 +145,14 @@ export function PairScanner({
       </section>
 
       {scanning ? (
-        <button type="button" className="kt-btn min-h-[44px] self-center px-6 py-3" onClick={scan.stop}>
-          <X size={16} aria-hidden="true" />
-          Stop scanning
-        </button>
+        <ActionRow
+          secondary={
+            <button type="button" className="kt-btn" onClick={scan.stop}>
+              <X size={16} aria-hidden="true" />
+              Stop scanning
+            </button>
+          }
+        />
       ) : (
         // Three equal ways in, none of them the "real" one: the app's choice cards, never a full-width bar.
         <div ref={group} data-pair-ways="">

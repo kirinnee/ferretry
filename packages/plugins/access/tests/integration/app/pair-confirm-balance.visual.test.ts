@@ -264,3 +264,39 @@ describe('the Connected screen is balanced (C59 O3)', () => {
     });
   }
 });
+
+describe('the confirm answers fit the first screen with the hosted Back row (C59 audit)', () => {
+  for (const variant of VARIANTS.filter(item => item.phone)) {
+    it(`${variant.name}: both answers end above the fold at 390 x 844, also while Rename is open`, async () => {
+      const context = await browser.newContext({
+        viewport: { width: variant.width, height: variant.height },
+        deviceScaleFactor: 2,
+        hasTouch: true,
+        isMobile: true,
+        colorScheme: variant.scheme,
+        reducedMotion: 'reduce',
+      });
+      const origin = server?.url.origin ?? '';
+      await context.route('**/*', async route =>
+        new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+      );
+      const tab = await context.newPage();
+      try {
+        await tab.goto(`${origin}/?theme=studio-${variant.scheme}&motion=reduced&back=1`);
+        await tab.waitForSelector('[data-pair-device-rename]');
+        await tab.evaluate(async () => await document.fonts.ready);
+        for (const when of ['closed', 'renaming'] as const) {
+          if (when === 'renaming') await tab.locator('[data-pair-device-rename]').click();
+          const later = await buttonBox(tab, 'Not now');
+          expect(later.bottom, `Not now ends above the fold (${when})`).toBeLessThanOrEqual(variant.height);
+          expect(
+            await tab.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight),
+            `nothing to scroll to reach an answer (${when})`,
+          ).toBe(true);
+        }
+      } finally {
+        await context.close();
+      }
+    });
+  }
+});

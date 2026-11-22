@@ -369,7 +369,14 @@ describe('The pair page: mascot and night sky', () => {
         await ways.nth(2).click();
         await tab.waitForSelector('input[aria-label="Pairing link"]');
         const submit = must(await tab.getByRole('button', { name: 'Use this link' }).boundingBox(), 'the submit');
-        expect(submit.width, 'the submit is not a full-width bar').toBeLessThan(variant.width * 0.6);
+        // C59 audit: the shared answer row: the field's width on a phone, a 12 rem button at the right end on a desktop.
+        if (variant.phone) {
+          const field = must(await tab.locator('input[aria-label="Pairing link"]').boundingBox(), 'the field');
+          expect(
+            Math.abs(submit.width - field.width),
+            'phone: Use this link is the full field width',
+          ).toBeLessThanOrEqual(1);
+        } else expect(submit.width, 'the submit is not a full-width bar').toBeLessThan(variant.width * 0.6);
         expect(submit.width, 'r11-1b G4: Use this link is at least 136 px wide').toBeGreaterThanOrEqual(135.5);
         // The paste path is mounted WITH a return path, so Back is on it: exactly one, 136 px wide and 44 tall.
         expect(await tab.locator('[data-pairing-close]').count(), 'the paste path has exactly one Back').toBe(1);

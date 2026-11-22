@@ -2,7 +2,7 @@
  * One tool's page (Claude Code, then Codex): what is on this machine, install it, sign in, choose what to bring, name the
  * runtime, and import. After the import, the answer says each file written or refused (what the owners reported).
  */
-import { Badge, Button } from '../../ui.ts';
+import { ActionRow, Badge, Button } from '../../ui.ts';
 import { useState } from 'react';
 import type { ImportItemId } from '../../../contract/index.ts';
 import { AddLoginSlot } from '../fleet/runtimes/add-runtime-login-slots.tsx';
@@ -49,17 +49,6 @@ function InstallBlock({ model, wizard }: { readonly model: ToolModel; readonly w
           >
             {model.install.command}
           </code>
-          <div>
-            <Button
-              type="button"
-              variant="primary"
-              disabled={busy}
-              data-install-run={model.harness}
-              onClick={() => void wizard.install(model.harness)}
-            >
-              {busy ? 'Installing…' : `Install ${model.label}`}
-            </Button>
-          </div>
         </>
       ) : model.install?.kind === 'no-package-manager' ? (
         <>
@@ -82,11 +71,27 @@ function InstallBlock({ model, wizard }: { readonly model: ToolModel; readonly w
           {note}
         </p>
       )}
-      <div>
-        <Button type="button" size="sm" data-install-recheck={model.harness} onClick={() => void wizard.look()}>
-          Check again
-        </Button>
-      </div>
+      {/* ONE answer row (C59 audit): Check again at the left end, Install at the right on a desktop; both full width on a phone. */}
+      <ActionRow
+        secondary={
+          <Button type="button" data-install-recheck={model.harness} onClick={() => void wizard.look()}>
+            Check again
+          </Button>
+        }
+        primary={
+          model.install?.kind === 'runnable' ? (
+            <Button
+              type="button"
+              variant="primary"
+              disabled={busy}
+              data-install-run={model.harness}
+              onClick={() => void wizard.install(model.harness)}
+            >
+              {busy ? 'Installing…' : `Install ${model.label}`}
+            </Button>
+          ) : undefined
+        }
+      />
     </section>
   );
 }
@@ -256,6 +261,7 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
         busyLabel="Importing…"
         disabled={invalid !== null || !model.installed}
         onSubmit={() => void wizard.bringIn(harness)}
+        answerRow
       >
         <Button type="button" data-tool-skip={harness} onClick={() => wizard.skip(harness)}>
           {`Skip ${model.label}`}
