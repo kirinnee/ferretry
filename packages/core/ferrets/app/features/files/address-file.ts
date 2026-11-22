@@ -14,22 +14,36 @@ export const fileOfAddress = (search: string): string | null => {
   return named === null ? null : codeReferenceRelativePath(named);
 };
 
-/** Addresses already acted on, so a Files panel that mounts again (a phone's chip) does not re-open what was closed. */
+/**
+ * What was acted on is remembered per NAVIGATION — the history entry (`entry`, the router's `entryKey`: stable across
+ * Back, Forward and a remount of the panel, new on every push) AND the address — never per address alone. A Files panel
+ * that mounts again within the same navigation (a phone's chip) must not re-open what was closed; but a fresh explicit
+ * navigation to an address already visited earlier (src/entry.ts, then src/entry-ts, then src/entry.ts again) is a new
+ * entry and always opens its file. `entry` is `''` where no router is mounted.
+ */
 const handled = new Set<string>();
 
+const navigationKey = (entry: string, pathname: string, search: string): string => `${entry}\n${pathname}${search}`;
+
 /**
- * The open request an address carries until it has been acted on (`markAddressHandled`), or `null`. Its sequence is 0,
- * below every request another panel makes (`open-request.ts` counts from 1), so a later request still wins. Pure: a
- * render that is drawn twice asks the same question twice.
+ * The open request an address carries until it has been acted on (`markAddressHandled`) in this navigation, or `null`.
+ * Its sequence is 0, below every request another panel makes (`open-request.ts` counts from 1), so a later request still
+ * wins. Pure: a render that is drawn twice asks the same question twice.
  */
-export const addressOpenRequest = (pathname: string, search: string): CodeReferenceOpenRequest | null => {
+export const addressOpenRequest = (
+  entry: string,
+  pathname: string,
+  search: string,
+): CodeReferenceOpenRequest | null => {
   const path = fileOfAddress(search);
-  return path === null || handled.has(`${pathname}${search}`) ? null : { sequence: 0, reference: { path } };
+  return path === null || handled.has(navigationKey(entry, pathname, search))
+    ? null
+    : { sequence: 0, reference: { path } };
 };
 
-/** Says the Files panel acted on this address's `?file=`. */
-export const markAddressHandled = (pathname: string, search: string): void => {
-  handled.add(`${pathname}${search}`);
+/** Says the Files panel acted on this navigation's `?file=`. */
+export const markAddressHandled = (entry: string, pathname: string, search: string): void => {
+  handled.add(navigationKey(entry, pathname, search));
 };
 
 /** Forgets what was acted on. Tests use it. */

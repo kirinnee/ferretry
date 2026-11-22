@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { useRouter } from '@ferretry/app';
+import { RouterProvider } from '@ferretry/app/testing';
 import type { PanelProps } from '@ferretry/kernel/manifest';
 import type { ComponentType } from 'react';
 import {
@@ -48,13 +50,19 @@ describe('fileOfAddress', () => {
 });
 
 describe('addressOpenRequest', () => {
-  it('is asked once per address, below any request a panel makes', () => {
-    const asked = addressOpenRequest(ADDRESS, '?file=a.ts');
+  it('is asked once per address in one navigation, below any request a panel makes', () => {
+    const asked = addressOpenRequest('e1', ADDRESS, '?file=a.ts');
     expect(asked).toEqual({ sequence: 0, reference: { path: 'a.ts' } });
-    expect(addressOpenRequest(ADDRESS, '?file=a.ts')).toEqual(asked);
-    markAddressHandled(ADDRESS, '?file=a.ts');
-    expect(addressOpenRequest(ADDRESS, '?file=a.ts')).toBeNull();
-    expect(addressOpenRequest(ADDRESS, '?file=b.ts')?.reference.path).toBe('b.ts');
+    expect(addressOpenRequest('e1', ADDRESS, '?file=a.ts')).toEqual(asked);
+    markAddressHandled('e1', ADDRESS, '?file=a.ts');
+    expect(addressOpenRequest('e1', ADDRESS, '?file=a.ts')).toBeNull();
+    expect(addressOpenRequest('e1', ADDRESS, '?file=b.ts')?.reference.path).toBe('b.ts');
+  });
+
+  it('is asked again by a NEW navigation (history entry) to an address that was handled before', () => {
+    markAddressHandled('e1', ADDRESS, '?file=a.ts');
+    expect(addressOpenRequest('e1', ADDRESS, '?file=a.ts')).toBeNull();
+    expect(addressOpenRequest('e3', ADDRESS, '?file=a.ts')).toEqual({ sequence: 0, reference: { path: 'a.ts' } });
   });
 });
 
@@ -75,6 +83,66 @@ describe('the Files panel', () => {
         'src/entry-ts',
       ]);
       expect(view.container.textContent).toContain('export const entry = 1;');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('opens the chosen file on a REVISIT: entry.ts, back, entry-ts, back, entry.ts again shows entry.ts', async () => {
+    window.history.replaceState({}, '', '/d/work/projects/p1');
+    const calls: FsCall[] = [];
+    const fixture: FsFixture = {
+      files: {
+        'src/entry.ts': { path: 'src/entry.ts', content: 'CONTENT-OF-DOT' },
+        'src/entry-ts': { path: 'src/entry-ts', content: 'CONTENT-OF-DASH' },
+      },
+    };
+    const Panel = createFilesPanel(fsClient(() => fixture, calls)) as ComponentType<PanelProps>;
+    const Host = () => {
+      const { navigate, back } = useRouter();
+      const onFerret = window.location.pathname.startsWith('/d/work/ferrets/');
+      return onFerret ? (
+        <div>
+          <button type="button" onClick={() => back('/d/work/projects/p1')}>
+            Back to Projects
+          </button>
+          <Panel subject="zed" />
+        </div>
+      ) : (
+        <div>
+          <button type="button" onClick={() => navigate('/d/work/ferrets/zed?file=src%2Fentry.ts')}>
+            Go dot
+          </button>
+          <button type="button" onClick={() => navigate('/d/work/ferrets/zed?file=src%2Fentry-ts')}>
+            Go dash
+          </button>
+        </div>
+      );
+    };
+    const view = await mount(
+      <RouterProvider>
+        <Host />
+      </RouterProvider>,
+    );
+    const press = async (label: string): Promise<void> => {
+      const button = [...view.container.querySelectorAll('button')].find(node => node.textContent === label);
+      await interact(() => button?.click());
+      await interact(async () => {
+        for (let turn = 0; turn < 8; turn += 1) await new Promise(resolve => setTimeout(resolve, 5));
+      });
+    };
+    try {
+      await press('Go dot');
+      expect(view.container.textContent).toContain('CONTENT-OF-DOT');
+      await press('Back to Projects');
+      expect(window.location.pathname).toBe('/d/work/projects/p1');
+      await press('Go dash');
+      expect(view.container.textContent).toContain('CONTENT-OF-DASH');
+      await press('Back to Projects');
+      await press('Go dot');
+      expect(window.location.search).toBe('?file=src%2Fentry.ts');
+      expect(view.container.textContent, 'the panel shows the file the address names').toContain('CONTENT-OF-DOT');
+      expect(view.container.textContent).not.toContain('CONTENT-OF-DASH');
     } finally {
       await view.unmount();
     }

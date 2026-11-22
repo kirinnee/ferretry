@@ -3,6 +3,7 @@
  * panel its `subject` (the ferret id); every read goes through the half's own client by route key, and the daemon has
  * already masked secret values in what it answers — this panel draws exactly that and offers no way around it.
  */
+import { useOptionalRouter } from '@ferretry/app';
 import type { AppComponent, PanelProps } from '@ferretry/kernel/manifest';
 import { useMemo } from 'react';
 import type { LiveFerretsClient } from '../lib/client.ts';
@@ -27,13 +28,15 @@ export function createFilesPanel(client: LiveFerretsClient): AppComponent<PanelP
     const asked = useFileOpenRequest(scope);
     // A page that is not a panel of this ferret (Projects' file finder) names a file in the address (`?file=`): it is
     // opened once, through the same gated read, unless a panel asked for another file since.
+    // "Acted on" is per history entry (a fresh navigation to an address visited before still opens its file).
+    const entry = useOptionalRouter()?.entryKey ?? '';
     const requestedReference =
-      asked ?? addressOpenRequest(globalThis.location?.pathname ?? '', globalThis.location?.search ?? '');
+      asked ?? addressOpenRequest(entry, globalThis.location?.pathname ?? '', globalThis.location?.search ?? '');
     if (scope === null) return <NoFerret />;
     return (
       <FilesTab
         onRequestedReferenceHandled={() =>
-          markAddressHandled(globalThis.location?.pathname ?? '', globalThis.location?.search ?? '')
+          markAddressHandled(entry, globalThis.location?.pathname ?? '', globalThis.location?.search ?? '')
         }
         requestedReference={requestedReference}
         scope={scope}
