@@ -1,11 +1,23 @@
 /*
  * What the app's base styles take from a hypermedia message, handed back. The app resets every list (Tailwind's base layer),
  * and Durian's stylesheet leaves list markers and indent to the browser's own rules, so a Markdown list in a message lost its
- * bullets and numbers. `:where` keeps this the weakest rule there is: Durian's own lists (file tree, code walk steps) set
- * `list-style` themselves, with the higher specificity of their own classes, and win.
+ * bullets and numbers. The marker is the STYLE's (`--md-ul-marker`, `--md-ol-marker`, the same slots the app's other prose
+ * reads). The base layer's `ul { list-style: none }` is a single type selector that can come LATER in the page than this
+ * sheet, so the rule must outweigh it by specificity, not by order; it then names the lists it must leave alone: a Markdown
+ * list has no class, and Durian's own lists (file tree, code walk steps, contents, citations) either carry one or sit
+ * inside a part that sets `list-style` itself. The colours, type and shape of the message are in `dh-theme.css`.
  */
-:where(.fy-hm .dh-doc) :is(ul, ol) {
-  list-style: revert;
+.fy-hm
+  .dh-doc
+  ul:not([class], :is(.ftree, .ide-side, .toc-block, .toc-inline, .scn-steps, .scn-legend, .cites, .fx) *) {
+  list-style: var(--md-ul-marker);
+  padding-inline-start: 1.5em;
+}
+
+.fy-hm
+  .dh-doc
+  ol:not([class], :is(.ftree, .ide-side, .toc-block, .toc-inline, .scn-steps, .scn-legend, .cites, .fx) *) {
+  list-style: var(--md-ol-marker);
   padding-inline-start: 1.5em;
 }
 
@@ -15,11 +27,12 @@
 }
 
 /* One quiet line under an animation whose 3D view lost its graphics context (`animation-part.tsx`), and a diagram's source
-   when nothing can draw it (`mermaid-slot.tsx`): wrapped, never sideways. */
+   when nothing can draw it (`mermaid-slot.tsx`): wrapped, never sideways. Quiet by size and ink, never by `opacity`: a
+   dimmed line is a contrast failure the theme audit measured (4.16:1). */
 .fy-hm .dh-doc .fy-hm-note {
+  color: var(--muted);
   font-size: 0.85em;
   margin-block: 0.25rem;
-  opacity: 0.8;
 }
 
 .fy-hm .dh-doc pre.fy-hm-mermaid-source {
@@ -27,15 +40,16 @@
   white-space: pre-wrap;
 }
 
-/* The "LLM-only text" disclosure (`llm-text.tsx`): a quiet, collapsed line under its part; wrapped, never sideways. */
+/* The "LLM-only text" disclosure (`llm-text.tsx`): a quiet, collapsed line under its part; wrapped, never sideways. Quiet
+   by size and ink, never by `opacity`. */
 .fy-hm .dh-doc details.llm-peek {
   font-size: 0.85em;
   margin-block: 0.5rem;
 }
 
 .fy-hm .dh-doc details.llm-peek > summary {
+  color: var(--muted);
   cursor: pointer;
-  opacity: 0.75;
 }
 
 .fy-hm .dh-doc details.llm-peek .pane-llm {
