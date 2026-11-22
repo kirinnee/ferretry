@@ -380,7 +380,7 @@ first**, then those it is **working** on, each oldest rest first, then the snooz
   1. **"Where we are now" — the main tab**, always first and open by default; its name is fixed and it is never
      renamed, moved or removed. It holds, in this order: the ferret's **answer to the owner's question**
      (`questionAnswer`), **decided so far** (`decided`), **still open** (`stillOpen`), then **`whereWeAre`** — full
-     Markdown with fy-render, as long and as rich as it needs to be (200,000), no longer a short status. A ferret
+     Markdown (an `fy-render` block stays code on the agenda), as long and as rich as it needs to be (200,000), no longer a short status. A ferret
      writes it whole with `--where-file <file>` (`-` reads stdin), or as points with `--where` (repeat); both together
      are refused.
   2. **"The full picture"** (a review's **"Reasoning"**) — `body` (`--body-file`): the report, explainer or plan.
@@ -416,11 +416,18 @@ first**, then those it is **working** on, each oldest rest first, then the snooz
     are what the item's versions keep and what the Changes diff compares first.
   - **The conversation is only the log.** The ferret answers there briefly and points at the tabs; it never retypes
     a tab into the conversation.
-  - **Explainer mode by default, in hypermedia**: fy-render charts, mermaid, an interactive `html` visual the reader changes (never a stepper), and `task` and
-    `board` blocks for status. **Plain Markdown draws no fold** — raw HTML in prose stays inert — so a long part is
-    folded inside an fy-render `html` block (`<details><summary>…</summary>…</details>`), whose contents are HTML.
-    **GAP:** a fold written in Markdown (for example a fenced or directive fold block) is not built; it would take a
-    remark plugin that turns that block into a `<details>` the agenda segment renders, with its own tests.
+  - **Explainer mode by default, in hypermedia — the parts the agenda draws.** The agenda reads a tab as Durian
+    hypermedia with **no `fy-render` door** (the surface table in
+    [fy-render.md](fy-render.md#where-a-block-renders-and-where-it-cannot)): a `fy-render` block written in a tab stays
+    a code fence, so a chart, a picture, an interactive `html` page, a `task` or a `board` block does **not** draw
+    there — it draws only in a chat message. A ` ```mermaid ` part has no door to draw through either and shows its
+    source as code. What draws in a tab is Markdown and, once the agenda reads with Durian hypermedia on that machine,
+    Durian's own parts that need no door (a `terminal`, tabs, an accordion) and a proved `&F12` reference; until then it
+    is the shell's plain Markdown. A reader who needs an illustration gets it in the conversation, and the tab points at
+    it. **Plain Markdown draws no fold** — raw HTML in prose stays inert — and a fold written in `fy-render` `html` is
+    code in a tab, so use Durian's accordion part where Durian reads the tab.
+    **GAP:** a fold written as a plain Markdown block (for example a fenced or directive fold block) is not built; it would
+    take a remark plugin that turns that block into a `<details>` the agenda segment renders, with its own tests.
   - `fy agenda --help`, `add --help` and `edit --help` say this whole (`AGENDA_BODY_RULE`); the Agenda-mode prompt
     says it in short.
 - **`detail`** (`--detail`) is the context explained from zero, for a reader new to the topic; the app draws it
@@ -1393,7 +1400,7 @@ and a part the item does not carry is not drawn:
 | 3   | Detailed context                    | `detail`, explained from zero — **folded**                                                                                                                                                                                                                                                                                                                                                    |
 | 4   | Terms and references                | ONE table of every term and every link (PR, task, file, page), a term says what it means; a link is named by its target (drawn by the one reference renderer) and means its label, or nothing when it has none — **folded**                                                                                                                                                                   |
 | 5   | What I need from you                | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **every task ask with its own buttons** (test steps and Done / Not good, or OK to build); **marked out** (a heavier accent frame and a tint, the heading in the accent) while the item needs the owner                                                                                          |
-| 6   | The live document (tabs)            | **Where we are now** first and open (the answer to the owner's question, decided so far, still open, then `whereWeAre`), **The full picture** (`body`; a review's Reasoning), then the ferret's own tabs — each drawn open and whole, Markdown with fy-render                                                                                                                                 |
+| 6   | The live document (tabs)            | **Where we are now** first and open (the answer to the owner's question, decided so far, still open, then `whereWeAre`), **The full picture** (`body`; a review's Reasoning), then the ferret's own tabs — each drawn open and whole, Markdown (an `fy-render` block stays code there)                                                                                                        |
 | 7   | Conversation                        | the owner's and the ferret's words about the item, oldest first, each whole: the log, at the bottom — **folded**                                                                                                                                                                                                                                                                              |
 | 8   | Activity                            | the grey lines — each stage entered, each edit with what it changed, where it rests or sleeps now — **folded**                                                                                                                                                                                                                                                                                |
 

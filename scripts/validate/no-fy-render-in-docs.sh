@@ -20,23 +20,28 @@ set -euo pipefail
 #
 #   * a run of THREE OR MORE backticks, not just exactly three;
 #   * a run of three or more TILDES;
-#   * a fence nested inside a blockquote or a list item, where the delimiter is not at column zero.
+#   * a fence nested inside a blockquote or a list item, where the delimiter is not at column zero;
+#   * spaces or a tab between the delimiter run and the info string (CommonMark allows them, and the
+#     reader's opener, `FY_RENDER_OPENER` in `fence-boundaries.ts`, takes `[ \t]*` there).
 #
-# A gate anchored to a line start with three exact backticks would pass all three of those while the
+# A gate anchored to a line start with three exact backticks would pass all four of those while the
 # product rendered them, so the pattern below requires none of it: a delimiter RUN of either kind,
-# the token, and then only whitespace to end of line, wherever on the line that lands.
+# optional spaces or tabs, the token, and then only whitespace to end of line, wherever on the line
+# that lands.
 #
 # Anchoring to end-of-line is the part that must stay. It is what keeps a DIFFERENT fence — one
 # labelled `fy-render-x`, or an info string `fy-render notes` — from being reported, and that also
 # matches the renderer exactly: the remark plugin marks a fence only when the token is the WHOLE info
 # string, so a fence this gate ignores is a fence the product ignores too.
-# `packages/pwa/tests/unit/markdown.test.tsx` pins both halves of that agreement.
+# `packages/plugins/conversation/tests/integration/app/fy-render-docs-gate.test.ts` pins the gate's half
+# against planted openers (the spaced form included) and
+# `packages/plugins/conversation/tests/unit/app/hypermedia/fy-render-fence-decisions.test.tsx` the reader's.
 #
 # ## WHY THE TOKEN IS ASSEMBLED, NOT WRITTEN
 #
 # The backtick run is built from a hex-escaped backtick rather than typed literally. That keeps this
 # script's own source free of the exact token it searches for, so it cannot match itself and the
-# allowlist holds exactly the teaching files with no third mechanical self-exemption. This
+# allowlist holds exactly the three teaching files with no mechanical self-exemption beside them. This
 # mirrors the conflict-markers gate's stance that a teaching document shows a shape exactly rather
 # than one character off — but a validator's job is to FIND the shape, not to teach it, so here it is
 # assembled on purpose.
@@ -54,8 +59,10 @@ cd "${root_dir}"
 
 bt=$'\x60' # one backtick, via hex escape — see note above
 # Either delimiter run CommonMark accepts, at three or more, anywhere on the line (so a fence nested
-# under a blockquote or list marker is found), then the token, then only whitespace to end of line.
-opener="(${bt}{3,}|~{3,})fy-render[[:space:]]*\$"
+# under a blockquote or list marker is found), then OPTIONAL spaces or tabs (the renderer's own opener
+# is `[ \t]*` between the run and the token, so `<fence> fy-render` renders), then the token, then only
+# whitespace to end of line.
+opener="(${bt}{3,}|~{3,})[[:blank:]]*fy-render[[:space:]]*\$"
 
 # The only files that may legitimately contain the opener. Each exists to teach the syntax —
 # docs/hypermedia.md quotes, verbatim, the instruction that teaches it to every ferret;
@@ -123,13 +130,15 @@ everywhere else in the app. It must NEVER be used in documentation, handovers, R
 files, or exported artifacts — use the document's native format and ordinary static assets instead.
 A Mermaid diagram in a document is an ordinary fenced block, never an fy-render block.
 
-The syntax is taught in exactly two places, and they are the only files that may contain the opener.
+The syntax is taught in exactly three places, and they are the only files that may contain the opener.
 The comparison is over the WHOLE filename, so a neighbour such as `docs/fy-render.md:evil` is a
 violation and not the allowlisted document:
   - docs/fy-render.md                           (the contract)
+  - docs/hypermedia.md                          (quotes, verbatim, the instruction every ferret is taught)
   - .claude/skills/fy-render-authoring/SKILL.md (the authoring skill)
 
-A test or example that must name the token assembles it (see packages/pwa/tests/unit/markdown.test.tsx).
+A test or example that must name the token assembles it (see
+packages/plugins/conversation/tests/integration/app/fy-render-docs-gate.test.ts).
 
 See docs/fy-render.md for the full grammar, the threat model and the declared gaps.
 GUIDANCE

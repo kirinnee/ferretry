@@ -12,10 +12,33 @@ It is written for two audiences at once, because they have to agree:
 - **Somebody implementing a surface.** Sections 6 to 8 add the proof contract, the code-span rule,
   and how a new reference kind joins the system.
 
-Reference implementation: `packages/pwa/src/lib/references.ts` (grammar, proof gate, remark
-transform), `packages/pwa/src/lib/code-span-references.ts` (references inside code),
-`packages/pwa/src/components/markdown.tsx` (the one renderer and the one click behaviour),
-`packages/pwa/src/components/reference-surface.tsx` (the one per-session surface).
+Reference implementation: `packages/app/src/references/grammar.ts` (the one grammar, the proof gate, and the remark
+transform that reads it), `packages/app/src/references/code-spans.ts` (references inside code),
+`packages/app/src/references/reference-surface.tsx` (the one per-surface bundle of resolvers and openers).
+
+**Two readers, one scanner and one proof gate.** An assistant's message is read as Durian hypermedia by
+`packages/plugins/conversation/app/hypermedia/hypermedia-prose.tsx`: `with-references.ts` lays the same scanner
+(`findReferences`) over Durian's parsed tree, `reference-chip.tsx` and `reference-proof.tsx` prove each token at paint,
+re-prove it at the click and open it (the one click behaviour), and `slots.tsx` draws code with the references proved
+inside it. Every other Markdown surface — file previews, warden reports, skills, the composer — is the shell's
+`packages/app/src/prose/markdown.tsx`, which reads the same scanner through `remarkReferences` and keeps its own
+copy of the same click rule. The shared part is the scanner: the same sigils, boundaries and backslash-escape rule,
+and the same proof bundle. **It is not a guarantee that both readers produce identical output on every input.** The
+Durian reader works on a tree whose character references are already decoded, so `with-references.ts` (the
+`CHARACTER_REFERENCE`, `DECODED_CHARACTER` and `splitRun` rules, lines 46-66 and the `withReferences` line that
+decides `ambiguous`) adds one Durian-only heuristic: when the message source holds a character reference anywhere
+(`&amp;`, `&#38;`), the first decoded `&`, `<`, `>`, `"` or `'` in a text node ends linking in that node, and a
+reference after it stays prose. That fails closed, and the test is made over the whole message source while the
+Markdown reader stops only in the text node that holds the character reference, so Durian can leave as prose a
+reference the Markdown reader would link (a literal quote before a reference in one paragraph, when an `&amp;` sits
+in another). That difference is read from the two sources, not pinned by a test.
+
+The two readers are compared by a parity suite
+(`packages/plugins/conversation/tests/unit/app/hypermedia/hypermedia-prose.test.tsx`, the "parity with the Markdown
+reader" block), and its limits are part of the claim: it is a fixed corpus of 26 strings, each drawn by both readers
+and compared as the list of linked tokens only (the `a[data-fy-reference]` and closed-reference text), not their
+proofs, markup or clicks. It holds one character-reference case (`&amp; then :zelda`) and none of the
+literal-quote-after-a-character-reference shape above. An input outside that corpus is not proven to agree.
 
 ---
 
@@ -266,10 +289,10 @@ its machine only, so the destination always carries the daemon the reference was
 > ferret's own slice (`ferret = <session>`). The chat's task search keeps the ferret slice. Offering
 > every task on the machine would drown the menu; proving every task costs one id list.
 >
-> **Surfaces that are not a chat prove the same way.** The Inbox and the Board's task detail have no
-> session, so `DaemonTaskReferences` hands them the same proof (the machine's ids) and the same
-> click (this machine's task route) through the one reference surface — never a second path. A surface
-> already above it wins, so a chat's own is never downgraded.
+> **The Board's task detail does not use this gate.** Its text is drawn by the Board's own small renderer
+> (`packages/plugins/board/app/views/prose.tsx`), which turns any well-formed `&B`, `&F`, `&I` or `&C` id into a link
+> to that task's Board path with no daemon read, so there a task id that names no task is still a link. `^A48`, `@file` and the other kinds are plain text there. This is
+> a declared exception to proof before link, not a second implementation of it.
 >
 > **Old references resolve through the project read.** A task imported from one of this session's old
 > tasks carries `legacyRef = <session>:<oldId>`. `&F12` in the transcript is proved when `F12` is a task on the
@@ -340,24 +363,33 @@ Rules:
    decoded stand-in. (Hypermedia's parser decodes the six common references before the reader sees a span, so the
    reader claims exactly the spans that hold one and draws their source text; a span over 400 characters that holds
    one is read decoded, a declared GAP until the parser hands over literal code.)
+7. In the chat's hypermedia reading, code is the one code component of
+   `packages/plugins/conversation/app/hypermedia/slots.tsx`, so rules 1 to 6 hold for a span and a fence there, and
+   for a ` ```chart ` or ` ```codewalk ` fence, which is held as code
+   ([fy-render.md](fy-render.md#where-a-block-renders-and-where-it-cannot)). A reference is **not** read inside a
+   part Durian draws as a part (a terminal, a file tree, an editor, a tier list, an animation): that text belongs to
+   the part, not to the prose around it, and a sigil there stays the text it was written as. It is read in prose
+   (paragraphs, headings, quotes, callouts, lists, table cells) including the bodies of tabs, accordions and
+   `:::human` containers.
 
 ## 8. Adding a new reference kind
 
 The grammar is meant to be extended in one place, not forked. To add a kind:
 
-1. Add its token to the grammar and its shape to the `Reference` union in `references.ts`, with a
+1. Add its token to the grammar and its shape to the `Reference` union in `grammar.ts`, with a
    right boundary that cannot swallow sentence punctuation.
 2. Add a resolver to `ReferenceResolvers` — a boolean existence check unless the kind needs a
    canonical answer back, as `file` and `agent` do.
 3. Add its arm to `formatReference`, `referenceHref`, `parseReferenceHref`, `referenceIdentity`,
    `resolveReference`, `revalidateReference` and `referenceTitle`. TypeScript's exhaustiveness will
    list them for you.
-4. Add its opener to the renderer and to the per-session surface. A kind with no opener stays prose,
+4. Add its opener to the per-session surface, which both readers draw from (the chat's is
+   `packages/plugins/conversation/app/chat/reference-surface.ts`). A kind with no opener stays prose,
    which is the correct intermediate state to ship.
 
 `%browser:` went through exactly that intermediate state: it parsed and encoded for months while
 nothing could prove it. The surface resolver now reads the session's browser status as well as its
-terminal listing (`packages/pwa/src/lib/surface-references.ts`), and the session page opens a proved
+terminal listing (`packages/app/src/references/surface-references.ts`), and the session page opens a proved
 page in its own workspace tab.
 
 ## 9. Agenda message headings
@@ -379,7 +411,7 @@ token and its quoted ask or title — so the ferret always knows which item a me
 A burst of board answers is ONE message: each form in turn, a blank line apart.
 
 **One owner, both directions.** The writer and the reader are the same module,
-`packages/protocol/src/lib/agenda-message.ts`: the daemon builds every heading through it, and the app
+`packages/core/asks/contract/snapshot/agenda-message.ts`: the daemon builds every heading through it, and the app
 reads them back through `parseAgendaMessage` to draw each as a compact item (kind, the `^AN` chip, the
 item's title, the owner's words) instead of raw text. Never parse or word a heading anywhere else — a
 second reader is how the two drift apart.
