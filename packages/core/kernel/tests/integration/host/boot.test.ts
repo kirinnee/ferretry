@@ -548,6 +548,115 @@ describe('config/plugins.yaml `work`: the one switch for Board and Agenda (O8-14
     expect(board).toBe(404);
   });
 
+  describe('the last-accepted-set recovery does not bypass the work switch', () => {
+    interface AccountsApi {
+      ready(): boolean;
+    }
+    const AccountsPort = definePort<AccountsApi>('accounts');
+
+    /**
+     * A daemon on a home that carries a pre-P2 accepted graph (Board and Agenda in it) and a plugins.yaml that strands
+     * an UNRELATED plugin (Pulls needs Accounts, which the file turns off), so boot takes the recovery path.
+     */
+    async function recovering(yaml: string, confirmedWorkOn = false) {
+      const home = await freshHome();
+      // a home is only made by a boot, so it is booted bare once and then given the pre-P2 files
+      const bare = await bootRaw(home, ownerJudge(), []);
+      if (confirmedWorkOn) await turnWorkOn(bare);
+      await bare.stop();
+      await mkdir(`${home}/config`, { recursive: true });
+      await mkdir(`${home}/state/kernel`, { recursive: true });
+      await writeFile(
+        `${home}/state/kernel/plugins-accepted.json`,
+        `${JSON.stringify({ format: 1, enabled: ['accounts', 'agenda', 'board', 'gate', 'pulls', 'voice'] })}\n`,
+      );
+      await writeFile(`${home}/config/plugins.yaml`, yaml);
+      const accounts = definePlugin({
+        id: 'accounts',
+        title: 'Git Accounts',
+        version: '5.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        provides: { accounts: AccountsPort },
+      });
+      const pulls = definePlugin({
+        id: 'pulls',
+        title: 'Pulls',
+        version: '5.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        needs: { accounts: AccountsPort },
+        actions: {
+          routes: [
+            route('GET /v1/pulls', {
+              minimum: 'authenticated',
+              caller: 'any',
+              audit: { skip: 'test' },
+              guard: { none: 'test' },
+            }),
+          ],
+        },
+      });
+      const outcome = await bootHost({
+        home,
+        version: '5.0.0',
+        implementations: [
+          ...plugins(recordingAdmission(), []),
+          implementDaemon(accounts, { build: () => ({ provides: { accounts: { ready: () => true } } }) }),
+          implementDaemon(pulls, {
+            build: () => ({ routes: { 'GET /v1/pulls': async () => jsonResponse({ pulls: 0 }) } }),
+          }),
+        ],
+        adapters: realAdapters(home, () => {}, { binary: 'fy' }),
+      });
+      if (outcome.kind !== 'running') throw new Error(outcome.sentence);
+      running.push(outcome.host);
+      const host = outcome.host;
+      const status = async (path: string): Promise<number> => (await host.dispatch(request('GET', path))).status;
+      return {
+        host,
+        board: await status('/v1/board'),
+        agenda: await status('/v1/agenda'),
+        pulls: await status('/v1/pulls'),
+      };
+    }
+
+    test('`work` absent: Board and Agenda answer 404 while the unrelated recovery still serves what it kept', async () => {
+      const { host, board, agenda, pulls } = await recovering('plugins:\n  accounts: off\n');
+      // the recovery is on (the note names the line), and unchanged for the unrelated plugin
+      const note = (await host.doctor()).find(line => line.plugin === 'kernel' && line.detail.includes('plugins.yaml'));
+      expect(note?.state).toBe('warn');
+      // it names what the owner turned off that Pulls needs, never Board or Agenda (the work switch turned those off)
+      expect(note?.detail).toContain('Git Accounts');
+      expect(note?.detail).not.toContain('Board');
+      expect(note?.detail).not.toContain('Agenda');
+      expect(host.plugins.get('pulls')?.status).toBe('serving');
+      expect(pulls).toBe(200);
+      // the work switch still wins
+      expect(host.plugins.get('board')?.status).toBe('off');
+      expect(host.plugins.get('agenda')?.status).toBe('off');
+      expect(board).toBe(404);
+      expect(agenda).toBe(404);
+    });
+
+    test('`work: off`: the same', async () => {
+      const { host, board, agenda, pulls } = await recovering('work: off\nplugins:\n  accounts: off\n  board: on\n');
+      expect(host.plugins.get('pulls')?.status).toBe('serving');
+      expect(pulls).toBe(200);
+      expect(board).toBe(404);
+      expect(agenda).toBe(404);
+    });
+
+    test('`work: on`: the recovered set keeps Board and Agenda, as before', async () => {
+      const { board, agenda, pulls } = await recovering('work: on\nplugins:\n  accounts: off\n', true);
+      expect(pulls).toBe(200);
+      expect(board).toBe(200);
+      expect(agenda).toBe(200);
+    });
+  });
+
   test('a work plugin is on only if `work: on` AND its own line is not off', async () => {
     const { pluginsYamlSaysOn } = await import('../../../plugin.ts');
     expect(pluginsYamlSaysOn(undefined, 'board')).toBe(false);

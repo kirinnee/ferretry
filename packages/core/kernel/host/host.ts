@@ -76,7 +76,13 @@ import type {
   ToolResult,
 } from '../manifest/implement.ts';
 import type { Manifest, Needer, ToolDecl } from '../manifest/types.ts';
-import kernelManifest, { HostConfigFile, PluginsConfig, pluginsYamlSaysOn, type PluginsYaml } from '../plugin.ts';
+import kernelManifest, {
+  HostConfigFile,
+  PluginsConfig,
+  pluginsYamlSaysOn,
+  WORK_PLUGINS,
+  type PluginsYaml,
+} from '../plugin.ts';
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import { bindDirectory } from './bound-directory.ts';
@@ -684,10 +690,16 @@ async function bootLocked(
         accepted,
       ).catch(() => log.warn('the accepted plugin set could not be written'));
     else if (accepted !== undefined) {
-      const fallback = (id: string): boolean => isCore(id) || accepted.has(id);
+      // The last accepted set may predate the `work` switch, so it can never turn a work plugin on by itself: with
+      // `work` not on, Board and Agenda stay off here too. A work plugin's OWN `off` line is recovered like any other.
+      const workOn = pluginsYaml?.work === 'on';
+      const fallback = (id: string): boolean =>
+        isCore(id) || (accepted.has(id) && (workOn || !WORK_PLUGINS.includes(id)));
       const kept = planWith(fallback);
       if (kept.stranded.length === 0) {
-        const turnedOff = manifests.filter(manifest => accepted.has(manifest.id) && !yamlEnabled(manifest.id));
+        const turnedOff = manifests.filter(
+          manifest => !isCore(manifest.id) && fallback(manifest.id) && !yamlEnabled(manifest.id),
+        );
         for (const manifest of turnedOff) {
           const line = await pluginsYamlLine(adapters.fs, home, manifest.id);
           bootNotes.push({
