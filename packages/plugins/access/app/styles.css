@@ -40,6 +40,17 @@
   justify-content: center;
   padding-bottom: 10vh;
 }
+/* ...but the progress bar stays at the top, as on every other page: it takes the free space above the hero, and the hero and
+   the words under it share the rest. */
+.fy-pair-scene main[data-pairing-stage='paired'] > [data-step-progress] {
+  margin-block-end: auto;
+}
+.fy-pair-scene main[data-pairing-stage='paired'] > .fy-pair-hero {
+  margin-block-start: auto;
+}
+.fy-pair-scene main[data-pairing-stage='paired'] > .fy-pair-arrive {
+  margin-block-end: auto;
+}
 
 /* ───────── the hero: the mascot, and the check badge on success ───────── */
 .fy-pair-hero {
@@ -59,10 +70,21 @@
     width: min(100%, 210px);
   }
 }
+/* The check is ON the burrow, at the front-right of its lip (the mascot's own coordinates, 71% / 86% of its box), so it reads as
+   the ferret's, not as something floating off the corner of the picture. `translate` (not `transform`) centres it, so the pop-in
+   animation's own transform is free. */
+/* A phone keeps the confirm answers above the fold even with the hosted Back row and the progress bar over the mascot (C59 audit:
+   the viewport cut through Not now at 390 x 844). */
+@media (max-width: 639px) {
+  .fy-pair-scene main:not([data-pairing-stage='paired']) .fy-pair-hero {
+    width: min(100%, 132px);
+  }
+}
 .fy-pair-badge {
   position: absolute;
-  top: 2%;
-  right: 4%;
+  top: 88%;
+  left: 77%;
+  translate: -50% -50%;
   display: grid;
   place-items: center;
   width: 44px;
@@ -655,17 +677,6 @@
   50% {
     transform: rotate(calc(var(--fy-ear-dir) * 14deg));
   }
-}
-
-/* The passkey offer's two answers ("Add a passkey now", "Not now", and "Continue" after it) are one fixed size, so the
-   row reads as a set: 12 rem wide, 44 px or taller, the label centred. Where two do not fit a row they stack, 12 px apart. */
-.fy-pair-answer {
-  box-sizing: border-box;
-  inline-size: 12rem;
-  min-block-size: 44px;
-  padding-inline: 1rem;
-  justify-content: center;
-  white-space: nowrap;
 }
 
 /* r11-1b G4: the pairing page's own buttons (Back, Use this link, Rename, Pair this device, Not now) are never narrower

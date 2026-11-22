@@ -4,6 +4,14 @@
   flex: 1 1 180px;
   max-width: 320px;
 }
+/* On a phone a choice card is the column's width, the same edges as the review cards above it (it stopped 38 px short at the
+   320 px cap, a ragged right edge); a desktop keeps the compact, wrapping cards. 640px is the shared answer-row breakpoint. */
+@media (max-width: 639.98px) {
+  .fy-choice-card {
+    flex-basis: 100%;
+    max-width: none;
+  }
+}
 @keyframes fy-choice-settle {
   from {
     transform: scale(0.98);

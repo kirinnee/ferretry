@@ -156,19 +156,22 @@ export function FerretMascot({ pose, className }: FerretMascotProps) {
               />
             </g>
           </g>
-          {/* The waving arm: it rises out of the hole beside the head. Hidden except when cheering. */}
-          <g className="fy-ferret-wave-again" data-mascot-wave="">
-            <g className="fy-ferret-wave">
-              <rect className="fy-ferret-fur" x="156" y="112" width="13" height="52" rx="6.5" />
-              <ellipse className="fy-ferret-paw" cx="162.5" cy="112" rx="10" ry="9" />
-            </g>
-          </g>
         </g>
       </g>
 
       {/* The lip of the hole sits in FRONT of the ferret, so it can sink behind it. */}
       <path className="fy-ferret-lip" d="M66 148 Q120 180 174 148 L174 186 L66 186 Z" />
       <path className="fy-ferret-lip-edge" d="M66 148 Q120 180 174 148" />
+      {/* The waving arm is drawn IN FRONT of the lip (its own hop, in step with the body's): it comes up from the shoulder and
+          is whole, not cut off by the edge of the burrow. Hidden except when cheering. */}
+      <g className="fy-ferret-hop" data-mascot-hop-front="">
+        <g className="fy-ferret-wave-again" data-mascot-wave="">
+          <g className="fy-ferret-wave">
+            <rect className="fy-ferret-fur" x="156" y="112" width="13" height="44" rx="6.5" />
+            <ellipse className="fy-ferret-paw" cx="162.5" cy="112" rx="10" ry="9" />
+          </g>
+        </g>
+      </g>
       {/* The paws rest on the edge of the burrow. When cheering one is up, waving, and the other pops into view. */}
       {cheering ? (
         <ellipse className="fy-ferret-paw fy-ferret-paw-rest" cx="93" cy="157" rx="12" ry="8.5" />

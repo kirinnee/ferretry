@@ -3,7 +3,7 @@
  * ones done, the one to do now carrying the only highlight and the only button, the rest quiet. Each step is a list item
  * that says its state in words as well as in marks, for a reader who cannot see colour.
  */
-import { Button, LivingBackground } from '@ferretry/app/ui';
+import { ActionRow, Button, LivingBackground } from '@ferretry/app/ui';
 import { Check } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { allDone, type StepperState, type StepperStep } from './stepper-model.ts';
@@ -106,16 +106,22 @@ export function StepperView({ steps, action, onDismiss }: StepperViewProps): Rea
           className="mt-3 flex min-w-0 flex-col gap-2 border-t border-border-strong pt-3"
           data-first-run-stepper-choice=""
         >
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="primary" onClick={action.run} data-first-run-stepper-action={current.id}>
-              {action.label}
-            </Button>
-            {action.alternative === undefined ? null : (
-              <Button size="sm" onClick={action.alternative.run} data-first-run-stepper-alternative={current.id}>
-                {action.alternative.label}
+          {/* The shared answer row (C59 audit): equal size, the alternative at the left end and the way on at the right on a
+              desktop, both the column's width on a phone, so neither answer is narrower or louder than the other. */}
+          <ActionRow
+            secondary={
+              action.alternative === undefined ? undefined : (
+                <Button onClick={action.alternative.run} data-first-run-stepper-alternative={current.id}>
+                  {action.alternative.label}
+                </Button>
+              )
+            }
+            primary={
+              <Button variant="primary" onClick={action.run} data-first-run-stepper-action={current.id}>
+                {action.label}
               </Button>
-            )}
-          </div>
+            }
+          />
           {action.note === undefined ? null : (
             <p className="m-0 max-w-[70ch] text-cell text-muted" data-first-run-stepper-note="">
               {action.note}

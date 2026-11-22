@@ -570,6 +570,23 @@ describe('the session layer: one session, one job', () => {
 });
 
 describe('the session layer: requests', () => {
+  test("C59 O5-10b a carried request's signal aborts when its session ends, so work still queued for it sees the caller left", async () => {
+    const fx = await fixture();
+    let signal: AbortSignal | undefined;
+    fx.dispatch = request => {
+      signal = request.signal;
+      return new Promise<ApiResponse>(() => {});
+    };
+    const { client } = await serving(fx);
+    await client.send(req(1));
+    await client.pump();
+    expect(signal?.aborted).toBe(false);
+    client.credit(0);
+    await client.pump();
+    expect(client.end?.code).toBe(4430);
+    expect(signal?.aborted).toBe(true);
+  });
+
   test('R235 R534 answers carry their id and may cross in any order', async () => {
     const fx = await fixture();
     const gates = new Map<string, () => void>();
@@ -993,6 +1010,67 @@ describe('the session layer: pairing and modes', () => {
     expect(client.end?.code).toBe(4440);
     expect(fx.pair.attempts[0]?.peer).toBe('192.0.2.9');
     expect(fx.pair.attempts[0]?.carrier).toBe('direct' as never);
+  });
+
+  test('a machine name sent with the pairing is saved after the code is accepted, and the paired answer carries it', async () => {
+    const named: string[] = [];
+    const fx = await fixture({
+      nameMachine: async name => {
+        named.push(name);
+        return name;
+      },
+    });
+    const client = TestClient.open(fx, 'direct', { address: '192.0.2.9' });
+    await client.handshake(fx.daemonId);
+    await client.send({ ...(await pairRecord(client)), machineName: 'Studio box' });
+    await client.pump();
+    expect(named).toEqual(['Studio box']);
+    expect(client.last('paired')).toMatchObject({ response: { daemonName: 'Studio box' } });
+  });
+
+  test('a refused pairing names nothing, and a pairing with no name answers the host’s own', async () => {
+    const named: string[] = [];
+    const nameMachine = async (name: string): Promise<string> => {
+      named.push(name);
+      return name;
+    };
+    const refused = await fixture({ nameMachine });
+    refused.pair.answer = 'refused';
+    const first = TestClient.open(refused, 'direct', { address: '192.0.2.9' });
+    await first.handshake(refused.daemonId);
+    await first.send({ ...(await pairRecord(first)), machineName: 'Studio box' });
+    await first.pump();
+    expect(named).toEqual([]);
+
+    const plain = await fixture({ nameMachine });
+    const second = TestClient.open(plain, 'direct', { address: '192.0.2.9' });
+    await second.handshake(plain.daemonId);
+    await second.send(await pairRecord(second));
+    await second.pump();
+    expect(named).toEqual([]);
+    expect(second.last('paired')).toMatchObject({ response: { daemonName: 'host-box' } });
+  });
+
+  test('a machine name the host answers the owner’s own for (it already has one) puts that name in the answer', async () => {
+    const fx = await fixture({ nameMachine: async () => 'pebox' });
+    const client = TestClient.open(fx, 'direct', { address: '192.0.2.9' });
+    await client.handshake(fx.daemonId);
+    await client.send({ ...(await pairRecord(client)), machineName: 'Studio box' });
+    await client.pump();
+    expect(client.last('paired')).toMatchObject({ response: { daemonName: 'pebox' } });
+  });
+
+  test('a host that cannot answer the name leaves the paired answer as it was', async () => {
+    const fx = await fixture({
+      nameMachine: async () => {
+        throw new Error('the disk');
+      },
+    });
+    const client = TestClient.open(fx, 'direct', { address: '192.0.2.9' });
+    await client.handshake(fx.daemonId);
+    await client.send({ ...(await pairRecord(client)), machineName: 'Studio box' });
+    await client.pump();
+    expect(client.last('paired')).toMatchObject({ response: { daemonName: 'host-box' } });
   });
 
   test('R662 R675 pairing over the tunnel or WebRTC gets the uniform pair-refused and the mode is never asked', async () => {

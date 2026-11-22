@@ -493,7 +493,10 @@ describe('r11 O10: the passkey offer buttons are one fixed size', () => {
         expect(card.border, 'no border').toEqual([0, 0, 0, 0]);
         expect(card.background, 'no fill').toBe('rgba(0, 0, 0, 0)');
         expect(card.padding, 'no padding').toEqual([0, 0, 0, 0]);
-        expect(add.width, 'Add is 192 px wide').toBeCloseTo(192, 0);
+        // C59 O3: the shared answer row. Desktop: 192 px each at the two ends of one row; phone: the offer's width, stacked.
+        const offerBox = must(await tab.locator('[data-first-passkey-offer]').boundingBox(), 'the offer');
+        if (variant.phone) expect(add.width, 'phone: Add is the full width').toBeCloseTo(offerBox.width, 0);
+        else expect(add.width, 'desktop: Add is 192 px wide').toBeCloseTo(192, 0);
         expect(later.width, 'Not now is the same width').toBeCloseTo(add.width, 0);
         expect(add.height).toBeGreaterThanOrEqual(44);
         // The label (icon included) is centred in its button: its content box midpoint is the button midpoint ± 1 px.
@@ -510,9 +513,12 @@ describe('r11 O10: the passkey offer buttons are one fixed size', () => {
         }
         expect(later.height).toBeCloseTo(add.height, 0);
         const sideBySide = Math.abs(add.y - later.y) < 4;
-        if (sideBySide) expect(later.x - (add.x + add.width), 'the row gap is 12 px').toBeCloseTo(12, 0);
-        else {
+        if (sideBySide) {
+          expect(later.x, 'Not now at the left end').toBeCloseTo(offerBox.x, 0);
+          expect(add.x + add.width, 'Add at the right end').toBeCloseTo(offerBox.x + offerBox.width, 0);
+        } else {
           expect(later.x, 'stacked: both on one column').toBeCloseTo(add.x, 0);
+          expect(add.y, 'the way on is above').toBeLessThan(later.y);
           expect(later.y - (add.y + add.height), 'the stack gap is 12 px').toBeCloseTo(12, 0);
         }
         if (variant.phone) expect(sideBySide, 'on a phone the two stack').toBe(false);
@@ -587,10 +593,12 @@ describe('r11 O10: pair-confirm fits above the fold; Rename and Back read as but
       const { tab, problems, close } = await open(variant, '&back=1');
       try {
         await tab.waitForSelector('[data-pair-device-rename]');
-        for (const [name, selector] of [
-          ['Rename', '[data-pair-device-rename]'],
-          ['Back', '[data-pairing-close]'],
-        ] as const) {
+        // C59 O2: "Rename" is TEXT on the "called" line (an underlined inline control, no taller than the line: the balance test
+        // owns its geometry); only Back is a bordered button.
+        const rename = await buttonLook(tab, '[data-pair-device-rename]');
+        expect(rename.underline, 'Rename is an underlined inline control').not.toBe('none');
+        expect(rename.height, 'Rename is no taller than a text line').toBeLessThanOrEqual(28);
+        for (const [name, selector] of [['Back', '[data-pairing-close]']] as const) {
           const found = await buttonLook(tab, selector);
           MEASURED.push(
             `${variant.name}: ${name} variant ${found.variant} border ${found.border} underline ${found.underline} fill ${found.fill} over ${found.behind} height ${found.height}`,

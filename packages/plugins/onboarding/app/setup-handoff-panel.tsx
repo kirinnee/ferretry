@@ -19,7 +19,7 @@
  *   link — shared through the OS if this browser has that, copied if not, and
  *   printed in full so it can be read aloud or typed as a last resort.
  *
- * THE SHORT URL IS ALWAYS THERE. A link carrying `#fy-setup=f1;route=first-time;target=this;doer=self;step=install`
+ * THE SHORT URL IS ALWAYS THERE. A link carrying `#fy-setup=f1;route=first-time;target=this;step=install`
  * is not something a human retypes correctly, and they never have to: the bare
  * setup page asks the same question, and answering it by hand costs one tap. It
  * is offered BESIDE the full link, never instead of it, because losing the place
@@ -40,10 +40,8 @@ import { tryQrModules } from './setup-qr.ts';
  * `NotAllowedError` when pressed is worse than a button that was never drawn. The
  * composition root decides; a component only asks whether it exists.
  *
- * BOTH `text` AND `url` ARE OPTIONAL, because the two things worth sending from
- * this flow are not the same kind of thing: a hand-off is a URL, and an agent
- * prompt is thirty lines of text that no URL can carry. `navigator.share` accepts
- * either and requires at least one, which is exactly this shape.
+ * BOTH `text` AND `url` ARE OPTIONAL, because that is the shape `navigator.share`
+ * accepts (at least one of them); a hand-off sends a URL.
  */
 export type SetupSharePort = (payload: {
   readonly title: string;

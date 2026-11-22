@@ -9,6 +9,7 @@
 import type { ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AddLoginPanel } from '../../../../app/features/add-login-panel.tsx';
+import { ClaudeLoginPanel } from '../../../../app/features/claude-login-panel.tsx';
 import { LoginSignIn } from '../../../../app/features/login-sign-in.tsx';
 import logins from '../../../../app/index.ts';
 import type { LoginsClient } from '../../../../app/lib/client.ts';
@@ -19,6 +20,8 @@ import { claudeFlow, codexFlow } from '../../../unit/app/support/harness-login.t
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const which = params.get('case') ?? 'codex-add';
+/** The cases whose daemon speaks Claude's sign-in (C59 O5). */
+const CLAUDE_FLOW: ReadonlySet<string> = new Set(['claude-code', 'claude-fail', 'claude-done', 'claude-starting']);
 
 /** The authorize link the fake daemon sends: unique, never a value any app file holds. */
 const DAEMON_LINK =
@@ -119,8 +122,10 @@ let starts = 0;
 let made = false;
 const startAnswer = () => {
   starts += 1;
-  if (which === 'claude-code') return claudeFlow('awaiting-code');
+  if (CLAUDE_FLOW.has(which)) return claudeFlow(which === 'claude-starting' ? 'starting' : 'awaiting-code');
   if (which === 'codex-device') return codexFlow('awaiting-approval');
+  // C59 follow-up: the Codex sign-in that ran out of time, its recovery actions in the alert.
+  if (which === 'codex-timeout') return { ...codexFlow('failed'), lastCode: 'expired' as const };
   if (which === 'codex-made') return starts === 1 ? codexFlow('failed') : codexFlow('awaiting-approval');
   return { ...codexFlow('awaiting-callback'), verificationUrl: DAEMON_LINK };
 };
@@ -158,7 +163,13 @@ const client = scripted({
   // The address is held for a moment before it is answered, so a test can look at the page while the request is in flight.
   'POST /v1/logins/sign-in/:flowId': async (call: { route: string; body: unknown }) => {
     note(call);
-    await new Promise(resolve => setTimeout(resolve, 1_200));
+    await new Promise(resolve => setTimeout(resolve, CLAUDE_FLOW.has(which) ? CLAUDE_HOLD_MS : 1_200));
+    // C59 O5: Claude's code is refused (`claude-fail`), accepted (`claude-done`), or held a long while (`claude-code`).
+    if (which === 'claude-fail') return { outcome: 'refused', reason: 'Claude did not accept that code. Try again.' };
+    if (which === 'claude-done') {
+      current = claudeFlow('complete');
+      return { outcome: 'accepted', flow: current };
+    }
     current = codexFlow('finishing');
     return { outcome: 'accepted', flow: current };
   },
@@ -172,13 +183,35 @@ const registered = (subject: string | undefined): ReactElement => {
   return panel(subject === undefined ? {} : { subject });
 };
 
+/** How long a Claude code submit is held in flight, so a test can measure the busy page. `?hold=` shortens it. */
+const CLAUDE_HOLD_MS = Number(params.get('hold') ?? '1200');
+
+const WORDING = { coverage: 'The login is kept on studio-mac. Nothing uses it yet.', signedIn: 'Signed in.' };
+const noop = (): void => undefined;
+
 const surface = ((): ReactElement => {
+  // C59 O5: the panel itself, over a flow the test chooses, to measure its buttons without a daemon in between.
+  if (which === 'claude-idle' || which === 'claude-starting-direct')
+    return (
+      <ClaudeLoginPanel
+        accountLabel="Claude Code login"
+        loginId="claude-studio"
+        flow={which === 'claude-idle' ? null : claudeFlow('starting')}
+        busy={false}
+        refusal={null}
+        wording={WORDING}
+        onStart={noop}
+        onSubmitCode={noop}
+        onCancel={noop}
+        onStartOver={noop}
+      />
+    );
   if (which === 'codex-add' || which === 'codex-made') return registered('harness:codex');
   if (which === 'claude-add') return registered('harness:claude');
   if (which === 'settings-add') return <AddLoginPanel client={client} />;
   return (
     <LoginSignIn
-      login={which === 'claude-code' ? CLAUDE : CODEX}
+      login={CLAUDE_FLOW.has(which) ? CLAUDE : CODEX}
       machineName="studio-mac"
       client={client}
       onSignedIn={() => undefined}

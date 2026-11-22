@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { useState } from 'react';
-import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
+import { interact, type Mounted, mount, must, settleUntil, ShellContext, WithViewPlace } from '@ferretry/app/testing';
 import { PullPageAnswerSchema, type ReviewThread } from '../../../contract/index.ts';
 import type { PullAddress, PullsClient } from '../../../app/features/compose/api.ts';
 import { useCompose } from '../../../app/features/compose/context.tsx';
@@ -176,6 +176,46 @@ describe('the comment box', () => {
     );
     await type(mounted, 'hello');
     expect(postButton(mounted).disabled).toBe(true);
+    await mounted.unmount();
+  });
+
+  it('the link to a posted comment follows the "Open links in" setting', async () => {
+    const taken: string[] = [];
+    const provision = {
+      activate: (click: Event, target: { readonly href: string | undefined }): boolean => {
+        click.preventDefault();
+        taken.push(target.href ?? '');
+        return true;
+      },
+      open: () => undefined,
+      sheet: null,
+      destination: () => 'in-app',
+    };
+    const shell = { runtime: { linkProvision: () => provision, subscribe: () => () => undefined, version: () => 0 } };
+    const { client } = scripted(() => POSTED);
+    const mounted = await mount(
+      <ShellContext.Provider value={shell as never}>
+        <WithViewPlace place={{ daemon: 'desk', machine: 'Desk' } as never}>
+          <ComposeDock
+            address={ADDRESS}
+            client={client}
+            headSha={HEAD}
+            onChanged={() => undefined}
+            pullUrl="https://github.com/octo/demo/pull/7"
+          >
+            <Probe />
+          </ComposeDock>
+        </WithViewPlace>
+      </ShellContext.Provider>,
+    );
+    await press(mounted, '[data-compose-open]');
+    await ready(mounted);
+    await type(mounted, 'Looks good to me.');
+    await tap(mounted);
+    await settled(mounted, '[data-compose-posted]');
+    const link = must(mounted.container.querySelector('[data-compose-posted] a'), 'the posted link');
+    await interact(() => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
+    expect(taken).toEqual([POSTED.url]);
     await mounted.unmount();
   });
 

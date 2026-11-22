@@ -1,8 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import type { ApiRequest, CallContext } from '@ferretry/kernel/contract';
+import { ApiError, type ApiRequest, type CallContext } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import { MakeFolderRequestSchema } from '../../../contract/index.ts';
 import { FolderExplorer } from '../../../daemon/features/folders/browse.ts';
+import {
+  foldName as sharedFoldName,
+  holdsSignIn as sharedHoldsSignIn,
+  isPrivateFolder as sharedIsPrivateFolder,
+} from '@ferretry/std';
 import { foldName, holdsSignIn, isPrivateFolder, parsePath } from '../../../daemon/features/folders/fence.ts';
 import type {
   FolderBrowser,
@@ -24,13 +29,15 @@ interface Machine {
   /** Folders (by path as named) whose held object turns out to be another: the swap between the check and the hold. */
   readonly swapped?: Record<string, string>;
   readonly git?: readonly string[];
+  /** Folders whose sign-in look reads only part of their names (no marker seen, none ruled out). */
+  readonly partial?: readonly string[];
   /** What the new folder turns out to be after it is made: a path it really reaches. */
   readonly madeReaches?: Record<string, string>;
 }
 
 /** A machine of folders in a map. */
 function machine(tree: Tree, options: Machine = {}) {
-  const { links = {}, swapped = {}, git = [], madeReaches = {} } = options;
+  const { links = {}, swapped = {}, git = [], madeReaches = {}, partial = [] } = options;
   const calls: string[] = [];
   const made: string[] = [];
   const removed: string[] = [];
@@ -44,7 +51,7 @@ function machine(tree: Tree, options: Machine = {}) {
     home: async () => HOME,
     holdsSignIn: async path => {
       calls.push(`holdsSignIn ${path}`);
-      return holdsSignIn(names(path));
+      return holdsSignIn(names(path)) || (partial.includes(path) ? 'partial' : false);
     },
     leaf: async path => (path in links ? 'link' : path in tree ? 'present' : 'missing'),
     realPaths: async paths =>
@@ -81,6 +88,7 @@ function machine(tree: Tree, options: Machine = {}) {
         },
         readText: async () => undefined,
         hasGit: async name => git.includes(`${real}/${name}`),
+        device: async () => 'd1',
         makeLeaf: async (name, judge): Promise<LeafMade> => {
           const target = `${real}/${name}`;
           if (names(real).includes(name)) return { kind: 'exists' };
@@ -163,6 +171,16 @@ describe('fence rules', () => {
     expect(holdsSignIn(['ID_RSA'])).toBe(true);
     expect(holdsSignIn(['Auth.JSON'])).toBe(true);
     expect(holdsSignIn(['id_rsa.pub'])).toBe(false);
+  });
+
+  test('a project folder holding a .env, a key file or an .npmrc is an ordinary folder, not a sign-in folder', () => {
+    expect(holdsSignIn(['.env', '.npmrc', 'server.pem', 'package.json'])).toBe(false);
+  });
+
+  test('the fence reads the one shared secret-name list', () => {
+    expect(holdsSignIn).toBe(sharedHoldsSignIn);
+    expect(isPrivateFolder).toBe(sharedIsPrivateFolder);
+    expect(foldName).toBe(sharedFoldName);
   });
 });
 
@@ -269,7 +287,7 @@ describe('FolderExplorer.list', () => {
     const swapped = machine(BASE, { swapped: { [`${HOME}/code`]: `${HOME}/.ssh` } });
     expect((await failure(() => swapped.explorer.list('~/code', true))).code).toBe('folder_refused');
     expect(swapped.calls.some(call => call.startsWith('entries'))).toBe(false);
-    const out = machine(BASE, { swapped: { [`${HOME}/code`]: '/etc' } });
+    const out = machine(BASE, { swapped: { [`${HOME}/code`]: '/proc/1' } });
     expect((await failure(() => out.explorer.list('~/code', true))).code).toBe('folder_refused');
     expect(out.calls.some(call => call.startsWith('entries'))).toBe(false);
     // Listed from the real path of what was held.
@@ -279,24 +297,151 @@ describe('FolderExplorer.list', () => {
     expect(listing.entries.map(entry => entry.name)).toContain('app');
   });
 
-  test('outside the home answers ONE way, without touching the machine, whether or not it exists', async () => {
+  test("outside the home, a caller that fails the gate gets the gate's answer before the machine is touched, whether or not it exists", async () => {
     const { explorer, calls } = machine(BASE, {
       links: { [`${HOME}/escape`]: '/etc', [`${HOME}/escape-missing`]: '/nowhere', [`${HOME}/dev`]: '/dev/null' },
     });
-    const answers: [number, string, string][] = [];
-    for (const path of ['/etc', '/etc/passwd', '/nonexistent', '/home/mee', '/home', '/']) {
+    const deny = async () => {
+      throw new ApiError(403, 'needs configure', 'grant_step_up_required');
+    };
+    for (const path of ['/etc', '/etc/passwd', '/nonexistent', '/home/mee', '/home', '/', '/proc', '/home/other']) {
       calls.length = 0;
-      const refused = await failure(() => explorer.list(path, false));
+      const refused = await failure(() => explorer.list(path, false, deny));
+      expect([refused.status, refused.code]).toEqual([403, 'grant_step_up_required']);
       expect(calls.filter(call => call.startsWith('open'))).toEqual([]);
-      answers.push([refused.status, refused.code, refused.message]);
     }
-    expect(answers.every(answer => answer.join() === answers[0]?.join())).toBe(true);
-    expect(answers[0]).toEqual([403, 'folder_refused', 'that folder is not there, or cannot be listed']);
-    // A link out of the home is refused after it resolves, with the very same answer, and so is a device.
-    for (const link of ['~/escape', '~/escape-missing', '~/dev']) {
-      const refused = await failure(() => explorer.list(link, false));
-      expect([refused.status, refused.code, refused.message]).toEqual(answers[0] as [number, string, string]);
+    // A link in the home that leads out is gated after it resolves, and nothing is read from there.
+    for (const link of ['~/escape']) {
+      calls.length = 0;
+      expect((await failure(() => explorer.list(link, false, deny))).code).toBe('grant_step_up_required');
+      expect(calls.some(call => call.startsWith('entries'))).toBe(false);
     }
+    // GAP (stated in browse.ts): a link that leads nowhere never reaches the gate.
+    expect((await failure(() => explorer.list('~/escape-missing', false, deny))).code).toBe('folder_refused');
+    // The home is never gated.
+    let asked = 0;
+    const count = async () => {
+      asked++;
+    };
+    await explorer.list('~/code', false, count);
+    await explorer.list('~', false, count);
+    expect(asked).toBe(0);
+  });
+
+  test('a caller that passes the gate lists outside the home: crumbs from /, the gate asked once, other homes and pseudo trees left out', async () => {
+    const world = machine({
+      ...BASE,
+      '/': ['etc', 'proc', 'home', 'srv', 'dev', 'run', 'nix'],
+      '/etc': ['passwd'],
+      '/home': ['me', 'other', 'shared.txt'],
+      '/srv': ['www', 'app', 'keys'],
+      '/srv/www': ['site'],
+      '/srv/www/site': [],
+      '/srv/keys': ['id_rsa'],
+    });
+    let asked = 0;
+    const allow = async () => {
+      asked++;
+    };
+    const root = await world.explorer.list('/', false, allow);
+    expect(root.path).toBe('/');
+    expect(root.crumbs).toEqual([{ name: '/', path: '/' }]);
+    expect(root.entries.map(entry => entry.name)).toEqual(['etc', 'home', 'nix', 'srv']);
+    expect(root.broad).toBe(true);
+    expect(asked).toBe(1);
+    const home = await world.explorer.list('/home', false, allow);
+    expect(home.entries.map(entry => entry.name)).toEqual(['me', 'shared.txt']);
+    expect(home.broad).toBe(true);
+    const site = await world.explorer.list('/srv/www/site', false, allow);
+    expect(site.crumbs).toEqual([
+      { name: '/', path: '/' },
+      { name: 'srv', path: '/srv' },
+      { name: 'www', path: '/srv/www' },
+      { name: 'site', path: '/srv/www/site' },
+    ]);
+    expect(site.broad).toBeUndefined();
+    // each request asks the gate ONCE however many real paths it judges (the spelling, the first look, the held object)
+    asked = 0;
+    await world.explorer.list('/srv/www', false, allow);
+    expect(asked).toBe(1);
+    // the same fence applies out there: a folder that holds a sign-in file is refused as the one it is, and so are the trees
+    expect((await failure(() => world.explorer.list('/srv/keys', false, allow))).code).toBe('folder_refused');
+    for (const path of ['/proc', '/dev', '/run', '/home/other', '/home/other/x'])
+      expect((await failure(() => world.explorer.list(path, false, allow))).code).toBe('folder_refused');
+  });
+
+  test('without a gate (the caller at the machine) every place the policy accepts is listed, and a missing one is the one refusal', async () => {
+    const { explorer } = machine({ ...BASE, '/srv': ['a'], '/srv/a': [] });
+    expect((await explorer.list('/srv', false)).entries.map(entry => entry.name)).toEqual(['a']);
+    expect((await failure(() => explorer.list('/nonexistent', false))).code).toBe('folder_refused');
+  });
+
+  test('a denied name is refused outside the home as it is inside (.ssh, .gnupg, .password-store as a path part), and a secret name is never listed', async () => {
+    const world = machine({
+      ...BASE,
+      '/': ['srv', '.ssh', '.gnupg'],
+      '/.ssh': ['config'],
+      '/.gnupg': ['pubring.kbx'],
+      '/srv': ['ok', '.ssh', '.password-store', 'plain'],
+      '/srv/.ssh': ['known', 'deep'],
+      '/srv/.ssh/deep': [],
+      '/srv/.password-store': ['x'],
+      '/srv/ok': ['.env', 'key.pem', 'cert.p12', 'id_ed25519.pub', '.env.local', 'notes.txt', 'sub'],
+      '/srv/ok/sub': [],
+      '/srv/plain': [],
+    });
+    const allow = async () => undefined;
+    // the same refusal as a place that is not there: a denied name is never confirmed to exist
+    for (const path of ['/.ssh', '/.gnupg', '/srv/.ssh', '/srv/.ssh/deep', '/srv/.password-store'])
+      expect([path, (await failure(() => world.explorer.list(path, true, allow))).code]).toEqual([
+        path,
+        'folder_refused',
+      ]);
+    // a denied folder is not listed among its parent's names, even when hidden names are asked for
+    const srv = await world.explorer.list('/srv', true, allow);
+    expect(srv.entries.map(entry => entry.name)).toEqual(['ok', 'plain']);
+    expect((await world.explorer.list('/', true, allow)).entries.map(entry => entry.name)).toEqual(['srv']);
+    // a secret FILE name is not listed either, outside the home or in it
+    const ok = await world.explorer.list('/srv/ok', true, allow);
+    expect(ok.entries.map(entry => entry.name)).toEqual(['sub', 'notes.txt']);
+    const code = await machine({ ...BASE, [`${HOME}/code`]: ['app', '.env', 'server.pem', 'readme.md'] }).explorer.list(
+      '~/code',
+      true,
+    );
+    expect(code.entries.map(entry => entry.name)).toEqual(['app', 'readme.md']);
+  });
+
+  test('a folder, or an ancestor, whose sign-in look saw only part of its names is refused with one fixed reason and nothing of it is read (R4)', async () => {
+    const tree: Tree = {
+      ...BASE,
+      '/srv': ['wide', 'plain'],
+      '/srv/wide': ['inner'],
+      '/srv/wide/inner': ['leaf'],
+      '/srv/wide/inner/leaf': [],
+      '/srv/plain': ['sub'],
+      '/srv/plain/sub': [],
+      [`${HOME}/code/big`]: ['x'],
+      [`${HOME}/code`]: ['big', 'app'],
+    };
+    const allow = async () => undefined;
+    const world = machine(tree, { partial: ['/srv/wide', `${HOME}/code/big`] });
+    // the folder itself, a folder BELOW the wide ancestor, and the same inside the home
+    for (const path of ['/srv/wide', '/srv/wide/inner', '/srv/wide/inner/leaf', '~/code/big']) {
+      const refusal = await failure(() => world.explorer.list(path, true, allow));
+      expect([path, refusal.status, refusal.code, refusal.message]).toEqual([
+        path,
+        403,
+        'folder_too_large',
+        'this folder is too large to check for private files',
+      ]);
+    }
+    // nothing of those folders was read
+    expect(
+      world.calls.filter(call => call.startsWith('entries /srv/wide') || call === `entries ${HOME}/code/big`),
+    ).toEqual([]);
+    // a sibling that was fully looked at, and the home itself (the anchor, never looked at), still list
+    expect((await world.explorer.list('/srv/plain', true, allow)).entries.map(entry => entry.name)).toEqual(['sub']);
+    expect((await world.explorer.list('~', true)).path).toBe(HOME);
   });
 
   test('a listing is bounded at 500 and says so, counting only what is shown', async () => {
@@ -512,6 +657,31 @@ describe('routes', () => {
     expect(body.path).toBe(HOME);
     expect((await failure(() => list(call({ x: '1' })))).status).toBe(400);
     expect((await failure(() => list(call({ hidden: 'yes' })))).status).toBe(400);
+  });
+
+  test('GET through a governed device: the home needs only what the route declares; a place outside it needs filesystem.configure', async () => {
+    const { explorer } = machine({ ...BASE, '/': ['etc', 'srv'], '/etc': [], '/srv': [] });
+    const list = listFoldersRoute(explorer);
+    const governed = (configure: boolean): CallContext =>
+      ({
+        ...call({ path: '/' }),
+        governance: {
+          governed: true,
+          decide: () =>
+            configure ? { allowed: true, refusal: 'granted' } : { allowed: false, refusal: 'step-up-required' },
+        },
+      }) as unknown as CallContext;
+    const useOnly = governed(false);
+    const home = { ...useOnly, request: call({}).request } as CallContext;
+    expect(JSON.parse(String((await list(home)).body)).path).toBe(HOME);
+    const refused = await failure(() => list(useOnly));
+    expect([refused.status, refused.code]).toEqual([403, 'grant_step_up_required']);
+    const allowed = JSON.parse(String((await list(governed(true))).body)) as {
+      path: string;
+      crumbs: { name: string }[];
+    };
+    expect(allowed.path).toBe('/');
+    expect(allowed.crumbs[0]?.name).toBe('/');
   });
 
   test('POST makes a folder and refuses a bad body', async () => {

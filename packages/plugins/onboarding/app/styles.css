@@ -26,9 +26,13 @@
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  justify-content: flex-end;
+  /* C59 audit: the way back is at the LEFT end, the way on at the right (the shared answer-row rule, `ui/action-row.css`). */
+  justify-content: space-between;
   margin-top: auto;
   padding-block: 12px;
+}
+.fy-ob-actions > :only-child {
+  margin-inline-start: auto;
 }
 .fy-ob-actions .kt-btn {
   flex: 0 0 auto;
@@ -42,6 +46,15 @@
   min-inline-size: 8.5rem;
 }
 @container (max-width: 599.98px) {
+  /* A phone: equal tracks for the buttons there are, so a lone Continue is the column's width and Back + Continue split it. */
+  .fy-ob-actions {
+    display: grid;
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
+  }
+  .fy-ob-actions .kt-btn {
+    inline-size: auto;
+  }
   .fy-ob-sticky {
     background: var(--bg);
     bottom: 0;

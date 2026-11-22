@@ -135,8 +135,15 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
   };
 
   return {
-    // The last load; the files and the owners' components are live, so only the login list is reused.
-    inEffect: async () => (lastLogins === undefined ? await load() : await evaluate(lastLogins)),
+    // The last load; the files and the owners' components are live, so only the login list is reused. The command
+    // lookups are asked again too (the cache itself answers from the last ten seconds): every catalogue read comes
+    // through here, so a tool installed or removed since boot shows on the NEXT read, never only after a load.
+    inEffect: async () => {
+      if (lastLogins === undefined) return await load();
+      const loaded = await evaluate(lastLogins);
+      await sources.prime?.(loaded.evaluation.effective.model);
+      return loaded;
+    },
     load,
     // Every refusal here is made while the change is PROPOSED, before any document is written, so each sentence's
     // "nothing was changed" is true and the owner is never shown a plan that can only be refused at apply.

@@ -1,5 +1,6 @@
 import type { FetchPort, SpawnPort } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
+import { harnessFallbackDirectories } from '@ferretry/plugin-runtimes/contract';
 import type { HarnessConfig } from '../../contract/index.ts';
 import {
   passesThroughHomeManagerPath,
@@ -90,12 +91,16 @@ async function fact(spawn: SpawnPort, program: string, args: readonly string[]):
 export function hostFacts(spawn: SpawnPort): {
   home(): Promise<string>;
   platform(): Promise<string>;
+  /** `XDG_STATE_HOME` as the daemon's environment has it, or empty. */
+  stateHome(): Promise<string>;
 } {
   let home: Promise<string> | undefined;
   let platform: Promise<string> | undefined;
+  let stateHome: Promise<string> | undefined;
   return {
     home: () => (home ??= fact(spawn, 'printenv', ['HOME']).then(out => (out ?? '').trim())),
     platform: () => (platform ??= fact(spawn, 'uname', ['-s']).then(out => (out ?? '').trim().toLowerCase())),
+    stateHome: () => (stateHome ??= fact(spawn, 'printenv', ['XDG_STATE_HOME']).then(out => (out ?? '').trim())),
   };
 }
 
@@ -158,6 +163,18 @@ export function locationSource(
       if (onPath !== undefined && onPath !== '')
         return { outcome: 'located', path: onPath, rule: 'inherited environment', declaredBy: 'PATH' };
       searched.push('PATH');
+      // The folders the installers write to, after PATH (the one list Runtimes' setup scan uses too).
+      const fallbacks = harnessFallbackDirectories({
+        home,
+        platform: await host.platform(),
+        xdgStateHome: await host.stateHome(),
+      });
+      for (const directory of fallbacks) {
+        const path = `${directory}/claude`;
+        searched.push(path);
+        if (await starts(path))
+          return { outcome: 'located', path, rule: 'search directory', declaredBy: 'built-in install folders' };
+      }
       return { outcome: 'absent', searched };
     },
   };

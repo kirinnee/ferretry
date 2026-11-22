@@ -262,14 +262,14 @@
   --hm-header: label;
 }
 
-:root[data-style='geist'] .fy-spinner,
+:root[data-style='geist'] .fy-spinner:where(:not([data-swatch] *)),
 [data-swatch][data-style='geist'] .fy-spinner {
   animation: none;
 }
-:root[data-style='geist'] .fy-spinner__p1,
-:root[data-style='geist'] .fy-spinner__p2,
-:root[data-style='geist'] .fy-spinner__p3,
-:root[data-style='geist'] .fy-spinner__p4,
+:root[data-style='geist'] .fy-spinner__p1:where(:not([data-swatch] *)),
+:root[data-style='geist'] .fy-spinner__p2:where(:not([data-swatch] *)),
+:root[data-style='geist'] .fy-spinner__p3:where(:not([data-swatch] *)),
+:root[data-style='geist'] .fy-spinner__p4:where(:not([data-swatch] *)),
 [data-swatch][data-style='geist'] .fy-spinner__p1,
 [data-swatch][data-style='geist'] .fy-spinner__p2,
 [data-swatch][data-style='geist'] .fy-spinner__p3,
@@ -281,19 +281,19 @@
   x: 7.375px;
   y: 1px;
 }
-:root[data-style='geist'] .fy-spinner__p2,
+:root[data-style='geist'] .fy-spinner__p2:where(:not([data-swatch] *)),
 [data-swatch][data-style='geist'] .fy-spinner__p2 {
   /* The base `animation` shorthand (specificity 0,2,0) resets the delay, so each phase is restated here, above it. */
   animation-delay: calc(var(--spinner-parts-speed) * 0.25);
   transform: rotate(90deg);
 }
-:root[data-style='geist'] .fy-spinner__p4,
+:root[data-style='geist'] .fy-spinner__p4:where(:not([data-swatch] *)),
 [data-swatch][data-style='geist'] .fy-spinner__p4 {
   /* The base `animation` shorthand (specificity 0,2,0) resets the delay, so each phase is restated here, above it. */
   animation-delay: calc(var(--spinner-parts-speed) * 0.5);
   transform: rotate(180deg);
 }
-:root[data-style='geist'] .fy-spinner__p3,
+:root[data-style='geist'] .fy-spinner__p3:where(:not([data-swatch] *)),
 [data-swatch][data-style='geist'] .fy-spinner__p3 {
   /* The base `animation` shorthand (specificity 0,2,0) resets the delay, so each phase is restated here, above it. */
   animation-delay: calc(var(--spinner-parts-speed) * 0.75);

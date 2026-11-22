@@ -147,6 +147,8 @@ export function registeredCodex() {
     spawn: {
       start: childSpawn.start,
       run: async (program: string, args: string[], options?: { timeout?: unknown; env?: unknown }) => {
+        // A missing Codex is missing from the built-in install folders too: `test -x` finds no file there.
+        if (program === 'test' && codexMissing) return { exitCode: 1, signal: null, stderr: '', stdout: '' };
         if (args[0] === 'queue') {
           queueRuns.push({ program, args, env: options?.env, timeout: options?.timeout });
           if (queueAnswer.throws === true) throw new Error('spawn failed');

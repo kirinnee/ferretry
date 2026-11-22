@@ -29,6 +29,7 @@ import { applyClaimFor } from './adapters/apply-claim.ts';
 import { componentWriters } from './adapters/component-writers.ts';
 import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
 import { CommandCache } from './adapters/command-cache.ts';
+import { harnessAwareWhich } from './adapters/harness-lookup.ts';
 import { HostPlatform } from './adapters/host-platform.ts';
 import { toolInstaller } from './adapters/tool-installer.ts';
 import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
@@ -388,10 +389,17 @@ export function fileAssembly(
   /** The etag of one profile file right now: the revision a change to it is pinned to. */
   readonly profileEtag: (profile: string) => Promise<string>;
 } {
-  const commands = new CommandCache({ which: async name => await ctx.kernel.paths.which(name) }, () =>
-    ctx.kernel.clock.nowMs(),
-  );
   const platform = new HostPlatform(() => ctx.kernel.spawn);
+  const commands = new CommandCache(
+    {
+      which: harnessAwareWhich({
+        which: async (name, options) => await ctx.kernel.paths.which(name, options),
+        home: () => ctx.kernel.paths.home(),
+        platform,
+      }),
+    },
+    () => ctx.kernel.clock.nowMs(),
+  );
   const { host, directory } = fleetHost(ctx.kernel, commands);
   const home = directory.slice(0, directory.lastIndexOf('/'));
   const configDirectory = configDirectoryOf(home);
@@ -464,6 +472,10 @@ export function fileAssembly(
   });
   const tools: FleetSetupServiceDeps['tools'] = {
     plans: harnesses => installer.plans(harnesses),
+    // "Check again" asks past the ten-second lookup window, for the same names every read looks up.
+    refresh: async () => {
+      await Promise.all([commands.refresh(HARNESS_COMMANDS), platform.prime()]);
+    },
     install: async (request, governance) =>
       // The command the person was shown travels with the request (each entry's harness in the installer's own spelling), so
       // the installer can refuse a plan that changed since; dropping it here would leave that check never made.

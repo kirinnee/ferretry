@@ -14,6 +14,8 @@ import { restrictSpawn } from '../../../../../core/kernel/host/permissions.ts';
 import { PinRegistry } from '../../../../../core/kernel/host/pins.ts';
 import { rootsPortFor } from '../../../../../core/kernel/host/roots.ts';
 import { kernelBrowser } from '../../../daemon/features/folders/adapter.ts';
+import { isAtOrUnder } from '../../../daemon/features/folders/fence.ts';
+import type { FolderBrowser } from '../../../daemon/features/folders/port.ts';
 import { scanRepos } from '../../../daemon/features/repos/scan.ts';
 
 const parents: string[] = [];
@@ -45,7 +47,8 @@ async function world() {
     join(project, 'app', '.git'),
     join(project, 'group', 'lib', '.git'),
     join(project, 'group', 'plain'),
-    join(project, 'a', 'b', 'c', 'too-deep', '.git'),
+    join(project, 'p', 'q', 'r', 's', 't', '.git'),
+    join(project, 'a', 'b', 'c', 'd', 'e', 'too-deep', '.git'),
     join(project, 'node_modules', 'dep', '.git'),
     join(project, '.hidden', 'r', '.git'),
     join(project, 'worktree'),
@@ -74,16 +77,25 @@ async function world() {
     KernelPorts,
     'roots' | 'paths' | 'spawn'
   >;
-  return { user, project, outside, deps: { browser: kernelBrowser(kernel) } };
+  const real = kernelBrowser(kernel);
+  // The fixture is its OWN small root: the folders ABOVE it (the host's /tmp or $TMPDIR, tens of thousands of names wide on a
+  // busy machine) are not part of what a test is about, so they are looked at as clear. Everything inside the fixture is
+  // looked at for real, so a wide folder the test makes itself still fails closed.
+  const browser: FolderBrowser = {
+    ...real,
+    holdsSignIn: path => (isAtOrUnder(path, parent) ? real.holdsSignIn(path) : Promise.resolve(false)),
+  };
+  return { user, project, outside, deps: { browser } };
 }
 
 describe('the repository scan over the real imports root', () => {
-  test('finds repositories to depth three, reads their remotes, and keeps the token out', async () => {
+  test('finds repositories to depth five, reads their remotes, and keeps the token out', async () => {
     const w = await world();
     const found = await scanRepos(w.project, w.deps);
     expect(found.repos).toEqual([
       { path: 'app', remote: 'https://github.com/me/app', provider: 'github' },
       { path: 'group/lib', remote: 'https://gitlab.example.com/team/lib' },
+      { path: 'p/q/r/s/t' },
       { path: 'worktree' },
     ]);
     expect(found.truncated).toBe(false);
@@ -92,7 +104,7 @@ describe('the repository scan over the real imports root', () => {
   test('never follows a link out of the project, into a private folder, or under node_modules and hidden folders', async () => {
     const w = await world();
     const paths = (await scanRepos(w.project, w.deps)).repos.map(repo => repo.path);
-    for (const never of ['linked-out', 'to-ssh', 'node_modules/dep', '.hidden/r', 'a/b/c/too-deep'])
+    for (const never of ['linked-out', 'to-ssh', 'node_modules/dep', '.hidden/r', 'a/b/c/d/e/too-deep'])
       expect(paths).not.toContain(never);
     expect(JSON.stringify(paths)).not.toContain('stolen');
   });
@@ -107,6 +119,70 @@ describe('the repository scan over the real imports root', () => {
     expect((await scanRepos(join(w.project, 'app'), w.deps)).repos).toEqual([
       { path: '.', remote: 'https://github.com/me/app', provider: 'github' },
     ]);
+  });
+  test('a project outside the home is scanned; a link from it into a private folder is not followed; a skipped tree answers truncated', async () => {
+    const w = await world();
+    await mkdir(join(w.outside, 'srv', 'svc', '.git'), { recursive: true });
+    await writeFile(join(w.outside, 'srv', 'svc', '.git', 'config'), CONFIG('https://github.com/me/svc'));
+    await symlink(join(w.user, '.ssh'), join(w.outside, 'srv', 'to-ssh'));
+    const found = await scanRepos(join(w.outside, 'srv'), w.deps);
+    // The fixture is its own small root (see `world`), so the answer does not depend on how wide this machine's temp folder is.
+    expect(found).toEqual({
+      repos: [{ path: 'svc', remote: 'https://github.com/me/svc', provider: 'github' }],
+      truncated: false,
+    });
+    // `/proc` is a pseudo filesystem: a project there is refused on the real path, nothing is opened, and it is not "empty".
+    expect(await scanRepos('/proc', w.deps)).toEqual({ repos: [], truncated: true });
+  });
+  /** `count` empty files in `folder`, made by the shell: the count is the point, not thousands of promises. */
+  const fill = async (folder: string, count: number) => {
+    await mkdir(folder, { recursive: true });
+    const made = Bun.spawn(['sh', '-c', `seq -f n%g ${count} | xargs touch`], { cwd: folder });
+    expect(await made.exited).toBe(0);
+  };
+  test('a child folder wider than the sign-in look reads is NOT proved safe (R3): not indexed, and the answer is truncated so stored repositories are kept', async () => {
+    const w = await world();
+    await mkdir(join(w.project, 'wide', '.git'), { recursive: true });
+    await writeFile(join(w.project, 'wide', '.git', 'config'), CONFIG('https://github.com/me/wide'));
+    await fill(join(w.project, 'wide'), 5001);
+    // a marker in an odd spelling (the known names are asked for exactly, so only the fold would see it)
+    await writeFile(join(w.project, 'wide', 'ID_RSA'), 'not a key');
+    const found = await scanRepos(w.project, w.deps);
+    expect(found.repos.map(repo => repo.path)).not.toContain('wide');
+    expect(found.repos.map(repo => repo.path)).toContain('app');
+    // wherever the marker sits in the listing, the folder is either refused as a sign-in one or unproved: never exposed
+    expect(JSON.stringify(found)).not.toContain('me/wide');
+    // with no marker anywhere the look is deterministic: unproved, so truncated (never "whole")
+    await mkdir(join(w.project, 'wide-plain', '.git'), { recursive: true });
+    await fill(join(w.project, 'wide-plain'), 5001);
+    const plain = await scanRepos(w.project, w.deps);
+    expect(plain.repos.map(repo => repo.path)).not.toContain('wide-plain');
+    expect(plain.truncated).toBe(true);
+  });
+  test('a wide project folder or a wide ancestor fails closed (R4): nothing is opened or read, the answer is "saw nothing" (truncated), never a complete list', async () => {
+    const w = await world();
+    await mkdir(join(w.project, 'wide', 'proj', '.git'), { recursive: true });
+    await writeFile(join(w.project, 'wide', 'proj', '.git', 'config'), CONFIG('https://github.com/me/proj'));
+    await fill(join(w.project, 'wide', 'proj'), 5001);
+    // a project folder below a wide ordinary ancestor
+    await mkdir(join(w.outside, 'srv', 'svc', '.git'), { recursive: true });
+    await fill(w.outside, 5001);
+    const inside = await scanRepos(w.project, w.deps);
+    // a 5,001-name CHILD is not proved free of an odd-spelled marker (R3): not indexed, and the answer is truncated
+    expect(inside.repos.map(repo => repo.path)).not.toContain('wide/proj');
+    expect(inside.truncated).toBe(true);
+    // an ancestor whose sign-in look saw only part of its names is not proved safe: nothing below it is read
+    expect(await scanRepos(join(w.outside, 'srv'), w.deps)).toEqual({ repos: [], truncated: true });
+    // a project folder (here a repository) that is itself 5,001 names wide is not proved safe either: not opened, not probed
+    expect(await scanRepos(join(w.project, 'wide', 'proj'), w.deps)).toEqual({ repos: [], truncated: true });
+  });
+  test('a sign-in file is still found by name in a wide folder: that child is skipped, wide or not', async () => {
+    const w = await world();
+    await mkdir(join(w.project, 'keys', '.git'), { recursive: true });
+    await fill(join(w.project, 'keys'), 5001);
+    await writeFile(join(w.project, 'keys', 'id_ed25519'), 'not a key');
+    const found = await scanRepos(w.project, w.deps);
+    expect(found.repos.map(repo => repo.path)).not.toContain('keys');
   });
   test('a link where `.git/config` should be is not read: the repository shows no remote', async () => {
     const w = await world();

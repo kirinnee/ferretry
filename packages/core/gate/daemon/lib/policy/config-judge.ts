@@ -1,5 +1,5 @@
 import type { CallStanding, ConfigWriteJudgement } from '@ferretry/kernel/contract';
-import { proofClaimed } from '../../../contract/claimed-standings.ts';
+import { actCovers, proofClaimed } from '../../../contract/claimed-standings.ts';
 import { CAPABILITIES, isFerretCall } from '../../../contract/index.ts';
 
 /** The file whose own capability is `warden`; every other config file is the fleet's (today's `configFileCapability`). */
@@ -34,6 +34,9 @@ const spent = new WeakSet<object>();
  * whose proof an owner-only act claimed for THIS request is accepted once without a second claim.
  */
 export function claimLooseningProof(standing: CallStanding): boolean {
+  // Inside ONE loosening act (`openLooseningAct`: an import, a clone) the proof claimed for the act covers each of its
+  // loosenings until the act ends; the grants were asked above, per file, as always.
+  if (actCovers(standing.claimFreshStepUp)) return true;
   if (spent.has(standing) || (standing.claimFreshStepUp !== undefined && spent.has(standing.claimFreshStepUp)))
     return false;
   if (!proofClaimed(standing.claimFreshStepUp) && standing.claimFreshStepUp?.() !== true) return false;

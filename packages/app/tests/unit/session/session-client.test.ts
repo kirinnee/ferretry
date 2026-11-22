@@ -850,6 +850,27 @@ describe('a relay session proving its device', () => {
     should(await daemon.proves(credential, pairing.publicKey)).be.true();
   });
 
+  it('should carry the machine name the person typed in the pairing record, and nothing when none was typed', async () => {
+    const pairing = await testDevice();
+    const recordFor = async (machineName?: string): Promise<Record<string, unknown>> => {
+      const { socket, daemon, session } = await opened({
+        mode: {
+          kind: 'pair',
+          code: 'ABCD-EFGH',
+          deviceName: 'phone',
+          ...(machineName === undefined ? {} : { machineName }),
+          publicKey: pairing.publicKey,
+          key: pairing.claim.key,
+        },
+      });
+      await session.receiveBinary(await daemon.answer(socket.sent[0] as Uint8Array));
+      await drain();
+      return (await daemon.receive(socket.sent[1] as Uint8Array)) as Record<string, unknown>;
+    };
+    should(await recordFor('Studio box')).have.property('machineName', 'Studio box');
+    should(await recordFor()).not.have.property('machineName');
+  });
+
   it('should renew its lease by signing the nonce the daemon sent, on a request session', async () => {
     const { session, socket, daemon } = await serving();
     await daemon.receive(socket.sent[1] as Uint8Array);

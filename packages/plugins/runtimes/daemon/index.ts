@@ -562,7 +562,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
 
       return {
         routes: {
-          ...fleetCatalogRoutes(assembly.catalog),
+          ...fleetCatalogRoutes(assembly.catalog, ctx.kernel.log),
           ...fleetSetupRoutes(assembly.setup),
           ...ferretRuntimeRoutes(assembly.runtime ?? ctx.needs.ferrets.runtimeControl),
         },

@@ -118,7 +118,13 @@ export class FakeStepUpWitness implements StepUpWitness {
     return !this.#unlocked(subject.deviceId);
   }
 
-  claimFresh = ((subject: StepUpSubject, act?: StepUpAct, bound?: string, notAfterMs?: number): boolean => {
+  claimFresh = ((
+    subject: StepUpSubject,
+    act?: StepUpAct,
+    bound?: string,
+    notAfterMs?: number,
+    spentAtAdmission = false,
+  ): boolean => {
     if (act !== undefined && !stepUpSkippableAtMachine(act)) {
       if (stepUpKeepsProof(act)) return false;
       const proof = this.#liveBound(subject, act, bound);
@@ -126,8 +132,10 @@ export class FakeStepUpWitness implements StepUpWitness {
       this.#bound.delete(key(subject));
       return true;
     }
-    if (!this.freshlyHeld(subject)) return false;
+    if (!spentAtAdmission && !this.freshlyHeld(subject)) return false;
     const proof = this.#fresh.get(key(subject));
+    if (spentAtAdmission && (proof === undefined || this.options.nowMs() - proof.provedAtMs >= FAKE_PROOF_TTL_MS))
+      return false;
     if (notAfterMs !== undefined && (proof === undefined || proof.provedAtMs > notAfterMs)) return false;
     if (act !== undefined && proof?.act !== act) return false;
     this.#fresh.delete(key(subject));

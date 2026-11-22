@@ -2,8 +2,12 @@ import { ApiError, jsonResponse, queryValue, type RouteHandler } from '@ferretry
 import { MakeFolderRequestSchema } from '../../../contract/index.ts';
 import { parseBody } from '../../lib/body.ts';
 import type { FolderExplorer } from './browse.ts';
+import { outsideHomeGate } from './outside-gate.ts';
 
-/** `GET /v1/projects/folders?path=<abs or ~/x>&hidden=1`: one folder's names. Starts at `~`. */
+/**
+ * `GET /v1/projects/folders?path=<abs or ~/x>&hidden=1`: one folder's names. Starts at `~`. A place outside the home needs
+ * `filesystem.configure` (see `outside-gate.ts`), on top of the `filesystem.use` the route declares.
+ */
 export const listFoldersRoute =
   (explorer: FolderExplorer): RouteHandler =>
   async call => {
@@ -14,7 +18,9 @@ export const listFoldersRoute =
     const hidden = queryValue(call.request, 'hidden');
     if (hidden !== undefined && hidden !== '0' && hidden !== '1')
       throw new ApiError(400, 'hidden is 0 or 1', 'invalid_hidden');
-    return jsonResponse(await explorer.list(queryValue(call.request, 'path') ?? '~', hidden === '1'));
+    return jsonResponse(
+      await explorer.list(queryValue(call.request, 'path') ?? '~', hidden === '1', outsideHomeGate(call)),
+    );
   };
 
 /** `POST /v1/projects/folders` `{parent, name}`: makes one new folder, owner-only. */

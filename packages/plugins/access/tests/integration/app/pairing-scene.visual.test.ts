@@ -196,7 +196,9 @@ describe('The pair page: mascot and night sky', () => {
         expect(await tab.evaluate(() => document.activeElement?.id)).toBe('pairing-title');
         expect(await tab.locator('#pairing-title').innerText()).toBe('Connected');
         expect(await tab.locator('[data-sky][data-celebrating] .fy-sky-streak').count()).toBe(1);
-        expect(await tab.locator('main').innerText()).toContain('Paired with kirin-workstation, through the relay.');
+        expect(await tab.locator('main').innerText()).toContain('Paired with kirin-workstation.');
+        // C59 O3: how it connected is a detail behind a tap, not in the main words.
+        expect(await tab.locator('.fy-pair-arrive').innerText()).not.toContain('through the relay');
         expect(await tab.locator('body').innerText()).not.toContain('127.0.0.1');
         // One live region the whole way through, so the arrival is announced.
         expect(await tab.locator('[role="status"]').count()).toBe(1);
@@ -255,7 +257,54 @@ describe('The pair page: mascot and night sky', () => {
   }
 
   for (const variant of VARIANTS) {
-    it(`${variant.name}: the success screen offers "Add a passkey now" with the minutes left, one clear way on, readable on the sky`, async () => {
+    it(`${variant.name}: the machine name typed on the confirm screen is sent, shown on Connected and on both first-passkey labels`, async () => {
+      const { tab, problems, close } = await open(variant, '&offer=open');
+      try {
+        // Typed for real: the name field, not a query flag, and the device name left as the page proposes it.
+        await tab.locator('[data-pair-machine-name]').fill('Studio box');
+        await pair(tab);
+        expect(await tab.locator('.fy-pair-arrive').innerText()).toContain('Paired with Studio box.');
+        expect(await tab.locator('main').innerText()).not.toContain('kirin-workstation');
+        const scene = () =>
+          tab.evaluate(
+            () =>
+              (
+                window as unknown as {
+                  __pairScene: { sent: { deviceName: string; machineName?: string }[]; created: unknown[] };
+                }
+              ).__pairScene,
+          );
+        expect((await scene()).sent.map(sent => sent.machineName)).toEqual(['Studio box']);
+        await tab.waitForSelector('[data-first-passkey-offer]');
+        await tab.getByRole('button', { name: 'Add a passkey now' }).click();
+        await tab.waitForFunction(
+          () => (window as unknown as { __pairScene: { created: unknown[] } }).__pairScene.created.length > 0,
+        );
+        const [created] = (await scene()).created as { user: { name: string; displayName: string } }[];
+        expect(created?.user.name).toBe('Chrome on Linux · 4f2a → Studio box');
+        expect(created?.user.displayName).toBe('Ferretry: Chrome on Linux · 4f2a → Studio box');
+        expect(`${created?.user.name}${created?.user.displayName}`).not.toContain('kirin-workstation');
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+
+    it(`${variant.name}: with no name typed, Connected and the labels fall back to the host name`, async () => {
+      const { tab, close } = await open(variant, '&offer=open');
+      try {
+        await pair(tab);
+        expect(await tab.locator('.fy-pair-arrive').innerText()).toContain('Paired with kirin-workstation.');
+        const sent = await tab.evaluate(
+          () => (window as unknown as { __pairScene: { sent: object[] } }).__pairScene.sent,
+        );
+        expect(sent).toEqual([{ deviceName: 'Chrome on Linux · 4f2a' }]);
+      } finally {
+        await close();
+      }
+    });
+
+    it(`${variant.name}: the success screen offers "Add a passkey now" with why, what happens after and no bare countdown, one clear way on, readable on the sky`, async () => {
       for (const how of ['normal', 'reduced'] as const) {
         const { tab, problems, close } = await open(
           variant,
@@ -266,17 +315,38 @@ describe('The pair page: mascot and night sky', () => {
           await pair(tab);
           await tab.waitForSelector('[data-first-passkey-offer]');
           const offer = tab.locator('[data-first-passkey-offer]');
-          expect(await offer.innerText()).toContain('7 minutes left');
+          const words = await offer.innerText();
+          // C59 O3: WHY a passkey, what happens after the quick window, and no bare "N minutes left".
+          expect(words).toContain('approve risky actions with your fingerprint or face');
+          expect(words).toContain('about 7 minutes');
+          expect(words).toContain('later in Settings');
+          expect(words).not.toContain('minutes left');
+          expect(words).not.toContain('through the relay');
           expect(await tab.getByRole('button', { name: 'Add a passkey now' }).isVisible()).toBe(true);
           // ONE primary action: the passkey. "Not now" is the quiet way on; nothing else asks for a press.
-          expect(await tab.locator('main button:visible').allInnerTexts()).toEqual(['Add a passkey now', 'Not now']);
+          // The DOM follows the picture (Tab too): the way on first on a phone, where it is on top; the way out first on a desktop.
+          expect(await tab.locator('main button:visible').allInnerTexts()).toEqual(
+            variant.phone ? ['Add a passkey now', 'Not now'] : ['Not now', 'Add a passkey now'],
+          );
           expect(await tab.locator('[data-variant="primary"]').allInnerTexts()).toEqual(['Add a passkey now']);
           expect(await tab.locator('#pairing-title').innerText()).toBe('Connected');
-          // A8 shot 01: each answer is at least 44 px tall, auto width (well under the card), and the row has room.
-          for (const name of ['Add a passkey now', 'Not now']) {
-            const box = must(await tab.getByRole('button', { name }).boundingBox(), name);
-            expect(box.height, `${name} is at least 44 px tall`).toBeGreaterThanOrEqual(44);
-            expect(box.width, `${name} is not a full-width bar`).toBeLessThan(variant.width * 0.8);
+          // C59 O3: the shared answer row. Each answer is at least 44 px tall; on a phone both are the card's width and stacked;
+          // on a desktop Not now is at the left end and Add a passkey now at the right end of one row.
+          const add = must(await tab.getByRole('button', { name: 'Add a passkey now' }).boundingBox(), 'add');
+          const later = must(await tab.getByRole('button', { name: 'Not now' }).boundingBox(), 'later');
+          for (const box of [add, later]) expect(box.height, 'at least 44 px tall').toBeGreaterThanOrEqual(43.5);
+          expect(Math.abs(add.width - later.width), 'same size').toBeLessThanOrEqual(1);
+          const row = must(await offer.boundingBox(), 'offer');
+          if (variant.phone) {
+            expect(Math.abs(add.width - row.width), 'phone: full width').toBeLessThanOrEqual(1);
+            expect(add.y, 'phone: stacked, the way on above').toBeLessThan(later.y);
+          } else {
+            expect(Math.abs(add.y - later.y), 'desktop: one row').toBeLessThanOrEqual(1);
+            expect(Math.abs(later.x - row.x), 'Not now at the left end').toBeLessThanOrEqual(1);
+            expect(
+              Math.abs(add.x + add.width - (row.x + row.width)),
+              'Add a passkey now at the right end',
+            ).toBeLessThanOrEqual(1);
           }
           // "Not now" is a real secondary button (a visible border, not the borderless ghost that reads as bare text).
           const notNow = await tab.getByRole('button', { name: 'Not now' }).evaluate(node => ({
@@ -308,11 +378,13 @@ describe('The pair page: mascot and night sky', () => {
         expect(back.height, 'Back is at least 44 px tall').toBeGreaterThanOrEqual(44);
         const confirm = must(await tab.locator('[data-pair-confirm]').boundingBox(), 'Pair this device');
         expect(confirm.height, 'at least 44 px tall').toBeGreaterThanOrEqual(43.5);
-        expect(confirm.width, 'not the row wide').toBeLessThan(variant.width * 0.7);
+        // C59 O2: the answers are the shared row (phone: the card's width, stacked; desktop: 12 rem each at the two ends); the
+        // balance test (pair-confirm-balance.visual.test.ts) owns that geometry.
         // r11-1b G4: every button on the page is at least O2's 136 px (8.5rem), Back included (it was 51 px).
         expect(back.width, 'Back is at least 136 px wide').toBeGreaterThanOrEqual(135.5);
         expect(confirm.width, 'Pair this device is at least 136 px wide').toBeGreaterThanOrEqual(135.5);
-        for (const selector of ['[data-pair-device-rename]', 'button:text-is("Not now")']) {
+        // C59 O2: Rename is text on the "called" line now (balance test), not a button.
+        for (const selector of ['button:text-is("Not now")']) {
           const box = must(await tab.locator(selector).boundingBox(), selector);
           expect(box.width, `${selector} is at least 136 px wide`).toBeGreaterThanOrEqual(135.5);
           expect(box.height, `${selector} is at least 44 px tall`).toBeGreaterThanOrEqual(43.5);
@@ -347,7 +419,14 @@ describe('The pair page: mascot and night sky', () => {
         await ways.nth(2).click();
         await tab.waitForSelector('input[aria-label="Pairing link"]');
         const submit = must(await tab.getByRole('button', { name: 'Use this link' }).boundingBox(), 'the submit');
-        expect(submit.width, 'the submit is not a full-width bar').toBeLessThan(variant.width * 0.6);
+        // C59 audit: the shared answer row: the field's width on a phone, a 12 rem button at the right end on a desktop.
+        if (variant.phone) {
+          const field = must(await tab.locator('input[aria-label="Pairing link"]').boundingBox(), 'the field');
+          expect(
+            Math.abs(submit.width - field.width),
+            'phone: Use this link is the full field width',
+          ).toBeLessThanOrEqual(1);
+        } else expect(submit.width, 'the submit is not a full-width bar').toBeLessThan(variant.width * 0.6);
         expect(submit.width, 'r11-1b G4: Use this link is at least 136 px wide').toBeGreaterThanOrEqual(135.5);
         // The paste path is mounted WITH a return path, so Back is on it: exactly one, 136 px wide and 44 tall.
         expect(await tab.locator('[data-pairing-close]').count(), 'the paste path has exactly one Back').toBe(1);

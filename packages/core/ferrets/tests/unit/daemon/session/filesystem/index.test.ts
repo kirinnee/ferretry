@@ -121,6 +121,19 @@ describe('the session file index inside a Git worktree', () => {
     should(index.coverage).eql('complete');
   });
 
+  it('should not list the key store or sign-in names of a home folder a person started a ferret in', async () => {
+    // Arrange: a ferret started in `~` — only the id_* key names used to be dropped.
+    const paths = ['notes.md', '.ssh/config', '.ssh/known_hosts', '.config/gh/hosts.yml', '.codex/auth.json'];
+    const { filesystem } = viewer({ tree: gitTree('notes.md') }, { listFiles: () => ({ paths, truncated: false }) });
+
+    // Act
+    const index = await filesystem.index(CWD);
+
+    // Assert
+    should(index.files.map(file => file.path)).eql(['notes.md']);
+    should(index.skipped).eql([{ reason: 'denied', count: 4 }]);
+  });
+
   it('should report a repository it could not interrogate as partial rather than as empty', async () => {
     // Arrange
     const { filesystem } = viewer(

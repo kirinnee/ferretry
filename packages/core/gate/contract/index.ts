@@ -18,6 +18,7 @@ export * from './credentials.ts';
 export * from './gate-config.ts';
 export * from './grants.ts';
 export * from './inventory.ts';
+export * from './loosening-act.ts';
 export * from './owner-only.ts';
 export * from './policy.ts';
 export * from './port.ts';

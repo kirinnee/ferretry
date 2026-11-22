@@ -133,3 +133,28 @@
 .fy-composer-send[data-sending]:disabled {
   opacity: 1;
 }
+
+/* A BUTTON THAT WORKS (primitives.tsx `Button` with `busy`): the mark takes the icon's own 16px slot and the label that is not showing is kept as a ghost,
+   so the button is exactly as big busy as idle. Layout only. */
+.kt-btn__lead {
+  align-items: center;
+  block-size: 16px;
+  display: inline-flex;
+  flex: 0 0 16px;
+  inline-size: 16px;
+  justify-content: center;
+}
+.kt-btn__label {
+  align-items: center;
+  display: inline-flex;
+  flex-direction: column;
+}
+/* The other label, unseen and no taller than a hairline: it only keeps the width of the longer of the two. */
+.kt-btn__label::after {
+  block-size: 0;
+  content: attr(data-ghost);
+  display: block;
+  overflow: hidden;
+  visibility: hidden;
+  white-space: nowrap;
+}

@@ -111,7 +111,7 @@ describe('S14 the first run is Onboarding’s daemon-less screen', () => {
   });
 
   test('S14 a pairing made in ANOTHER tab (fy pair --open) carries this tab from the same-computer step into the setup flow', async () => {
-    go('/onboarding#fy-setup=f1;route=first-time;target=this;doer=self;step=local');
+    go('/onboarding#fy-setup=f1;route=first-time;target=this;step=local');
     const { app, daemons, storage } = boot({ paired: false });
     const view = await mount(app);
     await until(() => view.container.querySelector('[data-onboarding-screen="local"]') !== null);

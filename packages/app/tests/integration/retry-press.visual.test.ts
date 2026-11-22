@@ -112,3 +112,31 @@ describe('Try again opens the passkey dialog, and keeps opening it after a Cance
     }
   }
 });
+
+// end B5: the Try again is a 44px target at a phone's width even where the pointer is not reported coarse (a narrow desktop window,
+// the gate's run), where it was 23-30px.
+describe('Try again is a 44px target at 390', () => {
+  for (const coarse of [false, true])
+    it(`${coarse ? 'a touch phone' : 'a narrow window with a mouse'}`, async () => {
+      const context = await browser.newContext({
+        viewport: { width: 390, height: 844 },
+        hasTouch: coarse,
+        isMobile: coarse,
+      });
+      const origin = server?.url.origin ?? '';
+      await context.route('**/*', async route =>
+        new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+      );
+      const tab = await context.newPage();
+      try {
+        await tab.goto(`${origin}/?theme=studio-light`);
+        const button = tab.locator('[data-context-retry]');
+        await button.waitFor({ state: 'visible' });
+        const box = await button.boundingBox();
+        expect(box?.height ?? 0, 'the Try again is at least 44px tall').toBeGreaterThanOrEqual(44);
+        if (shotsDir !== '' && !coarse) await tab.screenshot({ path: join(shotsDir, '390-mouse-retry-44px.png') });
+      } finally {
+        await context.close();
+      }
+    });
+});

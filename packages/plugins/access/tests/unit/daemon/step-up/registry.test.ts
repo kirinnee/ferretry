@@ -686,3 +686,50 @@ describe("StepUpRegistry stored proof (a standing rule's kept assertion, invaria
     should(registry.claimStoredProof(phone, now, STEP_UP_ACTS.approveSignInRule, RULE, CHALLENGE)).be.undefined();
   });
 });
+
+describe('StepUpRegistry: a call that spent its own zero-minute step-up at admission (C59 O5-10b R1)', () => {
+  const zeroMinute = (): StepUpRegistry => {
+    const registry = new StepUpRegistry({ nowMs: () => NOW }, () => 0);
+    registry.open(phone);
+    return registry;
+  };
+
+  it('should let that call, and only that call, take the proof it was admitted with, once', () => {
+    // Arrange: the passkey was proved for the act, and the admission spent the step-up it rode on (one step-up, one act).
+    const registry = zeroMinute();
+    registry.grant(phone, NOW - 1_000, true, STEP_UP_ACTS.loosenConfig);
+    registry.spend(phone);
+    should(registry.held(phone, NOW)).be.false();
+
+    // Assert: any other question still needs a step-up held now ...
+    should(registry.freshlyHeld(phone, NOW)).be.false();
+    should(registry.claimFresh(phone, NOW, STEP_UP_ACTS.loosenConfig, undefined, NOW)).be.false();
+    // ... but the call that spent it takes the proof it was admitted with, exactly once.
+    should(registry.claimFresh(phone, NOW, STEP_UP_ACTS.loosenConfig, undefined, NOW, true)).be.true();
+    should(registry.claimFresh(phone, NOW, STEP_UP_ACTS.loosenConfig, undefined, NOW, true)).be.false();
+  });
+
+  it('should never hand that call a proof proved for another act, or after its admission', () => {
+    const registry = zeroMinute();
+    registry.grant(phone, NOW - 1_000, true, STEP_UP_ACTS.addDevice);
+    registry.spend(phone);
+    should(registry.claimFresh(phone, NOW, STEP_UP_ACTS.loosenConfig, undefined, NOW, true)).be.false();
+
+    const later = zeroMinute();
+    later.grant(phone, NOW + 1_000, true, STEP_UP_ACTS.loosenConfig);
+    later.spend(phone);
+    should(later.claimFresh(phone, NOW, STEP_UP_ACTS.loosenConfig, undefined, NOW, true)).be.false();
+  });
+
+  it('should hand that call nothing once the copy of the app has no live session, or the proof is a challenge old', () => {
+    const registry = zeroMinute();
+    registry.grant(phone, NOW - PASSKEY_CHALLENGE_TTL_SECONDS * 1_000, true, STEP_UP_ACTS.loosenConfig);
+    registry.spend(phone);
+    should(registry.claimFresh(phone, NOW, STEP_UP_ACTS.loosenConfig, undefined, NOW, true)).be.false();
+
+    const closed = new StepUpRegistry({ nowMs: () => NOW }, () => 0);
+    // Never opened: the copy has no live session, so nothing it proved stands.
+    closed.grant(phone, NOW - 1_000, true, STEP_UP_ACTS.loosenConfig);
+    should(closed.claimFresh(phone, NOW, STEP_UP_ACTS.loosenConfig, undefined, NOW, true)).be.false();
+  });
+});

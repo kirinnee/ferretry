@@ -81,9 +81,13 @@ export async function readUpdate(client: OnboardingClient): Promise<HarnessCliVi
 /** How a missing Codex would be installed, from the setup scan; a scan that cannot be read falls back to the manual command. */
 export async function readInstallPlan(
   client: OnboardingClient,
+  /** An explicit "Check again": the daemon looks the tools up now, not from its last ten seconds. */
+  fresh = false,
 ): Promise<Extract<InstallFacts, { state: 'missing' }>['plan']> {
   try {
-    const scan = SetupScanSchema.parse(await client.call(ROUTES.scan, { quiet: true }));
+    const scan = SetupScanSchema.parse(
+      await client.call(ROUTES.scan, { quiet: true, ...(fresh ? { query: { fresh: '1' } } : {}) }),
+    );
     const tool = scan.tools.find(entry => entry.harness === 'codex');
     if (tool === undefined || tool.installed)
       return { kind: 'manual', command: MANUAL_INSTALL, reason: 'This machine did not say how to install Codex.' };

@@ -18,10 +18,10 @@ const ADDRESS: Readonly<Record<string, string>> = {
   start: `${ORIGIN}/onboarding`,
   target: `${ORIGIN}/onboarding?journey=add-daemon`,
   pair: `${ORIGIN}/onboarding?journey=pair`,
-  install: `${ORIGIN}/setup#fy-setup=f1;route=first-time;target=this;doer=self;step=install`,
-  elsewhere: `${ORIGIN}/setup#fy-setup=f1;route=first-time;target=other;doer=self;step=elsewhere`,
-  daemon: `${ORIGIN}/setup#fy-setup=f1;route=first-time;target=this;doer=self;step=daemon`,
-  local: `${ORIGIN}/setup#fy-setup=f1;route=first-time;target=this;doer=self;step=local`,
+  install: `${ORIGIN}/setup#fy-setup=f1;route=first-time;target=this;step=install`,
+  elsewhere: `${ORIGIN}/setup#fy-setup=f1;route=first-time;target=other;step=elsewhere`,
+  daemon: `${ORIGIN}/setup#fy-setup=f1;route=first-time;target=this;step=daemon`,
+  local: `${ORIGIN}/setup#fy-setup=f1;route=first-time;target=this;step=local`,
 };
 const address = ADDRESS[params.get('view') ?? 'start'] ?? ADDRESS.start ?? '';
 

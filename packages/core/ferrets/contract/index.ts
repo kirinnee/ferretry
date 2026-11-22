@@ -38,6 +38,8 @@ export { type CompactAtParse, checkCompactAt, parseCompactAt } from './view/comp
 export * from './transfer.ts';
 export * from './subtree.ts';
 export * from './task-title.ts';
+export * from './tree-git.ts';
+export * from './tree-index.ts';
 export * from './fork.ts';
 export * from './handover.ts';
 export * from './move.ts';

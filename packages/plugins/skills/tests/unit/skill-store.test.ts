@@ -16,6 +16,7 @@ import { SKILLS_INSTALLED_STATE } from '../../contract/index.ts';
 import { skillParts } from '../../daemon/lib/launch-parts.ts';
 import {
   installRefusal,
+  InstalledSkillChanged,
   InstalledSkillConflict,
   InstalledSkillExists,
   InstalledSkillRefused,
@@ -410,5 +411,122 @@ describe('a create-only install never replaces what is already there', () => {
       read: () => Promise.reject(new Error('read failed')),
     });
     await expect(store.install('review', SKILL, { createOnly: true })).rejects.toBe(failure);
+  });
+});
+
+describe('a stamped folder is replaced only while it still holds what the import wrote', () => {
+  const STAMPED = [
+    { path: 'SKILL.md', content: '---\nname: review\n---\nreview\n' },
+    { path: 'b/two.md', content: 'two' },
+    { path: 'a.md', content: 'one' },
+  ];
+  const unchanged = { stamp: true, onlyIfUnchangedSinceImport: true } as const;
+
+  async function stamped() {
+    const f = await fixture();
+    await f.store.install('review', STAMPED, { createOnly: true, stamp: true });
+    return f;
+  }
+
+  test('a create-only install can stamp the folder, and the stamp says it is unchanged', async () => {
+    const f = await stamped();
+    expect(await f.store.unchangedSinceImport('review')).toBe(true);
+  });
+
+  test('a replacing install of an untouched folder goes ahead and stamps what it wrote', async () => {
+    const f = await stamped();
+    await f.store.install('review', [{ path: 'SKILL.md', content: 'v2\n' }], unchanged);
+    expect(await readFile(join(f.installed, 'review', 'SKILL.md'), 'utf8')).toBe('v2\n');
+    expect(await f.store.walk('review')).toEqual([{ path: 'SKILL.md', kind: 'file' }]);
+    expect(await f.store.unchangedSinceImport('review')).toBe(true);
+  });
+
+  test('the same files in a different order stamp the same folder (the digest is in path order)', async () => {
+    const f = await stamped();
+    await f.store.install('review', [...STAMPED].reverse(), unchanged);
+    expect(await f.store.unchangedSinceImport('review')).toBe(true);
+  });
+
+  test('a file edited since the import refuses the replacement with InstalledSkillChanged and writes nothing', async () => {
+    const f = await stamped();
+    await writeFile(join(f.installed, 'review', 'a.md'), 'edited by hand');
+    const refused = await f.store.install('review', [{ path: 'SKILL.md', content: 'v2\n' }], unchanged).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(refused).toBeInstanceOf(InstalledSkillChanged);
+    expect(refused).toBeInstanceOf(InstalledSkillRefused);
+    expect((refused as Error).name).toBe('InstalledSkillChanged');
+    expect((refused as Error).message).toBe('review was changed after the import wrote it, so it was left as it is.');
+    expect(await readFile(join(f.installed, 'review', 'a.md'), 'utf8')).toBe('edited by hand');
+    expect(await readFile(join(f.installed, 'review', 'SKILL.md'), 'utf8')).toBe('---\nname: review\n---\nreview\n');
+    expect(await f.store.paths('review')).toEqual(['SKILL.md', 'b/two.md', 'a.md']);
+  });
+
+  test('a file added, a file deleted or a link in place of a file is a change too', async () => {
+    const added = await stamped();
+    await writeFile(join(added.installed, 'review', 'extra.md'), 'x');
+    expect(await added.store.unchangedSinceImport('review')).toBe(false);
+
+    const deleted = await stamped();
+    await rm(join(deleted.installed, 'review', 'a.md'));
+    expect(await deleted.store.unchangedSinceImport('review')).toBe(false);
+
+    const linked = await stamped();
+    await rm(join(linked.installed, 'review', 'a.md'));
+    await symlink(join(linked.installed, 'review', 'SKILL.md'), join(linked.installed, 'review', 'a.md'));
+    expect(await linked.store.unchangedSinceImport('review')).toBe(false);
+  });
+
+  test('a file that cannot be read back is a change (the folder is not what the import wrote)', async () => {
+    const f = await stamped();
+    const store = new SkillStore(
+      { ...f.port, stat: () => Promise.reject(new Error('stat failed')) } as ConstructorParameters<
+        typeof SkillStore
+      >[0],
+      { share: () => Promise.reject(new Error('no share')) },
+    );
+    expect(await store.unchangedSinceImport('review')).toBe(false);
+  });
+
+  test('a folder the import never stamped, an emptied one and a name that is no folder are not unchanged', async () => {
+    const f = await fixture();
+    await f.store.install('plain', SKILL, { createOnly: true });
+    expect(await f.store.unchangedSinceImport('plain')).toBe(false);
+    expect(await f.store.unchangedSinceImport('missing')).toBe(false);
+    expect(await f.store.unchangedSinceImport('..')).toBe(false);
+    await f.port.write(SKILLS_INSTALLED_STATE, 'digest', '_written/empty');
+    expect(await f.store.unchangedSinceImport('empty')).toBe(false);
+  });
+
+  test('a stamp that cannot be read is no stamp, and a stamp held as bytes is read as its text', async () => {
+    const f = await stamped();
+    const failing = new SkillStore(
+      { ...f.port, read: () => Promise.reject(new Error('read failed')) } as ConstructorParameters<
+        typeof SkillStore
+      >[0],
+      { share: () => Promise.reject(new Error('no share')) },
+    );
+    expect(await failing.unchangedSinceImport('review')).toBe(false);
+
+    const asBytes = new SkillStore(
+      {
+        ...f.port,
+        read: async (...args: Parameters<typeof f.port.read>) => {
+          const read = await f.port.read(...args);
+          return read.ok && typeof read.value === 'string' && args[1]?.startsWith('_written/') === true
+            ? { ...read, value: new TextEncoder().encode(read.value) }
+            : read;
+        },
+      } as ConstructorParameters<typeof SkillStore>[0],
+      { share: () => Promise.reject(new Error('no share')) },
+    );
+    expect(await asBytes.unchangedSinceImport('review')).toBe(true);
+  });
+
+  test('removing the whole skill forgets its stamp too', async () => {
+    const f = await stamped();
+    await f.store.uninstall('review');
+    expect(await f.store.unchangedSinceImport('review')).toBe(false);
   });
 });
