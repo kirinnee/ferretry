@@ -360,11 +360,12 @@
 .fy-card__desc .md.fy-seg > * + * {
   margin-top: 6px;
 }
-/* The same for a segment drawn as hypermedia: its document is the block, and its own blocks keep the beat. */
-.fy-card__desc .fy-seg .dh-doc {
+/* The same for a segment drawn as hypermedia: its document is the block, and its own blocks keep the beat. (`.fy-seg.fy-hm`:
+   it must outweigh the segment rules further down, which name the same box.) */
+.fy-card__desc .fy-seg.fy-hm .dh-doc {
   display: block;
 }
-.fy-card__desc .fy-seg .dh-doc > * + * {
+.fy-card__desc .fy-seg.fy-hm .dh-doc > * + * {
   margin-top: 6px;
 }
 /* The chips' line (part 1): the state and the stage. Everything else the head offers is behind the view's ⋯. */
@@ -1335,45 +1336,55 @@
 }
 /* The same segment when it is drawn as hypermedia (`ProseView`, Durian): its document keeps the card's own type, colour and
    rhythm instead of Durian's reading scale (17px, light weight, 16px under every block), so a card is as tall and reads
-   the same either way. Parts (a terminal) keep Durian's own look; this only sets the text between them. */
-.fy-seg .dh-doc {
+   the same either way. Parts (a terminal) keep Durian's own look; this only sets the text between them.
+   EVERY RULE NAMES `.fy-seg.fy-hm` (one box: `ProseView` hands its class to the hypermedia root). Conversation's own document
+   theme (`.fy-hm .dh-doc :is(p, ul, ol)` margins, the heading rules) has the same specificity as `.fy-seg .dh-doc` and loads
+   after it, so without the second class it won and a card grew by a paragraph margin under every block. */
+.fy-seg.fy-hm .dh-doc {
   display: flex;
   flex-direction: column;
   gap: 6px;
   color: inherit;
   font: inherit;
 }
-.fy-seg .dh-doc :is(p, ul, ol, h1, h2, h3, h4, h5, h6) {
+.fy-seg.fy-hm .dh-doc :is(p, ul, ol, h1, h2, h3, h4, h5, h6) {
   margin: 0;
 }
-.fy-seg .dh-doc :is(ul, ol) {
+.fy-seg.fy-hm .dh-doc :is(ul, ol) {
   display: flex;
   flex-direction: column;
   gap: 3px;
   padding-inline-start: 18px;
 }
-.fy-seg .dh-doc li {
+.fy-seg.fy-hm .dh-doc li {
   margin: 0;
   padding-left: 2px;
 }
-.fy-seg .dh-doc li > :is(ul, ol) {
+.fy-seg.fy-hm .dh-doc li > :is(ul, ol) {
   margin-top: 3px;
 }
-.fy-seg .dh-doc :is(strong, b) {
+.fy-seg.fy-hm .dh-doc :is(strong, b) {
   color: inherit;
   font-weight: var(--weight-strong);
 }
-/* A heading is a bold line at the segment's size, without Durian's `#` anchor. */
-.fy-seg .dh-doc :is(h1, h2, h3, h4, h5, h6) {
+/* A heading the ferret wrote is not drawn as a heading at all (`ProseView demoteHeadings`: Conversation's heading slot makes it
+   `p[data-demoted-heading] > strong`, as the shell's Markdown does), so the card's own labels stay the only headings on the
+   outline. It is a line at the segment's size whose words are bold (the `strong` rule above), exactly as in the Markdown draw.
+   The h1–h6 rule below is for a draw that still holds one. */
+.fy-seg.fy-hm .dh-doc [data-demoted-heading] {
+  font: inherit;
+  letter-spacing: normal;
+}
+.fy-seg.fy-hm .dh-doc :is(h1, h2, h3, h4, h5, h6) {
   font: inherit;
   font-weight: var(--weight-strong);
   letter-spacing: normal;
 }
-.fy-seg .dh-doc .h-anchor {
+.fy-seg.fy-hm .dh-doc .h-anchor {
   display: none;
 }
 /* A quote is the card's quote (`.md blockquote`), not Durian's bar. */
-.fy-seg .dh-doc blockquote {
+.fy-seg.fy-hm .dh-doc blockquote {
   margin: 0.7em 0;
   padding: 0.1em 0 0.1em var(--md-quote-pad);
   border-left: var(--md-quote-bar);
@@ -1382,10 +1393,10 @@
   font-style: var(--md-quote-font-style);
   color: var(--fg-soft);
 }
-.fy-seg .dh-doc > :first-child {
+.fy-seg.fy-hm .dh-doc > :first-child {
   margin-top: 0;
 }
-.fy-seg .dh-doc > :last-child {
+.fy-seg.fy-hm .dh-doc > :last-child {
   margin-bottom: 0;
 }
 
