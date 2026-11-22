@@ -12,6 +12,7 @@ import {
   type Pick,
   type Provider,
   SUPPORTED_HARNESSES,
+  isEmptyPick,
   memoryOfPick,
   pickFromMemory,
   withHarness,
@@ -28,7 +29,7 @@ type ProviderRead =
   | { readonly kind: 'failed' }
   | { readonly kind: 'ready'; readonly providers: readonly Provider[] };
 
-const harnessLabel = (key: string): string => SUPPORTED_HARNESSES.find(harness => harness.key === key)?.label ?? key;
+const harnessLabel = (key: string): string => SUPPORTED_HARNESSES.find(harness => harness.plugin === key)?.label ?? key;
 
 function Row({
   label,
@@ -216,5 +217,29 @@ export function AgentsPage({
   useEffect(() => {
     host.current?.remember(memoryOfPick(pick, providers));
   }, [pick, providers]);
-  return <AgentsChoices pick={pick} onPick={setPick} read={read} onRetry={load} />;
+  // Next needs at least one AI: an empty pick would skip both harnesses without a word. Later (which never runs this) is the
+  // plain way to leave the question for another time.
+  const empty = isEmptyPick(pick, providers);
+  const holding = useRef(false);
+  useEffect(() => {
+    if (!empty && !holding.current) return;
+    holding.current = empty;
+    host.current?.commit(
+      empty
+        ? async () => {
+            throw new Error('Pick at least one AI to set up, or choose Later.');
+          }
+        : null,
+    );
+  }, [empty]);
+  return (
+    <>
+      <AgentsChoices pick={pick} onPick={setPick} read={read} onRetry={load} />
+      {empty ? (
+        <p className="m-0 mt-3 text-cell text-muted" role="status" data-agent-none="">
+          Pick at least one AI to set up, or choose Later.
+        </p>
+      ) : null}
+    </>
+  );
 }

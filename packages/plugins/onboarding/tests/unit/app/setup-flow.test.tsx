@@ -1089,7 +1089,8 @@ describe('Next saves the choice (contract rule 8, r11 O1)', () => {
 });
 
 describe('"Which AI do you want to use?" decides which harness segments the run walks', () => {
-  const machine = (): Machine => ({
+  /** The machine's steps; `states` names the ones the machine already recorded an answer for (by `<plugin>.<id>`). */
+  const machine = (states: Readonly<Record<string, 'done' | 'found'>> = {}): Machine => ({
     id: A,
     name: 'Studio',
     steps: [
@@ -1105,9 +1106,11 @@ describe('"Which AI do you want to use?" decides which harness segments the run 
       side: 'daemon' as const,
       group: String(plugin),
       stepHost: true,
-      state: 'pending' as const,
+      state: states[`${plugin}.${id}`] ?? ('pending' as const),
     })),
   });
+  const told = (run: ReturnType<typeof setup>, plugin: string): string[] =>
+    run.answers.filter(answer => answer.plugin === plugin).map(answer => answer.state);
   const box = (name: string): HTMLInputElement | null | undefined =>
     view?.container.querySelector<HTMLInputElement>(`[data-agent-row="${name}"] > label input`);
 
@@ -1156,5 +1159,102 @@ describe('"Which AI do you want to use?" decides which harness segments the run 
     await next();
     await settle();
     expect(pageKey()).toBe('codex.installed');
+  });
+
+  it('a run resumed after a Codex-only pick asks the picker again, so the pending Claude pages are not walked', async () => {
+    // The machine recorded the picker (and the name) as answered, but the pick itself lived in memory and is gone.
+    const run = setup({ machines: [machine({ 'onboarding.agents': 'done', 'onboarding.name': 'done' })] });
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('onboarding.agents');
+    expect(box('claude')?.checked).toBe(true);
+    await interact(() => box('claude')?.click());
+    await interact(() => box('codex')?.click());
+    await next();
+    await settle();
+    expect(pageKey()).toBe('codex.installed');
+    await next();
+    await settle();
+    // Nothing of Claude was walked, and the machine hears of it only that it was skipped.
+    expect(told(run, 'claude-code')).toEqual(['skipped']);
+  });
+
+  it('a resumed run whose harness pages were all answered does not ask the picker again', async () => {
+    const run = setup({
+      machines: [
+        machine({
+          'onboarding.agents': 'done',
+          'onboarding.name': 'done',
+          'claude-code.installed': 'done',
+          'codex.installed': 'done',
+        }),
+      ],
+    });
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).not.toBe('onboarding.agents');
+  });
+
+  it('changing the pick after pages were answered keeps their state: nothing is told to the machine over them', async () => {
+    // Claude was already found before this run; Codex is asked now.
+    const found = setup({ machines: [machine({ 'claude-code.installed': 'found' })] });
+    view = await mount(found.tree);
+    await settle();
+    await interact(() => box('claude')?.click());
+    await interact(() => box('codex')?.click());
+    await next();
+    await next();
+    await settle();
+    expect(pageKey()).toBe('codex.installed');
+    await next();
+    await settle();
+    expect(view?.container.querySelector('[data-flow-end]')).not.toBeNull();
+    expect(told(found, 'claude-code')).toEqual([]);
+    await view?.unmount();
+
+    // Claude answered DURING this run, then the person goes back and unticks it: the answer stands, nothing more is told.
+    const during = setup({ machines: [machine()] });
+    view = await mount(during.tree);
+    await settle();
+    await next();
+    await next();
+    await settle();
+    expect(pageKey()).toBe('claude-code.installed');
+    await next();
+    await settle();
+    // The end page, then Back to Claude, to the name page, and to the picker.
+    await press('[data-step-back]');
+    await press('[data-step-back]');
+    await press('[data-step-back]');
+    await settle();
+    expect(pageKey()).toBe('onboarding.agents');
+    await interact(() => box('claude')?.click());
+    await interact(() => box('codex')?.click());
+    await next();
+    await next();
+    await settle();
+    expect(pageKey()).toBe('codex.installed');
+    await next();
+    await settle();
+    expect(view?.container.querySelector('[data-flow-end]')).not.toBeNull();
+    expect(told(during, 'claude-code')).toEqual(['done']);
+  });
+
+  it('an empty pick holds Next and says so; Later leaves the question for another time', async () => {
+    const run = setup({ machines: [machine()] });
+    view = await mount(run.tree);
+    await settle();
+    await interact(() => box('claude')?.click());
+    expect(view?.container.querySelector('[data-agent-none]')).not.toBeNull();
+    await next();
+    await settle();
+    expect(pageKey()).toBe('onboarding.agents');
+    expect(view?.container.querySelector('[data-flow-commit-error]')?.textContent).toContain('at least one');
+    const answered = () => run.arrived.filter(row => row.step !== '');
+    expect(answered()).toEqual([]);
+    await press('[data-flow-later]');
+    await settle();
+    expect(pageKey()).not.toBe('onboarding.agents');
+    expect(answered()).toEqual([{ step: 'agents', state: 'later' }]);
   });
 });

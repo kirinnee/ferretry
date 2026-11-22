@@ -8,6 +8,9 @@
  */
 import type { TransportAnswer, TransportRequest } from '../../../src/client/transport.ts';
 import { json } from '../../unit/client/fixtures.ts';
+// The REAL catalog (`ProviderPresetService.catalog()` over the shipped built-in presets); a copy of the Onboarding plugin's own
+// fixture, because a test reaches another package only through its contract.
+import PROVIDER_PRESETS from './provider-presets.json';
 import { answerFor } from './mobile-fake-daemon.ts';
 
 /** The fixed fake pairing code. It is not a real one and opens nothing. */
@@ -62,6 +65,7 @@ const stepsOf = (plugin: string, rows: readonly (readonly [string, string, numbe
 
 /** What every machine carries. */
 const COMMON: readonly FakeStep[] = [
+  { plugin: 'onboarding', id: 'agents', title: 'Which AI do you want to use?', order: 2, group: 'This machine' },
   { plugin: 'onboarding', id: 'name', title: 'Name this machine', order: 5, group: 'This machine' },
   { plugin: 'onboarding', id: 'appearance', title: 'Appearance', order: 1, side: 'client', group: 'This device' },
   { plugin: 'layouts', id: 'layout', title: 'Layout', order: 2, side: 'client' },
@@ -154,6 +158,9 @@ export class FakeDaemon {
 
   private own(request: TransportRequest): TransportAnswer | undefined {
     if (request.method === 'GET' && request.path === '/v1/onboarding') return json(this.view());
+    // "Which AI do you want to use?" lists the provider catalog: the REAL one (the shipped built-in presets, as
+    // `GET /v1/logins/presets` answers them), so the picker is walked over the harness ids the wire really carries.
+    if (request.method === 'GET' && request.path === '/v1/logins/presets') return json(PROVIDER_PRESETS);
     const answered = /^\/v1\/onboarding\/steps\/([^/]+)\/([^/]+)$/u.exec(request.path);
     if (request.method === 'POST' && answered !== null) {
       const [, plugin = '', id = ''] = answered;

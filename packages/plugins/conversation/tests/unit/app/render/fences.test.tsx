@@ -3,7 +3,8 @@ import { ensureDom, render } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
 import should from 'should';
 import { FyRenderBlock } from '../../../../app/render/fy-render-block.tsx';
-import { fyRenderFenceBody, fyRenderFences, tolerateAuthoringNoise } from '../../../../app/render/fences.tsx';
+import { tolerateAuthoringNoise } from '../../../../app/render/authoring-noise.ts';
+import { fyRenderFenceBody, fyRenderFences } from '../../../../app/render/fences.tsx';
 import { FY_RENDER_FENCE_ATTRIBUTE, parseFyRender } from '../../../../app/render/fy-render.ts';
 
 /**

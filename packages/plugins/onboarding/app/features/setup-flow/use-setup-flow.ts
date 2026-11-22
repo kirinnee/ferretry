@@ -188,6 +188,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     trail: [],
     gone: new Set(),
     notNeeded: new Set(),
+    aside: new Set(),
     direction: 'forward',
     visit: 0,
   });
@@ -425,11 +426,13 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     if (run.at !== END) return;
     for (const key of run.notNeeded) {
       const step = pages.find(candidate => candidate.key === key);
-      if (step?.phase !== 'daemon' || answeredNow.current.has(key) || toldAtEnd.current.has(key)) continue;
+      // A page that holds an answer (before the run or during it) keeps it: `skipped` would replace its found / done state.
+      if (step?.phase !== 'daemon' || answered.has(key) || answeredNow.current.has(key) || toldAtEnd.current.has(key))
+        continue;
       toldAtEnd.current.add(key);
       sendDaemon(step, 'skipped');
     }
-  }, [run.at, run.notNeeded, pages, sendDaemon]);
+  }, [run.at, run.notNeeded, pages, answered, sendDaemon]);
 
   const page = pages.find(candidate => candidate.key === run.at);
   const hidden = passedOver(run);
@@ -474,7 +477,9 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
         setRun(state => clearNotNeeded(state, pages, plugin));
         // "Which AI do you want to use?": the pages of every harness left out are not needed in this run (flow-model.ts `applyPicked`).
         const picked = plugin === 'onboarding' ? pickedOf(memory.current.get(plugin) ?? {}) : undefined;
-        if (picked !== undefined) setRun(state => applyPicked(state, pages, picked));
+        // A page that already holds an answer (before the run or during it) keeps it: only unanswered pages are passed over.
+        if (picked !== undefined)
+          setRun(state => applyPicked(state, pages, picked, new Set([...answered, ...answeredNow.current.keys()])));
         setMemoryRead(count => count + 1);
       }
     },

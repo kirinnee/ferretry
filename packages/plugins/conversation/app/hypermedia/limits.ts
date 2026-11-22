@@ -129,3 +129,41 @@ export const exceedsMessageCap = (text: string): boolean => exceedsBytes(text, M
 
 /** True when the text Durian would be given is over {@link PARSER_LIMITS}, counted in UTF-8 bytes. */
 export const exceedsParserBudget = (text: string): boolean => exceedsBytes(text, PARSER_LIMITS.maxInputBytes);
+
+/**
+ * HOW BIG THE DOCUMENT DURIAN MADE MAY BE, FOR THE MESSAGE IT WAS MADE FROM (checked inside the worker, before the result is
+ * copied across to the page). A small input must never grow into a tree the page has to receive, copy and draw: the parse
+ * can be stopped at a time budget, but a result that arrives in time can still be enormous.
+ *
+ *  - SERIALIZED SIZE: at most {@link DOCUMENT_BYTES_PER_BYTE} times the message's bytes, plus {@link DOCUMENT_BYTES_FLOOR}. Durian's
+ *    tree is JSON with a field name per node (`{"t":"text","v":"…"}`). MEASURED on the pinned release: prose 3.8×, a table 6.8×,
+ *    a list 10×, a heading and a line of text per section 14×, and the densest honest Markdown (an emphasis mark on every
+ *    word) 16.8×. 24 leaves headroom over that and still bounds the result to 24 × 300,000 bytes plus the floor, about 7.3 MB,
+ *    for the largest message the cap lets through. The floor lets a short message through whatever its ratio (a three-byte
+ *    emphasis is 118×).
+ *  - NODES: at most {@link DOCUMENT_NODES_PER_BYTE} per message byte plus {@link DOCUMENT_NODES_FLOOR}: a node is at least a
+ *    mark or a character of the message, so more than three per byte is expansion, not reading.
+ */
+export const DOCUMENT_BYTES_PER_BYTE = 24;
+export const DOCUMENT_BYTES_FLOOR = 65_536;
+export const DOCUMENT_NODES_PER_BYTE = 3;
+export const DOCUMENT_NODES_FLOOR = 2_000;
+
+/**
+ * True when `doc` (plain data: objects, arrays, strings, numbers) is over the budget for `source`. The node count is taken
+ * first and stops at the cap, so a tree far over it is never serialized; only a tree within the node cap is.
+ */
+export function exceedsDocumentBudget(doc: unknown, source: string): boolean {
+  const bytes = encoder.encode(source).length;
+  const nodeCap = DOCUMENT_NODES_PER_BYTE * bytes + DOCUMENT_NODES_FLOOR;
+  let nodes = 0;
+  const pending: unknown[] = [doc];
+  while (pending.length > 0) {
+    const next = pending.pop();
+    if (typeof next !== 'object' || next === null) continue;
+    nodes += 1;
+    if (nodes > nodeCap) return true;
+    for (const child of Object.values(next)) pending.push(child);
+  }
+  return JSON.stringify(doc).length > DOCUMENT_BYTES_PER_BYTE * bytes + DOCUMENT_BYTES_FLOOR;
+}

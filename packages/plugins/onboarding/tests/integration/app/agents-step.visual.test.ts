@@ -115,21 +115,43 @@ for (const variant of VARIANTS)
 
         await tab.locator('[data-agent-row="others"] > label').click();
         await tab.waitForSelector('[data-agent-row="provider-kimi"]');
-        await tab.locator('[data-agent-row="provider-glm"] > label').click();
-        await tab.waitForSelector('[data-agent-harness="glm"]');
+        await tab.locator('[data-agent-row="provider-zai-glm"] > label').click();
+        await tab.waitForSelector('[data-agent-harness="zai-glm"]');
         await tab.waitForTimeout(200);
         const opened = await measure(tab);
+        // The REAL catalog: every offered preset a supported harness runs, in catalog order (GLM is Z.ai's `zai-glm`).
         expect(opened.rows.map(row => row.row).slice(3)).toEqual([
           'others',
+          'provider-anthropic-api-key',
+          'provider-amazon-bedrock',
+          'provider-amazon-bedrock-api-key',
+          'provider-bedrock-mantle',
+          'provider-google-vertex',
+          'provider-microsoft-foundry-api-key',
+          'provider-microsoft-foundry-azure-cli',
+          'provider-zai-glm',
           'provider-kimi',
-          'provider-glm',
-          'provider-deepseek',
           'provider-minimax',
-          'provider-ollama',
-          'provider-groq',
-          'provider-cerebras',
-          'provider-mistral',
+          'provider-deepseek',
+          'provider-qwen-coding-plan',
+          'provider-openrouter',
+          'provider-vercel-ai-gateway',
+          'provider-litellm',
+          'provider-custom-gateway',
+          'provider-openai-api-key',
+          'provider-azure-openai',
+          'provider-ollama-codex',
         ]);
+        // The harness question offers exactly what the catalog's halves say.
+        const choices = async (provider: string): Promise<string[]> =>
+          await tab
+            .locator(`[data-agent-harness="${provider}"] input`)
+            .evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value));
+        expect(await choices('zai-glm')).toEqual(['claude-code']);
+        for (const provider of ['kimi', 'minimax', 'deepseek']) {
+          await tab.locator(`[data-agent-row="provider-${provider}"] > label`).click();
+          expect(await choices(provider), `${provider} offers Claude Code and Codex`).toEqual(['claude-code', 'codex']);
+        }
         expect(opened.overflow).toBeLessThanOrEqual(0);
         await shot(tab, variant, 'others-harness');
         expect(problems).toEqual([]);

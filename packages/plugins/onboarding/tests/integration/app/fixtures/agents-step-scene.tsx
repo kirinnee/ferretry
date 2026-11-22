@@ -1,7 +1,8 @@
 /**
  * The browser entry for the ONBOARDING "WHICH AI DO YOU WANT TO USE?" STEP over fake data (no daemon): the REAL `createAgentsPanel`
  * (what the setup flow mounts) drawn by the REAL `FlowPage` (cover, frame, footer). The one fake is the client, whose
- * `GET /v1/logins/presets` answers a made-up provider catalog (the page lists whatever it is given).
+ * `GET /v1/logins/presets` answers the REAL provider catalog (`tests/fixtures/provider-presets.json`: what the shipped built-in
+ * presets say, with the harness ids the wire carries).
  *
  *   ?theme=<family>-<mode>   the first look (the mode is read from it)
  */
@@ -14,31 +15,15 @@ import { createRoot } from 'react-dom/client';
 import { createAgentsPanel } from '../../../../app/features/agents/agents-panel.tsx';
 import { FlowPage } from '../../../../app/features/setup-flow/page-frame.tsx';
 import type { FlowStep } from '../../../../app/lib/index.ts';
+import PROVIDER_PRESETS from '../../../fixtures/provider-presets.json';
 
 const params = new URLSearchParams(window.location.search);
 const first = params.get('theme') ?? 'studio-light';
 document.documentElement.dataset.theme = first;
 
-const yes = { available: true };
-const provider = (id: string, label: string, harnesses: readonly string[]) => ({
-  id,
-  label,
-  offered: yes,
-  halves: harnesses.map(harness => ({ harness, offered: yes })),
-});
-const PRESETS = [
-  provider('kimi', 'Kimi', ['claude']),
-  provider('glm', 'GLM', ['claude', 'codex']),
-  provider('deepseek', 'DeepSeek', ['claude']),
-  provider('minimax', 'MiniMax', ['claude']),
-  provider('ollama', 'Ollama', ['claude', 'codex']),
-  provider('groq', 'Groq', ['codex']),
-  provider('cerebras', 'Cerebras', ['codex']),
-  provider('mistral', 'Mistral', ['codex']),
-];
 const client = {
   call: async (route: string) => {
-    if (route === 'GET /v1/logins/presets') return { presets: PRESETS };
+    if (route === 'GET /v1/logins/presets') return PROVIDER_PRESETS;
     throw new Error(`unexpected route ${route}`);
   },
 } as unknown as PluginClient;

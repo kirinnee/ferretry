@@ -168,14 +168,15 @@ const show = async (
   return { page, context, found, state, requested };
 };
 
-const fetched = (requested: readonly string[], file: string): boolean => requested.includes(`/${file}`);
+/** Whether the page asked for `file` (a file that is not in the build is never asked for: its name is empty). */
+const fetched = (requested: readonly string[], file: string): boolean => file !== '' && requested.includes(`/${file}`);
 
 describe('what a message fetches', () => {
-  it('finds the engine, the 3D stage and (nowhere) Chart.js in the build', () => {
-    expect(engineFile).not.toBe('');
-    expect(threeFile).not.toBe('');
-    expect(engineFile).not.toBe(threeFile);
-    // The evaluator and the chart library are not shipped: there is no chart file to fetch.
+  it('has no animation engine, no 3D stage and no Chart.js in the build (r12 H11: a message is read in a worker that has no scene compiler)', () => {
+    // Nothing a message does reaches the 2D scene compiler or the 3D stage any more, so the page build holds neither chunk; they come
+    // back, with their tests below, when the worker carries a compiler. The evaluator and the chart library are not shipped either.
+    expect(engineFile).toBe('');
+    expect(threeFile).toBe('');
     expect(chartFiles).toEqual([]);
   });
 

@@ -1,3 +1,4 @@
+import { noteClientDaemon } from '@ferretry/app/testing';
 import { describe, expect, it } from 'bun:test';
 import { createElement } from 'react';
 import { buildImportChange } from '../../../../../app/features/import-kit/change.ts';
@@ -305,6 +306,31 @@ describe('the scan is read once per client and shared', () => {
       expect(scans()).toBe(2);
       await second.unmount();
       forgetSetupScanAhead(client);
+    });
+
+    it('two clients of one machine (onboarding opens the flow, the Claude page reads through its own): reopening shows the NEW read', async () => {
+      // The flow is opened through the onboarding client; the Claude Code page draws through another client of the SAME daemon.
+      const { client: opening, gates, scans } = gatedClient();
+      const { client: claudePage } = gatedClient();
+      noteClientDaemon(opening, 'fy_daemon_two_clients');
+      noteClientDaemon(claudePage, 'fy_daemon_two_clients');
+      readSetupScanAhead(opening);
+      const first = await mount(createElement(Probe, { client: claudePage }));
+      gates[0]?.(['old']);
+      await settle();
+      expect(shown(first)).toBe('old');
+      await first.unmount();
+      forgetSetupScanAhead(opening);
+      // Reopened: the old store the Claude page's client kept must not be reused.
+      readSetupScanAhead(opening);
+      expect(scans()).toBe(2);
+      const second = await mount(createElement(Probe, { client: claudePage }));
+      gates[1]?.(['new']);
+      await settle();
+      expect(shown(second)).toBe('new');
+      expect(scans()).toBe(2);
+      await second.unmount();
+      forgetSetupScanAhead(opening);
     });
   });
 

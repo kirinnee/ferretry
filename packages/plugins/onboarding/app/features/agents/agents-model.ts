@@ -12,17 +12,19 @@
  */
 import { z } from 'zod';
 
-/** A harness this build can run: its catalog key (the preset halves name it) and the plugin whose pages set it up. */
+/**
+ * A harness this build can run. Its `plugin` id is the ONE name for it: the catalog's preset halves name a harness by its plugin
+ * id (`claude-code`, `codex`; logins/contract/wire.ts `HarnessKeySchema`), and the flow's pages belong to the plugin of that id.
+ */
 export interface SupportedHarness {
-  readonly key: string;
   readonly plugin: string;
   readonly label: string;
 }
 
 /** Every harness a setup segment exists for, in the order the run walks them (Claude, then Codex). */
 export const SUPPORTED_HARNESSES: readonly SupportedHarness[] = [
-  { key: 'claude', plugin: 'claude-code', label: 'Claude Code' },
-  { key: 'codex', plugin: 'codex', label: 'Codex' },
+  { plugin: 'claude-code', label: 'Claude Code' },
+  { plugin: 'codex', label: 'Codex' },
 ];
 
 /** The first-party AIs the page lists by name. Gemini has no harness yet, so it is shown and cannot be picked. */
@@ -58,7 +60,7 @@ export interface Provider {
   readonly harnesses: readonly string[];
 }
 
-const harnessKeys = SUPPORTED_HARNESSES.map(harness => harness.key);
+const harnessKeys = SUPPORTED_HARNESSES.map(harness => harness.plugin);
 
 /** The providers the catalog offers that a supported harness can run, in catalog order; the rest are not shown. */
 export function providersOf(catalog: z.infer<typeof PresetCatalogSchema>): readonly Provider[] {
@@ -111,16 +113,20 @@ export interface Segments {
 /** Flattens a pick into the segments it walks: Claude, then Codex, whether picked directly or as the harness of a provider. */
 export function segmentsOf(pick: Pick, providers: readonly Provider[]): Segments {
   const wanted = new Set<string>();
-  if (pick.claude) wanted.add('claude');
+  if (pick.claude) wanted.add('claude-code');
   if (pick.codex) wanted.add('codex');
   for (const provider of providers) {
     const harness = pick.others[provider.id];
     if (harness !== undefined && provider.harnesses.includes(harness)) wanted.add(harness);
   }
-  const on = SUPPORTED_HARNESSES.filter(harness => wanted.has(harness.key)).map(harness => harness.plugin);
-  const off = SUPPORTED_HARNESSES.filter(harness => !wanted.has(harness.key)).map(harness => harness.plugin);
+  const on = SUPPORTED_HARNESSES.filter(harness => wanted.has(harness.plugin)).map(harness => harness.plugin);
+  const off = SUPPORTED_HARNESSES.filter(harness => !wanted.has(harness.plugin)).map(harness => harness.plugin);
   return { on, off };
 }
+
+/** Whether the pick walks no harness at all: there is then nothing to set up, so Next is held (agents-page.tsx). */
+export const isEmptyPick = (pick: Pick, providers: readonly Provider[]): boolean =>
+  segmentsOf(pick, providers).on.length === 0;
 
 /**
  * The memory patch for a pick: the segments the run walks (`agentsOn` / `agentsOff`, read back by the flow: flow-model.ts `pickedOf`)

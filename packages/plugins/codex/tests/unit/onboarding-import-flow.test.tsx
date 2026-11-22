@@ -4,7 +4,7 @@
  * shell does with a page's `skip()` (it is persisted on the machine and the page is gone for the rest of the run) is exactly
  * what a unit over a recording host cannot see. So these walk the flow with Next / Back / Later the way a person does.
  */
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, setSystemTime, test } from 'bun:test';
 import { act, createElement } from 'react';
 import {
   deviceViewHarness,
@@ -262,6 +262,39 @@ describe('the Codex import pages in the setup flow', () => {
     noChooser();
     expect(query(`[data-found-item="${id}"] input`)?.hasAttribute('checked') ?? false).toBe(false);
     expect((query<HTMLInputElement>(`[data-found-item="${id}"] input`) as HTMLInputElement).checked).toBe(false);
+  });
+
+  test('unticking a row keeps the checklist on screen and reads the machine once (the next page drawn in advance never replaces the run)', async () => {
+    // C59 O8-5: the hidden pre-render of the next pages used to take the run's scan store, so the visible page switched to a
+    // fresh one that was still reading, drew nothing, and read the machine again. A REPEAT read is held open here.
+    let reads = 0;
+    const held = new Promise<never>(() => undefined);
+    const run = setup({
+      answered: [...START_AT_CHOICE, 'import-choice'],
+      scan: () => {
+        reads += 1;
+        return reads === 1 ? FULL : held;
+      },
+    });
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('codex.import-settings');
+    const before = boxes().length;
+    expect(before).toBeGreaterThan(0);
+    expect(reads).toBe(1);
+    // The read the flow started ahead no longer stands in for a store's first read (it is 10 minutes old), so a store made
+    // now would ask the machine again, and that read never answers.
+    setSystemTime(new Date(Date.now() + 11 * 60_000));
+    try {
+      await interact(() => boxes()[0]?.click()); // untick the first row
+      await settle();
+      expect(boxes().length).toBe(before);
+      expect(boxes()[0]?.checked).toBe(false);
+      expect(reads).toBe(1);
+      expect(query<HTMLButtonElement>('[data-step-next]')?.disabled).toBe(false);
+    } finally {
+      setSystemTime();
+    }
   });
 
   test('the first choice (import-choice) selected by arrow keys writes nothing and stays', async () => {

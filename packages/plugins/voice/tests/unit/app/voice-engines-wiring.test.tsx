@@ -98,7 +98,9 @@ describe('the Voice app half in the built app', () => {
 
   test('the shell’s Vite config takes the speech workers and resolutions from Voice', () => {
     const config = source('../../../../../app/vite.config.ts');
-    expect(config).toContain('worker: voiceBuild.worker');
+    // The worker build is Voice's (spread, so Conversation's Durian worker plugins can ride the same build: `...voiceBuild.worker`).
+    expect(config).toContain('...voiceBuild.worker');
+    expect(config).toContain('voiceBuild.worker.plugins()');
     expect(config).toContain('alias: voiceBuild.alias');
   });
 

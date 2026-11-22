@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   DEFAULT_PICK,
+  isEmptyPick,
   memoryOfPick,
   pickFromMemory,
   type Pick,
@@ -16,8 +17,11 @@ import {
   withProvider,
 } from '../../../app/features/agents/agents-model.ts';
 import { EMPTY_LEDGER, flattenFlow, type PairedDaemon } from '../../../app/lib/index.ts';
+import { ProviderPresetCatalogSchema } from '@ferretry/plugin-logins/contract';
+import realCatalog from '../../fixtures/provider-presets.json';
 import {
   advance,
+  answeredBefore,
   applyPicked,
   clearNotNeeded,
   markNotNeeded,
@@ -38,15 +42,15 @@ const row = (id: string, label: string, halves: readonly (readonly [string, bool
 /** A catalog with names the code has never heard of: the list can only come from the data. */
 const catalog = PresetCatalogSchema.parse({
   presets: [
-    row('alpha-ai', 'Alpha AI', [['claude', true]]),
+    row('alpha-ai', 'Alpha AI', [['claude-code', true]]),
     row('beta-ai', 'Beta AI', [
       ['codex', true],
-      ['claude', true],
+      ['claude-code', true],
     ]),
     row('gamma-ai', 'Gamma AI', [['codex', false]]),
     row('delta-ai', 'Delta AI', [['gemini', true]]),
-    row('eps-ai', 'Eps AI', [['claude', true]], false),
-    row('alpha-ai', 'Alpha AI again', [['claude', true]]),
+    row('eps-ai', 'Eps AI', [['claude-code', true]], false),
+    row('alpha-ai', 'Alpha AI again', [['claude-code', true]]),
   ],
 });
 
@@ -58,13 +62,13 @@ describe('Others: the provider list and the harness choice come from the catalog
   });
 
   test('"Which harness runs it?" offers only supported harnesses with an offered half, Claude before Codex', () => {
-    expect(providers.map(provider => provider.harnesses)).toEqual([['claude'], ['claude', 'codex']]);
+    expect(providers.map(provider => provider.harnesses)).toEqual([['claude-code'], ['claude-code', 'codex']]);
   });
 
   test('ticking a provider picks its first harness; the choice is limited to the ones it offers', () => {
     const beta = providers[1]!;
     let pick = withProvider(DEFAULT_PICK, beta, true);
-    expect(pick.others).toEqual({ 'beta-ai': 'claude' });
+    expect(pick.others).toEqual({ 'beta-ai': 'claude-code' });
     pick = withHarness(pick, beta, 'codex');
     expect(pick.others).toEqual({ 'beta-ai': 'codex' });
     expect(withHarness(pick, beta, 'gemini')).toBe(pick);
@@ -97,7 +101,7 @@ describe('the pick flattens to the segments the run walks', () => {
     expect(flat({ ...DEFAULT_PICK, others: { 'beta-ai': 'codex' } }).on).toEqual(['claude-code', 'codex']);
   });
   test('an Others choice the provider does not offer, or one the catalog dropped, walks nothing', () => {
-    expect(flat({ ...none, others: { 'alpha-ai': 'codex', 'gone-ai': 'claude' } }).on).toEqual([]);
+    expect(flat({ ...none, others: { 'alpha-ai': 'codex', 'gone-ai': 'claude-code' } }).on).toEqual([]);
   });
 });
 
@@ -199,5 +203,92 @@ describe('the flow hides the unpicked segments and records nothing', () => {
     expect(pickFromMemory({})).toBe(DEFAULT_PICK);
     expect(pickFromMemory({ agentsPick: 'not json' })).toBe(DEFAULT_PICK);
     expect(pickFromMemory({ agentsPick: '{"claude":1}' })).toBe(DEFAULT_PICK);
+  });
+});
+
+/**
+ * The REAL catalog: `provider-presets.json` is `ProviderPresetService.catalog()` over the shipped built-in presets (logins
+ * daemon), whole. Regenerate it with the service when a built-in preset changes. It names a harness the way the wire does
+ * (`claude-code`), which a hand-made catalog once got wrong without any test noticing.
+ */
+describe('the provider list over the real catalog', () => {
+  const real = providersOf(PresetCatalogSchema.parse(realCatalog));
+
+  test('the fixture is the Logins wire shape, whole', () => {
+    expect(ProviderPresetCatalogSchema.safeParse(realCatalog).success).toBe(true);
+  });
+  const harnessesOf = (id: string): readonly string[] | undefined =>
+    real.find(provider => provider.id === id)?.harnesses;
+
+  test('GLM (Z.ai) is offered, run by Claude Code', () => {
+    expect(harnessesOf('zai-glm')).toEqual(['claude-code']);
+  });
+  test('Kimi, MiniMax and DeepSeek offer Claude Code AND Codex, Claude Code first', () => {
+    for (const id of ['kimi', 'minimax', 'deepseek']) expect(harnessesOf(id)).toEqual(['claude-code', 'codex']);
+  });
+  test('a Codex-only provider is offered for Codex alone', () => {
+    expect(harnessesOf('openai-api-key')).toEqual(['codex']);
+  });
+  test('every harness any offered half names is one the page can run (none is silently dropped)', () => {
+    const named = new Set(realCatalog.presets.flatMap(row => row.halves.map(half => half.harness)));
+    expect([...named].sort()).toEqual(['claude-code', 'codex']);
+    for (const row of realCatalog.presets) expect(real.some(provider => provider.id === row.id)).toBe(true);
+  });
+});
+
+describe('an empty pick', () => {
+  const providers = providersOf(catalog);
+  test('walks no harness; any ticked AI is not empty', () => {
+    expect(isEmptyPick({ claude: false, codex: false, others: {} }, providers)).toBe(true);
+    expect(isEmptyPick(DEFAULT_PICK, providers)).toBe(false);
+    expect(isEmptyPick({ claude: false, codex: false, others: { 'beta-ai': 'codex' } }, providers)).toBe(false);
+  });
+});
+
+describe('answers the picker already sees', () => {
+  const step = (plugin: string, id: string, order: number, state: 'pending' | 'done' | 'found') => ({
+    plugin,
+    id,
+    title: id,
+    order,
+    side: 'daemon' as const,
+    stepHost: true as const,
+    state,
+    group: plugin,
+  });
+  const make = (
+    states: readonly ['pending' | 'done' | 'found', 'pending' | 'done' | 'found', 'pending' | 'done' | 'found'],
+  ) => {
+    const daemon: PairedDaemon = {
+      id: 'fy_daemon_a',
+      name: 'Studio',
+      steps: [
+        step('onboarding', 'agents', 2, states[0]),
+        step('claude-code', 'installed', 20, states[1]),
+        step('codex', 'installed', 40, states[2]),
+      ],
+    };
+    return pagesOf(flattenFlow({ journey: 'first-time', target: daemon.id, daemons: [daemon], ledger: EMPTY_LEDGER }));
+  };
+
+  test('the picker is asked again while a harness page is still unanswered (the pick itself is never stored)', () => {
+    expect(answeredBefore(make(['done', 'pending', 'done']), new Set()).has('onboarding.agents')).toBe(false);
+  });
+  test('and stays answered once every harness page is', () => {
+    expect(answeredBefore(make(['done', 'found', 'done']), new Set()).has('onboarding.agents')).toBe(true);
+  });
+  test('an answered page of a segment left out is passed over, never marked: no mark means nothing is told to the machine', () => {
+    const pages = make(['pending', 'found', 'pending']);
+    const answered = answeredBefore(pages, new Set());
+    const state = applyPicked(startRun(pages, answered), pages, { on: ['codex'], off: ['claude-code'] }, answered);
+    expect([...state.notNeeded]).toEqual([]);
+    expect([...state.aside]).toEqual(['claude-code.installed']);
+    // Picked again, it is no longer set aside.
+    expect(applyPicked(state, pages, { on: ['claude-code', 'codex'], off: [] }, answered).aside.size).toBe(0);
+  });
+  test('without the answered set an unanswered page is marked as before', () => {
+    const pages = make(['pending', 'pending', 'pending']);
+    const state = applyPicked(startRun(pages, new Set()), pages, { on: ['codex'], off: ['claude-code'] });
+    expect([...state.notNeeded]).toEqual(['claude-code.installed']);
   });
 });

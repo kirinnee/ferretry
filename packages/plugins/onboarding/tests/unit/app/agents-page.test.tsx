@@ -17,11 +17,14 @@ afterEach(async () => {
 });
 
 const PROVIDERS: readonly Provider[] = [
-  { id: 'alpha-ai', label: 'Alpha AI', harnesses: ['claude'] },
-  { id: 'beta-ai', label: 'Beta AI', harnesses: ['claude', 'codex'] },
+  { id: 'alpha-ai', label: 'Alpha AI', harnesses: ['claude-code'] },
+  { id: 'beta-ai', label: 'Beta AI', harnesses: ['claude-code', 'codex'] },
 ];
 
+const held: { save: (() => Promise<void>) | null } = { save: null };
+
 const fakeStep = () => {
+  held.save = null;
   const calls: string[] = [];
   const memory: Record<string, unknown> = {};
   const step = {
@@ -31,7 +34,10 @@ const fakeStep = () => {
     done: () => calls.push('done'),
     skip: () => calls.push('skip'),
     notNeeded: () => calls.push('notNeeded'),
-    commit: () => calls.push('commit'),
+    commit: (save: (() => Promise<void>) | null) => {
+      calls.push(save === null ? 'commit:clear' : 'commit:hold');
+      held.save = save;
+    },
     busy: () => calls.push('busy'),
   } as unknown as StepHost;
   return { step, calls, memory };
@@ -85,7 +91,7 @@ describe('Which AI do you want to use?', () => {
     expect(list.querySelector('[data-agent-harness]')).toBeNull();
     await interact(() => box('provider-beta-ai').click());
     const harness = must(list.querySelector('[data-agent-harness="beta-ai"]'), 'the harness choice');
-    expect([...harness.querySelectorAll('input')].map(input => input.value)).toEqual(['claude', 'codex']);
+    expect([...harness.querySelectorAll('input')].map(input => input.value)).toEqual(['claude-code', 'codex']);
     await interact(() => must(harness.querySelectorAll<HTMLInputElement>('input')[1], 'codex').click());
     expect(memory).toMatchObject({ agentsOn: 'claude-code,codex', agentsOff: '' });
   });
@@ -98,6 +104,17 @@ describe('Which AI do you want to use?', () => {
     expect(memory).toMatchObject({ agentsOn: 'claude-code', agentsOff: 'codex' });
     await interact(() => box('others').click());
     expect(memory).toMatchObject({ agentsOn: '', agentsOff: 'claude-code,codex' });
+  });
+
+  it('an empty pick holds Next with a clear message and says so; a pick lets it through again', async () => {
+    const { calls } = await mountPage();
+    await interact(() => box('claude').click());
+    expect(calls).toEqual(['ready', 'commit:hold']);
+    expect(view?.container.querySelector('[data-agent-none]')?.textContent).toContain('at least one');
+    await expect(held.save?.()).rejects.toThrow('at least one');
+    await interact(() => box('codex').click());
+    expect(calls).toEqual(['ready', 'commit:hold', 'commit:clear']);
+    expect(view?.container.querySelector('[data-agent-none]')).toBeNull();
   });
 
   it('a catalog that cannot be read says so and offers to try again', async () => {

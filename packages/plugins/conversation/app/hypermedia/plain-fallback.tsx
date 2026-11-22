@@ -8,11 +8,24 @@
 /** What the note says. One string, so the worker and the belt say the same thing. */
 export const PLAIN_TEXT_NOTE = 'shown as plain text';
 
-export function PlainFallback({ text, noted }: { readonly text: string; readonly noted: boolean }) {
+export function PlainFallback({
+  text,
+  noted,
+  reason = '',
+}: {
+  readonly text: string;
+  readonly noted: boolean;
+  /** Why it was not read (`durian-reader.ts`): a data attribute, for a test and for a reader of the page's source. */
+  readonly reason?: string;
+}) {
   return (
     <>
       {noted ? (
-        <p className="fy-hm-plain-note" data-fy-plain-note="" style={{ fontSize: '0.75rem', opacity: 0.7, margin: 0 }}>
+        <p
+          className="fy-hm-plain-note"
+          data-fy-plain-note={reason}
+          style={{ fontSize: '0.75rem', opacity: 0.7, margin: 0 }}
+        >
           {PLAIN_TEXT_NOTE}
         </p>
       ) : null}

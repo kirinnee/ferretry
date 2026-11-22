@@ -1,7 +1,8 @@
 import { Markdown, useReferenceSurface } from '@ferretry/app';
 import { Fragment, useMemo } from 'react';
 import { commonMarkFences, linesOf, normalizeText } from '../hypermedia/fence-boundaries.ts';
-import { isClosedFyRender, synthesizedFence } from '../hypermedia/fy-render-host.tsx';
+import { synthesizedFence } from '../hypermedia/fy-render-host.tsx';
+import { isClosedFyRender } from '../hypermedia/fy-render-parse.ts';
 
 /**
  * A QUEUED MESSAGE'S WORDS (r12 H7 fix 2). A queued message is drawn the way it was before H7: the shell's `Markdown`
