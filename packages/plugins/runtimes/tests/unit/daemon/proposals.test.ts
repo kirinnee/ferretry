@@ -139,12 +139,64 @@ describe('FleetProposalStore', () => {
 
     // Act
     const first = store.consume(id);
+    store.settle(first); // the apply ended
     const repeat = refusal(() => store.consume(id));
 
     // Assert
     should(first.state).equal('consumed');
     should(repeat.problem).equal('consumed');
     should(repeat.message).containEql('has already been applied');
+  });
+
+  it('E3 says a spent change is being applied while its apply runs, never "already applied"', () => {
+    // Arrange
+    const { store } = rig();
+    const record = store.consume(store.open(staged('a')).id);
+
+    // Act
+    const during = refusal(() => store.require(record.id));
+    store.settle(record);
+    const after = refusal(() => store.require(record.id));
+
+    // Assert
+    should(during.problem).equal('applying');
+    should(during.extra).eql({ applying: true });
+    should(during.message).containEql('is being applied right now');
+    should(during.message).not.containEql('already been applied');
+    should(after.message).containEql('has already been applied');
+  });
+
+  it('E3 never says "expired before it was applied" for a change that was spent, whole or in part', () => {
+    // Arrange
+    const { store, advance } = rig();
+    const whole = store.consume(store.open(staged('whole')).id);
+    store.settle(whole);
+    const partly = store.consume(store.open(staged('partly')).id);
+    partly.landed = ['learning.yaml'];
+    partly.notLanded = ['voice.yaml'];
+    store.settle(partly);
+    advance(FIFTEEN_MINUTES + 1);
+
+    // Act
+    const wholeAnswer = refusal(() => store.require(whole.id));
+    const partlyAnswer = refusal(() => store.require(partly.id));
+
+    // Assert
+    should(partlyAnswer.problem).equal('consumed');
+    should(partlyAnswer.message).containEql(
+      'Part of this change was applied: learning.yaml. The rest was not: voice.yaml.',
+    );
+    should(partlyAnswer.message).not.containEql('expired');
+    should(partlyAnswer.extra).eql({ landed: ['learning.yaml'], notLanded: ['voice.yaml'] });
+    should(wholeAnswer.message).not.containEql('expired');
+    should(wholeAnswer.message).containEql('has already been applied');
+  });
+
+  it('should still say a change nobody spent expired before it was applied', () => {
+    const { store, advance } = rig();
+    const { id } = store.open(staged('a'));
+    advance(FIFTEEN_MINUTES + 1);
+    should(refusal(() => store.require(id)).message).containEql('expired before it was applied');
   });
 
   it('should put a consumed proposal back when the apply never reached the host', () => {
@@ -163,6 +215,7 @@ describe('FleetProposalStore', () => {
     // Arrange
     const { store, advance } = rig();
     const record = store.consume(store.open(staged('a')).id);
+    store.settle(record);
     advance(FIFTEEN_MINUTES);
     store.open(staged('sweeps the old one'));
 
@@ -181,7 +234,7 @@ describe('FleetProposalStore', () => {
     for (let index = 0; index < 17; index += 1) {
       advance(1);
       const { id } = store.open(staged(String(index)));
-      store.consume(id);
+      store.settle(store.consume(id));
       ids.push(id);
     }
 

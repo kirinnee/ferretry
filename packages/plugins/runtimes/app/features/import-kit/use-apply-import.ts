@@ -7,7 +7,7 @@ import { useCallback, useState } from 'react';
 import type { AccountChange } from '../../../contract/index.ts';
 import type { RuntimesClient } from '../../lib/client.ts';
 import { type AccountChanges, useAccountChanges } from '../fleet/shell/apply-change-panel.tsx';
-import type { ChangeResult } from '../fleet/shell/apply-change.ts';
+import { type ChangeRecovery, type ChangeResult, readChangeRecovery } from '../fleet/shell/apply-change.ts';
 import { resultSentences } from './model.ts';
 
 /** The daemon's own words for an import that has nothing it does not already hold. */
@@ -19,9 +19,22 @@ export interface ImportApplied {
   readonly sentences: readonly string[];
 }
 
+/**
+ * An import that stopped part-way: what landed on this machine and what did not, in the daemon's own words (names only).
+ * The page draws both lists beside the refusal, so the person is never left to guess what the machine holds.
+ */
+export interface ImportPartial {
+  /** The tool it was for, as the page names it. */
+  readonly label: string;
+  readonly landed: readonly string[];
+  readonly notLanded: readonly string[];
+}
+
 export interface ApplyImport {
   readonly changes: AccountChanges;
   readonly applied: ImportApplied | null;
+  /** The last import's landed / not-landed lists, when it stopped part-way; `null` otherwise. */
+  readonly partial: ImportPartial | null;
   readonly apply: (change: AccountChange, label: string) => Promise<ImportApplied | null>;
 }
 
@@ -35,6 +48,27 @@ export const IMPORT_DEADLINE_MS = 90_000;
 /** The page stopped waiting: what failed, that it may still land, and what the Try again press does. */
 const importTimedOutSentence = (label: string, deadlineMs: number = IMPORT_DEADLINE_MS): string =>
   `The ${label} import did not answer within ${String(Math.round(deadlineMs / 1000))} s, so this page stopped waiting. It may still finish on this machine. Press Try again: anything already brought over is not imported twice.`;
+
+/** After the page stopped waiting, what the machine said when it was asked once what became of the import. */
+const timedOutThen = (label: string, deadlineMs: number, recovery: ChangeRecovery['kind']): string => {
+  const waited = `The ${label} import did not answer within ${String(Math.round(deadlineMs / 1000))} s, so this page stopped waiting.`;
+  switch (recovery) {
+    case 'partial':
+      return `${waited} Part of it did land on this machine, as listed here. Press Try again to bring in the rest: anything already brought over is not imported twice.`;
+    case 'applying':
+      return `${waited} This machine is still finishing it. Wait a moment, then press Try again: anything already brought over is not imported twice.`;
+    case 'not-applied':
+      return `${waited} Nothing was written on this machine. Press Try again.`;
+    default:
+      return importTimedOutSentence(label, deadlineMs);
+  }
+};
+
+/** The time the one recovery read of a timed-out import may take before the page says what it knows instead. */
+const RECOVERY_DEADLINE_MS = 15_000;
+
+/** The sentence an import that finished while the page was not looking is shown with: the daemon's own summary was lost with the answer. */
+const FINISHED_WHILE_AWAY = 'The import finished on this machine.';
 
 /**
  * The refusal code of a machine that wants its unlock (Gate's `UNLOCK_REQUIRED_CODE`). Matched by value: Runtimes'
@@ -56,6 +90,7 @@ export interface ApplyImportOptions {
 export function useApplyImport(client: RuntimesClient, options: ApplyImportOptions = {}): ApplyImport {
   const changes = useAccountChanges({ client });
   const [applied, setApplied] = useState<ImportApplied | null>(null);
+  const [partial, setPartial] = useState<ImportPartial | null>(null);
   const deadlineMs = options.deadlineMs ?? IMPORT_DEADLINE_MS;
   const schedule = options.schedule;
   const apply = useCallback(
@@ -63,10 +98,18 @@ export function useApplyImport(client: RuntimesClient, options: ApplyImportOptio
       // One controller per attempt: the deadline aborts THIS attempt's requests (a stage that answers after the abort
       // never sends its apply), and `abandon` makes its late answer unable to touch the screen or the next attempt.
       const attempt = new AbortController();
+      // The id of the change this attempt staged: kept, so a timeout can still ask the machine what became of it.
+      let stagedId: string | undefined;
       let result: ChangeResult;
+      setPartial(null);
       try {
         result = await withDeadline(
-          changes.apply(change, { signal: attempt.signal }),
+          changes.apply(change, {
+            signal: attempt.signal,
+            onStaged: id => {
+              stagedId = id;
+            },
+          }),
           deadlineMs,
           schedule ?? realSchedule,
         );
@@ -74,11 +117,29 @@ export function useApplyImport(client: RuntimesClient, options: ApplyImportOptio
         // `changes.apply` never throws (a failure is a refusal), so the deadline is the only way here.
         attempt.abort();
         changes.abandon();
-        changes.refuse(
-          error instanceof MachineDeadlineError ? importTimedOutSentence(label, deadlineMs) : String(error),
-        );
+        if (!(error instanceof MachineDeadlineError)) {
+          changes.refuse(String(error));
+          return null;
+        }
+        // Nothing was staged yet: nothing can have landed. Otherwise ask ONCE what became of the change.
+        const recovery =
+          stagedId === undefined
+            ? ({ kind: 'unknown' } as const)
+            : await withDeadline(
+                readChangeRecovery(client, stagedId),
+                RECOVERY_DEADLINE_MS,
+                schedule ?? realSchedule,
+              ).catch((): ChangeRecovery => ({ kind: 'unknown' }));
+        if (recovery.kind === 'applied') {
+          const finished: ImportApplied = { kind: 'imported', sentences: [FINISHED_WHILE_AWAY] };
+          setApplied(finished);
+          return finished;
+        }
+        if (recovery.kind === 'partial') setPartial({ label, landed: recovery.landed, notLanded: recovery.notLanded });
+        changes.refuse(timedOutThen(label, deadlineMs, recovery.kind));
         return null;
       }
+      if (result.kind === 'refused' && result.partly !== undefined) setPartial({ label, ...result.partly });
       if (result.kind === 'refused' && result.code === UNLOCK_REQUIRED_CODE) {
         changes.refuse(IMPORT_UNLOCK_SENTENCE);
         return null;
@@ -97,7 +158,7 @@ export function useApplyImport(client: RuntimesClient, options: ApplyImportOptio
       setApplied(done);
       return done;
     },
-    [changes, deadlineMs, schedule],
+    [changes, client, deadlineMs, schedule],
   );
-  return { changes, applied, apply };
+  return { changes, applied, partial, apply };
 }

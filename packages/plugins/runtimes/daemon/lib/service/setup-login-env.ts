@@ -8,6 +8,7 @@ import { HARNESS_DISPLAY_NAMES } from '../account/layering.ts';
 import type { ImportedLoginEnv } from '../account/import.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { FleetCatalogRefusal, type ExecutorCaller, type FleetCatalogServiceDeps } from './catalog-service.ts';
+import type { WriteNotes } from './apply-ledger.ts';
 import { harnessKey } from './foreign.ts';
 
 const errorMessage = (error: unknown): string =>
@@ -56,13 +57,18 @@ export async function createLogins(
   plan: LoginEnvPlan,
   /** Called before each login is created: throws once the request has ended, so the next login is never written. */
   live?: () => void,
+  /** The apply's ledger: told each login as it is created, and each one that was already there. */
+  notes?: Pick<WriteNotes, 'login' | 'existingLogin'>,
 ): Promise<void> {
   const wanted = plan.newLogins ?? [];
   if (wanted.length === 0) return;
   const { credentials, loginChanges } = catalog;
   const have = new Set((await credentials.list()).logins.map(login => String(login.id)));
   for (const login of wanted) {
-    if (have.has(login.id)) continue;
+    if (have.has(login.id)) {
+      notes?.existingLogin(login.id);
+      continue;
+    }
     live?.();
     const refused = (error: unknown): FleetCatalogRefusal =>
       new FleetCatalogRefusal(
@@ -87,6 +93,7 @@ export async function createLogins(
     } catch (error) {
       throw refused(error);
     }
+    notes?.login(login.id);
   }
 }
 
@@ -101,6 +108,8 @@ export async function importLoginEnvs(
   port: LoginEnvImportApi | undefined,
   plan: LoginEnvPlan,
   caller?: ExecutorCaller,
+  /** The apply's ledger: told each login whose variables were really added. */
+  notes?: Pick<WriteNotes, 'loginVariables'>,
 ): Promise<string[]> {
   const envs = plan.loginEnvs ?? [];
   if (envs.length === 0) return [];
@@ -131,6 +140,7 @@ export async function importLoginEnvs(
     }
     if (outcome.outcome === 'refused') caller?.left?.('refused');
     else if (outcome.outcome === 'held') caller?.left?.('held');
+    else if (outcome.outcome !== 'unchanged') notes?.loginVariables(env.login);
     sentences.push(...loginEnvSentences(label, env.login, outcome));
   }
   return sentences;

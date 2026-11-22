@@ -8,6 +8,7 @@ import type { ImportItemId } from '../../../contract/index.ts';
 import { AddLoginSlot } from '../fleet/runtimes/add-runtime-login-slots.tsx';
 import { ChangeApplyPanel } from '../fleet/shell/apply-change-panel.tsx';
 import { FoundList } from '../import-kit/found-list.tsx';
+import { ImportPartialNote } from '../import-kit/import-partial.tsx';
 import { ImportResultList } from '../import-kit/import-results.tsx';
 import { counts, nameProblem, type ToolModel } from '../import-kit/model.ts';
 import { plural, toolHeadline } from '../import-kit/mapping-words.ts';
@@ -252,6 +253,9 @@ export function ToolPage({ model, wizard, machineName, nextLabel, onNext }: Tool
           {`Install ${model.label} first; the import needs it on this machine.`}
         </p>
       )}
+      {wizard.partial !== null && wizard.partial.label === model.label ? (
+        <ImportPartialNote partial={wizard.partial} />
+      ) : null}
       <ChangeApplyPanel
         machineName={machineName}
         authority={wizard.changes.authority}

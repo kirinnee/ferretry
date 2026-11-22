@@ -10,7 +10,7 @@ import { type ImportItemId, ToolInstallResultSchema, type ToolInstallOutcome } f
 import type { RuntimesClient } from '../../lib/client.ts';
 import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
 import { HARNESSES, importChange, nameProblem, stepsSettledBy } from '../import-kit/model.ts';
-import { useApplyImport } from '../import-kit/use-apply-import.ts';
+import { type ApplyImportOptions, useApplyImport } from '../import-kit/use-apply-import.ts';
 import { useScan } from '../import-kit/use-harness-scan.ts';
 
 const INSTALL_ROUTE = 'POST /v1/runtimes/machine/tools/install' as const;
@@ -29,7 +29,7 @@ const installSentence = (outcome: ToolInstallOutcome): string => {
   return `${outcome.reason} To do it yourself, run: ${outcome.manualCommand}${lines}`;
 };
 
-export function useImportWizard(client: RuntimesClient) {
+export function useImportWizard(client: RuntimesClient, applyOptions?: ApplyImportOptions) {
   // The scan is the kit's: read once per client and shared, read again here on opening (the machine as it is now).
   const { read, models, look, rescan } = useScan(client, { run: 'settings-import', refresh: true });
   // What a reload keeps (the address): the open tool, the names, what was left out, the ticked tokens.
@@ -51,7 +51,7 @@ export function useImportWizard(client: RuntimesClient) {
   const [finished, setFinished] = useState(remembered.finished);
   const [installing, setInstalling] = useState<HarnessKey | null>(null);
   const [installNote, setInstallNote] = useState<Partial<Record<HarnessKey, string>>>({});
-  const { changes, apply } = useApplyImport(client);
+  const { changes, apply, partial } = useApplyImport(client, applyOptions);
 
   useEffect(() => {
     rememberInAddress({
@@ -214,6 +214,8 @@ export function useImportWizard(client: RuntimesClient) {
     /** The person's own press: may ask for the passkey. */
     look,
     changes,
+    /** What the last import left on the machine when it stopped part-way (landed and not landed), else `null`. */
+    partial,
   };
 }
 
