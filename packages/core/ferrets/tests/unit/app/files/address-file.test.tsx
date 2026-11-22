@@ -64,6 +64,15 @@ describe('addressOpenRequest', () => {
     expect(addressOpenRequest('e1', ADDRESS, '?file=a.ts')).toBeNull();
     expect(addressOpenRequest('e3', ADDRESS, '?file=a.ts')).toEqual({ sequence: 0, reference: { path: 'a.ts' } });
   });
+
+  it('remembers only the LAST applied navigation: a Back or Forward to an earlier entry is applied again', () => {
+    markAddressHandled('e1', ADDRESS, '?file=a.ts');
+    markAddressHandled('e3', ADDRESS, '?file=b.ts');
+    expect(addressOpenRequest('e3', ADDRESS, '?file=b.ts'), 'a remount of the same entry opens nothing').toBeNull();
+    expect(addressOpenRequest('e1', ADDRESS, '?file=a.ts')?.reference.path, 'Back to A').toBe('a.ts');
+    markAddressHandled('e1', ADDRESS, '?file=a.ts');
+    expect(addressOpenRequest('e3', ADDRESS, '?file=b.ts')?.reference.path, 'Forward to B').toBe('b.ts');
+  });
 });
 
 describe('the Files panel', () => {
@@ -143,6 +152,74 @@ describe('the Files panel', () => {
       expect(window.location.search).toBe('?file=src%2Fentry.ts');
       expect(view.container.textContent, 'the panel shows the file the address names').toContain('CONTENT-OF-DOT');
       expect(view.container.textContent).not.toContain('CONTENT-OF-DASH');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('follows browser Back and Forward: A, Projects, B, Back twice shows A, Forward twice shows B', async () => {
+    window.history.replaceState({}, '', '/d/work/projects/p1');
+    const fixture: FsFixture = {
+      files: {
+        'src/entry.ts': { path: 'src/entry.ts', content: 'CONTENT-OF-DOT' },
+        'src/entry-ts': { path: 'src/entry-ts', content: 'CONTENT-OF-DASH' },
+      },
+    };
+    const Panel = createFilesPanel(fsClient(() => fixture, [])) as ComponentType<PanelProps>;
+    const Host = () => {
+      const { navigate } = useRouter();
+      return window.location.pathname.startsWith('/d/work/ferrets/') ? (
+        <div>
+          <button type="button" onClick={() => navigate('/d/work/projects/p1')}>
+            Open Projects
+          </button>
+          <Panel subject="zed" />
+        </div>
+      ) : (
+        <div>
+          <button type="button" onClick={() => navigate('/d/work/ferrets/zed?file=src%2Fentry.ts')}>
+            Go dot
+          </button>
+          <button type="button" onClick={() => navigate('/d/work/ferrets/zed?file=src%2Fentry-ts')}>
+            Go dash
+          </button>
+        </div>
+      );
+    };
+    const view = await mount(
+      <RouterProvider>
+        <Host />
+      </RouterProvider>,
+    );
+    const settle = () =>
+      interact(async () => {
+        for (let turn = 0; turn < 8; turn += 1) await new Promise(resolve => setTimeout(resolve, 5));
+      });
+    const press = async (label: string): Promise<void> => {
+      const button = [...view.container.querySelectorAll('button')].find(node => node.textContent === label);
+      await interact(() => button?.click());
+      await settle();
+    };
+    const travel = async (delta: number): Promise<void> => {
+      await interact(() => window.history.go(delta));
+      await settle();
+    };
+    try {
+      await press('Go dot');
+      await press('Open Projects');
+      await press('Go dash');
+      expect(view.container.textContent).toContain('CONTENT-OF-DASH');
+      await travel(-1);
+      expect(window.location.pathname).toBe('/d/work/projects/p1');
+      await travel(-1);
+      expect(window.location.search).toBe('?file=src%2Fentry.ts');
+      expect(view.container.textContent, 'Back twice: the panel shows A').toContain('CONTENT-OF-DOT');
+      expect(view.container.textContent).not.toContain('CONTENT-OF-DASH');
+      await travel(1);
+      await travel(1);
+      expect(window.location.search).toBe('?file=src%2Fentry-ts');
+      expect(view.container.textContent, 'Forward twice: the panel shows B').toContain('CONTENT-OF-DASH');
+      expect(view.container.textContent).not.toContain('CONTENT-OF-DOT');
     } finally {
       await view.unmount();
     }

@@ -15,13 +15,14 @@ export const fileOfAddress = (search: string): string | null => {
 };
 
 /**
- * What was acted on is remembered per NAVIGATION — the history entry (`entry`, the router's `entryKey`: stable across
- * Back, Forward and a remount of the panel, new on every push) AND the address — never per address alone. A Files panel
- * that mounts again within the same navigation (a phone's chip) must not re-open what was closed; but a fresh explicit
- * navigation to an address already visited earlier (src/entry.ts, then src/entry-ts, then src/entry.ts again) is a new
- * entry and always opens its file. `entry` is `''` where no router is mounted.
+ * Only the LAST navigation acted on is remembered: its history entry (`entry`, the router's `entryKey`: stable across a
+ * remount of the panel, new on every push, restored by Back and Forward) AND its address. An address is applied whenever
+ * its (entry + address) is not the one last applied — a fresh navigation, a revisit of an address seen before, and a
+ * Back or Forward that restores an earlier entry all differ from it — while a panel that mounts again within the same
+ * navigation (a phone's chip) must not re-open what was closed. No set: a set would suppress every restored entry.
+ * `entry` is `''` where no router is mounted.
  */
-const handled = new Set<string>();
+let lastApplied: string | null = null;
 
 const navigationKey = (entry: string, pathname: string, search: string): string => `${entry}\n${pathname}${search}`;
 
@@ -36,17 +37,17 @@ export const addressOpenRequest = (
   search: string,
 ): CodeReferenceOpenRequest | null => {
   const path = fileOfAddress(search);
-  return path === null || handled.has(navigationKey(entry, pathname, search))
+  return path === null || lastApplied === navigationKey(entry, pathname, search)
     ? null
     : { sequence: 0, reference: { path } };
 };
 
-/** Says the Files panel acted on this navigation's `?file=`. */
+/** Says the Files panel acted on this navigation's `?file=` (and forgets the one before it). */
 export const markAddressHandled = (entry: string, pathname: string, search: string): void => {
-  handled.add(navigationKey(entry, pathname, search));
+  lastApplied = navigationKey(entry, pathname, search);
 };
 
 /** Forgets what was acted on. Tests use it. */
 export const resetAddressOpens = (): void => {
-  handled.clear();
+  lastApplied = null;
 };

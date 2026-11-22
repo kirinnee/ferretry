@@ -2,7 +2,7 @@
  * The browser entry for "Go to file on a revisit": the REAL router (`RouterProvider` over the browser's own history) and
  * the REAL Files panel of a ferret, over a fake daemon that answers from memory. A "Projects" page offers the links
  * Projects' Go to file makes (`/d/fake/ferrets/zed?file=<path>`); the ferret page draws the Files panel under a
- * "← Projects" in-app back. `window.__fileReads` lists every `fs/file` read.
+ * "← Projects" in-app back and an "Open Projects" that pushes a new entry. `window.__fileReads` lists every `fs/file` read.
  *
  *   ?theme=<family>-<mode>
  */
@@ -22,8 +22,8 @@ const reads: string[] = [];
 (window as unknown as { __fileReads: string[] }).__fileReads = reads;
 
 const SOURCES: Record<string, string> = {
-  'src/entry.ts': 'export const dotted = 1; // the file src/entry.ts',
-  'src/entry-ts': 'export const dashed = 2; // the file src/entry-ts',
+  'src/entry.ts': '// the file src/entry.ts\nexport const dotted = 1;',
+  'src/entry-ts': '// the file src/entry-ts\nexport const dashed = 2;',
 };
 
 const client = {
@@ -64,6 +64,14 @@ function Page() {
       <main className="mx-auto max-w-3xl p-panel">
         <button type="button" className="mb-3 rounded-md border border-border px-3 py-2" onClick={() => back(PROJECT)}>
           ← Projects
+        </button>
+        {/* A plain push (not an in-app back): the Projects page becomes a NEW history entry between two files. */}
+        <button
+          type="button"
+          className="mb-3 ml-2 rounded-md border border-border px-3 py-2"
+          onClick={() => navigate(PROJECT)}
+        >
+          Open Projects
         </button>
         <FilesPanel subject="zed" />
       </main>
