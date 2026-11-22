@@ -31,7 +31,7 @@ import { forgetSetupScanAhead, readSetupScanAhead } from '@ferretry/plugin-runti
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { StepSegmentMemory } from '@ferretry/kernel/contract';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { StepState } from '../../../contract/index.ts';
 import {
   flattenFlow,
@@ -80,9 +80,6 @@ export interface FlowDeps {
 
 /** How long the other paired machines get to answer after the machine being set up has: a silent one is left out. */
 const PEER_WAIT_MS = 1500;
-
-/** The plugins whose setup pages read this machine's own Claude Code and Codex setup (the runtimes setup scan). */
-const HOST_SETUP_PLUGINS: ReadonlySet<string> = new Set(['claude-code', 'codex']);
 
 /** One step's daemon answers: at most one in flight, and the newest intent waits as the only queued one. */
 interface AnswerLane {
@@ -211,15 +208,25 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   const targetRow = rows.find(row => row.daemon === target);
   const targetReady = targetRow !== undefined;
 
+  // C59 O8-4 / O8-15: the machine's own Claude Code and Codex setup (tools, logins, runtimes, versions) is read ONCE, the moment
+  // the flow opens, beside the steps list and not after it: a machine being set up (not one a device is only pairing to) has
+  // such pages, so the read is the first thing the flow asks, and the pages then open already answered because the shared scan
+  // store takes this read for its first read on that machine. ONE effect owns that read for the whole life of the flow: the
+  // steps list (its own effect below, declared after so the scan is asked first) is retried by `attempt`, and a retry must never start another scan or drop a settled one,
+  // so nothing here depends on the steps, the pages or `attempt`. The read is forgotten when this flow closes, so a later flow
+  // never shows it.
+  useEffect(() => {
+    if (target === undefined || !targetReady || address.journey === 'pair') return;
+    const scanned = env.current.rows.find(row => row.daemon === target)?.client;
+    if (scanned === undefined) return;
+    readSetupScanAhead(scanned);
+    return () => forgetSetupScanAhead(scanned);
+  }, [target, targetReady, address.journey]);
+
   // One read of every paired machine, once the machine being set up can be reached.
   useEffect(() => {
     if (target === undefined || !targetReady) return;
     let live = true;
-    // O8-15: the machine's own Claude Code and Codex setup is read AT ONCE, beside the steps list, not after it: a machine being
-    // set up (not one a device is only pairing to) has such pages, so the read is the first thing the flow asks. Never throws.
-    const scanned =
-      address.journey === 'pair' ? undefined : env.current.rows.find(row => row.daemon === target)?.client;
-    if (scanned !== undefined) readSetupScanAhead(scanned);
     setLoading({ kind: 'loading' });
     // Try again is the person's own act: its read may raise the passkey prompt a first, quiet read must not. Only the
     // machine being set up is ever asked that way; the others are read quietly and never hold the run.
@@ -272,27 +279,12 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
     });
     return () => {
       live = false;
-      if (scanned !== undefined) forgetSetupScanAhead(scanned);
     };
   }, [target, targetReady, attempt, address.journey]);
 
   const ready = loading.kind === 'ready' ? loading : undefined;
   const pages = ready?.pages ?? [];
   const answered = ready?.answered ?? new Set<string>();
-
-  // C59 O8-4: the machine's own Claude Code and Codex setup (tools, logins, runtimes, versions) is read ONCE, as soon as the
-  // flow knows it has such pages to show, while the person is still on the first pages; those pages then open already
-  // answered, because the shared scan store takes this read for its first read on this machine instead of asking again.
-  // A LAYOUT effect, so it starts before any page's own first read (pages read in a passive effect), and the read is
-  // forgotten when this flow closes, so a later flow never shows it.
-  const readsHostSetup = pages.some(
-    page => page.phase === 'daemon' && HOST_SETUP_PLUGINS.has(page.plugin) && !answered.has(page.key),
-  );
-  useLayoutEffect(() => {
-    if (!readsHostSetup) return;
-    readSetupScanAhead(client);
-    return () => forgetSetupScanAhead(client);
-  }, [client, readsHostSetup]);
 
   /**
    * Sends one daemon answer for a step: one write in flight per step, and a newer intent replaces any queued one, so the

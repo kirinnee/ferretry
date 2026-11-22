@@ -1371,8 +1371,15 @@ describe('secretNamesOver: the name listing is the only thing the setup is hande
 });
 
 describe('the first-run scan over a synthetic Claude and Codex setup (C59 O8-15)', () => {
-  const listing = async (directory: string): Promise<string[]> =>
-    (await readdir(directory, { recursive: true })).sort();
+  /** Every path under a directory with the BYTES of each file (base64; a directory is `null`): a rewrite in place shows. */
+  const listing = async (directory: string): Promise<Record<string, string | null>> => {
+    const found: Record<string, string | null> = {};
+    for (const path of (await readdir(directory, { recursive: true })).sort())
+      found[path] = (await stat(join(directory, path))).isFile()
+        ? (await readFile(join(directory, path))).toString('base64')
+        : null;
+    return found;
+  };
 
   it('finds Claude and Codex ready to import, and writes nothing until the person confirms', async () => {
     const { host, world } = await compose();
