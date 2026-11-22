@@ -985,15 +985,17 @@ class SealedSession implements CarrierLink {
       const standing = this.#standing;
       if (standing === undefined) return;
       let response: ApiResponse;
+      const carried = this.#carried.build({ ...request, body }, standing.principal, this.#origin(), this.#transcript);
       try {
-        response = await this.deps.dispatch(
-          this.#carried.build({ ...request, body }, standing.principal, this.#origin(), this.#transcript),
-        );
+        response = await this.deps.dispatch(carried);
       } catch {
         response = jsonResponse(
           { error: { code: 'internal_error', message: 'the daemon failed to handle this request' } },
           500,
         );
+      } finally {
+        // Settled, answered or failed: the request's own end, with the carrying session still open.
+        this.#carried.settled(carried);
       }
       if (this.#live() && this.#phase === 'serving') {
         this.#answer(request.id, response);

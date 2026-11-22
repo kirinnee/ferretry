@@ -587,6 +587,27 @@ describe('the session layer: requests', () => {
     expect(signal?.aborted).toBe(true);
   });
 
+  test("E2 L129 a carried request's signal aborts when ITS handler settles, answered or failed, with the session still open", async () => {
+    const fx = await fixture();
+    const signals = new Map<string, AbortSignal | undefined>();
+    fx.dispatch = request => {
+      signals.set(request.path, request.signal);
+      if (request.path === '/fails') return Promise.reject(new Error('the handler failed'));
+      if (request.path === '/waits') return new Promise<ApiResponse>(() => {});
+      return Promise.resolve(jsonResponse({ path: request.path }));
+    };
+    const { client } = await serving(fx);
+    await client.send(req(1, { path: '/ok' }));
+    await client.send(req(2, { path: '/fails' }));
+    await client.send(req(3, { path: '/waits' }));
+    await client.pump();
+    expect(client.end).toBeUndefined();
+    // The session is open and shares nothing but its own end: the settled requests ended, the one still running did not.
+    expect(signals.get('/ok')?.aborted).toBe(true);
+    expect(signals.get('/fails')?.aborted).toBe(true);
+    expect(signals.get('/waits')?.aborted).toBe(false);
+  });
+
   test('R235 R534 answers carry their id and may cross in any order', async () => {
     const fx = await fixture();
     const gates = new Map<string, () => void>();

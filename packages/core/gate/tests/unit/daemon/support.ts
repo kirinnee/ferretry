@@ -60,11 +60,18 @@ export interface RequestOptions {
    */
   readonly appSession?: string;
   readonly clientAddress?: string;
+  /**
+   * The carrying session's end, shared by EVERY request of that session (the kernel's `CarriedRequests`). The request's
+   * own `signal` is that session signal joined with its own settle, as in production: ending the request
+   * (`settle()`) does not end the session, and the session staying open does not keep the request alive.
+   */
+  readonly session?: AbortSignal;
 }
 
 /** A call; reading its body throws, so a test proves a refusal came before the body was read. */
-export function request(options: RequestOptions = {}): ApiRequest & { bodyRead: () => boolean } {
+export function request(options: RequestOptions = {}): ApiRequest & { bodyRead: () => boolean; settle: () => void } {
   let read = false;
+  const own = new AbortController();
   const headers = new Map<string, string>(Object.entries(options.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
   if (options.bearer !== undefined) headers.set('authorization', `Bearer ${options.bearer}`);
   const who = options.device ?? options.member;
@@ -86,11 +93,13 @@ export function request(options: RequestOptions = {}): ApiRequest & { bodyRead: 
     arrival: options.arrival ?? (principal === undefined ? local() : carried()),
     ...(principal === undefined ? {} : { principal }),
     ...(options.clientAddress === undefined ? {} : { clientAddress: options.clientAddress }),
+    signal: options.session === undefined ? own.signal : AbortSignal.any([options.session, own.signal]),
     text: async () => {
       read = true;
       throw new Error('a refusal must come before the body is read');
     },
     bodyRead: () => read,
+    settle: () => own.abort(),
   };
 }
 
