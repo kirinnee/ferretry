@@ -29,7 +29,7 @@ const flowScreen = (client: PluginClient): AppComponent<ScreenProps> =>
   );
 
 const shellPanel =
-  (name: 'createNamePanel' | 'createAppearancePanel') =>
+  (name: 'createNamePanel' | 'createAppearancePanel' | 'createAgentsPanel') =>
   (client: PluginClient): AppComponent<PanelProps> =>
     lazyComponent<PanelProps>(async () =>
       ((await loadViews())[name] as (client: PluginClient) => AppComponent<PanelProps>)(client),
@@ -68,6 +68,7 @@ export default provideToShell(
         },
         panels: {
           'first-run-stepper': stepperPanel(client),
+          'agents-step': forSubject('onboarding.agents', shellPanel('createAgentsPanel')(client)),
           'name-step': forSubject('onboarding.name', shellPanel('createNamePanel')(client)),
           'appearance-step': forSubject('onboarding.appearance', shellPanel('createAppearancePanel')(client)),
         },

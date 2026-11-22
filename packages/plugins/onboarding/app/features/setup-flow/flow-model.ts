@@ -155,6 +155,38 @@ export function clearNotNeeded(state: RunState, pages: readonly FlowStep[], plug
   return stays.size === state.notNeeded.size ? state : { ...state, notNeeded: stays };
 }
 
+/** The segments the person picked ("Which AI do you want to use?"): the plugins whose pages the run walks and the ones it leaves out. */
+export interface Picked {
+  readonly on: readonly string[];
+  readonly off: readonly string[];
+}
+
+const idsOf = (list: unknown): readonly string[] =>
+  typeof list === 'string' && list !== '' ? list.split(',').filter(id => id !== '') : [];
+
+/** What the picker left in Onboarding's run memory (`agentsOn` / `agentsOff`), or `undefined` when nothing was picked in this run. */
+export function pickedOf(memory: Readonly<Record<string, unknown>>): Picked | undefined {
+  if (typeof memory['agentsOn'] !== 'string' || typeof memory['agentsOff'] !== 'string') return undefined;
+  return { on: idsOf(memory['agentsOn']), off: idsOf(memory['agentsOff']) };
+}
+
+/**
+ * The picker's answer reaches the whole run: every daemon page of an unpicked segment is marked not needed (passed over in both
+ * directions, never counted, never recorded: rule 7), and a segment that is picked again loses the mark so its pages are asked
+ * again. A mark the pages made themselves in a picked segment is dropped too (its plugin's answers are asked again, as for any
+ * changed answer); a page that still passes over calls `notNeeded()` when it mounts.
+ */
+export function applyPicked(state: RunState, pages: readonly FlowStep[], picked: Picked): RunState {
+  const on = new Set(picked.on);
+  const off = new Set(picked.off);
+  const pluginOf = new Map(pages.map(page => [page.key, page.plugin] as const));
+  const marks = new Set([...state.notNeeded].filter(key => !on.has(pluginOf.get(key) ?? '')));
+  for (const page of pages)
+    if (page.phase === 'daemon' && off.has(page.plugin) && page.key !== state.at) marks.add(page.key);
+  const same = marks.size === state.notNeeded.size && [...marks].every(key => state.notNeeded.has(key));
+  return same ? state : { ...state, notNeeded: marks };
+}
+
 /** The progress bar's one segment for the whole client phase (every plugin's client pages read as "This device"). */
 const DEVICE_SEGMENT = { id: 'device', label: 'This device' } as const;
 
@@ -185,6 +217,7 @@ export function progressOf(
   passed: ReadonlySet<string>,
   foreseen: ReadonlySet<string>,
   at: string,
+  leftOut: ReadonlySet<string> = NONE,
 ): ProgressRead | undefined {
   const here = pages.find(page => page.key === at);
   if (here === undefined) return undefined;
@@ -194,6 +227,8 @@ export function progressOf(
   for (const segment of flow.daemon) labels.set(segment.plugin, segment.group);
   const segments: { id: string; label: string }[] = [];
   for (const page of asked) {
+    // A harness the person did not pick has no segment in the bar: its pages are never drawn.
+    if (leftOut.has(page.plugin)) continue;
     const id = segmentOf(page);
     if (!segments.some(segment => segment.id === id))
       segments.push({ id, label: id === DEVICE_SEGMENT.id ? DEVICE_SEGMENT.label : (labels.get(id) ?? id) });

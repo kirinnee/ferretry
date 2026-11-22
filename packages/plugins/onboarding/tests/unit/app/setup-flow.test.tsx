@@ -21,6 +21,7 @@ import type { StepHost } from '@ferretry/kernel/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { Instant } from '@ferretry/std';
 import { useEffect, useState, type ReactNode } from 'react';
+import { AgentsPage } from '../../../app/features/agents/agents-page.tsx';
 import { createSetupFlow } from '../../../app/features/setup-flow/setup-flow.tsx';
 import { sideOf } from '../../../contract/index.ts';
 import { isComplete } from '../../../daemon/lib/steps.ts';
@@ -162,6 +163,9 @@ const PAGES: Readonly<Record<string, (step: StepHost) => ReactNode>> = {
   'fake-pack.beta': step => <KindLikePage step={step} name="Beta" />,
   'fake-pack.run': step => <RunLikePage step={step} />,
   'onboarding.name': step => <ReadyPage step={step} />,
+  'onboarding.agents': step => <AgentsPage step={step} readProviders={async () => []} />,
+  'claude-code.installed': step => <ReadyPage step={step} />,
+  'codex.installed': step => <ReadyPage step={step} />,
   'onboarding.appearance': step => <ReadyPage step={step} />,
   'fake-pack.welcome': step => <WelcomePage step={step} />,
   'fake-pack.choose': step => <ChoosePage step={step} />,
@@ -265,6 +269,9 @@ function setup(options: {
       stepPanel('onboarding', 'name-step'),
       stepPanel('onboarding', 'appearance-step'),
       stepPanel('fake-pack', 'step'),
+      stepPanel('onboarding', 'agents-step'),
+      stepPanel('claude-code', 'step'),
+      stepPanel('codex', 'step'),
     ],
   };
   const tree = (
@@ -1078,5 +1085,76 @@ describe('Next saves the choice (contract rule 8, r11 O1)', () => {
     await settle();
     expect(pageKey()).toBe('fake-pack.after');
     expect(saves.runs).toBe(0);
+  });
+});
+
+describe('"Which AI do you want to use?" decides which harness segments the run walks', () => {
+  const machine = (): Machine => ({
+    id: A,
+    name: 'Studio',
+    steps: [
+      ['onboarding', 'agents', 2],
+      ['onboarding', 'name', 5],
+      ['claude-code', 'installed', 20],
+      ['codex', 'installed', 40],
+    ].map(([plugin, id, order]) => ({
+      plugin: String(plugin),
+      id: String(id),
+      title: String(id),
+      order: Number(order),
+      side: 'daemon' as const,
+      group: String(plugin),
+      stepHost: true,
+      state: 'pending' as const,
+    })),
+  });
+  const box = (name: string): HTMLInputElement | null | undefined =>
+    view?.container.querySelector<HTMLInputElement>(`[data-agent-row="${name}"] > label input`);
+
+  it('is the first page, Claude only by default: the Codex pages are never drawn and nothing is recorded for the pick', async () => {
+    const run = setup({ machines: [machine()] });
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('onboarding.agents');
+    expect(box('claude')?.checked).toBe(true);
+    await next();
+    await settle();
+    expect(pageKey()).toBe('onboarding.name');
+    await next();
+    await settle();
+    expect(pageKey()).toBe('claude-code.installed');
+    await next();
+    await settle();
+    expect(pageKey()).not.toBe('codex.installed');
+    // The machine hears nothing about Codex until the run ends, and then only that it was skipped.
+    expect(run.arrived.filter(row => row.step === 'installed').map(row => row.state)).not.toContain('pending');
+  });
+
+  it('ticking Codex too, from the first page, walks both segments in order; unticking Claude drops its pages', async () => {
+    const run = setup({ machines: [machine()] });
+    view = await mount(run.tree);
+    await settle();
+    await interact(() => box('codex')?.click());
+    await next();
+    await next();
+    await settle();
+    expect(pageKey()).toBe('claude-code.installed');
+    await next();
+    await settle();
+    expect(pageKey()).toBe('codex.installed');
+
+    // Back to the first page and drop Claude: Back from the name page, then forward again passes Claude over.
+    await press('[data-step-back]');
+    await press('[data-step-back]');
+    await press('[data-step-back]');
+    await settle();
+    expect(pageKey()).toBe('onboarding.agents');
+    await interact(() => box('claude')?.click());
+    await next();
+    await settle();
+    expect(pageKey()).toBe('onboarding.name');
+    await next();
+    await settle();
+    expect(pageKey()).toBe('codex.installed');
   });
 });

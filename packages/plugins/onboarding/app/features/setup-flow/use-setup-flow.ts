@@ -48,12 +48,14 @@ import type { SummaryStep } from '../../views/steps-screen.tsx';
 import { readLater, rememberLater } from './client-later.ts';
 import {
   advance,
+  applyPicked,
   answeredBefore,
   clearNotNeeded,
   dropPage,
   END,
   markNotNeeded,
   passedOver,
+  pickedOf,
   type Place,
   type ProgressRead,
   type RunState,
@@ -448,6 +450,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
           hidden,
           foreseenPassedOver(pages, plugin => memory.current.get(plugin) ?? {}),
           page.key,
+          new Set(pickedOf(memory.current.get('onboarding') ?? {})?.off ?? []),
         );
   return {
     loading: loading.kind,
@@ -469,6 +472,9 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
       // An answer that CHANGED may change what its plugin's other pages need, so they are asked again.
       if (Object.entries(patch).some(([key, value]) => before[key] !== value)) {
         setRun(state => clearNotNeeded(state, pages, plugin));
+        // "Which AI do you want to use?": the pages of every harness left out are not needed in this run (flow-model.ts `applyPicked`).
+        const picked = plugin === 'onboarding' ? pickedOf(memory.current.get(plugin) ?? {}) : undefined;
+        if (picked !== undefined) setRun(state => applyPicked(state, pages, picked));
         setMemoryRead(count => count + 1);
       }
     },
