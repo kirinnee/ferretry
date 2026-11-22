@@ -274,34 +274,29 @@ export { PASSIVE_LEARNING_ENV };
  * (see {@link PASSIVE_LEARNING_ENV}). A ferret switched while running learns it at its next launch;
  * nothing is sent to it.
  *
- * The markup it teaches is the `fy-render` fence (docs/fy-render.md), and docs/hypermedia.md is the
- * contract that quotes this text verbatim.
+ * The markup it teaches is Markdown with rich parts (docs/hypermedia.md), and the `fy-render` fence for pictures and
+ * media (docs/fy-render.md); docs/hypermedia.md is the contract that quotes this text verbatim.
  */
 export { HYPERMEDIA_ENV };
 
 /**
- * The hypermedia teaching. Short on purpose — it is in every prompt, so only mermaid, svg and html are taught
- * whole; chart keeps one line and every other type is one `render guide <type>` away. Its second line is the
- * owner's explainer rule (2026-11-04: "for explainers, make sure its ADHD Firendly (make sure you say that) and user hypermeida to
- * walk user through things", "give example to illustrate your points etc"). docs/hypermedia.md quotes it.
+ * The hypermedia teaching. Short on purpose — it is in every prompt (at most 20 lines), so it names the part fences, the
+ * `fy-render` fence and the reference sigils once, and every spec is one `render guide <part>` away; the check an agent
+ * can run before sending is `render check`. Its second line is the owner's explainer rule (2026-11-04: "for explainers,
+ * make sure its ADHD Firendly (make sure you say that) and user hypermeida to walk user through things", "give example
+ * to illustrate your points etc"). docs/hypermedia.md quotes it, and its `## Guide for agents` section is what
+ * `render guide` prints.
  */
 export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
   [
     'Hypermedia: to teach, explain or compare anything not simple (a flow, a design, a change), show it, not just say it. Inline: never publish a page or link unless asked.',
     'Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Make it interactive: a visual the reader changes (sliders, toggles) that redraws live, no steppers; gentle motion (prefers-reduced-motion).',
-    'A fence whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, `---`, then the payload.',
+    'Write Markdown. Rich parts are fences named for the part: ```terminal, ```filetree, ```editor, ```chart, ```mermaid, ```animation, ```tierlist, ```alignment; :::tabs holds prose in tabs.',
     '- mermaid: flowchart TB, sequenceDiagram, …: top-down, short labels; auto-themed: no %%{init}%% or colours.',
-    '- svg: one self-contained <svg> (CSS animation ok); no script, foreignObject or links.',
-    '- html: a fragment, inline CSS and <script> (isolated); no network; transparent, theme-token colours.',
-    `- chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: \`${fy} render guide chart\`.`,
-    `- task, board (live tasks), map, image, video, audio, pdf: \`${fy} render guide <type>\`.`,
-    '```fy-render',
-    'type: mermaid',
-    'alt: Request flow',
-    '---',
-    'flowchart TB',
-    '  Phone --> Relay --> Daemon',
-    '```',
+    '- chart: YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; no colours.',
+    '- Pictures, media, maps, live tasks, svg, interactive html: a fence whose info string is exactly fy-render: `type: <type>`, `alt: <one line>`, `---`, then the payload.',
+    'References are plain text, never links: `:agent @file &F12 ^A3 /skill $skill %terminal:dev %browser:app`.',
+    `Every spec: \`${fy} render guide <part>\`. Before you send a rich message, run \`${fy} render check <file|->\`: it prints \`line N: …\` for each problem and exits 1 on an error.`,
     'Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.',
   ].join('\n');
 

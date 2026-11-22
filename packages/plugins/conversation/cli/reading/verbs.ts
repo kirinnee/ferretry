@@ -8,11 +8,15 @@ import type {
   WorkHit,
   WorkSearchResponse,
 } from '../../contract/index.ts';
-import { RENDER_GUIDE_TYPES, renderGuideSection, renderGuideSectionName } from './guide.ts';
+import { checkMessage, findingLine } from './check.ts';
+import { RENDER_GUIDE_TOPICS, renderGuideSection, renderGuideSectionName } from './guide.ts';
 import { RENDER_GUIDE_SECTION } from './guide-text.ts';
 
-/** What the reading verbs need of the CLI: the generated client, the terminal and (for `--since`) the time. */
-type Context = Pick<CliContext<never>, 'client' | 'io' | 'clock'>;
+/**
+ * What the reading verbs need of the CLI: the generated client, the terminal, (for `--since`) the time and (for
+ * `render check`) the shell's file reader.
+ */
+type Context = Pick<CliContext<never>, 'client' | 'io' | 'clock' | 'readText'>;
 
 /** `<n>d`, `<n>h` or `<n>w` — the only duration grammar `--since` accepts (v4's). */
 const SINCE_PATTERN = /^(\d+)(d|h|w)$/u;
@@ -111,7 +115,7 @@ function renderTranscriptPage(page: TranscriptPage): string {
  * The reading verbs: logs, search, render guide, link (list, preview, keep) and transcript. Each is one client call and one
  * rendering; a refusal is a sentence on stderr and a non-zero exit, never a stack.
  */
-export function readingVerbs({ client, io, clock }: Context) {
+export function readingVerbs({ client, io, clock, readText }: Context) {
   /** `--since` is a duration on the command line and an ISO instant on the wire: this is the bridge (v4's `sinceInstant`). */
   const sinceInstant = (value: string): string => {
     const match = SINCE_PATTERN.exec(value.trim());
@@ -133,15 +137,32 @@ export function readingVerbs({ client, io, clock }: Context) {
   const print = (text: string): void => io.out(text.endsWith('\n') ? text : `${text}\n`);
 
   const guide = guarded(async invocation => {
-    const type = invocation.args[0];
-    if (type === undefined) {
-      const commands = RENDER_GUIDE_TYPES.map(each => `${BIN} render guide ${each}`).join('\n');
+    const topic = invocation.args[0];
+    if (topic === undefined) {
+      const commands = RENDER_GUIDE_TOPICS.map(each => `${BIN} render guide ${each}`).join('\n');
       print(`${section('overview')}\n\n${commands}`);
       return;
     }
-    const name = renderGuideSectionName(type);
-    if (name === undefined) throw new Usage(`no type ${type} — one of ${RENDER_GUIDE_TYPES.join(', ')}`);
+    const name = renderGuideSectionName(topic);
+    if (name === undefined) throw new Usage(`no topic ${topic} — one of ${RENDER_GUIDE_TOPICS.join(', ')}`);
     print(section(name));
+  });
+  /**
+   * `fy render check <file|->`: the doccheck for a message, run by the agent that wrote it. A problem is a line
+   * `line N: …`; an error (not a warning) makes the exit code 1. A file that cannot be read is a usage error (2), so
+   * "1" always means "the message has a problem".
+   */
+  const renderCheck = guarded(async invocation => {
+    const path = invocation.args[0];
+    if (path === undefined) throw new Usage(`name the message: ${BIN} render check <file|->`);
+    if (readText === undefined) throw new Error('this fy has no file reader for render check');
+    const text = await readText(path).catch(() => {
+      throw new Usage(`cannot read ${path}`);
+    });
+    const findings = checkMessage(text);
+    if (findings.length === 0) return print('no problems found');
+    print(findings.map(findingLine).join('\n'));
+    return findings.some(finding => finding.level === 'error') ? 1 : 0;
   });
   const section = (name: string): string => {
     const body = renderGuideSection(RENDER_GUIDE_SECTION, name);
@@ -204,6 +225,7 @@ export function readingVerbs({ client, io, clock }: Context) {
     /** `fy render` with nothing after it is the guide, as it always was. */
     render: guide,
     'render guide': guide,
+    'render check': renderCheck,
 
     'link [query...]': guarded(async invocation => {
       const q = words(invocation);

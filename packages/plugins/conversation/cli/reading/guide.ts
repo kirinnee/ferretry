@@ -1,12 +1,12 @@
 /**
- * Pulls the per-type sections out of the guide text `fy render guide` prints
- * (docs/fy-render.md § Guide for agents, shipped as {@link RENDER_GUIDE_SECTION}).
+ * Pulls the per-topic sections out of the guide text `fy render guide` prints
+ * (docs/hypermedia.md § Guide for agents, shipped as {@link RENDER_GUIDE_SECTION}).
  *
  * The doc is the one owner of the text; this module only reads the shape it is stored in: a
  * `## Guide for agents` heading, then one `### <section>` subsection per surface, closed by the
  * `---` separator every top-level section of the doc ends with. Extraction is line-based on those
  * three shapes alone — nothing else in the section can move a boundary, so prose may change freely
- * under the `render-guide-doc` contract without this code noticing.
+ * under the drift test (`tests/unit/cli/guide-drift.test.ts`) without this code noticing.
  */
 
 import { FY_RENDER_FORMER_TYPES } from '../../contract/fy-render.ts';
@@ -14,12 +14,23 @@ import { FY_RENDER_FORMER_TYPES } from '../../contract/fy-render.ts';
 /** The heading that opens the guide section, matched as a whole line. */
 const RENDER_GUIDE_HEADING = '## Guide for agents';
 
-/** Every type `fy render guide <type>` answers, in the order the overview lists them. */
-export const RENDER_GUIDE_TYPES = [
+/**
+ * Every topic `fy render guide <topic>` answers, in the order the overview lists them: the Markdown parts, the
+ * containers and the references first, then the `fy-render` types (pictures, media, maps, live tasks).
+ */
+export const RENDER_GUIDE_TOPICS = [
+  'terminal',
+  'filetree',
+  'editor',
+  'chart',
   'mermaid',
+  'animation',
+  'tierlist',
+  'alignment',
+  'tabs',
+  'references',
   'svg',
   'html',
-  'chart',
   'map',
   'image',
   'video',
@@ -30,18 +41,26 @@ export const RENDER_GUIDE_TYPES = [
   'board',
 ] as const;
 
-/** The types `fy render guide` accepts. */
-type RenderGuideType = (typeof RENDER_GUIDE_TYPES)[number];
+/** The topics `fy render guide` accepts. */
+type RenderGuideTopic = (typeof RENDER_GUIDE_TOPICS)[number];
 
 /**
- * Which `###` section answers a type. `image`, `video`, `audio` and `pdf` share `media`: they name
- * bytes the same way, and the doc keeps one section for the four; `task` and `board` share `task`, which names tasks.
+ * Which `###` section answers a topic. `image`, `video`, `audio` and `pdf` share `media`: they name bytes the same
+ * way, and the doc keeps one section for the four; `task` and `board` share `task`, which names tasks.
  */
-const SECTION_FOR_TYPE: Record<RenderGuideType, string> = {
+const SECTION_FOR_TOPIC: Record<RenderGuideTopic, string> = {
+  terminal: 'terminal',
+  filetree: 'filetree',
+  editor: 'editor',
+  chart: 'chart',
   mermaid: 'mermaid',
+  animation: 'animation',
+  tierlist: 'tierlist',
+  alignment: 'alignment',
+  tabs: 'tabs',
+  references: 'references',
   svg: 'svg',
   html: 'html',
-  chart: 'chart',
   map: 'map',
   image: 'media',
   video: 'media',
@@ -52,13 +71,16 @@ const SECTION_FOR_TYPE: Record<RenderGuideType, string> = {
   board: 'task',
 };
 
+/** The other containers: `tabs` answers for all four, because one section holds what they are for. */
+const CONTAINER_NAMES: ReadonlySet<string> = new Set(['accordion', 'human', 'llm']);
+
 /**
- * The section that answers `type`, or `undefined` when `fy render guide` refuses it. An agent that still types the
+ * The section that answers `topic`, or `undefined` when `fy render guide` refuses it. An agent that still types the
  * type a fence had before the rename (`FY_RENDER_FORMER_TYPES`) is answered with the new type's section.
  */
-export function renderGuideSectionName(type: string): string | undefined {
-  const named = FY_RENDER_FORMER_TYPES.get(type) ?? type;
-  return named in SECTION_FOR_TYPE ? SECTION_FOR_TYPE[named as RenderGuideType] : undefined;
+export function renderGuideSectionName(topic: string): string | undefined {
+  const named = CONTAINER_NAMES.has(topic) ? 'tabs' : (FY_RENDER_FORMER_TYPES.get(topic) ?? topic);
+  return named in SECTION_FOR_TOPIC ? SECTION_FOR_TOPIC[named as RenderGuideTopic] : undefined;
 }
 
 /**
