@@ -289,6 +289,41 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     expect((await screenAt('https://f.invalid/onboarding')).screen).toBe('entry');
   });
 
+  it('an older hand-off link carrying a doer field opens the start screen: usable, no error, no dead end (C59 O7)', async () => {
+    // Older builds wrote `doer=self` / `doer=agent` into the hand-off. That answer is gone and the link is not read as a
+    // hand-off, so the reader lands where anybody starts and can still choose, continue and walk a journey.
+    for (const doer of ['self', 'agent']) {
+      localStorage.clear();
+      const paired = pairedList({ daemons: [], selected: null });
+      const OnboardingRoute = Route(paired.ports);
+      const view = await mount(
+        <OnboardingRoute
+          params={{}}
+          navigate={() => undefined}
+          location={() =>
+            `https://f.invalid/onboarding#fy-setup=f1;route=first-time;target=this;doer=${doer};step=install`
+          }
+          chooseDaemon={async () => undefined}
+        />,
+      );
+      expect(screenOf(view)).toBe('entry');
+      const text = view.container.textContent ?? '';
+      for (const scary of ['error', 'Error', 'invalid', 'went wrong', 'doer', 'expired'])
+        expect(text).not.toContain(scary);
+      const card = view.container.querySelector<HTMLInputElement>('[data-choice-cards] input[value="first-time"]');
+      expect(card).not.toBeNull();
+      await interact(() => {
+        card?.click();
+      });
+      await interact(() => {
+        view.container.querySelector<HTMLElement>('[data-onboarding-continue]')?.click();
+      });
+      // Choosing a route from there walks on to a real step of that journey (the way every other reader gets there).
+      expect(screenOf(view)).not.toBe('entry');
+      await view.unmount();
+    }
+  });
+
   /** The return Access navigates to: the bare first-run address, with no fragment. */
   const BARE = 'https://f.invalid/onboarding';
   const HANDOFF = 'https://f.invalid/onboarding#fy-setup=f1;route=add-client;step=scan';

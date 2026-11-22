@@ -85,16 +85,6 @@ fy setup --yes
 PATH="$HOME/.local/bin:$PATH" fy setup --yes
 ```
 
-### Setting up with an agent
-
-The [Get started](https://ferretry.pages.dev/get-started) page has a prompt for Claude Code or Codex.
-The agent only **looks** (`uname -sm`, `command -v …`, `fy setup --check --json`), recommends one
-install method, and hands **you** each command to run — in Claude Code by typing it after `!` in the
-chat, in Codex in your own terminal. It never installs, updates or uses `sudo` itself, so Claude
-Code's auto-mode safety checks and Codex's sandbox never block it halfway: those checks exist to stop
-an agent changing your system on its own, and here it does not. Pairing (`fy pair`) always runs in
-your own terminal so the code never reaches the agent.
-
 ## Debian / Ubuntu (apt)
 
 Releases push `.deb` packages to the `kirinnee97` Gemfury repository:

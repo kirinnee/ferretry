@@ -25,7 +25,7 @@
  *   mechanism and be useless, which is worse than offering the honest one.
  *
  * NOTHING IDENTIFYING TRAVELS. The payload is a route, a step, and at most which
- * computer and who installs it — four closed unions, all of them
+ * computer — three closed unions, all of them
  * already public constants in this bundle. No daemon address, no code, no token,
  * no name. A hand-off link is safe to photograph, and it has to be, because
  * photographing it is the point. A pairing code travels the OTHER way, from
