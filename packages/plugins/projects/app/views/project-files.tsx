@@ -32,10 +32,17 @@ export function ProjectFiles({
   const seed = addressSeed();
   return (
     <div className="grid gap-sm" data-project-files={project.id}>
-      <FileFinder key={`${project.id}|${seed}`} client={client} project={project} initialQuery={seed} />
+      <FileFinder
+        key={`${project.id}|${seed}`}
+        client={client}
+        project={project}
+        initialQuery={seed}
+        opensIn={ferret === null ? null : { daemon, ferret }}
+        {...(onNavigate === undefined ? {} : { onNavigate })}
+      />
       {ferret !== null && (
         <p className="m-0 text-meta text-muted" data-project-files-ferret={ferret.id}>
-          To open a file, browse{' '}
+          A file opens in{' '}
           <RouteLink
             to={ferretPath(daemon, ferret.id)}
             {...(onNavigate === undefined ? {} : { onNavigate })}

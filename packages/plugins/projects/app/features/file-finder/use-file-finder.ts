@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ProjectFilesAnswer } from '../../../contract/index.ts';
 import { type ProjectsClient, reasonOf } from '../../lib/client.ts';
-import { filesStatus, findFiles, rescanFiles } from './finder-api.ts';
+import { filesStatus, findFiles, isRefusal, rescanFiles } from './finder-api.ts';
 import { searchText } from './finder-model.ts';
 
 /** Wait for a typed burst to stop before asking; the first read of a mount is immediate. */
@@ -27,8 +27,14 @@ export interface FileFinderState {
   readonly answeredFor: string | null;
   readonly loading: boolean;
   readonly error: string | null;
-  /** A build is running, started by this page or noticed on an answer. */
+  /** A build is running, started by this page or noticed on an answer, and this page can still ask how it is going. */
   readonly rebuilding: boolean;
+  /**
+   * The daemon REFUSED the look at a build this page started or noticed (a folder outside the home asks `filesystem.configure`
+   * again, and a per-act confirmation is spent by the Rescan that started the build). The build may still be running; the page
+   * stops saying "Updating…", says why, and Rescan is offered again.
+   */
+  readonly refused: string | null;
   readonly rescan: () => void;
 }
 
@@ -51,6 +57,7 @@ export function useFileFinder(
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rescanning, setRescanning] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [first, setFirst] = useState(true);
 
@@ -61,6 +68,7 @@ export function useFileFinder(
     setAnsweredFor(null);
     setError(null);
     setRescanning(false);
+    setRefused(null);
     setFirst(true);
   }, [projectId, client]);
 
@@ -94,7 +102,7 @@ export function useFileFinder(
     };
   }, [client, projectId, query, tick, debounceMs, first]);
 
-  const rebuilding = rescanning || answer?.rebuilding === true;
+  const rebuilding = refused === null && (rescanning || answer?.rebuilding === true);
   useEffect(() => {
     if (!rebuilding) return;
     const abort = new AbortController();
@@ -105,8 +113,17 @@ export function useFileFinder(
           setRescanning(false);
           setTick(value => value + 1);
         })
-        .catch(() => {
-          // A failed look at a running build is tried again on the next beat; the read that follows says why if it matters.
+        .catch((cause: unknown) => {
+          if (abort.signal.aborted) return;
+          // SAY SO. A refusal does not pass by itself (the daemon asks `filesystem.configure` again for a folder outside the
+          // home, and a per-act confirmation is spent by the Rescan that started the build), so asking again every beat
+          // would leave "Updating…" on screen for ever with no word of why: stop, say why, offer Rescan again. Anything else
+          // (a busy daemon, a dropped connection) is a hiccup: it is said once and the next beat asks again.
+          setError(reasonOf(cause));
+          if (isRefusal(cause)) {
+            setRescanning(false);
+            setRefused(reasonOf(cause));
+          }
         });
     }, pollMs);
     return () => {
@@ -117,6 +134,8 @@ export function useFileFinder(
 
   const rescan = useCallback(() => {
     setRescanning(true);
+    setRefused(null);
+    setError(null);
     void rescanFiles(client, projectId)
       .then(status => {
         if (status.rebuilding) return;
@@ -129,5 +148,5 @@ export function useFileFinder(
       });
   }, [client, projectId]);
 
-  return { answer, answeredFor, loading, error, rebuilding, rescan };
+  return { answer, answeredFor, loading, error, rebuilding, refused, rescan };
 }

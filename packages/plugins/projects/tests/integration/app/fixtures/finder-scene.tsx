@@ -7,7 +7,9 @@
  *   &view=ready       a complete index of 12,594 files
  *   &view=cap         an index that hit the 50,000 cap (banner: where, skipped, tip)
  *   &view=building    a build is running (the button says Updating…), then it finishes after ~1.2 s
- *   &view=ferret      a complete index and a ferret working in the project (the link into its file browser)
+ *   &view=ferret      a complete index and a ferret working in the project (a row opens its file in that ferret's view)
+ *   &view=outside     a project OUTSIDE the home: Rescan starts a build, and then every look at it is refused, 403, as a
+ *                     real daemon does once the per-act confirmation is spent (filesystem.configure on every status GET)
  *   &find=<text>      the address seeds the finder's box (how "Go to file" arrives)
  */
 import { RouterProvider } from '@ferretry/app/testing/router';
@@ -47,9 +49,18 @@ const PATHS = [
   'README.md',
   'package.json',
   'Taskfile.yaml',
+  // Two names that differ only by `.` and `-`: the command bar once made one DOM id of both.
+  'src/entry.ts',
+  'src/entry-ts',
   ...Array.from({ length: 14 }, (_, row) => `packages/plugins/projects/daemon/features/files/module-${String(row)}.ts`),
   'packages/plugins/projects/app/features/file-finder/some-very-long-file-name-that-has-to-truncate-instead-of-scrolling-the-page-sideways.tsx',
 ];
+
+/** What the daemon's gate throws for a folder outside the home when the per-act confirmation is spent (a DaemonCallError). */
+const REFUSED = Object.assign(new Error('listing a folder outside the home folder needs filesystem.configure'), {
+  status: 403,
+  code: 'step-up-required',
+});
 
 interface Recorded {
   route: string;
@@ -64,7 +75,7 @@ const client = {
     if (route === 'GET /v1/projects') return [PROJECT] as Answer;
     if (route === 'GET /v1/ferrets')
       return (
-        view === 'ferret'
+        view === 'ferret' || view === 'outside'
           ? [
               {
                 id: 'f-1',
@@ -81,7 +92,10 @@ const client = {
       return { projectId: PROJECT.id, on: false, setBy: 'default', setAt: null } as Answer;
     if (route === FILES)
       return answerFor(index, init?.query?.q, Number(init?.query?.limit ?? 50), building(), PATHS) as Answer;
-    if (route === STATUS) return statusOf(index, building()) as Answer;
+    if (route === STATUS) {
+      if (view === 'outside') throw REFUSED;
+      return statusOf(index, building()) as Answer;
+    }
     if (route === RESCAN) return statusOf(index, true) as Answer;
     throw new Error(`no route ${route}`);
   },

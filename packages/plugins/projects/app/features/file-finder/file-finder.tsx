@@ -6,15 +6,17 @@
  * hold the most files, what was skipped), "Updating…" while a newer index is being built, and a Rescan button. An empty
  * result over a partial index never says there is nothing there (`emptyResultSentence`).
  *
- * A row COPIES the file's absolute path. Opening a file's content is the ferret file page's read, which re-checks every
- * path; the finder is names only and goes no further than naming.
+ * A row OPENS the file in the file view of the ferret working in the project (the ferret page, `?file=`), and a small
+ * button copies its absolute path; with no ferret there is no gated view to open it in, so the row copies the path.
+ * Opening a file's content is the ferret file page's read, which re-checks every path; the finder is names only.
  */
-import { Loading, Spinner } from '@ferretry/app/ui';
-import { Check, File, RefreshCw, Search } from 'lucide-react';
+import { Loading, RouteLink, Spinner } from '@ferretry/app/ui';
+import { Check, Copy, File, RefreshCw, Search } from 'lucide-react';
 import { useState } from 'react';
 import type { ProjectInfo } from '../../../contract/index.ts';
 import { relativeTime } from '../../lib/folders.ts';
 import type { ProjectsClient } from '../../lib/client.ts';
+import { ferretFilePath } from '../../lib/paths.ts';
 import {
   absolutePath,
   coverageBanner,
@@ -43,9 +45,26 @@ export interface FileFinderProps {
   readonly timings?: FileFinderTimings;
   /** The wall clock, for "updated 3m ago". */
   readonly now?: () => number;
+  /**
+   * The ferret whose file view a chosen file opens in (the newest one working in this project), with the daemon it is on.
+   * Without one there is no gated view of the folder to open the file in, and a row copies the file's path instead.
+   */
+  readonly opensIn?: {
+    readonly daemon: string;
+    readonly ferret: { readonly id: string; readonly name: string };
+  } | null;
+  readonly onNavigate?: (to: string) => void;
 }
 
-export function FileFinder({ client, project, initialQuery = '', timings, now = Date.now }: FileFinderProps) {
+export function FileFinder({
+  client,
+  project,
+  initialQuery = '',
+  timings,
+  now = Date.now,
+  opensIn = null,
+  onNavigate,
+}: FileFinderProps) {
   const [query, setQuery] = useState(initialQuery);
   const [copied, setCopied] = useState<string | null>(null);
   const finder = useFileFinder(client, project.id, query, timings);
@@ -139,10 +158,17 @@ export function FileFinder({ client, project, initialQuery = '', timings, now = 
         </section>
       )}
 
-      {finder.error !== null && (
-        <p className="m-0 text-meta text-warn" role="status" data-finder-error="">
-          Could not refresh: {finder.error}. Showing the last answer.
+      {finder.refused !== null ? (
+        <p className="m-0 text-meta text-warn" role="alert" data-finder-refused="">
+          Could not check whether the update finished: {finder.refused}. It may still be running on the daemon. Showing
+          the last answer; press Rescan to update again.
         </p>
+      ) : (
+        finder.error !== null && (
+          <p className="m-0 text-meta text-warn" role="status" data-finder-error="">
+            Could not refresh: {finder.error}. Showing the last answer.
+          </p>
+        )
       )}
 
       {answer.files.length === 0 ? (
@@ -160,25 +186,58 @@ export function FileFinder({ client, project, initialQuery = '', timings, now = 
         >
           {answer.files.map(file => {
             const { folder, name } = splitPath(file.path);
-            return (
+            const rowClass =
+              'grid min-h-control w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-xs rounded-control px-xs py-1 text-left hover:bg-surface-2 focus-visible:bg-surface-2';
+            const label = (
+              <>
+                <File className="shrink-0 text-faint" size={14} aria-hidden="true" />
+                <span className="min-w-0 truncate text-ui">
+                  <span className="font-medium text-fg">{name}</span>
+                  {folder !== '' && <span className="mono ml-xs text-2xs text-muted">{folder}</span>}
+                </span>
+                {copied === file.path && (
+                  <span className="flex items-center gap-1 text-2xs text-accent" role="status">
+                    <Check size={12} aria-hidden="true" /> Copied
+                  </span>
+                )}
+              </>
+            );
+            // With a ferret working here the row OPENS the file in that ferret's file view (its own gated read); a small
+            // button beside it still copies the path. Without one, copying the path is all a name can do.
+            return opensIn === null ? (
               <li key={file.path} className="min-w-0">
                 <button
                   type="button"
-                  className="grid min-h-control w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-xs rounded-control px-xs py-1 text-left hover:bg-surface-2 focus-visible:bg-surface-2"
+                  className={rowClass}
                   onClick={() => copy(file.path)}
                   aria-label={`Copy the path of ${file.path}`}
                   data-finder-row={file.path}
                 >
-                  <File className="shrink-0 text-faint" size={14} aria-hidden="true" />
-                  <span className="min-w-0 truncate text-ui">
-                    <span className="font-medium text-fg">{name}</span>
-                    {folder !== '' && <span className="mono ml-xs text-2xs text-muted">{folder}</span>}
-                  </span>
-                  {copied === file.path && (
-                    <span className="flex items-center gap-1 text-2xs text-accent" role="status">
-                      <Check size={12} aria-hidden="true" /> Copied
-                    </span>
-                  )}
+                  {label}
+                </button>
+              </li>
+            ) : (
+              <li key={file.path} className="flex min-w-0 items-center gap-xs">
+                <RouteLink
+                  to={ferretFilePath(opensIn.daemon, opensIn.ferret.id, file.path)}
+                  {...(onNavigate === undefined ? {} : { onNavigate })}
+                  className={`${rowClass} flex-1 text-fg no-underline`}
+                  aria-label={`Open ${file.path} in the files of ${opensIn.ferret.name}`}
+                  data-finder-row={file.path}
+                  data-finder-opens="ferret"
+                >
+                  {label}
+                </RouteLink>
+                <button
+                  type="button"
+                  className="kt-btn min-h-control shrink-0 justify-center"
+                  // Inline, as Rescan's (`.kt-btn` fixes its own height): as tall as a row, and wide enough for a thumb.
+                  style={{ minWidth: '2.5rem', height: 'auto' }}
+                  onClick={() => copy(file.path)}
+                  aria-label={`Copy the path of ${file.path}`}
+                  data-finder-copy={file.path}
+                >
+                  <Copy size={13} aria-hidden="true" />
                 </button>
               </li>
             );

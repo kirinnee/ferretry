@@ -359,5 +359,74 @@ describe('the project page file finder', () => {
           expect(await tab.locator('[data-finder-input]').count(), 'one finder').toBe(1);
           await shot('ferret');
         }));
+
+      it(`choosing a file opens THAT file in the file view of the ferret working here; a button beside it still copies (${where})`, () =>
+        withTab(viewport, scheme, async (tab, open) => {
+          await open('view=ferret&find=entry-ts');
+          const row = tab.locator('[data-finder-row="src/entry-ts"]');
+          await row.waitFor({ timeout: 8_000 });
+          expect(await row.getAttribute('href')).toBe('/d/fake/ferrets/f-1?file=src%2Fentry-ts');
+          // The copy button is a SEPARATE control, as tall as the row, so a thumb can tell them apart.
+          const sizes = await tab.evaluate(() => {
+            const link = document.querySelector('[data-finder-row="src/entry-ts"]')?.getBoundingClientRect();
+            const copy = document.querySelector('[data-finder-copy="src/entry-ts"]')?.getBoundingClientRect();
+            return { linkRight: link?.right ?? 0, copyLeft: copy?.left ?? 0, copyHeight: copy?.height ?? 0 };
+          });
+          expect(sizes.copyLeft, 'the copy button sits beside the row, not over it').toBeGreaterThanOrEqual(
+            sizes.linkRight - 0.5,
+          );
+          expect(sizes.copyHeight).toBeGreaterThanOrEqual(viewport.phone ? 40 : 28);
+          await row.click();
+          await tab.waitForFunction(() => window.location.pathname === '/d/fake/ferrets/f-1', undefined, {
+            timeout: 8_000,
+          });
+          const where2 = await tab.evaluate(() => `${window.location.pathname}${window.location.search}`);
+          console.info(`[u7] row click ${where}: went to ${where2}`);
+          expect(where2).toBe('/d/fake/ferrets/f-1?file=src%2Fentry-ts');
+        }));
+
+      it(`outside the home, a refused look at the rebuild stops Updating…, says why, and offers Rescan again (${where})`, () =>
+        withTab(viewport, scheme, async (tab, open, shot) => {
+          await open('view=outside');
+          const statusReads = (): Promise<number> =>
+            tab.evaluate(
+              () =>
+                (window as unknown as { __calls: { route: string }[] }).__calls.filter(call =>
+                  call.route.endsWith('/files/status'),
+                ).length,
+            );
+          expect(await statusReads()).toBe(0);
+          await tab.locator('[data-finder-rescan]').click();
+          await tab.waitForSelector('[data-finder-refused]', { timeout: 8_000 });
+          const after = await measure(tab);
+          const refusedText = await tab.locator('[data-finder-refused]').innerText();
+          expect(refusedText).toContain('listing a folder outside the home folder needs filesystem.configure');
+          expect(after.rescan.text, 'the button says Rescan again, not Updating…').toContain('Rescan');
+          expect(after.rescan.disabled, 'and can be pressed').toBe(false);
+          expectFits(`refused ${where}`, after, viewport);
+          // It stopped asking: two further beats of the 1.5 s poll add no status reads behind the refusal.
+          const reads = await statusReads();
+          await tab.waitForTimeout(3_300);
+          const later = await statusReads();
+          console.info(
+            `[u7] outside ${where}: status reads ${String(reads)} -> ${String(later)}, button "${after.rescan.text}"`,
+          );
+          expect(reads).toBe(1);
+          expect(later, 'no endless polling behind a refusal').toBe(reads);
+          // Rescan starts another build (the POST the daemon asks a fresh confirmation for).
+          const posts = (): Promise<number> =>
+            tab.evaluate(
+              () =>
+                (window as unknown as { __calls: { route: string }[] }).__calls.filter(call =>
+                  call.route.startsWith('POST'),
+                ).length,
+            );
+          const before = await posts();
+          await tab.locator('[data-finder-rescan]').click();
+          await tab.waitForTimeout(200);
+          expect(await posts()).toBe(before + 1);
+          await tab.waitForSelector('[data-finder-refused]', { timeout: 8_000 });
+          await shot('outside-refused');
+        }));
     }
 });

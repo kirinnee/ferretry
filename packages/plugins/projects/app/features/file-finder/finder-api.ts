@@ -46,3 +46,15 @@ export const filesStatus = async (
 /** Starts a rebuild (or joins the one running) and answers at once. */
 export const rescanFiles = async (client: ProjectsClient, projectId: string): Promise<ProjectFilesStatus> =>
   ProjectFilesStatusSchema.parse(await client.call(RESCAN_ROUTE, { params: { id: projectId } }));
+
+/** The HTTP status a thrown call carries, when it carries one. */
+export const statusOf = (cause: unknown): number | undefined => {
+  const status = typeof cause === 'object' && cause !== null ? (cause as { status?: unknown }).status : undefined;
+  return typeof status === 'number' ? status : undefined;
+};
+
+/** A daemon's "no" (not signed in, not allowed, or a confirmation not given): a status of 401 or 403 on the thrown call. */
+export const isRefusal = (cause: unknown): boolean => {
+  const status = statusOf(cause);
+  return status === 401 || status === 403;
+};

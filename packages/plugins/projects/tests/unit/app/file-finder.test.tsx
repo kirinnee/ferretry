@@ -270,4 +270,89 @@ describe('FileFinder', () => {
     expect(copied).toEqual(['/work/ferretry/README.md']);
     await mounted.unmount();
   });
+
+  it('with a ferret working here a row OPENS that file in the ferret’s file view, and a button beside it copies the path', async () => {
+    const navigated: string[] = [];
+    const mounted = await mount(
+      <FileFinder
+        client={scripted(reading())}
+        project={PROJECT}
+        timings={FAST}
+        now={() => NOW}
+        opensIn={{ daemon: 'workstation', ferret: { id: 'f-1', name: 'hayden' } }}
+        onNavigate={to => void navigated.push(to)}
+      />,
+    );
+    await until(mounted, c => c.querySelector('[data-finder-row]') !== null, 'the rows');
+
+    const row = must(mounted.container.querySelector('[data-finder-row="README.md"]'), 'the README row');
+    expect(row.tagName).toBe('A');
+    expect(row.getAttribute('href')).toBe('/d/workstation/ferrets/f-1?file=README.md');
+    expect(row.getAttribute('aria-label')).toBe('Open README.md in the files of hayden');
+    await interact(() => row.dispatchEvent(clickEvent()));
+    expect(navigated).toEqual(['/d/workstation/ferrets/f-1?file=README.md']);
+    expect(mounted.container.querySelector('[data-finder-copy="README.md"]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
+  it('a refused look at a running build stops “Updating…”, says why, and offers Rescan again', async () => {
+    const calls: Call[] = [];
+    const sentence = 'listing a folder outside the home folder needs filesystem.configure';
+    const mounted = await mount(
+      finder(
+        scripted(
+          {
+            ...reading(),
+            [RESCAN]: () => statusOf(summaryOf(), true),
+            [STATUS]: () => refusal(403, sentence, 'step-up-required'),
+          },
+          calls,
+        ),
+      ),
+    );
+    await until(mounted, c => c.querySelector('[data-finder-row]') !== null, 'the first rows');
+    const button = must(mounted.container.querySelector<HTMLButtonElement>('[data-finder-rescan]'), 'rescan');
+    await interact(() => button.dispatchEvent(clickEvent()));
+    await until(mounted, c => c.querySelector('[data-finder-refused]') !== null, 'the refusal');
+
+    expect(mounted.container.querySelector('[data-finder-refused]')?.textContent).toContain(sentence);
+    expect(button.textContent).toContain('Rescan');
+    expect(button.getAttribute('aria-disabled')).toBe('false');
+    // It asked once and stopped: no endless status reads behind a refusal.
+    const statusReads = calls.filter(call => call.route === STATUS).length;
+    await interact(() => new Promise<void>(resolve => setTimeout(resolve, 40)));
+    expect(calls.filter(call => call.route === STATUS).length).toBe(statusReads);
+    expect(statusReads).toBe(1);
+    // Rescan works again.
+    await interact(() => button.dispatchEvent(clickEvent()));
+    expect(calls.filter(call => call.route === RESCAN).length).toBe(2);
+    await mounted.unmount();
+  });
+
+  it('a hiccup in the look at a running build is said once and the next beat asks again', async () => {
+    let looks = 0;
+    const mounted = await mount(
+      finder(
+        scripted({
+          ...reading(),
+          [RESCAN]: () => statusOf(summaryOf(), true),
+          [STATUS]: () => {
+            looks += 1;
+            return looks === 1 ? refusal(503, 'the file index is busy', 'index_busy') : statusOf(summaryOf(), false);
+          },
+        }),
+      ),
+    );
+    await until(mounted, c => c.querySelector('[data-finder-row]') !== null, 'the first rows');
+    const button = must(mounted.container.querySelector<HTMLButtonElement>('[data-finder-rescan]'), 'rescan');
+    await interact(() => button.dispatchEvent(clickEvent()));
+    await until(
+      mounted,
+      c => c.querySelector('[data-finder-rescan]')?.textContent?.includes('Rescan') === true,
+      'the end',
+    );
+    expect(looks).toBeGreaterThanOrEqual(2);
+    expect(mounted.container.querySelector('[data-finder-refused]')).toBeNull();
+    await mounted.unmount();
+  });
 });
