@@ -1,0 +1,31 @@
+/*
+ * What the app's base styles take from a hypermedia message, handed back. The app resets every list (Tailwind's base layer),
+ * and Durian's stylesheet leaves list markers and indent to the browser's own rules, so a Markdown list in a message lost its
+ * bullets and numbers. `:where` keeps this the weakest rule there is: Durian's own lists (file tree, code walk steps) set
+ * `list-style` themselves, with the higher specificity of their own classes, and win.
+ */
+:where(.fy-hm .dh-doc) :is(ul, ol) {
+  list-style: revert;
+  padding-inline-start: 1.5em;
+}
+
+:where(.fy-hm .dh-doc) li.task {
+  list-style: none;
+  margin-inline-start: -1.5em;
+}
+
+/* The "LLM-only text" disclosure (`llm-text.tsx`): a quiet, collapsed line under its part; wrapped, never sideways. */
+.fy-hm .dh-doc details.llm-peek {
+  font-size: 0.85em;
+  margin-block: 0.5rem;
+}
+
+.fy-hm .dh-doc details.llm-peek > summary {
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.fy-hm .dh-doc details.llm-peek .pane-llm {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

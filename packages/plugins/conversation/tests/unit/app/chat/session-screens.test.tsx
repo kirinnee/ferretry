@@ -61,6 +61,9 @@ class MemoryStorage implements DraftStorage {
   }
 }
 
+const contentOf = (node: ReactTestInstance): string =>
+  node.children.map(child => (typeof child === 'string' ? child : contentOf(child))).join('');
+
 const findText = (node: ReactTestInstance, text: string): ReactTestInstance[] =>
   node.findAll(item => item.children.includes(text));
 
@@ -240,7 +243,7 @@ describe('session screen components', () => {
     expect(findText(rows.root, 'Assistant')).toHaveLength(1);
     expect(findText(rows.root, 'Tool')).toHaveLength(1);
     expect(findText(rows.root, 'Daemon')).toHaveLength(1);
-    expect(rows.root.findAllByType('strong').map(node => node.children.join(''))).toEqual(['rendered']);
+    expect(rows.root.findAllByType('strong').map(contentOf)).toEqual(['rendered']);
     expect(rows.root.findAllByType('time')).toHaveLength(0);
   });
 
