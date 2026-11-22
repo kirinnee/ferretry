@@ -1,4 +1,4 @@
-import { PRIVATE_FOLDERS } from '@ferretry/std';
+import { foldName, isPrivateFolder, isSecretFileName, isSecretFolderName, PRIVATE_FOLDERS } from '@ferretry/std';
 import { MAX_FOLDER_PATH_LENGTH } from '../../../contract/index.ts';
 
 /**
@@ -8,15 +8,72 @@ import { MAX_FOLDER_PATH_LENGTH } from '../../../contract/index.ts';
  */
 export { foldName, holdsSignIn, isPrivateFolder } from '@ferretry/std';
 
+/**
+ * What a PROJECT reader keeps out under the home beyond that list: the macOS `~/Library` (Mail, Messages, Keychains, browser
+ * profiles). Applied by name on every platform: a Linux home that has a `~/Library` loses one folder, a Mac that slipped
+ * loses its mail. The ferret file reader has its own say about it.
+ */
+const LIBRARY = 'Library';
+
+/** Whether a path relative to a home (segments) is, or is inside, a private folder or the macOS `~/Library`. */
+export const isPrivateBelowHome = (relative: readonly string[]): boolean =>
+  isPrivateFolder(relative) || (relative[0] !== undefined && foldName(relative[0]) === foldName(LIBRARY));
+
+/**
+ * Whether ONE name is denied wherever it sits, with no home to anchor it: a key store by name (`.ssh`, `.gnupg`,
+ * `.password-store`) or anything that names a secret (`.env`, `*.pem`, `id_ed25519*`, …). The shared list in `@ferretry/std`
+ * decides; it over-matches on purpose. Applied to every real path component and to every name a listing would return, so a
+ * place outside the home is no softer than one inside it.
+ */
+export const isDeniedName = (name: string): boolean => isSecretFolderName(name) || isSecretFileName(name);
+
 /** Every private folder as an absolute spelling under `home`: the paths whose REAL location is then looked up per request. */
 export const privateSpellings = (home: string): readonly string[] => {
   const base = home.replace(/\/+$/, '');
-  return PRIVATE_FOLDERS.map(folder => `${base}/${folder.join('/')}`);
+  return [...PRIVATE_FOLDERS.map(folder => folder.join('/')), LIBRARY].map(folder => `${base}/${folder}`);
 };
+
+/**
+ * Trees a project is never read from on any machine: runtime and pseudo filesystems (other processes' memory, endless
+ * names) and the huge read-only trees no one keeps a project in. Judged on the real path.
+ */
+const SKIPPED_TREES: readonly string[] = [
+  '/proc',
+  '/sys',
+  '/dev',
+  '/run',
+  '/var/run',
+  '/nix/store',
+  '/System',
+  '/private/var',
+];
+
+/** Folders that are somebody's home, whole. */
+const HOME_FOLDERS: readonly string[] = ['/root', '/var/root'];
+/** Folders whose every child is somebody's home. */
+const HOME_PARENTS: readonly string[] = ['/home', '/Users'];
 
 /** Whether the real path `real` is `root` or inside it. */
 export const isAtOrUnder = (real: string, root: string): boolean =>
   real === root || real.startsWith(root.endsWith('/') ? root : `${root}/`);
+
+/** Whether the real path is in a tree a project is never read from (never the owner's own home, wherever it sits). */
+export const isSkippedTree = (real: string, home: string): boolean =>
+  !isAtOrUnder(real, home) && SKIPPED_TREES.some(tree => isAtOrUnder(real, tree));
+
+/**
+ * Whether the real path is in ANOTHER user's home: `/home/<x>`, `/Users/<x>`, `/root`, `/var/root`, below the owner's own
+ * (which may be any of them). `/home` and `/Users` themselves are not: they are only the folder the homes are in.
+ */
+export const isOtherHome = (real: string, home: string): boolean => {
+  if (isAtOrUnder(real, home)) return false;
+  if (HOME_FOLDERS.some(folder => isAtOrUnder(real, folder))) return true;
+  return HOME_PARENTS.some(parent => real.startsWith(`${parent}/`));
+};
+
+/** Whether the real path is a place so wide that a project there is "your whole disk or home": `/`, a home's parent, the home. */
+export const isBroadRoot = (real: string, home: string): boolean =>
+  real === '/' || real === home || HOME_PARENTS.includes(real);
 
 export type PathParse =
   | { readonly ok: true; readonly absolute: string }

@@ -33,7 +33,9 @@ import { FolderPlus, TriangleAlert } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useRef } from 'react';
 import { cn, Spinner } from '@ferretry/app/ui';
 import {
+  BROAD_ROOT_WARNING,
   CLONE_PATIENCE,
+  isBroadRootSpelling,
   NEW_FOLDER_ONE_LEVEL,
   PROJECT_REGISTRATION_MODES,
   type ProjectRegistrationDraft,
@@ -210,6 +212,18 @@ export function AddProjectForm({ draft, onDraftChange, onSubmit, onCancel, statu
       )}
 
       {draft.mode === 'clone' && <p className="m-0 text-meta leading-base text-warn">{CLONE_PATIENCE}</p>}
+
+      {/* Registering the disk or a home is allowed; what it means is said BEFORE the button, not after. */}
+      {draft.mode === 'existing-folder' && isBroadRootSpelling(draft.path) && (
+        <p
+          className="m-0 flex items-start gap-xs text-meta leading-base text-warn"
+          role="status"
+          data-project-broad-warning=""
+        >
+          <TriangleAlert className="mt-0.5 shrink-0" size={14} aria-hidden="true" />
+          <span>{BROAD_ROOT_WARNING}</span>
+        </p>
+      )}
 
       <Refusal status={status} />
 
