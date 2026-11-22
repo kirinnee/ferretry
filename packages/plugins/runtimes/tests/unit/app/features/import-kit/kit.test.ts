@@ -11,6 +11,7 @@ import {
 import { importChange, itemIds, skipList, toolModel } from '../../../../../app/features/import-kit/model.ts';
 import {
   createScanStore,
+  forgetSetupScanAhead,
   readSetupScanAhead,
   scanStoreFor,
   useHarnessScan,
@@ -226,6 +227,85 @@ describe('the scan is read once per client and shared', () => {
     expect(calls.filter(route => route === 'GET /v1/runtimes/setup/scan')).toHaveLength(1);
     readSetupScanAhead(client);
     expect(calls.filter(route => route === 'GET /v1/runtimes/setup/scan')).toHaveLength(2);
+  });
+
+  describe('C59 O8-4 a flow closing and reopening (one fixed run key, as the Claude pages use)', () => {
+    const RUN = 'onboarding-claude-code';
+    /** A machine whose scan answers only when the test says so; each scan call is one entry. */
+    const gatedClient = () => {
+      const calls: string[] = [];
+      const gates: Array<(skills: string[]) => void> = [];
+      const client = {
+        call: (route: string) => {
+          calls.push(route);
+          if (route !== 'GET /v1/runtimes/setup/scan')
+            return Promise.resolve({ installed: { state: 'ok', version: '1' } });
+          return new Promise(resolve => gates.push(skills => resolve(scanOf({ claude: { skills } }))));
+        },
+      } as unknown as RuntimesClient;
+      return { client, gates, scans: () => calls.filter(route => route === 'GET /v1/runtimes/setup/scan').length };
+    };
+    const settle = () => interact(() => new Promise(resolve => setTimeout(resolve, 20)));
+    const Probe = ({ client }: { readonly client: RuntimesClient }) => {
+      const { read } = useHarnessScan(client, 'claude-code', RUN);
+      const skills = read.kind === 'ready' ? read.scan.harnesses[0]?.skills.join(',') : read.kind;
+      return createElement('span', { 'data-skills': skills });
+    };
+    const shown = (view: { readonly container: Element }): string | null =>
+      view.container.querySelector('[data-skills]')?.getAttribute('data-skills') ?? null;
+
+    it('close → reopen while the read is pending: exactly one scan call, shared by the reopened pages', async () => {
+      const { client, gates, scans } = gatedClient();
+      readSetupScanAhead(client);
+      forgetSetupScanAhead(client);
+      readSetupScanAhead(client);
+      expect(scans()).toBe(1);
+      const view = await mount(createElement(Probe, { client }));
+      expect(scans()).toBe(1);
+      gates[0]?.(['one']);
+      await settle();
+      expect(shown(view)).toBe('one');
+      expect(scans()).toBe(1);
+      await view.unmount();
+      forgetSetupScanAhead(client);
+    });
+
+    it('a read that settles after its flow closed (nobody reopened) is cleared: the next flow asks the machine', async () => {
+      const { client, gates, scans } = gatedClient();
+      readSetupScanAhead(client);
+      forgetSetupScanAhead(client);
+      gates[0]?.(['stale']);
+      await settle();
+      readSetupScanAhead(client);
+      expect(scans()).toBe(2);
+      gates[1]?.(['fresh']);
+      const view = await mount(createElement(Probe, { client }));
+      await settle();
+      expect(shown(view)).toBe('fresh');
+      await view.unmount();
+      forgetSetupScanAhead(client);
+    });
+
+    it('close → reopen after the read settled shows the fresh result, not the first answer (Claude consumer)', async () => {
+      const { client, gates, scans } = gatedClient();
+      readSetupScanAhead(client);
+      const first = await mount(createElement(Probe, { client }));
+      gates[0]?.(['old']);
+      await settle();
+      expect(shown(first)).toBe('old');
+      await first.unmount();
+      forgetSetupScanAhead(client);
+      // The flow opens again: same client, same run key.
+      readSetupScanAhead(client);
+      expect(scans()).toBe(2);
+      const second = await mount(createElement(Probe, { client }));
+      gates[1]?.(['new']);
+      await settle();
+      expect(shown(second)).toBe('new');
+      expect(scans()).toBe(2);
+      await second.unmount();
+      forgetSetupScanAhead(client);
+    });
   });
 
   it('an answer that is not a scan, read quietly, waits for a press instead of failing', async () => {

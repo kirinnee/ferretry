@@ -67,8 +67,11 @@ const readMachine = async (client: RuntimesClient, quiet: boolean): Promise<Mach
  * the first read of every store on that machine, for {@link AHEAD_MS} after it started. Only a store's FIRST read takes it:
  * Check again, a read after an install or a sign-in and the Settings re-import (`refresh`) always ask the machine.
  *
- * Each flow opening reads afresh (one already in flight is shared, never doubled) and forgets its read when it closes
- * ({@link forgetSetupScanAhead}), so a flow never shows what an earlier one read. A read that FAILED is handed to exactly one page, which shows the failure and its retry as its own read would
+ * Each flow opening reads afresh and forgets its read when it closes ({@link forgetSetupScanAhead}), so a flow never shows
+ * what an earlier one read. A read still IN FLIGHT when the flow closes is not dropped: it is kept (one per machine, never
+ * doubled), a reopening reuses it, and it is cleared once it settles. Every opening also starts the stores of that
+ * machine over, so a page of a reopened flow never shows the answer of the flow before (the Claude pages keep one fixed
+ * run key). A read that FAILED is handed to exactly one page, which shows the failure and its retry as its own read would
  * have; the next store asks the machine itself.
  */
 const AHEAD_MS = 10 * 60_000;
@@ -77,37 +80,61 @@ interface Ahead {
   readonly read: Promise<MachineRead>;
   /** Set once the read settles: `ok` or `failed`. */
   settled?: 'ok' | 'failed';
+  /** The flow that started it closed while it was in flight: kept for a reopening only, dropped when it settles. */
+  closed?: true;
 }
 const AHEAD = new Map<object | string, Ahead>();
 const machineOf = (client: RuntimesClient): object | string => daemonOfClient(client) ?? client;
 
-/** Start the scan for `client`'s machine now, quietly (one still in flight is shared). Never throws. */
+/**
+ * One store per client and run: a client is per daemon, so another machine is another store and nothing crosses machines.
+ * Only the latest run of a client is kept: asking for another `run` drops the old store, so the next page reads again.
+ */
+const STORES = new WeakMap<RuntimesClient, { readonly run: string; readonly store: ScanStore }>();
+
+/**
+ * Start the scan for `client`'s machine now, quietly. A read still in flight is shared, never doubled: that includes one
+ * the previous flow left when it closed. A flow opening (anything but a read of the flow still open) starts the machine's
+ * stores over, so no page shows an earlier flow's answer. Never throws.
+ */
 export function readSetupScanAhead(client: RuntimesClient, nowMs: number = Date.now()): void {
   const machine = machineOf(client);
   const held = AHEAD.get(machine);
-  if (held !== undefined && held.settled === undefined) return;
+  if (held === undefined || held.closed === true || held.settled !== undefined) STORES.delete(client);
+  if (held !== undefined && held.settled === undefined) {
+    delete held.closed;
+    return;
+  }
   const ahead: Ahead = { at: nowMs, read: readMachine(client, true) };
   AHEAD.set(machine, ahead);
+  const settle = (outcome: 'ok' | 'failed'): void => {
+    ahead.settled = outcome;
+    // Its flow closed while it was in flight and nobody reopened: nothing may take it now.
+    if (ahead.closed === true && AHEAD.get(machine) === ahead) AHEAD.delete(machine);
+  };
   ahead.read.then(
-    () => {
-      ahead.settled = 'ok';
-    },
-    () => {
-      ahead.settled = 'failed';
-    },
+    () => settle('ok'),
+    () => settle('failed'),
   );
 }
 
-/** The flow that started a read ahead has closed: no later store, and no later flow, takes what it read. */
+/**
+ * The flow that started a read ahead has closed: no later store, and no later flow, takes what it read. A read still in
+ * flight is kept (a reopening reuses it, one scan call) and cleared when it settles.
+ */
 export function forgetSetupScanAhead(client: RuntimesClient): void {
-  AHEAD.delete(machineOf(client));
+  const machine = machineOf(client);
+  const held = AHEAD.get(machine);
+  if (held === undefined) return;
+  if (held.settled === undefined) held.closed = true;
+  else AHEAD.delete(machine);
 }
 
 /** The read started ahead for `client`'s machine, if it may still stand in for a first read (a failed one, only once). */
 const aheadFor = (client: RuntimesClient, nowMs: number): Promise<MachineRead> | undefined => {
   const machine = machineOf(client);
   const held = AHEAD.get(machine);
-  if (held === undefined || nowMs - held.at >= AHEAD_MS) return undefined;
+  if (held === undefined || held.closed === true || nowMs - held.at >= AHEAD_MS) return undefined;
   if (held.settled === 'failed') AHEAD.delete(machine);
   return held.read;
 };
@@ -154,11 +181,6 @@ export function createScanStore(client: RuntimesClient): ScanStore {
   };
 }
 
-/**
- * One store per client and run: a client is per daemon, so another machine is another store and nothing crosses machines.
- * Only the latest run of a client is kept: asking for another `run` drops the old store, so the next page reads again.
- */
-const STORES = new WeakMap<RuntimesClient, { readonly run: string; readonly store: ScanStore }>();
 export const scanStoreFor = (client: RuntimesClient, run: string): ScanStore => {
   const known = STORES.get(client);
   if (known?.run === run) return known.store;
