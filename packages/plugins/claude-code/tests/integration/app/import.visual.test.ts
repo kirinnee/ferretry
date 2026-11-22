@@ -181,7 +181,9 @@ describe('the Claude import pages', () => {
           );
         const press = tab.locator('[data-import-press]');
         await press.click();
-        await tab.waitForSelector('[role="status"]:has-text("Importing…")');
+        // O5: the page no longer says "Importing…" itself (the host footer's hold line does, and this scene's footer is a stand-in): the working bar moving is the page's own sign that it waits.
+        await tab.waitForSelector('[data-import-actions]');
+        await tab.waitForSelector('.cc-working[data-working="true"]');
         // Waiting: the press is disabled and the first stage POST is in flight with a live signal.
         expect(await press.isDisabled()).toBe(true);
         expect(await sent()).toEqual([{ route: 'POST /v1/runtimes/proposals', aborted: false }]);
@@ -191,6 +193,7 @@ describe('the Claude import pages', () => {
         const refusal = await tab.locator('[data-import-refusal]').innerText();
         expect(refusal).toContain('Claude Code import did not answer within 90 s');
         expect(await tab.getByText('Importing…').count()).toBe(0);
+        expect(await tab.locator('.cc-working[data-working="true"]').count()).toBe(0);
         expect((await press.innerText()).replace(/^↓\s*/, '')).toBe('Try again');
         expect(await press.isEnabled()).toBe(true);
         // The deadline aborted the request that was waiting.

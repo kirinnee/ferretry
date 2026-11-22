@@ -30,7 +30,6 @@ import { ActionRow, SecretInput, useSecretField } from '@ferretry/app/ui';
 import { Check, ChevronRight, Link2, ShieldCheck, Trash2 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { type DaemonPath, describeDaemonPath, describeListedDaemon } from '@ferretry/plugin-connections/contract';
-import { PAIRING_DEVICE_NAME_MAX_LENGTH } from '../../../contract/index.ts';
 import {
   BrandMark,
   type DaemonConnectionRecord,
@@ -41,10 +40,11 @@ import type { QrScanHost } from '../../lib/pair-scan.ts';
 import { usePairingScreenMarker } from '../../lib/pairing-screen-marker.ts';
 import { type PairingArrival, pairingSeedFromUrl, type PairingSeed } from '../../lib/pairing.ts';
 import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
-import { browserDeviceName, StepProgress } from '@ferretry/app';
+import { browserDeviceName } from '@ferretry/app';
 import { normalizedDeviceName } from '../../lib/device-name.ts';
 import { FerretMascot, type FerretPose } from './ferret-mascot.tsx';
 import { MachineNameField, machineNameChoice } from './machine-name-field.tsx';
+import { ConfirmActions, DeviceNameLine, PairProgress } from './pair-confirm-pieces.tsx';
 import { PairScanner } from './pair-scanner.tsx';
 import {
   FirstPasskeyOffer,
@@ -560,14 +560,7 @@ function PairingFrame({ embedded, stage, announce = '', onClose, children }: Pai
       <PairingSky celebrating={stage === 'paired'} />
       <main className={SHELL} aria-labelledby="pairing-title" data-pairing-stage={stage}>
         {onClose !== undefined && stage !== 'paired' && <PairingBack onClose={onClose} />}
-        {PROGRESS_AT[stage] === undefined ? null : (
-          <StepProgress
-            segments={PAIR_SEGMENTS}
-            current={PROGRESS_AT[stage]}
-            step={PAIR_SEGMENTS.findIndex(segment => segment.id === PROGRESS_AT[stage]) + 1}
-            of={PAIR_SEGMENTS.length}
-          />
-        )}
+        <PairProgress stage={stage} />
         {pose !== undefined && (
           <div className="fy-pair-hero">
             <FerretMascot pose={pose} />
@@ -582,30 +575,6 @@ function PairingFrame({ embedded, stage, announce = '', onClose, children }: Pai
         {status}
       </main>
     </div>
-  );
-}
-
-/** THE SAME PROGRESS BAR the setup pages draw (`StepProgress`), so the first screens are steps of the same run, not a different thing. */
-const PAIR_SEGMENTS = [
-  { id: 'pair', label: 'Pair' },
-  { id: 'connected', label: 'Connected' },
-  { id: 'setup', label: 'Set up' },
-] as const;
-const PROGRESS_AT: Readonly<Record<string, string | undefined>> = {
-  confirm: 'pair',
-  pairing: 'pair',
-  failed: 'pair',
-  paired: 'connected',
-};
-
-/** The device name as typed; only a wrap is steered: the "·" stays with the suffix after it (same text, so nothing reads or copies differently). */
-function DeviceNameText({ name }: { readonly name: string }) {
-  const at = name.indexOf(' · ');
-  if (at < 0) return <>{name}</>;
-  return (
-    <>
-      {name.slice(0, at)} <span className="whitespace-nowrap">{name.slice(at + 1)}</span>
-    </>
   );
 }
 
@@ -825,81 +794,27 @@ function PairingFocus({
         </details>
       </section>
 
-      {/*
-        WHAT THE MACHINE WILL CALL THIS DEVICE, said before it is sent, and changeable. Every browser
-        used to pair as "Ferretry PWA", and a second one made every name at the machine ambiguous; the
-        default is now this browser and system plus a short suffix. A sentence with a quiet Rename
-        rather than a field, because this screen is still one decision for somebody who scanned a QR.
-      */}
-      {renaming ? (
-        <label className="flex min-w-0 flex-col gap-1 text-ui text-muted">
-          Name this device
-          <input
-            type="text"
-            className="kt-input min-h-[44px] min-w-0"
-            data-pair-device-name=""
-            value={deviceName}
-            maxLength={PAIRING_DEVICE_NAME_MAX_LENGTH}
-            autoComplete="off"
-            spellCheck={false}
-            disabled={busy}
-            onChange={event => onDeviceName(event.target.value)}
-          />
-        </label>
-      ) : (
-        <p className="m-0 min-w-0 break-words text-ui leading-base text-muted" data-pair-device-label="">
-          <span>
-            This device will be called{' '}
-            {/* A wrap never strands the "·" at the end of a line: the dot stays with what follows it. */}
-            <span className="font-semibold text-fg">
-              <DeviceNameText name={deviceName} />
-            </span>
-            .
-          </span>{' '}
-          <button
-            type="button"
-            className="fy-inline-action"
-            data-pair-device-rename=""
-            onClick={() => setRenaming(true)}
-            disabled={busy}
-          >
-            Rename
-          </button>
-        </p>
-      )}
+      <DeviceNameLine
+        name={deviceName}
+        renaming={renaming}
+        busy={busy}
+        onName={onDeviceName}
+        onRename={() => setRenaming(true)}
+      />
 
       <MachineNameField value={machineName} disabled={busy} onChange={onMachineName} />
 
-      {/*
-        `data-pair-confirm` names the one control that starts a redemption, so a harness presses it
-        by identity rather than by position or by a design-system attribute. Both fallbacks are
-        wrong for the same reason in different ways: the first structural button on this screen is a
-        NAVIGATION control, and `data-variant="primary"` is a styling choice a restyle may take away
-        while leaving a journey silently pressing nothing.
-      */}
       {busy && <p className="m-0 text-center text-ui text-muted">Exchanging the one-time code with this daemon…</p>}
-      <ActionRow
-        secondary={
-          <PairButton type="button" onClick={onCancel} disabled={busy}>
-            Not now
-          </PairButton>
-        }
-        primary={
-          <PairButton
-            type="button"
-            data-variant="primary"
-            data-pair-confirm=""
-            onClick={() => {
-              const machine = machineNameChoice(machineName);
-              if (sendableName === undefined || machine.kind === 'refused') return;
-              if (machine.kind === 'none') onPair(seed, sendableName);
-              else onPair(seed, sendableName, machine.name);
-            }}
-            disabled={busy || sendableName === undefined || machineNameChoice(machineName).kind === 'refused'}
-          >
-            {busy ? 'Pairing…' : 'Pair this device'}
-          </PairButton>
-        }
+      <ConfirmActions
+        busy={busy}
+        pairDisabled={sendableName === undefined || machineNameChoice(machineName).kind === 'refused'}
+        onCancel={onCancel}
+        onPair={() => {
+          const machine = machineNameChoice(machineName);
+          if (sendableName === undefined || machine.kind === 'refused') return;
+          if (machine.kind === 'none') onPair(seed, sendableName);
+          else onPair(seed, sendableName, machine.name);
+        }}
       />
     </PairingFrame>
   );
