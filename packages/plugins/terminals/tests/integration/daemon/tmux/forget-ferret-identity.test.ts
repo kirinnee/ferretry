@@ -6,7 +6,8 @@ import should from 'should';
 import { boundedSpawn } from '../../../../daemon/adapters/tmux/bounded.ts';
 import { forgetFerretIdentity } from '../../../../daemon/adapters/tmux/forget-ferret-identity.ts';
 import { KernelTmuxProcess } from '../../../../daemon/adapters/tmux/kernel-tmux-process.ts';
-import { hostSpawn, realAfter } from '../support/host-spawn.ts';
+import { HeldSpawn } from '../support/held-spawn.ts';
+import { realAfter } from '../support/host-spawn.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
 
 /**
@@ -58,7 +59,9 @@ describe("a daemon's tmux server's global environment", () => {
     const wedged = join(root, 'tmux');
     await writeFile(wedged, '#!/bin/sh\nexec sleep 30\n');
     await chmod(wedged, 0o755);
-    const tmux = new KernelTmuxProcess(boundedSpawn(hostSpawn, 300), join(root, 'tmux.sock'), wedged);
+    // The port keeps the handle of every child it starts, so the test ends exactly those, never a recorded pid.
+    const children = new HeldSpawn();
+    const tmux = new KernelTmuxProcess(boundedSpawn(children, 300), join(root, 'tmux.sock'), wedged);
     let stalled = 0;
 
     try {
@@ -75,6 +78,10 @@ describe("a daemon's tmux server's global environment", () => {
       should(cleared).deepEqual([]);
       should(stalled).equal(1);
     } finally {
+      // The bound kills a child 300 ms after it starts, which can be after this test ends: end each child through
+      // its own handle now and wait for it, so none outlives the test process (scripts/test/swept.sh fails a run
+      // that leaves one).
+      await children.endAll();
       await rm(root, { recursive: true, force: true });
     }
   });

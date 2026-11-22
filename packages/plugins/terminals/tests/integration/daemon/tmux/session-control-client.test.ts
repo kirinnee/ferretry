@@ -23,14 +23,34 @@ import {
   SESSION_WORKER_ATTACH_FLAGS,
 } from '../../../../daemon/lib/tmux/control-protocol.ts';
 import { isTmuxServerAbsent } from '../../../../daemon/lib/tmux/server-absent.ts';
+import { stopTmuxServer, TEARDOWN_BUDGET_MS } from '../support/stop-tmux-server.ts';
 import { waitFor } from '../support/wait-for.ts';
 
 const TMUX = Bun.which('tmux');
+/** How long the control client gets to exit on SIGTERM before `stop()` SIGKILLs the child it holds. */
+const CLIENT_EXIT_MS = 2000;
 const cleanups: (() => Promise<void>)[] = [];
 
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
+
+/**
+ * End a fixture inside ONE budget (`TEARDOWN_BUDGET_MS`, under the file's timeout): first the control client, and only
+ * once its process has EXITED the server. `close()` only asks the client to go; tmux 3.6a, told `kill-server` while
+ * that client is still detaching, keeps the server and the client waiting on each other for good, which is the
+ * deadlock `ControlModeTmuxProcess.stop()` exists to prevent (control-tmux-process.ts). Everything the budget does
+ * not cover fails by name, never by timing out the file.
+ */
+async function teardown(subject: ControlModeTmuxProcess, socket: string, root: string): Promise<void> {
+  const started = Date.now();
+  try {
+    await subject.stop(CLIENT_EXIT_MS);
+    if (TMUX !== null) await stopTmuxServer(TMUX, socket, Math.max(TEARDOWN_BUDGET_MS - (Date.now() - started), 1000));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
 
 /** The spawn path, counted: a worker's client may spawn a read when it is not connected, never more. */
 class CountingSpawn implements TmuxCommandPort {
@@ -56,11 +76,7 @@ async function attached(target = 'agent') {
     spawned,
     controlOptions({ attach: { target, flags: SESSION_WORKER_ATTACH_FLAGS }, mutations: 'refuse' }),
   );
-  cleanups.push(async () => {
-    subject.close();
-    await direct.execute(['kill-server']);
-    await rm(root, { recursive: true, force: true });
-  });
+  cleanups.push(async () => await teardown(subject, socket, root));
   return { direct, spawned, subject };
 }
 
@@ -219,11 +235,7 @@ describe('a session worker’s pane subscription', () => {
       direct,
       controlOptions({ attach: { target: 'agent', flags: SESSION_WORKER_ATTACH_FLAGS }, mutations: 'refuse' }),
     );
-    cleanups.push(async () => {
-      subject.close();
-      await direct.execute(['kill-server']);
-      await rm(root, { recursive: true, force: true });
-    });
+    cleanups.push(async () => await teardown(subject, socket, root));
 
     // Act
     const took = await subject.watch('fy-pane', PANE_WATCH_FORMAT);
