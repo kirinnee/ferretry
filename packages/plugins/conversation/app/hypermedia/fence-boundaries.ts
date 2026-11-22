@@ -139,7 +139,9 @@ function durianCloser(lines: readonly string[], from: number, fence: string): nu
 }
 
 /** The fences Durian's line scan finds, which are the ones it splits the message at. A fence it never closes swallows the rest. */
-function durianFences(lines: readonly string[]): readonly { readonly open: number; readonly close: number | null }[] {
+export function durianFences(
+  lines: readonly string[],
+): readonly { readonly open: number; readonly close: number | null }[] {
   const found: { open: number; close: number | null }[] = [];
   for (let i = 0; i < lines.length; i++) {
     const fence = DURIAN_FENCE.exec(lines[i] ?? '')?.[2];
