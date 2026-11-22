@@ -375,6 +375,26 @@ describe('document writes over a journal restored in place', () => {
     await closeStorage(opened.storage);
   });
 
+  it('should vouch for a long journal from a bounded sample of its pointers, never a full read', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const fileSystems = new CountingFileSystemFactory();
+    const opened = await openStorage(home, fileSystems);
+    const fileSystem = fileSystems.instance;
+    const id = parseSessionId('long-journal');
+    for (let index = 0; index < 120; index += 1) await opened.storage.append(id, 'tick', { index });
+    fileSystem?.resetJournalReads();
+
+    // Act
+    await opened.storage.writeState(id, { status: 'finished' });
+
+    // Assert: one slice for the last pointer and the sample, far fewer than the 120 events, and no chunk streamed.
+    should(fileSystem?.chunkReads).deepEqual([]);
+    should(fileSystem?.sliceReads.length).be.within(2, 40);
+    should(opened.storage.findSession(id)?.lastSequence).equal(120);
+    await closeStorage(opened.storage);
+  });
+
   it('should owe a full journal read once the backstop window passed, even when every sampled pointer still matches', async () => {
     // Arrange
     const home = await createTemporaryHome();
