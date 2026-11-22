@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@ferretry/app": "workspace:*",
+    "@ferretry/core-asks": "workspace:*",
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/kernel": "workspace:*",
     "@ferretry/plugin-connections": "workspace:*",

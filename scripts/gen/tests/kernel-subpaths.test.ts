@@ -119,6 +119,15 @@ describe('context-imports: the app shell public API', () => {
     expect(refusal(edge('connections', 'tests/unit/app/x.test.ts', '@ferretry/app/testing'))).toBeUndefined();
   });
 
+  test("an app half also imports the two pure subpaths a worker can carry, and nothing else of the shell's src", () => {
+    for (const specifier of ['@ferretry/app/fy-render', '@ferretry/app/references/grammar'])
+      expect(refusal(edge('conversation', 'app/hypermedia/x.ts', specifier))).toBeUndefined();
+    expect(
+      refusal(edge('conversation', 'app/hypermedia/x.ts', '@ferretry/app/src/session/session-client.ts')),
+    ).toContain('only by app halves');
+    expect(refusal(edge('conversation', 'daemon/index.ts', '@ferretry/app/fy-render'))).toContain('only by app halves');
+  });
+
   test('a daemon half, a contract, or an app half reaching for the fakes is refused', () => {
     expect(refusal(edge('connections', 'daemon/index.ts', '@ferretry/app'))).toContain('only by app halves');
     expect(refusal(edge('connections', 'app/index.ts', '@ferretry/app/testing'))).toContain('only by tests');

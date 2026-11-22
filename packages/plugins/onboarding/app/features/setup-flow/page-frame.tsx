@@ -258,12 +258,18 @@ export function FlowPage(props: FlowPageProps): ReactNode {
           <div className="fy-sf-cover" data-flow-cover="">
             {loaderDue ? <Loading kind="page" label="Checking what this step needs…" /> : null}
             {silent && !ready ? (
-              <div className="fy-sf-silent" data-flow-silent="">
-                <p className="fy-sf-note">Still checking…</p>
-                <Button variant="ghost" onClick={() => props.onSkip('not-needed')} data-flow-skip="">
+              // C59 O8-4: a hint reads as a hint and the way out as a link (a quiet action, never a second button).
+              <p className="fy-sf-silent fy-sf-hint" data-flow-silent="">
+                Still checking.{' '}
+                <button
+                  type="button"
+                  className="fy-inline-action"
+                  onClick={() => props.onSkip('not-needed')}
+                  data-flow-skip=""
+                >
                   Skip this step
-                </Button>
-              </div>
+                </button>
+              </p>
             ) : null}
           </div>
         ) : null}

@@ -61,6 +61,7 @@
       },
       "dependencies": {
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-board": "workspace:*",
         "@ferretry/plugin-runtimes": "workspace:*",
         "@ferretry/plugin-updates": "workspace:*",
         "@ferretry/std": "workspace:*",
@@ -170,6 +171,7 @@
       "version": "5.0.0",
       "dependencies": {
         "@ferretry/app": "workspace:*",
+        "@ferretry/core-asks": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-connections": "workspace:*",

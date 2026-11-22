@@ -23,6 +23,7 @@ import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx
 import { fyRenderFences } from '../../../../app/render/fences.tsx';
 import { transcriptEntriesFromLog } from '../../../../app/chat/chat-refresh.ts';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
+import { inProcessReader, withDurianReader } from '../../../support/durian-reader.tsx';
 import { ensureDom, interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 const NOW = Date.UTC(2026, 9, 29, 12, 0, 0);
@@ -32,11 +33,15 @@ const FENCES = fyRenderFences();
 
 /** The surface a chat draws its transcript in, which is where its fy-render blocks come from. */
 const SURFACE = chatReferenceSurface({ daemonId: 'd', ferretId: 's' });
-const inChat = (entries: readonly TranscriptEntry[]) => (
-  <ReferenceSurfaceProvider surface={SURFACE}>
-    <Transcript daemonId="d" entries={entries} sessionId="s" />
-  </ReferenceSurfaceProvider>
-);
+/** Every message here is read by one Durian reader over an in-process worker (`tests/support/durian-reader.tsx`), as the page has one. */
+const READER = inProcessReader();
+const inChat = (entries: readonly TranscriptEntry[]) =>
+  withDurianReader(
+    <ReferenceSurfaceProvider surface={SURFACE}>
+      <Transcript daemonId="d" entries={entries} sessionId="s" />
+    </ReferenceSurfaceProvider>,
+    READER,
+  );
 
 /** An interactive block with state of its own: a tab strip whose choice lives inside the frame. */
 const HTML_BLOCK = [
@@ -95,6 +100,8 @@ const mounted: Mounted[] = [];
 const mountTracked = async (...args: Parameters<typeof mount>): Promise<Mounted> => {
   const view = await mount(...args);
   mounted.push(view);
+  // A message's document comes from the Durian worker after the first paint.
+  await interact(() => Promise.resolve());
   return view;
 };
 afterEach(async () => {
@@ -117,11 +124,13 @@ describe('Markdown keeps what it drew across a re-render', () => {
     // Arrange — the session's reference surface is rebuilt whenever a terminal, page or task changes,
     // which hands every message new opener functions.
     const text = ['Here is the agenda:', '', ...HTML_BLOCK].join('\n');
-    const message = () => (
-      <ReferenceSurfaceProvider surface={{ fences: FENCES, onTaskOpen: () => undefined }}>
-        <HypermediaProse text={text} />
-      </ReferenceSurfaceProvider>
-    );
+    const message = () =>
+      withDurianReader(
+        <ReferenceSurfaceProvider surface={{ fences: FENCES, onTaskOpen: () => undefined }}>
+          <HypermediaProse text={text} />
+        </ReferenceSurfaceProvider>,
+        READER,
+      );
     const view = await mountTracked(message());
     const frame = htmlFrame(view);
 

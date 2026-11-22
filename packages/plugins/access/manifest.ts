@@ -1,11 +1,13 @@
 import { SessionModes } from '@ferretry/kernel/contract';
 import { definePlugin, panel, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
+import { AsksChanged, AsksPort } from '@ferretry/core-asks/contract';
 import { Credentials, GatePort, StepUp } from '@ferretry/core-gate/contract';
 import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
 import {
   ACCESS_WORDS,
   AccessPort,
   PairingWindowPort,
+  AskBuzzesFile,
   AUDIT,
   DevicesChanged,
   DevicesFile,
@@ -40,7 +42,8 @@ export default definePlugin({
   kinds: ['session-mode', 'credential-provider', 'view', 'command'],
   words: ACCESS_WORDS,
 
-  needs: { gate: GatePort },
+  // Asks: the ask buzz (a card's ask, a buzzed notice) is Access's, so the owner's phone hears it with Agenda off.
+  needs: { gate: GatePort, asks: AsksPort },
   uses: { connections: ConnectionsPort },
   provides: { access: AccessPort, pairingWindow: PairingWindowPort },
 
@@ -293,9 +296,12 @@ export default definePlugin({
       /** Device-grant and security changes, one line per axis, attributed to the actor (G150). */
       GrantAuditFile,
       PairingRedirectsFile,
+      /** The asks whose buzz went out, one line each: what keeps an ask from buzzing the phone twice. */
+      AskBuzzesFile,
     ],
     readModels: ['devices'],
     publishes: [DevicesChanged],
+    subscribes: [AsksChanged],
   },
 
   hooks: {

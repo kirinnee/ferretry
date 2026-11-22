@@ -1,4 +1,4 @@
-import { findReferences, type Reference } from '@ferretry/app';
+import { findReferences, type Reference } from '@ferretry/app/references/grammar';
 import type { Block, Document } from 'durian-hypermedia';
 
 /**

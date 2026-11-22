@@ -171,3 +171,23 @@ export const PairingRedirectsFile = defineState({
   schema: z.instanceof(Uint8Array),
   mode: 0o600,
 });
+
+// ─── ask-buzzes.jsonl ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/** One line per ask whose buzz went out: the moment's key, when, and which kind. Holds no endpoint, key or words. */
+export const AskBuzzRecordSchema = z.strictObject({
+  format: z.literal(1),
+  key: z.string().min(1),
+  at: InstantSchema,
+  kind: z.enum(['card-ask', 'notice']),
+});
+export type AskBuzzRecord = z.infer<typeof AskBuzzRecordSchema>;
+
+/** The ask-buzz ledger: what keeps an ask from buzzing the phone twice, across a restart too. */
+export const AskBuzzesFile = defineState({
+  name: 'ask-buzzes',
+  path: 'ask-buzzes.jsonl',
+  store: 'jsonl',
+  format: 1,
+  schema: AskBuzzRecordSchema,
+});

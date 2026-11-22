@@ -15,7 +15,7 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import { ALL_PALETTE_IDS, sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 import { expectKitFrame, factsOf, SAME_AS_CLAUDE } from './fixtures/parity.ts';
 
 const packageRoot = import.meta.dir;
@@ -216,4 +216,96 @@ describe('the Codex import pages', () => {
           await context.close();
         }, 60_000);
       }
+});
+
+/**
+ * C59 O8 item 5, the owner's line: "when i uncheck stuff, it all becomes black (settings and agents.md so far)". The shared
+ * found-list row (Codex AND Claude Code kind pages, the import wizard) dimmed a whole unticked row with `opacity-70`, so its text
+ * and its panel sank into the page: near-black in dark, washed out in light. An unticked row says it is unticked with its
+ * box and nothing else: its words and panel keep the contrast a ticked row has.
+ *
+ * Measured in the browser, over ALL twelve palettes, light and dark: the unticked row has no opacity of its own, its text colour
+ * and panel colour are the ticked row's, its words read at least as well as the ticked row's against its panel, and the
+ * unticked row's words are never near-black on a dark panel (nor its panel near-black under a light one's words).
+ */
+describe('an unticked import row keeps its words and its panel (C59 O8 item 5)', () => {
+  for (const palette of ALL_PALETTE_IDS)
+    for (const mode of ['light', 'dark'] as const)
+      for (const page of ['settings', 'instructions'] as const)
+        it(`${page}: unticked reads like ticked, ${palette}-${mode}`, async () => {
+          const context = await newContext(VIEWPORTS[1], mode);
+          const tab = await context.newPage();
+          await tab.goto(`${server?.url.origin ?? ''}/?page=${page}&theme=${palette}-${mode}`);
+          await tab.waitForSelector('[data-found-row]');
+          await tab.waitForTimeout(500);
+          const boxes = tab.locator('[data-found-row] input[type="checkbox"]:not(:disabled)');
+          const measure = async () =>
+            await tab.evaluate(() => {
+              const canvas = document.createElement('canvas');
+              canvas.width = canvas.height = 1;
+              const g = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D;
+              const rgba = (css: string): [number, number, number, number] => {
+                g.clearRect(0, 0, 1, 1);
+                g.fillStyle = '#000';
+                g.fillStyle = css;
+                g.fillRect(0, 0, 1, 1);
+                const d = g.getImageData(0, 0, 1, 1).data;
+                // Draw over transparent: alpha comes back un-premultiplied by the canvas readback.
+                return [d[0] ?? 0, d[1] ?? 0, d[2] ?? 0, (d[3] ?? 0) / 255];
+              };
+              const over = (top: number[], below: number[], opacity: number): number[] => {
+                const a = (top[3] ?? 1) * opacity;
+                return [0, 1, 2].map(i => (top[i] ?? 0) * a + (below[i] ?? 0) * (1 - a));
+              };
+              const lum = (c: number[]): number => {
+                const [r, g2, b] = c.map(v => {
+                  const s = v / 255;
+                  return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+                }) as [number, number, number];
+                return 0.2126 * r + 0.7152 * g2 + 0.0722 * b;
+              };
+              const page = rgba(getComputedStyle(document.body).backgroundColor);
+              const opaquePage = [page[0], page[1], page[2], 1];
+              return [...document.querySelectorAll<HTMLElement>('[data-found-row]')].map(row => {
+                let opacity = 1;
+                for (let node: HTMLElement | null = row; node !== null; node = node.parentElement)
+                  opacity *= Number(getComputedStyle(node).opacity);
+                const text = row.querySelector('span span') as HTMLElement;
+                const panel = over(rgba(getComputedStyle(row).backgroundColor), opaquePage, 1);
+                const seenPanel = over([...panel, 1], opaquePage, opacity);
+                const seenText = over(rgba(getComputedStyle(text).color), seenPanel, opacity);
+                const lp = lum(seenPanel);
+                const lt = lum(seenText);
+                return {
+                  ticked: (row.querySelector('input') as HTMLInputElement).checked,
+                  opacity,
+                  textCss: getComputedStyle(text).color,
+                  panelCss: getComputedStyle(row).backgroundColor,
+                  ratio: (Math.max(lp, lt) + 0.05) / (Math.min(lp, lt) + 0.05),
+                  textLum: lt,
+                  panelLum: lp,
+                };
+              });
+            });
+          for (const box of await boxes.all()) await box.check();
+          await tab.waitForTimeout(200);
+          const ticked = await measure();
+          for (const box of await boxes.all()) await box.uncheck();
+          await tab.waitForTimeout(200);
+          const unticked = await measure();
+          expect(unticked.length, 'there are rows to untick').toBeGreaterThan(0);
+          expect(unticked.length).toBe(ticked.length);
+          for (const [index, row] of unticked.entries()) {
+            const reference = ticked[index] as (typeof ticked)[number];
+            expect(row.ticked, 'the box is really unticked').toBe(false);
+            expect(row.opacity, 'an unticked row is not faded').toBe(1);
+            expect(row.textCss, 'same text colour as when ticked').toBe(reference.textCss);
+            expect(row.panelCss, 'same panel colour as when ticked').toBe(reference.panelCss);
+            expect(row.ratio, 'reads at least as well as when ticked').toBeGreaterThanOrEqual(reference.ratio - 0.01);
+            // Never near-black words on a dark panel, nor a near-black panel on a light surface.
+            if (mode === 'dark') expect(row.textLum, 'words not near-black on dark').toBeGreaterThan(0.2);
+            else expect(row.panelLum, 'panel not near-black on light').toBeGreaterThan(0.2);
+          }
+          await context.close();
+        }, 60_000);
 });

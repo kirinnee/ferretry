@@ -1,4 +1,4 @@
-import { AskOwnerActionError, type AskId, type AsksApi } from '@ferretry/core-asks/contract';
+import { AskOwnerActionError, askBuzzKind, type AskId, type AsksApi } from '@ferretry/core-asks/contract';
 import { ferretOf, isFerretCall } from '@ferretry/core-gate/contract';
 import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import {
@@ -154,7 +154,8 @@ export function agendaRoutes(parts: AgendaRouteParts) {
         await parts.asks.open({ ferret: body.sessionId as FerretId, state: 'open' }),
       ).filter(other => other.id !== body.agendaId);
       const tags = tagsToClear(body.sessionId, body.agendaId, {
-        askBuzzed: buzzes.some(record => record.ask === body.agendaId),
+        // The ask buzz is Access's (its ledger is not Agenda's to read), so the fact is the ask's own kind: a card's ask or a buzzed notice.
+        askBuzzed: askBuzzKind({ ...ask, state: 'open' }) !== undefined,
         stopBuzzed: buzzes.some(record => record.kind === 'stopped'),
         othersWaiting: others.length > 0,
       });

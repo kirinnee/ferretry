@@ -1,4 +1,4 @@
-/** `fy notify`: tell the owner one thing. Agenda raises the notice through the Asks port (it consumes Asks through `needs`). */
+/** `fy notify`: tell the owner one thing. Asks raises the notice itself, so it works with the Agenda plugin off. */
 import { manifestFragment, verb } from '@ferretry/kernel/manifest';
 
 export default manifestFragment({

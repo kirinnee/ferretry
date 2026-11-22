@@ -5,6 +5,7 @@
  * arguments. An unknown sub-verb is a usage error that names the verb's real sub-verbs (exit 2), for every verb.
  */
 import { describe, it } from 'bun:test';
+import { TRACK_ASK_COMMAND } from '@ferretry/plugin-board/contract';
 import should from 'should';
 import { registry } from '../../src/generated/commands.ts';
 import type { DaemonReply, SendOptions } from '../../src/lib/client.ts';
@@ -61,6 +62,16 @@ const world = (environment: Record<string, string> = { FY_SESSION_ID: 'f1' }) =>
 };
 
 describe('fy agenda item verbs', () => {
+  it('a command another plugin tells a ferret to run (the board off-board hint) is read by the real agenda add: its flags are real and it carries the brief the verb requires', async () => {
+    const words = [...TRACK_ASK_COMMAND.matchAll(/"([^"]*)"|(\S+)/gu)].map(word => word[1] ?? word[2] ?? '');
+    const { world: w, io, transport } = world();
+    should(words.slice(0, 3)).eql(['fy', 'agenda', 'add']);
+    await runFy(words.slice(1), w);
+    // It may still ask for a title, but never for a flag it does not know or for the premise and context it already carries.
+    should(io.stderr()).not.match(/unknown option|--premise|--context/u);
+    should(transport.sent.map(request => request.path)).not.containEql('/v1/agenda/open');
+  });
+
   it('agenda add raises the ask on this ferret’s board instead of printing the grouped agenda', async () => {
     const { world: w, io, transport, posted } = world();
     const code = await runFy(

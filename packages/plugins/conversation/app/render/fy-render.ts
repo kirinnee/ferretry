@@ -73,7 +73,9 @@ import {
   validateHtml,
   validateSvg,
 } from '../../contract/index.ts';
-import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS, PALETTE_KEY, parseReferenceToken } from '@ferretry/app';
+// The two pure subpaths, not the shell's barrel: the Durian worker reads `fy-render` blocks and must not carry the shell.
+import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS, PALETTE_KEY } from '@ferretry/app/fy-render';
+import { parseReferenceToken } from '@ferretry/app/references/grammar';
 import { type FyRenderEmbedSpec, parseFyRenderEmbed } from './fy-render-embed.ts';
 
 export { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS };

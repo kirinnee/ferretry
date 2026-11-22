@@ -28,8 +28,12 @@ const SECRET = 'sk-ant-secret-value-1234';
 /** Every `verb('<line>')` a manifest declares, as the words before its first argument: `agenda show <id>` is `agenda show`. */
 async function declaredVerbs(): Promise<Set<string>> {
   const verbs = new Set<string>();
-  for (const plugin of ['board', 'agenda', 'conversation']) {
-    const root = join(import.meta.dir, '../../../..', plugin);
+  // Core Asks owns the item verbs (`agenda add`, `agenda show`…) and `notify`; the plugins keep the rest.
+  const roots = [
+    join(import.meta.dir, '../../../../../core/asks'),
+    ...['board', 'agenda', 'conversation'].map(plugin => join(import.meta.dir, '../../../..', plugin)),
+  ];
+  for (const root of roots) {
     // The manifest shell and every feature fragment under manifest/actions/ (a plugin may keep its verbs in either).
     const files = ['manifest.ts', ...(await Array.fromAsync(new Bun.Glob('manifest/actions/*.actions.ts').scan(root)))];
     const source = (await Promise.all(files.map(file => Bun.file(join(root, file)).text()))).join('\n');

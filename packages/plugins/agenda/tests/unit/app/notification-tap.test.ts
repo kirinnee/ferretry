@@ -14,7 +14,8 @@ import {
   sessionNotificationPath,
 } from '@ferretry/core-asks/contract';
 import { agendaAskPath, askBuzzPath } from '../../../contract/index.ts';
-import { askBuzzWords, type BuzzableAsk, stopBuzzWords } from '../../../daemon/lib/buzz-policy.ts';
+import { askBuzzWords, type BuzzableAsk } from '@ferretry/core-asks/contract';
+import { stopBuzzWords } from '../../../daemon/lib/buzz-policy.ts';
 import agendaManifest from '../../../manifest.ts';
 import type { NotificationPayload as PushNotificationPayload } from '../../../app/lib/notify.ts';
 import { inboxTargetFromSearch, inboxTargetPath } from '../../../app/lib/agenda-inbox.ts';

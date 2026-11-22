@@ -33,7 +33,8 @@ const SELF_VALIDATING: ReadonlyMap<string, ReadonlySet<string>> = new Map([
     'accounts', // `readInvocation` against each verb's shape (`copy …`, `plan …`, `account …`) …
     new Set(['rules ls', 'rules add', 'rules resume', 'rules renew', 'rules widen', 'rules narrow', 'rules rm']), // … but `rules` reads by name
   ],
-  ['agenda', new Set(['notify'])], // `readVerb` re-reads the raw words against each verb's grammar; `notify` reads by name
+  ['agenda', new Set<string>()], // `readVerb` re-reads the raw words against each verb's grammar
+  ['asks', new Set(['notify'])], // the raise verbs (`agenda add|show|ls|done|dismiss`) read the same way; `notify` reads by name
   ['browsers', new Set<string>()], // `parseVerb` against each verb's flag table
   ['vault', new Set<string>()], // `secret …` reads its options against each verb's shape
 ]);
