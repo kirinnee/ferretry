@@ -5,10 +5,24 @@ import { accountsRoute, reposRoute } from '../../../daemon/features/repos/routes
 import type { FolderBrowser } from '../../../daemon/features/folders/port.ts';
 import { fakeMachine, registryOver } from './support.ts';
 
-const callWith = (body: unknown, params: Record<string, string> = {}): CallContext =>
+type Decision = { allowed: boolean; refusal: string; steppedUp?: boolean };
+/** What Gate's `governance` answers for `filesystem.configure` (the route's own `filesystem.use` is already admitted). */
+const governed = (configure: Decision) => ({
+  governed: true,
+  decide: (demand: { capability: string; axis: string }) =>
+    demand.axis === 'configure' ? configure : { allowed: true, refusal: 'granted' },
+});
+const OWNER = { governed: false, decide: () => ({ allowed: true, refusal: 'granted' }) };
+
+const callWith = (
+  body: unknown,
+  params: Record<string, string> = {},
+  governance: { governed: boolean; decide: (demand: never) => Decision } | undefined = undefined,
+): CallContext =>
   ({
     request: { text: async () => (typeof body === 'string' ? body : JSON.stringify(body)) },
     params: new Map(Object.entries(params)),
+    ...(governance === undefined ? {} : { governance }),
   }) as unknown as CallContext;
 const answer = (response: { readonly status: number; readonly body: unknown }) => ({
   status: response.status,
@@ -94,12 +108,102 @@ describe('GET /v1/projects/:id/repos', () => {
   test('a project folder outside the home folder is scanned, and the answer has no field about the home', async () => {
     const { registry, id, store } = await setup('/srv/alpha');
     const elsewhere: FolderBrowser = { ...browserAt('/srv/alpha'), home: async () => '/home/me' };
-    const got = answer(await reposRoute(registry, { browser: elsewhere })(callWith(undefined, { id })));
+    const got = answer(await reposRoute(registry, { browser: elsewhere })(callWith(undefined, { id }, OWNER)));
     expect(got.json).toEqual({
       repos: [{ path: 'app', remote: 'https://github.com/o/app', provider: 'github' }],
       truncated: false,
     });
     expect(store.file.projects[0]?.repos?.[0]?.path).toBe('app');
+  });
+
+  describe('a registered project OUTSIDE the home (LEAD DECISION R1: reading saved results is use; STARTING a scan is filesystem.configure)', () => {
+    /** A project at `/srv/alpha` with one repository already saved, and a browser that writes down every folder it is asked to open. */
+    const outside = async () => {
+      const world = await setup('/srv/alpha');
+      await world.registry.recordRepos(world.id, [{ path: 'saved', remote: 'https://github.com/o/saved' }], true);
+      const opened: string[] = [];
+      const base = browserAt('/srv/alpha');
+      const scan = {
+        browser: {
+          ...base,
+          open: async (path: string, verdict: Parameters<FolderBrowser['open']>[1]) => {
+            opened.push(path);
+            return base.open(path, verdict);
+          },
+        } as FolderBrowser,
+      };
+      return { ...world, scan, opened };
+    };
+    const SAVED = { repos: [{ path: 'saved', remote: 'https://github.com/o/saved' }], truncated: true };
+
+    test('a use-only device reads what was saved, starts no scan and touches nothing outside the home', async () => {
+      const { registry, id, scan, opened, store } = await outside();
+      const before = JSON.stringify(store.file);
+      const got = answer(
+        await reposRoute(
+          registry,
+          scan,
+        )(callWith(undefined, { id }, governed({ allowed: false, refusal: 'device-not-granted' }))),
+      );
+      expect([got.status, got.json]).toEqual([200, SAVED]);
+      expect(opened).toEqual([]);
+      expect(JSON.stringify(store.file)).toBe(before);
+    });
+    test('a device that holds configure but has not stepped up is held to saved results too', async () => {
+      const { registry, id, scan, opened } = await outside();
+      const got = answer(
+        await reposRoute(
+          registry,
+          scan,
+        )(callWith(undefined, { id }, governed({ allowed: false, refusal: 'step-up-required' }))),
+      );
+      expect(got.json).toEqual(SAVED);
+      expect(opened).toEqual([]);
+    });
+    test('a device that holds configure and has stepped up starts the scan, persists it and spends the step-up', async () => {
+      const { registry, id, scan, opened, store } = await outside();
+      let spent = 0;
+      const call = {
+        ...callWith(undefined, { id }, governed({ allowed: true, refusal: 'granted', steppedUp: true })),
+        spendStepUp: () => {
+          spent++;
+        },
+      } as unknown as CallContext;
+      const got = answer(await reposRoute(registry, scan)(call));
+      expect(got.json).toEqual({
+        repos: [{ path: 'app', remote: 'https://github.com/o/app', provider: 'github' }],
+        truncated: false,
+      });
+      expect(opened.length).toBeGreaterThan(0);
+      expect(spent).toBe(1);
+      expect(store.file.projects[0]?.repos?.[0]?.path).toBe('app');
+    });
+    test('the owner at the machine (ungoverned) scans', async () => {
+      const { registry, id, scan, opened } = await outside();
+      const got = answer(await reposRoute(registry, scan)(callWith(undefined, { id }, OWNER)));
+      expect(got.json.truncated).toBe(false);
+      expect(opened.length).toBeGreaterThan(0);
+    });
+    test('a call with no standing is refused, never read on a guess', async () => {
+      const { registry, id, scan, opened } = await outside();
+      const refused = await failure(() => reposRoute(registry, scan)(callWith(undefined, { id })));
+      expect(refused.code).toBe('folder_gate_unavailable');
+      expect(opened).toEqual([]);
+    });
+    test('a project INSIDE the home needs only use: a use-only device scans it, and the configure decision is never asked', async () => {
+      const { registry, id, scan } = await setup();
+      let asked = 0;
+      const governance = {
+        governed: true,
+        decide: () => {
+          asked++;
+          return { allowed: false, refusal: 'device-not-granted' };
+        },
+      };
+      const got = answer(await reposRoute(registry, scan)(callWith(undefined, { id }, governance)));
+      expect(got.json.truncated).toBe(false);
+      expect(asked).toBe(0);
+    });
   });
   test('a project folder the skip list refuses answers truncated and keeps the stored repositories and their accounts', async () => {
     const { registry, id, store } = await setup();
@@ -113,7 +217,7 @@ describe('GET /v1/projects/:id/repos', () => {
     }));
     // the owner's home is somewhere else and this project sits in ANOTHER user's home: refused on principle
     const other: FolderBrowser = { ...browser, home: async () => '/home/someone' };
-    const got = answer(await reposRoute(registry, { browser: other })(callWith(undefined, { id })));
+    const got = answer(await reposRoute(registry, { browser: other })(callWith(undefined, { id }, OWNER)));
     expect(got.json).toEqual({ repos: [{ path: 'kept', account: 'work' }], truncated: true });
     expect(store.file.projects[0]?.repos).toEqual([{ path: 'kept', account: 'work' }]);
   });

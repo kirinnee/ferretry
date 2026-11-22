@@ -13,7 +13,7 @@ import { platformRootPinner } from '../../../../../core/kernel/host/adapters/pin
 import { restrictSpawn } from '../../../../../core/kernel/host/permissions.ts';
 import { PinRegistry } from '../../../../../core/kernel/host/pins.ts';
 import { rootsPortFor } from '../../../../../core/kernel/host/roots.ts';
-import { kernelBrowser } from '../../../daemon/features/folders/adapter.ts';
+import { kernelBrowser, SIGN_IN_READ_LIMIT } from '../../../daemon/features/folders/adapter.ts';
 import { FolderExplorer } from '../../../daemon/features/folders/browse.ts';
 import type { FolderBrowser, HeldFolder } from '../../../daemon/features/folders/port.ts';
 
@@ -208,6 +208,24 @@ describe('the explorer over the real imports root', () => {
     expect((await failure(() => w.explorer.make({ parent: '~/spell-dest', name: 'plain-taken' }))).code).toBe(
       'folder_exists',
     );
+  });
+
+  test('the sign-in look is bounded and fails closed: a folder with more names than the bound cannot be proved free of one', async () => {
+    const w = await world();
+    // Made by the shell, not by thousands of promises: the file count is the point, and a test that allocates that much would
+    // move when the garbage collector runs in the tests around it.
+    const fill = async (folder: string, count: number) => {
+      await mkdir(join(w.user, folder), { recursive: true });
+      const made = Bun.spawn(['sh', '-c', `seq -f n%g ${count} | xargs touch`], { cwd: join(w.user, folder) });
+      expect(await made.exited).toBe(0);
+    };
+    await fill('at-bound', SIGN_IN_READ_LIMIT);
+    await fill('over-bound', SIGN_IN_READ_LIMIT + 1);
+    // exactly the bound is read whole and holds none; one more is not proved free
+    expect(await w.real.holdsSignIn(join(w.user, 'at-bound'))).toBe(false);
+    expect(await w.real.holdsSignIn(join(w.user, 'over-bound'))).toBe(true);
+    // and so a child that wide is left out of its parent's listing, like any folder that may hold a sign-in
+    expect((await w.explorer.list('~', false)).entries.map(entry => entry.name)).not.toContain('over-bound');
   });
 
   test('a caller that fails the gate: a link out of the home, an outside path, whether or not it exists, is one answer; a dangling link is the one refusal', async () => {

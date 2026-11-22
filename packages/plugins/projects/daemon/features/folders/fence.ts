@@ -1,4 +1,4 @@
-import { foldName, isPrivateFolder, PRIVATE_FOLDERS } from '@ferretry/std';
+import { foldName, isPrivateFolder, isSecretFileName, isSecretFolderName, PRIVATE_FOLDERS } from '@ferretry/std';
 import { MAX_FOLDER_PATH_LENGTH } from '../../../contract/index.ts';
 
 /**
@@ -18,6 +18,14 @@ const LIBRARY = 'Library';
 /** Whether a path relative to a home (segments) is, or is inside, a private folder or the macOS `~/Library`. */
 export const isPrivateBelowHome = (relative: readonly string[]): boolean =>
   isPrivateFolder(relative) || (relative[0] !== undefined && foldName(relative[0]) === foldName(LIBRARY));
+
+/**
+ * Whether ONE name is denied wherever it sits, with no home to anchor it: a key store by name (`.ssh`, `.gnupg`,
+ * `.password-store`) or anything that names a secret (`.env`, `*.pem`, `id_ed25519*`, …). The shared list in `@ferretry/std`
+ * decides; it over-matches on purpose. Applied to every real path component and to every name a listing would return, so a
+ * place outside the home is no softer than one inside it.
+ */
+export const isDeniedName = (name: string): boolean => isSecretFolderName(name) || isSecretFileName(name);
 
 /** Every private folder as an absolute spelling under `home`: the paths whose REAL location is then looked up per request. */
 export const privateSpellings = (home: string): readonly string[] => {

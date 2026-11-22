@@ -4,7 +4,7 @@
  * folder, and a remote that carries a token. Linux only for the held-folder reach, as `folders-disk.test.ts`.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { KernelPorts, SpawnPort } from '@ferretry/kernel/contract';
@@ -13,7 +13,7 @@ import { platformRootPinner } from '../../../../../core/kernel/host/adapters/pin
 import { restrictSpawn } from '../../../../../core/kernel/host/permissions.ts';
 import { PinRegistry } from '../../../../../core/kernel/host/pins.ts';
 import { rootsPortFor } from '../../../../../core/kernel/host/roots.ts';
-import { kernelBrowser } from '../../../daemon/features/folders/adapter.ts';
+import { kernelBrowser, SIGN_IN_READ_LIMIT } from '../../../daemon/features/folders/adapter.ts';
 import { scanRepos } from '../../../daemon/features/repos/scan.ts';
 
 const parents: string[] = [];
@@ -116,10 +116,14 @@ describe('the repository scan over the real imports root', () => {
     await writeFile(join(w.outside, 'srv', 'svc', '.git', 'config'), CONFIG('https://github.com/me/svc'));
     await symlink(join(w.user, '.ssh'), join(w.outside, 'srv', 'to-ssh'));
     const found = await scanRepos(join(w.outside, 'srv'), w.deps);
-    expect(found).toEqual({
-      repos: [{ path: 'svc', remote: 'https://github.com/me/svc', provider: 'github' }],
-      truncated: false,
-    });
+    // Every folder above a project outside the home is looked at for a sign-in file, with a bound that fails closed: when the
+    // machine's temp folder holds more names than that bound, it cannot be proved free of one and the scan saw nothing.
+    const crowded = (await readdir(tmpdir())).length > SIGN_IN_READ_LIMIT;
+    expect(found).toEqual(
+      crowded
+        ? { repos: [], truncated: true }
+        : { repos: [{ path: 'svc', remote: 'https://github.com/me/svc', provider: 'github' }], truncated: false },
+    );
     // `/proc` is a pseudo filesystem: a project there is refused on the real path, nothing is opened, and it is not "empty".
     expect(await scanRepos('/proc', w.deps)).toEqual({ repos: [], truncated: true });
   });

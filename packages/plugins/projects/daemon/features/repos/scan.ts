@@ -66,15 +66,21 @@ export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResul
   const childVerdict = inside(policy.child);
 
   const found: Found[] = [];
+  // TWO facts, kept apart: `truncated` is what the answer says (something was not seen), `stop` is what ends the walk (a bound
+  // was reached, or there is nothing to walk from). A skipped mount or an unreadable folder only sets the first: the rest
+  // of the same disk is still walked.
   let truncated = false;
+  let stop = false;
   let opened = 0;
   let rootDevice: string | undefined;
   let queue: { abs: string; rel: string }[] = [{ abs: rootReal, rel: '.' }];
-  for (let depth = 0; depth < MAX_SCAN_DEPTH && queue.length > 0 && !truncated; depth++) {
+  for (let depth = 0; depth < MAX_SCAN_DEPTH && queue.length > 0 && !stop; depth++) {
     const next: { abs: string; rel: string }[] = [];
     for (const item of queue) {
+      if (stop) break;
       if (opened === MAX_SCAN_FOLDERS) {
         truncated = true;
+        stop = true;
         break;
       }
       opened++;
@@ -83,6 +89,7 @@ export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResul
         // A child refused on principle (outside, private) is a decision; any other refusal is a folder that could not be
         // read. The PROJECT folder refused for any reason is a scan that saw nothing, never "an empty project".
         if (depth === 0 || (held.reason !== 'outside' && held.reason !== 'private')) truncated = true;
+        if (depth === 0) stop = true;
         continue;
       }
       const folder = held.folder;
@@ -91,6 +98,7 @@ export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResul
           rootDevice = await folder.device('');
           if (rootDevice === undefined) {
             truncated = true;
+            stop = true;
             continue;
           }
         }
@@ -107,18 +115,20 @@ export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResul
         for (const entry of read.entries) {
           if (entry.kind !== 'directory' || entry.name.startsWith('.') || SKIPPED.has(entry.name)) continue;
           const abs = `${folder.real === '/' ? '' : folder.real}/${entry.name}`;
-          // The policy first: nothing is probed (not even for a `.git`) in a folder it does not accept.
-          if ((await childVerdict(abs)) !== undefined) continue;
-          // One disk only: a folder on another device (a mount, a network or cloud drive) is not entered, and not probed.
+          // One disk only, told BEFORE anything of the folder is read: a folder on another device (a mount, a network or
+          // cloud drive) is not entered, not probed and its names are not read for a sign-in file (a dead mount can hang a read).
           const device = await folder.device(entry.name);
           if (device !== rootDevice) {
             truncated = true;
             continue;
           }
+          // Then the policy: nothing is probed (not even for a `.git`) in a folder it does not accept.
+          if ((await childVerdict(abs)) !== undefined) continue;
           const rel = item.rel === '.' ? entry.name : `${item.rel}/${entry.name}`;
           if (await folder.hasGit(entry.name)) {
             if (found.length === MAX_PROJECT_REPOS) {
               truncated = true;
+              stop = true;
               break;
             }
             found.push({ rel, config: await folder.readText(`${entry.name}/.git/config`, CONFIG_READ_LIMIT) });

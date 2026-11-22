@@ -1,4 +1,12 @@
-import { belowHome, isAtOrUnder, isOtherHome, isPrivateBelowHome, isSkippedTree, privateSpellings } from './fence.ts';
+import {
+  belowHome,
+  isAtOrUnder,
+  isDeniedName,
+  isOtherHome,
+  isPrivateBelowHome,
+  isSkippedTree,
+  privateSpellings,
+} from './fence.ts';
 import type { FolderBrowser, FolderVerdict } from './port.ts';
 
 /** The policy for ONE request: the verdict on a real path, and whether a real path is a private folder (a link to one included). */
@@ -58,6 +66,9 @@ export async function folderPolicy(
     if (isSkippedReal(real)) return 'outside' as const;
     if ((below !== undefined && isPrivateBelowHome(below)) || isPrivateReal(real)) return 'private' as const;
     const segments = below ?? real.split('/').filter(segment => segment !== '');
+    // The shared name list on every real path component (below the home, or from `/` outside it): `/srv/.ssh` is no softer
+    // than `~/.ssh`, and the sign-in marker alone would miss a key store that holds none.
+    if (segments.some(isDeniedName)) return 'private' as const;
     return (await signInOf(segments, below === undefined ? '' : home.replace(/\/+$/, '')))
       ? ('private' as const)
       : undefined;

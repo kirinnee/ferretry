@@ -26,12 +26,17 @@ function browserOf(
   git: readonly string[],
   links: Record<string, string> = {},
   more: { signIn?: readonly string[]; configs?: Record<string, string>; devices?: Record<string, string> } = {},
-): { browser: FolderBrowser; opened: string[]; probed: string[] } {
+): { browser: FolderBrowser; opened: string[]; probed: string[]; asked: string[] } {
   const opened: string[] = [];
   const probed: string[] = [];
+  /** Every folder whose names were read for a sign-in file. */
+  const asked: string[] = [];
   const browser: FolderBrowser = {
     home: async () => HOME,
-    holdsSignIn: async path => more.signIn?.includes(path) ?? false,
+    holdsSignIn: async path => {
+      asked.push(path);
+      return more.signIn?.includes(path) ?? false;
+    },
     leaf: async path => (path in links ? 'link' : path in tree ? 'present' : 'missing'),
     realPaths: async paths => paths.map(path => links[path] ?? path).filter(path => path in tree),
     open: async (path, verdict) => {
@@ -70,7 +75,7 @@ function browserOf(
       return { ok: true, folder };
     },
   };
-  return { browser, opened, probed };
+  return { browser, opened, probed, asked };
 }
 
 describe('remote parsing', () => {
@@ -205,6 +210,10 @@ describe('scanning a project folder for repositories', () => {
       '/Users/bob/w',
       '/root/w',
       `${HOME}/Library/Mail`,
+      // a denied name on a real path component outside the home (F6061 U4 review item 1)
+      '/srv/.ssh/proj',
+      '/.gnupg',
+      '/srv/.password-store/x',
     ]) {
       const world = browserOf({ [root]: ['r'], [`${root}/r`]: [] }, [`${root}/r`]);
       expect(await scanRepos(root, { browser: world.browser })).toEqual({ repos: [], truncated: true });
@@ -223,6 +232,32 @@ describe('scanning a project folder for repositories', () => {
     expect(found).toEqual({ repos: [{ path: 'ok' }], truncated: true });
     expect(world.opened).toEqual([P]);
     expect(world.probed.filter(path => path.includes('/mnt'))).toEqual([]);
+  });
+  test('a mount is told by its disk BEFORE any of its names are read: no sign-in look at a folder on another disk', async () => {
+    const world = browserOf(
+      { [P]: ['mnt', 'ok'], [`${P}/mnt`]: ['r'], [`${P}/mnt/r`]: [], [`${P}/ok`]: [] },
+      [`${P}/ok`],
+      {},
+      { devices: { [`${P}/mnt`]: 'd2' } },
+    );
+    await scanRepos(P, { browser: world.browser });
+    expect(world.asked).not.toContain(`${P}/mnt`);
+    expect(world.asked).toContain(`${P}/ok`);
+  });
+  test('a skipped mount only marks the answer partial: the rest of the same disk is still walked', async () => {
+    const world = browserOf(
+      {
+        [P]: ['mnt', 'a'],
+        [`${P}/mnt`]: [],
+        [`${P}/a`]: ['b'],
+        [`${P}/a/b`]: ['r'],
+        [`${P}/a/b/r`]: [],
+      },
+      [`${P}/a/b/r`],
+      {},
+      { devices: { [`${P}/mnt`]: 'd2' } },
+    );
+    expect(await scanRepos(P, { browser: world.browser })).toEqual({ repos: [{ path: 'a/b/r' }], truncated: true });
   });
   test('a project folder on its own disk is the one disk: a mount deeper down is left out, the folder itself is not', async () => {
     const world = browserOf(

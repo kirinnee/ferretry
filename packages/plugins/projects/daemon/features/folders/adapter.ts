@@ -5,6 +5,12 @@ import type { FolderBrowser, FolderOpen, FolderVerdict, HeldFolder, LeafMade, Ra
 
 type Kernel = Pick<KernelPorts, 'roots' | 'paths' | 'spawn'>;
 
+/**
+ * The most names read from one folder to look for a sign-in file. A folder with more cannot be proved free of one, so the
+ * look answers "holds one" (fail closed): no folder, however wide, is read without a bound.
+ */
+export const SIGN_IN_READ_LIMIT = 5000;
+
 const EPOCH = '1970-01-01T00:00:00.000Z' as Instant;
 const instantOf = (text: string | undefined): Instant => {
   const at = text === undefined ? Number.NaN : Date.parse(text);
@@ -107,7 +113,12 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
       return { ok: false, reason: same && (await isFile(reached)) ? 'not_folder' : 'refused' };
     }
     // The object actually held, not the name that was judged: a swap between the two lands here.
-    const second = await verdict(pinned.rootReal);
+    // A verdict that THROWS (the outside-home gate refusing a held object that turned out to be outside) must not leave the
+    // held descriptor open for the garbage collector to find.
+    const second = await verdict(pinned.rootReal).catch(async (error: unknown) => {
+      await pinned.close().catch(() => undefined);
+      throw error;
+    });
     if (second !== undefined) {
       await pinned.close().catch(() => undefined);
       return { ok: false, reason: second };
@@ -240,8 +251,20 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
       }
       try {
         // Every name the folder holds, a link included, judged by the SAME fold as everywhere else (`fence.ts`): a marker
-        // spelled `ID_RSA`, `Auth.JSON` or in full-width letters is a marker.
-        return holdsSignIn(await root.list(self.value));
+        // spelled `ID_RSA`, `Auth.JSON` or in full-width letters is a marker. Read through the held folder with a bound:
+        // more names than {@link SIGN_IN_READ_LIMIT} cannot be proved free of a marker, so they answer "holds one".
+        const pinned = await root.pin(self.value, { fence: 'none' });
+        try {
+          const target = await pinned.open('', { wantDirectory: true });
+          try {
+            const listing = await target.list(SIGN_IN_READ_LIMIT);
+            return listing.truncated || holdsSignIn(listing.entries.map(entry => entry.name));
+          } finally {
+            await target.close();
+          }
+        } finally {
+          await pinned.close().catch(() => undefined);
+        }
       } catch {
         // What cannot be read is not proved free of one.
         return true;

@@ -8,7 +8,7 @@ import {
   type MakeFolderResult,
 } from '../../../contract/index.ts';
 import type { ProjectFolders } from '../../lib/ports.ts';
-import { belowHome, holdsSignIn, isBroadRoot, isPrivateBelowHome, parsePath } from './fence.ts';
+import { belowHome, holdsSignIn, isBroadRoot, isDeniedName, isPrivateBelowHome, parsePath } from './fence.ts';
 import { type FolderPolicy, folderPolicy } from './policy.ts';
 import type { FolderBrowser, HeldFolder, RawFolderEntry } from './port.ts';
 
@@ -74,6 +74,8 @@ export class FolderExplorer {
       const base = folder.real === '/' ? '' : folder.real;
       const kept = read.entries
         .filter(entry => hidden || !entry.name.startsWith('.'))
+        // A name the shared list denies (a key store, `.env`, `*.pem`, …) is never returned, file or folder, anywhere.
+        .filter(entry => !isDeniedName(entry.name))
         .filter(
           entry => entry.kind !== 'directory' || below === undefined || !isPrivateBelowHome([...below, entry.name]),
         )

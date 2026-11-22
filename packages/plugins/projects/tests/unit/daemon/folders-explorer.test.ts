@@ -374,6 +374,41 @@ describe('FolderExplorer.list', () => {
     expect((await failure(() => explorer.list('/nonexistent', false))).code).toBe('folder_refused');
   });
 
+  test('a denied name is refused outside the home as it is inside (.ssh, .gnupg, .password-store as a path part), and a secret name is never listed', async () => {
+    const world = machine({
+      ...BASE,
+      '/': ['srv', '.ssh', '.gnupg'],
+      '/.ssh': ['config'],
+      '/.gnupg': ['pubring.kbx'],
+      '/srv': ['ok', '.ssh', '.password-store', 'plain'],
+      '/srv/.ssh': ['known', 'deep'],
+      '/srv/.ssh/deep': [],
+      '/srv/.password-store': ['x'],
+      '/srv/ok': ['.env', 'key.pem', 'cert.p12', 'id_ed25519.pub', '.env.local', 'notes.txt', 'sub'],
+      '/srv/ok/sub': [],
+      '/srv/plain': [],
+    });
+    const allow = async () => undefined;
+    // the same refusal as a place that is not there: a denied name is never confirmed to exist
+    for (const path of ['/.ssh', '/.gnupg', '/srv/.ssh', '/srv/.ssh/deep', '/srv/.password-store'])
+      expect([path, (await failure(() => world.explorer.list(path, true, allow))).code]).toEqual([
+        path,
+        'folder_refused',
+      ]);
+    // a denied folder is not listed among its parent's names, even when hidden names are asked for
+    const srv = await world.explorer.list('/srv', true, allow);
+    expect(srv.entries.map(entry => entry.name)).toEqual(['ok', 'plain']);
+    expect((await world.explorer.list('/', true, allow)).entries.map(entry => entry.name)).toEqual(['srv']);
+    // a secret FILE name is not listed either, outside the home or in it
+    const ok = await world.explorer.list('/srv/ok', true, allow);
+    expect(ok.entries.map(entry => entry.name)).toEqual(['sub', 'notes.txt']);
+    const code = await machine({ ...BASE, [`${HOME}/code`]: ['app', '.env', 'server.pem', 'readme.md'] }).explorer.list(
+      '~/code',
+      true,
+    );
+    expect(code.entries.map(entry => entry.name)).toEqual(['app', 'readme.md']);
+  });
+
   test('a listing is bounded at 500 and says so, counting only what is shown', async () => {
     const many = Array.from({ length: 700 }, (_, index) => `d${String(index).padStart(4, '0')}`);
     const { explorer } = machine({ ...BASE, [`${HOME}/many`]: many });
