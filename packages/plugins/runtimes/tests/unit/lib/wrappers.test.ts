@@ -276,6 +276,18 @@ describe('renderRuntimeWrapperScript', () => {
     ).be.true();
   });
 
+  it('should render no auto block at all when the wrapper has no autonomous launch', () => {
+    // Arrange
+    const { autonomous: _none, ...bare } = account({ flags: ['--model', 'm'] });
+
+    // Act
+    const actual = render(bare);
+
+    // Assert — the person's own CLI and nothing else: no mode test, no seeding, one exec.
+    should(actual).not.containEql('FY_SESSION_MODE');
+    should(actual.split('\n').filter(line => line.startsWith('exec '))).deepEqual([`exec claude '--model' 'm' "$@"`]);
+  });
+
   it('should emit environment keys in a stable order so re-rendering is byte-identical', () => {
     // Arrange
     const first = account({ env: { ZULU: '1', ALPHA: '2', MIKE: '3' } });

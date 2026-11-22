@@ -485,9 +485,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         // What a ferret started in auto mode gets instead (the wrapper runs it only for FY_SESSION_MODE=auto).
         autonomous:
           launch === undefined
-            ? autoRefusal === undefined
-              ? undefined
-              : { refusal: autoRefusal }
+            ? { refusal: result.ok ? '' : result.refusal.message }
             : {
                 args: [...launchPrefix, ...launch.args, ...fixedSettingsArgs],
                 seedFirstRun: harness === 'claude',
