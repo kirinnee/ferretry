@@ -570,6 +570,23 @@ describe('the session layer: one session, one job', () => {
 });
 
 describe('the session layer: requests', () => {
+  test("C59 O5-10b a carried request's signal aborts when its session ends, so work still queued for it sees the caller left", async () => {
+    const fx = await fixture();
+    let signal: AbortSignal | undefined;
+    fx.dispatch = request => {
+      signal = request.signal;
+      return new Promise<ApiResponse>(() => {});
+    };
+    const { client } = await serving(fx);
+    await client.send(req(1));
+    await client.pump();
+    expect(signal?.aborted).toBe(false);
+    client.credit(0);
+    await client.pump();
+    expect(client.end?.code).toBe(4430);
+    expect(signal?.aborted).toBe(true);
+  });
+
   test('R235 R534 answers carry their id and may cross in any order', async () => {
     const fx = await fixture();
     const gates = new Map<string, () => void>();
