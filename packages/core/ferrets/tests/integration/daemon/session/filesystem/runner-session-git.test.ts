@@ -873,8 +873,9 @@ describe('RunnerSessionGit.listFiles', () => {
     const runner: GitRunner = {
       run: invocation => {
         invocations.push(invocation);
-        // The owner's global config is established first (&F6061 U2); a readable one lets the list itself be asked.
-        if (invocation.args.includes('config')) {
+        // The owner's global config is established first (&F6061 U2: the global read, where the active config is, that
+        // one read); a readable one lets the list itself be asked.
+        if (invocation.args.includes('config') || invocation.args[0] === 'var') {
           return Promise.resolve({
             exitCode: 0,
             stdout: encode(''),
@@ -903,9 +904,9 @@ describe('RunnerSessionGit.listFiles', () => {
     should(failure).be.instanceof(GitCommandError);
     should((failure as GitCommandError).execution.timedOut).be.true();
     should((failure as Error).message).match(/timed out/u);
-    should(invocations).have.length(2);
-    should(invocations[1]?.args).eql(['ls-files', '-z', '--cached', '--others', '--exclude-standard']);
-    should(invocations[1]?.maxStdoutBytes).eql(128);
+    should(invocations.map(call => call.args[0])).eql(['config', 'var', 'ls-files']);
+    should(invocations[2]?.args).eql(['ls-files', '-z', '--cached', '--others', '--exclude-standard']);
+    should(invocations[2]?.maxStdoutBytes).eql(128);
   });
 });
 

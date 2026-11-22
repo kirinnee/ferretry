@@ -210,6 +210,55 @@ describe('the file list and the owner’s global ignore rules', () => {
       should(failure).be.instanceof(Error);
     });
 
+    it('should refuse the list when the ACTIVE config ($XDG_CONFIG_HOME/git/config) cannot be read', async () => {
+      // Arrange: a custom XDG_CONFIG_HOME beside a readable ~/.gitconfig. Git skips the unreadable custom config in
+      // silence while `ls-files` still reads it, so the index would list a name the owner ignores globally.
+      const home = await tempDirectory('home-custom-xdg-denied');
+      const config = await tempDirectory('custom-xdg-denied');
+      await mkdir(path.join(config, 'git'), { recursive: true });
+      await writeFile(path.join(home, '.gitconfig'), '[user]\n\tname = owner\n');
+      await writeFile(path.join(home, 'my-ignore'), '*.tmp\n');
+      const active = path.join(config, 'git', 'config');
+      await writeFile(active, `[core]\n\texcludesFile = ${path.join(home, 'my-ignore')}\n`);
+      const root = await repositoryWithScratch('global-custom-xdg-denied');
+
+      // Act
+      const failure = await unreadable(active, () =>
+        gitWith({ HOME: home, XDG_CONFIG_HOME: config }).listFiles(root, 1024 * 1024),
+      );
+
+      // Assert
+      should(failure).be.instanceof(Error);
+    });
+
+    it('should list a complete index when the custom config is readable and the INACTIVE default is not', async () => {
+      // Arrange: with XDG_CONFIG_HOME set Git never reads ~/.config/git/config, so its mode must not block the list.
+      const home = await tempDirectory('home-inactive-default-denied');
+      const config = await tempDirectory('custom-xdg-readable');
+      await mkdir(path.join(home, '.config', 'git'), { recursive: true });
+      await mkdir(path.join(config, 'git'), { recursive: true });
+      await writeFile(path.join(home, '.gitconfig'), '[user]\n\tname = owner\n');
+      await writeFile(path.join(home, 'my-ignore'), '*.tmp\n');
+      await writeFile(path.join(config, 'git', 'config'), `[core]\n\texcludesFile = ${path.join(home, 'my-ignore')}\n`);
+      const inactive = path.join(home, '.config', 'git', 'config');
+      await writeFile(inactive, '[user]\n\temail = inactive@example.test\n');
+      const root = await repositoryWithScratch('global-inactive-default-denied');
+
+      // Act
+      const result = await chmod(inactive, 0o000).then(async () => {
+        try {
+          return await gitWith({ HOME: home, XDG_CONFIG_HOME: config }).listFiles(root, 1024 * 1024);
+        } finally {
+          await chmod(inactive, 0o644);
+        }
+      });
+
+      // Assert
+      should(result.truncated).be.false();
+      should(result.paths).containEql('wanted.ts');
+      should(result.paths).not.containEql('scratch.tmp');
+    });
+
     it('should still list a complete index when ~/.config/git/config is readable beside ~/.gitconfig', async () => {
       // Arrange
       const home = await tempDirectory('home-xdg-config-readable');

@@ -182,25 +182,65 @@ const UNREADABLE_RULES = /unable to access|permission denied|could not open|cann
  * include — means a rule may exist that cannot be applied.
  *
  * `--global` lists `~/.gitconfig` ALONE whenever that file exists, and Git skips an unreadable
- * `~/.config/git/config` (the XDG config) in silence — while `ls-files` still reads it. A readable `~/.gitconfig` next to
- * a mode-000 XDG config would therefore pass the read above and list a name the owner ignores globally. So the XDG
- * config is also named as an include: Git then DIES on a file it cannot read, and ignores one that is absent. GAP: only
- * the default location is named, because an `include.path` expands `~` and nothing else; a daemon with a custom
- * `XDG_CONFIG_HOME` is not covered for that file.
+ * XDG config (`$XDG_CONFIG_HOME/git/config`, else `~/.config/git/config`) in silence — while `ls-files` still reads it. A
+ * readable `~/.gitconfig` next to a mode-000 XDG config would therefore pass the read above and list a name the owner
+ * ignores globally. So the ACTIVE XDG config is also read on its own, by absolute path
+ * (`git config --file <abs> --includes --list -z`): only a clean read or a missing file passes. Which file is active is
+ * decided by the Git child itself, from its own environment (`git var GIT_CONFIG_GLOBAL`, whose first line is the XDG
+ * path): no plugin reads the environment, and a daemon with a custom `XDG_CONFIG_HOME` is covered while an unreadable
+ * INACTIVE default location blocks nothing. A relative path is refused (Git would resolve it against the repository).
+ * GAP: a Git that does not know `git var GIT_CONFIG_GLOBAL` (before 2.46) answers non-zero, and then only the global read
+ * above is made.
  */
 export async function establishGlobalConfig(
   runner: TreeGitRunner,
   cwd: TreeGitDirectory,
-  timeoutMs: number | undefined,
+  budget: TreeGitBudget | undefined,
   failure: TreeGitFailure = defaultFailure,
 ): Promise<void> {
+  const bound = (): { readonly timeoutMs?: number } => {
+    const timeoutMs = spawnBound(budget);
+    return timeoutMs === undefined ? {} : { timeoutMs };
+  };
   const execution = await runner.run({
-    args: ['-c', 'include.path=~/.config/git/config', 'config', '--global', '--includes', '--list', '-z'],
+    args: ['config', '--global', '--includes', '--list', '-z'],
     cwd,
     readsGlobalConfig: true,
     maxStdoutBytes: 1024 * 1024,
-    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...bound(),
   });
+  assertConfigRead(execution, failure);
+
+  // The budget is asked again: each child takes some of it, and an expired one starts no further child (the caller
+  // re-asks it before trusting the answer).
+  if (budget?.expired() === true) return;
+  const located = await runner.run({
+    args: ['var', 'GIT_CONFIG_GLOBAL'],
+    cwd,
+    readsGlobalConfig: true,
+    maxStdoutBytes: 64 * 1024,
+    ...bound(),
+  });
+  if (located.timedOut || located.stdoutTruncated) throw failure('git var', located);
+  if (located.exitCode !== 0) return;
+  const active = new TextDecoder().decode(located.stdout).split('\n')[0]?.trim() ?? '';
+  if (active === '') return;
+  if (!active.startsWith('/'))
+    throw failure('git var', { ...located, stderr: `relative global config path: ${active}` });
+
+  if (budget?.expired() === true) return;
+  const read = await runner.run({
+    args: ['config', '--file', active, '--includes', '--list', '-z'],
+    cwd,
+    readsGlobalConfig: true,
+    maxStdoutBytes: 1024 * 1024,
+    ...bound(),
+  });
+  assertConfigRead(read, failure);
+}
+
+/** A config read that was clean, or whose only complaint is that the file is not there; anything else THROWS. */
+function assertConfigRead(execution: TreeGitExecution, failure: TreeGitFailure): void {
   if (execution.timedOut || execution.stdoutTruncated) throw failure('git config', execution);
   const lines = execution.stderr.split('\n').filter(line => line.trim() !== '');
   const clean = execution.exitCode === 0 && lines.length === 0;
@@ -241,7 +281,7 @@ export function treeGit(runner: TreeGitRunner, failure: TreeGitFailure = default
     async listFiles(cwd, maxBytes, budget) {
       // No command was asked, so the empty list is explicitly incomplete rather than confidently empty.
       if (budget?.expired() === true) return { paths: [], truncated: true };
-      await establishGlobalConfig(runner, cwd, spawnBound(budget), failure);
+      await establishGlobalConfig(runner, cwd, budget, failure);
       // The budget is asked again: the config read took some of it, and an expired one starts no second child.
       if (budget?.expired() === true) return { paths: [], truncated: true };
       const timeoutMs = spawnBound(budget);
