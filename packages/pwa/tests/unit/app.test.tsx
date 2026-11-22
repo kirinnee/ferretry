@@ -79,6 +79,7 @@ import { type DaemonCarrierRouter, DEVICE_NOT_ACCEPTED_SENTENCE } from '../../sr
 import { RouterProvider } from '../../src/lib/router.tsx';
 import { SCROLL_MEMORY_KEY, type ScrollMemoryStorage } from '../../src/lib/scroll-memory.ts';
 import { SessionCache, type SessionCacheBackend } from '../../src/lib/session-cache.ts';
+import { AGENDA_SAFETY_NET_MS } from '../../src/lib/spaced-read.ts';
 import { type AppStore, createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { openWorkspaceTab, workspaceTab } from '../../src/lib/workspace-layout.ts';
 import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
@@ -2479,8 +2480,20 @@ describe('AppShell', () => {
 
         const initialAgendaReads = agendaReads;
         items = [externalAgendaItem];
+        // Inside the spacing a poll tick re-reads the transcript, not the complete board (`lib/spaced-read.ts`).
         await interact(() => refresh?.());
         await settle();
+        expect(agendaReads).toBe(initialAgendaReads);
+        expect(store.attention.store.count(scope)).toBe(0);
+        // Past it, the tick's transcript read takes the board along again.
+        const realNow = Date.now.bind(Date);
+        const restoreNow = patchGlobal(Date, 'now', () => realNow() + AGENDA_SAFETY_NET_MS);
+        try {
+          await interact(() => refresh?.());
+          await settle();
+        } finally {
+          restoreNow();
+        }
         expect(agendaReads).toBeGreaterThan(initialAgendaReads);
         expect(store.attention.store.count(scope)).toBe(1);
 

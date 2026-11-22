@@ -50,6 +50,7 @@ function fixture(archived = false) {
     readDocument: () => Promise<unknown>;
     ensureSessionDirectory: () => Promise<void>;
     syncSessionUnlocked: () => Promise<void>;
+    syncDocumentsUnlocked: () => Promise<void>;
   };
   if (archived) internals.archived.set(ID, { indexed: { id: ID }, archivedAt: NOW });
   storage.readConfig = async () => config;
@@ -59,6 +60,8 @@ function fixture(archived = false) {
     syncs++;
     rows.set(ID, { id: ID });
   };
+  // A document write refreshes the row through this; it is the same index sync to this fixture.
+  internals.syncDocumentsUnlocked = internals.syncSessionUnlocked;
   const store = new StorageTranscriptProvenanceStore(storage);
   const resolver = new SessionTranscriptResolver({ candidates: async () => [] }, { claimed: async () => [] }, store, {
     now: () => NOW,

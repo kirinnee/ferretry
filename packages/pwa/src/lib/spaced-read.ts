@@ -18,7 +18,7 @@ export class SpacedRead {
 
   constructor(
     private readonly spacingMs: number,
-    private readonly now: () => number = Date.now,
+    private readonly now: () => number = () => Date.now(),
   ) {}
 
   /** Whether to read now — none yet, a reset since, or the last one at least the spacing ago — counting it as read. */
