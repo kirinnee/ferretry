@@ -13,6 +13,8 @@ export interface CallFailure {
   readonly status?: unknown;
   readonly code?: unknown;
   readonly message?: unknown;
+  /** The refusal's whole JSON body, when the carrier kept it (a refusal that carries facts beside its sentence). */
+  readonly body?: unknown;
 }
 
 export const callFailure = (failure: unknown): CallFailure | null =>

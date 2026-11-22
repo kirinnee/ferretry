@@ -13,7 +13,8 @@ export { IMPORT_KINDS, type ImportKind, kindFound, kindGroups, kindItemIds, kind
 export { HARNESS_LABEL, HOOKS_NOT_IMPORTED, SECRET_KEPT } from './mapping-words.ts';
 export { type FoundGroup, type FoundItem, HARNESSES, nameProblem, type ToolModel } from './model.ts';
 export { ImportResultList } from './import-results.tsx';
-export { type ApplyImport, type ImportApplied, useApplyImport } from './use-apply-import.ts';
+export { ImportPartialNote, type ImportPartialNoteProps } from './import-partial.tsx';
+export { type ApplyImport, type ImportApplied, type ImportPartial, useApplyImport } from './use-apply-import.ts';
 export {
   createScanStore,
   type HarnessScan,

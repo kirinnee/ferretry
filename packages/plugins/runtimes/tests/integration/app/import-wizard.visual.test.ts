@@ -199,6 +199,30 @@ const CASES: readonly Case[] = [
     ],
   },
   {
+    // E3 item 4: the import never answered, the page stopped waiting, asked the machine ONCE, and shows what landed.
+    name: 'partial-after-timeout',
+    view: 'timeout',
+    prepare: async tab => {
+      await tab.locator('[data-change-submit]').click();
+      await tab.waitForSelector('[data-import-partial]', { timeout: 15_000 });
+      await tab.waitForSelector('[data-change-refusal]');
+    },
+    expectText: [
+      'Part of the Claude Code import is on this machine',
+      'Brought in',
+      'secret-store key ANTHROPIC_API_KEY',
+      'login claude-default',
+      'claude-code/settings/default.yaml',
+      'Not brought in',
+      'skills/review.yaml',
+      'the runtimes and fleet files',
+      'variables of login claude-default',
+      'Part of it did land on this machine',
+      'Press Try again to bring in the rest',
+    ],
+    expectNo: ['is set up'],
+  },
+  {
     name: 'done',
     view: 'claude',
     prepare: async tab => {

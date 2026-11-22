@@ -66,7 +66,13 @@ const MAX_CHANGE_BODY_BYTES = 512 * 1024;
 function refusal(error: FleetCatalogRefusal): ApiError {
   if (error.message === UNAVAILABLE || error.message === CONFIG_WRITE_UNAVAILABLE)
     return new ApiError(503, error.message, 'plugin_unavailable');
-  return new ApiError(error.code === 'fleet_change_unknown' ? 404 : 409, error.message, error.code);
+  return new ApiError(
+    error.code === 'fleet_change_unknown' ? 404 : 409,
+    error.message,
+    error.code,
+    undefined,
+    error.extra,
+  );
 }
 
 async function answer<Schema extends z.ZodType>(schema: Schema, work: () => Promise<unknown>): Promise<ApiResponse> {
