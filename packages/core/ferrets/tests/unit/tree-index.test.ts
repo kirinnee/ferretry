@@ -6,6 +6,8 @@ import {
   establishGlobalConfig,
   indexPinnedTree,
   MAX_INDEX_FILES,
+  MAX_PROJECT_INDEX_CANDIDATES,
+  MAX_PROJECT_INDEX_FILES,
   parseFileList,
   TreeRootDeniedError,
   type TreeGitExecution,
@@ -482,5 +484,45 @@ describe('checkTreeIndexBounds', () => {
     should(() => checkTreeIndexBounds({ maxFiles: MAX_INDEX_FILES })).not.throw();
     should(() => checkTreeIndexBounds({ budgetMs: -1 })).throw(RangeError);
     should(() => checkTreeIndexBounds({})).not.throw();
+  });
+
+  it('should raise the ceilings only for the project scale (&F6061 U5), and no further', () => {
+    should(() => checkTreeIndexBounds({ scale: 'project', maxFiles: MAX_PROJECT_INDEX_FILES })).not.throw();
+    should(() => checkTreeIndexBounds({ scale: 'project', maxFiles: MAX_PROJECT_INDEX_FILES + 1 })).throw(RangeError);
+    should(() => checkTreeIndexBounds({ scale: 'project', maxCandidates: MAX_PROJECT_INDEX_CANDIDATES })).not.throw();
+    should(() => checkTreeIndexBounds({ scale: 'session', maxFiles: MAX_PROJECT_INDEX_FILES })).throw(RangeError);
+    should(() => checkTreeIndexBounds({ maxFiles: MAX_PROJECT_INDEX_FILES })).throw(RangeError);
+  });
+});
+
+describe('the project scale keeps shallow files first when a ceiling bites', () => {
+  const policy: TreePolicy = { normalize: rel => rel, isDenied: () => false };
+  const names = ['a/b/c/deep.ts', 'a/mid.ts', 'z/other.ts', 'README.md', 'top.ts'];
+  const gitListing = {
+    isInsideWorkTree: async () => true,
+    listFiles: async () => ({ paths: names, truncated: false }),
+  };
+  const run = async (scale: 'session' | 'project') => {
+    const pinner = new FakeRootPinner({ tree: treeOf(...names.map(name => [name, textFile('x')] as const)) });
+    const root = await pinner.pin('/ignored');
+    return indexPinnedTree(root, { git: gitListing, policy, nowMs: () => 0 }, { scale, maxFiles: 3 });
+  };
+
+  it('should keep README.md and top.ts and drop the deepest names, and say a bound bit', async () => {
+    // Act
+    const index = await run('project');
+
+    // Assert
+    should(index.files.map(file => file.path)).eql(['README.md', 'top.ts', 'a/mid.ts']);
+    should(index.coverage).eql('partial');
+    should(index.skipped).eql([{ reason: 'truncated', count: 2 }]);
+  });
+
+  it('should keep a ferret index in path order, as before', async () => {
+    // Act
+    const index = await run('session');
+
+    // Assert
+    should(index.files.map(file => file.path)).eql(['README.md', 'a/b/c/deep.ts', 'a/mid.ts']);
   });
 });
