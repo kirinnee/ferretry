@@ -83,6 +83,10 @@ const entries: readonly TranscriptEntry[] = [
       '---',
       chartPng(),
       '```',
+      // r12 H3: the last assistant message of a running ferret is still arriving, and a closing fence on its LAST line is
+      // held as code (the closer could still be growing). A finished message ends with words after its picture.
+      '',
+      'That is the whole run.',
     ].join('\n'),
     at: NOW - 300_000,
   },
