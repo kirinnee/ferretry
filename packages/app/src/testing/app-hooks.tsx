@@ -23,6 +23,8 @@ export function WithAppHooks({
         onDaemon[daemon] !== undefined && name in onDaemon[daemon] ? onDaemon[daemon][name] : provided[name],
       subscribe: () => () => undefined,
       version: () => 0,
+      // No plugin registers a surface here, so no one provides the shell's prose view and the Markdown fallback draws.
+      surfaces: [],
     },
     // No plugin contributes a panel here, so a slot a view draws is empty (`PanelSlot` asks the plan).
     plan: { panels: () => [] },

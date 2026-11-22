@@ -118,6 +118,17 @@ describe('shell.prose', () => {
     expect(view.container.querySelector('.md strong')?.textContent).toBe('bold');
   });
 
+  test('draws the shell Markdown in a shell that holds no registry of surfaces', async () => {
+    const runtime = { subscribe: () => () => undefined };
+    view = await mount(
+      <ShellContext.Provider value={{ runtime } as unknown as ShellModel}>
+        <ProseView text="**bold** words" />
+      </ShellContext.Provider>,
+    );
+    expect(view.container.querySelector('section')).toBeNull();
+    expect(view.container.querySelector('.md strong')?.textContent).toBe('bold');
+  });
+
   test('draws the Markdown while the provided view loads, then swaps to it', async () => {
     const gate = Promise.withResolvers<void>();
     const manifest = manifestOf('conversation', { ui: { screens: [] } });

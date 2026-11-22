@@ -25,10 +25,9 @@ export type ProseProvision = ComponentType<ProseProps>;
 export function ProseView(props: ProseProps) {
   const runtime = useOptionalShell()?.runtime;
   const daemon = useViewPlace()?.daemon;
-  const provider = useMemo(
-    () => (runtime === undefined ? undefined : registeredProseProvider(runtime.surfaces)),
-    [runtime],
-  );
+  // A shell that holds no registry of surfaces (a bare test shell) registers no provider: the Markdown fallback draws.
+  const surfaces = runtime?.surfaces;
+  const provider = useMemo(() => (surfaces === undefined ? undefined : registeredProseProvider(surfaces)), [surfaces]);
   // Registered is not allowed: Conversation's half is compiled in even where this machine's daemon has turned it off or
   // blocked it, so its view draws only when that machine's standing for it is `allowed`. On a screen with no machine
   // nothing can say it is on, and the shell's own Markdown draws.
