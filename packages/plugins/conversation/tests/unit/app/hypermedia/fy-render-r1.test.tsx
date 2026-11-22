@@ -14,7 +14,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
 import { readMessage } from '../../../../app/hypermedia/parse-message.ts';
-import { MESSAGE_LIMITS } from '../../../../app/hypermedia/limits.ts';
+import {
+  exceedsMessageCap,
+  exceedsParserBudget,
+  MESSAGE_LIMITS,
+  PARSER_LIMITS,
+} from '../../../../app/hypermedia/limits.ts';
+import { mustRead } from './must-read.ts';
 import { ReferenceSurfaceProvider } from '@ferretry/app';
 import { interact, type Mounted, mount } from '@ferretry/app/testing';
 import { fyRenderFences } from '../../../../app/render/fences.tsx';
@@ -100,6 +106,35 @@ describe('two quoted blocks that differ only by payload indentation each draw th
       expect(sources[0]).toContain('\n<text>PAY100');
       expect(sources[1]).toContain('\n    <text>PAY100');
     });
+
+  // A quoted list: Marked expands the TAB inside the first block to spaces, so its slot text IS the space-indented twin's.
+  // Neither slot can be told from the other by its text, so neither may draw a body (never one body twice, never one under
+  // the other's fence): an ambiguous slot stays code.
+  const quotedList = (line: string, index: number): string => (index === 0 ? `> - ${line}` : `>   ${line}`);
+
+  for (const [first, second] of [
+    ['\t', '    '],
+    ['    ', '\t'],
+  ] as const)
+    it(`never draws one body twice when a tab-indented block and its space-indented twin share a quoted list (${JSON.stringify(first)} then ${JSON.stringify(second)})`, async () => {
+      const text = [...svgBody(first).map(quotedList), '', ...svgBody(second).map(quotedList)].join('\n');
+      const sources = await seen(text);
+      expect(new Set(sources).size).toBe(sources.length);
+    });
+
+  it('still draws a tab-indented block that has no twin, in a quoted list and in a quote', async () => {
+    for (const wrap of [quotedList, (line: string) => `> ${line}`])
+      expect((await seen(svgBody('\t').map(wrap).join('\n'))).length).toBe(1);
+  });
+
+  it('in a quote, where the tab is kept, draws the block whose text only it spells and keeps the one it cannot tell as code', async () => {
+    const quote = (line: string): string => `> ${line}`;
+    const sources = await seen([...svgBody('\t').map(quote), '', ...svgBody('    ').map(quote)].join('\n'));
+    // The tab-indented block's text is its own alone. The space-indented text could be either body's spelling (a renderer
+    // that expands tabs would spell the first as it), so that slot is ambiguous: code, never the first body a second time.
+    expect(sources.length).toBe(1);
+    expect(sources[0]).toContain('\n\t<text>PAY100');
+  });
 });
 
 describe('the size cap is checked on the text the reader parses (2312 H4)', () => {
@@ -113,7 +148,38 @@ describe('the size cap is checked on the text the reader parses (2312 H4)', () =
   it('a message at the cap that holds two chart fences is read, not answered with Durian’s too-big error', () => {
     const text = padded(MESSAGE_LIMITS.maxInputBytes - 2);
     expect(bytes(text)).toBe(MESSAGE_LIMITS.maxInputBytes - 2);
-    const { doc } = readMessage(text, 'p-');
+    const { doc } = mustRead(text, 'p-');
     expect(doc.problems.map(problem => problem.message).filter(message => /bytes|too big/iu.test(message))).toEqual([]);
+  });
+
+  // UTF-8, not UTF-16: normalising a CRLF takes a character AND a byte away, a held fence's opener adds characters, and a
+  // NUL becomes U+FFFD, the same one UTF-16 unit and two bytes more. Nine CRLFs against the nine characters of a held
+  // fence's added word leave the length EQUAL while the bytes grew by the NUL's two: 299,999 bytes written, 300,001 given.
+  it('a 299,999-byte message whose normalised text is 300,001 bytes at the SAME length is read, not answered with the too-big error', () => {
+    const head = ['> ```fy-render', '> x', '', 'a', 'b', 'c', 'd', 'e', 'f', 'g'].join('\r\n');
+    const text = `${head}\n${'a'.repeat(MESSAGE_LIMITS.maxInputBytes - 1 - bytes(head) - 2)}\u{0}`;
+    expect(bytes(text)).toBe(MESSAGE_LIMITS.maxInputBytes - 1);
+    const read = mustRead(text, 'p-');
+    expect(read.doc.problems.map(problem => problem.message)).toEqual([]);
+    expect(read.doc.blocks.length).toBeGreaterThan(0);
+  });
+
+  it('a message over the cap in UTF-8 but not in UTF-16 is shown as text (null), never read', () => {
+    const text = '€'.repeat(100_001);
+    expect(text.length).toBeLessThan(MESSAGE_LIMITS.maxInputBytes);
+    expect(bytes(text)).toBeGreaterThan(MESSAGE_LIMITS.maxInputBytes);
+    expect(readMessage(text, 'p-')).toBeNull();
+    expect(exceedsMessageCap(text)).toBe(true);
+  });
+
+  it('the parser has a fixed budget above any reading of a message under the cap, counted in UTF-8', () => {
+    // The worst growth of a message at the cap is three times (every byte a NUL, U+FFFD is three bytes).
+    expect(PARSER_LIMITS.maxInputBytes).toBeGreaterThan(MESSAGE_LIMITS.maxInputBytes * 3);
+    expect(exceedsParserBudget('a'.repeat(PARSER_LIMITS.maxInputBytes))).toBe(false);
+    expect(exceedsParserBudget('a'.repeat(PARSER_LIMITS.maxInputBytes + 1))).toBe(true);
+    // Fewer characters than the budget, more bytes than it.
+    const wide = '€'.repeat(Math.ceil(PARSER_LIMITS.maxInputBytes / 3) + 1);
+    expect(wide.length).toBeLessThan(PARSER_LIMITS.maxInputBytes);
+    expect(exceedsParserBudget(wide)).toBe(true);
   });
 });

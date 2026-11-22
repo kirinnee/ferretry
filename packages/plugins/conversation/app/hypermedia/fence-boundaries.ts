@@ -71,6 +71,9 @@ export function commonMarkFences(text: string): readonly CommonMarkFence[] {
       .write(preprocess()(text, undefined, true)),
   );
   const fences: CommonMarkFence[] = [];
+  // Where the text's last non-whitespace character ends, found once: "nothing but whitespace follows this fence" is then a
+  // comparison, not a copy of the whole tail for every fence (which made a message of thousands of fences quadratic).
+  const contentEnd = text.trimEnd().length;
   let current: {
     open: number;
     close: number | null;
@@ -112,7 +115,7 @@ export function commonMarkFences(text: string): readonly CommonMarkFence[] {
         info: current.info,
         meta: current.meta,
         body,
-        atTail: text.slice(token.end.offset).trim() === '',
+        atTail: token.end.offset >= contentEnd,
         lead: current.lead,
       });
       current = null;
@@ -210,8 +213,13 @@ const asHeld = (fence: CommonMarkFence): CommonMarkFence =>
 /** Three backticks or tildes in a row: a text without them has no fence, for CommonMark or for Durian. */
 const MAY_HOLD_FENCE = /`{3}|~{3}/u;
 
-/** The one word a fence must be opened with to draw anything. A message without it has nothing for CommonMark to decide. */
-const FY_RENDER_WORD = 'fy-render';
+/**
+ * A fence opened with the one word that draws anything: a run of three backticks or tildes, optional spaces, then
+ * `fy-render`, on one line (the info string is read as written). A message with no such line has nothing for CommonMark
+ * to decide, however often it mentions the word in prose: a message of thousands of fences that only TALKS about
+ * `fy-render` is not read by micromark at all.
+ */
+const FY_RENDER_OPENER = /(?:`{3}|~{3})[ \t]*fy-render/u;
 
 /**
  * A message that cannot hold a `fy-render` fence draws nothing from one, whatever CommonMark makes of its fences, so its
@@ -271,7 +279,7 @@ function stillOpen(
 export function settleFences(source: string, arriving = false): SettledFences {
   const normal = normalizeText(source);
   if (!MAY_HOLD_FENCE.test(normal)) return { text: source, fences: [] };
-  if (!normal.includes(FY_RENDER_WORD)) return durianOnly(source, normal);
+  if (!FY_RENDER_OPENER.test(normal)) return durianOnly(source, normal);
 
   let lines = normal.split('\n');
   let fences = stillOpen(commonMarkFences(normal), lines, arriving);
@@ -286,8 +294,12 @@ export function settleFences(source: string, arriving = false): SettledFences {
 
   let doubt = Number.POSITIVE_INFINITY;
   for (const fence of fences) if (fence.close === null && fence.atTail) doubt = Math.min(doubt, fence.open);
+  // One pass: each of Durian's fences is matched to CommonMark's by its opening line through a table, not a search of
+  // every fence, so a message of thousands of fences is read in time linear in its size.
+  const byOpen = new Map<number, CommonMarkFence>();
+  for (const fence of fences) if (!byOpen.has(fence.open)) byOpen.set(fence.open, fence);
   for (const found of durianFences(lines)) {
-    const same = fences.find(fence => fence.open === found.open);
+    const same = byOpen.get(found.open);
     if (found.close === null || same === undefined || same.close !== found.close) doubt = Math.min(doubt, found.open);
   }
 

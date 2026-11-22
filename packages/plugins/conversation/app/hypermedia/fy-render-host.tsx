@@ -231,19 +231,42 @@ export const drawableBodies = (settled: SettledFences): DrawableFyRenderBodiesMa
 /** A text without the newlines that end it: how the renderer ends a fence's text, which the author did not type. */
 const withoutTrailingNewlines = (text: string): string => text.replace(/\n+$/u, '');
 
+/** The whitespace a line begins with. */
+const indentOf = (line: string): string => /^[ \t]*/u.exec(line)?.[0] ?? '';
+
+/**
+ * Could the Markdown renderer have spelled `candidate` as `text`? Line for line the same, but for the indent of a line that
+ * begins with a TAB in the candidate: the renderer keeps a tab in one place (a quote) and expands it to spaces in another
+ * (a quoted list), where it cannot be told from the spaces an author typed. Every other line must be spelled exactly.
+ */
+function couldBeSpelled(candidate: string, text: string): boolean {
+  const written = withoutTrailingNewlines(candidate).split('\n');
+  const seen = withoutTrailingNewlines(text).split('\n');
+  return (
+    written.length === seen.length &&
+    written.every((line, index) => {
+      const other = seen[index] ?? '';
+      if (line === other) return true;
+      const lead = indentOf(line);
+      return lead.includes('\t') && !indentOf(other).includes('\t') && line.slice(lead.length) === other.trimStart();
+    })
+  );
+}
+
 /**
  * The body a code slot's text stands for, or `undefined` when it is not provably one of this message's. Bodies that differ
- * only by indentation are told apart by the text itself: the slot's text is the one of them it spells exactly (the
- * Markdown renderer keeps a fence's own indentation; it only re-spells a tab-indented list item's). A text that matches
- * none of several exactly, or more than one, stays plain code, so no block's content is ever replaced by another's.
+ * only by indentation are told apart by the text itself: the slot's text is the one of them it could be the spelling of
+ * ({@link couldBeSpelled}: the Markdown renderer keeps a fence's own indentation; it only re-spells a tab-indented line).
+ * A text that could be the spelling of none of several, or of more than one (a tab-indented body and its space-indented
+ * twin: the renderer's expansion of the first IS the second), is AMBIGUOUS and stays plain code, so no block's content is
+ * ever replaced by another's and no body is drawn under the wrong fence or twice.
  */
 const bodyFor = (drawable: DrawableFyRenderBodiesMap, text: string): string | undefined => {
   const candidates = drawable.get(bodyKey(text));
   if (candidates === undefined) return undefined;
   if (candidates.length === 1) return candidates[0];
-  const spelled = withoutTrailingNewlines(text);
-  const exact = candidates.filter(candidate => withoutTrailingNewlines(candidate) === spelled);
-  return exact.length === 1 ? exact[0] : undefined;
+  const spelled = candidates.filter(candidate => couldBeSpelled(candidate, text));
+  return spelled.length === 1 ? spelled[0] : undefined;
 };
 
 /**

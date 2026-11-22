@@ -5,7 +5,7 @@ import { settleFences } from './fence-boundaries.ts';
 import { type DrawableFyRenderBodiesMap, drawableBodies, fyRenderParseBlock } from './fy-render-host.tsx';
 import { heldFenceParseBlocks, holdFences } from './held-fences.tsx';
 import { LITERAL_CODE_INLINES, mayHoldLiteralCode } from './literal-code.tsx';
-import { MESSAGE_LIMITS } from './limits.ts';
+import { exceedsMessageCap, exceedsParserBudget, PARSER_LIMITS } from './limits.ts';
 import { hypermediaUrlPolicy } from './url-policy.ts';
 import { withReferences } from './with-references.ts';
 
@@ -14,20 +14,6 @@ export interface ReadMessage {
   readonly doc: Document;
   /** The bodies the code slot may draw as blocks ({@link drawableBodies}). */
   readonly drawable: DrawableFyRenderBodiesMap;
-}
-
-const encoder = new TextEncoder();
-
-/**
- * The size cap is about the message the author wrote (`exceedsMessageCap`, checked before a message is read), but Durian
- * counts the text it is GIVEN, and holding a chart or a code walk renames its opener to something a few bytes longer.
- * A message at the cap with such fences in it must never be answered with Durian's own "the page is too big" error
- * (`limits.ts`), so Durian's cap is the message cap plus exactly what the renaming added. Pure.
- */
-function parsedLimits(source: string, parsed: string): typeof MESSAGE_LIMITS | { readonly maxInputBytes: number } {
-  if (parsed.length === source.length) return MESSAGE_LIMITS;
-  const added = encoder.encode(parsed).length - encoder.encode(source).length;
-  return added <= 0 ? MESSAGE_LIMITS : { maxInputBytes: MESSAGE_LIMITS.maxInputBytes + added };
 }
 
 /**
@@ -47,6 +33,11 @@ function parsedLimits(source: string, parsed: string): typeof MESSAGE_LIMITS | {
  * `arriving` is true for the tail of a message still streaming in: a closing delimiter that is its last line is not yet
  * one (the rest of that line may turn it into content), so that fence stays open and inert until the line ends. A final
  * message is read as written.
+ *
+ * `null` MEANS "SHOW THE TEXT": the message is over the author's cap (`exceedsMessageCap`, counted on the bytes written), or
+ * the text Durian would be given is over the parser's fixed budget (`exceedsParserBudget`: normalising line endings and NULs
+ * and holding fences all change the size). Either way the message is shown as the text it is, never answered with Durian's
+ * own "the page is too big" error (`limits.ts`).
  */
 export function readMessage(
   source: string,
@@ -54,17 +45,19 @@ export function readMessage(
   arriving = false,
   /** Whether the 2D animation engine is here: the current state of the gate unless a caller (the view, which re-reads on arrival) says. */
   animationReady = animationEngineReady(),
-): ReadMessage {
+): ReadMessage | null {
+  if (exceedsMessageCap(source)) return null;
   configureDurian();
   const settled = settleFences(source, arriving);
   // A chart (unbounded formulas) and a code walk are held as code before Durian can read them (`held-fences.tsx`), and so is
   // an animation until its lazy engine has arrived (`animation-engine.ts`).
   const text = holdFences(settled.text, !animationReady);
+  if (exceedsParserBudget(text)) return null;
   const doc = parse(text, {
     blocks: [fyRenderParseBlock(settled), ...heldFenceParseBlocks(text)],
     frontMatter: false,
     idPrefix,
-    limits: parsedLimits(source, text),
+    limits: PARSER_LIMITS,
     urlPolicy: hypermediaUrlPolicy,
     // Offered only to a message that can hold such a span: every other message is read by Durian's own lexer.
     inlines: mayHoldLiteralCode(text) ? LITERAL_CODE_INLINES : undefined,
@@ -72,5 +65,6 @@ export function readMessage(
   return { doc: withReferences(doc), drawable: drawableBodies(settled) };
 }
 
-/** The document of {@link readMessage}. */
-export const parseMessage = (source: string, idPrefix: string): Document => readMessage(source, idPrefix).doc;
+/** The document of {@link readMessage}, or `null` when the message is shown as text. */
+export const parseMessage = (source: string, idPrefix: string): Document | null =>
+  readMessage(source, idPrefix)?.doc ?? null;
