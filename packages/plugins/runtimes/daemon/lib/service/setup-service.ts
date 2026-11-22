@@ -82,15 +82,10 @@ import {
 } from '../account/clone.ts';
 import { CloneRefusal } from '../account/clone-parts.ts';
 import { EMPTY_RUNTIME_IDS } from '../account/ids.ts';
-import {
-  FleetApplyAfterConfigError,
-  FleetApplyFailureError,
-  type FleetDocumentWrite,
-  type FleetModelApplyPlan,
-} from '../provisioning.ts';
+import type { FleetDocumentWrite, FleetModelApplyPlan } from '../provisioning.ts';
 import { notingLanded } from './apply-bracket.ts';
 import { type ApplyLedger, namingWhatLanded } from './apply-ledger.ts';
-import { configurationLanded, failedApplySentence } from './failed-apply.ts';
+import { configurationLanded, failedApplySentence, landedWithCommittedFleet } from './failed-apply.ts';
 import { putConfigFile, writeConfigFiles } from './setup-config-files.ts';
 import { reportLeft, writeVaultAndLogins } from './setup-vault-logins.ts';
 import {
@@ -1504,13 +1499,12 @@ export class FleetSetupService {
     try {
       await catalog.provisioner.apply(plan, documents);
     } catch (error) {
-      // The fleet committed and only its shared history failed afterwards: the manifest IS published, so the fleet and
-      // the configuration files the adapter wrote first have landed, and the ledger must say so like the sentence does.
-      const cause = error instanceof FleetApplyAfterConfigError ? error.failure : error;
-      if (cause instanceof FleetApplyFailureError && cause.failure.kind === 'history-failed-after-commit') {
+      // A fleet that committed (its manifest is published) and only failed its history afterwards HAS landed, with
+      // the configuration files the adapter wrote first: the ledger says so.
+      const committed = landedWithCommittedFleet(error);
+      if (committed !== undefined) {
         ledger.fleet();
-        if (error instanceof FleetApplyAfterConfigError)
-          landed.push(...error.written.filter(path => !landed.includes(path)));
+        landed.push(...committed);
       }
       throw new FleetCatalogRefusal('fleet_change_failed', failedApplySentence(error, landed));
     }
