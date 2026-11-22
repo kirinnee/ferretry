@@ -448,7 +448,13 @@ describe.skipIf(!HAVE || getuid === undefined || process.platform !== 'linux')(
       expect(
         await waitFor(async () => {
           const listed = (await table.list()) ?? [];
-          return [ours.pid, theirs.pid].every(pid => listed.some(entry => entry.pid === pid));
+          // By command line too: until `bash` has `exec`ed, its pid is listed under the `bash -c …` it started with.
+          return [
+            [ours.pid, `${folder.path}/gha_77.sock`],
+            [theirs.pid, `${strangers}/gha_77.sock`],
+          ].every(([pid, socket]) =>
+            listed.some(entry => entry.pid === pid && entry.args === `ssh-agent -D -a ${socket as string}`),
+          );
         }),
       ).toBe(true);
       const swept = new AgentSupervisor(
