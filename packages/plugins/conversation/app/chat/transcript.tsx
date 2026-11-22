@@ -119,6 +119,8 @@ export function Transcript({
   const shown = useHeldStill({ entries, busy, activity, activityFallback, turnStartedAt, live }, hold);
   const items = transcriptItems(shown.entries);
   const runs = agentRuns(items);
+  // The text still arriving is the last ASSISTANT item, not the last row: a message the owner queued mid-stream sits after it.
+  const lastAssistantIndex = items.findLastIndex(item => item.entry.kind === 'assistant');
   const compaction = shown.live?.compaction;
   const stripAt =
     compaction?.phase === 'done'
@@ -210,6 +212,7 @@ export function Transcript({
                 answered={item.answered === true}
                 entry={agentName === undefined ? item.entry : withAgentName(item.entry, agentName)}
                 isLast={index === items.length - 1}
+                lastAssistant={index === lastAssistantIndex}
                 live={shown.busy}
                 onCancel={onCancel}
                 onDismiss={onDismiss}

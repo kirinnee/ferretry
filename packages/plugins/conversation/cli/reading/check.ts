@@ -87,6 +87,9 @@ function configureYaml(): void {
   });
 }
 
+/** U+FEFF: three bytes at the start of a file saved by an editor that writes one. */
+const BYTE_ORDER_MARK = '\u{feff}';
+
 const byteLength = (text: string): number => new TextEncoder().encode(text).length;
 
 /**
@@ -182,9 +185,15 @@ function durianFindings(text: string): Finding[] {
  * Every problem of a message, in the order it appears. Pure over its input. A message past the size cap is answered by
  * the size finding alone, before Durian or the `fy-render` scan reads a byte of it: it is shown as text, so nothing
  * inside it is a part to check.
+ *
+ * THE CAP COUNTS THE BYTES AS READ, A BYTE ORDER MARK INCLUDED (a bounded read keeps it: `plugin-host.ts`), and then ONE
+ * leading mark is dropped, as the reader of a message drops it, before Durian and the fence scan see the text: with the
+ * mark in front, the first line is no fence to the scan and a block that has no alt would pass as "no problems found".
+ * A diagnostic's line number is the same either way (the mark is not a line).
  */
-export function checkMessage(text: string): readonly Finding[] {
-  if (byteLength(text) > CHECK_LIMITS.maxInputBytes) return [OVER_CAP_FINDING];
+export function checkMessage(read: string): readonly Finding[] {
+  if (byteLength(read) > CHECK_LIMITS.maxInputBytes) return [OVER_CAP_FINDING];
+  const text = read.startsWith(BYTE_ORDER_MARK) ? read.slice(BYTE_ORDER_MARK.length) : read;
   return [...durianFindings(text), ...fyRenderFindings(text)]
     .map((finding, order) => ({ finding, order }))
     .sort((a, b) => a.finding.line - b.finding.line || a.order - b.order)

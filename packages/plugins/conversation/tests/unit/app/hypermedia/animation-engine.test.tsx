@@ -13,13 +13,13 @@ import type { ReactNode } from 'react';
 import { animationEngineReady, loadAnimationEngine } from '../../../../app/hypermedia/animation-engine.ts';
 import { holdsAnimation } from '../../../../app/hypermedia/held-fences.tsx';
 import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
-import { readMessage } from '../../../../app/hypermedia/parse-message.ts';
+import { mustRead } from './must-read.ts';
 import { fixture, inShell } from './surface-fixture.tsx';
 
 const FENCE = '`'.repeat(3);
 const fence = (info: string, ...body: readonly string[]): string => [`${FENCE}${info}`, ...body, FENCE].join('\n');
 const ANIMATION = fence('animation', 'array a: 5 2 8 1', '@step 5 and 2 swap.', 'swap a.0 a.1');
-const types = (text: string): readonly string[] => readMessage(text, 'x-').doc.blocks.map(block => block.type);
+const types = (text: string): readonly string[] => mustRead(text, 'x-').doc.blocks.map(block => block.type);
 
 const draw = async (text: string) => {
   const tree = inShell(
@@ -51,7 +51,7 @@ describe('the animation engine', () => {
 
   it('is not here at first: a message READ without it shows an animation as the code it is', () => {
     expect(animationEngineReady()).toBe(false);
-    const read = readMessage(ANIMATION, 'x-');
+    const read = mustRead(ANIMATION, 'x-');
     expect(read.doc.blocks.map(block => block.type)).toEqual(['host']);
     expect(read.doc.problems).toEqual([]);
   });

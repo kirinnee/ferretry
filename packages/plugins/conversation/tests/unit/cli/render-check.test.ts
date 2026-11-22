@@ -23,13 +23,16 @@ const harness = (files: Record<string, string>) => {
   const verbs = readingVerbs({
     client: { call: (async () => undefined) as never, subscribe: () => () => undefined },
     io: { out: (text: string) => void out.push(text), err: (text: string) => void err.push(text), isTty: false },
-    // Like the shell's reader: with a limit it hands back no more than that many bytes of the file.
+    // Like the shell's reader: with a limit it hands back no more than that many bytes of the file, a byte order mark
+    // kept (`plugin-host.ts`: a bounded read counts the bytes it was asked for).
     readText: async (path: string, limit?: number) => {
       read.push(path);
       limits.push(limit);
       const text = files[path];
       if (text === undefined) throw new Error(`no such file: ${path}`);
-      return limit === undefined ? text : new TextDecoder().decode(new TextEncoder().encode(text).slice(0, limit));
+      return limit === undefined
+        ? text
+        : new TextDecoder('utf-8', { ignoreBOM: true }).decode(new TextEncoder().encode(text).slice(0, limit));
     },
   } as never);
   const check = (args: string[]) => verbs['render check']({ args, options: {} } as never);
@@ -167,6 +170,37 @@ describe('fy render check: input bounds', () => {
     const text = `${badBlock}${'a'.repeat(cap - badBlock.length)}`;
     expect(new TextEncoder().encode(text).length).toBe(cap);
     expect(checkMessage(text).map(found => found.message)).toEqual([expect.stringContaining('alt')]);
+  });
+
+  describe('a byte order mark (2312 L138)', () => {
+    const BOM = '\u{feff}';
+    const noAlt = `${FENCE}fy-render\ntype: mermaid\n---\nflowchart TB\n${FENCE}\n`;
+
+    test('a small BOM-prefixed message whose first fence has no alt is reported on line 1, like the same text without it', () => {
+      const plain = checkMessage(noAlt).map(found => ({ line: found.line, level: found.level }));
+      expect(plain).toEqual([{ line: 1, level: 'error' }]);
+      const marked = checkMessage(`${BOM}${noAlt}`);
+      expect(marked.map(found => ({ line: found.line, level: found.level }))).toEqual(plain);
+      expect(marked[0]?.message).toContain('Missing required alt header');
+    });
+
+    test('a BOM-prefixed file exits 1 and names the problem; it never answers "no problems found"', async () => {
+      const { check, out } = harness({ 'bom.md': `${BOM}${noAlt}` });
+      expect(await check(['bom.md'])).toBe(1);
+      expect(out.join('')).toMatch(/^line 1: .*alt/u);
+    });
+
+    test('the cap counts the bytes read, the mark included: cap-2 characters behind a mark are cap+1 bytes', () => {
+      const found = checkMessage(`${BOM}${'a'.repeat(cap - 2)}`);
+      expect(found).toHaveLength(1);
+      expect(found[0]?.message).toContain('300,000');
+      // One byte less and it is read (and clean).
+      expect(checkMessage(`${BOM}${'a'.repeat(cap - 3)}`)).toEqual([]);
+    });
+
+    test('only ONE leading mark is dropped: a second one is text, and no fence is found behind it', () => {
+      expect(checkMessage(`${BOM}${BOM}${noAlt}`)).toEqual([]);
+    });
   });
 });
 
