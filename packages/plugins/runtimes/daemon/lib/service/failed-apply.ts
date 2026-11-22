@@ -25,6 +25,17 @@ export function failedApplySentence(error: unknown, landed: readonly string[] = 
   return cleanRollback ? `${failure}; nothing was left half-changed` : failure;
 }
 
+/**
+ * The configuration files that landed with a fleet that COMMITTED (its manifest is published) and only then failed its
+ * shared history, or `undefined` for any other failure: what a ledger must list as landed beside the fleet itself.
+ */
+export function landedWithCommittedFleet(error: unknown): readonly string[] | undefined {
+  const cause = error instanceof FleetApplyAfterConfigError ? error.failure : error;
+  if (!(cause instanceof FleetApplyFailureError) || cause.failure.kind !== 'history-failed-after-commit')
+    return undefined;
+  return error instanceof FleetApplyAfterConfigError ? error.written : [];
+}
+
 /** What a person is told when configuration files were written before the change then failed. */
 export function configurationLanded(written: readonly string[]): string {
   const named =

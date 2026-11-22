@@ -15,6 +15,7 @@ describe('the import kit public entry point', () => {
       'HARNESS_LABEL',
       'HARNESSES',
       'ImportResultList',
+      'ImportPartialNote',
       'useApplyImport',
       'createScanStore',
       'scanStoreFor',

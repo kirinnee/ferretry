@@ -36,7 +36,10 @@ export interface AccountChanges {
    * Stage and apply one change. A caller that may stop waiting passes a `signal`: it reaches both requests, and an
    * apply is never sent once it has aborted.
    */
-  readonly apply: (change: AccountChange, options?: { readonly signal?: AbortSignal }) => Promise<ChangeResult>;
+  readonly apply: (
+    change: AccountChange,
+    options?: { readonly signal?: AbortSignal; readonly onStaged?: (changeId: string) => void },
+  ) => Promise<ChangeResult>;
   /**
    * Stop waiting for the attempt in flight (its deadline passed): `busy` clears now, and whatever that attempt answers
    * later changes neither the busy state nor the refusal. The next attempt starts clean.
@@ -125,7 +128,7 @@ export function useAccountChanges({ client }: UseAccountChangesOptions): Account
     authority,
     busy,
     refusal,
-    apply: (change, options) => run(client => applyAccountChange(client, change, options?.signal)),
+    apply: (change, options) => run(client => applyAccountChange(client, change, options?.signal, options?.onStaged)),
     abandon: () => {
       newest.current += 1;
       setBusy(false);
