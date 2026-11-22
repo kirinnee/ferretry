@@ -41,9 +41,6 @@
   min-height: 44px;
   padding: 10px 12px;
 }
-.cc-item[data-on='false'] {
-  color: var(--muted);
-}
 .cc-item__box {
   accent-color: var(--accent);
   block-size: 18px;
