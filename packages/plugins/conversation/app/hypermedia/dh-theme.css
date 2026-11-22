@@ -494,27 +494,59 @@
   box-shadow: var(--shadow-md);
 }
 
-/* THE 3D STAGE'S COLOURS (r12 H4 follow-up, end-list L145). Durian's 3D stage reads these tokens from its own host
+/* THE 3D STAGE'S COLOURS (r12 H4 follow-up, end-list L145; r2 review). Durian's 3D stage reads these tokens from its own host
    (`.scn3`, drawn over the stage ground `--surface-2`) and turns each into a three.js colour, which keeps the RGB and drops
    the alpha. So here a hairline rule (`--line`, `--line-2`: the app's `--border`, translucent) drew as its solid, loudest
    colour in light and nearly vanished against a soft tint in dark, and a soft fill (a `color-mix(…, transparent)` of the
    status colour) drew as the status colour itself, the same as the edge on top of it. On the stage's own host they are
    OPAQUE, composited over the stage ground, and the two edge greys are the ink mixed into it to a floor of 3:1 against
    every fill (`tests/integration/app/hypermedia-3d-edges.visual.test.ts` holds it for every style, palette and mode). The
-   labels inside the host read the same tokens, which only strengthens their rules. */
-.fy-hm .dh-doc .scn3 {
-  --line-2: color-mix(in srgb, var(--fg) 66%, var(--surface-2));
-  --line: color-mix(in srgb, var(--fg) 58%, var(--surface-2));
-  --acc-soft: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
-  --acc-softer: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
-  --hot-soft: color-mix(in srgb, var(--err) 16%, var(--surface-2));
-  --good-soft: color-mix(in srgb, var(--ok) 16%, var(--surface-2));
-  --warn-soft: color-mix(in srgb, var(--fyhm-warn) 16%, var(--surface-2));
+   labels inside the host read the same tokens, which only strengthens their rules.
+
+   A MIX IS NOT HANDED TO THE STAGE AS A MIX. Chromium serialises a `color-mix()` as `color(srgb …)`, which three.js cannot
+   parse (the colour falls back to WHITE). So each recipe is declared here as `--stage-src-<name>` on the part's box
+   (`[data-fy-animation]`), `stage-colours.ts` resolves it to the plain `rgb(r, g, b)` the canvas draws for it and sets that as
+   `--stage-<name>` on the same box, and the host reads `--stage-<name>`. Before that has run, the host reads the recipe itself. */
+.fy-hm .dh-doc [data-fy-animation] {
+  --stage-src-line-2: color-mix(in srgb, var(--fg) 66%, var(--surface-2));
+  --stage-src-line: color-mix(in srgb, var(--fg) 58%, var(--surface-2));
+  --stage-src-acc-soft: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+  --stage-src-acc-softer: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+  --stage-src-hot-soft: color-mix(in srgb, var(--err) 16%, var(--surface-2));
+  --stage-src-good-soft: color-mix(in srgb, var(--ok) 16%, var(--surface-2));
+  --stage-src-warn-soft: color-mix(in srgb, var(--fyhm-warn) 16%, var(--surface-2));
+  /* The family tints are the theme's own (`--cK-soft` above); only their serialisation is resolved. */
+  --stage-src-c1-soft: var(--c1-soft);
+  --stage-src-c2-soft: var(--c2-soft);
+  --stage-src-c3-soft: var(--c3-soft);
+  --stage-src-c4-soft: var(--c4-soft);
+  --stage-src-c5-soft: var(--c5-soft);
+  --stage-src-c6-soft: var(--c6-soft);
+  --stage-src-c7-soft: var(--c7-soft);
+  --stage-src-c8-soft: var(--c8-soft);
 }
 
 /* In light the translucent border was ALREADY drawn as the near-black ink it is made of, and the stage read well; keep the
    edges that strong there rather than easing them to the dark-mode grey. */
-:root[data-mode='light'] .fy-hm .dh-doc .scn3 {
-  --line-2: color-mix(in srgb, var(--fg) 92%, var(--surface-2));
-  --line: color-mix(in srgb, var(--fg) 80%, var(--surface-2));
+:root[data-mode='light'] .fy-hm .dh-doc [data-fy-animation] {
+  --stage-src-line-2: color-mix(in srgb, var(--fg) 92%, var(--surface-2));
+  --stage-src-line: color-mix(in srgb, var(--fg) 80%, var(--surface-2));
+}
+
+.fy-hm .dh-doc .scn3 {
+  --line-2: var(--stage-line-2, var(--stage-src-line-2));
+  --line: var(--stage-line, var(--stage-src-line));
+  --acc-soft: var(--stage-acc-soft, var(--stage-src-acc-soft));
+  --acc-softer: var(--stage-acc-softer, var(--stage-src-acc-softer));
+  --hot-soft: var(--stage-hot-soft, var(--stage-src-hot-soft));
+  --good-soft: var(--stage-good-soft, var(--stage-src-good-soft));
+  --warn-soft: var(--stage-warn-soft, var(--stage-src-warn-soft));
+  --c1-soft: var(--stage-c1-soft, var(--stage-src-c1-soft));
+  --c2-soft: var(--stage-c2-soft, var(--stage-src-c2-soft));
+  --c3-soft: var(--stage-c3-soft, var(--stage-src-c3-soft));
+  --c4-soft: var(--stage-c4-soft, var(--stage-src-c4-soft));
+  --c5-soft: var(--stage-c5-soft, var(--stage-src-c5-soft));
+  --c6-soft: var(--stage-c6-soft, var(--stage-src-c6-soft));
+  --c7-soft: var(--stage-c7-soft, var(--stage-src-c7-soft));
+  --c8-soft: var(--stage-c8-soft, var(--stage-src-c8-soft));
 }

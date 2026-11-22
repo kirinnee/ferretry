@@ -247,7 +247,7 @@ describe('the 3D picture (end-list L145: its edges read in dark as well as light
         // >= 3:1 against it, the floor for a graphic.
         await page.addStyleTag({ content: '.scn3-labels{display:none !important}' });
         const stage = await page.locator('.scn-stage').first().screenshot();
-        const edgePixels = await page.evaluate(async (base64: string) => {
+        const { edgePixels, whitePixels } = await page.evaluate(async (base64: string) => {
           const image = new Image();
           image.src = `data:image/png;base64,${base64}`;
           await image.decode();
@@ -273,12 +273,14 @@ describe('the 3D picture (end-list L145: its edges read in dark as well as light
           const [ground] = [...seen.entries()].sort((a, b) => b[1] - a[1])[0] as [number, number];
           const back = lum((ground >> 16) & 255, (ground >> 8) & 255, ground & 255);
           let count = 0;
+          let white = 0;
           for (let at = 0; at < data.length; at += 4) {
             const own = lum(data[at] as number, data[at + 1] as number, data[at + 2] as number);
+            if (own > 0.85) white += 1;
             const [hi, lo] = own > back ? [own, back] : [back, own];
             if ((hi + 0.05) / (lo + 0.05) >= 3) count += 1;
           }
-          return count;
+          return { edgePixels: count, whitePixels: white };
         }, stage.toString('base64'));
         await context.close();
         expect(canvases).toBe(1);
@@ -286,6 +288,9 @@ describe('the 3D picture (end-list L145: its edges read in dark as well as light
         // ~30,000 before; light ~850 and ~1,250 either way, where the edges were already strong). The floor only says the
         // stage drew shapes the ground does not already hold; the per-pair 3:1 proof is `hypermedia-3d-edges.visual.test.ts`.
         expect(edgePixels).toBeGreaterThan(400);
+        // THE WHITE FALLBACK (r2 review): a token three.js cannot parse draws white. On a dark stage nothing is white once the
+        // labels are hidden; before the stage colours were resolved to plain rgb, every mixed edge and soft fill was.
+        if (theme === 'dark') expect(whitePixels).toBe(0);
         expect(fetched(requested, threeFile)).toBe(true);
         expect(state.stages).toBeGreaterThan(0);
         expect(found).toEqual({ csp: [], errors: [] });
