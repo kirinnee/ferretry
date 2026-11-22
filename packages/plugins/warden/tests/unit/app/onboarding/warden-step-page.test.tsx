@@ -54,13 +54,24 @@ const fileReply = (exists: boolean, text = '# yaml-language-server: $schema=ward
   issues: [],
 });
 
+/** What the daemon client throws for `403 grant_step_up_required` (a message that is raw wire text, never shown). */
+const stepUpRefusal = (): Error =>
+  Object.assign(new Error('grant_step_up_required: this act needs a recent passkey'), {
+    status: 403,
+    code: 'grant_step_up_required',
+  });
+
 interface Scene {
   readonly file?: ReturnType<typeof fileReply>;
   /** The key the page reads; a test may change it between reads with `setKey`. */
   readonly key?: SpeedupsView | 'off';
   readonly unreadable?: boolean;
+  /** The Jev key list cannot be read when Next saves: the key is unknown, not missing, so nothing is asked. */
+  readonly keyUnreadable?: boolean;
   readonly held?: readonly string[];
-  readonly refuse?: string;
+  readonly refuse?: string | Error;
+  /** The refusal is given once: the next write goes through (the person confirmed the passkey). */
+  readonly stepUpOnce?: boolean;
   /** What the slot under the cards holds; `null` = no key row is placed (Voice off). */
   readonly keyRow?: null;
 }
@@ -69,6 +80,7 @@ const open = async (scene: Scene = {}) => {
   const patches: WardenConfigPatch[] = [];
   let named = 0;
   let writes = 0;
+  let refusals = 0;
   let key: SpeedupsView | 'off' = scene.key ?? speedups(false);
   let nameable: WardenConfigView['jevKey'] = 'not_named';
   let config = wardenConfig();
@@ -82,7 +94,10 @@ const open = async (scene: Scene = {}) => {
     client: fakeWardenClient({
       config: async () => view({ jevKey: nameable }),
       updateConfig: async (patch, options) => {
-        if (scene.refuse !== undefined) throw new Error(scene.refuse);
+        if (scene.refuse !== undefined && !(scene.stepUpOnce === true && refusals > 0)) {
+          refusals += 1;
+          throw typeof scene.refuse === 'string' ? new Error(scene.refuse) : scene.refuse;
+        }
         patches.push(patch);
         writes += 1;
         // Naming rides the same write as the answer: it is counted, and the key is then named.
@@ -104,7 +119,10 @@ const open = async (scene: Scene = {}) => {
       if (scene.unreadable === true) throw new Error('The file could not be read.');
       return scene.file ?? fileReply(false);
     },
-    readKey: async () => key,
+    readKey: async () => {
+      if (scene.keyUnreadable === true) throw new Error('The key list could not be read.');
+      return key;
+    },
   };
   const run = recordedStep();
   const page = await mount(
@@ -148,6 +166,10 @@ describe('the Warden step page', () => {
     expect(page.container.querySelectorAll('[data-choice]').length).toBe(0);
     expect(patches).toEqual([]);
     expect(run.events).toEqual(['ready']);
+    // Try again reads the file once more (it is unreadable again here, so the line stays).
+    await interact(() => must(page.container.querySelector<HTMLButtonElement>('button'), 'try again').click());
+    await settle();
+    expect(run.events).toEqual(['ready', 'ready']);
   });
 
   it('shows three stacked cards with the free answer chosen, registers a commit, and writes nothing yet', async () => {
@@ -249,8 +271,64 @@ describe('the Warden step page', () => {
     const { run, page } = await open({ key: speedups(false), keyRow: null });
     await pick(page, 'jev');
     const asking = interact(() => run.runCommit());
-    await expect(asking).rejects.toThrow('Go on without one? Press Next to say yes.');
+    await expect(asking).rejects.toThrow(
+      'No Jev key yet, and this page has no place to add one. Go on without one? Press Next to say yes.',
+    );
     await expect(interact(() => run.runCommit())).resolves.toBeUndefined();
+  });
+
+  it('points at the key row above only when a key row is drawn', async () => {
+    const { run, page } = await open({ key: speedups(false) });
+    await pick(page, 'jev');
+    await expect(interact(() => run.runCommit())).rejects.toThrow(
+      'No Jev key yet. Go on without one? Press Next to say yes, or paste a key above.',
+    );
+  });
+
+  it('says the passkey sentence and offers the unlock when the save was refused for want of the step-up', async () => {
+    const { page, run, patches } = await open({ key: 'off', refuse: stepUpRefusal(), stepUpOnce: true });
+    await pick(page, 'jev');
+    expect(page.container.querySelector('[data-warden-unlock]')).toBeNull();
+    await expect(interact(() => run.runCommit())).rejects.toThrow('Part of this page needs you to confirm it’s you.');
+    await settle();
+    // The sentence is the footer's; the page adds the one action, never the raw error.
+    expect(must(page.container.querySelector('[data-warden-unlock] button'), 'unlock').textContent).toBe(
+      'Confirm it’s you',
+    );
+    expect(page.container.textContent).not.toContain('grant_step_up_required');
+    // The button is the person's own press of Next: it asks the shell to run the save again (and so the passkey).
+    await interact(() =>
+      must(page.container.querySelector<HTMLButtonElement>('[data-warden-unlock] button'), 'unlock').click(),
+    );
+    expect(run.events.filter(event => event === 'next')).toEqual(['next']);
+    // Once the save goes through, the unlock goes away; a new pick clears it too.
+    await interact(() => run.runCommit());
+    expect(patches).toEqual([{ enabled: true, layers: { jev: true, llm: false } }]);
+    expect(page.container.querySelector('[data-warden-unlock]')).toBeNull();
+  });
+
+  it('shows any other refusal as it is, with no unlock offered', async () => {
+    const { page, run } = await open({ key: 'off', refuse: new Error('That is not yours to change.') });
+    await pick(page, 'jev');
+    await expect(interact(() => run.runCommit())).rejects.toThrow('That is not yours to change.');
+    expect(page.container.querySelector('[data-warden-unlock]')).toBeNull();
+  });
+
+  it('clears the unlock when the pick changes', async () => {
+    const { page, run } = await open({ key: 'off', refuse: stepUpRefusal() });
+    await pick(page, 'jev');
+    await expect(interact(() => run.runCommit())).rejects.toThrow('confirm it’s you');
+    await settle();
+    expect(page.container.querySelector('[data-warden-unlock]')).not.toBeNull();
+    await pick(page, 'llm');
+    expect(page.container.querySelector('[data-warden-unlock]')).toBeNull();
+  });
+
+  it('does not ask when the key list cannot be read (the key is unknown, not missing)', async () => {
+    const { page, run, patches } = await open({ keyUnreadable: true });
+    await pick(page, 'jev');
+    await interact(() => run.runCommit());
+    expect(patches.length).toBe(1);
   });
 
   it('does not ask when Voice is off (no place to add a key)', async () => {
