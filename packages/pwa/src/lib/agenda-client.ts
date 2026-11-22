@@ -277,6 +277,8 @@ export class DaemonAgendaClient {
   readonly #machineReads = new Map<DaemonId, MachineAgendaRead>();
   readonly #fullInFlight = new Map<string, InFlight<void>>();
   readonly #countInFlight = new Map<string, InFlight<void>>();
+  /** The read queued behind a board read already in flight by a caller that needs a newer one. */
+  readonly #followUps = new Map<string, InFlight<void>>();
   /** Settled-only tails: full reads wait for every write already chained here. */
   readonly #mutationTails = new Map<string, InFlight<void>>();
   readonly #bindings = new Map<DaemonId, ConnectionBinding>();
@@ -308,10 +310,20 @@ export class DaemonAgendaClient {
     return this.#load(daemon, scope, false);
   }
 
-  /** Refreshes a complete board even when this session is already hydrated. */
-  revalidate(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
+  /**
+   * Refreshes a complete board even when this session is already hydrated.
+   *
+   * Overlapping calls share one read — unless the caller is `fresh`: it knows the board changed AFTER the read
+   * already on the wire was sent, so that read's answer is older than what it needs. A fresh call waits for the
+   * read in flight, then runs exactly one more that every fresh call in the meantime shares.
+   */
+  revalidate(
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    options?: { readonly fresh?: boolean },
+  ): Promise<void> {
     if (isMachineAgendaId(scope.sessionId)) return this.#machineRead(daemon, scope).request();
-    return this.#load(daemon, scope, true);
+    return this.#load(daemon, scope, true, options?.fresh === true);
   }
 
   #machineRead(daemon: DaemonConnection, scope: DaemonSessionScope): ListRefresh<void> {
@@ -339,22 +351,47 @@ export class DaemonAgendaClient {
         .invalidate()
         .catch(() => undefined);
     } else if (this.store.status(scope) === 'ready') {
-      void this.revalidate(daemon, scope).catch(() => undefined);
+      // The event is newer than any read already on the wire.
+      void this.revalidate(daemon, scope, { fresh: true }).catch(() => undefined);
     }
   }
 
-  #load(daemon: DaemonConnection, scope: DaemonSessionScope, revalidate: boolean): Promise<void> {
+  #load(daemon: DaemonConnection, scope: DaemonSessionScope, revalidate: boolean, fresh = false): Promise<void> {
     assertScopeDaemon(daemon, scope);
     const generation = this.#bind(daemon);
     const key = daemonSessionKey(scope);
     const existing = this.#fullInFlight.get(key);
-    if (existing?.generation === generation) return existing.promise;
+    if (existing?.generation === generation) {
+      if (!fresh) return existing.promise;
+      return this.#readAfter(daemon, scope, generation, key, existing.promise);
+    }
     if (!revalidate && this.store.status(scope) === 'ready') return Promise.resolve();
 
     const promise = this.#loadAfterMutations(daemon, scope, generation, key).finally(() => {
       if (this.#fullInFlight.get(key)?.promise === promise) this.#fullInFlight.delete(key);
     });
     this.#fullInFlight.set(key, { generation, promise });
+    return promise;
+  }
+
+  /** The one read after the one in flight that every fresh caller in the meantime shares. */
+  #readAfter(
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    generation: number,
+    key: string,
+    inFlight: Promise<void>,
+  ): Promise<void> {
+    const queued = this.#followUps.get(key);
+    if (queued?.generation === generation) return queued.promise;
+    const promise = inFlight
+      .catch(() => undefined)
+      .then(() => {
+        // Released before the read starts: a fresh call made from here on belongs to the NEXT follow-up.
+        if (this.#followUps.get(key)?.promise === promise) this.#followUps.delete(key);
+        return this.#load(daemon, scope, true);
+      });
+    this.#followUps.set(key, { generation, promise });
     return promise;
   }
 

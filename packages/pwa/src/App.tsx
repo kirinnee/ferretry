@@ -1523,8 +1523,13 @@ function SessionRoute({
         // A newly opened session reads its board on the first transcript read, whatever the last session did.
         agendaRead.current.reset();
         const revalidateAgenda = (): void => {
-          if (agendaRead.current.take())
-            void store.attention.revalidate(connection, agendaScope).catch(() => undefined);
+          const why = agendaRead.current.takeWhy();
+          // An announced change must be read AFTER the announcement: joining a board read already on the wire
+          // would apply an older snapshot and spend the spacing on it (`fresh`, `DaemonAgendaClient.revalidate`).
+          if (why !== undefined)
+            void store.attention
+              .revalidate(connection, agendaScope, { fresh: why === 'announced' })
+              .catch(() => undefined);
         };
         const ledger = ledgerFeed(setSends);
         control = startSessionWorkspaceRefresh({

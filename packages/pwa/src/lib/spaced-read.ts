@@ -11,10 +11,15 @@
  * beat, not a reflex.
  *
  * {@link SpacedRead.take} says whether this ride may read; {@link SpacedRead.reset} makes the next one read,
- * for the moment something announced a change.
+ * for the moment something announced a change. {@link SpacedRead.takeWhy} also says WHY it may read: a read
+ * owed to an announcement must reflect a state newer than the announcement, so it may not join a read that
+ * was already on the wire when the announcement arrived (its response is older than the change).
  */
+export type SpacedReadReason = 'announced' | 'spaced';
+
 export class SpacedRead {
   #lastAt: number | undefined;
+  #announced = false;
 
   constructor(
     private readonly spacingMs: number,
@@ -23,15 +28,23 @@ export class SpacedRead {
 
   /** Whether to read now — none yet, a reset since, or the last one at least the spacing ago — counting it as read. */
   take(): boolean {
-    const now = this.now();
-    if (this.#lastAt !== undefined && now - this.#lastAt < this.spacingMs) return false;
-    this.#lastAt = now;
-    return true;
+    return this.takeWhy() !== undefined;
   }
 
-  /** Something announced a change: the next {@link take} reads. */
+  /** {@link take}, naming the reason: `announced` when a reset is what allowed it, `spaced` when only the spacing did. */
+  takeWhy(): SpacedReadReason | undefined {
+    const now = this.now();
+    const announced = this.#announced;
+    if (!announced && this.#lastAt !== undefined && now - this.#lastAt < this.spacingMs) return undefined;
+    this.#lastAt = now;
+    this.#announced = false;
+    return announced ? 'announced' : 'spaced';
+  }
+
+  /** Something announced a change: the next {@link take} reads, and that read must start after this moment. */
   reset(): void {
     this.#lastAt = undefined;
+    this.#announced = true;
   }
 }
 

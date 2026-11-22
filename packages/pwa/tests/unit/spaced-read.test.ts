@@ -36,6 +36,31 @@ describe('SpacedRead', () => {
     should(read.take()).be.true();
     should(read.take()).be.false();
   });
+
+  it('should say a read owed to an announcement is announced, and a spacing read is only spaced', () => {
+    // Arrange
+    let now = 1_000;
+    const read = new SpacedRead(AGENDA_SAFETY_NET_MS, () => now);
+
+    // Act
+    const first = read.takeWhy();
+    now += 500;
+    const inside = read.takeWhy();
+    read.reset();
+    const announced = read.takeWhy();
+    const after = read.takeWhy();
+    now += AGENDA_SAFETY_NET_MS;
+    const spaced = read.takeWhy();
+
+    // Assert
+    should([first, inside, announced, after, spaced]).deepEqual([
+      'spaced',
+      undefined,
+      'announced',
+      undefined,
+      'spaced',
+    ]);
+  });
 });
 
 describe('changesTheAgenda', () => {
