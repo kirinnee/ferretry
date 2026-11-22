@@ -705,8 +705,10 @@ describe('hypermedia teaching', () => {
     should(teaching).not.containEql('flowchart LR');
     // A reference is a token the reader's proof gate turns into a chip, never a link an agent writes.
     should(teaching).containEql('plain text, never links');
-    // In every prompt, so it is capped: 1,209 before r12 H6; the sigils and the check took it to 1,362 with one part, and teaching every part that draws to 1,593.
-    should(teaching.length).be.below(1_700);
+    // In every prompt, so it is capped: 1,209 before r12 H6; the sigils and the check took it to 1,362 with one part, and teaching every part that draws (with Mermaid's own `%% @step`) to 1,542, under the integration cap of 1,550.
+    should(teaching.length).be.below(1_550);
+    // Mermaid's step marker is a comment line; a bare `@step` inside a mermaid fence is one frame, not a step.
+    should(teaching).containEql('mermaid: `%% @step <caption>`');
   });
 });
 

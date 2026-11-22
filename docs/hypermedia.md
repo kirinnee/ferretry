@@ -81,12 +81,12 @@ points etc"_). Change it there and here together.
 ````text
 Hypermedia: to teach, explain or compare anything not simple (a flow, a design, a change), show it, not just say it. Inline: never publish a page or link unless asked.
 Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Make it interactive: a visual the reader changes (sliders, toggles) that redraws live, no steppers; gentle motion (prefers-reduced-motion).
-Write Markdown. Rich parts are fences named for the part: ```terminal, ```filetree, ```editor, ```tierlist, ```alignment, ```mermaid, ```animation (add `3d` to open it in 3D); `@step <caption>` lines give a part steps; :::tabs and :::accordion hold prose under headings; `:::human` text is for people, `:::llm` after a part is for another agent.
+Write Markdown. Parts are fences: ```terminal, ```filetree, ```editor, ```tierlist, ```alignment, ```mermaid, ```animation (`3d` after it: 3D); `@step <caption>` lines give a part steps (mermaid: `%% @step <caption>`); :::tabs and :::accordion; `:::human` text is for people, `:::llm` after a part is for another agent.
 - mermaid: flowchart TB, sequenceDiagram, …: top-down, short labels; auto-themed: no %%{init}%% or colours.
 - Charts, svg, interactive html, maps, media, live tasks: a fence whose info string is exactly fy-render: `type: chart|svg|html|map|image|video|audio|pdf|lottie|task|board`, `alt: <one line>`, `---`, then the payload.
 - chart (fy-render only; a part named chart is shown as code): YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; no colours.
 References are plain text, never links: `:agent @file &F12 ^A3 /skill $skill %terminal:dev %browser:app`.
-Every spec: `fy render guide <part>`. Before you send a rich message, run `fy render check <file|->`: it prints `line N: …` for each problem and exits 1 on an error.
+Every spec: `fy render guide <part>`. Before sending, run `fy render check <file|->`: it prints `line N: …` per problem; exit 1 on an error.
 Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.
 ````
 

@@ -56,7 +56,7 @@ describe('fy render check', () => {
   });
 
   test('`-` reads standard input through the shell, and a missing argument is a usage error', async () => {
-    const { check, read, err } = harness({ '-': `${FENCE}chart\nkind: bar\n${FENCE}\n` });
+    const { check, read, err } = harness({ '-': `${FENCE}fy-render\ntype: mermaid\n---\nflowchart TB\n${FENCE}\n` });
     expect(await check(['-'])).toBe(1);
     expect(read).toEqual(['-']);
     expect(await check([])).toBe(2);
@@ -156,9 +156,51 @@ describe('fy render check: parts the app does not draw, and the parts it does', 
     ).toContain('fy-render block of type chart');
   });
 
+  test('a closed chart or codewalk fence makes the CLI exit 0 with the warning: the app shows it as code, never as a failure', async () => {
+    // Durian alone would call this chart an error (no series, a bar with no data); the app never draws it, so it is not one.
+    for (const word of ['chart', 'codewalk']) {
+      const { check, out } = harness({ 'held.md': `Intro\n\n${FENCE}${word}\nkind: bar\n${FENCE}\n` });
+      expect(await check(['held.md'])).toBe(0);
+      const printed = out.join('');
+      expect(printed).toContain(`line 3: warning: a ${word} fence is not drawn by the app`);
+      expect(printed).not.toMatch(/^line \d+: (?!warning)/mu);
+    }
+  });
+
+  test('a held fence does not hide a real error elsewhere in the message', async () => {
+    const text = `${FENCE}chart\nkind: bar\n${FENCE}\n\n${FENCE}fy-render\ntype: mermaid\n---\nflowchart TB\n${FENCE}\n`;
+    const { check } = harness({ 'both.md': text });
+    expect(await check(['both.md'])).toBe(1);
+  });
+
   test('a chart fence inside a tab is found too, on its own line', () => {
     const text = [':::tabs', '#### A', `${FENCE}chart`, 'kind: bar', FENCE, '#### B', 'x', ':::'].join('\n');
     expect(checkMessage(text).filter(each => each.message.includes('a chart fence'))).toMatchObject([{ line: 3 }]);
+  });
+});
+
+describe('fy render check: a mermaid diagram’s steps', () => {
+  // The pinned parser reads `%% @step <title>` as a step (two make a stepped diagram); a bare `@step` line is one frame.
+  test('a bare @step inside a mermaid fence is a warning that names the real marker; `%% @step` is clean', async () => {
+    const bare = `${FENCE}mermaid\nflowchart LR\n@step First\n  A --> B\n@step Second\n  B --> C\n${FENCE}\n`;
+    const found = checkMessage(bare).filter(each => each.message.includes('@step'));
+    expect(found.map(each => each.line)).toEqual([3, 5]);
+    expect(found[0]).toMatchObject({ level: 'warn' });
+    expect(found[0]?.message).toContain('%% @step');
+    const { check, out } = harness({ 'bare.md': bare });
+    expect(await check(['bare.md'])).toBe(0);
+    expect(out.join('')).toContain('line 3: warning:');
+    const marked = `${FENCE}mermaid\nflowchart LR\n%% @step First\n  A --> B\n%% @step Second\n  B --> C\n${FENCE}\n`;
+    expect(checkMessage(marked)).toEqual([]);
+  });
+
+  test('a bare @step in an animation or a terminal is the right marker and is left alone', () => {
+    for (const part of ['animation', 'terminal'])
+      expect(
+        checkMessage(`${FENCE}${part}\n@step One\n$ ls\n@step Two\n${FENCE}\n`).filter(each =>
+          each.message.includes('@step'),
+        ),
+      ).toEqual([]);
   });
 });
 
