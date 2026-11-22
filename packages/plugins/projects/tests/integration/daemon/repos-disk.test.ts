@@ -131,7 +131,26 @@ describe('the repository scan over the real imports root', () => {
     const made = Bun.spawn(['sh', '-c', `seq -f n%g ${count} | xargs touch`], { cwd: folder });
     expect(await made.exited).toBe(0);
   };
-  test('how WIDE a folder is decides nothing about it: a repository in a 5,001-name folder is found and the answer is whole', async () => {
+  test('a child folder wider than the sign-in look reads is NOT proved safe (R3): not indexed, and the answer is truncated so stored repositories are kept', async () => {
+    const w = await world();
+    await mkdir(join(w.project, 'wide', '.git'), { recursive: true });
+    await writeFile(join(w.project, 'wide', '.git', 'config'), CONFIG('https://github.com/me/wide'));
+    await fill(join(w.project, 'wide'), 5001);
+    // a marker in an odd spelling (the known names are asked for exactly, so only the fold would see it)
+    await writeFile(join(w.project, 'wide', 'ID_RSA'), 'not a key');
+    const found = await scanRepos(w.project, w.deps);
+    expect(found.repos.map(repo => repo.path)).not.toContain('wide');
+    expect(found.repos.map(repo => repo.path)).toContain('app');
+    // wherever the marker sits in the listing, the folder is either refused as a sign-in one or unproved: never exposed
+    expect(JSON.stringify(found)).not.toContain('me/wide');
+    // with no marker anywhere the look is deterministic: unproved, so truncated (never "whole")
+    await mkdir(join(w.project, 'wide-plain', '.git'), { recursive: true });
+    await fill(join(w.project, 'wide-plain'), 5001);
+    const plain = await scanRepos(w.project, w.deps);
+    expect(plain.repos.map(repo => repo.path)).not.toContain('wide-plain');
+    expect(plain.truncated).toBe(true);
+  });
+  test('how WIDE a folder is decides nothing about the project folder itself: a repository that is 5,001 names wide still answers itself', async () => {
     const w = await world();
     await mkdir(join(w.project, 'wide', 'proj', '.git'), { recursive: true });
     await writeFile(join(w.project, 'wide', 'proj', '.git', 'config'), CONFIG('https://github.com/me/proj'));
@@ -140,7 +159,9 @@ describe('the repository scan over the real imports root', () => {
     await mkdir(join(w.outside, 'srv', 'svc', '.git'), { recursive: true });
     await fill(w.outside, 5001);
     const inside = await scanRepos(w.project, w.deps);
-    expect(inside.repos.map(repo => repo.path)).toContain('wide/proj');
+    // a 5,001-name CHILD is not proved free of an odd-spelled marker (R3): not indexed, and the answer is truncated
+    expect(inside.repos.map(repo => repo.path)).not.toContain('wide/proj');
+    expect(inside.truncated).toBe(true);
     const below = await scanRepos(join(w.outside, 'srv'), w.deps);
     expect(below).toEqual({ repos: [{ path: 'svc' }], truncated: false });
     // a repository that is itself 5,001 names wide

@@ -83,8 +83,13 @@ export interface FolderBrowser {
    * counts, not followed), so the width of the folder never matters, and the names it holds are judged by the one fold in
    * `fence.ts`, so a differently spelled marker is a marker. A folder whose names cannot be asked for answers `true`; a
    * file or a missing name, `false`. A folder is never "private" for being wide.
+   *
+   * `'partial'` is the third answer: no marker was found, but the folder holds more names than were read for the
+   * spelling-fold look, so a differently spelled marker past the bound was NOT ruled out. A caller that only asks "is it a
+   * sign-in folder" reads that as `false` (width alone never makes a folder private); the repository scan reads it as "not
+   * proved safe": the folder is skipped and the scan is truncated.
    */
-  holdsSignIn(path: string): Promise<boolean>;
+  holdsSignIn(path: string): Promise<boolean | 'partial'>;
   /** What is AT the absolute `path`, the leaf never followed (a link anywhere above it is the machine's to resolve): nothing, a link, or something else. */
   leaf(path: string): Promise<'missing' | 'link' | 'present'>;
   /** The real path (links resolved) of each of `paths` that exists and resolves; the others are left out. */

@@ -132,7 +132,11 @@ export class ProjectRegistry {
         return account === undefined ? repo : { ...repo, account };
       });
       const unseen = complete ? [] : before.filter(known => !found.some(repo => repo.path === known.path));
-      const repos = [...seen, ...unseen]
+      // On a scan that did not see everything, every SAVED path (found again or not) is admitted first and only then the new
+      // ones, up to the cap: a partial scan that fills the cap must never evict a saved repository or its account link.
+      const saved = (repo: { readonly path: string }): boolean => before.some(known => known.path === repo.path);
+      const ordered = complete ? seen : [...seen.filter(saved), ...unseen, ...seen.filter(repo => !saved(repo))];
+      const repos = ordered
         .slice(0, MAX_PROJECT_REPOS)
         .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
       const { repos: _before, ...rest } = project;

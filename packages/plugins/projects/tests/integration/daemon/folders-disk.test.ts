@@ -222,7 +222,8 @@ describe('the explorer over the real imports root', () => {
     await fill('wide', 5001);
     await fill('wide-with-key', 5001);
     await writeFile(join(w.user, 'wide-with-key', 'id_ed25519'), 'not a key');
-    expect(await w.real.holdsSignIn(join(w.user, 'wide'))).toBe(false);
+    // no marker seen, but the listing was cut at the bound: said as `'partial'` (a differently spelled marker is not ruled out)
+    expect(await w.real.holdsSignIn(join(w.user, 'wide'))).toBe('partial');
     expect(await w.real.holdsSignIn(join(w.user, 'wide-with-key'))).toBe(true);
     // a wide ordinary folder is shown in its parent's listing; one that holds a marker is not
     const names = (await w.explorer.list('~', false)).entries.map(entry => entry.name);

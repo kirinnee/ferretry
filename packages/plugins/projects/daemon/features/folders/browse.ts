@@ -137,7 +137,7 @@ export class FolderExplorer {
       if (!(await folders.mayName(target))) throw refused();
       // A real folder that already exists and holds a sign-in marker (any spelling) is refused as the folder it is, BEFORE
       // "already there" can say so.
-      if (found === 'present' && (await browser.holdsSignIn(target))) throw refused();
+      if (found === 'present' && (await browser.holdsSignIn(target)) === true) throw refused();
       const made = await folder.makeLeaf(request.name, policy.confined);
       switch (made.kind) {
         case 'made':
@@ -205,6 +205,7 @@ export class FolderExplorer {
           entry.kind === 'directory' ? this.deps.browser.holdsSignIn(`${base}/${entry.name}`) : false,
         ),
       );
+      // Only a proved marker hides a folder from the listing: `'partial'` (a wide folder) is shown, as before.
       for (const [index, entry] of batch.entries()) {
         if (holds[index] === true) continue;
         if (entries.length === MAX_FOLDER_ENTRIES) return { entries, cut: true };

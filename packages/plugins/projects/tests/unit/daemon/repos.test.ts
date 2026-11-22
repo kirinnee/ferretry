@@ -25,7 +25,13 @@ function browserOf(
   tree: Record<string, readonly string[]>,
   git: readonly string[],
   links: Record<string, string> = {},
-  more: { signIn?: readonly string[]; configs?: Record<string, string>; devices?: Record<string, string> } = {},
+  more: {
+    signIn?: readonly string[];
+    /** Folders whose sign-in look reads only part of their names: no marker seen, none ruled out. */
+    partial?: readonly string[];
+    configs?: Record<string, string>;
+    devices?: Record<string, string>;
+  } = {},
 ): { browser: FolderBrowser; opened: string[]; probed: string[]; asked: string[] } {
   const opened: string[] = [];
   const probed: string[] = [];
@@ -35,7 +41,8 @@ function browserOf(
     home: async () => HOME,
     holdsSignIn: async path => {
       asked.push(path);
-      return more.signIn?.includes(path) ?? false;
+      if (more.signIn?.includes(path)) return true;
+      return more.partial?.includes(path) ? 'partial' : false;
     },
     leaf: async path => (path in links ? 'link' : path in tree ? 'present' : 'missing'),
     realPaths: async paths => paths.map(path => links[path] ?? path).filter(path => path in tree),
@@ -378,6 +385,19 @@ describe('scanning a project folder for repositories', () => {
     expect(await scanRepos(P, { browser: marked.browser })).toEqual({ repos: [], truncated: true });
     expect(marked.probed).toEqual([]);
   });
+  test('a child whose sign-in look could not see the whole folder is not indexed or entered, and the scan says it did not see everything (R3)', async () => {
+    const world = browserOf(
+      { [P]: ['wide', 'ok'], [`${P}/wide`]: ['inner'], [`${P}/wide/inner`]: [], [`${P}/ok`]: [] },
+      [`${P}/wide`, `${P}/ok`, `${P}/wide/inner`],
+      {},
+      { partial: [`${P}/wide`] },
+    );
+    const found = await scanRepos(P, { browser: world.browser });
+    expect(found.repos.map(repo => repo.path)).toEqual(['ok']);
+    expect(found.truncated).toBe(true);
+    expect(world.opened).not.toContain(`${P}/wide`);
+    expect(world.probed.filter(path => path.startsWith(`${P}/wide`))).toEqual([]);
+  });
   test('a folder that could not be read says the scan did not see everything', async () => {
     const world = browserOf({ [P]: ['a'], [`${P}/a`]: [] }, []);
     const flaky: FolderBrowser = {
@@ -443,6 +463,33 @@ describe("a project's accounts and repositories", () => {
     expect(nothing.ok && nothing.value.repos?.map(repo => repo.path)).toEqual(['a', 'b']);
     const full = await registry.recordRepos(id, [{ path: 'a' }], true);
     expect(full.ok && full.value.repos).toEqual([{ path: 'a' }]);
+  });
+  test('a partial scan that fills the cap admits every saved path first: no saved repository or its account link is evicted by new ones (R3)', async () => {
+    const { registry, id, store } = await over();
+    const name = (n: number) => `s${String(n).padStart(3, '0')}`;
+    const saved = Array.from({ length: MAX_PROJECT_REPOS }, (_, n) => ({ path: name(n) }));
+    await registry.recordRepos(id, saved, true);
+    await store.update(file => ({
+      ...file,
+      projects: file.projects.map(project => ({
+        ...project,
+        repos: project.repos?.map(repo =>
+          repo.path === name(MAX_PROJECT_REPOS - 1) ? { ...repo, account: 'work' } : repo,
+        ),
+      })),
+    }));
+    // the partial scan found 10 NEW paths that sort first, and none of the saved ones
+    const fresh = Array.from({ length: 10 }, (_, n) => ({ path: `a${n}` }));
+    const partial = await registry.recordRepos(id, fresh, false);
+    const paths = partial.ok ? (partial.value.repos ?? []).map(repo => repo.path) : [];
+    expect(paths).toHaveLength(MAX_PROJECT_REPOS);
+    expect(paths).toEqual(saved.map(repo => repo.path));
+    expect(partial.ok && partial.value.repos?.at(-1)).toEqual({ path: name(MAX_PROJECT_REPOS - 1), account: 'work' });
+    // room left: new ones are admitted after the saved ones
+    await registry.recordRepos(id, saved.slice(0, 40), true);
+    const room = await registry.recordRepos(id, fresh, false);
+    expect(room.ok && room.value.repos).toHaveLength(MAX_PROJECT_REPOS);
+    expect(room.ok && room.value.repos?.map(repo => repo.path)).toContain('a9');
   });
   test('a repository found again keeps its account; one that is gone is dropped; nothing found removes the field', async () => {
     const { registry, id, store } = await over();

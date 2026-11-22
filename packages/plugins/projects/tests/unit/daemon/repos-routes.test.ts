@@ -128,6 +128,25 @@ describe('GET /v1/projects/:id/repos', () => {
     expect(got.json).toEqual({ repos: [{ path: 'wide-one', account: 'work' }], truncated: true });
     expect(store.file.projects[0]?.repos).toEqual([{ path: 'wide-one', account: 'work' }]);
   });
+  test('a child whose names the sign-in look could not read to the end (R3) is not indexed and truncates the answer: what was stored, and its account link, stay', async () => {
+    const { registry, id, store } = await setup();
+    await registry.recordRepos(id, [{ path: 'stored' }], true);
+    await store.update(file => ({
+      ...file,
+      projects: file.projects.map(project => ({
+        ...project,
+        repos: project.repos?.map(repo => ({ ...repo, account: 'work' })),
+      })),
+    }));
+    // `app` holds more names than the look reads: no marker was seen, and a differently spelled one past the bound is not ruled out
+    const unseen: FolderBrowser = {
+      ...browserAt('/home/me/work/alpha'),
+      holdsSignIn: async path => (path.endsWith('/app') ? 'partial' : false),
+    };
+    const got = answer(await reposRoute(registry, { browser: unseen })(callWith(undefined, { id })));
+    expect(got.json).toEqual({ repos: [{ path: 'stored', account: 'work' }], truncated: true });
+    expect(store.file.projects[0]?.repos).toEqual([{ path: 'stored', account: 'work' }]);
+  });
   test('a project folder outside the home folder is scanned, and the answer has no field about the home', async () => {
     const { registry, id, store } = await setup('/srv/alpha');
     const elsewhere: FolderBrowser = { ...browserAt('/srv/alpha'), home: async () => '/home/me' };

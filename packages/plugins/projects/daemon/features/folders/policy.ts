@@ -9,6 +9,12 @@ import {
 } from './fence.ts';
 import type { FolderBrowser, FolderVerdict } from './port.ts';
 
+/** A verdict, and whether the sign-in look behind it saw the whole folder (`false`: not ruled out past what was read). */
+interface ChildLook {
+  readonly verdict: Awaited<ReturnType<FolderVerdict>>;
+  readonly complete: boolean;
+}
+
 /** The policy for ONE request: the verdict on a real path, and whether a real path is a private folder (a link to one included). */
 export interface FolderPolicy {
   /**
@@ -24,6 +30,13 @@ export interface FolderPolicy {
    * ancestor per child.
    */
   readonly child: FolderVerdict;
+  /**
+   * `child`, with what the sign-in look could NOT see said too: `complete: false` is a folder with more names than were read
+   * for the spelling-fold look, so a differently spelled marker past the bound is not ruled out. `child` itself accepts such
+   * a folder (width alone never makes one private); a reader that must not expose an unproved folder (the repository scan)
+   * asks this and skips it.
+   */
+  readonly childLook: (real: string) => Promise<ChildLook>;
   /** `verdict`, but a place outside the home is `outside` and the outside-home gate is never asked: what a folder is MADE in. */
   readonly confined: FolderVerdict;
   /** Whether a real path is at or under where any private folder REALLY is, or is in another user's home. */
@@ -60,30 +73,41 @@ export async function folderPolicy(
     asked ??= outsideHome();
     return asked;
   };
-  const judge = async (real: string, signInOf: (segments: readonly string[], anchor: string) => Promise<boolean>) => {
+  const judge = async (
+    real: string,
+    signInOf: (segments: readonly string[], anchor: string) => Promise<boolean | 'partial'>,
+  ): Promise<ChildLook> => {
     const below = belowHome(real, home);
     if (below === undefined) await enterOutside();
-    if (isSkippedReal(real)) return 'outside' as const;
-    if ((below !== undefined && isPrivateBelowHome(below)) || isPrivateReal(real)) return 'private' as const;
+    if (isSkippedReal(real)) return { verdict: 'outside', complete: true };
+    if ((below !== undefined && isPrivateBelowHome(below)) || isPrivateReal(real))
+      return { verdict: 'private', complete: true };
     const segments = below ?? real.split('/').filter(segment => segment !== '');
     // The shared name list on every real path component (below the home, or from `/` outside it): `/srv/.ssh` is no softer
     // than `~/.ssh`, and the sign-in marker alone would miss a key store that holds none.
-    if (segments.some(isDeniedName)) return 'private' as const;
-    return (await signInOf(segments, below === undefined ? '' : home.replace(/\/+$/, '')))
-      ? ('private' as const)
-      : undefined;
+    if (segments.some(isDeniedName)) return { verdict: 'private', complete: true };
+    const signIn = await signInOf(segments, below === undefined ? '' : home.replace(/\/+$/, ''));
+    return signIn === true
+      ? { verdict: 'private', complete: true }
+      : { verdict: undefined, complete: signIn !== 'partial' };
   };
-  const verdict: FolderVerdict = real =>
-    judge(real, async (segments, anchor) => {
-      let path = anchor;
-      for (const segment of segments) {
-        path = `${path}/${segment}`;
-        if (await browser.holdsSignIn(path)) return true;
-      }
-      return false;
-    });
-  const child: FolderVerdict = real =>
-    judge(real, async segments => segments.length > 0 && (await browser.holdsSignIn(real)));
+  const verdict: FolderVerdict = async real =>
+    (
+      await judge(real, async (segments, anchor) => {
+        let path = anchor;
+        let partial = false;
+        for (const segment of segments) {
+          path = `${path}/${segment}`;
+          const look = await browser.holdsSignIn(path);
+          if (look === true) return true;
+          if (look === 'partial') partial = true;
+        }
+        return partial ? 'partial' : false;
+      })
+    ).verdict;
+  const childLook = (real: string): Promise<ChildLook> =>
+    judge(real, async segments => (segments.length > 0 ? await browser.holdsSignIn(real) : false));
+  const child: FolderVerdict = async real => (await childLook(real)).verdict;
   const confined: FolderVerdict = async real => (belowHome(real, home) === undefined ? 'outside' : verdict(real));
-  return { verdict, child, confined, isPrivateReal, isSkippedReal, enterOutside };
+  return { verdict, child, childLook, confined, isPrivateReal, isSkippedReal, enterOutside };
 }

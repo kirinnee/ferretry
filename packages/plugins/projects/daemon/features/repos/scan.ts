@@ -72,7 +72,8 @@ export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResul
     async real =>
       isAtOrUnder(real, rootReal) ? judge(real) : 'outside';
   const verdict = inside(policy.verdict);
-  const childVerdict = inside(policy.child);
+  const childLook = async (real: string) =>
+    isAtOrUnder(real, rootReal) ? policy.childLook(real) : { verdict: 'outside' as const, complete: true };
 
   const found: Found[] = [];
   // TWO facts, kept apart: `truncated` is what the answer says (something was not seen), `stop` is what ends the walk (a bound
@@ -132,7 +133,14 @@ export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResul
             continue;
           }
           // Then the policy: nothing is probed (not even for a `.git`) in a folder it does not accept.
-          if ((await childVerdict(abs)) !== undefined) continue;
+          const look = await childLook(abs);
+          if (look.verdict !== undefined) continue;
+          // A folder whose names the sign-in look could not read to the end is NOT proved safe: not indexed, not entered, and
+          // the answer says it did not see everything (so stored repositories and account links are kept, never pruned).
+          if (!look.complete) {
+            truncated = true;
+            continue;
+          }
           const rel = item.rel === '.' ? entry.name : `${item.rel}/${entry.name}`;
           if (await folder.hasGit(entry.name)) {
             if (found.length === MAX_PROJECT_REPOS) {

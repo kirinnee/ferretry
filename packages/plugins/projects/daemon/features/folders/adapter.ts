@@ -262,7 +262,9 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
           const target = await pinned.open('', { wantDirectory: true });
           try {
             const listing = await target.list(SIGN_IN_READ_LIMIT);
-            return holdsSignIn(listing.entries.map(entry => entry.name));
+            if (holdsSignIn(listing.entries.map(entry => entry.name))) return true;
+            // Not listed to the end: a marker spelled differently past the bound is not ruled out, and that is said, not hidden.
+            return listing.truncated ? 'partial' : false;
           } finally {
             await target.close();
           }
