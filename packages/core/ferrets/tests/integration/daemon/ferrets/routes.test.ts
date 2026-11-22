@@ -449,6 +449,7 @@ describe('today’s start fields, the title, and the stop and resume words', () 
         harnessFlags: ['--verbose'],
       },
       title: 'Fix the login',
+      titleSource: 'owner',
     });
     // ferret.json is unchanged: who a ferret is, nothing more.
     expect(JSON.parse(h.state('ferrets').raw(FerretFiles, id) as string).model).toBeUndefined();
