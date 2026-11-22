@@ -155,7 +155,9 @@ for (const id of NEW_PALETTES)
 
       it('reads: body ink 7:1, muted ink and the accent as text 4.5:1 on every surface', () => {
         for (const surface of ['bg', 'surface', 'surface-2', 'surface-3', 'code-bg', 'user-bg']) {
-          expect(ratio(hexOf('fg'), hexOf(surface)), `fg on ${surface}`).toBeGreaterThanOrEqual(7);
+          // Code is read in its own ink (a palette may draw code on a navy block in both modes: Briefing, as its reference does).
+          const ink = surface === 'code-bg' ? 'code-fg' : 'fg';
+          expect(ratio(hexOf(ink), hexOf(surface)), `${ink} on ${surface}`).toBeGreaterThanOrEqual(7);
           if (surface !== 'code-bg')
             expect(ratio(hexOf('muted'), hexOf(surface)), `muted on ${surface}`).toBeGreaterThanOrEqual(4.5);
         }

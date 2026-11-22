@@ -1,7 +1,7 @@
 /**
  * THE ONBOARDING APPEARANCE STEP (r11 G2, owner line 3) in a real browser over fake data (`fixtures/appearance-step-scene.tsx`):
- * the choices are STACKED cards (one column, one above the next), the live theme demo sits to the RIGHT of them at 1280 and above
- * them at 390, the page text (the slot's text minus the card titles) is at most 160 characters, and a pick restyles the page and
+ * the choices are a GRID OF SMALL CARDS (C59 O6c: several to a row, never full-width bars), the live theme demo sits to the RIGHT of
+ * them at 1280 and above them at 390, the page text (the slot's text minus the card titles) is at most 160 characters, and a pick restyles the page and
  * the demo at once.
  *
  * Set `FY_APPEARANCE_STEP_SHOTS_DIR` to keep `<viewport>-<scheme>-<case>.png`.
@@ -11,6 +11,7 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
+import { PALETTES, STYLES } from '@ferretry/app';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
 setDefaultTimeout(60_000);
@@ -174,6 +175,42 @@ describe('the live sample shows text size and motion (C59 O6)', () => {
     }
   });
 
+  // The phone's demo column is at most 140px tall and clips what does not fit: every part of the sample, the motion strip
+  // included, must be inside it at every text size (it was cut at its foot).
+  for (const variant of [VARIANTS[2], VARIANTS[3]])
+    it(`nothing of the sample is clipped by the phone's 140px column, at every text size (${variant.name})`, async () => {
+      const { tab, close } = await open(variant);
+      try {
+        for (const choice of ['default', 'large', 'larger']) {
+          await tab.locator(`[aria-label="Text size"] .fy-cc__card[data-choice="${choice}"]`).click();
+          await tab.waitForTimeout(250);
+          const fit = await tab.evaluate(() => {
+            const column = (document.querySelector('[data-step-demo]') as HTMLElement).getBoundingClientRect();
+            const parts = [...document.querySelectorAll<HTMLElement>('[data-appearance-demo] .fy-ad__window *')].filter(
+              element => element.getBoundingClientRect().height > 0,
+            );
+            const lowest = Math.max(...parts.map(element => element.getBoundingClientRect().bottom));
+            const motion = (
+              document.querySelector('[data-appearance-demo-motion]') as HTMLElement
+            ).getBoundingClientRect();
+            return {
+              column: Math.round(column.bottom),
+              lowest: Math.round(lowest),
+              motionBottom: Math.round(motion.bottom),
+              height: Math.round(column.height),
+            };
+          });
+          console.log(
+            `MEASURED ${variant.name} text ${choice}: column bottom ${fit.column}, lowest part ${fit.lowest}, motion strip bottom ${fit.motionBottom}, column height ${fit.height}`,
+          );
+          expect(fit.motionBottom, `${choice}: motion strip bottom`).toBeLessThanOrEqual(fit.column - 1);
+          expect(fit.lowest, `${choice}: lowest part`).toBeLessThanOrEqual(fit.column - 1);
+        }
+      } finally {
+        await close();
+      }
+    });
+
   it('the motion strip sweeps and the busy mark turns, until Reduced is picked (1280 light)', async () => {
     const { tab, close } = await open(VARIANTS[0]);
     try {
@@ -261,25 +298,183 @@ describe('the new palettes on the Appearance page (C59 O6)', () => {
       });
 });
 
+/** C59 O6c: "try if it works properly here with all our themes": the page holds together in every style and every palette. */
+describe('the Appearance page works in every style and every palette (C59 O6c)', () => {
+  const probe = async (tab: Page) =>
+    await tab.evaluate(() => {
+      const slot = document.querySelector('.fy-sf-slot') as HTMLElement;
+      const bounds = slot.getBoundingClientRect();
+      const cut: string[] = [];
+      for (const title of document.querySelectorAll<HTMLElement>('.fy-astep .fy-cc__title'))
+        if (title.scrollWidth > title.clientWidth + 1) {
+          const cs = getComputedStyle(title);
+          cut.push(
+            `${title.textContent ?? ''} (${title.scrollWidth}>${title.clientWidth}px, ${cs.fontSize} ${cs.fontFamily.split(',')[0]}, ls ${cs.letterSpacing}, pad ${cs.paddingInlineEnd})`,
+          );
+        }
+      // A loud style may tilt or scale its picked card (Gen Z's sticker), so a card may lean a few px past the slot; more than 6px is a defect.
+      const outside: string[] = [];
+      let lean = 0;
+      for (const card of document.querySelectorAll<HTMLElement>('.fy-astep .fy-cc__card')) {
+        const box = card.getBoundingClientRect();
+        const over = Math.max(box.right - bounds.right, bounds.left - box.left);
+        lean = Math.max(lean, over);
+        if (over > 6) outside.push(card.dataset.choice ?? '');
+      }
+      const selected = [...document.querySelectorAll('.fy-astep .fy-cc__card[data-selected="true"]')].length;
+      const demo = document.querySelector('[data-appearance-demo]') as HTMLElement;
+      const demoBox = demo.getBoundingClientRect();
+      return {
+        cut,
+        outside,
+        lean: Math.round(lean * 10) / 10,
+        selected,
+        overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        demoInside: demoBox.left >= -1 && demoBox.right <= window.innerWidth + 1,
+        demoPainted: [...demo.querySelectorAll('*')].filter(node => node.getBoundingClientRect().height > 0).length,
+      };
+    });
+  for (const variant of [VARIANTS[0], VARIANTS[3]])
+    it(`every one of the ${STYLES.length} styles keeps the cards, the sample and the page whole (${variant.name})`, async () => {
+      const { tab, problems, close } = await open(variant);
+      try {
+        for (const style of STYLES) {
+          const card = tab.locator(`[aria-label="Style"] .fy-cc__card[data-choice="${style.id}"]`);
+          await card.scrollIntoViewIfNeeded();
+          await card.click();
+          await tab.waitForTimeout(220);
+          const seen = await probe(tab);
+          expect(seen.cut, `${style.id}: a card title is cut`).toEqual([]);
+          expect(seen.outside, `${style.id}: a card pokes outside the page by ${seen.lean}px`).toEqual([]);
+          if (seen.lean > 0)
+            console.log(`MEASURED ${variant.name} ${style.id}: a picked card leans ${seen.lean}px past the slot`);
+          expect(seen.selected, `${style.id}: one card is selected in each of the five lists`).toBe(5);
+          expect(seen.overflow, `${style.id}: horizontal overflow`).toBeLessThanOrEqual(0);
+          expect(seen.demoInside, `${style.id}: the sample is on screen`).toBe(true);
+          expect(seen.demoPainted, `${style.id}: the sample is drawn`).toBeGreaterThan(8);
+        }
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+  it('at the Larger text size the cards grow their columns and no name is cut or broken (390 light)', async () => {
+    const { tab, close } = await open(VARIANTS[2]);
+    try {
+      await tab.locator('[aria-label="Text size"] .fy-cc__card[data-choice="larger"]').click();
+      await tab.waitForTimeout(250);
+      for (const style of ['studio', 'briefing', 'raw', 'pixel']) {
+        const card = tab.locator(`[aria-label="Style"] .fy-cc__card[data-choice="${style}"]`);
+        await card.scrollIntoViewIfNeeded();
+        await card.click();
+        await tab.waitForTimeout(220);
+        const seen = await probe(tab);
+        expect(seen.cut, `${style}: a card title is cut at Larger`).toEqual([]);
+        expect(seen.overflow, `${style}: horizontal overflow at Larger`).toBeLessThanOrEqual(0);
+      }
+    } finally {
+      await close();
+    }
+  });
+  for (const variant of [VARIANTS[1], VARIANTS[2]])
+    it(`every one of the ${PALETTES.length} palettes keeps the cards, the sample and the page whole (${variant.name})`, async () => {
+      const { tab, problems, close } = await open(variant);
+      try {
+        for (const palette of PALETTES) {
+          const card = tab.locator(`[aria-label="Palette"] .fy-cc__card[data-choice="${palette.id}"]`);
+          await card.scrollIntoViewIfNeeded();
+          await card.click();
+          await tab.waitForTimeout(220);
+          const seen = await probe(tab);
+          expect(seen.cut, `${palette.id}: a card title is cut`).toEqual([]);
+          expect(seen.outside, `${palette.id}: a card pokes outside the page`).toEqual([]);
+          expect(seen.overflow, `${palette.id}: horizontal overflow`).toBeLessThanOrEqual(0);
+          expect(seen.demoPainted, `${palette.id}: the sample is drawn`).toBeGreaterThan(8);
+        }
+        expect(problems).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+});
+
+describe("the Briefing style and palette match the owner's reference (C59 O6b)", () => {
+  for (const variant of VARIANTS)
+    it(`Poppins 600 headings over a Poppins 400 body, a flat page, indigo on lavender-grey (${variant.name})`, async () => {
+      const { tab, close } = await open(variant);
+      try {
+        await tab.locator('[aria-label="Style"] .fy-cc__card[data-choice="briefing"]').click();
+        await tab.locator('[aria-label="Palette"] .fy-cc__card[data-choice="briefing"]').click();
+        await tab.waitForTimeout(500);
+        const read = await tab.evaluate(() => {
+          const heading = document.querySelector('.fy-astep__name') as HTMLElement;
+          const root = getComputedStyle(document.documentElement);
+          const demoButton = document.querySelector('[data-appearance-demo] .fy-ad__button') as HTMLElement;
+          return {
+            style: document.documentElement.dataset.style,
+            palette: document.documentElement.dataset.palette,
+            mode: document.documentElement.dataset.mode,
+            headingFamily: getComputedStyle(heading).fontFamily,
+            headingWeight: getComputedStyle(heading).fontWeight,
+            bodyFamily: getComputedStyle(document.body).fontFamily,
+            bodyWeight: getComputedStyle(document.body).fontWeight,
+            grain: getComputedStyle(document.body, '::after').opacity,
+            bg: getComputedStyle(document.body).backgroundColor,
+            accent: root.getPropertyValue('--accent').trim(),
+            focus: root.getPropertyValue('--focus-color').trim(),
+            radiusPanel: getComputedStyle(document.documentElement).getPropertyValue('--radius-panel').trim(),
+            demoButtonColour: getComputedStyle(demoButton).backgroundColor,
+          };
+        });
+        expect(read).toMatchObject({ style: 'briefing', palette: 'briefing' });
+        expect(read.headingFamily).toMatch(/^Poppins/u);
+        expect(read.headingWeight).toBe('600');
+        expect(read.bodyFamily).toMatch(/^Poppins/u);
+        expect(read.bodyWeight).toBe('400');
+        expect(Number(read.grain), 'no paper grain').toBe(0);
+        expect(read.radiusPanel).toBe('16px');
+        // The reference's own colours: lavender-grey page / navy ground, indigo accent.
+        expect(read.bg).toBe(variant.scheme === 'light' ? 'rgb(233, 235, 244)' : 'rgb(14, 18, 32)');
+        expect(read.accent).toBe(variant.scheme === 'light' ? '#3b44e0' : '#a9afff');
+        expect(read.focus).toBe(variant.scheme === 'light' ? '#3b44e0' : '#8a92ff');
+        await tab.evaluate(() => window.scrollTo(0, 0));
+        await shot(tab, variant, 'briefing');
+        console.log(`MEASURED briefing ${variant.name}: ${JSON.stringify(read)}`);
+      } finally {
+        await close();
+      }
+    });
+});
+
 describe('the onboarding Appearance step (r11 G2)', () => {
   for (const variant of VARIANTS)
-    it(`stacks the choices, puts the live demo beside them, and says little (${variant.name})`, async () => {
+    it(`draws the choices as a grid of small cards, puts the live demo beside them, and says little (${variant.name})`, async () => {
       const { tab, problems, close } = await open(variant);
       try {
         await shot(tab, variant, 'appearance');
         const seen = await measure(tab);
-        // Stacked: every group is the stack layout, and each card sits under the one before it, in one column.
+        // Small cards in a grid (C59 O6c): the style and palette lists (16 and 12 cards) hold several to a row, and no card is a
+        // full-width bar: each is under 200px wide and 140px tall, and a card is under 45% of the slot's width.
         // Five lists in three groups, in the order a person decides them (C59 O6): Style; Colour = Palette + Light or dark; Size and motion.
         expect(seen.labels).toEqual(['Style', 'Palette', 'Light or dark', 'Text size', 'Motion']);
         for (const group of seen.groups) {
-          expect(group.layout).toBe('stack');
-          for (let index = 1; index < group.cards.length; index += 1) {
-            const above = group.cards[index - 1] as Box;
-            const card = group.cards[index] as Box;
-            expect(Math.abs(card.x - above.x)).toBeLessThan(1);
-            expect(card.y).toBeGreaterThanOrEqual(above.bottom - 1);
+          expect(group.layout).toBe('row');
+          for (const card of group.cards) {
+            expect(card.right - card.x, 'a small card, not a bar').toBeLessThan(200);
+            expect(card.bottom - card.y, 'a small card').toBeLessThan(140);
           }
         }
+        const [styleCards, paletteCards] = [seen.groups[0], seen.groups[1]] as [
+          (typeof seen.groups)[number],
+          (typeof seen.groups)[number],
+        ];
+        for (const group of [styleCards, paletteCards]) {
+          const perRow = group.cards.filter(card => Math.abs(card.y - (group.cards[0] as Box).y) < 2).length;
+          expect(perRow, 'several to a row').toBeGreaterThanOrEqual(variant.phone ? 2 : 3);
+        }
+        const shape = (group: (typeof seen.groups)[number]) =>
+          `${group.cards.filter(card => Math.abs(card.y - (group.cards[0] as Box).y) < 2).length} per row, ${Math.round((group.cards[0] as Box).right - (group.cards[0] as Box).x)}x${Math.round((group.cards[0] as Box).bottom - (group.cards[0] as Box).y)}px`;
+        console.log(`MEASURED ${variant.name} cards: style ${shape(styleCards)}; palette ${shape(paletteCards)}`);
         const firstCard = seen.groups[0]?.cards[0] as Box;
         // The demo is drawn and has something in it.
         expect(seen.demo).not.toBeNull();

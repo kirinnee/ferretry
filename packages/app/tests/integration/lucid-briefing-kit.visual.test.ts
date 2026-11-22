@@ -13,8 +13,8 @@
  *              fields; markdown as a window sheet (ruled h1, recessed code well, a tinted quote block, striped table, tag links);
  *              a spinner that is a glossy BEAD rolling round a thin rail with a trailing droplet, the bead squashing as it goes;
  *              springy motion; hypermedia `shaped`.
- *   Briefing = a printed report. Paper grain on the page; Gelasio serif headings over thin Poppins, a double rule under h1, a ruled
- *              code box, a ledger table (rules only, no grid), a pull-quote block; a spinner that is FOUR LINES OF TEXT being
+ *   Briefing = the owner's reference report (C59 O6b). A flat page (no grain); Poppins 600 headings over a Poppins 400 body, no rule
+ *              under h1, a navy code box, a ledger table (rules only, no grid), a pull-quote block; a spinner that is FOUR LINES OF TEXT being
  *              written one after another; calm eased motion; hypermedia `ink`.
  *
  * The STYLE KITS rules from the six earlier reviews (T5-T10) are asserted here too, each against the real engine:
@@ -279,15 +279,13 @@ for (const style of ['lucid', 'briefing'] as const)
               expect(read.spinner.parts).toEqual(['inline', 'inline', 'none', 'none']);
               expect(read.spinner.markAnimation).toBe('fy-spinner-turn');
             } else {
-              // BACKGROUND: paper. No pattern, no wash; fine grain over the page (a data URI, no request).
+              // BACKGROUND: a flat page, as the reference draws it. No pattern, no wash, no grain.
               expect(read.layers.filter(layer => layer !== 'none')).toEqual([]);
-              expect(read.grain.image).toMatch(/^url\("data:image\/svg\+xml/u);
-              expect(Number(read.grain.opacity), 'a visible but faint grain').toBeGreaterThan(0.02);
-              expect(Number(read.grain.opacity)).toBeLessThanOrEqual(0.08);
-              expect(read.grain.blend).toBe(mode === 'light' ? 'multiply' : 'screen');
-              // TYPE: Gelasio serif headings over the thin Poppins body.
-              expect(read.h1.family).toMatch(/^Gelasio/u);
-              expect(read.h1.weight).toBe('700');
+              expect(read.grain.image).toBe('none');
+              expect(Number(read.grain.opacity), 'no grain').toBe(0);
+              // TYPE: Poppins headings (600) over the Poppins body, no serif.
+              expect(read.h1.family).toMatch(/^Poppins/u);
+              expect(read.h1.weight).toBe('600');
               // MOTION: calm and eased; nothing presses, nothing pops.
               expect(milliseconds(read.motion.base)).toBe(320);
               expect(milliseconds(read.motion.pop)).toBe(260);
@@ -300,9 +298,9 @@ for (const style of ['lucid', 'briefing'] as const)
               expect(read.hm.radius).toBe('2px');
               expect(read.hm.stroke).toBe('1px');
               expect(Number(read.hm.fill)).toBe(0);
-              // MARKDOWN: a printed page. A double rule under h1; a ruled box for code; a pull-quote block (no bar); a ledger
+              // MARKDOWN: a written report. No rule under h1; a navy box for code; a pull-quote block (no bar); a ledger
               // (rules between rows, none between columns) under an uppercase header; bold underlined links; square bullets.
-              expect(read.h1.rule).toBe('3px double');
+              expect(read.h1.rule).toBe('0px none');
               expect(read.pre.border).toBe('1px solid');
               expect(read.pre.radius).toBe('4px');
               expect(read.quote.left, 'no side bar').toBe('none 0px');
@@ -326,8 +324,8 @@ for (const style of ['lucid', 'briefing'] as const)
 
 /**
  * The pattern and the grain are really PAINTED, not only declared: with the specimen's own opaque page cover taken off, a 100 x 100
- * corner of the page screenshot holds Lucid's pinstripe (rows of two alternating levels, period 4px) and Briefing's grain (many
- * levels, a stable mean, no pattern period).
+ * corner of the page screenshot holds Lucid's pinstripe (rows of two alternating levels, period 4px) and Briefing's FLAT page (the
+ * reference has no grain: one level, the same along a row).
  */
 describe('the field is painted as declared', () => {
   for (const style of ['lucid', 'briefing'] as const)
@@ -381,8 +379,8 @@ describe('the field is painted as declared', () => {
             expect(painted.onLine[0], 'a visible stripe').not.toBe(painted.offLine[0]);
             expect(Math.abs((painted.onLine[0] as number) - (painted.offLine[0] as number))).toBeLessThanOrEqual(150);
           } else {
-            expect(painted.distinct, 'grain: several levels over one ground').toBeGreaterThanOrEqual(4);
-            expect(painted.steps, 'a different level between most neighbours along a row').toBeGreaterThan(30);
+            expect(painted.distinct, 'flat: one ground, no grain').toBeLessThanOrEqual(2);
+            expect(painted.steps, 'the same level between neighbours along a row').toBeLessThanOrEqual(2);
           }
         } finally {
           await close();

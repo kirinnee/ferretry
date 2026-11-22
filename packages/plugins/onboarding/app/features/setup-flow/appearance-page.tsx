@@ -1,7 +1,8 @@
 /**
  * THE APPEARANCE STEP (r11 G2, C59 O6): first run's client page about how this device looks, in THREE groups in the order a
  * person decides them: STYLE, then COLOUR (the palette and light/dark together), then SIZE AND MOTION (text size and motion
- * together). Each list is short stacked cards (titles only, nothing to read) and ONE live picture sits on the right
+ * together). Each list is a GRID OF SMALL CARDS (a Style and a Palette card carry a tiny picture drawn in what it names; the
+ * rest are a title) and ONE live picture sits beside them on a wide page and above them on a phone
  * (`StepDemo`: a small app window drawn from the page's own tokens, so it IS the look in force: colours, style, text size and
  * motion), which pops once when a pick is made.
  *
@@ -20,6 +21,7 @@ import {
 import type { StepHost } from '@ferretry/kernel/contract';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { AppearanceDemo } from './appearance-demo.tsx';
+import { PaletteMini, StyleMini } from './appearance-minis.tsx';
 import './appearance-page.css';
 
 const MODES: readonly { readonly id: 'system' | 'light' | 'dark'; readonly title: string }[] = [
@@ -73,10 +75,13 @@ export function AppearanceChoices({
         </h2>
         <ChoiceCards
           label="Style"
-          layout="stack"
           value={preference.style}
           onChange={picked(theme.setStyle as (id: string) => void)}
-          options={theme.styles.map(style => ({ id: style.id, title: style.label }))}
+          options={theme.styles.map(style => ({
+            id: style.id,
+            title: style.label,
+            demo: <StyleMini style={style.id} palette={style.defaultPalette} mode={theme.resolved} />,
+          }))}
         />
       </section>
       {/* 2. COLOUR: the palette and light or dark, together. */}
@@ -84,17 +89,20 @@ export function AppearanceChoices({
         <h2 id="fy-astep-colour" className="fy-astep__name">
           Colour
         </h2>
-        <div className="fy-astep__pair">
+        <div className="fy-astep__pair" data-stack="">
           <div className="fy-astep__list">
             <h3 id="fy-astep-palette" className="fy-astep__sub">
               Palette
             </h3>
             <ChoiceCards
               label="Palette"
-              layout="stack"
               value={preference.palette}
               onChange={picked(theme.setPalette as (id: string) => void)}
-              options={theme.palettes.map(palette => ({ id: palette.id, title: palette.label }))}
+              options={theme.palettes.map(palette => ({
+                id: palette.id,
+                title: palette.label,
+                demo: <PaletteMini style={preference.style} palette={palette.id} />,
+              }))}
             />
           </div>
           <div className="fy-astep__list">
@@ -103,7 +111,6 @@ export function AppearanceChoices({
             </h3>
             <ChoiceCards
               label="Light or dark"
-              layout="stack"
               value={preference.mode}
               onChange={picked(theme.setMode as (id: string) => void)}
               options={MODES.map(mode => ({ id: mode.id, title: mode.title }))}
@@ -123,7 +130,6 @@ export function AppearanceChoices({
             </h3>
             <ChoiceCards
               label="Text size"
-              layout="stack"
               value={preference.textScale}
               onChange={picked(theme.setTextScale as (id: string) => void)}
               options={TEXT_SIZES.map(size => ({ id: size.id, title: size.title }))}
@@ -135,7 +141,6 @@ export function AppearanceChoices({
             </h3>
             <ChoiceCards
               label="Motion"
-              layout="stack"
               value={motion}
               onChange={picked(setMotion as (id: string) => void)}
               options={MOTIONS.map(option => ({ id: option.id, title: option.title }))}

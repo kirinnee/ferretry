@@ -132,7 +132,8 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
   {
     id: 'briefing',
     label: 'Briefing',
-    blurb: 'A calm written report: thin Poppins, mono numbers, pill controls, soft shadows, a hot focus ring.',
+    blurb:
+      'A calm written report: Poppins, mono numbers, pill controls, 16px panels, soft shadows, an indigo focus ring.',
     defaultPalette: 'geist',
   },
   {
@@ -166,7 +167,11 @@ export const PALETTES: readonly PaletteEntry[] = Object.freeze([
   { id: 'mesh', label: PALETTE_NAMES.mesh, blurb: 'Violet, rose and sky glows blended behind the page.' },
   { id: 'aurora', label: PALETTE_NAMES.aurora, blurb: 'Teal, green and blue glows, like northern lights.' },
   { id: 'afterglow', label: PALETTE_NAMES.afterglow, blurb: 'Dusk orange, rose and gold glows behind the page.' },
-  { id: 'briefing', label: PALETTE_NAMES.briefing, blurb: 'Navy ink, indigo accent and one hot pink.' },
+  {
+    id: 'briefing',
+    label: PALETTE_NAMES.briefing,
+    blurb: 'Lavender-grey page, white panels, navy ink, indigo and one hot pink.',
+  },
   { id: 'contrast', label: PALETTE_NAMES.contrast, blurb: 'Pure black and white, AAA-targeted.' },
 ] as const);
 

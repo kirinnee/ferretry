@@ -26,7 +26,7 @@
 .fy-lb-grid {
   color: var(--fy-lb-dot);
   inset: 0;
-  opacity: 0.2;
+  opacity: calc(0.2 * var(--lb-grid-alpha, 1));
   position: absolute;
   /* The grid fades out behind the content, so it is texture at the edges and never behind a line of text. */
   -webkit-mask-image: radial-gradient(ellipse 65% 55% at 50% 40%, transparent 0 25%, #000 95%);
@@ -59,11 +59,11 @@
 @keyframes fy-lb-breathe {
   0%,
   100% {
-    opacity: 0.1;
+    opacity: calc(0.1 * var(--lb-grid-alpha, 1));
     transform: scale(1);
   }
   50% {
-    opacity: 0.22;
+    opacity: calc(0.22 * var(--lb-grid-alpha, 1));
     transform: scale(1.04);
   }
 }
