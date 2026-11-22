@@ -68,6 +68,7 @@ export function exceedsPreParseLimits(text: string): boolean {
   let brackets = 0;
   let destinations = 0;
   let emphasis = 0;
+  let tildes = 0;
   let totalOpeners = 0;
   let totalEmphasis = 0;
   let paragraphStart = 0;
@@ -79,15 +80,16 @@ export function exceedsPreParseLimits(text: string): boolean {
     const code = at === text.length ? NEWLINE : text.charCodeAt(at);
     if (code === NEWLINE || code === RETURN) {
       if (at - lineStart > longLine && longestRun >= spaceRun) return true;
-      // Both factors only grow within a paragraph, so the product is checked where the paragraph's length is known (not at
+      // Both factors only grow within a paragraph, so the product (link openers and runs of the second kind) is checked where the paragraph's length is known (not at
       // the blank line after it, which belongs to no paragraph and was checked at the line before).
-      if (!blank && (brackets + destinations) * (at - paragraphStart) > paragraphWork) return true;
+      if (!blank && (brackets + destinations + tildes) * (at - paragraphStart) > paragraphWork) return true;
       // CRLF is one line end: step over its LF, or the pair would read as a blank line.
       if (code === RETURN && text.charCodeAt(at + 1) === NEWLINE) at++;
       if (blank) {
         brackets = 0;
         destinations = 0;
         emphasis = 0;
+        tildes = 0;
         paragraphStart = at + 1;
       }
       lineStart = at + 1;
@@ -108,6 +110,7 @@ export function exceedsPreParseLimits(text: string): boolean {
     } else if (code === CLOSE_BRACKET && text.charCodeAt(at + 1) === OPEN_PAREN) {
       if (++destinations > linkOpeners || ++totalOpeners > messageOpeners) return true;
     } else if ((code === STAR || code === UNDERSCORE || code === TILDE) && text.charCodeAt(at - 1) !== code) {
+      if (code === TILDE) tildes++;
       if (++emphasis > emphasisRuns || ++totalEmphasis > messageEmphasisRuns) return true;
     }
   }

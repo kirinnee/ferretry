@@ -68,6 +68,19 @@ describe('the work a paragraph may ask of the parser: its openers times its leng
     expect(exceedsPreParseLimits(padded('', 10 * paragraphWork))).toBe(false);
   });
 
+  it('counts the tilde runs with the link openers in the same product, at the limit and one character past it', () => {
+    const tildes = times('~a ', 20); // 20 runs
+    expect(exceedsPreParseLimits(padded(tildes, paragraphWork / 20))).toBe(false);
+    expect(exceedsPreParseLimits(padded(tildes, paragraphWork / 20 + 1))).toBe(true);
+    const mixed = `${times('~a ', 10)}${times('[a](b) ', 5)}`; // 10 runs + 10 openers
+    expect(exceedsPreParseLimits(padded(mixed, paragraphWork / 20))).toBe(false);
+    expect(exceedsPreParseLimits(padded(mixed, paragraphWork / 20 + 1))).toBe(true);
+    // A star run is not a tilde run: the same count of them is not in this product.
+    expect(exceedsPreParseLimits(padded(times('*a ', 20), paragraphWork / 20 + 1))).toBe(false);
+    // A new paragraph starts the count again.
+    expect(exceedsPreParseLimits([tildes, padded('', 10 * paragraphWork)].join('\n\n'))).toBe(false);
+  });
+
   it('measures at the end of text and at a CR line end as it does at an LF', () => {
     const over = padded(head, paragraphWork / openers + 1);
     expect(exceedsPreParseLimits(`${over}\r\n`)).toBe(true);
