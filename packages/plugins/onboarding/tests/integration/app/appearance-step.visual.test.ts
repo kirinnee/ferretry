@@ -123,6 +123,11 @@ const measure = async (tab: Page) =>
     return {
       groups,
       labels: [...slot.querySelectorAll('[role=radiogroup]')].map(group => group.getAttribute('aria-label') ?? ''),
+      // Each section's own heading and the radio-group labels INSIDE it, so the grouping (not only the flat order) is read.
+      sections: [...slot.querySelectorAll<HTMLElement>('section[data-appearance-group]')].map(section => ({
+        heading: (section.querySelector('h2') as HTMLElement | null)?.innerText.trim() ?? '',
+        labels: [...section.querySelectorAll('[role=radiogroup]')].map(group => group.getAttribute('aria-label') ?? ''),
+      })),
       text,
       demo: demo === null ? null : box(demo),
       demoPainted: painted.length,
@@ -489,6 +494,12 @@ describe('the onboarding Appearance step (r11 G2)', () => {
         // full-width bar: each is under 200px wide and 140px tall, and a card is under 45% of the slot's width.
         // Five lists in three groups, in the order a person decides them (C59 O6): Style; Colour = Palette + Light or dark; Size and motion.
         expect(seen.labels).toEqual(['Style', 'Palette', 'Light or dark', 'Text size', 'Motion']);
+        // ...and the grouping itself: Light or dark sits inside Colour (with Palette), Motion inside Size and motion (with Text size).
+        expect(seen.sections).toEqual([
+          { heading: 'Style', labels: ['Style'] },
+          { heading: 'Colour', labels: ['Palette', 'Light or dark'] },
+          { heading: 'Size and motion', labels: ['Text size', 'Motion'] },
+        ]);
         for (const group of seen.groups) {
           expect(group.layout).toBe('row');
           for (const card of group.cards) {
