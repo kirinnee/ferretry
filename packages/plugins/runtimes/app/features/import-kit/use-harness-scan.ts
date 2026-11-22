@@ -87,10 +87,12 @@ const AHEAD = new Map<object | string, Ahead>();
 const machineOf = (client: RuntimesClient): object | string => daemonOfClient(client) ?? client;
 
 /**
- * One store per client and run: a client is per daemon, so another machine is another store and nothing crosses machines.
- * Only the latest run of a client is kept: asking for another `run` drops the old store, so the next page reads again.
+ * One store per MACHINE and run: every plugin talks through its own client, so the key is the machine (as the read ahead's
+ * is), and a flow opening starts over the store every plugin's page of that machine would otherwise reuse. Another machine is
+ * another store and nothing crosses machines. Only the latest run of a machine is kept: asking for another `run` drops the
+ * old store, so the next page reads again.
  */
-const STORES = new WeakMap<RuntimesClient, { readonly run: string; readonly store: ScanStore }>();
+const STORES = new Map<object | string, { readonly run: string; readonly store: ScanStore }>();
 
 /**
  * Start the scan for `client`'s machine now, quietly. A read still in flight is shared, never doubled: that includes one
@@ -100,7 +102,7 @@ const STORES = new WeakMap<RuntimesClient, { readonly run: string; readonly stor
 export function readSetupScanAhead(client: RuntimesClient, nowMs: number = Date.now()): void {
   const machine = machineOf(client);
   const held = AHEAD.get(machine);
-  if (held === undefined || held.closed === true || held.settled !== undefined) STORES.delete(client);
+  if (held === undefined || held.closed === true || held.settled !== undefined) STORES.delete(machine);
   if (held !== undefined && held.settled === undefined) {
     delete held.closed;
     return;
@@ -182,10 +184,10 @@ export function createScanStore(client: RuntimesClient): ScanStore {
 }
 
 export const scanStoreFor = (client: RuntimesClient, run: string): ScanStore => {
-  const known = STORES.get(client);
+  const known = STORES.get(machineOf(client));
   if (known?.run === run) return known.store;
   const made = createScanStore(client);
-  STORES.set(client, { run, store: made });
+  STORES.set(machineOf(client), { run, store: made });
   return made;
 };
 
@@ -212,13 +214,14 @@ export function useScan(
   // up and falls back to its own, and the run's store is registered by the page's effect, which a hidden page never runs.
   // biome-ignore lint/correctness/useExhaustiveDependencies: another run of the same page is another store
   const own = useMemo(() => createScanStore(client), [client, options.run]);
-  const known = STORES.get(client);
+  const machine = machineOf(client);
+  const known = STORES.get(machine);
   const store = known?.run === options.run ? known.store : own;
   const read = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
   useEffect(() => {
-    if (STORES.get(client)?.run !== options.run) STORES.set(client, { run: options.run, store });
+    if (STORES.get(machine)?.run !== options.run) STORES.set(machine, { run: options.run, store });
     if (options.refresh === true || store.snapshot().kind === 'idle') void store.scan(true, options.refresh !== true);
-  }, [client, store, options.run, options.refresh]);
+  }, [machine, store, options.run, options.refresh]);
   const models = useMemo(
     () =>
       read.kind === 'ready'
