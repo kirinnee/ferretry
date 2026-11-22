@@ -18,6 +18,13 @@ type WithLlm = Block & { readonly llm: string | null; readonly llmKind: string }
 const attachedText = (block: { readonly llm?: string | null; readonly llmKind?: string }): string | null =>
   block.llmKind === 'text' && block.llm !== null && block.llm !== undefined && block.llm !== '' ? block.llm : null;
 
+/**
+ * What the author wrote for an LLM after a host block, or `null`: a block's `llm` that is not the text Durian made of the
+ * fence itself (`generated`, its `as-is` rule) is the author's own `:::llm`.
+ */
+export const authorTextBeside = (block: { readonly llm: string | null }, generated: string | null): string | null =>
+  block.llm !== null && block.llm !== '' && block.llm !== generated ? block.llm : null;
+
 export function LlmOnlyText({ text }: { readonly text: string }): ReactElement {
   return (
     <details className="llm-peek" data-fy-llm-only="">

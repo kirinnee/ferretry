@@ -24,6 +24,7 @@ import { dirname, join, resolve } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sharedChromium } from '@ferretry/app/testing/browser';
 import { fyRenderIntegrationFixture } from './support/fy-render-integration-fixture.ts';
+import { scanForHtmlSinks } from './support/sink-scan.ts';
 
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_HYPERMEDIA_SHOTS_DIR ?? '';
@@ -69,8 +70,11 @@ const showcase = async (): Promise<string> => {
   return bodies.join('\n\n');
 };
 
+/** The cwd the split build runs in: the metafile it prints names every input relative to it. */
+const BUILD_CWD = packageRoot;
+
 const spawnJson = async <T>(args: readonly string[]): Promise<T> => {
-  const child = Bun.spawn([process.execPath, ...args], { cwd: packageRoot, stderr: 'pipe', stdout: 'pipe' });
+  const child = Bun.spawn([process.execPath, ...args], { cwd: BUILD_CWD, stderr: 'pipe', stdout: 'pipe' });
   const [stdout, stderr, code] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
@@ -110,8 +114,10 @@ beforeAll(async () => {
     resolve(packageRoot, '../../../../../app/src/security/zod-jitless.ts'),
   ]);
   bundleInputs = built.inputs;
-  for (const chunk of built.chunks)
-    if ((await readFile(join(directory, chunk), 'utf8')).includes('WebGLRenderer')) threeChunk = chunk;
+  for (const file of ['scene.js', ...built.chunks]) {
+    const text = await readFile(join(directory, file), 'utf8');
+    if (file !== 'scene.js' && text.includes('WebGLRenderer')) threeChunk = file;
+  }
   const css = `${fixture.appCss}\n${await durianCss()}\n${SCENE_CSS}`;
   for (const kind of ['format', 'hostile'])
     for (const file of (await readdir(join(durianRoot, 'fixtures', kind))).sort())
@@ -392,21 +398,15 @@ describe('a mermaid part is drawn by our sandbox renderer', () => {
     expect(inputs.some(path => /src\/react\/containers\.tsx$/u.test(path))).toBe(true);
   });
 
-  it('keeps every Durian source in the bundle free of an HTML-string sink', async () => {
-    const sink =
-      /dangerouslySetInnerHTML|\.innerHTML\s*=|outerHTML|insertAdjacentHTML|createContextualFragment|document\.write|srcdoc/u;
+  it('keeps every Durian source in the bundle free of an HTML-string sink, and reads every one of them', async () => {
     const own = bundleInputs.filter(path =>
       /durian-hypermedia[^/]*\/(?:node_modules\/durian-hypermedia\/)?src\//u.test(path),
     );
     expect(own.length).toBeGreaterThan(10);
-    const sources = await Promise.all(
-      own.map(async path => ({
-        path,
-        text: await readFile(resolve(packageRoot, '../../..', path), 'utf8').catch(() => ''),
-      })),
-    );
-    const bad = sources.filter(source => sink.test(source.text.replace(/\/\/.*$/gmu, ''))).map(source => source.path);
-    expect(bad).toEqual([]);
+    // The metafile's paths are relative to the cwd the build ran in (BUILD_CWD), and a file that cannot be read rejects.
+    const scan = await scanForHtmlSinks(own, BUILD_CWD);
+    expect({ scanned: scan.scanned, inMetafile: own.length }).toEqual({ scanned: own.length, inMetafile: own.length });
+    expect(scan.hits).toEqual([]);
   });
 });
 
@@ -503,7 +503,56 @@ describe('an animation: 3D is on, lazy, and falls back to the flat view', () => 
   }, 60_000);
 });
 
-describe('the author’s :::llm text beside a fallback part is the disclosure, drawn on the page (C7)', () => {
+describe('an author’s chart cannot freeze the tab: the reviewer’s two charts are read as code in under 50 ms (S1)', () => {
+  const FENCE = '`'.repeat(3);
+  const fenced = (...body: readonly string[]): string => [`${FENCE}chart`, ...body, FENCE].join('\n');
+  // 417 bytes: user functions calling user functions over a 10,000-item list. 3.7 s of main-thread time on the unguarded pin.
+  const functions = ((): string => {
+    const defs = ['  a: range(1,10000)', '  h0(x): x+x'];
+    for (let level = 1; level <= 14; level++) defs.push(`  h${level}(x): h${level - 1}(x)+h${level - 1}(x)`);
+    return fenced('kind: line', 'let:', ...defs, '  b: h14(a)', 'x: a', 'series:', '  - name: s', '    data: b');
+  })();
+  // 27 million values on the unguarded pin (0.45 s, hundreds of MB); a billion at n = 1000.
+  const fill = fenced(
+    'kind: line',
+    'let:',
+    '  big: fill(fill(fill(1,300),300),300)+1',
+    'x: [1]',
+    'series:',
+    '  - name: s',
+    '    data: big',
+  );
+  for (const [name, chart] of [
+    ['nested user functions (h14)', functions],
+    ['nested fill (300 x 300 x 300)', fill],
+  ] as const)
+    it(`${name}: is read in under 50 ms and drawn as code, with no canvas`, async () => {
+      const visit = await open('text=');
+      try {
+        const read = await visit.page.evaluate(
+          source => (window as unknown as { fyRead: (text: string) => number }).fyRead(source),
+          chart,
+        );
+        expect(read).toBeLessThan(50);
+        await visit.page.evaluate(
+          source => (window as unknown as { fyStream: (text: string) => void }).fyStream(source),
+          chart,
+        );
+        await visit.page.waitForTimeout(400);
+        const m = await visit.page.evaluate(() => ({
+          code: [...document.querySelectorAll('.dh-doc .code-block .code-lang')].map(label => label.textContent),
+          canvases: document.querySelectorAll('.dh-doc canvas').length,
+          error: document.querySelector('.dh-doc .dh-error') !== null,
+        }));
+        expect(m).toEqual({ code: ['chart'], canvases: 0, error: false });
+        await expectClean(visit, name);
+      } finally {
+        await visit.close();
+      }
+    }, 60_000);
+});
+
+describe('a held part (chart, code walk) is its readable source, with the author’s :::llm text beside it (C7, S1, G1)', () => {
   const FENCE = '`'.repeat(3);
   const cases = {
     chart: [`${FENCE}chart`, 'type: bar', 'x: [a, b]', 'series:', '  - name: s', '    data: [1, 2]', FENCE],
@@ -523,10 +572,17 @@ describe('the author’s :::llm text beside a fallback part is the disclosure, d
           })),
           fallback: document.querySelector('.dh-doc pre[data-dh-missing]')?.textContent ?? '',
           charts: document.querySelectorAll('.dh-doc .chart canvas').length,
+          code: [...document.querySelectorAll('.dh-doc .code-block')].map(block => ({
+            lang: block.querySelector('.code-lang')?.textContent,
+            text: block.querySelector('pre')?.textContent,
+          })),
         }));
         expect(m.disclosures).toEqual([{ open: false, summary: 'LLM-only text', body: `About the ${name}.` }]);
         expect(m.fallback).not.toContain(`About the ${name}.`);
-        if (name === 'chart') expect(m.charts).toBe(1);
+        // G1: the source (and a code walk's notes) is on the page as code, beside the disclosure, not replaced by it.
+        expect(m.code).toEqual([{ lang: name, text: lines.slice(1, -1).join('\n') }]);
+        // S1: a chart is never evaluated, so no canvas.
+        expect(m.charts).toBe(0);
         await expectClean(visit, name);
       } finally {
         await visit.close();
@@ -562,6 +618,9 @@ describe('the parts at a phone and a desktop width, light and dark', () => {
               return log !== null && log.scrollWidth > log.clientWidth + 1;
             })(),
             chartCanvases: document.querySelectorAll('.dh-doc .chart canvas').length,
+            heldCharts: [...document.querySelectorAll('.dh-doc .code-block .code-lang')].filter(
+              label => label.textContent === 'chart',
+            ).length,
             parts: [...document.querySelectorAll('.dh-doc [data-dh-part]')].map(part =>
               part.getAttribute('data-dh-part'),
             ),
@@ -569,10 +628,13 @@ describe('the parts at a phone and a desktop width, light and dark', () => {
           }));
           expect(m.wide).toBe(false);
           expect(m.log).toBe(false);
-          expect(m.chartCanvases).toBeGreaterThan(0);
+          // A chart is held as code (S1): it is on the page as source and draws no canvas.
+          expect(m.chartCanvases).toBe(0);
+          expect(m.heldCharts).toBeGreaterThan(0);
           expect(m.images).toBe(1);
-          for (const part of ['terminal', 'filetree', 'tabs', 'chart', 'mermaid', 'animation', 'tierlist', 'accordion'])
+          for (const part of ['terminal', 'filetree', 'tabs', 'mermaid', 'animation', 'tierlist', 'accordion'])
             expect(m.parts).toContain(part);
+          expect(m.parts).not.toContain('chart');
           await expectClean(visit, `showcase ${viewport} ${scheme}`);
           if (shotsDir !== '') await visit.page.screenshot({ path: join(shotsDir, `parts-${viewport}-${scheme}.png`) });
         } finally {

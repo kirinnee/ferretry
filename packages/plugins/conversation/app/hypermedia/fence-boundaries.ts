@@ -139,7 +139,9 @@ function durianCloser(lines: readonly string[], from: number, fence: string): nu
 }
 
 /** The fences Durian's line scan finds, which are the ones it splits the message at. A fence it never closes swallows the rest. */
-function durianFences(lines: readonly string[]): readonly { readonly open: number; readonly close: number | null }[] {
+export function durianFences(
+  lines: readonly string[],
+): readonly { readonly open: number; readonly close: number | null }[] {
   const found: { open: number; close: number | null }[] = [];
   for (let i = 0; i < lines.length; i++) {
     const fence = DURIAN_FENCE.exec(lines[i] ?? '')?.[2];
@@ -239,6 +241,23 @@ const longerThanAnyRun = (lines: readonly string[]): string => {
 };
 
 /**
+ * WHILE A MESSAGE IS ARRIVING, A CLOSER ON ITS LAST LINE IS NOT YET ONE. The text can end exactly on a line that is a
+ * closing delimiter (` ``` `, `~~~`, `> ``` `) before the rest of that line arrives (` ```js `): CommonMark rightly reads
+ * the bare line as the fence's end, and the next token turns it into content. A fence whose closer is the last line
+ * (nothing after it, not even a newline) is therefore open at the tail, and its tail is inert. A final message is not
+ * touched: `arriving` is false.
+ */
+function stillOpen(
+  fences: readonly CommonMarkFence[],
+  lines: readonly string[],
+  arriving: boolean,
+): readonly CommonMarkFence[] {
+  if (!arriving) return fences;
+  const last = lines.length - 1;
+  return fences.map(fence => (fence.close === last ? { ...fence, close: null, atTail: true } : fence));
+}
+
+/**
  * Decides every fence's boundaries once. The message is read as plain code from the first line at which a fence is in
  * doubt, to its end, when
  *  - a fence has no closing delimiter and nothing follows it (a message still arriving: nothing from its opener on draws,
@@ -249,19 +268,19 @@ const longerThanAnyRun = (lines: readonly string[]): string => {
  * block of code whatever its lines look like (the text before it keeps its line numbers). A fence in a quote or a list item that its
  * container ended without a closer, with more text after it, is held: its opening line gains a word, so it is code.
  */
-export function settleFences(source: string): SettledFences {
+export function settleFences(source: string, arriving = false): SettledFences {
   const normal = normalizeText(source);
   if (!MAY_HOLD_FENCE.test(normal)) return { text: source, fences: [] };
   if (!normal.includes(FY_RENDER_WORD)) return durianOnly(source, normal);
 
   let lines = normal.split('\n');
-  let fences = commonMarkFences(normal);
+  let fences = stillOpen(commonMarkFences(normal), lines, arriving);
   let edited = false;
   const opened = openListFences(lines, fences);
   if (opened !== null) {
     // The text changed under every later line number: read it again, once.
     lines = [...opened];
-    fences = commonMarkFences(lines.join('\n'));
+    fences = stillOpen(commonMarkFences(lines.join('\n')), lines, arriving);
     edited = true;
   }
 

@@ -5,7 +5,7 @@ import { type ComponentType, createContext, useContext, useMemo } from 'react';
 import { FY_RENDER_FENCE_ATTRIBUTE, parseFyRender } from '../render/fy-render.ts';
 import { tolerateAuthoringNoise } from '../render/fences.tsx';
 import { type CommonMarkFence, DURIAN_FENCE, linesOf, type SettledFences } from './fence-boundaries.ts';
-import { LlmOnlyText } from './llm-text.tsx';
+import { authorTextBeside, LlmOnlyText } from './llm-text.tsx';
 import { HYPERMEDIA_SLOTS, HypermediaCode } from './slots.tsx';
 
 /**
@@ -88,7 +88,11 @@ function readBody(body: string, generated: string | null): FyRenderHostData {
  * `llmFormOf`), or `null` when the opener is not a fence. It is how a part's own generated text is told from text the
  * author wrote: a block's `llm` that differs from it is the author's.
  */
-function durianAsIs(opener: string | undefined, body: string, attrs: Readonly<Record<string, string>>): string | null {
+export function durianAsIs(
+  opener: string | undefined,
+  body: string,
+  attrs: Readonly<Record<string, string>>,
+): string | null {
   const fence = DURIAN_FENCE.exec(opener ?? '');
   if (fence === null) return null;
   const kept = Object.entries(attrs)
@@ -156,8 +160,7 @@ function PlainFence({ body }: { readonly body: string }) {
 }
 
 /** What the author wrote for an LLM after this block, or null when they wrote nothing (Durian's own generated text is not theirs). */
-const authorText = (block: HostBlock, data: FyRenderHostData): string | null =>
-  block.llm !== null && block.llm !== '' && block.llm !== data.generated ? block.llm : null;
+const authorText = (block: HostBlock, data: FyRenderHostData): string | null => authorTextBeside(block, data.generated);
 
 /** A block drawn as its sink, or as the plain code it is. */
 function FyRenderBody({ data }: { readonly data: FyRenderHostData }) {
@@ -192,12 +195,35 @@ const DrawableBodies = createContext<ReadonlyMap<string, string>>(new Map());
 /** The provider a message hands its drawable bodies through. */
 export const DrawableFyRenderBodies = DrawableBodies.Provider;
 
-/** How the code slot's text is matched to CommonMark's body: the Markdown renderer spells a tab-indented item's indent its own way. */
-const bodyKey = (text: string): string => text.replace(/\s+/gu, '');
+/**
+ * How the code slot's text is matched to CommonMark's body: EXACTLY, but for the one thing the Markdown renderer spells
+ * its own way, the indent of each line (a tab-indented list item) and the newline that ends the text. Every other
+ * character, whitespace inside a line included, must be the same, so two blocks that differ only by a space are two keys.
+ */
+const bodyKey = (text: string): string =>
+  text
+    .replace(/\n+$/u, '')
+    .split('\n')
+    .map(line => line.replace(/^[ \t]+/u, ''))
+    .join('\n');
 
-/** The bodies of the fences of one message that may be drawn: opened as exactly `fy-render` and really closed. */
-export const drawableBodies = (settled: SettledFences): ReadonlyMap<string, string> =>
-  new Map(settled.fences.filter(isClosedFyRender).map(fence => [bodyKey(fence.body), fence.body]));
+/**
+ * The bodies of the fences of one message that may be drawn: opened as exactly `fy-render` and really closed. A key two
+ * DIFFERENT bodies share (they differ only by their indent) is left out: neither is drawn and each stays the code it
+ * is, so no block's content is ever replaced by another's.
+ */
+export const drawableBodies = (settled: SettledFences): ReadonlyMap<string, string> => {
+  const bodies = new Map<string, string>();
+  const ambiguous = new Set<string>();
+  for (const fence of settled.fences.filter(isClosedFyRender)) {
+    const key = bodyKey(fence.body);
+    const known = bodies.get(key);
+    if (known !== undefined && known !== fence.body) ambiguous.add(key);
+    bodies.set(key, fence.body);
+  }
+  for (const key of ambiguous) bodies.delete(key);
+  return bodies;
+};
 
 /**
  * A ` ```fy-render ` fence Durian did NOT take for a part: one inside a blockquote or a list item is Markdown to Durian
@@ -227,5 +253,3 @@ export const FY_RENDER_COMPONENT_BLOCK: BlockDef<
   FyRenderHostData,
   ComponentType<{ block: HostBlock; data: FyRenderHostData }>
 > = { name: FY_RENDER_BLOCK_NAME, Component: FyRenderPart };
-
-export const FY_RENDER_COMPONENT_BLOCKS: readonly (typeof FY_RENDER_COMPONENT_BLOCK)[] = [FY_RENDER_COMPONENT_BLOCK];
