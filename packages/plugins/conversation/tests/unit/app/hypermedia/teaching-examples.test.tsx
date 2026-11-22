@@ -71,7 +71,7 @@ const messageOf = (example: Example): string => (firstWord(example.info) === 'md
 /** The fake surface, lending the one door a mermaid step is drawn through (the sandbox itself is Chromium evidence). */
 const surface = (): ReferenceSurface => ({
   ...fixture().surface,
-  fences: { remark: [], draw: (): ReactNode => <div data-fy-render-type="mermaid">drawn</div> },
+  fences: { draw: (): ReactNode => <div data-fy-render-type="mermaid">drawn</div> },
 });
 
 const draw = async (text: string) => {
