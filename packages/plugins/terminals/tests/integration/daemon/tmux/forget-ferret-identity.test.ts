@@ -1,13 +1,13 @@
 import { describe, it } from 'bun:test';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { boundedSpawn } from '../../../../daemon/adapters/tmux/bounded.ts';
 import { forgetFerretIdentity } from '../../../../daemon/adapters/tmux/forget-ferret-identity.ts';
 import { KernelTmuxProcess } from '../../../../daemon/adapters/tmux/kernel-tmux-process.ts';
-import { hostSpawn, realAfter } from '../support/host-spawn.ts';
-import { waitFor } from '../support/wait-for.ts';
+import { HeldSpawn } from '../support/held-spawn.ts';
+import { realAfter } from '../support/host-spawn.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
 
 /**
@@ -21,29 +21,6 @@ class RecordingTmux implements TmuxCommandPort {
   async execute(arguments_: readonly string[]): Promise<TmuxCommandResult> {
     this.commands.push([...arguments_]);
     return await this.answer(arguments_);
-  }
-}
-
-const running = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-/** SIGKILL each pid listed in `file` (one per line, as the wedged tmux wrote them) and wait until it is gone. */
-async function endRecordedChildren(file: string): Promise<void> {
-  const listed = await readFile(file, 'utf8').catch(() => '');
-  for (const pid of listed.split('\n').map(line => Number.parseInt(line, 10))) {
-    if (!Number.isInteger(pid) || pid <= 1) continue;
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      continue; // already ended by the bound
-    }
-    await waitFor(() => !running(pid), `wedged tmux ${pid} to end`);
   }
 }
 
@@ -80,11 +57,11 @@ describe("a daemon's tmux server's global environment", () => {
     // Arrange — a tmux program that never answers; each child is killed at the bound by the bounded spawn.
     const root = await mkdtemp(join(tmpdir(), 'ferretry-wedged-tmux-'));
     const wedged = join(root, 'tmux');
-    // Each wedged child records its own pid (`exec` keeps it), so the test can end exactly the ones it started.
-    const pids = join(root, 'pids');
-    await writeFile(wedged, `#!/bin/sh\necho $$ >> '${pids}'\nexec sleep 30\n`);
+    await writeFile(wedged, '#!/bin/sh\nexec sleep 30\n');
     await chmod(wedged, 0o755);
-    const tmux = new KernelTmuxProcess(boundedSpawn(hostSpawn, 300), join(root, 'tmux.sock'), wedged);
+    // The port keeps the handle of every child it starts, so the test ends exactly those, never a recorded pid.
+    const children = new HeldSpawn();
+    const tmux = new KernelTmuxProcess(boundedSpawn(children, 300), join(root, 'tmux.sock'), wedged);
     let stalled = 0;
 
     try {
@@ -101,9 +78,10 @@ describe("a daemon's tmux server's global environment", () => {
       should(cleared).deepEqual([]);
       should(stalled).equal(1);
     } finally {
-      // The bound kills a child 300 ms after it starts, which can be after this test ends: end each recorded child
-      // now and wait for it, so none outlives the test process (scripts/test/swept.sh fails a run that leaves one).
-      await endRecordedChildren(pids);
+      // The bound kills a child 300 ms after it starts, which can be after this test ends: end each child through
+      // its own handle now and wait for it, so none outlives the test process (scripts/test/swept.sh fails a run
+      // that leaves one).
+      await children.endAll();
       await rm(root, { recursive: true, force: true });
     }
   });

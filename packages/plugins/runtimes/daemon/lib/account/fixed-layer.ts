@@ -293,15 +293,15 @@ export { HYPERMEDIA_ENV };
  */
 export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
   [
-    'Hypermedia: to teach, explain or compare anything not simple (a flow, a design, a change), show it, not just say it. Inline: never publish a page or link unless asked.',
+    'Hypermedia: to teach, explain or compare anything not simple, show it, not just say it. Inline: never publish a page or link unless asked.',
     'Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Make it interactive: a visual the reader changes (sliders, toggles) that redraws live, no steppers; gentle motion (prefers-reduced-motion).',
-    'Write Markdown. Parts are fences: ```terminal, ```filetree, ```editor, ```tierlist, ```alignment, ```mermaid, ```animation (`3d` after it: 3D); `@step <caption>` lines give a part steps (mermaid: `%% @step <caption>`); :::tabs and :::accordion; `:::human` text is for people, `:::llm` after a part is for another agent.',
+    'Write Markdown. Parts are fences: ```terminal, ```filetree, ```editor, ```tierlist, ```alignment, ```mermaid, ```animation (`3d` after it: 3D); `@step <caption>` lines give a part steps (mermaid: `%% @step <caption>`); :::tabs and :::accordion; `:::human` is for people, `:::llm` after a part for another agent.',
     '- mermaid: flowchart TB, sequenceDiagram, …: top-down, short labels; auto-themed: no %%{init}%% or colours.',
     '- Charts, svg, interactive html, maps, media, live tasks: a fence whose info string is exactly fy-render: `type: chart|svg|html|map|image|video|audio|pdf|lottie|task|board`, `alt: <one line>`, `---`, then the payload.',
     '- chart (fy-render only; a part named chart is shown as code): YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; no colours.',
     'References are plain text, never links: `:agent @file &F12 ^A3 /skill $skill %terminal:dev %browser:app`.',
-    `Every spec: \`${fy} render guide <part>\`. Before sending, run \`${fy} render check <file|->\`: it prints \`line N: …\` per problem; exit 1 on an error.`,
-    'Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.',
+    `Every spec: \`${fy} render guide <part>\`. Before sending, run \`${fy} render check <file|->\`: prints \`line N: …\` per problem; exit 1 on error.`,
+    "Draws in chat and the ferret's Queue panel; agenda, tasks, Board, PRs, All queues show code; never in files, docs, commits.",
   ].join('\n');
 
 /**

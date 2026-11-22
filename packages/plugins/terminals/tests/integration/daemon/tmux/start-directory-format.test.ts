@@ -29,7 +29,7 @@ async function arrange(): Promise<{ tmux: BunTmuxProcess; root: string; hostile:
   const socket = join(root, 's');
   const tmux = new BunTmuxProcess(TMUX, socket);
   cleanups.push(async () => {
-    await stopTmuxServer(tmux, socket);
+    await stopTmuxServer(TMUX, socket);
     await rm(root, { recursive: true, force: true });
   });
   return { tmux, root, hostile };
