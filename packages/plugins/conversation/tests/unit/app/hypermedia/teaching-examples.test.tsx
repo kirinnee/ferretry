@@ -123,7 +123,9 @@ describe('every example of the guide passes `fy render check` and draws', () => 
     it(`${label}: is read as the part it teaches, with no problem and no error block`, async () => {
       await loadAnimationEngine();
       expect(animationEngineReady()).toBe(true);
-      const read = readMessage(messageOf(example), 'teach-');
+      // The parser is asked as a page that HAS the scene compiler would ask it; the product's own reader (the Durian worker)
+      // has none, so the next test is what the page draws for an animation (r12 H11).
+      const read = readMessage(messageOf(example), 'teach-', false, true);
       if (read === null) throw new Error('a teaching example is over the message cap');
       const { doc } = read;
       expect(doc.problems).toEqual([]);
@@ -140,8 +142,11 @@ describe('every example of the guide passes `fy render check` and draws', () => 
       expect(container.querySelector('.dh-doc')).not.toBeNull();
       expect(container.querySelector('.dh-error, [data-dh-missing]')).toBeNull();
       const word = firstWord(example.info);
-      if (word === 'animation') expect(container.querySelector('[data-fy-animation] .scn')).not.toBeNull();
-      else if (word === 'mermaid')
+      // The worker that reads a message has no scene compiler (r12 H11): an animation is shown as the code it is, never blank.
+      if (word === 'animation') {
+        expect(container.querySelector('[data-fy-animation]')).toBeNull();
+        expect(container.querySelector('.dh-doc code')?.textContent).toContain('@step');
+      } else if (word === 'mermaid')
         expect(container.querySelector('.dh-doc [data-fy-render-type="mermaid"]')).not.toBeNull();
       else if (word === 'md') expect(container.querySelector('.dh-doc .tabs, .dh-doc .accordion')).not.toBeNull();
       else expect(container.querySelector(`.dh-doc [data-dh-part="${DRAWN_FENCES[word]}"]`)).not.toBeNull();

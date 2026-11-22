@@ -6,6 +6,7 @@
 import { type ReferenceSurface, ScreenHrefProvider } from '@ferretry/app';
 import type { ReactNode } from 'react';
 import { testHref } from '../../../support/app/client.tsx';
+import { withDurianReader } from '../../../support/durian-reader.tsx';
 
 interface Opened {
   readonly tasks: string[];
@@ -50,5 +51,6 @@ export const fixture = (): Fixture => {
   return { surface, opened, gone };
 };
 
-/** A row is drawn where screen addresses resolve, as the shell draws it. */
-export const inShell = (node: ReactNode): ReactNode => <ScreenHrefProvider href={testHref}>{node}</ScreenHrefProvider>;
+/** A row is drawn where screen addresses resolve, as the shell draws it, and its messages are read in-process (`tests/support/durian-reader.tsx`). */
+export const inShell = (node: ReactNode): ReactNode =>
+  withDurianReader(<ScreenHrefProvider href={testHref}>{node}</ScreenHrefProvider>);

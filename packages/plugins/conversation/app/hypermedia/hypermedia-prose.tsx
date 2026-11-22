@@ -1,17 +1,15 @@
 import type { ProseProps } from '@ferretry/app';
 import { DocumentView, type InlineDef } from 'durian-hypermedia/react/strict';
-import { memo, useEffect, useId, useMemo, useSyncExternalStore } from 'react';
-import { animationEngineReady, loadAnimationEngine, onAnimationEngine } from './animation-engine.ts';
-import { holdsAnimation } from './held-fences.tsx';
+import { memo, useId, useMemo, useSyncExternalStore } from 'react';
 import { DrawableFyRenderBodies } from './fy-render-host.tsx';
-import { exceedsMessageCap } from './limits.ts';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';
 import { readLook, serverLook, subscribeToLook, variantOf } from './look.ts';
-import { readMessage } from './parse-message.ts';
 import { HYPERMEDIA_COMPONENT_BLOCKS, HYPERMEDIA_PART_SLOTS, HYPERMEDIA_PARTS } from './parts.tsx';
 import { ReferenceChip } from './reference-chip.tsx';
 import { ReferenceProofProvider } from './reference-proof.tsx';
+import { useDurianReading } from './use-durian-reading.ts';
 import { hypermediaUrlPolicy } from './url-policy.ts';
+import { withIdPrefix } from './with-id-prefix.ts';
 import { REFERENCE_INLINE } from './with-references.ts';
 
 /**
@@ -31,15 +29,22 @@ import { REFERENCE_INLINE } from './with-references.ts';
  *    belongs to, and a `:::human` segment draws its body even with `llm=none` (`llm-text.tsx`, decision C7).
  *  - LINKS go through our URL policy (never an image, an app route or a reference envelope) and open through the
  *    shell's one outside link; code carries our colours and references (`slots.tsx`).
- *  - OVER THE CAP a message is shown as the text it is, never as Durian's error ({@link exceedsMessageCap}).
+ *  - THE PARSE IS NOT ON THIS THREAD (r12 H11). Durian reads the message in a worker (`durian-reader.ts`, `durian-worker.ts`);
+ *    a parse that takes longer than its budget is ended and the message is shown as the plain text it is, with a note.
+ *    Until the document arrives the plain text is drawn, so a message is readable at once. Over the author's cap a message
+ *    is also plain text, never Durian's "too big" error.
  *
  * Streaming: a message grows one parse at a time; `DocumentView` keys its blocks by position and every component below
- * is module-level, so what is already drawn is updated in place, never remounted.
+ * is module-level, so what is already drawn is updated in place, never remounted. The last document stays drawn while the
+ * next one is awaited.
  *
  * The theme is the app's own look, always passed (`look.ts`): the mode, because Durian's stylesheet goes dark on the system
  * setting unless told otherwise and our root says `data-mode`, not `data-theme`; and the style's shape and header, which
  * `dh-theme.css` cannot branch on. Colours, type and corners follow the palette and style by CSS alone.
  */
+
+/** The note under a message shown as plain text because it could not be read as hypermedia. */
+const PLAIN_NOTE = 'shown as plain text';
 
 /**
  * Our inlines: the chip that draws a proved reference (Durian reads only its `Component`; it never tokenises one), and the
@@ -75,32 +80,28 @@ export const HypermediaProse = memo(function HypermediaProse({
   arriving = false,
 }: HypermediaProseProps) {
   const { mode, shape, header } = useSyncExternalStore(subscribeToLook, readLook, serverLook);
-  // `useId` is unique per mounted message and stable across its re-renders; keep only what an id may hold.
+  // The message is read in the Durian worker, never on this thread (`durian-reader.ts`): its plain text is drawn until the
+  // document arrives, and stays drawn, with a note, when the parse was too slow or failed.
+  const reading = useDurianReading(text, arriving);
+  // ONE ID PER MESSAGE: the document is kept by text, so its ids carry a prefix made of the text; each message on screen puts its
+  // own in place (`useId` is unique per mounted message and stable across its re-renders; keep only what an id may hold).
   const idPrefix = `dh-${useId().replace(/[^\w-]/gu, '')}-`;
-  // The 2D animation engine is a lazy chunk: asked for only by a message that holds an animation, and the message is read again
-  // (animation drawn, not shown as code) when it arrives.
-  const engine = useSyncExternalStore(onAnimationEngine, animationEngineReady, () => false);
-  const wantsEngine = !engine && holdsAnimation(text);
-  useEffect(() => {
-    if (wantsEngine) loadAnimationEngine().catch(() => undefined);
-  }, [wantsEngine]);
-  const read = useMemo(
-    () => (exceedsMessageCap(text) ? null : readMessage(text, idPrefix, arriving, engine)),
-    [text, idPrefix, arriving, engine],
+  const rich = useMemo(
+    () =>
+      reading.kind === 'rich'
+        ? { drawable: reading.read.drawable, doc: withIdPrefix(reading.read.doc, reading.prefix, idPrefix) }
+        : null,
+    [reading, idPrefix],
   );
   return (
     <ReferenceProofProvider text={text}>
       <div className={`fy-hm min-w-0 max-w-full ${className ?? ''}`} data-fy-hypermedia="" data-hm-header={header}>
-        {read === null ? (
-          <pre className="fy-hm-plain" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
-            {text}
-          </pre>
-        ) : (
-          <DrawableFyRenderBodies value={read.drawable}>
+        {rich !== null ? (
+          <DrawableFyRenderBodies value={rich.drawable}>
             <DocumentView
               blocks={HYPERMEDIA_COMPONENT_BLOCKS}
               components={HYPERMEDIA_PARTS}
-              doc={read.doc}
+              doc={rich.doc}
               inlines={INLINES}
               slots={HYPERMEDIA_PART_SLOTS}
               theme={mode}
@@ -108,6 +109,17 @@ export const HypermediaProse = memo(function HypermediaProse({
               variant={variantOf(shape)}
             />
           </DrawableFyRenderBodies>
+        ) : (
+          <>
+            <pre className="fy-hm-plain" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
+              {text}
+            </pre>
+            {reading.kind === 'plain' ? (
+              <p className="fy-hm-plain-note" data-fy-plain-note={reading.reason} role="status">
+                {PLAIN_NOTE}
+              </p>
+            ) : null}
+          </>
         )}
       </div>
     </ReferenceProofProvider>

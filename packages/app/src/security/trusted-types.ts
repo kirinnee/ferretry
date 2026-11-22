@@ -18,10 +18,11 @@
  *   `>` is left: that is the whole shape highlight.js emits, because it escapes the source it
  *   tokenizes. Anything else is refused by the policy itself, and {@link trustedHighlight} escapes
  *   such a string first, so a broken highlighter shows its markup as text rather than running it.
- * - `fy-worker` makes the script URL of the app's own workers, and only two exist: the signed service
+ * - `fy-worker` makes the script URL of the app's own workers, and only three kinds exist: the signed service
  *   worker every registration names (`sw.verified.js`, with a machine label for a push registration),
- *   and the on-device speech worker the build emits beside the app (`/assets/parakeet-worker-<hash>.js`,
- *   or its dev-server address). A registration and a `new Worker` are script sinks to the browser, so
+ *   the on-device speech workers the build emits beside the app (`/assets/parakeet-worker-<hash>.js`,
+ *   or its dev-server address), and Conversation's Durian worker (`/assets/durian-worker-<hash>.js`, which reads
+ *   a message off the main thread so a slow parse can be stopped). A registration and a `new Worker` are script sinks to the browser, so
  *   without a policy neither could start at all.
  * - `fy-fragment` exists for ONE caller, the `fy-render` html fragment sanitizer
  *   (`components/fy-render-fragment.tsx`), and it is handed to DOMPurify as its parsing policy and
@@ -81,8 +82,19 @@ const SPEECH_WORKER_SCRIPT =
 /** Whether a URL is one of the app's own SPEECH worker scripts (not the service worker). */
 export const isSpeechWorkerScriptUrl = (url: string): boolean => SPEECH_WORKER_SCRIPT.test(url);
 
-/** Whether a URL is one of the app's own worker scripts: the service worker or the speech worker. */
-export const isWorkerScriptUrl = (url: string): boolean => WORKER_SCRIPT.test(url) || SPEECH_WORKER_SCRIPT.test(url);
+/**
+ * Conversation's Durian worker (`plugins/conversation/app/hypermedia/durian-worker.ts`, r12 H11): the ONE chunk the build
+ * emits under this name, content-hashed (`/assets/durian-worker-<hash>.js`). Nothing else under `/assets/` is a worker,
+ * and the pattern names no directory, query or prefix, so it widens the policy by exactly that file.
+ */
+const DURIAN_WORKER_SCRIPT = /^\/assets\/durian-worker-[A-Za-z0-9_-]+\.js$/u;
+
+/** Whether a URL is the Durian worker's script. */
+export const isDurianWorkerScriptUrl = (url: string): boolean => DURIAN_WORKER_SCRIPT.test(url);
+
+/** Whether a URL is one of the app's own worker scripts: the service worker, a speech worker or the Durian worker. */
+export const isWorkerScriptUrl = (url: string): boolean =>
+  WORKER_SCRIPT.test(url) || SPEECH_WORKER_SCRIPT.test(url) || DURIAN_WORKER_SCRIPT.test(url);
 
 export interface TrustedTypes {
   /** Highlighter output as a value `innerHTML` accepts; anything not highlighter-shaped is escaped first. */

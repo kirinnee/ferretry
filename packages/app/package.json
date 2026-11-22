@@ -14,6 +14,8 @@
     "./testing": "./src/testing/index.ts",
     "./testing/router": "./src/testing/router.tsx",
     "./worker-facts": "./src/worker/facts.ts",
+    "./fy-render": "./src/fy-render/index.ts",
+    "./references/grammar": "./src/references/grammar.ts",
     "./testing/browser": "./tests/support/browser/index.ts",
     "./testing/settings-shell": "./tests/support/browser/settings-shell.tsx"
   },

@@ -35,6 +35,14 @@
   margin-block: 0.25rem;
 }
 
+/* The one line under a message shown as plain text because it could not be read as hypermedia in time (`hypermedia-prose.tsx`).
+   Outside `.dh-doc`: the plain text is not a document. Quiet by size and ink, never by `opacity`. */
+.fy-hm > .fy-hm-plain-note {
+  color: var(--muted);
+  font-size: 0.85em;
+  margin-block: 0.25rem;
+}
+
 .fy-hm .dh-doc pre.fy-hm-mermaid-source {
   overflow-wrap: anywhere;
   white-space: pre-wrap;

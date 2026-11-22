@@ -11,7 +11,7 @@ import { ReferenceSurfaceProvider } from '@ferretry/app';
 import { interact, mount } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
 import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
-import { holdFences } from '../../../../app/hypermedia/held-fences.tsx';
+import { holdFences } from '../../../../app/hypermedia/held-fence-parse.ts';
 import { mustRead } from './must-read.ts';
 import { fixture, inShell } from './surface-fixture.tsx';
 

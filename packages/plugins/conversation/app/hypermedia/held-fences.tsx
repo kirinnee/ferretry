@@ -1,12 +1,13 @@
 import type { BlockDef, HostBlock } from 'durian-hypermedia';
 import type { ComponentType } from 'react';
-import { DURIAN_FENCE, durianFences, linesOf } from './fence-boundaries.ts';
-import { durianAsIs } from './fy-render-host.tsx';
+import { type HeldFenceData, HELD_BLOCKS } from './held-fence-parse.ts';
 import { authorTextBeside, LlmOnlyText } from './llm-text.tsx';
 import { HypermediaCode } from './slots.tsx';
 
 /**
- * TWO DURIAN PARTS ARE HELD AS THE CODE THEY ARE, BEFORE DURIAN READS THEM (r12 H4 review R1: S1 and G1).
+ * TWO DURIAN PARTS ARE HELD AS THE CODE THEY ARE, BEFORE DURIAN READS THEM (r12 H4 review R1: S1 and G1). This file is the
+ * renderer half; the parser half, which renames the fences and carries their source as data, is `held-fence-parse.ts`
+ * (it runs inside the Durian worker, so it has no React in it).
  *
  * ```chart (S1, HIGH). Durian evaluates a chart's `let` formulas AT PARSE TIME (`src/core/dh-lib.ts` `jsonOf`, then
  * `chart-llm.ts`), on the main thread, and again on every control change. Its expression engine (`src/core/expr.ts`)
@@ -24,76 +25,8 @@ import { HypermediaCode } from './slots.tsx';
  * Durian block keeps no source: with an author's `:::llm` after it, the fence's own text was nowhere on the page. Held,
  * its source and notes are drawn as code, and the `:::llm` text is the disclosure beside them.
  *
- * THE WHOLE DEFENCE IS THAT THE EVALUATOR (and the code walk's reader) IS NEVER REACHED. Every fence Durian's own line
- * scan would read as one of these parts (any depth: top level, `:::tabs`, `:::accordion`, `:::human`, `:::llm`) has its
- * fence word renamed to a host block of ours, which Durian carries as data. It stays a PART to Durian, so an author's
- * `:::llm` after it still attaches (after a plain code fence Durian would refuse the whole message). `HYPERMEDIA_PARTS`
- * still names a component for both (its type requires one per part); none is reachable.
+ * `HYPERMEDIA_PARTS` still names a component for both (its type requires one per part); none is reachable.
  */
-
-/** The fence words held, and the host block each is renamed to. */
-const HELD: Readonly<Record<string, string>> = { chart: 'fy-chart-held', codewalk: 'fy-codewalk-held' };
-
-/**
- * A part held ONLY UNTIL ITS ENGINE HAS ARRIVED (r12 H8 fix): the 2D animation's scene compiler is a lazy chunk
- * (`animation-engine.ts`), and the parser cannot compile a scene it does not have. Until then the fence is shown as the code
- * it is; once the engine is here a message is read again and the animation draws.
- */
-const AWAITING: Readonly<Record<string, string>> = { animation: 'fy-animation-awaiting' };
-
-/** The host block a fence word is renamed to, when it is one held. */
-const heldNameOf = (word: string | undefined, awaiting: boolean): string | undefined => {
-  if (word === undefined) return undefined;
-  if (Object.hasOwn(HELD, word)) return HELD[word];
-  return awaiting && Object.hasOwn(AWAITING, word) ? AWAITING[word] : undefined;
-};
-
-/** Whether `text` has a fence Durian reads as an animation (the same line scan as {@link holdFences}). */
-export function holdsAnimation(text: string): boolean {
-  if (!text.includes('animation')) return false;
-  const lines = linesOf(text);
-  return durianFences(lines).some(({ open }) => DURIAN_FENCE.exec(lines[open] ?? '')?.[3] === 'animation');
-}
-
-/**
- * `text` with every fence Durian reads as a held part renamed to its host block; `text` itself when it holds none. It reads
- * the fences the way Durian does (its own pattern and its own line scan), so it holds exactly the ones Durian would
- * evaluate, whatever CommonMark makes of them. Line numbers do not move. `awaitingAnimation`: the animation engine has not
- * arrived, so an animation fence is held too.
- */
-export function holdFences(text: string, awaitingAnimation = false): string {
-  if (!text.includes('chart') && !text.includes('codewalk') && !(awaitingAnimation && text.includes('animation')))
-    return text;
-  const lines = [...linesOf(text)];
-  let held = false;
-  for (const { open } of durianFences(lines)) {
-    const parts = DURIAN_FENCE.exec(lines[open] ?? '');
-    const name = heldNameOf(parts?.[3], awaitingAnimation);
-    if (parts === null || name === undefined) continue;
-    const before = parts[0].length - (parts[3]?.length ?? 0) - (parts[4]?.length ?? 0);
-    lines[open] = `${parts[0].slice(0, before)}${name}${parts[4] ?? ''}`;
-    held = true;
-  }
-  return held ? lines.join('\n') : text;
-}
-
-/** What the parser hands the component: the fence body as written, and Durian's own `as-is` text for it. */
-interface HeldFenceData {
-  readonly body: string;
-  readonly generated: string | null;
-}
-
-/**
- * The parser half, for ONE message (`heldText` is what {@link holdFences} returned, which Durian is given). No `llm` hook,
- * as with `fy-render`: the author's `:::llm` after the fence stays on `block.llm` for the disclosure.
- */
-export function heldFenceParseBlocks(heldText: string): readonly BlockDef<HeldFenceData>[] {
-  const lines = linesOf(heldText);
-  return [...Object.values(HELD), ...Object.values(AWAITING)].map(name => ({
-    name,
-    parse: input => ({ body: input.body, generated: durianAsIs(lines[input.line - 1], input.body, input.attrs) }),
-  }));
-}
 
 /** The fence as the code it is, then the author's `:::llm` text as the usual disclosure. */
 const heldPart =
@@ -112,7 +45,7 @@ const heldPart =
 export const HELD_COMPONENT_BLOCKS: readonly BlockDef<
   HeldFenceData,
   ComponentType<{ block: HostBlock; data: HeldFenceData }>
->[] = [...Object.entries(HELD), ...Object.entries(AWAITING)].map(([lang, name]) => ({
+>[] = HELD_BLOCKS.map(([lang, name]) => ({
   name,
   Component: heldPart(lang),
 }));
