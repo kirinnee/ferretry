@@ -33,8 +33,86 @@
   ],
   "int": [
     {
-      "name": "all",
-      "prefixes": ["packages/"]
+      "name": "shard-1",
+      "prefixes": [
+        "packages/app/tests/integration/a",
+        "packages/app/tests/integration/f",
+        "packages/app/tests/integration/o",
+        "packages/core/kernel/",
+        "packages/plugins/catalogs/",
+        "packages/plugins/connections/",
+        "packages/plugins/git-accounts/",
+        "packages/plugins/logins/",
+        "packages/plugins/shells/"
+      ]
+    },
+    {
+      "name": "shard-2",
+      "prefixes": [
+        "packages/app/tests/integration/b",
+        "packages/app/tests/integration/p",
+        "packages/app/tests/integration/r",
+        "packages/app/tests/integration/z",
+        "packages/plugins/board/",
+        "packages/plugins/conversation/",
+        "packages/plugins/skills/"
+      ]
+    },
+    {
+      "name": "shard-3",
+      "prefixes": [
+        "packages/app/tests/integration/g",
+        "packages/core/asks/",
+        "packages/core/gate/",
+        "packages/plugins/access/",
+        "packages/plugins/claude-code/",
+        "packages/plugins/codex/",
+        "packages/plugins/mcp/",
+        "packages/plugins/projects/",
+        "packages/plugins/runtimes/"
+      ]
+    },
+    {
+      "name": "shard-4",
+      "prefixes": [
+        "packages/app/tests/integration/c",
+        "packages/app/tests/integration/d",
+        "packages/app/tests/integration/l",
+        "packages/app/tests/integration/t",
+        "packages/core/vault/",
+        "packages/plugins/agenda/",
+        "packages/plugins/browsers/",
+        "packages/plugins/layouts/",
+        "packages/plugins/lessons/"
+      ]
+    },
+    {
+      "name": "shard-5",
+      "prefixes": [
+        "packages/app/tests/integration/h",
+        "packages/app/tests/integration/n",
+        "packages/app/tests/integration/s",
+        "packages/cli/",
+        "packages/core/mailbox/",
+        "packages/plugins/accounts/",
+        "packages/plugins/onboarding/",
+        "packages/plugins/packs/",
+        "packages/plugins/updates/",
+        "packages/plugins/warden/"
+      ]
+    },
+    {
+      "name": "shard-6",
+      "prefixes": [
+        "packages/app/tests/integration/e",
+        "packages/app/tests/integration/m",
+        "packages/app/tests/integration/u",
+        "packages/core/ferrets/",
+        "packages/plugins/pulls/",
+        "packages/plugins/terminals/",
+        "packages/plugins/usage/",
+        "packages/plugins/voice/"
+      ]
     }
   ]
 }

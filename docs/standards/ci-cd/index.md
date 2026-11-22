@@ -117,6 +117,16 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   run doubled the archive unit test from 3.819 to 8.371 seconds when gates shared its cores; that is why they moved
   instead of interleaving. Quick's summary names each group's slowest test and duration from JUnit, with
   `unit-timings.tsv` in the part artifact.
+- **Why six integration shards and a 40-minute cap (measured 2026-11-22, E12).** One integration group `all` ran 880 files
+  in ONE serial bun process and was cancelled at the 20-minute cap with 31 files done (run 45041640864, 1,166 s of test
+  time, the visual files in packages/app ~37 s each). By estimate the tier holds ~9,400 s: 208 visual files (~7,700 s) and 672
+  others (~1,600 s). The shards (`shard-1` … `shard-6` in `config/test-groups.json`) balance by those seconds to ~1,560 s
+  each, so six parallel streams on the 8x16 need ~26 min: that is why the `int` job (and `int-after.yaml`) ceiling is 40, not 15. Fitting 15 min would need ~11 parallel streams, i.e. a bigger runner. A plugin stays whole (the ledger passes an
+  adapters file only when ONE shard covers it 100%); `packages/app` has no `adapters/` directory, so its files are split by
+  the first letter of the file name. **The shards partition the tier**: `scripts/validate/test-tiers.sh` refuses an
+  integration test that no shard or more than one shard claims. A new `packages/app/tests/integration/<letter>…` file whose
+  first letter no shard lists fails that gate: add the letter to the lightest shard. Re-balance from per-file timings in
+  the `integration-parts` artifact, never by guessing.
 - **Why six unit groups (measured 2026-11-16, owner ask "speed it up significantly").** One `all` group ran 3,398
   files / 52,909 tests in ONE bun process: 794 s of Quick's 925 s step, on one core of an 8x16. By package: kernel
   260 s (its `tests/unit/host-config/` alone 147 s), runtimes 149, voice 75, conversation 58, catalogs 31, std 24,
