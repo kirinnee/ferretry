@@ -63,6 +63,14 @@
     width: min(100%, 300px);
   }
 }
+/* C59 O8-2: ONE READING COLUMN, LEFT-ALIGNED, on a desktop (the page is a 600px column: `SHELL`). The words start at the column's left
+   edge and the buttons sit on its two edges, so everything hangs off the same two lines; the mascot starts at that left edge too
+   instead of floating in the middle of text that starts at the edge. A phone keeps its centred, stacked screen. */
+@media (min-width: 640px) {
+  .fy-pair-hero {
+    margin-inline: 0;
+  }
+}
 /* A short screen (a laptop) keeps the confirm answers above the fold: the hero is smaller until the success screen, which
    has the room. */
 @media (min-width: 640px) and (max-height: 900px) {

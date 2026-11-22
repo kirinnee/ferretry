@@ -5,7 +5,7 @@
  */
 import { ActionRow } from '@ferretry/app/ui';
 import { StepProgress } from '@ferretry/app';
-import type { ReactNode } from 'react';
+import { type ReactNode, useId, useState } from 'react';
 
 import { PAIRING_DEVICE_NAME_MAX_LENGTH } from '../../../contract/index.ts';
 import { PairButton } from './pairing-back.tsx';
@@ -136,5 +136,54 @@ export function ConfirmActions({ busy, pairDisabled, onPair, onCancel }: Confirm
         </PairButton>
       }
     />
+  );
+}
+
+export interface LineWithDetailsProps {
+  /** The one friendly line (a sentence, ending in its full stop). */
+  readonly children: ReactNode;
+  /** What sits behind the small "Details" link (a fingerprint, the path it travelled): read by anyone who asks, never in the way. */
+  readonly details: ReactNode;
+  /** The line's own `data-*` marker, for a harness that reads it. */
+  readonly lineProps?: Readonly<Record<`data-${string}`, string>>;
+  /** The details block's own `data-*` marker (it carries `hidden` until opened). */
+  readonly detailsProps?: Readonly<Record<`data-${string}`, string>>;
+  readonly className?: string;
+  readonly detailsClassName?: string;
+}
+
+/**
+ * ONE LINE AND A SMALL LINK (C59 O8-1, O8-3). The line says the thing; "Details" is a quiet link on the end of the SAME line
+ * (`.fy-inline-action`: its 44px touch target is an invisible layer over the text), so no row, card or disclosure triangle of
+ * its own is drawn under the sentence. Opened, what it holds shows one small step below.
+ */
+export function LineWithDetails({
+  children,
+  details,
+  lineProps,
+  detailsProps,
+  className = 'm-0 text-ui leading-base text-fg',
+  detailsClassName = 'm-0 break-all text-meta text-muted',
+}: LineWithDetailsProps) {
+  const [open, setOpen] = useState(false);
+  const panel = useId();
+  return (
+    <div className="min-w-0" data-pair-details={open ? 'open' : 'closed'}>
+      <p className={className} {...lineProps}>
+        {children}{' '}
+        <button
+          type="button"
+          className="fy-inline-action"
+          aria-expanded={open}
+          aria-controls={panel}
+          onClick={() => setOpen(value => !value)}
+        >
+          Details
+        </button>
+      </p>
+      <p id={panel} hidden={!open} className={`mt-1 ${detailsClassName}`} {...detailsProps}>
+        {details}
+      </p>
+    </div>
   );
 }

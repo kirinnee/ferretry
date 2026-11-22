@@ -160,7 +160,7 @@ describe('PairingScreen arrival', () => {
     const screen = await screenWith({ arrival: PREFILLED, onArrivalTaken: () => (taken += 1) });
 
     expect(screen.container.textContent).toContain('Pair this device?');
-    expect(screen.container.textContent).toContain('Its name shows once paired.');
+    expect(screen.container.textContent).toContain('Pairing directly with daemon.example.test.');
     expect(screen.container.textContent).toContain('daemon.example.test');
     expect(screen.container.textContent).toContain('daemon-a');
     // The one-time code is never rendered, and the address bar is emptied of it.
@@ -778,12 +778,17 @@ describe('PairingScreen never shows the loopback address of a relayed daemon', (
     expect(screen.container.textContent).toContain('through the relay');
     expect(screen.container.textContent).not.toContain('127.0.0.1');
     expect(screen.container.textContent).not.toContain('7617');
-    const details = must(screen.container.querySelector('details[data-pair-details]'), 'the Details toggle');
-    expect(details.hasAttribute('open')).toBe(false);
-    expect(details.querySelector('summary')?.textContent).toBe('Details');
-    expect(details.textContent).toContain(LOOPBACK_SEED.daemonId);
-    await interact(() => (details as HTMLDetailsElement).setAttribute('open', ''));
-    expect(details.hasAttribute('open')).toBe(true);
+    // ONE line, and a small "Details" link on its end: the fingerprint is in the page but hidden until the link is pressed.
+    const details = must(screen.container.querySelector('[data-pair-details]'), 'the Details block');
+    const fingerprint = must(details.querySelector<HTMLElement>('[data-pair-fingerprint]'), 'the fingerprint');
+    const toggle = must(details.querySelector('button'), 'the Details link');
+    expect(toggle.textContent).toBe('Details');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(fingerprint.hidden).toBe(true);
+    expect(fingerprint.textContent).toContain(LOOPBACK_SEED.daemonId);
+    await interact(() => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(fingerprint.hidden).toBe(false);
     await screen.unmount();
   });
 
