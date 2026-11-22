@@ -261,6 +261,9 @@ describe('Settings shell: the frame rules (S1)', () => {
             bodyColour: body,
             fg,
             activeShadow: active === null ? '' : getComputedStyle(active).boxShadow,
+            activeFill: active === null ? '' : getComputedStyle(active).backgroundColor,
+            activeWeight: active === null ? '' : getComputedStyle(active).fontWeight,
+            restFill: links[0] === undefined ? '' : getComputedStyle(links[0]).backgroundColor,
             blocks: [...document.querySelectorAll('.fy-settings-block__title')].map(el => el.textContent),
             pageMax: ((el: Element | null) => (el === null ? '' : getComputedStyle(el).maxWidth))(
               document.querySelector('.fy-settings-page'),
@@ -273,7 +276,14 @@ describe('Settings shell: the frame rules (S1)', () => {
         expect(facts.form).toBe('block');
         expect(facts.linkColours).toEqual([facts.fgProbe]);
         // A phone's bare Settings is the list alone: no item is current and no page is mounted.
-        if (!variant.phone) expect(facts.activeShadow).not.toBe('none');
+        // The current item reads by a soft fill and a 600 weight, and draws NO accent side bar (r11 S2, a1ced4a412: the
+        // old inset box-shadow bar is gone app-wide, which is what this line used to assert).
+        if (!variant.phone) {
+          expect(facts.activeShadow, 'no side bar on the current item').toBe('none');
+          expect(facts.activeFill, 'a fill marks the current item').not.toBe('rgba(0, 0, 0, 0)');
+          expect(facts.activeFill).not.toBe(facts.restFill);
+          expect(facts.activeWeight).toBe('600');
+        }
         expect(facts.blocks[0]).toBe('Just this device');
         expect(facts.blocks[1]).toMatch(/ · every device$/);
         if (!variant.phone) expect(facts.pageMax).toBe('1100px');

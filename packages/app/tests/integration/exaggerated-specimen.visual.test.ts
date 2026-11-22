@@ -107,7 +107,9 @@ describe('the Exaggerated Minimalism specimen', () => {
               for (const element of document.querySelectorAll<HTMLElement>('[data-specimen] *')) {
                 const style = getComputedStyle(element);
                 const label = `${element.tagName.toLowerCase()}.${element.className}`.slice(0, 60);
-                const visible = element.getBoundingClientRect().width > 0;
+                // Drawn = has area beyond a visually hidden 1px box (`sr-only`: a segmented control's radios, which a UA rounds).
+                const box = element.getBoundingClientRect();
+                const visible = box.width > 1 || box.height > 1;
                 // A radio dot, a switch thumb's circle and a status dot are shape signals, never a corner.
                 if (visible && style.borderTopLeftRadius !== '0px' && !/dot|spinner/u.test(String(element.className)))
                   rounded.push(`${label} ${style.borderTopLeftRadius}`);
@@ -127,7 +129,16 @@ describe('the Exaggerated Minimalism specimen', () => {
                 titleWeight: titleStyle?.fontWeight ?? '',
                 titleSize: Number.parseFloat(titleStyle?.fontSize ?? '0'),
                 displayWeight: root.getPropertyValue('--weight-display').trim(),
-                displaySize: root.getPropertyValue('--text-display').trim(),
+                // The token's text is `calc(3.2rem * var(--fy-text-scale, 1))`, the Text size setting's own wrapper
+                // (`text-scale-postcss.ts`), so it is read as the length it resolves to, in rem, at the default scale.
+                displaySize: (() => {
+                  const probe = document.createElement('i');
+                  probe.style.fontSize = 'var(--text-display)';
+                  document.body.append(probe);
+                  const px = Number.parseFloat(getComputedStyle(probe).fontSize);
+                  probe.remove();
+                  return `${Math.round((px / Number.parseFloat(getComputedStyle(document.documentElement).fontSize)) * 100) / 100}rem`;
+                })(),
                 padPanel: root.getPropertyValue('--pad-panel').trim(),
                 bodyPadding:
                   body === null || body === undefined ? 0 : Number.parseFloat(getComputedStyle(body).paddingLeft),

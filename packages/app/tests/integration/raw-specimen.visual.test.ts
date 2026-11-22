@@ -136,7 +136,10 @@ describe('the Raw Brutalism specimen', () => {
           for (const element of document.querySelectorAll<HTMLElement>('[data-specimen] *')) {
             const style = getComputedStyle(element);
             const label = `${element.tagName.toLowerCase()}.${element.className}`.slice(0, 60);
-            if (element.getBoundingClientRect().width === 0) continue;
+            // Nothing is drawn for a box with no area, nor for a visually hidden 1px one (`sr-only`: the radios of a segmented
+            // control). A native radio's own UA stylesheet rounds it (`50%` in newer Chromium), and no pixel of it shows.
+            const box = element.getBoundingClientRect();
+            if (box.width <= 1 && box.height <= 1) continue;
             // A status dot is a shape, never themed (`--radius-dot`): a circle that is also a small filled box is fine.
             if (style.borderTopLeftRadius !== '0px' && style.borderTopLeftRadius !== '9999px')
               rounded.push(`${label} ${style.borderTopLeftRadius}`);

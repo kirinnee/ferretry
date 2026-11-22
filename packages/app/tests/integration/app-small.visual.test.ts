@@ -161,8 +161,14 @@ describe('the command bar', () => {
           .innerText();
         expect(machine.split('workshop-host').length - 1, 'the host name appears once').toBe(1);
         const panel = await tab.locator('[role="dialog"][aria-label="Command bar"]').boundingBox();
-        // A phone's rows are taller and fill the panel to its cap; a desktop's list is shorter than the cap.
-        if (!variant.phone) expect(panel?.height ?? 9_999, 'the panel is no taller than its rows').toBeLessThan(420);
+        // A phone's rows are taller and fill the panel to its cap; a desktop's list is shorter than the cap. The cap is read
+        // off the panel itself (a fixed 420 went stale as places were added: PRs & CI, Lessons), so "no taller than its rows"
+        // still means "stopped short of its own cap".
+        const cap = await tab
+          .locator('[role="dialog"][aria-label="Command bar"]')
+          .evaluate(node => Number.parseFloat(getComputedStyle(node).maxHeight));
+        expect(Number.isFinite(cap), 'the panel has a pixel cap').toBe(true);
+        if (!variant.phone) expect(panel?.height ?? 9_999, 'the panel is no taller than its rows').toBeLessThan(cap);
         await shotOf(tab, variant, 'command-bar');
       } finally {
         await close();
