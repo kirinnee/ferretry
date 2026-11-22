@@ -668,6 +668,12 @@ button.fy-receipt {
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: var(--focus-offset);
 }
+/* The retry of a failed older page is a 44px target at a phone's width (end B5), as every Try again is. */
+@media (max-width: 640px) {
+  .fy-transcript-history__button {
+    min-height: 44px;
+  }
+}
 /* THE COMPACT COMPOSER: one rounded row — ＋, the growing line, 🎙, send — and one small status line
  * under it. Focus is the row's border stepping up to the strong border, never a heavy accent ring. */
 .fy-composer {

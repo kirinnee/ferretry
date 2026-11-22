@@ -83,15 +83,20 @@ export class GhRunner {
       return refused('A ferret does not choose the account: Ferretry uses the one linked to its project.', {});
     const cwd = plain(request.cwd);
     if (!clean(cwd)) return refused('The folder must be a plain absolute path.', {});
-    if (caller.ferret !== undefined) {
-      const own = await this.deps.workFolder(caller.ferret);
-      if (own === undefined || !inside(plain(own), cwd))
-        return refused("Ferretry's gh runs only for the folder this ferret works in.", {});
-    }
+    const own = caller.ferret === undefined ? undefined : await this.deps.workFolder(caller.ferret);
+    if (caller.ferret !== undefined && (own === undefined || !inside(plain(own), cwd)))
+      return refused("Ferretry's gh runs only for the folder this ferret works in.", {});
 
     const accounts = await this.deps.accounts.list();
     const projects = await this.deps.projects();
-    const found = accountForFolder(cwd, projects, id => accounts.some(account => account.id === id));
+    const exists = (id: string) => accounts.some(account => account.id === id);
+    const found = accountForFolder(cwd, projects, exists);
+    if (own !== undefined) {
+      // A ferret is handed the account of its OWN folder (B4's launch); a project nested below it must not lend it another.
+      const mine = accountForFolder(plain(own), projects, exists);
+      if (mine?.project !== found?.project || mine?.account !== found?.account)
+        return refused("Ferretry's gh runs only for the folder this ferret works in.", {});
+    }
     const chosen = request.account === undefined ? undefined : pick(accounts, request.account);
     if (request.account !== undefined && chosen === undefined)
       return refused('No connected GitHub account has that login or id.', {});

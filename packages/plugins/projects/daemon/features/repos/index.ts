@@ -1,4 +1,5 @@
 import type { KernelPorts, RouteHandler } from '@ferretry/kernel/contract';
+import type { ProjectId } from '../../../contract/index.ts';
 import type { ProjectRegistry } from '../../lib/registry.ts';
 import { kernelBrowser } from '../folders/adapter.ts';
 import { accountsRoute, reposRoute } from './routes.ts';
@@ -12,9 +13,10 @@ export function reposRoutes(
   kernel: Pick<KernelPorts, 'roots' | 'paths' | 'spawn'>,
   registry: ProjectRegistry,
   scan: ScanDeps = { browser: kernelBrowser(kernel) },
+  listChanged?: (id: ProjectId) => void,
 ): Readonly<Record<'GET /v1/projects/:id/repos' | 'PUT /v1/projects/:id/accounts', RouteHandler>> {
   return {
-    'GET /v1/projects/:id/repos': reposRoute(registry, scan),
+    'GET /v1/projects/:id/repos': reposRoute(registry, scan, listChanged),
     'PUT /v1/projects/:id/accounts': accountsRoute(registry),
   };
 }

@@ -1,45 +1,119 @@
-import { belowHome, isAtOrUnder, isPrivateFolder, privateSpellings } from './fence.ts';
+import {
+  belowHome,
+  isAtOrUnder,
+  isDeniedName,
+  isOtherHome,
+  isPrivateBelowHome,
+  isSkippedTree,
+  privateSpellings,
+} from './fence.ts';
 import type { FolderBrowser, FolderVerdict } from './port.ts';
+
+/** A verdict, and whether the sign-in look behind it saw the whole folder (`false`: not ruled out past what was read). */
+interface ChildLook {
+  readonly verdict: Awaited<ReturnType<FolderVerdict>>;
+  readonly complete: boolean;
+}
 
 /** The policy for ONE request: the verdict on a real path, and whether a real path is a private folder (a link to one included). */
 export interface FolderPolicy {
-  /** The full verdict: home or below, not private, and no folder from the home down to this one holds a sign-in file. */
+  /**
+   * The full verdict on a real path, anywhere on the disk: not in a skipped tree (`outside`), not private (`private`: a
+   * private folder by name or by where it REALLY is, another user's home, the macOS `~/Library`), and no folder from the first
+   * below the anchor down to it holds a sign-in file. The anchor is the home for a path inside it and `/` for one outside
+   * (the home itself often holds a sign-in file and is the starting point; `/` is not a place that has one).
+   */
   readonly verdict: FolderVerdict;
+  /**
+   * `verdict`, with what the sign-in look could NOT see said too, over the folder AND every ancestor: `complete: false` is a
+   * folder on the way (or the folder itself) with more names than were read for the spelling-fold look. `verdict` accepts such
+   * a place (width alone never makes one private); a reader that must not open an unproved place (the repository scan and the
+   * explorer's listing) asks this and fails closed. The owner's own home is the anchor and is never looked at, so it is complete.
+   */
+  readonly look: (real: string) => Promise<ChildLook>;
   /**
    * The verdict for a folder directly inside one that `verdict` already accepted: the same judgment, with the ancestors not
    * asked again (they are the parent's, already proved), so a wide folder costs one sign-in look per child, not one per
    * ancestor per child.
    */
   readonly child: FolderVerdict;
-  /** Whether a real path is at or under where any private folder REALLY is. */
+  /**
+   * `child`, with what the sign-in look could NOT see said too: `complete: false` is a folder with more names than were read
+   * for the spelling-fold look, so a differently spelled marker past the bound is not ruled out. `child` itself accepts such
+   * a folder (width alone never makes one private); a reader that must not expose an unproved folder (the repository scan)
+   * asks this and skips it.
+   */
+  readonly childLook: (real: string) => Promise<ChildLook>;
+  /** `verdict`, but a place outside the home is `outside` and the outside-home gate is never asked: what a folder is MADE in. */
+  readonly confined: FolderVerdict;
+  /** Whether a real path is at or under where any private folder REALLY is, or is in another user's home. */
   readonly isPrivateReal: (real: string) => boolean;
+  /** Whether a real path is in a tree a project is never read from (pseudo filesystems, the nix store, …). */
+  readonly isSkippedReal: (real: string) => boolean;
+  /** Asks the outside-home gate, once per request (a no-op without one): called before the disk is touched for a path named outside the home. */
+  readonly enterOutside: () => Promise<void>;
 }
 
 /**
  * The ONE privacy policy every folder reader shares (the explorer and the repository scan): the real path (never the
- * spelling alone) is the home or below it, is not a private folder (by name, and by where each private folder REALLY is:
- * `~/.gnupg` linked to `~/dotfiles/gnupg` makes both private), and no folder from the first below the home down to it holds
- * a sign-in file (the home itself often does and is the starting point). Where each private folder really is is read once.
+ * spelling alone) is not in a skipped tree, is not a private folder (by name, and by where each private folder REALLY is:
+ * `~/.gnupg` linked to `~/dotfiles/gnupg` makes both private) or another user's home, and no folder from the first below the
+ * anchor down to it holds a sign-in file. Where each private folder really is is read once.
+ *
+ * It does not fence the home: a project can be anywhere. `outsideHome` is what a reader that is NOT the owner at the
+ * machine must pass to look at a place outside it (a remote device needs `filesystem.configure`): it is asked once per
+ * request, before anything else is said about a real path outside the home, and a refusal is the error it throws. The
+ * repository scan hands it the same gate for the project folder's RESOLVED place; a reader with no gate has none.
  */
-export async function folderPolicy(browser: FolderBrowser, home: string): Promise<FolderPolicy> {
+export async function folderPolicy(
+  browser: FolderBrowser,
+  home: string,
+  outsideHome?: () => Promise<void>,
+): Promise<FolderPolicy> {
   const roots = await browser.realPaths(privateSpellings(home));
-  const isPrivateReal = (real: string): boolean => roots.some(root => isAtOrUnder(real, root));
-  const judge = async (real: string, signInOf: (below: readonly string[]) => Promise<boolean>) => {
-    const below = belowHome(real, home);
-    if (below === undefined) return 'outside' as const;
-    if (isPrivateFolder(below) || isPrivateReal(real)) return 'private' as const;
-    return (await signInOf(below)) ? ('private' as const) : undefined;
+  const isPrivateReal = (real: string): boolean =>
+    roots.some(root => isAtOrUnder(real, root)) || isOtherHome(real, home);
+  const isSkippedReal = (real: string): boolean => isSkippedTree(real, home);
+  let asked: Promise<void> | undefined;
+  const enterOutside = (): Promise<void> => {
+    if (outsideHome === undefined) return Promise.resolve();
+    asked ??= outsideHome();
+    return asked;
   };
-  const verdict: FolderVerdict = real =>
-    judge(real, async below => {
-      let path = home.replace(/\/+$/, '');
-      for (const segment of below) {
+  const judge = async (
+    real: string,
+    signInOf: (segments: readonly string[], anchor: string) => Promise<boolean | 'partial'>,
+  ): Promise<ChildLook> => {
+    const below = belowHome(real, home);
+    if (below === undefined) await enterOutside();
+    if (isSkippedReal(real)) return { verdict: 'outside', complete: true };
+    if ((below !== undefined && isPrivateBelowHome(below)) || isPrivateReal(real))
+      return { verdict: 'private', complete: true };
+    const segments = below ?? real.split('/').filter(segment => segment !== '');
+    // The shared name list on every real path component (below the home, or from `/` outside it): `/srv/.ssh` is no softer
+    // than `~/.ssh`, and the sign-in marker alone would miss a key store that holds none.
+    if (segments.some(isDeniedName)) return { verdict: 'private', complete: true };
+    const signIn = await signInOf(segments, below === undefined ? '' : home.replace(/\/+$/, ''));
+    return signIn === true
+      ? { verdict: 'private', complete: true }
+      : { verdict: undefined, complete: signIn !== 'partial' };
+  };
+  const look = (real: string): Promise<ChildLook> =>
+    judge(real, async (segments, anchor) => {
+      let path = anchor;
+      let partial = false;
+      for (const segment of segments) {
         path = `${path}/${segment}`;
-        if (await browser.holdsSignIn(path)) return true;
+        const seen = await browser.holdsSignIn(path);
+        if (seen === true) return true;
+        if (seen === 'partial') partial = true;
       }
-      return false;
+      return partial ? 'partial' : false;
     });
-  const child: FolderVerdict = real =>
-    judge(real, async below => below.length > 0 && (await browser.holdsSignIn(real)));
-  return { verdict, child, isPrivateReal };
+  const verdict: FolderVerdict = async real => (await look(real)).verdict;
+  const childLook = (real: string): Promise<ChildLook> =>
+    judge(real, async segments => (segments.length > 0 ? await browser.holdsSignIn(real) : false));
+  const child: FolderVerdict = async real => (await childLook(real)).verdict;
+  const confined: FolderVerdict = async real => (belowHome(real, home) === undefined ? 'outside' : verdict(real));
+  return { verdict, look, child, childLook, confined, isPrivateReal, isSkippedReal, enterOutside };
 }

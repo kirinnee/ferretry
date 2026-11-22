@@ -596,3 +596,64 @@ describe('the demos say what they show', () => {
     }
   });
 });
+
+describe('C59 O5 item 6: the sign-in block sits in the vertical middle of a desktop page', () => {
+  for (const theme of THEMES)
+    it(`the free room above and below the block is the same, desktop only (1280, ${theme}); a phone keeps it at the top`, async () => {
+      const measure = async (viewport: (typeof VIEWPORTS)[number]) => {
+        const { tab, close } = await open(viewport, theme, '&page=sign-in');
+        try {
+          await tab.waitForTimeout(300);
+          return await tab.evaluate(() => {
+            const head = document.querySelector('.fy-spf__head') as HTMLElement;
+            const main = document.querySelector('.fy-spf__main') as HTMLElement;
+            const page = document.querySelector('.fy-spf__page') as HTMLElement;
+            const style = getComputedStyle(page);
+            const gap = Number.parseFloat(style.rowGap);
+            const above = main.getBoundingClientRect().top - head.getBoundingClientRect().bottom - gap;
+            const below =
+              page.getBoundingClientRect().bottom -
+              Number.parseFloat(style.paddingBottom) -
+              main.getBoundingClientRect().bottom;
+            return { above, below };
+          });
+        } finally {
+          await close();
+        }
+      };
+      const desktop = await measure(VIEWPORTS[0]);
+      const phone = await measure(VIEWPORTS[1]);
+      console.log(
+        `O5 sign-in centring ${theme}: desktop above ${String(desktop.above)} below ${String(desktop.below)}; phone above ${String(phone.above)} below ${String(phone.below)}`,
+      );
+      expect(desktop.above).toBeGreaterThan(8);
+      expect(Math.abs(desktop.above - desktop.below)).toBeLessThanOrEqual(2);
+      expect(phone.above).toBeLessThanOrEqual(1);
+    });
+});
+
+describe('audit row: Install is as wide as the command it runs', () => {
+  for (const viewport of VIEWPORTS)
+    for (const theme of THEMES)
+      it(`the Install button and the command share a width (${viewport.name}, ${theme})`, async () => {
+        const { tab, close } = await open(viewport, theme, '&page=installed');
+        try {
+          await tab.locator('[data-install-run]').waitFor({ state: 'visible' });
+          const facts = await tab.evaluate(() => {
+            const w = (selector: string) => (document.querySelector(selector) as HTMLElement).getBoundingClientRect();
+            return {
+              button: { left: w('[data-install-run]').left, w: w('[data-install-run]').width },
+              command: { left: w('[data-install-command]').left, w: w('[data-install-command]').width },
+            };
+          });
+          console.log(
+            `O5 install ${viewport.name} ${theme}: button ${String(facts.button.w)} command ${String(facts.command.w)}`,
+          );
+          expect(Math.abs(facts.button.w - facts.command.w)).toBeLessThanOrEqual(1);
+          expect(Math.abs(facts.button.left - facts.command.left)).toBeLessThanOrEqual(1);
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `install-${viewport.name}-${theme}.png`) });
+        } finally {
+          await close();
+        }
+      });
+});

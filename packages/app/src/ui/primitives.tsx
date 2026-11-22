@@ -12,8 +12,9 @@
  * design language for free — which is exactly why they are not allowed opinions.
  */
 
-import { Children, type ComponentPropsWithRef } from 'react';
+import { Children, type ComponentPropsWithRef, type ReactNode } from 'react';
 import { cn } from './lib/class-names.ts';
+import { Spinner } from './spinner.tsx';
 
 type ButtonVariant = 'primary' | 'ghost' | 'outline' | 'danger';
 type ButtonSize = 'sm' | 'md';
@@ -21,17 +22,65 @@ type ButtonSize = 'sm' | 'md';
 export interface ButtonProps extends ComponentPropsWithRef<'button'> {
   readonly variant?: ButtonVariant;
   readonly size?: ButtonSize;
+  /**
+   * The button is working. The busy mark REPLACES the icon in its own fixed slot and the label is the one that says what
+   * it is doing, so the button is exactly as wide and as tall busy as idle (C59 O5: "the loader makes the button too big").
+   * A busy button is also disabled: it cannot be pressed twice.
+   */
+  readonly busy?: boolean;
+  /** The icon in front of the label: a 16px mark. While `busy` the spinner takes its place. */
+  readonly icon?: ReactNode;
+  /**
+   * What the label says while `busy`. The label that is NOT showing is kept as an invisible, zero-height ghost (CSS `attr()`),
+   * so the button is as wide as the longer of the two and neither shows up twice in the text. Needs a string `children`.
+   */
+  readonly busyLabel?: string;
 }
 
-export function Button({ className, variant = 'outline', size = 'md', ...rest }: ButtonProps) {
+export function Button({
+  className,
+  variant = 'outline',
+  size = 'md',
+  busy,
+  icon,
+  busyLabel,
+  children,
+  disabled,
+  ...rest
+}: ButtonProps) {
+  const rich = busy !== undefined || icon !== undefined || busyLabel !== undefined;
+  const working = busy === true;
+  const ghost =
+    busyLabel === undefined ? undefined : working ? (typeof children === 'string' ? children : undefined) : busyLabel;
   return (
     <button
       // `outline` is the default and needs no data-variant: `.kt-btn`'s own
       // resting style IS the outline variant.
       data-variant={variant === 'outline' ? undefined : variant}
       className={cn('kt-btn', size === 'sm' && 'kt-btn--sm', className)}
+      aria-busy={working ? true : undefined}
+      disabled={disabled === true || working}
       {...rest}
-    />
+    >
+      {rich ? (
+        <>
+          {icon === undefined && !working ? null : (
+            <span className="kt-btn__lead" aria-hidden="true">
+              {working ? <Spinner size={16} /> : icon}
+            </span>
+          )}
+          {busyLabel === undefined ? (
+            children
+          ) : (
+            <span className="kt-btn__label" {...(ghost === undefined ? {} : { 'data-ghost': ghost })}>
+              {working ? busyLabel : children}
+            </span>
+          )}
+        </>
+      ) : (
+        children
+      )}
+    </button>
   );
 }
 

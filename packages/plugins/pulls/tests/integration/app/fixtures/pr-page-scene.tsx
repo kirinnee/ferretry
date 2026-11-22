@@ -1,6 +1,6 @@
 /**
  * The browser entry for the PR page: the REAL `PullPageView` over a scripted client and FAKE data (no real repository,
- * login or account). Cases: `?case=long|merged|draft|paused`. `?pixel=<url>` plants a remote image in the description so
+ * login or account). Cases: `?case=long|merged|draft|paused|hostile|flood`. `?pixel=<url>` plants a remote image in the description so
  * a test can prove the page never requests it. `?theme=<family>-<mode>`.
  */
 import { createRoot } from 'react-dom/client';
@@ -106,7 +106,55 @@ const checks = {
   ],
 };
 
+const MAX_TEXT = 65_536;
+/** Hidden control characters of every kind the page must mark. */
+const CONTROLS = '‪‫‬‭‮⁦⁧⁨⁩​‌‍‎‏﻿';
+/** Control characters in the title and a description that looks empty, and a link whose label lies about its address. */
+const hostile = {
+  kind: 'page',
+  pull: pull({ title: 'Fix ‮gnp.exe​ handoff﻿', body: '﻿' }),
+  comments: [
+    {
+      id: '1',
+      author: { login: 'mallory-fake' },
+      body: `[https://github.com/octo-fake/ferretry-demo/pull/42](https://evil.example/steal?token=1) and ${CONTROLS}`,
+      createdAt: '2026-02-02T09:00:00Z',
+      url: `${URL_BASE}#issuecomment-1`,
+    },
+  ],
+  reviews: [],
+  checks,
+  truncated: false,
+  fromCache: false,
+};
+/** The wire's largest page: 500 comments and 500 reviews, each 65,536 characters of tiny spans and hidden characters. */
+const FLOOD_BODY = '​*a* '.repeat(Math.ceil(MAX_TEXT / 6)).slice(0, MAX_TEXT);
+const flood = {
+  kind: 'page',
+  pull: pull({ body: FLOOD_BODY }),
+  comments: Array.from({ length: 500 }, (_, index) => ({
+    id: String(index + 1),
+    author: { login: 'flood-fake' },
+    body: FLOOD_BODY,
+    createdAt: new Date(Date.UTC(2026, 1, 2, 0, 0, index)).toISOString(),
+    url: `${URL_BASE}#issuecomment-${index + 1}`,
+  })),
+  reviews: Array.from({ length: 500 }, (_, index) => ({
+    id: String(index + 1),
+    author: { login: 'flood-fake' },
+    verdict: 'commented',
+    body: FLOOD_BODY,
+    submittedAt: new Date(Date.UTC(2026, 1, 3, 0, 0, index)).toISOString(),
+    url: `${URL_BASE}#pullrequestreview-${index + 1}`,
+  })),
+  checks,
+  truncated: false,
+  fromCache: false,
+};
+
 const answers: Record<string, unknown> = {
+  hostile,
+  flood,
   long: { kind: 'page', pull: pull({}), comments, reviews, checks, truncated: false, fromCache: false },
   merged: {
     kind: 'page',

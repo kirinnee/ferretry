@@ -27,7 +27,8 @@
   bottom: 0;
   padding-bottom: env(safe-area-inset-bottom, 0px);
   position: sticky;
-  z-index: 1;
+  /* Above a page control that is its own layer (Voice's Install button is z-index 2), so the footer is never drawn over. */
+  z-index: 10;
 }
 /* Next keeps its width while it works (the busy mark would otherwise move Back). */
 .fy-sf-root .fy-spf__button {

@@ -4,6 +4,7 @@ import {
   declaredModelIds,
   EMPTY_IMPORT_RECORD,
   freeName,
+  instructionsCandidates,
   type HostDocumentRead,
   type HostHarnessScan,
   type ImportPlan,
@@ -1117,5 +1118,18 @@ describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
     // Assert — only Claude's own instructions are offered as an update.
     should(again.updates.map(update => update.reference)).deepEqual(['instructions/claude-instructions']);
     should(again.updates[0]?.component.value).deepEqual({ text: 'claude words, edited', harness: 'claude' });
+  });
+});
+
+describe('the digest an instructions candidate is recorded under', () => {
+  it('should be the one form: the scope and the text, with no pointer to a file', () => {
+    // Arrange
+    const claude = { harness: 'claude' as const, instructions: { text: 'claude words', source: '/h/CLAUDE.md' } };
+
+    // Act
+    const [only] = instructionsCandidates([{ ...claude, codexProfiles: [], mcp: [], skills: [] } as never]).candidates;
+
+    // Assert — it reads as its own text and scope, so the same source twice is the same digest.
+    should(only?.digestText).equal('{"harness":"claude"}\nclaude words');
   });
 });

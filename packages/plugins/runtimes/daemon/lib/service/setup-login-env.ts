@@ -54,6 +54,8 @@ function loginEnvSentences(label: string, login: string, outcome: LoginEnvImport
 export async function createLogins(
   catalog: Pick<FleetCatalogServiceDeps, 'credentials' | 'loginChanges'>,
   plan: LoginEnvPlan,
+  /** Called before each login is created: throws once the request has ended, so the next login is never written. */
+  live?: () => void,
 ): Promise<void> {
   const wanted = plan.newLogins ?? [];
   if (wanted.length === 0) return;
@@ -61,19 +63,29 @@ export async function createLogins(
   const have = new Set((await credentials.list()).logins.map(login => String(login.id)));
   for (const login of wanted) {
     if (have.has(login.id)) continue;
+    live?.();
+    const refused = (error: unknown): FleetCatalogRefusal =>
+      new FleetCatalogRefusal(
+        'fleet_change_failed',
+        `Logins could not create the login ${login.id}: ${errorMessage(error)}. Nothing else was changed${plan.secrets.length === 0 ? '' : '; the keys already added to the secret store stay there'}.`,
+      );
+    let staged: Awaited<ReturnType<typeof loginChanges.stage>>;
     try {
-      const view = await loginChanges.stage({
+      staged = await loginChanges.stage({
         kind: 'login.add',
         id: login.id,
         harness: harnessKey(login.harness),
         store: login.store as 'host' | 'ferretry' | 'environment',
       });
-      await loginChanges.apply(view.id);
     } catch (error) {
-      throw new FleetCatalogRefusal(
-        'fleet_change_failed',
-        `Logins could not create the login ${login.id}: ${errorMessage(error)}. Nothing else was changed${plan.secrets.length === 0 ? '' : '; the keys already added to the secret store stay there'}.`,
-      );
+      throw refused(error);
+    }
+    // Staging awaited Logins' door: a request that ended meanwhile never applies the login (the stage stays pending).
+    live?.();
+    try {
+      await loginChanges.apply(staged.id);
+    } catch (error) {
+      throw refused(error);
     }
   }
 }
@@ -82,7 +94,8 @@ export async function createLogins(
  * Adds each imported harness's own `env` to the login this apply selected or created, once the login is in effect (r9 A8).
  * The secrets are already filed (every create-only put above succeeded) or were reused from an earlier import, so `minted` is
  * exactly the keys this apply holds: a variable whose secret was neither is left out. Never throws: what could not be added is said in a sentence, and the
- * import that landed stays landed.
+ * import that landed stays landed. The one exception is the request ending (`caller.live` throws `499`): the next login's
+ * variables are then not written.
  */
 export async function importLoginEnvs(
   port: LoginEnvImportApi | undefined,
@@ -96,6 +109,8 @@ export async function importLoginEnvs(
   const filed = new Set([...plan.secrets.map(secret => secret.name), ...(plan.reused ?? [])]);
   const sentences: string[] = [];
   for (const env of envs) {
+    // The one throw: a request that has ended stops before the next login's variables are written (what landed stays).
+    caller?.live?.();
     const label = HARNESS_DISPLAY_NAMES[env.harness];
     let outcome: LoginEnvImportOutcome;
     try {
@@ -108,11 +123,14 @@ export async function importLoginEnvs(
         ticked: plan.tickedEnv ?? [],
       });
     } catch (error) {
+      caller?.left?.('refused');
       sentences.push(
         `The variables of your ${label} settings were not added to login ${env.login}: ${errorMessage(error)}.`,
       );
       continue;
     }
+    if (outcome.outcome === 'refused') caller?.left?.('refused');
+    else if (outcome.outcome === 'held') caller?.left?.('held');
     sentences.push(...loginEnvSentences(label, env.login, outcome));
   }
   return sentences;

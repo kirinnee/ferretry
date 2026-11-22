@@ -15,13 +15,22 @@ export type TextPart =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'control'; readonly label: string };
 
+/**
+ * Chips drawn for one string. A string of 65,536 control characters would otherwise be 65,536 spans: past this many the
+ * rest are named by ONE chip that counts them (still visible, still never passed on), so the DOM stays bounded.
+ */
+const MAX_CHIPS = 100;
+
 /** `text` cut into the runs between its control characters and the controls themselves; one run when it has none. */
 function textParts(text: string): readonly TextPart[] {
   const parts: TextPart[] = [];
+  const matches = [...text.matchAll(CONTROLS)];
   let from = 0;
-  for (const match of text.matchAll(CONTROLS)) {
+  for (const [position, match] of matches.entries()) {
     if (match.index > from) parts.push({ kind: 'text', text: text.slice(from, match.index) });
-    parts.push({ kind: 'control', label: controlLabel(match[0]) });
+    if (position < MAX_CHIPS) parts.push({ kind: 'control', label: controlLabel(match[0]) });
+    else if (position === MAX_CHIPS)
+      parts.push({ kind: 'control', label: `${String(matches.length - MAX_CHIPS)} more` });
     from = match.index + match[0].length;
   }
   if (from < text.length || parts.length === 0) parts.push({ kind: 'text', text: text.slice(from) });
@@ -34,7 +43,11 @@ function ControlChip({ label }: { readonly label: string }) {
     <span
       className="mx-px rounded-sm bg-warn-bg px-0.5 text-meta text-warn"
       data-diff-control={label}
-      title={`A hidden control character (${label}) is in this text`}
+      title={
+        label.startsWith('U+')
+          ? `A hidden control character (${label}) is in this text`
+          : `${label} hidden control characters are in this text`
+      }
     >
       {`<${label}>`}
     </span>

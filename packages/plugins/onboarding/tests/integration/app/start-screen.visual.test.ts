@@ -2,7 +2,7 @@
  * THE DAEMON-LESS FIRST RUN'S OWN PAGES in a real browser over fake data (`fixtures/start-screen-scene.tsx`), light and dark at
  * 390 and 1280 (r10 O5): the start screen's three cards (not the page wide, one row on a desktop and a stack on a phone, a
  * select animation that plays on a NEW choice), its auto-width Continue, the target question, and the install page with its
- * quiet "Let an agent do it" link and the shared footer. Set `FY_START_SHOTS_DIR` to keep `<viewport>-<theme>-<case>.png`.
+ * commands (and no agent entry point, C59 O7) and the shared footer. Set `FY_START_SHOTS_DIR` to keep `<viewport>-<theme>-<case>.png`.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -175,13 +175,12 @@ describe('the target question', () => {
 
 describe('the install stage', () => {
   for (const variant of VARIANTS) {
-    it(`${variant.name}: the commands, a quiet agent link, and a footer that is not the page wide`, async () => {
-      const { tab, close } = await open(variant, 'install', '[data-onboarding-agent-instead]');
+    it(`${variant.name}: the commands, no agent entry point, and a footer that is not the page wide`, async () => {
+      const { tab, close } = await open(variant, 'install', '[data-onboarding-next]');
       try {
         await noOverflow(tab);
-        const link = await boxOf(tab, '[data-onboarding-agent-instead]');
-        expect(link.height).toBeGreaterThanOrEqual(44);
-        expect(link.width, 'the agent link is not the page wide').toBeLessThan(variant.width * 0.6);
+        expect(await tab.locator('[data-onboarding-agent-link], [data-onboarding-agent-instead]').count()).toBe(0);
+        expect(await tab.locator('text=/let an agent do it/i').count()).toBe(0);
         const next = await boxOf(tab, '[data-onboarding-next]');
         expect(next.height).toBeGreaterThanOrEqual(44);
         expect(next.width, 'Next is not the page wide').toBeLessThan(variant.width / 2);
@@ -200,10 +199,12 @@ describe('the install stage', () => {
 
 describe('the other computer page', () => {
   for (const variant of VARIANTS) {
-    it(`${variant.name}: the link to open there, and the same quiet agent link`, async () => {
-      const { tab, close } = await open(variant, 'elsewhere', '[data-onboarding-agent-instead]');
+    it(`${variant.name}: the link to open there, and no agent entry point`, async () => {
+      const { tab, close } = await open(variant, 'elsewhere', '[data-onboarding-next]');
       try {
         await noOverflow(tab);
+        expect(await tab.locator('[data-onboarding-agent-link], [data-onboarding-agent-instead]').count()).toBe(0);
+        expect(await tab.locator('text=/let an agent do it/i').count()).toBe(0);
         await shot(tab, variant, 'elsewhere');
       } finally {
         await close();
@@ -223,7 +224,8 @@ describe('the Pair journey', () => {
         // G2: "Open the pairing page" is auto width and 44px tall, never the row wide.
         const openPair = await tab.locator('[data-onboarding-open-pair]').boundingBox();
         expect(openPair?.height ?? 0, 'at least 44 px tall').toBeGreaterThanOrEqual(43.5);
-        expect(openPair?.width ?? Infinity, 'not the row wide').toBeLessThan(variant.width * 0.7);
+        // C59 audit: the shared answer row: the column's width on a phone, a 12 rem button at the right end on a desktop.
+        if (!variant.phone) expect(openPair?.width ?? Infinity, 'not the row wide').toBeLessThan(variant.width * 0.7);
         await shot(tab, variant, 'pair');
       } finally {
         await close();
@@ -290,8 +292,11 @@ describe('the get-started pages: footer and body buttons', () => {
             `${page.view}: the footer holds exactly ${page.footer.join(' + ')}`,
           ).toEqual([...page.footer]);
           for (const button of footer) {
-            expect(button.w, `${page.view}: footer ${button.label} is 136 +-1`).toBeGreaterThanOrEqual(135);
-            expect(button.w, `${page.view}: footer ${button.label} is 136 +-1`).toBeLessThanOrEqual(137);
+            // C59 audit: a desktop's buttons are 136 +-1 (the way back at the left end, the way on at the right); a phone's are
+            // equal tracks of the row (at least 136), so a lone Continue is the column's width.
+            expect(button.w, `${page.view}: footer ${button.label} is 136 or more`).toBeGreaterThanOrEqual(135);
+            if (!variant.phone)
+              expect(button.w, `${page.view}: footer ${button.label} is 136 +-1`).toBeLessThanOrEqual(137);
             expect(
               button.h,
               `${page.view}: footer ${button.label} is >= 44 tall and its label does not wrap`,
@@ -300,7 +305,14 @@ describe('the get-started pages: footer and body buttons', () => {
           }
           const [first, second] = footer;
           if (first !== undefined && second !== undefined) {
-            expect(Math.abs(second.x - (first.x + first.w) - 12), `${page.view}: 12 px apart`).toBeLessThanOrEqual(1);
+            if (variant.phone) {
+              expect(Math.abs(second.x - (first.x + first.w) - 12), `${page.view}: 12 px apart`).toBeLessThanOrEqual(1);
+              expect(Math.abs(second.w - first.w), `${page.view}: equal tracks`).toBeLessThanOrEqual(1);
+            } else
+              expect(
+                second.x - (first.x + first.w),
+                `${page.view}: Back at the left end, away from the way on`,
+              ).toBeGreaterThan(40);
             expect(Math.abs(second.y - first.y), `${page.view}: the footer is one line`).toBeLessThanOrEqual(1);
           }
           const body = await tab

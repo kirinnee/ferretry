@@ -184,6 +184,8 @@ export interface ImportRecordEntry {
   readonly left?: readonly string[];
   /** The owner's own items (a skill folder, a Codex profile item) an import created through this component. */
   readonly owned?: readonly string[];
+  /** The config etag each owned file had when an import wrote it, by item name: an update replaces only an item still at it. */
+  readonly etags?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -937,9 +939,7 @@ export function instructionsCandidates(harvests: readonly HarnessHarvest[]): {
       component: { kind: 'instructions', name, value },
       files: [],
       sources,
-      // The digest an earlier import recorded (a `file` pointer plus the text), so a record made before this change
-      // does not read as "changed" for a source that did not move.
-      digestText: `${JSON.stringify({ file: componentFilePath('instructions', name, 'md'), ...(harness === undefined ? {} : { harness }) })}\n${text}`,
+      digestText: `${JSON.stringify(harness === undefined ? {} : { harness })}\n${text}`,
       warnings: [],
     };
   };

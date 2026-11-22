@@ -21,15 +21,17 @@
  *   FY_ONBOARDING_E2E_SHOTS_DIR  keep `<variant>-<nn>-<page>.png` of every page (fake data only)
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
+import { cpus, loadavg } from 'node:os';
 import { join } from 'node:path';
 import type { Page } from 'playwright-core';
-import { LOADING_FADE_MS, LOADING_MIN_MS } from '../../src/ui/loading-gate.ts';
+import { LOADING_DELAY_MS, LOADING_FADE_MS, LOADING_MIN_MS } from '../../src/ui/loading-gate.ts';
 import {
   arrowWalkRings,
   edgeRings,
   NEXT_SPINNER_LOG,
+  type NextSpinnerRun,
   sceneServer,
   sharedChromium,
   walkFocusRings,
@@ -85,9 +87,9 @@ interface Observed {
   /** Every page's counter and segment count, in order (printed with FY_ONBOARDING_E2E_SHOTS_DIR). */
   counters: string[];
   /** r11-1b G6: every step cover that drew its loader in a journey with `latency` ms answers: how long the loader stayed. */
-  covers: { latency: number; variant: string; ms: number; fullMs: number }[];
+  covers: { latency: number; variant: string; ms: number; fullMs: number; gapMs: number }[];
   /** r11-1c C3: every time the Next button's busy spinner was VISIBLE in a journey: how long, and how long fully shown. */
-  nextSpinners: { latency: number; variant: string; ms: number; fullMs: number }[];
+  nextSpinners: { latency: number; variant: string; ms: number; fullMs: number; gapMs: number }[];
 }
 const seen: Observed = {
   nameForms: -1,
@@ -147,7 +149,7 @@ const reach = async (tab: Page, key: string): Promise<void> => {
         return page?.getAttribute('data-flow-page') === wanted && page.hasAttribute('data-ready');
       },
       key,
-      { timeout: 15_000 },
+      { timeout: loadAware(15_000, IDLE_FRAME_MS) },
     );
   } catch {
     throw new Error(`expected the flow on ${key} but it is on ${await keyOf(tab)}`);
@@ -157,7 +159,61 @@ const reach = async (tab: Page, key: string): Promise<void> => {
 };
 
 /** Every Next press: where it was, where it went and how long (page clock) until the target was ready. */
-const moves: { from: string; to: string; ms: number; latency: number }[] = [];
+const moves: { from: string; to: string; ms: number; latency: number; frameMs: number }[] = [];
+/**
+ * LOAD-AWARE TIME BOUNDS (end B5). A fixed bound of N ms is a bound of N ms on an idle machine only: under load 50-70 the same
+ * work takes several times as long and the test flaked red with nothing wrong in the product (a Next press measured 152 ms against
+ * 150 at load 44, while the page's frames still read an idle 16.7 ms). So each bound is stated at idle and scales with the larger of
+ * two measured slow-downs: the page's own median animation-frame interval (measured just before the act) over an idle frame, and the
+ * host's load (the larger of the one-minute average and the runnable count of the last ten seconds) over its core count (twice, see `LOAD_MARGIN`). It is never tighter than the idle bound.
+ */
+const IDLE_FRAME_MS = 1_000 / 60;
+/** The one-minute load average lags and time-slicing costs more than the ratio (a press took 2.6x its idle time at a load ratio of 2.1). */
+const LOAD_MARGIN = 2;
+const frameBaseline = async (tab: Page): Promise<number> =>
+  await tab.evaluate(
+    () =>
+      new Promise<number>(done => {
+        const stamps: number[] = [];
+        const tick = (now: number): void => {
+          stamps.push(now);
+          if (stamps.length < 14) requestAnimationFrame(tick);
+          else {
+            const gaps = stamps
+              .slice(1)
+              .map((stamp, index) => stamp - (stamps[index] as number))
+              .sort((a, b) => a - b);
+            done(gaps[Math.floor(gaps.length / 2)] as number);
+          }
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+/**
+ * The host's runnable-task count NOW (Linux: the fourth field of /proc/loadavg), because the one-minute average lags a burst by
+ * minutes: a run that started at load 13 saw a Next press take 260 ms once other work arrived. Elsewhere the one-minute load stands in.
+ */
+const runnableNow = (): number => {
+  try {
+    return Number(readFileSync('/proc/loadavg', 'utf8').split(' ')[3]?.split('/')[0]);
+  } catch {
+    return loadavg()[0] ?? 0;
+  }
+};
+const recentRunnable: number[] = [];
+const sampler = setInterval(() => {
+  recentRunnable.push(runnableNow());
+  if (recentRunnable.length > 20) recentRunnable.shift();
+}, 500);
+sampler.unref();
+/** The host's slow-down: the larger of its one-minute load and the mean runnable count of the last ten seconds, over its core count. */
+const hostSlowdown = (): number => {
+  const recent =
+    recentRunnable.length === 0 ? 0 : recentRunnable.reduce((sum, count) => sum + count, 0) / recentRunnable.length;
+  return Math.max(loadavg()[0] ?? 0, recent) / cpus().length;
+};
+const loadAware = (idleMs: number, frameMs: number): number =>
+  Math.round(idleMs * Math.max(1, frameMs / IDLE_FRAME_MS, LOAD_MARGIN * hostSlowdown()));
 /** The answer delay of the journey being walked: 0 (the machines answer at once) or the slow run's 100 ms (r11-1b G6). */
 let latencyNow = 0;
 /**
@@ -166,9 +222,38 @@ let latencyNow = 0;
  * and fully shown (opacity 1) for the minimum. The first frame of each is SAMPLED, not announced, so a loaded machine's late
  * frames are given six frames of slack; a blink on base was 50-183 ms, far under either bound.
  */
-const SAMPLE_SLACK_MS = 100;
-const COVER_ON_SCREEN_AT_LEAST_MS = LOADING_FADE_MS + LOADING_MIN_MS - SAMPLE_SLACK_MS;
-const COVER_FULL_AT_LEAST_MS = LOADING_MIN_MS - SAMPLE_SLACK_MS;
+const SAMPLE_SLACK_FRAMES = 6;
+/**
+ * LOAD-INDEPENDENT HOLD BOUNDS (end B5 review). The hold is a page timer and the page samples it from its own animation frames,
+ * so the only thing load can change is how LATE a frame sampled the loader: and the sampler measures that itself (`gapMs`, the
+ * widest gap between two of its frames while the loader was there). The slack is six of those frames (six idle frames = 100 ms,
+ * what the gate always allowed at idle), never more than a quarter of what the code promises. The HOST's load never enters:
+ * widening by it let a 126.5 ms blink and a loader that never reached full opacity pass at load 60 on 32 cores. The floor
+ * (three quarters of each promise: 345 ms on screen, 225 ms fully shown) stays far above the 126.5 ms blink.
+ */
+const SLACK_SHARE = 0.25;
+const slackOf = (gapMs: number, promisedMs: number): number =>
+  Math.min(SAMPLE_SLACK_FRAMES * Math.max(gapMs, IDLE_FRAME_MS), promisedMs * SLACK_SHARE);
+const coverOnScreenAtLeast = (gapMs: number): number =>
+  LOADING_FADE_MS + LOADING_MIN_MS - slackOf(gapMs, LOADING_FADE_MS + LOADING_MIN_MS);
+const coverFullAtLeast = (gapMs: number): number => LOADING_MIN_MS - slackOf(gapMs, LOADING_MIN_MS);
+/** What a held loader got wrong (empty: it stayed for its promise). */
+const holdShortfalls = (held: { ms: number; fullMs: number; gapMs: number }): string[] => [
+  ...(held.ms >= coverOnScreenAtLeast(held.gapMs)
+    ? []
+    : [`on screen ${held.ms} ms, under ${Math.round(coverOnScreenAtLeast(held.gapMs))}`]),
+  ...(held.fullMs >= coverFullAtLeast(held.gapMs)
+    ? []
+    : [`fully shown ${held.fullMs} ms, under ${Math.round(coverFullAtLeast(held.gapMs))}`]),
+];
+/**
+ * The ready-time limit of a move onto a page that was drawn in advance: 150 ms at idle, widened by the page's own frames and by the
+ * host's slow-down (a press measured 152 ms at load 44), but NEVER to or past LOADING_DELAY_MS: a move that was not preloaded waits
+ * out that React hold (300 ms) and then does its work, so it takes at least that long at any load (416 ms at the gate), and a limit
+ * of 563 ms at load 60 on 32 cores accepted it.
+ */
+const moveReadyLimit = (frameMs: number, slowdown: number): number =>
+  Math.min(Math.round(150 * Math.max(1, frameMs / IDLE_FRAME_MS, LOAD_MARGIN * slowdown)), LOADING_DELAY_MS - 1);
 /**
  * Every step-cover loader of a journey, and how long it was ON SCREEN: from the first frame its computed opacity is above 0 to
  * the moment it leaves the document (a frame loop samples the opacity; a MutationObserver stamps the removal). A loader that
@@ -180,20 +265,33 @@ const COVER_LOG = `
   let fullAt = -1;
   let there = false;
   const loader = () => document.querySelector('[data-flow-cover] [data-loading]');
+  let lastFrame = -1;
+  let widestGap = 0;
   const sample = () => {
     const node = loader();
     if (node === null) return;
+    const now = performance.now();
+    widestGap = Math.max(widestGap, now - lastFrame);
+    lastFrame = now;
     const opacity = Number.parseFloat(getComputedStyle(node).opacity);
-    if (shownAt < 0 && opacity > 0) shownAt = performance.now();
-    if (fullAt < 0 && opacity >= 0.99) fullAt = performance.now();
+    if (shownAt < 0 && opacity > 0) shownAt = now;
+    if (fullAt < 0 && opacity >= 0.99) fullAt = now;
     requestAnimationFrame(sample);
   };
   new MutationObserver(() => {
     const now = loader() !== null;
-    if (now && !there) requestAnimationFrame(sample);
+    if (now && !there) {
+      lastFrame = performance.now();
+      widestGap = 0;
+      requestAnimationFrame(sample);
+    }
     if (!now && there) {
       const end = performance.now();
-      window.__covers.push({ ms: shownAt < 0 ? 0 : end - shownAt, fullMs: fullAt < 0 ? 0 : end - fullAt });
+      window.__covers.push({
+        ms: shownAt < 0 ? 0 : end - shownAt,
+        fullMs: fullAt < 0 ? 0 : end - fullAt,
+        gapMs: widestGap,
+      });
       shownAt = -1;
       fullAt = -1;
     }
@@ -358,11 +456,11 @@ const stagePage = async (tab: Page, variant: Variant, key: string): Promise<void
   ).toEqual([]);
   expect(await clippedBoxes(tab, '[data-onboarding]'), `${key}: no box hides what it holds`).toEqual([]);
   const heights = await tab
-    .locator('[data-onboarding-channel], [data-onboarding-actions] button, [data-onboarding-agent-instead]')
+    .locator('[data-onboarding-channel], [data-onboarding-actions] button')
     .evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().height * 10) / 10));
-  // A button that offers something (Let an agent do it, the OS choices) has a border: never a plain text line in a sentence.
+  // A button that offers something (the OS choices) has a border: never a plain text line in a sentence.
   for (const borderless of await tab
-    .locator('[data-onboarding-channel], [data-onboarding-agent-instead]')
+    .locator('[data-onboarding-channel]')
     .evaluateAll(nodes =>
       nodes
         .filter(node => Number.parseFloat(getComputedStyle(node).borderTopWidth) === 0)
@@ -385,6 +483,7 @@ const measureButton = async (tab: Page, variant: Variant, label: string, selecto
 /** Presses Next and waits for `to` (a page key, or `end`). */
 const next = async (tab: Page, to: string): Promise<void> => {
   const from = await keyOf(tab);
+  const frameMs = await frameBaseline(tab);
   // The press is stamped IN the browser (pointerdown, page clock): Playwright's own scroll/stability checks before the click
   // (up to ~100 ms on a phone) are not the app's time.
   await tab.evaluate(() => {
@@ -415,11 +514,11 @@ const next = async (tab: Page, to: string): Promise<void> => {
           : false;
       },
       to,
-      { timeout: 15_000 },
+      { timeout: loadAware(15_000, IDLE_FRAME_MS) },
     )
     .then(handle => handle.jsonValue())
     .catch(() => Number.NaN);
-  moves.push({ from, to, ms: Math.round((readyAt as number) - began), latency: latencyNow });
+  moves.push({ from, to, ms: Math.round((readyAt as number) - began), latency: latencyNow, frameMs });
   await reach(tab, to);
 };
 
@@ -428,6 +527,33 @@ const backAndForth = async (tab: Page, from: string, key: string): Promise<void>
   await tab.locator('[data-step-back]').click();
   await reach(tab, from);
   await next(tab, key);
+};
+
+/** The runtime-import proposals the machine has been sent so far: an import that was asked for makes one, Later makes none. */
+const proposalsOf = async (tab: Page, daemon: string): Promise<number> =>
+  (await daemonOf(tab, daemon)).mutations.filter(mutation => mutation.route === 'POST /v1/runtimes/proposals').length;
+
+/**
+ * Later on an import page: the flow goes on to another page, and the machine was sent NO import proposal (leaving an import
+ * for later imports nothing). Then Back to the page, so the walk below carries on from where it was.
+ */
+const laterThenBack = async (tab: Page, daemon: string, key: string): Promise<void> => {
+  const proposals = await proposalsOf(tab, daemon);
+  await tab.locator('[data-step-later]').click();
+  await tab.waitForFunction(
+    from => document.querySelector('[data-flow-page]')?.getAttribute('data-flow-page') !== from,
+    key,
+    { timeout: 8_000 },
+  );
+  const landed = await keyOf(tab);
+  expect(landed, `${key}: Later left the page`).not.toBe(key);
+  expect(await proposalsOf(tab, daemon), `${key}: Later sent no import proposal`).toBe(proposals);
+  for (let steps = 0; (await keyOf(tab)) !== key && steps < 12; steps += 1) {
+    await tab.locator('[data-step-back]').click();
+    await tab.waitForTimeout(500);
+  }
+  await reach(tab, key);
+  expect(await proposalsOf(tab, daemon), `${key}: coming back sent no import proposal either`).toBe(proposals);
 };
 
 /** The daemon has taken an answer for the step (`<plugin>.<step>`), and the page has not been answered twice. */
@@ -444,11 +570,13 @@ const recorded = async (tab: Page, daemon: string, key: string): Promise<string>
     { timeout: 8_000 },
   );
   const view = await daemonOf(tab, daemon);
+  const final = view.states[key] as string;
+  // A page left with Later and answered by Next afterwards carries both answers (Later, then done); the FINAL answer is never written twice.
   expect(
-    view.answers.filter(answer => answer.plugin === plugin && answer.id === id).length,
-    `${key}: answered on the machine exactly once`,
+    view.answers.filter(answer => answer.plugin === plugin && answer.id === id && answer.state === final).length,
+    `${key}: its final answer reached the machine exactly once`,
   ).toBe(1);
-  return view.states[key] as string;
+  return final;
 };
 
 /** A page that asks something and answers with Next: the daemon holds `done` for it afterwards. */
@@ -626,6 +754,7 @@ const endMascot = async (tab: Page, variant: Variant, key: string): Promise<void
   const rest = await pupilLook(tab);
   expect(rest, `${key}: at rest the pupils look straight ahead`).toEqual({ x: 0, y: 0 });
   const aim = { x: box.x + box.width * 0.9, y: box.y + box.height * 0.5 };
+  const waveBudget = loadAware(400, await frameBaseline(tab));
   const started = Date.now();
   if (phone) await tab.touchscreen.tap(aim.x, aim.y);
   else await tab.mouse.move(aim.x, aim.y);
@@ -641,13 +770,13 @@ const endMascot = async (tab: Page, variant: Variant, key: string): Promise<void
             animation.playState === 'running',
         ) === true,
     undefined,
-    { timeout: 400 },
+    { timeout: waveBudget },
   );
   const waveMs = Date.now() - started;
   expect(
     waveMs,
-    `${key}: the wave runs within 400 ms of the ${phone ? 'tap' : 'hover'} (${waveMs} ms)`,
-  ).toBeLessThanOrEqual(400);
+    `${key}: the wave runs within ${waveBudget} ms (400 ms at idle frames) of the ${phone ? 'tap' : 'hover'} (${waveMs} ms)`,
+  ).toBeLessThanOrEqual(waveBudget);
   const looked = await pupilLook(tab);
   expect(looked.x, `${key}: the pupils moved toward the pointer (x ${looked.x.toFixed(2)})`).toBeGreaterThan(1);
   expect(Math.abs(looked.x), `${key}: and stay inside the eye`).toBeLessThanOrEqual(3.3);
@@ -706,7 +835,7 @@ describe('the first run, end to end', () => {
         await context.addInitScript(COVER_LOG);
         await context.addInitScript(NEXT_SPINNER_LOG);
         const tab = await context.newPage();
-        tab.setDefaultTimeout(20_000);
+        tab.setDefaultTimeout(loadAware(60_000, IDLE_FRAME_MS));
         tab.on('pageerror', error => seen.pageErrors.push(error.message));
         const consoleLines: string[] = [];
         tab.on('console', message => consoleLines.push(message.text()));
@@ -790,21 +919,38 @@ describe('the first run, end to end', () => {
           'Machine name: "Name this machine" is a heading once, not twice',
         ).toBe(1);
         await inspect(tab, variant, 'onboarding.name', { first: true });
-        // The name form's own buttons are the 44px, auto width buttons of the footer (not a 28px row of small ones).
-        for (const button of await tab.locator('[data-flow-page="onboarding.name"] form button').all()) {
-          const box = await button.boundingBox();
-          expect(box?.height ?? 0, 'Machine name: Save name / Not now are 44px tall').toBeGreaterThanOrEqual(43.5);
-          expect(box?.width ?? 0, 'Machine name: its buttons are auto width').toBeLessThan(0.5 * variant.width);
-        }
-        await shot(tab, variant, 'onboarding.name');
-        // Save the name: the machine takes it through the host file, and the flow goes on by itself.
-        await tab.getByLabel('Machine name').last().fill('studio-mac');
-        await tab.getByRole('button', { name: 'Save name' }).last().click();
-        await reach(tab, 'claude-code.import-choice');
+        // C59 follow-up: ONE set of actions. The form draws no Save name / Not now of its own; the footer's Later and Next are the
+        // answers (Next saves the name on screen), so the page never shows two rows of buttons for one step.
         expect(
-          (await daemonOf(tab, A)).writes.some(write => write.route === 'PUT /v1/config/file'),
-          'the name went to the machine',
-        ).toBe(true);
+          await tab.locator('[data-flow-page="onboarding.name"] form button').count(),
+          'Machine name: the form has no buttons of its own',
+        ).toBe(0);
+        expect(await tab.getByRole('button', { name: 'Save name' }).count(), 'no second "Save name"').toBe(0);
+        expect(await tab.locator('[data-step-later]').count(), 'the footer carries Later').toBe(1);
+        expect(await tab.locator('[data-step-next]').count(), 'the footer carries Next').toBe(1);
+        // The card sits on the page's own edges (it was inset 12 px on each side of the title and the progress bar).
+        const edges = await tab.evaluate(() => {
+          const card = (document.querySelector('[data-name-machine]') as HTMLElement).getBoundingClientRect();
+          const title = (document.querySelector('h1') as HTMLElement).getBoundingClientRect();
+          return { cardLeft: card.left, titleLeft: title.left };
+        });
+        expect(
+          Math.abs(edges.cardLeft - edges.titleLeft),
+          'Machine name: the card shares the title’s left edge',
+        ).toBeLessThanOrEqual(1);
+        await shot(tab, variant, 'onboarding.name');
+        // Next saves the name: the machine takes it through the host file, and the flow goes on by itself.
+        // A name that is NOT the one the field starts with (the machine's host name), so the payload proves the typed name was sent.
+        await tab.getByLabel('Machine name').last().fill('harbor-lamp');
+        await tab.locator('[data-step-next]').click();
+        await reach(tab, 'claude-code.import-choice');
+        const nameWrites = (await daemonOf(tab, A)).writes.filter(
+          write => write.route === 'PUT /v1/config/file' && (write.body as { path?: string }).path === 'host.yaml',
+        );
+        expect(
+          nameWrites.map(write => write.body),
+          'the name went to the machine once, as exactly this host.yaml',
+        ).toEqual([{ path: 'host.yaml', text: 'name: "harbor-lamp"\n', etag: 'e1' }]);
         expect(await recorded(tab, A, 'onboarding.name'), 'Machine name recorded').toMatch(/done|skipped/u);
 
         // ── Claude: installed and signed in are never asked; Choose what to import ──────────────────────────────────
@@ -816,6 +962,7 @@ describe('the first run, end to end', () => {
         );
         await shot(tab, variant, 'claude-code.import-choice');
         await backAndForth(tab, 'onboarding.name', 'claude-code.import-choice');
+        await laterThenBack(tab, A, 'claude-code.import-choice');
         // An arrow key moves the FOCUS and writes nothing: no request, no answer, nothing on the device ledger, and the
         // card is not chosen until Enter (or Space, or a click).
         const before = await daemonOf(tab, A);
@@ -938,6 +1085,7 @@ describe('the first run, end to end', () => {
         walked.push('codex.import-choice');
         await inspect(tab, variant, 'codex.import-choice');
         await shot(tab, variant, 'codex.import-choice');
+        await laterThenBack(tab, A, 'codex.import-choice');
         // Everything is already selected: Next is the answer. Count the pages Codex then walks before the Warden.
         await tab.locator('[data-step-next]').click();
         let codexPages = 0;
@@ -1254,9 +1402,12 @@ describe('the first run, end to end', () => {
         for (const step of MACHINE_A.steps.filter(candidate => candidate.side === undefined)) {
           const key = `${step.plugin}.${step.id}`;
           expect(done.states[key], `${key} was answered on the machine`).toBeDefined();
+          // The two import choices were left with Later once and answered by Next afterwards: that is a Later, then ONE final answer.
           expect(
-            done.answers.filter(answer => answer.plugin === step.plugin && answer.id === step.id).length,
-            `${key} was answered exactly once`,
+            done.answers.filter(
+              answer => answer.plugin === step.plugin && answer.id === step.id && answer.state === done.states[key],
+            ).length,
+            `${key} was answered exactly once (its final answer)`,
           ).toBe(1);
         }
         expect(walked, 'the first-run pages, in order').toEqual(
@@ -1344,22 +1495,24 @@ describe('the first run, end to end', () => {
         seen.counters.length = 0;
         seen.unanswered = [...(await daemonOf(tab, A)).unanswered, ...(await daemonOf(tab, B)).unanswered];
         for (const cover of await tab.evaluate(
-          () => (window as unknown as { __covers: { ms: number; fullMs: number }[] }).__covers,
+          () => (window as unknown as { __covers: { ms: number; fullMs: number; gapMs: number }[] }).__covers,
         ))
           seen.covers.push({
             latency,
             variant: variant.name,
             ms: Math.round(cover.ms),
             fullMs: Math.round(cover.fullMs),
+            gapMs: Math.round(cover.gapMs),
           });
         for (const spinner of await tab.evaluate(
-          () => (window as unknown as { __nextSpinner: { ms: number; fullMs: number }[] }).__nextSpinner,
+          () => (window as unknown as { __nextSpinner: NextSpinnerRun[] }).__nextSpinner,
         ))
           seen.nextSpinners.push({
             latency,
             variant: variant.name,
             ms: Math.round(spinner.ms),
             fullMs: Math.round(spinner.fullMs),
+            gapMs: Math.round(spinner.gapMs),
           });
         await context.close();
       });
@@ -1400,7 +1553,7 @@ describe('the End page of a Pair journey', () => {
           { key: 'fy:onboarding:client', daemon: MACHINE_B.id },
         );
         const tab = await context.newPage();
-        tab.setDefaultTimeout(20_000);
+        tab.setDefaultTimeout(loadAware(60_000, IDLE_FRAME_MS));
         const problems: string[] = [];
         tab.on('pageerror', error => problems.push(error.message));
         try {
@@ -1480,8 +1633,36 @@ describe('the gaps the gate found, now closed', () => {
     for (const target of ['onboarding.appearance', 'layouts.layout']) {
       const onto = immediate.filter(move => move.to === target);
       expect(onto.length, `the run moved onto ${target}`).toBeGreaterThan(0);
-      for (const move of onto) expect(move.ms, `${move.from} -> ${target}: ms from Next to ready`).toBeLessThan(150);
+      for (const move of onto)
+        expect(
+          move.ms,
+          `${move.from} -> ${target}: ms from Next to ready (frames ${move.frameMs.toFixed(1)} ms)`,
+        ).toBeLessThan(moveReadyLimit(move.frameMs, hostSlowdown()));
     }
+  });
+  // FORCED REGRESSIONS (end B5 review). The load-aware budget is judged at a SIMULATED host of load 60 on 32 cores (slowdown 1.875,
+  // the target the gate runs at), with idle frames: the two regressions the gate documents must still be red, the real code green.
+  describe('at a simulated load-60 / 32-core host the load-aware budget still catches its regressions', () => {
+    const SIMULATED_SLOWDOWN = 60 / 32;
+    it('a loader removed early (126.5 ms on screen, never fully opaque) is red; the real hold (460 / 300 ms) is green', () => {
+      expect(
+        holdShortfalls({ ms: 126.5, fullMs: 0, gapMs: IDLE_FRAME_MS }),
+        'the premature removal measured at the gate',
+      ).toHaveLength(2);
+      // the same blink with the late frames a loaded host shows (6x idle) is still red, and so is the load-60 minima 85 / -75
+      expect(holdShortfalls({ ms: 126.5, fullMs: 0, gapMs: IDLE_FRAME_MS * 6 })).toHaveLength(2);
+      expect(holdShortfalls({ ms: 85, fullMs: -75, gapMs: IDLE_FRAME_MS * 6 })).toHaveLength(2);
+      expect(holdShortfalls({ ms: 460, fullMs: 300, gapMs: IDLE_FRAME_MS })).toEqual([]);
+      expect(holdShortfalls({ ms: 380, fullMs: 250, gapMs: IDLE_FRAME_MS * 6 })).toEqual([]);
+    });
+    it('a missed preload (416 ms from Next to ready) is red; a preloaded move (140 ms) is green', () => {
+      expect(416, 'the Lessons move on base').toBeGreaterThanOrEqual(moveReadyLimit(IDLE_FRAME_MS, SIMULATED_SLOWDOWN));
+      expect(140).toBeLessThan(moveReadyLimit(IDLE_FRAME_MS, SIMULATED_SLOWDOWN));
+      // the limit never reaches the 300 ms hold, whatever the load
+      expect(moveReadyLimit(IDLE_FRAME_MS * 10, 10)).toBeLessThan(LOADING_DELAY_MS);
+      // the idle bound is the owner's 150 ms
+      expect(moveReadyLimit(IDLE_FRAME_MS, 0)).toBe(150);
+    });
   });
   // The same journey with every machine answer 100 ms late: a page whose reads add up past 300 ms puts up the cover's loader, and
   // that loader must then stay for its minimum (a cover that blinked for 50-183 ms eight times on base).
@@ -1493,14 +1674,8 @@ describe('the gaps the gate found, now closed', () => {
     expect(slow.length, 'the slow journey covered at least one page (otherwise this proves nothing)').toBeGreaterThan(
       0,
     );
-    for (const cover of seen.covers) {
-      expect(cover.ms, `a cover's loader was on screen ${cover.ms} ms`).toBeGreaterThanOrEqual(
-        COVER_ON_SCREEN_AT_LEAST_MS,
-      );
-      expect(cover.fullMs, `a cover's loader was fully shown ${cover.fullMs} ms`).toBeGreaterThanOrEqual(
-        COVER_FULL_AT_LEAST_MS,
-      );
-    }
+    for (const cover of seen.covers)
+      expect(holdShortfalls(cover), `a cover's loader (frames up to ${cover.gapMs} ms apart)`).toEqual([]);
   });
   // r11-1c C3 (owner line 4, the gate's one literal miss): the Next button's own busy spinner is a loader for a short step, so it waits
   // the same 300 ms as a page loader and, once shown, stays for its minimum. Base drew it at once: 15-38 ms at 1 ms answers.
@@ -1516,15 +1691,11 @@ describe('the gaps the gate found, now closed', () => {
       );
     for (const latency of [0, 1])
       expect(runs(latency), `answers ${latency} ms late: the Next spinner is never visible`).toEqual([]);
-    for (const spinner of seen.nextSpinners) {
+    for (const spinner of seen.nextSpinners)
       expect(
-        spinner.ms,
-        `the Next spinner was on screen ${spinner.ms} ms (answers ${spinner.latency} ms late)`,
-      ).toBeGreaterThanOrEqual(COVER_ON_SCREEN_AT_LEAST_MS);
-      expect(spinner.fullMs, `the Next spinner was fully shown ${spinner.fullMs} ms`).toBeGreaterThanOrEqual(
-        COVER_FULL_AT_LEAST_MS,
-      );
-    }
+        holdShortfalls(spinner),
+        `the Next spinner (answers ${spinner.latency} ms late, frames up to ${spinner.gapMs} ms apart)`,
+      ).toEqual([]);
   });
   it('no page threw', () => {
     expect(seen.pageErrors).toEqual([]);

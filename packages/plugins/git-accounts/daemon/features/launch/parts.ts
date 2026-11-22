@@ -3,7 +3,7 @@ import type { LaunchPart, LaunchPartSource } from '@ferretry/core-ferrets/contra
 import type { ProjectInfo } from '@ferretry/plugin-projects/contract';
 import type { GitAccount, GitAccountId } from '../../../contract/index.ts';
 import { accountForFolder } from '../../lib/account-for-folder.ts';
-import { type AccountKit, gitEnvironment } from './environment.ts';
+import { type AccountKit, gitEnvironment, noIdentityEnvironment } from './environment.ts';
 
 const GIT_ACCOUNTS_PLUGIN = 'git-accounts';
 
@@ -15,10 +15,14 @@ export interface AccountLaunchDeps {
   kit(account: GitAccountId): Promise<AccountKit | undefined>;
 }
 
+const KEY_UNAVAILABLE =
+  "The Git account key for this project is unavailable: Ferretry could not start it. `git push` over ssh here is given no identity at all (not this machine's own), so it will fail, and commits here are not signed as the GitHub account linked to this project. Do not push; tell the person to open the Git accounts page and try again.";
+
 /**
  * Only a folder inside a project that is linked to an account that exists, and only an account with a key Ferretry
- * made, is given anything: elsewhere the launch is exactly what it was. A source that cannot answer is skipped (the
- * ferret starts, without the account), because it is an addition and never a reason to refuse a start.
+ * made, is given anything: elsewhere the launch is exactly what it was. A key that cannot be started does not refuse the
+ * start (this is an addition): the ferret starts with a one-sentence instruction that its account key is unavailable.
+ * A source that cannot answer at all is skipped.
  */
 export function accountLaunchParts(deps: AccountLaunchDeps): LaunchPartSource {
   return {
@@ -29,7 +33,20 @@ export function accountLaunchParts(deps: AccountLaunchDeps): LaunchPartSource {
       const found = accountForFolder(spec.folder, projects, id => accounts.some(account => account.id === id));
       const account = accounts.find(each => each.id === found?.account);
       if (account === undefined) return [];
-      const kit = await deps.kit(account.id);
+      let kit: AccountKit | undefined;
+      try {
+        kit = await deps.kit(account.id);
+      } catch {
+        // Without a word the pane would push with the machine's own ssh identity: say so, never why (no error text),
+        // and give git no identity to fall back to.
+        const none = noIdentityEnvironment(account);
+        return [
+          { kind: 'instruction', id: 'git-accounts-key-unavailable', text: KEY_UNAVAILABLE },
+          ...(Object.keys(none).length === 0
+            ? []
+            : [{ kind: 'pane-env' as const, plugin: GIT_ACCOUNTS_PLUGIN, env: none }]),
+        ];
+      }
       if (kit === undefined || (!kit.auth && !kit.signing)) return [];
       return [{ kind: 'pane-env', plugin: GIT_ACCOUNTS_PLUGIN, env: gitEnvironment(account, kit) }];
     },

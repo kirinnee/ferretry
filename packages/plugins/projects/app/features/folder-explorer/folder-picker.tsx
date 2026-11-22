@@ -22,9 +22,19 @@ export interface FolderPickerProps {
   /** Whether a folder read is pending (the listing on screen is then the PREVIOUS folder): a stepper locks Next on it. */
   readonly onBusyChange?: (busy: boolean) => void;
   readonly chooseLabel?: string;
+  /** Say it when the open folder is a broad root (the disk, a home); on unless the caller only picks a place to put something. */
+  readonly warnBroad?: boolean;
 }
 
-export function FolderPicker({ client, startAt, onChoose, onOpened, onBusyChange, chooseLabel }: FolderPickerProps) {
+export function FolderPicker({
+  client,
+  startAt,
+  onChoose,
+  onOpened,
+  onBusyChange,
+  chooseLabel,
+  warnBroad,
+}: FolderPickerProps) {
   const [path, setPath] = useState<string | undefined>(startAt);
   const [showHidden, setShowHidden] = useState(false);
   const state = useFolderListing(client, path, showHidden);
@@ -52,6 +62,7 @@ export function FolderPicker({ client, startAt, onChoose, onOpened, onBusyChange
       onOpen={setPath}
       {...(onChoose === undefined ? {} : { onChoose })}
       {...(chooseLabel === undefined ? {} : { chooseLabel })}
+      {...(warnBroad === undefined ? {} : { warnBroad })}
       onMakeFolder={async name => {
         if (state.listing === null) return 'The folder list has not been read yet.';
         try {

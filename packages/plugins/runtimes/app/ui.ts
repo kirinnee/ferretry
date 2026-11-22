@@ -1,5 +1,6 @@
 /** Shared browser primitives come from the app shell. */
 export {
+  ActionRow,
   Badge,
   BottomSheet,
   Button,

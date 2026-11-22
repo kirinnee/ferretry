@@ -413,8 +413,7 @@ around either. The agent hands the person the command instead:
 - **Either**: press **Update** in the app.
 
 `fy setup` and `fy setup --check --json` report an available update (`update.available`,
-`update.command`) but never apply one: an update restarts the daemon, which is its own decision. The
-[Get started](https://ferretry.pages.dev/get-started) prompt tells the agent all of this.
+`update.command`) but never apply one: an update restarts the daemon, which is its own decision.
 
 ## The app
 

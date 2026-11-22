@@ -194,6 +194,33 @@ describe('installed', () => {
     expect(container.querySelector('[data-install-command]')?.textContent).toBe('brew install codex');
     expect(container.querySelector('[data-install-recheck]')).not.toBeNull();
   });
+
+  test('"Check again" asks the daemon for a fresh scan (past its lookup cache); opening the page does not', async () => {
+    const harness = stepHarness();
+    const manual = {
+      ...SCAN_MISSING,
+      tools: [
+        {
+          harness: 'codex',
+          label: 'Codex',
+          installed: false,
+          install: { kind: 'no-package-manager', reason: 'No npm here.', manualCommand: 'brew install codex' },
+        },
+      ],
+    };
+    const { container, calls } = await mount('installed', harness, route =>
+      route === 'GET /v1/codex/update' ? ABSENT_VIEW : manual,
+    );
+    const scanQueries = () =>
+      calls
+        .filter(call => call.route === 'GET /v1/runtimes/setup/scan')
+        .map(call => (call.options as { query?: unknown } | undefined)?.query);
+    expect(scanQueries()).toEqual([undefined]);
+
+    await press(container, '[data-install-recheck]');
+
+    expect(scanQueries().at(-1)).toEqual({ fresh: '1' });
+  });
 });
 
 describe('sign-in', () => {

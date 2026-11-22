@@ -28,15 +28,19 @@ const folders = (...skills: string[]): ImportedSkillFile[] =>
 
 function owner(answer?: (name: string, edit: unknown) => ConfigWriteOutcome, failInstall?: string) {
   const held = new Map<string, SkillsItem>();
+  // The file's version moves when the person edits it (`edit()`): the etag is `etag-<name>`, then `etag-<name>-<n>`.
+  let revision = 0;
+  const etagOf = (name: string): string => `etag-${name}${revision === 0 ? '' : `-${String(revision)}`}`;
+  let whileInstalling: () => void = () => undefined;
   const calls: { name: string | undefined; ifMatch: string | undefined }[] = [];
   const config = {
-    etag: async (_def: unknown, name?: string) => (name !== undefined && held.has(name) ? `etag-${name}` : 'absent'),
+    etag: async (_def: unknown, name?: string) => (name !== undefined && held.has(name) ? etagOf(name) : 'absent'),
     write: async (def: unknown, name: string | undefined, edit: unknown, options?: { ifMatch?: string }) => {
       calls.push({ name, ifMatch: options?.ifMatch });
       expect(def).toBe(SKILLS_CONFIG);
       if (answer !== undefined && name !== undefined) return answer(name, edit);
       if (name === undefined || (options?.ifMatch === 'absent' && held.has(name))) return { kind: 'conflict' as const };
-      if (options?.ifMatch !== undefined && options.ifMatch !== 'absent' && options.ifMatch !== `etag-${name}`)
+      if (options?.ifMatch !== undefined && options.ifMatch !== 'absent' && options.ifMatch !== etagOf(name))
         return { kind: 'conflict' as const };
       const parsed = SkillsItemSchema.safeParse(JSON.parse(edit as string));
       if (!parsed.success)
@@ -52,11 +56,21 @@ function owner(answer?: (name: string, edit: unknown) => ConfigWriteOutcome, fai
   // A fake of Skills' installed store: it keeps what `install` was given and refuses what the real one refuses to.
   const installed = new Map<string, readonly { path: string; content: string }[]>();
   const removed: string[] = [];
+  // What the last import wrote into each skill folder (the real store keeps a digest of it).
+  const stamped = new Map<string, readonly { path: string; content: string }[]>();
   const store = {
+    unchangedSinceImport: async (skill: string) =>
+      JSON.stringify(installed.get(skill)) === JSON.stringify(stamped.get(skill)),
     holds: async (skill: string) => installed.has(skill),
-    install: async (skill: string, files: readonly { path: string; content: string }[]) => {
+    install: async (
+      skill: string,
+      files: readonly { path: string; content: string }[],
+      options?: { createOnly?: boolean; stamp?: boolean },
+    ) => {
       if (failInstall === skill) throw new InstalledSkillRefused('the store said no');
       installed.set(skill, files);
+      if (options?.stamp === true) stamped.set(skill, files);
+      whileInstalling();
     },
     uninstall: async (skill: string) => {
       removed.push(skill);
@@ -65,11 +79,28 @@ function owner(answer?: (name: string, edit: unknown) => ConfigWriteOutcome, fai
   };
   const put = skillsImportPut({
     has: name => held.has(name),
+    etag: async name => (held.has(name) ? etagOf(name) : 'absent'),
     create: createSkillsItem(config),
     replace: replaceSkillsItem(config),
     store,
   });
-  return { held, calls, put, installed, removed, source: skillsComponentSource(() => held) };
+  return {
+    held,
+    calls,
+    put,
+    installed,
+    removed,
+    stamped,
+    source: skillsComponentSource(() => held),
+    /** The person edits the selection file. */
+    edit: () => {
+      revision += 1;
+    },
+    /** Runs while the folders are being written (after the preflight, before the selection is written). */
+    during: (action: () => void) => {
+      whileInstalling = action;
+    },
+  };
 }
 
 describe('skills host import: put', () => {
@@ -80,6 +111,7 @@ describe('skills host import: put', () => {
     expect(await put('imported', text(document), folders('pdf', 'review.v2'))).toEqual({
       ok: true,
       created: ['pdf', 'review.v2'],
+      etags: { imported: 'e1' },
     });
 
     expect(calls).toEqual([{ name: 'imported', ifMatch: 'absent' }]);
@@ -95,9 +127,10 @@ describe('skills host import: put', () => {
     const answered = await put('mine', text({ items: ['one', 'two'], harness: 'claude-code' }), folders('one', 'two'), {
       replace: true,
       owned: ['one'],
+      etags: { mine: 'etag-mine' },
     });
 
-    expect(answered).toEqual({ ok: true, created: ['two'] });
+    expect(answered).toEqual({ ok: true, created: ['two'], etags: { mine: 'e1' } });
     expect(calls).toEqual([{ name: 'mine', ifMatch: 'etag-mine' }]);
     expect(held.get('mine')?.items).toEqual(['one', 'two']);
     expect([...installed.keys()].toSorted()).toEqual(['one', 'two']);
@@ -106,17 +139,19 @@ describe('skills host import: put', () => {
   test('an update rewrites the files of a skill an import installed, and leaves one it did not install alone', async () => {
     const { put, installed } = owner();
     const first = await put('mine', text({ items: ['one'] }), folders('one'));
-    expect(first).toEqual({ ok: true, created: ['one'] });
+    expect(first).toEqual({ ok: true, created: ['one'], etags: { mine: 'e1' } });
     installed.set('theirs', [{ path: 'SKILL.md', content: 'the person made this' }]);
     const changed = [{ path: 'one/SKILL.md', content: '---\nname: one\n---\nNEW TEXT\n' }, ...folders('theirs')];
 
     const answered = await put('mine', text({ items: ['one', 'theirs'] }), changed, {
       replace: true,
       owned: ['one'],
+      etags: { mine: 'etag-mine' },
     });
 
     expect(answered).toEqual({
       ok: true,
+      etags: { mine: 'e1' },
       warnings: ['"theirs" is already installed here and was not brought in by an import, so it was left as it is'],
     });
     expect(installed.get('one')).toEqual([{ path: 'SKILL.md', content: '---\nname: one\n---\nNEW TEXT\n' }]);
@@ -127,7 +162,12 @@ describe('skills host import: put', () => {
     const { put, held } = owner();
     await put('mine', text({ items: ['one'] }), folders('one'));
 
-    expect(await put('mine', text({ items: ['one', 'two'] }), folders('one'), { replace: true })).toEqual({
+    expect(
+      await put('mine', text({ items: ['one', 'two'] }), folders('one'), {
+        replace: true,
+        etags: { mine: 'etag-mine' },
+      }),
+    ).toEqual({
       ok: false,
       reason: 'the files of the skill "two" were not handed over, so it was not imported',
     });
@@ -162,7 +202,61 @@ describe('skills host import: put', () => {
       ok: true,
       held: true,
       created: ['one'],
+      etags: { held: 'e' },
     });
+  });
+
+  test('an update leaves a selection made again by hand under the same name as it is', async () => {
+    const { put, held } = owner();
+    await put('mine', text({ items: ['one'] }), folders('one'));
+
+    const answered = await put('mine', text({ items: ['one', 'two'] }), folders('one', 'two'), {
+      replace: true,
+      owned: ['one'],
+      etags: { mine: 'the-etag-of-the-file-the-import-wrote' },
+    });
+
+    expect(answered.ok).toBe(false);
+    expect(held.get('mine')?.items).toEqual(['one']);
+  });
+
+  test('an update is pinned to the etag it verified: an edit of the selection during the folder work is a conflict, never an overwrite', async () => {
+    const { put, held, edit, during } = owner();
+    await put('mine', text({ items: ['one'] }), folders('one'));
+    // The person edits the selection file after the owner has checked it and before it writes.
+    during(edit);
+
+    const answered = await put('mine', text({ items: ['one', 'two'] }), folders('one', 'two'), {
+      replace: true,
+      owned: ['one'],
+      etags: { mine: 'etag-mine' },
+    });
+
+    expect(answered).toEqual({ ok: false, reason: expect.stringContaining('appeared meanwhile') });
+    expect(held.get('mine')?.items).toEqual(['one']);
+  });
+
+  test('an update leaves a folder an import wrote but the person changed since, and rewrites one still as it was left', async () => {
+    const { put, installed } = owner();
+    await put('mine', text({ items: ['one', 'two'] }), folders('one', 'two'));
+    installed.set('one', [{ path: 'SKILL.md', content: 'edited by the person' }]);
+    const changed = [
+      { path: 'one/SKILL.md', content: 'NEW ONE' },
+      { path: 'two/SKILL.md', content: 'NEW TWO' },
+    ];
+
+    const answered = await put('mine', text({ items: ['one', 'two'] }), changed, {
+      replace: true,
+      owned: ['one', 'two'],
+      etags: { mine: 'etag-mine' },
+    });
+
+    expect(answered).toMatchObject({
+      ok: true,
+      warnings: [expect.stringContaining('"one" was changed after the import wrote it, so it was left as it is')],
+    });
+    expect(installed.get('one')).toEqual([{ path: 'SKILL.md', content: 'edited by the person' }]);
+    expect(installed.get('two')).toEqual([{ path: 'SKILL.md', content: 'NEW TWO' }]);
   });
 
   test('an item name that is not a plain safe name is refused before anything is written', async () => {
