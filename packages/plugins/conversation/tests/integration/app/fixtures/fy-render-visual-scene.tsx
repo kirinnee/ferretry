@@ -23,6 +23,7 @@
  * `parseFyRender` is the real grammar, so a fixture that would not parse in
  * production fails here too.
  */
+import { swatchAttributes } from '@ferretry/app';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { FyRenderBlock } from '../../../../app/render/fy-render-block.tsx';
@@ -35,9 +36,23 @@ const which = new URLSearchParams(location.search).get('case') ?? 'mermaid';
 const source = FY_RENDER_VISUAL_CASES[which];
 if (source === undefined) throw new Error(`no such fy-render fixture: ${which}`);
 
-// `?theme=studio-light` flips the page the way the app's theme switch does, before the block mounts.
-const theme = new URLSearchParams(location.search).get('theme');
-if (theme !== null) document.documentElement.setAttribute('data-theme', theme);
+// The look the app reads is three root attributes (`data-style`, `data-palette`, `data-mode`); the page also keeps
+// `data-theme="<palette>-<mode>"` for the watchers that still read it. `?theme=studio-light` sets them before the block
+// mounts, and `window.fySetLook('mission-dark')` is how a test switches them afterwards, the way the real shell does.
+const setLook = (name: string): void => {
+  const root = document.documentElement;
+  const { 'data-style': style, 'data-palette': palette, 'data-mode': mode } = swatchAttributes(name);
+  root.setAttribute('data-style', style);
+  root.setAttribute('data-palette', palette);
+  root.setAttribute('data-mode', mode);
+  root.setAttribute('data-theme', name);
+};
+Object.assign(window, { fySetLook: setLook });
+setLook(
+  new URLSearchParams(location.search).get('theme') ??
+    document.documentElement.getAttribute('data-theme') ??
+    'studio-dark',
+);
 
 const parsed = parseFyRender(source);
 if (!parsed.ok) throw new Error(`fixture did not parse: ${parsed.reason}`);

@@ -102,13 +102,14 @@ describe('one Vite build of the renderer entry', () => {
 
   const count = (pattern: RegExp): number => chunks.filter(c => pattern.test(c.code)).length;
 
-  it('holds exactly one chart.js (ours) although Durian installs its own 4.5.1', () => {
-    // Durian pins chart.js 4.5.1 and bun installs that copy beside it…
+  it('installs one chart.js (ours, by the root override) and holds exactly one in the bundle', () => {
+    // Durian pins chart.js 4.5.1; the root `overrides` entry makes bun install OURS for it too, so there is no second
+    // copy on disk to bundle by mistake or to audit…
     const own = JSON.parse(readFileSync(join(dirname(installed), 'chart.js/package.json'), 'utf8')) as {
       version: string;
     };
-    expect(own.version).toBe('4.5.1');
-    // …and the bundle never reads it: every chart.js banner is ours, all in ONE (lazy) chunk.
+    expect(own.version).toBe(ours['chart.js'] as string);
+    // …and every chart.js banner in the bundle is ours, all in ONE (lazy) chunk.
     const banners = chunks.flatMap(c => [...c.code.matchAll(/Chart\.js v(\d+\.\d+\.\d+)/gu)].map(m => m[1]));
     expect([...new Set(banners)]).toEqual([ours['chart.js']]);
     expect(count(/Chart\.js v/u)).toBe(1);

@@ -10,9 +10,11 @@ import type { Plugin } from 'vite';
  *
  * Which chunks: the dynamic entries of the app page that come from a plugin or core app half, plus the shared chunks
  * those import and the page does not already load. NOT the heavy optional ones (on-device speech, diagram and map
- * libraries, workers): those stay on demand, over `HEAVY`. A bundle with no such chunk (a dev server) gets no links.
+ * libraries, workers, and the animation ENGINE and its parts: Durian's 2D stage, 36 KB gzipped, which only a message with
+ * an `animation` fence draws): those stay on demand, over `HEAVY`. A bundle with no such chunk (a dev server) gets no links.
  */
-const HEAVY = /(voice|vosk|onnx|mermaid|lottie|leaflet|worker|fy-render|speech|model)/iu;
+const HEAVY =
+  /(voice|vosk|onnx|mermaid|lottie|leaflet|worker|fy-render|speech|model|animation-(?:stage|engine|part))/iu;
 /** Past this a chunk is not "a view"; it is a library that happens to be split. */
 const MAX_CHUNK_BYTES = 400_000;
 

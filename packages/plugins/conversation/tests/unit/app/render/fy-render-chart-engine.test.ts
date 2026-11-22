@@ -92,6 +92,30 @@ const FRAMES = [
 ].join('\n');
 
 describe('mountChart', () => {
+  test('should draw a repaint whole but still animate what the reader does next', () => {
+    // Arrange
+    const reading = readChart(FRAMES);
+    if (!reading.ok) throw new Error(reading.reason);
+    const canvas = document.createElement('canvas');
+    document.body.appendChild(canvas);
+    canvases.push(canvas);
+
+    // Act
+    const handle = engine.mountChart(canvas, {
+      frame: 0,
+      hidden: new Set(),
+      interaction: { animate: true, coarse: false, entrance: false, fullscreen: false },
+      spec: reading.spec,
+      theme,
+    });
+    const chart = chartJs.Chart.getChart(canvas);
+
+    // Assert — the first draw ran with no animation (it is on the canvas at once), and a frame step animates again.
+    should(chart?.options.animation).eql({ duration: 420, easing: 'easeOutCubic' });
+    should(chart?.config.options?.animation).not.be.false();
+    handle.destroy();
+  });
+
   test('should mount the chart with the series it was told to hide already hidden', () => {
     // Act
     const { chart } = mount(FRAMES, new Set([1]));

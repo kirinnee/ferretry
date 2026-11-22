@@ -1,6 +1,7 @@
 import type { AnimationBlock } from 'durian-hypermedia';
-import { type ReactElement, useEffect, useRef, useState } from 'react';
+import { type ReactElement, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { animationStage } from './animation-engine.ts';
+import { watchStageColours } from './stage-colours.ts';
 
 /**
  * AN ANIMATION, WITH THE ONE GRAPHICS FAILURE DURIAN DOES NOT HANDLE. Durian's wrapper falls back to the flat (2D) stage
@@ -17,6 +18,12 @@ export function GuardedAnimation({ block }: { readonly block: AnimationBlock }):
   const [lost, setLost] = useState(false);
   // The stage is the lazy engine's: a block exists only once the parser had the engine, so it is here whenever this draws.
   const Stage = animationStage();
+  // The 3D stage's mixed colours, resolved to plain rgb for three.js (`stage-colours.ts`). A layout effect: it is done before
+  // the stage's own module (a lazy chunk) is asked to draw, and so before it reads its colours the first time.
+  useLayoutEffect(() => {
+    const element = box.current;
+    return element === null ? undefined : watchStageColours(element);
+  }, []);
   useEffect(() => {
     const element = box.current;
     if (element === null) return;

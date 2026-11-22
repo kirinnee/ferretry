@@ -774,6 +774,14 @@ const resolvedToken = async (page: Page, token: string): Promise<string> =>
     return `#${[r, g, b].map(value => value.toString(16).padStart(2, '0')).join('')}`;
   }, token);
 
+/**
+ * Switches the scene's look the way the real shell does: the three root axes (`data-style`, `data-palette`, `data-mode`),
+ * through the scene's own `fySetLook` (`fixtures/fy-render-visual-scene.tsx`). `<palette>-<light|dark>`.
+ */
+const setLook = async (page: Page, name: string): Promise<void> => {
+  await page.evaluate(look => (window as unknown as { fySetLook: (name: string) => void }).fySetLook(look), name);
+};
+
 /** How many of the chart canvas's pixels are exactly this colour: proof the theme is what painted it. */
 const pixelsOf = async (page: Page, hex: string): Promise<number> =>
   await page.evaluate(colour => {
@@ -1001,7 +1009,7 @@ describe('fy-render component evidence — Chart', () => {
       const before = await page.locator('[data-fy-render-chart]').getAttribute('data-fy-render-chart-palette');
 
       // Act — a different family in the same mode: "dark" alone would not notice.
-      await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'mission-dark'));
+      await setLook(page, 'mission-dark');
       await page.waitForFunction(
         previous =>
           document.querySelector('[data-fy-render-chart]')?.getAttribute('data-fy-render-chart-palette') !== previous,
@@ -1039,6 +1047,67 @@ describe('fy-render component evidence — Chart', () => {
 
       // Assert
       should(await pixelsOf(page, await resolvedToken(page, 'viz-1'))).be.above(200);
+    } finally {
+      await scene.close();
+    }
+  }, 120_000);
+
+  test('should repaint whole in the first frames after a switch, never blank and never growing back in', async () => {
+    // Arrange
+    const scene = await openScene('chart-bar', VIEWPORTS[1], { themeName: 'studio-dark' });
+    const { page } = scene;
+
+    try {
+      await waitForChart(page, true);
+
+      // Act — one switch of the palette, then one reading of the canvas per animation frame. A chart that is
+      // remounted with its entrance animation is blank for its first frames and grows back over ~420 ms.
+      const frames = await page.evaluate(async () => {
+        const rgbOf = (): number[] => {
+          const probe = document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D;
+          probe.fillStyle = getComputedStyle(document.querySelector('figure.fy-render') as Element)
+            .getPropertyValue('--viz-1')
+            .trim();
+          probe.fillRect(0, 0, 1, 1);
+          return [...probe.getImageData(0, 0, 1, 1).data];
+        };
+        const count = (rgb: readonly number[]): number => {
+          const canvas = document.querySelector('.fy-render-chart canvas') as HTMLCanvasElement;
+          const { data } = (canvas.getContext('2d') as CanvasRenderingContext2D).getImageData(
+            0,
+            0,
+            canvas.width,
+            canvas.height,
+          );
+          let pixels = 0;
+          for (let at = 0; at < data.length; at += 4)
+            if (data[at] === rgb[0] && data[at + 1] === rgb[1] && data[at + 2] === rgb[2] && data[at + 3] === 255)
+              pixels += 1;
+          return pixels;
+        };
+        const was = rgbOf();
+        (window as unknown as { fySetLook: (name: string) => void }).fySetLook('mission-dark');
+        const now = rgbOf();
+        const read: { readonly now: number; readonly was: number }[] = [];
+        for (let frame = 0; frame < 8; frame += 1) {
+          await new Promise(resolve => requestAnimationFrame(resolve));
+          read.push({ now: count(now), was: count(was) });
+        }
+        return { differs: was.join() !== now.join(), read };
+      });
+      await waitForCanvasSettled(page);
+      const settled = frames.read[frames.read.length - 1]?.now ?? 0;
+
+      // Assert — the two palettes differ in this slot, the new one is on the canvas in the FIRST frame after the
+      // switch (it used to take four or five), drawn in full (not a sliver of its final size), with the old one gone,
+      // and no frame is empty of both.
+      should(frames.differs).be.true();
+      const first = frames.read.findIndex(frame => frame.now > 0);
+      should(first).equal(0);
+      for (const [frame, { now, was }] of frames.read.entries()) {
+        should(now + was).be.above(0, `frame ${frame} shows neither palette`);
+        if (frame >= first) should(now).be.above(settled * 0.9, `frame ${frame} is still growing in`);
+      }
     } finally {
       await scene.close();
     }
@@ -1084,7 +1153,7 @@ describe('fy-render component evidence — Chart', () => {
           return [...context.getImageData(0, 0, 1, 1).data.slice(0, 3)];
         };
         return themes.map(name => {
-          document.documentElement.setAttribute('data-theme', name);
+          (window as unknown as { fySetLook: (name: string) => void }).fySetLook(name);
           const style = getComputedStyle(document.documentElement);
           return {
             colors: [1, 2, 3, 4, 5, 6, 7, 8].map(slot => rgb(style.getPropertyValue(`--viz-${slot}`).trim())),
@@ -1155,7 +1224,7 @@ describe('fy-render component evidence — Mermaid in the theme', () => {
       const before = await diagramSvg(page);
 
       // Act — dark to dark: a cache keyed on light/dark alone would keep the old picture.
-      await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'mission-dark'));
+      await setLook(page, 'mission-dark');
       await page.waitForFunction(
         previous => {
           const src = document.querySelector('img[data-fy-render-diagram="true"]')?.getAttribute('src') ?? '';

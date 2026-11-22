@@ -59,7 +59,8 @@
  */
 
 import { Code2, Maximize2, Minimize2, MousePointerClick, Pause, Play, RotateCcw } from 'lucide-react';
-import { type RefObject, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { type RefObject, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useDialogFocus } from '@ferretry/app/ui';
 import './fy-render.css';
 import {
@@ -351,7 +352,9 @@ export function FyRenderBlock({
     if (!near || typeof MutationObserver === 'undefined') return;
     // Sync on attach: the document may have been repainted before this block was near.
     setTheme(themeName());
-    const observer = new MutationObserver(() => setTheme(themeName()));
+    // Flushed now, not queued: with the layout effects below, the new palette is read and drawn in the frame the root
+    // changed, instead of one scheduler hop per step (the chart showed the old palette for four frames).
+    const observer = new MutationObserver(() => flushSync(() => setTheme(themeName())));
     observer.observe(document.documentElement, { attributeFilter: [...THEME_ATTRIBUTES], attributes: true });
     return () => observer.disconnect();
   }, [near]);
@@ -368,7 +371,7 @@ export function FyRenderBlock({
   const themed = presentation === 'chart' || (presentation === 'sandbox' && block.type === 'mermaid');
   const [resolved, setResolved] = useState<{ readonly theme: ResolvedTheme; readonly key: string } | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: `theme` is the repaint trigger; the read is the DOM's
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!themed || !near) return;
     const read = readTheme(hostRef.current);
     const key = paletteKey(read);
