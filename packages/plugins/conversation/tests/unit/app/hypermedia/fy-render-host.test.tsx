@@ -10,7 +10,7 @@ import type { ReactNode } from 'react';
 import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
 import { parse } from 'durian-hypermedia';
 import { settleFences } from '../../../../app/hypermedia/fence-boundaries.ts';
-import { fyRenderParseBlock } from '../../../../app/hypermedia/fy-render-host.tsx';
+import { fyRenderParseBlock } from '../../../../app/hypermedia/fy-render-parse.ts';
 import { fyRenderFences } from '../../../../app/render/fences.tsx';
 import { fixture, inShell } from './surface-fixture.tsx';
 

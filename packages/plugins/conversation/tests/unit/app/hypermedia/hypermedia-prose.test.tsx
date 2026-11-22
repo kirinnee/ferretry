@@ -401,7 +401,9 @@ describe('a message over the size cap', () => {
     const big = `${'word '.repeat(70_000)}END`;
     const { container, unmount } = await draw(big);
     expect(container.querySelector('.dh-error')).toBeNull();
-    expect(container.textContent?.endsWith('END')).toBe(true);
+    expect(container.querySelector('pre.fy-hm-plain')?.textContent?.endsWith('END')).toBe(true);
+    // Over the author's cap it is the text without a note, as before (a message over a pre-parse limit, or one that could not be read, has one).
+    expect(container.querySelector('[data-fy-plain-note]')).toBeNull();
     await unmount();
   });
 });

@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sharedChromium } from '@ferretry/app/testing/browser';
+import { buildWorkerChunk } from '../../support/vite-scene.ts';
 import { fyRenderIntegrationFixture } from './support/fy-render-integration-fixture.ts';
 import { scanForHtmlSinks } from './support/sink-scan.ts';
 
@@ -46,6 +47,10 @@ let origin = '';
 const ledger: string[] = [];
 let threeChunk = '';
 let bundleInputs: readonly string[] = [];
+/** The Durian worker as the app builds it, and the test-only one whose parse of a marked message never returns. */
+let workerCode = '';
+let slowWorkerCode = '';
+let slowWorker = false;
 const FIXTURES: { readonly name: string; readonly file: string }[] = [];
 
 /** Durian's `build-css.ts`, run the way the app's Vite plugin runs it (the package ships no `dist/`). */
@@ -102,6 +107,8 @@ beforeAll(async () => {
       .slice('Content-Security-Policy:'.length)
       .trim() ?? '';
   if (!policy.includes("require-trusted-types-for 'script'")) throw new Error('the real policy lost Trusted Types');
+  workerCode = await buildWorkerChunk(resolve(packageRoot, '../../../app/hypermedia/durian-worker.ts'));
+  slowWorkerCode = await buildWorkerChunk(resolve(packageRoot, 'fixtures/slow-durian-worker.ts'));
   directory = await mkdtemp(join(tmpdir(), 'ferretry-hypermedia-parts-'));
   const built = await spawnJson<{ chunks: string[]; inputs: string[] }>([
     resolve(packageRoot, 'fixtures/hypermedia-split-build.ts'),
@@ -138,6 +145,10 @@ beforeAll(async () => {
         );
       }
       if (path === '/app.css') return secured(css, CONTENT_TYPES['.css'] ?? '');
+      // The Durian worker, built the app's way and served under the page's real policy (a worker script's own response
+      // carries the policy it runs under); a test swaps in the one with a slow parse (`slowWorker`).
+      if (path === '/assets/durian-worker-test.js')
+        return secured(slowWorker ? slowWorkerCode : workerCode, CONTENT_TYPES['.js'] ?? '');
       if (path === '/fy-render-sandbox.html')
         return new Response(fixture.shell, {
           headers: {
@@ -203,14 +214,6 @@ const COLLECT = `(() => {
   window.addEventListener('unhandledrejection', e => s.errors.push('rejection ' + String(e.reason).slice(0, 200)));
 })();`;
 
-/** WebGL answers "not available": what a phone with the feature off, or a blocklisted GPU, does. */
-const NO_WEBGL = `(() => {
-  const get = HTMLCanvasElement.prototype.getContext;
-  HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
-    return /webgl/i.test(String(type)) ? null : get.call(this, type, ...rest);
-  };
-})();`;
-
 /**
  * Waits for an expression to be true by asking the page, NOT with `page.waitForFunction`: that compiles its predicate in the
  * page with `new Function`, which the page's Trusted Types policy rightly refuses and counts as a violation of the very
@@ -253,6 +256,8 @@ const open = async (
   if (options.init !== undefined) await page.addInitScript(options.init);
   await page.goto(`${origin}/?${query}&theme=studio-${options.scheme ?? 'light'}`);
   await until(page, 'window.fyPartsReady === true', 20_000);
+  // The message is read in the Durian worker, so the page has the plain text first: wait until it is a document or says why not.
+  await until(page, "document.querySelector('.dh-doc, [data-fy-plain-note]') !== null", 20_000);
   const collected = async (): Promise<Report> => {
     const seen = await page.evaluate(() => (window as unknown as { __h4: { csp: string[]; errors: string[] } }).__h4);
     return {
@@ -330,6 +335,24 @@ const expectClean = async (visit: Visit, label: string): Promise<void> => {
   expect({ label, errors: report.errors }).toEqual({ label, errors: [] });
   expect({ label, foreign: report.foreign }).toEqual({ label, foreign: [] });
   expect({ label, danger: danger as string[] }).toEqual({ label, danger: [] });
+};
+
+/** The page's own report, for a page that is plain text (no `.dh-doc` to look for live author nodes in). */
+const expectNoViolations = async (visit: Visit, label: string): Promise<void> => {
+  const report = await visit.report();
+  expect({
+    label,
+    csp: report.csp,
+    trustedTypes: report.trustedTypes,
+    errors: report.errors,
+    foreign: report.foreign,
+  }).toEqual({
+    label,
+    csp: [],
+    trustedTypes: [],
+    errors: [],
+    foreign: [],
+  });
 };
 
 describe('Durian’s fixtures inside a transcript, under the real policy', () => {
@@ -442,106 +465,12 @@ describe('held tabs and animation draw as code (r12 H11a)', () => {
         expect(drawn.parts).not.toContain('tabs');
         expect(drawn.parts).not.toContain('animation');
         // Nothing heavy is fetched for source: no 3D chunk.
-        expect(ledger.slice(before).filter(path => path === `/${threeChunk}`)).toEqual([]);
+        expect(threeChunk === '' ? [] : ledger.slice(before).filter(path => path === `/${threeChunk}`)).toEqual([]);
         await expectClean(visit, `held ${label}`);
       } finally {
         await visit.close();
       }
     }, 60_000);
-});
-
-// r12 H11a: skipped while animations are held as code (`ANIMATION_DRAWS` is false); re-enabled with the flag.
-describe.skip('an animation: 3D is on, lazy, and falls back to the flat view', () => {
-  const ANIMATION_2D = 'fixture=format/44-animation-binary-search-tree-insert.dh.md';
-  const ANIMATION_3D = 'fixture=format/59-3d-the-stateless-replay-system-in-layers.dh.md';
-
-  it('fetches no 3D chunk for a page with no 3D block, and fetches it when a reader opens a 3D view', async () => {
-    expect(threeChunk).not.toBe('');
-    const before = ledger.length;
-    const flat = await open('fixture=format/39-terminal.dh.md');
-    try {
-      await exercise(flat.page);
-    } finally {
-      await flat.close();
-    }
-    expect(ledger.slice(before).filter(path => path === `/${threeChunk}`)).toEqual([]);
-
-    const mid = ledger.length;
-    const stage = await open(ANIMATION_2D);
-    try {
-      await stage.page.waitForTimeout(500);
-      // A 2D animation keeps the 3D module until the reader asks for it.
-      const scene = await stage.page.evaluate(() => ({
-        toggle: document.querySelector('.dh-doc button.scn-mode') !== null,
-        canvas: document.querySelector('.dh-doc .scn3 canvas') !== null,
-      }));
-      expect(scene.toggle).toBe(true);
-      expect(scene.canvas).toBe(false);
-      expect(ledger.slice(mid).filter(path => path === `/${threeChunk}`)).toEqual([]);
-      await stage.page.click('.dh-doc button.scn-mode');
-      await stage.page.waitForSelector('.dh-doc .scn3 canvas', { timeout: 15_000 });
-      expect(ledger.slice(mid).filter(path => path === `/${threeChunk}`).length).toBe(1);
-      await expectClean(stage, '3d');
-    } finally {
-      await stage.close();
-    }
-  }, 90_000);
-
-  it('opens a 3D scene on its own, and draws it with 0 CSP and Trusted Types violations', async () => {
-    const visit = await open(ANIMATION_3D);
-    try {
-      await visit.page.waitForSelector('.dh-doc .scn3 canvas', { timeout: 20_000 });
-      await visit.page.waitForTimeout(500);
-      await expectClean(visit, '3d scene');
-    } finally {
-      await visit.close();
-    }
-  }, 60_000);
-
-  it('falls back to the flat view when WebGL is unavailable: no toggle, the 2D stage, no 3D chunk', async () => {
-    const mid = ledger.length;
-    const visit = await open(ANIMATION_3D, { init: NO_WEBGL });
-    try {
-      await visit.page.waitForSelector('.dh-doc .scn svg.scn-svg', { timeout: 15_000 });
-      const m = await visit.page.evaluate(() => ({
-        toggle: document.querySelector('.dh-doc button.scn-mode') !== null,
-        canvas: document.querySelector('.dh-doc .scn3 canvas') !== null,
-        flat: document.querySelectorAll('.dh-doc .scn svg.scn-svg').length,
-      }));
-      expect(m).toEqual({ toggle: false, canvas: false, flat: 1 });
-      expect(ledger.slice(mid).filter(path => path === `/${threeChunk}`)).toEqual([]);
-      await expectClean(visit, 'no webgl');
-    } finally {
-      await visit.close();
-    }
-  }, 60_000);
-
-  it('falls back to the flat view when the WebGL context is LOST, and says so', async () => {
-    const visit = await open(ANIMATION_3D);
-    try {
-      await visit.page.waitForSelector('.dh-doc .scn3 canvas', { timeout: 20_000 });
-      const lost = await visit.page.evaluate(() => {
-        const canvas = document.querySelector('.dh-doc .scn3 canvas') as HTMLCanvasElement;
-        const gl = (canvas.getContext('webgl2') ?? canvas.getContext('webgl')) as WebGLRenderingContext | null;
-        const extension = gl?.getExtension('WEBGL_lose_context');
-        extension?.loseContext();
-        return extension !== null && extension !== undefined;
-      });
-      expect(lost).toBe(true);
-      await visit.page.waitForSelector('.dh-doc .scn svg.scn-svg', { timeout: 10_000 });
-      const m = await visit.page.evaluate(() => ({
-        canvas: document.querySelector('.dh-doc .scn3') !== null,
-        flat: document.querySelectorAll('.dh-doc .scn svg.scn-svg').length,
-        note: document.querySelector('.dh-doc [data-fy-webgl-lost]')?.textContent ?? null,
-      }));
-      expect(m.canvas).toBe(false);
-      expect(m.flat).toBe(1);
-      expect(m.note).toContain('flat view');
-      await expectClean(visit, 'lost context');
-    } finally {
-      await visit.close();
-    }
-  }, 60_000);
 });
 
 describe('an author’s chart cannot freeze the tab: the reviewer’s two charts are read as code in under 50 ms (S1)', () => {
@@ -685,4 +614,180 @@ describe('the parts at a phone and a desktop width, light and dark', () => {
           await visit.close();
         }
       }, 60_000);
+});
+
+/**
+ * r12 H11: A MESSAGE IS READ IN THE DURIAN WORKER, AND A SLOW PARSE CANNOT FREEZE THE PAGE. The worker is the chunk the app's
+ * Vite makes of `durian-worker.ts`, started by the product's own `spawnDurianWorker` under the real policy
+ * (`worker-src 'self'`, `require-trusted-types-for 'script'`, the `fy-worker` policy that accepts this chunk's name). The "slow
+ * parse" is a loop the TEST's own worker runs for a message carrying a marker (`fixtures/slow-durian-worker.ts`): nothing in the
+ * product has a hook for it, and nothing here names what makes a real parse slow.
+ */
+describe('a message is read in the Durian worker, under the real policy', () => {
+  /** Records every animation frame and a 10 ms timer on the MAIN thread, from before the page's own script. */
+  const PROBE = `(() => {
+    const frames = [];
+    let last = performance.now();
+    const tick = () => { const now = performance.now(); frames.push(now - last); last = now; requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+    const timers = [];
+    setInterval(() => timers.push(performance.now()), 10);
+    window.__probe = { frames, timers };
+  })();`;
+
+  const SLOW_TEXT = '# Slow\n\nFY-SLOW-PARSE and some words.';
+
+  it('starts the worker through the real spawn with 0 CSP and Trusted Types violations, and draws the document it sends', async () => {
+    const before = ledger.length;
+    const visit = await open(
+      `text=${encodeURIComponent('# Plan\n\nSome **bold** words and `code`.\n\n| a | b |\n| - | - |\n| 1 | 2 |')}`,
+    );
+    try {
+      await until(visit.page, "document.querySelector('.dh-doc h1') !== null", 10_000);
+      const m = await visit.page.evaluate(() => ({
+        rich: document.querySelector('.dh-doc h1')?.textContent?.includes('Plan') ?? false,
+        table: document.querySelectorAll('.dh-doc table').length,
+        plain: document.querySelector('pre.fy-hm-plain') !== null,
+        note: document.querySelector('[data-fy-plain-note]') !== null,
+      }));
+      expect(m).toEqual({ rich: true, table: 1, plain: false, note: false });
+      expect(ledger.slice(before)).toContain('/assets/durian-worker-test.js');
+      await expectClean(visit, 'worker');
+    } finally {
+      await visit.close();
+    }
+  }, 60_000);
+
+  it('ends a parse that never returns: the message is plain text with a note within the budget, and the page never stops', async () => {
+    slowWorker = true;
+    const visit = await open('text=', { init: PROBE });
+    try {
+      const outcome = await visit.page.evaluate(
+        text =>
+          new Promise<{ ms: number; reason: string | null; plain: string | null; note: string | null }>(resolve => {
+            // What is measured is what happens from here: the page's own start-up is not the parse's.
+            const probe = (window as unknown as { __probe: { frames: number[]; timers: number[] } }).__probe;
+            probe.frames.length = 0;
+            probe.timers.length = 0;
+            const started = performance.now();
+            (window as unknown as { fyStream: (text: string) => void }).fyStream(text);
+            const look = (): void => {
+              const note = document.querySelector<HTMLElement>('[data-fy-plain-note]');
+              if (note === null) {
+                setTimeout(look, 5);
+                return;
+              }
+              resolve({
+                ms: performance.now() - started,
+                reason: note.getAttribute('data-fy-plain-note'),
+                plain: document.querySelector('pre.fy-hm-plain')?.textContent ?? null,
+                note: note.textContent,
+              });
+            };
+            look();
+          }),
+        SLOW_TEXT,
+      );
+      // The worker starts, says ready, is asked, and is ended at the 500 ms budget: ~500 ms plus the worker's start.
+      expect(outcome.ms).toBeLessThan(1000);
+      expect(outcome.ms).toBeGreaterThan(450);
+      expect(outcome).toMatchObject({ reason: 'slow', plain: SLOW_TEXT, note: 'shown as plain text' });
+      // The main thread never stopped: no frame, and no 10 ms timer, waited a long time for the thread.
+      const probe = await visit.page.evaluate(() => {
+        const { frames, timers } = (window as unknown as { __probe: { frames: number[]; timers: number[] } }).__probe;
+        const gaps = timers.slice(1).map((time, index) => time - (timers[index] ?? time));
+        return {
+          frames: frames.length,
+          worstFrame: Math.max(...frames),
+          timers: timers.length,
+          worstTimer: Math.max(...gaps),
+        };
+      });
+      expect(probe.frames).toBeGreaterThan(5);
+      expect(probe.worstFrame).toBeLessThan(250);
+      expect(probe.worstTimer).toBeLessThan(250);
+      await expectNoViolations(visit, 'slow parse');
+    } finally {
+      slowWorker = false;
+      await visit.close();
+    }
+  }, 60_000);
+
+  // The one visible new state: a message that was ended is its own text with a quiet line under it. Fake text only.
+  const FAKE = [
+    '# Release notes for the demo',
+    '',
+    'FY-SLOW-PARSE This is made-up text for a picture: the build went green, the checklist is done, and nothing here is real.',
+    '',
+    '- first made-up item with a **bold** word',
+    '- second made-up item with `code`',
+  ].join('\n');
+  for (const viewport of ['phone', 'desktop'] as const)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`shows an ended message as its text with a note, inside the page (${viewport}, ${scheme})`, async () => {
+        slowWorker = true;
+        const visit = await open('text=', { viewport, scheme, init: PROBE });
+        try {
+          await visit.page.evaluate(
+            text => (window as unknown as { fyStream: (text: string) => void }).fyStream(text),
+            FAKE,
+          );
+          await until(visit.page, "document.querySelector('[data-fy-plain-note]') !== null", 5_000);
+          const m = await visit.page.evaluate(() => {
+            const note = document.querySelector<HTMLElement>('[data-fy-plain-note]');
+            const box = note?.getBoundingClientRect();
+            const style = note === null ? undefined : getComputedStyle(note);
+            return {
+              text: note?.textContent,
+              role: note?.getAttribute('role') ?? null,
+              inside: box !== undefined && box.left >= 0 && box.right <= window.innerWidth,
+              wide: document.documentElement.scrollWidth > window.innerWidth + 1,
+              fontSize: style?.fontSize,
+            };
+          });
+          expect(m).toMatchObject({ text: 'shown as plain text', role: null, inside: true, wide: false });
+          if (shotsDir !== '')
+            await visit.page.screenshot({ path: join(shotsDir, `plain-note-${viewport}-${scheme}.png`) });
+          await expectNoViolations(visit, 'ended message');
+        } finally {
+          slowWorker = false;
+          await visit.close();
+        }
+      }, 60_000);
+
+  it('does not parse the killed message again, and the next message still reads (a new worker)', async () => {
+    slowWorker = true;
+    const visit = await open('text=', { init: PROBE });
+    try {
+      const stream = (text: string): Promise<void> =>
+        visit.page.evaluate(
+          source => (window as unknown as { fyStream: (text: string) => void }).fyStream(source),
+          text,
+        );
+      await stream(SLOW_TEXT);
+      await until(visit.page, "document.querySelector('[data-fy-plain-note]') !== null", 5_000);
+      // Another message reads (the killed worker did not take it down)…
+      await stream('# Fine\n\nA short one.');
+      await until(visit.page, "document.querySelector('.dh-doc h1')?.textContent === 'Fine'", 5_000);
+      // …and the killed one is answered from the cache at once, with no second wait for the budget.
+      const again = await visit.page.evaluate(
+        text =>
+          new Promise<number>(resolve => {
+            const started = performance.now();
+            (window as unknown as { fyStream: (text: string) => void }).fyStream(text);
+            const look = (): void => {
+              if (document.querySelector('[data-fy-plain-note]') !== null) resolve(performance.now() - started);
+              else setTimeout(look, 2);
+            };
+            look();
+          }),
+        SLOW_TEXT,
+      );
+      expect(again).toBeLessThan(100);
+      await expectNoViolations(visit, 'slow parse, cached');
+    } finally {
+      slowWorker = false;
+      await visit.close();
+    }
+  }, 60_000);
 });

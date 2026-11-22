@@ -103,7 +103,12 @@ export default defineConfig({
   base: '/',
   // ON-DEVICE DICTATION's workers and their resolutions belong to Voice (`plugins/voice/app/vite-voice.ts`): module
   // workers with the Vosk glue made eval-free, and `onnxruntime-web` pinned to its WASM-only build.
-  worker: voiceBuild.worker,
+  // Conversation's DURIAN WORKER (`plugins/conversation/app/hypermedia/durian-worker.ts`) is built by the same worker build,
+  // so it needs Durian's source resolution (`vite-durian.ts`): workers are bundled apart from the page, with their own plugins.
+  worker: {
+    ...voiceBuild.worker,
+    plugins: () => [...voiceBuild.worker.plugins(), durianBuild.plugin, durianBuild.workerPlugin],
+  },
   resolve: { alias: voiceBuild.alias },
   build: {
     outDir: 'dist',
