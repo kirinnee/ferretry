@@ -448,6 +448,8 @@ describe('C59 O5-10b R2 item 4b: an apply whose request ends once it has STARTED
     const caller = new AbortController();
     const running = apply(host, id, { signal: caller.signal });
     await door.entered.promise;
+    // Milestone: the held read was the one `createLogins` made, so the door is spent and the apply is mid-execution.
+    expect(door.armed).toBe(false);
     caller.abort();
     door.release.resolve();
     const answered = await running;

@@ -606,6 +606,11 @@ export class GateAdmission implements Admission {
    * `spentAtAdmission` (a window of 0 spent the step-up this call rode on) lasts only for the admitting request: once
    * `requestEnded` aborts, a continuation claim of the same standing is asked as any other caller's, which a spent
    * window answers `false`. A request that carries no signal keeps the right for its own claims.
+   *
+   * `requestEnded` is the request's OWN signal. A device (the only caller with a step-up subject) arrives on a session,
+   * and the kernel (`CarriedRequests`) joins the session's end with the request's own settle: the signal aborts when
+   * the handler answered or failed, even while the session stays open. It is never the session's signal alone, which
+   * outlives every request it carries.
    */
   #claimFresh(
     subject: StepUpSubject | undefined,
