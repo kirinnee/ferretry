@@ -59,6 +59,11 @@ export interface TranscriptRowProps {
   readonly live?: boolean;
   /** This row is the final block in the transcript. */
   readonly isLast?: boolean;
+  /**
+   * This row is the last ASSISTANT item, the one a live session is still streaming into. A message the owner queued
+   * meanwhile sits after it, so "the last row" is the wrong question; absent, it is `isLast`.
+   */
+  readonly lastAssistant?: boolean;
   /** Offered on a ledger row, and only when a retry is possible at all. */
   readonly onRetry?: SendRetry;
   /** Offered on a ledger row for a message that was not proven delivered. */
@@ -87,6 +92,7 @@ export function TranscriptRow({
   previous,
   live = false,
   isLast = false,
+  lastAssistant = isLast,
   onRetry,
   onCancel,
   onSubmit,
@@ -174,7 +180,7 @@ export function TranscriptRow({
       <SystemNoticeRow entry={{ ...entry, text: parseFerretryNotice(entry.text) ?? entry.text }} rhythm={rhythm} />
     );
   if (entry.kind === 'user') return <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm} />;
-  return <TranscriptTextRow arriving={live && isLast} entry={entry} rhythm={rhythm} run={run} />;
+  return <TranscriptTextRow arriving={live && lastAssistant} entry={entry} rhythm={rhythm} run={run} />;
 }
 
 /**

@@ -12,7 +12,7 @@ import { interact, mount } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
 import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
 import { holdFences } from '../../../../app/hypermedia/held-fences.tsx';
-import { readMessage } from '../../../../app/hypermedia/parse-message.ts';
+import { mustRead } from './must-read.ts';
 import { fixture, inShell } from './surface-fixture.tsx';
 
 const FENCE = '`'.repeat(3);
@@ -65,7 +65,7 @@ const draw = async (text: string) => {
 describe('a chart is held as code, never evaluated (S1)', () => {
   for (const [name, chart] of Object.entries(CHARTS)) {
     it(`${name}: is read as a host block that holds the source, never a chart part`, () => {
-      const { doc } = readMessage(chart, 'p-');
+      const { doc } = mustRead(chart, 'p-');
       expect(doc.blocks.map(block => block.type)).toEqual(['host']);
       expect(doc.blocks[0]).toMatchObject({ type: 'host', name: 'fy-chart-held' });
       expect(JSON.stringify(doc.blocks)).not.toContain('"initial"');
@@ -92,7 +92,7 @@ describe('a chart is held as code, never evaluated (S1)', () => {
       ['~~~chart title=x', ...body, '~~~'].join('\n'),
       `  ${FENCE}chart{x}\n${body.join('\n')}\n  ${FENCE}`,
     ].join('\n\n');
-    const { doc } = readMessage(text, 'p-');
+    const { doc } = mustRead(text, 'p-');
     expect(JSON.stringify(doc.blocks)).not.toContain('"type":"chart"');
     expect(JSON.stringify(doc.blocks)).not.toContain('"initial"');
     expect(JSON.stringify(doc.blocks).match(/"name":"fy-chart-held"/gu)?.length).toBe(5);
