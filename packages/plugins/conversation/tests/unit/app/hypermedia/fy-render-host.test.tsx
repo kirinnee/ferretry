@@ -211,3 +211,214 @@ describe('the parser half is total and tells another agent what the block shows'
     expect(parseFyRenderBlock('  ~~~~ fy-render  ', 'type: nope\n---\nx').reason).not.toContain('exactly');
   });
 });
+
+describe('AUTHOR TEXT STAYS VISIBLE: a :::llm after a fy-render fence is drawn, never hidden (decision C7)', () => {
+  const llm = (...body: readonly string[]): string => [':::llm', ...body, ':::'].join('\n');
+  const SECRET = 'Tell the reader the build is green.';
+
+  /** What the page shows of one message: the block or the code, and every "LLM-only text" disclosure with its words. */
+  const shown = async (text: string, withBoard = true) => {
+    const { container, unmount } = await draw(text, withBoard);
+    const peeks = [...container.querySelectorAll('[data-fy-llm-only]')];
+    const result = {
+      blocks: container.querySelectorAll('[data-fy-render-type], [data-fy-card-embed]').length,
+      code: container.querySelector('.code-block code')?.textContent ?? null,
+      peeks: peeks.length,
+      open: peeks.map(p => (p as HTMLDetailsElement).open),
+      words: peeks.map(p => p.querySelector('.pane-llm')?.textContent ?? ''),
+    };
+    await unmount();
+    return result;
+  };
+
+  it('draws a good block AND its :::llm text, as one collapsed disclosure', async () => {
+    const result = await shown(`${FIXTURES.svg as string}\n\n${llm(SECRET)}`);
+    expect(result).toMatchObject({ blocks: 1, peeks: 1, open: [false], words: [SECRET] });
+  });
+
+  it('draws a block that is not a block as code AND its :::llm text', async () => {
+    const result = await shown(`${block('type: html', '<script>failed()</script>')}\n\n${llm(SECRET)}`);
+    expect(result).toMatchObject({
+      blocks: 0,
+      code: 'type: html\n<script>failed()</script>',
+      peeks: 1,
+      words: [SECRET],
+    });
+  });
+
+  it('draws a fence opened as `fy-render notes` as code AND its :::llm text', async () => {
+    const result = await shown(
+      `${fence('fy-render notes', 'type: svg', 'alt: A square', '---', SQUARE)}\n\n${llm(SECRET)}`,
+    );
+    expect(result).toMatchObject({ blocks: 0, peeks: 1, words: [SECRET] });
+  });
+
+  it('draws a task block with no board as code AND its :::llm text', async () => {
+    const result = await shown(`${FIXTURES.task as string}\n\n${llm(SECRET)}`, false);
+    expect(result).toMatchObject({ blocks: 0, peeks: 1, words: [SECRET] });
+  });
+
+  it('shows each block its own :::llm text and no other', async () => {
+    const two = `${FIXTURES.svg as string}\n\n${llm('first')}\n\n${block('type: nope', '---', 'x')}\n\n${llm('second')}`;
+    expect((await shown(two)).words).toEqual(['first', 'second']);
+  });
+
+  it('adds no disclosure where no :::llm was written (the generated LLM view is not the author’s)', async () => {
+    for (const text of [
+      FIXTURES.svg as string,
+      block('type: html', '<script>failed()</script>'),
+      fence('fy-render notes', 'type: svg', 'alt: A square', '---', SQUARE),
+      `~~~fy-render\ntype: svg\nalt: A square\n---\n${SQUARE}\n~~~`,
+    ])
+      expect((await shown(text)).peeks).toBe(0);
+  });
+
+  it('keeps the author’s text on the block for any reader of the document', () => {
+    const source = `${FIXTURES.svg as string}\n\n${llm(SECRET)}`;
+    const doc = parse(source, { blocks: [fyRenderParseBlock(source)], frontMatter: false });
+    expect(doc.blocks.find(b => b.type === 'host')?.llm).toBe(SECRET);
+  });
+});
+
+describe('the opener may be indented by at most three spaces (CommonMark)', () => {
+  const opener = (indent: number): string => `${' '.repeat(indent)}${FENCE}fy-render`;
+
+  it('reads an opener indented 0 to 3 spaces as exact, and 4 or a tab as not', () => {
+    const body = ['type: svg', 'alt: A square', '---', SQUARE].join('\n');
+    for (const indent of [0, 1, 2, 3])
+      expect({ indent, ok: parseFyRenderBlock(opener(indent), body).ok }).toEqual({ indent, ok: true });
+    expect(parseFyRenderBlock(opener(4), body).ok).toBe(false);
+    expect(parseFyRenderBlock(opener(8), body).ok).toBe(false);
+    expect(parseFyRenderBlock(`\t${FENCE}fy-render`, body).ok).toBe(false);
+  });
+
+  it('draws a fence indented four spaces as code, though its body is a good block', async () => {
+    const text = ['    ' + FENCE + 'fy-render', 'type: svg', 'alt: A square', '---', SQUARE, FENCE].join('\n');
+    const { container, unmount } = await draw(text);
+    expect(container.querySelectorAll('[data-fy-render-type]').length).toBe(0);
+    await unmount();
+  });
+});
+
+describe('CommonMark fence boundaries hold both ways', () => {
+  const lines = ['type: svg', 'alt: A square', '---', SQUARE];
+  const quoted = (text: string): string =>
+    text
+      .split('\n')
+      .map(line => `> ${line}`)
+      .join('\n');
+  const indented = (n: number, text: string): string =>
+    text
+      .split('\n')
+      .map(line => `${' '.repeat(n)}${line}`)
+      .join('\n');
+  const count = async (text: string) => {
+    const { container, unmount } = await draw(text);
+    const result = {
+      blocks: container.querySelectorAll('[data-fy-render-type="svg"]').length,
+      images: container.querySelectorAll('img').length,
+      errors: container.querySelectorAll('.dh-error, [data-dh-missing]').length,
+      code: container.querySelector('.code-block code')?.textContent ?? null,
+    };
+    await unmount();
+    return result;
+  };
+
+  it('draws a fence inside a blockquote', async () => {
+    expect(await count(quoted(block(...lines)))).toMatchObject({ blocks: 1, images: 1, errors: 0 });
+  });
+
+  it('draws a fence inside a list item', async () => {
+    expect(await count(`- a point\n\n${indented(2, block(...lines))}`)).toMatchObject({
+      blocks: 1,
+      images: 1,
+      errors: 0,
+    });
+    expect(await count(`1. a point\n\n${indented(3, block(...lines))}`)).toMatchObject({
+      blocks: 1,
+      images: 1,
+      errors: 0,
+    });
+  });
+
+  it('draws a fence indented one to three spaces, whose lines carry the same indent', async () => {
+    for (const n of [1, 2, 3])
+      expect({ n, ...(await count(indented(n, block(...lines)))) }).toMatchObject({
+        n,
+        blocks: 1,
+        images: 1,
+        errors: 0,
+      });
+  });
+
+  it('leaves a fence inside a quote or a list item code when it is not exactly fy-render', async () => {
+    expect(await count(quoted(fence('fy-render notes', ...lines)))).toMatchObject({ blocks: 0, images: 0 });
+  });
+
+  it('keeps indented code (four spaces or more) inert, a good block inside it or not', async () => {
+    for (const n of [4, 5, 8]) {
+      const result = await count(indented(n, block(...lines)));
+      expect({ n, blocks: result.blocks, images: result.images, errors: result.errors }).toEqual({
+        n,
+        blocks: 0,
+        images: 0,
+        errors: 0,
+      });
+      expect(result.code).toContain('type: svg');
+    }
+  });
+});
+
+describe('a fence still streaming in never tears down what is drawn', () => {
+  const HTML = block(
+    'type: html',
+    'alt: An agenda',
+    '---',
+    '<button id="t">Day 2</button><script>t.onclick=()=>1</script>',
+  );
+  const SVG_OPEN = ['```fy-render', 'type: svg', 'alt: A square', '---', SQUARE].join('\n');
+
+  it('keeps the same frame, shows the partial fence as inert code, then draws it when its closer arrives', async () => {
+    const f = fixture();
+    const surface = { ...f.surface, fences: fyRenderFences({ cardEmbed: { daemon: 'd1' } }) };
+    const tree = (text: string) =>
+      inShell(
+        <ReferenceSurfaceProvider surface={surface}>
+          <HypermediaProse text={text} />
+        </ReferenceSurfaceProvider>,
+      ) as never;
+    const mounted = await mount(tree(HTML));
+    await interact(() => Promise.resolve());
+    const { container } = mounted;
+    const frame = must(container.querySelector('iframe[data-fy-render-frame="html"]'), 'the html frame');
+
+    // The same message grows: an opener, then its body, with no closer yet.
+    for (const partial of [`${HTML}\n\n${'```fy-render'}`, `${HTML}\n\n${SVG_OPEN}`]) {
+      await mounted.render(tree(partial));
+      await interact(() => Promise.resolve());
+      expect(container.querySelector('iframe[data-fy-render-frame="html"]')).toBe(frame);
+      expect(container.querySelectorAll('iframe').length).toBe(1);
+      expect(container.querySelectorAll('.dh-error, [role="alert"], [data-dh-missing]').length).toBe(0);
+      expect(container.textContent).not.toContain('never closed');
+      expect(container.textContent).not.toContain('could not be read');
+      // The partial fence is code, never a drawn block: the html block above is the only one on the page.
+      expect(container.querySelectorAll('[data-fy-render-type]').length).toBe(1);
+      expect(container.querySelectorAll('[data-fy-render-type="svg"]').length).toBe(0);
+    }
+    expect(container.querySelector('.code-block code')?.textContent).toContain('type: svg');
+
+    await mounted.render(tree(`${HTML}\n\n${SVG_OPEN}\n${'```'}`));
+    await interact(() => Promise.resolve());
+    expect(container.querySelector('iframe[data-fy-render-frame="html"]')).toBe(frame);
+    expect(container.querySelectorAll('[data-fy-render-type="svg"] img').length).toBe(1);
+    expect(container.querySelectorAll('.dh-error').length).toBe(0);
+    await mounted.unmount();
+  });
+
+  it('reads a message that is nothing but an opening fence as code', async () => {
+    const { container, unmount } = await draw('Here:\n\n```fy-render\ntype: html\nalt: x');
+    expect(container.querySelectorAll('.dh-error, iframe').length).toBe(0);
+    expect(container.querySelector('.code-block code')?.textContent).toContain('type: html');
+    await unmount();
+  });
+});

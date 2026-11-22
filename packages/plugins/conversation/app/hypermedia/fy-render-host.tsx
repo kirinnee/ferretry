@@ -1,9 +1,11 @@
 import { type MarkdownAstFenceNode, useReferenceSurface } from '@ferretry/app';
 import type { BlockDef, HostBlock } from 'durian-hypermedia';
+import type { CodeSlotProps, Slots } from 'durian-hypermedia/react/strict';
 import { type ComponentType, useMemo } from 'react';
 import { FY_RENDER_FENCE_ATTRIBUTE, parseFyRender } from '../render/fy-render.ts';
 import { tolerateAuthoringNoise } from '../render/fences.tsx';
-import { HYPERMEDIA_SLOTS } from './slots.tsx';
+import { LlmOnlyText } from './llm-text.tsx';
+import { HYPERMEDIA_SLOTS, HypermediaCode } from './slots.tsx';
 
 /**
  * `fy-render` AS ONE DURIAN HOST BLOCK. The twelve illustration types (`html svg lottie mermaid map chart task board
@@ -35,10 +37,19 @@ export interface FyRenderHostData {
   readonly reason: string | null;
   /** The description the author wrote, when it is a block: what another agent reads in its place. */
   readonly alt: string | null;
+  /** The text Durian makes of this fence for an LLM when the author wrote none, or null: see {@link durianAsIs}. */
+  readonly generated: string | null;
 }
 
-/** The opening line of a fence that is EXACTLY ` ```fy-render ` (either delimiter, any length from 3), and nothing else. */
-const EXACT_OPENER = /^\s*(?:`{3,}|~{3,})\s*fy-render\s*$/u;
+/**
+ * The opening line of a fence that is EXACTLY ` ```fy-render ` (either delimiter, any length from 3), and nothing else,
+ * indented by at most three spaces: CommonMark's own limit (four is an indented code block). Durian's fence pattern
+ * allows any indent, so the limit is ours to hold.
+ */
+const EXACT_OPENER = /^ {0,3}(?:`{3,}|~{3,})\s*fy-render\s*$/u;
+
+/** Durian's own fence pattern (`src/core/dh-lib.ts`), which reads the opening line of every part. */
+const DURIAN_FENCE = /^(\s*)(`{3,}|~{3,})\s*([^\s`{]*)(.*)$/u;
 
 const linesOf = (source: string): readonly string[] => source.split(/\r\n|\r|\n/u);
 
@@ -46,13 +57,44 @@ const linesOf = (source: string): readonly string[] => source.split(/\r\n|\r|\n/
  * Reads one `fy-render` fence. Total: never throws, never draws, never reaches a network. `opener` is the fence's own
  * opening line (what Durian dropped: its info string), `body` the lines between the delimiters.
  */
-export function parseFyRenderBlock(opener: string | undefined, body: string): FyRenderHostData {
+export function parseFyRenderBlock(
+  opener: string | undefined,
+  body: string,
+  attrs: Readonly<Record<string, string>> = {},
+): FyRenderHostData {
+  const generated = durianAsIs(opener, body, attrs);
   if (opener === undefined || !EXACT_OPENER.test(opener))
-    return { ok: false, body, reason: 'the fence is not opened as exactly fy-render', alt: null };
-  const parsed = parseFyRender(tolerateAuthoringNoise(body));
+    return { ok: false, body, reason: 'the fence is not opened as exactly fy-render', alt: null, generated };
+  // CommonMark: a fence indented n spaces loses up to n spaces of indentation from each of its lines.
+  const indent = /^ */u.exec(opener)?.[0].length ?? 0;
+  const dedented =
+    indent === 0
+      ? body
+      : linesOf(body)
+          .map(line => stripIndent(line, indent))
+          .join('\n');
+  const parsed = parseFyRender(tolerateAuthoringNoise(dedented));
   return parsed.ok
-    ? { ok: true, body, reason: null, alt: parsed.block.alt }
-    : { ok: false, body, reason: parsed.reason, alt: null };
+    ? { ok: true, body: dedented, reason: null, alt: parsed.block.alt, generated }
+    : { ok: false, body: dedented, reason: parsed.reason, alt: null, generated };
+}
+
+const stripIndent = (line: string, max: number): string =>
+  line.slice(Math.min(max, /^ */u.exec(line)?.[0].length ?? 0));
+
+/**
+ * What Durian itself puts in a part's `llm` when the author wrote no `:::llm` (the `as-is` rule of `src/core/dh-lib.ts`,
+ * `llmFormOf`), or `null` when the opener is not a fence. It is how a part's own generated text is told from text the
+ * author wrote: a block's `llm` that differs from it is the author's.
+ */
+function durianAsIs(opener: string | undefined, body: string, attrs: Readonly<Record<string, string>>): string | null {
+  const fence = DURIAN_FENCE.exec(opener ?? '');
+  if (fence === null) return null;
+  const kept = Object.entries(attrs)
+    .filter(([key]) => !['id', 'title', 'kind'].includes(key))
+    .map(([key, value]) => `${key}=${/\s/u.test(value) ? `"${value}"` : value}`);
+  const open = [`${fence[2]}${fence[3]}`, attrs.kind ?? '', ...kept].filter(Boolean).join(' ');
+  return `${open}\n${body.replace(/\n+$/u, '')}\n${fence[2]}`;
 }
 
 /**
@@ -73,19 +115,24 @@ function synthesizedFence(body: string): MarkdownAstFenceNode {
   };
 }
 
-const FENCE = '`'.repeat(3);
-
-/** The parser half, for ONE message: reads each fence's opening line from `source`. Build it per parse. */
+/**
+ * The parser half, for ONE message: reads each fence's opening line from `source`. Build it per parse.
+ *
+ * It has NO `llm` hook on purpose: Durian lets a hook's text replace the part's LLM text, and an author's `:::llm`
+ * after the fence is that text. The hook would overwrite it with ours and the reader would never see what the author
+ * wrote for an LLM (decision C7: author text is never hidden). Without one the author's text stays on `block.llm`, and
+ * {@link FyRenderPart} draws it.
+ */
 export function fyRenderParseBlock(source: string): BlockDef<FyRenderHostData> {
   const lines = linesOf(source);
-  const read = (input: { readonly body: string; readonly line: number }): FyRenderHostData =>
-    parseFyRenderBlock(lines[input.line - 1], input.body);
+  const read = (input: {
+    readonly body: string;
+    readonly line: number;
+    readonly attrs: Readonly<Record<string, string>>;
+  }): FyRenderHostData => parseFyRenderBlock(lines[input.line - 1], input.body, input.attrs);
   return {
     name: FY_RENDER_BLOCK_NAME,
     parse: read,
-    // What another agent reads in place of the picture: the description the author had to write. A block that is not a
-    // block is the fence as written.
-    llm: (data, input) => data.alt ?? `${FENCE}${FY_RENDER_BLOCK_NAME}\n${input.body}\n${FENCE}`,
     check: data =>
       data.ok
         ? []
@@ -93,19 +140,17 @@ export function fyRenderParseBlock(source: string): BlockDef<FyRenderHostData> {
   };
 }
 
-/** The code a not-a-block fence is drawn as: this message's own code slot, so its colours and references match every other fence. */
+/** The code a not-a-block fence is drawn as: this message's own code, so its colours and references match every other fence. */
 function PlainFence({ body }: { readonly body: string }) {
-  const Code = HYPERMEDIA_SLOTS.Code;
-  if (Code === undefined)
-    return (
-      <pre>
-        <code>{body}</code>
-      </pre>
-    );
-  return <Code lang={FY_RENDER_BLOCK_NAME} meta="" text={body} />;
+  return <HypermediaCode lang={FY_RENDER_BLOCK_NAME} meta="" text={body} />;
 }
 
-function FyRenderPart({ data }: { readonly block: HostBlock; readonly data: FyRenderHostData }) {
+/** What the author wrote for an LLM after this block, or null when they wrote nothing (Durian's own generated text is not theirs). */
+const authorText = (block: HostBlock, data: FyRenderHostData): string | null =>
+  block.llm !== null && block.llm !== '' && block.llm !== data.generated ? block.llm : null;
+
+/** A block drawn as its sink, or as the plain code it is. */
+function FyRenderBody({ data }: { readonly data: FyRenderHostData }) {
   const { fences, onTaskOpen } = useReferenceSurface();
   const { ok, body } = data;
   // `draw` answers null for a block the surface cannot honour (a `task` with no board to ask), and a surface that
@@ -116,6 +161,39 @@ function FyRenderPart({ data }: { readonly block: HostBlock; readonly data: FyRe
   );
   return drawn ?? <PlainFence body={body} />;
 }
+
+/**
+ * One fence, drawn or plain, and then the `:::llm` text the author wrote after it, in BOTH cases (decision C7: author
+ * text is never hidden): the same collapsed "LLM-only text" disclosure every other part gets.
+ */
+function FyRenderPart({ block, data }: { readonly block: HostBlock; readonly data: FyRenderHostData }) {
+  const text = authorText(block, data);
+  return (
+    <>
+      <FyRenderBody data={data} />
+      {text === null ? null : <LlmOnlyText text={text} />}
+    </>
+  );
+}
+
+/**
+ * A ` ```fy-render ` fence Durian did NOT take for a part: one inside a blockquote or a list item is Markdown to Durian
+ * and reaches the code slot. It is the same fence it always was, so it is read and drawn the same way. (Anything that is
+ * not exactly `fy-render`, and any other language, is the plain code slot's.)
+ */
+function CodeOrFyRender(props: CodeSlotProps) {
+  const data = useMemo(
+    () =>
+      props.lang === FY_RENDER_BLOCK_NAME && props.meta === ''
+        ? parseFyRenderBlock(`${'`'.repeat(3)}${FY_RENDER_BLOCK_NAME}`, props.text)
+        : null,
+    [props.lang, props.meta, props.text],
+  );
+  return data === null ? <HypermediaCode {...props} /> : <FyRenderBody data={data} />;
+}
+
+/** The slots a message is drawn with: ours, with the code slot that also reads a `fy-render` fence. Module-level, like the slots. */
+export const FY_RENDER_SLOTS: Slots = { ...HYPERMEDIA_SLOTS, Code: CodeOrFyRender };
 
 /**
  * The renderer half, module-level and never rebuilt: handed to `DocumentView` as `blocks`, because Durian reads a

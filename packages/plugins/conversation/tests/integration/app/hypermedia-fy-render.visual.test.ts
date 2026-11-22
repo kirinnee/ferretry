@@ -179,3 +179,84 @@ describe('an fy-render block inside a Durian message', () => {
         }
       });
 });
+
+describe('a fence still streaming into the SAME message', () => {
+  const TICKS = '`'.repeat(3);
+  for (const { name } of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`keeps the mounted html frame, shows the partial fence as inert code, and draws it at its closer (${name}, ${scheme})`, async () => {
+        const { tab, close, foreign } = await open(name, scheme);
+        try {
+          await tab.evaluate(() => {
+            (window as unknown as { keptFrame: Element | null }).keptFrame = document.querySelector(
+              'iframe[data-fy-render-frame="html"]',
+            );
+          });
+          const state = async () =>
+            await tab.evaluate(() => {
+              const doc = document.querySelector('.dh-doc') as HTMLElement;
+              const kept = (window as unknown as { keptFrame: Element | null }).keptFrame;
+              const frames = doc.querySelectorAll('iframe[data-fy-render-frame="html"]');
+              return {
+                sameFrame: frames.length === 1 && frames[0] === kept,
+                keptConnected: kept?.isConnected === true,
+                frames: doc.querySelectorAll('iframe').length,
+                svgs: doc.querySelectorAll('[data-fy-render-type="svg"] img').length,
+                errors: doc.querySelectorAll('.dh-error, [data-dh-missing]').length,
+                neverClosed: document.body.textContent?.includes('never closed') === true,
+                unreadable: document.body.textContent?.includes('could not be read') === true,
+                partialCode: [...doc.querySelectorAll('.code-block code')].some(code =>
+                  (code.textContent ?? '').includes('alt: arriving'),
+                ),
+              };
+            });
+          const grow = async (extra: string) =>
+            await tab.evaluate(extra => {
+              const w = window as unknown as { fyStream: (text: string) => void; fyMessage: string };
+              w.fyStream(`${w.fyMessage}\n\n${extra}`);
+            }, extra);
+          const settle = async () => await tab.waitForTimeout(150);
+
+          const steps = [
+            `${TICKS}fy-render`,
+            `${TICKS}fy-render\ntype: svg\nalt: arriving`,
+            `${TICKS}fy-render\ntype: svg\nalt: arriving\n---\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>`,
+          ];
+          const seen: Awaited<ReturnType<typeof state>>[] = [];
+          for (const step of steps) {
+            await grow(step);
+            await settle();
+            seen.push(await state());
+          }
+          for (const s of seen)
+            expect(s).toMatchObject({
+              sameFrame: true,
+              keptConnected: true,
+              frames: 1,
+              svgs: 1,
+              errors: 0,
+              neverClosed: false,
+              unreadable: false,
+            });
+          expect(seen.slice(1).every(s => s.partialCode)).toBe(true);
+
+          // Its closer arrives: now it is a block, and the frame beside it is still the one the reader was using.
+          await grow(`${steps[2]}\n${TICKS}`);
+          await tab.waitForFunction(
+            () => document.querySelectorAll('.dh-doc [data-fy-render-type="svg"] img').length === 2,
+          );
+          const after = await state();
+          expect(after).toMatchObject({
+            sameFrame: true,
+            keptConnected: true,
+            frames: 1,
+            svgs: 2,
+            errors: 0,
+            partialCode: false,
+          });
+          expect(foreign).toEqual([]);
+        } finally {
+          await close();
+        }
+      });
+});

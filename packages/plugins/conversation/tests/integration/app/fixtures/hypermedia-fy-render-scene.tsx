@@ -63,23 +63,29 @@ const MESSAGE = [
   FENCE,
 ].join('\n');
 
-const entries: readonly TranscriptEntry[] = [
+const entriesOf = (text: string): readonly TranscriptEntry[] => [
   { id: 'u1', kind: 'user', text: 'Show me the plan.' },
-  { id: 'a1', kind: 'assistant', text: MESSAGE },
+  { id: 'a1', kind: 'assistant', text },
 ];
 
 const surface = chatReferenceSurface({ daemonId: 'daemon-h3', ferretId: 'mvh3scene-5e7d0b1e' });
 
-const root = document.getElementById('root');
-if (root !== null)
-  createRoot(root).render(
-    <ReferenceSurfaceProvider surface={surface}>
-      <div className="kt-chat-surface scene-chat">
-        <div className="fy-chat-log">
-          <div className="fy-chat-log__messages">
-            <Transcript agentName="Zoe" daemonId="daemon-h3" entries={entries} sessionId="mvh3scene-5e7d0b1e" />
-          </div>
+const view = (text: string) => (
+  <ReferenceSurfaceProvider surface={surface}>
+    <div className="kt-chat-surface scene-chat">
+      <div className="fy-chat-log">
+        <div className="fy-chat-log__messages">
+          <Transcript agentName="Zoe" daemonId="daemon-h3" entries={entriesOf(text)} sessionId="mvh3scene-5e7d0b1e" />
         </div>
       </div>
-    </ReferenceSurfaceProvider>,
-  );
+    </div>
+  </ReferenceSurfaceProvider>
+);
+
+const root = document.getElementById('root');
+if (root !== null) {
+  const app = createRoot(root);
+  app.render(view(MESSAGE));
+  // STREAMING: the SAME assistant message grows (same entry id), the way a reply arrives; a test drives it step by step.
+  Object.assign(window, { fyStream: (text: string) => app.render(view(text)), fyMessage: MESSAGE });
+}

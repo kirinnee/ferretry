@@ -1,13 +1,12 @@
 import { DocumentView, type InlineDef } from 'durian-hypermedia/react/strict';
 import { memo, useId, useMemo, useSyncExternalStore } from 'react';
-import { FY_RENDER_COMPONENT_BLOCKS } from './fy-render-host.tsx';
+import { FY_RENDER_COMPONENT_BLOCKS, FY_RENDER_SLOTS } from './fy-render-host.tsx';
 import { exceedsMessageCap } from './limits.ts';
 import { HumanSegment, TerminalWithLlmText } from './llm-text.tsx';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';
 import { parseMessage } from './parse-message.ts';
 import { ReferenceChip } from './reference-chip.tsx';
 import { ReferenceProofProvider } from './reference-proof.tsx';
-import { HYPERMEDIA_SLOTS } from './slots.tsx';
 import { hypermediaUrlPolicy } from './url-policy.ts';
 import { REFERENCE_INLINE } from './with-references.ts';
 
@@ -82,7 +81,7 @@ export const HypermediaProse = memo(function HypermediaProse({ text, className }
             components={PARTS}
             doc={doc}
             inlines={INLINES}
-            slots={HYPERMEDIA_SLOTS}
+            slots={FY_RENDER_SLOTS}
             theme={mode}
             urlPolicy={hypermediaUrlPolicy}
           />

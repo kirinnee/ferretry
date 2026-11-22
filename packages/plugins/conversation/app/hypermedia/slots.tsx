@@ -133,7 +133,7 @@ function decorated(proof: ReferenceProof | null, code: string, html: string | nu
   return decoratedCodeNodes({ code, html, resolvers: proof.trusted, isOpenable: proof.hasOpener });
 }
 
-function HypermediaCode({ lang, text }: CodeSlotProps) {
+export function HypermediaCode({ lang, text }: CodeSlotProps) {
   const proof = useReferenceProof();
   const language = lang.toLowerCase();
   const html = highlightToHtml(text, language);
