@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import type { Instant } from '@ferretry/std';
-import type { ProjectIndex } from '../../../daemon/features/files/build.ts';
-import { ProjectIndexCache, STALE_AFTER_MS, MAX_CACHED_PROJECTS } from '../../../daemon/features/files/cache.ts';
+import { type ProjectIndex, ProjectFolderRefused } from '../../../daemon/features/files/build.ts';
+import {
+  MAX_CACHED_PROJECTS,
+  MAX_CONCURRENT_BUILDS,
+  ProjectIndexCache,
+  STALE_AFTER_MS,
+} from '../../../daemon/features/files/cache.ts';
 import { searchFiles } from '../../../daemon/features/files/search.ts';
 
 const entry = (path: string) => ({ path, name: path.split('/').at(-1) ?? path });
@@ -163,5 +168,82 @@ describe('ProjectIndexCache', () => {
     await cache.read(`p${MAX_CACHED_PROJECTS}`, `/p${MAX_CACHED_PROJECTS}`);
 
     expect(built).toEqual(['/p0']);
+  });
+});
+
+describe('ProjectIndexCache bounds', () => {
+  test('runs a bounded number of builds at once; the rest wait their turn', async () => {
+    const { build, calls } = manualBuild();
+    const cache = new ProjectIndexCache(build, () => 0);
+
+    for (let number = 0; number < MAX_CACHED_PROJECTS; number++) void cache.read(`p${number}`, `/p${number}`);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.length).toBeLessThanOrEqual(MAX_CONCURRENT_BUILDS);
+    calls[0]?.finish(index('one'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(calls.length).toBeLessThanOrEqual(MAX_CONCURRENT_BUILDS + 1);
+  });
+
+  test('when every held project is running, one more is refused as busy and nothing grows past the bound', async () => {
+    const { build } = manualBuild();
+    const cache = new ProjectIndexCache(build, () => 0);
+    for (let number = 0; number < MAX_CACHED_PROJECTS; number++) void cache.read(`p${number}`, `/p${number}`);
+
+    const busy = await cache.read('extra', '/extra').catch((error: unknown) => error);
+    const status = (() => {
+      try {
+        return cache.status('extra', '/extra');
+      } catch (error) {
+        return error;
+      }
+    })();
+
+    expect(busy).toMatchObject({ name: 'IndexCacheBusy' });
+    expect(status).toMatchObject({ name: 'IndexCacheBusy' });
+    expect(cache.size()).toBeLessThanOrEqual(MAX_CACHED_PROJECTS);
+  });
+
+  test('a rebuild the privacy policy refuses discards the old index; one that merely failed keeps it', async () => {
+    let now = 0;
+    const outcomes: (ProjectIndex | Error)[] = [
+      index('old'),
+      new Error('disk hiccup'),
+      new ProjectFolderRefused('private'),
+    ];
+    const cache = new ProjectIndexCache(
+      async () => {
+        const next = outcomes.shift();
+        if (next instanceof Error) throw next;
+        return next ?? index('none');
+      },
+      () => now,
+    );
+    const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+    await cache.read('p', '/p');
+
+    now += STALE_AFTER_MS;
+    await cache.read('p', '/p');
+    await settle();
+    const afterHiccup = await cache.read('p', '/p');
+    now += STALE_AFTER_MS;
+    await cache.read('p', '/p');
+    await settle();
+
+    expect(afterHiccup.index.files[0]?.path).toBe('old.ts');
+    expect(cache.status('p', '/p').index).toBeUndefined();
+  });
+
+  test('evict forgets a project at once', async () => {
+    const cache = new ProjectIndexCache(
+      async () => index('x'),
+      () => 0,
+    );
+    await cache.read('p', '/p');
+
+    cache.evict('p');
+
+    expect(cache.status('p', '/p').index).toBeUndefined();
   });
 });

@@ -10,7 +10,7 @@ import {
 } from '../../../contract/index.ts';
 import type { ProjectRegistry } from '../../lib/registry.ts';
 import { ProjectFolderRefused } from './build.ts';
-import type { CachedStatus, ProjectIndexCache } from './cache.ts';
+import { type CachedStatus, IndexCacheBusy, type ProjectIndexCache } from './cache.ts';
 import { searchFiles } from './search.ts';
 
 /** The project a request names, or the 400/404 that says why not. */
@@ -45,7 +45,22 @@ function refusal(error: unknown): never {
     throw error.reason === 'private'
       ? new ApiError(403, 'this project folder is private and is not indexed', 'project_folder_private')
       : new ApiError(404, 'this project folder is not available', 'project_folder_unavailable');
+  if (error instanceof IndexCacheBusy)
+    throw new ApiError(503, 'the file index is busy building other projects; try again shortly', 'index_busy');
   throw error;
+}
+
+/** Whether a project's registered path is still the very place its index was built from (no link has appeared in it). */
+export type StillThatPlace = (path: string) => Promise<boolean>;
+
+/**
+ * Asked before ANY of the three routes touches the cache: a registered place that now resolves somewhere else is no longer
+ * the project, so what was indexed there is forgotten and nothing is answered from memory (nor is a rebuild started on it).
+ */
+async function guard(cache: ProjectIndexCache, project: ProjectInfo, still: StillThatPlace): Promise<void> {
+  if (await still(project.path)) return;
+  cache.evict(project.id);
+  throw new ProjectFolderRefused('unavailable');
 }
 
 const statusOf = (held: CachedStatus): ProjectFilesStatus => ({
@@ -59,7 +74,7 @@ const statusOf = (held: CachedStatus): ProjectFilesStatus => ({
  * Search runs here, so a phone over a relay is sent a few rows and never the list.
  */
 export const filesRoute =
-  (registry: ProjectRegistry, cache: ProjectIndexCache): RouteHandler =>
+  (registry: ProjectRegistry, cache: ProjectIndexCache, still: StillThatPlace = async () => true): RouteHandler =>
   async call => {
     for (const [name] of call.request.query) {
       if (name !== 'q' && name !== 'limit')
@@ -68,7 +83,9 @@ export const filesRoute =
     const project = await projectOf(registry, call.params.get('id'));
     const query = queryOf(queryValue(call.request, 'q'));
     const limit = limitOf(queryValue(call.request, 'limit'));
-    const held = await cache.read(project.id, project.path).catch(refusal);
+    const held = await guard(cache, project, still)
+      .then(() => cache.read(project.id, project.path))
+      .catch(refusal);
     const matches = searchFiles(held.index.files, query, limit);
     const answer: ProjectFilesAnswer = {
       files: [...matches.files],
@@ -81,16 +98,22 @@ export const filesRoute =
 
 /** `GET /v1/projects/:id/files/status`: the coverage block alone, never waiting for a build, for a badge. */
 export const filesStatusRoute =
-  (registry: ProjectRegistry, cache: ProjectIndexCache): RouteHandler =>
+  (registry: ProjectRegistry, cache: ProjectIndexCache, still: StillThatPlace = async () => true): RouteHandler =>
   async call => {
     const project = await projectOf(registry, call.params.get('id'));
-    return jsonResponse(statusOf(cache.status(project.id, project.path)));
+    const held = await guard(cache, project, still)
+      .then(() => cache.status(project.id, project.path))
+      .catch(refusal);
+    return jsonResponse(statusOf(held));
   };
 
 /** `POST /v1/projects/:id/files/rescan`: starts a rebuild (or joins the one running) and answers at once. */
 export const filesRescanRoute =
-  (registry: ProjectRegistry, cache: ProjectIndexCache): RouteHandler =>
+  (registry: ProjectRegistry, cache: ProjectIndexCache, still: StillThatPlace = async () => true): RouteHandler =>
   async call => {
     const project = await projectOf(registry, call.params.get('id'));
-    return jsonResponse(statusOf(cache.rescan(project.id, project.path)));
+    const held = await guard(cache, project, still)
+      .then(() => cache.rescan(project.id, project.path))
+      .catch(refusal);
+    return jsonResponse(statusOf(held));
   };

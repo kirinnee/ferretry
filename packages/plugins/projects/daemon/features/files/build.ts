@@ -18,7 +18,7 @@ import {
   type TreePolicy,
   MAX_INDEX_WALL_MS,
 } from '@ferretry/core-ferrets/contract';
-import type { HeldRoot, PinnedTarget, SpawnBudget } from '@ferretry/kernel/contract';
+import { FsError, type HeldRoot, type PinnedTarget, type SpawnBudget } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import {
   MAX_PROJECT_WORKTREES_NAMED,
@@ -121,16 +121,140 @@ class Deadline implements SpawnBudget {
 }
 
 interface State {
+  /** Accepted rows, never more than twice the cap: {@link accept} keeps the shallowest as it goes. */
   readonly files: SessionFileIndexEntry[];
   readonly skips: SkipTally;
   readonly worktrees: string[];
   /** Folders opened or repositories indexed: the one bound on how much of the disk a build touches. */
   opened: number;
+  /** Names looked at across the WHOLE project, every repository and the plain walk together: the one candidate budget. */
+  candidates: number;
+}
+
+/** What one build shares across its repositories: the deps, the pins, the limits, the ONE deadline and the one verdict memo. */
+interface Run {
+  readonly deps: ProjectIndexDeps;
+  readonly pins: FolderPins;
+  readonly state: State;
+  readonly limits: ProjectIndexLimits;
+  readonly deadline: Deadline;
+  readonly judge: Judge;
+  /** The device of the project folder, read from its held descriptor: a descendant on another device is not entered. */
+  readonly device: string;
 }
 
 const depthOf = (rel: string): number => (rel === '' ? 0 : rel.split('/').length);
 const join = (parent: string, name: string): string => (parent === '' ? name : `${parent}/${name}`);
 const below = (real: string, rel: string): string => `${real === '/' ? '' : real}/${rel}`;
+const parentOf = (rel: string): string => (rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '');
+
+/**
+ * The device (`st_dev`) of the folder `rel` inside a held root (`''` is the held folder itself), read from the DESCRIPTOR the
+ * pinned walk opened — never from a path that could be swapped for another after it was looked at. `undefined` when it is
+ * not a folder there now.
+ */
+async function deviceOf(root: HeldRoot, rel: string): Promise<string | undefined> {
+  try {
+    const target = await root.open(rel, { wantDirectory: true });
+    try {
+      return target.identities.at(-1)?.dev.toString();
+    } finally {
+      await target.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+/** Why a folder below the project was not entered: the policy said private, it is on another disk, or nothing was proved. */
+type Verdict = 'ok' | 'private' | 'device' | 'unreadable' | 'spent';
+
+/** Counts what a refused folder (or each file below one) costs the answer, in the words the skip list already has. */
+function refuse(state: State, verdict: Exclude<Verdict, 'ok'>, count = 1): void {
+  tally(
+    state.skips,
+    verdict === 'private'
+      ? 'denied'
+      : verdict === 'device'
+        ? 'excluded'
+        : verdict === 'spent'
+          ? 'truncated'
+          : 'unreadable',
+    count,
+  );
+}
+
+/**
+ * The ONE judgment of an ordinary folder below the project folder, shared by the walk and by the folders a Git list names:
+ * the shared folder policy (`pins.descendant`: a key store by name or by where it REALLY is, a folder holding a sign-in
+ * file) AND the same disk as the project folder (`find -xdev`), read from the held descriptor. Every folder from the held
+ * root down is judged, ancestors first, so a private folder closes everything beneath it; each verdict is remembered, so a
+ * folder is asked once however many files it holds.
+ */
+class Judge {
+  private readonly memo = new Map<string, Verdict>();
+  constructor(
+    private readonly pins: FolderPins,
+    private readonly device: string,
+    private readonly deadline: Deadline,
+  ) {}
+
+  async dir(root: HeldRoot, rel: string): Promise<Verdict> {
+    if (rel === '') return 'ok';
+    const above = await this.dir(root, parentOf(rel));
+    if (above !== 'ok') return above;
+    const real = below(root.rootReal, rel);
+    const known = this.memo.get(real);
+    if (known !== undefined) return known;
+    if (this.deadline.expired()) return 'spent';
+    const verdict = await this.judge(root, rel, real);
+    this.memo.set(real, verdict);
+    return verdict;
+  }
+
+  private async judge(root: HeldRoot, rel: string, real: string): Promise<Verdict> {
+    const policy = await this.pins.descendant(real);
+    if (policy !== undefined) return policy;
+    const device = await deviceOf(root, rel);
+    return device === undefined ? 'unreadable' : device === this.device ? 'ok' : 'device';
+  }
+}
+
+/** What `<rel>/.git` is, asked of the held root before any listing: a folder, a file, nothing there, or not established. */
+async function gitMarker(root: HeldRoot, rel: string): Promise<'directory' | 'file' | 'absent' | 'indeterminate'> {
+  const path = `${rel}/.git`;
+  const attempt = async (wantDirectory: boolean) => {
+    const target = await root.open(path, { wantDirectory });
+    try {
+      return target.metadata.type;
+    } finally {
+      await target.close();
+    }
+  };
+  try {
+    return (await attempt(true)) === 'dir' ? 'directory' : 'indeterminate';
+  } catch (error) {
+    if (error instanceof FsError && error.code === 'not_found') return 'absent';
+    if (!(error instanceof FsError && error.code === 'not_a_directory')) return 'indeterminate';
+  }
+  try {
+    return (await attempt(false)) === 'file' ? 'file' : 'indeterminate';
+  } catch {
+    return 'indeterminate';
+  }
+}
+
+/**
+ * Keeps an accepted row. The rows are held shallow first and never past twice the cap: a project of many repositories each
+ * holding up to the cap would otherwise grow without a bound until the final sort.
+ */
+function accept(state: State, rows: readonly SessionFileIndexEntry[], limits: ProjectIndexLimits): void {
+  for (const row of rows) state.files.push(row);
+  if (state.files.length <= limits.maxFiles * 2) return;
+  state.files.sort((left, right) => compareShallowFirst(left.path, right.path));
+  tally(state.skips, 'truncated', state.files.length - limits.maxFiles);
+  state.files.length = limits.maxFiles;
+}
 
 /** One indexed row for a name the walk met, or `undefined` for a spelling the file routes would refuse. */
 function entryFor(rel: string): SessionFileIndexEntry | undefined {
@@ -144,16 +268,22 @@ function entryFor(rel: string): SessionFileIndexEntry | undefined {
  */
 export async function buildProjectIndex(path: string, deps: ProjectIndexDeps): Promise<ProjectIndex> {
   const limits = deps.limits ?? DEFAULT_PROJECT_INDEX_LIMITS;
+  // ONE deadline for the whole build, started BEFORE anything is held: reading the privacy policy and holding the folder can
+  // list whole folders, and that time is spent from the same budget the walk has.
+  const deadline = new Deadline(deps.nowMs, limits.budgetMs);
   const pins = await deps.pins();
   const held = await pins.project(path);
   if (!held.ok) throw new ProjectFolderRefused(held.reason);
   const root = held.root;
-  const state: State = { files: [], skips: new Map(), worktrees: [], opened: 0 };
-  const deadline = new Deadline(deps.nowMs, limits.budgetMs);
+  const state: State = { files: [], skips: new Map(), worktrees: [], opened: 0, candidates: 0 };
   try {
     // The folder itself is a key store or a secret name (`~/.ssh`, a folder called `.env`): nothing beneath it is innocent.
     if (isSharedSecretPath(root.rootReal.split('/').filter(Boolean).join('/')))
       throw new ProjectFolderRefused('private');
+    // Nothing below can be proved on the project's own disk without knowing which disk that is.
+    const device = await deviceOf(root, '');
+    if (device === undefined) throw new ProjectFolderRefused('unavailable');
+    const run: Run = { deps, pins, state, limits, deadline, judge: new Judge(pins, device, deadline), device };
     let inside: boolean | undefined;
     try {
       inside = await deps.git.isInsideWorkTree(root.policyCwd, deadline);
@@ -162,8 +292,8 @@ export async function buildProjectIndex(path: string, deps: ProjectIndexDeps): P
       tally(state.skips, 'unreadable', 1);
     }
     // A spent budget answers `false` without a child; the walk then stops at its first step and says so.
-    if (inside === true) await indexRepository(root, '', deps, pins, state, limits, deadline);
-    else if (inside === false) await walk(root, deps, pins, state, limits, deadline);
+    if (inside === true) await indexRepository(root, '', run);
+    else if (inside === false) await walk(root, run);
   } finally {
     await root.close().catch(() => undefined);
   }
@@ -177,21 +307,18 @@ export async function buildProjectIndex(path: string, deps: ProjectIndexDeps): P
  * nested repository or linked worktree as one `dir/` entry and does not enter it; those entries are taken out of the list
  * (they would otherwise be counted as unsupported names) and handled here.
  */
-async function indexRepository(
-  pinned: HeldRoot,
-  prefix: string,
-  deps: ProjectIndexDeps,
-  pins: FolderPins,
-  state: State,
-  limits: ProjectIndexLimits,
-  deadline: Deadline,
-): Promise<void> {
+async function indexRepository(pinned: HeldRoot, prefix: string, run: Run): Promise<void> {
+  const { deps, state, limits, deadline } = run;
+  // What the project folder and the repositories before this one already looked at is spent: one budget, not one per repository.
+  const room = limits.maxCandidates - state.candidates;
+  if (room <= 0) return void tally(state.skips, 'truncated', 1);
   const nested: string[] = [];
   const git: Pick<TreeGit, 'isInsideWorkTree' | 'listFiles'> = {
     // Established by the caller: a `.git` folder is there, or Git already said so for the project folder.
     isInsideWorkTree: async () => true,
     listFiles: async (cwd, maxBytes, budget) => {
       const listed = await deps.git.listFiles(cwd, maxBytes, budget);
+      state.candidates += listed.paths.length;
       nested.push(...listed.paths.filter(name => name.endsWith('/')).map(name => name.slice(0, -1)));
       return { paths: listed.paths.filter(name => !name.endsWith('/')), truncated: listed.truncated };
     },
@@ -199,14 +326,13 @@ async function indexRepository(
   const bounds: TreeIndexBounds = {
     scale: 'project',
     maxFiles: limits.maxFiles,
-    maxCandidates: limits.maxCandidates,
+    maxCandidates: room,
     budgetMs: Math.ceil(deadline.remainingMs()),
   };
   try {
     const result = await indexPinnedTree(pinned, { git, policy: POLICY, nowMs: deps.nowMs }, bounds);
-    for (const file of result.files)
-      state.files.push(prefix === '' ? file : { path: join(prefix, file.path), name: file.name });
     for (const skip of result.skipped) tally(state.skips, skip.reason, skip.count);
+    accept(state, await admitted(pinned, prefix, result.files, run), limits);
   } catch (error) {
     tally(state.skips, error instanceof TreeRootDeniedError ? 'denied' : 'unreadable', 1);
     return;
@@ -217,52 +343,61 @@ async function indexRepository(
       tally(state.skips, 'truncated', folders.length - position);
       return;
     }
-    await indexNested(pinned, folder, join(prefix, folder), deps, pins, state, limits, deadline);
+    await indexNested(pinned, folder, join(prefix, folder), run);
   }
+}
+
+/**
+ * The rows of one repository's Git list whose every folder passes the shared folder policy and is on the project's disk.
+ * Git names files at any depth and says nothing about what a folder is, so each distinct folder is judged once (ancestors
+ * first); what is under a refused one is counted by the reason and not returned. The rows come back as the project names
+ * them (below the project folder).
+ */
+async function admitted(
+  pinned: HeldRoot,
+  prefix: string,
+  files: readonly SessionFileIndexEntry[],
+  run: Run,
+): Promise<SessionFileIndexEntry[]> {
+  const kept: SessionFileIndexEntry[] = [];
+  for (const file of files) {
+    const verdict = await run.judge.dir(pinned, parentOf(file.path));
+    if (verdict === 'ok') kept.push(prefix === '' ? file : { path: join(prefix, file.path), name: file.name });
+    else refuse(run.state, verdict);
+  }
+  return kept;
 }
 
 /** One folder Git would not enter: a repository (indexed on its own), a linked worktree or submodule (named), or neither. */
-async function indexNested(
-  parent: HeldRoot,
-  folder: string,
-  rel: string,
-  deps: ProjectIndexDeps,
-  pins: FolderPins,
-  state: State,
-  limits: ProjectIndexLimits,
-  deadline: Deadline,
-): Promise<void> {
+async function indexNested(parent: HeldRoot, folder: string, rel: string, run: Run): Promise<void> {
+  const { state, limits } = run;
   if (isSharedSecretPath(rel)) return void tally(state.skips, 'denied', 1);
   if (isIndexExcludedPath(rel) || depthOf(rel) > limits.maxDepth) return void tally(state.skips, 'excluded', 1);
-  const kind = await gitKindOf(parent, folder);
-  if (kind === 'none') return void tally(state.skips, 'unreadable', 1);
+  // Every folder from the parent down to the one Git named is judged like any other descendant (a repository under a
+  // sign-in folder is under it), by the policy and the disk, before a marker is asked about or anything is held.
+  const judged = await run.judge.dir(parent, folder);
+  if (judged !== 'ok') return void refuse(state, judged);
+  const kind = await gitMarker(parent, folder);
+  // Git named it a repository: no `.git` there now, or not established, is not one to enter.
+  if (kind === 'absent' || kind === 'indeterminate') return void tally(state.skips, 'unreadable', 1);
   if (kind === 'file') return void noteWorktree(state, rel);
+  await indexHeld(parent, folder, rel, run);
+}
+
+/** A repository whose `.git` folder was established: held as a child of the folder it is in, and indexed whole. */
+async function indexHeld(parent: HeldRoot, folder: string, rel: string, run: Run): Promise<void> {
+  const { state } = run;
   state.opened += 1;
-  const held = await pins.nested(below(parent.rootReal, folder));
+  const held = await run.pins.nested(below(parent.rootReal, folder));
   if (!held.ok) return void tally(state.skips, held.reason === 'private' ? 'denied' : 'unreadable', 1);
   try {
-    // The held object must be the very folder Git named: a name swapped for a link lands somewhere else.
+    // The held object must be the very folder that was judged: a name swapped for a link or a mount lands somewhere else.
     if (held.root.rootReal !== below(parent.rootReal, folder)) return void tally(state.skips, 'denied', 1);
-    await indexRepository(held.root, rel, deps, pins, state, limits, deadline);
+    if ((await deviceOf(held.root, '')) !== run.device) return void tally(state.skips, 'excluded', 1);
+    await indexRepository(held.root, rel, run);
   } finally {
     await held.root.close().catch(() => undefined);
   }
-}
-
-/** What `<folder>/.git` is, walked through the held parent (no link at any component): a folder, a file, or neither. */
-async function gitKindOf(parent: HeldRoot, folder: string): Promise<'directory' | 'file' | 'none'> {
-  for (const wantDirectory of [true, false]) {
-    try {
-      const target = await parent.open(`${folder}/.git`, { wantDirectory });
-      const type = target.metadata.type;
-      await target.close();
-      if (type === 'dir') return 'directory';
-      if (type === 'file') return 'file';
-    } catch {
-      // Not a folder (or not there); the second try asks whether it is a file.
-    }
-  }
-  return 'none';
 }
 
 /** A linked worktree or submodule checkout: counted as excluded and named, never entered. */
@@ -278,16 +413,9 @@ function noteWorktree(state: State, rel: string): void {
  * leaves the project. A folder that cannot be opened costs its own subtree and nothing else. Hidden folders, the index's
  * noisy roots and secret-named entries are skipped and counted; a plain file met on the way is indexed.
  */
-async function walk(
-  root: HeldRoot,
-  deps: ProjectIndexDeps,
-  pins: FolderPins,
-  state: State,
-  limits: ProjectIndexLimits,
-  deadline: Deadline,
-): Promise<void> {
+async function walk(root: HeldRoot, run: Run): Promise<void> {
+  const { state, limits, deadline } = run;
   const queue: { readonly rel: string; readonly depth: number }[] = [{ rel: '', depth: 0 }];
-  let inspected = 0;
   walking: while (true) {
     const next = queue.shift();
     if (next === undefined) break;
@@ -296,6 +424,33 @@ async function walk(
       break;
     }
     state.opened += 1;
+    if (next.rel !== '') {
+      // BEFORE the folder is listed: the shared folder policy and the disk, then whether it is a repository. A listing is
+      // capped, so it can miss a `.git` that is there; the marker is asked of the held root, and what cannot be established
+      // is not listed (listing it would name what Git's ignore rules close, or enter a linked worktree).
+      const verdict = await run.judge.dir(root, next.rel);
+      if (verdict === 'spent') {
+        tally(state.skips, 'truncated', 1 + queue.length);
+        break;
+      }
+      if (verdict !== 'ok') {
+        refuse(state, verdict);
+        continue;
+      }
+      const marker = await gitMarker(root, next.rel);
+      if (marker === 'directory') {
+        await indexHeld(root, next.rel, next.rel, run);
+        continue;
+      }
+      if (marker === 'file') {
+        noteWorktree(state, next.rel);
+        continue;
+      }
+      if (marker === 'indeterminate') {
+        tally(state.skips, 'unreadable', 1);
+        continue;
+      }
+    }
     let target: PinnedTarget;
     try {
       target = await root.open(next.rel, { wantDirectory: true });
@@ -307,20 +462,12 @@ async function walk(
       const listing = await target.list(MAX_FOLDER_NAMES, deadline);
       if (listing.truncated) tally(state.skips, 'truncated', 1);
       const children = [...listing.entries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-      const git = children.find(child => child.name === '.git');
-      if (git !== undefined && next.rel !== '') {
-        // A repository is its own folder: indexed whole (Git's list, any depth), never listed name by name here.
-        if (git.type === 'file') noteWorktree(state, next.rel);
-        else if (git.type === 'dir') await indexFound(root, next.rel, deps, pins, state, limits, deadline);
-        else tally(state.skips, 'unsupported', 1);
-        continue;
-      }
       for (const child of children) {
-        if (inspected >= limits.maxCandidates || deadline.expired()) {
+        if (state.candidates >= limits.maxCandidates || deadline.expired()) {
           tally(state.skips, 'truncated', 1);
           break walking;
         }
-        inspected += 1;
+        state.candidates += 1;
         const rel = join(next.rel, child.name);
         if (child.type === 'dir' && child.name.startsWith('.')) {
           tally(state.skips, 'excluded', 1);
@@ -346,7 +493,7 @@ async function walk(
         }
         const entry = child.type === 'file' ? entryFor(rel) : undefined;
         if (entry === undefined) tally(state.skips, 'unsupported', 1);
-        else state.files.push(entry);
+        else accept(state, [entry], limits);
       }
     } catch {
       tally(state.skips, 'unreadable', 1);
@@ -356,28 +503,9 @@ async function walk(
   }
 }
 
-/** A repository the walk found: held as a child of the project folder and indexed whole. */
-async function indexFound(
-  root: HeldRoot,
-  rel: string,
-  deps: ProjectIndexDeps,
-  pins: FolderPins,
-  state: State,
-  limits: ProjectIndexLimits,
-  deadline: Deadline,
-): Promise<void> {
-  const held = await pins.nested(below(root.rootReal, rel));
-  if (!held.ok) return void tally(state.skips, held.reason === 'private' ? 'denied' : 'unreadable', 1);
-  try {
-    if (held.root.rootReal !== below(root.rootReal, rel)) return void tally(state.skips, 'denied', 1);
-    await indexRepository(held.root, rel, deps, pins, state, limits, deadline);
-  } finally {
-    await held.root.close().catch(() => undefined);
-  }
-}
-
 /** Sorts shallow first, applies the one cap, and turns the tally into the summary the app shows. */
 function finish(state: State, limits: ProjectIndexLimits, builtAt: Instant): ProjectIndex {
+  // At most twice the cap is held (`accept`), so this sort is bounded work however many repositories fed it.
   const sorted = [...state.files].sort((left, right) => compareShallowFirst(left.path, right.path));
   tally(state.skips, 'truncated', sorted.length - limits.maxFiles);
   const files = sorted.slice(0, limits.maxFiles);

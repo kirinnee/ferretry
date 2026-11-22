@@ -1,10 +1,24 @@
-import type { ProjectIndex } from './build.ts';
+import { type ProjectIndex, ProjectFolderRefused } from './build.ts';
 
 /** A read of an index older than this answers the old one and starts a rebuild (owner decision D5: no watcher). */
 export const STALE_AFTER_MS = 30_000;
 
 /** The most projects held in memory at once; the oldest idle one goes first. A project's index is a few MB of names. */
 export const MAX_CACHED_PROJECTS = 16;
+
+/**
+ * The most builds that run at once, across every project. A build walks a disk and holds descriptors, and it is the one
+ * thing here a caller can ask for by naming a project; the rest wait their turn rather than all starting together.
+ */
+export const MAX_CONCURRENT_BUILDS = 2;
+
+/** Every held project is building or waiting to, so there is no room to take another: say so, retry later. */
+export class IndexCacheBusy extends Error {
+  constructor() {
+    super('every project index slot is busy building');
+    this.name = 'IndexCacheBusy';
+  }
+}
 
 interface Entry {
   index: ProjectIndex | undefined;
@@ -31,16 +45,34 @@ export interface CachedStatus {
  *
  * MEMORY ONLY, deliberately. A list of every file name written into `state/` is one more place names could leak from
  * (backups, copies) for no real speed gain: a rebuild costs well under a second on a 14,000-file project. One build per
- * project runs at a time and a second request joins it. The clock is injected so staleness is proved without waiting.
+ * project runs at a time and a second request joins it; at most {@link MAX_CONCURRENT_BUILDS} run at once and the rest
+ * queue; at most {@link MAX_CACHED_PROJECTS} projects are held, and when every one of them is building another is
+ * refused ({@link IndexCacheBusy}) rather than held past the bound. The clock is injected so staleness is proved without
+ * waiting.
+ *
+ * A rebuild the privacy policy refuses (`ProjectFolderRefused('private')`) DISCARDS the index it had: what was private is
+ * no longer answered from memory. A rebuild that merely failed keeps the old one.
  */
 export class ProjectIndexCache {
   private readonly entries = new Map<string, Entry>();
+  private building = 0;
+  private readonly waiting: (() => void)[] = [];
 
   constructor(
     private readonly build: (path: string) => Promise<ProjectIndex>,
     private readonly nowMs: () => number,
     private readonly staleMs: number = STALE_AFTER_MS,
   ) {}
+
+  /** How many projects are held (an index, or a build in flight). */
+  size(): number {
+    return this.entries.size;
+  }
+
+  /** Forgets a project's index at once: what the place was is no longer what is registered. */
+  evict(key: string): void {
+    this.entries.delete(key);
+  }
 
   /**
    * The index to answer with. The FIRST read waits for the build (and throws what it throws: a refused folder); a later
@@ -49,10 +81,11 @@ export class ProjectIndexCache {
   async read(key: string, path: string): Promise<CachedIndex> {
     const entry = this.entry(key);
     if (entry.index === undefined) {
-      const index = await this.run(entry, path);
+      const index = await this.run(key, entry, path);
       return { index, rebuilding: false };
     }
-    if (entry.running === undefined && this.nowMs() - entry.checkedMs >= this.staleMs) this.background(entry, path);
+    if (entry.running === undefined && this.nowMs() - entry.checkedMs >= this.staleMs)
+      this.background(key, entry, path);
     return { index: entry.index, rebuilding: entry.running !== undefined };
   }
 
@@ -60,14 +93,14 @@ export class ProjectIndexCache {
   status(key: string, path: string): CachedStatus {
     const entry = this.entry(key);
     if (entry.index === undefined || (entry.running === undefined && this.nowMs() - entry.checkedMs >= this.staleMs))
-      this.background(entry, path);
+      this.background(key, entry, path);
     return { index: entry.index, rebuilding: entry.running !== undefined };
   }
 
   /** Starts a rebuild now (or joins the one running) and answers without waiting for it. */
   rescan(key: string, path: string): CachedStatus {
     const entry = this.entry(key);
-    this.background(entry, path);
+    this.background(key, entry, path);
     return { index: entry.index, rebuilding: true };
   }
 
@@ -79,23 +112,59 @@ export class ProjectIndexCache {
       this.entries.set(key, held);
       return held;
     }
+    // Room is made BEFORE the new one is held, so a full cache of running builds never grows past its bound.
+    for (const [other, candidate] of this.entries) {
+      if (this.entries.size < MAX_CACHED_PROJECTS) break;
+      if (candidate.running === undefined) this.entries.delete(other);
+    }
+    if (this.entries.size >= MAX_CACHED_PROJECTS) throw new IndexCacheBusy();
     const entry: Entry = { index: undefined, checkedMs: 0, running: undefined };
     this.entries.set(key, entry);
-    for (const [other, candidate] of this.entries) {
-      if (this.entries.size <= MAX_CACHED_PROJECTS) break;
-      if (other !== key && candidate.running === undefined) this.entries.delete(other);
-    }
     return entry;
   }
 
+  /** Starts the build now when one of the {@link MAX_CONCURRENT_BUILDS} slots is free (synchronously), else when one is. */
+  private start(path: string): Promise<ProjectIndex> {
+    if (this.building >= MAX_CONCURRENT_BUILDS)
+      return new Promise<ProjectIndex>((resolve, reject) => {
+        this.waiting.push(() => {
+          this.start(path).then(resolve, reject);
+        });
+      });
+    this.building += 1;
+    const release = (): void => {
+      this.building -= 1;
+      this.waiting.shift()?.();
+    };
+    let started: Promise<ProjectIndex>;
+    try {
+      started = this.build(path);
+    } catch (error) {
+      started = Promise.reject(error);
+    }
+    // A side branch: giving the slot back never delays what the caller is told.
+    started.then(release, release);
+    return started;
+  }
+
   /** One build per project: a second caller gets the promise already running. */
-  private run(entry: Entry, path: string): Promise<ProjectIndex> {
-    entry.running ??= this.build(path)
-      .then(index => {
-        entry.index = index;
-        entry.checkedMs = this.nowMs();
-        return index;
-      })
+  private run(key: string, entry: Entry, path: string): Promise<ProjectIndex> {
+    entry.running ??= this.start(path)
+      .then(
+        index => {
+          entry.index = index;
+          entry.checkedMs = this.nowMs();
+          return index;
+        },
+        (error: unknown) => {
+          // What the privacy policy refuses is not answered from memory any longer; a hiccup keeps what there is.
+          if (error instanceof ProjectFolderRefused && error.reason === 'private') {
+            entry.index = undefined;
+            if (this.entries.get(key) === entry) this.entries.delete(key);
+          }
+          throw error;
+        },
+      )
       .finally(() => {
         entry.running = undefined;
       });
@@ -103,8 +172,8 @@ export class ProjectIndexCache {
   }
 
   /** A build nobody waits on: its failure keeps the index there is, and is not retried until the next stale interval. */
-  private background(entry: Entry, path: string): void {
-    this.run(entry, path).catch(() => {
+  private background(key: string, entry: Entry, path: string): void {
+    this.run(key, entry, path).catch(() => {
       entry.checkedMs = this.nowMs();
     });
   }

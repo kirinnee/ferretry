@@ -31,6 +31,8 @@ const start = async () => {
           built.push(path);
           return INDEX;
         },
+        // `/work/alpha` is a fake machine's folder, not one on this disk.
+        stillThatPlace: async () => true,
       }),
     ],
   });

@@ -7,7 +7,7 @@ import {
   ProjectIndexSummarySchema,
 } from '../../../contract/index.ts';
 import { type ProjectIndex, ProjectFolderRefused } from '../../../daemon/features/files/build.ts';
-import { ProjectIndexCache } from '../../../daemon/features/files/cache.ts';
+import { IndexCacheBusy, ProjectIndexCache } from '../../../daemon/features/files/cache.ts';
 import { filesRescanRoute, filesRoute, filesStatusRoute } from '../../../daemon/features/files/routes.ts';
 import { fakeMachine, registryOver } from './support.ts';
 
@@ -137,6 +137,41 @@ describe('the status and rescan routes', () => {
 
     expect(got.rebuilding).toBe(true);
     expect(got.index).toEqual(READY.summary);
+  });
+});
+
+describe('a cached index is only answered while the registered path is still the place that was indexed', () => {
+  test('all three routes forget the index and refuse when the path no longer resolves to itself', async () => {
+    const { registry, cache, id } = await setup();
+    let held = true;
+    const holds = async () => held;
+    await filesRoute(registry, cache, holds)(callWith({ id }));
+    held = false;
+
+    const read = await failure(() => filesRoute(registry, cache, holds)(callWith({ id })));
+    const status = await failure(() => filesStatusRoute(registry, cache, holds)(callWith({ id })));
+    const rescan = await failure(() => filesRescanRoute(registry, cache, holds)(callWith({ id })));
+
+    for (const refused of [read, status, rescan])
+      expect([refused.status, refused.code]).toEqual([404, 'project_folder_unavailable']);
+    held = true;
+    expect(
+      ProjectFilesStatusSchema.parse(answer(await filesStatusRoute(registry, cache, holds)(callWith({ id }))).json)
+        .index,
+    ).toBeUndefined();
+  });
+
+  test('a cache with nowhere to put another project answers 503, not a hang', async () => {
+    const { registry, id } = await setup();
+    const full = {
+      read: async () => {
+        throw new IndexCacheBusy();
+      },
+    } as unknown as ProjectIndexCache;
+
+    const refused = await failure(() => filesRoute(registry, full)(callWith({ id })));
+
+    expect([refused.status, refused.code]).toEqual([503, 'index_busy']);
   });
 });
 

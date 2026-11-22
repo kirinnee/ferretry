@@ -17,10 +17,20 @@ type PinResult = { readonly ok: true; readonly root: HeldRoot } | { readonly ok:
 
 /** The two ways the indexer holds a folder, both judged by the one privacy policy (`folders/policy.ts`). */
 export interface FolderPins {
-  /** The project folder itself: it must not be a link, and every folder from the home down is judged. */
+  /**
+   * The project folder itself, which must BE the path it was registered under: a link at any component (the leaf or an
+   * ancestor) reaches some other folder, so the resolved real path and the held object must both equal the registered one.
+   */
   project(path: string): Promise<PinResult>;
   /** A repository inside a project folder already held: judged as a child (its own sign-in file, its own real place). */
   nested(path: string): Promise<PinResult>;
+  /**
+   * An ordinary folder below one already held (`real` is its place, held parent plus relative path): `undefined` to accept
+   * it, `'private'` when the policy says so (a key store, a folder holding a sign-in file), `'unreadable'` when it could not
+   * be proved either way. A descendant is judged exactly like a nested repository, so a folder's privacy does not depend on
+   * whether Git happens to know it.
+   */
+  descendant(real: string): Promise<'private' | 'unreadable' | undefined>;
 }
 
 type Kernel = Pick<KernelPorts, 'roots' | 'paths' | 'spawn'>;
@@ -33,7 +43,7 @@ type Kernel = Pick<KernelPorts, 'roots' | 'paths' | 'spawn'>;
  * not shared with the explorer because that one hands back a listing object and this one needs the held root itself (its
  * descriptor is what Git is started in).
  */
-function holder(kernel: Pick<KernelPorts, 'roots'>, verdict: FolderVerdict) {
+function holder(kernel: Pick<KernelPorts, 'roots'>, verdict: FolderVerdict, mustBeNamed: boolean) {
   return async (path: string): Promise<PinResult> => {
     const named = kernel.roots.root('imports', { subfolder: path });
     const fenced = named.resolve('');
@@ -44,6 +54,9 @@ function holder(kernel: Pick<KernelPorts, 'roots'>, verdict: FolderVerdict) {
     } catch {
       return { ok: false, reason: 'unavailable' };
     }
+    // A registered place is already canonical: a spelling that resolves anywhere else has a link in it, and what it reaches
+    // is not the project the person registered (the leaf alone looks like a plain folder when an ANCESTOR is the link).
+    if (mustBeNamed && real !== path.replace(/(?<=.)\/+$/u, '')) return { ok: false, reason: 'unavailable' };
     const first = await verdict(real);
     if (first !== undefined) return { ok: false, reason: first === 'private' ? 'private' : 'unavailable' };
     const handle = kernel.roots.root('imports', { subfolder: real });
@@ -56,7 +69,7 @@ function holder(kernel: Pick<KernelPorts, 'roots'>, verdict: FolderVerdict) {
     } catch {
       return { ok: false, reason: 'unavailable' };
     }
-    const second = await verdict(root.rootReal);
+    const second = root.rootReal === real ? await verdict(root.rootReal) : 'outside';
     if (second !== undefined) {
       await root.close().catch(() => undefined);
       return { ok: false, reason: second === 'private' ? 'private' : 'unavailable' };
@@ -73,14 +86,22 @@ export function kernelPins(kernel: Kernel, browser: FolderBrowser): () => Promis
   return async () => {
     const policy = await folderPolicy(browser, await browser.home());
     return {
-      project: async path => {
-        // What a link at the project folder reaches is not the project.
-        if ((await browser.leaf(path)) !== 'present') return { ok: false, reason: 'unavailable' };
-        return holder(kernel, policy.verdict)(path);
+      project: holder(kernel, policy.verdict, true),
+      nested: holder(kernel, policy.child, false),
+      descendant: async real => {
+        const verdict = await policy.child(real);
+        return verdict === undefined ? undefined : verdict === 'private' ? 'private' : 'unreadable';
       },
-      nested: holder(kernel, policy.child),
     };
   };
+}
+
+/**
+ * Whether `path` still resolves to ITSELF (no link at any component, and a folder is there): the cheap check a cached index
+ * must pass before it is answered, so a registered place that became a link is not served from memory.
+ */
+export function stillThatPlace(browser: Pick<FolderBrowser, 'realPaths'>): (path: string) => Promise<boolean> {
+  return async path => (await browser.realPaths([path])).at(0) === path.replace(/(?<=.)\/+$/u, '');
 }
 
 /** The default Git child's limits; the index asks for its own byte cap and gives the child what is left of its budget. */

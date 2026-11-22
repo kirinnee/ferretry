@@ -7,6 +7,8 @@ import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DEFAULT_PROJECT_INDEX_LIMITS, ProjectFolderRefused } from '../../../daemon/features/files/build.ts';
 import { ProjectIndexSummarySchema } from '../../../contract/index.ts';
+import { kernelBrowser } from '../../../daemon/features/folders/adapter.ts';
+import { stillThatPlace } from '../../../daemon/features/files/pins.ts';
 import { cleanUp, git, put, world } from './files-support.ts';
 
 afterEach(cleanUp);
@@ -250,5 +252,76 @@ describe('the project folder itself', () => {
     expect(await refusals(join(w.user, 'alias'))).toBe('unavailable');
     expect(await refusals(join(w.user, 'missing'))).toBe('unavailable');
     expect(await refusals(w.project)).toBe('built');
+  });
+});
+
+describe('the project folder is the registered place, not wherever its spelling reaches', () => {
+  test('a link in an ANCESTOR is refused: the leaf alone looks like a plain folder', async () => {
+    const w = await world();
+    await put(w.user, { 'other/work/a.txt': '' });
+    await symlink(join(w.user, 'other'), join(w.user, 'link'));
+
+    let reason: unknown;
+    try {
+      await w.build(join(w.user, 'link', 'work'));
+    } catch (error) {
+      reason = error instanceof ProjectFolderRefused ? error.reason : error;
+    }
+
+    expect(reason).toBe('unavailable');
+  });
+
+  test('what a cached index is checked against: a registered path that became (or sits under) a link is no longer itself', async () => {
+    const w = await world();
+    const still = stillThatPlace(kernelBrowser(w.kernel));
+    await put(w.user, { 'other/work/a.txt': '' });
+    await symlink(join(w.user, 'other'), join(w.user, 'link'));
+
+    expect(await still(w.project)).toBe(true);
+    expect(await still(`${w.project}/`)).toBe(true);
+    expect(await still(join(w.user, 'link', 'work'))).toBe(false);
+    expect(await still(join(w.user, 'missing'))).toBe(false);
+  });
+});
+
+describe('a descendant folder is judged by the shared folder policy', () => {
+  test('a folder holding a sign-in file is not listed, in the plain walk', async () => {
+    const w = await world();
+    await put(w.project, { 'ok.txt': '', 'vault/auth.json': '{}', 'vault/notes.txt': '' });
+
+    const index = await w.build();
+
+    expect(paths(index.files)).toEqual(['ok.txt']);
+    expect(skip(index.summary, 'denied')).toBeGreaterThanOrEqual(1);
+  });
+
+  test('a folder holding a sign-in file is not listed, in a Git repository either', async () => {
+    const w = await world();
+    git(w.project, w.user, 'init', '-q');
+    await put(w.project, { 'ok.txt': '', 'vault/auth.json': '{}', 'vault/notes.txt': '', 'vault/sub/more.txt': '' });
+
+    const index = await w.build();
+
+    expect(paths(index.files)).toEqual(['ok.txt']);
+    expect(skip(index.summary, 'denied')).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('one candidate budget covers the whole project', () => {
+  test('nested repositories share what the project folder left, instead of each getting a fresh budget', async () => {
+    const w = await world({ ...DEFAULT_PROJECT_INDEX_LIMITS, maxCandidates: 5 });
+    git(w.project, w.user, 'init', '-q');
+    await put(w.project, { 'top.ts': '' });
+    for (const name of ['a', 'b']) {
+      await put(join(w.project, 'libs', name), { '1.ts': '', '2.ts': '', '3.ts': '' });
+      git(join(w.project, 'libs', name), w.user, 'init', '-q');
+    }
+
+    const index = await w.build();
+
+    // top.ts and the two `libs/<x>/` entries are three candidates; two are left for everything inside them.
+    expect(index.files.length).toBeLessThanOrEqual(3);
+    expect(index.summary.coverage).toBe('partial');
+    expect(skip(index.summary, 'truncated')).toBeGreaterThanOrEqual(1);
   });
 });
