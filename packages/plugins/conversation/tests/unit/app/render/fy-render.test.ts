@@ -1,8 +1,6 @@
 import { describe, test } from 'bun:test';
 import should from 'should';
 import {
-  FY_RENDER_FENCE_ATTRIBUTE,
-  FY_RENDER_FENCE_LANGUAGE,
   FY_RENDER_IMAGE_MIMES,
   FY_RENDER_LIMITS,
   FY_RENDER_MEDIA_TYPES,
@@ -17,7 +15,6 @@ import {
   isFyRenderMediaBlock,
   isFyRenderEmbedBlock,
   parseFyRender,
-  remarkFyRenderFences,
 } from '../../../../app/render/fy-render.ts';
 import { FY_RENDER_LIMITS as BOUNDS_LIMITS, FY_RENDER_SANDBOX_LIMITS as BOUNDS_SANDBOX_LIMITS } from '@ferretry/app';
 
@@ -220,64 +217,12 @@ const WEBP_FRAME: readonly number[] = [...chars('ANMF'), 2, 0, 0, 0, 0, 0];
 /** The smallest raster the grammar accepts, used wherever the bytes are incidental. */
 const PIXEL = base64(png(1, 1));
 
-describe('fy-render fence language', () => {
-  test('should name exactly the token the renderer matches', () => {
-    should(FY_RENDER_FENCE_LANGUAGE).equal('fy-render');
-  });
-
+describe('fy-render bounds', () => {
   test('should re-export the bounds module rather than keep a second copy of the numbers', () => {
     // Assert — the sandbox shells import the bounds module directly and every
     // other reader imports the grammar, so the two must be the same objects.
     should(FY_RENDER_LIMITS).equal(BOUNDS_LIMITS);
     should(FY_RENDER_SANDBOX_LIMITS).equal(BOUNDS_SANDBOX_LIMITS);
-  });
-});
-
-describe('fy-render fence marking', () => {
-  interface Node {
-    type: string;
-    lang?: string | null;
-    meta?: string | null;
-    children?: Node[];
-    data?: { hProperties?: Record<string, unknown> };
-  }
-  const fence = (lang: string | null, meta: string | null = null, data?: Node['data']): Node => ({
-    type: 'code',
-    lang,
-    meta,
-    ...(data === undefined ? {} : { data }),
-  });
-  const marked = (node: Node): boolean => node.data?.hProperties?.[FY_RENDER_FENCE_ATTRIBUTE] === 'true';
-
-  test('should mark only a code fence whose info string is exactly the language', () => {
-    // Arrange — a fence with metadata after the token is a different fence, and
-    // so is any other language.
-    const exact = fence('fy-render');
-    const withMeta = fence('fy-render', 'notes');
-    const other = fence('ts');
-    const notCode: Node = { type: 'inlineCode', lang: 'fy-render' };
-    const root: Node = { type: 'root', children: [exact, withMeta, other, notCode] };
-
-    // Act
-    remarkFyRenderFences()(root);
-
-    // Assert
-    should([exact, withMeta, other, notCode].map(marked)).eql([true, false, false, false]);
-  });
-
-  test('should mark a fence at any depth and keep the properties it already carries', () => {
-    // Arrange — inside a list item inside a blockquote, with a label already set.
-    const nested = fence('fy-render', '', { hProperties: { 'data-label': 'x' } });
-    const root: Node = {
-      type: 'root',
-      children: [{ type: 'blockquote', children: [{ type: 'listItem', children: [nested] }] }],
-    };
-
-    // Act
-    remarkFyRenderFences()(root);
-
-    // Assert
-    should(nested.data?.hProperties).eql({ 'data-label': 'x', [FY_RENDER_FENCE_ATTRIBUTE]: 'true' });
   });
 });
 

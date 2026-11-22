@@ -1,6 +1,6 @@
 /**
  * The browser entry for "a markdown table never covers the agenda card's head": the REAL `AgendaItemView` over a
- * card whose body holds a two-column markdown table, rendered by the REAL `ChatProse`, above a stand-in composer.
+ * card whose body holds a two-column markdown table, rendered by the REAL `ProseView`, above a stand-in composer.
  *
  *   ?theme=<family>-<mode>
  *   ?view=cards|table          the device's table view (phone only; a desktop always draws the table)
@@ -8,7 +8,7 @@
  */
 
 import { createRoot } from 'react-dom/client';
-import { ChatProse } from '../../../../app/shell.ts';
+import { ProseView } from '../../../../app/shell.ts';
 import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view.tsx';
 import { TABLE_VIEW_KEY } from '../../../../app/shell.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
@@ -40,7 +40,7 @@ const table = [
   ),
 ].join('\n');
 
-const prose = (text: string) => <ChatProse text={text} />;
+const prose = (text: string) => <ProseView text={text} />;
 
 const item = agendaItem('A60', {
   title: 'Which apps join the divine class?',

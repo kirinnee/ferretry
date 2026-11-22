@@ -103,7 +103,7 @@ export function durianAsIs(
 }
 
 /**
- * The fence node `remarkFyRenderFences` would have made for this body, which is the one shape the surface's fences read:
+ * The fence node the door (`render/fences.tsx`) reads for this body, which is the one shape the surface's fences read:
  * their `draw` is the host's door (it holds the board and the file reader), and only it may open it.
  */
 function synthesizedFence(body: string): MarkdownAstFenceNode {

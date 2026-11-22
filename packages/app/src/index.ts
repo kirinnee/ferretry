@@ -321,7 +321,6 @@ export {
 export {
   Markdown,
   type MarkdownAstFenceNode,
-  type MarkdownFences,
   type MarkdownProps,
   locationFenceBody,
   referenceHasTrustedOrigin,
@@ -337,11 +336,11 @@ export {
   TableViewPreferenceStore,
   type TableViewStorage,
 } from './prose/table-view-preference.ts';
-export { ChatProse } from './prose/chat-prose.tsx';
 export { type ProseProps, ProseView } from './prose/prose-view.tsx';
 export { CodeBlock, type CodeBlockProps } from './prose/code-block.tsx';
 export { escapeHtml, fenceLanguage, highlightToHtml, isKnownLanguage, type Tokenizer } from './prose/highlight.ts';
 export {
+  type ReferenceFences,
   type ReferenceSurface,
   ReferenceSurfaceProvider,
   useReferenceSurface,

@@ -8,13 +8,14 @@ import should from 'should';
  * The cheapest guard in the whole design, and the only one that can fail for a
  * file this feature never touches.
  *
- * `enableFyRender` defaults to `false`, so every Markdown surface in the product
- * is inert unless it names the capability. That is a structural property, not a
- * documented rule — but it is only worth anything while the number of surfaces
- * naming it stays at one. A second call site is how "conversation-only" becomes
- * "wherever somebody found it convenient", and it would arrive in a diff that
- * looks like it is about something else entirely. So the count is asserted here
- * rather than trusted, against the real source tree.
+ * Only the hypermedia reader (`HypermediaProse`) draws a `fy-render` block; the shell's
+ * Markdown is inert on every surface. That is a structural property, not a
+ * documented rule — but it is only worth anything while the number of places
+ * mounting the reader stays at two (the transcript, and the view the agenda is
+ * given). A third is how "conversation-only" becomes "wherever somebody found it
+ * convenient", and it would arrive in a diff that looks like it is about
+ * something else entirely. So the count is asserted here rather than trusted,
+ * against the real source tree.
  *
  * This is a source-text test on purpose. The property is "no OTHER file does
  * this", and no amount of rendering the files that exist can prove something
@@ -23,14 +24,15 @@ import should from 'should';
 
 /**
  * The repository root, and every source root a Markdown surface can be reached from: the shell's prose kit and the
- * app half of every plugin and core feature. Agenda, board and the queue render ChatProse, so a guard that read only
- * Conversation's half would miss a second execution surface in any of them.
+ * app half of every plugin and core feature. Agenda and the board draw agent text through the shell's prose view,
+ * so a guard that read only Conversation's half would miss a second execution surface in any of them.
  */
 const repoRoot = join(import.meta.dir, '../../../../../../..');
 const APP_SOURCES = ['packages/app/src/**/*.{ts,tsx}', 'packages/{plugins,core}/*/app/**/*.{ts,tsx}'] as const;
 const packageDir = repoRoot;
 const MARKDOWN = 'packages/app/src/prose/markdown.tsx';
-const RENDER = 'packages/plugins/conversation/app/render';
+const CONVERSATION = 'packages/plugins/conversation/app';
+const RENDER = `${CONVERSATION}/render`;
 
 const productionSources = (): readonly string[] =>
   APP_SOURCES.flatMap(pattern => [...new Glob(pattern).scanSync(repoRoot)]).sort();
@@ -46,23 +48,23 @@ const mentioning = (token: string): readonly string[] => {
 };
 
 describe('fy-render opt-in', () => {
-  test('should be named by exactly one production surface, plus the renderer that declares it', () => {
-    // Act
-    const files = mentioning('enableFyRender');
+  test('should be drawn by exactly two <HypermediaProse> call sites: the transcript and the view the agenda is given', () => {
+    // Act — a JSX mount of the hypermedia reader, the only reader that draws a `fy-render` block.
+    const files = productionSources().filter(path =>
+      /<HypermediaProse(?![A-Za-z0-9_$])/u.test(readFileSync(join(packageDir, path), 'utf8')),
+    );
 
-    // Assert — `markdown.tsx` DECLARES the prop; `chat-prose.tsx` is the one
-    // component that PASSES it (the transcript and the agenda cards both render through it); `fences.tsx` only
-    // names it in the sentence that says every other reader leaves it off. Anything else in this list is a new
-    // execution surface and needs the threat model re-read, not a test update.
-    should(files).eql(['packages/app/src/prose/chat-prose.tsx', MARKDOWN, `${RENDER}/fences.tsx`]);
+    // Assert — the transcript row, and `ProvidedProse`, which Conversation hands the shell for the agenda. A third
+    // entry is a new execution surface and needs the threat model re-read, not a test update.
+    should(files).eql([`${CONVERSATION}/chat/transcript-row.tsx`, `${CONVERSATION}/hypermedia/hypermedia-prose.tsx`]);
   });
 
-  test('should default the capability off where it is declared', () => {
-    // Arrange
-    const renderer = readFileSync(join(packageDir, MARKDOWN), 'utf8');
-
-    // Assert — the default is what makes every other surface inert for free.
-    should(renderer).containEql('enableFyRender = false');
+  test('should leave the shell Markdown with no way to draw an illustration', () => {
+    // Assert — Markdown (and every surface that spreads a reference surface into it) renders a `fy-render` fence as
+    // code, because the capability, its opt-in and its fence plumbing are gone from the whole product.
+    should(mentioning('enableFyRender')).eql([]);
+    should(mentioning('remarkFyRenderFences')).eql([]);
+    should(readFileSync(join(packageDir, MARKDOWN), 'utf8')).not.containEql('fences');
   });
 
   test('should render an illustration from exactly one component', () => {

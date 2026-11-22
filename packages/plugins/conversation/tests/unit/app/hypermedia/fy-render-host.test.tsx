@@ -63,6 +63,7 @@ const FIXTURES: Readonly<Record<string, string>> = {
   mermaid: block('type: mermaid', 'alt: A flow', '---', 'graph TD; A-->B'),
   lottie: block('type: lottie', 'alt: A spinner', '---', '{"v":"5.7.0","w":100,"h":100,"layers":[]}'),
   html: block('type: html', 'alt: An agenda', '---', '<button id="t">Day 2</button><script>t.onclick=()=>1</script>'),
+  chart: block('type: chart', 'alt: Spend per day', '---', 'kind: bar\nseries: [{name: A, data: [1, 2]}]'),
   task: block('type: task', 'alt: The task', '---', '&F12'),
   board: block('type: board', 'alt: Open work', '---', '&F1 &F2'),
 };
@@ -116,6 +117,15 @@ describe('every fy-render type reaches its own sink through the Durian path', ()
       await unmount();
     });
   }
+
+  // r12 H7: our chart is the one chart language while Durian's is held as code, so it must keep drawing.
+  it('still draws our chart block as a block in the page, in no frame', async () => {
+    const { container, unmount } = await draw(FIXTURES.chart as string);
+    expect(container.querySelectorAll('[data-fy-render-type="chart"]').length).toBe(1);
+    expect(container.querySelectorAll('iframe').length).toBe(0);
+    expect(container.querySelector('.dh-error')).toBeNull();
+    await unmount();
+  });
 
   it('draws a scripted html block in the html frame and nowhere else', async () => {
     const { container, unmount } = await draw(FIXTURES.html as string);

@@ -1,7 +1,7 @@
 /** The unified agenda item with its snooze control, in a real browser fixture. */
 
 import { createRoot } from 'react-dom/client';
-import { ChatProse } from '../../../../app/shell.ts';
+import { ProseView } from '../../../../app/shell.ts';
 import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view.tsx';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
 
@@ -39,7 +39,7 @@ function Item() {
           onPrevious={() => undefined}
           onSnooze={() => undefined}
           position={{ index: 0, total: 1 }}
-          renderProse={text => <ChatProse text={text} />}
+          renderProse={text => <ProseView text={text} />}
           swipeable
         />
       </div>

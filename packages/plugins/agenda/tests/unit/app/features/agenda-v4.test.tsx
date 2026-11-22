@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaItem } from '@ferretry/core-asks/contract';
-import { ChatProse } from '../../../../app/shell.ts';
+import { ProseView } from '../../../../app/shell.ts';
 import { AgendaBriefSections, PointForm } from '../../../../app/features/agenda/agenda-brief.tsx';
 import { AgendaQuickReplies } from '../../../../app/features/agenda/agenda-quick-replies.tsx';
 import { cardModel } from '../../../../app/lib/agenda-card-model.ts';
@@ -16,7 +16,7 @@ afterEach(async () => {
 
 const root = (): HTMLElement => must(view?.container, 'the view');
 
-const markdown = (text: string) => <ChatProse text={text} />;
+const markdown = (text: string) => <ProseView text={text} />;
 
 const jaeda = agendaItem('A57', {
   title: 'Which fix for the login race?',
