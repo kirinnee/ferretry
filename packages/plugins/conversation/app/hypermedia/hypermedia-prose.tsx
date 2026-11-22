@@ -1,10 +1,10 @@
 import { DocumentView, type InlineDef } from 'durian-hypermedia/react/strict';
 import { memo, useId, useMemo, useSyncExternalStore } from 'react';
-import { DrawableFyRenderBodies, FY_RENDER_COMPONENT_BLOCKS } from './fy-render-host.tsx';
+import { DrawableFyRenderBodies } from './fy-render-host.tsx';
 import { exceedsMessageCap } from './limits.ts';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';
 import { readMessage } from './parse-message.ts';
-import { HYPERMEDIA_PART_SLOTS, HYPERMEDIA_PARTS } from './parts.tsx';
+import { HYPERMEDIA_COMPONENT_BLOCKS, HYPERMEDIA_PART_SLOTS, HYPERMEDIA_PARTS } from './parts.tsx';
 import { ReferenceChip } from './reference-chip.tsx';
 import { ReferenceProofProvider } from './reference-proof.tsx';
 import { hypermediaUrlPolicy } from './url-policy.ts';
@@ -21,8 +21,8 @@ import { REFERENCE_INLINE } from './with-references.ts';
  *  - ONE ID PER MESSAGE. Heading ids carry a prefix made for this message, so two messages with the same heading never
  *    share a DOM id (and a `#anchor` link in a message reaches its own heading).
  *  - A PART DRAWN ONLY IF WE NAME IT. Only the parts in `HYPERMEDIA_PARTS` (`parts.tsx`) have a component here, each
- *    under our policy (a chart and an animation draw, a mermaid diagram goes to our sandbox renderer, `codewalk` is the
- *    plain text an LLM reads for it), so a part we have not reviewed shows its content and runs nothing.
+ *    under our policy (an animation draws, a mermaid diagram goes to our sandbox renderer, `codewalk` is the plain text an
+ *    LLM reads for it, and a ```chart is held as code: its formulas are unbounded work, `held-chart.tsx`), so a part we have not reviewed shows its content and runs nothing.
  *  - AUTHOR TEXT STAYS VISIBLE. A `:::llm` text is always shown, collapsed under "LLM-only text" beside the part it
  *    belongs to, and a `:::human` segment draws its body even with `llm=none` (`llm-text.tsx`, decision C7).
  *  - LINKS go through our URL policy (never an image, an app route or a reference envelope) and open through the
@@ -85,7 +85,7 @@ export const HypermediaProse = memo(function HypermediaProse({
         ) : (
           <DrawableFyRenderBodies value={read.drawable}>
             <DocumentView
-              blocks={FY_RENDER_COMPONENT_BLOCKS}
+              blocks={HYPERMEDIA_COMPONENT_BLOCKS}
               components={HYPERMEDIA_PARTS}
               doc={read.doc}
               inlines={INLINES}

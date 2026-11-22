@@ -15,6 +15,7 @@ import { createRoot } from 'react-dom/client';
 import { chatReferenceSurface } from '../../../../app/chat/reference-surface.ts';
 import type { TranscriptEntry } from '../../../../app/chat/transcript-entries.ts';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
+import { readMessage } from '../../../../app/hypermedia/parse-message.ts';
 
 const params = new URLSearchParams(window.location.search);
 const theme = params.get('theme') ?? 'studio-light';
@@ -48,7 +49,15 @@ const root = document.getElementById('root');
 const fixture = params.get('fixture');
 if (root !== null) {
   const app = createRoot(root);
-  Object.assign(window, { fyStream: (text: string) => app.render(view(text)) });
+  Object.assign(window, {
+    fyStream: (text: string) => app.render(view(text)),
+    /** The milliseconds the main thread spends reading one message (the parse, before anything draws). */
+    fyRead: (text: string): number => {
+      const started = performance.now();
+      readMessage(text, 'read-');
+      return performance.now() - started;
+    },
+  });
   const literal = params.get('text');
   const text =
     literal !== null

@@ -5,7 +5,7 @@ import { type ComponentType, createContext, useContext, useMemo } from 'react';
 import { FY_RENDER_FENCE_ATTRIBUTE, parseFyRender } from '../render/fy-render.ts';
 import { tolerateAuthoringNoise } from '../render/fences.tsx';
 import { type CommonMarkFence, DURIAN_FENCE, linesOf, type SettledFences } from './fence-boundaries.ts';
-import { LlmOnlyText } from './llm-text.tsx';
+import { authorTextBeside, LlmOnlyText } from './llm-text.tsx';
 import { HYPERMEDIA_SLOTS, HypermediaCode } from './slots.tsx';
 
 /**
@@ -88,7 +88,11 @@ function readBody(body: string, generated: string | null): FyRenderHostData {
  * `llmFormOf`), or `null` when the opener is not a fence. It is how a part's own generated text is told from text the
  * author wrote: a block's `llm` that differs from it is the author's.
  */
-function durianAsIs(opener: string | undefined, body: string, attrs: Readonly<Record<string, string>>): string | null {
+export function durianAsIs(
+  opener: string | undefined,
+  body: string,
+  attrs: Readonly<Record<string, string>>,
+): string | null {
   const fence = DURIAN_FENCE.exec(opener ?? '');
   if (fence === null) return null;
   const kept = Object.entries(attrs)
@@ -156,8 +160,7 @@ function PlainFence({ body }: { readonly body: string }) {
 }
 
 /** What the author wrote for an LLM after this block, or null when they wrote nothing (Durian's own generated text is not theirs). */
-const authorText = (block: HostBlock, data: FyRenderHostData): string | null =>
-  block.llm !== null && block.llm !== '' && block.llm !== data.generated ? block.llm : null;
+const authorText = (block: HostBlock, data: FyRenderHostData): string | null => authorTextBeside(block, data.generated);
 
 /** A block drawn as its sink, or as the plain code it is. */
 function FyRenderBody({ data }: { readonly data: FyRenderHostData }) {
@@ -250,5 +253,3 @@ export const FY_RENDER_COMPONENT_BLOCK: BlockDef<
   FyRenderHostData,
   ComponentType<{ block: HostBlock; data: FyRenderHostData }>
 > = { name: FY_RENDER_BLOCK_NAME, Component: FyRenderPart };
-
-export const FY_RENDER_COMPONENT_BLOCKS: readonly (typeof FY_RENDER_COMPONENT_BLOCK)[] = [FY_RENDER_COMPONENT_BLOCK];
