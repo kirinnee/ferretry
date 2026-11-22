@@ -1837,6 +1837,15 @@ describe('shell-provides', () => {
       expect.stringContaining('provides `shell.links`, but only browsers may'),
     ]);
   });
+  test('planted: a prose view outside the taker list, or on a skeleton half, is found; Conversation may provide it', () => {
+    expect(found(half('conversation', { prose: true }))).toEqual([]);
+    expect(found(half('agenda', { prose: true }))).toEqual([
+      expect.stringContaining('provides `shell.prose`, but only conversation may'),
+    ]);
+    expect(found(half('conversation', { prose: true, skeleton: true }))).toEqual([
+      'is a skeleton half with a `shell.prose` view: nothing mounts it',
+    ]);
+  });
   test('planted: a navBadges key that is not an own screen with a nav entry is found', () => {
     expect(found(half('agenda', { navBadges: ['inbox'] }))).toEqual([
       'has a `shell.navBadges` key "inbox", which is not one of its own screens',

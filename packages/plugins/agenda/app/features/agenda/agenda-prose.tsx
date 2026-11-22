@@ -1,20 +1,23 @@
 /**
- * THE ONE RENDERER OF AN AGENDA SEGMENT: the chat's Markdown (`ChatProse`, so references, `code` and fy-render blocks
- * behave exactly as in a message) over the segment with its lines kept (`segmentMarkdown`), inside `.fy-seg`, the one
- * rule that gives every segment the same spacing, bullets and numbering. A heading the ferret wrote inside a segment
- * (`## Plan`) is drawn as bold body text, never an h1–h6: the card's own labels are the only headings on it. A host passes this as `renderProse`; a
+ * THE ONE RENDERER OF AN AGENDA SEGMENT: the way a ferret's text is drawn everywhere — Durian hypermedia, so a segment
+ * may hold a ` ```terminal ` part and a reference — through the shell's one `ProseView` (Conversation provides it; the
+ * shell's Markdown draws the segment until it loads), over the segment with its lines kept (`segmentMarkdown`), inside
+ * `.fy-seg`, the one rule that gives every segment the same spacing, bullets and numbering. A heading the ferret wrote
+ * inside a segment (`## Plan`) is drawn as bold body text, never an h1–h6: the card's own labels are the only headings
+ * on it. A reference reads through the reference surface the card is drawn in (the Inbox's Board proof scope: `&F12` is a
+ * link when Board proves the task, and the plain text it is when it does not). A host passes this as `renderProse`; a
  * segment is never drawn any other way.
  */
 
 import type { ReactNode } from 'react';
-import { ChatProse } from '../../shell.ts';
+import { ProseView } from '../../shell.ts';
 import { segmentMarkdown } from '../../lib/agenda-segment.ts';
 import type { ClipboardWriter } from '../../shell.ts';
 
 function AgendaProse({ text, copyable }: { readonly text: string; readonly copyable?: ClipboardWriter }) {
   return (
-    <ChatProse
-      className="fy-seg"
+    <ProseView
+      className="md fy-seg"
       demoteHeadings
       text={segmentMarkdown(text)}
       {...(copyable === undefined ? {} : { copyable })}

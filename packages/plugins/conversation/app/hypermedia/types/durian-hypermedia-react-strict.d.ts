@@ -4,11 +4,22 @@
  */
 import type { ComponentType, ReactElement, ReactNode } from 'react';
 import type {
+  AccordionBlock,
+  AlignmentBlock,
+  AnimationBlock,
   Block,
+  BlockDef,
   BlockType,
+  ChartBlock,
   Document,
+  EditorBlock,
+  FileTreeBlock,
+  HostBlock,
   InlineDef as ParsedInlineDef,
+  MermaidBlock,
+  TabsBlock,
   TerminalBlock,
+  TierListBlock,
   UrlPolicy,
 } from './durian-hypermedia';
 
@@ -42,8 +53,20 @@ export interface LinkSlotProps {
   readonly children: ReactNode;
 }
 
+/** One step of a mermaid diagram, for the host's `Mermaid` slot to draw (Durian's `DiagramDrawProps`). */
+export interface MermaidSlotProps {
+  /** The step's mermaid source. */
+  readonly src: string;
+  readonly title: string;
+  /** This step's place in the diagram. */
+  readonly step: number;
+  /** True while this step is the one shown (every step is mounted at once). */
+  readonly active: boolean;
+}
+
 /** The chrome and Markdown elements a host may draw itself (Durian's `Slots`, the ones we set). */
 export interface Slots {
+  readonly Mermaid?: ComponentType<MermaidSlotProps>;
   readonly Code?: ComponentType<CodeSlotProps>;
   readonly InlineCode?: ComponentType<InlineCodeSlotProps>;
   readonly Link?: ComponentType<LinkSlotProps>;
@@ -67,6 +90,8 @@ export interface DocumentProps {
   readonly inlines?: readonly InlineDef[];
   /** Links are checked again with this policy at render time. */
   readonly urlPolicy?: UrlPolicy;
+  /** Host blocks: their `Component` draws them (the parser half is passed to `parse`). Keep the array stable. */
+  readonly blocks?: readonly BlockDef<any, ComponentType<{ readonly block: HostBlock; readonly data: any }>>[];
 }
 
 /** Every part, with mermaid drawn by the host's slot: imports neither mermaid nor DOMPurify. */
@@ -77,3 +102,21 @@ export declare function DocumentView(props: DocumentProps): ReactElement;
 export declare function Blocks(props: { readonly blocks: readonly Block[] }): ReactElement;
 /** The terminal part (` ```terminal `). */
 export declare const TerminalPart: ComponentType<{ readonly block: TerminalBlock }>;
+/** The file tree part (` ```filetree `). */
+export declare const FileTreePart: ComponentType<{ readonly block: FileTreeBlock }>;
+/** The editor part (` ```editor `). */
+export declare const EditorPart: ComponentType<{ readonly block: EditorBlock }>;
+/** The chart part (` ```chart `): Chart.js on a canvas, loaded when the chart mounts. */
+export declare const ChartPart: ComponentType<{ readonly block: ChartBlock }>;
+/** The mermaid part with no mermaid library: each step is drawn by the host's `Mermaid` slot. */
+export declare const HostMermaidPart: ComponentType<{ readonly block: MermaidBlock }>;
+/** The animation part (` ```animation `): 2D in SVG, 3D (three.js, a lazy module) when a reader opens it. */
+export declare const AnimationPart: ComponentType<{ readonly block: AnimationBlock }>;
+/** The tier list part. */
+export declare const TierListPart: ComponentType<{ readonly block: TierListBlock }>;
+/** The alignment grid part. */
+export declare const AlignmentPart: ComponentType<{ readonly block: AlignmentBlock }>;
+/** The `:::tabs` container. */
+export declare const TabsPart: ComponentType<{ readonly block: TabsBlock }>;
+/** The `:::accordion` container. */
+export declare const AccordionPart: ComponentType<{ readonly block: AccordionBlock }>;

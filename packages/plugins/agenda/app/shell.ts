@@ -45,6 +45,7 @@ export {
   MachineDeadlineError,
   Markdown,
   PanelSlot,
+  ProseView,
   type ReferenceSurface,
   ReferenceSurfaceProvider,
   RendererView,

@@ -1,13 +1,14 @@
+import type { ProseProps } from '@ferretry/app';
 import { DocumentView, type InlineDef } from 'durian-hypermedia/react/strict';
 import { memo, useId, useMemo, useSyncExternalStore } from 'react';
+import { DrawableFyRenderBodies } from './fy-render-host.tsx';
 import { exceedsMessageCap } from './limits.ts';
-import { HumanSegment, TerminalWithLlmText } from './llm-text.tsx';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';
 import { readLook, serverLook, subscribeToLook, variantOf } from './look.ts';
-import { parseMessage } from './parse-message.ts';
+import { readMessage } from './parse-message.ts';
+import { HYPERMEDIA_COMPONENT_BLOCKS, HYPERMEDIA_PART_SLOTS, HYPERMEDIA_PARTS } from './parts.tsx';
 import { ReferenceChip } from './reference-chip.tsx';
 import { ReferenceProofProvider } from './reference-proof.tsx';
-import { HYPERMEDIA_SLOTS } from './slots.tsx';
 import { hypermediaUrlPolicy } from './url-policy.ts';
 import { REFERENCE_INLINE } from './with-references.ts';
 
@@ -21,8 +22,9 @@ import { REFERENCE_INLINE } from './with-references.ts';
  *    the app's own chrome, and a leading YAML block would be eaten.
  *  - ONE ID PER MESSAGE. Heading ids carry a prefix made for this message, so two messages with the same heading never
  *    share a DOM id (and a `#anchor` link in a message reaches its own heading).
- *  - A PART DRAWN ONLY IF WE NAME IT. Only the parts in {@link PARTS} have a component here; any other part is drawn as
- *    the plain text an LLM reads for it, so a part we have not reviewed shows its content and runs nothing.
+ *  - A PART DRAWN ONLY IF WE NAME IT. Only the parts in `HYPERMEDIA_PARTS` (`parts.tsx`) have a component here, each
+ *    under our policy (an animation draws, a mermaid diagram goes to our sandbox renderer, `codewalk` is the plain text an
+ *    LLM reads for it, and a ```chart is held as code: its formulas are unbounded work, `held-chart.tsx`), so a part we have not reviewed shows its content and runs nothing.
  *  - AUTHOR TEXT STAYS VISIBLE. A `:::llm` text is always shown, collapsed under "LLM-only text" beside the part it
  *    belongs to, and a `:::human` segment draws its body even with `llm=none` (`llm-text.tsx`, decision C7).
  *  - LINKS go through our URL policy (never an image, an app route or a reference envelope) and open through the
@@ -38,12 +40,6 @@ import { REFERENCE_INLINE } from './with-references.ts';
  */
 
 /**
- * The parts this build draws. Wider sets come with their own review (r12 H4); an absent part is shown as LLM text, which
- * includes an author's `:::llm` text, so none is lost.
- */
-const PARTS = { terminal: TerminalWithLlmText, human: HumanSegment } as const;
-
-/**
  * Our inlines: the chip that draws a proved reference (Durian reads only its `Component`; it never tokenises one), and the
  * code span that keeps its literal bytes (`literal-code.tsx`, which the parser is given too).
  */
@@ -52,33 +48,57 @@ const INLINES: readonly InlineDef[] = [
   ...LITERAL_CODE_INLINES,
 ];
 
+/**
+ * What Conversation hands the shell as `shell.prose`: this, for a surface that is not the chat's (the agenda). A plain
+ * function, because the shell calls it as a view; `copyable` and `demoteHeadings` are Markdown's and a part has its own
+ * copy, so they are not read. Headings are the surface's to restyle (`.dh-doc h1…h6`), as the agenda card does.
+ */
+export function ProvidedProse({ text, className }: ProseProps) {
+  return <HypermediaProse text={text} {...(className === undefined ? {} : { className })} />;
+}
+
 export interface HypermediaProseProps {
   readonly text: string;
   readonly className?: string;
+  /**
+   * The text is the tail of a message still streaming in (the live session's last row). A fence closed only by the
+   * text's last line is then still open, so a partial body never draws (`settleFences`). Absent or false: a final message.
+   */
+  readonly arriving?: boolean;
 }
 
-export const HypermediaProse = memo(function HypermediaProse({ text, className }: HypermediaProseProps) {
+export const HypermediaProse = memo(function HypermediaProse({
+  text,
+  className,
+  arriving = false,
+}: HypermediaProseProps) {
   const { mode, shape, header } = useSyncExternalStore(subscribeToLook, readLook, serverLook);
   // `useId` is unique per mounted message and stable across its re-renders; keep only what an id may hold.
   const idPrefix = `dh-${useId().replace(/[^\w-]/gu, '')}-`;
-  const doc = useMemo(() => (exceedsMessageCap(text) ? null : parseMessage(text, idPrefix)), [text, idPrefix]);
+  const read = useMemo(
+    () => (exceedsMessageCap(text) ? null : readMessage(text, idPrefix, arriving)),
+    [text, idPrefix, arriving],
+  );
   return (
     <ReferenceProofProvider text={text}>
       <div className={`fy-hm min-w-0 max-w-full ${className ?? ''}`} data-fy-hypermedia="" data-hm-header={header}>
-        {doc === null ? (
+        {read === null ? (
           <pre className="fy-hm-plain" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
             {text}
           </pre>
         ) : (
-          <DocumentView
-            components={PARTS}
-            doc={doc}
-            inlines={INLINES}
-            slots={HYPERMEDIA_SLOTS}
-            theme={mode}
-            urlPolicy={hypermediaUrlPolicy}
-            variant={variantOf(shape)}
-          />
+          <DrawableFyRenderBodies value={read.drawable}>
+            <DocumentView
+              blocks={HYPERMEDIA_COMPONENT_BLOCKS}
+              components={HYPERMEDIA_PARTS}
+              doc={read.doc}
+              inlines={INLINES}
+              slots={HYPERMEDIA_PART_SLOTS}
+              theme={mode}
+              urlPolicy={hypermediaUrlPolicy}
+              variant={variantOf(shape)}
+            />
+          </DrawableFyRenderBodies>
         )}
       </div>
     </ReferenceProofProvider>
