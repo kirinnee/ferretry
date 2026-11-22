@@ -69,11 +69,29 @@
   justify-content: center;
   min-height: 240px;
 }
-.fy-sf-silent {
-  align-items: center;
+/* C59 O8-4: THE WAIT SITS IN THE MIDDLE of the space between the title and the footer (owner: "very top heavy"). While the
+   cover is up, every box from the frame's main column down to the cover grows to fill that space, and the cover centres its
+   loader in it; the page itself is hidden, so nothing else is in that space. */
+.fy-spf__main:has(.fy-sf-cover),
+.fy-spf__body:has(.fy-sf-cover),
+.fy-sf-page:has(> .fy-sf-cover) {
+  align-self: stretch;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  gap: 4px;
+}
+.fy-sf-page > .fy-sf-cover {
+  flex: 1 1 auto;
+}
+/* "Still checking." is a HINT (small, muted, one line under the loader) and "Skip this step" is a LINK on that line
+   (`.fy-inline-action`: underlined, no fill, a 44px target over the text): a quiet way out, not a second button. */
+.fy-sf-silent {
+  margin: 0;
+  text-align: center;
+}
+.fy-sf-hint {
+  color: var(--muted);
+  font-size: calc(var(--font-size-base) * 0.875);
 }
 .fy-sf-note {
   color: var(--muted);
@@ -83,13 +101,10 @@
 .fy-sf-chip {
   align-self: flex-start;
 }
-.fy-sf-page .fy-sf-silent button {
-  height: auto;
-  min-height: 44px;
-}
-/* The cover is a short block, so "Still checking…" sits right under the spinner it belongs to. */
+/* The loader is a short block inside the centred cover, so the hint sits right under the spinner it belongs to. */
 .fy-sf-cover .fy-loading {
-  min-height: 160px;
+  flex: 0 0 auto;
+  min-height: 0;
 }
 .fy-sf-unsaved {
   align-items: center;

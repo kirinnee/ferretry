@@ -7,6 +7,7 @@
  * A read nobody asked for is quiet and never raises a passkey prompt; a machine that wants one is answered with `confirm`,
  * and the person's own press (`quiet: false`) may ask. Holds names only: the scan carries no value.
  */
+import { daemonOfClient } from '@ferretry/app';
 import { isStepUpRefusal } from '@ferretry/app/ui';
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
@@ -36,9 +37,58 @@ export type ScanRead =
 export interface ScanStore {
   readonly subscribe: (listener: () => void) => () => void;
   readonly snapshot: () => ScanRead;
-  /** Read (again). `quiet` is a read nobody asked for. A ready answer stays on screen while the new one is read. */
-  readonly scan: (quiet?: boolean) => Promise<void>;
+  /**
+   * Read (again). `quiet` is a read nobody asked for. A ready answer stays on screen while the new one is read. `ahead`: a
+   * page mounting may take the read {@link readSetupScanAhead} started for this machine, on this store's first read only.
+   */
+  readonly scan: (quiet?: boolean, ahead?: boolean) => Promise<void>;
 }
+
+/** The three reads one scan is: the setup scan and each tool's update view (a failed update view is `null`). */
+interface MachineRead {
+  readonly answer: unknown;
+  readonly claude: unknown;
+  readonly codex: unknown;
+}
+
+const readMachine = async (client: RuntimesClient, quiet: boolean): Promise<MachineRead> => {
+  const [answer, claude, codex] = await Promise.all([
+    client.call(SCAN_ROUTE, { quiet }),
+    client.call(UPDATE_ROUTE['claude-code'], { quiet: true }).catch(() => null),
+    client.call(UPDATE_ROUTE.codex, { quiet: true }).catch(() => null),
+  ]);
+  return { answer, claude, codex };
+};
+
+/**
+ * C59 O8-4: THE SCAN READ AHEAD, once per machine, when the setup flow opens ({@link readSetupScanAhead}), so the Claude Code
+ * and Codex pages find it already answered instead of each waiting on its own read. It is keyed by MACHINE, not by client or
+ * run: every plugin's page talks through its own client, and each run has its own store, so one read here stands in for the
+ * first read of every store on that machine for {@link AHEAD_MS}. Only a store's FIRST read takes it: Check again, a read
+ * after an install or a sign-in and the Settings re-import (`refresh`) always ask the machine. A read that failed is
+ * dropped, so the page's own read asks again.
+ */
+const AHEAD_MS = 10 * 60_000;
+const AHEAD = new Map<object | string, { readonly at: number; readonly read: Promise<MachineRead> }>();
+const machineOf = (client: RuntimesClient): object | string => daemonOfClient(client) ?? client;
+
+/** Start the scan for `client`'s machine now, quietly, unless one started within {@link AHEAD_MS}. Never throws. */
+export function readSetupScanAhead(client: RuntimesClient, nowMs: number = Date.now()): void {
+  const machine = machineOf(client);
+  const held = AHEAD.get(machine);
+  if (held !== undefined && nowMs - held.at < AHEAD_MS) return;
+  const read = readMachine(client, true);
+  AHEAD.set(machine, { at: nowMs, read });
+  read.catch(() => {
+    if (AHEAD.get(machine)?.read === read) AHEAD.delete(machine);
+  });
+}
+
+/** The read started ahead for `client`'s machine, if it is still young enough to stand in for a first read. */
+const aheadFor = (client: RuntimesClient, nowMs: number): Promise<MachineRead> | undefined => {
+  const held = AHEAD.get(machineOf(client));
+  return held !== undefined && nowMs - held.at < AHEAD_MS ? held.read : undefined;
+};
 
 export function createScanStore(client: RuntimesClient): ScanStore {
   let state: ScanRead = { kind: 'idle' };
@@ -48,17 +98,18 @@ export function createScanStore(client: RuntimesClient): ScanStore {
     state = next;
     for (const listener of listeners) listener();
   };
-  const scan = async (quiet = true): Promise<void> => {
+  const scan = async (quiet = true, ahead = false): Promise<void> => {
     generation += 1;
     const mine = generation;
+    // Only a store's first read, asked by a page mounting (never a press or a refresh), may take the read started ahead.
+    const started = ahead && quiet && state.kind === 'idle' ? aheadFor(client, Date.now()) : undefined;
     // No blank-out: what is already read stays until the new answer is in.
     if (state.kind !== 'ready') set({ kind: 'reading' });
     try {
-      const [answer, claude, codex] = await Promise.all([
-        client.call(SCAN_ROUTE, { quiet }),
-        client.call(UPDATE_ROUTE['claude-code'], { quiet: true }).catch(() => null),
-        client.call(UPDATE_ROUTE.codex, { quiet: true }).catch(() => null),
-      ]);
+      const { answer, claude, codex } =
+        started === undefined
+          ? await readMachine(client, quiet)
+          : await started.catch(async () => await readMachine(client, quiet));
       if (mine !== generation) return;
       const parsed = SetupScanSchema.safeParse(answer);
       if (!parsed.success && quiet) return set({ kind: 'confirm' });
@@ -118,7 +169,7 @@ export function useScan(
   const store = scanStoreFor(client, options.run);
   const read = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
   useEffect(() => {
-    if (options.refresh === true || store.snapshot().kind === 'idle') void store.scan();
+    if (options.refresh === true || store.snapshot().kind === 'idle') void store.scan(true, options.refresh !== true);
   }, [store, options.refresh]);
   const models = useMemo(
     () =>

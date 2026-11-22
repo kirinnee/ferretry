@@ -18,6 +18,7 @@ export { type ApplyImport, type ImportApplied, type ImportPartial, useApplyImpor
 export {
   createScanStore,
   type HarnessScan,
+  readSetupScanAhead,
   scanStoreFor,
   type ScanRead,
   useHarnessScan,

@@ -11,6 +11,7 @@ import {
 import { importChange, itemIds, skipList, toolModel } from '../../../../../app/features/import-kit/model.ts';
 import {
   createScanStore,
+  readSetupScanAhead,
   scanStoreFor,
   useHarnessScan,
 } from '../../../../../app/features/import-kit/use-harness-scan.ts';
@@ -172,6 +173,44 @@ describe('the scan is read once per client and shared', () => {
     // No blank-out: it never went back to "reading" while the second answer was in flight.
     expect(seen).not.toContain('reading');
     expect(seen.at(-1)).toBe('ready');
+  });
+
+  it('C59 O8-4 the scan read ahead (setup opening) is the first read of every store on that machine: one scan for both tools', async () => {
+    const calls: string[] = [];
+    const client = clientOf(calls, scanOf({ claude: CLAUDE_FULL, codex: CODEX_FULL }));
+    readSetupScanAhead(client);
+    // Asked again while it is young: still one read.
+    readSetupScanAhead(client);
+    const codexPages = createScanStore(client);
+    const claudePages = createScanStore(client);
+    await Promise.all([codexPages.scan(true, true), claudePages.scan(true, true)]);
+    expect(codexPages.snapshot().kind).toBe('ready');
+    expect(claudePages.snapshot().kind).toBe('ready');
+    expect(calls.filter(route => route === 'GET /v1/runtimes/setup/scan')).toHaveLength(1);
+    // A press, a re-read after a sign-in and the Settings re-import (no `ahead`) always ask the machine.
+    await codexPages.scan(false);
+    await claudePages.scan();
+    await createScanStore(client).scan(true, false);
+    expect(calls.filter(route => route === 'GET /v1/runtimes/setup/scan')).toHaveLength(4);
+  });
+
+  it('C59 O8-4 a read ahead that failed is dropped: the page asks the machine itself', async () => {
+    const calls: string[] = [];
+    let fail = true;
+    const client = {
+      call: async (route: string) => {
+        calls.push(route);
+        if (route !== 'GET /v1/runtimes/setup/scan') return { installed: { state: 'ok', version: '1.2.3' } };
+        if (fail) throw new Error('This machine did not answer.');
+        return scanOf({ claude: CLAUDE_FULL });
+      },
+    } as unknown as RuntimesClient;
+    readSetupScanAhead(client);
+    fail = false;
+    const store = createScanStore(client);
+    await store.scan(true, true);
+    expect(store.snapshot().kind).toBe('ready');
+    expect(calls.filter(route => route === 'GET /v1/runtimes/setup/scan')).toHaveLength(2);
   });
 
   it('an answer that is not a scan, read quietly, waits for a press instead of failing', async () => {
