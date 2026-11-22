@@ -135,6 +135,32 @@ describe('the ask buzz, with the Agenda plugin off', () => {
     expect(pushes).toHaveLength(0);
   });
 
+  test('an ask that closes drops its key from the ledger, and the ledger a restart reads is what is still open', async () => {
+    const { host, asks, pushes } = await world();
+    const one = await raise(asks, 'e1', { source: 'card' });
+    const two = await raise(asks, 'e2', { source: 'card' });
+    await announce(host, one.id);
+    await announce(host, two.id);
+    expect(pushes).toHaveLength(2);
+    host.emit(AsksChanged, { ferret: 'f1', askId: one.id as never, state: 'answered' });
+    await host.settle();
+    const kept = host.state('access').files.get('ask-buzzes.jsonl') ?? '';
+    expect(kept).not.toContain('ask:f1:A1');
+    expect(kept).toContain('ask:f1:A2');
+  });
+
+  test('a restart replays no buzz: the ledger the new host reads still holds the key, and the bound holds', async () => {
+    const first = await world();
+    const ref = await raise(first.asks, 'e1', { source: 'card' });
+    await announce(first.host, ref.id);
+    expect(first.pushes).toHaveLength(1);
+    const ledger = first.host.state('access').files.get('ask-buzzes.jsonl') ?? '';
+    const second = await world(ledger);
+    const again = await raise(second.asks, 'e1', { source: 'card' });
+    await announce(second.host, again.id, 2);
+    expect(second.pushes).toHaveLength(0);
+  });
+
   test('an ask that is gone by the time it is read buzzes nothing, and says nothing', async () => {
     const { host, pushes } = await world();
     host.emit(AsksChanged, { ferret: 'f1', askId: 'A99' as never, state: 'open' });

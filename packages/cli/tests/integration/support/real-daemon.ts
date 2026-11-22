@@ -55,10 +55,12 @@ export interface RealDaemon {
 /**
  * @param seed files (path under FY_HOME → text) written before the first boot: the state a ferret with no live agent cannot
  *   be made to produce (a message the owner sent it, which a daemon without a pane refuses to take).
+ * @param options.preload a module the daemon process loads first (`bun --preload`): a test's seam at the process boundary.
  */
 export async function bootRealDaemon(
   ferrets: readonly SeededFerret[],
   seed: Readonly<Record<string, string>> = {},
+  options: { readonly preload?: string } = {},
 ): Promise<RealDaemon> {
   const root = await mkdtemp(join(tmpdir(), 'fy-cli-real-'));
   const home = join(root, 'fy-home');
@@ -124,7 +126,7 @@ export async function bootRealDaemon(
     FYD_BACKGROUND_DELAY_SECONDS: '3600',
   };
   const child = Bun.spawn({
-    cmd: [process.execPath, FYD],
+    cmd: [process.execPath, ...(options.preload === undefined ? [] : ['--preload', options.preload]), FYD],
     cwd: ROOT,
     env: { ...base, FY_PORT: '0' },
     stdin: 'ignore',

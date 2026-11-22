@@ -3,7 +3,7 @@ import type { BuzzableAsk, BuzzWords } from '@ferretry/core-asks/contract';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { instantFromEpochMs } from '@ferretry/std';
 import type { AskBuzzRecord } from '../../../../contract/index.ts';
-import { StateAskBuzzLedger } from '../../../../daemon/adapters/push/state-ask-buzz-ledger.ts';
+import { ASK_BUZZ_LEDGER_CAP, StateAskBuzzLedger } from '../../../../daemon/adapters/push/state-ask-buzz-ledger.ts';
 import { AskBuzzer, type AskBuzzLedger } from '../../../../daemon/lib/push/ask-buzz.ts';
 
 const NOW = instantFromEpochMs(Date.parse('2026-11-22T09:00:00.000Z'));
@@ -23,6 +23,10 @@ class MemoryLedger implements AskBuzzLedger {
   }
   async append(record: AskBuzzRecord) {
     this.records.push(record);
+  }
+  async forget(key: string) {
+    const at = this.records.findIndex(record => record.key === key);
+    if (at >= 0) this.records.splice(at, 1);
   }
 }
 
@@ -75,7 +79,55 @@ describe('AskBuzzer', () => {
     expect(sent).toEqual([]);
   });
 
-  test('a failing push or ledger is said and swallowed: buzzing is total, and the moment can buzz later', async () => {
+  test('the moment is recorded BEFORE the push goes out: a crash in between loses the buzz, never doubles it', async () => {
+    const ledger = new MemoryLedger();
+    let recordedWhenSent = -1;
+    const { made } = buzzer({
+      ledger,
+      buzz: async () => {
+        recordedWhenSent = ledger.records.length;
+        return 1;
+      },
+    });
+    await made.buzz(card);
+    expect(recordedWhenSent).toBe(1);
+  });
+
+  test('a closed ask drops its key, and an unknown one is nothing', async () => {
+    const { made, ledger } = buzzer();
+    await made.buzz(card);
+    await made.settle('f1', 'A9');
+    expect((ledger as MemoryLedger).records).toHaveLength(1);
+    await made.settle('f1', 'A3');
+    expect((ledger as MemoryLedger).records).toEqual([]);
+  });
+
+  test('a ledger that cannot drop a key says so and does not throw', async () => {
+    const { made, warned } = buzzer({
+      ledger: {
+        has: async () => false,
+        append: async () => undefined,
+        forget: async () => {
+          throw new Error('disk full');
+        },
+      },
+    });
+    await made.settle('f1', 'A3');
+    expect(warned).toEqual(["an ask's buzz record could not be dropped: disk full"]);
+    const odd = buzzer({
+      ledger: {
+        has: async () => false,
+        append: async () => undefined,
+        forget: async () => {
+          throw 'odd';
+        },
+      },
+    });
+    await odd.made.settle('f1', 'A3');
+    expect(odd.warned).toEqual(["an ask's buzz record could not be dropped: odd"]);
+  });
+
+  test('a failing push or ledger is said and swallowed: buzzing is total, and a failed push is not retried (at most once)', async () => {
     const failing = buzzer({
       buzz: async () => {
         throw new Error('push service down');
@@ -83,13 +135,14 @@ describe('AskBuzzer', () => {
     });
     expect(await failing.made.buzz(card)).toBe(false);
     expect(failing.warned).toEqual(["an ask's buzz could not be made: push service down"]);
-    expect((failing.ledger as MemoryLedger).records).toEqual([]);
+    expect((failing.ledger as MemoryLedger).records).toHaveLength(1);
     const unreadable = buzzer({
       ledger: {
         has: async () => {
           throw 'the ledger is damaged';
         },
         append: async () => undefined,
+        forget: async () => undefined,
       },
     });
     expect(await unreadable.made.buzz(card)).toBe(false);
@@ -98,37 +151,85 @@ describe('AskBuzzer', () => {
 });
 
 describe('StateAskBuzzLedger', () => {
-  function state(lines: () => AsyncIterable<AskBuzzRecord>) {
-    const appended: AskBuzzRecord[] = [];
+  /** A state port over an in-memory jsonl: `write` replaces the lines, `append` adds one; `log` says which was used. */
+  function state(initial: readonly AskBuzzRecord[], onRead?: () => void) {
+    let lines = [...initial];
+    const log: string[] = [];
     const port = {
-      lines,
-      append: async (_file: unknown, record: AskBuzzRecord) => void appended.push(record),
+      lines: async function* () {
+        onRead?.();
+        for (const line of lines) yield line;
+      },
+      append: async (_file: unknown, record: AskBuzzRecord) => {
+        log.push('append');
+        lines.push(record);
+      },
+      write: async (_file: unknown, next: readonly AskBuzzRecord[]) => {
+        log.push('write');
+        lines = [...next];
+      },
     } as unknown as StatePort;
-    return { ledger: new StateAskBuzzLedger(port), appended };
+    return { ledger: new StateAskBuzzLedger(port), log, file: () => lines.map(line => line.key) };
   }
+  const line = (n: number): AskBuzzRecord => ({ format: 1, key: `ask:f1:A${n}`, at: NOW, kind: 'notice' });
 
   test('reads the file once, then answers from memory, and remembers what it appends', async () => {
     let reads = 0;
-    const { ledger, appended } = state(async function* () {
-      reads += 1;
-      yield { format: 1, key: 'ask:f1:A1', at: NOW, kind: 'notice' };
-    });
+    const { ledger, log } = state([line(1)], () => (reads += 1));
     expect(await ledger.has('ask:f1:A1')).toBe(true);
     expect(await ledger.has('ask:f1:A2')).toBe(false);
-    await ledger.append({ format: 1, key: 'ask:f1:A2', at: NOW, kind: 'card-ask' });
+    await ledger.append(line(2));
     expect(await ledger.has('ask:f1:A2')).toBe(true);
-    expect(appended).toHaveLength(1);
+    expect(log).toEqual(['append']);
     expect(reads).toBe(1);
   });
 
   test('a damaged file refuses the lookup rather than reading as empty, and is read again next time', async () => {
     let fail = true;
-    const { ledger } = state(async function* () {
-      if (fail) throw new Error('damaged');
-      yield { format: 1, key: 'ask:f1:A1', at: NOW, kind: 'notice' };
-    });
+    const ledger = new StateAskBuzzLedger({
+      lines: async function* () {
+        if (fail) throw new Error('damaged');
+        yield line(1);
+      },
+    } as unknown as StatePort);
     await expect(ledger.has('ask:f1:A1')).rejects.toThrow('damaged');
     fail = false;
     expect(await ledger.has('ask:f1:A1')).toBe(true);
+  });
+
+  test('forgetting a key rewrites the file without it; a key it never had writes nothing', async () => {
+    const { ledger, log, file } = state([line(1), line(2)]);
+    await ledger.forget('ask:f1:A9');
+    expect(log).toEqual([]);
+    await ledger.forget('ask:f1:A1');
+    expect(log).toEqual(['write']);
+    expect(file()).toEqual(['ask:f1:A2']);
+    expect(await ledger.has('ask:f1:A1')).toBe(false);
+  });
+
+  test('the file is capped: past the cap the OLDEST keys go and the newest stay, however the writes race', async () => {
+    const full = Array.from({ length: ASK_BUZZ_LEDGER_CAP }, (_, n) => line(n));
+    const { ledger, file } = state(full);
+    await Promise.all([ledger.append(line(ASK_BUZZ_LEDGER_CAP)), ledger.append(line(ASK_BUZZ_LEDGER_CAP + 1))]);
+    expect(file()).toHaveLength(ASK_BUZZ_LEDGER_CAP);
+    expect(file()[0]).toBe('ask:f1:A2');
+    expect(file().at(-1)).toBe(`ask:f1:A${ASK_BUZZ_LEDGER_CAP + 1}`);
+    expect(await ledger.has('ask:f1:A0')).toBe(false);
+    expect(await ledger.has('ask:f1:A2')).toBe(true);
+  });
+
+  test('a failed write is said to its caller and does not block the next one', async () => {
+    let fail = true;
+    const ledger = new StateAskBuzzLedger({
+      lines: async function* () {},
+      append: async () => {
+        if (fail) throw new Error('disk full');
+      },
+    } as unknown as StatePort);
+    await expect(ledger.append(line(1))).rejects.toThrow('disk full');
+    fail = false;
+    await ledger.append(line(2));
+    expect(await ledger.has('ask:f1:A2')).toBe(true);
+    expect(await ledger.has('ask:f1:A1')).toBe(false);
   });
 });

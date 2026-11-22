@@ -4,6 +4,7 @@
  * still fails the half closed. Codes are read to be checked, never printed.
  */
 import { describe, expect, test } from 'bun:test';
+import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeGate, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { testHost } from '@ferretry/kernel/testing';
 import { DevicesFile, PairingCodeMintResponseSchema } from '../../../contract/index.ts';
@@ -23,7 +24,7 @@ describe('Access takes the daemon identity from kernel.identity', () => {
     const h = await testHost({
       plugins: [daemon],
       gate: atTheMachine(),
-      fakes: { gate: new FakeGate() },
+      fakes: { gate: new FakeGate(), asks: new FakeAsks() },
       identity: IDENTITY,
     });
     const response = await h.request('POST', '/v1/pair/code');
@@ -36,7 +37,11 @@ describe('Access takes the daemon identity from kernel.identity', () => {
   });
 
   test('the host’s default throwaway identity pairs too: the route no longer answers 503', async () => {
-    const h = await testHost({ plugins: [daemon], gate: atTheMachine(), fakes: { gate: new FakeGate() } });
+    const h = await testHost({
+      plugins: [daemon],
+      gate: atTheMachine(),
+      fakes: { gate: new FakeGate(), asks: new FakeAsks() },
+    });
     const response = await h.request('POST', '/v1/pair/code');
     expect(response.status).toBe(201);
     expect(PairingCodeMintResponseSchema.parse(response.json()).daemonId).toBe(h.identity.daemonId);
@@ -47,7 +52,7 @@ describe('Access takes the daemon identity from kernel.identity', () => {
     const h = await testHost({
       plugins: [daemon],
       gate: atTheMachine(),
-      fakes: { gate: new FakeGate() },
+      fakes: { gate: new FakeGate(), asks: new FakeAsks() },
       identity: IDENTITY,
     });
     h.state('access').plant(DevicesFile, '{broken');

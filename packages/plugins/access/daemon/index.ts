@@ -78,7 +78,7 @@ export default implementDaemon(manifest, {
       subscribers: {
         // A raise, a close or a change: an ask that is a buzzing moment (a card's ask, a notice that asked for the phone) makes its one buzz.
         'asks.changed': async ({ ferret, askId, state }) => {
-          if (state !== 'open') return;
+          if (state !== 'open') return void (await askBuzzer.settle(ferret, askId));
           const ask = (await ctx.needs.asks.get({ ferret, id: askId }).catch(() => undefined)) as
             | BuzzableAsk
             | undefined;
