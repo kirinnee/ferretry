@@ -1,4 +1,5 @@
 import { type Document, parse } from 'durian-hypermedia';
+import { animationEngineReady } from './animation-engine.ts';
 import { configureDurian } from './durian.ts';
 import { settleFences } from './fence-boundaries.ts';
 import { drawableBodies, fyRenderParseBlock } from './fy-render-host.tsx';
@@ -26,15 +27,25 @@ export interface ReadMessage {
  * message plain code from that fence on, so nothing at or after it draws and a partial body is never run; a block draws
  * only where its parsed fence has a real closing delimiter. Durian is given that one decision, not asked again.
  *
+ * ONE INPUT BESIDES THE TEXT: whether the 2D animation engine has arrived (`animation-engine.ts`). Without it an animation
+ * fence is read as code; with it, as the animation. It only ever goes from the first to the second.
+ *
  * `arriving` is true for the tail of a message still streaming in: a closing delimiter that is its last line is not yet
  * one (the rest of that line may turn it into content), so that fence stays open and inert until the line ends. A final
  * message is read as written.
  */
-export function readMessage(source: string, idPrefix: string, arriving = false): ReadMessage {
+export function readMessage(
+  source: string,
+  idPrefix: string,
+  arriving = false,
+  /** Whether the 2D animation engine is here: the current state of the gate unless a caller (the view, which re-reads on arrival) says. */
+  animationReady = animationEngineReady(),
+): ReadMessage {
   configureDurian();
   const settled = settleFences(source, arriving);
-  // A chart (unbounded formulas) and a code walk are held as code before Durian can read them (`held-fences.tsx`).
-  const text = holdFences(settled.text);
+  // A chart (unbounded formulas) and a code walk are held as code before Durian can read them (`held-fences.tsx`), and so is
+  // an animation until its lazy engine has arrived (`animation-engine.ts`).
+  const text = holdFences(settled.text, !animationReady);
   const doc = parse(text, {
     blocks: [fyRenderParseBlock(settled), ...heldFenceParseBlocks(text)],
     frontMatter: false,

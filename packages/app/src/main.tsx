@@ -8,6 +8,7 @@
  * below, behind the generated client's hash guard (§9.6). Access supplies the device claims and Connections the
  * carriers (`src/connect/provides.ts`); with neither built, every daemon reads "cannot reach yet", nothing is sent.
  */
+import './security/zod-jitless.ts'; // FIRST: zod's JIT is off before any schema below is built (it would probe `new Function`)
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { connector, type DirectDial, pairOverCarriers, pairOverDirect } from './connect/connector.ts';

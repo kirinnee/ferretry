@@ -30,6 +30,15 @@ import { fileURLToPath } from 'node:url';
  * THE PIN IS A DECISION, NOT A RANGE (owner choice C8): a newer Durian comes in by a PR that reads its CHANGELOG and
  * re-runs the hostile and format fixtures. `DURIAN_PIN` is the record, and the build refuses an installed version
  * that is not the pinned tag's.
+ *
+ * THE PIN-BUMP CHECKLIST (every item is in the PR that moves `DURIAN_PIN`, `package.json` and `bun.lock` together):
+ *   1. read the new tag's CHANGELOG; any API change in the slots and blocks `app/hypermedia/` uses is handled in the same PR;
+ *   2. re-run `hypermedia-csp.visual.test.ts` (every format and hostile fixture: 0 violations, 0 Trusted Types errors);
+ *   3. READ `scripts/build-css.ts` IN THE NEW TAG: this build runs it, as code, in a child process on every Vite build
+ *      (`runStyleBuild`), with `PATH` and no other environment. A new line there that reads the environment, the network or
+ *      anything outside the package is a supply-chain change: the PR names it, and the reviewer reads it as code that runs
+ *      on every developer machine and CI runner;
+ *   4. re-measure `tests/perf/hypermedia-size.test.ts` and say what moved.
  */
 
 /** The reviewed release: tag `v0.5.1` (signed), the commit it points at, and the tag object. MIT. */
@@ -52,6 +61,14 @@ interface ResolveContext {
   resolve(source: string, importer?: string, options?: { skipSelf?: boolean }): Promise<{ id: string } | null>;
 }
 
+/**
+ * THE STYLESHEET'S OWN IMPORT (`app/hypermedia/dh-styles.ts`, loaded by the Conversation surfaces) HAS A SIDE EFFECT, and this
+ * package declares none (`"sideEffects": false`, which the hosted-relay guard `scripts/validate/relay-config.sh` requires of every
+ * workspace package a Worker could import). A bare import of a side-effect-free module is dropped, and the app shipped no Durian
+ * CSS (r12 H8 review, item 3). The plugin that builds Durian says so for this one module, where the stylesheet is made.
+ */
+const STYLES_MODULE = /(^|\/)hypermedia\/dh-styles\.ts$/u;
+
 interface Installed {
   readonly root: string;
   readonly exports: Record<string, string | { bun?: string }>;
@@ -71,21 +88,64 @@ function installedPackage(): Installed {
   return installed;
 }
 
+/** Our stand-ins for two of Durian's own modules (`hypermedia/durian-shims/`, header there). */
+const CHART_HELD = fileURLToPath(new URL('./hypermedia/durian-shims/chart-held.ts', import.meta.url));
+const SCENE_LATE = fileURLToPath(new URL('./hypermedia/durian-shims/scene-late.ts', import.meta.url));
+
+/**
+ * WHICH DURIAN IMPORTS ARE REDIRECTED (r12 H8 fix): the PARSER's, and only the parser's (`core/dh-lib.ts`, `document.ts`).
+ *  - its chart reader and the expression engine under it (`./chart`, `./chart-llm`): H4 holds every chart fence as code, so the
+ *    evaluator is never reached and is not shipped either (`chart-held.ts`);
+ *  - its scene compiler (`./scene`, `./core/scene`): the real one stays in the 2D animation's lazy chunk, and the parser reaches
+ *    it through `scene-late.ts`, which that chunk fills in when it loads. The renderer's own import of the compiler
+ *    (`ui/anim.tsx`) is NOT redirected, so the compiler lives in the animation chunk, not in a first load.
+ * Matched on the importer's path under Durian's `src/` and on the exact relative specifier, so a Durian release that moves them
+ * fails the build test (`tests/perf/hypermedia-size.test.ts`) rather than silently shipping them again.
+ */
+export function redirectedImport(source: string, importer: string | undefined, root: string): string | null {
+  if (importer === undefined) return null;
+  const src = join(root, 'src');
+  if (importer === join(src, 'core/dh-lib.ts')) {
+    if (source === './chart' || source === './chart-llm') return CHART_HELD;
+    if (source === './scene') return SCENE_LATE;
+  }
+  if (importer === join(src, 'document.ts') && source === './core/scene') return SCENE_LATE;
+  return null;
+}
+
+/** The file of Durian's scene compiler, which registers itself with {@link SCENE_LATE} when it evaluates. */
+const sceneCompilerId = (root: string): string => join(root, 'src/core/scene.ts');
+
 /** `true` for a source file inside the Durian package (an importer Vite resolved to its real path). */
 function insideDurian(importer: string | undefined, root: string): boolean {
   return importer !== undefined && importer.startsWith(root + sep);
 }
 
-let styles: string | undefined;
+/**
+ * What the stylesheet child may see of the build's environment: `PATH` (to find `bun`) and nothing else. The child runs a
+ * script that arrives from a git dependency, in every Vite build, in a process that inherits whatever the build was started
+ * with (a CI job's tokens, a developer's credentials); it needs none of it, so it is handed none (r12 H8, Opus review of H1).
+ */
+export const styleBuildEnvironment = (env: NodeJS.ProcessEnv): Record<string, string> =>
+  env.PATH === undefined ? {} : { PATH: env.PATH };
+
 /**
  * The stylesheet, built by the package's own script (`prepare` would write it to `dist/styles.css`). The script is
  * TypeScript inside `node_modules`, which Node will not import and Bun will, so it runs in a `bun` child that prints
- * the CSS; nothing is written into the package.
+ * the CSS; nothing is written into the package. The child gets {@link styleBuildEnvironment}, not the build's environment.
  */
-function buildStyles(root: string): string {
-  if (styles !== undefined) return styles;
+export function runStyleBuild(root: string, env: NodeJS.ProcessEnv = process.env): string {
   const script = `import { buildCss } from ${JSON.stringify(join(root, 'scripts/build-css.ts'))}; process.stdout.write(buildCss());`;
-  styles = execFileSync('bun', ['--eval', script], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  return execFileSync('bun', ['--eval', script], {
+    encoding: 'utf8',
+    env: styleBuildEnvironment(env),
+    maxBuffer: 16 * 1024 * 1024,
+  });
+}
+
+let styles: string | undefined;
+function buildStyles(root: string): string {
+  styles ??= runStyleBuild(root);
   return styles;
 }
 
@@ -102,9 +162,19 @@ const plugin = {
           'move the pin only by a PR that reads its CHANGELOG and re-runs the Durian fixtures (docs/hypermedia.md).',
       );
   },
-  async resolveId(this: ResolveContext, source: string, importer?: string): Promise<string | { id: string } | null> {
+  async resolveId(
+    this: ResolveContext,
+    source: string,
+    importer?: string,
+  ): Promise<string | { id: string; moduleSideEffects?: boolean } | null> {
     if (source === STYLES) return STYLES_ID;
+    if (STYLES_MODULE.test(source)) {
+      const resolved = await this.resolve(source, importer, { skipSelf: true });
+      return resolved === null ? null : { id: resolved.id, moduleSideEffects: true };
+    }
     const { root, exports } = installedPackage();
+    const redirected = redirectedImport(source, importer, root);
+    if (redirected !== null) return redirected;
     if (source === PACKAGE || source.startsWith(`${PACKAGE}/`)) {
       const entry = exports[source === PACKAGE ? '.' : `.${source.slice(PACKAGE.length)}`];
       if (typeof entry !== 'object' || entry.bun === undefined) return null;
@@ -116,6 +186,12 @@ const plugin = {
   },
   load(id: string): string | null {
     return id === STYLES_ID ? buildStyles(installedPackage().root) : null;
+  },
+  // The real scene compiler tells the parser's door it has arrived (`scene-late.ts`): appended to the compiler's own module,
+  // so it runs exactly when the animation's chunk evaluates it, wherever the bundler puts it.
+  transform(code: string, id: string): string | null {
+    if (id !== sceneCompilerId(installedPackage().root)) return null;
+    return `${code}\nimport { bindScene as __fyBindScene } from ${JSON.stringify(SCENE_LATE)};\n__fyBindScene({ compileScene, sceneLlm, KINDS });\n`;
   },
 };
 

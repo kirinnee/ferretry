@@ -1,6 +1,6 @@
 import type { AnimationBlock } from 'durian-hypermedia';
-import { AnimationPart } from 'durian-hypermedia/react/strict';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
+import { animationStage } from './animation-engine.ts';
 
 /**
  * AN ANIMATION, WITH THE ONE GRAPHICS FAILURE DURIAN DOES NOT HANDLE. Durian's wrapper falls back to the flat (2D) stage
@@ -15,6 +15,8 @@ import { type ReactElement, useEffect, useRef, useState } from 'react';
 export function GuardedAnimation({ block }: { readonly block: AnimationBlock }): ReactElement {
   const box = useRef<HTMLDivElement>(null);
   const [lost, setLost] = useState(false);
+  // The stage is the lazy engine's: a block exists only once the parser had the engine, so it is here whenever this draws.
+  const Stage = animationStage();
   useEffect(() => {
     const element = box.current;
     if (element === null) return;
@@ -30,7 +32,7 @@ export function GuardedAnimation({ block }: { readonly block: AnimationBlock }):
   }, []);
   return (
     <div data-fy-animation="" ref={box}>
-      <AnimationPart block={block} />
+      {Stage === undefined ? null : <Stage block={block} />}
       {lost ? (
         <p className="fy-hm-note" data-fy-webgl-lost="" role="status">
           The 3D view lost its graphics context, so this is the flat view.
