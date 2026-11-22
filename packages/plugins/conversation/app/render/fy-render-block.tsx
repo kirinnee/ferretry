@@ -88,7 +88,7 @@ import { FyRenderHtmlFrame, type FyRenderHtmlPaint } from './fy-render-html-fram
 import { FyRenderMap, type FyRenderMapModules } from './fy-render-map.tsx';
 import { FyRenderMedia } from './fy-render-media.tsx';
 import { FyRenderSandbox, type FyRenderSandboxFailure } from './fy-render-sandbox.tsx';
-import { documentThemeName, readTheme } from './fy-render-theme.ts';
+import { documentMode, documentThemeName, readTheme, THEME_ATTRIBUTES } from './fy-render-theme.ts';
 import { FyRenderViewport } from './fy-render-viewport.tsx';
 
 /**
@@ -352,10 +352,11 @@ export function FyRenderBlock({
     // Sync on attach: the document may have been repainted before this block was near.
     setTheme(themeName());
     const observer = new MutationObserver(() => setTheme(themeName()));
-    observer.observe(document.documentElement, { attributeFilter: ['data-theme'], attributes: true });
+    observer.observe(document.documentElement, { attributeFilter: [...THEME_ATTRIBUTES], attributes: true });
     return () => observer.disconnect();
   }, [near]);
-  const mode: FyRenderSandboxTheme = theme.includes('light') ? 'light' : 'dark';
+  // `theme` (the state above) is what makes a switch of ANY axis re-render this block; the mode is then read off the page.
+  const mode: FyRenderSandboxTheme = documentMode();
 
   /**
    * THE THEME AS DATA, for the two illustrations painted by a library that cannot read CSS: a chart's

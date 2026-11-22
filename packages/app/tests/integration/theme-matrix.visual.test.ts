@@ -39,9 +39,10 @@
  * 2x screenshot per style/palette/mode at 1280 and 390.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
+import { createRequire } from 'node:module';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { PALETTES, STYLES } from '../../src/theme/catalog.ts';
 import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
@@ -65,7 +66,16 @@ setDefaultTimeout(60_000);
 const packageRoot = import.meta.dir;
 /** The specimen page's browser entry lives in Conversation's tests: it mounts Conversation's real renderer through that plugin's own half. */
 const conversationScenes = resolve(packageRoot, '../../../plugins/conversation/tests/integration/app/fixtures');
+/** Conversation's own package folder: the specimen draws a real `HypermediaProse`, whose stylesheet is Durian's plus the app's theme for it. */
+const conversationRoot = resolve(conversationScenes, '../../../..');
 const shotsDir = process.env.FY_THEME_MATRIX_SHOTS_DIR ?? '';
+
+/** Durian's stylesheet as the app's Vite plugin builds it (the package's own script), then `dh-theme.css`, in the order `dh-styles.ts` imports them. */
+const hypermediaCss = async (): Promise<string> => {
+  const root = dirname(createRequire(join(conversationRoot, 'package.json')).resolve('durian-hypermedia/package.json'));
+  const { buildCss } = (await import(join(root, 'scripts/build-css.ts'))) as { buildCss: () => string };
+  return `${buildCss()}\n${await readFile(join(conversationRoot, 'app/hypermedia/dh-theme.css'), 'utf8')}`;
+};
 const reportFile = process.env.FY_THEME_MATRIX_REPORT ?? '';
 /** Set to `1` to run the whole matrix with the OS "reduce transparency" setting emulated (every surface must stay readable opaque). */
 const reducedTransparency = process.env.FY_THEME_MATRIX_REDUCED_TRANSPARENCY === '1';
@@ -160,7 +170,8 @@ beforeAll(async () => {
   const manifest = JSON.parse(stdout.trim().split('\n').at(-1) as string) as { css: string; js: string };
   const css = await readFile(manifest.css, 'utf8');
   const js = await readFile(manifest.js, 'utf8');
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
+  const hypermedia = await hypermediaCss();
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style><style>${hypermedia}</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
   browser = await sharedChromium();
   server = Bun.serve({
     hostname: '127.0.0.1',
@@ -531,14 +542,11 @@ const FACTS = `(() => {
 })()`;
 
 /**
- * The hypermedia probe's node: what the REAL renderer drew for the specimen's `FyRenderBlock` (the picture, its stage and its
- * viewport), as computed values (r11 T4's seam: `fy-render.css` consumes the `--hm-*` slots for every block it draws). The
- * declared tokens are NOT read: a token that moves with the renderer unchanged draws nothing and earns nothing. Stroke,
- * shadow and the fill's alpha are the parts a "shaped" and a "flat" style differ on. The corner RADIUS is deliberately not
- * read: until a renderer consumes `--hm-radius` (r12 H5), the only radius on the picture is the shared `--radius-sm` that
- * `.fy-render-pan` and its image take from the control scale, which every style sets for its buttons and fields and is not
- * hypermedia distinctness (r11 T14 review: five styles scored 6 of 8 on that alone). r12 H5 puts the radius back. Nothing here is a size or an
- * inherited font: those move with the page's layout and type, not with the renderer.
+ * The hypermedia probe's node: what the REAL renderer drew for the specimen's `HypermediaProse` (a terminal, its header band,
+ * and a callout), as computed values (r12 H5: `dh-theme.css` consumes the `--hm-*` slots for every part it draws). The declared
+ * tokens are NOT read: a token that moves with the renderer unchanged draws nothing and earns nothing. Corner radius, stroke,
+ * shadow, whether the header band is drawn, and the fill's alpha are what a "shaped", a "flat", an "ink" and a "block" style
+ * differ on. Nothing here is a size or an inherited font: those move with the page's layout and type, not with the renderer.
  */
 const HYPERMEDIA_NODE = `(() => {
   const alphaOf = (value) => {
@@ -547,11 +555,11 @@ const HYPERMEDIA_NODE = `(() => {
     const comma = /^rgba?\\([^)]*,\\s*([\\d.]+)\\s*\\)\$/.exec(value);
     return comma ? comma[1] : '1';
   };
-  return ['.fy-render-stage', '.fy-render-viewport', '.fy-render-pan', '.fy-render-image'].map((selector) => {
+  return ['.dh-doc .term', '.dh-doc .term-chrome', '.dh-doc .callout'].map((selector) => {
     const el = document.querySelector('[data-probe="hypermedia"] ' + selector);
     if (!el) return selector + ':absent';
     const cs = getComputedStyle(el);
-    return selector + ':' + [cs.borderTopWidth, cs.borderTopStyle, cs.boxShadow.replace(/(rgba?|color)\\([^()]*\\)/g, 'C'), alphaOf(cs.backgroundColor), cs.filter, cs.clipPath, cs.outlineStyle].join('/');
+    return selector + ':' + [cs.borderTopWidth, cs.borderTopStyle, cs.borderTopLeftRadius, cs.boxShadow.replace(/(rgba?|color)\\([^()]*\\)/g, 'C'), alphaOf(cs.backgroundColor), cs.display, cs.filter, cs.clipPath, cs.outlineStyle].join('/');
   }).join('|');
 })()`;
 
@@ -1159,30 +1167,30 @@ describe('the probes read the real page', () => {
         }
       });
 
-  it('the shared --radius-sm (what .fy-render-pan reads today) is not hypermedia distinctness', async () => {
-    // No renderer reads an --hm-* slot at this head (r12 H5 owns that), so the only thing a style can move on the picture is
-    // the shared control radius. A probe that counts it scores every style "distinct" for a change that is not hypermedia.
+  it('the shared --radius-sm is not hypermedia distinctness', async () => {
+    // The terminal's corner is the style's `--hm-radius` (r12 H5), not the shared control radius every style sets for its buttons
+    // and fields. A probe that counted the control radius would score every style "distinct" for a change that is not hypermedia.
     const session = await open(VIEWPORTS[0], 'light', 'real');
     try {
       await apply(session.tab, 'studio', 'studio', 'light');
       const panRadius = async () =>
         (await session.tab.evaluate(
-          `getComputedStyle(document.querySelector('[data-probe="hypermedia"] .fy-render-pan')).borderTopLeftRadius`,
+          `getComputedStyle(document.querySelector('[data-probe="hypermedia"] .dh-doc .term')).borderTopLeftRadius`,
         )) as string;
       const probe = async () => ((await session.tab.evaluate(SIGNATURE)) as Signature).hypermedia;
       const before = { radius: await panRadius(), probe: await probe() };
       const wash = await washed(session.tab, ':root { --radius-sm: 91px !important; }');
       const after = { radius: await panRadius(), probe: await probe() };
       await gone(wash);
-      expect(after.radius, 'the shared radius really changed the picture frame (the lever works)').toBe('91px');
-      expect(before.radius, 'and it was not 91px before').not.toBe('91px');
-      expect(after.probe, 'but the hypermedia signature does not move').toBe(before.probe);
+      expect(after.radius, 'the shared radius did not move the terminal').toBe(before.radius);
+      expect(after.radius, "it is the style's hypermedia radius").not.toBe('91px');
+      expect(after.probe, 'and the hypermedia signature does not move').toBe(before.probe);
     } finally {
       await session.close();
     }
   });
 
-  it('a hypermedia token declared with the renderer unchanged moves nothing the probe reads', async () => {
+  it('a hypermedia token moves what the renderer draws, and the probe moves with it', async () => {
     const session = await open(VIEWPORTS[0], 'light', 'real');
     try {
       await apply(session.tab, 'studio', 'studio', 'light');
@@ -1196,7 +1204,9 @@ describe('the probes read the real page', () => {
       );
       const after = { node: await node(), probe: await probe() };
       await gone(tokens);
-      // The probe moves exactly when the rendered node moves: a disconnected consumer earns no point.
+      // r12 H5 connected the renderer: the declared slots now change the drawn node, and the probe sees exactly that. (A token
+      // nothing consumed would move neither, and earn no point.)
+      expect(after.node, 'the slots changed what the renderer drew').not.toBe(before.node);
       expect(after.probe !== before.probe, "the probe moves iff the renderer's node moves").toBe(
         after.node !== before.node,
       );

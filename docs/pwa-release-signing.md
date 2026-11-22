@@ -78,7 +78,7 @@ No second key exists for it.
 | `scripts/ci/check-pwa-release.sh`                 | proves the list says only what the run decided, before signing/deploy |
 | `scripts/ci/verify-pwa-release.sh`                | proves the signature before a deploy                                  |
 | `packages/pwa/release-signing-key.pub`            | the public key, compiled into every worker                            |
-| `.github/workflows/pwa-pages.yaml`                | three jobs — build, sign, deploy — so the key never meets the build   |
+| `.github/workflows/pwa-pages.yaml`                | four jobs — build, sign, verify, deploy — key never meets the build   |
 
 ### Wire formats
 
@@ -169,7 +169,7 @@ decision the build made out loud, never a missing upload.
   Selected branches → `main`**. Add required reviewers if you want a human to approve each deploy.
   GitHub creates a referenced environment that does not exist yet with **no** branch policy, so
   until this is set, a workflow on any branch could name the environment and read the secret.
-- **Only the `sign` job holds it.** `pwa-pages.yaml` runs three jobs:
+- **Only the `sign` job holds it.** `pwa-pages.yaml` runs four jobs:
   - **`build`** installs dependencies and builds the release, and holds no secret. Any dependency's
     install script or build plugin runs here, so nothing it produces is trusted downstream.
   - **`sign`** holds the key. It installs nothing and runs no build: it checks out the repository for
@@ -191,8 +191,14 @@ decision the build made out loud, never a missing upload.
     stolen key) or on a huge sequence (every later release refused as older, forever). At worst it
     spoils one release's app code, which the list still names exactly.
 
-  - **`deploy`** holds only the Cloudflare token. It runs the same check and proves the signature
-    before it uploads.
+  - **`verify`** holds no secret and has the checkout. It runs the same check, proves the signature, and hands
+    the verified bytes to `deploy` as an artifact.
+  - **`deploy`** holds only the Cloudflare token, and **never meets checkout code**: it has no `actions/checkout`,
+    no local action, no `nix develop` and no `bun`/`bunx`/`npx`, so no flake shellHook, bun resolution or script
+    from the pushed commit runs with the token in its environment. It downloads the verified artifact and runs
+    wrangler from an exact-version npm install (`WRANGLER_VERSION`, `--ignore-scripts`, in a step that holds no
+    token). `scripts/validate/release-guards.sh` holds all of that for both PWA deploy workflows. Declared gap:
+    wrangler's own dependencies are resolved by npm at install time, not from a lockfile.
     Every action in the workflow is pinned to an exact SHA.
 
 - **In the `sign` job** the key reaches the signer on **stdin** (`printf`, a shell builtin, so no
@@ -350,10 +356,15 @@ touching none of it:
   force-rewind), and it fails on anything it cannot read, prove or relate, except a 404 for the manifest, which it passes
   on because it holds no Cloudflare credential and cannot tell a never-deployed project from a wrong origin. It is not the
   authority: GitHub can re-run the `deploy` job alone, reusing a stale "allow" after the live release has moved on.
-  (2) The `deploy` job is the **authority**, in two steps immediately before the upload, on every attempt.
-  **`Read the production deployment`** holds the Pages-only token (in that step's environment alone, sent to `curl` on
+  (2) The `project` and `verify` jobs are the **authority**, in two steps before the upload, on every attempt, and
+  neither the token nor the checkout is ever in the same job: the `deploy` job has no checkout at all. Their
+  hand-off artifacts (`pages-project-<attempt>`, `pwa-release-verified-<attempt>`) carry the run attempt in their
+  names, so a re-run of `deploy` alone finds nothing of an earlier attempt's decision and **fails closed**; re-run the
+  whole workflow or push again.
+  **`Read the production deployment`** (job `project`) holds the Pages-only token (in that step's environment alone, sent to `curl` on
   stdin, never as an argument) and runs nothing from the checkout: it asks the Cloudflare Pages API for the project's
-  `canonical_deployment` and leaves the answer in a file. **`Refuse a release that goes backwards`** holds no secret, so
+  `canonical_deployment` and leaves only the fields the decision reads in an artifact (the rest of the project answer,
+  its deployment configuration, never leaves the job). **`Refuse a release that goes backwards`** (job `verify`) holds no secret, so
   the scripts it runs from the pushed commit (`hosted-app-origin.sh`, `verify-pwa-release.sh`) never see the token. It
   checks the deployment is of `ferretry-v5` and that its URL is `https://<first 8 characters of its id>.<alias host>`,
   then reads and proves the signed record **from that deployment's own URL** (the alias is mutable and not bound to the

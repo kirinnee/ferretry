@@ -1,0 +1,495 @@
+/*
+ * THE APP'S THEME, WORN BY DURIAN HYPERMEDIA (r12 H5). Durian draws every part from ~120 custom properties on `.dh-doc`
+ * (`THEME.md` in the package); this file is the one place that sets them, from the app's palette and style tokens, so a
+ * message follows the palette (colour), the style (type, corners, strokes, shadows, header, fill) and the mode, and
+ * nothing in it is a colour of its own. The package's own defaults are one fixed set under every theme, with Poppins and
+ * IBM Plex Mono forced on top (the owner's theme audit, c59: 1,699 findings over 256 combinations).
+ *
+ *  - SPECIFICITY. Durian goes dark on `prefers-color-scheme` with `:root:not([data-theme="light"]) .dh-doc:not([data-theme="light"])`
+ *    (four classes' worth), and our root says `data-mode`, so a plain `.fy-hm .dh-doc` rule would lose to it on a
+ *    system-dark machine. The token block repeats the class to outweigh it; `data-theme` on the document stays Durian's
+ *    own light/dark switch for what it draws on its own (a chart's canvas), set from `data-mode` by `HypermediaProse`.
+ *  - NO CYCLE. Both sides name `--surface`, `--surface-2`, `--surface-3`, `--muted`, `--faint`, `--bg`, `--warn` and the
+ *    fonts and shadows, so `.dh-doc { --surface: var(--surface) }` would be a self-reference (invalid, so the package's
+ *    own value would win). The app's values are copied to `--fyhm-*` on the wrapper `.fy-hm`, which Durian never sets,
+ *    and the document reads them from there.
+ *  - SHAPE. `--hm-shape` (shaped | flat | ink | block) reaches the document as `data-dh-variant`, and `--hm-header`
+ *    (band | label | none) as `data-hm-header` on the wrapper: a custom property cannot branch on a keyword, so
+ *    `HypermediaProse` reads them once per theme change (`look.ts`). The continuous slots (`--hm-radius`, `--hm-stroke`,
+ *    `--hm-node-fill-alpha`, `--hm-font`) are used here as they are.
+ *  - NO LITERAL COLOUR here. The package's own literals (terminal window dots, the terminal's prompt colours, file-icon
+ *    hues, the "marked line" colour) are replaced below by the palette's status and syntax colours.
+ */
+
+/* The app's values, copied under names Durian never sets. */
+.fy-hm {
+  --fyhm-bg: var(--bg);
+  --fyhm-surface: var(--surface);
+  --fyhm-surface-2: var(--surface-2);
+  --fyhm-surface-3: var(--surface-3);
+  --fyhm-muted: var(--muted);
+  --fyhm-faint: var(--faint);
+  --fyhm-warn: var(--warn);
+  --fyhm-font-display: var(--font-display);
+  --fyhm-font-mono: var(--font-mono);
+  --fyhm-shadow-sm: var(--shadow-sm);
+  --fyhm-shadow-md: var(--shadow-md);
+  --fyhm-shadow-lg: var(--shadow-lg);
+  /* How much of a tinted ground (a callout, a tag, a family fill) is painted: Studio draws filled nodes, Geist outlines. */
+  --fyhm-fill: calc(var(--hm-node-fill-alpha, 0.85) * 100%);
+}
+
+.fy-hm .dh-doc.dh-doc.dh-doc.dh-doc {
+  /* ---- surfaces and lines ---- */
+  --bg: var(--fyhm-bg);
+  --bg-glow-1: transparent;
+  --bg-glow-2: transparent;
+  --surface: var(--fyhm-surface);
+  --surface-2: var(--fyhm-surface-2);
+  --surface-3: var(--fyhm-surface-3);
+  --line: var(--border);
+  --line-2: var(--border-strong, var(--border));
+
+  /* ---- ink ---- */
+  --ink: var(--fg);
+  --ink-2: var(--fg-soft);
+  --muted: var(--fyhm-muted);
+  --faint: var(--fyhm-faint);
+
+  /* ---- accent and status: the palette's own ---- */
+  --acc: var(--accent);
+  --acc-2: var(--accent);
+  --acc-ink: var(--accent-strong, var(--accent));
+  --acc-soft: var(--accent-soft);
+  --acc-softer: color-mix(in srgb, var(--accent-soft) var(--fyhm-fill), transparent);
+  --hot: var(--err);
+  --hot-ink: var(--err);
+  --hot-soft: color-mix(in srgb, var(--err-bg) var(--fyhm-fill), transparent);
+  --good: var(--ok);
+  --good-ink: var(--ok);
+  --good-soft: color-mix(in srgb, var(--ok-bg) var(--fyhm-fill), transparent);
+  --warn: var(--fyhm-warn);
+  --warn-ink: var(--fyhm-warn);
+  --warn-soft: color-mix(in srgb, var(--warn-bg) var(--fyhm-fill), transparent);
+  --bad: var(--err);
+  --bad-ink: var(--err);
+  --bad-soft: color-mix(in srgb, var(--err-bg) var(--fyhm-fill), transparent);
+  --info: var(--accent);
+  --info-ink: var(--accent-strong, var(--accent));
+  --info-soft: color-mix(in srgb, var(--accent-soft) var(--fyhm-fill), transparent);
+  --untested: var(--pend);
+  --untested-ink: var(--pend);
+  --untested-soft: color-mix(in srgb, var(--pend-bg) var(--fyhm-fill), transparent);
+  --on-acc: var(--accent-fg);
+
+  /* ---- text techniques ---- */
+  --mark-bg: color-mix(in srgb, var(--fyhm-warn) 24%, var(--surface));
+  --mark-ink: var(--fg);
+  --strike-ink: var(--fyhm-muted);
+  --new-bg: var(--accent);
+  --new-ink: var(--accent-fg);
+  --comment-mark: color-mix(in srgb, var(--err) 26%, transparent);
+  --ul-line: color-mix(in srgb, var(--accent) 60%, transparent);
+  --ul-line-soft: color-mix(in srgb, var(--accent) 28%, transparent);
+
+  /* ---- the code and terminal ground is the app's code ground, so its syntax colours sit on what they were made for ---- */
+  --term: var(--code-bg);
+  --term-2: color-mix(in srgb, var(--code-bg) 94%, var(--code-fg));
+  --term-line: var(--code-border);
+  --term-ink: var(--code-fg);
+  --term-faint: color-mix(in srgb, var(--syn-comment) 70%, var(--code-fg));
+  --ch-1: var(--syn-comment);
+  --ch-2: var(--syn-number);
+  --ch-3: var(--syn-type);
+  --ch-4: var(--code-fg);
+  --ch-5: var(--syn-keyword);
+  --ch-6: var(--syn-string);
+  --ch-7: var(--syn-keyword);
+  --ch-8: var(--syn-string);
+  --ch-9: var(--syn-deletion);
+  --ch-10: var(--code-bg);
+  --ch-11: color-mix(in srgb, var(--syn-deletion) 22%, transparent);
+  --ch-12: color-mix(in srgb, var(--syn-addition) 22%, transparent);
+  --ch-13: color-mix(in srgb, var(--syn-meta) 22%, transparent);
+  --ch-14: var(--code-fg);
+  --ch-15: var(--syn-comment);
+  --ch-16: var(--code-bg);
+  --ch-17: color-mix(in srgb, var(--accent) 20%, transparent);
+  --ch-18: color-mix(in srgb, var(--accent) 14%, transparent);
+  --ch-19: var(--syn-comment);
+  --ch-20: color-mix(in srgb, var(--accent) 35%, transparent);
+  --ch-21: var(--accent);
+  --ch-22: color-mix(in srgb, var(--code-bg) 95%, var(--code-fg));
+  --ch-23: var(--code-border);
+  --ch-24: var(--syn-comment);
+  --ch-25: var(--code-border);
+  --ch-26: color-mix(in srgb, var(--code-bg) 94%, var(--code-fg));
+
+  /* ---- families, series, tones: the app's data-visualisation ramp (`--viz-*`, tuned per palette and mode) ---- */
+  --c1: var(--viz-1);
+  --c2: var(--viz-2);
+  --c3: var(--viz-3);
+  --c4: var(--viz-4);
+  --c5: var(--viz-5);
+  --c6: var(--viz-6);
+  --c7: var(--viz-7);
+  --c8: var(--viz-8);
+  --c1-soft: color-mix(in srgb, var(--viz-1) 16%, var(--surface));
+  --c2-soft: color-mix(in srgb, var(--viz-2) 16%, var(--surface));
+  --c3-soft: color-mix(in srgb, var(--viz-3) 16%, var(--surface));
+  --c4-soft: color-mix(in srgb, var(--viz-4) 16%, var(--surface));
+  --c5-soft: color-mix(in srgb, var(--viz-5) 16%, var(--surface));
+  --c6-soft: color-mix(in srgb, var(--viz-6) 16%, var(--surface));
+  --c7-soft: color-mix(in srgb, var(--viz-7) 16%, var(--surface));
+  --c8-soft: color-mix(in srgb, var(--viz-8) 16%, var(--surface));
+  --c1-ink: color-mix(in srgb, var(--viz-1) 55%, var(--fg));
+  --c2-ink: color-mix(in srgb, var(--viz-2) 55%, var(--fg));
+  --c3-ink: color-mix(in srgb, var(--viz-3) 55%, var(--fg));
+  --c4-ink: color-mix(in srgb, var(--viz-4) 55%, var(--fg));
+  --c5-ink: color-mix(in srgb, var(--viz-5) 55%, var(--fg));
+  --c6-ink: color-mix(in srgb, var(--viz-6) 55%, var(--fg));
+  --c7-ink: color-mix(in srgb, var(--viz-7) 55%, var(--fg));
+  --c8-ink: color-mix(in srgb, var(--viz-8) 55%, var(--fg));
+  --series-1: var(--viz-1);
+  --series-2: var(--viz-2);
+  --series-3: var(--viz-3);
+  --series-4: var(--viz-4);
+  --series-5: var(--viz-5);
+  --grid: color-mix(in srgb, var(--fg) 10%, var(--surface));
+  --axis: var(--border-strong, var(--border));
+  --meter: var(--fg);
+  --meter-track: var(--fyhm-surface-3);
+  --tone-good: var(--ok);
+  --tone-good-soft: color-mix(in srgb, var(--ok-bg) var(--fyhm-fill), transparent);
+  --tone-neutral: var(--pend);
+  --tone-neutral-soft: color-mix(in srgb, var(--pend-bg) var(--fyhm-fill), transparent);
+  --tone-cli: var(--accent);
+  --tone-cli-soft: color-mix(in srgb, var(--accent-soft) var(--fyhm-fill), transparent);
+  --tone-coordinator: var(--tool-search);
+  --tone-coordinator-soft: color-mix(in srgb, var(--tool-search) 14%, var(--surface));
+  --tone-container: var(--syn-keyword);
+  --tone-container-soft: color-mix(in srgb, var(--syn-keyword) 14%, var(--surface));
+  --tone-answer: var(--ok);
+  --tone-answer-soft: color-mix(in srgb, var(--ok-bg) var(--fyhm-fill), transparent);
+  --tone-question: var(--err);
+  --tone-question-soft: color-mix(in srgb, var(--err-bg) var(--fyhm-fill), transparent);
+  --tone-warn: var(--fyhm-warn);
+  --tone-warn-soft: color-mix(in srgb, var(--warn-bg) var(--fyhm-fill), transparent);
+
+  /* ---- type: the style's own faces, sizes and rhythm (a message reads like the app's other prose) ---- */
+  --font-sans: var(--font-prose);
+  --font-display: var(--fyhm-font-display);
+  --font-mono: var(--fyhm-font-mono);
+  --w-thin: var(--weight-normal);
+  --w-body: var(--weight-normal);
+  --w-medium: var(--weight-medium);
+  --w-strong: var(--weight-strong);
+  --w-head: var(--md-h2-weight);
+  --fs-m: var(--md-font-size);
+  --fs-s: calc(var(--md-font-size) * 0.92);
+  --fs-xs: calc(var(--md-font-size) * 0.82);
+  --fs-l: calc(var(--md-font-size) * 1.18);
+  --fs-xl: var(--md-h2-size);
+  --fs-2xl: var(--md-h1-size);
+  --fs-3xl: var(--md-h1-size);
+  --lh-body: var(--md-leading);
+  --ls-head: var(--tracking-display);
+
+  /* ---- shape: the style's corners, strokes and shadows ---- */
+  --r-s: calc(var(--hm-radius, 9px) * 0.6);
+  --r-m: var(--hm-radius, 9px);
+  --r-l: var(--hm-radius, 9px);
+  --r-pill: var(--radius-control);
+  --shadow-sm: var(--fyhm-shadow-sm);
+  --shadow-md: var(--fyhm-shadow-md);
+  --shadow-lg: var(--fyhm-shadow-lg);
+  --ring: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+  --ring-hot: 0 0 0 4px color-mix(in srgb, var(--err) 18%, transparent);
+  --dur-fast: var(--motion-fast);
+  --dur: var(--motion-base);
+  --dur-slow: var(--motion-slow);
+}
+
+/* ---- the document reads like the app's prose, not a page ---- */
+.fy-hm .dh-doc {
+  font-size: var(--md-font-size);
+}
+
+.fy-hm .dh-doc > :first-child {
+  margin-top: 0;
+}
+
+.fy-hm .dh-doc > :last-child {
+  margin-bottom: 0;
+}
+
+.fy-hm .dh-doc :is(p, ul, ol) {
+  margin-block: var(--flow-paragraph);
+}
+
+.fy-hm .dh-doc li {
+  margin-block: var(--flow-list);
+}
+
+.fy-hm .dh-doc :is(h1, h2, h3, h4) {
+  letter-spacing: var(--tracking-display);
+  line-height: 1.3;
+  margin-block: 1.3em 0.5em;
+}
+
+.fy-hm .dh-doc h1 {
+  border-bottom: var(--md-h1-rule);
+  font-size: var(--md-h1-size);
+  font-weight: var(--md-h1-weight);
+  padding-bottom: var(--md-h1-rule-pad);
+  text-transform: var(--md-h1-case);
+}
+
+.fy-hm .dh-doc h2 {
+  border-bottom: var(--md-h2-rule);
+  font-size: var(--md-h2-size);
+  font-weight: var(--md-h2-weight);
+  padding-bottom: var(--md-h2-rule-pad);
+  text-transform: var(--md-h2-case);
+}
+
+.fy-hm .dh-doc h3 {
+  font-size: 1.06em;
+}
+
+@media (max-width: 520px) {
+  .fy-hm .dh-doc {
+    font-size: var(--md-font-size);
+  }
+}
+
+/* ---- links, inline code, quotes, tables: the app's markdown slots, so a style shapes them ---- */
+.fy-hm .dh-doc a:not(.h-anchor) {
+  background: var(--md-link-bg);
+  border-radius: var(--md-link-radius);
+  color: var(--accent-strong, var(--accent));
+  font-weight: var(--md-link-weight);
+  padding: var(--md-link-pad);
+  text-decoration: var(--md-link-decoration);
+  text-decoration-color: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+.fy-hm .dh-doc a:not(.h-anchor):hover {
+  color: var(--accent-strong, var(--accent));
+  text-decoration-color: var(--accent);
+}
+
+.fy-hm .dh-doc code a[data-fy-reference] {
+  color: inherit;
+}
+
+.fy-hm .dh-doc :not(pre) > code {
+  background: var(--code-bg);
+  border: var(--border-width) solid var(--code-border);
+  border-radius: var(--radius-xs);
+  color: var(--code-fg);
+}
+
+.fy-hm .dh-doc blockquote {
+  background: var(--md-quote-bg);
+  border-left: var(--md-quote-bar);
+  border-radius: var(--md-quote-radius);
+  color: var(--fg-soft);
+  font-style: var(--md-quote-font-style);
+  padding-left: var(--md-quote-pad);
+}
+
+.fy-hm .dh-doc th {
+  background: var(--md-th-bg);
+  font-weight: var(--md-th-weight);
+  text-transform: var(--md-th-case);
+}
+
+.fy-hm .dh-doc :is(th, td) {
+  border-bottom: var(--md-cell-border-y);
+}
+
+.fy-hm .dh-doc li::marker {
+  color: var(--md-list-marker-color);
+}
+
+/* ---- the style's stroke, on every box a part draws ---- */
+.fy-hm
+  .dh-doc
+  :is(
+    .term,
+    .code-block,
+    .callout,
+    .banner,
+    .table-wrap,
+    .cw,
+    .ide,
+    .fx,
+    .chart,
+    .scn,
+    .dg,
+    .tl,
+    .al,
+    .acc-item,
+    .tabs
+  ) {
+  border-width: var(--hm-stroke, 1px);
+}
+
+/* A frosted style (Glass) blurs what is behind its tinted nodes; every other style says `none`. The code and terminal grounds
+   stay opaque: their text is measured against the code ground. */
+.fy-hm .dh-doc :is(.callout, .banner, .table-wrap, .acc-item, .tabs) {
+  backdrop-filter: var(--surface-blur);
+}
+
+/* The terminal's control row (Replay) sits on the terminal's own ground, not on the page surface; a table is a node too, so it
+   takes the style's fill (Glass 0.6, Geist and Swiss none). */
+.fy-hm .dh-doc .term .ctl {
+  background: var(--term-2);
+}
+
+.fy-hm .dh-doc .table-wrap {
+  background: color-mix(in srgb, var(--surface) var(--fyhm-fill), transparent);
+}
+
+/* A style that draws outlines (fill alpha near 0) has only the edge to say where a callout is, so the edge is the tone's own
+   colour, not its pale ground. */
+.fy-hm .dh-doc :is(.callout-note, .banner-info) {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.fy-hm .dh-doc .callout-tip {
+  border-color: color-mix(in srgb, var(--ok) 50%, transparent);
+}
+
+.fy-hm .dh-doc :is(.btn, .seg button, .tab-bar [role='tab'], .part-name) {
+  font-family: var(--hm-font, var(--font-prose));
+}
+
+/* ---- the terminal and the code: no colour of the package's own ---- */
+.fy-hm .dh-doc .t-pr {
+  color: var(--syn-string);
+}
+
+.fy-hm .dh-doc .t-pr.t-root {
+  color: var(--syn-keyword);
+}
+
+.fy-hm .dh-doc .t-q {
+  color: var(--syn-number);
+}
+
+.fy-hm .dh-doc .t-ans {
+  color: var(--syn-type);
+}
+
+.fy-hm .dh-doc :is(.t-note, .t-step) {
+  color: var(--syn-comment);
+}
+
+.fy-hm .dh-doc .win-dots i {
+  background: var(--err);
+}
+
+.fy-hm .dh-doc .win-dots i:nth-child(2) {
+  background: var(--fyhm-warn);
+}
+
+.fy-hm .dh-doc .win-dots i:nth-child(3) {
+  background: var(--ok);
+}
+
+.fy-hm .dh-doc .ch-mark {
+  background: color-mix(in srgb, var(--syn-number) 16%, transparent);
+  box-shadow: inset 3px 0 var(--syn-number);
+}
+
+.fy-hm .dh-doc .ch-del {
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+}
+
+.fy-hm .dh-doc .ide-row:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.fy-hm .dh-doc .ide-row.is-cur {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.fy-hm .dh-doc .fi,
+.fy-hm .dh-doc .fi[data-ext] {
+  background: var(--syn-comment);
+  color: var(--code-bg);
+}
+
+.fy-hm .dh-doc .fi-dir::before,
+.fy-hm .dh-doc .fi-dir::after {
+  background: var(--syn-number);
+}
+
+/* ---- the header band of a window (`--hm-header`) ---- */
+.fy-hm[data-hm-header='label'] .dh-doc :is(.term-chrome, .ide-chrome, .cw-file) {
+  background: transparent;
+}
+
+.fy-hm[data-hm-header='label'] .dh-doc .win-dots,
+.fy-hm[data-hm-header='none'] .dh-doc .win-dots {
+  display: none;
+}
+
+.fy-hm[data-hm-header='none'] .dh-doc :is(.term-chrome, .ide-chrome, .cw-file) {
+  display: none;
+}
+
+/* ---- the shape (`--hm-shape`), carried as `data-dh-variant`. `shaped` is the default drawing; `flat` is the package's own
+   (hairlines, no shadows); `ink` and `block` are ours. ---- */
+.fy-hm
+  .dh-doc[data-dh-variant='ink']
+  :is(
+    .term,
+    .cw,
+    .ide,
+    .fx,
+    .chart,
+    .scn,
+    .dg,
+    .tl,
+    .al,
+    .code-block,
+    .table-wrap,
+    .callout,
+    .banner,
+    .acc-item,
+    .tabs
+  ) {
+  background: transparent;
+  border-color: var(--fg);
+  box-shadow: none;
+}
+
+.fy-hm .dh-doc[data-dh-variant='ink'] :is(.term, .code-block, .cw, .ide) {
+  background: var(--code-bg);
+}
+
+.fy-hm
+  .dh-doc[data-dh-variant='block']
+  :is(
+    .term,
+    .cw,
+    .ide,
+    .fx,
+    .chart,
+    .scn,
+    .dg,
+    .tl,
+    .al,
+    .code-block,
+    .table-wrap,
+    .callout,
+    .banner,
+    .acc-item,
+    .tabs
+  ) {
+  border-color: var(--fg);
+  box-shadow: var(--shadow-md);
+}
