@@ -6,6 +6,7 @@ import { holdsAnimation } from './held-fences.tsx';
 import { DrawableFyRenderBodies } from './fy-render-host.tsx';
 import { exceedsMessageCap } from './limits.ts';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';
+import { readLook, serverLook, subscribeToLook, variantOf } from './look.ts';
 import { readMessage } from './parse-message.ts';
 import { HYPERMEDIA_COMPONENT_BLOCKS, HYPERMEDIA_PART_SLOTS, HYPERMEDIA_PARTS } from './parts.tsx';
 import { ReferenceChip } from './reference-chip.tsx';
@@ -35,8 +36,9 @@ import { REFERENCE_INLINE } from './with-references.ts';
  * Streaming: a message grows one parse at a time; `DocumentView` keys its blocks by position and every component below
  * is module-level, so what is already drawn is updated in place, never remounted.
  *
- * The theme is the app's own mode, always passed: Durian's stylesheet goes dark on the system setting unless told
- * otherwise, and our root says `data-mode`, not `data-theme`.
+ * The theme is the app's own look, always passed (`look.ts`): the mode, because Durian's stylesheet goes dark on the system
+ * setting unless told otherwise and our root says `data-mode`, not `data-theme`; and the style's shape and header, which
+ * `dh-theme.css` cannot branch on. Colours, type and corners follow the palette and style by CSS alone.
  */
 
 /**
@@ -47,14 +49,6 @@ const INLINES: readonly InlineDef[] = [
   { name: REFERENCE_INLINE, match: /(?!)/u, Component: ReferenceChip },
   ...LITERAL_CODE_INLINES,
 ];
-
-const subscribeToMode = (notify: () => void): (() => void) => {
-  const observer = new MutationObserver(notify);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-mode'] });
-  return () => observer.disconnect();
-};
-const readMode = (): 'light' | 'dark' => (document.documentElement.dataset.mode === 'dark' ? 'dark' : 'light');
-const SERVER_MODE = (): 'light' | 'dark' => 'light';
 
 /**
  * What Conversation hands the shell as `shell.prose`: this, for a surface that is not the chat's (the agenda). A plain
@@ -80,7 +74,7 @@ export const HypermediaProse = memo(function HypermediaProse({
   className,
   arriving = false,
 }: HypermediaProseProps) {
-  const mode = useSyncExternalStore(subscribeToMode, readMode, SERVER_MODE);
+  const { mode, shape, header } = useSyncExternalStore(subscribeToLook, readLook, serverLook);
   // `useId` is unique per mounted message and stable across its re-renders; keep only what an id may hold.
   const idPrefix = `dh-${useId().replace(/[^\w-]/gu, '')}-`;
   // The 2D animation engine is a lazy chunk: asked for only by a message that holds an animation, and the message is read again
@@ -96,7 +90,7 @@ export const HypermediaProse = memo(function HypermediaProse({
   );
   return (
     <ReferenceProofProvider text={text}>
-      <div className={`fy-hm min-w-0 max-w-full ${className ?? ''}`} data-fy-hypermedia="">
+      <div className={`fy-hm min-w-0 max-w-full ${className ?? ''}`} data-fy-hypermedia="" data-hm-header={header}>
         {read === null ? (
           <pre className="fy-hm-plain" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
             {text}
@@ -111,6 +105,7 @@ export const HypermediaProse = memo(function HypermediaProse({
               slots={HYPERMEDIA_PART_SLOTS}
               theme={mode}
               urlPolicy={hypermediaUrlPolicy}
+              variant={variantOf(shape)}
             />
           </DrawableFyRenderBodies>
         )}

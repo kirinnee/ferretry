@@ -3,7 +3,12 @@ import should from 'should';
 import { ensureDom } from '@ferretry/app/testing';
 
 ensureDom();
-import { readTheme } from '../../../../app/render/fy-render-theme.ts';
+import {
+  documentMode,
+  documentThemeName,
+  readTheme,
+  THEME_ATTRIBUTES,
+} from '../../../../app/render/fy-render-theme.ts';
 
 /**
  * The theme, read off the page. The unit DOM has no canvas, so the pixel a colour is resolved on is
@@ -136,5 +141,70 @@ describe('readTheme', () => {
     // Assert
     should(theme.font).equal('');
     should(Object.values(theme.colors).every(value => value === '')).be.true();
+  });
+});
+
+/**
+ * r12 H5: what a repaint is keyed on. The root carries `data-style`, `data-palette`, `data-mode` and (older) `data-theme`; a
+ * switch of the STYLE alone changes a diagram's corners and face but not `data-theme`, so the watcher heard nothing.
+ */
+describe('the theme attributes', () => {
+  const root = (): HTMLElement => document.documentElement;
+  const saved = THEME_ATTRIBUTES.map(name => [name, root().getAttribute(name)] as const);
+  afterEach(() => {
+    for (const [name, value] of saved) {
+      if (value === null) root().removeAttribute(name);
+      else root().setAttribute(name, value);
+    }
+  });
+
+  test('should name every attribute a theme switch can change, the three axes and the older one', () => {
+    // Assert
+    should([...THEME_ATTRIBUTES].sort()).deepEqual(['data-mode', 'data-palette', 'data-style', 'data-theme']);
+  });
+
+  test('should change the theme name when only the style changes', () => {
+    // Arrange
+    root().setAttribute('data-theme', 'studio-light');
+    root().setAttribute('data-palette', 'studio');
+    root().setAttribute('data-mode', 'light');
+    root().setAttribute('data-style', 'studio');
+    const before = documentThemeName();
+
+    // Act — `data-theme` (the palette and the mode) is untouched.
+    root().setAttribute('data-style', 'neo');
+
+    // Assert
+    should(documentThemeName()).not.equal(before);
+  });
+
+  test('should change the theme name when only the palette or only the mode changes', () => {
+    // Arrange
+    root().setAttribute('data-style', 'studio');
+    root().setAttribute('data-palette', 'studio');
+    root().setAttribute('data-mode', 'light');
+    const before = documentThemeName();
+
+    // Act
+    root().setAttribute('data-palette', 'mission');
+    const palette = documentThemeName();
+    root().setAttribute('data-palette', 'studio');
+    root().setAttribute('data-mode', 'dark');
+
+    // Assert
+    should(palette).not.equal(before);
+    should(documentThemeName()).not.equal(before);
+  });
+
+  test('should read the mode from data-mode, and from the older data-theme when there is none', () => {
+    // Arrange
+    root().removeAttribute('data-mode');
+    root().setAttribute('data-theme', 'studio-light');
+    const older = documentMode();
+    root().setAttribute('data-mode', 'dark');
+
+    // Assert
+    should(older).equal('light');
+    should(documentMode()).equal('dark');
   });
 });

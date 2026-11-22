@@ -35,7 +35,8 @@ const durianCss = async (): Promise<string> => {
     createRequire(join(packageRoot, '../../../package.json')).resolve('durian-hypermedia/package.json'),
   );
   const { buildCss } = (await import(join(root, 'scripts/build-css.ts'))) as { buildCss: () => string };
-  return buildCss();
+  // Then the app's theme for it (`dh-styles.ts` imports the two in this order).
+  return `${buildCss()}\n${await readFile(join(packageRoot, '../../../app/hypermedia/dh-theme.css'), 'utf8')}`;
 };
 
 let browser: Browser;
