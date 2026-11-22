@@ -51,7 +51,7 @@ const scripted = (answer: (invocation: TreeGitInvocation) => TreeGitExecution) =
   return { runner, calls };
 };
 
-const isConfigRead = (invocation: TreeGitInvocation): boolean => invocation.args[0] === 'config';
+const isConfigRead = (invocation: TreeGitInvocation): boolean => invocation.args.includes('config');
 
 describe('gitEnvironment', () => {
   it('should close the global config unless the command asks to see the owner’s exclusions', () => {
@@ -98,7 +98,16 @@ describe('establishGlobalConfig', () => {
     await establishGlobalConfig(runner, '/cwd', undefined);
 
     // Assert
-    should(calls[0]?.args).eql(['config', '--global', '--includes', '--list', '-z']);
+    // The XDG config is named as an include because Git skips an unreadable one in silence next to a readable ~/.gitconfig.
+    should(calls[0]?.args).eql([
+      '-c',
+      'include.path=~/.config/git/config',
+      'config',
+      '--global',
+      '--includes',
+      '--list',
+      '-z',
+    ]);
     should(calls[0]?.readsGlobalConfig).be.true();
   });
 
@@ -199,7 +208,7 @@ describe('treeGit.listFiles', () => {
 
     // Assert
     should(failure).be.instanceof(Error);
-    should(calls.map(call => call.args[0])).eql(['config']);
+    should(calls.map(call => (call.args.includes('config') ? 'config' : call.args[0]))).eql(['config']);
   });
 
   it('should answer an expired budget with an incomplete empty list and spawn nothing', async () => {
@@ -231,7 +240,7 @@ describe('treeGit.listFiles', () => {
 
     // Assert
     should(listed).eql({ paths: [], truncated: true });
-    should(calls.map(call => call.args[0])).eql(['config']);
+    should(calls.map(call => (call.args.includes('config') ? 'config' : call.args[0]))).eql(['config']);
   });
 
   it('should hand the runner what is left of the budget as the timeout, rounded up', async () => {

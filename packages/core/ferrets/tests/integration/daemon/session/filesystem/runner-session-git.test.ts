@@ -874,7 +874,7 @@ describe('RunnerSessionGit.listFiles', () => {
       run: invocation => {
         invocations.push(invocation);
         // The owner's global config is established first (&F6061 U2); a readable one lets the list itself be asked.
-        if (invocation.args[0] === 'config') {
+        if (invocation.args.includes('config')) {
           return Promise.resolve({
             exitCode: 0,
             stdout: encode(''),

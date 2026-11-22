@@ -192,6 +192,45 @@ describe('the file list and the owner’s global ignore rules', () => {
       should(failure).be.instanceof(Error);
     });
 
+    it('should refuse the list when ~/.config/git/config cannot be read, even beside a readable ~/.gitconfig', async () => {
+      // Arrange: Git lists `--global` from ~/.gitconfig alone and skips an unreadable XDG config without a word, so the
+      // index would otherwise be complete while hiding a rule the owner set there.
+      const home = await tempDirectory('home-xdg-config-denied');
+      await mkdir(path.join(home, '.config', 'git'), { recursive: true });
+      await writeFile(path.join(home, '.gitconfig'), '[user]\n\tname = owner\n');
+      const xdgConfig = path.join(home, '.config', 'git', 'config');
+      await writeFile(xdgConfig, `[core]\n\texcludesFile = ${path.join(home, 'my-ignore')}\n`);
+      await writeFile(path.join(home, 'my-ignore'), '*.tmp\n');
+      const root = await repositoryWithScratch('global-xdg-config-denied');
+
+      // Act
+      const failure = await unreadable(xdgConfig, () => gitWith({ HOME: home }).listFiles(root, 1024 * 1024));
+
+      // Assert
+      should(failure).be.instanceof(Error);
+    });
+
+    it('should still list a complete index when ~/.config/git/config is readable beside ~/.gitconfig', async () => {
+      // Arrange
+      const home = await tempDirectory('home-xdg-config-readable');
+      await mkdir(path.join(home, '.config', 'git'), { recursive: true });
+      await writeFile(path.join(home, '.gitconfig'), '[user]\n\tname = owner\n');
+      await writeFile(path.join(home, 'my-ignore'), '*.tmp\n');
+      await writeFile(
+        path.join(home, '.config', 'git', 'config'),
+        `[core]\n\texcludesFile = ${path.join(home, 'my-ignore')}\n`,
+      );
+      const root = await repositoryWithScratch('global-xdg-config-readable');
+
+      // Act
+      const listed = await gitWith({ HOME: home }).listFiles(root, 1024 * 1024);
+
+      // Assert
+      should(listed.truncated).be.false();
+      should(listed.paths).containEql('wanted.ts');
+      should(listed.paths).not.containEql('scratch.tmp');
+    });
+
     it('should refuse the list when ~/.gitconfig is malformed', async () => {
       // Arrange
       const home = await tempDirectory('home-config-malformed');

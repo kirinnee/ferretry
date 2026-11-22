@@ -180,6 +180,13 @@ const UNREADABLE_RULES = /unable to access|permission denied|could not open|cann
  * `git config --global --includes --list` exits 0 when it was, 128 with only "No such file or directory" when there is
  * none (no file, no rules: not an error), and anything else — a permission error, a malformed line, an unreadable
  * include — means a rule may exist that cannot be applied.
+ *
+ * `--global` lists `~/.gitconfig` ALONE whenever that file exists, and Git skips an unreadable
+ * `~/.config/git/config` (the XDG config) in silence — while `ls-files` still reads it. A readable `~/.gitconfig` next to
+ * a mode-000 XDG config would therefore pass the read above and list a name the owner ignores globally. So the XDG
+ * config is also named as an include: Git then DIES on a file it cannot read, and ignores one that is absent. GAP: only
+ * the default location is named, because an `include.path` expands `~` and nothing else; a daemon with a custom
+ * `XDG_CONFIG_HOME` is not covered for that file.
  */
 export async function establishGlobalConfig(
   runner: TreeGitRunner,
@@ -188,7 +195,7 @@ export async function establishGlobalConfig(
   failure: TreeGitFailure = defaultFailure,
 ): Promise<void> {
   const execution = await runner.run({
-    args: ['config', '--global', '--includes', '--list', '-z'],
+    args: ['-c', 'include.path=~/.config/git/config', 'config', '--global', '--includes', '--list', '-z'],
     cwd,
     readsGlobalConfig: true,
     maxStdoutBytes: 1024 * 1024,
