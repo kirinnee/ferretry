@@ -11,6 +11,7 @@ import { machineSettingsView } from '../../views/machine-settings-host.tsx';
 import { Badge, Button } from '../../ui.ts';
 import { HARNESS_LABEL } from '../import-kit/mapping-words.ts';
 import { HARNESSES } from '../import-kit/model.ts';
+import type { ApplyImportOptions } from '../import-kit/use-apply-import.ts';
 import { ToolPage } from './tool-page.tsx';
 import { useImportWizard } from './use-import-wizard.ts';
 
@@ -51,11 +52,14 @@ function Progress({
 export function ImportStep({
   client,
   machineName,
+  applyOptions,
 }: {
   readonly client: LiveRuntimesClient;
   readonly machineName: string;
+  /** How the import is applied (its deadline): a suite shortens the wait; the app takes the defaults. */
+  readonly applyOptions?: ApplyImportOptions;
 }) {
-  const wizard = useImportWizard(client);
+  const wizard = useImportWizard(client, applyOptions);
   const at = wizard.tool;
   const setAt = wizard.setTool;
   const { finished, setFinished } = wizard;

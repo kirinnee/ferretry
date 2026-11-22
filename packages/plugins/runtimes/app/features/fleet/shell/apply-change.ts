@@ -37,6 +37,7 @@ export type { FleetApplyAuthority } from '../../../lib/shell-ports.ts';
 const MACHINE_ROUTE = 'GET /v1/runtimes/machine' as const;
 const PROPOSE_ROUTE = 'POST /v1/runtimes/proposals' as const;
 const APPLY_ROUTE = 'POST /v1/runtimes/proposals/:proposalId/apply' as const;
+const READ_ROUTE = 'GET /v1/runtimes/proposals/:proposalId' as const;
 
 /** Agent permissions, the tools installed, whether it is set up, and what this caller may change. */
 export const readMachine = async (client: RuntimesClient, press: ReadPress = {}): Promise<MachineView> =>
@@ -123,6 +124,8 @@ export type ChangeResult =
       readonly sentence: string;
       /** The daemon’s refusal code, for a caller that branches on cause. */
       readonly code?: string;
+      /** What landed and what did not, when the refusal came from a change that stopped part-way. */
+      readonly partly?: PartlyApplied;
     };
 
 export type StageResult =
@@ -181,9 +184,61 @@ export const changeRefusalSentence = (error: unknown): string => {
   return `This machine didn’t answer${detail(error)}. Check it is awake and try again.`;
 };
 
+/** What a change that stopped part-way left: the writes that landed and the ones that did not, each in the daemon's words. */
+interface PartlyApplied {
+  readonly landed: readonly string[];
+  readonly notLanded: readonly string[];
+}
+
+/** The lists a refusal's body carries (`landed`, `notLanded`); nothing when it carries no landed write. */
+const partlyAppliedOf = (error: unknown): PartlyApplied | null => {
+  const body = callFailure(error)?.body;
+  if (typeof body !== 'object' || body === null) return null;
+  const words = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  const landed = words((body as { landed?: unknown }).landed);
+  return landed.length === 0 ? null : { landed, notLanded: words((body as { notLanded?: unknown }).notLanded) };
+};
+
 const refused = (error: unknown): Extract<ChangeResult, { kind: 'refused' }> => {
   const code = daemonRefusal(error)?.code;
-  return { kind: 'refused', sentence: changeRefusalSentence(error), ...(typeof code === 'string' ? { code } : {}) };
+  const partly = partlyAppliedOf(error);
+  return {
+    kind: 'refused',
+    sentence: changeRefusalSentence(error),
+    ...(typeof code === 'string' ? { code } : {}),
+    ...(partly === null ? {} : { partly }),
+  };
+};
+
+/**
+ * What a re-read of a change says about it: the one question an apply that never answered leaves (did it land?).
+ * `partial` names what landed and what did not; `applying` says the machine is still at it; `applied` is a change spent
+ * whole; `not-applied` is a change nobody spent (nothing was written); `unknown` is any answer this cannot place.
+ */
+export type ChangeRecovery =
+  | ({ readonly kind: 'partial' } & PartlyApplied)
+  | { readonly kind: 'applying' | 'applied' | 'not-applied' | 'unknown' };
+
+/** Reads one staged change back, ONCE, and says what became of its apply. Never throws. */
+export const readChangeRecovery = async (
+  client: RuntimesClient,
+  changeId: string,
+  signal?: AbortSignal,
+): Promise<ChangeRecovery> => {
+  try {
+    await client.call(READ_ROUTE, { params: { proposalId: changeId }, ...(signal === undefined ? {} : { signal }) });
+    return { kind: 'not-applied' };
+  } catch (error) {
+    const failure = daemonRefusal(error);
+    if (failure === null || failure.code !== 'fleet_change_consumed') return { kind: 'unknown' };
+    const partly = partlyAppliedOf(error);
+    if (partly !== null) return { kind: 'partial', ...partly };
+    const body = failure.body;
+    return typeof body === 'object' && body !== null && (body as { applying?: unknown }).applying === true
+      ? { kind: 'applying' }
+      : { kind: 'applied' };
+  }
 };
 
 /**
@@ -322,9 +377,12 @@ export const applyAccountChange = async (
   client: RuntimesClient,
   change: AccountChange,
   signal?: AbortSignal,
+  /** Told the id of the staged change before its apply is sent, so a caller that stops waiting can still read it back. */
+  onStaged?: (changeId: string) => void,
 ): Promise<ChangeResult> => {
   const stage = await stageAccountChange(client, change, signal);
   if (stage.kind === 'refused') return stage;
+  onStaged?.(stage.staged.id);
   if (signal?.aborted === true) return ABANDONED;
   return await applyStagedChange(client, stage.staged, signal);
 };
