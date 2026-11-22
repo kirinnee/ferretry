@@ -160,9 +160,46 @@ describe('the command bar', () => {
           .first()
           .innerText();
         expect(machine.split('workshop-host').length - 1, 'the host name appears once').toBe(1);
-        const panel = await tab.locator('[role="dialog"][aria-label="Command bar"]').boundingBox();
-        // A phone's rows are taller and fill the panel to its cap; a desktop's list is shorter than the cap.
-        if (!variant.phone) expect(panel?.height ?? 9_999, 'the panel is no taller than its rows').toBeLessThan(420);
+        // The rows' own geometry, not the panel's cap (a cap-relative check passes a panel padded 40px past its rows, and a
+        // fixed 420 went stale when PRs & CI and Lessons were added). Measure where the last row ends inside the bar's own
+        // scroller: the space left below it is the scroller's bottom padding and nothing else (slack fails), and on a
+        // desktop every row lies inside the scroller with nothing to scroll (a row that no longer fits fails). A phone's
+        // rows are taller and fill the panel to its cap, so there the list may scroll but must not leave slack either.
+        const geometry = await tab.evaluate(() => {
+          const options = [
+            ...document.querySelectorAll('[role="dialog"][aria-label="Command bar"] [role="option"]'),
+          ] as HTMLElement[];
+          const scroller = options[0]?.closest('[role="listbox"]')?.parentElement as HTMLElement | null | undefined;
+          if (scroller === null || scroller === undefined) return undefined;
+          const area = scroller.getBoundingClientRect();
+          const last = options.at(-1)?.getBoundingClientRect();
+          const lastBottom = last?.bottom ?? -1;
+          return {
+            rows: options.length,
+            areaBottom: area.bottom,
+            lastBottom,
+            padBottom: Number.parseFloat(getComputedStyle(scroller).paddingBottom),
+            overflow: scroller.scrollHeight - scroller.clientHeight,
+            // The bottom of the last row relative to the scroller's content, so it holds when the list is scrolled.
+            belowLast: scroller.scrollHeight - (lastBottom - area.top + scroller.scrollTop),
+          };
+        });
+        expect(geometry, 'the bar has its own scroller around the rows').toBeDefined();
+        if (geometry === undefined) return;
+        expect(geometry.rows, 'every row was measured').toBe(rows);
+        expect(Number.isFinite(geometry.padBottom), 'the scroller has a pixel bottom padding').toBe(true);
+        // Slack: whatever sits below the last row beyond the scroller's own padding (1 px of rounding).
+        expect(
+          geometry.belowLast - geometry.padBottom,
+          `the last row ends at the scroller's padding, not ${(geometry.belowLast - geometry.padBottom).toFixed(1)}px short of it`,
+        ).toBeLessThan(2);
+        // Fit: on a desktop the whole list is on screen with nothing to scroll to.
+        if (!variant.phone) {
+          expect(geometry.overflow, 'every row fits without scrolling').toBeLessThanOrEqual(1);
+          expect(geometry.lastBottom, 'the last row ends inside the scroller').toBeLessThanOrEqual(
+            geometry.areaBottom + 1,
+          );
+        }
         await shotOf(tab, variant, 'command-bar');
       } finally {
         await close();

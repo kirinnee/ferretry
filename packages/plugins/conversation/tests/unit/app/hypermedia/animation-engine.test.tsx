@@ -66,9 +66,12 @@ describe('the animation engine', () => {
     await unmount();
   });
 
-  it('once it is loaded, the parser (which only the worker runs, without it) reads the same text as an animation', async () => {
+  it('once loaded, still does not draw an animation: the hold is the one value `ANIMATION_DRAWS`', async () => {
     await loadAnimationEngine();
     expect(animationEngineReady()).toBe(true);
-    expect(types(ANIMATION)).toEqual(['animation']);
+    expect(types(ANIMATION)).toEqual(['host']);
+    // The engine's own compile path is exercised directly: a read that is told the engine is here, with drawing on, is the
+    // path r12 H11 turns back on; here the value is off, so it is a host block whatever the engine says.
+    expect(mustRead(ANIMATION, 'x-', false, true).doc.blocks.map(block => block.type)).toEqual(['host']);
   });
 });

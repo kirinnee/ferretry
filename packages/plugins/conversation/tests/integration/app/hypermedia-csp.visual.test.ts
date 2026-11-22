@@ -306,7 +306,8 @@ const exercise = async (page: Page): Promise<void> => {
 /** Every way an author's text could have become a live part of the page, found in the message's own subtree. */
 const DANGER = `(() => {
   const doc = document.querySelector('.dh-doc');
-  if (doc === null) return ['no .dh-doc'];
+  // A message over a pre-parse limit (r12 H11a) is plain text with its note: nothing of it is drawn, so there is nothing to find.
+  if (doc === null) return document.querySelector('[data-fy-plain-note] + pre.fy-hm-plain') !== null ? [] : ['no .dh-doc'];
   const found = [];
   for (const el of doc.querySelectorAll('script, object, embed, foreignObject, frame, base, meta, link')) found.push(el.tagName);
   for (const frame of doc.querySelectorAll('iframe')) {
@@ -362,11 +363,13 @@ describe('Durian’s fixtures inside a transcript, under the real policy', () =>
 
   it('draws every fixture with 0 CSP violations, 0 Trusted Types errors, 0 off-origin requests and no live author node', async () => {
     const failures: string[] = [];
+    const plain: string[] = [];
     for (const { name } of FIXTURES) {
       const visit = await open(`fixture=${encodeURIComponent(name)}`);
       try {
         await exercise(visit.page);
         await expectClean(visit, name);
+        if (await visit.page.evaluate(() => document.querySelector('[data-fy-plain-note]') !== null)) plain.push(name);
       } catch (error) {
         failures.push(`${name}: ${error instanceof Error ? error.message.slice(0, 400) : String(error)}`);
       } finally {
@@ -374,6 +377,8 @@ describe('Durian’s fixtures inside a transcript, under the real policy', () =>
       }
     }
     expect(failures).toEqual([]);
+    // Only a hostile fixture may be over a pre-parse limit: no fixture of the format is shown as plain text.
+    expect(plain.filter(name => !name.startsWith('hostile/'))).toEqual([]);
   }, 600_000);
 });
 
@@ -433,30 +438,35 @@ describe('a mermaid part is drawn by our sandbox renderer', () => {
   });
 });
 
-describe('an animation: 3D is on, lazy, and falls back to the flat view', () => {
-  const ANIMATION_2D = 'fixture=format/44-animation-binary-search-tree-insert.dh.md';
-  const ANIMATION_3D = 'fixture=format/59-3d-the-stateless-replay-system-in-layers.dh.md';
+describe('held tabs and animation draw as code (r12 H11a)', () => {
+  const HELD_FIXTURES: readonly (readonly [string, string])[] = [
+    ['tabs', 'fixture=format/06-tabs.dh.md'],
+    ['animation', 'fixture=format/44-animation-binary-search-tree-insert.dh.md'],
+    ['3d animation', 'fixture=format/59-3d-the-stateless-replay-system-in-layers.dh.md'],
+  ];
 
-  // r12 H11: the worker that reads a message has no scene compiler, so an animation is its source as code: no stage, no toggle,
-  // and the 3D chunk is never asked for (the 3D and fallback paths come back with a worker that carries a compiler).
-  for (const [name, query] of [
-    ['a 2D animation', ANIMATION_2D],
-    ['a 3D animation', ANIMATION_3D],
-  ] as const)
-    it(`${name} is shown as the code it is, with no 3D chunk fetched and 0 CSP and Trusted Types violations`, async () => {
-      // The page's bundle no longer carries the 3D module at all (the engine is not asked for): there is no chunk to fetch.
-      const mid = ledger.length;
+  for (const [label, query] of HELD_FIXTURES)
+    it(`${label}: its source is on the page as code, no tab strip and no stage, with 0 CSP and Trusted Types violations`, async () => {
+      const before = ledger.length;
       const visit = await open(query);
       try {
-        await visit.page.waitForTimeout(500);
-        const m = await visit.page.evaluate(() => ({
-          stage: document.querySelector('.dh-doc .scn, .dh-doc button.scn-mode') !== null,
-          code: [...document.querySelectorAll('.dh-doc .code-block .code-lang')].map(label => label.textContent),
+        await exercise(visit.page);
+        const drawn = await visit.page.evaluate(() => ({
+          code: document.querySelectorAll('.dh-doc .code-block pre').length,
+          tabs: document.querySelectorAll('.dh-doc .tabs, .dh-doc [role="tab"]').length,
+          stages: document.querySelectorAll('.dh-doc .scn, .dh-doc .scn3, .dh-doc canvas').length,
+          parts: [...document.querySelectorAll('.dh-doc [data-dh-part]')].map(part =>
+            part.getAttribute('data-dh-part'),
+          ),
         }));
-        expect(m.stage).toBe(false);
-        expect(m.code).toContain('animation');
-        expect(threeChunk === '' ? [] : ledger.slice(mid).filter(path => path === `/${threeChunk}`)).toEqual([]);
-        await expectClean(visit, name);
+        expect(drawn.code).toBeGreaterThan(0);
+        expect(drawn.tabs).toBe(0);
+        expect(drawn.stages).toBe(0);
+        expect(drawn.parts).not.toContain('tabs');
+        expect(drawn.parts).not.toContain('animation');
+        // Nothing heavy is fetched for source: no 3D chunk.
+        expect(threeChunk === '' ? [] : ledger.slice(before).filter(path => path === `/${threeChunk}`)).toEqual([]);
+        await expectClean(visit, `held ${label}`);
       } finally {
         await visit.close();
       }
@@ -592,17 +602,12 @@ describe('the parts at a phone and a desktop width, light and dark', () => {
           expect(m.chartCanvases).toBe(0);
           expect(m.heldCharts).toBeGreaterThan(0);
           expect(m.images).toBe(1);
-          for (const part of [
-            'terminal',
-            'filetree',
-            'tabs',
-            'mermaid',
-            'fy-animation-awaiting',
-            'tierlist',
-            'accordion',
-          ])
-            expect(m.parts).toContain(part);
+          for (const part of ['terminal', 'filetree', 'mermaid', 'tierlist']) expect(m.parts).toContain(part);
+          // r12 H11a: tabs, an accordion and an animation are held as code, like a chart.
           expect(m.parts).not.toContain('chart');
+          expect(m.parts).not.toContain('tabs');
+          expect(m.parts).not.toContain('accordion');
+          expect(m.parts).not.toContain('animation');
           await expectClean(visit, `showcase ${viewport} ${scheme}`);
           if (shotsDir !== '') await visit.page.screenshot({ path: join(shotsDir, `parts-${viewport}-${scheme}.png`) });
         } finally {

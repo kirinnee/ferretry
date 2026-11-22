@@ -58,11 +58,14 @@ afterAll(async () => {
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
+/** The group is the kit's `ChoiceCards` (r10 P1), named by `aria-label`; each card is a label with a title and a line. */
+const GROUP = '[role="radiogroup"][aria-label="What to read"]';
+
 const PROBES = {
   /** The chosen card's description: the text that fell to 1.35:1. */
-  chosenDescription: '[role="radiogroup"][aria-labelledby="auto-read-what"] label:has(:checked) span.text-meta',
+  chosenDescription: `${GROUP} label:has(:checked) .fy-cc__line`,
   /** An unchosen card's label. */
-  otherLabel: '[role="radiogroup"][aria-labelledby="auto-read-what"] label:not(:has(:checked)) span.text-ui',
+  otherLabel: `${GROUP} label:not(:has(:checked)) .fy-cc__title`,
 } as const;
 
 describe("Voice's What to read under Neo", () => {
@@ -80,7 +83,7 @@ describe("Voice's What to read under Neo", () => {
         tab.on('pageerror', error => problems.push(error.message));
         try {
           await tab.goto(`${origin}/?style=neo&palette=${palette}&mode=${mode}`);
-          await tab.waitForSelector('[data-scene] [aria-labelledby="auto-read-what"]');
+          await tab.waitForSelector(`[data-scene] ${GROUP}`);
           await tab.evaluate(async () => await document.fonts.ready);
           if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${palette}-${mode}.png`), fullPage: true });
           if (shotsDir !== '') {
@@ -90,7 +93,7 @@ describe("Voice's What to read under Neo", () => {
           }
           expect(problems).toEqual([]);
           const report = await textContrast(tab, {
-            within: '[data-scene] [aria-labelledby="auto-read-what"]',
+            within: `[data-scene] ${GROUP}`,
             probes: PROBES,
           });
           expect(report.checked).toBeGreaterThan(2);

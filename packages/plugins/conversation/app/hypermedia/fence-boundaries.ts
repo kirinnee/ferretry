@@ -128,7 +128,7 @@ export function commonMarkFences(text: string): readonly CommonMarkFence[] {
 export const DURIAN_FENCE = /^(\s*)(`{3,}|~{3,})\s*([^\s`{]*)(.*)$/u;
 
 /** Where Durian ends a fence (its `closeFence`): the next line that, trimmed, is nothing but this fence's own character, at least as long. */
-function durianCloser(lines: readonly string[], from: number, fence: string): number {
+export function durianCloser(lines: readonly string[], from: number, fence: string): number {
   for (let j = from + 1; j < lines.length; j++) {
     const trimmed = (lines[j] ?? '').trim();
     if (

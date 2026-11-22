@@ -1,5 +1,5 @@
 import type { ReadMessage } from './parse-message.ts';
-import { DOCUMENT_BYTES_PER_BYTE, exceedsMessageCap } from './limits.ts';
+import { DOCUMENT_BYTES_PER_BYTE, exceedsMessageCap, exceedsPreParseLimits } from './limits.ts';
 import { type ReadRequest, isWorkerMessage, type WorkerMessage } from './durian-wire.ts';
 
 /**
@@ -23,7 +23,7 @@ import { type ReadRequest, isWorkerMessage, type WorkerMessage } from './durian-
  *    {@link STREAM_INTERVAL_MS}. While the next answer is awaited the last one stays drawn, so a growing message does not
  *    blink to plain text and back.
  *
- * A message that is over the author's cap never reaches the worker ({@link exceedsMessageCap}), and where there is no worker
+ * A message that is over the author's cap ({@link exceedsMessageCap}) or over a pre-parse limit ({@link exceedsPreParseLimits}) never reaches the worker, and where there is no worker
  * at all (the build did not make one, or the browser refused it) a message is shown as text, never as nothing.
  */
 
@@ -44,7 +44,8 @@ export const CACHE_WEIGHT = 16_000_000;
 const DOCUMENT_WEIGHT = DOCUMENT_BYTES_PER_BYTE;
 
 /** Why a message is plain text: too slow, the parse failed, no worker is available, or it is over a cap. */
-type PlainReason = 'slow' | 'failed' | 'unavailable' | 'text';
+/** `capped`: over the author's cap (shown as text, no note, as before). `limit`: over a pre-parse limit, never asked of the worker (r12 H11a). The rest are the worker's answer or its absence. */
+type PlainReason = 'slow' | 'failed' | 'unavailable' | 'text' | 'limit' | 'capped';
 
 /** What a message is, now: being read, read, or plain text (with the note that says so). */
 export type Reading =
@@ -59,7 +60,8 @@ export type Reading =
 
 const PENDING: Reading = { kind: 'pending' };
 const plain = (reason: PlainReason): Reading => ({ kind: 'plain', reason });
-const OVER_CAP: Reading = plain('text');
+const OVER_CAP: Reading = plain('capped');
+const OVER_LIMIT: Reading = plain('limit');
 
 /** The slice of a `Worker` the reader uses. */
 export interface WorkerLike {
@@ -184,8 +186,16 @@ export function createDurianReader(deps: ReaderDeps): DurianReader {
   let running: Running | undefined;
   let nextId = 1;
 
-  const cached = (source: string, arriving: boolean): Reading | undefined =>
-    exceedsMessageCap(source) ? OVER_CAP : settled[arriving ? 1 : 0].get(source);
+  const cached = (source: string, arriving: boolean): Reading | undefined => {
+    if (exceedsMessageCap(source)) return OVER_CAP;
+    const known = settled[arriving ? 1 : 0].get(source);
+    if (known !== undefined) return known;
+    // THE PRE-PARSE LIMITS (r12 H11a) COME BEFORE THE WORKER IS ASKED: one linear pass over the text on this thread, and a message
+    // over a limit is plain text without a worker ever being started for it. The outcome is kept, so the pass runs once per text.
+    if (!exceedsPreParseLimits(source)) return undefined;
+    settled[arriving ? 1 : 0].set(source, OVER_LIMIT);
+    return OVER_LIMIT;
+  };
   const notify = (): void => {
     for (const listener of [...listeners]) listener();
   };

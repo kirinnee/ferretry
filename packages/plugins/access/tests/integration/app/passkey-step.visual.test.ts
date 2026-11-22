@@ -144,7 +144,16 @@ describe('the access.passkey step, in a real browser', () => {
         expect(later2.width, 'one width').toBeCloseTo(add.width, 0);
         expect(add.width, 'width of 136 px or more').toBeGreaterThanOrEqual(136);
         if (variant.phone) {
-          expect(flow.direction, 'a phone stacks the two buttons').toBe('column-reverse');
+          // C59 follow-up (f7487677f5): the keyboard order IS the visual order, so the row swaps the two buttons in the DOM
+          // (Add first, then Not now) and stacks them as a plain column; a CSS `column-reverse` would draw one order and
+          // tab in the other.
+          expect(flow.direction, 'a phone stacks the two buttons').toBe('column');
+          expect(
+            await tab
+              .locator('[data-passkey-step] button')
+              .evaluateAll(nodes => nodes.map(node => node.hasAttribute('data-passkey-add'))),
+            'the DOM order is the visual order: Add, then Not now',
+          ).toEqual([true, false]);
           expect(later2.x, 'one left edge').toBeCloseTo(add.x, 0);
           expect(later2.y, 'Not now is under Add').toBeGreaterThan(add.y + add.height - 1);
           expect(later2.y - (add.y + add.height), 'the gap is 12 px').toBeCloseTo(12, 0);

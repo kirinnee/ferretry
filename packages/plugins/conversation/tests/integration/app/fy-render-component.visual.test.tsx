@@ -1135,7 +1135,10 @@ describe('fy-render component evidence — Chart', () => {
   test('should keep every theme’s series colours apart, in every family and mode', async () => {
     // Arrange — every theme the reader can pick: each family in each mode, from the app's own list.
     const names = THEME_FAMILIES.flatMap(family => [`${family.id}-light`, `${family.id}-dark`]);
-    should(names.length).equal(22);
+    // Twelve palettes (the r10 T1 three-axis catalog, `theme/catalog.ts` PALETTES; r11 T1 re-cut it) in two modes each:
+    // the old 11-family list this guard was written against (22 names) is gone, and a literal still catches a palette
+    // dropped from the list the reader picks from by accident.
+    should(names.length).equal(24);
     const scene = await openScene('chart-bar', VIEWPORTS[1]);
     const { page } = scene;
 

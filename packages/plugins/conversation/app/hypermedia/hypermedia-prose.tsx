@@ -4,6 +4,7 @@ import { memo, useId, useMemo, useSyncExternalStore } from 'react';
 import { DrawableFyRenderBodies } from './fy-render-host.tsx';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';
 import { readLook, serverLook, subscribeToLook, variantOf } from './look.ts';
+import { PlainFallback } from './plain-fallback.tsx';
 import { HYPERMEDIA_COMPONENT_BLOCKS, HYPERMEDIA_PART_SLOTS, HYPERMEDIA_PARTS } from './parts.tsx';
 import { ReferenceChip } from './reference-chip.tsx';
 import { ReferenceProofProvider } from './reference-proof.tsx';
@@ -42,9 +43,6 @@ import { REFERENCE_INLINE } from './with-references.ts';
  * setting unless told otherwise and our root says `data-mode`, not `data-theme`; and the style's shape and header, which
  * `dh-theme.css` cannot branch on. Colours, type and corners follow the palette and style by CSS alone.
  */
-
-/** The note under a message shown as plain text because it could not be read as hypermedia. */
-const PLAIN_NOTE = 'shown as plain text';
 
 /**
  * Our inlines: the chip that draws a proved reference (Durian reads only its `Component`; it never tokenises one), and the
@@ -110,16 +108,13 @@ export const HypermediaProse = memo(function HypermediaProse({
             />
           </DrawableFyRenderBodies>
         ) : (
-          <>
-            <pre className="fy-hm-plain" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
-              {text}
-            </pre>
-            {reading.kind === 'plain' ? (
-              <p className="fy-hm-plain-note" data-fy-plain-note={reading.reason}>
-                {PLAIN_NOTE}
-              </p>
-            ) : null}
-          </>
+          // Until the document arrives, and for good when it cannot: the text as it is. The note is for a message that was NOT
+          // read (too slow, failed, over a pre-parse limit, no worker); one over the author's cap is text without it, as before.
+          <PlainFallback
+            noted={reading.kind === 'plain' && reading.reason !== 'capped'}
+            reason={reading.kind === 'plain' ? reading.reason : ''}
+            text={text}
+          />
         )}
       </div>
     </ReferenceProofProvider>

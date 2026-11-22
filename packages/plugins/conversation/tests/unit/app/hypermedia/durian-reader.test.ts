@@ -398,10 +398,27 @@ describe('a message too big to send', () => {
     const { reader, spawns } = rig();
     const slot = reader.slot();
     const big = 'x'.repeat(300_001);
-    expect(reader.snapshot(slot, big, false)).toEqual({ kind: 'plain', reason: 'text' });
+    expect(reader.snapshot(slot, big, false)).toEqual({ kind: 'plain', reason: 'capped' });
     reader.want(slot, big, false);
     await settle();
     expect(spawns()).toBe(0);
+  });
+});
+
+describe('a message over a pre-parse limit (r12 H11a)', () => {
+  it('is plain text at once, with its own reason, and no worker is started for it', async () => {
+    const { reader, spawns } = rig();
+    const slot = reader.slot();
+    const over = '['.repeat(60);
+    expect(reader.snapshot(slot, over, false)).toEqual({ kind: 'plain', reason: 'limit' });
+    reader.want(slot, over, false);
+    await settle();
+    expect(spawns()).toBe(0);
+    // Asked again, it is the same answer (kept), and a message under the limits is still asked of the worker.
+    expect(reader.snapshot(slot, over, false)).toEqual({ kind: 'plain', reason: 'limit' });
+    reader.want(reader.slot(), 'fine', false);
+    await settle();
+    expect(spawns()).toBe(1);
   });
 });
 

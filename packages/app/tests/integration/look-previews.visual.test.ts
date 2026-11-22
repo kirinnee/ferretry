@@ -221,12 +221,12 @@ describe('the Look previews', () => {
           );
         await tab.waitForTimeout(150); // the pause lands on the next frame
         const held = await mine();
-        // The dots and the ring keep their animation while paused (3 dots + ring + 2 fade layers), all paused.
-        expect(held.filter(a => a.name === 'fy-dap-bounce' || a.name === 'fy-dap-turn').length).toBe(4);
+        // The style's own spinner (r11 T13, eb08946a57: the Motion frame draws the real `Spinner`, no longer bouncing dots and a
+        // ring) keeps its animation while paused: at least one spinner animation, all paused, each held past 0.
+        const spinning = held.filter(a => a.name.startsWith('fy-spinner'));
+        expect(spinning.length).toBeGreaterThan(0);
         expect(held.every(a => a.state === 'paused')).toBe(true);
-        expect(held.filter(a => a.name === 'fy-dap-bounce' || a.name === 'fy-dap-turn').every(a => a.at > 0)).toBe(
-          true,
-        );
+        expect(spinning.every(a => a.at > 0)).toBe(true);
         await tab.waitForTimeout(300);
         expect((await mine()).map(a => a.at)).toEqual(held.map(a => a.at));
       } finally {

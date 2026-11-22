@@ -35,6 +35,10 @@ const server = await createServer({
   root: packageRoot,
   logLevel: 'error',
   server: { port: 0, host: '127.0.0.1', fs: { allow: [workspace] }, hmr: false },
+  // The scene's entry is injected by the page middleware below, not an HTML file Vite scans, so the dependency scan never sees
+  // the production JSX runtime that Durian's TSX source (served raw, `react-jsx`) imports. Left to be found at run time it is
+  // served as the raw CommonJS file (`does not provide an export named 'jsx'`) and the chat view never mounts. Name it up front.
+  optimizeDeps: { include: ['react/jsx-runtime'] },
   plugins: [
     {
       // `node:crypto` as a module that throws when used, not one Vite refuses to evaluate.

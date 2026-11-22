@@ -17,7 +17,7 @@ Two shapes are deliberately absent from this section. An example fence of the \`
 
 ### overview
 
-A message is Markdown (GitHub flavour: headings, lists, tables, task lists, code, links) with rich parts. A part is a fence named for it: \`terminal\`, \`filetree\`, \`editor\`, \`tierlist\`, \`alignment\`, \`mermaid\`, \`animation\`. Prose parts are containers, a line \`:::tabs\` or \`:::accordion\` closed by a line \`:::\`. A line \`:::human\` closed by a line \`:::\` is text for people, and \`:::llm\` after a part is the text another agent reads. Any other fence (\`ts\`, \`diff\`, \`sh\`) is plain code — and so is a \`chart\` or \`codewalk\` fence, which the app does not draw: a chart is an \`fy-render\` block (below). A part with a mistake in it is shown as its source with the problem named, so check that it drew.
+A message is Markdown (GitHub flavour: headings, lists, tables, task lists, code, links) with rich parts. A part is a fence named for it: \`terminal\`, \`filetree\`, \`editor\`, \`tierlist\`, \`alignment\`, \`mermaid\`, \`animation\`. Prose parts are containers, a line \`:::tabs\` or \`:::accordion\` closed by a line \`:::\`. A line \`:::human\` closed by a line \`:::\` is text for people, and \`:::llm\` after a part is the text another agent reads. Any other fence (\`ts\`, \`diff\`, \`sh\`) is plain code — and so is a \`chart\` or \`codewalk\` fence, which the app does not draw: a chart is an \`fy-render\` block (below). For now an \`animation\` fence and a \`:::tabs\` or \`:::accordion\` container are shown as code too, their source as written: use them only where the source is the point. A message over the pre-parse limits is shown as plain text. A part with a mistake in it is shown as its source with the problem named, so check that it drew.
 
 Charts, pictures, media, maps, live tasks and static or interactive pages are a different fence: its info string is exactly \`fy-render\`, line 1 \`type: <type>\`, line 2 \`alt: <one-line description>\`, then a line \`---\`, then the payload. Types: \`chart\`, \`svg\`, \`html\`, \`map\`, \`image\`, \`video\`, \`audio\`, \`pdf\`, \`lottie\`, \`task\`, \`board\`. A broken block renders as an ordinary code fence with no warning, so run \`fy render check\` on the message first.
 
@@ -86,7 +86,7 @@ flowchart TB
 
 ### animation
 
-One engine: a stage of entities, connectors and steps. The lines before the first \`@step\` set the stage; each \`@step <caption>\` is a sentence the reader sees, followed by the changes that happen in it, one per line; step k shows the setup plus steps 1 to k. At least two steps. Add \`3d\` after the fence name to open the scene in 3D; the reader can switch either way, and a browser with no 3D (or that loses it) shows the flat view.
+For now the app shows an \`animation\` fence as code (its source, as written), not as the animation. One engine: a stage of entities, connectors and steps. The lines before the first \`@step\` set the stage; each \`@step <caption>\` is a sentence the reader sees, followed by the changes that happen in it, one per line; step k shows the setup plus steps 1 to k. At least two steps. Add \`3d\` after the fence name to open the scene in 3D; the reader can switch either way, and a browser with no 3D (or that loses it) shows the flat view.
 
 Things: \`box\`, \`circle\`, \`pill\`, \`cylinder\`, \`cloud\`, \`person\`, \`diamond\`, \`text\`, \`dot\`; frames \`group "label" layout=row|column|grid|tree|graph\`; data \`array a: 5 2 8\`, \`list\`, \`stack\`, \`queue\`; \`token t "req" at api\`. Write \`<kind> <id> "label" [in <container>]\`; ids are letters, digits, \`-\` \`_\` \`.\`, labels are in double quotes. Connectors: \`a -> b\`, \`a --> b\` (dashed), \`a -- b\`, \`a <-> b\`, with a label last: \`app -> db "writes"\`.
 
@@ -140,7 +140,7 @@ Speed up the build @ 0.66, 0.2
 
 ### tabs
 
-\`:::tabs\` holds prose in tabs and \`:::accordion\` in rows: every heading at the highest level used inside starts one tab or row, and the container is closed by a line \`:::\`. Containers do not nest and hold no other container; they may hold fenced parts. Keep them for parallel choices (two languages, two options), not for a story that reads top to bottom.
+For now the app shows a \`:::tabs\` or \`:::accordion\` container as code (its source, as written), not as tabs or rows. \`:::tabs\` holds prose in tabs and \`:::accordion\` in rows: every heading at the highest level used inside starts one tab or row, and the container is closed by a line \`:::\`. Containers do not nest and hold no other container; they may hold fenced parts. Keep them for parallel choices (two languages, two options), not for a story that reads top to bottom.
 
 \`\`\`md
 :::tabs
