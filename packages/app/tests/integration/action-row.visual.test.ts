@@ -170,6 +170,41 @@ describe('C59 the shared answer row', () => {
       }
     });
 
+    it(`${variant.name}: ActionRow, a focused answer keeps focus on the SAME action when the window crosses the breakpoint`, async () => {
+      const { tab, close } = await open(variant, 'row');
+      try {
+        for (const answer of ['primary', 'secondary'] as const) {
+          await tab.locator(`[data-sample="two"] [data-b="${answer}"]`).focus();
+          await tab.setViewportSize(variant.phone ? { width: 1_280, height: 800 } : { width: 390, height: 844 });
+          // The row reorders its DOM at the breakpoint (phone: the way on first; desktop: the way out first): wait for that
+          // new order, not for a width that was already nonzero before the resize.
+          await tab.waitForFunction(
+            expected => document.querySelector('[data-sample="two"] button')?.getAttribute('data-b') === expected,
+            variant.phone ? 'secondary' : 'primary',
+          );
+          const after = await tab.evaluate(() => ({
+            focused: document.activeElement?.getAttribute('data-b'),
+            label: document.activeElement?.textContent,
+          }));
+          expect(after.focused, `${answer} stays focused after the resize (${after.label})`).toBe(answer);
+          // Enter acts on that action, not on the one that took its slot.
+          await tab.evaluate(() => {
+            const w = window as unknown as { __pressed?: string[] };
+            const fresh = w.__pressed === undefined;
+            w.__pressed = [];
+            if (!fresh) return;
+            for (const button of document.querySelectorAll('[data-sample="two"] button'))
+              button.addEventListener('click', () => w.__pressed?.push(button.getAttribute('data-b') ?? ''));
+          });
+          await tab.keyboard.press('Enter');
+          expect(await tab.evaluate(() => (window as unknown as { __pressed: string[] }).__pressed)).toEqual([answer]);
+          await tab.setViewportSize({ width: variant.width, height: variant.height });
+        }
+      } finally {
+        await close();
+      }
+    });
+
     it(`${variant.name}: the recovery stack is one size, the column's full width on a phone`, async () => {
       const { tab, close } = await open(variant, 'stack');
       try {

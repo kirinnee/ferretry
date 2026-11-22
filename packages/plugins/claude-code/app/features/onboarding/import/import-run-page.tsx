@@ -62,7 +62,7 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
   const mode = importModeOf(step?.segment ?? {});
   const [asked, setAsked] = useState<Asked | null>(null);
   const [typed, setTyped] = useState<string | null>(null);
-  const [end, setEnd] = useState<'imported' | 'already-in' | 'left' | null>(null);
+  const [end, setEnd] = useState<'imported' | 'already-in' | null>(null);
   const [sentences, setSentences] = useState<readonly string[]>([]);
   const [working, setWorking] = useState(false);
   /** What the person unticked on THIS page, over what the kind pages left out; `null` until they touch a tick. */
@@ -135,11 +135,6 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
     }
   };
 
-  const leave = (): void => {
-    setEnd('left');
-    step?.done();
-  };
-
   return (
     <div className="cc-step" data-onboarding-step="claude-code.import-run">
       {read.kind !== 'ready' || model === null ? (
@@ -149,12 +144,8 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
               ? read.sentence
               : 'Ferretry needs your OK before it reads what Claude Code keeps on this computer.'}
           </p>
+          {/* One way on here: the footer's Later (and Next) are the way to leave the import, so no second "skip" row. */}
           <ActionRow
-            secondary={
-              <Button data-import-skip="" onClick={leave}>
-                Skip the import
-              </Button>
-            }
             primary={
               <Button variant={read.kind === 'confirm' ? 'primary' : undefined} onClick={() => void look()}>
                 {read.kind === 'confirm' ? 'Show what is there' : 'Try again'}
@@ -169,10 +160,6 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
           </p>
           <ImportResultList sentences={sentences} />
         </div>
-      ) : end === 'left' ? (
-        <p className="cc-step__line" data-import-left="">
-          Nothing was imported. You can import later from Settings › Runtimes › Import.
-        </p>
       ) : (
         <>
           {mode === undefined ? (
@@ -232,11 +219,6 @@ export function ImportRunPage({ client, step }: StepPageProps<ClaudeCodeClient>)
           {plan === 'everything' || plan === 'choose' ? <WorkingBar working={working} /> : null}
           <ActionRow
             data-import-actions=""
-            secondary={
-              <Button disabled={working} data-import-skip="" onClick={leave}>
-                Skip the import
-              </Button>
-            }
             primary={
               <Button
                 variant="primary"

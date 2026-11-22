@@ -124,6 +124,8 @@ const startAnswer = () => {
   starts += 1;
   if (CLAUDE_FLOW.has(which)) return claudeFlow(which === 'claude-starting' ? 'starting' : 'awaiting-code');
   if (which === 'codex-device') return codexFlow('awaiting-approval');
+  // C59 follow-up: the Codex sign-in that ran out of time, its recovery actions in the alert.
+  if (which === 'codex-timeout') return { ...codexFlow('failed'), lastCode: 'expired' as const };
   if (which === 'codex-made') return starts === 1 ? codexFlow('failed') : codexFlow('awaiting-approval');
   return { ...codexFlow('awaiting-callback'), verificationUrl: DAEMON_LINK };
 };
