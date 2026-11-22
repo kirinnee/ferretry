@@ -1,5 +1,5 @@
 import type { ProseProps } from '@ferretry/app';
-import { DocumentView, type HeadingSlotProps, type InlineDef, type Slots } from 'durian-hypermedia/react/strict';
+import { DocumentView, type InlineDef } from 'durian-hypermedia/react/strict';
 import { memo, useEffect, useId, useMemo, useSyncExternalStore } from 'react';
 import { animationEngineReady, loadAnimationEngine, onAnimationEngine } from './animation-engine.ts';
 import { holdsAnimation } from './held-fences.tsx';
@@ -51,36 +51,12 @@ const INLINES: readonly InlineDef[] = [
 ];
 
 /**
- * A heading a surface does not want AS a heading (`demoteHeadings`): the agenda draws a ferret's `## Plan` inside a card
- * whose own title is the heading, so an `h2` there would sit above it in the outline however it was styled down (R3). It is
- * what the shell's Markdown makes of it too: a paragraph holding one bold line (`p[data-demoted-heading] > strong`), which the
- * surface sets at its own size. It keeps the heading's id, so a `[link](#plan)` in the same message still jumps to it.
- */
-function DemotedHeading({ id, children }: HeadingSlotProps) {
-  return (
-    <p data-demoted-heading="" id={id}>
-      <strong>{children}</strong>
-    </p>
-  );
-}
-
-/** The message's slots when its headings are demoted. Module-level, like every slot object (Durian keys its settings on the identity). */
-const DEMOTED_HEADING_SLOTS: Slots = { ...HYPERMEDIA_PART_SLOTS, Heading: DemotedHeading };
-
-/**
  * What Conversation hands the shell as `shell.prose`: this, for a surface that is not the chat's (the agenda). A plain
- * function, because the shell calls it as a view; `copyable` is Markdown's and a part has its own copy, so it is not read.
- * `demoteHeadings` is read: the surface's headings are its own (see {@link DemotedHeading}); without it a heading is a
- * heading, for the surface to restyle (`.dh-doc h1…h6`).
+ * function, because the shell calls it as a view; `copyable` and `demoteHeadings` are Markdown's and a part has its own
+ * copy, so they are not read. Headings are the surface's to restyle (`.dh-doc h1…h6`), as the agenda card does.
  */
-export function ProvidedProse({ text, className, demoteHeadings }: ProseProps) {
-  return (
-    <HypermediaProse
-      text={text}
-      {...(className === undefined ? {} : { className })}
-      {...(demoteHeadings === true ? { demoteHeadings: true } : {})}
-    />
-  );
+export function ProvidedProse({ text, className }: ProseProps) {
+  return <HypermediaProse text={text} {...(className === undefined ? {} : { className })} />;
 }
 
 export interface HypermediaProseProps {
@@ -91,15 +67,12 @@ export interface HypermediaProseProps {
    * text's last line is then still open, so a partial body never draws (`settleFences`). Absent or false: a final message.
    */
   readonly arriving?: boolean;
-  /** Draw every heading as a bold line, not a heading element ({@link DemotedHeading}). Absent or false: headings are headings. */
-  readonly demoteHeadings?: boolean;
 }
 
 export const HypermediaProse = memo(function HypermediaProse({
   text,
   className,
   arriving = false,
-  demoteHeadings = false,
 }: HypermediaProseProps) {
   const { mode, shape, header } = useSyncExternalStore(subscribeToLook, readLook, serverLook);
   // `useId` is unique per mounted message and stable across its re-renders; keep only what an id may hold.
@@ -129,7 +102,7 @@ export const HypermediaProse = memo(function HypermediaProse({
               components={HYPERMEDIA_PARTS}
               doc={read.doc}
               inlines={INLINES}
-              slots={demoteHeadings ? DEMOTED_HEADING_SLOTS : HYPERMEDIA_PART_SLOTS}
+              slots={HYPERMEDIA_PART_SLOTS}
               theme={mode}
               urlPolicy={hypermediaUrlPolicy}
               variant={variantOf(shape)}
