@@ -202,13 +202,18 @@ describe('r11 O2: step page layout, stacked choices left and demo right', () => 
         expect(Math.abs(m.demo.y - (m.cards[0]?.y ?? 0))).toBeLessThanOrEqual(8);
         expect(m.demo.w).toBeGreaterThanOrEqual(320);
         expect(m.stickyTop).toBe('sticky');
-        // Fixed footer buttons: 136 x >= 44, 12 apart, right-aligned (Next is the right-most).
+        // Fixed footer buttons: 136 x >= 44 (Next is the right-most).
         for (const button of m.footer) {
           near(button.w, 136, 1);
           expect(button.h).toBeGreaterThanOrEqual(44);
         }
-        near((m.footer[1]?.x ?? 0) - (m.footer[0]?.right ?? 0), 12, 1);
+        // C59 O3, the shared answer-row rule: the way back (Back) is at the LEFT end, the way on (Later, Next) is a pair 12 apart
+        // at the right end, so Back is far from Later.
         near((m.footer[2]?.x ?? 0) - (m.footer[1]?.right ?? 0), 12, 1);
+        expect(
+          (m.footer[1]?.x ?? 0) - (m.footer[0]?.right ?? 0),
+          'Back is at the left end, away from Later',
+        ).toBeGreaterThan(100);
         // An in-body Button is fixed too and 12px from its neighbour.
         for (const button of m.bodyButtons) {
           expect(button.w).toBeGreaterThanOrEqual(135);

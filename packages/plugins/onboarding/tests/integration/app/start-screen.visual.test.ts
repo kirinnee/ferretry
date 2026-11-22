@@ -180,7 +180,9 @@ describe('the install stage', () => {
       try {
         await noOverflow(tab);
         const link = await boxOf(tab, '[data-onboarding-agent-instead]');
-        expect(link.height).toBeGreaterThanOrEqual(44);
+        // C59 audit: the agent link is an inline action in the sentence now, no taller than a text line (its 44 px target is an
+        // invisible layer), not an outlined button twice the sentence's height.
+        expect(link.height, 'a text-size inline action').toBeLessThanOrEqual(30);
         expect(link.width, 'the agent link is not the page wide').toBeLessThan(variant.width * 0.6);
         const next = await boxOf(tab, '[data-onboarding-next]');
         expect(next.height).toBeGreaterThanOrEqual(44);
@@ -223,7 +225,8 @@ describe('the Pair journey', () => {
         // G2: "Open the pairing page" is auto width and 44px tall, never the row wide.
         const openPair = await tab.locator('[data-onboarding-open-pair]').boundingBox();
         expect(openPair?.height ?? 0, 'at least 44 px tall').toBeGreaterThanOrEqual(43.5);
-        expect(openPair?.width ?? Infinity, 'not the row wide').toBeLessThan(variant.width * 0.7);
+        // C59 audit: the shared answer row: the column's width on a phone, a 12 rem button at the right end on a desktop.
+        if (!variant.phone) expect(openPair?.width ?? Infinity, 'not the row wide').toBeLessThan(variant.width * 0.7);
         await shot(tab, variant, 'pair');
       } finally {
         await close();
@@ -290,8 +293,11 @@ describe('the get-started pages: footer and body buttons', () => {
             `${page.view}: the footer holds exactly ${page.footer.join(' + ')}`,
           ).toEqual([...page.footer]);
           for (const button of footer) {
-            expect(button.w, `${page.view}: footer ${button.label} is 136 +-1`).toBeGreaterThanOrEqual(135);
-            expect(button.w, `${page.view}: footer ${button.label} is 136 +-1`).toBeLessThanOrEqual(137);
+            // C59 audit: a desktop's buttons are 136 +-1 (the way back at the left end, the way on at the right); a phone's are
+            // equal tracks of the row (at least 136), so a lone Continue is the column's width.
+            expect(button.w, `${page.view}: footer ${button.label} is 136 or more`).toBeGreaterThanOrEqual(135);
+            if (!variant.phone)
+              expect(button.w, `${page.view}: footer ${button.label} is 136 +-1`).toBeLessThanOrEqual(137);
             expect(
               button.h,
               `${page.view}: footer ${button.label} is >= 44 tall and its label does not wrap`,
@@ -300,7 +306,14 @@ describe('the get-started pages: footer and body buttons', () => {
           }
           const [first, second] = footer;
           if (first !== undefined && second !== undefined) {
-            expect(Math.abs(second.x - (first.x + first.w) - 12), `${page.view}: 12 px apart`).toBeLessThanOrEqual(1);
+            if (variant.phone) {
+              expect(Math.abs(second.x - (first.x + first.w) - 12), `${page.view}: 12 px apart`).toBeLessThanOrEqual(1);
+              expect(Math.abs(second.w - first.w), `${page.view}: equal tracks`).toBeLessThanOrEqual(1);
+            } else
+              expect(
+                second.x - (first.x + first.w),
+                `${page.view}: Back at the left end, away from the way on`,
+              ).toBeGreaterThan(40);
             expect(Math.abs(second.y - first.y), `${page.view}: the footer is one line`).toBeLessThanOrEqual(1);
           }
           const body = await tab

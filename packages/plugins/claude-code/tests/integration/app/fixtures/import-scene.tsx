@@ -5,7 +5,7 @@
  *   ?page=settings|model-set|instructions|skills|mcp|conversations|run|run-everything|run-lost|run-slow|run-locked   ?theme=<family>-<mode>
  *   `run` is "Choose" mode with some items left out; `run-everything` is the everything mode's single page;
  *   `run-lost` is what a reload leaves (no memory of the choice); `run-slow` holds the first import's first POST
- *   (it never answers, and ignores the abort) until `window.__import.releaseFirst()`; `run-locked` refuses every POST
+ *   (it never answers, and ignores the abort) until `window.__import.releaseFirst()`; `?hold=<ms>` holds the import's apply; `run-locked` refuses every POST
  *   with `401 unlock_required` and raises an unlock prompt until `window.__import.unlock()`.
  */
 import type { StepHost, StepSegmentMemory } from '@ferretry/kernel/contract';
@@ -41,8 +41,16 @@ const TITLES: Record<string, string> = {
   'run-locked': 'Bring it over',
 };
 
+/** `?hold=<ms>`: the import's apply is held this long, so a test can look at the page while it works (C59 O5). */
+const hold = Number(params.get('hold') ?? '0');
+const routes = importRoutes(scanOf());
+const applied = routes['POST /v1/runtimes/proposals/:proposalId/apply'];
 const table: Record<string, unknown> = {
-  ...importRoutes(scanOf()),
+  ...routes,
+  'POST /v1/runtimes/proposals/:proposalId/apply': async () => {
+    await new Promise(resolve => setTimeout(resolve, hold));
+    return applied;
+  },
   'GET /v1/config/file': {
     path: 'harness-claude-code.yaml',
     text: 'binary: /fake/bin/claude\npermissionMode: skip\n',

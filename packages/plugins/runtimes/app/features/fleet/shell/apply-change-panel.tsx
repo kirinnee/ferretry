@@ -14,7 +14,7 @@ import type { AccountChange, AccountChangeView } from '../../../../contract/inde
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { RuntimesClient } from '../../../lib/client.ts';
 import { fleetRefusalExplanation } from '../../../lib/shell-ports.ts';
-import { Button } from '../../../ui.ts';
+import { ActionRow, Button } from '../../../ui.ts';
 import {
   applyAccountChange,
   applyStagedChange,
@@ -154,6 +154,8 @@ export interface ChangeApplyPanelProps {
   readonly children?: ReactNode;
   /** Extra classes for the submit button: a label long enough to need two lines on a phone wraps. */
   readonly submitClassName?: string;
+  /** Draw the submit and its sibling as the shared answer row (equal, full width on a phone; sibling left, submit right on a desktop). */
+  readonly answerRow?: boolean;
 }
 
 export function ChangeApplyPanel({
@@ -168,6 +170,7 @@ export function ChangeApplyPanel({
   onSubmit,
   children,
   submitClassName,
+  answerRow = false,
 }: ChangeApplyPanelProps) {
   const ready = authority !== null && authority.kind !== 'refused' && !disabled && !busy;
 
@@ -193,12 +196,23 @@ export function ChangeApplyPanel({
           {refusal}
         </p>
       )}
-      <div className="flex flex-wrap gap-2">
-        <Button type="submit" variant={variant} disabled={!ready} className={submitClassName} data-change-submit="">
-          {busy ? busyLabel : submitLabel}
-        </Button>
-        {children}
-      </div>
+      {answerRow ? (
+        <ActionRow
+          secondary={children}
+          primary={
+            <Button type="submit" variant={variant} disabled={!ready} data-change-submit="">
+              {busy ? busyLabel : submitLabel}
+            </Button>
+          }
+        />
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" variant={variant} disabled={!ready} className={submitClassName} data-change-submit="">
+            {busy ? busyLabel : submitLabel}
+          </Button>
+          {children}
+        </div>
+      )}
     </form>
   );
 }

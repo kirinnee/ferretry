@@ -321,7 +321,8 @@ describe('PairingScreen exchange', () => {
     // telling this reader to mint another would send them to redo the step that was working.
     expect(screen.container.querySelector('[data-pairing-failure="transport"]')).not.toBeNull();
     expect(screen.container.textContent).toContain('its code is probably still good');
-    expect(screen.container.textContent).not.toContain('Connected');
+    // (The progress bar names its stages, "Connected" among them; the success HEADING is what a failure must not show.)
+    expect(screen.container.querySelector('#pairing-title')?.textContent).toBe('Pairing failed');
 
     await interact(() => buttonNamed(screen.container, 'Start over').click());
     expect(screen.container.textContent).toContain('Connect a daemon');

@@ -50,7 +50,7 @@ export const factsOf = async (tab: Page): Promise<PageFacts> =>
               height: rect.height,
             },
       buttons: buttons.map(button => (button.textContent ?? '').trim()),
-      buttonsInRow: buttons.every(button => button.closest('.ob-actions') !== null),
+      buttonsInRow: buttons.every(button => button.closest('.ob-actions, [data-action-row]') !== null),
       field: body?.querySelector('.ob-field input.ob-input') != null,
       cards: body?.querySelectorAll('[data-choice]').length ?? 0,
     };
@@ -58,8 +58,9 @@ export const factsOf = async (tab: Page): Promise<PageFacts> =>
 
 /** Claude Code's run page, said once: what a Codex run page must match. The other Codex pages are proved by their own owner-line asserts. */
 export const SAME_AS_CLAUDE = {
-  // Claude: "Import" and "Skip the import", the runtime name field, the count line and what Next does (import-run-page.tsx).
-  importRun: { buttons: ['Import', 'Skip the import'] },
+  // Claude: "Skip the import" and "Import", the runtime name field, the count line and what Next does (import-run-page.tsx).
+  // The shared answer row (ui/action-row.tsx): the quiet way out first in the DOM, the way on last (a phone shows it on top).
+  importRun: { buttons: ['Skip the import', 'Import'] },
 } as const;
 
 /** The page body is the kit's frame, and its buttons are the kit's row. */

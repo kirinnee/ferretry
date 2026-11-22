@@ -568,7 +568,9 @@ describe('the /pair page offers the first passkey on its success screen', () => 
     await pairNow(Page, moves);
     const page = must(view, 'the page').container;
     expect(page.textContent).toContain('Connected');
-    expect(must(page.querySelector('[data-first-passkey-offer]'), 'the offer').textContent).toContain('7 minutes left');
+    expect(must(page.querySelector('[data-first-passkey-offer]'), 'the offer').textContent).toContain(
+      'stays open for about 7 minutes',
+    );
     expect(page.textContent).toContain('Add a passkey now');
     expect(moves).toEqual([]);
     // One clear way on, and it moves on.

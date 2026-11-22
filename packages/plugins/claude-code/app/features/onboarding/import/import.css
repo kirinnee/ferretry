@@ -17,3 +17,104 @@
   padding: 8px 12px;
   width: 100%;
 }
+
+/* C59 O5 items 8 and 9: every item found is one row (a tick, a fold, and one status line that is reserved so it never moves the
+   row), and one working bar under the list that is always drawn and only moves while the import runs. */
+.cc-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  max-width: 60ch;
+  padding: 0;
+}
+.cc-item {
+  align-items: start;
+  background: var(--surface-2);
+  border: var(--stroke-control, 1px) solid var(--border);
+  border-radius: var(--radius-control);
+  box-sizing: border-box;
+  column-gap: 12px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 7.5rem;
+  min-height: 44px;
+  padding: 10px 12px;
+}
+.cc-item[data-on='false'] {
+  color: var(--muted);
+}
+.cc-item__box {
+  accent-color: var(--accent);
+  block-size: 18px;
+  inline-size: 18px;
+  margin: 2px 0 0;
+}
+.cc-item__summary {
+  color: inherit;
+  cursor: pointer;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.cc-item__more {
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.cc-item__line {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.cc-item__status {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: var(--font-size-meta, 0.875em);
+  gap: 6px;
+  justify-content: flex-end;
+  min-height: 1.5em;
+  text-align: end;
+}
+.cc-working {
+  background: var(--surface-2);
+  border-radius: 2px;
+  block-size: 4px;
+  max-width: 60ch;
+  overflow: hidden;
+}
+.cc-working__bar {
+  background: var(--accent);
+  border-radius: 2px;
+  display: block;
+  block-size: 100%;
+  inline-size: 35%;
+  opacity: 0;
+}
+.cc-working[data-working='true'] .cc-working__bar {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cc-working[data-working='true'] .cc-working__bar {
+    animation: cc-working-slide 1.2s ease-in-out infinite;
+  }
+}
+@keyframes cc-working-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(290%);
+  }
+}
+/* Less motion (the OS setting or the app's own): a full bar, nothing slides. */
+@media (prefers-reduced-motion: reduce) {
+  .cc-working[data-working='true'] .cc-working__bar {
+    inline-size: 100%;
+  }
+}
+:root[data-motion='reduced'] .cc-working[data-working='true'] .cc-working__bar {
+  animation: none;
+  inline-size: 100%;
+}

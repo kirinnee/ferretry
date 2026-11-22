@@ -1,0 +1,83 @@
+/* THE ANSWER ROW (`action-row.tsx`): layout only, no colour, so every style family keeps its own buttons.
+   Phone: stacked, each answer the full container width, the way on first. The component puts the answers in the DOM in the
+   order they are drawn (phone: primary, secondary; desktop: secondary, primary), so Tab and a screen reader follow the
+   picture: nothing here reverses a direction. Desktop: one row, space-between, both answers one width. */
+.fy-action-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+.fy-action-row > .kt-btn {
+  box-sizing: border-box;
+  inline-size: 100%;
+  height: auto;
+  min-block-size: 44px;
+  padding-block: 0.75rem;
+  white-space: nowrap;
+}
+@media (min-width: 640px) {
+  .fy-action-row {
+    flex-direction: row;
+    /* Stretch, so the two answers are one height even when one carries an icon (a centred row let a taller button sit off the other's top). */
+    align-items: stretch;
+    justify-content: space-between;
+  }
+  .fy-action-row > .kt-btn {
+    inline-size: 12rem;
+    flex: 0 0 auto;
+  }
+  .fy-action-row:not(.fy-action-row--start) > :only-child {
+    margin-inline-start: auto;
+  }
+}
+
+/* AN INLINE ACTION is text, not a button ("Rename" on the "This device will be called X" line, "Let an agent do it" after a sentence): it sits ON the line at the line's own size and
+   height, so the sentence stays one even line. On a touch screen its 44 px target is an invisible layer over the text (the
+   transcript's rule in design-system.css), never a taller box that makes the line uneven. */
+.fy-inline-action {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.fy-inline-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+:root .fy-inline-action {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+}
+:root .fy-inline-action::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 44px);
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+/* A GROUP OF RECOVERY ACTIONS (three or more, in an alert): one column on a phone, equal tracks on a desktop, every button the same
+   size, never a ragged set of content-sized buttons. */
+.fy-action-stack {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+}
+.fy-action-stack > .kt-btn {
+  box-sizing: border-box;
+  height: auto;
+  inline-size: 100%;
+  min-block-size: 44px;
+  padding-block: 0.75rem;
+  white-space: normal;
+}

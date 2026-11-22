@@ -76,7 +76,7 @@ function AppearanceChoices({
           options={MODES.map(mode => ({ id: mode.id, title: mode.title, line: mode.line }))}
         />
       </section>
-      <section className="fy-astep__row" aria-labelledby="fy-astep-palette">
+      <section className="fy-astep__row fy-astep__row--palette" aria-labelledby="fy-astep-palette">
         <h2 id="fy-astep-palette" className="fy-astep__name">
           Palette
         </h2>
