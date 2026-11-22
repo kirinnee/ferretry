@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { SIGN_IN_FILES } from '@ferretry/std';
 import { kernelBrowser } from '../../../daemon/features/folders/adapter.ts';
 import { cleanUp, put, world } from './files-support.ts';
 
@@ -30,8 +31,10 @@ describe('holdsSignIn takes the build’s budget', () => {
     await put(machine.project, { 'docs/a.txt': 'a', 'docs/b.txt': 'b', 'docs/c.txt': 'c' });
     const browser = kernelBrowser(machine.kernel);
 
-    // One question before the pin; the listing then finds the budget spent at its first name.
-    expect(await browser.holdsSignIn(join(machine.project, 'docs'), spentAfter(1))).toBe('partial');
+    // The look asks before the stat, each marker lstat, the pin, the open and the list: all of those find time left, and the
+    // listing itself then finds the budget spent at its first name.
+    const beforeTheListing = 1 + SIGN_IN_FILES.length + 3;
+    expect(await browser.holdsSignIn(join(machine.project, 'docs'), spentAfter(beforeTheListing))).toBe('partial');
   });
 
   test('with time left it answers as before: no sign-in file is false, a sign-in file is true', async () => {

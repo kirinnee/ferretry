@@ -297,3 +297,101 @@ describe('no new work starts after the deadline, whichever stage of it was pendi
     expect(stopped).toBe(true);
   }, 2_000);
 });
+
+describe('every path that rejects a held project root closes it: closes == opens (R4 item c)', () => {
+  type Ending =
+    | 'spent-after-pin'
+    | 'second-private'
+    | 'second-outside'
+    | 'second-budget-spent'
+    | 'second-throws'
+    | 'spent-after-second';
+  const endings: readonly Ending[] = [
+    'spent-after-pin',
+    'second-private',
+    'second-outside',
+    'second-budget-spent',
+    'second-throws',
+    'spent-after-second',
+  ];
+
+  /**
+   * Holds `/h/p` against a world where the first verdict passes and the descriptor arrives, then makes the SECOND verdict
+   * (every look made once a pin exists) end the way `ending` says. Returns what the pin answered and how many descriptors
+   * were opened and closed once everything the build started had stopped.
+   */
+  async function reject(ending: Ending) {
+    const world = controlled();
+    const cue = cuedClock();
+    let looks = 0;
+    const pins = await kernelPins(
+      { ...world.kernel, clock: cue.clock } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'spawn' | 'clock'>,
+      browser({
+        holdsSignIn: async () => {
+          if (world.log.pins === 0) return false;
+          looks += 1;
+          if (ending === 'second-private') return true;
+          // The first look of the second verdict comes back AT the deadline: the next guarded look is then refused.
+          if (ending === 'second-budget-spent') {
+            world.expiresNow();
+            return false;
+          }
+          if (ending === 'second-throws') throw new Error('disk gone');
+          if (ending === 'spent-after-second' && looks >= 1) world.expiresNow();
+          return false;
+        },
+      }),
+    )(world.budget);
+
+    // Two ancestors below the home: the second verdict makes more than one guarded look, so the first can end at the deadline.
+    const held = pins.project('/h/a/b');
+    world.realPath.resolve('/h/a/b');
+    await flush();
+    world.pin.resolve({
+      rootReal: ending === 'second-outside' ? '/h/elsewhere' : '/h/a/b',
+      close: async () => undefined,
+    });
+    if (ending === 'spent-after-pin') world.expiresNow();
+    const answer = await held.then(
+      value => value,
+      (error: unknown) => ({ rejected: String(error) }),
+    );
+    await pins.settled?.();
+    await flush();
+    return { answer, opened: world.log.pins, closed: world.log.closed };
+  }
+
+  for (const ending of endings)
+    test(`${ending}: the descriptor it held is closed before the pin settles`, async () => {
+      const { opened, closed } = await reject(ending);
+
+      expect(opened).toBe(1);
+      expect(closed).toBe(opened);
+    }, 2_000);
+
+  test('a second verdict cut off by the deadline is "spent", and the pin settles with the root closed', async () => {
+    const { answer, closed } = await reject('second-budget-spent');
+
+    expect(answer).toEqual({ ok: false, reason: 'spent' });
+    expect(closed).toBe(1);
+  }, 2_000);
+
+  test('an accepted project root is NOT closed: it is handed to the build', async () => {
+    const world = controlled();
+    const cue = cuedClock();
+    const pins = await kernelPins(
+      { ...world.kernel, clock: cue.clock } as unknown as Pick<KernelPorts, 'roots' | 'paths' | 'spawn' | 'clock'>,
+      browser({}),
+    )(world.budget);
+    const held = pins.project('/h/p');
+    world.realPath.resolve('/h/p');
+    await flush();
+    world.pin.resolve({ rootReal: '/h/p', close: async () => undefined });
+    const answer = await held;
+    await pins.settled?.();
+
+    expect(answer.ok).toBe(true);
+    expect(world.log.pins).toBe(1);
+    expect(world.log.closed).toBe(0);
+  }, 2_000);
+});

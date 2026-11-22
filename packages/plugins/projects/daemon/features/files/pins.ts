@@ -217,17 +217,20 @@ function holdWith(
     } catch {
       return { ok: false, reason: 'unavailable' };
     }
-    // A descriptor that arrives after the time is gone is never handed on: it is closed, and no second verdict is started.
-    if (budget.expired()) {
-      await root.close().catch(() => undefined);
-      return spent;
+    // From here the descriptor is OURS until it is handed on: EVERY way out (a refusal, the time running out, a verdict that
+    // throws, a late arrival) closes it, so a rejected project never leaves a held root behind.
+    let handedOn = false;
+    try {
+      // A descriptor that arrives after the time is gone is never handed on, and no second verdict is started.
+      if (budget.expired()) return spent;
+      const second = root.rootReal === real ? await verdict(root.rootReal) : 'outside';
+      if (second !== undefined) return { ok: false, reason: second === 'private' ? 'private' : 'unavailable' };
+      if (budget.expired()) return spent;
+      handedOn = true;
+      return { ok: true, root };
+    } finally {
+      if (!handedOn) await root.close().catch(() => undefined);
     }
-    const second = root.rootReal === real ? await verdict(root.rootReal) : 'outside';
-    if (second !== undefined || budget.expired()) {
-      await root.close().catch(() => undefined);
-      return second === undefined ? spent : { ok: false, reason: second === 'private' ? 'private' : 'unavailable' };
-    }
-    return { ok: true, root };
   };
 }
 
