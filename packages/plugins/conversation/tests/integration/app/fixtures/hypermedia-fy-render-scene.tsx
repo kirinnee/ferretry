@@ -70,12 +70,18 @@ const entriesOf = (text: string): readonly TranscriptEntry[] => [
 
 const surface = chatReferenceSurface({ daemonId: 'daemon-h3', ferretId: 'mvh3scene-5e7d0b1e' });
 
-const view = (text: string) => (
+const view = (text: string, busy = false) => (
   <ReferenceSurfaceProvider surface={surface}>
     <div className="kt-chat-surface scene-chat">
       <div className="fy-chat-log">
         <div className="fy-chat-log__messages">
-          <Transcript agentName="Zoe" daemonId="daemon-h3" entries={entriesOf(text)} sessionId="mvh3scene-5e7d0b1e" />
+          <Transcript
+            agentName="Zoe"
+            busy={busy}
+            daemonId="daemon-h3"
+            entries={entriesOf(text)}
+            sessionId="mvh3scene-5e7d0b1e"
+          />
         </div>
       </div>
     </div>
@@ -87,5 +93,9 @@ if (root !== null) {
   const app = createRoot(root);
   app.render(view(MESSAGE));
   // STREAMING: the SAME assistant message grows (same entry id), the way a reply arrives; a test drives it step by step.
-  Object.assign(window, { fyStream: (text: string) => app.render(view(text)), fyMessage: MESSAGE });
+  // `busy`: the session is still working, so the last row is still arriving (a closing fence on its last line is not yet one).
+  Object.assign(window, {
+    fyStream: (text: string, busy = false) => app.render(view(text, busy)),
+    fyMessage: MESSAGE,
+  });
 }

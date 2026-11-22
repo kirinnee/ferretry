@@ -61,13 +61,25 @@ const SERVER_MODE = (): 'light' | 'dark' => 'light';
 export interface HypermediaProseProps {
   readonly text: string;
   readonly className?: string;
+  /**
+   * The text is the tail of a message still streaming in (the live session's last row). A fence closed only by the
+   * text's last line is then still open, so a partial body never draws (`settleFences`). Absent or false: a final message.
+   */
+  readonly arriving?: boolean;
 }
 
-export const HypermediaProse = memo(function HypermediaProse({ text, className }: HypermediaProseProps) {
+export const HypermediaProse = memo(function HypermediaProse({
+  text,
+  className,
+  arriving = false,
+}: HypermediaProseProps) {
   const mode = useSyncExternalStore(subscribeToMode, readMode, SERVER_MODE);
   // `useId` is unique per mounted message and stable across its re-renders; keep only what an id may hold.
   const idPrefix = `dh-${useId().replace(/[^\w-]/gu, '')}-`;
-  const read = useMemo(() => (exceedsMessageCap(text) ? null : readMessage(text, idPrefix)), [text, idPrefix]);
+  const read = useMemo(
+    () => (exceedsMessageCap(text) ? null : readMessage(text, idPrefix, arriving)),
+    [text, idPrefix, arriving],
+  );
   return (
     <ReferenceProofProvider text={text}>
       <div className={`fy-hm min-w-0 max-w-full ${className ?? ''}`} data-fy-hypermedia="">
