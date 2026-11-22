@@ -42,8 +42,15 @@ async function readBounded(stream: AsyncIterable<Uint8Array>, limit: number): Pr
     whole.set(piece, at);
     at += piece.length;
   }
-  return new TextDecoder().decode(whole);
+  return decodeBounded(whole);
 }
+
+/**
+ * A BOUNDED read keeps a byte order mark. The caller named a number of bytes because it counts bytes against a cap
+ * (`fy render check`), and a decoder that drops the mark's 3 bytes would let a file over the cap read as under it.
+ * Unbounded reads are as they always were.
+ */
+const decodeBounded = (bytes: Uint8Array): string => new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes);
 
 export function createPluginHost(inputs: PluginHostInputs): PluginHost {
   const clock = systemClock();
@@ -52,7 +59,9 @@ export function createPluginHost(inputs: PluginHostInputs): PluginHost {
   const readFile =
     inputs.readFile ??
     (async (path, limit) =>
-      limit === undefined ? await Bun.file(path).text() : await Bun.file(path).slice(0, limit).text());
+      limit === undefined
+        ? await Bun.file(path).text()
+        : decodeBounded(new Uint8Array(await Bun.file(path).slice(0, limit).arrayBuffer())));
   const readStdin =
     inputs.readStdin ??
     (async limit => (limit === undefined ? await Bun.stdin.text() : await readBounded(stdinStream(), limit)));

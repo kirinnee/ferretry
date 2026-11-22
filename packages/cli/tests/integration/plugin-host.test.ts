@@ -63,6 +63,24 @@ describe('the facilities a plugin half is handed, on the real disk', () => {
     should(pulled).be.belowOrEqual(3);
   });
 
+  it('should keep a byte order mark in a bounded read, so the caller counts the raw bytes it asked for', async () => {
+    const dir = await temp();
+    const bom = '\u{feff}';
+    await writeFile(join(dir, 'bom.txt'), `${bom}${'a'.repeat(400_000)}`);
+    const host = createPluginHost({
+      home: dir,
+      stdinStream: () =>
+        (async function* () {
+          yield new TextEncoder().encode(`${bom}${'b'.repeat(400_000)}`);
+        })(),
+    });
+    // Bounded: 300,001 bytes read are 300,001 bytes seen (3 of them the mark), never 299,998 with the mark dropped.
+    should(new TextEncoder().encode(await host.readText(join(dir, 'bom.txt'), 300_001)).length).equal(300_001);
+    should(new TextEncoder().encode(await host.readText('-', 300_001)).length).equal(300_001);
+    // Unbounded reads are as they were: a mark is not part of the text.
+    should((await host.readText(join(dir, 'bom.txt'))).length).equal(400_000);
+  });
+
   it('should read the raw bytes of a real file with no decoding, and refuse a missing one', async () => {
     const dir = await temp();
     // Not valid UTF-8 (0xff, 0xfe, a lone continuation byte): a text read would replace them, bytes keep every one.
