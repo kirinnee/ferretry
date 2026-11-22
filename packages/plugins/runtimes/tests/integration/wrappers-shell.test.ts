@@ -44,7 +44,7 @@ const account = (overrides: RuntimeFacts = {}): RuntimeWrapperInput => {
     configDirectory: overrides.home ?? '$HOME/.state/fleet/homes/auto-kirin',
     env: overrides.env ?? {},
     args: overrides.flags ?? [],
-    seedFirstRun: harness === 'claude',
+    autonomous: { args: overrides.flags ?? [], seedFirstRun: harness === 'claude', trustLaunchFolder: false },
     fyCommand: 'fy',
   };
 };
@@ -55,7 +55,10 @@ const render = (input: RuntimeWrapperInput, options: { readonly secretsFile?: st
 
 /** What the wrapper's question line leaves in "$@" for a launch with the given mode, run for real in sh. */
 const argumentsAfterQuestionLine = (wrapper: string, mode: string | undefined, launchArgs: readonly string[]) => {
-  const line = wrapper.split('\n').find(candidate => candidate.startsWith('set -- ') && candidate.includes('"$@"'));
+  const line = wrapper
+    .split('\n')
+    .map(candidate => candidate.trim())
+    .find(candidate => candidate.startsWith('set -- ') && candidate.includes('"$@"'));
   if (line === undefined) return undefined;
   const { stdout } = Bun.spawnSync(['sh', '-c', `${line}\nprintf '%s\\n' "$@"`, 'wrapper', ...launchArgs], {
     env: mode === undefined ? {} : { FY_SESSION_MODE: mode },
@@ -94,7 +97,6 @@ describe('the question tool, per ferret (O3)', () => {
 
     // Act + Assert
     should(wrapper).not.containEql('--enable');
-    should(wrapper).not.containEql('FY_SESSION_MODE');
     for (const mode of ['interactive', 'auto', undefined] as const)
       should(argumentsAfterQuestionLine(wrapper, mode, ['do the thing'])).deepEqual([...OFF, 'do the thing']);
   });
@@ -123,9 +125,16 @@ const launchArguments = (
   env: Readonly<Record<string, string>>,
   harnesses: string = OLD_HARNESS,
 ): readonly string[] => {
-  const script = wrapper.replace(/^exec (?:claude|codex) /mu, "printf '%s\\0' ");
+  // Every `exec <harness>` (the auto block's and the interactive one) becomes a function that prints what it would run and stops.
+  const script = `_fy_exec() { shift; printf '%s\\0' "$@"; exit 0; }\n${wrapper.replace(/^(\s*)exec (?:claude|codex)(?= )/gmu, '$1_fy_exec x')}`;
   const { stdout } = Bun.spawnSync(['sh', '-c', script, 'wrapper', 'the task'], {
-    env: { PATH: `${harnesses}:${process.env.PATH ?? ''}`, HOME: '/nonexistent', FY_SEED_FIRST_RUN: '0', ...env },
+    env: {
+      PATH: `${harnesses}:${process.env.PATH ?? ''}`,
+      HOME: '/nonexistent',
+      FY_SEED_FIRST_RUN: '0',
+      FY_SESSION_MODE: 'auto',
+      ...env,
+    },
   });
   return stdout.toString().split('\0').slice(0, -1);
 };
@@ -477,5 +486,62 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       'account_hint',
     ])
       should(AGENT_TOOLS_INSTRUCTION).containEql(phrase);
+  });
+});
+
+/**
+ * The per-launch split (PR 2346, owner: a runtime has no "agent" property; the mode is chosen per launch). The fixed
+ * layer is the autonomous launch's alone: the person's own run and an `interactive` ferret get the profile's flags and
+ * nothing Ferretry adds.
+ */
+describe('the launch mode decides the permissions, not the runtime', () => {
+  const PROFILE_FLAGS = ['--model', 'sonnet', '--verbose'];
+  const FIXED = ['--permission-mode', 'bypassPermissions', '--model', 'sonnet', '--verbose'];
+  const wrapper = render({
+    ...account({ flags: PROFILE_FLAGS }),
+    autonomous: { args: FIXED, seedFirstRun: true, trustLaunchFolder: false },
+  });
+
+  it('should give a ferret started in auto mode the autonomous layer', () => {
+    // Act
+    const args = launchArguments(wrapper, { FY_SESSION_MODE: 'auto' });
+
+    // Assert
+    should(args.slice(0, 5)).eql(['--permission-mode', 'bypassPermissions', '--model', 'sonnet', '--verbose']);
+    should(args.at(-1)).equal('the task');
+  });
+
+  it.each([
+    ['interactive', { FY_SESSION_MODE: 'interactive' }],
+    ['unset (run from a shell)', { FY_SESSION_MODE: '' }],
+  ])('should give a launch with %s mode the profile flags and nothing autonomous', (_label, env) => {
+    // Act
+    const args = launchArguments(wrapper, env);
+
+    // Assert
+    should(args).eql([...PROFILE_FLAGS, 'the task']);
+  });
+
+  it('should render, for the interactive part, exactly what a runtime with no autonomous launch renders (the old agent:false script)', () => {
+    // Arrange
+    const base = render({ ...account({ flags: PROFILE_FLAGS }), autonomous: undefined });
+
+    // Act: drop the guarded auto block
+    const withoutBlock = wrapper.replace(/\n# A ferret started in auto mode[\s\S]*?\nfi\n/u, '');
+
+    // Assert
+    should(withoutBlock).equal(base);
+    for (const word of ['bypassPermissions', 'hasTrustDialogAccepted', 'permission-mode', '_fy_sections'])
+      should(base).not.containEql(word);
+    should(base).not.containEql('FY_SESSION_MODE');
+  });
+
+  it('should refuse only the auto launch when the harness cannot honour the agent permissions', () => {
+    // Arrange
+    const refused = render({ ...account({ flags: PROFILE_FLAGS }), autonomous: { refusal: 'Claude is too old' } });
+
+    // Assert
+    should(launchArguments(refused, { FY_SESSION_MODE: 'interactive' })).eql([...PROFILE_FLAGS, 'the task']);
+    should(refused).containEql('cannot start an auto ferret: Claude is too old');
   });
 });

@@ -1057,5 +1057,6 @@ export function parseAccountModel(input: unknown): AccountModel {
  */
 export function resolveDefaultRuntime(model: AccountModel): string | undefined {
   if (model.machine.defaultRuntime !== undefined) return model.machine.defaultRuntime;
-  return model.runtimes[DEFAULT_RUNTIME_NAME] === undefined ? undefined : DEFAULT_RUNTIME_NAME;
+  if (model.runtimes[DEFAULT_RUNTIME_NAME] !== undefined) return DEFAULT_RUNTIME_NAME;
+  return Object.keys(model.runtimes).toSorted((left, right) => left.localeCompare(right))[0];
 }

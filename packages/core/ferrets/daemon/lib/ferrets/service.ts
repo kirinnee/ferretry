@@ -2807,6 +2807,9 @@ export class FerretsService implements FerretsApi {
     // The ferret's mode (v4 parity: the pane is handed FY_SESSION_MODE, which the wrappers and `instructions` read) goes
     // in AFTER the parts: it is the record's own fact, the same one the harness decided its question tool from
     // (`LaunchSpec.mode`), so no part or login file can make the pane say something else.
+    // A runtime wrapper applies its autonomous layer ONLY for `auto`, so a value a login file or a part carried is cleared
+    // first: an interactive launch (or one with no recorded mode) can never read as autonomous.
+    delete env['FY_SESSION_MODE'];
     Object.assign(env, sessionModeSwitch(mode));
     // Whether it is a helper (`FY_SUB_FERRET`) is the record's own fact too: with it the wrapper gives the pane the
     // Sub-ferret section, without it every helper would be handed the lead's Notify, Board and Agenda text.

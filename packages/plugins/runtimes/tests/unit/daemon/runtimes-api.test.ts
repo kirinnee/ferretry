@@ -159,7 +159,20 @@ describe('createRuntimesApi — why a start cannot happen', () => {
 
 describe('createRuntimesApi — default runtime', () => {
   it('should use the named default over everything', async () => {
-    should(await api({ defaultSetting: 'zed' }).default()).equal('zed');
+    should(
+      await api({ defaultSetting: 'zed', runtimes: { zed: runtimeFile(), 'claude-default': runtimeFile() } }).default(),
+    ).equal('zed');
+  });
+
+  it('should read a saved default that is no longer a runtime as unset (2 logins, the saved one needs sign-in)', async () => {
+    // Arrange — "claude-out" was a derived runtime; its login now needs sign-in, so nothing derives it any more.
+    const logins = [loginView({ id: 'claude-two' }), loginView({ id: 'claude-out', word: 'needs_sign_in' })];
+
+    // Act
+    const actual = await api({ runtimes: {}, logins, defaultSetting: 'claude-out' }).default();
+
+    // Assert — the first runtime that can start, not the dangling name
+    should(actual).equal('claude-two');
   });
 
   it('should fall back to claude-default, else the first runtime that can launch, else nothing', async () => {

@@ -73,6 +73,7 @@ export async function readConfigAccountDocument(
     model,
     revision: evaluation.fleetRevision,
     unreadable: loaded.unreadable,
+    ...(loaded.notices === undefined || loaded.notices.length === 0 ? {} : { notices: loaded.notices }),
     stoodInLogins: loaded.stoodInLogins,
     documents: (next: AccountModel, rename?: RuntimeRename): readonly FleetDocumentWrite[] =>
       [

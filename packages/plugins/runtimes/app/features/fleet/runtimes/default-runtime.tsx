@@ -112,6 +112,11 @@ export function DefaultRuntimeControl({
           <p className="m-0 text-meta leading-base text-muted" data-default-runtime-hint="" id={`${id}-hint`}>
             {DEFAULT_RUNTIME_HINT}
           </p>
+          {(machine.notices ?? []).map(notice => (
+            <p className="m-0 text-meta leading-base text-warn" data-default-runtime-notice="" key={notice}>
+              {notice}
+            </p>
+          ))}
           {pending ? (
             <ChangeApplyPanel
               machineName={machineName}

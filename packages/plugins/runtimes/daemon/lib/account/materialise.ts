@@ -375,7 +375,9 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
             fyCommand: input.fyCommand,
           });
     if (result.ok) fixed = withoutLaunchFolder(result.layer);
-    else reasons.push(result.refusal.message);
+    // An auto launch the harness cannot honour refuses THAT launch only: the person's own run and an interactive ferret
+    // never get the fixed layer, so they are not stopped by it.
+    const autoRefusal = result.ok ? undefined : result.refusal.message;
     const launch = fixed === undefined ? undefined : applyFixedLayer(resolved, fixed);
 
     const adapted = adaptProfile({
@@ -392,7 +394,6 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
           ? {}
           : { skillItems: new Set(Object.keys(input.bodies.skillFrontmatter)) }),
       },
-      ...(launch === undefined ? {} : { settings: launch.settings }),
     });
     for (const problem of adapted.problems) problems.push({ runtime: name, message: problem.message });
 
@@ -461,7 +462,14 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         : ['--settings', joinPath(joinPath(home, RUNTIME_STATE_DIRECTORY), FIXED_SETTINGS_FILE)];
     const { models, modelCatalog, defaultModel } = publishedModels(derived);
     const compactAt = runtime.compactAt ?? model.profiles[runtime.profile]?.compactAt;
-    const blocked = reasons.length === 0 ? undefined : reasons.join('; ');
+    const launchPrefix = [
+      ...credentialLaunchArguments(store, defaultModel !== null),
+      ...(codexCatalog === undefined ? [] : codexCatalogArguments(codexCatalogPath)),
+    ];
+    // The wrapper refuses only what stops EVERY launch. An auto launch the harness cannot honour is refused inside the
+    // wrapper's auto block, and is still published as unavailable: a start's default mode is auto.
+    const wrapperBlocked = reasons.length === 0 ? undefined : reasons.join('; ');
+    const blocked = [...reasons, ...(autoRefusal === undefined ? [] : [autoRefusal])].join('; ') || undefined;
     operations.push({
       kind: 'file',
       path: wrapper,
@@ -471,19 +479,25 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         harness,
         configDirectory: home,
         env,
-        args: [
-          ...credentialLaunchArguments(store, defaultModel !== null),
-          ...(codexCatalog === undefined ? [] : codexCatalogArguments(codexCatalogPath)),
-          ...(launch === undefined ? resolved.flags.map(flag => flag.flag) : [...launch.args, ...fixedSettingsArgs]),
-        ],
+        // What the person's own run, and an interactive ferret, gets: the profile's flags and nothing of the fixed layer.
+        args: [...launchPrefix, ...resolved.flags.map(flag => flag.flag)],
         defaultModel: defaultModel ?? undefined,
-        seedFirstRun: harness === 'claude',
-        trustLaunchFolder: harness === 'codex',
+        // What a ferret started in auto mode gets instead (the wrapper runs it only for FY_SESSION_MODE=auto).
+        autonomous:
+          launch === undefined
+            ? autoRefusal === undefined
+              ? undefined
+              : { refusal: autoRefusal }
+            : {
+                args: [...launchPrefix, ...launch.args, ...fixedSettingsArgs],
+                seedFirstRun: harness === 'claude',
+                trustLaunchFolder: harness === 'codex',
+              },
         fyCommand: input.fyCommand,
         secretsFile: model.advanced.secretsFile,
         harnessCommand: input.harnessCommands?.[harness],
         signInLink: codexWrapperLink(home, store),
-        refusal: blocked,
+        refusal: wrapperBlocked,
       }),
       mode: EXECUTABLE_MODE,
     });

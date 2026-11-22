@@ -6,6 +6,7 @@ import { describe, expect, it } from 'bun:test';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { ModelSetFile, ProfileFile, RuntimeFile } from '../../../contract/index.ts';
 import { deriveRuntimes, withDerived } from '../../../daemon/lib/account/derived-runtimes.ts';
+import { resolveDefaultRuntime } from '../../../daemon/lib/account/schema.ts';
 import {
   assembleRuntimesModel,
   NO_COMPONENTS,
@@ -81,8 +82,62 @@ describe('runtimes derived from logins', () => {
       logins: [sampleLogin('atomi', { store: 'ferretry' })],
     });
 
-    expect(derived.profiles.size).toBe(0);
+    // The explicit one stands; only the other harness's built-in is derived.
+    expect([...derived.profiles.keys()]).toEqual(['ferretry-codex']);
     expect(derived.runtimes.get('atomi')?.profile).toBe('ferretry-claude');
+  });
+
+  it('always carries the built-in profiles and model sets, with no login at all', () => {
+    const derived = deriveRuntimes({ ...none, logins: [] });
+
+    expect([...derived.profiles.keys()].toSorted()).toEqual(['ferretry-claude', 'ferretry-codex']);
+    expect([...derived.modelSets.keys()].toSorted()).toEqual(['ferretry-claude', 'ferretry-codex']);
+  });
+
+  it('never dangles a runtime the owner saved on a built-in preset: fresh one-login home, save my-claude, read again', () => {
+    // Arrange — the saved runtime takes the login, so the derived one for it is gone; its preset must still be there.
+    const mine = new Map([['my-claude', { login: 'atomi', profile: 'ferretry-claude' } as RuntimeFile]]);
+
+    // Act
+    const assembled = assembleRuntimesModel(
+      files({ logins: [sampleLogin('atomi', { store: 'ferretry' })], runtimes: mine }),
+    );
+
+    // Assert — valid, and nothing was written for the built-ins
+    expect(Object.keys(assembled.model.runtimes)).toEqual(['my-claude']);
+    expect(assembled.model.profiles['ferretry-claude']).toBeDefined();
+    expect(assembled.model.components.modelSets['ferretry-claude']).toBeDefined();
+    expect(assembled.sources).toBe(2);
+  });
+
+  it('reads a saved default that no longer exists as unset, falls back to the first runtime and says so (2 logins, one not ready)', () => {
+    // Arrange — the owner saved the derived runtime of a login that has since needed sign-in.
+    const assembled = assembleRuntimesModel(
+      files({
+        logins: [sampleLogin('claude-two', { store: 'ferretry' }), notReady],
+        settings: { defaultRuntime: 'claude-out' } as never,
+      }),
+    );
+
+    // Assert — not a refusal of the whole model
+    expect(Object.keys(assembled.model.runtimes)).toEqual(['claude-two']);
+    expect(assembled.model.machine.defaultRuntime).toBeUndefined();
+    expect(resolveDefaultRuntime(assembled.model)).toBe('claude-two');
+    expect(assembled.notices).toHaveLength(1);
+    expect(assembled.notices[0]).toContain('"claude-out"');
+    expect(assembled.unreadable).toEqual([]);
+  });
+
+  it('keeps a saved default that is still there, with no notice', () => {
+    const assembled = assembleRuntimesModel(
+      files({
+        logins: [sampleLogin('claude-two', { store: 'ferretry' }), sampleLogin('claude-three', { store: 'ferretry' })],
+        settings: { defaultRuntime: 'claude-three' } as never,
+      }),
+    );
+
+    expect(resolveDefaultRuntime(assembled.model)).toBe('claude-three');
+    expect(assembled.notices).toEqual([]);
   });
 
   it('shows in the model Runtimes assembles, with no file behind it', () => {

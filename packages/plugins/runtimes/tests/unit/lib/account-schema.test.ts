@@ -686,11 +686,19 @@ describe('resolveDefaultRuntime', () => {
     should(actual).equal('claude-default');
   });
 
-  it('should resolve to nothing on a machine with no claude-default runtime at all', () => {
+  it('should fall back to the first runtime on a machine with no claude-default runtime', () => {
     // Act
     const actual = resolveDefaultRuntime(
       parseAccountModel(documentWith({ runtimes: { other: { credential: 'claude-you', profile: 'default' } } })),
     );
+
+    // Assert
+    should(actual).equal('other');
+  });
+
+  it('should resolve to nothing on a machine with no runtime at all', () => {
+    // Act
+    const actual = resolveDefaultRuntime(parseAccountModel(documentWith({ runtimes: {} })));
 
     // Assert
     should(actual).be.undefined();

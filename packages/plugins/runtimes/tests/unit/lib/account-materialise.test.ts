@@ -103,6 +103,17 @@ const wrapperOf = (result: FleetModelApplyPlan, name: string): string => {
   return operation.content;
 };
 
+/** The block a wrapper runs only for a ferret started in auto mode (`FY_SESSION_MODE=auto`), or `''` when it has none. */
+const AUTO_BLOCK = /\n# A ferret started in auto mode[\s\S]*?\nfi\n/u;
+const autoBlockOf = (wrapper: string): string => AUTO_BLOCK.exec(wrapper)?.[0] ?? '';
+/** What the person's own run, and an interactive ferret, gets: the wrapper without its auto block. */
+const interactivePart = (wrapper: string): string => wrapper.replace(AUTO_BLOCK, '');
+/** The auto block's own `exec …` line, as the old agent wrapper ended: from `exec` to the end of the line. */
+const autoExec = (wrapper: string): string =>
+  autoBlockOf(wrapper)
+    .replace(/^[\s\S]*\n {2}exec /u, 'exec ')
+    .replace(/\nfi\n$/u, '\n');
+
 const failure = (run: () => unknown): FleetMaterialiseError => {
   try {
     run();
@@ -114,15 +125,42 @@ const failure = (run: () => unknown): FleetMaterialiseError => {
 };
 
 describe('materialiseFleet', () => {
-  it('should launch every runtime with the fixed layer: nothing on a runtime marks it an agent', () => {
+  it('should give the autonomous layer to a ferret started in auto mode and NOTHING of it to the interactive launch', () => {
     // Arrange / Act
     const result = plan(modelOf());
 
-    // Assert
+    // Assert — a runtime has no agent flag: the launch mode decides.
     for (const name of ['claude-default', 'codex-default']) {
-      should(/permission|sandbox_mode/.test(wrapperOf(result, name))).be.true();
-      should(wrapperOf(result, name)).containEql('$_fy_sections');
+      const wrapper = wrapperOf(result, name);
+      should(/permission|sandbox_mode/.test(autoBlockOf(wrapper))).be.true();
+      should(autoBlockOf(wrapper)).containEql('$_fy_sections').and.containEql('FY_SESSION_MODE');
+      // The person's own run and an interactive ferret: the harness's own permissions, no seeding, no trust, no sections.
+      const interactive = interactivePart(wrapper);
+      for (const word of [
+        'permission',
+        'sandbox_mode',
+        '_fy_sections',
+        'trust_level',
+        'hasTrustDialogAccepted',
+        'FY_SEED',
+      ])
+        should(interactive).not.containEql(word);
     }
+  });
+
+  it('should write an interactive launch and settings byte-identical to what a runtime with no fixed layer got', () => {
+    // Arrange / Act
+    const result = plan(modelOf());
+
+    // Assert — the shared home's settings carry the profile only; the fixed layer lives in the auto block and its overlay file.
+    const settings = result.operations.filter(
+      operation => operation.kind === 'settings' && operation.path === `${HOME_A}/settings.json`,
+    );
+    should(JSON.stringify(settings)).not.containEql('bypassPermissions');
+    should(JSON.stringify(settings)).not.containEql('skipDangerousModePermissionPrompt');
+    should(interactivePart(wrapperOf(result, 'claude-default'))).endWith(
+      `exec claude '--model' 'claude-opus-5-5' "$@"\n`,
+    );
   });
 
   it('should mint an id per runtime and write ids.json inside the same plan', () => {
@@ -253,17 +291,7 @@ describe('materialiseFleet', () => {
       kind: 'settings',
       path: `${HOME_A}/settings.json`,
       format: 'json',
-      layers: [
-        {
-          from: 'inline',
-          settings: {
-            permissions: { defaultMode: 'bypassPermissions' },
-            skipDangerousModePermissionPrompt: true,
-            remoteControlAtStartup: false,
-            statusLine: { type: 'command', command: "'fy' statusline" },
-          },
-        },
-      ],
+      layers: [{ from: 'inline', settings: { statusLine: { type: 'command', command: "'fy' statusline" } } }],
       mode: 0o600,
       preserveExisting: true,
     });
@@ -385,10 +413,10 @@ describe('materialiseFleet', () => {
     should(wrapper).containEql('[ -z "${GITHUB_TOKEN:-}" ]').and.containEql('ferretry: GITHUB_TOKEN is not set');
     should(wrapper).not.match(/export HOME=/);
     should(wrapper).containEql("'/opt/ferretry/bin/fy' history claim --harness claude --pid $$ --from-arguments");
-    // Every runtime carries the fixed layer: the permission mode and the Ferretry sections.
-    should(wrapper).containEql("'--permission-mode'");
-    should(wrapper).containEql("'--model' 'claude-opus-5-5'");
-    should(wrapper).endWith('"$@"\n');
+    // The person's own run behaves like their own CLI: no mode, no seeding (the auto block holds those).
+    should(interactivePart(wrapper)).not.containEql('--permission-mode');
+    should(interactivePart(wrapper)).not.containEql('FY_SEED_FIRST_RUN');
+    should(interactivePart(wrapper)).endWith(`exec claude '--model' 'claude-opus-5-5' "$@"\n`);
   });
 
   it("should export a Ferretry-kept Claude login's own store and the Codex SQLite pool", () => {
@@ -409,7 +437,7 @@ describe('materialiseFleet', () => {
     );
     should(at(result, '/fy/fleet/credentials/claude-you')).be.empty();
     should(wrapperOf(result, 'codex-default')).containEql("export CODEX_SQLITE_HOME='/fy/fleet/shared/codex/sqlite'");
-    should(wrapperOf(result, 'codex-default')).containEql(`'-c' 'model="gpt-6"'`);
+    should(interactivePart(wrapperOf(result, 'codex-default'))).containEql(`exec codex '-c' 'model="gpt-6"' "$@"`);
   });
 
   it("should export an environment credential's variables and publish only the secret references", () => {
@@ -683,7 +711,7 @@ describe('materialiseFleet', () => {
       available: false,
       unavailableReason: 'profile "default" names no model it can use',
     });
-    should(wrapperOf(result, 'claude-default')).containEql('exec claude ').and.endWith('"$@"\n');
+    should(interactivePart(wrapperOf(result, 'claude-default'))).endWith('exec claude "$@"\n');
   });
 
   it('should have each wrapper exec the harness path the caller resolved, per harness', () => {
@@ -786,7 +814,7 @@ describe('materialiseFleet', () => {
       const overlay = `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`;
       should(wrapper).containEql('FY_SEED_FIRST_RUN');
       should(wrapper).containEql('hasSeenAutoDefaultNudge');
-      should(wrapper).endWith(
+      should(autoExec(wrapper)).endWith(
         `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'auto' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' ${shellQuote(`--append-system-prompt=${AGENT_BASE_INSTRUCTION('fy')}`)}"$_fy_sections" '--settings' '${overlay}' "$@"\n`,
       );
       should(JSON.parse((only(result, overlay) as { content: string }).content)).eql({
@@ -794,9 +822,8 @@ describe('materialiseFleet', () => {
         remoteControlAtStartup: false,
         skipAutoPermissionPrompt: true,
       });
-      should(only(result, `${HOME_A}/settings.json`)).match({
-        layers: [{ settings: { permissions: { defaultMode: 'auto' } } }],
-      });
+      // The shared home's settings are the profile's alone: the mode is the auto launch's (flag and overlay).
+      should(JSON.stringify(only(result, `${HOME_A}/settings.json`))).not.containEql('defaultMode');
     });
 
     it('should give a Claude agent on Skip the settings overlay and keep the placeholder folder out of every file', () => {
@@ -806,7 +833,7 @@ describe('materialiseFleet', () => {
 
       // Assert
       const overlay = `${HOME_A}/.fy/fixed.json`;
-      should(wrapper).endWith(
+      should(autoExec(wrapper)).endWith(
         `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'bypassPermissions' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' ${shellQuote(`--append-system-prompt=${AGENT_BASE_INSTRUCTION('fy')}`)}"$_fy_sections" '--settings' '${overlay}' "$@"\n`,
       );
       should(only(result, overlay)).eql({
@@ -835,14 +862,14 @@ describe('materialiseFleet', () => {
       const wrapper = wrapperOf(result, 'codex-agent');
 
       // Assert
-      should(wrapper).endWith(
+      should(autoExec(wrapper)).endWith(
         `exec codex '-c' 'model="gpt-6"' '-c' 'approval_policy="on-request"' '-c' 'sandbox_mode="workspace-write"' '--no-alt-screen' '-c' 'notice={hide_full_access_warning=true,hide_world_writable_warning=true,hide_rate_limit_model_nudge=true,hide_gpt5_1_migration_prompt=true,"hide_gpt-5.1-codex-max_migration_prompt"=true}' '-c' 'mcp_servers.ferretry.command="/opt/ferretry/bin/fy"' '-c' 'mcp_servers.ferretry.args=["mcp","serve"]' '-c' 'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_TOKEN","FY_SESSION_BOARD_CAPABILITY"]' '-c' ${shellQuote(`developer_instructions=${tomlString(AGENT_BASE_INSTRUCTION('fy')).slice(0, -1)}`)}"$_fy_sections"'"' "$@"\n`,
       );
-      should(wrapper).containEql('set -- -c "projects={\\"$_fy_cwd\\"={trust_level=\\"trusted\\"}}" "$@"');
+      should(autoBlockOf(wrapper)).containEql('set -- -c "projects={\\"$_fy_cwd\\"={trust_level=\\"trusted\\"}}" "$@"');
+      should(interactivePart(wrapper)).not.containEql('trust_level');
       should(wrapper).not.containEql('ferretry-launch-folder');
-      should(only(result, `${HOME_B}/config.toml`)).match({
-        layers: [{ settings: { approval_policy: 'on-request', sandbox_mode: 'workspace-write' } }],
-      });
+      // The shared home's config.toml is the profile's alone: approval and sandbox are the auto launch's (`-c` flags).
+      should(JSON.stringify(only(result, `${HOME_B}/config.toml`))).not.containEql('approval_policy');
       should(JSON.stringify(only(result, `${HOME_B}/config.toml`))).not.containEql('projects');
     });
 
@@ -872,11 +899,12 @@ describe('materialiseFleet', () => {
 
       // Assert
       const wrapper = wrapperOf(result, 'claude-agent');
-      should(wrapper).containEql(
-        'ferretry: claude-agent cannot start: Claude Code on this machine does not accept Auto mode',
+      // Only the AUTO launch is refused (inside its block); the person's own run and an interactive ferret still start.
+      should(autoBlockOf(wrapper)).containEql(
+        'ferretry: claude-agent cannot start an auto ferret: Claude Code on this machine does not accept Auto mode',
       );
-      should(wrapper).containEql('exit 1');
-      should(wrapper).not.containEql('exec claude');
+      should(autoBlockOf(wrapper)).containEql('exit 1').and.not.containEql('exec claude');
+      should(interactivePart(wrapper)).containEql('exec claude').and.not.containEql('cannot start');
       should(result.manifest.accounts[0]).match({ available: false, mode: 'auto' });
       // Codex is unaffected by what Claude accepts.
       should(wrapperOf(result, 'codex-agent')).containEql('exec codex');

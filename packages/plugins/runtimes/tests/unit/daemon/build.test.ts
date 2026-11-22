@@ -341,7 +341,9 @@ describe('the runtimes daemon', () => {
     // Act
     host.setConfig('runtimes.yaml', { defaultRuntime: 'codex-work' });
     await host.settle();
-    await Promise.resolve();
+    // Choosing the default now also reads the logins (a saved default that is no longer a runtime reads as unset).
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    await host.settle();
 
     // Assert
     should(host.published.slice(before)).deepEqual([

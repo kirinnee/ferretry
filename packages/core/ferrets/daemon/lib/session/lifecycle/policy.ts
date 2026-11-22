@@ -1,4 +1,4 @@
-import { HARNESS_LABEL, HYPERMEDIA_ENV, QUESTION_ASKED_FILE_ENV } from '../peers/fleet.ts';
+import { HARNESS_LABEL, HYPERMEDIA_ENV, QUESTION_ASKED_FILE_ENV, SESSION_MODE_ENV } from '../peers/fleet.ts';
 import type { BoardProjectId } from '../../protocol/board-refs.ts';
 import { INTERACTIVE_PLACEHOLDER_NAME, type SessionLaunchInstructions } from '../../protocol/session.ts';
 import {
@@ -167,6 +167,10 @@ export function sessionPaneEnvironment(
   return {
     [HYPERMEDIA_ENV]: mode === 'interactive' ? '1' : '0',
     ...kept,
+    // The record's own mode, EXPLICIT on every launch and after the stored environment: a runtime wrapper applies its
+    // autonomous layer only for `auto`, so a value the daemon (and the tmux server it started) inherited, or one a
+    // parent auto ferret stored, can never turn an interactive launch autonomous.
+    [SESSION_MODE_ENV]: mode,
     ...(credential === undefined || credential === '' ? {} : { [SESSION_TOKEN_VARIABLE]: credential }),
     [SESSION_ID_VARIABLE]: id,
     ...(files === undefined

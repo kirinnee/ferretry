@@ -158,7 +158,9 @@ export function createRuntimesApi(
 
   const defaultRuntime = async (): Promise<RuntimeId | undefined> => {
     const named = deps.defaultSetting();
-    if (named !== undefined) return RuntimeIdSchema.parse(named);
+    // A saved default that points at a runtime that is no longer here (a derived one whose login needs sign-in) is unset.
+    if (named !== undefined && effective(await loginsById(deps.logins)).runtimes.has(named))
+      return RuntimeIdSchema.parse(named);
     const ready = await summaries();
     const fallback = ready.find(summary => summary.id === FALLBACK_DEFAULT_RUNTIME);
     // No default named: the first runtime that can launch, Claude Code's before Codex's.

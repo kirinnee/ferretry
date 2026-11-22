@@ -30,6 +30,7 @@ import {
   SUB_FERRET_INSTRUCTION,
   PACK_ENV,
   PACK_ROUTING_ENV,
+  SESSION_MODE_ENV,
   tomlString,
 } from './account/fixed-layer.ts';
 import type { HarnessKind } from './manifest.ts';
@@ -359,10 +360,25 @@ export interface RuntimeWrapperInput {
   readonly args: readonly string[];
   /** The model the runtime starts with when nobody names one. A later `--model` the caller passes wins. */
   readonly defaultModel?: string | undefined;
-  /** Claude agent runtimes: re-assert the trust and onboarding keys before every launch (§8.4). */
-  readonly seedFirstRun?: boolean;
-  /** Codex agent runtimes: trust the launch folder with the measured `-c projects={…}` table. */
-  readonly trustLaunchFolder?: boolean;
+  /**
+   * What a ferret started in `auto` mode gets IN PLACE OF the interactive launch, run only when the pane's
+   * `FY_SESSION_MODE` is `auto`. Absent: the wrapper has no autonomous launch at all.
+   */
+  readonly autonomous?:
+    | {
+        /** The profile's surviving flags, then the fixed layer's arguments. */
+        readonly args: readonly string[];
+        /** Claude: re-assert the trust and onboarding keys before the launch (§8.4). */
+        readonly seedFirstRun: boolean;
+        /** Codex: trust the launch folder with the measured `-c projects={…}` table. */
+        readonly trustLaunchFolder: boolean;
+        readonly refusal?: undefined;
+      }
+    | {
+        /** Why an auto launch cannot start (the harness cannot honour the agent permissions); the interactive launch is unaffected. */
+        readonly refusal: string;
+      }
+    | undefined;
   /** The `fy` executable a wrapper runs to claim a conversation it is about to resume. */
   readonly fyCommand: string;
   /**
@@ -474,17 +490,24 @@ const defaultModelArgs = (harness: HarnessKind, model: string | undefined): read
 /** A TOML basic string, for a value a Codex `-c` override carries. */
 const tomlBasicString = (value: string): string => `"${value.replace(/[\\"]/gu, character => `\\${character}`)}"`;
 
+/** The shell test that is true only for a ferret Ferretry starts in `auto` mode (the pane's `FY_SESSION_MODE`). */
+const AUTO_LAUNCH_TEST = `[ "\${${SESSION_MODE_ENV}:-}" = auto ]`;
+
 /**
  * Render the launch script for one account-model runtime (§8.4).
  *
- * Both kinds of runtime export the config directory, the credential's variables and the `FY_*`
- * variables. An agent runtime's launch arguments carry the fixed layer, which outranks every file the
- * harness or the person can edit. Nothing here sets `HOME`: the person's real home is how both
- * harnesses find a `host` login, and on macOS how Claude finds the keychain at all.
+ * The script a person runs from a shell, and an `interactive` ferret, is the person's own CLI on this runtime: the
+ * config directory, the credential's variables, the `FY_*` variables and the profile's flags, with the harness's own
+ * permissions (no permission mode, no seeding, no folder trust). Nothing here sets `HOME`: the person's real home is
+ * how both harnesses find a `host` login, and on macOS how Claude finds the keychain at all.
  *
- * Order is fixed: refuse (when the runtime cannot launch), source secrets, guard, export, seed, claim
- * the conversation, trust the folder, exec. A non-agent runtime gets no permission mode and no seeding:
- * it behaves like the person's own CLI.
+ * A ferret started in `auto` mode is handed `FY_SESSION_MODE=auto`, and only then does the guarded `autonomous` block
+ * run: it seeds, claims the conversation, trusts the folder and `exec`s with the fixed layer, which outranks every file
+ * the harness or the person can edit. An `interactive` ferret never enters it, so nothing autonomous is applied to a
+ * launch with a person at the pane.
+ *
+ * Order is fixed: refuse (when the runtime cannot launch), source secrets, guard, export, [the auto block: seed,
+ * claim, trust, exec], claim the conversation, exec.
  */
 export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
   const header = ['#!/bin/sh', MANAGED_MARKER, `# runtime ${input.name} ${input.id} (${input.harness})`, ''];
@@ -497,13 +520,45 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
     ].join('\n');
   }
   const environment = environmentLines(input.env, input.secretsFile);
-  const sections = ferretSectionLines(input.harness, input.fyCommand);
   const harness =
     input.harnessCommand === undefined ? HARNESS_BINARIES[input.harness] : shellPath(input.harnessCommand);
-  const args = [...defaultModelArgs(input.harness, input.defaultModel), ...input.args]
-    .filter(arg => arg !== CLAUDE_NO_QUESTIONS_FLAG)
-    .map(arg => (sections.length > 0 ? instructionArgument(input.harness, arg) : undefined) ?? shellQuote(arg))
-    .join(' ');
+  const defaults = defaultModelArgs(input.harness, input.defaultModel);
+  const execLine = (launchArguments: readonly string[], withSections: boolean): string => {
+    const args = [...defaults, ...launchArguments]
+      .filter(arg => arg !== CLAUDE_NO_QUESTIONS_FLAG)
+      .map(arg => (withSections ? instructionArgument(input.harness, arg) : undefined) ?? shellQuote(arg))
+      .join(' ');
+    return `exec ${harness}${args === '' ? '' : ` ${args}`} "$@"`;
+  };
+  const { autonomous } = input;
+  const autoBlock: readonly string[] =
+    autonomous === undefined
+      ? []
+      : autonomous.refusal !== undefined
+        ? [
+            '',
+            '# A ferret started in auto mode cannot be launched on this machine; the interactive launch below is unaffected.',
+            `if ${AUTO_LAUNCH_TEST}; then`,
+            `  echo ${shellQuote(`ferretry: ${input.name} cannot start an auto ferret: ${autonomous.refusal}`)} >&2`,
+            '  exit 1',
+            'fi',
+          ]
+        : [
+            '',
+            '# A ferret started in auto mode runs unattended: the fixed layer, the seeded prompts and the trusted folder.',
+            `if ${AUTO_LAUNCH_TEST}; then`,
+            ...[
+              ...(autonomous.seedFirstRun ? firstRunSeedLines(input.harness) : []),
+              ...historyClaimLines(input.harness, input.fyCommand),
+              ...(autonomous.trustLaunchFolder ? codexTrustLines() : []),
+              ...questionLines(input.harness),
+              ...ferretSectionLines(input.harness, input.fyCommand),
+              ...promptSnapshotLines(input.harness, harness),
+              '',
+              execLine(autonomous.args, true),
+            ].map(line => (line === '' ? '' : `  ${line}`)),
+            'fi',
+          ];
   return [
     ...header,
     ...sourceSecretsLines(input.secretsFile),
@@ -511,14 +566,10 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
     `export ${HARNESS_HOME_ENV[input.harness]}=${shellPath(input.configDirectory)}`,
     ...environment.exports,
     ...(input.signInLink === undefined ? [] : signInLinkLines(input.signInLink)),
-    ...(input.seedFirstRun === true ? firstRunSeedLines(input.harness) : []),
+    ...autoBlock,
     ...historyClaimLines(input.harness, input.fyCommand),
-    ...(input.trustLaunchFolder === true ? codexTrustLines() : []),
-    ...questionLines(input.harness),
-    ...sections,
-    ...(sections.length > 0 ? promptSnapshotLines(input.harness, harness) : []),
     '',
-    `exec ${harness}${args === '' ? '' : ` ${args}`} "$@"`,
+    execLine(input.args, false),
     '',
   ].join('\n');
 }

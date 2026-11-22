@@ -360,7 +360,13 @@ describe('a runtime wrapper, run', () => {
 
   const withWrapper = async (
     input: Partial<RuntimeWrapperInput>,
-    options: { readonly fyStatus?: number; readonly cwdName?: string; readonly sessionId?: string } = {},
+    options: {
+      readonly fyStatus?: number;
+      readonly cwdName?: string;
+      readonly sessionId?: string;
+      /** The ferret's launch mode, as the daemon hands it to the pane. */
+      readonly mode?: 'auto' | 'interactive';
+    } = {},
   ): Promise<{ readonly run: (...args: string[]) => Promise<Run>; readonly cwd: string }> => {
     const root = await temporaryDirectory();
     const bin = path.join(root, 'bin');
@@ -414,6 +420,7 @@ describe('a runtime wrapper, run', () => {
             PATH: `${bin}:/usr/bin:/bin`,
             HOME: path.join(root, 'person'),
             FY_SEED_FIRST_RUN: '0',
+            ...(options.mode === undefined ? {} : { FY_SESSION_MODE: options.mode }),
             ...(options.sessionId === undefined ? {} : { FY_SESSION_ID: options.sessionId }),
           },
           stdout: 'ignore',
@@ -525,8 +532,12 @@ describe('a runtime wrapper, run', () => {
   it('should trust the physical launch folder with exactly the measured Codex override, quotes and backslashes included', async () => {
     // Arrange
     const { run, cwd } = await withWrapper(
-      { harness: 'codex', trustLaunchFolder: true, args: ['--no-alt-screen'] },
-      { cwdName: 'we"ird\\dir' },
+      {
+        harness: 'codex',
+        args: ['--no-alt-screen'],
+        autonomous: { args: ['--no-alt-screen'], seedFirstRun: false, trustLaunchFolder: true },
+      },
+      { cwdName: 'we"ird\\dir', mode: 'auto' },
     );
 
     // Act

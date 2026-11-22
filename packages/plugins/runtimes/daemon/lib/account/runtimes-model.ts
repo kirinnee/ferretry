@@ -119,6 +119,8 @@ export interface RuntimesModel {
    * every one was read. While it is not empty NOTHING is written: a home built from it would replace what is there.
    */
   readonly unreadable: readonly string[];
+  /** Plain sentences about a saved setting that was read as unset (a default runtime that is no longer here); they block nothing. */
+  readonly notices: readonly string[];
   /**
    * The environment logins whose variables stand in (Logins withheld their templates or gave none), used or not. Judged
    * against the model a change would WRITE ({@link standInsNamedBy}), never against the model in effect: a change that
@@ -314,13 +316,20 @@ export function assembleRuntimesModel(explicit: RuntimesFiles): RuntimesModel {
     if (Object.hasOwn(credentials, file.login)) present.set(name, file);
     else unavailable.push({ runtime: name, login: file.login });
   }
-  const defaultRuntime = files.settings?.defaultRuntime;
+  // A saved default that names a runtime that is not here (a derived one whose login needs sign-in, a file removed by hand)
+  // is read as unset, never a reason to refuse the whole model: the first runtime stands in, and a notice says so.
+  const saved = files.settings?.defaultRuntime;
+  const defaultRuntime = saved !== undefined && present.has(saved) ? saved : undefined;
+  const notices: string[] =
+    saved === undefined || defaultRuntime !== undefined
+      ? []
+      : [
+          `The saved default runtime "${saved}" is not available on this machine (its login may need signing in), so the first runtime that can start is used until you pick another.`,
+        ];
   const document = {
     version: 1,
     machine: {
-      ...(defaultRuntime === undefined || unavailable.some(set => set.runtime === defaultRuntime)
-        ? {}
-        : { defaultRuntime }),
+      ...(defaultRuntime === undefined ? {} : { defaultRuntime }),
       ...(files.settings?.autoResume === undefined ? {} : { autoResume: files.settings.autoResume }),
       ...(files.settings?.browserPorts === undefined ? {} : { browserPorts: files.settings.browserPorts }),
       ...(files.settings?.browserFirewallFailure === undefined
@@ -346,6 +355,7 @@ export function assembleRuntimesModel(explicit: RuntimesFiles): RuntimesModel {
     model,
     unavailable,
     unreadable,
+    notices,
     stoodInLogins,
     sources:
       explicit.runtimes.size +

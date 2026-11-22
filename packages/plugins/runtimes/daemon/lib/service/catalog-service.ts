@@ -192,6 +192,8 @@ export interface AccountDocumentReading {
    * the list of the reading it was made from; nothing else answers for it.
    */
   readonly unreadable: readonly string[];
+  /** Plain sentences about a saved setting read as unset (a default runtime that is no longer here); absent: none. */
+  readonly notices?: readonly string[];
   /**
    * The environment logins whose variables stand in, in THIS reading. A model that names one (a runtime using it) is
    * never written ({@link standInsNamedBy}); a change that stops using it is.
@@ -537,7 +539,8 @@ export class FleetCatalogService {
   /** `GET /v1/fleet/machine`, with what this caller may do to it. */
   async machine(governance: CallerGovernance | undefined): Promise<MachineView> {
     const reading = await this.#read();
-    return machineView(reading.model, await this.#facts(reading), machineAuthority(governance));
+    const view = machineView(reading.model, await this.#facts(reading), machineAuthority(governance));
+    return reading.notices === undefined ? view : { ...view, notices: [...reading.notices] };
   }
 
   /** `GET /v1/fleet/components`. */

@@ -36,7 +36,7 @@ const account = (overrides: RuntimeFacts = {}): RuntimeWrapperInput => {
     configDirectory: overrides.home ?? '$HOME/.state/fleet/homes/auto-kirin',
     env: overrides.env ?? {},
     args: overrides.flags ?? [],
-    seedFirstRun: harness === 'claude',
+    autonomous: { args: overrides.flags ?? [], seedFirstRun: harness === 'claude', trustLaunchFolder: false },
     fyCommand: 'fy',
   };
 };
