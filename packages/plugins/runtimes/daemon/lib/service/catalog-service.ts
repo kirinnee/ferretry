@@ -217,12 +217,28 @@ export interface ExecutorCaller {
    * Absent: nobody listens.
    */
   left?(state: ApplyLeft): void;
+  /**
+   * Called before EACH owner write (the Vault, a login, a component, a settings file, a login's variables): throws
+   * `499 request_aborted` once the request has ended, so an apply that already started stops before its next write.
+   * What landed before stays landed (the owners' files are not one transaction). Absent: nobody can end the apply.
+   */
+  live?(): void;
 }
 
 /** The error an apply whose request already ended is answered with (nothing was written, the change stays pending). */
 function assertRequestLive(bracket: ApplyBracket | undefined): void {
   if (bracket?.signal?.aborted === true)
     throw new ApiError(499, 'the request ended before this change was applied; nothing was written', 'request_aborted');
+}
+
+/** The error an apply whose request ended MID-WAY is answered with: it stops before its next write. */
+function assertRequestLiveBetweenWrites(bracket: ApplyBracket | undefined): void {
+  if (bracket?.signal?.aborted === true)
+    throw new ApiError(
+      499,
+      'the request ended while this change was being applied; it stopped before its next write, and what was already written stays',
+      'request_aborted',
+    );
 }
 
 /** What a finished apply left behind: waiting for the owner, not written, or cut short. */
@@ -243,6 +259,8 @@ export interface ApplyAct {
 export interface ApplyBracket {
   /** The request's own lifecycle: an apply whose request already ended writes nothing. */
   readonly signal?: AbortSignal;
+  /** Told, once, that the catalogue knows the change id being applied (a change it holds, pending or spent). */
+  readonly known?: () => void;
   /**
    * Called once the change is resolved (consumed) and before any work, with its kind. Answers the act to run it in, or
    * `undefined` when the kind is not an act; THROWS to refuse (the change is put back, nothing was written).
@@ -761,6 +779,8 @@ export class FleetCatalogService {
       throw new ApiError(403, 'this daemon cannot say whether this caller may change the fleet', 'forbidden');
     }
     // A request that ended while it waited its turn writes nothing and consumes nothing.
+    // Only an id this catalogue holds is ever named in the log (`apply-act.ts`); anything else is a fixed code there.
+    if (this.#changes.knows(id)) bracket?.known?.();
     assertRequestLive(bracket);
     const record = this.#proposals(() => this.#changes.consume(id));
     const kind = record.mutation.kind;
@@ -794,7 +814,9 @@ export class FleetCatalogService {
     const caller: ExecutorCaller = {
       governance,
       agent: freshStepUp?.agent === true,
+      // `act.covered` is read LIVE each time: an act that ended (the request ended) never covers a later claim.
       claim: () => act?.covered === true || freshStepUp?.claim() === true,
+      live: () => assertRequestLiveBetweenWrites(bracket),
       ...(bracket?.left === undefined ? {} : { left: (state: ApplyLeft) => bracket.left?.(state, kind) }),
     };
     let outcome: AccountChangeOutcome;

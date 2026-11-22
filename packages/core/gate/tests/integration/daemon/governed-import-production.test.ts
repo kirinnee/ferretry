@@ -150,6 +150,9 @@ async function machine(mode: Mode, settings: object = JSON.parse(OWNER_SETTINGS)
   const inner = fakeLogins([]);
   const door = {
     armed: false,
+    /** How many `list` calls to let through once armed, before the door holds: later calls are the apply's own writes. */
+    skip: 0,
+    calls: 0,
     failure: undefined as Error | undefined,
     entered: Promise.withResolvers<void>(),
     release: Promise.withResolvers<void>(),
@@ -157,7 +160,9 @@ async function machine(mode: Mode, settings: object = JSON.parse(OWNER_SETTINGS)
   const logins = {
     ...inner,
     list: async () => {
-      if (door.armed) {
+      door.calls += 1;
+      if (door.armed && door.skip > 0) door.skip -= 1;
+      else if (door.armed) {
         door.armed = false;
         door.entered.resolve();
         await door.release.promise;
@@ -383,7 +388,51 @@ describe('C59 O5-10b R1 item 4: the act is bound to the request, including while
   });
 });
 
+describe('C59 O5-10b R2 item 4b: an apply whose request ends once it has STARTED stops before its next owner write', () => {
+  test('aborted while the Logins door is held: no login is created, no component or settings file is written, the log says so', async () => {
+    const m = await machine(UNLOCKED);
+    const { host, prove, door, loginChanges } = m;
+    const id = await stage(m);
+    prove(STEP_UP_ACTS.loosenConfig);
+
+    // The apply is INSIDE execution (Logins' door is held in `createLogins`, after the Vault was filed) when its request
+    // ends. Its first three reads of Logins are the review's (current model, two scans), so the fourth is the write path.
+    door.armed = true;
+    door.skip = 3;
+    const caller = new AbortController();
+    const running = apply(host, id, { signal: caller.signal });
+    await door.entered.promise;
+    caller.abort();
+    door.release.resolve();
+    const answered = await running;
+    // The handler may outlive the answer the caller already left: let everything it still does land before looking.
+    await host.settle();
+
+    expect([answered.status, answered.json<{ code: string }>().code]).toEqual([499, 'request_aborted']);
+    expect(loginChanges.staged).toEqual([]);
+    expect(written(host)).toEqual([]);
+    expect(notApplied(host).map(line => line.fields)).toEqual([
+      { change: id, kind: 'setup.import', status: 499, code: 'request_aborted' },
+    ]);
+  });
+});
+
 describe('C59 O5-10b R1 item 5: the log names minted ids and fixed codes, and what a 200 left behind', () => {
+  test('an id of the right SHAPE that the catalogue does not hold is the fixed `unknown-proposal`, never the segment', async () => {
+    const m = await machine(UNLOCKED);
+    const { host, prove } = m;
+    const shaped = `fy_fprop_${'Z'.repeat(22)}`;
+    prove(STEP_UP_ACTS.loosenConfig);
+
+    const missing = await apply(host, shaped);
+
+    expect(missing.status).toBe(404);
+    expect(notApplied(host).map(line => line.fields)).toEqual([
+      { change: 'unknown-proposal', kind: 'unknown', status: 404, code: 'fleet_change_unknown' },
+    ]);
+    expect(JSON.stringify(host.logs)).not.toContain(shaped);
+  });
+
   test('a path segment that is no change id is never logged, and neither is the text of what failed', async () => {
     const m = await machine(UNLOCKED);
     const { host, prove, door } = m;
@@ -399,7 +448,7 @@ describe('C59 O5-10b R1 item 5: the log names minted ids and fixed codes, and wh
 
     // Ids the daemon minted and codes it chose: no segment from the path, no error name, no sentence.
     expect(notApplied(host).map(line => line.fields)).toEqual([
-      { change: 'unrecognised', kind: 'unknown', status: 404, code: 'fleet_change_unknown' },
+      { change: 'unknown-proposal', kind: 'unknown', status: 404, code: 'fleet_change_unknown' },
       { change: id, kind: 'setup.import', status: 409, code: 'fleet_catalog_unreadable' },
     ]);
     expect(JSON.stringify(host.logs)).not.toContain('secret-looking-path-segment');

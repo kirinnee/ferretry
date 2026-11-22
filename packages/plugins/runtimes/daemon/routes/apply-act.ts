@@ -12,10 +12,14 @@
  *    again. Somebody at the machine claims nothing, as before.
  * 2. **The act ends with the request.** It closes when the apply settles AND when the request ends (its signal): a
  *    request that ended while it waited its turn consumes nothing and writes nothing, and one that ends mid-way ends
- *    the act, so no later loosening of that request rides on its proof.
+ *    the act, so no later loosening of that request rides on its proof. Once execution has started the service checks
+ *    the signal before EACH owner write and stops before the next one (what already landed stays: the owners' files are
+ *    not one transaction). **Declared GAP (session-end-only cancellation):** an app-side cancel of a request already
+ *    sent only discards the app's wait for the answer; the carrier stays open until the session ends, so the daemon
+ *    never sees an abort and the apply runs to its end. Only a peer disconnect (the session ending) aborts.
  * 3. **Every refused, held or unfinished apply is a log line.** A handler's 409 is not an admission refusal, so the
- *    daemon's log used to say nothing at all while a phone waited. The line names the change id (only an id this
- *    daemon minted), its kind, the status and a FIXED code: never a path segment, an error's name or a sentence (a
+ *    daemon's log used to say nothing at all while a phone waited. The line names the change id (only one the catalogue
+ *    holds; any other path segment is the fixed `unknown-proposal`), its kind, the status and a FIXED code: never a path segment, an error's name or a sentence (a
  *    refusal can quote a budget), never a value. What an executor left held or refused behind a `200` is read from
  *    structured state it reports (`ExecutorCaller.left`), never parsed out of its words.
  */
@@ -38,8 +42,8 @@ const ACT_WORDS: Readonly<Record<string, string>> = {
   'clone.import': 'copy this setup',
 };
 
-/** A change id this daemon minted (`fy_fprop_` and 22 URL-safe characters); anything else is never logged. */
-const MINTED_ID = /^fy_fprop_[A-Za-z0-9_-]{22}$/u;
+/** What the log says for a change id the catalogue does not hold: a fixed code, never the path segment itself. */
+const UNKNOWN_PROPOSAL = 'unknown-proposal';
 
 /** The act could not open: what the caller is answered, before anything was written. */
 class ActRefused extends Error {
@@ -75,7 +79,9 @@ export async function applyAsOneAct(input: {
   readonly answered: () => AccountChangeOutcome | undefined;
 }): Promise<ApiResponse> {
   const { call, log } = input;
-  const change = MINTED_ID.test(input.id) ? input.id : 'unrecognised';
+  // The id is logged only once the CATALOGUE says it holds this change (`ApplyBracket.known`): a path segment it does
+  // not know, whatever its shape, is the fixed code.
+  let recognised = false;
   // The kind of the change the service RESOLVED (a member of the contract's closed set), never text from the request.
   let kind = 'unknown';
   const known = (named: string): void => {
@@ -83,11 +89,18 @@ export async function applyAsOneAct(input: {
   };
   const left = new Set<ApplyLeft>();
   const say = (fields: Readonly<Record<string, string | number>>): void => {
-    log?.warn('runtimes: a change was not fully applied', { change, kind, ...fields });
+    log?.warn('runtimes: a change was not fully applied', {
+      change: recognised ? input.id : UNKNOWN_PROPOSAL,
+      kind,
+      ...fields,
+    });
   };
   const signal = call.request.signal;
   const bracket: ApplyBracket = {
     ...(signal === undefined ? {} : { signal }),
+    known: () => {
+      recognised = true;
+    },
     open: (named): ApplyAct | undefined => {
       known(named);
       if (!ACT_KINDS.has(named)) return undefined;
@@ -102,7 +115,13 @@ export async function applyAsOneAct(input: {
       };
       // The request's own end closes the act too: nothing the request still spawns rides on its proof.
       signal?.addEventListener('abort', end, { once: true });
-      return { covered: act.covered, end };
+      // LIVE, never a copy taken now: an act that ended reports itself uncovered from that moment.
+      return {
+        get covered(): boolean {
+          return !ended && act.covered;
+        },
+        end,
+      };
     },
     left: (state, named) => {
       known(named);

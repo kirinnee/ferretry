@@ -1,12 +1,15 @@
 import { ApiError, jsonResponse, type PlainApiResponse } from '@ferretry/kernel/contract';
-import { coverAct, markProofClaimed } from './claimed-standings.ts';
+import { actCovers, coverAct, markProofClaimed } from './claimed-standings.ts';
 import type { OwnerOnlyCall } from './owner-only.ts';
 import { STEP_UP_ACTS, STEP_UP_REQUIRED_CODE, type StepUpRequiredBody } from './policy.ts';
 import { isFerretCall } from './standing.ts';
 
 /** An open loosening act: `end` closes it (always, in a `finally`). */
 export interface LooseningAct {
-  /** Whether a governed caller's proof covers the act (`false` at the machine, where nothing is claimed). */
+  /**
+   * Whether a governed caller's proof covers the act RIGHT NOW (`false` at the machine, where nothing is claimed, and
+   * `false` once the act ended): read from Gate's live mark every time, never copied.
+   */
   readonly covered: boolean;
   end(): void;
 }
@@ -54,5 +57,12 @@ export function openLooseningAct(call: OwnerOnlyCall, act: string): LooseningAct
       ),
     };
   markProofClaimed(claim);
-  return { covered: true, end: coverAct(claim) };
+  const end = coverAct(claim);
+  // LIVE: read from Gate's own mark each time, so an act that has ended never reports itself covered from a stale copy.
+  return {
+    get covered(): boolean {
+      return actCovers(claim);
+    },
+    end,
+  };
 }

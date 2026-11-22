@@ -598,8 +598,12 @@ export class FleetSetupService {
     }
     // The Vault is written first: the caller's right to write it is settled before the first write.
     assertMayFileSecrets(composed.secrets, caller, 'apply');
+    // A request that has ended stops the apply BEFORE its next owner write (each `live()` below): what landed stays.
+    caller?.live?.();
     await fileSecrets((name, value) => this.deps.secrets.put(name, value), composed.secrets);
-    await createLogins(this.deps.catalog, composed);
+    caller?.live?.();
+    await createLogins(this.deps.catalog, composed, () => caller?.live?.());
+    caller?.live?.();
     // Settings files go first, each through the owner's door and against the version it was compared with. The
     // record rides the batch after them, so it can only claim less than landed, never more. A write that loosens
     // is held unless the caller is at this machine (`governed: false`); a remote caller confirms it as for any
@@ -614,6 +618,7 @@ export class FleetSetupService {
       owners: composed.owners,
       applied: { model: composed.model, documents: composed.documents },
       secretValues: composed.secrets.map(secret => secret.value),
+      live: () => caller?.live?.(),
       // The fleet is built from what the owners report in effect after they wrote, not from the import's own model.
       inEffect: async () => (await this.#read()).model,
     });
@@ -622,6 +627,7 @@ export class FleetSetupService {
     if (handed.refused > 0) caller?.left?.('refused');
     const { model, documents } = handed.applied;
     for (const write of composed.configWrites ?? []) {
+      caller?.live?.();
       try {
         const waiting = await this.#writeConfigFile(write, mayLoosen);
         held += waiting;
@@ -633,6 +639,7 @@ export class FleetSetupService {
         throw error;
       }
     }
+    caller?.live?.();
     await this.#applyModel(model, documents, landed);
     const envSentences = await importLoginEnvs(this.deps.loginEnvImport, composed, caller);
     const sentences = [

@@ -90,6 +90,17 @@ describe('C59 O5-10b one import is one loosening act on one passkey', () => {
     expect(taken()).toBe(1);
   });
 
+  test('`covered` is the LIVE Gate mark: true while the act is open, false the moment it ends, never a stale copy', () => {
+    const w = world();
+    w.enrol('phone');
+    w.stepUps.grant(subjectOf('phone'), true, STEP_UP_ACTS.loosenConfig);
+    const act = openLooseningAct(callOf(standingOf(w, { device: 'phone' })), 'import this setup');
+    if ('refused' in act) throw new Error('expected the act to open');
+    expect(act.covered).toBe(true);
+    act.end();
+    expect(act.covered).toBe(false);
+  });
+
   test('outside an act the old rule stands: one proof buys one loosening on the same call', () => {
     const w = world();
     w.enrol('phone');

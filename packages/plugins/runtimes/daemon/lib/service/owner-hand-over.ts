@@ -115,6 +115,8 @@ export async function handOver(input: {
   readonly secretValues: readonly string[];
   /** The model the owners report in effect NOW (read again after they wrote). Only asked when an owner took something. */
   readonly inEffect: () => Promise<AccountModel>;
+  /** Called before each owner's write: throws once the request has ended, so the next owner is never written. */
+  readonly live?: () => void;
 }): Promise<HandOver> {
   const { writer, owners, applied } = input;
   if (owners === undefined || writer === undefined || owners.writes.length === 0) {
@@ -134,6 +136,7 @@ export async function handOver(input: {
   const created = new Map<string, readonly string[]>();
   const etags = new Map<string, Readonly<Record<string, string>>>();
   for (const write of owners.writes) {
+    input.live?.();
     const answer =
       write.text === undefined
         ? ({ outcome: 'refused', reason: write.problem ?? 'it could not be made' } as const)
