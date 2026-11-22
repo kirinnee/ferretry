@@ -529,6 +529,33 @@ const backAndForth = async (tab: Page, from: string, key: string): Promise<void>
   await next(tab, key);
 };
 
+/** The runtime-import proposals the machine has been sent so far: an import that was asked for makes one, Later makes none. */
+const proposalsOf = async (tab: Page, daemon: string): Promise<number> =>
+  (await daemonOf(tab, daemon)).mutations.filter(mutation => mutation.route === 'POST /v1/runtimes/proposals').length;
+
+/**
+ * Later on an import page: the flow goes on to another page, and the machine was sent NO import proposal (leaving an import
+ * for later imports nothing). Then Back to the page, so the walk below carries on from where it was.
+ */
+const laterThenBack = async (tab: Page, daemon: string, key: string): Promise<void> => {
+  const proposals = await proposalsOf(tab, daemon);
+  await tab.locator('[data-step-later]').click();
+  await tab.waitForFunction(
+    from => document.querySelector('[data-flow-page]')?.getAttribute('data-flow-page') !== from,
+    key,
+    { timeout: 8_000 },
+  );
+  const landed = await keyOf(tab);
+  expect(landed, `${key}: Later left the page`).not.toBe(key);
+  expect(await proposalsOf(tab, daemon), `${key}: Later sent no import proposal`).toBe(proposals);
+  for (let steps = 0; (await keyOf(tab)) !== key && steps < 12; steps += 1) {
+    await tab.locator('[data-step-back]').click();
+    await tab.waitForTimeout(500);
+  }
+  await reach(tab, key);
+  expect(await proposalsOf(tab, daemon), `${key}: coming back sent no import proposal either`).toBe(proposals);
+};
+
 /** The daemon has taken an answer for the step (`<plugin>.<step>`), and the page has not been answered twice. */
 const recorded = async (tab: Page, daemon: string, key: string): Promise<string> => {
   const [plugin = '', id = ''] = key.split('.');
@@ -543,11 +570,13 @@ const recorded = async (tab: Page, daemon: string, key: string): Promise<string>
     { timeout: 8_000 },
   );
   const view = await daemonOf(tab, daemon);
+  const final = view.states[key] as string;
+  // A page left with Later and answered by Next afterwards carries both answers (Later, then done); the FINAL answer is never written twice.
   expect(
-    view.answers.filter(answer => answer.plugin === plugin && answer.id === id).length,
-    `${key}: answered on the machine exactly once`,
+    view.answers.filter(answer => answer.plugin === plugin && answer.id === id && answer.state === final).length,
+    `${key}: its final answer reached the machine exactly once`,
   ).toBe(1);
-  return view.states[key] as string;
+  return final;
 };
 
 /** A page that asks something and answers with Next: the daemon holds `done` for it afterwards. */
@@ -911,13 +940,17 @@ describe('the first run, end to end', () => {
         ).toBeLessThanOrEqual(1);
         await shot(tab, variant, 'onboarding.name');
         // Next saves the name: the machine takes it through the host file, and the flow goes on by itself.
-        await tab.getByLabel('Machine name').last().fill('studio-mac');
+        // A name that is NOT the one the field starts with (the machine's host name), so the payload proves the typed name was sent.
+        await tab.getByLabel('Machine name').last().fill('harbor-lamp');
         await tab.locator('[data-step-next]').click();
         await reach(tab, 'claude-code.import-choice');
+        const nameWrites = (await daemonOf(tab, A)).writes.filter(
+          write => write.route === 'PUT /v1/config/file' && (write.body as { path?: string }).path === 'host.yaml',
+        );
         expect(
-          (await daemonOf(tab, A)).writes.some(write => write.route === 'PUT /v1/config/file'),
-          'the name went to the machine',
-        ).toBe(true);
+          nameWrites.map(write => write.body),
+          'the name went to the machine once, as exactly this host.yaml',
+        ).toEqual([{ path: 'host.yaml', text: 'name: "harbor-lamp"\n', etag: 'e1' }]);
         expect(await recorded(tab, A, 'onboarding.name'), 'Machine name recorded').toMatch(/done|skipped/u);
 
         // ── Claude: installed and signed in are never asked; Choose what to import ──────────────────────────────────
@@ -929,6 +962,7 @@ describe('the first run, end to end', () => {
         );
         await shot(tab, variant, 'claude-code.import-choice');
         await backAndForth(tab, 'onboarding.name', 'claude-code.import-choice');
+        await laterThenBack(tab, A, 'claude-code.import-choice');
         // An arrow key moves the FOCUS and writes nothing: no request, no answer, nothing on the device ledger, and the
         // card is not chosen until Enter (or Space, or a click).
         const before = await daemonOf(tab, A);
@@ -1051,6 +1085,7 @@ describe('the first run, end to end', () => {
         walked.push('codex.import-choice');
         await inspect(tab, variant, 'codex.import-choice');
         await shot(tab, variant, 'codex.import-choice');
+        await laterThenBack(tab, A, 'codex.import-choice');
         // Everything is already selected: Next is the answer. Count the pages Codex then walks before the Warden.
         await tab.locator('[data-step-next]').click();
         let codexPages = 0;
@@ -1367,9 +1402,12 @@ describe('the first run, end to end', () => {
         for (const step of MACHINE_A.steps.filter(candidate => candidate.side === undefined)) {
           const key = `${step.plugin}.${step.id}`;
           expect(done.states[key], `${key} was answered on the machine`).toBeDefined();
+          // The two import choices were left with Later once and answered by Next afterwards: that is a Later, then ONE final answer.
           expect(
-            done.answers.filter(answer => answer.plugin === step.plugin && answer.id === step.id).length,
-            `${key} was answered exactly once`,
+            done.answers.filter(
+              answer => answer.plugin === step.plugin && answer.id === step.id && answer.state === done.states[key],
+            ).length,
+            `${key} was answered exactly once (its final answer)`,
           ).toBe(1);
         }
         expect(walked, 'the first-run pages, in order').toEqual(

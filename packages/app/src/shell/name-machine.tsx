@@ -220,6 +220,17 @@ export function NameThisMachine({
   // The footer's Next saves what is typed: the flow calls the latest save, never one from an earlier render.
   const typed = useRef<string | undefined>(undefined);
   const footerSave = useRef<() => Promise<void>>(async () => undefined);
+  const pending = useRef<Promise<void> | null>(null);
+  // A flow page left without an answer (Later, or Back) is deferred: the offer to name the machine is not made again on its home.
+  const wasShown = useRef(false);
+  wasShown.current ||= shown;
+  const inFlow = commit !== undefined;
+  useEffect(() => {
+    if (!inFlow) return;
+    return () => {
+      if (wasShown.current) runtime.daemons.nameSettled(daemon);
+    };
+  }, [inFlow, runtime, daemon]);
   const footer = useRef(commit);
   footer.current = commit;
   useEffect(() => {
@@ -230,7 +241,7 @@ export function NameThisMachine({
   }, [shown]);
   if (client === undefined || paired === undefined) return null;
   if (chosen === undefined ? !ready : chosen.state !== 'failed') return null;
-  footerSave.current = async (): Promise<void> => {
+  const writeTyped = async (): Promise<void> => {
     if (refusal !== undefined) {
       runtime.daemons.nameSettled(daemon);
       return;
@@ -255,6 +266,24 @@ export function NameThisMachine({
     }
     runtime.daemons.learnMachine(daemon, parsed.data);
     runtime.daemons.nameSettled(daemon);
+  };
+  // One save at a time on a flow page: Next and Enter in the field are the same act, so the second asks for the first's
+  // result instead of writing the name again.
+  footerSave.current = (): Promise<void> => {
+    pending.current ??= writeTyped().finally(() => {
+      pending.current = null;
+    });
+    return pending.current;
+  };
+  /** Enter in the field on a flow page: the same guarded save as Next, then the answer is given (ignored while one runs). */
+  const submitFromFlow = (name: string): void => {
+    if (pending.current !== null) return;
+    typed.current = name;
+    setBusy(true);
+    footerSave.current().then(settle, (cause: unknown) => {
+      setProblem(cause instanceof Error ? cause.message : sentenceOf(cause));
+      setBusy(false);
+    });
   };
   const save = async (typed: string): Promise<void> => {
     const parsed = MachineNameSchema.safeParse(typed);
@@ -288,7 +317,7 @@ export function NameThisMachine({
       busy={busy}
       {...(refusal === undefined ? {} : { refusal })}
       {...(problem === undefined && chosen?.problem === undefined ? {} : { problem: problem ?? chosen?.problem })}
-      onSave={name => void save(name)}
+      onSave={name => (commit === undefined ? void save(name) : submitFromFlow(name))}
       onSkip={settle}
       onValue={value => {
         typed.current = value;

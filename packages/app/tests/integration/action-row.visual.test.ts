@@ -176,9 +176,11 @@ describe('C59 the shared answer row', () => {
         for (const answer of ['primary', 'secondary'] as const) {
           await tab.locator(`[data-sample="two"] [data-b="${answer}"]`).focus();
           await tab.setViewportSize(variant.phone ? { width: 1_280, height: 800 } : { width: 390, height: 844 });
+          // The row reorders its DOM at the breakpoint (phone: the way on first; desktop: the way out first): wait for that
+          // new order, not for a width that was already nonzero before the resize.
           await tab.waitForFunction(
-            expected => document.querySelector('[data-sample="two"]')?.getBoundingClientRect().width !== expected,
-            0,
+            expected => document.querySelector('[data-sample="two"] button')?.getAttribute('data-b') === expected,
+            variant.phone ? 'secondary' : 'primary',
           );
           const after = await tab.evaluate(() => ({
             focused: document.activeElement?.getAttribute('data-b'),
