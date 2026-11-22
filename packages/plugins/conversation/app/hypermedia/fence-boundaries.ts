@@ -39,10 +39,34 @@ export interface CommonMarkFence {
   readonly lead: string;
 }
 
+/**
+ * What a fence's boundaries do not depend on: the INLINE constructs (emphasis, links, code spans, escapes, references,
+ * raw inline HTML) and link reference definitions. Only block structure decides where a fence is, so micromark is told
+ * not to look for the rest: a message is read again on every token that streams in, and reading its inline Markdown
+ * here, where nothing uses it, would cost most of the time.
+ */
+const BLOCK_STRUCTURE_ONLY = {
+  disable: {
+    null: [
+      'attention',
+      'autolink',
+      'characterEscape',
+      'characterReference',
+      'codeText',
+      'definition',
+      'hardBreakEscape',
+      'htmlText',
+      'labelEnd',
+      'labelStartImage',
+      'labelStartLink',
+    ],
+  },
+};
+
 /** Every fenced code block of `text` (any nesting), in order, read from micromark's token stream. `text` is normalised. */
 export function commonMarkFences(text: string): readonly CommonMarkFence[] {
   const events = postprocess(
-    parse()
+    parse({ extensions: [BLOCK_STRUCTURE_ONLY] })
       .document()
       .write(preprocess()(text, undefined, true)),
   );
@@ -151,9 +175,8 @@ const visualWidth = (text: string): number => [...text].reduce((w, ch) => (ch ==
  * and holds the fence is the same item to CommonMark, and the same list to the reader), indented to where it stood, so
  * Durian sees the pair. Only a list marker is moved: a quote marker hides the closer from Durian as well.
  */
-function openListFences(text: string): string {
-  const lines = text.split('\n');
-  const moved = commonMarkFences(text)
+function openListFences(lines: readonly string[], fences: readonly CommonMarkFence[]): readonly string[] | null {
+  const moved = fences
     .filter(
       fence =>
         fence.close !== null &&
@@ -162,17 +185,48 @@ function openListFences(text: string): string {
         DURIAN_FENCE.test(lines[fence.close] ?? ''),
     )
     .sort((a, b) => b.open - a.open);
-  if (moved.length === 0) return text;
+  if (moved.length === 0) return null;
+  const out = [...lines];
   for (const fence of moved) {
-    const line = lines[fence.open] ?? '';
-    lines.splice(
+    const line = out[fence.open] ?? '';
+    out.splice(
       fence.open,
       1,
       fence.lead.trimEnd(),
       `${' '.repeat(visualWidth(fence.lead))}${line.slice(fence.lead.length)}`,
     );
   }
-  return lines.join('\n');
+  return out;
+}
+
+/** The table row of a held fence: its opening line gained {@link HELD_META}, so that is its info or its meta now. */
+const asHeld = (fence: CommonMarkFence): CommonMarkFence =>
+  fence.info === ''
+    ? { ...fence, info: HELD_META }
+    : { ...fence, meta: fence.meta === '' ? HELD_META : `${fence.meta} ${HELD_META}` };
+
+/** Three backticks or tildes in a row: a text without them has no fence, for CommonMark or for Durian. */
+const MAY_HOLD_FENCE = /`{3}|~{3}/u;
+
+/** The one word a fence must be opened with to draw anything. A message without it has nothing for CommonMark to decide. */
+const FY_RENDER_WORD = 'fy-render';
+
+/**
+ * A message that cannot hold a `fy-render` fence draws nothing from one, whatever CommonMark makes of its fences, so its
+ * table is empty and it is not read by micromark at all (a long reply is read again on every token that streams in).
+ * What Durian itself cannot read is still held: a fence it never closes would make it refuse the whole message, so the
+ * message is read as code from that fence on.
+ */
+function durianOnly(source: string, normal: string): SettledFences {
+  const lines = normal.split('\n');
+  const unclosed = durianFences(lines).find(found => found.close === null);
+  return unclosed === undefined ? { text: source, fences: [] } : { text: inertTail(lines, unclosed.open), fences: [] };
+}
+
+/** The lines before `doubt`, then the rest of them as one block of code: a bare fence, longer than any run in them, around them. */
+function inertTail(lines: readonly string[], doubt: number): string {
+  const bar = longerThanAnyRun(lines.slice(doubt));
+  return [...lines.slice(0, doubt), bar, ...lines.slice(doubt), bar].join('\n');
 }
 
 /**
@@ -196,9 +250,20 @@ const longerThanAnyRun = (lines: readonly string[]): string => {
  * container ended without a closer, with more text after it, is held: its opening line gains a word, so it is code.
  */
 export function settleFences(source: string): SettledFences {
-  const normal = openListFences(normalizeText(source));
-  const lines = normal.split('\n');
-  const fences = commonMarkFences(normal);
+  const normal = normalizeText(source);
+  if (!MAY_HOLD_FENCE.test(normal)) return { text: source, fences: [] };
+  if (!normal.includes(FY_RENDER_WORD)) return durianOnly(source, normal);
+
+  let lines = normal.split('\n');
+  let fences = commonMarkFences(normal);
+  let edited = false;
+  const opened = openListFences(lines, fences);
+  if (opened !== null) {
+    // The text changed under every later line number: read it again, once.
+    lines = [...opened];
+    fences = commonMarkFences(lines.join('\n'));
+    edited = true;
+  }
 
   let doubt = Number.POSITIVE_INFINITY;
   for (const fence of fences) if (fence.close === null && fence.atTail) doubt = Math.min(doubt, fence.open);
@@ -207,18 +272,18 @@ export function settleFences(source: string): SettledFences {
     if (found.close === null || same === undefined || same.close !== found.close) doubt = Math.min(doubt, found.open);
   }
 
-  const held = fences.filter(fence => fence.close === null && !fence.atTail && fence.open < doubt);
-  if (held.length === 0 && doubt === Number.POSITIVE_INFINITY)
-    return { text: normal === normalizeText(source) ? source : normal, fences };
+  const held = new Set(fences.filter(fence => fence.close === null && !fence.atTail && fence.open < doubt));
+  if (held.size === 0 && doubt === Number.POSITIVE_INFINITY)
+    return { text: edited ? lines.join('\n') : source, fences };
 
   const out = [...lines];
   for (const fence of held) out[fence.open] = `${out[fence.open] ?? ''} ${HELD_META}`;
-  const text =
-    doubt === Number.POSITIVE_INFINITY
-      ? out.join('\n')
-      : (() => {
-          const bar = longerThanAnyRun(out.slice(doubt));
-          return [...out.slice(0, doubt), bar, ...out.slice(doubt), bar].join('\n');
-        })();
-  return { text, fences: commonMarkFences(text) };
+  // A fence that reaches the tail (its closer is at or after it) is cut by it: it has no row.
+  const kept = fences
+    .filter(fence => (fence.close ?? fence.open) < doubt)
+    .map(fence => (held.has(fence) ? asHeld(fence) : fence));
+  if (doubt === Number.POSITIVE_INFINITY) return { text: out.join('\n'), fences: kept };
+  // Lines before the tail are unchanged, and CommonMark reads a line without looking ahead, so their rows stand; the
+  // tail is one bare fence, which is no `fy-render` and so has no row of interest.
+  return { text: inertTail(out, doubt), fences: kept };
 }

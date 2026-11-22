@@ -88,8 +88,21 @@ describe('the message Durian is given', () => {
   });
 
   it('reads the rest as code from a fence Durian ends where CommonMark does not', () => {
-    const text = lines(`${F}js`, 'a', `    ${F}`, 'b', F, '', 'after');
+    const text = lines(`${F}js`, 'a', `    ${F}`, 'b', F, '', `${F}fy-render`, 'x', F);
     expect(settleFences(text).text.split('\n')[0]).toMatch(/^`{4,}$/u);
+  });
+
+  it('is read by CommonMark only when it can hold a fy-render fence: otherwise the table is empty', () => {
+    const text = lines(`${F}js`, 'a', F);
+    expect(settleFences(text)).toEqual({ text, fences: [] });
+    expect(settleFences('no fence here')).toEqual({ text: 'no fence here', fences: [] });
+  });
+
+  it('still holds what Durian cannot read (a fence it never closes) in a message with no fy-render', () => {
+    const settled = settleFences(lines('Hello', '', `${F}js`, 'a'));
+    expect(settled.fences).toEqual([]);
+    expect(settled.text.split('\n').slice(0, 2)).toEqual(['Hello', '']);
+    expect(settled.text.split('\n')[2]).toMatch(/^`{4,}$/u);
   });
 
   it('holds a quote fence that its quote ended without a closer when text follows, and keeps what follows', () => {
