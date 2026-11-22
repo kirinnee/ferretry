@@ -242,8 +242,8 @@ describe('scripts/validate/release-guards.sh', () => {
     expect(workflow).toContain('compare/${live}...${AFTER}');
     expect(workflow).toContain('behind | diverged)');
     expect(workflow).toContain('unexpected compare status');
-    // build, sign and deploy all wait on that decision.
-    expect(workflow.match(/needs\.gate\.outputs\.deploy == 'true'/gu)).toHaveLength(3);
+    // build, sign, project, verify and deploy all wait on that decision.
+    expect(workflow.match(/needs\.gate\.outputs\.deploy == 'true'/gu)).toHaveLength(5);
     // A deploy still goes to the Pages project's PRODUCTION alias.
     expect(workflow).toContain('--project-name=ferretry-v5 --branch=rebuild/5.0');
     expect(workflow).not.toContain('--branch=rebuild/preview');
@@ -266,7 +266,7 @@ describe('scripts/validate/release-guards.sh', () => {
 
     test('the workflow reads the branch head and compares it with GITHUB_SHA before wrangler pages deploy', () => {
       const text = readFileSync(join(repository, workflowFile), 'utf8');
-      const deploy = text.indexOf('nix develop .#ci -c bunx wrangler pages deploy');
+      const deploy = text.indexOf('wrangler pages deploy "${RUNNER_TEMP}/dist"');
       const read = text.indexOf(
         'git ls-remote --exit-code --heads "https://github.com/${REPOSITORY}" "refs/heads/${BRANCH}"',
       );
@@ -552,8 +552,8 @@ describe('the deploy job re-checks, before the upload and on every attempt, agai
         .join('\n'),
     };
   };
-  const read = stepSource('Read the production deployment', '      # STEP 2');
-  const decide = stepSource('Refuse a release that goes backwards', '      # `--branch` is the Pages project');
+  const read = stepSource('Read the production deployment', '      # The artifact is readable');
+  const decide = stepSource('Refuse a release that goes backwards', '      # The bytes `deploy` uploads');
   const TOKEN = 'token-not-in-args';
   const ID = 'abcd1234-0000-4000-8000-000000000000';
   const ALIAS_HOST = 'ferretry-v5.pages.dev';
@@ -875,12 +875,15 @@ describe('the deploy job re-checks, before the upload and on every attempt, agai
 
   test('the steps sit before the upload, the upload is skipped on a no-op, and it records the commit', () => {
     const at = (needle: string) => text.indexOf(needle);
-    expect(at('- name: Read the production deployment')).toBeGreaterThan(at('name: Refuse a stale commit'));
+    // Across the jobs: project reads, verify decides, deploy refuses a stale head and then uploads.
     expect(at('- name: Refuse a release that goes backwards')).toBeGreaterThan(
       at('- name: Read the production deployment'),
     );
-    expect(at('- name: Refuse a release that goes backwards')).toBeLessThan(at('name: Deploy production bundle'));
+    expect(at('name: Refuse a stale commit')).toBeGreaterThan(at('- name: Refuse a release that goes backwards'));
+    expect(at('name: Deploy production bundle')).toBeGreaterThan(at('name: Refuse a stale commit'));
+    // A no-op decision ("already live") skips the hand-off upload and, in deploy, the download, the install and the upload.
     expect(text).toContain("if: steps.live.outputs.skip != 'true'");
+    expect(text.match(/if: needs\.verify\.outputs\.skip != 'true'/gu)).toHaveLength(3);
     expect(text).toContain('--commit-hash="${GITHUB_SHA}"');
     expect(read.script).toContain('--header @-');
   });
@@ -890,7 +893,7 @@ describe('the deploy job re-checks, before the upload and on every attempt, agai
       checkout(p =>
         edit(
           p('.github/workflows/pwa-pages-v5.yaml'),
-          /      - name: Read the production deployment[\s\S]*?(?=      # STEP 2)/u,
+          /      - name: Read the production deployment[\s\S]*?(?=      # The artifact is readable)/u,
           '',
         ),
       ),
@@ -908,5 +911,188 @@ describe('the deploy job re-checks, before the upload and on every attempt, agai
     );
     expect(tokenInStep2.status).toBe(1);
     expect(tokenInStep2.err).toContain('no secret');
+  });
+});
+
+describe('the Cloudflare token never meets checkout code (both PWA deploy workflows)', () => {
+  const workflows = [
+    { file: '.github/workflows/pwa-pages.yaml', tokenJob: 'deploy', secret: 'secrets.CLOUDFLARE_API_TOKEN' },
+    {
+      file: '.github/workflows/pwa-pages-v5.yaml',
+      tokenJob: 'deploy',
+      secret: 'secrets.CLOUDFLARE_PAGES_V5_API_TOKEN',
+    },
+  ];
+  const message = 'the token must never meet checkout code';
+
+  test('this checkout passes, and the token-holding jobs are the two that were meant to hold it', () => {
+    expect(gate(checkout())).toMatchObject({ status: 0 });
+    for (const { file, secret } of workflows) {
+      const text = readFileSync(join(repository, file), 'utf8');
+      // Every step that names the token sits in a job without checkout, nix, bun or bunx.
+      const jobs = text.split(/^ {2}(?=[a-z][a-z-]*:\n)/mu).filter(job => job.includes(secret));
+      expect(jobs.length).toBeGreaterThan(0);
+      for (const job of jobs) {
+        const code = job.replace(/^\s*#.*$/gmu, '');
+        expect(code).not.toMatch(/actions\/checkout|uses: \.\/|nix develop|\bbunx?\b|\bnpx\b/u);
+      }
+    }
+  });
+
+  for (const { file, tokenJob } of workflows) {
+    const tokenJobStart = (text: string) => text.indexOf(`\n  ${tokenJob}:\n`) + 1;
+    const addStepToTokenJob = (step: string) => (text: string) => {
+      const at = tokenJobStart(text);
+      const steps = text.indexOf('    steps:\n', at) + '    steps:\n'.length;
+      return `${text.slice(0, steps)}${step}${text.slice(steps)}`;
+    };
+    const refused = (mutate: (text: string) => string, expected: string) => {
+      const result = gate(
+        checkout(p => {
+          writeFileSync(p(file), mutate(readFileSync(p(file), 'utf8')));
+        }),
+      );
+      expect(result.status).toBe(1);
+      expect(result.err).toContain(expected);
+    };
+
+    test(`${file}: an actions/checkout step in the token job is refused`, () => {
+      refused(
+        addStepToTokenJob(
+          '      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0\n        with:\n          persist-credentials: false\n',
+        ),
+        message,
+      );
+    });
+
+    test(`${file}: a local action (the nix installer) in the token job is refused`, () => {
+      refused(addStepToTokenJob('      - uses: ./.github/actions/install-nix\n'), message);
+    });
+
+    test(`${file}: nix develop, bunx or npx in a token job's run step is refused`, () => {
+      for (const command of ['nix develop .#ci -c true', 'bunx wrangler --version', 'npx --yes wrangler --version']) {
+        refused(addStepToTokenJob(`      - name: sneaky\n        run: ${command}\n`), message);
+      }
+    });
+
+    test(`${file}: a secret in the job-level env (so the install step holds it) is refused`, () => {
+      refused(text => {
+        const at = tokenJobStart(text);
+        const runsOn = text.indexOf('    runs-on:', at);
+        return `${text.slice(0, runsOn)}    env:\n      LEAK: \${{ secrets.CLOUDFLARE_API_TOKEN }}\n${text.slice(runsOn)}`;
+      }, 'job-level env');
+    });
+
+    test(`${file}: a wrangler that is not installed at the pinned version first is refused`, () => {
+      refused(
+        text => text.replace(/--save-exact "wrangler@\$\{WRANGLER_VERSION\}"/gu, '--save-exact wrangler@latest'),
+        'WRANGLER_VERSION',
+      );
+      refused(text => text.replace(/ --ignore-scripts/gu, ''), 'without first installing');
+    });
+
+    test(`${file}: a wrangler version that is not exact is refused`, () => {
+      for (const version of ['^4.93.0', 'latest', '4', '4.93']) {
+        refused(text => text.replace(/WRANGLER_VERSION: [^\n]+/u, `WRANGLER_VERSION: ${version}`), 'exact x.y.z');
+      }
+    });
+  }
+
+  test('the two workflows must pin the same wrangler', () => {
+    const result = gate(
+      checkout(p =>
+        edit(p('.github/workflows/pwa-pages.yaml'), /WRANGLER_VERSION: [^\n]+/u, 'WRANGLER_VERSION: 4.92.0'),
+      ),
+    );
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('pin different wrangler versions');
+  });
+
+  test('a token secret read in no job at all fails the check instead of passing it vacuously', () => {
+    const result = gate(
+      checkout(p => edit(p('.github/workflows/pwa-pages.yaml'), /secrets\.CLOUDFLARE_/gu, 'secrets.RENAMED_')),
+    );
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('no job reads a CLOUDFLARE secret');
+  });
+
+  test('the preview deploy job needs verify, and its hand-off artifacts are scoped to the attempt', () => {
+    const file = '.github/workflows/pwa-pages-v5.yaml';
+    const unscoped = gate(
+      checkout(p =>
+        edit(p(file), 'name: pwa-release-verified-${{ github.run_attempt }}', 'name: pwa-release-verified'),
+      ),
+    );
+    expect(unscoped.status).toBe(1);
+    expect(unscoped.err).toContain('github.run_attempt');
+    const unneeded = gate(
+      checkout(p =>
+        edit(p(file), 'needs: [gate, build, sign, project, verify]', 'needs: [gate, build, sign, project]'),
+      ),
+    );
+    expect(unneeded.status).toBe(1);
+    expect(unneeded.err).toContain('deploy must need both');
+  });
+});
+
+describe('the Pages project answer leaves the token job only as what the decision reads', () => {
+  const text = readFileSync(join(repository, '.github/workflows/pwa-pages-v5.yaml'), 'utf8');
+  const start = text.indexOf('      - name: Keep only what the decision reads');
+  const body = text.slice(start, text.indexOf('      - uses: actions/upload-artifact', start));
+  const script = (body.split('        run: |\n')[1] ?? '')
+    .split('\n')
+    .map(line => (line.startsWith('          ') ? line.slice(10) : line))
+    .join('\n');
+  const commit = 'a'.repeat(40);
+
+  function filtered(project: unknown) {
+    const directory = mkdtempSync(join(tmpdir(), 'pages-decision-'));
+    scratch.push(directory);
+    writeFileSync(join(directory, 'pages-project.json'), JSON.stringify(project));
+    const result = Bun.spawnSync(['bash', '-c', script], { env: { ...process.env, RUNNER_TEMP: directory } });
+    expect(result.exitCode).toBe(0);
+    return JSON.parse(readFileSync(join(directory, 'pages-decision', 'pages-project.json'), 'utf8')) as unknown;
+  }
+
+  test('the deployment configuration (environment variables) never reaches the artifact', () => {
+    const kept = filtered({
+      success: true,
+      result: {
+        name: 'ferretry-v5',
+        deployment_configs: { production: { env_vars: { LEAK: { value: 'plaintext-value' } } } },
+        canonical_deployment: {
+          id: 'abcd1234-0000-4000-8000-000000000000',
+          url: 'https://abcd1234.ferretry-v5.pages.dev',
+          project_name: 'ferretry-v5',
+          env_vars: { LEAK: { value: 'plaintext-value' } },
+          deployment_trigger: { type: 'ad_hoc', metadata: { commit_hash: commit, commit_message: 'm' } },
+        },
+      },
+    });
+    expect(JSON.stringify(kept)).not.toContain('plaintext-value');
+    expect(kept).toEqual({
+      success: true,
+      result: {
+        name: 'ferretry-v5',
+        canonical_deployment: {
+          id: 'abcd1234-0000-4000-8000-000000000000',
+          url: 'https://abcd1234.ferretry-v5.pages.dev',
+          project_name: 'ferretry-v5',
+          deployment_trigger: { metadata: { commit_hash: commit } },
+        },
+      },
+    });
+  });
+
+  test('no production deployment stays null, and a deployment with no recorded hash keeps an empty metadata object', () => {
+    expect(filtered({ success: true, result: { name: 'ferretry-v5', canonical_deployment: null } })).toEqual({
+      success: true,
+      result: { name: 'ferretry-v5', canonical_deployment: null },
+    });
+    const kept = filtered({
+      success: true,
+      result: { name: 'ferretry-v5', canonical_deployment: { id: 'x', url: 'u', project_name: 'ferretry-v5' } },
+    }) as { result: { canonical_deployment: { deployment_trigger: unknown } } };
+    expect(kept.result.canonical_deployment.deployment_trigger).toEqual({ metadata: {} });
   });
 });

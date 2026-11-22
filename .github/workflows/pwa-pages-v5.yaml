@@ -3,7 +3,7 @@ name: Deploy 5.0 preview PWA to Pages
 # THE 5.0 PREVIEW. Builds, signs and deploys the app from ONE dedicated ref, `rebuild/preview` (and no other), to its own
 # Cloudflare Pages project (`ferretry-v5`, https://ferretry-v5.pages.dev), beside production. Nothing here touches
 # production: another workflow file (so its own run counter), another signing key and environment, another Pages
-# project. It is a copy of pwa-pages.yaml's three-job split; read that file's comments for why the jobs are separate. A
+# project. It is a copy of pwa-pages.yaml's job split; read that file's comments for why the jobs are separate. A
 # push to any other branch does not trigger it, and there is no manual trigger (no `workflow_dispatch`): the kit's push
 # is the only way in, and every job still repeats the ref.
 #
@@ -59,9 +59,14 @@ concurrency:
 
 env:
   FY_HOSTED_APP_ORIGIN: https://ferretry-v5.pages.dev
+  # The ONE wrangler version both token-holding jobs install (exact, never a range or a tag).
+  # scripts/validate/token-jobs.sh holds that it is exact and equals pwa-pages.yaml's.
+  WRANGLER_VERSION: 4.93.0
 
-# THREE JOBS, BECAUSE THE SIGNING KEY MUST NEVER SHARE A RUNNER WITH THE BUILD (docs/pwa-release-signing.md).
+# SIX JOBS, BECAUSE THE SIGNING KEY MUST NEVER SHARE A RUNNER WITH THE BUILD, AND THE CLOUDFLARE TOKEN MUST NEVER SHARE
+# ONE WITH CHECKOUT CODE (docs/pwa-release-signing.md).
 #
+#   gate    the fast never-backwards pre-filter (above). Holds no secret.
 #   build   installs dependencies and builds the release. Holds NO secret: any dependency's install
 #           script or build plugin runs here, so NOTHING it produces is trusted downstream.
 #   sign    holds the signing key, and nothing else. It installs nothing and runs no build — only
@@ -70,8 +75,13 @@ env:
 #           run's number and commit, the checkout's next key or none, no Pages server code, and
 #           exactly the built files. A compromised build therefore cannot get a real signature on an
 #           attacker's next key or a frozen sequence; at worst it spoils one release's app code.
-#   deploy  holds only the Cloudflare token. It runs the same check and proves the signature
-#           (scripts/ci/verify-pwa-release.sh) before it uploads a byte.
+#   project holds the Cloudflare token and has NO checkout, no nix, no bun: it ensures the Pages project exists and
+#           reads its production deployment, and leaves only the fields the decision needs as an artifact.
+#   verify  holds NO secret and has the checkout. It runs the same check and proves the signature
+#           (scripts/ci/verify-pwa-release.sh) and the never-backwards decision before anything is uploaded, and hands
+#           the verified bytes on as an artifact.
+#   deploy  holds the Cloudflare token and has NO checkout, no nix, no bun: it downloads the verified artifact and
+#           runs the exactly-pinned wrangler (scripts/validate/token-jobs.sh holds that).
 #
 # Every action in this workflow is pinned to an exact SHA, because two of its jobs hold long-lived
 # secrets (docs/standards/ci-cd/index.md).
@@ -259,47 +269,45 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  deploy:
+  # THE CLOUDFLARE TOKEN NEVER MEETS CHECKOUT CODE. `project` and `deploy` hold it; neither runs `actions/checkout`, a
+  # local action, `nix develop`, `bun` or `bunx` (scripts/validate/token-jobs.sh holds that), so no flake shellHook, bun
+  # resolution or script from the pushed commit ever runs with the token in its environment. Everything that needs the
+  # repository runs in `verify`, which holds no secret: it proves the signed release and decides never-backwards, and
+  # hands the verified bytes to `deploy` as an artifact. Wrangler is installed from npm at ONE exact version, in a step
+  # that holds no token, and only then run in a step that does.
+  #
+  # THE HAND-OFF IS SCOPED TO THE ATTEMPT (`-${{ github.run_attempt }}` in the artifact names below). GitHub can re-run
+  # `deploy` alone, and `project` and `verify` would not run again, so the "never backwards" decision would be stale. A
+  # re-run's artifacts of the OLD attempt are not the new attempt's, so a deploy-only re-run fails at its first download
+  # (closed). Re-run the whole workflow, or push again.
+  project:
     timeout-minutes: 10
-    name: Deploy PWA
+    name: Read the Pages project
     needs: [gate, build, sign]
     if: github.ref == 'refs/heads/rebuild/preview' && needs.gate.outputs.deploy == 'true'
     # The Cloudflare credentials live in this environment, which only `rebuild/preview` may deploy
-    # to, so no other branch can reach them; it is not the signing key's environment, so the deploy job never holds that key. They are named
+    # to, so no other branch can reach them; it is not the signing key's environment, so no job here holds that key. They are named
     # CLOUDFLARE_PAGES_V5_* and nothing at repository level has those names, so this job can NEVER fall back to
     # production's account token (the secrets setup script requires a Pages-only token for ferretry-v5).
     environment: pwa-deploy-v5
     permissions:
       contents: read
-      deployments: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          persist-credentials: false
-          # Whole history: "Refuse a release that goes backwards" asks git whether the live commit is an ancestor of this one.
-          fetch-depth: 0
-      - uses: ./.github/actions/install-nix
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: pwa-dist
-          path: packages/app/dist
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: pwa-release-signature
-          path: ${{ runner.temp }}/signature
-      - name: Verify the signed release
+      # No token in this step: the install scripts of wrangler's dependencies are not run at all (`--ignore-scripts`), and
+      # nothing is read from the repository (there is no checkout in this job).
+      - name: Install the pinned wrangler
         run: |
           set -euo pipefail
-          cp "${RUNNER_TEMP}/signature/release-manifest.sig" packages/app/dist/release-manifest.sig
-          ./scripts/ci/check-pwa-release.sh --sequence "${GITHUB_RUN_NUMBER}" --commit "${GITHUB_SHA}" packages/app/dist
-          ./scripts/ci/verify-pwa-release.sh packages/app/dist
-      # Wrangler runs through the pinned devshell rather than cloudflare/wrangler-action. The action
-      # installs wrangler with whichever package manager it detects, picks bun from this repository's
-      # lockfile, and then cannot find bun — it runs outside the nix shell that provides it. Calling
-      # bunx inside `nix develop` uses the toolchain the rest of CI already uses, and drops a
-      # third-party action from the deploy path. Wrangler reads both credentials from the
-      # environment, so neither is ever passed as an argument.
+          npm install --prefix "${RUNNER_TEMP}/wrangler" --ignore-scripts --no-audit --no-fund --save-exact "wrangler@${WRANGLER_VERSION}"
+          installed="$(node -p "require(process.argv[1]).version" "${RUNNER_TEMP}/wrangler/node_modules/wrangler/package.json")"
+          if [[ ${installed} != "${WRANGLER_VERSION}" ]]; then
+            echo "❌ installed wrangler ${installed}, not the pinned ${WRANGLER_VERSION}" >&2
+            exit 1
+          fi
+      # Wrangler runs from that install, not through `nix develop` and not through cloudflare/wrangler-action (which
+      # installs with whichever package manager it detects). Wrangler reads both credentials from the environment, so
+      # neither is ever passed as an argument.
       #
       # The project is created on first run: Cloudflare merged Workers and Pages into one flow whose
       # direct-upload path wants files before it will create a project, which a repository that
@@ -323,53 +331,19 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_PAGES_V5_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          projects="$(nix develop .#ci -c bunx wrangler pages project list)"
+          export PATH="${RUNNER_TEMP}/wrangler/node_modules/.bin:${PATH}"
+          projects="$(wrangler pages project list)"
           if grep -qE '(^|[[:space:]])ferretry-v5([[:space:]]|$)' <<<"${projects}"; then
             echo "project ferretry-v5 already exists"
           else
-            nix develop .#ci -c bunx wrangler pages project create ferretry-v5 --production-branch=rebuild/5.0
+            wrangler pages project create ferretry-v5 --production-branch=rebuild/5.0
           fi
-      # Runs inside the serialised path (the shared concurrency group) and holds no Cloudflare credential. The
-      # concurrency group does not order runs, so an older commit's run can reach this point AFTER a newer one has
-      # deployed (or while it waits); deploying it would put older app code on the production alias. Deploy only the
-      # branch's current head. Exiting non-zero keeps this job's conclusion honest: a refused deploy is not a success.
-      # The token reaches git through GIT_CONFIG_* variables, never an argument, and is masked.
-      - name: Refuse a stale commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ github.ref_name }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
-          echo "::add-mask::${auth}"
-          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader "GIT_CONFIG_VALUE_0=AUTHORIZATION: basic ${auth}"
-          # --exit-code: 0 = the branch exists, 2 = it does not; any failure to read is a failure here (never a guess).
-          status=0
-          listing="$(git ls-remote --exit-code --heads "https://github.com/${REPOSITORY}" "refs/heads/${BRANCH}")" || status=$?
-          if ((status != 0)); then
-            echo "❌ could not read the head of ${BRANCH} (git ls-remote exit ${status}); refusing to deploy ${GITHUB_SHA} without knowing it is the newest" >&2
-            exit 1
-          fi
-          current="${listing%%[[:space:]]*}"
-          # Exactly one line, "<40-hex sha><TAB>refs/heads/<branch>": anything else is not a head we can compare.
-          if [[ ! ${current} =~ ^[0-9a-f]{40}$ || ${listing} != "${current}"[[:space:]]"refs/heads/${BRANCH}" ]]; then
-            echo "❌ unexpected branch listing for ${BRANCH}; refusing to deploy ${GITHUB_SHA}" >&2
-            exit 1
-          fi
-          if [[ ${current} != "${GITHUB_SHA}" ]]; then
-            echo "a newer commit ${current} is on ${BRANCH}; its own run deploys it" >&2
-            echo "❌ not deploying ${GITHUB_SHA}: it is no longer the head of ${BRANCH} (this job concludes as failed on purpose, so it never reads as deployed)" >&2
-            exit 1
-          fi
-          echo "${GITHUB_SHA} is the head of ${BRANCH}: deploying it"
-      # THE AUTHORITATIVE NEVER-BACKWARDS CHECK, in two steps. It runs on every attempt of this job (GitHub can re-run
-      # this job alone, so nothing the gate decided earlier is trusted), right before the upload. What is live is the
-      # project's CURRENT PRODUCTION DEPLOYMENT, read from the Cloudflare Pages API (`canonical_deployment`: its id, its own
-      # URL and the commit hash every upload records: this workflow's `--commit-hash` and, before it, wrangler's own from
-      # the checkout).
+      # THE AUTHORITATIVE NEVER-BACKWARDS CHECK, in two steps in two jobs. It runs on every attempt (see the hand-off note
+      # above), right before the upload. What is live is the project's CURRENT PRODUCTION DEPLOYMENT, read from the
+      # Cloudflare Pages API (`canonical_deployment`: its id, its own URL and the commit hash every upload records: this
+      # workflow's `--commit-hash` and, before it, wrangler's own from the checkout).
       #
-      # STEP 1 HOLDS THE TOKEN AND RUNS NOTHING FROM THE CHECKOUT: curl and jq, nothing else. The token is in this step's
+      # STEP 1 HOLDS THE TOKEN AND RUNS NOTHING FROM THE CHECKOUT (this job has none): curl and jq, nothing else. The token is in this step's
       # environment alone and reaches curl on stdin, never in an argument; the answer is left in a file for step 2.
       - name: Read the production deployment
         id: project
@@ -389,7 +363,56 @@ jobs:
           [[ ${api_status} == 200 ]] || fail "the Pages API answered HTTP ${api_status} for ferretry-v5; refusing to guess what is live"
           jq -e '.success == true and (.result | type == "object") and (.result | has("canonical_deployment"))' "${RUNNER_TEMP}/pages-project.json" >/dev/null ||
             fail "the Pages API answer for ferretry-v5 is not a project with a production deployment field; refusing to guess what is live"
-      # STEP 2 HOLDS NO TOKEN, so the scripts it runs from the pushed commit (hosted-app-origin.sh, verify-pwa-release.sh)
+      # The artifact is readable by anyone who can read this repository's runs, and the Pages project answer carries the
+      # project's deployment configuration: only the fields step 2 reads leave this job. No token here.
+      - name: Keep only what the decision reads
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/pages-decision"
+          jq '{success, result: {name: .result.name, canonical_deployment: (.result.canonical_deployment | if type == "object" then {id, url, project_name, deployment_trigger: {metadata: ((.deployment_trigger.metadata // {}) | with_entries(select(.key == "commit_hash")))}} else . end)}}' \
+            "${RUNNER_TEMP}/pages-project.json" >"${RUNNER_TEMP}/pages-decision/pages-project.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pages-project-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pages-decision/pages-project.json
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    timeout-minutes: 10
+    name: Verify PWA release
+    needs: [gate, build, sign, project]
+    if: github.ref == 'refs/heads/rebuild/preview' && needs.gate.outputs.deploy == 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.live.outputs.skip }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          # Whole history: "Refuse a release that goes backwards" asks git whether the live commit is an ancestor of this one.
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pwa-dist
+          path: packages/app/dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pwa-release-signature
+          path: ${{ runner.temp }}/signature
+      - name: Verify the signed release
+        run: |
+          set -euo pipefail
+          cp "${RUNNER_TEMP}/signature/release-manifest.sig" packages/app/dist/release-manifest.sig
+          ./scripts/ci/check-pwa-release.sh --sequence "${GITHUB_RUN_NUMBER}" --commit "${GITHUB_SHA}" packages/app/dist
+          ./scripts/ci/verify-pwa-release.sh packages/app/dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pages-project-${{ github.run_attempt }}
+          path: ${{ runner.temp }}
+      # STEP 2 HOLDS NO TOKEN (and neither does this job), so the scripts it runs from the pushed commit (hosted-app-origin.sh, verify-pwa-release.sh)
       # never see it. The signed record is read from the production deployment's OWN URL (https://<first 8 of its
       # id>.<alias host>, checked against the id and the project), because the alias is mutable and not bound to that
       # deployment; the alias's record must then agree with it. Then: the live commit must be an ancestor of the commit
@@ -482,15 +505,88 @@ jobs:
           fi
           echo "${AFTER} descends from the live ${live} and its sequence ${SEQUENCE} exceeds ${live_sequence}: deploying it"
           echo "skip=false" >> "${GITHUB_OUTPUT}"
+      # The bytes `deploy` uploads are exactly the ones proved above: signed list included, nothing else downloaded.
+      # Uploaded under a name only this step can create in this attempt: a build that pre-uploaded the same name makes
+      # this step fail (artifacts are not overwritten), never deploy its bytes.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: steps.live.outputs.skip != 'true'
+        with:
+          name: pwa-release-verified-${{ github.run_attempt }}
+          path: packages/app/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    timeout-minutes: 10
+    name: Deploy PWA
+    needs: [gate, build, sign, project, verify]
+    if: github.ref == 'refs/heads/rebuild/preview' && needs.gate.outputs.deploy == 'true'
+    # The same environment as `project`: the Cloudflare credentials, which only `rebuild/preview` may deploy to.
+    environment: pwa-deploy-v5
+    permissions:
+      contents: read
+      deployments: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: needs.verify.outputs.skip != 'true'
+        with:
+          name: pwa-release-verified-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dist
+      - name: Install the pinned wrangler
+        if: needs.verify.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          npm install --prefix "${RUNNER_TEMP}/wrangler" --ignore-scripts --no-audit --no-fund --save-exact "wrangler@${WRANGLER_VERSION}"
+          installed="$(node -p "require(process.argv[1]).version" "${RUNNER_TEMP}/wrangler/node_modules/wrangler/package.json")"
+          if [[ ${installed} != "${WRANGLER_VERSION}" ]]; then
+            echo "❌ installed wrangler ${installed}, not the pinned ${WRANGLER_VERSION}" >&2
+            exit 1
+          fi
+      # Runs inside the serialised path (the shared concurrency group) and holds no Cloudflare credential. The
+      # concurrency group does not order runs, so an older commit's run can reach this point AFTER a newer one has
+      # deployed (or while it waits); deploying it would put older app code on the production alias. Deploy only the
+      # branch's current head. Exiting non-zero keeps this job's conclusion honest: a refused deploy is not a success.
+      # The token reaches git through GIT_CONFIG_* variables, never an argument, and is masked.
+      - name: Refuse a stale commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          echo "::add-mask::${auth}"
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader "GIT_CONFIG_VALUE_0=AUTHORIZATION: basic ${auth}"
+          # --exit-code: 0 = the branch exists, 2 = it does not; any failure to read is a failure here (never a guess).
+          status=0
+          listing="$(git ls-remote --exit-code --heads "https://github.com/${REPOSITORY}" "refs/heads/${BRANCH}")" || status=$?
+          if ((status != 0)); then
+            echo "❌ could not read the head of ${BRANCH} (git ls-remote exit ${status}); refusing to deploy ${GITHUB_SHA} without knowing it is the newest" >&2
+            exit 1
+          fi
+          current="${listing%%[[:space:]]*}"
+          # Exactly one line, "<40-hex sha><TAB>refs/heads/<branch>": anything else is not a head we can compare.
+          if [[ ! ${current} =~ ^[0-9a-f]{40}$ || ${listing} != "${current}"[[:space:]]"refs/heads/${BRANCH}" ]]; then
+            echo "❌ unexpected branch listing for ${BRANCH}; refusing to deploy ${GITHUB_SHA}" >&2
+            exit 1
+          fi
+          if [[ ${current} != "${GITHUB_SHA}" ]]; then
+            echo "a newer commit ${current} is on ${BRANCH}; its own run deploys it" >&2
+            echo "❌ not deploying ${GITHUB_SHA}: it is no longer the head of ${BRANCH} (this job concludes as failed on purpose, so it never reads as deployed)" >&2
+            exit 1
+          fi
+          echo "${GITHUB_SHA} is the head of ${BRANCH}: deploying it"
       # `--branch` is the Pages project's PRODUCTION branch whatever ref built this bundle: a deploy of any other
       # branch name would land on a preview alias and leave https://ferretry-v5.pages.dev on the old app. `--commit-hash`
       # records the built commit on the deployment, which is what the check above reads next time.
       - name: Deploy production bundle
-        if: steps.live.outputs.skip != 'true'
+        if: needs.verify.outputs.skip != 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_V5_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_PAGES_V5_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          nix develop .#ci -c bunx wrangler pages deploy packages/app/dist \
+          export PATH="${RUNNER_TEMP}/wrangler/node_modules/.bin:${PATH}"
+          wrangler pages deploy "${RUNNER_TEMP}/dist" \
             --project-name=ferretry-v5 --branch=rebuild/5.0 --commit-hash="${GITHUB_SHA}"

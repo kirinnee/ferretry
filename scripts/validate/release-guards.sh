@@ -37,7 +37,9 @@ set -euo pipefail
 #      no other branch, every job's `if` OPENS with exactly that one-ref guard (only `&&` may follow it, never a
 #      top-level `||`), its signing and deploy jobs use environments of their own, and its deploy job refuses a stale
 #      commit (the run branch's head must equal GITHUB_SHA) in a step before `wrangler pages deploy`.
-#   5. Nothing but CD and the Release workflow's own steps names `Casks/` or semantic-release.
+#   5. The Cloudflare token never meets checkout code: a PWA deploy job that reads a CLOUDFLARE secret has no checkout,
+#      local action, nix, bun, bunx or npx, and runs wrangler only from an exact-version, secret-free npm install.
+#   6. Nothing but CD and the Release workflow's own steps names `Casks/` or semantic-release.
 
 root_dir="$(git rev-parse --show-toplevel)"
 if [[ ${1:-} == --root ]]; then root_dir="$(cd "${2:?--root needs a directory}" && pwd)"; fi
@@ -149,36 +151,37 @@ if [[ -f ${preview} ]]; then
                   and ($r | contains("exit 1")))]
            | length > 0)' >/dev/null ||
     fail "${preview}: the deploy job must, before wrangler pages deploy, read the run branch head with git ls-remote --exit-code --heads, refuse (exit 1) unless it equals GITHUB_SHA (an older commit must not publish after a newer one)"
-  # THE DEPLOY JOB IS THE AUTHORITY ON "NEVER BACKWARDS". GitHub can re-run it alone on a stale gate result, so BEFORE
-  # `wrangler pages deploy` it must (1) in a step that holds the Cloudflare token and runs nothing from the checkout (no
-  # `./scripts/`), read the project's production deployment from the Pages API (canonical_deployment), and (2) in a LATER
-  # step that holds no Cloudflare credential at all (the pushed commit's scripts run there), prove the signed record and ask
-  # git whether the live commit is an ancestor (`merge-base --is-ancestor`).
+  # THE PROJECT -> VERIFY -> DEPLOY CHAIN IS THE AUTHORITY ON "NEVER BACKWARDS". GitHub can re-run `deploy` alone on a
+  # stale gate result, so BEFORE the upload (1) the `project` job, which holds the Cloudflare token and has no checkout
+  # (no `./scripts/`), reads the project's production deployment from the Pages API (canonical_deployment) and hands
+  # it on as an artifact, and (2) the `verify` job, which holds no secret at all (the pushed commit's scripts run
+  # there), proves the signed record and asks git whether the live commit is an ancestor (`merge-base --is-ancestor`).
+  # `deploy` needs both, and every hand-off artifact is named with the run attempt, so a deploy-only re-run finds
+  # nothing of an earlier attempt's decision and fails closed.
   json "${preview}" | jq -e '
-    .jobs.deploy.steps as $steps
-    | ([$steps | to_entries[] | select((.value.run // "") | contains("wrangler pages deploy")) | .key] | first) as $deploy_at
-    | ([$steps | to_entries[]
-            | select(.key < $deploy_at)
-            | select((.value.run // "") as $r
-                | ((.value.env // {}) | tostring | contains("secrets.CLOUDFLARE_PAGES_V5_API_TOKEN"))
-                  and ($r | contains("api.cloudflare.com/client/v4/accounts/"))
-                  and ($r | contains("canonical_deployment"))
-                  and (($r | contains("./scripts/")) | not))
-            | .key] | first) as $read_at
-    | $deploy_at != null
-      and $read_at != null
-      and ([$steps | to_entries[]
-            | select(.key > $read_at and .key < $deploy_at)
-            | select((.value.run // "") as $r
-                | (((.value.env // {}) | tostring | contains("secrets.")) | not)
-                  and (($r | contains("CLOUDFLARE")) | not)
-                  and ($r | contains("verify-pwa-release.sh"))
-                  and ($r | contains("merge-base --is-ancestor"))
-                  and ($r | contains("fail")))]
-           | length > 0)' >/dev/null ||
-    fail "${preview}: the deploy job must, before wrangler pages deploy, (1) read the production deployment from the Cloudflare Pages API in a step that runs nothing from the checkout, then (2) in a later step with no secret and no Cloudflare variable, verify the signed record and refuse (git merge-base --is-ancestor) a commit that is not a descendant of it (a re-run of the deploy job alone must not reuse a stale gate, and the token must not reach the pushed commit's scripts)"
-  json "${preview}" | jq -e '(.jobs.sign.environment == "pwa-release-v5") and (.jobs.deploy.environment == "pwa-deploy-v5")' >/dev/null ||
-    fail "${preview}: sign must use pwa-release-v5 and deploy pwa-deploy-v5"
+    ([.jobs.project.steps[]?
+       | select((.run // "") as $r
+           | ((.env // {}) | tostring | contains("secrets.CLOUDFLARE_PAGES_V5_API_TOKEN"))
+             and ($r | contains("api.cloudflare.com/client/v4/accounts/"))
+             and ($r | contains("canonical_deployment"))
+             and (($r | contains("./scripts/")) | not))]
+      | length > 0)
+    and ([.jobs.verify.steps[]?
+          | select((.run // "") as $r
+              | (((.env // {}) | tostring | contains("secrets.")) | not)
+                and (($r | contains("CLOUDFLARE")) | not)
+                and ($r | contains("verify-pwa-release.sh"))
+                and ($r | contains("merge-base --is-ancestor"))
+                and ($r | contains("fail")))]
+         | length > 0)
+    and ((.jobs.verify | tostring | contains("secrets.")) | not)
+    and ((.jobs.verify.needs // []) | index("project") != null)
+    and ((.jobs.deploy.needs // []) | (index("project") != null and index("verify") != null))
+    and ([.jobs.verify.steps[], .jobs.deploy.steps[], .jobs.project.steps[] | (.with.name // empty) | select(startswith("pages-project") or startswith("pwa-release-verified"))]
+         | length > 0 and all(endswith("-${{ github.run_attempt }}")))' >/dev/null ||
+    fail "${preview}: before the upload, the project job (token, no checkout) must read the production deployment from the Cloudflare Pages API, then the verify job (no secret, no Cloudflare variable) must verify the signed record and refuse (git merge-base --is-ancestor) a commit that is not a descendant of it; deploy must need both, and their hand-off artifacts must be named with github.run_attempt (a re-run of the deploy job alone must not reuse a stale decision, and the token must not reach the pushed commit's scripts)"
+  json "${preview}" | jq -e '(.jobs.sign.environment == "pwa-release-v5") and (.jobs.deploy.environment == "pwa-deploy-v5") and (.jobs.project.environment == "pwa-deploy-v5") and ((.jobs.verify.environment // null) == null)' >/dev/null ||
+    fail "${preview}: sign must use pwa-release-v5, project and deploy pwa-deploy-v5, and verify no environment"
   json "${preview}" | jq -e '[.jobs[] | .permissions // {} | .["contents"] // "none"] | all(. == "read")' >/dev/null ||
     fail "${preview} may only read contents"
   # The deploy holds a Pages-only token of its own, in its own environment: never the repository-level production token.
@@ -189,7 +192,60 @@ if [[ -f ${preview} ]]; then
     fail "${preview} must deploy with secrets.CLOUDFLARE_PAGES_V5_API_TOKEN"
 fi
 
-# 5. Casks/ and semantic-release are named only where they belong
+# 5. THE CLOUDFLARE TOKEN NEVER MEETS CHECKOUT CODE. A job of a PWA deploy workflow that can read a CLOUDFLARE secret
+# has no `actions/checkout`, no local action (`uses: ./...`), no reusable workflow and no run step that names `nix`, `bun`,
+# `bunx` or `npx`: the checkout's flake shellHook, bun resolution and scripts would otherwise run with the token in their
+# environment. Wrangler there is installed from npm at ONE exact version (`WRANGLER_VERSION`, the same in both
+# workflows), by a step that holds no secret, before any step that runs it.
+pages_workflows=(.github/workflows/pwa-pages.yaml "${preview}")
+wrangler_versions=()
+for workflow in "${pages_workflows[@]}"; do
+  [[ -f ${workflow} ]] || continue
+  holders="$(json "${workflow}" | jq -r '
+    .jobs // {} | to_entries[]
+    | select(.value | tostring | test("secrets\\.CLOUDFLARE|secrets\\[|toJSON\\(secrets"))
+    | .key')"
+  [[ -n ${holders} ]] || fail "${workflow}: no job reads a CLOUDFLARE secret, so the deploy token check has nothing to prove (renamed secret?)"
+  while IFS=$'\t' read -r job why; do
+    fail "${workflow}: job ${job} holds the Cloudflare token and ${why}; the token must never meet checkout code (no checkout, local action, nix, bun, bunx or npx in a token job)"
+  done < <(json "${workflow}" | jq -r '
+    .jobs // {} | to_entries[]
+    | select(.value | tostring | test("secrets\\.CLOUDFLARE|secrets\\[|toJSON\\(secrets"))
+    | .key as $job
+    | (if (.value.uses // null) != null then ["\($job)\tcalls a reusable workflow"] else [] end)
+      + [(.value.steps // [])[]
+         | if ((.uses // "") | test("^(actions/checkout@|\\./)")) then "\($job)\tuses \(.uses)"
+           elif ((.run // "") | test("(^|[^A-Za-z0-9_./-])(nix|bun|bunx|npx)([^A-Za-z0-9_-]|$)")) then "\($job)\truns nix, bun, bunx or npx"
+           else empty end]
+      + (if ((.value.env // {}) | tostring | test("secrets\\.")) then ["\($job)\tputs a secret in the job-level env (every step, the install included, would hold it)"] else [] end)
+    | .[]')
+  # Wrangler: exact version, installed by a secret-free step BEFORE the first step that runs it.
+  version="$(json "${workflow}" | jq -r '.env.WRANGLER_VERSION // ""')"
+  [[ ${version} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+    fail "${workflow}: env.WRANGLER_VERSION must be an exact x.y.z version, got '${version}'"
+  wrangler_versions+=("${version}")
+  json "${workflow}" | jq -e '(.env // {}) | tostring | test("secrets\\.") | not' >/dev/null ||
+    fail "${workflow}: a secret at workflow level reaches every job, the install steps included"
+  while IFS= read -r job; do
+    json "${workflow}" | jq -e --arg job "${job}" '
+      .jobs[$job].steps as $steps
+      | ([$steps | to_entries[] | select((.value.run // "") | test("wrangler pages")) | .key] | first) as $use_at
+      | ([$steps | to_entries[]
+          | select((.value.run // "") as $r
+              | ($r | contains("npm install")) and ($r | contains("wrangler@${WRANGLER_VERSION}")) and ($r | contains("--ignore-scripts"))
+                and (((.value.env // {}) | tostring | test("secrets\\.|CLOUDFLARE")) | not))
+          | .key] | first) as $install_at
+      | $use_at == null or ($install_at != null and $install_at < $use_at)' >/dev/null ||
+      fail "${workflow}: job ${job} runs wrangler without first installing it at the exact WRANGLER_VERSION (npm install --ignore-scripts wrangler@\${WRANGLER_VERSION}) in a step with no secret"
+    json "${workflow}" | jq -e --arg job "${job}" '[.jobs[$job].steps[] | (.run // "") | scan("wrangler@[^ \"]*")] | all(. == "wrangler@${WRANGLER_VERSION}")' >/dev/null ||
+      fail "${workflow}: job ${job} names a wrangler version other than \${WRANGLER_VERSION}"
+  done <<<"${holders}"
+done
+if [[ -n "$(printf '%s\n' "${wrangler_versions[@]}" | sort -u | sed -n '2p')" ]]; then
+  fail "the PWA deploy workflows pin different wrangler versions (${wrangler_versions[*]}); they must agree"
+fi
+
+# 6. Casks/ and semantic-release are named only where they belong
 for workflow in "${workflows[@]}"; do
   [[ ${workflow} == "${release}" || ${workflow} == "${cd_workflow}" || ${workflow} == .github/workflows/ci.yaml ]] && continue
   if rg -q 'Casks/|semantic-release|goreleaser|gh release' "${workflow}"; then
