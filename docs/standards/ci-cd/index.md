@@ -830,7 +830,7 @@ hung inside a test and held its runner for two hours, three runs in a row, befor
   `smoke` 10, `full-pending` and `full` 5; E2E relevance and summary 5; `Harness Contract (latest)`
   20 and its report 10; `CD` `compile` 15, `goreleaser` 30, `fury` 15 and `sign` 15; the darwin smoke
   (`smoke-darwin.yaml`) attempts 10 each, backoffs 5 and 8, verdict 5; `macOS Advisory` 5; `Deploy PWA to Pages` build 15, sign 10,
-  deploy 10; `Deploy Hosted Relay` jobs 20; `Release` 20.
+  verify 10, deploy 10 (the 5.0 preview's `Deploy 5.0 preview PWA to Pages` adds `project` 10); `Deploy Hosted Relay` jobs 20; `Release` 20.
 - A new job states its ceiling when it is added, sized from its first green runs.
   `scripts/validate/job-ceilings.sh` refuses a workflow job without one.
 

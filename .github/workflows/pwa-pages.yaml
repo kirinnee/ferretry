@@ -9,7 +9,13 @@ concurrency:
   group: pwa-pages-production
   cancel-in-progress: false
 
-# THREE JOBS, BECAUSE THE SIGNING KEY MUST NEVER SHARE A RUNNER WITH THE BUILD (docs/pwa-release-signing.md).
+env:
+  # The ONE wrangler version the token-holding job installs (exact, never a range or a tag).
+  # scripts/validate/release-guards.sh holds that it is exact and equals pwa-pages-v5.yaml's.
+  WRANGLER_VERSION: 4.93.0
+
+# FOUR JOBS, BECAUSE THE SIGNING KEY MUST NEVER SHARE A RUNNER WITH THE BUILD, AND THE CLOUDFLARE TOKEN MUST NEVER SHARE
+# ONE WITH CHECKOUT CODE (docs/pwa-release-signing.md).
 #
 #   build   installs dependencies and builds the release. Holds NO secret: any dependency's install
 #           script or build plugin runs here, so NOTHING it produces is trusted downstream.
@@ -19,8 +25,11 @@ concurrency:
 #           run's number and commit, the checkout's next key or none, no Pages server code, and
 #           exactly the built files. A compromised build therefore cannot get a real signature on an
 #           attacker's next key or a frozen sequence; at worst it spoils one release's app code.
-#   deploy  holds only the Cloudflare token. It runs the same check and proves the signature
-#           (scripts/ci/verify-pwa-release.sh) before it uploads a byte.
+#   verify  holds NO secret and has the checkout. It runs the same check and proves the signature
+#           (scripts/ci/verify-pwa-release.sh) before anything is uploaded, and hands the verified bytes on as an
+#           artifact.
+#   deploy  holds only the Cloudflare token and has NO checkout, no nix, no bun: it downloads the verified artifact
+#           and runs the exactly-pinned wrangler (scripts/validate/release-guards.sh holds that).
 #
 # Every action in this workflow is pinned to an exact SHA, because two of its jobs hold long-lived
 # secrets (docs/standards/ci-cd/index.md).
@@ -102,20 +111,23 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  deploy:
+  # THE CLOUDFLARE TOKEN NEVER MEETS CHECKOUT CODE. `deploy` holds it and runs no `actions/checkout`, no local action, no
+  # `nix develop`, no `bun` or `bunx` (scripts/validate/release-guards.sh holds that), so no flake shellHook, bun resolution or
+  # script from the pushed commit ever runs with the token in its environment. `verify` has the checkout and holds no
+  # secret: it proves the signed release and hands the verified bytes to `deploy` as an artifact. Wrangler is installed
+  # from npm at ONE exact version, in a step that holds no token, and only then run in a step that does.
+  verify:
     timeout-minutes: 10
-    name: Deploy PWA
+    name: Verify PWA release
     needs: [build, sign]
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
-      deployments: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - uses: ./.github/actions/install-nix
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: pwa-dist
@@ -130,11 +142,43 @@ jobs:
           cp "${RUNNER_TEMP}/signature/release-manifest.sig" packages/app/dist/release-manifest.sig
           ./scripts/ci/check-pwa-release.sh --sequence "${GITHUB_RUN_NUMBER}" --commit "${GITHUB_SHA}" packages/app/dist
           ./scripts/ci/verify-pwa-release.sh packages/app/dist
-      # Wrangler runs through the pinned devshell rather than cloudflare/wrangler-action. The action
-      # installs wrangler with whichever package manager it detects, picks bun from this repository's
-      # lockfile, and then cannot find bun — it runs outside the nix shell that provides it. Calling
-      # bunx inside `nix develop` uses the toolchain the rest of CI already uses, and drops a
-      # third-party action from the deploy path. Wrangler reads both credentials from the
+      # The bytes `deploy` uploads are exactly the ones proved above: signed list included, nothing else downloaded.
+      # Uploaded under a name of its own: a build that pre-uploaded the same name makes this step fail (artifacts are
+      # not overwritten), never deploy its bytes.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pwa-release-verified
+          path: packages/app/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    timeout-minutes: 10
+    name: Deploy PWA
+    needs: [build, sign, verify]
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      deployments: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pwa-release-verified
+          path: ${{ runner.temp }}/dist
+      # No token in this step: the install scripts of wrangler's dependencies are not run at all (`--ignore-scripts`), and
+      # nothing is read from the repository (there is no checkout in this job).
+      - name: Install the pinned wrangler
+        run: |
+          set -euo pipefail
+          npm install --prefix "${RUNNER_TEMP}/wrangler" --ignore-scripts --no-audit --no-fund --save-exact "wrangler@${WRANGLER_VERSION}"
+          installed="$(node -p "require(process.argv[1]).version" "${RUNNER_TEMP}/wrangler/node_modules/wrangler/package.json")"
+          if [[ ${installed} != "${WRANGLER_VERSION}" ]]; then
+            echo "❌ installed wrangler ${installed}, not the pinned ${WRANGLER_VERSION}" >&2
+            exit 1
+          fi
+      # Wrangler runs from that install, not through `nix develop` and not through cloudflare/wrangler-action (which
+      # installs with whichever package manager it detects). Wrangler reads both credentials from the
       # environment, so neither is ever passed as an argument.
       #
       # The project is created on first run: Cloudflare merged Workers and Pages into one flow whose
@@ -148,11 +192,12 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          projects="$(nix develop .#ci -c bunx wrangler pages project list)"
+          export PATH="${RUNNER_TEMP}/wrangler/node_modules/.bin:${PATH}"
+          projects="$(wrangler pages project list)"
           if grep -qE '(^|[[:space:]])ferretry([[:space:]]|$)' <<<"${projects}"; then
             echo "project ferretry already exists"
           else
-            nix develop .#ci -c bunx wrangler pages project create ferretry --production-branch=main
+            wrangler pages project create ferretry --production-branch=main
           fi
       - name: Deploy production bundle
         env:
@@ -160,5 +205,6 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          nix develop .#ci -c bunx wrangler pages deploy packages/app/dist \
-            --project-name=ferretry --branch=main
+          export PATH="${RUNNER_TEMP}/wrangler/node_modules/.bin:${PATH}"
+          wrangler pages deploy "${RUNNER_TEMP}/dist" \
+            --project-name=ferretry --branch=main --commit-hash="${GITHUB_SHA}"
