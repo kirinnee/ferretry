@@ -142,20 +142,25 @@ login is shared in place and never seeded. A stray `fleet/config.yaml` is **igno
 never read, converted or refused, so a machine that still has one boots as if it were not there.
 There is no switch, no old reader and no migration: the old account system is deleted.
 
-`packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `^attention` (the old `!A3` is still read, never written: `!` is shell mode in agent composers), `/skill` or
-`$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one
-renderer and one click behaviour. The authoring and implementation contract is
+`packages/app` and Conversation's hypermedia reader read every reference — `:agent`, `@file`, `&task`, `^attention` (the old `!A3` is still read, never written: `!` is shell mode in agent composers), `/skill` or
+`$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate and
+one click behaviour. The authoring and implementation contract is
 [docs/reference-standard.md](docs/reference-standard.md) — implement against that document, and
 extend the grammar there rather than adding a second one.
 
-A fenced `fy-render` block renders an illustration inline in an assistant's own transcript message,
-and **no author-supplied code executes** — `svg` and `image` become an `<img>`; `mermaid` and
+A fenced `fy-render` block renders an illustration inline in an assistant's own chat message (and in a
+closed top-level block of a ferret's queued message). The chat reads a message as Durian hypermedia
+(`HypermediaProse`), and `fy-render` is one of its fences, drawn only where a surface lends the fence
+door (`ReferenceSurface.fences`, lent by the chat alone: the agenda, All queues and the shell's
+`Markdown` show a block as code),
+and **author code runs in exactly one place, an opaque-origin frame that cannot reach the app** — `svg` and `image` become an `<img>`; `mermaid` and
 `lottie` are handed as **data** to a trusted library inside an opaque-origin sandbox frame, which is
 a narrower claim than "author code is sandboxed" and the difference is the point. A compiled Mermaid
 diagram returns as SVG text and re-enters through that same measured `<img>` sink; Lottie stays live
-because an animation must. `html` is still shown as escaped source with the limitation stated on
-screen, because no browser-only boundary for executing author JavaScript survived measurement — so
-**handover row 65 stays open**. The frame is denied every ordinary **subresource** — which is not the
+because an animation must. `html` without script is a sanitized static fragment in a closed shadow
+root, and `html` **with script runs** in its own opaque-origin frame — the owner's stated decision, with
+the residual declared, because no browser-only boundary that bounds author JavaScript's CPU and memory
+survived measurement — so **handover row 65 stays open**. The frame is denied every ordinary **subresource** — which is not the
 same as having no network, since self-navigation, prerender and WebRTC egress were all measured from
 that frame shape and remain a declared residual: the parent fetches the one pinned library and
 transfers the bytes over a capability port, and the shell's `script-src` lists nothing but build-time

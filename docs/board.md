@@ -682,9 +682,11 @@ fy task patch F12 --file f12.yaml    # one atomic edit; --file - reads stdin; JS
 ## How a task reads
 
 Every text a ferret writes on a task — `summary`, `status`, `premise`, `context`, `brief` and `howToTest` — is Markdown,
-drawn by the chat's one renderer (`ChatProse`), so `fy-render` hypermedia (mermaid, svg, html, chart, image…) draws
-exactly as in a message or an agenda item ([fy-render.md](fy-render.md)), and references are read through the one
-grammar and its proof-before-link gate ([reference-standard.md](reference-standard.md)). The task detail reads top to bottom
+drawn by the Board's own small renderer (`packages/plugins/board/app/views/prose.tsx`: paragraphs, lists, `code`, bold,
+links and a `&F12` task link), so an `fy-render` block there is a code fence, not an illustration — the chat's richer
+reading belongs to Conversation ([fy-render.md](fy-render.md#where-a-block-renders-and-where-it-cannot)), and the
+reference grammar with its proof-before-link gate ([reference-standard.md](reference-standard.md)) is the chat's and the
+shell's, which this renderer does not run. The task detail reads top to bottom
 as an agenda item does, with nothing folded:
 
 1. the title, with the **summary** as one line under it, then the **Status** ([The task's Status](#the-tasks-status)) when
