@@ -99,6 +99,9 @@ export interface HandOver {
   readonly applied: { readonly model: AccountModel; readonly documents: readonly FleetDocumentWrite[] };
   readonly landed: readonly string[];
   readonly sentences: readonly string[];
+  /** How many files an owner HELD for the owner's confirmation, and how many it refused (structured, for the log). */
+  readonly held: number;
+  readonly refused: number;
 }
 
 /**
@@ -112,10 +115,12 @@ export async function handOver(input: {
   readonly secretValues: readonly string[];
   /** The model the owners report in effect NOW (read again after they wrote). Only asked when an owner took something. */
   readonly inEffect: () => Promise<AccountModel>;
+  /** Called before each owner's write: throws once the request has ended, so the next owner is never written. */
+  readonly live?: () => void;
 }): Promise<HandOver> {
   const { writer, owners, applied } = input;
   if (owners === undefined || writer === undefined || owners.writes.length === 0) {
-    return { applied, landed: [], sentences: [] };
+    return { applied, landed: [], sentences: [], held: 0, refused: 0 };
   }
   const values = input.secretValues.filter(value => value.length > 0);
   const say = (reason: string): string => {
@@ -131,6 +136,7 @@ export async function handOver(input: {
   const created = new Map<string, readonly string[]>();
   const etags = new Map<string, Readonly<Record<string, string>>>();
   for (const write of owners.writes) {
+    input.live?.();
     const answer =
       write.text === undefined
         ? ({ outcome: 'refused', reason: write.problem ?? 'it could not be made' } as const)
@@ -196,6 +202,8 @@ export async function handOver(input: {
   return {
     applied: { model: effective, documents },
     landed: written,
+    held: held.length,
+    refused: refused.length,
     sentences: [
       ...(written.length === 0 ? [] : [`Written by the parts that own them: ${written.join(', ')}.`]),
       ...(held.length === 0 ? [] : [`Held until you confirm: ${held.join(', ')}.`]),

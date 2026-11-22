@@ -368,6 +368,8 @@ export interface RequestInit2 {
   readonly query?: Readonly<Record<string, string | readonly string[]>>;
   readonly headers?: Readonly<Record<string, string>>;
   readonly as?: TestCaller;
+  /** The request's own lifecycle (`ApiRequest.signal`): a carried caller that left aborts it. Absent: never aborted. */
+  readonly signal?: AbortSignal;
 }
 
 export interface OpenSocket {
@@ -2907,6 +2909,7 @@ async function start(world: World): Promise<TestHost> {
       }),
       arrival: testArrival(caller),
       ...(principal === undefined ? {} : { principal }),
+      ...(init.signal === undefined ? {} : { signal: init.signal }),
       text: async limit => {
         if (limit !== undefined && body.length > limit)
           throw new ApiError(413, 'The request body is too large.', 'too_large');

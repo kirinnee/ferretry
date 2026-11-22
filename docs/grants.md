@@ -718,6 +718,15 @@ step-up window, which origin a passkey belongs to); this section owns what the g
 When a per-act step-up is asked for, its window is the `stepUpWindowMinutes` security setting (0–60, default
 15); at `0` a step-up admits exactly one act and the boundary spends it. An unlock is never spent.
 
+**A spent step-up still confirms the act it admitted.** The spend ends the WINDOW (the next call needs another step-up);
+it does not take the passkey proof away from the call it was spent on. A call admitted on a step-up the machine then
+spent (`stepUpOnActions` with a window of `0`) still claims, once, the fresh proof that already existed when it was
+admitted (`claimFreshStepUp`, told by Gate that its own admission spent the step-up) — never one proved after the
+admission, one for another act, or one on a copy of the app with no live session. Without that, a `0`-minute machine
+could never complete an act that claims its own proof. A route that names the passkey's act (`CapabilityDemand.act`, the
+first refusal's `demand.act`: an import's `loosen-config`) gets the proof stamped for that act on the FIRST ask, and
+claims exactly that proof; a passkey proved for any other act, or for none, never confirms it.
+
 **What needs one** — which an unlock satisfies by default. A **governed** caller needs a current step-up for:
 
 - **every `configure` demand**, on every capability; and

@@ -113,7 +113,6 @@ import {
   type SessionFrame,
   type SessionId as WireSessionId,
   sealRecord,
-  sessionApiRequest,
   sessionStreamRequest,
   speaksPreviousSessionProtocol,
   streamDataFrame,
@@ -137,6 +136,7 @@ import {
 import { createIdentitySigner, signerFor } from './signer.ts';
 import * as refusal from './refusal-note.ts';
 import { answerWithMachineName } from './pair-name.ts';
+import { CarriedRequests } from './carried-requests.ts';
 
 /** The kernel's route table, as the one function a session's request needs from it. */
 export type SessionDispatch = (request: ApiRequest) => Promise<ApiResponse>;
@@ -360,6 +360,7 @@ class SealedSession implements CarrierLink {
   #receive: ReceiveWindow = newReceiveWindow();
   readonly #answered = new Set<number>();
   #running = 0;
+  readonly #carried = new CarriedRequests();
   readonly #backlog: WaitingRequest[] = [];
   /** Records waiting for credit, in order. */
   readonly #waiting: PendingRecord[] = [];
@@ -986,7 +987,7 @@ class SealedSession implements CarrierLink {
       let response: ApiResponse;
       try {
         response = await this.deps.dispatch(
-          sessionApiRequest({ ...request, body }, standing.principal, this.#origin(), this.#transcript),
+          this.#carried.build({ ...request, body }, standing.principal, this.#origin(), this.#transcript),
         );
       } catch {
         response = jsonResponse(
@@ -1306,6 +1307,7 @@ class SealedSession implements CarrierLink {
   /** Everything a session holds beyond its record state. THE PHASE GOES FIRST, so no send path queues again. */
   #forget(): void {
     this.#phase = 'concluding';
+    this.#carried.end();
     this.#credentialDeadline?.();
     this.#credentialDeadline = undefined;
     this.#lease?.();

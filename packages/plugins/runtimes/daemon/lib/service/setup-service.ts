@@ -84,6 +84,8 @@ import { CloneRefusal } from '../account/clone-parts.ts';
 import { EMPTY_RUNTIME_IDS } from '../account/ids.ts';
 import type { FleetDocumentWrite, FleetModelApplyPlan } from '../provisioning.ts';
 import { configurationLanded, failedApplySentence } from './failed-apply.ts';
+import { writeConfigFiles } from './setup-config-files.ts';
+import { reportLeft, writeVaultAndLogins } from './setup-vault-logins.ts';
 import {
   freeName,
   type HostHarnessScan,
@@ -137,10 +139,10 @@ import {
   type FleetCatalogServiceDeps,
   harnessCommandsOf,
 } from './catalog-service.ts';
-import { assertMayFileSecrets, fileSecrets, reusableSecrets, secretSentences, uniqueByName } from './setup-secrets.ts';
+import { assertMayFileSecrets, reusableSecrets, secretSentences, uniqueByName } from './setup-secrets.ts';
 import { type ToolInstallOutcome, type ToolInstallPreview, ToolInstallRefusal } from './tool-install.ts';
 import { toolOutcomeOnWire } from './tool-install-wire.ts';
-import { createLogins, importLoginEnvs, type LoginEnvPlan, loginEnvPlanOf, tickedEnvOf } from './setup-login-env.ts';
+import { importLoginEnvs, type LoginEnvPlan, loginEnvPlanOf, tickedEnvOf } from './setup-login-env.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -596,10 +598,11 @@ export class FleetSetupService {
         'what this would add changed on this machine after it was previewed; review it again',
       );
     }
-    // The Vault is written first: the caller's right to write it is settled before the first write.
-    assertMayFileSecrets(composed.secrets, caller, 'apply');
-    await fileSecrets((name, value) => this.deps.secrets.put(name, value), composed.secrets);
-    await createLogins(this.deps.catalog, composed);
+    await writeVaultAndLogins(
+      { put: (name, value) => this.deps.secrets.put(name, value), catalog: this.deps.catalog },
+      composed,
+      caller,
+    );
     // Settings files go first, each through the owner's door and against the version it was compared with. The
     // record rides the batch after them, so it can only claim less than landed, never more. A write that loosens
     // is held unless the caller is at this machine (`governed: false`); a remote caller confirms it as for any
@@ -614,24 +617,20 @@ export class FleetSetupService {
       owners: composed.owners,
       applied: { model: composed.model, documents: composed.documents },
       secretValues: composed.secrets.map(secret => secret.value),
+      live: () => caller?.live?.(),
       // The fleet is built from what the owners report in effect after they wrote, not from the import's own model.
       inEffect: async () => (await this.#read()).model,
     });
     landed.push(...handed.landed);
+    reportLeft(caller, handed.held, handed.refused);
     const { model, documents } = handed.applied;
-    for (const write of composed.configWrites ?? []) {
-      try {
-        const waiting = await this.#writeConfigFile(write, mayLoosen);
-        held += waiting;
-        if (waiting === 0) landed.push(write.path);
-      } catch (error) {
-        if (landed.length > 0 && error instanceof FleetCatalogRefusal) {
-          throw new FleetCatalogRefusal(error.code, `${error.message}; ${configurationLanded(landed)}`);
-        }
-        throw error;
-      }
-    }
-    await this.#applyModel(model, documents, landed);
+    held += await writeConfigFiles(
+      composed.configWrites ?? [],
+      write => this.#writeConfigFile(write, mayLoosen),
+      caller,
+      landed,
+    );
+    await this.#applyModel(model, documents, landed, () => caller?.live?.());
     const envSentences = await importLoginEnvs(this.deps.loginEnvImport, composed, caller);
     const sentences = [
       composed.summary,
@@ -642,6 +641,7 @@ export class FleetSetupService {
       ...handed.sentences,
       ...envSentences,
     ];
+    reportLeft(caller, held, 0);
     if (held > 0)
       sentences.push(`${plural(held, 'settings file')} held until you confirm ${held === 1 ? 'it' : 'them'}.`);
     return sentences.join(' ');
@@ -1476,6 +1476,7 @@ export class FleetSetupService {
     model: AccountModel,
     documents: readonly FleetDocumentWrite[],
     landed: readonly string[],
+    live?: () => void,
   ): Promise<void> {
     const { catalog } = this.deps;
     let plan: FleetModelApplyPlan;
@@ -1503,6 +1504,7 @@ export class FleetSetupService {
         landed.length === 0 ? errorMessage(error) : `${errorMessage(error)}; ${configurationLanded(landed)}`,
       );
     }
+    live?.(); // the model preparation above awaited: recheck the request right before the write
     try {
       await catalog.provisioner.apply(plan, documents);
     } catch (error) {
