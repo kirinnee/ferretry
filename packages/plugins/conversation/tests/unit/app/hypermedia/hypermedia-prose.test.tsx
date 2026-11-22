@@ -7,6 +7,7 @@ import { describe, expect, it } from 'bun:test';
 import { Markdown, ReferenceSurfaceProvider } from '@ferretry/app';
 import { interact, mount, must } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
+import { DemotingProse } from '../../../../app/hypermedia/demoting-prose.tsx';
 import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
 import { fixture, inShell } from './surface-fixture.tsx';
 
@@ -386,6 +387,51 @@ describe('a message over the size cap', () => {
     const { container, unmount } = await draw(big);
     expect(container.querySelector('.dh-error')).toBeNull();
     expect(container.textContent?.endsWith('END')).toBe(true);
+    await unmount();
+  });
+});
+
+describe('headings the surface does not want as headings (demoteHeadings, r12 R3)', () => {
+  const TEXT = ['## Plan', '', 'First, the short.', '', '### Later', '', 'More, with [a link](#plan).'].join('\n');
+  const drawProvided = async (demoteHeadings: boolean) => {
+    const f = fixture();
+    const mounted = await mount(
+      inShell(
+        <ReferenceSurfaceProvider surface={f.surface}>
+          <DemotingProse text={TEXT} {...(demoteHeadings ? { demoteHeadings } : {})} />
+        </ReferenceSurfaceProvider>,
+      ) as never,
+    );
+    await interact(() => Promise.resolve());
+    return mounted;
+  };
+
+  it('without it a heading is a heading, as the chat draws it', async () => {
+    const { container, unmount } = await drawProvided(false);
+    expect([...container.querySelectorAll('.dh-doc :is(h1, h2, h3, h4, h5, h6)')].map(each => each.tagName)).toEqual([
+      'H2',
+      'H3',
+    ]);
+    expect(container.querySelector('[data-demoted-heading]')).toBeNull();
+    // The heading slot draws what Durian draws with no slot: the `#` anchor to its own id, so the chat is unchanged.
+    const heading = must(container.querySelector('.dh-doc h2'), 'the h2');
+    expect(heading.getAttribute('id')).toMatch(/plan$/u);
+    expect(heading.querySelector('a.h-anchor')?.getAttribute('href')).toBe(`#${heading.getAttribute('id')}`);
+    await unmount();
+  });
+
+  it('with it no h1–h6 is drawn: each is the shell Markdown’s own bold line, keeping its id for a link in the message', async () => {
+    const { container, unmount } = await drawProvided(true);
+    expect(container.querySelectorAll('.dh-doc :is(h1, h2, h3, h4, h5, h6)').length).toBe(0);
+    const lines = [...container.querySelectorAll('.dh-doc p[data-demoted-heading]')];
+    expect(lines.map(line => line.querySelector('strong')?.textContent)).toEqual(['Plan', 'Later']);
+    expect(lines.map(line => line.textContent)).toEqual(['Plan', 'Later']);
+    // The id Durian gave the heading is kept: the link `#plan` still has its target.
+    const id = lines[0]?.getAttribute('id') ?? '';
+    expect(id).toMatch(/plan$/u);
+    expect(container.querySelector(`a[href="#${id}"]`)).not.toBeNull();
+    // Only a heading changes: the prose around it is drawn as ever.
+    expect(container.textContent).toContain('First, the short.');
     await unmount();
   });
 });

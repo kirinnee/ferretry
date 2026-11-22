@@ -12,6 +12,7 @@ import {
   TierListPart,
 } from 'durian-hypermedia/react/strict';
 import { GuardedAnimation } from './animation-part.tsx';
+import { HypermediaHeading } from './demoted-heading.tsx';
 import { FY_RENDER_COMPONENT_BLOCK, FY_RENDER_SLOTS } from './fy-render-host.tsx';
 import { HELD_COMPONENT_BLOCKS } from './held-fences.tsx';
 import { HumanSegment, UndrawnPart, withLlmText } from './llm-text.tsx';
@@ -71,4 +72,8 @@ export const HYPERMEDIA_PARTS: Required<Pick<Components, PartName>> = {
 export const HYPERMEDIA_COMPONENT_BLOCKS = [FY_RENDER_COMPONENT_BLOCK, ...HELD_COMPONENT_BLOCKS] as const;
 
 /** The slots a message is drawn with: the `fy-render` ones, plus the mermaid slot. Module-level, like every slot object (Durian keys its settings on the identity of this and `HYPERMEDIA_PARTS`). */
-export const HYPERMEDIA_PART_SLOTS: Slots = { ...FY_RENDER_SLOTS, Mermaid: HypermediaMermaid };
+export const HYPERMEDIA_PART_SLOTS: Slots = {
+  ...FY_RENDER_SLOTS,
+  Heading: HypermediaHeading,
+  Mermaid: HypermediaMermaid,
+};

@@ -131,7 +131,7 @@ export default provideToShell(
     // Durian's stylesheet comes with it: it is otherwise loaded by the chat's surfaces, which an agenda may open first.
     prose: lazyComponent<ProseProps>(async () => {
       await import('./hypermedia/dh-styles.ts');
-      return (await import('./hypermedia/hypermedia-prose.tsx')).ProvidedProse;
+      return (await import('./hypermedia/demoting-prose.tsx')).DemotingProse;
     }) as NonNullable<ShellProvides['prose']>,
     // Settings › Appearance (S4): this device's conversation width and the key to a message's marks. No machine, no client.
     deviceSettings: {
